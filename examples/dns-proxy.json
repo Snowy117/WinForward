@@ -1,0 +1,20 @@
+{
+  "socks5Servers": [
+    {
+      "name": "primary",
+      "host": "127.0.0.1",
+      "port": 1080
+    }
+  ],
+  "rules": [
+    {
+      "protocol": ["udp"],
+      "remotePort": ["53"],
+      "action": "proxy",
+      "proxyServer": "primary"
+    }
+  ],
+  "fallbackAction": "pass",
+  "proxyUnavailableAction": "block",
+  "processingFailureAction": "block"
+}

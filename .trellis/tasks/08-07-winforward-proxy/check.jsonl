@@ -1,0 +1,4 @@
+{"file":".trellis/spec/guides/index.md","reason":"Quality checklist and cross-cutting contract checks for final verification."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Review shared parsing, policy, flow, and lifecycle primitives for accidental duplication."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Review full CLI-to-config-to-policy-to-packet-to-native data flow and contract consistency."}
+{"file":".trellis/tasks/08-07-winforward-proxy/research/winpkfilter-ndisapi-design-constraints.md","reason":"Verify implementation against researched NDISAPI ABI, packet-direction, process, adapter, and loop-safety constraints."}

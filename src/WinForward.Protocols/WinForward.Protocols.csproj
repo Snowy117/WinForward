@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>WinForward.Protocols</AssemblyName>
+    <RootNamespace>WinForward.Protocols</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../WinForward.Core/WinForward.Core.csproj" />
+  </ItemGroup>
+</Project>

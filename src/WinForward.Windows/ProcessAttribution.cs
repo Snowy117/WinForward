@@ -1,0 +1,287 @@
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Net;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
+using WinForward.Core;
+
+namespace WinForward.Windows;
+
+public sealed class WindowsProcessAttributor : IProcessAttributor
+{
+    private readonly TimeSpan _retryDelay;
+    private readonly int _cacheCapacity;
+    private readonly Dictionary<ProcessCacheKey, ProcessIdentity> _identityCache = [];
+    private readonly Queue<ProcessCacheKey> _cacheOrder = [];
+    private readonly Lock _cacheGate = new();
+
+    public WindowsProcessAttributor(TimeSpan? retryDelay = null, int cacheCapacity = 1024)
+    {
+        if (cacheCapacity <= 0) throw new ArgumentOutOfRangeException(nameof(cacheCapacity));
+        _retryDelay = retryDelay ?? TimeSpan.FromMilliseconds(2);
+        _cacheCapacity = cacheCapacity;
+    }
+
+    public async ValueTask<ProcessIdentity?> FindAsync(FlowKey key, CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsWindows()) return null;
+        var result = FindOwnerSafely(key);
+        if (result is null && _retryDelay > TimeSpan.Zero)
+        {
+            await Task.Delay(_retryDelay, cancellationToken).ConfigureAwait(false);
+            result = FindOwnerSafely(key);
+        }
+
+        return result is null ? null : ReadProcessIdentity(result.Value);
+    }
+
+    private static uint? FindOwner(FlowKey key)
+    {
+        return key.Protocol switch
+        {
+            TransportProtocol.Udp => IpHelperTables.FindUdpOwner(key.Local),
+            TransportProtocol.Tcp => IpHelperTables.FindTcpOwner(key.Local, key.Remote),
+            _ => null
+        };
+    }
+
+    private static uint? FindOwnerSafely(FlowKey key)
+    {
+        try { return FindOwner(key); }
+        catch (Win32Exception) { return null; }
+        catch (InvalidOperationException) { return null; }
+        catch (ArgumentException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private ProcessIdentity? ReadProcessIdentity(uint processId)
+    {
+        try
+        {
+            using var process = Process.GetProcessById((int)processId);
+            var creationTime = process.StartTime.ToUniversalTime();
+            var cacheKey = new ProcessCacheKey(processId, creationTime);
+            lock (_cacheGate)
+            {
+                if (_identityCache.TryGetValue(cacheKey, out var cached)) return cached;
+            }
+
+            var name = process.ProcessName;
+            string? path;
+            try
+            {
+                path = process.MainModule?.FileName;
+            }
+            catch (Win32Exception)
+            {
+                path = null;
+            }
+            catch (InvalidOperationException)
+            {
+                path = null;
+            }
+
+            var identity = new ProcessIdentity(processId, creationTime, name, path);
+            lock (_cacheGate)
+            {
+                if (_identityCache.ContainsKey(cacheKey)) return _identityCache[cacheKey];
+                while (_identityCache.Count >= _cacheCapacity && _cacheOrder.TryDequeue(out var evicted)) _identityCache.Remove(evicted);
+                _identityCache[cacheKey] = identity;
+                _cacheOrder.Enqueue(cacheKey);
+            }
+
+            return identity;
+        }
+        catch (Win32Exception)
+        {
+            return null;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+        catch (NotSupportedException)
+        {
+            return null;
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private readonly record struct ProcessCacheKey(uint ProcessId, DateTime CreationTimeUtc);
+}
+
+internal static partial class IpHelperTables
+{
+    private const int AfInet = 2;
+    private const int AfInet6 = 23;
+    private const int ErrorInsufficientBuffer = 122;
+    private const int TcpTableOwnerPidAll = 5;
+    private const int UdpTableOwnerPid = 1;
+    private const int Udp6TableOwnerPid = 3;
+
+    public static uint? FindUdpOwner(Endpoint local)
+    {
+        var owners = local.AddressFamily == AddressFamilyKind.IPv4 ? ReadUdp4() : ReadUdp6();
+        var wildcard = local.AddressFamily == AddressFamilyKind.IPv4 ? IPAddress.Any : IPAddress.IPv6Any;
+        var matches = owners.Where(row => row.Port == local.Port && (row.Address.Equals(wildcard) || row.Address.Equals(local.Address))).Select(row => row.ProcessId).Distinct().ToArray();
+        return matches.Length == 1 ? matches[0] : null;
+    }
+
+    public static uint? FindTcpOwner(Endpoint local, Endpoint remote)
+    {
+        var owners = local.AddressFamily == AddressFamilyKind.IPv4 ? ReadTcp4() : ReadTcp6();
+        var matches = owners.Where(row => row.Local.Port == local.Port && row.Remote.Port == remote.Port && row.Local.Address.Equals(local.Address) && row.Remote.Address.Equals(remote.Address)).Select(row => row.ProcessId).Distinct().ToArray();
+        return matches.Length == 1 ? matches[0] : null;
+    }
+
+    private static unsafe IReadOnlyList<UdpOwner> ReadUdp4()
+    {
+        var buffer = ReadTable(AfInet, UdpTableOwnerPid, out var rowCount);
+        try
+        {
+            var rows = new UdpOwner[rowCount];
+            for (var index = 0; index < rows.Length; index++)
+            {
+                var row = ReadRow<MibUdpRowOwnerPid>(buffer, index);
+                rows[index] = new UdpOwner(new IPAddress(row.LocalAddress), NetworkPort(row.LocalPort), row.ProcessId);
+            }
+            return rows;
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    private static unsafe IReadOnlyList<UdpOwner> ReadUdp6()
+    {
+        var buffer = ReadTable(AfInet6, Udp6TableOwnerPid, out var rowCount);
+        try
+        {
+            var rows = new UdpOwner[rowCount];
+            for (var index = 0; index < rows.Length; index++)
+            {
+                var row = ReadRow<MibUdp6RowOwnerPid>(buffer, index);
+                rows[index] = new UdpOwner(new IPAddress(new ReadOnlySpan<byte>(row.LocalAddress, 16), row.ScopeId), NetworkPort(row.LocalPort), row.ProcessId);
+            }
+            return rows;
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    private static unsafe IReadOnlyList<TcpOwner> ReadTcp4()
+    {
+        var buffer = ReadTable(AfInet, TcpTableOwnerPidAll, out var rowCount);
+        try
+        {
+            var rows = new TcpOwner[rowCount];
+            for (var index = 0; index < rows.Length; index++)
+            {
+                var row = ReadRow<MibTcpRowOwnerPid>(buffer, index);
+                rows[index] = new TcpOwner(new Endpoint(AddressFamilyKind.IPv4, new IPAddress(row.LocalAddress), NetworkPort(row.LocalPort)), new Endpoint(AddressFamilyKind.IPv4, new IPAddress(row.RemoteAddress), NetworkPort(row.RemotePort)), row.ProcessId);
+            }
+            return rows;
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    private static unsafe IReadOnlyList<TcpOwner> ReadTcp6()
+    {
+        var buffer = ReadTable(AfInet6, TcpTableOwnerPidAll, out var rowCount);
+        try
+        {
+            var rows = new TcpOwner[rowCount];
+            for (var index = 0; index < rows.Length; index++)
+            {
+                var row = ReadRow<MibTcp6RowOwnerPid>(buffer, index);
+                rows[index] = new TcpOwner(new Endpoint(AddressFamilyKind.IPv6, new IPAddress(new ReadOnlySpan<byte>(row.LocalAddress, 16), row.LocalScopeId), NetworkPort(row.LocalPort)), new Endpoint(AddressFamilyKind.IPv6, new IPAddress(new ReadOnlySpan<byte>(row.RemoteAddress, 16), row.RemoteScopeId), NetworkPort(row.RemotePort)), row.ProcessId);
+            }
+            return rows;
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    private static nint ReadTable(int addressFamily, int tableClass, out int rowCount)
+    {
+        uint size = 0;
+        var result = tableClass is UdpTableOwnerPid or Udp6TableOwnerPid
+            ? Native.GetExtendedUdpTable(nint.Zero, ref size, false, addressFamily, tableClass, 0)
+            : Native.GetExtendedTcpTable(nint.Zero, ref size, false, addressFamily, tableClass, 0);
+        if (result != ErrorInsufficientBuffer || size < 4) throw new Win32Exception(result);
+        var buffer = Marshal.AllocHGlobal(checked((int)size));
+        result = tableClass is UdpTableOwnerPid or Udp6TableOwnerPid
+            ? Native.GetExtendedUdpTable(buffer, ref size, false, addressFamily, tableClass, 0)
+            : Native.GetExtendedTcpTable(buffer, ref size, false, addressFamily, tableClass, 0);
+        if (result != 0)
+        {
+            Marshal.FreeHGlobal(buffer);
+            throw new Win32Exception(result);
+        }
+        rowCount = Marshal.ReadInt32(buffer);
+        return buffer;
+    }
+
+    private static ushort NetworkPort(uint value) => (ushort)IPAddress.NetworkToHostOrder((short)(value & 0xffff));
+
+    private static unsafe T ReadRow<T>(nint buffer, int index) where T : unmanaged =>
+        Unsafe.ReadUnaligned<T>((void*)(buffer + 4 + index * sizeof(T)));
+
+    private readonly record struct UdpOwner(IPAddress Address, ushort Port, uint ProcessId);
+    private readonly record struct TcpOwner(Endpoint Local, Endpoint Remote, uint ProcessId);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MibUdpRowOwnerPid
+    {
+        public uint LocalAddress;
+        public uint LocalPort;
+        public uint ProcessId;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private unsafe struct MibUdp6RowOwnerPid
+    {
+        public fixed byte LocalAddress[16];
+        public uint ScopeId;
+        public uint LocalPort;
+        public uint ProcessId;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MibTcpRowOwnerPid
+    {
+        public uint State;
+        public uint LocalAddress;
+        public uint LocalPort;
+        public uint RemoteAddress;
+        public uint RemotePort;
+        public uint ProcessId;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private unsafe struct MibTcp6RowOwnerPid
+    {
+        public fixed byte LocalAddress[16];
+        public uint LocalScopeId;
+        public uint LocalPort;
+        public fixed byte RemoteAddress[16];
+        public uint RemoteScopeId;
+        public uint RemotePort;
+        public uint State;
+        public uint ProcessId;
+    }
+
+    private static partial class Native
+    {
+        [LibraryImport("iphlpapi.dll", EntryPoint = "GetExtendedTcpTable")]
+        internal static partial int GetExtendedTcpTable(nint table, ref uint size, [MarshalAs(UnmanagedType.Bool)] bool order, int addressFamily, int tableClass, uint reserved);
+
+        [LibraryImport("iphlpapi.dll", EntryPoint = "GetExtendedUdpTable")]
+        internal static partial int GetExtendedUdpTable(nint table, ref uint size, [MarshalAs(UnmanagedType.Bool)] bool order, int addressFamily, int tableClass, uint reserved);
+    }
+}

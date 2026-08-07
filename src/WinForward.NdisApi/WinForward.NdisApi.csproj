@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>WinForward.NdisApi</AssemblyName>
+    <RootNamespace>WinForward.NdisApi</RootNamespace>
+  </PropertyGroup>
+</Project>

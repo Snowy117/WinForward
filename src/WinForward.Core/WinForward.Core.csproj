@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>WinForward.Core</AssemblyName>
+    <RootNamespace>WinForward.Core</RootNamespace>
+  </PropertyGroup>
+</Project>

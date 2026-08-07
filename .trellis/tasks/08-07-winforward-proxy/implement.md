@@ -1,0 +1,159 @@
+# WinForward Implementation Plan
+
+## Current Progress (2026-08-07)
+
+The hardware-independent foundation is implemented and verified: configuration/policy validation, packet and SOCKS5 framing, pinned NDISAPI/IP Helper ABI seams, transactional lifecycle primitives, flow/UDP association ownership, self-traffic guards, and concurrent UDP burst tests. The remaining release gates are Windows-specific capture bridging, complete adapter identity/change handling, TCP transparent redirect, full UDP packet reinjection, runtime wiring, and Native AOT publication on a supported Windows host. The unchecked items below remain intentionally open.
+
+### Check phase (2026-08-07, Win11 host 192.168.100.2 via WinRM)
+
+- Linux + Windows `dotnet build -c Release`: 0 warnings / 0 errors (all four analyzers, TreatWarningsAsErrors).
+- Unit tests: 59/59 on Linux and Windows (check phase added 19 tests: config-validation branches, AND/OR semantics, IPv6 packet handling, adapter correlation).
+- Native AOT publish on Win11 (SDK 10.0.102, global.json patched on the Windows copy only) produces a working `WinForward.exe` (~2.6 MB).
+- AOT smoke tests on Win11 (WinpkFilter driver 3.6.2.1 running, ndisapi.dll 3.6.1 sidecar from tools_bin_x64.zip): `validate` accepts the example config (exit 0) and rejects 10 hand-crafted invalid configs with field-pathed diagnostics (exit 1); `adapters` enumerates 5 MSTCP-bound adapters with stable GUID + friendly name + internal name (exit 0); missing ndisapi.dll fails cleanly with an actionable diagnostic (exit 1).
+- Fixed during check: adapter identity correlation is GUID-primary (NDISAPI internal name `\DEVICE\{GUID}` == `NetworkInterface.Id`) with MAC as sanity fallback. The previous MAC-only correlation always failed on real hosts because NDIS filter drivers (WFP LWF, WinpkFilter LWF, Npcap, QoS) clone the physical MAC across multiple `NetworkInterface` entries.
+
+## Execution Strategy
+
+Build WinForward incrementally behind hardware-independent seams. Do not attempt the full proxy runtime before proving the x64 NDISAPI ABI and local TCP redirect on Windows. Each phase must leave the solution building and its applicable tests passing.
+
+## 1. Bootstrap the .NET Solution
+
+- [ ] Add `global.json` pinned to the .NET 10 SDK roll-forward policy.
+- [ ] Add solution/projects for CLI, Configuration, Core, Protocols, Windows, NdisApi, Runtime, unit tests, Windows tests, and integration tests.
+- [ ] Centralize build properties: `net10.0-windows`, C# 14, nullable, implicit usings policy, warnings, deterministic build, unsafe, Native AOT compatibility, and `win-x64` publish settings.
+- [ ] Centralize the four requested analyzer package versions and apply them with `PrivateAssets=all`.
+- [ ] Add editor/analyzer configuration only for deliberate project conventions; do not bulk-disable analyzer categories.
+- [ ] Add a minimal AOT-compatible CLI command router and stable exit-code definitions.
+
+Validation:
+
+```powershell
+dotnet restore
+dotnet build -c Release
+dotnet test -c Release
+dotnet publish src/WinForward.Cli/WinForward.Cli.csproj -c Release -r win-x64
+```
+
+## 2. Implement Configuration and Pure Policy Core
+
+- [ ] Define raw JSON DTOs and source-generated serializer context.
+- [ ] Reject unknown JSON fields and retain omitted-versus-empty array semantics.
+- [ ] Implement redacted structured validation diagnostics.
+- [ ] Normalize/validate SOCKS5 servers, credential encoded lengths, rule actions/references, process selectors, CIDRs, ports/ranges, protocols, families, fallback, and block-only failure fields.
+- [ ] Build the immutable runtime policy snapshot and server lookup.
+- [ ] Implement first-match evaluator with AND-across-fields / OR-within-field semantics.
+- [ ] Test invalid inputs, first-match behavior, fallback, exact process/path comparison, and secret redaction.
+
+Gate: all configuration and policy tests pass without Windows or native dependencies.
+
+## 3. Implement Protocol Parsing and SOCKS5 Framing
+
+- [ ] Add bounds-checked Ethernet II, IPv4, bounded IPv6 extension-header, TCP, and UDP views.
+- [ ] Add endpoint/L2 rewrite operations and IPv4/TCP/UDP checksum algorithms.
+- [ ] Detect fragments, TCP Fast Open data, malformed lengths, unsupported extension chains, and frame-capacity violations.
+- [ ] Implement SOCKS5 greeting, NO AUTH, RFC 1929, CONNECT, UDP ASSOCIATE, response parsing, and UDP request/response framing for IPv4/IPv6/domain.
+- [ ] Use fixtures and property/fuzz-style bounds tests for truncated/malformed packets.
+
+Gate: packet transforms/checksums and SOCKS5 state machines pass pure tests with no hot-path allocations established by focused benchmarks where practical.
+
+## 4. Pin and Validate the NDISAPI ABI
+
+- [ ] Select and record the exact WinpkFilter/NDISAPI release, header commit, expected DLL/driver versions, and frame ABI.
+- [ ] Implement source-generated C ABI imports, SafeHandle, packed blittable structures, fixed buffers, adapter modes, events, and batched read/send calls.
+- [ ] Add controlled native DLL resolution and actionable startup error classification.
+- [ ] Add the native x64 ABI probe and compare every used managed size/offset.
+- [ ] Implement unmanaged packet slabs/leases and exactly-once terminal disposition guards.
+
+Gate (Windows x64): ABI comparison passes and driver open/enumerate/close smoke test succeeds. Stop and return to design on any unexplained layout mismatch.
+
+## 5. Implement Platform Checks, Adapter Discovery, and Process Attribution
+
+- [ ] Check supported Windows version, x64 architecture, and elevated administrator token before filter state changes.
+- [ ] Correlate NDISAPI adapters with IP Helper GUID/LUID/permanent/friendly identities.
+- [ ] Implement `adapters` output and config selector resolution, including missing/ambiguous diagnostics.
+- [ ] Register adapter-list change handling and fail-closed resolution-loss behavior.
+- [ ] Implement IPv4/IPv6 TCP/UDP owner-table attribution and full image-path lookup.
+- [ ] Cache by PID plus process creation time; define bounded refresh/retry and unknown/ambiguous results.
+
+Gate (Windows): physical and Hyper-V adapters are listed and selectors behave exactly; process attribution tests cover normal, missed, wildcard UDP, inaccessible, exited, and PID-reused processes.
+
+## 6. Implement Transactional Capture with `pass` and `block`
+
+- [ ] Implement lifecycle coordinator and exact prior-mode snapshots.
+- [ ] Start bounded capture pumps only after safety state and rollback hooks are ready.
+- [ ] Parse/classify packet origin and create canonical flow keys.
+- [ ] Implement exactly-once pass reinjection matrix and block consumption.
+- [ ] Add flow decision caching/aliases so routed traffic observed on another adapter is not re-evaluated.
+- [ ] Implement cancellation, queue saturation, handled fatal failure, and exact mode restoration.
+
+Gate (Windows/Hyper-V): pass produces no duplication, block drops, routed flows make one decision, and all startup/shutdown failure injections restore modes.
+
+## 7. Implement Internal Socket Registry and Flow Runtime
+
+- [ ] Add exact WinForward-owned socket tuple registration before connect/send.
+- [ ] Track local listener/redirect tuples and dynamic SOCKS UDP relay endpoints.
+- [ ] Ensure internal guard runs before user policy without broad endpoint/process exemption.
+- [ ] Implement atomic flow claim, translated aliases, bounded setup queues, generation, idle/close expiry, and counters.
+- [ ] Test catch-all proxy policy, unrelated application using the same proxy endpoint, multiple servers, changing DNS results, and UDP relay port differences.
+- [ ] Test concurrent same-process DNS-style datagrams on one source socket, multiple destinations from one socket, distinct source sockets, and deliberate local-endpoint reuse; assert deterministic flow/association ownership and no response cross-wiring.
+
+Gate: no recursive self-interception and no unrelated endpoint bypass.
+
+## 8. Prove and Implement TCP Local Redirect
+
+- [ ] First build a focused Windows proof-of-concept based on the documented WinpkFilter local redirect transform.
+- [ ] Prove host-originated and Hyper-V-originated IPv4/IPv6 initial SYN redirection to a local listener.
+- [ ] Preserve tuple mapping, TCP sequence/ACK space, TCP options, SYN retransmission, FIN, RST, and half-close while rewriting endpoints/checksums.
+- [ ] Connect accepted local sockets to the selected SOCKS5 server and perform CONNECT for the saved original target.
+- [ ] Relay bytes asynchronously with bounded buffers/backpressure and fail-closed setup behavior.
+- [ ] Integrate translated/reverse packets with the origin adapter/L2 context and runtime lifecycle.
+
+Gate (release blocking): host and Hyper-V TCP work through SOCKS5 for IPv4/IPv6 under retransmission and orderly/error closure. If this fails, return to planning; do not substitute WFP or a kernel component without approval.
+
+## 9. Implement UDP Local Relay and SOCKS5 Association
+
+- [ ] Claim the first datagram and buffer setup traffic within strict packet/byte/deadline limits.
+- [ ] Establish and retain per-flow SOCKS5 control and UDP sockets.
+- [ ] Register and validate the dynamic relay endpoint.
+- [ ] Encode/decode SOCKS5 UDP framing, reject `FRAG != 0`, and restore remote/client/L2 context.
+- [ ] Reinject responses toward MSTCP or the origin Hyper-V adapter with correct IPv4/IPv6 checksums.
+- [ ] Implement idle expiry, control-channel failure, generation reuse, and teardown.
+
+Gate: host and Hyper-V UDP work through SOCKS5 for IPv4/IPv6, including DNS/QUIC-sized bursts within the documented unfragmented limits and a relay port different from the SOCKS TCP port.
+
+## 10. Complete CLI, Diagnostics, Documentation, and Hardening
+
+- [ ] Complete `validate`, `adapters`, and `run --config` behavior and exit codes.
+- [ ] Add structured, rate-limited operational logs and counters with credential redaction.
+- [ ] Document configuration, no implicit rules, pass/forwarding/NAT responsibility, unsupported proxy packet classes, Native AOT publishing, native DLL/driver deployment, administrator requirement, and graceful shutdown.
+- [ ] Add example configurations for process proxying, Hyper-V adapter proxying, explicit DNS policy, pass fallback, and leak-prevention block fallback.
+- [ ] Run analyzer, build, test, publish, dependency, performance, supported-Windows, Hyper-V, proxy-outage, and lifecycle matrices.
+
+Final validation:
+
+```powershell
+dotnet restore
+dotnet build -c Release
+dotnet test -c Release
+dotnet publish src/WinForward.Cli/WinForward.Cli.csproj -c Release -r win-x64
+```
+
+On a supported elevated Windows/Hyper-V host, additionally run the documented ABI, adapter, pass/block, TCP, UDP, loop-prevention, failure, and cleanup integration suites.
+
+## Risky Boundaries and Rollback Points
+
+- **Native ABI:** do not continue past the ABI phase until the exact header/DLL layout passes; revert interop changes rather than guessing packing.
+- **Adapter mode:** every mode write must have an idempotent rollback registered first; integration tests must inspect post-exit mode.
+- **Packet ownership:** never suppress disposition guards to improve throughput; optimize only after exactly-once tests pass.
+- **TCP redirect:** keep the proof-of-concept isolated until its release gate passes. Failure returns the task to planning.
+- **Flow/queue limits:** no unbounded queue or table is accepted; fail closed under saturation.
+- **Self traffic:** avoid broad static proxy-host exemptions. Revert if unrelated applications bypass policy.
+- **Secrets:** no diagnostic/test snapshot may contain configured credentials.
+
+## Pre-Start Checklist
+
+- [ ] `prd.md` has completed its convergence rewrite and has no blocking open questions.
+- [ ] `design.md` and this implementation plan have been reviewed.
+- [ ] `implement.jsonl` and `check.jsonl` contain real spec/research context.
+- [ ] The user explicitly approves the latest planning summary after these artifacts are complete.
+- [ ] Only then run `task.py start`; implementation approval is not inferred from earlier task-creation consent.

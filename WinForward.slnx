@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+  <Project Path="src/WinForward.Cli/WinForward.Cli.csproj" />
+  <Project Path="src/WinForward.Windows/WinForward.Windows.csproj" />
+  <Project Path="src/WinForward.Runtime/WinForward.Runtime.csproj" />
+    <Project Path="src/WinForward.Configuration/WinForward.Configuration.csproj" />
+    <Project Path="src/WinForward.Core/WinForward.Core.csproj" />
+    <Project Path="src/WinForward.NdisApi/WinForward.NdisApi.csproj" />
+    <Project Path="src/WinForward.Protocols/WinForward.Protocols.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/WinForward.Core.Tests/WinForward.Core.Tests.csproj" />
+  </Folder>
+</Solution>

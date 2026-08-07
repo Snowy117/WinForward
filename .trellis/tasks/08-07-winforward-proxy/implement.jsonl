@@ -1,0 +1,4 @@
+{"file":".trellis/spec/guides/index.md","reason":"Pre-development checklist and cross-cutting change guidance for the greenfield multi-layer implementation."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Guides shared packet/configuration contracts and avoids duplicated parsing or policy logic across modules."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Guides end-to-end CLI/configuration/runtime/native data flow and typed contract placement."}
+{"file":".trellis/tasks/08-07-winforward-proxy/research/winpkfilter-ndisapi-design-constraints.md","reason":"Authoritative NDISAPI direction, adapter identity, process attribution, loop prevention, and Native AOT ABI research."}

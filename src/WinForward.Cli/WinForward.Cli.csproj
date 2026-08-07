@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>WinForward</AssemblyName>
+    <RootNamespace>WinForward.Cli</RootNamespace>
+    <PublishAot>true</PublishAot>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishSingleFile>true</PublishSingleFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../WinForward.Core/WinForward.Core.csproj" />
+    <ProjectReference Include="../WinForward.Configuration/WinForward.Configuration.csproj" />
+    <ProjectReference Include="../WinForward.Protocols/WinForward.Protocols.csproj" />
+    <ProjectReference Include="../WinForward.NdisApi/WinForward.NdisApi.csproj" />
+    <ProjectReference Include="../WinForward.Windows/WinForward.Windows.csproj" />
+    <ProjectReference Include="../WinForward.Runtime/WinForward.Runtime.csproj" />
+  </ItemGroup>
+</Project>

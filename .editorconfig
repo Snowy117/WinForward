@@ -1,0 +1,322 @@
+# EditorConfig is awesome: https://EditorConfig.org
+
+# top-most EditorConfig file
+root = true
+
+# Don't use tabs for indentation.
+[*]
+indent_style = space
+# (Please don't specify an indent_size here; that has too many unintended consequences.)
+spelling_exclusion_path = SpellingExclusions.dic
+
+# Code files
+[*.{cs,csx,vb,vbx}]
+indent_size = 4
+insert_final_newline = true
+charset = utf-8
+
+# XML project files
+[*.{csproj,vbproj,vcxproj,vcxproj.filters,proj,projitems,shproj}]
+indent_size = 2
+
+# XML config files
+[*.{props,targets,ruleset,config,nuspec,resx,vsixmanifest,vsct}]
+indent_size = 2
+
+# JSON files
+[*.json]
+indent_size = 2
+
+# Powershell files
+[*.ps1]
+indent_size = 2
+
+# Shell script files
+[*.sh]
+end_of_line = lf
+indent_size = 2
+
+# Dotnet code style settings:
+[*.{cs,vb}]
+
+# Sort using and Import directives with System.* appearing first
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = false
+# Avoid "this." and "Me." if not necessary
+dotnet_style_qualification_for_field = false:refactoring
+dotnet_style_qualification_for_property = false:refactoring
+dotnet_style_qualification_for_method = false:refactoring
+dotnet_style_qualification_for_event = false:refactoring
+
+# Use language keywords instead of framework type names for type references
+dotnet_style_predefined_type_for_locals_parameters_members = true:suggestion
+dotnet_style_predefined_type_for_member_access = true:suggestion
+
+# Suggest more modern language features when available
+dotnet_style_object_initializer = true:suggestion
+dotnet_style_collection_initializer = true:suggestion
+dotnet_style_coalesce_expression = true:suggestion
+dotnet_style_null_propagation = true:suggestion
+dotnet_style_explicit_tuple_names = true:suggestion
+
+# Whitespace options
+dotnet_style_allow_multiple_blank_lines_experimental = false
+
+# Non-private static fields are PascalCase
+dotnet_naming_rule.non_private_static_fields_should_be_pascal_case.severity = suggestion
+dotnet_naming_rule.non_private_static_fields_should_be_pascal_case.symbols = non_private_static_fields
+dotnet_naming_rule.non_private_static_fields_should_be_pascal_case.style = non_private_static_field_style
+
+dotnet_naming_symbols.non_private_static_fields.applicable_kinds = field
+dotnet_naming_symbols.non_private_static_fields.applicable_accessibilities = public, protected, internal, protected_internal, private_protected
+dotnet_naming_symbols.non_private_static_fields.required_modifiers = static
+
+dotnet_naming_style.non_private_static_field_style.capitalization = pascal_case
+
+# Non-private readonly fields are PascalCase
+dotnet_naming_rule.non_private_readonly_fields_should_be_pascal_case.severity = suggestion
+dotnet_naming_rule.non_private_readonly_fields_should_be_pascal_case.symbols = non_private_readonly_fields
+dotnet_naming_rule.non_private_readonly_fields_should_be_pascal_case.style = non_private_readonly_field_style
+
+dotnet_naming_symbols.non_private_readonly_fields.applicable_kinds = field
+dotnet_naming_symbols.non_private_readonly_fields.applicable_accessibilities = public, protected, internal, protected_internal, private_protected
+dotnet_naming_symbols.non_private_readonly_fields.required_modifiers = readonly
+
+dotnet_naming_style.non_private_readonly_field_style.capitalization = pascal_case
+
+# Constants are PascalCase
+dotnet_naming_rule.constants_should_be_pascal_case.severity = suggestion
+dotnet_naming_rule.constants_should_be_pascal_case.symbols = constants
+dotnet_naming_rule.constants_should_be_pascal_case.style = constant_style
+
+dotnet_naming_symbols.constants.applicable_kinds = field, local
+dotnet_naming_symbols.constants.required_modifiers = const
+
+dotnet_naming_style.constant_style.capitalization = pascal_case
+
+# Static fields are camelCase and start with s_
+dotnet_naming_rule.static_fields_should_be_camel_case.severity = suggestion
+dotnet_naming_rule.static_fields_should_be_camel_case.symbols = static_fields
+dotnet_naming_rule.static_fields_should_be_camel_case.style = static_field_style
+
+dotnet_naming_symbols.static_fields.applicable_kinds = field
+dotnet_naming_symbols.static_fields.required_modifiers = static
+
+dotnet_naming_style.static_field_style.capitalization = camel_case
+dotnet_naming_style.static_field_style.required_prefix = s_
+
+# Instance fields are camelCase and start with _
+dotnet_naming_rule.instance_fields_should_be_camel_case.severity = suggestion
+dotnet_naming_rule.instance_fields_should_be_camel_case.symbols = instance_fields
+dotnet_naming_rule.instance_fields_should_be_camel_case.style = instance_field_style
+
+dotnet_naming_symbols.instance_fields.applicable_kinds = field
+
+dotnet_naming_style.instance_field_style.capitalization = camel_case
+dotnet_naming_style.instance_field_style.required_prefix = _
+
+# Locals and parameters are camelCase
+dotnet_naming_rule.locals_should_be_camel_case.severity = suggestion
+dotnet_naming_rule.locals_should_be_camel_case.symbols = locals_and_parameters
+dotnet_naming_rule.locals_should_be_camel_case.style = camel_case_style
+
+dotnet_naming_symbols.locals_and_parameters.applicable_kinds = parameter, local
+
+dotnet_naming_style.camel_case_style.capitalization = camel_case
+
+# Local functions are PascalCase
+dotnet_naming_rule.local_functions_should_be_pascal_case.severity = suggestion
+dotnet_naming_rule.local_functions_should_be_pascal_case.symbols = local_functions
+dotnet_naming_rule.local_functions_should_be_pascal_case.style = local_function_style
+
+dotnet_naming_symbols.local_functions.applicable_kinds = local_function
+
+dotnet_naming_style.local_function_style.capitalization = pascal_case
+
+# By default, name items with PascalCase
+dotnet_naming_rule.members_should_be_pascal_case.severity = suggestion
+dotnet_naming_rule.members_should_be_pascal_case.symbols = all_members
+dotnet_naming_rule.members_should_be_pascal_case.style = pascal_case_style
+
+dotnet_naming_symbols.all_members.applicable_kinds = *
+
+dotnet_naming_style.pascal_case_style.capitalization = pascal_case
+
+# RS0016: Only enable if API files are present
+dotnet_public_api_analyzer.require_api_files = true
+
+# IDE0055: Fix formatting
+# Workaround for https://github.com/dotnet/roslyn/issues/70570
+dotnet_diagnostic.IDE0055.severity = warning
+
+# https://github.com/dotnet/roslyn-analyzers/issues/7436 - False positives from valid GetDeclaredSymbol calls
+dotnet_diagnostic.RS1039.severity = none
+
+# CA1822 / RCS1146 / RCS1197 / MA0038（成员可标记为 static）：dotnet format 的 fixer 在 C# 14 extension 块
+# （receiver 参数语义）和 InterpolatedStringHandlerArgument("") 约定签名（绑 this）两类场景下
+# 错误地把实例方法改为 static，导致编译失败（CS8944 / CS9293 / CS0176）。
+# MA0038 是 Meziantou 分析器对应的同一规则，fixer 同样会触发误修；一并降级。
+dotnet_diagnostic.CA1822.severity = none
+dotnet_diagnostic.RCS1146.severity = none
+dotnet_diagnostic.RCS1197.severity = none
+dotnet_diagnostic.MA0038.severity = none
+
+# IDE0130（namespace 与文件夹不匹配）：dotnet format 的 fixer 试图改 MSBuild 的 document properties
+# （<RootNamespace> 等），触发 System.NotSupportedException: Changing document properties is not supported，
+# 直接让 format 全量崩溃。本项目刻意的多 namespace/文件夹布局（contracts 聚合、跨命名空间 partial 类）
+# 无法靠 fixer 调整 MSBuild 属性解决，故暂时降级。
+# TODO: 评估能否通过显式配置 csharp_style_namespace_options 或重新组织文件夹结构以恢复该规则。
+dotnet_diagnostic.IDE0130.severity = none
+
+# 第三方分析器仓库级抑制：以下规则都与本项目架构/技术栈根本不兼容，无法靠改代码消除。
+#
+# MA0048（文件名必须匹配类型名）：本项目刻意采用"一文件多类型"组织模式——
+# contracts/records 聚合文件（如 AccessControlContracts.cs 含 UserId/AccessResource/AccessGrant 等十余类型）、
+# EF 实体/配置聚合文件、JsonStreamEvent 聚合文件等。强制拆分文件会破坏既有架构，属根本不兼容。
+dotnet_diagnostic.MA0048.severity = none
+#
+# MA0004（async 调用缺 ConfigureAwait(false)）：本项目全部运行在 ASP.NET Core / 服务端 host，
+# 无 SynchronizationContext，ConfigureAwait(false) 在现代 .NET 中无意义（与旧 .NET Framework 库代码相反）。
+dotnet_diagnostic.MA0004.severity = none
+#
+# VSTHRD003（避免 await/return 外部任务）：与 MA0004 同理——服务端无 SynchronizationContext，
+# 不存在 await 外部任务导致的死锁风险。此外 quality-guidelines 强制的并发测试"释放屏障"模式
+# （TaskCompletionSource + await start.Task）必然 await 外部 TCS 任务，属刻意设计。
+dotnet_diagnostic.VSTHRD003.severity = none
+#
+# MA0026 / S1135（TODO 注释必须处理）：TODO 注释是本项目有意的 issue 追踪工作流，
+# 用于标注待办（如需先加数据库列才能实现的 RemoveUserAsync），不是 bug。强制处理会破坏该工作流。
+dotnet_diagnostic.MA0026.severity = none
+dotnet_diagnostic.S1135.severity = none
+
+# 测试树 tests/**：测试 fixture / fake / 场景与下列规则系统冲突——反射驱动的未用构造/属性
+# （S1144/S3459/S3237）、断言经异常或副作用的用例（S2699）、测试替身的重载/同名参数（S927/S4136/S4144）、
+# 长场景方法（MA0051）、测试构造的无参名 ArgumentException（MA0015）、测试配置类（MA0056/MA0009/S6966）、
+# fixture/fake 的迭代器桩不拆分校验（S4456），以及测试中合法的同步阻塞用法（VSTHRD002/103/200）。
+# 仅限实测触发的规则。
+# 注意：VSTHRD002/103/200 仅在此 tests 区域抑制，src/ 仍受保护以防真正的同步阻塞 bug。
+[tests/**.cs]
+dotnet_diagnostic.S1144.severity = none
+dotnet_diagnostic.MA0056.severity = none
+dotnet_diagnostic.MA0051.severity = none
+dotnet_diagnostic.S927.severity = none
+dotnet_diagnostic.MA0009.severity = none
+dotnet_diagnostic.MA0015.severity = none
+dotnet_diagnostic.S6966.severity = none
+dotnet_diagnostic.S4144.severity = none
+dotnet_diagnostic.S4136.severity = none
+dotnet_diagnostic.S3459.severity = none
+dotnet_diagnostic.S3237.severity = none
+dotnet_diagnostic.S2699.severity = none
+dotnet_diagnostic.S4456.severity = none
+dotnet_diagnostic.VSTHRD002.severity = none
+dotnet_diagnostic.VSTHRD103.severity = none
+dotnet_diagnostic.VSTHRD200.severity = none
+# MA0040（方法支持取消但未传 CancellationToken）：测试用例多数只断言单一行为，刻意不串取消令牌；
+# 在 src/ 仍受保护，避免生产代码遗漏 token。
+dotnet_diagnostic.MA0040.severity = none
+# MA0182（internal 类型从未被引用）：测试 fixture 经常通过反射 / assembly 扫描被消费
+# （GameSettingsContract.Discover(assembly)、UserConfigurableSettingsContract 等），
+# 编译期分析器看不到反射引用而误报。
+dotnet_diagnostic.MA0182.severity = none
+
+# These xUnit analyzers were disabled temporarily to let us move to the
+# new xUnit and get past several component governance issues. The
+# following issue tracks enabling them
+#
+# https://github.com/dotnet/roslyn/issues/75093
+dotnet_diagnostic.xUnit1012.severity = none
+dotnet_diagnostic.xUnit1030.severity = none
+dotnet_diagnostic.xUnit1031.severity = none
+dotnet_diagnostic.xUnit2005.severity = none
+dotnet_diagnostic.xUnit2020.severity = none
+dotnet_diagnostic.xUnit2023.severity = none
+dotnet_diagnostic.xUnit2029.severity = none
+
+# CSharp code style settings:
+[*.cs]
+# Newline settings
+csharp_new_line_before_open_brace = all
+csharp_new_line_before_else = true
+csharp_new_line_before_catch = true
+csharp_new_line_before_finally = true
+csharp_new_line_before_members_in_object_initializers = true
+csharp_new_line_before_members_in_anonymous_types = true
+csharp_new_line_between_query_expression_clauses = true
+
+# Indentation preferences
+csharp_indent_block_contents = true
+csharp_indent_braces = false
+csharp_indent_case_contents = true
+csharp_indent_case_contents_when_block = true
+csharp_indent_switch_labels = true
+csharp_indent_labels = flush_left
+
+# Whitespace options
+csharp_style_allow_embedded_statements_on_same_line_experimental = false
+csharp_style_allow_blank_lines_between_consecutive_braces_experimental = false
+csharp_style_allow_blank_line_after_colon_in_constructor_initializer_experimental = false
+csharp_style_allow_blank_line_after_token_in_conditional_expression_experimental = false
+csharp_style_allow_blank_line_after_token_in_arrow_expression_clause_experimental = false
+
+# Prefer "var" everywhere
+csharp_style_var_for_built_in_types = true:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_var_elsewhere = true:suggestion
+
+# Prefer method-like constructs to have a block body
+csharp_style_expression_bodied_methods = false:none
+csharp_style_expression_bodied_constructors = false:none
+csharp_style_expression_bodied_operators = false:none
+
+# Prefer property-like constructs to have an expression-body
+csharp_style_expression_bodied_properties = true:none
+csharp_style_expression_bodied_indexers = true:none
+csharp_style_expression_bodied_accessors = true:none
+
+# Suggest more modern language features when available
+csharp_style_pattern_matching_over_is_with_cast_check = true:suggestion
+csharp_style_pattern_matching_over_as_with_null_check = true:suggestion
+csharp_style_inlined_variable_declaration = true:suggestion
+csharp_style_throw_expression = true:suggestion
+csharp_style_conditional_delegate_call = true:suggestion
+csharp_style_prefer_extended_property_pattern = true:suggestion
+
+# Space preferences
+csharp_space_after_cast = false
+csharp_space_after_colon_in_inheritance_clause = true
+csharp_space_after_comma = true
+csharp_space_after_dot = false
+csharp_space_after_keywords_in_control_flow_statements = true
+csharp_space_after_semicolon_in_for_statement = true
+csharp_space_around_binary_operators = before_and_after
+csharp_space_around_declaration_statements = false
+csharp_space_before_colon_in_inheritance_clause = true
+csharp_space_before_comma = false
+csharp_space_before_dot = false
+csharp_space_before_open_square_brackets = false
+csharp_space_before_semicolon_in_for_statement = false
+csharp_space_between_empty_square_brackets = false
+csharp_space_between_method_call_empty_parameter_list_parentheses = false
+csharp_space_between_method_call_name_and_opening_parenthesis = false
+csharp_space_between_method_call_parameter_list_parentheses = false
+csharp_space_between_method_declaration_empty_parameter_list_parentheses = false
+csharp_space_between_method_declaration_name_and_open_parenthesis = false
+csharp_space_between_method_declaration_parameter_list_parentheses = false
+csharp_space_between_parentheses = false
+csharp_space_between_square_brackets = false
+
+# Blocks are allowed
+csharp_prefer_braces = true:silent
+csharp_preserve_single_line_blocks = true
+csharp_preserve_single_line_statements = true
+
+# jb/R# ArrangeTrailingCommaInMultilineLists/SinglelineLists：代码库 de facto 使用多行尾逗号
+# （enums / multiline initializers / method calls），dotnet format 对尾逗号静默=允许，
+# 但 jb 默认偏好"不要尾逗号"与之冲突。jb inspectcode 对风格偏好键解析不稳定，
+# 故直接用 _highlighting 键禁用这两条检查，使其与代码库 de facto 风格一致。
+resharper_arrange_trailing_comma_in_multiline_lists_highlighting = none
+resharper_arrange_trailing_comma_in_singleline_lists_highlighting = none
+
+# IDE0060: Remove unused parameter
+dotnet_diagnostic.IDE0060.severity = warning

@@ -1,0 +1,14 @@
+# Build outputs
+**/bin/
+**/obj/
+*.user
+*.suo
+
+# Local Trellis runtime state
+.trellis/.runtime/
+
+# Local agent/IDE tooling state (not project sources)
+.pi-subagents/
+.idea/
+.qodana/
+.repograph/
