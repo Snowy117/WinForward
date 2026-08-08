@@ -52,3 +52,14 @@
 - Fix 2: TcpRedirectTable.TryFind changed from static lock(table) to instance lock(_gate), matching UdpAssociationTable.
 - spec updated: barrier/TCS-gated concurrency-test technique (Yield-only is non-load-bearing); single-gate-lock discipline for association tables.
 - Committed as 60986e2. Suite 106/106, 0 warnings. glm-5.2 note: when it completes (with explicit output-nudging after stalls), its reviews are rigorous and worth waiting for; the stall-then-nudge pattern is reliable.
+
+## 2026-08-08 (cont.) — 8c: TCP redirect hardware-verified on Win11 (RELEASE GATE PASSED)
+
+- WinRM PTY via mkfifo + bg_jobs (evil-winrm-py upload/download/menu). Discovered WinRM shells die on long commands; workaround = schtasks scheduled task for publish (independent of the WinRM session), poll a done-marker file.
+- First sync failure: tar.gz extraction on Win11 silently dropped several new files (TcpProxyRelay.cs etc.) and kept stale PacketChecksums.cs — the swapped SYN frame had a corrupted TCP header (extra 0x0000, data offset 0). Lesson: after uploading an archive, verify per-file freshness (Select-String on key symbols) before trusting the build.
+- global.json on Win11 requested 10.0.109 (local) but only 10.0.102 installed — patched the Windows copy only (journal entry from earlier check phase confirmed this pattern).
+- The big one: dst->loopback local redirect produced a byte-perfect SYN (verified IP/TCP checksums) that MSTCP silently ignored. Pulled the official local_redirect.h + socksify.cpp + simple_packet_filter.h: the real transform is swap MACs + swap IPs + th_dport=proxy_port, KEEP th_sport (client's original port), listener binds 0.0.0.0, and the packet is reinjected toward MSTCP (ON_RECEIVE). Rewrote coordinator to this contract.
+- Next failure: MSTCP's SYN-ACK (response to the injected SYN) was never reversed — it was re-evaluated by policy (process attribution can't match the injected tuple) and passed to the wire, so the client never got its SYN-ACK. tshark on the host (Wireshark installed) was decisive: it showed the injected SYN accepted (SYN-ACK emitted) but nothing reversed. Fix: dispatcher-level reverse hook (HandleReverseIfApplicableAsync) runs BEFORE flow lookup/policy, keyed by proxy port (TryResolveByProxyPort — reverse packets carry the client's local IP as source, port is the stable discriminator).
+- Flooded accept-failed SocketExceptions after each connection: a retransmitted SYN opens a second connection on the same listener. Fix: after the first relay, drain and close redundant accepts (DrainRedundantConnectionsAsync). accept failed: 0 after the fix.
+- Final: 5/5 curl http://192.168.77.1/ -> HTTP 308 via SOCKS5 (CONNECT 192.168.77.1:80), 0 accept failures, graceful Ctrl+C exit 0, post-stop traffic normal. LoopbackFilter (0x20) investigated but NOT used.
+- Committed d45051f. Suite 107/107. Remaining: IPv6 host TCP, Hyper-V forwarded TCP, UDP relay (milestone 9), full hardware matrix.
