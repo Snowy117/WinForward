@@ -12,6 +12,13 @@ The hardware-independent foundation is implemented and verified: configuration/p
 - AOT smoke tests on Win11 (WinpkFilter driver 3.6.2.1 running, ndisapi.dll 3.6.1 sidecar from tools_bin_x64.zip): `validate` accepts the example config (exit 0) and rejects 10 hand-crafted invalid configs with field-pathed diagnostics (exit 1); `adapters` enumerates 5 MSTCP-bound adapters with stable GUID + friendly name + internal name (exit 0); missing ndisapi.dll fails cleanly with an actionable diagnostic (exit 1).
 - Fixed during check: adapter identity correlation is GUID-primary (NDISAPI internal name `\DEVICE\{GUID}` == `NetworkInterface.Id`) with MAC as sanity fallback. The previous MAC-only correlation always failed on real hosts because NDIS filter drivers (WFP LWF, WinpkFilter LWF, Npcap, QoS) clone the physical MAC across multiple `NetworkInterface` entries.
 
+### Run milestone 1 (2026-08-07, pass/block wired and hardware-verified)
+
+- `run` is now end-to-end: config -> platform/elevation -> driver -> adapter-scope resolution (missing/ambiguous selector = startup failure, exit 1) -> self-traffic registry -> transactional tunnel modes -> per-adapter capture pumps -> FlowDispatcher (process attribution on host flows) -> pass/block executor. Exit codes: 0 clean / 1 config-adapter-driver / 2 usage-platform / 3 runtime failure. 78/78 tests on Linux + Win11, AOT publish OK.
+- Win11 hardware matrix (all green): pass-through 100/100 ICMP 0% loss no DUP + TCP OK; block rule kills TCP 5985 while ICMP and out-of-scope adapter unaffected; proxy rule fails closed (drop + rate-limited warn); Ctrl+C exits cleanly with exact mode restoration (traffic unaffected afterwards); process attribution blocks curl.exe while powershell passes.
+- Fixed during hardware bring-up: reinjection requests must use the enumeration handle from `GetTcpipBoundAdaptersInfo`; the captured buffer's `m_hAdapter` is a different kernel pointer and is rejected with ERROR_INVALID_PARAMETER (87). NDISAPI imports now use `SetLastError = true` and send failures log native error + frame context. Contract recorded in `.trellis/spec/backend/windows-ndisapi.md`.
+- Known: polling pump adds ~5-15 ms RTT (event-driven `SetPacketEvent`/`ReadPackets` batch is the upgrade path); adapter-list change handling deferred (seam at `CaptureAdapterScopeResolver`); proxy actions remain fail-closed-blocked until the TCP redirect / UDP relay milestones.
+
 ## Execution Strategy
 
 Build WinForward incrementally behind hardware-independent seams. Do not attempt the full proxy runtime before proving the x64 NDISAPI ABI and local TCP redirect on Windows. Each phase must leave the solution building and its applicable tests passing.

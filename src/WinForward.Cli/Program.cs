@@ -2,17 +2,24 @@ using System.Runtime.Versioning;
 using System.Text.Json;
 using WinForward.Configuration;
 using WinForward.NdisApi;
+using WinForward.Runtime;
 using WinForward.Windows;
 
 namespace WinForward.Cli;
 
 internal static class Program
 {
-    public static int Main(string[] args)
+    // Exit-code contract:
+    //   0  clean shutdown / success
+    //   1  configuration or validation error, adapter-selector resolution error, or NDISAPI/driver access failure
+    //   2  usage error, unknown command, or unsupported platform
+    //   3  fatal runtime failure during capture (adapter modes are restored before exit)
+
+    public static async Task<int> Main(string[] args)
     {
         if (args.Length == 0 || args[0] is "--help" or "-h")
         {
-            Console.WriteLine("WinForward commands: validate --config <path>, adapters, run --config <path>");
+            await Console.Out.WriteLineAsync("WinForward commands: validate --config <path>, adapters, run --config <path>").ConfigureAwait(false);
             return 0;
         }
 
@@ -21,7 +28,7 @@ internal static class Program
         {
             if (!OperatingSystem.IsWindows())
             {
-                Console.Error.WriteLine("Adapter discovery requires Windows 10 22H2 or later.");
+                await Console.Error.WriteLineAsync("Adapter discovery requires Windows 10 22H2 or later.").ConfigureAwait(false);
                 return 2;
             }
             return ListAdapters();
@@ -31,20 +38,27 @@ internal static class Program
             var configPath = FindOption(args, "--config");
             if (configPath is null)
             {
-                Console.Error.WriteLine("run requires --config <path>.");
+                await Console.Error.WriteLineAsync("run requires --config <path>.").ConfigureAwait(false);
                 return 2;
             }
-            if (!TryLoadConfig(configPath, out _)) return 1;
+            if (!TryLoadConfig(configPath, out var configuration)) return 1;
+            if (!OperatingSystem.IsWindows())
+            {
+                await Console.Error.WriteLineAsync("run requires Windows 10 22H2 or later.").ConfigureAwait(false);
+                return 2;
+            }
             if (!PlatformRequirements.TryCheck(out var platformErrors))
             {
-                foreach (var error in platformErrors) Console.Error.WriteLine($"{error.Code}: {error.Message}");
+                foreach (var error in platformErrors)
+                {
+                    await Console.Error.WriteLineAsync($"{error.Code}: {error.Message}").ConfigureAwait(false);
+                }
                 return 2;
             }
-            Console.Error.WriteLine("Packet interception runtime is not initialized yet.");
-            return 2;
+            return await RunCaptureAsync(configuration!).ConfigureAwait(false);
         }
 
-        Console.Error.WriteLine($"Unknown command '{args[0]}'.");
+        await Console.Error.WriteLineAsync($"Unknown command '{args[0]}'.").ConfigureAwait(false);
         return 2;
     }
 
@@ -84,11 +98,7 @@ internal static class Program
         try
         {
             using var driver = NdisApiDriver.Open();
-            var ndisAdapters = driver.GetAdapters();
-            var inventory = new WindowsAdapterInventory(() => ndisAdapters
-                .Select(adapter => (adapter.InternalName, adapter.RuntimeHandle, adapter.MacAddress, adapter.Mtu))
-                .ToArray());
-            foreach (var adapter in inventory.GetCurrentAdapters())
+            foreach (var adapter in EnumerateAdapters(driver))
             {
                 Console.WriteLine($"{adapter.StableId}\t{adapter.FriendlyName}\t{adapter.InternalName}\tHANDLE=0x{adapter.RuntimeHandle.ToInt64():X}");
             }
@@ -99,6 +109,117 @@ internal static class Program
             Console.Error.WriteLine($"NDISAPI unavailable: {exception.Message}");
             return 1;
         }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static async Task<int> RunCaptureAsync(ValidatedConfiguration configuration)
+    {
+        var logger = new ConsoleRuntimeLogger();
+        try
+        {
+            return await RunInterceptionAsync(configuration, logger).ConfigureAwait(false);
+        }
+        catch (DllNotFoundException)
+        {
+            logger.Error("NDISAPI unavailable: ndisapi.dll was not found in the application directory.");
+            return 1;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            logger.Error("NDISAPI unavailable: ndisapi.dll is missing a required export.");
+            return 1;
+        }
+        catch (TypeLoadException)
+        {
+            logger.Error("NDISAPI ABI mismatch: the native library is incompatible with this build.");
+            return 1;
+        }
+        catch (System.ComponentModel.Win32Exception exception)
+        {
+            logger.Error($"NDISAPI driver error: {exception.Message}");
+            return 1;
+        }
+        catch (Exception exception)
+        {
+            logger.Error($"Startup failed: {exception.Message}");
+            return 3;
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static async Task<int> RunInterceptionAsync(ValidatedConfiguration configuration, IRuntimeLogger logger)
+    {
+        using var driver = NdisApiDriver.Open();
+        var adapters = EnumerateAdapters(driver);
+        if (adapters.Count == 0)
+        {
+            logger.Error("No MSTCP-bound adapters are available to capture.");
+            return 3;
+        }
+
+        // ADAPTER-LIST CHANGE SEAM (deferred): the runtime resolves the capture scope once against
+        // this startup snapshot. SetAdapterListChangeEvent-driven re-resolution and fail-closed
+        // handling of a configured adapter disappearing after startup are a later milestone; the
+        // resolver's TryResolve is the single point where a re-resolved snapshot would be injected.
+        if (!CaptureAdapterScopeResolver.TryResolve(adapters, configuration.Policy, out var scope, out var scopeErrors))
+        {
+            foreach (var error in scopeErrors) logger.Error(error);
+            return 1;
+        }
+        logger.Info($"Capture scope: {scope.Count} adapter(s) in tunnel mode.");
+
+        return await RunCaptureLoopAsync(configuration, driver, scope, logger).ConfigureAwait(false);
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static async Task<int> RunCaptureLoopAsync(ValidatedConfiguration configuration, NdisApiDriver driver, IReadOnlyList<WindowsAdapter> scope, IRuntimeLogger logger)
+    {
+        var selfTraffic = new SelfTrafficRegistry();
+        var executor = new NdisPacketActionExecutor(new NdisPacketReinjector(driver), logger);
+        var dispatcher = new FlowDispatcher(configuration, selfTraffic, executor, new WindowsProcessAttributor());
+        var processor = new CapturePacketProcessor(dispatcher);
+        var modeController = new NdisAdapterModeController(driver, scope);
+        var captureLoop = new MultiAdapterCaptureLoop(driver, scope, processor);
+        await using var runtime = new TransactionalCaptureRuntime(modeController, captureLoop);
+
+        using var shutdown = new CancellationTokenSource();
+        void OnCancel(object? sender, ConsoleCancelEventArgs eventArgs)
+        {
+            eventArgs.Cancel = true;
+            shutdown.Cancel();
+        }
+
+        Console.CancelKeyPress += OnCancel;
+        try
+        {
+            logger.Info("Interception started. Press Ctrl+C to stop.");
+            await runtime.StartAsync(shutdown.Token).ConfigureAwait(false);
+            logger.Info("WinForward stopped cleanly.");
+            return 0;
+        }
+        catch (OperationCanceledException)
+        {
+            logger.Info("Shutdown requested; restoring adapter modes.");
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            logger.Error($"Runtime failure: {exception.Message}");
+            return 3;
+        }
+        finally
+        {
+            Console.CancelKeyPress -= OnCancel;
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static IReadOnlyList<WindowsAdapter> EnumerateAdapters(NdisApiDriver driver)
+    {
+        var inventory = new WindowsAdapterInventory(() => driver.GetAdapters()
+            .Select(adapter => (adapter.InternalName, adapter.RuntimeHandle, adapter.MacAddress, adapter.Mtu))
+            .ToArray());
+        return inventory.GetCurrentAdapters();
     }
 
     private static int Validate(string[] args)
@@ -132,5 +253,12 @@ internal static class Program
     private static void PrintDiagnostics(IEnumerable<ConfigDiagnostic> diagnostics)
     {
         foreach (var diagnostic in diagnostics) Console.Error.WriteLine(diagnostic);
+    }
+
+    private sealed class ConsoleRuntimeLogger : IRuntimeLogger
+    {
+        public void Info(string message) => Console.Error.WriteLine($"[info] {message}");
+        public void Warn(string message) => Console.Error.WriteLine($"[warn] {message}");
+        public void Error(string message) => Console.Error.WriteLine($"[error] {message}");
     }
 }

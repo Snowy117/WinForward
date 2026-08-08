@@ -7,5 +7,7 @@
     <ProjectReference Include="../WinForward.Core/WinForward.Core.csproj" />
     <ProjectReference Include="../WinForward.Configuration/WinForward.Configuration.csproj" />
     <ProjectReference Include="../WinForward.Protocols/WinForward.Protocols.csproj" />
+    <ProjectReference Include="../WinForward.NdisApi/WinForward.NdisApi.csproj" />
+    <ProjectReference Include="../WinForward.Windows/WinForward.Windows.csproj" />
   </ItemGroup>
 </Project>

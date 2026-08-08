@@ -69,14 +69,22 @@ public sealed class NdisApiDriver : IDisposable
     {
         ArgumentNullException.ThrowIfNull(buffer);
         var request = new EthernetRequest { AdapterHandle = adapterHandle, Packet = new NdisrdEthernetPacket { Buffer = buffer.Pointer } };
-        if (NdisApiNative.SendPacketToMstcp(_handle, &request) == 0) throw new Win32Exception("Unable to inject an NDISAPI packet toward MSTCP.");
+        if (NdisApiNative.SendPacketToMstcp(_handle, &request) == 0)
+        {
+            var error = Marshal.GetLastWin32Error();
+            throw new Win32Exception(error, $"Unable to inject an NDISAPI packet toward MSTCP (native error {error}, length {buffer.Length}, flags 0x{buffer.DeviceFlags:X}, adapter 0x{adapterHandle:X}).");
+        }
     }
 
     public unsafe void SendPacketToAdapter(nint adapterHandle, NdisPacketBuffer buffer)
     {
         ArgumentNullException.ThrowIfNull(buffer);
         var request = new EthernetRequest { AdapterHandle = adapterHandle, Packet = new NdisrdEthernetPacket { Buffer = buffer.Pointer } };
-        if (NdisApiNative.SendPacketToAdapter(_handle, &request) == 0) throw new Win32Exception("Unable to inject an NDISAPI packet toward the adapter.");
+        if (NdisApiNative.SendPacketToAdapter(_handle, &request) == 0)
+        {
+            var error = Marshal.GetLastWin32Error();
+            throw new Win32Exception(error, $"Unable to inject an NDISAPI packet toward the adapter (native error {error}, length {buffer.Length}, flags 0x{buffer.DeviceFlags:X}, adapter 0x{adapterHandle:X}).");
+        }
     }
 
     public void Dispose() => _handle.Dispose();

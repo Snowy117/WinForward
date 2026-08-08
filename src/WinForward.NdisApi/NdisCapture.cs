@@ -34,7 +34,10 @@ public sealed class NdisCapturePump : IAsyncDisposable
                 continue;
             }
 
-            var packet = new NdisCapturedPacket(buffer, buffer.CapturedAdapterHandle, buffer.DeviceFlags);
+            // NDISAPI contract: reinjection requests must carry the enumeration handle
+            // (GetTcpipBoundAdaptersInfo); the captured buffer's m_hAdapter is rejected
+            // by the driver with ERROR_INVALID_PARAMETER. See spec/backend/windows-ndisapi.md.
+            var packet = new NdisCapturedPacket(buffer, _adapterHandle, buffer.DeviceFlags);
             await _handler(packet, cancellationToken).ConfigureAwait(false);
         }
     }

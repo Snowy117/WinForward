@@ -1,9 +1,22 @@
+using System.Runtime.InteropServices;
 using WinForward.Configuration;
 using WinForward.Core;
+using WinForward.NdisApi;
+using WinForward.Windows;
 
 namespace WinForward.Runtime;
 
-public sealed record CapturedFlowPacket(PacketLease Lease, FlowContext Context);
+/// <summary>
+/// The native capture metadata a reinjection executor needs to decide where a passed frame returns:
+/// the packet's MSS/NDISAPI direction flag and the adapter handle it was captured on.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+public readonly record struct PacketCaptureMetadata(uint DeviceFlags, nint AdapterHandle)
+{
+    public bool IsOnSend => (DeviceFlags & NdisApiAbi.PacketFlagOnSend) != 0;
+}
+
+public sealed record CapturedFlowPacket(PacketLease Lease, FlowContext Context, PacketCaptureMetadata Metadata = default);
 
 public interface ISelfTrafficGuard
 {
@@ -17,6 +30,21 @@ public interface IPacketActionExecutor
     ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken);
 }
 
+public interface IRuntimeLogger
+{
+    void Info(string message);
+    void Warn(string message);
+    void Error(string message);
+}
+
+public sealed class NullRuntimeLogger : IRuntimeLogger
+{
+    public static readonly NullRuntimeLogger Instance = new();
+    public void Info(string message) { }
+    public void Warn(string message) { }
+    public void Error(string message) { }
+}
+
 public sealed class FlowDispatcher
 {
     private readonly PolicySnapshot _policy;
@@ -24,8 +52,9 @@ public sealed class FlowDispatcher
     private readonly FlowTable _flows;
     private readonly ISelfTrafficGuard _selfTraffic;
     private readonly IPacketActionExecutor _executor;
+    private readonly IProcessAttributor? _attributor;
 
-    public FlowDispatcher(ValidatedConfiguration configuration, ISelfTrafficGuard selfTraffic, IPacketActionExecutor executor, int flowCapacity = 65_536)
+    public FlowDispatcher(ValidatedConfiguration configuration, ISelfTrafficGuard selfTraffic, IPacketActionExecutor executor, IProcessAttributor? attributor = null, int flowCapacity = 65_536)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(selfTraffic);
@@ -35,6 +64,7 @@ public sealed class FlowDispatcher
         _flows = new FlowTable(flowCapacity);
         _selfTraffic = selfTraffic;
         _executor = executor;
+        _attributor = attributor;
     }
 
     public async ValueTask DispatchAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
@@ -46,19 +76,66 @@ public sealed class FlowDispatcher
             return;
         }
 
-        if (_flows.TryGet(packet.Context.Key, out var existing) && existing is not null)
+        if (_flows.TryResolve(packet.Context.Key, out var existing) && existing is not null)
         {
             await ExecuteDecisionAsync(packet, existing.Decision, cancellationToken).ConfigureAwait(false);
             return;
         }
 
-        if (!_flows.TryClaim(packet.Context.Key, () => _policy.Evaluate(packet.Context), out var claimed) || claimed is null)
+        var context = packet.Context;
+        if (_attributor is not null && context.ProcessName is null && context.ProcessPath is null && context.Key.Origin == FlowOriginKind.Host)
+        {
+            var identity = await _attributor.FindAsync(context.Key, cancellationToken).ConfigureAwait(false);
+            if (identity is not null) context = context with { ProcessName = identity.Value.Name, ProcessPath = identity.Value.FullPath };
+        }
+
+        if (!_flows.TryClaimResolved(context.Key, () => _policy.Evaluate(context), out var claimed) || claimed is null)
         {
             await CompleteAsync(packet, PacketDisposition.Block, () => _executor.BlockAsync(packet, cancellationToken)).ConfigureAwait(false);
             return;
         }
 
         await ExecuteDecisionAsync(packet, claimed.Decision, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Handles a frame that cannot be classified into a TCP/UDP flow (non-IP, fragmented, malformed,
+    /// or a non-TCP/UDP protocol). Such traffic cannot match a TCP/UDP-only rule; it is evaluated
+    /// against the rules that can meaningfully match it (adapter-only rules) and otherwise the
+    /// fallback action. It is not cached in the flow table because these frames have no logical flow.
+    /// </summary>
+    public async ValueTask DispatchNonFlowAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(packet);
+        if (_selfTraffic.IsOwned(packet.Context))
+        {
+            await CompleteAsync(packet, PacketDisposition.Pass, () => _executor.PassAsync(packet, cancellationToken)).ConfigureAwait(false);
+            return;
+        }
+
+        var action = EvaluateNonFlow(packet.Context);
+        if (action == FlowAction.Pass)
+        {
+            await CompleteAsync(packet, PacketDisposition.Pass, () => _executor.PassAsync(packet, cancellationToken)).ConfigureAwait(false);
+        }
+        else
+        {
+            await CompleteAsync(packet, PacketDisposition.Block, () => _executor.BlockAsync(packet, cancellationToken)).ConfigureAwait(false);
+        }
+    }
+
+    private FlowAction EvaluateNonFlow(FlowContext context)
+    {
+        foreach (var rule in _policy.Rules)
+        {
+            var matcher = rule.Matcher;
+            if (matcher.Processes is not null || matcher.Protocols is not null || matcher.AddressFamilies is not null || matcher.RemoteNetworks is not null || matcher.RemotePorts is not null) continue;
+            var adapterMatches = (matcher.AdapterIds is null || matcher.AdapterIds.Contains(context.AdapterId ?? string.Empty)) &&
+                (matcher.AdapterNames is null || matcher.AdapterNames.Contains(context.AdapterName ?? string.Empty));
+            if (adapterMatches) return rule.Decision.Action;
+        }
+
+        return _policy.FallbackAction;
     }
 
     private async ValueTask ExecuteDecisionAsync(CapturedFlowPacket packet, FlowDecision decision, CancellationToken cancellationToken)

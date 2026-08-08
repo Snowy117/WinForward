@@ -125,23 +125,23 @@ internal static partial class NdisApiNative
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
     internal static unsafe partial int GetTcpipBoundAdaptersInfo(NdisApiSafeHandle handle, TcpAdapterList* adapters);
 
-    [LibraryImport(LibraryName, EntryPoint = "SetAdapterMode")]
+    [LibraryImport(LibraryName, EntryPoint = "SetAdapterMode", SetLastError = true)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
     internal static unsafe partial int SetAdapterMode(NdisApiSafeHandle handle, AdapterMode* mode);
 
-    [LibraryImport(LibraryName, EntryPoint = "GetAdapterMode")]
+    [LibraryImport(LibraryName, EntryPoint = "GetAdapterMode", SetLastError = true)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
     internal static unsafe partial int GetAdapterMode(NdisApiSafeHandle handle, AdapterMode* mode);
 
-    [LibraryImport(LibraryName, EntryPoint = "ReadPacket")]
+    [LibraryImport(LibraryName, EntryPoint = "ReadPacket", SetLastError = true)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
     internal static unsafe partial int ReadPacket(NdisApiSafeHandle handle, EthernetRequest* request);
 
-    [LibraryImport(LibraryName, EntryPoint = "SendPacketToMstcp")]
+    [LibraryImport(LibraryName, EntryPoint = "SendPacketToMstcp", SetLastError = true)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
     internal static unsafe partial int SendPacketToMstcp(NdisApiSafeHandle handle, EthernetRequest* request);
 
-    [LibraryImport(LibraryName, EntryPoint = "SendPacketToAdapter")]
+    [LibraryImport(LibraryName, EntryPoint = "SendPacketToAdapter", SetLastError = true)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
     internal static unsafe partial int SendPacketToAdapter(NdisApiSafeHandle handle, EthernetRequest* request);
 }

@@ -67,3 +67,23 @@ if (TryExtractGuid(adapter.InternalName, out var guid))
 ```
 
 **Related**: `.trellis/tasks/08-07-winforward-proxy/research/winpkfilter-ndisapi-design-constraints.md` (direction semantics, handle lifetime, IP Helper correlation evidence); `src/WinForward.Windows/AdapterIdentity.cs` (reference implementation).
+
+---
+
+## Adapter Handles: Enumeration vs Captured (hardware-verified 2026-08-07)
+
+> **Warning**: `GetTcpipBoundAdaptersInfo` returns per-adapter handles that are the ONLY valid values for request-level `hAdapterHandle` fields. The `INTERMEDIATE_BUFFER.m_hAdapter` seen in captured packets is a DIFFERENT kernel pointer (observed: list handle `0xFFFFAD8A2B30B010` vs captured `0xFFFFAD8A2B30B2D0` on the same adapter). Passing the captured `m_hAdapter` as the request handle makes `SendPacketToAdapter`/`SendPacketToMstcp` fail with `ERROR_INVALID_PARAMETER` (87) on every packet.
+
+- `NdisCapturePump` must stamp captured packets with the pump's enumeration handle (`NdisCapture.cs`), never with `NdisPacketBuffer.CapturedAdapterHandle`.
+- This matches the official samples: `ETH_M_REQUEST.hAdapterHandle` is set once from the adapter list and reused for read/write requests.
+- All NDISAPI `[LibraryImport]` declarations use `SetLastError = true`; send-path exceptions must include `Marshal.GetLastWin32Error()` — driver-side rejections are otherwise undiagnosable.
+- Diagnostics context worth logging on send failure: native error, frame length, device flags, adapter handle.
+
+**Symptom / Cause / Fix** (recorded as a verified bug class):
+
+- Symptom: capture works, tunnel mode applies, but every pass reinjection fails with native error 87 and the runtime shuts down fail-closed.
+- Cause: request built with the captured buffer's `m_hAdapter` instead of the enumeration handle.
+- Fix: `NdisCapturedPacket(buffer, _adapterHandle, buffer.DeviceFlags)` in the pump.
+- Verification: scratch harness `sendtest` (read -> reinject captured buffer with enumeration handle: 97/97 OK, both directions). Product re-verified: 100/100 ICMP pass-through with 0% loss and no duplicates.
+
+**Performance note**: the current polling pump (`ReadPacket` + 1 ms delay) adds ~5-15 ms RTT under tunnel mode (observed avg 8 ms vs 0.6 ms direct). Event-driven reads (`SetPacketEvent` + `ReadPackets` batch, as in `simple_packet_filter`) are the documented upgrade path when throughput work starts.

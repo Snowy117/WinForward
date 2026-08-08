@@ -133,6 +133,46 @@ public sealed class FlowTable
         }
     }
 
+    /// <summary>
+    /// Resolves a flow for a packet whose key may differ from the stored key in direction, origin
+    /// kind, or origin adapter. A flow is identified by its transport tuple (address family,
+    /// protocol, and the local/remote endpoint pair in either orientation); origin kind and origin
+    /// adapter are provenance metadata that must not cause a reverse or cross-adapter observation
+    /// to be re-evaluated as a new flow. Dictionary lookups cover the common same-adapter cases;
+    /// the adapter-agnostic scan is a rare fallback for routed flows observed at another adapter.
+    /// </summary>
+    public bool TryResolve(FlowKey key, out FlowState? state)
+    {
+        lock (_gate)
+        {
+            return TryResolveLocked(key, out state);
+        }
+    }
+
+    /// <summary>
+    /// Atomically resolves an existing flow for <paramref name="key"/> or claims a new flow when no
+    /// matching flow exists. The decision factory runs only for a genuinely new flow. When a flow is
+    /// already present (including in reverse or cross-adapter orientation) the existing decision is
+    /// returned and the factory is not invoked, so policy is evaluated exactly once per logical flow.
+    /// </summary>
+    public bool TryClaimResolved(FlowKey key, Func<FlowDecision> decide, out FlowState? state)
+    {
+        lock (_gate)
+        {
+            if (TryResolveLocked(key, out state)) return state is not null;
+            if (_states.Count >= _capacity)
+            {
+                state = null;
+                return false;
+            }
+
+            var created = new FlowState(key, decide(), ++_nextGeneration);
+            _states.Add(key, created);
+            state = created;
+            return true;
+        }
+    }
+
     public FlowState Claim(FlowKey key, Func<FlowDecision> decide)
     {
         if (!TryClaim(key, decide, out var state) || state is null) throw new InvalidOperationException("Flow table capacity has been reached.");
@@ -176,4 +216,37 @@ public sealed class FlowTable
             return expired.Length;
         }
     }
+
+    private bool TryResolveLocked(FlowKey key, out FlowState? state)
+    {
+        if (_states.TryGetValue(key, out state)) return true;
+        var reverse = key.Reverse();
+        if (_states.TryGetValue(reverse, out state)) return true;
+        var flippedReverse = reverse with { Origin = Flip(reverse.Origin) };
+        if (_states.TryGetValue(flippedReverse, out state)) return true;
+        var flipped = key with { Origin = Flip(key.Origin) };
+        if (_states.TryGetValue(flipped, out state)) return true;
+
+#pragma warning disable S3267 // Manual scan avoids per-packet LINQ allocation on the capture hot path.
+        foreach (var candidate in _states.Values)
+        {
+            if (SameLogicalFlow(candidate.Key, key))
+            {
+                state = candidate;
+                return true;
+            }
+        }
+#pragma warning restore S3267
+
+        state = null;
+        return false;
+    }
+
+    private static bool SameLogicalFlow(FlowKey first, FlowKey second) =>
+        first.AddressFamily == second.AddressFamily &&
+        first.Protocol == second.Protocol &&
+        ((first.Local == second.Local && first.Remote == second.Remote) ||
+         (first.Local == second.Remote && first.Remote == second.Local));
+
+    private static FlowOriginKind Flip(FlowOriginKind origin) => origin == FlowOriginKind.Host ? FlowOriginKind.Forwarded : FlowOriginKind.Host;
 }
