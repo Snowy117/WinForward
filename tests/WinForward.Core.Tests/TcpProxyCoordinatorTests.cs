@@ -178,17 +178,18 @@ public sealed class TcpProxyCoordinatorTests
     [Fact]
     public async Task ConcurrentSynBurstWithAsyncListenerStaysExactlyOnce()
     {
-        // The synchronous fake listener lets the first caller finish before others observe the
-        // table, masking the redirect-table exactly-once race. An async listener forces every
-        // concurrent caller through the allocation gap before any TryClaim runs, proving the
-        // redundant-listener release and re-inject fallback keep the flow single-listener.
-        var listenerFactory = new FakeListenerFactory(yieldOnce: true);
+        // Deterministically force the redirect-table exactly-once race: every caller's
+        // CreateAsync blocks at a barrier until all N have arrived, guaranteeing every caller
+        // passed the TryResolveByOriginal fast path (empty table) before any TryClaim runs. The
+        // coordinator's concurrent-loser counter then proves N-1 callers hit the existing-
+        // association branch, released their redundant listener, and fell back to re-inject.
+        const int count = 8;
+        var listenerFactory = new BarrierListenerFactory(count);
         var injector = new FakeInjector();
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable();
         await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic);
         var packet = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
-        const int count = 16;
 
         var tasks = Enumerable.Range(0, count)
             .Select(_ => coordinator.HandleSynAsync(packet, s_server, CancellationToken.None).AsTask())
@@ -197,7 +198,9 @@ public sealed class TcpProxyCoordinatorTests
 
         Assert.All(outcomes, outcome => Assert.Equal(TcpRedirectOutcome.Injected, outcome));
         Assert.Equal(1, table.Count);
-        // Only the winning caller's listener survives; the losers' redundant listeners are disposed.
+        // The N-1 losing callers each detected an existing association, released their redundant
+        // listener, and re-injected. This is the load-bearing assertion the synchronous fake masked.
+        Assert.Equal(count - 1, coordinator.ConcurrentLoserCount);
         Assert.Single(listenerFactory.Listeners, listener => !listener.IsDisposed);
     }
 
@@ -407,31 +410,51 @@ public sealed class TcpProxyCoordinatorTests
     {
         private readonly Endpoint? _fixedTuple;
         private readonly bool _throwOnCreate;
-        private readonly bool _yieldOnce;
         private int _nextPort = 40000;
-        private int _yielded;
 
-        public FakeListenerFactory(Endpoint? fixedTuple = null, bool throwOnCreate = false, bool yieldOnce = false)
+        public FakeListenerFactory(Endpoint? fixedTuple = null, bool throwOnCreate = false)
         {
             _fixedTuple = fixedTuple;
             _throwOnCreate = throwOnCreate;
-            _yieldOnce = yieldOnce;
         }
 
         public List<FakeListener> Listeners { get; } = [];
         public List<AddressFamilyKind> RequestedFamilies { get; } = [];
 
-        public async ValueTask<ITcpRedirectListener> CreateAsync(AddressFamilyKind addressFamily, CancellationToken cancellationToken)
+        public ValueTask<ITcpRedirectListener> CreateAsync(AddressFamilyKind addressFamily, CancellationToken cancellationToken)
         {
             if (_throwOnCreate) throw new IOException("listener allocation failed");
-            // Force an async gap on the first allocation so concurrent callers for the same flow
-            // all observe an empty table before any TryClaim runs, exercising the redirect-table
-            // exactly-once path rather than the synchronous fast path.
-            if (_yieldOnce && Interlocked.Exchange(ref _yielded, 1) == 0) await Task.Yield();
             RequestedFamilies.Add(addressFamily);
             var loopback = addressFamily == AddressFamilyKind.IPv4 ? IPAddress.Loopback : IPAddress.IPv6Loopback;
             var tuple = _fixedTuple ?? Endpoint.From(loopback, checked((ushort)Interlocked.Increment(ref _nextPort)));
             var listener = new FakeListener(tuple);
+            lock (Listeners) Listeners.Add(listener);
+            return ValueTask.FromResult<ITcpRedirectListener>(listener);
+        }
+    }
+
+    private sealed class BarrierListenerFactory(int participantCount) : ITcpRedirectListenerFactory
+    {
+        /* Gates CreateAsync so the first participantCount-1 callers block until the last one
+         * arrives; all are then released together. This guarantees every caller passed the
+         * coordinator's pre-claim TryResolveByOriginal fast path (empty table) before any
+         * TryClaim runs, deterministically forcing the redirect-table exactly-once race a
+         * synchronous fake masks. */
+        private readonly TaskCompletionSource _gate = new();
+        private int _arrived;
+        private int _nextPort = 40000;
+
+        public List<FakeListener> Listeners { get; } = [];
+
+        public async ValueTask<ITcpRedirectListener> CreateAsync(AddressFamilyKind addressFamily, CancellationToken cancellationToken)
+        {
+            // The last caller to arrive opens the gate; the rest were already awaiting it.
+            if (Interlocked.Increment(ref _arrived) == participantCount) _gate.TrySetResult();
+            await using var registration = cancellationToken.Register(() => _gate.TrySetCanceled(cancellationToken));
+            await _gate.Task.ConfigureAwait(false);
+            await Task.Yield();
+            var loopback = addressFamily == AddressFamilyKind.IPv4 ? IPAddress.Loopback : IPAddress.IPv6Loopback;
+            var listener = new FakeListener(Endpoint.From(loopback, checked((ushort)Interlocked.Increment(ref _nextPort))));
             lock (Listeners) Listeners.Add(listener);
             return listener;
         }

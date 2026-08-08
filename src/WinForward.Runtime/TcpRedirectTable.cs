@@ -146,9 +146,9 @@ public sealed class TcpRedirectTable
         lock (_gate) return _byOriginal.Values.ToArray();
     }
 
-    private static bool TryFind<TKey>(Dictionary<TKey, TcpRedirectAssociation> table, TKey key, DateTimeOffset now, out TcpRedirectAssociation? association) where TKey : notnull
+    private bool TryFind<TKey>(Dictionary<TKey, TcpRedirectAssociation> table, TKey key, DateTimeOffset now, out TcpRedirectAssociation? association) where TKey : notnull
     {
-        lock (table)
+        lock (_gate)
         {
             if (table.TryGetValue(key, out association))
             {

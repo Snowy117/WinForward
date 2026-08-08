@@ -4,6 +4,9 @@
     <RootNamespace>WinForward.Runtime</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="WinForward.Core.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../WinForward.Core/WinForward.Core.csproj" />
     <ProjectReference Include="../WinForward.Configuration/WinForward.Configuration.csproj" />
     <ProjectReference Include="../WinForward.Protocols/WinForward.Protocols.csproj" />

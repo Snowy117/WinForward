@@ -25,6 +25,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     private readonly Dictionary<FlowKey, TcpRedirectSession> _sessions = [];
     private readonly Lock _gate = new();
     private readonly CancellationTokenSource _shutdown = new();
+    private long _concurrentLoserCount;
     private bool _disposed;
 
     public TcpProxyCoordinator(
@@ -52,6 +53,14 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     }
 
     public TcpRedirectTable Table => _table;
+
+    /// <summary>
+    /// The number of concurrent SYN callers that arrived after another caller had already claimed
+    /// the flow, detected a translated-tuple mismatch, released their redundant listener, and
+    /// fallen back to re-inject. A non-zero value after a concurrent burst proves the redirect-table
+    /// exactly-once path was exercised under genuine concurrency.
+    /// </summary>
+    internal long ConcurrentLoserCount => Interlocked.Read(ref _concurrentLoserCount);
 
     public async ValueTask<TcpRedirectOutcome> HandleSynAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
     {
@@ -133,8 +142,13 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         // existing association (whose translated tuple differs from this listener's) rather than a
         // new one. The just-allocated listener is redundant: release it and fall back to the
         // re-inject path against the existing association so only one listener owns the flow.
+        // A concurrent caller may have claimed this same original flow first. TryClaim returns the
+        // existing association (whose translated tuple differs from this listener's) rather than a
+        // new one. The just-allocated listener is redundant: release it and fall back to the
+        // re-inject path against the existing association so only one listener owns the flow.
         if (association.TranslatedListenerTuple != translatedTuple)
         {
+            Interlocked.Increment(ref _concurrentLoserCount);
             await listener.DisposeAsync().ConfigureAwait(false);
             return new RedirectSetup(Listener: null, association, SelfTrafficToken: null);
         }
