@@ -31,3 +31,16 @@
 
 ---
 
+## 2026-08-08 (cont.) — milestone 8b: TCP redirect coordinator (hardware-independent)
+
+- Planning: trellis-research (glm-5.2) repeatedly stalled on long-form generation (read all context, then hung) across 2 attempts; orchestrator interrupted and authored the 8b plan directly from a full read of UdpProxyCoordinator/UdpAssociations/FlowDispatcher/Core types. Key decision: 8b = coordinator + table + 3 abstraction seams (ITcpRedirectListenerFactory/ITcpProxyRelayFactory/ITcpRedirectInjector), mirroring the UDP pattern; 8c = real sockets + NDISAPI + SOCKS5 end-to-end.
+- trellis-implement (deepseek-v4-flash) delivered coordinator + seams + table + 12 tests; 105/105. (One interruption mid-generation; resumed with explicit continuation prompt and finished cleanly.)
+- trellis-check (glm-5.2) stalled identically to the planning agent on report generation (3rd glm-5.2 stall this session); orchestrator interrupted and performed the review directly.
+- Parent review found a real TOCTOU: HandleSynAsync's pre-claim TryResolveByOriginal fast path returns empty for all concurrent SYN racers before any TryClaim runs; later racers got the existing association from TryClaim but proceeded to _sessions.Add → ArgumentException (duplicate key). The synchronous fake listener masked it. Fixed by detecting the existing association (translated-tuple mismatch) and releasing the redundant listener + re-injecting.
+- Added ConcurrentSynBurstWithAsyncListenerStaysExactlyOnce with a Task.Yield() gap in the fake listener factory to reproduce; verified it FAILS without the fix (ArgumentException) and PASSES with it. This is the load-bearing concurrency test — the synchronous ConcurrentSynBurst test was non-load-bearing.
+- spec(quality-guidelines): recorded the proxy-coordinator structural contract and the concurrent-initial-packet exactly-once rule (must force an async allocation gap in fakes or the concurrency test is non-load-bearing).
+- glm-5.2 reliability note: on this harness it reliably completes short targeted outputs but repeatedly hangs on multi-section long-form generation (planning doc, review report). deepseek-v4-flash handles long code generation reliably. For 8c, prefer deepseek for implementation and do structural review inline rather than delegating long-form review to glm-5.2.
+- Committed as 69094a7. Suite 106/106, 0 warnings. Next: 8c Windows PoC (real listener socket binding, SOCKS5 CONNECT relay pump, NDISAPI reinjection wiring into the capture pump + executor, Hyper-V L2 context, end-to-end hardware gate on Win11).
+
+---
+
