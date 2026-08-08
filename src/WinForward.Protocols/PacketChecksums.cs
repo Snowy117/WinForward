@@ -26,6 +26,18 @@ public static class PacketChecksums
         };
     }
 
+    public static bool TryRewriteTcpEndpoints(Span<byte> ethernetFrame, IPAddress sourceAddress, ushort sourcePort, IPAddress destinationAddress, ushort destinationPort)
+    {
+        if (ethernetFrame.Length < 14) return false;
+        var etherType = BinaryPrimitives.ReadUInt16BigEndian(ethernetFrame.Slice(12, 2));
+        return etherType switch
+        {
+            0x0800 => TryRewriteIpv4Tcp(ethernetFrame, sourceAddress, sourcePort, destinationAddress, destinationPort),
+            0x86dd => TryRewriteIpv6Tcp(ethernetFrame, sourceAddress, sourcePort, destinationAddress, destinationPort),
+            _ => false
+        };
+    }
+
     private static bool TryRewriteIpv4(Span<byte> frame, IPAddress sourceAddress, ushort sourcePort, IPAddress destinationAddress, ushort destinationPort)
     {
         const int ipOffset = 14;
@@ -54,7 +66,7 @@ public static class PacketChecksums
         const int ipOffset = 14;
         if (sourceAddress.AddressFamily != System.Net.Sockets.AddressFamily.InterNetworkV6 || destinationAddress.AddressFamily != sourceAddress.AddressFamily || frame.Length < ipOffset + 40 || frame[ipOffset] >> 4 != 6) return false;
         var payloadLength = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(ipOffset + 4, 2));
-        if (frame.Length < ipOffset + 40 + payloadLength || !TryFindIpv6Udp(frame, ipOffset, payloadLength, out var udpOffset)) return false;
+        if (frame.Length < ipOffset + 40 + payloadLength || !TryFindIpv6Transport(frame, ipOffset, payloadLength, 17, out var udpOffset)) return false;
         var udpLength = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(udpOffset + 4, 2));
         if (udpLength < 8 || udpOffset + udpLength > ipOffset + 40 + payloadLength) return false;
 
@@ -65,27 +77,82 @@ public static class PacketChecksums
         return true;
     }
 
-    private static bool TryFindIpv6Udp(ReadOnlySpan<byte> frame, int ipOffset, int payloadLength, out int udpOffset)
+    private static bool TryRewriteIpv4Tcp(Span<byte> frame, IPAddress sourceAddress, ushort sourcePort, IPAddress destinationAddress, ushort destinationPort)
+    {
+        const int ipOffset = 14;
+        if (sourceAddress.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork || destinationAddress.AddressFamily != sourceAddress.AddressFamily || frame.Length < ipOffset + 20) return false;
+        var headerLength = (frame[ipOffset] & 0x0f) * 4;
+        var totalLength = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(ipOffset + 2, 2));
+        if (frame[ipOffset] >> 4 != 4 || headerLength < 20 || frame[ipOffset + 9] != 6 || totalLength < headerLength + 20 || frame.Length < ipOffset + totalLength) return false;
+        var fragment = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(ipOffset + 6, 2));
+        if ((fragment & 0x3fff) != 0) return false;
+        var tcpOffset = ipOffset + headerLength;
+        var tcpLength = totalLength - headerLength;
+        if (tcpLength < 20 || frame.Length < tcpOffset + tcpLength) return false;
+        var dataOffset = (frame[tcpOffset + 12] >> 4) * 4;
+        if (dataOffset < 20 || dataOffset > tcpLength) return false;
+
+        sourceAddress.TryWriteBytes(frame.Slice(ipOffset + 12, 4), out _);
+        destinationAddress.TryWriteBytes(frame.Slice(ipOffset + 16, 4), out _);
+        WritePorts(frame, tcpOffset, sourcePort, destinationPort);
+        frame[ipOffset + 10] = 0;
+        frame[ipOffset + 11] = 0;
+        BinaryPrimitives.WriteUInt16BigEndian(frame.Slice(ipOffset + 10, 2), InternetChecksum(frame.Slice(ipOffset, headerLength)));
+        WriteTcpChecksum(frame, tcpOffset, tcpLength, frame.Slice(ipOffset + 12, 4), frame.Slice(ipOffset + 16, 4), isIpv6: false);
+        return true;
+    }
+
+    private static bool TryRewriteIpv6Tcp(Span<byte> frame, IPAddress sourceAddress, ushort sourcePort, IPAddress destinationAddress, ushort destinationPort)
+    {
+        const int ipOffset = 14;
+        if (sourceAddress.AddressFamily != System.Net.Sockets.AddressFamily.InterNetworkV6 || destinationAddress.AddressFamily != sourceAddress.AddressFamily || frame.Length < ipOffset + 40 || frame[ipOffset] >> 4 != 6) return false;
+        var payloadLength = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(ipOffset + 4, 2));
+        if (frame.Length < ipOffset + 40 + payloadLength || !TryFindIpv6Transport(frame, ipOffset, payloadLength, 6, out var tcpOffset)) return false;
+        var tcpLength = ipOffset + 40 + payloadLength - tcpOffset;
+        if (tcpLength < 20 || frame.Length < tcpOffset + tcpLength) return false;
+        var dataOffset = (frame[tcpOffset + 12] >> 4) * 4;
+        if (dataOffset < 20 || dataOffset > tcpLength) return false;
+
+        sourceAddress.TryWriteBytes(frame.Slice(ipOffset + 8, 16), out _);
+        destinationAddress.TryWriteBytes(frame.Slice(ipOffset + 24, 16), out _);
+        WritePorts(frame, tcpOffset, sourcePort, destinationPort);
+        WriteTcpChecksum(frame, tcpOffset, tcpLength, frame.Slice(ipOffset + 8, 16), frame.Slice(ipOffset + 24, 16), isIpv6: true);
+        return true;
+    }
+
+    private static bool TryFindIpv6Transport(ReadOnlySpan<byte> frame, int ipOffset, int payloadLength, byte targetNextHeader, out int transportOffset)
     {
         var nextHeader = frame[ipOffset + 6];
-        udpOffset = ipOffset + 40;
+        transportOffset = ipOffset + 40;
         var extensionBytes = 0;
         while (nextHeader is 0 or 43 or 44 or 60)
         {
-            if (nextHeader == 44 || frame.Length < udpOffset + 2) return false;
-            var extensionLength = (frame[udpOffset + 1] + 1) * 8;
-            if (extensionBytes + extensionLength > 256 || udpOffset + extensionLength > ipOffset + 40 + payloadLength) return false;
-            nextHeader = frame[udpOffset];
-            udpOffset += extensionLength;
+            if (nextHeader == 44 || frame.Length < transportOffset + 2) return false;
+            var extensionLength = (frame[transportOffset + 1] + 1) * 8;
+            if (extensionBytes + extensionLength > 256 || transportOffset + extensionLength > ipOffset + 40 + payloadLength) return false;
+            nextHeader = frame[transportOffset];
+            transportOffset += extensionLength;
             extensionBytes += extensionLength;
         }
-        return nextHeader == 17;
+        return nextHeader == targetNextHeader;
     }
 
-    private static void WritePorts(Span<byte> frame, int udpOffset, ushort sourcePort, ushort destinationPort)
+    private static void WriteTcpChecksum(Span<byte> frame, int tcpOffset, int tcpLength, ReadOnlySpan<byte> source, ReadOnlySpan<byte> destination, bool isIpv6)
     {
-        BinaryPrimitives.WriteUInt16BigEndian(frame.Slice(udpOffset, 2), sourcePort);
-        BinaryPrimitives.WriteUInt16BigEndian(frame.Slice(udpOffset + 2, 2), destinationPort);
+        frame[tcpOffset + 16] = 0;
+        frame[tcpOffset + 17] = 0;
+        uint sum = Sum(source) + Sum(destination) + 6u;
+        sum += isIpv6 ? (uint)tcpLength : (ushort)tcpLength;
+        sum += Sum(frame.Slice(tcpOffset, tcpLength));
+        // TCP has no UDP-style optional-zero-checksum: the folded value is stored verbatim,
+        // so the rare 0x0000 result is written directly rather than inverted to 0xFFFF.
+        BinaryPrimitives.WriteUInt16BigEndian(frame.Slice(tcpOffset + 16, 2), Finish(sum));
+    }
+
+    private static void WritePorts(Span<byte> frame, int transportOffset, ushort sourcePort, ushort destinationPort)
+    {
+        BinaryPrimitives.WriteUInt16BigEndian(frame.Slice(transportOffset, 2), sourcePort);
+        BinaryPrimitives.WriteUInt16BigEndian(frame.Slice(transportOffset + 2, 2), destinationPort);
     }
 
     private static void WriteUdpChecksum(Span<byte> frame, int udpOffset, int udpLength, ReadOnlySpan<byte> source, ReadOnlySpan<byte> destination, bool isIpv6)

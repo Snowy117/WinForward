@@ -108,6 +108,7 @@ Gate: no recursive self-interception and no unrelated endpoint bypass.
 
 ## 8. Prove and Implement TCP Local Redirect
 
+- [x] **8a (done, hardware-independent):** protocol-layer TCP endpoint rewrite primitive `PacketChecksums.TryRewriteTcpEndpoints` for IPv4/IPv6 — rewrites only addresses/ports/checksums, recomputes IPv4 header + TCP checksums (TCP never zero-inverts, per RFC 9293), leaves seq/ack/flags/options/payload untouched. Covered by `TcpEndpointRewriteTests` (15 tests incl. IPv6 Hop-by-Hop→TCP success path). 93/93 suite green. Feeds 8b/8c; not yet wired into the runtime.
 - [ ] First build a focused Windows proof-of-concept based on the documented WinpkFilter local redirect transform.
 - [ ] Prove host-originated and Hyper-V-originated IPv4/IPv6 initial SYN redirection to a local listener.
 - [ ] Preserve tuple mapping, TCP sequence/ACK space, TCP options, SYN retransmission, FIN, RST, and half-close while rewriting endpoints/checksums.
