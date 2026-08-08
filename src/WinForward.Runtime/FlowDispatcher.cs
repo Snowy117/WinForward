@@ -53,8 +53,9 @@ public sealed class FlowDispatcher
     private readonly ISelfTrafficGuard _selfTraffic;
     private readonly IPacketActionExecutor _executor;
     private readonly IProcessAttributor? _attributor;
+    private readonly Func<CapturedFlowPacket, CancellationToken, ValueTask<TcpRedirectOutcome>>? _reverseHandler;
 
-    public FlowDispatcher(ValidatedConfiguration configuration, ISelfTrafficGuard selfTraffic, IPacketActionExecutor executor, IProcessAttributor? attributor = null, int flowCapacity = 65_536)
+    public FlowDispatcher(ValidatedConfiguration configuration, ISelfTrafficGuard selfTraffic, IPacketActionExecutor executor, IProcessAttributor? attributor = null, int flowCapacity = 65_536, Func<CapturedFlowPacket, CancellationToken, ValueTask<TcpRedirectOutcome>>? reverseHandler = null)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(selfTraffic);
@@ -65,6 +66,7 @@ public sealed class FlowDispatcher
         _selfTraffic = selfTraffic;
         _executor = executor;
         _attributor = attributor;
+        _reverseHandler = reverseHandler;
     }
 
     public async ValueTask DispatchAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
@@ -74,6 +76,25 @@ public sealed class FlowDispatcher
         {
             await CompleteAsync(packet, PacketDisposition.Pass, () => _executor.PassAsync(packet, cancellationToken)).ConfigureAwait(false);
             return;
+        }
+
+        // A packet on an active redirect leg (source or destination port is a proxy listener port)
+        // must be reversed back to the original server:client tuple before the Windows stack sees it.
+        // This runs before flow lookup and policy so a reverse packet is never re-evaluated as a new
+        // client flow or silently passed.
+        if (_reverseHandler is not null)
+        {
+            var proxyOutcome = await _reverseHandler(packet, cancellationToken).ConfigureAwait(false);
+            if (proxyOutcome == TcpRedirectOutcome.Injected)
+            {
+                await CompleteAsync(packet, PacketDisposition.ProxyConsumed, () => ValueTask.CompletedTask).ConfigureAwait(false);
+                return;
+            }
+            if (proxyOutcome == TcpRedirectOutcome.Blocked)
+            {
+                await CompleteAsync(packet, PacketDisposition.Block, () => _executor.BlockAsync(packet, cancellationToken)).ConfigureAwait(false);
+                return;
+            }
         }
 
         if (_flows.TryResolve(packet.Context.Key, out var existing) && existing is not null)

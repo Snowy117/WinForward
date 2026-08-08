@@ -161,13 +161,19 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         var key = packet.Context.Key;
         var rewrittenFrame = packet.Lease.Frame.ToArray();
         var originalClient = key.Local;
-        var listenerAddress = translatedTuple.Address;
-        if (!PacketChecksums.TryRewriteTcpEndpoints(rewrittenFrame, originalClient.Address, originalClient.Port, listenerAddress, translatedTuple.Port))
+        var originalServer = key.Remote;
+        // Official WinpkFilter local_redirect pattern: swap MACs and IPs, rewrite the destination
+        // port to the proxy port. The SOURCE PORT is kept as the client's original port (the
+        // redirector only rewrites th_dport, never th_sport), so the local proxy server's accepted
+        // connection has peer = server:client_orig_port, which the per-flow mapping resolves by
+        // client source port.
+        if (!PacketChecksums.TryRewriteTcpEndpoints(rewrittenFrame, originalServer.Address, originalClient.Port, originalClient.Address, translatedTuple.Port))
         {
             await ReleaseAssociationAsync(listener, association, null).ConfigureAwait(false);
             _logger.Warn("TCP redirect failed: SYN endpoint rewrite failed, blocking the flow.");
             return null;
         }
+        SwapEthernetMacs(rewrittenFrame);
 
         var selfTrafficToken = _selfTraffic.Register(new SelfTrafficRegistry.SelfTrafficKey(TransportProtocol.Tcp, translatedTuple, translatedTuple));
 
@@ -191,14 +197,34 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     }
 
     private async ValueTask<TcpRedirectOutcome> ReinjectExistingSynAsync(CapturedFlowPacket packet, TcpRedirectAssociation association, CancellationToken cancellationToken)
+        => await ReinjectExistingFlowDataAsync(packet, association, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// Swaps the Ethernet source and destination MAC addresses of a frame. The official WinpkFilter
+    /// local-redirect pattern swaps MACs alongside IPs and ports so the redirected frame is accepted
+    /// by the local stack as if it arrived from the original server.
+    /// </summary>
+    private static void SwapEthernetMacs(Span<byte> frame)
+    {
+        if (frame.Length < 12) return;
+        Span<byte> destination = frame.Slice(0, 6);
+        Span<byte> source = frame.Slice(6, 6);
+        var temp = new byte[6];
+        destination.CopyTo(temp);
+        source.CopyTo(destination);
+        temp.CopyTo(source);
+    }
+
+    private async ValueTask<TcpRedirectOutcome> ReinjectExistingFlowDataAsync(CapturedFlowPacket packet, TcpRedirectAssociation association, CancellationToken cancellationToken)
     {
         var rewrittenFrame = packet.Lease.Frame.ToArray();
-        var listenerAddress = association.TranslatedListenerTuple.Address;
         var originalClient = packet.Context.Key.Local;
-        if (!PacketChecksums.TryRewriteTcpEndpoints(rewrittenFrame, originalClient.Address, originalClient.Port, listenerAddress, association.TranslatedListenerTuple.Port))
+        var originalServer = association.OriginalKey.Remote;
+        if (!PacketChecksums.TryRewriteTcpEndpoints(rewrittenFrame, originalServer.Address, originalClient.Port, originalClient.Address, association.TranslatedListenerTuple.Port))
         {
             return TcpRedirectOutcome.Blocked;
         }
+        SwapEthernetMacs(rewrittenFrame);
         try
         {
             await _injector.InjectAsync(rewrittenFrame, packet.Metadata.IsOnSend, packet.Metadata.AdapterHandle, cancellationToken).ConfigureAwait(false);
@@ -219,13 +245,13 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(packet);
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        // A reverse packet travels listener -> client, so the listener (translated) tuple is the
-        // packet's SOURCE. The flow classifier sets Local=Source, Remote=Destination, so resolve by
-        // Local first, then fall back to Remote for any orientation the classifier reports.
+        // A reverse packet travels local-proxy-listener -> client. The proxy binds 0.0.0.0 and
+        // connects to the client using the client's local IP, so the packet's source is
+        // client_ip:proxy_port — the proxy port discriminates, not the full tuple.
         var key = packet.Context.Key;
         var now = DateTimeOffset.UtcNow;
-        var found = _table.TryResolveByTranslated(key.Local, now, out var association);
-        if (!found) found = _table.TryResolveByTranslated(key.Remote, now, out association);
+        var found = _table.TryResolveByProxyPort(key.Local.Port, now, out var association);
+        if (!found) found = _table.TryResolveByProxyPort(key.Remote.Port, now, out association);
         if (!found || association is null) return TcpRedirectOutcome.Blocked;
 
         var original = association.OriginalKey;
@@ -236,6 +262,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         {
             return TcpRedirectOutcome.Blocked;
         }
+        SwapEthernetMacs(rewrittenFrame);
 
         try
         {
@@ -259,6 +286,28 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     /// packet whose source is a known translated listener tuple is a reverse packet; anything else
     /// is mid-flow data on the redirect leg and is passed through.
     /// </summary>
+    /// <summary>
+    /// Handles a packet that belongs to an active redirect leg (source or destination port is a
+    /// proxy listener port) by reversing it back to the original server:client tuple. Returns
+    /// <see cref="TcpRedirectOutcome.NotRelevant"/> when the packet has no proxy-port relationship,
+    /// so the caller can continue normal flow/policy processing. Runs before flow lookup and policy
+    /// so a reverse packet is never re-evaluated as a new client flow.
+    /// </summary>
+    public async ValueTask<TcpRedirectOutcome> HandleReverseIfApplicableAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(packet);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var key = packet.Context.Key;
+        var now = DateTimeOffset.UtcNow;
+        if (!_table.TryResolveByProxyPort(key.Local.Port, now, out _) && !_table.TryResolveByProxyPort(key.Remote.Port, now, out _))
+        {
+            return TcpRedirectOutcome.NotRelevant;
+        }
+
+        return await HandleReverseAsync(packet, cancellationToken).ConfigureAwait(false);
+    }
+
     public async ValueTask<TcpRedirectOutcome> HandlePacketAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(packet);
@@ -267,18 +316,27 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
 
         var key = packet.Context.Key;
         var now = DateTimeOffset.UtcNow;
+        var isSyn = IsTcpSyn(packet.Lease.Frame.Span);
 
-        if (_table.TryResolveByTranslated(key.Local, now, out _) || _table.TryResolveByTranslated(key.Remote, now, out _))
+        if (_table.TryResolveByProxyPort(key.Local.Port, now, out _) || _table.TryResolveByProxyPort(key.Remote.Port, now, out _))
         {
             return await HandleReverseAsync(packet, cancellationToken).ConfigureAwait(false);
         }
 
-        if (IsTcpSyn(packet.Lease.Frame.Span))
+        if (isSyn)
         {
             return await HandleSynAsync(packet, server, cancellationToken).ConfigureAwait(false);
         }
 
-        return TcpRedirectOutcome.Injected;
+        // Mid-flow data on the original client->listener leg: rewrite the destination to the proxy
+        // listener tuple so the redirected connection receives the client's payload. Only flows with
+        // an active redirect association are rewritten; anything else is not ours to handle.
+        if (_table.TryResolveByOriginal(key, now, out var existing) && existing is not null)
+        {
+            return await ReinjectExistingFlowDataAsync(packet, existing, cancellationToken).ConfigureAwait(false);
+        }
+
+        return TcpRedirectOutcome.NotRelevant;
     }
 
     /// <summary>
@@ -347,8 +405,9 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
                 // The listener was disposed during shutdown.
                 return;
             }
-            catch
+            catch (Exception acceptEx)
             {
+                _logger.Warn($"TCP redirect accept failed ({acceptEx.GetType().Name}); retrying.");
                 // A transient accept failure is retried on the next accepted connection.
                 continue;
             }
@@ -359,6 +418,8 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
                 session.Relay = relay;
                 session.Association.Phase = RelayPhase.Relaying;
                 _ = ObserveRelayCompletionAsync(session, relay, token);
+                await DrainRedundantConnectionsAsync(session, token).ConfigureAwait(false);
+                return;
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
@@ -372,6 +433,34 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
                 await TearDownSessionAsync(session).ConfigureAwait(false);
                 return;
             }
+        }
+    }
+
+    private static async Task DrainRedundantConnectionsAsync(TcpRedirectSession session, CancellationToken token)
+    {
+        // One logical flow owns exactly one relay. A retransmitted SYN can make MSTCP open a second
+        // connection on the same listener; any further accepts are redundant and are closed instead
+        // of starting a second relay. The loop ends when teardown disposes the listener.
+        while (!token.IsCancellationRequested)
+        {
+            ITcpAcceptedConnection extra;
+            try
+            {
+                extra = await session.Listener.AcceptAsync(token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (ObjectDisposedException)
+            {
+                return;
+            }
+            catch
+            {
+                continue;
+            }
+            await extra.DisposeAsync().ConfigureAwait(false);
         }
     }
 

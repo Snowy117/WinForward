@@ -87,3 +87,35 @@ if (TryExtractGuid(adapter.InternalName, out var guid))
 - Verification: scratch harness `sendtest` (read -> reinject captured buffer with enumeration handle: 97/97 OK, both directions). Product re-verified: 100/100 ICMP pass-through with 0% loss and no duplicates.
 
 **Performance note**: the current polling pump (`ReadPacket` + 1 ms delay) adds ~5-15 ms RTT under tunnel mode (observed avg 8 ms vs 0.6 ms direct). Event-driven reads (`SetPacketEvent` + `ReadPackets` batch, as in `simple_packet_filter`) are the documented upgrade path when throughput work starts.
+
+---
+
+## TCP Local Redirect: WinpkFilter local_redirect transform (hardware-verified 2026-08-08, Win11)
+
+The official WinpkFilter transparent-TCP-redirect pattern (`ndisapi::local_redirector`, used by socksify/ProxiFyre) is NOT "rewrite dst to loopback + SendToMstcp". It is:
+
+1. Swap Ethernet src/dst MACs.
+2. Swap IP src/dst.
+3. Rewrite `th_dport` to the local proxy port. **The client's source port (`th_sport`) MUST be preserved** — the redirector only rewrites th_dport. The local proxy server's accepted connection then has peer = server_ip:client_orig_port, which the per-flow mapping resolves by client source port.
+4. Recompute IP + TCP checksums (the pseudo-header uses the swapped addresses).
+5. The listener binds `0.0.0.0:proxy_port` (all interfaces), not loopback — the rewritten packet's destination is the client's own IP address + proxy port.
+
+Attempting dst=loopback + SendToMstcp produced a byte-correct frame (verified checksums) that MSTCP silently ignored — the local-redirect contract requires the IP-swap form.
+
+### Reverse path (the subtle part)
+
+The SYN-ACK that MSTCP emits in response to an injected (`SendPacketsToMstcp`) SYN is a reverse packet (source port = proxy port). It must be recognized and reversed BEFORE flow-table lookup and policy evaluation:
+
+- A dispatcher-level reverse hook (`TcpProxyCoordinator.HandleReverseIfApplicableAsync`, wired as `FlowDispatcher._reverseHandler`) runs right after the self-traffic check. If the packet's local/remote port matches a proxy listener port, it is reversed (`src -> original server:port, dst -> original client:port`, MACs swapped) and injected toward MSTCP. This prevents the reverse packet from being re-evaluated as a new client flow (which policy would silently `pass`, killing the handshake).
+- Without the hook, the reverse packet is evaluated by policy (process attribution can't match the injected tuple) and passed straight to the wire — the client never receives its SYN-ACK and the connection times out. This was the dominant failure mode during bring-up.
+- **LoopbackFilter (0x20) is NOT required** for this reverse path: the hook catches the reverse packet on the normal capture path. (Loopback filtering was investigated; enabling it caused the injected SYN's loopback reflection to be re-captured, which then had to be drained.)
+
+### Mid-flow data
+
+After the handshake, client -> listener data on the original flow must also be rewritten to the proxy tuple and reinjected (`ReinjectExistingFlowDataAsync`: same swap, dst -> proxy port). A flow with an active redirect association is recognized by `TryResolveByOriginal`; anything else is not ours.
+
+### Redundant accepts
+
+A retransmitted SYN can make MSTCP open a second connection on the same listener. After the first relay is established, further accepts must be drained and closed immediately (`DrainRedundantConnectionsAsync`) rather than starting a second relay — otherwise every extra accept fails with SocketException and the log floods.
+
+**Reference**: `src/WinForward.Runtime/TcpProxyCoordinator.cs` (HandleSynAsync/HandleReverseAsync/ReinjectExistingFlowDataAsync/HandleReverseIfApplicableAsync/DrainRedundantConnectionsAsync), `TcpRedirectListener.cs` (0.0.0.0 bind), `FlowDispatcher.cs` (`_reverseHandler`).

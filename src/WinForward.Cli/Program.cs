@@ -184,7 +184,9 @@ internal static class Program
             selfTraffic,
             logger);
         var executor = new NdisPacketActionExecutor(reinjector, logger, tcpCoordinator);
-        var dispatcher = new FlowDispatcher(configuration, selfTraffic, executor, new WindowsProcessAttributor());
+        var dispatcher = new FlowDispatcher(
+            configuration, selfTraffic, executor, new WindowsProcessAttributor(),
+            reverseHandler: tcpCoordinator.HandleReverseIfApplicableAsync);
         var processor = new CapturePacketProcessor(dispatcher);
         var modeController = new NdisAdapterModeController(driver, scope);
         var captureLoop = new MultiAdapterCaptureLoop(driver, scope, processor);

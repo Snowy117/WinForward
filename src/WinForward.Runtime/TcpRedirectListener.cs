@@ -10,12 +10,17 @@ public sealed class TcpRedirectListenerFactory : ITcpRedirectListenerFactory
 {
     public ValueTask<ITcpRedirectListener> CreateAsync(AddressFamilyKind addressFamily, CancellationToken cancellationToken)
     {
-        var loopback = addressFamily == AddressFamilyKind.IPv4 ? IPAddress.Loopback : IPAddress.IPv6Loopback;
-        var socket = new Socket(loopback.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+        // The listener binds 0.0.0.0 (all interfaces) on an ephemeral port. The official
+        // WinpkFilter local_redirect pattern rewrites the client SYN's destination from the
+        // original server to the CLIENT's own address + the proxy port (IP swap), so the
+        // redirected packet arrives at the client's local IP on the proxy port and must be
+        // accepted on any interface, not just loopback.
+        var bindAddress = addressFamily == AddressFamilyKind.IPv4 ? IPAddress.Any : IPAddress.IPv6Any;
+        var socket = new Socket(bindAddress.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
         try
         {
-            socket.Bind(new IPEndPoint(loopback, 0));
-            socket.Listen(backlog: 16);
+            socket.Bind(new IPEndPoint(bindAddress, 0));
+            socket.Listen(backlog: 64);
         }
         catch
         {

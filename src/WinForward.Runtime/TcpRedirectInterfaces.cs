@@ -68,11 +68,14 @@ public interface ITcpRedirectInjector
 }
 
 /// <summary>
-/// The terminal outcome of a proxy-selected TCP packet. A proxy-selected flow is never silently
-/// passed: any setup, rewrite, or injection failure fails closed as <see cref="Blocked"/>.
+/// The terminal outcome of handling a proxy-selected TCP packet. A proxy-selected flow is never
+/// silently passed: any setup, rewrite, or injection failure fails closed as <see cref="Blocked"/>.
+/// <see cref="NotRelevant"/> means the packet is not part of any active redirect (mid-flow data on
+/// the redirect leg that is handled by normal policy), so the caller continues normal processing.
 /// </summary>
 public enum TcpRedirectOutcome
 {
     Injected,
     Blocked,
+    NotRelevant,
 }

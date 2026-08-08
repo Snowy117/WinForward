@@ -108,6 +108,30 @@ public sealed class TcpRedirectTable
     public bool TryResolveByTranslated(Endpoint translatedTuple, DateTimeOffset now, out TcpRedirectAssociation? association) =>
         TryFind(_byTranslated, translatedTuple, now, out association);
 
+    /// <summary>
+    /// Resolves an association by proxy port. A reverse packet from the local proxy listener has a
+    /// source port equal to the proxy port but a source address equal to the client's own IP (the
+    /// proxy connects to the client using the client's local address), so exact tuple matching
+    /// fails; the port is the stable discriminator. Rare scan guarded by the same gate lock.
+    /// </summary>
+    public bool TryResolveByProxyPort(ushort proxyPort, DateTimeOffset now, out TcpRedirectAssociation? association)
+    {
+        lock (_gate)
+        {
+            foreach (var candidate in _byTranslated.Values)
+            {
+                if (candidate.TranslatedListenerTuple.Port == proxyPort)
+                {
+                    candidate.Touch(now);
+                    association = candidate;
+                    return true;
+                }
+            }
+            association = null;
+            return false;
+        }
+    }
+
     public bool TryResolveByOriginal(FlowKey originalKey, DateTimeOffset now, out TcpRedirectAssociation? association) =>
         TryFind(_byOriginal, originalKey, now, out association);
 

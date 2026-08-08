@@ -16,6 +16,7 @@ public static class NdisApiAbi
     public const uint PacketFlagOnReceive = 0x00000002;
     public const uint SentTunnel = 0x00000001;
     public const uint ReceiveTunnel = 0x00000002;
+    public const uint LoopbackFilter = 0x00000020;
 
     public static void AssertManagedX64Layout()
     {

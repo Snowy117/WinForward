@@ -56,18 +56,21 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         try
         {
             var outcome = await _tcpProxy.HandlePacketAsync(packet, server, cancellationToken).ConfigureAwait(false);
-            if (outcome != TcpRedirectOutcome.Injected)
+            if (outcome == TcpRedirectOutcome.Blocked)
             {
                 LogProxyUnavailable();
             }
+            // Injected: the coordinator rewrote and reinjected the frame itself; the lease is
+            // consumed. NotRelevant: mid-flow data on a flow with no active association is
+            // passed through by normal policy handling.
         }
         catch (OperationCanceledException)
         {
             throw;
         }
-        catch
+        catch (Exception ex)
         {
-            LogProxyUnavailable();
+            _logger.Warn($"TCP proxy handling failed: {ex.GetType().Name}: {ex.Message}");
         }
     }
 
