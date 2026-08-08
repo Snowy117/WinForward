@@ -14,3 +14,4 @@
 .repograph/
 dist/
 qodana-results/
+evil_winrm_py.log

@@ -63,6 +63,12 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
 
     public ValueTask DisposeAsync() => _stream.DisposeAsync();
 
+    /// <summary>
+    /// Returns the authenticated, CONNECT-negotiated upstream stream for byte relaying. The caller
+    /// does not take ownership; disposing the <see cref="Socks5ControlConnection"/> closes the stream.
+    /// </summary>
+    internal Stream GetUpstreamStream() => _stream;
+
     private async ValueTask AuthenticateAsync(Socks5Server server, CancellationToken cancellationToken)
     {
         var credentials = server.Username is not null;

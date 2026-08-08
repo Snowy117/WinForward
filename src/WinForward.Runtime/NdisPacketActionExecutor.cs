@@ -7,23 +7,24 @@ namespace WinForward.Runtime;
 /// <summary>
 /// Executes pass/block/proxy packet dispositions. A pass copies the captured frame into a native
 /// buffer and reinjects it exactly once in its captured direction through the <see cref="IPacketReinjector"/>;
-/// a block consumes the frame without reinjection. Because proxy relay is not implemented in this
-/// build, a proxy decision fails closed: the frame is consumed and dropped (never silently passed)
-/// with a rate-limited structured log. The reinjector is abstracted so the direction mapping is
-/// unit-testable without NDISAPI hardware.
+/// a block consumes the frame without reinjection. A proxy decision routes the packet through the
+/// <see cref="TcpProxyCoordinator"/> when one is configured; if no coordinator is provided the flow
+/// fails closed with a rate-limited structured log.
 /// </summary>
 public sealed class NdisPacketActionExecutor : IPacketActionExecutor
 {
     private static readonly TimeSpan ProxyUnavailableLogInterval = TimeSpan.FromSeconds(5);
 
     private readonly IPacketReinjector _reinjector;
+    private readonly TcpProxyCoordinator? _tcpProxy;
     private readonly IRuntimeLogger _logger;
     private long _lastProxyUnavailableLogTicks;
 
-    public NdisPacketActionExecutor(IPacketReinjector reinjector, IRuntimeLogger? logger = null)
+    public NdisPacketActionExecutor(IPacketReinjector reinjector, IRuntimeLogger? logger = null, TcpProxyCoordinator? tcpProxy = null)
     {
         ArgumentNullException.ThrowIfNull(reinjector);
         _reinjector = reinjector;
+        _tcpProxy = tcpProxy;
         _logger = logger ?? NullRuntimeLogger.Instance;
     }
 
@@ -44,10 +45,30 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         return ValueTask.CompletedTask;
     }
 
-    public ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
+    public async ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
     {
-        LogProxyUnavailable();
-        return ValueTask.CompletedTask;
+        if (_tcpProxy is null)
+        {
+            LogProxyUnavailable();
+            return;
+        }
+
+        try
+        {
+            var outcome = await _tcpProxy.HandlePacketAsync(packet, server, cancellationToken).ConfigureAwait(false);
+            if (outcome != TcpRedirectOutcome.Injected)
+            {
+                LogProxyUnavailable();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            LogProxyUnavailable();
+        }
     }
 
     private void LogProxyUnavailable()

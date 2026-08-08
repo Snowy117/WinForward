@@ -175,7 +175,15 @@ internal static class Program
     private static async Task<int> RunCaptureLoopAsync(ValidatedConfiguration configuration, NdisApiDriver driver, IReadOnlyList<WindowsAdapter> scope, IRuntimeLogger logger)
     {
         var selfTraffic = new SelfTrafficRegistry();
-        var executor = new NdisPacketActionExecutor(new NdisPacketReinjector(driver), logger);
+        var reinjector = new NdisPacketReinjector(driver);
+        await using var tcpCoordinator = new TcpProxyCoordinator(
+            new TcpRedirectListenerFactory(),
+            new TcpProxyRelayFactory(selfTraffic),
+            new TcpRedirectInjector(reinjector),
+            new TcpRedirectTable(),
+            selfTraffic,
+            logger);
+        var executor = new NdisPacketActionExecutor(reinjector, logger, tcpCoordinator);
         var dispatcher = new FlowDispatcher(configuration, selfTraffic, executor, new WindowsProcessAttributor());
         var processor = new CapturePacketProcessor(dispatcher);
         var modeController = new NdisAdapterModeController(driver, scope);

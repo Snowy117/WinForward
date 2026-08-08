@@ -1,3 +1,4 @@
+using WinForward.Configuration;
 using WinForward.Core;
 
 namespace WinForward.Runtime;
@@ -42,7 +43,7 @@ public interface ITcpAcceptedConnection : IAsyncDisposable
 /// </summary>
 public interface ITcpProxyRelayFactory
 {
-    ValueTask<ITcpRelay> EstablishAsync(Endpoint originalDestination, ITcpAcceptedConnection acceptedConnection, CancellationToken cancellationToken);
+    ValueTask<ITcpRelay> EstablishAsync(Endpoint originalDestination, ITcpAcceptedConnection acceptedConnection, Socks5Server server, CancellationToken cancellationToken);
 }
 
 /// <summary>

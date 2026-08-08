@@ -96,7 +96,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
             return await ReinjectExistingSynAsync(packet, setup.Association, cancellationToken).ConfigureAwait(false);
         }
 
-        var session = new TcpRedirectSession(setup.Association, setup.Listener, setup.SelfTrafficToken!);
+        var session = new TcpRedirectSession(setup.Association, setup.Listener, setup.SelfTrafficToken!, server);
         lock (_gate) _sessions.Add(setup.Association.OriginalKey, session);
         session.AcceptLoop = RunAcceptLoopAsync(session, cancellationToken);
 
@@ -219,16 +219,14 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(packet);
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        // A reverse packet's source is the listener (translated) tuple; its destination is the
-        // original client. Resolve by the listener tuple, then rewrite the source back to the
-        // original remote so the client observes the flow as if it came from the real server.
+        // A reverse packet travels listener -> client, so the listener (translated) tuple is the
+        // packet's SOURCE. The flow classifier sets Local=Source, Remote=Destination, so resolve by
+        // Local first, then fall back to Remote for any orientation the classifier reports.
         var key = packet.Context.Key;
-        var translatedTuple = key.Remote;
-
-        if (!_table.TryResolveByTranslated(translatedTuple, DateTimeOffset.UtcNow, out var association) || association is null)
-        {
-            return TcpRedirectOutcome.Blocked;
-        }
+        var now = DateTimeOffset.UtcNow;
+        var found = _table.TryResolveByTranslated(key.Local, now, out var association);
+        if (!found) found = _table.TryResolveByTranslated(key.Remote, now, out association);
+        if (!found || association is null) return TcpRedirectOutcome.Blocked;
 
         var original = association.OriginalKey;
         var rewrittenFrame = packet.Lease.Frame.ToArray();
@@ -253,6 +251,49 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         }
 
         return TcpRedirectOutcome.Injected;
+    }
+
+    /// <summary>
+    /// Routes a proxy-selected TCP packet to the correct redirect phase. The flow dispatcher sends
+    /// every packet on a proxy-decided TCP flow here. A SYN starts or re-injects the redirect; a
+    /// packet whose source is a known translated listener tuple is a reverse packet; anything else
+    /// is mid-flow data on the redirect leg and is passed through.
+    /// </summary>
+    public async ValueTask<TcpRedirectOutcome> HandlePacketAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(packet);
+        ArgumentNullException.ThrowIfNull(server);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var key = packet.Context.Key;
+        var now = DateTimeOffset.UtcNow;
+
+        if (_table.TryResolveByTranslated(key.Local, now, out _) || _table.TryResolveByTranslated(key.Remote, now, out _))
+        {
+            return await HandleReverseAsync(packet, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (IsTcpSyn(packet.Lease.Frame.Span))
+        {
+            return await HandleSynAsync(packet, server, cancellationToken).ConfigureAwait(false);
+        }
+
+        return TcpRedirectOutcome.Injected;
+    }
+
+    /// <summary>
+    /// Detects a TCP SYN (SYN set, ACK clear) from the raw Ethernet frame. The flags byte is at
+    /// the TCP header offset + 13; SYN = 0x02, ACK = 0x10.
+    /// </summary>
+    private static bool IsTcpSyn(ReadOnlySpan<byte> frame)
+    {
+        if (!IpTcpUdpPacket.TryParse(frame, out var view) || view.Transport != PacketTransport.Tcp) return false;
+        var tcpFlagsOffset = 14 + view.IpHeaderLength + 13;
+        if (frame.Length <= tcpFlagsOffset) return false;
+        var flags = frame[tcpFlagsOffset];
+        const byte Syn = 0x02;
+        const byte Ack = 0x10;
+        return (flags & Syn) != 0 && (flags & Ack) == 0;
     }
 
     public async ValueTask DisposeAsync()
@@ -314,7 +355,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
 
             try
             {
-                var relay = await _relayFactory.EstablishAsync(session.Association.OriginalDestination, accepted, token).ConfigureAwait(false);
+                var relay = await _relayFactory.EstablishAsync(session.Association.OriginalDestination, accepted, session.Server, token).ConfigureAwait(false);
                 session.Relay = relay;
                 session.Association.Phase = RelayPhase.Relaying;
                 _ = ObserveRelayCompletionAsync(session, relay, token);
@@ -376,11 +417,12 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     /// </summary>
     private sealed record RedirectSetup(ITcpRedirectListener? Listener, TcpRedirectAssociation Association, SelfTrafficRegistry.SelfTrafficToken? SelfTrafficToken);
 
-    private sealed class TcpRedirectSession(TcpRedirectAssociation association, ITcpRedirectListener listener, SelfTrafficRegistry.SelfTrafficToken selfTrafficToken)
+    private sealed class TcpRedirectSession(TcpRedirectAssociation association, ITcpRedirectListener listener, SelfTrafficRegistry.SelfTrafficToken selfTrafficToken, Socks5Server server)
     {
         public TcpRedirectAssociation Association { get; } = association;
         public ITcpRedirectListener Listener { get; } = listener;
         public SelfTrafficRegistry.SelfTrafficToken SelfTrafficToken { get; } = selfTrafficToken;
+        public Socks5Server Server { get; } = server;
         public ITcpRelay? Relay { get; set; }
         public Task? AcceptLoop { get; set; }
     }

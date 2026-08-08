@@ -41,6 +41,30 @@ public sealed class TcpProxyCoordinatorTests
     }
 
     [Fact]
+    public async Task ReversePacketWithClassifierOrientationResolvesToOriginalFlow()
+    {
+        // The flow classifier sets Local=SourceAddress, Remote=DestinationAddress. A reverse packet
+        // (listener -> client) therefore has Local=listener, Remote=client — the opposite orientation
+        // from MakeReversePacket. The reverse resolver must check both Local and Remote against the
+        // translated-tuple index or this packet is misrouted.
+        var listenerFactory = new FakeListenerFactory();
+        var injector = new FakeInjector();
+        var selfTraffic = new SelfTrafficRegistry();
+        var table = new TcpRedirectTable();
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic);
+
+        var syn = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(syn, s_server, CancellationToken.None));
+
+        var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
+        var reverse = MakeReversePacketClassifierOrientation(listenerTuple.Address, listenerTuple.Port, s_clientIpv4, 53000);
+        var outcome = await coordinator.HandleReverseAsync(reverse, CancellationToken.None);
+
+        Assert.Equal(TcpRedirectOutcome.Injected, outcome);
+        Assert.Equal(2, injector.InjectedFrames.Count);
+    }
+
+    [Fact]
     public async Task TranslatedTupleAliasCollisionIsRejectedFailClosed()
     {
         var sharedTuple = Endpoint.From(IPAddress.Loopback, 9999);
@@ -307,6 +331,19 @@ public sealed class TcpProxyCoordinatorTests
         return new CapturedFlowPacket(lease, context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, 0x1234));
     }
 
+    private static CapturedFlowPacket MakeReversePacketClassifierOrientation(IPAddress source, ushort sourcePort, IPAddress destination, ushort destinationPort)
+    {
+        var frame = source.AddressFamily == AddressFamily.InterNetwork
+            ? BuildIpv4TcpSyn(source, destination, sourcePort, destinationPort)
+            : BuildIpv6TcpSyn(source, destination, sourcePort, destinationPort);
+        var local = Endpoint.From(source, sourcePort);
+        var remote = Endpoint.From(destination, destinationPort);
+        var key = FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Host);
+        var context = new FlowContext(key, "app.exe", null, null, "eth0", destinationPort);
+        var lease = new PacketLease(frame);
+        return new CapturedFlowPacket(lease, context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, 0x1234));
+    }
+
     private static byte[] BuildIpv4TcpSyn(IPAddress source, IPAddress destination, ushort sourcePort, ushort destinationPort)
     {
         const int tcpHeaderLength = 20;
@@ -488,7 +525,7 @@ public sealed class TcpProxyCoordinatorTests
     {
         public List<Endpoint> EstablishedDestinations { get; } = [];
 
-        public ValueTask<ITcpRelay> EstablishAsync(Endpoint originalDestination, ITcpAcceptedConnection acceptedConnection, CancellationToken cancellationToken)
+        public ValueTask<ITcpRelay> EstablishAsync(Endpoint originalDestination, ITcpAcceptedConnection acceptedConnection, Socks5Server server, CancellationToken cancellationToken)
         {
             if (throwOnEstablish) throw new IOException("relay setup failed");
             lock (EstablishedDestinations) EstablishedDestinations.Add(originalDestination);
