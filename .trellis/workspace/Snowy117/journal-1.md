@@ -20,3 +20,14 @@
 
 ---
 
+## 2026-08-08 — milestone 8a: TCP endpoint rewrite primitive (hardware-independent)
+
+- Split milestone 8 (TCP Local Redirect) into 8a protocol-layer / 8b runtime state machine / 8c Windows PoC, doing the hardware-independent parts first.
+- trellis-implement (deepseek-v4-flash) added `PacketChecksums.TryRewriteTcpEndpoints` (IPv4/IPv6 addr+port rewrite, IPv4 header + TCP checksum recompute; only addresses/ports/checksums touched — seq/ack/flags/options/payload inviolate per design §8). TCP checksum stores folded result verbatim (no UDP-style 0→0xFFFF invert, RFC 9293). Refactored `TryFindIpv6Udp` into shared `TryFindIpv6Transport(targetNextHeader)` — byte-identical for UDP.
+- trellis-check (two independent passes) verdict ALL PASS / NO BLOCKERS. Residual risks all minor: R1 zero-inversion test non-adversarial, R2 pre-existing 256-byte ext cap, R3 no IPv6-ext-then-TCP success test.
+- Parent closed R3 by adding `Ipv6HopByHopExtensionThenTcpRewritesSuccessfully` (Hop-by-Hop next-header chain 0→6). Suite now 93/93, 0 warnings.
+- spec(quality-guidelines): recorded the endpoint-rewrite contract, TCP/UDP checksum divergence rule, fragment-mask mirroring rule, and packet-rewrite test requirements.
+- Committed as ccdf036. Next: 8b (runtime TCP state machine — SYN claim, translated tuple aliasing, local listener, relay lifecycle, reverse rewrite with fake-reinjector tests), then 8c Windows PoC + hardware verify.
+
+---
+
