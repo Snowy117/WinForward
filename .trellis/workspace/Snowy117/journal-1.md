@@ -44,3 +44,11 @@
 
 ---
 
+
+## 2026-08-08 (cont.) — 8b independent check + test hardening
+
+- trellis-check (glm-5.2, fresh pass after model availability restored) reviewed 8b. High-quality review: reviewer personally neutered the TOCTOU fix and found the locking test (yieldOnce) was scheduler-dependent and did NOT reliably reproduce the race. Verdict NEEDS FIXES on two non-behavioral items: (1) test determinism, (2) TryFind locking inconsistency.
+- Fix 1: replaced yieldOnce fake with a TaskCompletionSource-gated factory (all N callers block in CreateAsync until the last arrives, proving all passed the empty-table fast path before any claim). Added internal ConcurrentLoserCount counter; test asserts == N-1. Neutering now deterministically fails with ArgumentException at _sessions.Add. Added InternalsVisibleTo for the counter.
+- Fix 2: TcpRedirectTable.TryFind changed from static lock(table) to instance lock(_gate), matching UdpAssociationTable.
+- spec updated: barrier/TCS-gated concurrency-test technique (Yield-only is non-load-bearing); single-gate-lock discipline for association tables.
+- Committed as 60986e2. Suite 106/106, 0 warnings. glm-5.2 note: when it completes (with explicit output-nudging after stalls), its reviews are rigorous and worth waiting for; the stall-then-nudge pattern is reliable.
