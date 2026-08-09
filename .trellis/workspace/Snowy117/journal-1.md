@@ -71,3 +71,13 @@
 - Forwarded-direction fix: HandleReverseAsync always injected toward MSTCP, which is wrong for forwarded flows (client behind a VM/remote adapter — reverse must go back to the origin adapter). Changed ITcpRedirectInjector contract isOnSend -> towardMstcp; coordinator passes origin == Host. Locked by 2 new tests. 109/109.
 - Regression: IPv4 + IPv6 host TCP both 3/3 308 after the change. Committed 49a568f.
 - Next: milestone 9 (UDP relay). UdpProxyCoordinator/UdpAssociations/Socks5UdpTransport already exist from the foundation; needs the UDP packet rewrite/reinject path wired into the capture executor (like TCP) + hardware verification on Win11 (DNS/QUIC-style bursts, concurrent same-socket datagrams, relay port != SOCKS TCP port).
+
+## 2026-08-09 — milestone 9: UDP relay wired + hardware-verified (Win11)
+
+- trellis-implement wired UDP relay: UdpFrameBuilder (pure frame builder, RFC 768 0->0xFFFF), UdpResponseReinjector (IUdpResponseSink), executor UDP branch (parse payload -> TrySendAsync, consumed), Program wiring with Socks5UdpTransportFactory(selfTraffic) + scope-adapter MAC. Self-traffic fix: relay registers (Udp, 0.0.0.0:local, relayEndpoint), released on dispose. 122/122.
+- Hardware bring-up (Win11, local python SOCKS5 server with UDP ASSOCIATE support):
+  - python's DNS query format bug (bytes([1]) vs bytes([7]) for "example") — fixed the verify script; burst script was correct.
+  - Took many tshark captures to isolate: the local SOCKS5 server's own forwarded queries (forward_one target sockets) get re-caught by WinForward and re-proxied -> ASSOCIATE storm (819+). Self-traffic protects WinForward's own sockets, not the SOCKS5 server's. This is a TEST-HARNESS artifact; a remote SOCKS5 avoids it.
+  - Two real fixes found: (1) UDP proxy flow's reverse datagram (reinjected response) must pass, not re-proxy (FlowDispatcher IsReverseOf check) — else the response loops forever; (2) SelfTrafficRegistry must wildcard-match Any-bound sockets by port+remote (the relay socket binds 0.0.0.0 but emits routing-chosen src IP).
+  - Clean hardware proof: nslookup example.com 192.168.77.1 through proxy rule -> UDP ASSOCIATE + relay response 3/3.
+- Committed 953c92d. Suite 123/123. Remaining: Hyper-V forwarded UDP (needs real VM host), IPv6 UDP, full matrix.
