@@ -63,3 +63,11 @@
 - Flooded accept-failed SocketExceptions after each connection: a retransmitted SYN opens a second connection on the same listener. Fix: after the first relay, drain and close redundant accepts (DrainRedundantConnectionsAsync). accept failed: 0 after the fix.
 - Final: 5/5 curl http://192.168.77.1/ -> HTTP 308 via SOCKS5 (CONNECT 192.168.77.1:80), 0 accept failures, graceful Ctrl+C exit 0, post-stop traffic normal. LoopbackFilter (0x20) investigated but NOT used.
 - Committed d45051f. Suite 107/107. Remaining: IPv6 host TCP, Hyper-V forwarded TCP, UDP relay (milestone 9), full hardware matrix.
+
+## 2026-08-08 (cont.) — IPv6 host TCP verified + forwarded direction
+
+- IPv6 host TCP verified on Win11: `curl http://[fd00:1234:5678:1::1]/` via proxy rule -> 308 via SOCKS5 CONNECT to IPv6 gateway, 3/3 stable. No code change needed — 8a's TryRewriteTcpEndpoints already handles IPv6, and the swap/reverse/mid-flow machinery is family-agnostic.
+- Discovered the Win11 test host has NO Hyper-V VM stack (Get-VM / Msvm_ComputerSystem empty; the "Microsoft Hyper-V Network Adapter" interfaces are leftovers/host-is-VM artifacts). Guest-originated forwarded traffic cannot be exercised on this host — the forwarded path needs a real VM host for the hardware matrix.
+- Forwarded-direction fix: HandleReverseAsync always injected toward MSTCP, which is wrong for forwarded flows (client behind a VM/remote adapter — reverse must go back to the origin adapter). Changed ITcpRedirectInjector contract isOnSend -> towardMstcp; coordinator passes origin == Host. Locked by 2 new tests. 109/109.
+- Regression: IPv4 + IPv6 host TCP both 3/3 308 after the change. Committed 49a568f.
+- Next: milestone 9 (UDP relay). UdpProxyCoordinator/UdpAssociations/Socks5UdpTransport already exist from the foundation; needs the UDP packet rewrite/reinject path wired into the capture executor (like TCP) + hardware verification on Win11 (DNS/QUIC-style bursts, concurrent same-socket datagrams, relay port != SOCKS TCP port).
