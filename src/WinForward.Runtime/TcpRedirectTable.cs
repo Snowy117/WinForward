@@ -48,6 +48,7 @@ public sealed class TcpRedirectTable
 {
     private readonly Dictionary<FlowKey, TcpRedirectAssociation> _byOriginal = [];
     private readonly Dictionary<Endpoint, TcpRedirectAssociation> _byTranslated = [];
+    private readonly Dictionary<ushort, TcpRedirectAssociation> _byProxyPort = [];
     private readonly Lock _gate = new();
     private readonly int _capacity;
     private long _nextGeneration;
@@ -100,6 +101,7 @@ public sealed class TcpRedirectTable
             var created = new TcpRedirectAssociation(originalKey, originalDestination, originAdapter, translatedTuple, ++_nextGeneration, now);
             _byOriginal.Add(originalKey, created);
             _byTranslated.Add(translatedTuple, created);
+            _byProxyPort.Add(translatedTuple.Port, created);
             association = created;
             return true;
         }
@@ -112,20 +114,17 @@ public sealed class TcpRedirectTable
     /// Resolves an association by proxy port. A reverse packet from the local proxy listener has a
     /// source port equal to the proxy port but a source address equal to the client's own IP (the
     /// proxy connects to the client using the client's local address), so exact tuple matching
-    /// fails; the port is the stable discriminator. Rare scan guarded by the same gate lock.
+    /// fails; the port is the stable discriminator. Each listener binds a unique ephemeral port, so
+    /// the port index keeps this O(1) on the per-packet reverse path.
     /// </summary>
     public bool TryResolveByProxyPort(ushort proxyPort, DateTimeOffset now, out TcpRedirectAssociation? association)
     {
         lock (_gate)
         {
-            foreach (var candidate in _byTranslated.Values)
+            if (_byProxyPort.TryGetValue(proxyPort, out association))
             {
-                if (candidate.TranslatedListenerTuple.Port == proxyPort)
-                {
-                    candidate.Touch(now);
-                    association = candidate;
-                    return true;
-                }
+                association.Touch(now);
+                return true;
             }
             association = null;
             return false;
@@ -147,6 +146,7 @@ public sealed class TcpRedirectTable
             if (!_byOriginal.TryGetValue(association.OriginalKey, out var current) || !ReferenceEquals(current, association)) return false;
             _byOriginal.Remove(association.OriginalKey);
             _byTranslated.Remove(association.TranslatedListenerTuple);
+            _byProxyPort.Remove(association.TranslatedListenerTuple.Port);
             return true;
         }
     }
@@ -160,6 +160,7 @@ public sealed class TcpRedirectTable
             {
                 _byOriginal.Remove(association.OriginalKey);
                 _byTranslated.Remove(association.TranslatedListenerTuple);
+                _byProxyPort.Remove(association.TranslatedListenerTuple.Port);
             }
             return expired.Length;
         }

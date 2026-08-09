@@ -19,42 +19,29 @@ public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic) : ITcp
             throw new ArgumentException("The accepted connection must be a TcpAcceptedConnection.", nameof(acceptedConnection));
         }
 
-        var control = await Socks5ControlConnection.ConnectAsync(server, cancellationToken).ConfigureAwait(false);
+        // Register the upstream control connection's exact tuple before its SYN leaves the host.
+        // The socket is bound to a wildcard local endpoint, so the registration uses Any:port and
+        // the wildcard matcher in SelfTrafficRegistry covers the routing-chosen source IP. This
+        // mirrors the UDP relay transport and prevents a catch-all proxy rule from recursively
+        // intercepting WinForward's own SOCKS5 control traffic (design §10).
+        var control = await Socks5ControlConnection.ConnectAsync(server, cancellationToken, (local, remote) =>
+            selfTraffic.Register(new SelfTrafficRegistry.SelfTrafficKey(
+                TransportProtocol.Tcp,
+                Endpoint.From(local.Address, checked((ushort)local.Port)),
+                Endpoint.From(remote.Address, checked((ushort)remote.Port))))).ConfigureAwait(false);
         try
         {
             var destinationAddress = originalDestination.Address;
             await control.ConnectDestinationAsync(new IPEndPoint(destinationAddress, originalDestination.Port), cancellationToken).ConfigureAwait(false);
 
             var upstream = control.GetUpstreamStream();
-            var selfTrafficToken = RegisterUpstreamLoopPrevention(server, destinationAddress.AddressFamily);
-
-            return new TcpProxyRelay(concrete.Socket, upstream, control, selfTrafficToken);
+            return new TcpProxyRelay(concrete.Socket, upstream, control);
         }
         catch
         {
             await control.DisposeAsync().ConfigureAwait(false);
             throw;
         }
-    }
-
-    private SelfTrafficRegistry.SelfTrafficToken RegisterUpstreamLoopPrevention(Socks5Server server, System.Net.Sockets.AddressFamily destinationFamily)
-    {
-        var proxyAddress = Socks5EndpointResolver.ResolveProxyAddress(server.Host, destinationFamily);
-        var proxyEndpoint = Endpoint.From(proxyAddress, server.Port);
-        return selfTraffic.Register(new SelfTrafficRegistry.SelfTrafficKey(TransportProtocol.Tcp, proxyEndpoint, proxyEndpoint));
-    }
-}
-
-internal static class Socks5EndpointResolver
-{
-    public static IPAddress ResolveProxyAddress(string host, System.Net.Sockets.AddressFamily preferredFamily)
-    {
-        var addresses = Dns.GetHostAddresses(host);
-        foreach (var address in addresses)
-        {
-            if (address.AddressFamily == preferredFamily) return address;
-        }
-        return addresses.Length > 0 ? addresses[0] : throw new SocketException((int)SocketError.HostNotFound);
     }
 }
 
@@ -65,15 +52,13 @@ internal sealed class TcpProxyRelay : ITcpRelay
 
     private readonly Socket _localSocket;
     private readonly Socks5ControlConnection _control;
-    private readonly SelfTrafficRegistry.SelfTrafficToken? _selfTrafficToken;
     private readonly Task _completion;
     private int _disposed;
 
-    public TcpProxyRelay(Socket localSocket, Stream upstream, Socks5ControlConnection control, SelfTrafficRegistry.SelfTrafficToken? selfTrafficToken)
+    public TcpProxyRelay(Socket localSocket, Stream upstream, Socks5ControlConnection control)
     {
         _localSocket = localSocket;
         _control = control;
-        _selfTrafficToken = selfTrafficToken;
         _completion = RunPumpAsync(upstream);
     }
 
@@ -102,7 +87,6 @@ internal sealed class TcpProxyRelay : ITcpRelay
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return ValueTask.CompletedTask;
         _localSocket.Dispose();
-        _selfTrafficToken?.Dispose();
         return _control.DisposeAsync();
     }
 }

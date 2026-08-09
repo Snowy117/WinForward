@@ -10,14 +10,26 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
 {
     private readonly Socket _socket;
     private readonly NetworkStream _stream;
+    private readonly IDisposable? _loopPrevention;
 
-    private Socks5ControlConnection(Socket socket)
+    private Socks5ControlConnection(Socket socket, IDisposable? loopPrevention)
     {
         _socket = socket;
         _stream = new NetworkStream(socket, ownsSocket: true);
+        _loopPrevention = loopPrevention;
     }
 
-    public static async ValueTask<Socks5ControlConnection> ConnectAsync(Socks5Server server, CancellationToken cancellationToken)
+    /// <summary>
+    /// Opens a SOCKS5 control connection. <paramref name="onSocketReady"/> is invoked after the
+    /// socket is bound to a wildcard local endpoint (so the local port is already known) but before
+    /// the SYN leaves the host; it returns an optional loop-prevention registration that the
+    /// connection owns and disposes with itself. Registering before the SYN closes the race where a
+    /// catch-all proxy rule could capture WinForward's own SOCKS5 control traffic (design §10).
+    /// </summary>
+    public static async ValueTask<Socks5ControlConnection> ConnectAsync(
+        Socks5Server server,
+        CancellationToken cancellationToken,
+        Func<IPEndPoint, IPEndPoint, IDisposable?>? onSocketReady = null)
     {
         ArgumentNullException.ThrowIfNull(server);
         var addresses = await Dns.GetHostAddressesAsync(server.Host, cancellationToken).ConfigureAwait(false);
@@ -26,20 +38,26 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
         foreach (var address in addresses)
         {
             var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+            IDisposable? registration = null;
             try
             {
+                var bindAddress = address.AddressFamily == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any;
+                socket.Bind(new IPEndPoint(bindAddress, 0));
+                registration = onSocketReady?.Invoke((IPEndPoint)socket.LocalEndPoint!, new IPEndPoint(address, server.Port));
                 await socket.ConnectAsync(new IPEndPoint(address, server.Port), cancellationToken).ConfigureAwait(false);
-                var connection = new Socks5ControlConnection(socket);
+                var connection = new Socks5ControlConnection(socket, registration);
                 await connection.AuthenticateAsync(server, cancellationToken).ConfigureAwait(false);
                 return connection;
             }
             catch (SocketException exception)
             {
+                registration?.Dispose();
                 socket.Dispose();
                 lastConnectionError = exception;
             }
             catch
             {
+                registration?.Dispose();
                 socket.Dispose();
                 throw;
             }
@@ -62,7 +80,11 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
         _ = await ReadEndpointReplyAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    public ValueTask DisposeAsync() => _stream.DisposeAsync();
+    public ValueTask DisposeAsync()
+    {
+        _loopPrevention?.Dispose();
+        return _stream.DisposeAsync();
+    }
 
     /// <summary>
     /// Returns the authenticated, CONNECT-negotiated upstream stream for byte relaying. The caller
@@ -90,6 +112,14 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
     {
         var prefix = new byte[5];
         await _stream.ReadExactlyAsync(prefix, cancellationToken).ConfigureAwait(false);
+        if (!Socks5Messages.TryParseReply(prefix, out var status, out _, out _))
+        {
+            throw new IOException("SOCKS5 server returned an invalid reply prefix.");
+        }
+        if (status != 0)
+        {
+            throw new IOException($"SOCKS5 command failed: {Socks5Messages.DescribeReplyStatus(status)} (REP {status}).");
+        }
         if (!Socks5Messages.TryGetReplyLength(prefix, out var totalLength)) throw new IOException("SOCKS5 server returned an invalid reply address.");
         var reply = new byte[totalLength];
         prefix.CopyTo(reply, 0);
@@ -133,17 +163,15 @@ public interface IUdpProxyTransportFactory
 public sealed class Socks5UdpTransportFactory : IUdpProxyTransportFactory
 {
     private readonly SelfTrafficRegistry _selfTraffic;
-    private readonly IRuntimeLogger _logger;
 
-    public Socks5UdpTransportFactory(SelfTrafficRegistry selfTraffic, IRuntimeLogger? logger = null)
+    public Socks5UdpTransportFactory(SelfTrafficRegistry selfTraffic)
     {
         ArgumentNullException.ThrowIfNull(selfTraffic);
         _selfTraffic = selfTraffic;
-        _logger = logger ?? NullRuntimeLogger.Instance;
     }
 
     public async ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, AddressFamily addressFamily, CancellationToken cancellationToken) =>
-        await Socks5UdpTransport.CreateAsync(server, addressFamily, _selfTraffic, _logger, cancellationToken).ConfigureAwait(false);
+        await Socks5UdpTransport.CreateAsync(server, addressFamily, _selfTraffic, cancellationToken).ConfigureAwait(false);
 }
 
 public sealed class Socks5UdpTransport : IUdpProxyTransport
@@ -163,10 +191,16 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
     public IPEndPoint RelayEndpoint { get; }
     public IPEndPoint LocalEndpoint => (IPEndPoint)_socket.LocalEndPoint!;
 
-    public static async ValueTask<Socks5UdpTransport> CreateAsync(Socks5Server server, AddressFamily addressFamily, SelfTrafficRegistry selfTraffic, IRuntimeLogger logger, CancellationToken cancellationToken)
+    public static async ValueTask<Socks5UdpTransport> CreateAsync(Socks5Server server, AddressFamily addressFamily, SelfTrafficRegistry selfTraffic, CancellationToken cancellationToken)
     {
         var socket = new Socket(addressFamily, SocketType.Dgram, ProtocolType.Udp);
-        var control = await Socks5ControlConnection.ConnectAsync(server, cancellationToken).ConfigureAwait(false);
+        // Register the TCP control connection's exact tuple before its SYN leaves the host, so a
+        // catch-all proxy rule never recursively intercepts the UDP ASSOCIATE control socket.
+        var control = await Socks5ControlConnection.ConnectAsync(server, cancellationToken, (local, remote) =>
+            selfTraffic.Register(new SelfTrafficRegistry.SelfTrafficKey(
+                TransportProtocol.Tcp,
+                Endpoint.From(local.Address, checked((ushort)local.Port)),
+                Endpoint.From(remote.Address, checked((ushort)remote.Port))))).ConfigureAwait(false);
         try
         {
             socket.Bind(new IPEndPoint(addressFamily == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any, 0));

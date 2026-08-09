@@ -277,10 +277,13 @@ public sealed class UdpRelayTests
     private sealed class FakeTransportFactory : IUdpProxyTransportFactory
     {
         public List<FakeTransport> Transports { get; } = [];
+        private int _nextLocalPort = 40000;
 
         public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, System.Net.Sockets.AddressFamily addressFamily, CancellationToken cancellationToken)
         {
-            var transport = new FakeTransport(addressFamily);
+            // Each transport models a distinct bound UDP socket, so its local port is unique; the
+            // relay alias collision guard in UdpProxyCoordinator must not reject distinct flows.
+            var transport = new FakeTransport(addressFamily, Interlocked.Increment(ref _nextLocalPort));
             lock (Transports) Transports.Add(transport);
             return ValueTask.FromResult<IUdpProxyTransport>(transport);
         }
@@ -288,15 +291,16 @@ public sealed class UdpRelayTests
 
     private sealed class FakeTransport : IUdpProxyTransport
     {
-        public FakeTransport(System.Net.Sockets.AddressFamily addressFamily)
+        public FakeTransport(System.Net.Sockets.AddressFamily addressFamily, int localPort)
         {
             var loopback = addressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? IPAddress.Loopback : IPAddress.IPv6Loopback;
-            LocalEndpoint = new IPEndPoint(loopback, 40000);
+            LocalEndpoint = new IPEndPoint(loopback, localPort);
             RelayEndpoint = new IPEndPoint(loopback, 50000);
         }
 
         public IPEndPoint RelayEndpoint { get; }
         public IPEndPoint LocalEndpoint { get; }
+        public bool IsDisposed { get; private set; }
         public List<(IPEndPoint Destination, byte[] Payload)> Sent { get; } = [];
         public Channel<Socks5UdpDatagram> Responses { get; } = Channel.CreateUnbounded<Socks5UdpDatagram>();
 
@@ -306,9 +310,20 @@ public sealed class UdpRelayTests
             return ValueTask.CompletedTask;
         }
 
-        public ValueTask<Socks5UdpDatagram> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken) => Responses.Reader.ReadAsync(cancellationToken);
+        public ValueTask<Socks5UdpDatagram> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+        {
+            // A disposed transport models a closed socket: the pump's pending receive must end
+            // promptly instead of blocking forever, mirroring the real socket's throw.
+            ObjectDisposedException.ThrowIf(IsDisposed, this);
+            return Responses.Reader.ReadAsync(cancellationToken);
+        }
 
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        public ValueTask DisposeAsync()
+        {
+            IsDisposed = true;
+            Responses.Writer.TryComplete();
+            return ValueTask.CompletedTask;
+        }
     }
 
     private sealed class FakeResponseSink : IUdpResponseSink

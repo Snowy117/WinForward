@@ -142,10 +142,6 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         // existing association (whose translated tuple differs from this listener's) rather than a
         // new one. The just-allocated listener is redundant: release it and fall back to the
         // re-inject path against the existing association so only one listener owns the flow.
-        // A concurrent caller may have claimed this same original flow first. TryClaim returns the
-        // existing association (whose translated tuple differs from this listener's) rather than a
-        // new one. The just-allocated listener is redundant: release it and fall back to the
-        // re-inject path against the existing association so only one listener owns the flow.
         if (association.TranslatedListenerTuple != translatedTuple)
         {
             Interlocked.Increment(ref _concurrentLoserCount);
@@ -355,6 +351,28 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         const byte Syn = 0x02;
         const byte Ack = 0x10;
         return (flags & Syn) != 0 && (flags & Ack) == 0;
+    }
+
+    /// <summary>
+    /// Removes redirect associations idle past <paramref name="idleTimeout"/> and tears down their
+    /// sessions (listener, relay, self-traffic token, table alias). An idle half-open connection is
+    /// released rather than left occupying the bounded redirect table (design §7/§8).
+    /// </summary>
+    public async ValueTask<int> RemoveExpiredAsync(DateTimeOffset now, TimeSpan idleTimeout)
+    {
+        TcpRedirectSession[] expired;
+        lock (_gate)
+        {
+            expired = _sessions.Values.Where(session => now - session.Association.LastActivityUtc >= idleTimeout).ToArray();
+        }
+
+        var removed = 0;
+        foreach (var session in expired)
+        {
+            await TearDownSessionAsync(session).ConfigureAwait(false);
+            removed++;
+        }
+        return removed;
     }
 
     public async ValueTask DisposeAsync()

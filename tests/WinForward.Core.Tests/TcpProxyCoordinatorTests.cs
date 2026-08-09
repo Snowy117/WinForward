@@ -369,6 +369,35 @@ public sealed class TcpProxyCoordinatorTests
         Assert.False(registry.IsOwned(context));
     }
 
+    [Fact]
+    public void SelfTrafficUpstreamTcpTupleIsOwnedWhenObservedAsHostEphemeralToProxy()
+    {
+        // Regression for the CRITICAL loop-prevention defect: the TCP relay registered
+        // (proxy:proxy) as both endpoints, which can never match the observed upstream SYN
+        // (host:ephemeral -> proxy:socks). Under a catch-all proxy rule the SOCKS5 control
+        // connection would be recursively re-proxied. The fix registers the bound local endpoint
+        // (Any:port) plus the proxy endpoint; the wildcard matcher must own the observed tuple.
+        var registry = new SelfTrafficRegistry();
+        var boundLocal = Endpoint.From(IPAddress.Any, 40000);
+        var proxy = Endpoint.From(IPAddress.Parse("192.168.77.2"), 1080);
+        using var token = registry.Register(new SelfTrafficRegistry.SelfTrafficKey(TransportProtocol.Tcp, boundLocal, proxy));
+
+        var observedLocal = Endpoint.From(IPAddress.Parse("192.168.77.1"), 40000);
+        var observedKey = FlowKey.Create(observedLocal, proxy, TransportProtocol.Tcp, FlowOriginKind.Host);
+        var observed = new FlowContext(observedKey, null, null, null, null, proxy.Port);
+        Assert.True(registry.IsOwned(observed));
+
+        // The proxy's response (reverse direction) is owned too.
+        var reverse = new FlowContext(observedKey.Reverse(), null, null, null, null, proxy.Port);
+        Assert.True(registry.IsOwned(reverse));
+
+        // An unrelated application sharing the proxy endpoint but using its own source port is not
+        // exempted: loop prevention is exact to WinForward-owned sockets, never a broad exemption.
+        var otherLocal = Endpoint.From(IPAddress.Parse("192.168.77.1"), 41001);
+        var other = new FlowContext(FlowKey.Create(otherLocal, proxy, TransportProtocol.Tcp, FlowOriginKind.Host), null, null, null, null, proxy.Port);
+        Assert.False(registry.IsOwned(other));
+    }
+
     private static CapturedFlowPacket MakeSynPacket(IPAddress client, IPAddress destination, ushort clientPort, ushort destinationPort)
     {
         var frame = client.AddressFamily == AddressFamily.InterNetwork

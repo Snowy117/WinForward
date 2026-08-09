@@ -143,3 +143,22 @@ Reverse-packet injection direction follows the flow origin:
 - A UDP proxy flow's reverse datagram (server -> client, the reinjected relay response) MUST be delivered to the local client, not re-proxied back to the relay. The dispatcher detects a reverse-of-stored-key packet on a proxied UDP flow and passes it; without this the response loops forever creating new UDP ASSOCIATEs.
 - Self-traffic registry must wildcard-match a socket bound to Any/IPv6Any by port + remote, because an outgoing datagram's source IP is chosen by routing, not the bind address (the UDP relay socket binds 0.0.0.0). Exact tuple matching silently misses it and the relay traffic recurses.
 - Known test-harness artifact: a local SOCKS5 server's own forwarded queries (its forwarder target sockets) are re-caught and re-proxied by WinForward, causing an ASSOCIATE storm. Self-traffic protects WinForward's own sockets, not the SOCKS5 server's. A remote SOCKS5 server avoids this entirely; the clean hardware proof on this host is short single queries (nslookup) that are answered before re-interception matters.
+
+### Loop prevention: control-connection registration happens BEFORE the SYN (fixed 2026-08-12)
+
+- **Both TCP `CONNECT` and UDP `ASSOCIATE` control connections are SOCKS5 traffic to the proxy endpoint and must be registered in `SelfTrafficRegistry` before their SYN leaves the host.** A catch-all proxy rule would otherwise capture WinForward's own control SYN and recurse until the bounded session capacity is exhausted.
+- `Socks5ControlConnection.ConnectAsync` binds the socket to a wildcard local endpoint first, invokes an `onSocketReady(local, remote)` callback (which returns the loop-prevention token) BEFORE `socket.ConnectAsync`, and owns/disposes the token with the connection. Registering after connect leaves a race where the SYN is already observable.
+- The registered tuple is `(Tcp, Any:bound_port, proxy_ip:socks_port)`: the socket is bound to wildcard, so the local address is Any and the wildcard matcher covers the routing-chosen source IP, exactly like the UDP relay socket. Registering `(proxy, proxy)` is a bug — it can never match the observed `(host:ephemeral, proxy:socks)` and silently disables loop prevention.
+- A failed connection attempt (DNS multi-address fallback) disposes the registration of that attempt before trying the next address.
+- Locked by `SelfTrafficUpstreamTcpTupleIsOwnedWhenObservedAsHostEphemeralToProxy` (forward + reverse owned; an unrelated app sharing the proxy endpoint with its own source port is NOT exempted).
+
+### Idle expiry sweep (wired 2026-08-12)
+
+- `FlowTable.RemoveExpired`, `TcpRedirectTable.RemoveExpired`, and `UdpAssociationTable.RemoveExpired` implement idle expiry but had no caller; UDP sessions accumulated to the bounded capacity and then failed closed.
+- `IdleExpirySweeper` (Runtime) is the single wiring point: started in `Program.RunCaptureLoopAsync`, it periodically sweeps `FlowDispatcher.RemoveExpiredFlows`, `TcpProxyCoordinator.RemoveExpiredAsync`, and `UdpProxyCoordinator.RemoveExpiredAsync`. It is disposed (await-using, reverse order) after the capture runtime stops and before the coordinators are released.
+- `UdpProxySession` tracks `LastActivityUtc` on send and receive; `UdpProxyCoordinator.RemoveExpiredAsync` disposes idle sessions and releases their `UdpAssociationTable` entries. The relay-alias collision guard (`UdpAssociationTable` claim per flow, design §8) is now live: a second flow claiming the same relay alias is rejected fail-closed.
+- Sweep failures are isolated (RCS1075 suppression, same pattern as `CaptureLifecycle.cs`) so a transient teardown error cannot stop the capture loop.
+
+### Native DLL resolution (fixed 2026-08-12)
+
+- `NdisApiNative` registers a `NativeLibrary.SetDllImportResolver` in its static constructor that loads `ndisapi.dll` only from `AppContext.BaseDirectory` — matching the README claim; there is no PATH/current-directory search. Other library names return zero and use default resolution. AOT-safe (no reflection).

@@ -110,7 +110,22 @@ internal static partial class NdisApiNative
 {
     private const string LibraryName = "ndisapi.dll";
 
-    [LibraryImport(LibraryName, EntryPoint = "OpenFilterDriver", StringMarshalling = StringMarshalling.Utf16)]
+    static NdisApiNative()
+    {
+        // Load ndisapi.dll only from the application directory (the published executable's folder),
+        // never from an uncontrolled PATH/current-directory search. Returning zero for any other
+        // library name lets unrelated P/Invokes fall back to the default resolution.
+        NativeLibrary.SetDllImportResolver(typeof(NdisApiNative).Assembly, ResolveLibrary);
+    }
+
+    private static nint ResolveLibrary(string libraryName, System.Reflection.Assembly assembly, DllImportSearchPath? searchPath)
+    {
+        if (!string.Equals(libraryName, LibraryName, StringComparison.OrdinalIgnoreCase)) return nint.Zero;
+        var path = Path.Combine(AppContext.BaseDirectory, LibraryName);
+        return File.Exists(path) ? NativeLibrary.Load(path) : nint.Zero;
+    }
+
+    [LibraryImport(LibraryName, EntryPoint = "OpenFilterDriver", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
     internal static partial nint OpenFilterDriver(string driverName);
 
@@ -118,11 +133,11 @@ internal static partial class NdisApiNative
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
     internal static partial void CloseFilterDriver(nint handle);
 
-    [LibraryImport(LibraryName, EntryPoint = "GetDriverVersion")]
+    [LibraryImport(LibraryName, EntryPoint = "GetDriverVersion", SetLastError = true)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
     internal static partial uint GetDriverVersion(NdisApiSafeHandle handle);
 
-    [LibraryImport(LibraryName, EntryPoint = "GetTcpipBoundAdaptersInfo")]
+    [LibraryImport(LibraryName, EntryPoint = "GetTcpipBoundAdaptersInfo", SetLastError = true)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
     internal static unsafe partial int GetTcpipBoundAdaptersInfo(NdisApiSafeHandle handle, TcpAdapterList* adapters);
 

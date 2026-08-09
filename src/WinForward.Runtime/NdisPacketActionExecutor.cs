@@ -96,8 +96,8 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
                 LogProxyUnavailable();
             }
             // Injected: the coordinator rewrote and reinjected the frame itself; the lease is
-            // consumed. NotRelevant: mid-flow data on a flow with no active association is
-            // passed through by normal policy handling.
+            // consumed. NotRelevant: the packet has no proxy-port or active-association relation,
+            // and the dispatcher already consumed the lease, so it is dropped rather than passed.
         }
         catch (OperationCanceledException)
         {

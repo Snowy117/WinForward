@@ -69,6 +69,13 @@ public sealed class FlowDispatcher
         _reverseHandler = reverseHandler;
     }
 
+    /// <summary>
+    /// Removes flow decisions idle past <paramref name="idleTimeout"/> so the bounded flow table
+    /// does not accumulate stale one-shot flows (design §7). The runtime calls this on a periodic
+    /// sweep; active flows keep their decisions because observations touch them.
+    /// </summary>
+    public int RemoveExpiredFlows(DateTimeOffset now, TimeSpan idleTimeout) => _flows.RemoveExpired(now, idleTimeout);
+
     public async ValueTask DispatchAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(packet);

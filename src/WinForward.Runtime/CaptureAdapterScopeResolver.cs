@@ -31,8 +31,7 @@ public static class CaptureAdapterScopeResolver
                 continue;
             }
 
-            ResolveSelectorSet(adapters, matcher.AdapterIds, adapter => adapter.StableId, ruleIndex, scopeSet, errorList);
-            ResolveSelectorSet(adapters, matcher.AdapterNames, adapter => adapter.FriendlyName, ruleIndex, scopeSet, errorList);
+            ResolveRuleScope(adapters, matcher, ruleIndex, scopeSet, errorList);
         }
 
         if (errorList.Count > 0)
@@ -54,30 +53,59 @@ public static class CaptureAdapterScopeResolver
         return true;
     }
 
+    private static void ResolveRuleScope(IReadOnlyList<WindowsAdapter> adapters, Core.RuleMatcher matcher, int ruleIndex, HashSet<WindowsAdapter> scope, List<string> errors)
+    {
+        var idMatches = new List<WindowsAdapter>();
+        var nameMatches = new List<WindowsAdapter>();
+        if (matcher.AdapterIds is not null)
+        {
+            ResolveSelectorSet(adapters, matcher.AdapterIds, adapter => adapter.StableId, ruleIndex, idMatches, errors);
+        }
+        if (matcher.AdapterNames is not null)
+        {
+            ResolveSelectorSet(adapters, matcher.AdapterNames, adapter => adapter.FriendlyName, ruleIndex, nameMatches, errors);
+        }
+
+        // Both fields use AND semantics and must resolve to the same adapter; a rule that can
+        // never match is a configuration error rather than a silent fallback.
+        if (matcher.AdapterIds is not null && matcher.AdapterNames is not null && errors.Count == 0)
+        {
+            var byId = idMatches.Select(adapter => adapter.StableId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var byName = nameMatches.Select(adapter => adapter.StableId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (!byId.SetEquals(byName))
+            {
+                errors.Add($"rules[{ruleIndex}]: adapterId and adapterName resolve to different adapters; both fields must select the same adapter.");
+            }
+        }
+
+        foreach (var adapter in idMatches) scope.Add(adapter);
+        foreach (var adapter in nameMatches) scope.Add(adapter);
+    }
+
     private static void ResolveSelectorSet(
         IReadOnlyList<WindowsAdapter> adapters,
         IReadOnlySet<string>? selectors,
         Func<WindowsAdapter, string> valueOf,
         int ruleIndex,
-        HashSet<WindowsAdapter> scope,
+        List<WindowsAdapter> matches,
         List<string> errors)
     {
         if (selectors is null) return;
         foreach (var selector in selectors)
         {
-            var matches = adapters.Where(adapter => string.Equals(valueOf(adapter), selector, StringComparison.OrdinalIgnoreCase)).ToArray();
-            if (matches.Length == 0)
+            var found = adapters.Where(adapter => string.Equals(valueOf(adapter), selector, StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (found.Length == 0)
             {
                 errors.Add($"rules[{ruleIndex}]: configured adapter selector '{selector}' matches no current adapter.");
             }
-            else if (matches.Length > 1)
+            else if (found.Length > 1)
             {
-                var conflicts = string.Join(", ", matches.Select(adapter => adapter.StableId + " (" + adapter.FriendlyName + ")"));
+                var conflicts = string.Join(", ", found.Select(adapter => adapter.StableId + " (" + adapter.FriendlyName + ")"));
                 errors.Add($"rules[{ruleIndex}]: configured adapter selector '{selector}' is ambiguous; matching adapters: {conflicts}.");
             }
             else
             {
-                scope.Add(matches[0]);
+                matches.Add(found[0]);
             }
         }
     }

@@ -196,6 +196,7 @@ internal static class Program
         var modeController = new NdisAdapterModeController(driver, scope);
         var captureLoop = new MultiAdapterCaptureLoop(driver, scope, processor);
         await using var runtime = new TransactionalCaptureRuntime(modeController, captureLoop);
+        await using var idleExpirySweeper = new IdleExpirySweeper(dispatcher, tcpCoordinator, udpCoordinator);
 
         using var shutdown = new CancellationTokenSource();
         void OnCancel(object? sender, ConsoleCancelEventArgs eventArgs)
@@ -207,6 +208,7 @@ internal static class Program
         Console.CancelKeyPress += OnCancel;
         try
         {
+            idleExpirySweeper.Start();
             logger.Info("Interception started. Press Ctrl+C to stop.");
             await runtime.StartAsync(shutdown.Token).ConfigureAwait(false);
             logger.Info("WinForward stopped cleanly.");

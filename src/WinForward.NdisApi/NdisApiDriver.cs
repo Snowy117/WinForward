@@ -22,8 +22,9 @@ public sealed class NdisApiDriver : IDisposable
         var handle = NdisApiSafeHandle.FromRawHandle(rawHandle);
         if (handle.IsInvalid)
         {
+            var nativeError = Marshal.GetLastWin32Error();
             handle.Dispose();
-            throw new Win32Exception("Unable to open the WinpkFilter NDISRD driver.");
+            throw new Win32Exception(nativeError, $"Unable to open the WinpkFilter NDISRD driver (native error {nativeError}, 0x{nativeError:X8}).");
         }
 
         return new NdisApiDriver(handle);
@@ -32,7 +33,11 @@ public sealed class NdisApiDriver : IDisposable
     public unsafe IReadOnlyList<NdisAdapter> GetAdapters()
     {
         TcpAdapterList native = default;
-        if (NdisApiNative.GetTcpipBoundAdaptersInfo(_handle, &native) == 0) throw new Win32Exception("Unable to enumerate NDISAPI adapters.");
+        if (NdisApiNative.GetTcpipBoundAdaptersInfo(_handle, &native) == 0)
+        {
+            var nativeError = Marshal.GetLastWin32Error();
+            throw new Win32Exception(nativeError, $"Unable to enumerate NDISAPI adapters (native error {nativeError}, 0x{nativeError:X8}).");
+        }
         var count = checked((int)Math.Min(native.AdapterCount, NdisApiAbi.AdapterListSize));
         var adapters = new List<NdisAdapter>(count);
         for (var index = 0; index < count; index++)

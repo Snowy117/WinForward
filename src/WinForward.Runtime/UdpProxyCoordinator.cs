@@ -15,6 +15,7 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
 {
     private readonly IUdpProxyTransportFactory _transportFactory;
     private readonly IUdpResponseSink _responseSink;
+    private readonly UdpAssociationTable _associations;
     private readonly Dictionary<FlowKey, Task<UdpProxySession>> _sessions = [];
     private readonly Lock _gate = new();
     private readonly CancellationTokenSource _shutdown = new();
@@ -27,6 +28,7 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
         if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(capacity));
         _transportFactory = transportFactory;
         _responseSink = responseSink;
+        _associations = new UdpAssociationTable(capacity);
         _capacity = capacity;
     }
 
@@ -104,9 +106,56 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
     {
         var addressFamily = flow.Local.AddressFamily == AddressFamilyKind.IPv4 ? AddressFamily.InterNetwork : AddressFamily.InterNetworkV6;
         var transport = await _transportFactory.CreateAsync(server, addressFamily, cancellationToken).ConfigureAwait(false);
+        var relayAlias = new RelayAlias(FlowKey.Create(
+            Endpoint.From(transport.LocalEndpoint.Address, checked((ushort)transport.LocalEndpoint.Port)),
+            Endpoint.From(transport.RelayEndpoint.Address, checked((ushort)transport.RelayEndpoint.Port)),
+            TransportProtocol.Udp,
+            flow.Origin));
+        if (!_associations.TryClaim(flow, relayAlias, DateTimeOffset.UtcNow, out _))
+        {
+            await transport.DisposeAsync().ConfigureAwait(false);
+            throw new IOException("UDP relay alias collision with another flow; blocking the flow.");
+        }
+
         var session = new UdpProxySession(flow, transport, _responseSink, cancellationToken);
         session.Start();
         return session;
+    }
+
+    /// <summary>
+    /// Removes sessions whose last send or receive is older than <paramref name="idleTimeout"/>
+    /// and releases their associations, so short-lived DNS/QUIC-style flows do not accumulate to
+    /// the bounded capacity. Idle expiry (design §7/§8) runs on a periodic sweep in the runtime.
+    /// </summary>
+    public async ValueTask<int> RemoveExpiredAsync(DateTimeOffset now, TimeSpan idleTimeout)
+    {
+        Task<UdpProxySession>[] idle;
+        lock (_gate)
+        {
+            idle = _sessions.Values.Where(task => task.IsCompletedSuccessfully && now - task.Result.LastActivityUtc >= idleTimeout).ToArray();
+        }
+
+        var removed = 0;
+        foreach (var task in idle)
+        {
+            try
+            {
+                var session = await task.ConfigureAwait(false);
+                lock (_gate)
+                {
+                    if (_sessions.TryGetValue(session.Flow, out var current) && ReferenceEquals(current, task)) _sessions.Remove(session.Flow);
+                }
+                await session.DisposeAsync().ConfigureAwait(false);
+                removed++;
+            }
+            catch (Exception) when (task.IsFaulted || task.IsCanceled)
+            {
+                // A failed session has no transport to dispose.
+            }
+        }
+
+        _associations.RemoveExpired(now, idleTimeout);
+        return removed;
     }
 
     private async ValueTask RemoveFailedSessionAsync(FlowKey flow, Task<UdpProxySession> expected)
@@ -115,6 +164,7 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
         {
             if (_sessions.TryGetValue(flow, out var current) && ReferenceEquals(current, expected)) _sessions.Remove(flow);
         }
+        _associations.TryRemoveOriginal(flow);
         try
         {
             var session = await expected.ConfigureAwait(false);
@@ -135,6 +185,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
     private readonly CancellationToken _shutdown;
     private Task? _receiveLoop;
     private Exception? _receiveFailure;
+    private long _lastActivityTicks;
 
     public UdpProxySession(FlowKey flow, IUdpProxyTransport transport, IUdpResponseSink sink, CancellationToken shutdown)
     {
@@ -142,7 +193,11 @@ internal sealed class UdpProxySession : IAsyncDisposable
         _transport = transport;
         _sink = sink;
         _shutdown = shutdown;
+        _lastActivityTicks = DateTimeOffset.UtcNow.UtcTicks;
     }
+
+    public FlowKey Flow => _flow;
+    public DateTimeOffset LastActivityUtc => new(Interlocked.Read(ref _lastActivityTicks), TimeSpan.Zero);
 
     public void Start() => _receiveLoop = ReceiveLoopAsync();
 
@@ -150,6 +205,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
     {
         var failure = Volatile.Read(ref _receiveFailure);
         if (failure is not null) throw new IOException("SOCKS5 UDP relay session is no longer usable.", failure);
+        Interlocked.Exchange(ref _lastActivityTicks, DateTimeOffset.UtcNow.UtcTicks);
         return _transport.SendAsync(new IPEndPoint(destination.Address, destination.Port), payload, cancellationToken);
     }
 
@@ -179,6 +235,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
             {
                 var response = await _transport.ReceiveAsync(buffer, _shutdown).ConfigureAwait(false);
                 if (response.DestinationAddress is null) continue;
+                Interlocked.Exchange(ref _lastActivityTicks, DateTimeOffset.UtcNow.UtcTicks);
                 var source = Endpoint.From(response.DestinationAddress, response.DestinationPort);
                 await _sink.InjectAsync(_flow, source, response.Payload, _shutdown).ConfigureAwait(false);
             }

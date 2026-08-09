@@ -86,6 +86,21 @@ public sealed class UdpAssociationTable
 
     public bool TryFindRelay(RelayAlias relayAlias, DateTimeOffset now, out UdpAssociation? association) => TryFind(_byRelay, relayAlias, now, out association);
 
+    /// <summary>
+    /// Removes a specific original flow from both indexes. Used when a session is torn down so a
+    /// relay alias is released for reuse and no half-claimed association lingers.
+    /// </summary>
+    public bool TryRemoveOriginal(FlowKey originalKey)
+    {
+        lock (_gate)
+        {
+            if (!_byOriginal.TryGetValue(originalKey, out var association)) return false;
+            _byOriginal.Remove(originalKey);
+            _byRelay.Remove(association.RelayAlias);
+            return true;
+        }
+    }
+
     public int RemoveExpired(DateTimeOffset now, TimeSpan idleTimeout)
     {
         lock (_gate)

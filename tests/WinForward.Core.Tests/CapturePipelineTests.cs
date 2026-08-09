@@ -142,6 +142,48 @@ public sealed class CapturePipelineTests
     }
 
     [Fact]
+    public void AdapterScopeFailsWhenAdapterIdAndAdapterNameResolveToDifferentAdapters()
+    {
+        // Design §3: an ID/name selector must resolve to the same current adapter. A rule whose
+        // adapterId and adapterName point at different adapters can never match (AND semantics) and
+        // is a startup error, not a silent fallback.
+        var adapters = new[]
+        {
+            new WindowsAdapter("id-a", "Ethernet", "a", 1, 1),
+            new WindowsAdapter("id-b", "vEthernet 1", "b", 2, 1)
+        };
+        var policy = new PolicySnapshot(
+            [new(new RuleMatcher(
+                AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" },
+                AdapterNames: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "vEthernet 1" }),
+                new FlowDecision(FlowAction.Pass, 0, null))],
+            FlowAction.Pass);
+
+        Assert.False(CaptureAdapterScopeResolver.TryResolve(adapters, policy, out _, out var errors));
+        Assert.Contains(errors, error => error.Contains("different adapters", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AdapterScopeAcceptsAdapterIdAndAdapterNameResolvingToTheSameAdapter()
+    {
+        var adapters = new[]
+        {
+            new WindowsAdapter("id-a", "Ethernet", "a", 1, 1),
+            new WindowsAdapter("id-b", "vEthernet 1", "b", 2, 1)
+        };
+        var policy = new PolicySnapshot(
+            [new(new RuleMatcher(
+                AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-b" },
+                AdapterNames: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "vEthernet 1" }),
+                new FlowDecision(FlowAction.Pass, 0, null))],
+            FlowAction.Pass);
+
+        Assert.True(CaptureAdapterScopeResolver.TryResolve(adapters, policy, out var scope, out _));
+        var single = Assert.Single(scope);
+        Assert.Equal("id-b", single.StableId);
+    }
+
+    [Fact]
     public void AdapterScopeIncludesEveryAdapterForFallbackOnlyPolicy()
     {
         var adapters = new[]
