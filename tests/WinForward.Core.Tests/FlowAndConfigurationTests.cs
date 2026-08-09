@@ -242,6 +242,25 @@ public sealed class FlowAndConfigurationTests
     }
 
     [Fact]
+    public void Socks5SuccessPrefixIsAcceptedByPrefixParser()
+    {
+        // Regression: ReadEndpointReplyAsync reads a 5-byte prefix and must accept a SUCCESS
+        // prefix (VER=5, REP=0) without requiring the full >= 8-byte reply. The previous code
+        // called the full-reply parser on the prefix, which rejected every success reply with
+        // "invalid reply prefix" (the bound address arrives in the second read).
+        var success = new byte[] { 5, 0, 0, 1, 192 };
+        Assert.True(Socks5Messages.TryParseReplyPrefix(success, out var okStatus));
+        Assert.Equal((byte)0, okStatus);
+
+        var failure = new byte[] { 5, 5, 0, 1, 192 };
+        Assert.True(Socks5Messages.TryParseReplyPrefix(failure, out var refused));
+        Assert.Equal((byte)5, refused);
+
+        var badVersion = new byte[] { 4, 0, 0, 1, 192 };
+        Assert.False(Socks5Messages.TryParseReplyPrefix(badVersion, out _));
+    }
+
+    [Fact]
     public void IPv4UdpPacketParserRejectsFragmentsAndReadsPayload()
     {
         var frame = new byte[14 + 20 + 8 + 3];

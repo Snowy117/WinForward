@@ -112,7 +112,9 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
     {
         var prefix = new byte[5];
         await _stream.ReadExactlyAsync(prefix, cancellationToken).ConfigureAwait(false);
-        if (!Socks5Messages.TryParseReply(prefix, out var status, out _, out _))
+        // Validate only the VER/REP prefix: a success prefix is 5 bytes and carries no bound
+        // address yet, so the full-reply parser (which requires >= 8 bytes) must not be used here.
+        if (!Socks5Messages.TryParseReplyPrefix(prefix, out var status))
         {
             throw new IOException("SOCKS5 server returned an invalid reply prefix.");
         }

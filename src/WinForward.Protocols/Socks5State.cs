@@ -77,6 +77,21 @@ public static class Socks5Messages
         _ => $"unknown status {status}"
     };
 
+    /// <summary>
+    /// Validates a 5-byte reply prefix (VER REP RSV ATYP) and returns the REP status code. A
+    /// prefix is well-formed when VER==5; the status tells success (0) from a failure (1-8). This
+    /// does NOT require a full reply, because a success prefix is only 5 bytes and the bound
+    /// address arrives later. Callers must read the full reply (see <see cref="TryGetReplyLength"/>
+    /// and <see cref="TryParseReply"/>) to obtain the bound endpoint.
+    /// </summary>
+    public static bool TryParseReplyPrefix(ReadOnlySpan<byte> prefix, out byte status)
+    {
+        status = 0;
+        if (prefix.Length < 2 || prefix[0] != 5) return false;
+        status = prefix[1];
+        return true;
+    }
+
     public static bool TryGetReplyLength(ReadOnlySpan<byte> prefix, out int length)
     {
         length = 0;
