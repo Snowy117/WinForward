@@ -349,6 +349,26 @@ public sealed class TcpProxyCoordinatorTests
         Assert.Equal(0, table.Count);
     }
 
+    [Fact]
+    public async Task SelfTrafficRegistryMatchesWildcardBoundSocketByPort()
+    {
+        // The UDP relay transport binds 0.0.0.0 but emits packets whose source IP is chosen by
+        // routing (e.g. 192.168.77.2). The registry must treat a 0.0.0.0:port registration as
+        // matching any observed source IP on the same port + remote, or relay traffic recurses.
+        var registry = new SelfTrafficRegistry();
+        var anyLocal = Endpoint.From(IPAddress.Any, 40000);
+        var remote = Endpoint.From(IPAddress.Parse("192.168.77.2"), 59391);
+        var token = registry.Register(new SelfTrafficRegistry.SelfTrafficKey(TransportProtocol.Udp, anyLocal, remote));
+
+        var observedLocal = Endpoint.From(IPAddress.Parse("192.168.77.2"), 40000);
+        var key = FlowKey.Create(observedLocal, remote, TransportProtocol.Udp, FlowOriginKind.Host);
+        var context = new FlowContext(key, null, null, null, null, remote.Port);
+        Assert.True(registry.IsOwned(context));
+
+        token.Dispose();
+        Assert.False(registry.IsOwned(context));
+    }
+
     private static CapturedFlowPacket MakeSynPacket(IPAddress client, IPAddress destination, ushort clientPort, ushort destinationPort)
     {
         var frame = client.AddressFamily == AddressFamily.InterNetwork

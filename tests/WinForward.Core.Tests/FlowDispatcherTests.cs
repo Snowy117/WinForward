@@ -9,7 +9,7 @@ namespace WinForward.Core.Tests;
 public sealed class FlowDispatcherTests
 {
     [Fact]
-    public async Task FirstPacketClaimsPolicyAndReversePacketReusesDecision()
+    public async Task FirstPacketClaimsPolicyAndUdpResponseDirectionIsPassed()
     {
         var config = CreateConfig();
         var executor = new FakeExecutor();
@@ -21,9 +21,13 @@ public sealed class FlowDispatcherTests
         await dispatcher.DispatchAsync(first, CancellationToken.None);
         await dispatcher.DispatchAsync(reverse, CancellationToken.None);
 
-        Assert.Equal(2, executor.ProxyCount);
+        // The client datagram is proxied once (policy evaluated once). The reverse datagram is a
+        // relay response on the proxied flow and must be delivered to the local client, not
+        // re-proxied back to the relay (otherwise the response loops forever).
+        Assert.Equal(1, executor.ProxyCount);
+        Assert.Equal(1, executor.PassCount);
         Assert.Equal(PacketDisposition.ProxyConsumed, first.Lease.Disposition);
-        Assert.Equal(PacketDisposition.ProxyConsumed, reverse.Lease.Disposition);
+        Assert.Equal(PacketDisposition.Pass, reverse.Lease.Disposition);
     }
 
     [Fact]

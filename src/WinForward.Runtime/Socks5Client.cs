@@ -133,15 +133,17 @@ public interface IUdpProxyTransportFactory
 public sealed class Socks5UdpTransportFactory : IUdpProxyTransportFactory
 {
     private readonly SelfTrafficRegistry _selfTraffic;
+    private readonly IRuntimeLogger _logger;
 
-    public Socks5UdpTransportFactory(SelfTrafficRegistry selfTraffic)
+    public Socks5UdpTransportFactory(SelfTrafficRegistry selfTraffic, IRuntimeLogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(selfTraffic);
         _selfTraffic = selfTraffic;
+        _logger = logger ?? NullRuntimeLogger.Instance;
     }
 
     public async ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, AddressFamily addressFamily, CancellationToken cancellationToken) =>
-        await Socks5UdpTransport.CreateAsync(server, addressFamily, _selfTraffic, cancellationToken).ConfigureAwait(false);
+        await Socks5UdpTransport.CreateAsync(server, addressFamily, _selfTraffic, _logger, cancellationToken).ConfigureAwait(false);
 }
 
 public sealed class Socks5UdpTransport : IUdpProxyTransport
@@ -161,7 +163,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
     public IPEndPoint RelayEndpoint { get; }
     public IPEndPoint LocalEndpoint => (IPEndPoint)_socket.LocalEndPoint!;
 
-    public static async ValueTask<Socks5UdpTransport> CreateAsync(Socks5Server server, AddressFamily addressFamily, SelfTrafficRegistry selfTraffic, CancellationToken cancellationToken)
+    public static async ValueTask<Socks5UdpTransport> CreateAsync(Socks5Server server, AddressFamily addressFamily, SelfTrafficRegistry selfTraffic, IRuntimeLogger logger, CancellationToken cancellationToken)
     {
         var socket = new Socket(addressFamily, SocketType.Dgram, ProtocolType.Udp);
         var control = await Socks5ControlConnection.ConnectAsync(server, cancellationToken).ConfigureAwait(false);

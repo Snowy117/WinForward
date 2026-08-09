@@ -99,6 +99,17 @@ public sealed class FlowDispatcher
 
         if (_flows.TryResolve(packet.Context.Key, out var existing) && existing is not null)
         {
+            // A UDP proxy response (server -> client on an actively proxied flow) is injected by
+            // UdpResponseReinjector toward the local stack; when the capture path observes it again
+            // it must be delivered to the client, not re-proxied back to the relay. Detect by
+            // direction: the stored flow key is (client:port -> server:port), a response is the
+            // reverse. TCP reverse packets are handled by the reverse hook before this point.
+            if (existing.Decision.Action == FlowAction.Proxy && packet.Context.Key.Protocol == TransportProtocol.Udp &&
+                IsReverseOf(existing.Key, packet.Context.Key))
+            {
+                await CompleteAsync(packet, PacketDisposition.Pass, () => _executor.PassAsync(packet, cancellationToken)).ConfigureAwait(false);
+                return;
+            }
             await ExecuteDecisionAsync(packet, existing.Decision, cancellationToken).ConfigureAwait(false);
             return;
         }
@@ -158,6 +169,12 @@ public sealed class FlowDispatcher
 
         return _policy.FallbackAction;
     }
+
+    private static bool IsReverseOf(FlowKey stored, FlowKey observed) =>
+        stored.AddressFamily == observed.AddressFamily &&
+        stored.Protocol == observed.Protocol &&
+        stored.Local == observed.Remote &&
+        stored.Remote == observed.Local;
 
     private async ValueTask ExecuteDecisionAsync(CapturedFlowPacket packet, FlowDecision decision, CancellationToken cancellationToken)
     {
