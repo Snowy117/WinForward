@@ -81,3 +81,9 @@
   - Two real fixes found: (1) UDP proxy flow's reverse datagram (reinjected response) must pass, not re-proxy (FlowDispatcher IsReverseOf check) — else the response loops forever; (2) SelfTrafficRegistry must wildcard-match Any-bound sockets by port+remote (the relay socket binds 0.0.0.0 but emits routing-chosen src IP).
   - Clean hardware proof: nslookup example.com 192.168.77.1 through proxy rule -> UDP ASSOCIATE + relay response 3/3.
 - Committed 953c92d. Suite 123/123. Remaining: Hyper-V forwarded UDP (needs real VM host), IPv6 UDP, full matrix.
+
+## 2026-08-09 (cont.) — milestone 10: docs, examples, hardening
+
+- README.md written (configuration contract, no-implicit-rules, pass/forwarding/NAT responsibility, unsupported packet classes, AOT publish + ndisapi.dll/driver deployment, admin, graceful shutdown).
+- Six example configs (process-proxy, hyperv-adapter-proxy, dns-policy, dns-proxy, pass-fallback, block-fallback); ExampleConfigurationsAllValidate locks them (124/124).
+- Proxy-outage hardware verification on Win11: stopped the local SOCKS5 server, curl via proxy rule -> blocked (CODE=000) with "TCP redirect relay setup failed; releasing the flow alias" (fail-closed, no pass downgrade). Graceful Ctrl+C exit 0, post-stop traffic normal (308). Committed as 'docs: add README, example configs, and example-config validation'.
