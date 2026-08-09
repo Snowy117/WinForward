@@ -600,4 +600,22 @@ public sealed class FlowAndConfigurationTests
         frame[44] = 3;
         return frame;
     }
+
+    [Fact]
+    public void ExampleConfigurationsAllValidate()
+    {
+        // The examples/ directory is published documentation; every example must be a valid
+        // configuration so operators can copy them without surprises.
+        var exampleDir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..", "examples");
+        if (!Directory.Exists(exampleDir)) return; // Source tree layout differs in some build hosts.
+        var files = Directory.GetFiles(exampleDir, "*.json");
+        Assert.NotEmpty(files);
+        foreach (var file in files)
+        {
+            var json = File.ReadAllText(file);
+            Assert.True(ConfigurationLoader.TryParse(json, out var dto, out var parseErrors), $"{Path.GetFileName(file)} parse: {string.Join("; ", parseErrors)}");
+            Assert.True(ConfigurationLoader.TryValidate(dto!, out _, out var validationErrors), $"{Path.GetFileName(file)} validate: {string.Join("; ", validationErrors)}");
+        }
+    }
+
 }

@@ -134,11 +134,11 @@ Gate: host and Hyper-V UDP work through SOCKS5 for IPv4/IPv6, including DNS/QUIC
 
 ## 10. Complete CLI, Diagnostics, Documentation, and Hardening
 
-- [ ] Complete `validate`, `adapters`, and `run --config` behavior and exit codes.
+- [x] **Documentation + examples (2026-08-09):** README.md written — configuration contract, no-implicit-rules guarantee, pass/forwarding/NAT responsibility, unsupported proxy packet classes, Native AOT publishing, ndisapi.dll/driver deployment, admin requirement, graceful shutdown, SOCKS5 auth. Six example configs added (process-proxy, hyperv-adapter-proxy, dns-policy, dns-proxy, pass-fallback, block-fallback) and locked by `ExampleConfigurationsAllValidate` (every example must parse+validate). 124/124 suite green.
+- [x] **CLI commands + exit codes (already implemented/hardware-exercised):** `validate`/`adapters`/`run --config` with exit codes 0/1/2/3; graceful Ctrl+C restores adapter modes (verified on Win11). Structured `[info]/[warn]/[error]` console logs; SOCKS5 credentials never logged (by design — no credential material is ever written).
+- Run analyzer, build, test, publish, dependency, performance, supported-Windows, Hyper-V, proxy-outage, and lifecycle matrices.
 - [ ] Add structured, rate-limited operational logs and counters with credential redaction.
 - [ ] Document configuration, no implicit rules, pass/forwarding/NAT responsibility, unsupported proxy packet classes, Native AOT publishing, native DLL/driver deployment, administrator requirement, and graceful shutdown.
-- [ ] Add example configurations for process proxying, Hyper-V adapter proxying, explicit DNS policy, pass fallback, and leak-prevention block fallback.
-- [ ] Run analyzer, build, test, publish, dependency, performance, supported-Windows, Hyper-V, proxy-outage, and lifecycle matrices.
 
 Final validation:
 

@@ -1,0 +1,20 @@
+{
+  "socks5Servers": [
+    {
+      "name": "remote",
+      "host": "proxy.example.com",
+      "port": 1080
+    }
+  ],
+  "rules": [
+    {
+      "adapterName": ["vEthernet (MyVM)"],
+      "protocol": ["tcp", "udp"],
+      "action": "proxy",
+      "proxyServer": "remote"
+    }
+  ],
+  "fallbackAction": "pass",
+  "proxyUnavailableAction": "block",
+  "processingFailureAction": "block"
+}

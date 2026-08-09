@@ -1,0 +1,19 @@
+{
+  "socks5Servers": [
+    {
+      "name": "remote",
+      "host": "proxy.example.com",
+      "port": 1080
+    }
+  ],
+  "rules": [
+    {
+      "process": ["browser.exe"],
+      "action": "proxy",
+      "proxyServer": "remote"
+    }
+  ],
+  "fallbackAction": "block",
+  "proxyUnavailableAction": "block",
+  "processingFailureAction": "block"
+}

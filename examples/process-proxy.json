@@ -1,0 +1,25 @@
+{
+  "socks5Servers": [
+    {
+      "name": "main",
+      "host": "proxy.example.com",
+      "port": 1080,
+      "username": "user",
+      "password": "secret"
+    }
+  ],
+  "rules": [
+    {
+      "process": ["browser.exe", "curl.exe"],
+      "protocol": ["tcp", "udp"],
+      "addressFamily": ["ipv4", "ipv6"],
+      "remoteCidr": ["0.0.0.0/0", "::/0"],
+      "remotePort": ["80", "443", "10000-20000"],
+      "action": "proxy",
+      "proxyServer": "main"
+    }
+  ],
+  "fallbackAction": "pass",
+  "proxyUnavailableAction": "block",
+  "processingFailureAction": "block"
+}
