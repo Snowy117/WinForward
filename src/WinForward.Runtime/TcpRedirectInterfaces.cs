@@ -57,14 +57,15 @@ public interface ITcpRelay : IAsyncDisposable
 }
 
 /// <summary>
-/// Injects a rewritten TCP frame back into the packet path. For a SYN redirect the frame is injected
-/// toward the original capture direction so the Windows stack delivers it to the local listener; for
-/// a reverse packet it is injected toward the origin host stack. The concrete implementation (8c)
-/// drives the NDISAPI driver; a fake (8b tests) records the frame for assertions.
+/// Injects a rewritten TCP frame back into the packet path. <paramref name="towardMstcp"/> selects
+/// the direction: true sends toward the Windows TCP/IP stack (SendToMstcp), false sends toward the
+/// adapter (SendToAdapter). For a SYN redirect the frame is injected toward MSTCP so the stack
+/// delivers it to the local listener; for a reverse packet it is injected toward MSTCP (host flow)
+/// or back to the origin adapter (forwarded flow) per the association's origin.
 /// </summary>
 public interface ITcpRedirectInjector
 {
-    ValueTask InjectAsync(ReadOnlyMemory<byte> rewrittenFrame, bool isOnSend, nint adapterHandle, CancellationToken cancellationToken);
+    ValueTask InjectAsync(ReadOnlyMemory<byte> rewrittenFrame, bool towardMstcp, nint adapterHandle, CancellationToken cancellationToken);
 }
 
 /// <summary>

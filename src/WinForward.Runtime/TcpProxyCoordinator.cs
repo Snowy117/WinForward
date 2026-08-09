@@ -179,7 +179,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
 
         try
         {
-            await _injector.InjectAsync(rewrittenFrame, packet.Metadata.IsOnSend, packet.Metadata.AdapterHandle, cancellationToken).ConfigureAwait(false);
+            await _injector.InjectAsync(rewrittenFrame, towardMstcp: true, packet.Metadata.AdapterHandle, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -227,7 +227,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         SwapEthernetMacs(rewrittenFrame);
         try
         {
-            await _injector.InjectAsync(rewrittenFrame, packet.Metadata.IsOnSend, packet.Metadata.AdapterHandle, cancellationToken).ConfigureAwait(false);
+            await _injector.InjectAsync(rewrittenFrame, towardMstcp: true, packet.Metadata.AdapterHandle, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -264,9 +264,12 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         }
         SwapEthernetMacs(rewrittenFrame);
 
+        // Host-originated flows terminate on this host (reverse to MSTCP); forwarded flows (client
+        // on a VM/remote side) must be sent back to the origin adapter instead.
+        var towardMstcp = original.Origin == FlowOriginKind.Host;
         try
         {
-            await _injector.InjectAsync(rewrittenFrame, isOnSend: false, packet.Metadata.AdapterHandle, cancellationToken).ConfigureAwait(false);
+            await _injector.InjectAsync(rewrittenFrame, towardMstcp, packet.Metadata.AdapterHandle, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {

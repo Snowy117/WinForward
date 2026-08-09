@@ -270,6 +270,50 @@ public sealed class TcpProxyCoordinatorTests
     }
 
     [Fact]
+    public async Task ForwardedFlowReverseInjectsTowardOriginAdapter()
+    {
+        // A forwarded flow (client behind a VM/remote adapter) has no host process owner and its
+        // reverse packets must be sent back to the origin adapter, not up to MSTCP.
+        var listenerFactory = new FakeListenerFactory();
+        var injector = new FakeInjector();
+        var selfTraffic = new SelfTrafficRegistry();
+        var table = new TcpRedirectTable();
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic);
+
+        var syn = MakeForwardedSynPacket(IPAddress.Parse("192.0.2.10"), s_destIpv4, 53000, 443);
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(syn, s_server, CancellationToken.None));
+
+        injector.InjectedFrames.Clear();
+        var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
+        var reverse = MakeReversePacketClassifierOrientation(listenerTuple.Address, listenerTuple.Port, IPAddress.Parse("192.0.2.10"), 53000);
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleReverseAsync(reverse, CancellationToken.None));
+
+        var injected = Assert.Single(injector.InjectedFrames);
+        Assert.False(injected.TowardMstcp);
+    }
+
+    [Fact]
+    public async Task HostFlowReverseInjectsTowardMstcp()
+    {
+        var listenerFactory = new FakeListenerFactory();
+        var injector = new FakeInjector();
+        var selfTraffic = new SelfTrafficRegistry();
+        var table = new TcpRedirectTable();
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic);
+
+        var syn = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(syn, s_server, CancellationToken.None));
+
+        injector.InjectedFrames.Clear();
+        var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
+        var reverse = MakeReversePacketClassifierOrientation(listenerTuple.Address, listenerTuple.Port, s_clientIpv4, 53000);
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleReverseAsync(reverse, CancellationToken.None));
+
+        var injected = Assert.Single(injector.InjectedFrames);
+        Assert.True(injected.TowardMstcp);
+    }
+
+    [Fact]
     public async Task ShutdownDisposesAllSessionsAndListeners()
     {
         var listenerFactory = new FakeListenerFactory();
@@ -316,6 +360,20 @@ public sealed class TcpProxyCoordinatorTests
         var context = new FlowContext(key, "app.exe", null, null, "eth0", destinationPort);
         var lease = new PacketLease(frame);
         return new CapturedFlowPacket(lease, context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 0x1234));
+    }
+
+    private static CapturedFlowPacket MakeForwardedSynPacket(IPAddress client, IPAddress destination, ushort clientPort, ushort destinationPort)
+    {
+        var frame = client.AddressFamily == AddressFamily.InterNetwork
+            ? BuildIpv4TcpSyn(client, destination, clientPort, destinationPort)
+            : BuildIpv6TcpSyn(client, destination, clientPort, destinationPort);
+        var local = Endpoint.From(client, clientPort);
+        var remote = Endpoint.From(destination, destinationPort);
+        var adapter = new AdapterContext("veth-1", "vEthernet 1", 7);
+        var key = FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Forwarded, adapter);
+        var context = new FlowContext(key, null, null, "veth-1", "vEthernet 1", destinationPort);
+        var lease = new PacketLease(frame);
+        return new CapturedFlowPacket(lease, context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, 0x1234));
     }
 
     private static CapturedFlowPacket MakeReversePacket(IPAddress source, ushort sourcePort, IPAddress destination, ushort destinationPort)
@@ -546,11 +604,11 @@ public sealed class TcpProxyCoordinatorTests
 
     private sealed class FakeInjector : ITcpRedirectInjector
     {
-        public List<(byte[] Frame, bool IsOnSend, nint AdapterHandle)> InjectedFrames { get; } = [];
+        public List<(byte[] Frame, bool TowardMstcp, nint AdapterHandle)> InjectedFrames { get; } = [];
 
-        public ValueTask InjectAsync(ReadOnlyMemory<byte> rewrittenFrame, bool isOnSend, nint adapterHandle, CancellationToken cancellationToken)
+        public ValueTask InjectAsync(ReadOnlyMemory<byte> rewrittenFrame, bool towardMstcp, nint adapterHandle, CancellationToken cancellationToken)
         {
-            lock (InjectedFrames) InjectedFrames.Add((rewrittenFrame.ToArray(), isOnSend, adapterHandle));
+            lock (InjectedFrames) InjectedFrames.Add((rewrittenFrame.ToArray(), towardMstcp, adapterHandle));
             return ValueTask.CompletedTask;
         }
     }

@@ -6,15 +6,15 @@ namespace WinForward.Runtime;
 [SupportedOSPlatform("windows")]
 public sealed class TcpRedirectInjector(IPacketReinjector reinjector) : ITcpRedirectInjector
 {
-    public ValueTask InjectAsync(ReadOnlyMemory<byte> rewrittenFrame, bool isOnSend, nint adapterHandle, CancellationToken cancellationToken)
+    public ValueTask InjectAsync(ReadOnlyMemory<byte> rewrittenFrame, bool towardMstcp, nint adapterHandle, CancellationToken cancellationToken)
     {
         using var buffer = new NdisPacketBuffer();
         // SendToMstcp simulates a receive from the selected interface upward into the Windows
-        // TCP/IP stack, so the frame is always tagged ON_RECEIVE regardless of the original
-        // capture direction. The rewritten SYN (dst -> loopback listener) and the reverse packet
-        // (src -> original remote) both travel toward the local stack this way.
+        // TCP/IP stack; SendToAdapter injects toward the interface. SendToMstcp frames are always
+        // tagged ON_RECEIVE regardless of the original capture direction.
         buffer.SetFrame(rewrittenFrame.Span, NdisApiAbi.PacketFlagOnReceive, adapterHandle);
-        reinjector.SendToMstcp(adapterHandle, buffer);
+        if (towardMstcp) reinjector.SendToMstcp(adapterHandle, buffer);
+        else reinjector.SendToAdapter(adapterHandle, buffer);
         return ValueTask.CompletedTask;
     }
 }

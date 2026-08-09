@@ -119,3 +119,14 @@ After the handshake, client -> listener data on the original flow must also be r
 A retransmitted SYN can make MSTCP open a second connection on the same listener. After the first relay is established, further accepts must be drained and closed immediately (`DrainRedundantConnectionsAsync`) rather than starting a second relay — otherwise every extra accept fails with SocketException and the log floods.
 
 **Reference**: `src/WinForward.Runtime/TcpProxyCoordinator.cs` (HandleSynAsync/HandleReverseAsync/ReinjectExistingFlowDataAsync/HandleReverseIfApplicableAsync/DrainRedundantConnectionsAsync), `TcpRedirectListener.cs` (0.0.0.0 bind), `FlowDispatcher.cs` (`_reverseHandler`).
+
+### Forwards-direction reverse injection (hardware-verified complement)
+
+Reverse-packet injection direction follows the flow origin:
+
+- Host-originated flow (client on this host): the reversed packet goes to MSTCP (`SendToMstcp`).
+- Forwarded flow (client behind a VM/remote adapter): the reversed packet must go back to the origin adapter (`SendToAdapter`), not MSTCP.
+
+`TcpRedirectInjector.InjectAsync(frame, towardMstcp, adapterHandle, ct)` selects the direction; the coordinator passes `association.OriginalKey.Origin == FlowOriginKind.Host`. Locked by `ForwardedFlowReverseInjectsTowardOriginAdapter` / `HostFlowReverseInjectsTowardMstcp` in `TcpProxyCoordinatorTests`.
+
+> **Note**: the current Win11 test host has no Hyper-V VM stack (the "Microsoft Hyper-V Network Adapter" interfaces exist but no vSwitch/VM is present), so guest-originated forwarded traffic cannot be exercised end-to-end here. The forwarded code path is unit-locked; a host with a real guest VM is required for the hardware matrix.
