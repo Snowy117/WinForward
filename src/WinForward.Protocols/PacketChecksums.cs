@@ -155,7 +155,7 @@ public static class PacketChecksums
         BinaryPrimitives.WriteUInt16BigEndian(frame.Slice(transportOffset + 2, 2), destinationPort);
     }
 
-    private static void WriteUdpChecksum(Span<byte> frame, int udpOffset, int udpLength, ReadOnlySpan<byte> source, ReadOnlySpan<byte> destination, bool isIpv6)
+    internal static void WriteUdpChecksum(Span<byte> frame, int udpOffset, int udpLength, ReadOnlySpan<byte> source, ReadOnlySpan<byte> destination, bool isIpv6)
     {
         frame[udpOffset + 6] = 0;
         frame[udpOffset + 7] = 0;

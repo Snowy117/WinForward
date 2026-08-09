@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using WinForward.Configuration;
+using WinForward.Core;
 using WinForward.Protocols;
 
 namespace WinForward.Runtime;
@@ -131,26 +132,36 @@ public interface IUdpProxyTransportFactory
 
 public sealed class Socks5UdpTransportFactory : IUdpProxyTransportFactory
 {
+    private readonly SelfTrafficRegistry _selfTraffic;
+
+    public Socks5UdpTransportFactory(SelfTrafficRegistry selfTraffic)
+    {
+        ArgumentNullException.ThrowIfNull(selfTraffic);
+        _selfTraffic = selfTraffic;
+    }
+
     public async ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, AddressFamily addressFamily, CancellationToken cancellationToken) =>
-        await Socks5UdpTransport.CreateAsync(server, addressFamily, cancellationToken).ConfigureAwait(false);
+        await Socks5UdpTransport.CreateAsync(server, addressFamily, _selfTraffic, cancellationToken).ConfigureAwait(false);
 }
 
 public sealed class Socks5UdpTransport : IUdpProxyTransport
 {
     private readonly Socket _socket;
     private readonly Socks5ControlConnection _control;
+    private readonly SelfTrafficRegistry.SelfTrafficToken? _selfTrafficToken;
 
-    private Socks5UdpTransport(Socket socket, Socks5ControlConnection control, IPEndPoint relayEndpoint)
+    private Socks5UdpTransport(Socket socket, Socks5ControlConnection control, IPEndPoint relayEndpoint, SelfTrafficRegistry.SelfTrafficToken? selfTrafficToken)
     {
         _socket = socket;
         _control = control;
         RelayEndpoint = relayEndpoint;
+        _selfTrafficToken = selfTrafficToken;
     }
 
     public IPEndPoint RelayEndpoint { get; }
     public IPEndPoint LocalEndpoint => (IPEndPoint)_socket.LocalEndPoint!;
 
-    public static async ValueTask<Socks5UdpTransport> CreateAsync(Socks5Server server, AddressFamily addressFamily, CancellationToken cancellationToken)
+    public static async ValueTask<Socks5UdpTransport> CreateAsync(Socks5Server server, AddressFamily addressFamily, SelfTrafficRegistry selfTraffic, CancellationToken cancellationToken)
     {
         var socket = new Socket(addressFamily, SocketType.Dgram, ProtocolType.Udp);
         var control = await Socks5ControlConnection.ConnectAsync(server, cancellationToken).ConfigureAwait(false);
@@ -158,7 +169,12 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
         {
             socket.Bind(new IPEndPoint(addressFamily == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any, 0));
             var relay = await control.UdpAssociateAsync((IPEndPoint)socket.LocalEndPoint!, cancellationToken).ConfigureAwait(false);
-            return new Socks5UdpTransport(socket, control, relay);
+            // Register the relay transport tuple in the loop-prevention registry so catch-all proxy
+            // rules never recursively intercept WinForward's own UDP relay traffic (design §10).
+            var local = Endpoint.From(((IPEndPoint)socket.LocalEndPoint!).Address, checked((ushort)((IPEndPoint)socket.LocalEndPoint!).Port));
+            var remote = Endpoint.From(relay.Address, checked((ushort)relay.Port));
+            var token = selfTraffic.Register(new SelfTrafficRegistry.SelfTrafficKey(TransportProtocol.Udp, local, remote));
+            return new Socks5UdpTransport(socket, control, relay, token);
         }
         catch
         {
@@ -186,6 +202,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
     public async ValueTask DisposeAsync()
     {
         _socket.Dispose();
+        _selfTrafficToken?.Dispose();
         await _control.DisposeAsync().ConfigureAwait(false);
     }
 }

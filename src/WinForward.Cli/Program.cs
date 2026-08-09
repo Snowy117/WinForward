@@ -183,7 +183,12 @@ internal static class Program
             new TcpRedirectTable(),
             selfTraffic,
             logger);
-        var executor = new NdisPacketActionExecutor(reinjector, logger, tcpCoordinator);
+
+        // UDP relay: the response reinjector rebuilds client-bound frames on the capture scope's first
+        // adapter (host flows). Its MAC is the NDISAPI CurrentAddress of that adapter.
+        await using var udpCoordinator = CreateUdpCoordinator(driver, scope, reinjector, selfTraffic, logger);
+
+        var executor = new NdisPacketActionExecutor(reinjector, logger, tcpCoordinator, udpCoordinator);
         var dispatcher = new FlowDispatcher(
             configuration, selfTraffic, executor, new WindowsProcessAttributor(),
             reverseHandler: tcpCoordinator.HandleReverseIfApplicableAsync);
@@ -230,6 +235,40 @@ internal static class Program
             .Select(adapter => (adapter.InternalName, adapter.RuntimeHandle, adapter.MacAddress, adapter.Mtu))
             .ToArray());
         return inventory.GetCurrentAdapters();
+    }
+
+    /// <summary>
+    /// Returns the NDISAPI CurrentAddress (MAC) of the adapter identified by
+    /// <paramref name="adapterHandle"/>, or null when the adapter is not currently enumerated.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private static byte[]? GetAdapterMac(NdisApiDriver driver, nint adapterHandle)
+    {
+        foreach (var adapter in driver.GetAdapters())
+        {
+            if (adapter.RuntimeHandle == adapterHandle) return adapter.MacAddress;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Builds the UDP relay coordinator for a run. The response reinjector targets the capture
+    /// scope's first adapter (host flows); when no real MAC is accessible a zero placeholder is
+    /// used and the hardware pass verifies whether SendToMstcp honors the destination MAC.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private static UdpProxyCoordinator CreateUdpCoordinator(NdisApiDriver driver, IReadOnlyList<WindowsAdapter> scope, IPacketReinjector reinjector, SelfTrafficRegistry selfTraffic, IRuntimeLogger logger)
+    {
+        var hostAdapter = scope[0];
+        var localMac = GetAdapterMac(driver, hostAdapter.RuntimeHandle);
+        if (localMac is null)
+        {
+            logger.Warn("UDP response reinjection will use a zero MAC because the adapter MAC is unavailable; verify on the target host.");
+            localMac = new byte[NdisApiAbi.EthernetAddressLength];
+        }
+        return new UdpProxyCoordinator(
+            new Socks5UdpTransportFactory(selfTraffic),
+            new UdpResponseReinjector(reinjector, hostAdapter.RuntimeHandle, localMac, logger));
     }
 
     private static int Validate(string[] args)
