@@ -276,6 +276,24 @@ public sealed class CapturePipelineTests
     }
 
     [Fact]
+    public async Task DispatcherFallsBackWhenHostAttributionIsUnknown()
+    {
+        var config = CreateConfig(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "dns.exe" }), FlowAction.Pass, ruleAction: FlowAction.Block);
+        var attributor = new FakeAttributor(null);
+        var executor = new FakeExecutor();
+        var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor, attributor);
+        var key = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
+        var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), FlowContext(key));
+
+        await dispatcher.DispatchAsync(packet, CancellationToken.None);
+
+        Assert.Equal(1, attributor.Calls);
+        Assert.Equal(1, executor.PassCount);
+        Assert.Equal(0, executor.BlockCount);
+        Assert.Equal(PacketDisposition.Pass, packet.Lease.Disposition);
+    }
+
+    [Fact]
     public async Task DispatcherNonFlowEvaluatesAdapterRuleOrFallback()
     {
         var adapter = new WindowsAdapter("id-a", "vEthernet 1", "b", 2, 1);

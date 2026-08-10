@@ -78,8 +78,19 @@ public sealed class WindowsAdapterInventory : IWindowsAdapterInventory
             if (guidMatches.Length == 1) return guidMatches[0];
         }
 
+        if (!HasUsableMac(adapter.Mac)) return null;
         var macMatches = ipAdapters.Where(ip => ip.Mac.AsSpan().SequenceEqual(adapter.Mac)).ToArray();
         return macMatches.Length == 1 ? macMatches[0] : null;
+    }
+
+    private static bool HasUsableMac(ReadOnlySpan<byte> mac)
+    {
+        foreach (var octet in mac)
+        {
+            if (octet != 0) return true;
+        }
+
+        return false;
     }
 
     /// <summary>

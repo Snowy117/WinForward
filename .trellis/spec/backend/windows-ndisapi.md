@@ -21,6 +21,7 @@
 - **Correlation is GUID-primary.** MAC is only a sanity-check fallback when the internal name is not a GUID.
 - `RuntimeHandle` is process-lifetime state: never persist it, never print it as identity, rebuild it on adapter-list change.
 - Ambiguity rule: a correlation key must match **exactly one** IP Helper adapter; zero or multiple matches fall back (see matrix).
+- IP Helper owner-PID IPv6 `ScopeId` fields are host-order DWORDs and must be preserved when constructing `IPAddress`; only owner-row port fields use network byte order and require conversion.
 
 ## 4. Validation & Error Matrix
 
@@ -40,7 +41,7 @@
 
 ## 6. Tests Required
 
-- Unit (hardware-independent, via injected `IpAdapterInfo` provider): GUID correlation success; brace/case-insensitive GUID compare; MAC fallback when internal name is not a GUID; bare-GUID internal name; duplicate-MAC interfaces must NOT corrupt GUID correlation; uncorrelated adapters fall back to internal name.
+- Unit (hardware-independent, via injected `IpAdapterInfo` provider): GUID correlation success; brace/case-insensitive GUID compare; MAC fallback when internal name is not a GUID; bare-GUID internal name; duplicate-MAC interfaces must NOT corrupt GUID correlation; zero-MAC and ambiguous adapters fall back to the internal name. IP Helper projection tests preserve a nonzero IPv6 scope ID while converting network-order ports.
 - Windows smoke: `WinForward.exe adapters` prints stable GUID + friendly name + internal name for every MSTCP-bound adapter (exit 0); without `ndisapi.dll` it exits 1 with an actionable diagnostic.
 
 ## 7. Wrong vs Correct

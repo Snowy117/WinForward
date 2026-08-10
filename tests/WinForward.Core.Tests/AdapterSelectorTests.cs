@@ -87,6 +87,80 @@ public sealed class AdapterSelectorTests
 
     [Fact]
     [SupportedOSPlatform("windows")]
+    public void AdapterInventoryRejectsZeroMacFallback()
+    {
+        var inventory = new WindowsAdapterInventory(
+            () => [("not-a-guid", (nint)1, new byte[] { 0, 0, 0, 0, 0, 0 }, (ushort)1500)],
+            () => [new IpAdapterInfo("other-id", "Other", new byte[] { 0, 0, 0, 0, 0, 0 })]);
+
+        var adapter = Assert.Single(inventory.GetCurrentAdapters());
+
+        Assert.Equal("not-a-guid", adapter.StableId);
+        Assert.Equal("not-a-guid", adapter.FriendlyName);
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public void AdapterInventoryRejectsAmbiguousMacFallback()
+    {
+        var mac = new byte[] { 1, 2, 3, 4, 5, 6 };
+        var inventory = new WindowsAdapterInventory(
+            () => [("not-a-guid", (nint)1, mac, (ushort)1500)],
+            () =>
+            [
+                new IpAdapterInfo("first", "First", mac),
+                new IpAdapterInfo("second", "Second", mac)
+            ]);
+
+        var adapter = Assert.Single(inventory.GetCurrentAdapters());
+
+        Assert.Equal("not-a-guid", adapter.StableId);
+        Assert.Equal("not-a-guid", adapter.FriendlyName);
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public void AdapterInventoryUsesUniqueGuidDespiteDuplicateMacs()
+    {
+        const string Guid = "{DD8CD9A1-1111-2222-3333-444455556666}";
+        var mac = new byte[] { 1, 2, 3, 4, 5, 6 };
+        var inventory = new WindowsAdapterInventory(
+            () => [("\\DEVICE\\" + Guid, (nint)1, mac, (ushort)1500)],
+            () =>
+            [
+                new IpAdapterInfo(Guid, "Ethernet", mac),
+                new IpAdapterInfo("other-id", "Other", mac)
+            ]);
+
+        var adapter = Assert.Single(inventory.GetCurrentAdapters());
+
+        Assert.Equal(Guid, adapter.StableId);
+        Assert.Equal("Ethernet", adapter.FriendlyName);
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public void AdapterInventoryUsesUniqueMacWhenGuidCorrelationIsAmbiguous()
+    {
+        const string Guid = "{DD8CD9A1-1111-2222-3333-444455556666}";
+        var mac = new byte[] { 1, 2, 3, 4, 5, 6 };
+        var inventory = new WindowsAdapterInventory(
+            () => [("\\DEVICE\\" + Guid, (nint)1, mac, (ushort)1500)],
+            () =>
+            [
+                new IpAdapterInfo(Guid, "First", new byte[] { 6, 5, 4, 3, 2, 1 }),
+                new IpAdapterInfo(Guid, "Second", new byte[] { 9, 8, 7, 6, 5, 4 }),
+                new IpAdapterInfo("mac-match", "Fallback", mac)
+            ]);
+
+        var adapter = Assert.Single(inventory.GetCurrentAdapters());
+
+        Assert.Equal("mac-match", adapter.StableId);
+        Assert.Equal("Fallback", adapter.FriendlyName);
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
     public void AdapterInventoryRecognizesBareGuidInternalName()
     {
         const string Guid = "7C1A2B3C-4D5E-4F60-8A9B-0C1D2E3F4A5B";

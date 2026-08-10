@@ -1,19 +1,26 @@
+using System.Net;
 using System.Runtime.InteropServices;
 
 namespace WinForward.Windows;
 
 public static class IpHelperAbi
 {
+    internal const int UdpTableOwnerPid = 1;
+
     public static void AssertManagedLayout()
     {
-        AssertSize<IpHelperTcp4Row>(24);
-        AssertSize<IpHelperUdp4Row>(12);
-        AssertSize<IpHelperTcp6Row>(56);
-        AssertSize<IpHelperUdp6Row>(28);
-        AssertOffset<IpHelperTcp6Row>(nameof(IpHelperTcp6Row.LocalPort), 20);
-        AssertOffset<IpHelperTcp6Row>(nameof(IpHelperTcp6Row.RemoteAddress), 24);
-        AssertOffset<IpHelperTcp6Row>(nameof(IpHelperTcp6Row.ProcessId), 52);
+        AssertSize<MibTcpRowOwnerPid>(24);
+        AssertSize<MibUdpRowOwnerPid>(12);
+        AssertSize<MibTcp6RowOwnerPid>(56);
+        AssertSize<MibUdp6RowOwnerPid>(28);
+        AssertOffset<MibTcp6RowOwnerPid>(nameof(MibTcp6RowOwnerPid.LocalPort), 20);
+        AssertOffset<MibTcp6RowOwnerPid>(nameof(MibTcp6RowOwnerPid.RemoteAddress), 24);
+        AssertOffset<MibTcp6RowOwnerPid>(nameof(MibTcp6RowOwnerPid.ProcessId), 52);
     }
+
+    internal static ushort DecodeNetworkPort(uint value) => (ushort)IPAddress.NetworkToHostOrder((short)(value & 0xffff));
+
+    internal static IPAddress DecodeIpv6Address(ReadOnlySpan<byte> address, uint scopeId) => new(address, scopeId);
 
     private static void AssertSize<T>(int expected) where T : struct
     {
@@ -28,19 +35,35 @@ public static class IpHelperAbi
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct IpHelperTcp4Row
+    internal struct MibUdpRowOwnerPid
     {
-        public uint State, LocalAddress, LocalPort, RemoteAddress, RemotePort, ProcessId;
+        public uint LocalAddress;
+        public uint LocalPort;
+        public uint ProcessId;
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct IpHelperUdp4Row
+    internal unsafe struct MibUdp6RowOwnerPid
     {
-        public uint LocalAddress, LocalPort, ProcessId;
+        public fixed byte LocalAddress[16];
+        public uint ScopeId;
+        public uint LocalPort;
+        public uint ProcessId;
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private unsafe struct IpHelperTcp6Row
+    internal struct MibTcpRowOwnerPid
+    {
+        public uint State;
+        public uint LocalAddress;
+        public uint LocalPort;
+        public uint RemoteAddress;
+        public uint RemotePort;
+        public uint ProcessId;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct MibTcp6RowOwnerPid
     {
         public fixed byte LocalAddress[16];
         public uint LocalScopeId;
@@ -49,15 +72,6 @@ public static class IpHelperAbi
         public uint RemoteScopeId;
         public uint RemotePort;
         public uint State;
-        public uint ProcessId;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private unsafe struct IpHelperUdp6Row
-    {
-        public fixed byte LocalAddress[16];
-        public uint ScopeId;
-        public uint LocalPort;
         public uint ProcessId;
     }
 }
