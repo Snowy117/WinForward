@@ -134,6 +134,39 @@ public sealed class UdpRelayTests
         Assert.False(UdpFrameBuilder.TryBuild(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, payload, s_macA, s_macB, out _));
     }
 
+    [Theory]
+    [InlineData(1514)]
+    [InlineData(9014)]
+    public void FrameBuilderHonorsConfigurableCapBoundary(int cap)
+    {
+        // M3: the pinned native frame cap is injectable (1514 vs a jumbo 9014 ABI). For IPv4 the
+        // rebuilt frame is ethernet(14) + ip(20) + udp(8) + payload, so a payload of cap - 42 fits
+        // exactly and cap - 41 exceeds it. The cap must not be a hard-coded 1514 magic number.
+        var fits = cap - 42;
+        var overflow = cap - 41;
+        Assert.True(UdpFrameBuilder.TryBuild(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[fits], s_macA, s_macB, out _, cap));
+        Assert.False(UdpFrameBuilder.TryBuild(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[overflow], s_macA, s_macB, out _, cap));
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public async Task UdpResponseReinjectorHonorsConfiguredFrameCap()
+    {
+        // M3: the reinjector threads the configured cap into frame building; a payload over the cap
+        // is dropped fail-closed, never injected.
+        var reinjector = new FakeReinjector();
+        var sink = new UdpResponseReinjector(reinjector, (nint)7, s_macA, maximumFrameSize: 1514);
+        var client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000);
+        var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
+        var flow = FlowKey.Create(client, server, TransportProtocol.Udp, FlowOriginKind.Host);
+
+        var payload = new byte[1514 - 41]; // 1 byte over the 1514 cap for an IPv4 frame
+        await sink.InjectAsync(flow, server, payload, CancellationToken.None);
+
+        Assert.Equal(0, reinjector.ToMstcpCount);
+        Assert.Equal(0, reinjector.ToAdapterCount);
+    }
+
     // ---- UdpResponseReinjector ----
 
     [Fact]
@@ -161,10 +194,15 @@ public sealed class UdpRelayTests
 
     [Fact]
     [SupportedOSPlatform("windows")]
-    public async Task ForwardedFlowResponseInjectsTowardAdapter()
+    public async Task ForwardedFlowResponseInjectsTowardOriginAdapter()
     {
         var reinjector = new FakeReinjector();
-        var sink = new UdpResponseReinjector(reinjector, (nint)7, s_macA);
+        var originHandle = (nint)1234;
+        var adapters = new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["veth-1"] = new(originHandle, s_macB)
+        };
+        var sink = new UdpResponseReinjector(reinjector, (nint)7, s_macA, adaptersByStableId: adapters);
         var adapter = new AdapterContext("veth-1", "vEthernet 1", 3);
         var client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000);
         var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
@@ -172,8 +210,41 @@ public sealed class UdpRelayTests
 
         await sink.InjectAsync(flow, server, new byte[] { 1 }, CancellationToken.None);
 
+        // H2: a forwarded flow's response must reach the origin adapter, not the host adapter.
         Assert.Equal(0, reinjector.ToMstcpCount);
         Assert.Equal(1, reinjector.ToAdapterCount);
+        Assert.Equal(originHandle, reinjector.LastAdapterHandle);
+        // H3: a frame injected toward an adapter is an ON_SEND (interface-bound), not ON_RECEIVE.
+        Assert.Equal(NdisApiAbi.PacketFlagOnSend, reinjector.LastDeviceFlags);
+        // The rebuilt frame uses the origin adapter's MAC.
+        Assert.True(IpUdpPacket.TryParse(reinjector.LastFrame, out var udp));
+        Assert.Equal(server.Address, udp.SourceAddress);
+        Assert.Equal(client.Address, udp.DestinationAddress);
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public async Task ForwardedFlowWithUnresolvedOriginAdapterIsDroppedFailClosed()
+    {
+        // H2: when a forwarded flow's origin adapter is not in the reinjection map, the response
+        // must be dropped fail-closed (with a rate-limited log) rather than sent out the wrong
+        // (host) adapter where the VM could never receive it.
+        var reinjector = new FakeReinjector();
+        // Map intentionally omits "veth-1" so the origin adapter cannot be resolved.
+        var logger = new RecordingLogger();
+        var sink = new UdpResponseReinjector(reinjector, (nint)7, s_macA, logger: logger);
+        var adapter = new AdapterContext("veth-1", "vEthernet 1", 3);
+        var client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000);
+        var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
+        var flow = FlowKey.Create(client, server, TransportProtocol.Udp, FlowOriginKind.Forwarded, adapter);
+
+        await sink.InjectAsync(flow, server, new byte[] { 1 }, CancellationToken.None);
+
+        // Fail-closed: no response is sent out any adapter (the VM could never receive it), and the
+        // missing-origin is surfaced via a log rather than silently dropped (H2).
+        Assert.Equal(0, reinjector.ToMstcpCount);
+        Assert.Equal(0, reinjector.ToAdapterCount);
+        Assert.Equal(1, logger.WarnCount);
     }
 
     [Fact]
@@ -259,17 +330,26 @@ public sealed class UdpRelayTests
     {
         public int ToAdapterCount { get; private set; }
         public int ToMstcpCount { get; private set; }
+        public nint LastAdapterHandle { get; private set; }
+        public uint LastDeviceFlags { get; private set; }
         public byte[] LastFrame { get; private set; } = [];
 
         public void SendToAdapter(nint adapterHandle, NdisPacketBuffer buffer)
         {
             ToAdapterCount++;
-            LastFrame = buffer.GetFrame().ToArray();
+            Record(adapterHandle, buffer);
         }
 
         public void SendToMstcp(nint adapterHandle, NdisPacketBuffer buffer)
         {
             ToMstcpCount++;
+            Record(adapterHandle, buffer);
+        }
+
+        private void Record(nint adapterHandle, NdisPacketBuffer buffer)
+        {
+            LastAdapterHandle = adapterHandle;
+            LastDeviceFlags = buffer.DeviceFlags;
             LastFrame = buffer.GetFrame().ToArray();
         }
     }
@@ -329,5 +409,13 @@ public sealed class UdpRelayTests
     private sealed class FakeResponseSink : IUdpResponseSink
     {
         public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken) => ValueTask.CompletedTask;
+    }
+
+    private sealed class RecordingLogger : IRuntimeLogger
+    {
+        public int WarnCount { get; private set; }
+        public void Info(string message) { }
+        public void Warn(string message) => WarnCount++;
+        public void Error(string message) { }
     }
 }

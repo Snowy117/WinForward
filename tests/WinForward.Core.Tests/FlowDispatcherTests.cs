@@ -31,6 +31,42 @@ public sealed class FlowDispatcherTests
     }
 
     [Fact]
+    public async Task UdpFlowWithTcpListenerPortCollisionIsNotDroppedByReverseHandler()
+    {
+        // H1: the dispatcher invokes the TCP reverse handler only for TCP packets. A UDP datagram
+        // whose local AND remote ports equal an active TCP proxy-listener port value must be
+        // evaluated by normal flow/policy (here proxied) and never routed into the reverse handler,
+        // whose numeric-port matching could otherwise drop it.
+        var server = new Socks5Server("primary", "127.0.0.1", 1080, null, null);
+        var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase) { [server.Name] = server };
+        const ushort collidingPort = 40001;
+        var rules = new[] { new PolicyRule(new RuleMatcher(RemotePorts: [(collidingPort, collidingPort)]), new FlowDecision(FlowAction.Proxy, 0, server.Name)) };
+        var config = new ValidatedConfiguration(servers, new PolicySnapshot(rules, FlowAction.Block));
+
+        var executor = new FakeExecutor();
+        var reverseCalls = 0;
+        var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor, reverseHandler: (packet, ct) =>
+        {
+            // If the dispatcher routed a UDP packet here, it would drop it (Blocked). The H1 gate
+            // must prevent that.
+            reverseCalls++;
+            return ValueTask.FromResult(TcpRedirectOutcome.Blocked);
+        });
+
+        var key = FlowKey.Create(
+            Endpoint.From(IPAddress.Parse("192.0.2.10"), collidingPort),
+            Endpoint.From(IPAddress.Parse("192.0.2.53"), collidingPort),
+            TransportProtocol.Udp, FlowOriginKind.Host);
+        var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), Context(key));
+
+        await dispatcher.DispatchAsync(packet, CancellationToken.None);
+
+        Assert.Equal(0, reverseCalls);
+        Assert.Equal(1, executor.ProxyCount);
+        Assert.Equal(PacketDisposition.ProxyConsumed, packet.Lease.Disposition);
+    }
+
+    [Fact]
     public async Task SelfTrafficIsPassedBeforeCatchAllPolicy()
     {
         var config = CreateConfig();

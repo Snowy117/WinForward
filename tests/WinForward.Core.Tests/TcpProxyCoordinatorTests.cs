@@ -332,6 +332,56 @@ public sealed class TcpProxyCoordinatorTests
     }
 
     [Fact]
+    public async Task HandleReverseIfApplicableAsyncReturnsNotRelevantForUdp()
+    {
+        // H1: the numeric-port reverse gateway must not misclassify a UDP datagram whose local and
+        // remote ports collide with an active TCP listener port. On UDP it returns NotRelevant so
+        // the dispatcher leaves the datagram to normal flow/policy instead of dropping it.
+        var listenerFactory = new FakeListenerFactory();
+        var injector = new FakeInjector();
+        var selfTraffic = new SelfTrafficRegistry();
+        var table = new TcpRedirectTable();
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic);
+        await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None);
+        var listenerPort = Assert.Single(listenerFactory.Listeners).TranslatedTuple.Port;
+
+        var local = Endpoint.From(s_clientIpv4, listenerPort);
+        var remote = Endpoint.From(s_destIpv4, listenerPort);
+        var udpKey = FlowKey.Create(local, remote, TransportProtocol.Udp, FlowOriginKind.Host);
+        var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), new FlowContext(udpKey, "dns.exe", null, null, "eth0", listenerPort));
+
+        var outcome = await coordinator.HandleReverseIfApplicableAsync(packet, CancellationToken.None);
+
+        Assert.Equal(TcpRedirectOutcome.NotRelevant, outcome);
+        // Only the setup SYN was injected; the UDP datagram was not routed into reverse injection.
+        Assert.Single(injector.InjectedFrames);
+    }
+
+    [Fact]
+    public async Task Ipv6ReverseFrameWithCollidingPortDoesNotMatchIpv4Association()
+    {
+        // M5: an IPv6 frame whose port collides with an IPv4 flow's listener port shares the same
+        // numeric port value; the reverse gateway must not route it into the IPv4 association, or a
+        // rewritten frame would cross address families.
+        var listenerFactory = new FakeListenerFactory();
+        var injector = new FakeInjector();
+        var selfTraffic = new SelfTrafficRegistry();
+        var table = new TcpRedirectTable();
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic);
+        await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None);
+        var listenerPort = Assert.Single(listenerFactory.Listeners).TranslatedTuple.Port;
+
+        // Fully-IPv6 reverse packet whose destination (Local) port equals the IPv4 listener port.
+        var reverse = MakeReversePacket(s_clientIpv6, 53001, s_destIpv6, listenerPort);
+        var outcome = await coordinator.HandleReverseIfApplicableAsync(reverse, CancellationToken.None);
+
+        Assert.Equal(TcpRedirectOutcome.NotRelevant, outcome);
+        // Only the setup SYN was injected; the IPv6 reverse was not routed into the IPv4
+        // association's reverse injection.
+        Assert.Single(injector.InjectedFrames);
+    }
+
+    [Fact]
     public async Task ExpiryRemovesIdleAssociations()
     {
         var listenerFactory = new FakeListenerFactory();
@@ -347,6 +397,73 @@ public sealed class TcpProxyCoordinatorTests
 
         Assert.Equal(1, removed);
         Assert.Equal(0, table.Count);
+    }
+
+    [Fact]
+    public async Task RemoveExpiredAsyncExpiresOnlyRedirectingNotRelayingSessions()
+    {
+        // M4: a session stuck in Redirecting (never relayed) is expired by the wall-clock sweep,
+        // while a session whose relay is live (Relaying) is NOT torn down by remove-expiry — a live
+        // connection silent at the packet level must not be force-terminated.
+        var listenerFactory = new FakeListenerFactory();
+        var injector = new FakeInjector();
+        var selfTraffic = new SelfTrafficRegistry();
+        var table = new TcpRedirectTable();
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic);
+
+        // Session 1 remains Redirecting (no accepted connection ever relayed).
+        await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None);
+        // Session 2 is promoted to Relaying once its accepted connection establishes a relay.
+        await coordinator.HandleSynAsync(MakeSynPacket(IPAddress.Parse("192.0.2.11"), IPAddress.Parse("192.0.2.54"), 53001, 443), s_server, CancellationToken.None);
+        var relayingListener = listenerFactory.Listeners[1];
+        await relayingListener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(Endpoint.From(IPAddress.Loopback, 1111)), CancellationToken.None);
+        await WaitForAsync(() => table.Snapshot().Any(a => a.Phase == RelayPhase.Relaying));
+        Assert.Equal(2, table.Count);
+
+        var removed = await coordinator.RemoveExpiredAsync(DateTimeOffset.UtcNow.AddMinutes(5), TimeSpan.FromMinutes(1));
+
+        Assert.Equal(1, removed);
+        Assert.Equal(1, table.Count);
+        Assert.Equal(RelayPhase.Relaying, Assert.Single(table.Snapshot()).Phase);
+    }
+
+    [Fact]
+    public async Task AcceptLoopDoesNotRunAwayOnTransientAcceptError()
+    {
+        // L3: a transient (non-cancel, non-disposed) accept error must not busy-loop the accept
+        // path — the previous blanket `continue` could spin flat-out. The loop backs off for a
+        // bounded delay between attempts, so the accept call count over a short window stays
+        // bounded, and DisposeAsync (which cancels the loop and disposes the listener) completes
+        // promptly rather than hanging behind a persistent throw.
+        var throwingListener = new ThrowingListener();
+        var listenerFactory = new SingleListenerFactory(throwingListener);
+        var injector = new FakeInjector();
+        var selfTraffic = new SelfTrafficRegistry();
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, new TcpRedirectTable(), selfTraffic);
+
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None));
+
+        // Allow the accept loop to make a handful of backed-off attempts. With a 100 ms back-off
+        // between transient failures, this window yields a few calls, and the elapsed time proves
+        // real back-pressure was applied rather than a tight busy-loop.
+        var elapsed = await MeasureWindowAsync(() => throwingListener.AcceptCount >= 3, TimeSpan.FromMilliseconds(300));
+        Assert.True(throwingListener.AcceptCount < 25, $"accept calls over the window should be bounded, saw {throwingListener.AcceptCount}");
+        Assert.True(elapsed >= TimeSpan.FromMilliseconds(50), $"the retry should have observed back-off back-pressure, saw {elapsed.TotalMilliseconds:F0}ms");
+
+        // Dispose must terminate the throwing accept loop promptly (cancel + listener dispose).
+        await coordinator.DisposeAsync();
+    }
+
+    /// <summary>Polls <paramref name="condition"/> until it holds or the window elapses; returns the time spent.</summary>
+    private static async Task<TimeSpan> MeasureWindowAsync(Func<bool> condition, TimeSpan window)
+    {
+        var started = DateTime.UtcNow;
+        var deadline = started.Add(window);
+        while (!condition() && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(5, CancellationToken.None).ConfigureAwait(false);
+        }
+        return DateTime.UtcNow - started;
     }
 
     [Fact]
@@ -601,6 +718,32 @@ public sealed class TcpProxyCoordinatorTests
             var listener = new FakeListener(Endpoint.From(loopback, checked((ushort)Interlocked.Increment(ref _nextPort))));
             lock (Listeners) Listeners.Add(listener);
             return listener;
+        }
+    }
+
+    private sealed class SingleListenerFactory(ITcpRedirectListener listener) : ITcpRedirectListenerFactory
+    {
+        public ValueTask<ITcpRedirectListener> CreateAsync(AddressFamilyKind addressFamily, CancellationToken _) => ValueTask.FromResult(listener);
+    }
+
+    private sealed class ThrowingListener : ITcpRedirectListener
+    {
+        private int _acceptCount;
+        public Endpoint TranslatedTuple => Endpoint.From(IPAddress.Loopback, 40000);
+        public int AcceptCount => Volatile.Read(ref _acceptCount);
+        public bool IsDisposed { get; private set; }
+
+        public ValueTask<ITcpAcceptedConnection> AcceptAsync(CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _acceptCount);
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new IOException("transient accept error");
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            IsDisposed = true;
+            return ValueTask.CompletedTask;
         }
     }
 
