@@ -171,6 +171,13 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         }
         SwapEthernetMacs(rewrittenFrame);
 
+        // L4 clarity: this exact self-traffic key cannot be matched by the wildcard registry because
+        // the observable reverse leg is (client:orig_port) -> (client_ip:proxy_port), and the
+        // per-client source port is unknown until a connection arrives. The listener/reverse leg is
+        // therefore guarded by the TCP-only reverse hook (see HandleReverseIfApplicableAsync, gated
+        // to TCP by H1 in the dispatcher), which reverses before flow lookup/policy. This
+        // registration is retained as writer-intent belt-and-suspenders and because the registry is
+        // the natural home for an exact local-loopback listener tuple when one becomes expressible.
         var selfTrafficToken = _selfTraffic.Register(new SelfTrafficRegistry.SelfTrafficKey(TransportProtocol.Tcp, translatedTuple, translatedTuple));
 
         try
@@ -245,10 +252,19 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         // connects to the client using the client's local IP, so the packet's source is
         // client_ip:proxy_port — the proxy port discriminates, not the full tuple.
         var key = packet.Context.Key;
+        // M5 belt-and-suspenders: this coordinator owns TCP redirect table entries only. The
+        // dispatcher already gates the reverse handler to TCP (H1), but a non-TCP packet must never
+        // be routed into reverse handling regardless of call context.
+        if (key.Protocol != TransportProtocol.Tcp) return TcpRedirectOutcome.NotRelevant;
         var now = DateTimeOffset.UtcNow;
         var found = _table.TryResolveByProxyPort(key.Local.Port, now, out var association);
         if (!found) found = _table.TryResolveByProxyPort(key.Remote.Port, now, out association);
         if (!found || association is null) return TcpRedirectOutcome.Blocked;
+        // M5: the numeric proxy port is unique per flow, but an address family may share the same
+        // port value. An IPv6 reverse frame must not match an IPv4 flow's listener port index (or
+        // vice-versa), or a rewritten frame would cross address families. Adapter/generation
+        // scoping of the port index is out of scope for release 1.
+        if (association.OriginalKey.AddressFamily != key.AddressFamily) return TcpRedirectOutcome.NotRelevant;
 
         var original = association.OriginalKey;
         var rewrittenFrame = packet.Lease.Frame.ToArray();
@@ -297,7 +313,11 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(packet);
         ObjectDisposedException.ThrowIf(_disposed, this);
 
+        // H1/M5 gate before the numeric-port lookup: this handler owns TCP reverse routing. A UDP
+        // or other-protocol frame whose local/remote port numerically matches an active TCP
+        // listener port must be left to normal flow/policy handling, never dropped here.
         var key = packet.Context.Key;
+        if (key.Protocol != TransportProtocol.Tcp) return TcpRedirectOutcome.NotRelevant;
         var now = DateTimeOffset.UtcNow;
         if (!_table.TryResolveByProxyPort(key.Local.Port, now, out _) && !_table.TryResolveByProxyPort(key.Remote.Port, now, out _))
         {
@@ -354,16 +374,25 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     }
 
     /// <summary>
-    /// Removes redirect associations idle past <paramref name="idleTimeout"/> and tears down their
-    /// sessions (listener, relay, self-traffic token, table alias). An idle half-open connection is
-    /// released rather than left occupying the bounded redirect table (design §7/§8).
+    /// Removes half-open redirect associations still in <see cref="RelayPhase.Redirecting"/> that
+    /// have observed no activity for <paramref name="idleTimeout"/> and tears down their sessions
+    /// (listener, relay, self-traffic token, table alias). A session is only removed while it is
+    /// still <see cref="RelayPhase.Redirecting"/> — half-open and never relayed — so a genuinely
+    /// abandoned flow is released instead of occupying the bounded redirect table (design §7/§8).
+    /// An established flow whose relay is <see cref="RelayPhase.Relaying"/> is NOT expired by this
+    /// wall-clock sweep (M4): a live connection silent at the packet level (e.g. SSH without
+    /// keepalive) must not be force-torn-down. Teardown of a relaying session is instead tied to
+    /// the relay completing/ending (see <see cref="ObserveRelayCompletionAsync"/>), and a truly
+    /// stalled relay is reclaimed by the read/write timeouts in <see cref="TcpProxyRelay"/>.
     /// </summary>
     public async ValueTask<int> RemoveExpiredAsync(DateTimeOffset now, TimeSpan idleTimeout)
     {
         TcpRedirectSession[] expired;
         lock (_gate)
         {
-            expired = _sessions.Values.Where(session => now - session.Association.LastActivityUtc >= idleTimeout).ToArray();
+            expired = _sessions.Values
+                .Where(session => session.Association.Phase == RelayPhase.Redirecting && now - session.Association.LastActivityUtc >= idleTimeout)
+                .ToArray();
         }
 
         var removed = 0;
@@ -428,8 +457,10 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
             }
             catch (Exception acceptEx)
             {
-                _logger.Warn($"TCP redirect accept failed ({acceptEx.GetType().Name}); retrying.");
-                // A transient accept failure is retried on the next accepted connection.
+                // L3: a transient accept error is retried after a bounded delay, never a tight
+                // busy-loop. Cancellation and a disposed listener already break out above.
+                _logger.Warn($"TCP redirect accept failed ({acceptEx.GetType().Name}); retrying after a bounded delay.");
+                await BoundedRetryDelayAsync(token).ConfigureAwait(false);
                 continue;
             }
 
@@ -479,9 +510,31 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
             }
             catch
             {
+                // L3: a non-cancel, non-disposed accept error must not be a tight busy-loop; back
+                // off for a bounded delay before retrying. The loop still ends when teardown
+                // disposes the listener.
+                await BoundedRetryDelayAsync(token).ConfigureAwait(false);
                 continue;
             }
             await extra.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// A short bounded back-off between retries of a transient accept error, so a failing accept
+    /// loop cannot spin flat-out (L3).
+    /// </summary>
+    private static readonly TimeSpan BoundedAcceptRetryDelay = TimeSpan.FromMilliseconds(100);
+
+    private static async ValueTask BoundedRetryDelayAsync(CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(BoundedAcceptRetryDelay, token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            // Cancellation ends the accept loop.
         }
     }
 

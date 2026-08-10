@@ -9,10 +9,12 @@ public sealed class TcpRedirectInjector(IPacketReinjector reinjector) : ITcpRedi
     public ValueTask InjectAsync(ReadOnlyMemory<byte> rewrittenFrame, bool towardMstcp, nint adapterHandle, CancellationToken cancellationToken)
     {
         using var buffer = new NdisPacketBuffer();
-        // SendToMstcp simulates a receive from the selected interface upward into the Windows
-        // TCP/IP stack; SendToAdapter injects toward the interface. SendToMstcp frames are always
-        // tagged ON_RECEIVE regardless of the original capture direction.
-        buffer.SetFrame(rewrittenFrame.Span, NdisApiAbi.PacketFlagOnReceive, adapterHandle);
+        // Per the WinpkFilter pass/revert matrix (design §1): an ON_RECEIVE frame simulates a
+        // receive from the interface upward into MSTCP, and an ON_SEND frame injects toward the
+        // interface. SendToMstcp therefore tags ON_RECEIVE; the forwarded-direction adapter path
+        // (towardMstcp == false) must tag ON_SEND (H3). The previous hard-coded ON_RECEIVE was
+        // correct only for the host (toward-MSTCP) path and mis-tagged Hyper-V forwarded injection.
+        buffer.SetFrame(rewrittenFrame.Span, towardMstcp ? NdisApiAbi.PacketFlagOnReceive : NdisApiAbi.PacketFlagOnSend, adapterHandle);
         if (towardMstcp) reinjector.SendToMstcp(adapterHandle, buffer);
         else reinjector.SendToAdapter(adapterHandle, buffer);
         return ValueTask.CompletedTask;

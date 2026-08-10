@@ -85,11 +85,12 @@ public sealed class FlowDispatcher
             return;
         }
 
-        // A packet on an active redirect leg (source or destination port is a proxy listener port)
-        // must be reversed back to the original server:client tuple before the Windows stack sees it.
-        // This runs before flow lookup and policy so a reverse packet is never re-evaluated as a new
-        // client flow or silently passed.
-        if (_reverseHandler is not null)
+        // A packet on an active TCP redirect leg (a port matches a proxy listener port) must be
+        // reversed back to the original server:client tuple before the Windows stack sees it. This
+        // runs before flow lookup and policy so a reverse packet is never re-evaluated as a new
+        // client flow. Gated on TCP only (H1/M5): the reverse handler keys on numeric port alone,
+        // so a UDP datagram whose port collides with a TCP listener port must never reach it.
+        if (_reverseHandler is not null && packet.Context.Key.Protocol == TransportProtocol.Tcp)
         {
             var proxyOutcome = await _reverseHandler(packet, cancellationToken).ConfigureAwait(false);
             if (proxyOutcome == TcpRedirectOutcome.Injected)

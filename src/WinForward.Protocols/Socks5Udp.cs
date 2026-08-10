@@ -35,7 +35,7 @@ public static class Socks5UdpCodec
         return result;
     }
 
-    public static bool TryDecode(ReadOnlySpan<byte> frame, out Socks5UdpDatagram datagram)
+    public static bool TryDecode(ReadOnlySpan<byte> frame, out Socks5UdpDatagram datagram, long scopeId = 0)
     {
         datagram = default;
         if (frame.Length < 4 || frame[0] != 0 || frame[1] != 0 || frame[2] != 0 || frame[3] is not (1 or 3 or 4)) return false;
@@ -45,7 +45,7 @@ public static class Socks5UdpCodec
         if (frame[3] is 1 or 4)
         {
             var addressLength = frame[3] == 1 ? 4 : 16;
-            if (frame.Length < offset + addressLength + 2 || !TryReadAddress(frame.Slice(offset, addressLength), frame[3], out address)) return false;
+            if (frame.Length < offset + addressLength + 2 || !TryReadAddress(frame.Slice(offset, addressLength), frame[3], scopeId, out address)) return false;
             offset += addressLength;
         }
         else
@@ -61,11 +61,18 @@ public static class Socks5UdpCodec
         return true;
     }
 
-    private static bool TryReadAddress(ReadOnlySpan<byte> bytes, byte type, out IPAddress address)
+    /// <summary>
+    /// Reads an IPv4 or IPv6 address from SOCKS5 UDP frame bytes. <paramref name="scopeId"/> is the
+    /// interface scope to apply to a decoded IPv6 address (M2): the SOCKS5 UDP wire format does not
+    /// carry a scope, so the caller propagates one from the known relay/control endpoint so a
+    /// link-local address reconstructed from raw bytes keeps a non-zero <see cref="IPAddress.ScopeId"/>
+    /// and can route on the correct interface.
+    /// </summary>
+    private static bool TryReadAddress(ReadOnlySpan<byte> bytes, byte type, long scopeId, out IPAddress address)
     {
         try
         {
-            address = new IPAddress(bytes);
+            address = type == 4 && scopeId != 0 ? new IPAddress(bytes, scopeId) : new IPAddress(bytes);
             return (type == 1 && bytes.Length == 4) || (type == 4 && bytes.Length == 16);
         }
         catch (ArgumentException)

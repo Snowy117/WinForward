@@ -49,6 +49,13 @@ public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic) : ITcp
 internal sealed class TcpProxyRelay : ITcpRelay
 {
     private const int BufferSize = 8192;
+    // A relay that makes no progress in one direction for this long is considered stalled and the
+    // whole relay is reclaimed (M4). Established connections that are merely idle at the packet
+    // level (e.g. SSH with keepalives) keep traffic flowing in both directions (data + ACKs), so
+    // this generous stall window only fires for a genuinely dead peer and cannot be held forever
+    // by <see cref="TcpProxyRelay"/>. Teardown is otherwise tied to the relay ending, not to a
+    // per-flow wall-clock idle timeout.
+    internal static readonly TimeSpan StallTimeout = TimeSpan.FromMinutes(30);
 
     private readonly Socket _localSocket;
     private readonly Socks5ControlConnection _control;
@@ -77,9 +84,29 @@ internal sealed class TcpProxyRelay : ITcpRelay
         var buffer = new byte[BufferSize];
         while (true)
         {
-            var read = await source.ReadAsync(buffer.AsMemory(0, BufferSize), CancellationToken.None).ConfigureAwait(false);
+            int read;
+            try
+            {
+                using var readTimeout = new CancellationTokenSource(StallTimeout);
+                read = await source.ReadAsync(buffer.AsMemory(0, BufferSize), readTimeout.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // The read made no progress within the stall window; the peer is dead or unreachable.
+                // Ending the pump tears down the relay via ObserveRelayCompletionAsync.
+                return;
+            }
             if (read == 0) return;
-            await destination.WriteAsync(buffer.AsMemory(0, read), CancellationToken.None).ConfigureAwait(false);
+            try
+            {
+                using var writeTimeout = new CancellationTokenSource(StallTimeout);
+                await destination.WriteAsync(buffer.AsMemory(0, read), writeTimeout.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // The write made no progress within the stall window; the peer is no longer reading.
+                return;
+            }
         }
     }
 

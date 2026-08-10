@@ -8,6 +8,13 @@ namespace WinForward.Runtime;
 
 public sealed class Socks5ControlConnection : IAsyncDisposable
 {
+    // L1: the connect-attempt loop is bounded by a global attempt cap and a per-attempt socket
+    // timeout so DNS resolution plus sequential connects cannot hang the capture path indefinitely.
+    // Each candidate address is one attempt; exhausted candidates fail closed (exception -> blocked)
+    // without changing policy.
+    private const int MaxConnectionAttempts = 4;
+    private static readonly TimeSpan ConnectAttemptTimeout = TimeSpan.FromSeconds(30);
+
     private readonly Socket _socket;
     private readonly NetworkStream _stream;
     private readonly IDisposable? _loopPrevention;
@@ -25,59 +32,130 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
     /// the SYN leaves the host; it returns an optional loop-prevention registration that the
     /// connection owns and disposes with itself. Registering before the SYN closes the race where a
     /// catch-all proxy rule could capture WinForward's own SOCKS5 control traffic (design §10).
+    /// <paramref name="resolveAddresses"/> and <paramref name="socketFactory"/> are injectable seams
+    /// (address-list provider and socket ctor) so the attempt cap/deadline/disposal are testable with
+    /// fakes without real sockets or DNS. Attempts are capped by <paramref name="maxAttempts"/> and
+    /// each attempt is bounded by <paramref name="perAttemptTimeout"/>; a failed attempt waits out of
+    /// the loop to the next candidate, exhausting candidates fails closed (L1).
     /// </summary>
     public static async ValueTask<Socks5ControlConnection> ConnectAsync(
         Socks5Server server,
         CancellationToken cancellationToken,
-        Func<IPEndPoint, IPEndPoint, IDisposable?>? onSocketReady = null)
+        Func<IPEndPoint, IPEndPoint, IDisposable?>? onSocketReady = null,
+        Func<string, CancellationToken, ValueTask<IPAddress[]>>? resolveAddresses = null,
+        Func<AddressFamily, Socket>? socketFactory = null,
+        int maxAttempts = MaxConnectionAttempts,
+        TimeSpan? perAttemptTimeout = null)
     {
         ArgumentNullException.ThrowIfNull(server);
-        var addresses = await Dns.GetHostAddressesAsync(server.Host, cancellationToken).ConfigureAwait(false);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxAttempts);
+
+        var addressProvider = resolveAddresses ?? ((host, token) => new ValueTask<IPAddress[]>(Dns.GetHostAddressesAsync(host, token)));
+        var socketCtor = socketFactory ?? (family => new Socket(family, SocketType.Stream, ProtocolType.Tcp));
+        var timeout = perAttemptTimeout ?? ConnectAttemptTimeout;
+        var timeoutMs = (int)Math.Clamp(timeout.TotalMilliseconds, 0, int.MaxValue);
+
+        var addresses = await addressProvider(server.Host, cancellationToken).ConfigureAwait(false);
         if (addresses.Length == 0) throw new SocketException((int)SocketError.HostNotFound);
+
         SocketException? lastConnectionError = null;
+        var attempts = 0;
         foreach (var address in addresses)
         {
-            var socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
-            IDisposable? registration = null;
-            try
+            if (attempts >= maxAttempts) break;
+            attempts++;
+
+            var outcome = await ConnectOnceAsync(
+                server, address, socketCtor, onSocketReady, cancellationToken, timeout, timeoutMs).ConfigureAwait(false);
+            if (outcome.Connection is not null) return outcome.Connection;
+
+            outcome.Socket?.Dispose();
+            outcome.Registration?.Dispose();
+            // A socket-creation failure or a per-attempt timeout records a representative error so
+            // the next candidate is tried; only the final aggregate error is surfaced.
+            lastConnectionError ??= outcome.Error ?? new SocketException((int)SocketError.TimedOut);
+            if (outcome.IsFatal)
             {
-                var bindAddress = address.AddressFamily == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any;
-                socket.Bind(new IPEndPoint(bindAddress, 0));
-                registration = onSocketReady?.Invoke((IPEndPoint)socket.LocalEndPoint!, new IPEndPoint(address, server.Port));
-                await socket.ConnectAsync(new IPEndPoint(address, server.Port), cancellationToken).ConfigureAwait(false);
-                var connection = new Socks5ControlConnection(socket, registration);
-                await connection.AuthenticateAsync(server, cancellationToken).ConfigureAwait(false);
-                return connection;
-            }
-            catch (SocketException exception)
-            {
-                registration?.Dispose();
-                socket.Dispose();
-                lastConnectionError = exception;
-            }
-            catch
-            {
-                registration?.Dispose();
-                socket.Dispose();
-                throw;
+                break;
             }
         }
 
         throw new IOException("Unable to connect to the configured SOCKS5 server.", lastConnectionError);
     }
 
+    /// <summary>
+    /// Performs one connect attempt to a single candidate address. On success the owned connection
+    /// (and registration) are returned and ownership transfers to the caller, so this helper does
+    /// not dispose them. On failure the created socket/registration (if any) are handed back for the
+    /// caller to dispose. <paramref name="timeoutMs"/> is applied as the socket Send/Receive timeout
+    /// and as the per-attempt connect deadline; <paramref name="isFatal"/> distinguishes an abnormal
+    /// failure (cancellation by the caller) from a normal per-attempt failure that can retry.
+    /// </summary>
+    private static async ValueTask<ConnectAttempt> ConnectOnceAsync(
+        Socks5Server server,
+        IPAddress address,
+        Func<AddressFamily, Socket> socketCtor,
+        Func<IPEndPoint, IPEndPoint, IDisposable?>? onSocketReady,
+        CancellationToken cancellationToken,
+        TimeSpan timeout,
+        int timeoutMs)
+    {
+        Socket socket;
+        try
+        {
+            socket = socketCtor(address.AddressFamily);
+        }
+        catch (SocketException exception)
+        {
+            return new ConnectAttempt(Socket: null, Registration: null, Connection: null, Error: exception, IsFatal: false);
+        }
+
+        IDisposable? registration = null;
+        try
+        {
+            socket.ReceiveTimeout = timeoutMs;
+            socket.SendTimeout = timeoutMs;
+            var bindAddress = address.AddressFamily == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any;
+            socket.Bind(new IPEndPoint(bindAddress, 0));
+            registration = onSocketReady?.Invoke((IPEndPoint)socket.LocalEndPoint!, new IPEndPoint(address, server.Port));
+
+            using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            attemptCts.CancelAfter(timeout);
+            await socket.ConnectAsync(new IPEndPoint(address, server.Port), attemptCts.Token).ConfigureAwait(false);
+
+            var connection = new Socks5ControlConnection(socket, registration);
+            await connection.AuthenticateAsync(server, cancellationToken).ConfigureAwait(false);
+            return new ConnectAttempt(Socket: socket, Registration: registration, Connection: connection, Error: null, IsFatal: false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // The per-attempt timeout elapsed; this candidate failed and the next is tried.
+            return new ConnectAttempt(socket, registration, null, new SocketException((int)SocketError.TimedOut), IsFatal: false);
+        }
+        catch (SocketException exception)
+        {
+            return new ConnectAttempt(socket, registration, null, exception, IsFatal: false);
+        }
+        catch
+        {
+            return new ConnectAttempt(socket, registration, null, null, IsFatal: true);
+        }
+    }
+
+    private sealed record ConnectAttempt(Socket? Socket, IDisposable? Registration, Socks5ControlConnection? Connection, SocketException? Error, bool IsFatal);
+
     public async ValueTask<IPEndPoint> UdpAssociateAsync(IPEndPoint localEndpoint, CancellationToken cancellationToken)
     {
         var request = Socks5Messages.Request(Socks5Command.UdpAssociate, localEndpoint.Address, (ushort)localEndpoint.Port);
         await _stream.WriteAsync(request, cancellationToken).ConfigureAwait(false);
-        return await ReadEndpointReplyAsync(cancellationToken).ConfigureAwait(false);
+        return await ReadEndpointReplyAsync(Socks5Command.UdpAssociate, cancellationToken).ConfigureAwait(false);
     }
 
     public async ValueTask ConnectDestinationAsync(IPEndPoint destination, CancellationToken cancellationToken)
     {
         var request = Socks5Messages.Request(Socks5Command.Connect, destination.Address, (ushort)destination.Port);
         await _stream.WriteAsync(request, cancellationToken).ConfigureAwait(false);
-        _ = await ReadEndpointReplyAsync(cancellationToken).ConfigureAwait(false);
+        _ = await ReadEndpointReplyAsync(Socks5Command.Connect, cancellationToken).ConfigureAwait(false);
     }
 
     public ValueTask DisposeAsync()
@@ -108,7 +186,7 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
         if (authReply[0] != 1 || authReply[1] != 0) throw new IOException("SOCKS5 username/password authentication failed.");
     }
 
-    private async ValueTask<IPEndPoint> ReadEndpointReplyAsync(CancellationToken cancellationToken)
+    private async ValueTask<IPEndPoint> ReadEndpointReplyAsync(Socks5Command command, CancellationToken cancellationToken)
     {
         var prefix = new byte[5];
         await _stream.ReadExactlyAsync(prefix, cancellationToken).ConfigureAwait(false);
@@ -126,7 +204,12 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
         var reply = new byte[totalLength];
         prefix.CopyTo(reply, 0);
         await _stream.ReadExactlyAsync(reply.AsMemory(prefix.Length), cancellationToken).ConfigureAwait(false);
-        if (!Socks5Messages.TryParseReply(reply, out _, out var addressType, out var port)) throw new IOException("SOCKS5 command failed or returned a malformed reply.");
+        // L2: the full-reply parser is now discriminated. A success reply must parse exactly as
+        // Success; a truncated or malformed success body is rejected, never parsed into garbage.
+        if (Socks5Messages.TryParseReply(reply, out _, out var addressType, out var port) != Socks5ReplyKind.Success)
+        {
+            throw new IOException("SOCKS5 command returned a malformed reply.");
+        }
 
         IPAddress address = addressType switch
         {
@@ -135,10 +218,12 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
             3 => await ResolveDomainAsync(System.Text.Encoding.UTF8.GetString(reply.AsSpan(5, reply[4])), cancellationToken).ConfigureAwait(false),
             _ => throw new IOException("SOCKS5 server returned an unsupported address type.")
         };
-        if (address.Equals(IPAddress.Any) || address.Equals(IPAddress.IPv6Any))
-        {
-            address = ((IPEndPoint)_socket.RemoteEndPoint!).Address;
-        }
+
+        // M1: only a UDP ASSOCIATE reply may substitute an unspecified wildcard with the control
+        // peer; the server-provided BND port is always preserved. M2: a genuine IPv6 reply inherits
+        // the control peer's interface scope so a link-local relay routes on the correct interface.
+        var controlPeer = ((IPEndPoint)_socket.RemoteEndPoint!).Address;
+        address = Socks5Messages.NormalizeBndAddress(address, controlPeer, command);
         return new IPEndPoint(address, port);
     }
 
@@ -233,7 +318,10 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
         EndPoint sender = RelayEndpoint.AddressFamily == AddressFamily.InterNetwork ? new IPEndPoint(IPAddress.Any, 0) : new IPEndPoint(IPAddress.IPv6Any, 0);
         var result = await _socket.ReceiveFromAsync(buffer, SocketFlags.None, sender, cancellationToken).ConfigureAwait(false);
         if (!result.RemoteEndPoint.Equals(RelayEndpoint)) throw new IOException("SOCKS5 UDP packet came from an unexpected relay endpoint.");
-        if (!Socks5UdpCodec.TryDecode(buffer.Span[..result.ReceivedBytes], out var datagram)) throw new IOException("SOCKS5 UDP relay returned a malformed datagram.");
+        // M2: the SOCKS5 UDP wire format carries no interface scope, so propagate the relay
+        // endpoint's IPv6 scope into reconstruction to keep a link-local decoded address routable.
+        var scopeId = RelayEndpoint.Address.AddressFamily == AddressFamily.InterNetworkV6 ? RelayEndpoint.Address.ScopeId : 0;
+        if (!Socks5UdpCodec.TryDecode(buffer.Span[..result.ReceivedBytes], out var datagram, scopeId)) throw new IOException("SOCKS5 UDP relay returned a malformed datagram.");
         return datagram;
     }
 

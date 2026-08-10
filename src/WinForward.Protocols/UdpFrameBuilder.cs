@@ -10,8 +10,15 @@ namespace WinForward.Protocols;
 /// </summary>
 public static class UdpFrameBuilder
 {
-    /// <summary>The pinned NDISAPI capture-frame ABI (Ethernet II plus max payload).</summary>
-    public const int MaximumEthernetFrame = 1514;
+    /// <summary>The default pinned NDISAPI capture-frame ABI (Ethernet II plus max payload).</summary>
+    public const int DefaultMaximumEthernetFrame = 1514;
+
+    /// <summary>
+    /// The pinned NDISAPI capture-frame ABI (Ethernet II plus max payload) used when no explicit cap
+    /// is supplied. A jumbo-enabled (9014) ABI build is configured explicitly through
+    /// <see cref="TryBuild"/>'s <paramref name="maximumEthernetFrame"/> parameter.
+    /// </summary>
+    public const int MaximumEthernetFrame = DefaultMaximumEthernetFrame;
 
     public static bool TryBuild(
         IPAddress sourceAddress,
@@ -21,10 +28,12 @@ public static class UdpFrameBuilder
         ReadOnlyMemory<byte> payload,
         ReadOnlySpan<byte> sourceMac,
         ReadOnlySpan<byte> destinationMac,
-        out byte[] frame)
+        out byte[] frame,
+        int maximumEthernetFrame = DefaultMaximumEthernetFrame)
     {
         frame = [];
         if (sourceMac.Length != 6 || destinationMac.Length != 6) return false;
+        if (maximumEthernetFrame <= 0) return false;
         if (sourceAddress.AddressFamily != destinationAddress.AddressFamily) return false;
         var isIpv4 = sourceAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork;
         var isIpv6 = sourceAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6;
@@ -33,7 +42,7 @@ public static class UdpFrameBuilder
         var ipHeaderLength = isIpv4 ? 20 : 40;
         var udpLength = checked(8 + payload.Length);
         var totalLength = checked(14 + ipHeaderLength + udpLength);
-        if (totalLength > MaximumEthernetFrame) return false;
+        if (totalLength > maximumEthernetFrame) return false;
 
         var result = new byte[totalLength];
 
