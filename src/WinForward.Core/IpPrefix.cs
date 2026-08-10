@@ -4,9 +4,11 @@ namespace WinForward.Core;
 
 public readonly record struct IpPrefix(IPAddress Network, int PrefixLength)
 {
-    public static bool TryParse(string value, out IpPrefix prefix)
+    public static bool TryParse(string? value, out IpPrefix prefix)
     {
         prefix = default;
+        if (string.IsNullOrWhiteSpace(value)) return false;
+
         var separator = value.IndexOf('/');
         if (separator <= 0 || separator == value.Length - 1 ||
             !IPAddress.TryParse(value[..separator].Trim(), out var address) ||
@@ -20,9 +22,9 @@ public readonly record struct IpPrefix(IPAddress Network, int PrefixLength)
         return true;
     }
 
-    public bool Contains(IPAddress address)
+    public bool Contains(IPAddress? address)
     {
-        if (address.AddressFamily != Network.AddressFamily) return false;
+        if (address is null || address.AddressFamily != Network.AddressFamily) return false;
         var networkBytes = Network.GetAddressBytes();
         var addressBytes = address.GetAddressBytes();
         var fullBytes = PrefixLength / 8;

@@ -43,8 +43,11 @@ public readonly struct Endpoint : IEquatable<Endpoint>
     public IPAddress Address { get; }
     public ushort Port { get; }
 
-    public static Endpoint From(IPAddress address, ushort port) =>
-        new(address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? AddressFamilyKind.IPv4 : AddressFamilyKind.IPv6, address, port);
+    public static Endpoint From(IPAddress address, ushort port)
+    {
+        ArgumentNullException.ThrowIfNull(address);
+        return new(address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? AddressFamilyKind.IPv4 : AddressFamilyKind.IPv6, address, port);
+    }
 
     public bool Equals(Endpoint other) => AddressFamily == other.AddressFamily && Port == other.Port && Address.Equals(other.Address);
     public override bool Equals(object? obj) => obj is Endpoint other && Equals(other);
@@ -219,19 +222,36 @@ public sealed class FlowTable
 
     private bool TryResolveLocked(FlowKey key, out FlowState? state)
     {
-        if (_states.TryGetValue(key, out state)) return true;
+        if (_states.TryGetValue(key, out state))
+        {
+            state.Touch(DateTimeOffset.UtcNow);
+            return true;
+        }
         var reverse = key.Reverse();
-        if (_states.TryGetValue(reverse, out state)) return true;
+        if (_states.TryGetValue(reverse, out state))
+        {
+            state.Touch(DateTimeOffset.UtcNow);
+            return true;
+        }
         var flippedReverse = reverse with { Origin = Flip(reverse.Origin) };
-        if (_states.TryGetValue(flippedReverse, out state)) return true;
+        if (_states.TryGetValue(flippedReverse, out state))
+        {
+            state.Touch(DateTimeOffset.UtcNow);
+            return true;
+        }
         var flipped = key with { Origin = Flip(key.Origin) };
-        if (_states.TryGetValue(flipped, out state)) return true;
+        if (_states.TryGetValue(flipped, out state))
+        {
+            state.Touch(DateTimeOffset.UtcNow);
+            return true;
+        }
 
 #pragma warning disable S3267 // Manual scan avoids per-packet LINQ allocation on the capture hot path.
         foreach (var candidate in _states.Values)
         {
             if (SameLogicalFlow(candidate.Key, key))
             {
+                candidate.Touch(DateTimeOffset.UtcNow);
                 state = candidate;
                 return true;
             }

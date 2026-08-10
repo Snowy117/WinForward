@@ -52,6 +52,12 @@ public sealed class FlowAndConfigurationTests
     }
 
     [Fact]
+    public void EndpointFactoryRejectsNullAddressWithArgumentException()
+    {
+        Assert.Throws<ArgumentNullException>(() => Endpoint.From(null!, 53));
+    }
+
+    [Fact]
     public void PolicyUsesFirstMatchingRule()
     {
         var context = new FlowContext(
@@ -137,6 +143,24 @@ public sealed class FlowAndConfigurationTests
     }
 
     [Fact]
+    public void IPv6PrefixesNormalizeAndMatchOnlyTheirPrefix()
+    {
+        Assert.True(IpPrefix.TryParse("2001:db8:1::1234/64", out var prefix));
+
+        Assert.Equal(IPAddress.Parse("2001:db8:1::"), prefix.Network);
+        Assert.True(prefix.Contains(IPAddress.Parse("2001:db8:1::ffff")));
+        Assert.False(prefix.Contains(IPAddress.Parse("2001:db8:2::1")));
+        Assert.False(prefix.Contains(IPAddress.Parse("192.0.2.1")));
+    }
+
+    [Fact]
+    public void IpPrefixRejectsNullInputsWithoutThrowing()
+    {
+        Assert.False(IpPrefix.TryParse(null, out var prefix));
+        Assert.False(prefix.Contains(null));
+    }
+
+    [Fact]
     public void PacketLeaseAllowsExactlyOneDisposition()
     {
         using var lease = new PacketLease(new byte[] { 1, 2 });
@@ -167,6 +191,22 @@ public sealed class FlowAndConfigurationTests
         Assert.True(table.TryClaim(first, () => FlowDecision.Fallback(FlowAction.Pass), out _));
 
         Assert.False(table.TryClaim(second, () => FlowDecision.Fallback(FlowAction.Pass), out _));
+    }
+
+    [Fact]
+    public void FlowTableLookupRefreshesActivityBeforeIdleExpiry()
+    {
+        var table = new FlowTable();
+        var key = FlowKey.Create(Endpoint.From(IPAddress.Loopback, 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
+        var claimed = table.Claim(key, () => FlowDecision.Fallback(FlowAction.Pass));
+        var beforeLookup = DateTimeOffset.UtcNow;
+        claimed.Touch(beforeLookup - TimeSpan.FromMinutes(2));
+
+        Assert.True(table.TryResolve(key, out var resolved));
+        Assert.Same(claimed, resolved);
+        Assert.InRange(claimed.LastActivityUtc, beforeLookup, DateTimeOffset.UtcNow);
+        Assert.Equal(0, table.RemoveExpired(claimed.LastActivityUtc + TimeSpan.FromMinutes(1) - TimeSpan.FromTicks(1), TimeSpan.FromMinutes(1)));
+        Assert.Equal(1, table.RemoveExpired(claimed.LastActivityUtc + TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1)));
     }
 
     [Fact]
@@ -549,7 +589,25 @@ public sealed class FlowAndConfigurationTests
         """;
 
         Assert.False(ConfigurationLoader.TryParse(json, out _, out var diagnostics));
-        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "$", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Path.Contains("unexpectedField", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ConfigurationParseDiagnosticsNameTheFailingFieldWithoutEchoingCredentials()
+    {
+        const string json = """
+        {
+          "socks5Servers": [],
+          "rules": [],
+          "fallbackAction": "pass",
+          "unexpectedField": "credential-that-must-not-appear"
+        }
+        """;
+
+        Assert.False(ConfigurationLoader.TryParse(json, out _, out var diagnostics));
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Contains("unexpectedField", diagnostic.Path, StringComparison.Ordinal);
+        Assert.DoesNotContain("credential-that-must-not-appear", diagnostic.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -610,6 +668,39 @@ public sealed class FlowAndConfigurationTests
     }
 
     [Fact]
+    public void ConfigurationEnforcesUtf8CredentialLengthWithoutDisclosingPassword()
+    {
+        var maximumPassword = new string('a', 255);
+        var maximumJson = $$"""
+        {
+          "socks5Servers": [ { "name": "Main", "host": "127.0.0.1", "port": 1080, "username": "user", "password": "{{maximumPassword}}" } ],
+          "rules": [],
+          "fallbackAction": "pass"
+        }
+        """;
+
+        Assert.True(ConfigurationLoader.TryParse(maximumJson, out var maximumDto, out _));
+        Assert.NotNull(maximumDto);
+        Assert.True(ConfigurationLoader.TryValidate(maximumDto!, out _, out var maximumDiagnostics), string.Join("; ", maximumDiagnostics));
+
+        var password = new string('\u00e9', 128);
+        var json = $$"""
+        {
+          "socks5Servers": [ { "name": "Main", "host": "127.0.0.1", "port": 1080, "username": "user", "password": "{{password}}" } ],
+          "rules": [],
+          "fallbackAction": "pass"
+        }
+        """;
+
+        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
+        Assert.NotNull(dto);
+        Assert.False(ConfigurationLoader.TryValidate(dto!, out _, out var diagnostics));
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal("socks5Servers[0].password", diagnostic.Path);
+        Assert.DoesNotContain(password, diagnostic.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ConfigurationRejectsInvalidHost()
     {
         const string json = """
@@ -644,6 +735,67 @@ public sealed class FlowAndConfigurationTests
         Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "socks5Servers", StringComparison.Ordinal));
         Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "rules", StringComparison.Ordinal));
         Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "fallbackAction", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("process")]
+    [InlineData("adapterId")]
+    [InlineData("adapterName")]
+    [InlineData("protocol")]
+    [InlineData("addressFamily")]
+    [InlineData("remoteCidr")]
+    [InlineData("remotePort")]
+    public void ConfigurationRejectsNullRuleMatchValuesWithoutThrowing(string field)
+    {
+        var json = $$"""
+        {
+          "socks5Servers": [],
+          "rules": [{ "{{field}}": [null], "action": "pass" }],
+          "fallbackAction": "pass"
+        }
+        """;
+
+        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
+        Assert.NotNull(dto);
+        Assert.False(ConfigurationLoader.TryValidate(dto!, out _, out var diagnostics));
+        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, $"rules[0].{field}[0]", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("socks5Servers")]
+    [InlineData("rules")]
+    public void ConfigurationRejectsNullSectionEntriesWithoutThrowing(string section)
+    {
+        var json = $$"""
+        {
+          "socks5Servers": {{(string.Equals(section, "socks5Servers", StringComparison.Ordinal) ? "[null]" : "[]")}},
+          "rules": {{(string.Equals(section, "rules", StringComparison.Ordinal) ? "[null]" : "[]")}},
+          "fallbackAction": "pass"
+        }
+        """;
+
+        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
+        Assert.NotNull(dto);
+        Assert.False(ConfigurationLoader.TryValidate(dto!, out _, out var diagnostics));
+        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, $"{section}[0]", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ConfigurationNormalizesAndMergesRemotePortRanges()
+    {
+        const string json = """
+        {
+          "socks5Servers": [],
+          "rules": [{ "remotePort": ["443", "100-200", "80-150", "201-250", "443"], "action": "pass" }],
+          "fallbackAction": "pass"
+        }
+        """;
+
+        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
+        Assert.NotNull(dto);
+        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.NotNull(configuration);
+        Assert.Equal(new[] { ((ushort)80, (ushort)250), ((ushort)443, (ushort)443) }, configuration!.Policy.Rules[0].Matcher.RemotePorts);
     }
 
     [Fact]

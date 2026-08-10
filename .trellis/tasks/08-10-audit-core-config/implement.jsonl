@@ -1,0 +1,3 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Flow-key, process selector, packet ownership, and regression-test contracts."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Unknown attribution, fail-closed, collision, and cancellation semantics."}
+{"file":".trellis/tasks/archive/2026-08/08-07-winforward-proxy/design.md","reason":"Original configuration and canonical flow-key contract."}
