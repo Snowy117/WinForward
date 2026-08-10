@@ -124,3 +124,24 @@ Reviewed the WinForward capture/proxy datapath and fixed reviewed functional/UX 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 2: Audit core configuration contracts
+
+**Date**: 2026-08-10
+**Task**: Audit core configuration contracts
+**Branch**: `master`
+
+### Summary
+
+Audited Core domain, policy, selectors, flow keys, and configuration loading. Fixed flow activity refresh, null-safe validation, canonical port ranges, redacted JSON diagnostics, and Endpoint null validation; added regressions and captured the contracts in backend specs.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c180beb` | (see git log) |
+
+### Status
+
+[OK] **Completed**
