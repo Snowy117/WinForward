@@ -32,6 +32,7 @@ Questions to answer:
 - `FlowTable.TryResolve` is the packet-observation lookup: every successful exact, reverse, origin-flipped, or adapter-agnostic resolution MUST call `FlowState.Touch` before returning, so active flows cannot expire at their pre-lookup deadline. `TryGet` is a non-observing lookup and intentionally does not refresh activity.
 - Boundary constructors and parsers must be intentional about null inputs: `Endpoint.From(IPAddress, ushort)` rejects a null address with `ArgumentNullException`, while `IpPrefix.TryParse(string?, out IpPrefix)` returns `false` without throwing. Configuration validation must turn null JSON array elements into indexed diagnostics rather than allowing a `NullReferenceException`.
 - Normalized remote-port intervals are sorted by start/end and merged when overlapping or adjacent. Downstream rule matching receives the canonical disjoint interval list, never user ordering or duplicate ranges.
+- Capture composition owns proxy coordinators inside the capture-loop disposal boundary: stop the sweeper and capture pumps, then dispose UDP/TCP sessions, and only afterward restore adapter modes. Active `StopAsync` must cancel and await the capture run before releasing those resources.
 
 ## Testing Requirements
 
@@ -41,6 +42,7 @@ Questions to answer:
 - Packet-rewrite tests must validate checksums with INDEPENDENTLY reimplemented `Sum`/`Finish` helpers (not the production routines under test), assert only the expected mutable bytes changed via an explicit offset set, prove round-trip rewrite-back-to-original is byte-identical, and assert every reject path leaves the input span unchanged.
 - Flow lookup regressions must verify that an observation refreshes `LastActivityUtc` before an idle-expiry boundary; also preserve a non-observing lookup test where applicable.
 - Configuration tests must cover null DTO array entries, merged adjacent/overlapping port ranges, unknown JSON field paths, and paired credential limits at both 255-byte accepted and 256-byte rejected UTF-8 boundaries.
+- Lifecycle tests must assert coordinator disposal precedes mode restoration on normal completion, capture failure, and concurrent stop, using an ordered event seam rather than scheduler timing.
 
 ---
 

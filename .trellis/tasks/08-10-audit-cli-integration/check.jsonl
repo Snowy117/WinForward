@@ -1,0 +1,3 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Final build/test and cross-layer quality criteria."}
+{"file":".trellis/spec/backend/windows-ndisapi.md","reason":"Windows publish/smoke/adapter cleanup acceptance matrix."}
+{"file":".trellis/tasks/archive/2026-08/08-07-winforward-proxy/research/review-capture-lifecycle-config-2026.md","reason":"Prior shutdown/configuration evidence that composition root must preserve."}

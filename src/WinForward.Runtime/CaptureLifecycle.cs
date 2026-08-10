@@ -32,7 +32,9 @@ public sealed class TransactionalCaptureRuntime : IAsyncDisposable
     private readonly IPacketCaptureLoop _capture;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly List<AdapterModeSnapshot> _applied = [];
+    private readonly Lock _gate = new();
     private CaptureRuntimeState _state = CaptureRuntimeState.Created;
+    private Task? _runTask;
     private int _cleanupStarted;
     private int _captureDisposed;
 
@@ -46,9 +48,19 @@ public sealed class TransactionalCaptureRuntime : IAsyncDisposable
 
     public CaptureRuntimeState State => _state;
 
-    public async ValueTask StartAsync(CancellationToken cancellationToken)
+    public ValueTask StartAsync(CancellationToken cancellationToken)
     {
-        if (_state != CaptureRuntimeState.Created) throw new InvalidOperationException($"Cannot start runtime from state {_state}.");
+        lock (_gate)
+        {
+            if (_state != CaptureRuntimeState.Created) throw new InvalidOperationException($"Cannot start runtime from state {_state}.");
+            _state = CaptureRuntimeState.Prepared;
+            _runTask = StartCoreAsync(cancellationToken);
+            return new ValueTask(_runTask);
+        }
+    }
+
+    private async Task StartCoreAsync(CancellationToken cancellationToken)
+    {
         try
         {
             var snapshots = await _modes.SnapshotAsync(cancellationToken).ConfigureAwait(false);
@@ -77,27 +89,36 @@ public sealed class TransactionalCaptureRuntime : IAsyncDisposable
 
     public async ValueTask StopAsync()
     {
-        if (_state == CaptureRuntimeState.Closed) return;
-        if (_state == CaptureRuntimeState.Created)
+        Task? runTask;
+        lock (_gate)
         {
-            _state = CaptureRuntimeState.Stopping;
-            try { await DisposeCaptureAsync().ConfigureAwait(false); }
-            finally
+            if (_state == CaptureRuntimeState.Closed) return;
+            if (_state == CaptureRuntimeState.Created)
             {
-                await RestoreBestEffortAsync().ConfigureAwait(false);
-                _state = CaptureRuntimeState.Closed;
+                _state = CaptureRuntimeState.Stopping;
+                runTask = null;
             }
+            else
+            {
+                _state = CaptureRuntimeState.Stopping;
+                runTask = _runTask;
+            }
+        }
+
+        await _shutdown.CancelAsync().ConfigureAwait(false);
+        if (runTask is not null)
+        {
+            try { await runTask.ConfigureAwait(false); }
+            catch (OperationCanceledException) when (_shutdown.IsCancellationRequested) { return; }
             return;
         }
 
-        _state = CaptureRuntimeState.Stopping;
-        await _shutdown.CancelAsync().ConfigureAwait(false);
-        try { await DisposeCaptureAsync().ConfigureAwait(false); }
-        finally
+        try
         {
+            await DisposeCaptureAsync().ConfigureAwait(false);
             await RestoreBestEffortAsync().ConfigureAwait(false);
-            _state = CaptureRuntimeState.Closed;
         }
+        finally { _state = CaptureRuntimeState.Closed; }
     }
 
     public ValueTask DisposeAsync() => StopAsync();

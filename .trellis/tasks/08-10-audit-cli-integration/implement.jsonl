@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Build, warning, ownership, and regression quality contract."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Fail-closed errors and attribution/cancellation behavior composed by CLI."}
+{"file":".trellis/spec/backend/windows-ndisapi.md","reason":"Windows capture, adapter, TCP/UDP, loop-prevention, and Native AOT hardware gate requirements."}
+{"file":".trellis/tasks/archive/2026-08/08-07-winforward-proxy/design.md","reason":"CLI-owned runtime composition and release acceptance contract."}

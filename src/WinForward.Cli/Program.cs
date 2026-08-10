@@ -176,27 +176,9 @@ internal static class Program
     {
         var selfTraffic = new SelfTrafficRegistry();
         var reinjector = new NdisPacketReinjector(driver);
-        await using var tcpCoordinator = new TcpProxyCoordinator(
-            new TcpRedirectListenerFactory(),
-            new TcpProxyRelayFactory(selfTraffic),
-            new TcpRedirectInjector(reinjector),
-            new TcpRedirectTable(),
-            selfTraffic,
-            logger);
-
-        // UDP relay: the response reinjector rebuilds client-bound frames on the capture scope's first
-        // adapter (host flows). Its MAC is the NDISAPI CurrentAddress of that adapter.
-        await using var udpCoordinator = CreateUdpCoordinator(driver, scope, reinjector, selfTraffic, logger);
-
-        var executor = new NdisPacketActionExecutor(reinjector, logger, tcpCoordinator, udpCoordinator);
-        var dispatcher = new FlowDispatcher(
-            configuration, selfTraffic, executor, new WindowsProcessAttributor(),
-            reverseHandler: tcpCoordinator.HandleReverseIfApplicableAsync);
-        var processor = new CapturePacketProcessor(dispatcher);
+        await using var captureComposition = await CreateCaptureCompositionAsync(configuration, driver, scope, reinjector, selfTraffic, logger).ConfigureAwait(false);
         var modeController = new NdisAdapterModeController(driver, scope);
-        var captureLoop = new MultiAdapterCaptureLoop(driver, scope, processor);
-        await using var runtime = new TransactionalCaptureRuntime(modeController, captureLoop);
-        await using var idleExpirySweeper = new IdleExpirySweeper(dispatcher, tcpCoordinator, udpCoordinator);
+        await using var runtime = new TransactionalCaptureRuntime(modeController, captureComposition);
 
         using var shutdown = new CancellationTokenSource();
         void OnCancel(object? sender, ConsoleCancelEventArgs eventArgs)
@@ -208,7 +190,6 @@ internal static class Program
         Console.CancelKeyPress += OnCancel;
         try
         {
-            idleExpirySweeper.Start();
             logger.Info("Interception started. Press Ctrl+C to stop.");
             await runtime.StartAsync(shutdown.Token).ConfigureAwait(false);
             logger.Info("WinForward stopped cleanly.");
@@ -227,6 +208,49 @@ internal static class Program
         finally
         {
             Console.CancelKeyPress -= OnCancel;
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static async ValueTask<CoordinatorShutdownCaptureLoop> CreateCaptureCompositionAsync(
+        ValidatedConfiguration configuration,
+        NdisApiDriver driver,
+        IReadOnlyList<WindowsAdapter> scope,
+        IPacketReinjector reinjector,
+        SelfTrafficRegistry selfTraffic,
+        IRuntimeLogger logger)
+    {
+        var tcpCoordinator = new TcpProxyCoordinator(
+            new TcpRedirectListenerFactory(),
+            new TcpProxyRelayFactory(selfTraffic),
+            new TcpRedirectInjector(reinjector),
+            new TcpRedirectTable(),
+            selfTraffic,
+            logger);
+        try
+        {
+            var udpCoordinator = CreateUdpCoordinator(driver, scope, reinjector, selfTraffic, logger);
+            try
+            {
+                var executor = new NdisPacketActionExecutor(reinjector, logger, tcpCoordinator, udpCoordinator);
+                var dispatcher = new FlowDispatcher(
+                    configuration, selfTraffic, executor, new WindowsProcessAttributor(),
+                    reverseHandler: tcpCoordinator.HandleReverseIfApplicableAsync);
+                var captureLoop = new MultiAdapterCaptureLoop(driver, scope, new CapturePacketProcessor(dispatcher));
+                var idleExpirySweeper = new IdleExpirySweeper(dispatcher, tcpCoordinator, udpCoordinator);
+                idleExpirySweeper.Start();
+                return new CoordinatorShutdownCaptureLoop(captureLoop, idleExpirySweeper, udpCoordinator, tcpCoordinator);
+            }
+            catch
+            {
+                await udpCoordinator.DisposeAsync().ConfigureAwait(false);
+                throw;
+            }
+        }
+        catch
+        {
+            await tcpCoordinator.DisposeAsync().ConfigureAwait(false);
+            throw;
         }
     }
 
@@ -337,5 +361,73 @@ internal static class Program
         public void Info(string message) => Console.Error.WriteLine($"[info] {message}");
         public void Warn(string message) => Console.Error.WriteLine($"[warn] {message}");
         public void Error(string message) => Console.Error.WriteLine($"[error] {message}");
+    }
+
+    /// <summary>
+    /// Keeps proxy-session teardown within the capture runtime's disposal boundary. The runtime
+    /// disposes its capture loop before restoring adapter modes, so this ordered composition closes
+    /// the sweeper, packet pumps, and proxy coordinators while tunnel modes are still active.
+    /// </summary>
+    internal sealed class CoordinatorShutdownCaptureLoop : IPacketCaptureLoop
+    {
+        private readonly IPacketCaptureLoop _captureLoop;
+        private readonly IAsyncDisposable _idleExpirySweeper;
+        private readonly IAsyncDisposable _udpCoordinator;
+        private readonly IAsyncDisposable _tcpCoordinator;
+        private readonly Lock _gate = new();
+        private Task? _disposeTask;
+
+        public CoordinatorShutdownCaptureLoop(
+            IPacketCaptureLoop captureLoop,
+            IAsyncDisposable idleExpirySweeper,
+            IAsyncDisposable udpCoordinator,
+            IAsyncDisposable tcpCoordinator)
+        {
+            ArgumentNullException.ThrowIfNull(captureLoop);
+            ArgumentNullException.ThrowIfNull(idleExpirySweeper);
+            ArgumentNullException.ThrowIfNull(udpCoordinator);
+            ArgumentNullException.ThrowIfNull(tcpCoordinator);
+            _captureLoop = captureLoop;
+            _idleExpirySweeper = idleExpirySweeper;
+            _udpCoordinator = udpCoordinator;
+            _tcpCoordinator = tcpCoordinator;
+        }
+
+        public ValueTask RunAsync(CancellationToken cancellationToken) => _captureLoop.RunAsync(cancellationToken);
+
+        public ValueTask DisposeAsync()
+        {
+            lock (_gate)
+            {
+                _disposeTask ??= DisposeCoreAsync();
+                return new ValueTask(_disposeTask);
+            }
+        }
+
+        private async Task DisposeCoreAsync()
+        {
+            try
+            {
+                await _idleExpirySweeper.DisposeAsync().ConfigureAwait(false);
+            }
+            finally
+            {
+                try
+                {
+                    await _captureLoop.DisposeAsync().ConfigureAwait(false);
+                }
+                finally
+                {
+                    try
+                    {
+                        await _udpCoordinator.DisposeAsync().ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        await _tcpCoordinator.DisposeAsync().ConfigureAwait(false);
+                    }
+                }
+            }
+        }
     }
 }

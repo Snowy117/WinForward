@@ -12,5 +12,6 @@
     <ProjectReference Include="../../src/WinForward.NdisApi/WinForward.NdisApi.csproj" />
     <ProjectReference Include="../../src/WinForward.Runtime/WinForward.Runtime.csproj" />
     <ProjectReference Include="../../src/WinForward.Windows/WinForward.Windows.csproj" />
+    <ProjectReference Include="../../src/WinForward.Cli/WinForward.Cli.csproj" />
   </ItemGroup>
 </Project>
