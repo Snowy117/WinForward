@@ -8,10 +8,10 @@ namespace WinForward.Runtime;
 
 /// <summary>
 /// The native capture metadata a reinjection executor needs to decide where a passed frame returns:
-/// the packet's MSS/NDISAPI direction flag and the adapter handle it was captured on.
+/// the NDISAPI direction flag, packet metadata flags, and the adapter handle it was captured on.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
-public readonly record struct PacketCaptureMetadata(uint DeviceFlags, nint AdapterHandle)
+public readonly record struct PacketCaptureMetadata(uint DeviceFlags, nint AdapterHandle, uint Flags = 0)
 {
     public bool IsOnSend => (DeviceFlags & NdisApiAbi.PacketFlagOnSend) != 0;
 }

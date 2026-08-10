@@ -29,7 +29,7 @@ public sealed class CapturePacketProcessor
     {
         var frame = packet.Buffer.GetFrame().ToArray();
         var lease = new PacketLease(frame);
-        var metadata = new PacketCaptureMetadata(packet.DeviceFlags, packet.AdapterHandle);
+        var metadata = new PacketCaptureMetadata(packet.DeviceFlags, packet.AdapterHandle, packet.Flags);
         var isOnSend = (packet.DeviceFlags & NdisApiAbi.PacketFlagOnSend) != 0;
         try
         {

@@ -35,7 +35,7 @@ public sealed class TransactionalCaptureRuntime : IAsyncDisposable
     private readonly Lock _gate = new();
     private CaptureRuntimeState _state = CaptureRuntimeState.Created;
     private Task? _runTask;
-    private int _cleanupStarted;
+    private Task? _cleanupTask;
     private int _captureDisposed;
 
     public TransactionalCaptureRuntime(IAdapterModeController modes, IPacketCaptureLoop capture)
@@ -46,7 +46,13 @@ public sealed class TransactionalCaptureRuntime : IAsyncDisposable
         _capture = capture;
     }
 
-    public CaptureRuntimeState State => _state;
+    public CaptureRuntimeState State
+    {
+        get
+        {
+            lock (_gate) return _state;
+        }
+    }
 
     public ValueTask StartAsync(CancellationToken cancellationToken)
     {
@@ -61,71 +67,57 @@ public sealed class TransactionalCaptureRuntime : IAsyncDisposable
 
     private async Task StartCoreAsync(CancellationToken cancellationToken)
     {
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
+        var runtimeCancellation = linkedCancellation.Token;
         try
         {
-            var snapshots = await _modes.SnapshotAsync(cancellationToken).ConfigureAwait(false);
-            _state = CaptureRuntimeState.Prepared;
+            var snapshots = await _modes.SnapshotAsync(runtimeCancellation).ConfigureAwait(false);
             foreach (var adapter in snapshots)
             {
-                await _modes.ApplyCaptureModeAsync(adapter, cancellationToken).ConfigureAwait(false);
+                await _modes.ApplyCaptureModeAsync(adapter, runtimeCancellation).ConfigureAwait(false);
                 _applied.Add(adapter);
             }
-            _state = CaptureRuntimeState.ModesApplied;
-            _state = CaptureRuntimeState.Running;
-            using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
-            await _capture.RunAsync(linkedCancellation.Token).ConfigureAwait(false);
+            SetActiveState(CaptureRuntimeState.ModesApplied);
+            SetActiveState(CaptureRuntimeState.Running);
+            await _capture.RunAsync(runtimeCancellation).ConfigureAwait(false);
         }
         finally
         {
-            if (_state != CaptureRuntimeState.Closed) _state = CaptureRuntimeState.Stopping;
-            try { await DisposeCaptureAsync().ConfigureAwait(false); }
-            finally
-            {
-                await RestoreBestEffortAsync().ConfigureAwait(false);
-                _state = CaptureRuntimeState.Closed;
-            }
+            SetStoppingState();
+            await CleanupAsync().ConfigureAwait(false);
         }
     }
 
     public async ValueTask StopAsync()
     {
         Task? runTask;
+        var cancelShutdown = false;
         lock (_gate)
         {
             if (_state == CaptureRuntimeState.Closed) return;
-            if (_state == CaptureRuntimeState.Created)
+            if (_state != CaptureRuntimeState.Stopping)
             {
                 _state = CaptureRuntimeState.Stopping;
-                runTask = null;
+                cancelShutdown = true;
             }
-            else
-            {
-                _state = CaptureRuntimeState.Stopping;
-                runTask = _runTask;
-            }
+            runTask = _runTask;
         }
 
-        await _shutdown.CancelAsync().ConfigureAwait(false);
+        if (cancelShutdown) await _shutdown.CancelAsync().ConfigureAwait(false);
         if (runTask is not null)
         {
             try { await runTask.ConfigureAwait(false); }
-            catch (OperationCanceledException) when (_shutdown.IsCancellationRequested) { return; }
+            catch (OperationCanceledException) { return; }
             return;
         }
 
-        try
-        {
-            await DisposeCaptureAsync().ConfigureAwait(false);
-            await RestoreBestEffortAsync().ConfigureAwait(false);
-        }
-        finally { _state = CaptureRuntimeState.Closed; }
+        await CleanupAsync().ConfigureAwait(false);
     }
 
     public ValueTask DisposeAsync() => StopAsync();
 
     private async ValueTask RestoreBestEffortAsync()
     {
-        if (Interlocked.Exchange(ref _cleanupStarted, 1) != 0) return;
         foreach (var adapter in _applied.AsEnumerable().Reverse())
         {
             try { await _modes.RestoreAsync(adapter, CancellationToken.None).ConfigureAwait(false); }
@@ -139,6 +131,50 @@ public sealed class TransactionalCaptureRuntime : IAsyncDisposable
         _applied.Clear();
         await _modes.DisposeAsync().ConfigureAwait(false);
         _shutdown.Dispose();
+    }
+
+    private ValueTask CleanupAsync()
+    {
+        lock (_gate)
+        {
+            _cleanupTask ??= CleanupCoreAsync();
+            return new ValueTask(_cleanupTask);
+        }
+    }
+
+    private async Task CleanupCoreAsync()
+    {
+        try
+        {
+            await DisposeCaptureAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            try { await RestoreBestEffortAsync().ConfigureAwait(false); }
+            finally { SetClosedState(); }
+        }
+    }
+
+    private void SetActiveState(CaptureRuntimeState state)
+    {
+        lock (_gate)
+        {
+            if (_state is CaptureRuntimeState.Stopping or CaptureRuntimeState.Closed) return;
+            _state = state;
+        }
+    }
+
+    private void SetStoppingState()
+    {
+        lock (_gate)
+        {
+            if (_state != CaptureRuntimeState.Closed) _state = CaptureRuntimeState.Stopping;
+        }
+    }
+
+    private void SetClosedState()
+    {
+        lock (_gate) _state = CaptureRuntimeState.Closed;
     }
 
     private ValueTask DisposeCaptureAsync() =>

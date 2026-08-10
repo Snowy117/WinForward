@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Exactly-once ownership, association locking, deterministic concurrency, and rewrite boundaries."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Fail-closed and cancellation/error propagation contract."}
+{"file":".trellis/spec/backend/windows-ndisapi.md","reason":"Reinjection direction, adapter handle, capture, loop prevention, and shutdown constraints."}
+{"file":".trellis/tasks/archive/2026-08/08-07-winforward-proxy/research/review-capture-lifecycle-config-2026.md","reason":"Prior capture/dispose lifecycle evidence requiring current-tree revalidation."}

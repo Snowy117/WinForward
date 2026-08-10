@@ -83,6 +83,26 @@ public sealed class CaptureLifecycleTests
     }
 
     [Fact]
+    public async Task ConcurrentStopsBeforeStartWaitForTheSameCaptureCleanup()
+    {
+        var modes = new FakeModes([]);
+        var capture = new BlockingDisposeCapture();
+        await using var runtime = new TransactionalCaptureRuntime(modes, capture);
+
+        var firstStop = Task.Run(async () => await runtime.StopAsync());
+        await capture.DisposeStarted.Task;
+
+        var secondStop = Task.Run(async () => await runtime.StopAsync());
+        Assert.False(secondStop.IsCompleted);
+
+        capture.CompleteDispose();
+        await Task.WhenAll(firstStop, secondStop);
+
+        Assert.Equal(CaptureRuntimeState.Closed, runtime.State);
+        Assert.Equal(1, capture.DisposeCount);
+    }
+
+    [Fact]
     public async Task CoordinatorShutdownCompositionClosesProxySessionsBeforeRestoringModes()
     {
         var events = new List<string>();
@@ -249,6 +269,25 @@ public sealed class CaptureLifecycleTests
         public bool Disposed { get; private set; }
         public ValueTask RunAsync(CancellationToken cancellationToken) => ValueTask.CompletedTask;
         public ValueTask DisposeAsync() { Disposed = true; return ValueTask.CompletedTask; }
+    }
+
+    private sealed class BlockingDisposeCapture : IPacketCaptureLoop
+    {
+        private readonly TaskCompletionSource _complete = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource DisposeStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int DisposeCount { get; private set; }
+
+        public ValueTask RunAsync(CancellationToken cancellationToken) => ValueTask.CompletedTask;
+
+        public async ValueTask DisposeAsync()
+        {
+            DisposeCount++;
+            DisposeStarted.TrySetResult();
+            await _complete.Task;
+        }
+
+        public void CompleteDispose() => _complete.TrySetResult();
     }
 
     private sealed class BlockingCapture : IPacketCaptureLoop

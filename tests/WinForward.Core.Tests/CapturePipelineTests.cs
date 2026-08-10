@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Net;
+using System.Runtime.Versioning;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
@@ -382,6 +383,25 @@ public sealed class CapturePipelineTests
     }
 
     [Fact]
+    [SupportedOSPlatform("windows")]
+    public async Task ProcessorPreservesCapturedNdisFlagsThroughPassReinjection()
+    {
+        var reinjector = new FakeReinjector();
+        var dispatcher = new FlowDispatcher(CreateConfig(new RuleMatcher(), FlowAction.Pass), new FakeGuard(), new NdisPacketActionExecutor(reinjector));
+        var adapter = new WindowsAdapter("id-a", "Ethernet", "internal-a", 7, 1);
+        using var buffer = new NdisPacketBuffer();
+        buffer.SetFrame(CreateIpv4TcpFrame(), NdisApiAbi.PacketFlagOnSend, (nint)7, flags: 0x4000_0021);
+
+        await new CapturePacketProcessor(dispatcher).ProcessAsync(
+            NdisCapturedPacket.FromCapture(buffer, (nint)7),
+            adapter,
+            CancellationToken.None);
+
+        Assert.Equal(1, reinjector.ToAdapterCount);
+        Assert.Equal(0x4000_0021u, reinjector.LastFlags);
+    }
+
+    [Fact]
     public async Task ExecutorBlockAndProxyNeverReinject()
     {
         var reinjector = new FakeReinjector();
@@ -512,12 +532,14 @@ public sealed class CapturePipelineTests
         public int ToAdapterCount { get; private set; }
         public int ToMstcpCount { get; private set; }
         public nint LastAdapterHandle { get; private set; }
+        public uint LastFlags { get; private set; }
         public byte[]? LastFrame { get; private set; }
 
         public void SendToAdapter(nint adapterHandle, NdisPacketBuffer buffer)
         {
             ToAdapterCount++;
             LastAdapterHandle = adapterHandle;
+            LastFlags = buffer.Flags;
             LastFrame = buffer.GetFrame().ToArray();
         }
 
@@ -525,6 +547,7 @@ public sealed class CapturePipelineTests
         {
             ToMstcpCount++;
             LastAdapterHandle = adapterHandle;
+            LastFlags = buffer.Flags;
             LastFrame = buffer.GetFrame().ToArray();
         }
     }

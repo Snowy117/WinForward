@@ -37,7 +37,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         ArgumentNullException.ThrowIfNull(packet);
         var metadata = packet.Metadata;
         using var buffer = new NdisPacketBuffer();
-        buffer.SetFrame(packet.Lease.Frame.Span, metadata.DeviceFlags, metadata.AdapterHandle);
+        buffer.SetFrame(packet.Lease.Frame.Span, metadata.DeviceFlags, metadata.AdapterHandle, metadata.Flags);
         if (metadata.IsOnSend) _reinjector.SendToAdapter(metadata.AdapterHandle, buffer);
         else _reinjector.SendToMstcp(metadata.AdapterHandle, buffer);
         return ValueTask.CompletedTask;
