@@ -2,6 +2,8 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
+[assembly: InternalsVisibleTo("WinForward.Core.Tests")]
+
 namespace WinForward.NdisApi;
 
 public static class NdisApiAbi
@@ -23,11 +25,29 @@ public static class NdisApiAbi
         if (IntPtr.Size != 8) throw new PlatformNotSupportedException("WinForward supports only x64 NDISAPI ABI in the first release.");
         AssertSize<TcpAdapterList>(8836);
         AssertSize<IntermediateBuffer>(1566);
+        AssertSize<NdisrdEthernetPacket>(8);
         AssertSize<EthernetRequest>(16);
         AssertSize<AdapterMode>(12);
+        AssertOffset<TcpAdapterList>(nameof(TcpAdapterList.AdapterCount), 0);
+        AssertOffset<TcpAdapterList>(nameof(TcpAdapterList.AdapterNames), 4);
+        AssertOffset<TcpAdapterList>(nameof(TcpAdapterList.AdapterHandles), 8196);
+        AssertOffset<TcpAdapterList>(nameof(TcpAdapterList.AdapterMediums), 8452);
+        AssertOffset<TcpAdapterList>(nameof(TcpAdapterList.CurrentAddresses), 8580);
+        AssertOffset<TcpAdapterList>(nameof(TcpAdapterList.Mtus), 8772);
+        AssertOffset<IntermediateBuffer>(nameof(IntermediateBuffer.AdapterHandle), 0);
+        AssertOffset<IntermediateBuffer>(nameof(IntermediateBuffer.UnionPadding), 8);
         AssertOffset<IntermediateBuffer>(nameof(IntermediateBuffer.DeviceFlags), 16);
         AssertOffset<IntermediateBuffer>(nameof(IntermediateBuffer.Length), 20);
+        AssertOffset<IntermediateBuffer>(nameof(IntermediateBuffer.Flags), 24);
+        AssertOffset<IntermediateBuffer>(nameof(IntermediateBuffer.Ieee8021q), 28);
+        AssertOffset<IntermediateBuffer>(nameof(IntermediateBuffer.FilterId), 32);
+        AssertOffset<IntermediateBuffer>(nameof(IntermediateBuffer.Reserved), 36);
         AssertOffset<IntermediateBuffer>(nameof(IntermediateBuffer.Buffer), 52);
+        AssertOffset<NdisrdEthernetPacket>(nameof(NdisrdEthernetPacket.Buffer), 0);
+        AssertOffset<EthernetRequest>(nameof(EthernetRequest.AdapterHandle), 0);
+        AssertOffset<EthernetRequest>(nameof(EthernetRequest.Packet), 8);
+        AssertOffset<AdapterMode>(nameof(AdapterMode.AdapterHandle), 0);
+        AssertOffset<AdapterMode>(nameof(AdapterMode.Flags), 8);
     }
 
     private static void AssertSize<T>(int expected) where T : unmanaged
@@ -112,24 +132,32 @@ internal static partial class NdisApiNative
 
     static NdisApiNative()
     {
-        // Load ndisapi.dll only from the application directory (the published executable's folder),
-        // never from an uncontrolled PATH/current-directory search. Returning zero for any other
-        // library name lets unrelated P/Invokes fall back to the default resolution.
         NativeLibrary.SetDllImportResolver(typeof(NdisApiNative).Assembly, ResolveLibrary);
     }
 
     private static nint ResolveLibrary(string libraryName, System.Reflection.Assembly assembly, DllImportSearchPath? searchPath)
     {
         if (!string.Equals(libraryName, LibraryName, StringComparison.OrdinalIgnoreCase)) return nint.Zero;
-        var path = Path.Combine(AppContext.BaseDirectory, LibraryName);
-        return File.Exists(path) ? NativeLibrary.Load(path) : nint.Zero;
+        return NativeLibrary.Load(GetApplicationLocalLibraryPath(AppContext.BaseDirectory));
+    }
+
+    internal static string GetApplicationLocalLibraryPath(string applicationBaseDirectory)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(applicationBaseDirectory);
+        var path = Path.Combine(applicationBaseDirectory, LibraryName);
+        if (!File.Exists(path)) throw new DllNotFoundException($"WinForward requires {LibraryName} beside the executable: {path}");
+        return path;
     }
 
     [LibraryImport(LibraryName, EntryPoint = "OpenFilterDriver", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
     internal static partial nint OpenFilterDriver(string driverName);
 
-    [LibraryImport(LibraryName, EntryPoint = "CloseFilterDriver")]
+    [LibraryImport(LibraryName, EntryPoint = "IsDriverLoaded", SetLastError = true)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    internal static partial int IsDriverLoaded(NdisApiSafeHandle handle);
+
+    [LibraryImport(LibraryName, EntryPoint = "CloseFilterDriver", SetLastError = true)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
     internal static partial void CloseFilterDriver(nint handle);
 
@@ -148,6 +176,10 @@ internal static partial class NdisApiNative
     [LibraryImport(LibraryName, EntryPoint = "GetAdapterMode", SetLastError = true)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
     internal static unsafe partial int GetAdapterMode(NdisApiSafeHandle handle, AdapterMode* mode);
+
+    [LibraryImport(LibraryName, EntryPoint = "GetAdapterPacketQueueSize", SetLastError = true)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    internal static unsafe partial int GetAdapterPacketQueueSize(NdisApiSafeHandle handle, nint adapterHandle, uint* packetCount);
 
     [LibraryImport(LibraryName, EntryPoint = "ReadPacket", SetLastError = true)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]

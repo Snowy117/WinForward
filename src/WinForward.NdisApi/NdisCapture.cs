@@ -2,7 +2,16 @@ using System.Runtime.Versioning;
 
 namespace WinForward.NdisApi;
 
-public readonly record struct NdisCapturedPacket(NdisPacketBuffer Buffer, nint AdapterHandle, uint DeviceFlags);
+public readonly record struct NdisCapturedPacket(NdisPacketBuffer Buffer, nint AdapterHandle, uint DeviceFlags)
+{
+    public uint Flags { get; init; }
+
+    public static NdisCapturedPacket FromCapture(NdisPacketBuffer buffer, nint enumerationAdapterHandle)
+    {
+        ArgumentNullException.ThrowIfNull(buffer);
+        return new NdisCapturedPacket(buffer, enumerationAdapterHandle, buffer.DeviceFlags) { Flags = buffer.Flags };
+    }
+}
 
 [SupportedOSPlatform("windows")]
 public sealed class NdisCapturePump : IAsyncDisposable
@@ -37,7 +46,7 @@ public sealed class NdisCapturePump : IAsyncDisposable
             // NDISAPI contract: reinjection requests must carry the enumeration handle
             // (GetTcpipBoundAdaptersInfo); the captured buffer's m_hAdapter is rejected
             // by the driver with ERROR_INVALID_PARAMETER. See spec/backend/windows-ndisapi.md.
-            var packet = new NdisCapturedPacket(buffer, _adapterHandle, buffer.DeviceFlags);
+            var packet = NdisCapturedPacket.FromCapture(buffer, _adapterHandle);
             await _handler(packet, cancellationToken).ConfigureAwait(false);
         }
     }
