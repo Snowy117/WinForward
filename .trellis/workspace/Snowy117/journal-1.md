@@ -101,3 +101,26 @@
 - Committed 64408ff. Rebuilt 0.2.1 on Win11 (130/130, PUBLISH_EXIT=0). Hardware verification via `schtasks /RL HIGHEST` (a plain schtasks task runs non-elevated and WinForward exits with administrator_required): SOCKS5 log showed `UDP ASSOCIATE requested -> UDP relay bound -> forward 46B to 192.168.77.1:53` with no invalid-prefix errors.
 - LESSON (cost a network outage): running WinForward with a catch-all UDP proxy rule on the WinRM host itself proxies the WinRM control traffic and drops the WinRM connection (No route to host; ~6 min unreachable until manual reboot). For WinRM-host testing always scope rules with `remoteCidr: [192.168.100.1/24]` pass for the WinRM subnet so the control session survives, or run at a lower privilege cleverly. 0.2.1 released to dist/.
 - Another WinRM lesson: PowerShell `$ErrorActionPreference='Stop'` + `dotnet test 2>&1` triggers a TerminatingError on stderr writes (Fatal error) even when the build/tests pass. Use `$ErrorActionPreference='Continue'` in build scripts and gate on `$LASTEXITCODE`.
+
+
+## Session 1: WinForward review-driven bug-fix batch (H1-H3, M1-M5, L1-L4) + task archive
+
+**Date**: 2026-08-10
+**Task**: WinForward review-driven bug-fix batch (H1-H3, M1-M5, L1-L4) + task archive
+**Branch**: `master`
+
+### Summary
+
+Reviewed the WinForward capture/proxy datapath and fixed reviewed functional/UX bugs via the fix-plan workflow (fix plan -> validation subagent -> trellis-implement -> test-authoring subagent -> trellis-check re-verify). Source commit f2a9a4c resolves: H1/M5 TCP-only + address-family gate on the reverse handler; H2 origin-adapter routing for forwarded UDP responses (fail-closed on unresolved origin); H3 direction-correct ON_SEND/ON_RECEIVE injection flags; M1 NormalizeBndAddress; M2 IPv6 ScopeId; M3 frame-cap parameterization sourced from NdisApiAbi.MaximumEthernetFrame; M4 Relaying-not-expired + relay stall timeouts; L1 SOCKS5 connect cap/deadline/socket disposal; L2 Socks5ReplyKind discrimination; L3 bounded accept-error back-off; L4 comment clarity. Test commit fc33351 adds new TcpRedirectInjectorTests.cs plus targeted assertions for every fix. Docs commit 8fae5fb adds fix-plan-2026-08-09.md and review-capture-lifecycle-config-2026.md. Build: 0 warnings/0 errors; suite 149/149. Final trellis-check verdict: APPROVE-WITH-NOTES. Archived tasks 08-07-winforward-proxy and 00-bootstrap-guidelines. Hardware (Hyper-V forwarded TCP/UDP, >30min-idle TCP) remains a supported-Windows-host gate.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f2a9a4c` | (see git log) |
+| `fc33351` | (see git log) |
+| `8fae5fb` | (see git log) |
+
+### Status
+
+[OK] **Completed**
