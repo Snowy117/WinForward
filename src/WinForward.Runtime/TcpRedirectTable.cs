@@ -17,12 +17,16 @@ public enum RelayPhase
 
 public sealed class TcpRedirectAssociation
 {
-    internal TcpRedirectAssociation(FlowKey originalKey, Endpoint originalDestination, AdapterContext originAdapter, Endpoint translatedListenerTuple, long generation, DateTimeOffset now)
+    internal TcpRedirectAssociation(FlowKey originalKey, Endpoint originalDestination, AdapterContext originAdapter, nint originAdapterHandle, Endpoint translatedListenerTuple, long generation, DateTimeOffset now)
     {
         OriginalKey = originalKey;
         OriginalDestination = originalDestination;
         OriginAdapter = originAdapter;
+        OriginAdapterHandle = originAdapterHandle;
         TranslatedListenerTuple = translatedListenerTuple;
+        ReverseSourceEndpoint = Endpoint.From(originalKey.Local.Address, translatedListenerTuple.Port);
+        ReverseDestinationEndpoint = Endpoint.From(originalKey.Remote.Address, originalKey.Local.Port);
+        AcceptedPeerEndpoint = ReverseDestinationEndpoint;
         Generation = generation;
         LastActivityUtc = now;
     }
@@ -30,7 +34,11 @@ public sealed class TcpRedirectAssociation
     public FlowKey OriginalKey { get; }
     public Endpoint OriginalDestination { get; }
     public AdapterContext OriginAdapter { get; }
+    public nint OriginAdapterHandle { get; }
     public Endpoint TranslatedListenerTuple { get; }
+    public Endpoint ReverseSourceEndpoint { get; }
+    public Endpoint ReverseDestinationEndpoint { get; }
+    public Endpoint AcceptedPeerEndpoint { get; }
     public long Generation { get; }
     public RelayPhase Phase { get; internal set; }
     public DateTimeOffset LastActivityUtc { get; private set; }
@@ -47,8 +55,8 @@ public sealed class TcpRedirectAssociation
 public sealed class TcpRedirectTable
 {
     private readonly Dictionary<FlowKey, TcpRedirectAssociation> _byOriginal = [];
-    private readonly Dictionary<Endpoint, TcpRedirectAssociation> _byTranslated = [];
-    private readonly Dictionary<ushort, TcpRedirectAssociation> _byProxyPort = [];
+    private readonly Dictionary<Endpoint, TcpRedirectAssociation> _byTranslatedListener = [];
+    private readonly Dictionary<ReverseRedirectTuple, TcpRedirectAssociation> _byReverse = [];
     private readonly Lock _gate = new();
     private readonly int _capacity;
     private long _nextGeneration;
@@ -73,7 +81,7 @@ public sealed class TcpRedirectTable
     /// already belongs to a different original key, the claim is rejected (fail-closed) so reverse
     /// packets never route nondeterministically. A full table is rejected the same way.
     /// </summary>
-    public bool TryClaim(FlowKey originalKey, Endpoint originalDestination, AdapterContext originAdapter, Endpoint translatedTuple, DateTimeOffset now, out TcpRedirectAssociation? association)
+    public bool TryClaim(FlowKey originalKey, Endpoint originalDestination, AdapterContext originAdapter, nint originAdapterHandle, Endpoint translatedTuple, DateTimeOffset now, out TcpRedirectAssociation? association)
     {
         lock (_gate)
         {
@@ -84,10 +92,11 @@ public sealed class TcpRedirectTable
                 return true;
             }
 
-            if (_byTranslated.ContainsKey(translatedTuple))
+            var reverse = new ReverseRedirectTuple(
+                Endpoint.From(originalKey.Local.Address, translatedTuple.Port),
+                Endpoint.From(originalKey.Remote.Address, originalKey.Local.Port));
+            if (_byTranslatedListener.ContainsKey(translatedTuple) || _byReverse.ContainsKey(reverse))
             {
-                // The translated listener tuple already belongs to another logical flow. Sharing it
-                // would make reverse packets impossible to route deterministically.
                 association = null;
                 return false;
             }
@@ -98,30 +107,28 @@ public sealed class TcpRedirectTable
                 return false;
             }
 
-            var created = new TcpRedirectAssociation(originalKey, originalDestination, originAdapter, translatedTuple, ++_nextGeneration, now);
+            var created = new TcpRedirectAssociation(originalKey, originalDestination, originAdapter, originAdapterHandle, translatedTuple, ++_nextGeneration, now);
             _byOriginal.Add(originalKey, created);
-            _byTranslated.Add(translatedTuple, created);
-            _byProxyPort.Add(translatedTuple.Port, created);
+            _byTranslatedListener.Add(translatedTuple, created);
+            _byReverse.Add(new ReverseRedirectTuple(created.ReverseSourceEndpoint, created.ReverseDestinationEndpoint), created);
             association = created;
             return true;
         }
     }
 
     public bool TryResolveByTranslated(Endpoint translatedTuple, DateTimeOffset now, out TcpRedirectAssociation? association) =>
-        TryFind(_byTranslated, translatedTuple, now, out association);
+        TryFind(_byTranslatedListener, translatedTuple, now, out association);
 
     /// <summary>
-    /// Resolves an association by proxy port. A reverse packet from the local proxy listener has a
-    /// source port equal to the proxy port but a source address equal to the client's own IP (the
-    /// proxy connects to the client using the client's local address), so exact tuple matching
-    /// fails; the port is the stable discriminator. Each listener binds a unique ephemeral port, so
-    /// the port index keeps this O(1) on the per-packet reverse path.
+    /// Resolves a reverse redirect frame by its complete pre-rewrite wire tuple. The wildcard
+    /// listener replies from the route-selected client address, so the source is
+    /// client-address:proxy-port and the destination is server-address:original-client-port.
     /// </summary>
-    public bool TryResolveByProxyPort(ushort proxyPort, DateTimeOffset now, out TcpRedirectAssociation? association)
+    public bool TryResolveByReverse(Endpoint local, Endpoint remote, DateTimeOffset now, out TcpRedirectAssociation? association)
     {
         lock (_gate)
         {
-            if (_byProxyPort.TryGetValue(proxyPort, out association))
+            if (_byReverse.TryGetValue(new ReverseRedirectTuple(local, remote), out association))
             {
                 association.Touch(now);
                 return true;
@@ -129,6 +136,11 @@ public sealed class TcpRedirectTable
             association = null;
             return false;
         }
+    }
+
+    public bool IsReverseCandidate(Endpoint local, Endpoint remote)
+    {
+        lock (_gate) return _byReverse.ContainsKey(new ReverseRedirectTuple(local, remote));
     }
 
     public bool TryResolveByOriginal(FlowKey originalKey, DateTimeOffset now, out TcpRedirectAssociation? association) =>
@@ -145,8 +157,8 @@ public sealed class TcpRedirectTable
         {
             if (!_byOriginal.TryGetValue(association.OriginalKey, out var current) || !ReferenceEquals(current, association)) return false;
             _byOriginal.Remove(association.OriginalKey);
-            _byTranslated.Remove(association.TranslatedListenerTuple);
-            _byProxyPort.Remove(association.TranslatedListenerTuple.Port);
+            _byTranslatedListener.Remove(association.TranslatedListenerTuple);
+            _byReverse.Remove(new ReverseRedirectTuple(association.ReverseSourceEndpoint, association.ReverseDestinationEndpoint));
             return true;
         }
     }
@@ -159,8 +171,8 @@ public sealed class TcpRedirectTable
             foreach (var association in expired)
             {
                 _byOriginal.Remove(association.OriginalKey);
-                _byTranslated.Remove(association.TranslatedListenerTuple);
-                _byProxyPort.Remove(association.TranslatedListenerTuple.Port);
+                _byTranslatedListener.Remove(association.TranslatedListenerTuple);
+                _byReverse.Remove(new ReverseRedirectTuple(association.ReverseSourceEndpoint, association.ReverseDestinationEndpoint));
             }
             return expired.Length;
         }
@@ -184,4 +196,6 @@ public sealed class TcpRedirectTable
             return false;
         }
     }
+
+    private readonly record struct ReverseRedirectTuple(Endpoint Source, Endpoint Destination);
 }

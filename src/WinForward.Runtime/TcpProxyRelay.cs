@@ -58,12 +58,15 @@ internal sealed class TcpProxyRelay : ITcpRelay
     internal static readonly TimeSpan StallTimeout = TimeSpan.FromMinutes(30);
 
     private readonly Socket _localSocket;
-    private readonly Socks5ControlConnection _control;
+    private readonly IAsyncDisposable _control;
     private readonly Task _completion;
     private int _disposed;
 
-    public TcpProxyRelay(Socket localSocket, Stream upstream, Socks5ControlConnection control)
+    public TcpProxyRelay(Socket localSocket, Stream upstream, IAsyncDisposable control)
     {
+        ArgumentNullException.ThrowIfNull(localSocket);
+        ArgumentNullException.ThrowIfNull(upstream);
+        ArgumentNullException.ThrowIfNull(control);
         _localSocket = localSocket;
         _control = control;
         _completion = RunPumpAsync(upstream);
@@ -74,12 +77,39 @@ internal sealed class TcpProxyRelay : ITcpRelay
     private async Task RunPumpAsync(Stream upstream)
     {
         using var localStream = new NetworkStream(_localSocket, ownsSocket: true);
-        var localToUpstream = PumpAsync(localStream, upstream);
-        var upstreamToLocal = PumpAsync(upstream, localStream);
-        await Task.WhenAll(localToUpstream, upstreamToLocal).ConfigureAwait(false);
+        using var pumpCancellation = new CancellationTokenSource();
+        var localToUpstream = PumpAsync(localStream, upstream, pumpCancellation.Token);
+        var upstreamToLocal = PumpAsync(upstream, localStream, pumpCancellation.Token);
+
+        try
+        {
+            var first = await Task.WhenAny(localToUpstream, upstreamToLocal).ConfigureAwait(false);
+            var firstResult = await first.ConfigureAwait(false);
+            if (firstResult == PumpResult.Stalled)
+            {
+                await pumpCancellation.CancelAsync().ConfigureAwait(false);
+                ObservePump(first == localToUpstream ? upstreamToLocal : localToUpstream);
+                return;
+            }
+
+            if (first == localToUpstream) ShutdownSend(upstream);
+            else ShutdownSend(_localSocket);
+
+            var results = await Task.WhenAll(localToUpstream, upstreamToLocal).ConfigureAwait(false);
+            if (results[0] == PumpResult.Stalled || results[1] == PumpResult.Stalled)
+            {
+                await pumpCancellation.CancelAsync().ConfigureAwait(false);
+            }
+        }
+        catch
+        {
+            await pumpCancellation.CancelAsync().ConfigureAwait(false);
+            ObservePump(localToUpstream.IsCompleted ? upstreamToLocal : localToUpstream);
+            throw;
+        }
     }
 
-    private static async Task PumpAsync(Stream source, Stream destination)
+    private static async Task<PumpResult> PumpAsync(Stream source, Stream destination, CancellationToken cancellationToken)
     {
         var buffer = new byte[BufferSize];
         while (true)
@@ -87,27 +117,69 @@ internal sealed class TcpProxyRelay : ITcpRelay
             int read;
             try
             {
-                using var readTimeout = new CancellationTokenSource(StallTimeout);
+                using var readTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                readTimeout.CancelAfter(StallTimeout);
                 read = await source.ReadAsync(buffer.AsMemory(0, BufferSize), readTimeout.Token).ConfigureAwait(false);
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return PumpResult.Stalled;
+            }
             catch (OperationCanceledException)
             {
-                // The read made no progress within the stall window; the peer is dead or unreachable.
-                // Ending the pump tears down the relay via ObserveRelayCompletionAsync.
-                return;
+                return PumpResult.Stalled;
             }
-            if (read == 0) return;
+            if (read == 0)
+            {
+                return PumpResult.Ended;
+            }
             try
             {
-                using var writeTimeout = new CancellationTokenSource(StallTimeout);
+                using var writeTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                writeTimeout.CancelAfter(StallTimeout);
                 await destination.WriteAsync(buffer.AsMemory(0, read), writeTimeout.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return PumpResult.Stalled;
             }
             catch (OperationCanceledException)
             {
-                // The write made no progress within the stall window; the peer is no longer reading.
-                return;
+                return PumpResult.Stalled;
             }
         }
+    }
+
+    private static bool ShutdownSend(Socket socket)
+    {
+        try
+        {
+            socket.Shutdown(SocketShutdown.Send);
+            return true;
+        }
+        catch (SocketException) { return false; }
+        catch (ObjectDisposedException) { return false; }
+    }
+
+    private static void ShutdownSend(Stream stream)
+    {
+        if (stream is not NetworkStream networkStream) return;
+        _ = ShutdownSend(networkStream.Socket);
+    }
+
+    private static void ObservePump(Task<PumpResult> first)
+    {
+        _ = first.ContinueWith(
+            static task => _ = task.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+    }
+
+    private enum PumpResult
+    {
+        Ended,
+        Stalled,
     }
 
     public ValueTask DisposeAsync()

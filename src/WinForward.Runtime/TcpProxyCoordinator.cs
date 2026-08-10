@@ -25,6 +25,9 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     private readonly Dictionary<FlowKey, TcpRedirectSession> _sessions = [];
     private readonly Lock _gate = new();
     private readonly CancellationTokenSource _shutdown = new();
+    private TaskCompletionSource _setupsDrained = CompletedSource();
+    private Task? _disposeTask;
+    private int _inflightSetups;
     private long _concurrentLoserCount;
     private bool _disposed;
 
@@ -66,41 +69,47 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(packet);
         ArgumentNullException.ThrowIfNull(server);
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
-        var key = packet.Context.Key;
-        if (key.Protocol != TransportProtocol.Tcp)
+        EnterSetup();
+        try
         {
-            throw new ArgumentException("TCP coordinator accepts only TCP flow keys.", nameof(packet));
-        }
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed), this);
 
-        // A flow already claimed by a prior SYN reuses its decision: touch the association and
-        // re-inject the rewritten SYN toward the listener. Policy is evaluated exactly once.
-        if (_table.TryResolveByOriginal(key, DateTimeOffset.UtcNow, out var existing) && existing is not null)
+            var key = packet.Context.Key;
+            if (key.Protocol != TransportProtocol.Tcp)
+            {
+                throw new ArgumentException("TCP coordinator accepts only TCP flow keys.", nameof(packet));
+            }
+
+            // A flow already claimed by a prior SYN reuses its decision: touch the association and
+            // re-inject the rewritten SYN toward the listener. Policy is evaluated exactly once.
+            if (_table.TryResolveByOriginal(key, DateTimeOffset.UtcNow, out var existing) && existing is not null)
+            {
+                return await ReinjectExistingSynAsync(packet, existing, cancellationToken).ConfigureAwait(false);
+            }
+
+            lock (_gate)
+            {
+                if (_sessions.Count >= _capacity) return TcpRedirectOutcome.Blocked;
+            }
+
+            var setup = await SetupNewRedirectAsync(packet, server, cancellationToken).ConfigureAwait(false);
+            if (setup is null) return TcpRedirectOutcome.Blocked;
+
+            // A concurrent caller claimed this flow first; the redundant listener was already released.
+            // Re-inject the SYN against the existing association without creating a new session.
+            if (setup.Session is null)
+            {
+                return await ReinjectExistingSynAsync(packet, setup.Association, cancellationToken).ConfigureAwait(false);
+            }
+
+            setup.Session.AcceptLoop = RunAcceptLoopAsync(setup.Session);
+
+            return TcpRedirectOutcome.Injected;
+        }
+        finally
         {
-            return await ReinjectExistingSynAsync(packet, existing, cancellationToken).ConfigureAwait(false);
+            ExitSetup();
         }
-
-        lock (_gate)
-        {
-            if (_sessions.Count >= _capacity) return TcpRedirectOutcome.Blocked;
-        }
-
-        var setup = await SetupNewRedirectAsync(packet, cancellationToken).ConfigureAwait(false);
-        if (setup is null) return TcpRedirectOutcome.Blocked;
-
-        // A concurrent caller claimed this flow first; the redundant listener was already released.
-        // Re-inject the SYN against the existing association without creating a new session.
-        if (setup.Listener is null)
-        {
-            return await ReinjectExistingSynAsync(packet, setup.Association, cancellationToken).ConfigureAwait(false);
-        }
-
-        var session = new TcpRedirectSession(setup.Association, setup.Listener, setup.SelfTrafficToken!, server);
-        lock (_gate) _sessions.Add(setup.Association.OriginalKey, session);
-        session.AcceptLoop = RunAcceptLoopAsync(session, cancellationToken);
-
-        return TcpRedirectOutcome.Injected;
     }
 
     /// <summary>
@@ -108,7 +117,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     /// and injects the rewritten frame. Returns null (fail-closed) when any step fails, after
     /// releasing the listener, the table alias, and the self-traffic token it may have acquired.
     /// </summary>
-    private async ValueTask<RedirectSetup?> SetupNewRedirectAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
+    private async ValueTask<RedirectSetup?> SetupNewRedirectAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
     {
         var key = packet.Context.Key;
 
@@ -131,7 +140,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         var originAdapter = new AdapterContext(key.OriginAdapterId, packet.Context.AdapterName, key.OriginAdapterGeneration);
         var originalDestination = key.Remote;
 
-        if (!_table.TryClaim(key, originalDestination, originAdapter, translatedTuple, DateTimeOffset.UtcNow, out var association) || association is null)
+        if (!_table.TryClaim(key, originalDestination, originAdapter, packet.Metadata.AdapterHandle, translatedTuple, DateTimeOffset.UtcNow, out var association) || association is null)
         {
             await listener.DisposeAsync().ConfigureAwait(false);
             _logger.Warn("TCP redirect failed: redirect-table capacity reached or translated-tuple collision, blocking the flow.");
@@ -146,18 +155,26 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         {
             Interlocked.Increment(ref _concurrentLoserCount);
             await listener.DisposeAsync().ConfigureAwait(false);
-            return new RedirectSetup(Listener: null, association, SelfTrafficToken: null);
+            return new RedirectSetup(association, Session: null);
         }
 
-        return await CompleteNewRedirectAsync(packet, listener, association, translatedTuple, cancellationToken).ConfigureAwait(false);
+        return await CompleteNewRedirectAsync(packet, listener, association, translatedTuple, server, cancellationToken).ConfigureAwait(false);
     }
 
-    private async ValueTask<RedirectSetup?> CompleteNewRedirectAsync(CapturedFlowPacket packet, ITcpRedirectListener listener, TcpRedirectAssociation association, Endpoint translatedTuple, CancellationToken cancellationToken)
+    private async ValueTask<RedirectSetup?> CompleteNewRedirectAsync(CapturedFlowPacket packet, ITcpRedirectListener listener, TcpRedirectAssociation association, Endpoint translatedTuple, Socks5Server server, CancellationToken cancellationToken)
     {
+        var session = RegisterSession(listener, association, translatedTuple, server);
+        if (session is null)
+        {
+            await ReleaseAssociationAsync(listener, association, null).ConfigureAwait(false);
+            return null;
+        }
+
         var key = packet.Context.Key;
         var rewrittenFrame = packet.Lease.Frame.ToArray();
         var originalClient = key.Local;
         var originalServer = key.Remote;
+
         // Official WinpkFilter local_redirect pattern: swap MACs and IPs, rewrite the destination
         // port to the proxy port. The SOURCE PORT is kept as the client's original port (the
         // redirector only rewrites th_dport, never th_sport), so the local proxy server's accepted
@@ -165,7 +182,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         // client source port.
         if (!PacketChecksums.TryRewriteTcpEndpoints(rewrittenFrame, originalServer.Address, originalClient.Port, originalClient.Address, translatedTuple.Port))
         {
-            await ReleaseAssociationAsync(listener, association, null).ConfigureAwait(false);
+            await TearDownSessionAsync(session).ConfigureAwait(false);
             _logger.Warn("TCP redirect failed: SYN endpoint rewrite failed, blocking the flow.");
             return null;
         }
@@ -178,25 +195,42 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         // to TCP by H1 in the dispatcher), which reverses before flow lookup/policy. This
         // registration is retained as writer-intent belt-and-suspenders and because the registry is
         // the natural home for an exact local-loopback listener tuple when one becomes expressible.
-        var selfTrafficToken = _selfTraffic.Register(new SelfTrafficRegistry.SelfTrafficKey(TransportProtocol.Tcp, translatedTuple, translatedTuple));
-
         try
         {
             await _injector.InjectAsync(rewrittenFrame, towardMstcp: true, packet.Metadata.AdapterHandle, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
-            await ReleaseAssociationAsync(listener, association, selfTrafficToken).ConfigureAwait(false);
+            await TearDownSessionAsync(session).ConfigureAwait(false);
             throw;
         }
         catch
         {
-            await ReleaseAssociationAsync(listener, association, selfTrafficToken).ConfigureAwait(false);
+            await TearDownSessionAsync(session).ConfigureAwait(false);
             _logger.Warn("TCP redirect failed: rewritten-frame injection failed, blocking the flow.");
             return null;
         }
 
-        return new RedirectSetup(listener, association, selfTrafficToken);
+        return new RedirectSetup(association, session);
+    }
+
+    private TcpRedirectSession? RegisterSession(ITcpRedirectListener listener, TcpRedirectAssociation association, Endpoint translatedTuple, Socks5Server server)
+    {
+        var selfTrafficToken = _selfTraffic.Register(new SelfTrafficRegistry.SelfTrafficKey(TransportProtocol.Tcp, translatedTuple, translatedTuple));
+        var session = new TcpRedirectSession(association, listener, selfTrafficToken, server, _shutdown.Token);
+        lock (_gate)
+        {
+            if (_disposed)
+            {
+                session.Retire();
+                session.DisposeLifetime();
+                selfTrafficToken.Dispose();
+                return null;
+            }
+
+            _sessions.Add(association.OriginalKey, session);
+            return session;
+        }
     }
 
     private async ValueTask<TcpRedirectOutcome> ReinjectExistingSynAsync(CapturedFlowPacket packet, TcpRedirectAssociation association, CancellationToken cancellationToken)
@@ -225,6 +259,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         var originalServer = association.OriginalKey.Remote;
         if (!PacketChecksums.TryRewriteTcpEndpoints(rewrittenFrame, originalServer.Address, originalClient.Port, originalClient.Address, association.TranslatedListenerTuple.Port))
         {
+            await FailAssociationAsync(association).ConfigureAwait(false);
             return TcpRedirectOutcome.Blocked;
         }
         SwapEthernetMacs(rewrittenFrame);
@@ -233,11 +268,18 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
             await _injector.InjectAsync(rewrittenFrame, towardMstcp: true, packet.Metadata.AdapterHandle, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
         {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            await FailAssociationAsync(association).ConfigureAwait(false);
             throw;
         }
         catch
         {
+            await FailAssociationAsync(association).ConfigureAwait(false);
             return TcpRedirectOutcome.Blocked;
         }
         return TcpRedirectOutcome.Injected;
@@ -246,25 +288,15 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     public async ValueTask<TcpRedirectOutcome> HandleReverseAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(packet);
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed), this);
 
-        // A reverse packet travels local-proxy-listener -> client. The proxy binds 0.0.0.0 and
-        // connects to the client using the client's local IP, so the packet's source is
-        // client_ip:proxy_port — the proxy port discriminates, not the full tuple.
         var key = packet.Context.Key;
         // M5 belt-and-suspenders: this coordinator owns TCP redirect table entries only. The
         // dispatcher already gates the reverse handler to TCP (H1), but a non-TCP packet must never
         // be routed into reverse handling regardless of call context.
         if (key.Protocol != TransportProtocol.Tcp) return TcpRedirectOutcome.NotRelevant;
         var now = DateTimeOffset.UtcNow;
-        var found = _table.TryResolveByProxyPort(key.Local.Port, now, out var association);
-        if (!found) found = _table.TryResolveByProxyPort(key.Remote.Port, now, out association);
-        if (!found || association is null) return TcpRedirectOutcome.Blocked;
-        // M5: the numeric proxy port is unique per flow, but an address family may share the same
-        // port value. An IPv6 reverse frame must not match an IPv4 flow's listener port index (or
-        // vice-versa), or a rewritten frame would cross address families. Adapter/generation
-        // scoping of the port index is out of scope for release 1.
-        if (association.OriginalKey.AddressFamily != key.AddressFamily) return TcpRedirectOutcome.NotRelevant;
+        if (!_table.TryResolveByReverse(key.Local, key.Remote, now, out var association) || association is null) return TcpRedirectOutcome.NotRelevant;
 
         var original = association.OriginalKey;
         var rewrittenFrame = packet.Lease.Frame.ToArray();
@@ -272,6 +304,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         var originalClient = original.Local;
         if (!PacketChecksums.TryRewriteTcpEndpoints(rewrittenFrame, originalRemote.Address, originalRemote.Port, originalClient.Address, originalClient.Port))
         {
+            await FailAssociationAsync(association).ConfigureAwait(false);
             return TcpRedirectOutcome.Blocked;
         }
         SwapEthernetMacs(rewrittenFrame);
@@ -281,14 +314,27 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         var towardMstcp = original.Origin == FlowOriginKind.Host;
         try
         {
-            await _injector.InjectAsync(rewrittenFrame, towardMstcp, packet.Metadata.AdapterHandle, cancellationToken).ConfigureAwait(false);
+            if (!towardMstcp && association.OriginAdapterHandle == 0)
+            {
+                await FailAssociationAsync(association).ConfigureAwait(false);
+                return TcpRedirectOutcome.Blocked;
+            }
+            var targetHandle = towardMstcp ? packet.Metadata.AdapterHandle : association.OriginAdapterHandle;
+            await _injector.InjectAsync(rewrittenFrame, towardMstcp, targetHandle, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (OperationCanceledException)
         {
+            await FailAssociationAsync(association).ConfigureAwait(false);
             throw;
         }
         catch
         {
+            await FailAssociationAsync(association).ConfigureAwait(false);
             return TcpRedirectOutcome.Blocked;
         }
 
@@ -311,18 +357,14 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     public async ValueTask<TcpRedirectOutcome> HandleReverseIfApplicableAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(packet);
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed), this);
 
         // H1/M5 gate before the numeric-port lookup: this handler owns TCP reverse routing. A UDP
         // or other-protocol frame whose local/remote port numerically matches an active TCP
         // listener port must be left to normal flow/policy handling, never dropped here.
         var key = packet.Context.Key;
         if (key.Protocol != TransportProtocol.Tcp) return TcpRedirectOutcome.NotRelevant;
-        var now = DateTimeOffset.UtcNow;
-        if (!_table.TryResolveByProxyPort(key.Local.Port, now, out _) && !_table.TryResolveByProxyPort(key.Remote.Port, now, out _))
-        {
-            return TcpRedirectOutcome.NotRelevant;
-        }
+        if (!_table.IsReverseCandidate(key.Local, key.Remote)) return TcpRedirectOutcome.NotRelevant;
 
         return await HandleReverseAsync(packet, cancellationToken).ConfigureAwait(false);
     }
@@ -331,18 +373,20 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(packet);
         ArgumentNullException.ThrowIfNull(server);
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed), this);
 
         var key = packet.Context.Key;
         var now = DateTimeOffset.UtcNow;
-        var isSyn = IsTcpSyn(packet.Lease.Frame.Span);
+        var syn = ClassifyTcpSyn(packet.Lease.Frame.Span);
 
-        if (_table.TryResolveByProxyPort(key.Local.Port, now, out _) || _table.TryResolveByProxyPort(key.Remote.Port, now, out _))
+        if (_table.IsReverseCandidate(key.Local, key.Remote))
         {
             return await HandleReverseAsync(packet, cancellationToken).ConfigureAwait(false);
         }
 
-        if (isSyn)
+        if (syn == TcpSynKind.WithPayload) return TcpRedirectOutcome.Blocked;
+
+        if (syn == TcpSynKind.Empty)
         {
             return await HandleSynAsync(packet, server, cancellationToken).ConfigureAwait(false);
         }
@@ -362,15 +406,28 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     /// Detects a TCP SYN (SYN set, ACK clear) from the raw Ethernet frame. The flags byte is at
     /// the TCP header offset + 13; SYN = 0x02, ACK = 0x10.
     /// </summary>
-    private static bool IsTcpSyn(ReadOnlySpan<byte> frame)
+    private static TcpSynKind ClassifyTcpSyn(ReadOnlySpan<byte> frame)
     {
-        if (!IpTcpUdpPacket.TryParse(frame, out var view) || view.Transport != PacketTransport.Tcp) return false;
+        if (!IpTcpUdpPacket.TryParse(frame, out var view) || view.Transport != PacketTransport.Tcp) return TcpSynKind.None;
         var tcpFlagsOffset = 14 + view.IpHeaderLength + 13;
-        if (frame.Length <= tcpFlagsOffset) return false;
+        if (frame.Length <= tcpFlagsOffset) return TcpSynKind.None;
         var flags = frame[tcpFlagsOffset];
         const byte Syn = 0x02;
         const byte Ack = 0x10;
-        return (flags & Syn) != 0 && (flags & Ack) == 0;
+        if ((flags & Syn) == 0 || (flags & Ack) != 0) return TcpSynKind.None;
+
+        var etherType = System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(12, 2));
+        var transportLength = etherType == 0x0800
+            ? System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(16, 2)) - view.IpHeaderLength
+            : System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(18, 2)) - (view.IpHeaderLength - 40);
+        return transportLength == view.TransportHeaderLength ? TcpSynKind.Empty : TcpSynKind.WithPayload;
+    }
+
+    private enum TcpSynKind
+    {
+        None,
+        Empty,
+        WithPayload,
     }
 
     /// <summary>
@@ -387,41 +444,74 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     /// </summary>
     public async ValueTask<int> RemoveExpiredAsync(DateTimeOffset now, TimeSpan idleTimeout)
     {
-        TcpRedirectSession[] expired;
+        RetiredSession[] expired;
         lock (_gate)
         {
             expired = _sessions.Values
                 .Where(session => session.Association.Phase == RelayPhase.Redirecting && now - session.Association.LastActivityUtc >= idleTimeout)
+                .Select(RetireSessionUnderGate)
                 .ToArray();
         }
 
-        var removed = 0;
-        foreach (var session in expired)
+        foreach (var retired in expired)
         {
-            await TearDownSessionAsync(session).ConfigureAwait(false);
-            removed++;
+            await ReleaseRetiredSessionAsync(retired).ConfigureAwait(false);
         }
-        return removed;
+        return expired.Length;
     }
 
     public async ValueTask DisposeAsync()
     {
-        if (_disposed) return;
-        _disposed = true;
-
-        await _shutdown.CancelAsync().ConfigureAwait(false);
-
-        TcpRedirectSession[] sessions;
+        Task disposeTask;
+        TaskCompletionSource? start = null;
         lock (_gate)
         {
-            sessions = _sessions.Values.ToArray();
-            _sessions.Clear();
+            if (_disposeTask is not null)
+            {
+                disposeTask = _disposeTask;
+            }
+            else
+            {
+                _disposed = true;
+                start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                disposeTask = _disposeTask = start.Task;
+            }
         }
 
-        foreach (var session in sessions)
+        if (start is not null) _ = RunDisposeAsync(start);
+        await disposeTask.ConfigureAwait(false);
+    }
+
+    private async Task RunDisposeAsync(TaskCompletionSource completion)
+    {
+        try
         {
-            await ReleaseAssociationAsync(session.Listener, session.Association, session.SelfTrafficToken).ConfigureAwait(false);
-            if (session.Relay is not null) await session.Relay.DisposeAsync().ConfigureAwait(false);
+            await DisposeCoreAsync().ConfigureAwait(false);
+            completion.TrySetResult();
+        }
+        catch (Exception exception)
+        {
+            completion.TrySetException(exception);
+        }
+    }
+
+    private async Task DisposeCoreAsync()
+    {
+        await _shutdown.CancelAsync().ConfigureAwait(false);
+        Task setupsDrained;
+        lock (_gate) setupsDrained = _setupsDrained.Task;
+        await setupsDrained.ConfigureAwait(false);
+
+        RetiredSession[] sessions;
+        lock (_gate)
+        {
+            sessions = _sessions.Values.Select(RetireSessionUnderGate).ToArray();
+        }
+
+        foreach (var retired in sessions)
+        {
+            await ReleaseRetiredSessionAsync(retired).ConfigureAwait(false);
+            var session = retired.Session;
             if (session.AcceptLoop is not null)
             {
                 try { await session.AcceptLoop.ConfigureAwait(false); }
@@ -435,10 +525,9 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
 
 
 
-    private async Task RunAcceptLoopAsync(TcpRedirectSession session, CancellationToken externalCancellationToken)
+    private async Task RunAcceptLoopAsync(TcpRedirectSession session)
     {
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token, externalCancellationToken);
-        var token = linked.Token;
+        var token = session.Token;
         while (!token.IsCancellationRequested)
         {
             ITcpAcceptedConnection accepted;
@@ -466,9 +555,19 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
 
             try
             {
+                if (accepted.RemoteEndPoint != session.Association.AcceptedPeerEndpoint)
+                {
+                    _logger.Warn("TCP redirect accepted an unrelated peer; closing it.");
+                    await accepted.DisposeAsync().ConfigureAwait(false);
+                    continue;
+                }
                 var relay = await _relayFactory.EstablishAsync(session.Association.OriginalDestination, accepted, session.Server, token).ConfigureAwait(false);
-                session.Relay = relay;
-                session.Association.Phase = RelayPhase.Relaying;
+                if (!TryAttachRelay(session, relay))
+                {
+                    await relay.DisposeAsync().ConfigureAwait(false);
+                    await accepted.DisposeAsync().ConfigureAwait(false);
+                    return;
+                }
                 _ = ObserveRelayCompletionAsync(session, relay, token);
                 await DrainRedundantConnectionsAsync(session, token).ConfigureAwait(false);
                 return;
@@ -557,36 +656,132 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
 
     private async ValueTask TearDownSessionAsync(TcpRedirectSession session)
     {
-        lock (_gate) _sessions.Remove(session.Association.OriginalKey);
-        await ReleaseAssociationAsync(session.Listener, session.Association, session.SelfTrafficToken).ConfigureAwait(false);
-        if (session.Relay is not null)
+        RetiredSession? retired;
+        lock (_gate)
         {
-            await session.Relay.DisposeAsync().ConfigureAwait(false);
-            session.Relay = null;
+            retired = TryRetireSessionUnderGate(session);
         }
+        if (retired is not null) await ReleaseRetiredSessionAsync(retired).ConfigureAwait(false);
+    }
+
+    private RetiredSession? TryRetireSessionUnderGate(TcpRedirectSession session)
+    {
+        if (!_sessions.TryGetValue(session.Association.OriginalKey, out var current) || !ReferenceEquals(current, session)) return null;
+        return RetireSessionUnderGate(session);
+    }
+
+    private RetiredSession RetireSessionUnderGate(TcpRedirectSession session)
+    {
+        _sessions.Remove(session.Association.OriginalKey);
+        session.Association.Phase = RelayPhase.Closing;
+        session.Retire();
+        var relay = session.Relay;
+        session.Relay = null;
+        return new RetiredSession(session, relay);
+    }
+
+    private async ValueTask ReleaseRetiredSessionAsync(RetiredSession retired)
+    {
+        var session = retired.Session;
+        try
+        {
+            await ReleaseAssociationAsync(session.Listener, session.Association, session.SelfTrafficToken).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            _logger.Warn($"TCP redirect listener disposal failed ({exception.GetType().Name}).");
+        }
+        if (retired.Relay is not null)
+        {
+            try { await retired.Relay.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception exception) { _logger.Warn($"TCP redirect relay disposal failed ({exception.GetType().Name})."); }
+        }
+        session.DisposeLifetime();
+    }
+
+    private bool TryAttachRelay(TcpRedirectSession session, ITcpRelay relay)
+    {
+        lock (_gate)
+        {
+            if (!_sessions.TryGetValue(session.Association.OriginalKey, out var current) || !ReferenceEquals(current, session) || session.IsRetired || session.Association.Phase != RelayPhase.Redirecting || session.Relay is not null) return false;
+            session.Relay = relay;
+            session.Association.Phase = RelayPhase.Relaying;
+            return true;
+        }
+    }
+
+    private async ValueTask FailAssociationAsync(TcpRedirectAssociation association)
+    {
+        TcpRedirectSession? session;
+        lock (_gate) _sessions.TryGetValue(association.OriginalKey, out session);
+        if (session is not null) await TearDownSessionAsync(session).ConfigureAwait(false);
+        else _table.TryRemove(association);
+    }
+
+    private void EnterSetup()
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_inflightSetups++ == 0) _setupsDrained = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+    }
+
+    private void ExitSetup()
+    {
+        lock (_gate)
+        {
+            if (--_inflightSetups == 0) _setupsDrained.TrySetResult();
+        }
+    }
+
+    private static TaskCompletionSource CompletedSource()
+    {
+        var source = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        source.SetResult();
+        return source;
     }
 
     private async ValueTask ReleaseAssociationAsync(ITcpRedirectListener listener, TcpRedirectAssociation association, SelfTrafficRegistry.SelfTrafficToken? selfTrafficToken)
     {
         _table.TryRemove(association);
-        try { await listener.DisposeAsync().ConfigureAwait(false); }
-        catch (ObjectDisposedException) { /* the listener may already be disposed during teardown */ }
-        selfTrafficToken?.Dispose();
+        try
+        {
+            try { await listener.DisposeAsync().ConfigureAwait(false); }
+            catch (ObjectDisposedException) { /* the listener may already be disposed during teardown */ }
+        }
+        finally
+        {
+            selfTrafficToken?.Dispose();
+        }
     }
 
     /// <summary>
     /// The resources acquired by a successful new-redirect setup, returned to the caller so it can
     /// register the session and start the accept loop. A null return means fail-closed blocking.
     /// </summary>
-    private sealed record RedirectSetup(ITcpRedirectListener? Listener, TcpRedirectAssociation Association, SelfTrafficRegistry.SelfTrafficToken? SelfTrafficToken);
+    private sealed record RedirectSetup(TcpRedirectAssociation Association, TcpRedirectSession? Session);
 
-    private sealed class TcpRedirectSession(TcpRedirectAssociation association, ITcpRedirectListener listener, SelfTrafficRegistry.SelfTrafficToken selfTrafficToken, Socks5Server server)
+    private sealed record RetiredSession(TcpRedirectSession Session, ITcpRelay? Relay);
+
+    private sealed class TcpRedirectSession(TcpRedirectAssociation association, ITcpRedirectListener listener, SelfTrafficRegistry.SelfTrafficToken selfTrafficToken, Socks5Server server, CancellationToken shutdown)
     {
         public TcpRedirectAssociation Association { get; } = association;
         public ITcpRedirectListener Listener { get; } = listener;
         public SelfTrafficRegistry.SelfTrafficToken SelfTrafficToken { get; } = selfTrafficToken;
         public Socks5Server Server { get; } = server;
+        private CancellationTokenSource Lifetime { get; } = CancellationTokenSource.CreateLinkedTokenSource(shutdown);
+        private int _retired;
         public ITcpRelay? Relay { get; set; }
         public Task? AcceptLoop { get; set; }
+        public CancellationToken Token => Lifetime.Token;
+        public bool IsRetired => Volatile.Read(ref _retired) != 0;
+
+        public void Retire()
+        {
+            if (Interlocked.Exchange(ref _retired, 1) == 0) Lifetime.Cancel();
+        }
+
+        public void DisposeLifetime() => Lifetime.Dispose();
     }
 }

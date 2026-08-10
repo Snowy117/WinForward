@@ -48,7 +48,7 @@ public interface ITcpProxyRelayFactory
 
 /// <summary>
 /// A relay between an accepted redirect-leg connection and the upstream SOCKS5 socket. <see cref="Completion"/>
-/// transitions to a terminal state when the relay ends (either peer half-closed, errored, or torn down).
+/// transitions to a terminal state when both directions end, a direction stalls/errors, or the relay is torn down.
 /// The real byte pump is 8c; 8b uses a fake whose Completion is controlled by the test.
 /// </summary>
 public interface ITcpRelay : IAsyncDisposable

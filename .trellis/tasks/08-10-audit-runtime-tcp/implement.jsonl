@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Association ownership, deterministic race regression, and TCP rewrite invariants."}
+{"file":".trellis/spec/backend/windows-ndisapi.md","reason":"Verified local redirect transform, reverse direction, and redundant-accept contract."}
+{"file":".trellis/tasks/archive/2026-08/08-07-winforward-proxy/design.md","reason":"TCP transparent redirect architecture and release constraints."}
+{"file":".trellis/tasks/archive/2026-08/08-07-winforward-proxy/research/fix-plan-2026-08-09.md","reason":"Prior TCP-related findings and regression proof requirements."}
