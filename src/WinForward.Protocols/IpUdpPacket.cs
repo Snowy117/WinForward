@@ -31,7 +31,7 @@ public static class IpUdpPacket
         var totalLength = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(offset + 2, 2));
         if (totalLength < headerLength + 8 || frame.Length < offset + totalLength) return false;
         var fragment = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(offset + 6, 2));
-        if ((fragment & 0x1fff) != 0 || (fragment & 0x2000) != 0) return false;
+        if ((fragment & 0xbfff) != 0) return false;
         var source = new IPAddress(frame.Slice(offset + 12, 4));
         var destination = new IPAddress(frame.Slice(offset + 16, 4));
         return TryParseUdp(frame, offset + headerLength, source, destination, headerLength, totalLength - headerLength, out packet);

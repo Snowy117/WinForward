@@ -65,7 +65,7 @@ public static class IpTcpUdpPacket
         var totalLength = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(ipOffset + 2, 2));
         if (totalLength < headerLength + 8 || frame.Length < ipOffset + totalLength) return false;
         var fragment = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(ipOffset + 6, 2));
-        if ((fragment & 0x3fff) != 0) return false;
+        if ((fragment & 0xbfff) != 0) return false;
 
         var source = new IPAddress(frame.Slice(ipOffset + 12, 4));
         var destination = new IPAddress(frame.Slice(ipOffset + 16, 4));
@@ -122,6 +122,7 @@ public static class IpTcpUdpPacket
             return true;
         }
 
+        if (availableLength < 20 || frame.Length < transportOffset + 20) return false;
         // TCP data-offset field is the top four bits of the 12th byte (offset 12 within the header).
         var dataOffset = (frame[transportOffset + 12] >> 4) * 4;
         if (dataOffset < 20 || dataOffset > availableLength) return false;

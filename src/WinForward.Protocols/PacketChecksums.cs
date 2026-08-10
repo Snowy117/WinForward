@@ -9,8 +9,16 @@ public static class PacketChecksums
     {
         uint sum = 0;
         var index = 0;
-        for (; index + 1 < data.Length; index += 2) sum += BinaryPrimitives.ReadUInt16BigEndian(data.Slice(index, 2));
-        if (index < data.Length) sum += (uint)data[index] << 8;
+        for (; index + 1 < data.Length; index += 2)
+        {
+            sum += BinaryPrimitives.ReadUInt16BigEndian(data.Slice(index, 2));
+            sum = (sum & 0xffff) + (sum >> 16);
+        }
+        if (index < data.Length)
+        {
+            sum += (uint)data[index] << 8;
+            sum = (sum & 0xffff) + (sum >> 16);
+        }
         return Finish(sum);
     }
 
@@ -46,7 +54,7 @@ public static class PacketChecksums
         var totalLength = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(ipOffset + 2, 2));
         if (frame[ipOffset] >> 4 != 4 || headerLength < 20 || frame[ipOffset + 9] != 17 || totalLength < headerLength + 8 || frame.Length < ipOffset + totalLength) return false;
         var fragment = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(ipOffset + 6, 2));
-        if ((fragment & 0x3fff) != 0) return false;
+        if ((fragment & 0xbfff) != 0) return false;
         var udpOffset = ipOffset + headerLength;
         var udpLength = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(udpOffset + 4, 2));
         if (udpLength < 8 || udpOffset + udpLength > ipOffset + totalLength) return false;
@@ -67,8 +75,10 @@ public static class PacketChecksums
         if (sourceAddress.AddressFamily != System.Net.Sockets.AddressFamily.InterNetworkV6 || destinationAddress.AddressFamily != sourceAddress.AddressFamily || frame.Length < ipOffset + 40 || frame[ipOffset] >> 4 != 6) return false;
         var payloadLength = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(ipOffset + 4, 2));
         if (frame.Length < ipOffset + 40 + payloadLength || !TryFindIpv6Transport(frame, ipOffset, payloadLength, 17, out var udpOffset)) return false;
+        var availableLength = ipOffset + 40 + payloadLength - udpOffset;
+        if (availableLength < 8 || frame.Length < udpOffset + 8) return false;
         var udpLength = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(udpOffset + 4, 2));
-        if (udpLength < 8 || udpOffset + udpLength > ipOffset + 40 + payloadLength) return false;
+        if (udpLength < 8 || udpLength > availableLength) return false;
 
         sourceAddress.TryWriteBytes(frame.Slice(ipOffset + 8, 16), out _);
         destinationAddress.TryWriteBytes(frame.Slice(ipOffset + 24, 16), out _);
@@ -85,7 +95,7 @@ public static class PacketChecksums
         var totalLength = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(ipOffset + 2, 2));
         if (frame[ipOffset] >> 4 != 4 || headerLength < 20 || frame[ipOffset + 9] != 6 || totalLength < headerLength + 20 || frame.Length < ipOffset + totalLength) return false;
         var fragment = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(ipOffset + 6, 2));
-        if ((fragment & 0x3fff) != 0) return false;
+        if ((fragment & 0xbfff) != 0) return false;
         var tcpOffset = ipOffset + headerLength;
         var tcpLength = totalLength - headerLength;
         if (tcpLength < 20 || frame.Length < tcpOffset + tcpLength) return false;

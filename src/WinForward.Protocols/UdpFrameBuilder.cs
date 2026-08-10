@@ -39,9 +39,11 @@ public static class UdpFrameBuilder
         var isIpv6 = sourceAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6;
         if (!isIpv4 && !isIpv6) return false;
 
+        if (payload.Length > ushort.MaxValue - 8) return false;
+        var udpLength = 8 + payload.Length;
+        if (isIpv4 && udpLength > ushort.MaxValue - 20) return false;
         var ipHeaderLength = isIpv4 ? 20 : 40;
-        var udpLength = checked(8 + payload.Length);
-        var totalLength = checked(14 + ipHeaderLength + udpLength);
+        var totalLength = 14 + ipHeaderLength + udpLength;
         if (totalLength > maximumEthernetFrame) return false;
 
         var result = new byte[totalLength];

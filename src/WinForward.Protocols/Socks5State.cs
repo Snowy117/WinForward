@@ -69,13 +69,14 @@ public static class Socks5Messages
         port = 0;
         if (reply.Length < 2 || reply[0] != 5) return Socks5ReplyKind.Invalid;
         status = reply[1];
+        if (status > 8) return Socks5ReplyKind.Invalid;
         // A failure reply (REP 1-8) is a definite, well-formed failure; the status code itself is
         // the diagnostic and no bound address is required.
         if (status != 0) return Socks5ReplyKind.Failure;
-        if (reply.Length < 8) return Socks5ReplyKind.Invalid;
+        if (reply.Length < 5 || reply[2] != 0) return Socks5ReplyKind.Invalid;
         addressType = reply[3];
-        var addressTypeFamily = addressType is 1 or 4 ? addressType : 0;
-        var addressLength = addressTypeFamily switch { 1 => 4, 4 => 16, _ => 0 };
+        var addressLength = addressType switch { 1 => 4, 4 => 16, _ => 0 };
+        if (addressType is not (1 or 3 or 4)) return Socks5ReplyKind.Invalid;
         var portOffset = 4 + addressLength + (addressType == 3 ? 1 : 0);
         if (addressType is 3)
         {
@@ -154,7 +155,7 @@ public static class Socks5Messages
     public static bool TryParseReplyPrefix(ReadOnlySpan<byte> prefix, out byte status)
     {
         status = 0;
-        if (prefix.Length < 2 || prefix[0] != 5) return false;
+        if (prefix.Length < 5 || prefix[0] != 5 || prefix[1] > 8 || prefix[2] != 0 || prefix[3] is not (1 or 3 or 4)) return false;
         status = prefix[1];
         return true;
     }
@@ -162,7 +163,7 @@ public static class Socks5Messages
     public static bool TryGetReplyLength(ReadOnlySpan<byte> prefix, out int length)
     {
         length = 0;
-        if (prefix.Length < 5 || prefix[0] != 5) return false;
+        if (!TryParseReplyPrefix(prefix, out _)) return false;
         length = prefix[3] switch
         {
             1 => 10,
