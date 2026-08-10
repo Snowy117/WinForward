@@ -18,12 +18,16 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
     private readonly Socket _socket;
     private readonly NetworkStream _stream;
     private readonly IDisposable? _loopPrevention;
+    private readonly CancellationTokenSource _attemptCancellation;
+    private readonly CancellationToken _connectCancellation;
 
-    private Socks5ControlConnection(Socket socket, IDisposable? loopPrevention)
+    private Socks5ControlConnection(Socket socket, IDisposable? loopPrevention, CancellationTokenSource attemptCancellation, CancellationToken connectCancellation)
     {
         _socket = socket;
         _stream = new NetworkStream(socket, ownsSocket: true);
         _loopPrevention = loopPrevention;
+        _attemptCancellation = attemptCancellation;
+        _connectCancellation = connectCancellation;
     }
 
     /// <summary>
@@ -53,12 +57,13 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
         var addressProvider = resolveAddresses ?? ((host, token) => new ValueTask<IPAddress[]>(Dns.GetHostAddressesAsync(host, token)));
         var socketCtor = socketFactory ?? (family => new Socket(family, SocketType.Stream, ProtocolType.Tcp));
         var timeout = perAttemptTimeout ?? ConnectAttemptTimeout;
-        var timeoutMs = (int)Math.Clamp(timeout.TotalMilliseconds, 0, int.MaxValue);
+        if (timeout <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(perAttemptTimeout));
+        var timeoutMs = (int)Math.Clamp(timeout.TotalMilliseconds, 1, int.MaxValue);
 
-        var addresses = await addressProvider(server.Host, cancellationToken).ConfigureAwait(false);
+        var addresses = await ResolveAddressesAsync(addressProvider, server.Host, cancellationToken, timeout).ConfigureAwait(false);
         if (addresses.Length == 0) throw new SocketException((int)SocketError.HostNotFound);
 
-        SocketException? lastConnectionError = null;
+        Exception? lastConnectionError = null;
         var attempts = 0;
         foreach (var address in addresses)
         {
@@ -69,8 +74,6 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
                 server, address, socketCtor, onSocketReady, cancellationToken, timeout, timeoutMs).ConfigureAwait(false);
             if (outcome.Connection is not null) return outcome.Connection;
 
-            outcome.Socket?.Dispose();
-            outcome.Registration?.Dispose();
             // A socket-creation failure or a per-attempt timeout records a representative error so
             // the next candidate is tried; only the final aggregate error is surfaced.
             lastConnectionError ??= outcome.Error ?? new SocketException((int)SocketError.TimedOut);
@@ -85,11 +88,10 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
 
     /// <summary>
     /// Performs one connect attempt to a single candidate address. On success the owned connection
-    /// (and registration) are returned and ownership transfers to the caller, so this helper does
-    /// not dispose them. On failure the created socket/registration (if any) are handed back for the
-    /// caller to dispose. <paramref name="timeoutMs"/> is applied as the socket Send/Receive timeout
-    /// and as the per-attempt connect deadline; <paramref name="isFatal"/> distinguishes an abnormal
-    /// failure (cancellation by the caller) from a normal per-attempt failure that can retry.
+    /// (and registration) are returned and ownership transfers to the caller. On failure this helper
+    /// releases every acquired resource before returning. The single attempt deadline spans TCP
+    /// connect and authentication; the successful connection retains it for the SOCKS command and
+    /// reply-domain resolution that immediately follow setup.
     /// </summary>
     private static async ValueTask<ConnectAttempt> ConnectOnceAsync(
         Socks5Server server,
@@ -100,17 +102,19 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
         TimeSpan timeout,
         int timeoutMs)
     {
-        Socket socket;
+        Socket? socket = null;
+        IDisposable? registration = null;
+        Socks5ControlConnection? connection = null;
+        CancellationTokenSource? attemptCancellation = null;
         try
         {
             socket = socketCtor(address.AddressFamily);
         }
         catch (SocketException exception)
         {
-            return new ConnectAttempt(Socket: null, Registration: null, Connection: null, Error: exception, IsFatal: false);
+            return new ConnectAttempt(Connection: null, Error: exception, IsFatal: false);
         }
 
-        IDisposable? registration = null;
         try
         {
             socket.ReceiveTimeout = timeoutMs;
@@ -119,49 +123,77 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
             socket.Bind(new IPEndPoint(bindAddress, 0));
             registration = onSocketReady?.Invoke((IPEndPoint)socket.LocalEndPoint!, new IPEndPoint(address, server.Port));
 
-            using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            attemptCts.CancelAfter(timeout);
-            await socket.ConnectAsync(new IPEndPoint(address, server.Port), attemptCts.Token).ConfigureAwait(false);
+            attemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            attemptCancellation.CancelAfter(timeout);
+            await socket.ConnectAsync(new IPEndPoint(address, server.Port), attemptCancellation.Token).ConfigureAwait(false);
 
-            var connection = new Socks5ControlConnection(socket, registration);
-            await connection.AuthenticateAsync(server, cancellationToken).ConfigureAwait(false);
-            return new ConnectAttempt(Socket: socket, Registration: registration, Connection: connection, Error: null, IsFatal: false);
+            connection = new Socks5ControlConnection(socket, registration, attemptCancellation, cancellationToken);
+            socket = null;
+            registration = null;
+            attemptCancellation = null;
+            await connection.AuthenticateAsync(server, connection.AttemptToken).ConfigureAwait(false);
+            return new ConnectAttempt(Connection: connection, Error: null, IsFatal: false);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await DisposeFailedAttemptAsync(connection, socket, registration, attemptCancellation).ConfigureAwait(false);
+            throw new OperationCanceledException(cancellationToken);
+        }
+        catch (OperationCanceledException)
         {
             // The per-attempt timeout elapsed; this candidate failed and the next is tried.
-            return new ConnectAttempt(socket, registration, null, new SocketException((int)SocketError.TimedOut), IsFatal: false);
+            await DisposeFailedAttemptAsync(connection, socket, registration, attemptCancellation).ConfigureAwait(false);
+            return new ConnectAttempt(Connection: null, Error: new SocketException((int)SocketError.TimedOut), IsFatal: false);
         }
         catch (SocketException exception)
         {
-            return new ConnectAttempt(socket, registration, null, exception, IsFatal: false);
+            await DisposeFailedAttemptAsync(connection, socket, registration, attemptCancellation).ConfigureAwait(false);
+            return new ConnectAttempt(Connection: null, Error: exception, IsFatal: false);
         }
-        catch
+        catch (Exception exception)
         {
-            return new ConnectAttempt(socket, registration, null, null, IsFatal: true);
+            await DisposeFailedAttemptAsync(connection, socket, registration, attemptCancellation).ConfigureAwait(false);
+            return new ConnectAttempt(Connection: null, Error: exception, IsFatal: true);
         }
     }
 
-    private sealed record ConnectAttempt(Socket? Socket, IDisposable? Registration, Socks5ControlConnection? Connection, SocketException? Error, bool IsFatal);
+    private CancellationToken AttemptToken => _attemptCancellation.Token;
 
-    public async ValueTask<IPEndPoint> UdpAssociateAsync(IPEndPoint localEndpoint, CancellationToken cancellationToken)
-    {
-        var request = Socks5Messages.Request(Socks5Command.UdpAssociate, localEndpoint.Address, (ushort)localEndpoint.Port);
-        await _stream.WriteAsync(request, cancellationToken).ConfigureAwait(false);
-        return await ReadEndpointReplyAsync(Socks5Command.UdpAssociate, cancellationToken).ConfigureAwait(false);
-    }
+    private sealed record ConnectAttempt(Socks5ControlConnection? Connection, Exception? Error, bool IsFatal);
 
-    public async ValueTask ConnectDestinationAsync(IPEndPoint destination, CancellationToken cancellationToken)
-    {
-        var request = Socks5Messages.Request(Socks5Command.Connect, destination.Address, (ushort)destination.Port);
-        await _stream.WriteAsync(request, cancellationToken).ConfigureAwait(false);
-        _ = await ReadEndpointReplyAsync(Socks5Command.Connect, cancellationToken).ConfigureAwait(false);
-    }
+    public ValueTask<IPEndPoint> UdpAssociateAsync(IPEndPoint localEndpoint, CancellationToken cancellationToken) =>
+        RunWithinAttemptAsync(async token =>
+        {
+            var request = Socks5Messages.Request(Socks5Command.UdpAssociate, localEndpoint.Address, (ushort)localEndpoint.Port);
+            await _stream.WriteAsync(request, token).ConfigureAwait(false);
+            return await ReadEndpointReplyAsync(Socks5Command.UdpAssociate, token).ConfigureAwait(false);
+        }, cancellationToken);
 
-    public ValueTask DisposeAsync()
+    public ValueTask ConnectDestinationAsync(IPEndPoint destination, CancellationToken cancellationToken) =>
+        RunWithinAttemptAsync(async token =>
+        {
+            var request = Socks5Messages.Request(Socks5Command.Connect, destination.Address, (ushort)destination.Port);
+            await _stream.WriteAsync(request, token).ConfigureAwait(false);
+            _ = await ReadEndpointReplyAsync(Socks5Command.Connect, token).ConfigureAwait(false);
+        }, cancellationToken);
+
+    public async ValueTask DisposeAsync()
     {
-        _loopPrevention?.Dispose();
-        return _stream.DisposeAsync();
+        try
+        {
+            await _stream.DisposeAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            try
+            {
+                _loopPrevention?.Dispose();
+            }
+            finally
+            {
+                _attemptCancellation.Dispose();
+            }
+        }
     }
 
     /// <summary>
@@ -169,6 +201,41 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
     /// does not take ownership; disposing the <see cref="Socks5ControlConnection"/> closes the stream.
     /// </summary>
     internal Stream GetUpstreamStream() => _stream;
+
+    private async ValueTask<T> RunWithinAttemptAsync<T>(Func<CancellationToken, ValueTask<T>> operation, CancellationToken cancellationToken)
+    {
+        using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(AttemptToken, cancellationToken);
+        try
+        {
+            return await operation(operationCancellation.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (operationCancellation.IsCancellationRequested)
+        {
+            ThrowForAttemptCancellation(cancellationToken);
+            throw;
+        }
+    }
+
+    private async ValueTask RunWithinAttemptAsync(Func<CancellationToken, ValueTask> operation, CancellationToken cancellationToken)
+    {
+        using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(AttemptToken, cancellationToken);
+        try
+        {
+            await operation(operationCancellation.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (operationCancellation.IsCancellationRequested)
+        {
+            ThrowForAttemptCancellation(cancellationToken);
+            throw;
+        }
+    }
+
+    private void ThrowForAttemptCancellation(CancellationToken operationCancellation)
+    {
+        if (operationCancellation.IsCancellationRequested) throw new OperationCanceledException(operationCancellation);
+        if (_connectCancellation.IsCancellationRequested) throw new OperationCanceledException(_connectCancellation);
+        if (_attemptCancellation.IsCancellationRequested) throw new IOException("SOCKS5 control connection attempt timed out.");
+    }
 
     private async ValueTask AuthenticateAsync(Socks5Server server, CancellationToken cancellationToken)
     {
@@ -229,8 +296,45 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
 
     private static async ValueTask<IPAddress> ResolveDomainAsync(string domain, CancellationToken cancellationToken)
     {
-        var addresses = await Dns.GetHostAddressesAsync(domain, cancellationToken).ConfigureAwait(false);
+        var addresses = await Dns.GetHostAddressesAsync(domain, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
         return addresses.FirstOrDefault() ?? throw new IOException("SOCKS5 reply domain resolved to no addresses.");
+    }
+
+    private static async ValueTask<IPAddress[]> ResolveAddressesAsync(Func<string, CancellationToken, ValueTask<IPAddress[]>> addressProvider, string host, CancellationToken cancellationToken, TimeSpan timeout)
+    {
+        using var resolutionCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        resolutionCancellation.CancelAfter(timeout);
+        var resolution = addressProvider(host, resolutionCancellation.Token).AsTask();
+        try
+        {
+            return await resolution.WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(cancellationToken);
+        }
+        catch (TimeoutException)
+        {
+            await resolutionCancellation.CancelAsync().ConfigureAwait(false);
+            throw new IOException("SOCKS5 server address resolution timed out.", new SocketException((int)SocketError.TimedOut));
+        }
+        catch (OperationCanceledException)
+        {
+            throw new IOException("SOCKS5 server address resolution failed.", new SocketException((int)SocketError.TimedOut));
+        }
+    }
+
+    private static async ValueTask DisposeFailedAttemptAsync(Socks5ControlConnection? connection, Socket? socket, IDisposable? registration, CancellationTokenSource? attemptCancellation)
+    {
+        if (connection is not null)
+        {
+            await connection.DisposeAsync().ConfigureAwait(false);
+            return;
+        }
+
+        socket?.Dispose();
+        registration?.Dispose();
+        attemptCancellation?.Dispose();
     }
 }
 
@@ -279,17 +383,29 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
     public IPEndPoint LocalEndpoint => (IPEndPoint)_socket.LocalEndPoint!;
 
     public static async ValueTask<Socks5UdpTransport> CreateAsync(Socks5Server server, AddressFamily addressFamily, SelfTrafficRegistry selfTraffic, CancellationToken cancellationToken)
+        => await CreateAsync(server, addressFamily, selfTraffic, cancellationToken, null, null).ConfigureAwait(false);
+
+    internal static async ValueTask<Socks5UdpTransport> CreateAsync(
+        Socks5Server server,
+        AddressFamily addressFamily,
+        SelfTrafficRegistry selfTraffic,
+        CancellationToken cancellationToken,
+        Func<CancellationToken, ValueTask<Socks5ControlConnection>>? createControl,
+        Func<AddressFamily, Socket>? socketFactory)
     {
-        var socket = new Socket(addressFamily, SocketType.Dgram, ProtocolType.Udp);
-        // Register the TCP control connection's exact tuple before its SYN leaves the host, so a
-        // catch-all proxy rule never recursively intercepts the UDP ASSOCIATE control socket.
-        var control = await Socks5ControlConnection.ConnectAsync(server, cancellationToken, (local, remote) =>
-            selfTraffic.Register(new SelfTrafficRegistry.SelfTrafficKey(
-                TransportProtocol.Tcp,
-                Endpoint.From(local.Address, checked((ushort)local.Port)),
-                Endpoint.From(remote.Address, checked((ushort)remote.Port))))).ConfigureAwait(false);
+        var socket = (socketFactory ?? (family => new Socket(family, SocketType.Dgram, ProtocolType.Udp)))(addressFamily);
+        Socks5ControlConnection? control = null;
         try
         {
+            var controlFactory = createControl ?? (token =>
+                Socks5ControlConnection.ConnectAsync(
+                    server,
+                    token,
+                    (local, remote) => selfTraffic.Register(new SelfTrafficRegistry.SelfTrafficKey(
+                        TransportProtocol.Tcp,
+                        Endpoint.From(local.Address, checked((ushort)local.Port)),
+                        Endpoint.From(remote.Address, checked((ushort)remote.Port))))));
+            control = await controlFactory(cancellationToken).ConfigureAwait(false);
             socket.Bind(new IPEndPoint(addressFamily == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any, 0));
             var relay = await control.UdpAssociateAsync((IPEndPoint)socket.LocalEndPoint!, cancellationToken).ConfigureAwait(false);
             // Register the relay transport tuple in the loop-prevention registry so catch-all proxy
@@ -302,7 +418,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
         catch
         {
             socket.Dispose();
-            await control.DisposeAsync().ConfigureAwait(false);
+            if (control is not null) await control.DisposeAsync().ConfigureAwait(false);
             throw;
         }
     }

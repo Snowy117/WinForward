@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"UDP key/alias ownership, checksum and deterministic shared-setup test contracts."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Fail-closed, alias collision, and per-caller cancellation contract."}
+{"file":".trellis/spec/backend/windows-ndisapi.md","reason":"UDP relay reinjection, wildcard self-traffic, adapter direction, and control registration rules."}
+{"file":".trellis/tasks/archive/2026-08/08-07-winforward-proxy/research/fix-plan-2026-08-09.md","reason":"Previously fixed SOCKS5/UDP findings, test expectations, and residual hardware gates."}

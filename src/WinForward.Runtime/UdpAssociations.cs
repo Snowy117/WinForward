@@ -43,6 +43,9 @@ public sealed class UdpAssociationTable
     }
 
     public bool TryClaim(FlowKey originalKey, RelayAlias relayAlias, DateTimeOffset now, out UdpAssociation? association)
+        => TryClaim(originalKey, relayAlias, now, out association, out _);
+
+    public bool TryClaim(FlowKey originalKey, RelayAlias relayAlias, DateTimeOffset now, out UdpAssociation? association, out bool created)
     {
         lock (_gate)
         {
@@ -50,6 +53,7 @@ public sealed class UdpAssociationTable
             {
                 existing.Touch(now);
                 association = existing;
+                created = false;
                 return true;
             }
 
@@ -59,25 +63,29 @@ public sealed class UdpAssociationTable
                 {
                     relayExisting.Touch(now);
                     association = relayExisting;
+                    created = false;
                     return true;
                 }
 
                 // A relay tuple already belongs to another logical flow. Sharing it
                 // would make reverse datagrams impossible to route deterministically.
                 association = null;
+                created = false;
                 return false;
             }
 
             if (_byOriginal.Count >= _capacity)
             {
                 association = null;
+                created = false;
                 return false;
             }
 
-            var created = new UdpAssociation(originalKey, relayAlias, ++_nextGeneration, now);
-            _byOriginal.Add(originalKey, created);
-            _byRelay.Add(relayAlias, created);
-            association = created;
+            var newAssociation = new UdpAssociation(originalKey, relayAlias, ++_nextGeneration, now);
+            _byOriginal.Add(originalKey, newAssociation);
+            _byRelay.Add(relayAlias, newAssociation);
+            association = newAssociation;
+            created = true;
             return true;
         }
     }
@@ -85,6 +93,29 @@ public sealed class UdpAssociationTable
     public bool TryFindOriginal(FlowKey originalKey, DateTimeOffset now, out UdpAssociation? association) => TryFind(_byOriginal, originalKey, now, out association);
 
     public bool TryFindRelay(RelayAlias relayAlias, DateTimeOffset now, out UdpAssociation? association) => TryFind(_byRelay, relayAlias, now, out association);
+
+    public bool TryTouch(UdpAssociation expected, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(expected);
+        lock (_gate)
+        {
+            if (!_byOriginal.TryGetValue(expected.OriginalKey, out var association) || !ReferenceEquals(association, expected)) return false;
+            association.Touch(now);
+            return true;
+        }
+    }
+
+    public bool TryRemove(UdpAssociation expected)
+    {
+        ArgumentNullException.ThrowIfNull(expected);
+        lock (_gate)
+        {
+            if (!_byOriginal.TryGetValue(expected.OriginalKey, out var association) || !ReferenceEquals(association, expected)) return false;
+            _byOriginal.Remove(expected.OriginalKey);
+            _byRelay.Remove(expected.RelayAlias);
+            return true;
+        }
+    }
 
     /// <summary>
     /// Removes a specific original flow from both indexes. Used when a session is torn down so a
