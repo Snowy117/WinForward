@@ -166,3 +166,24 @@ Separated Host and Forwarded policy domains: forwarded traffic now requires adap
 ### Status
 
 [OK] **Completed**
+
+
+## Session 4: Fix cross-family SOCKS5 UDP relay
+
+**Date**: 2026-08-11
+**Task**: Fix cross-family SOCKS5 UDP relay
+**Branch**: `master`
+
+### Summary
+
+Fixed IPv6 original UDP flows through IPv4 SOCKS5 relays by associating before socket allocation and binding to the relay family; added cross-family, loop-prevention, cleanup, and matching-family coverage; delivered and validated the Network Bridge configuration and Windows Native AOT release.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8baccbc` | (see git log) |
+
+### Status
+
+[OK] **Completed**
