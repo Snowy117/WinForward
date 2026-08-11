@@ -1,0 +1,45 @@
+{
+  "socks5Servers": [
+    {
+      "name": "main",
+      "host": "127.0.0.1",
+      "port": 30890
+    }
+  ],
+  "rules": [
+    {
+      "process": [
+        "C:\\Program Files\\Tencent\\Weixin\\Weixin.exe",
+        "WeChatAppEx.exe",
+        "C:\\Program Files\\v2rayN-windows-64\\bin\\mihomo\\mihomo.exe",
+        "C:\\Program Files\\sing-box\\runtime\\sing-box.exe",
+        "WinForward.exe"
+      ],
+      "action": "pass"
+    },
+    {
+      "remoteCidr": [
+        "127.0.0.0/8",
+        "::1/128",
+        "192.168.100.0/24",
+        "192.168.77.0/24",
+        "fd00:1234:5678:1::/64"
+      ],
+      "action": "pass"
+    },
+    {
+      "adapterId": [
+        "{E14A2A2E-F7E2-4428-942E-6D04D1C6D797}"
+      ],
+      "action": "proxy",
+      "proxyServer": "main"
+    },
+    {
+      "action": "proxy",
+      "proxyServer": "main"
+    }
+  ],
+  "fallbackAction": "pass",
+  "proxyUnavailableAction": "block",
+  "processingFailureAction": "block"
+}

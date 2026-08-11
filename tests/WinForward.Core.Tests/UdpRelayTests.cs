@@ -359,11 +359,11 @@ public sealed class UdpRelayTests
         public List<FakeTransport> Transports { get; } = [];
         private int _nextLocalPort = 40000;
 
-        public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, System.Net.Sockets.AddressFamily addressFamily, CancellationToken cancellationToken)
+        public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
         {
             // Each transport models a distinct bound UDP socket, so its local port is unique; the
             // relay alias collision guard in UdpProxyCoordinator must not reject distinct flows.
-            var transport = new FakeTransport(addressFamily, Interlocked.Increment(ref _nextLocalPort));
+            var transport = new FakeTransport(System.Net.Sockets.AddressFamily.InterNetwork, Interlocked.Increment(ref _nextLocalPort));
             lock (Transports) Transports.Add(transport);
             return ValueTask.FromResult<IUdpProxyTransport>(transport);
         }

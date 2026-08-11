@@ -175,3 +175,81 @@ Reverse-packet injection direction follows the flow origin:
 - The implicit forwarded pass is cached in `FlowTable`; reverse and cross-adapter observations reuse it before origin-specific policy can run again. Flow-table capacity exhaustion still fails closed.
 - `Forwarded` is derived from NDIS `ON_RECEIVE`, not an authoritative Windows routing decision. It includes both traffic Windows may route across adapters and new inbound traffic addressed to a service on the host.
 - Regression coverage: `ForwardedPolicySkipsUnqualifiedRulesAndConfiguredFallback`, `DispatcherSeparatesForwardedAdaptersFromHostCatchAllPolicy`, `DispatcherCachesForwardedImplicitPassAcrossOriginsAndFailsClosedAtCapacity`, and forwarded non-flow tests.
+
+### Cross-family SOCKS5 UDP relay setup (fixed 2026-08-11)
+
+#### 1. Scope / Trigger
+
+- Trigger: creating a SOCKS5 UDP relay for an IPv4 or IPv6 original flow when
+  the SOCKS5 control endpoint and returned UDP relay may use a different
+  address family.
+
+#### 2. Signatures
+
+- `Socks5ControlConnection.UdpAssociateAsync(CancellationToken)` sends the
+  UDP ASSOCIATE request without a caller-provided local endpoint.
+- `IUdpProxyTransportFactory.CreateAsync(Socks5Server, CancellationToken)` and
+  `Socks5UdpTransport.CreateAsync(Socks5Server, SelfTrafficRegistry,
+  CancellationToken)` do not accept the original flow's address family.
+
+#### 3. Contracts
+
+- UDP ASSOCIATE sends `0.0.0.0:0` for an IPv4 control socket or
+  `[::]:0` for an IPv6 control socket. This is sent after control connection
+  authentication and before UDP socket allocation.
+- The returned BND/relay endpoint is authoritative for the UDP socket's
+  address family. Allocate and bind the UDP socket in that family, then build
+  the relay alias only after local and relay endpoints are same-family.
+- Register `(Udp, local UDP endpoint, relay endpoint)` in `SelfTrafficRegistry`
+  before the first relay datagram. The TCP control tuple remains registered
+  before its SYN through the control connection's existing `onSocketReady`
+  contract.
+- `Socks5UdpCodec.Encode` preserves the original destination's IPv4/domain/
+  IPv6 ATYP independently of the relay socket family. A valid IPv4 relay can
+  therefore carry an IPv6 destination ATYP.
+- Proxy setup errors remain fail-closed. Socket, UDP self-traffic token, and
+  control connection are each released when owned; disposal continues through
+  later resources if an earlier disposal throws.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Result |
+|---|---|
+| IPv4 control + IPv4 relay | bind IPv4 UDP socket and send IPv4 ATYP as requested |
+| IPv6 control + IPv6 relay | bind IPv6 UDP socket and send IPv6 ATYP as requested |
+| IPv4 relay + IPv6 destination | bind IPv4 UDP socket; send IPv6 ATYP unchanged |
+| IPv6 relay + IPv4 destination | bind IPv6 UDP socket; send IPv4 ATYP unchanged |
+| relay response family differs from original flow | do not throw from `FlowKey.Create`; alias uses same-family transport endpoints |
+| control/associate/socket/registration failure | release acquired resources and block the proxy-selected flow |
+
+#### 5. Good/Base/Bad Cases
+
+- Good: loopback IPv4 SOCKS5 control and UDP relay receives an all-zero
+  ASSOCIATE and a UDP frame whose destination ATYP is IPv6.
+- Base: matching-family IPv4 and IPv6 control/relay integration tests remain
+  green.
+- Bad: allocate UDP socket from `flow.Local` before ASSOCIATE; an IPv6 local
+  endpoint plus IPv4 relay produces `ArgumentException` from `FlowKey.Create`.
+
+#### 6. Tests Required
+
+- Assert exact all-zero IPv4 and IPv6 ASSOCIATE request bytes.
+- Assert loopback IPv4 relay receives IPv6 destination ATYP/address/payload and
+  that relay self-traffic ownership exists before send and is removed after
+  disposal.
+- Assert an injected socket-disposal exception still releases the UDP token and
+  control connection.
+- Preserve coordinator same-flow reuse, relay collision, capacity, failure,
+  response routing, and matching-family coverage.
+
+#### 7. Wrong vs Correct
+
+```csharp
+// Wrong: original destination/flow family is not the relay transport family.
+var socket = new Socket(flowFamily, SocketType.Dgram, ProtocolType.Udp);
+var relay = await control.UdpAssociateAsync(...);
+
+// Correct: discover relay first, then use its family for the transport socket.
+var relay = await control.UdpAssociateAsync(cancellationToken);
+var socket = new Socket(relay.AddressFamily, SocketType.Dgram, ProtocolType.Udp);
+```

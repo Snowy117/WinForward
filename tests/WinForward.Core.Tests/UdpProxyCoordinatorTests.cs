@@ -74,7 +74,7 @@ public sealed class UdpProxyCoordinatorTests
     }
 
     [Fact]
-    public async Task IPv6FlowUsesIPv6UdpTransport()
+    public async Task Ipv6OriginalFlowCanUseIpv4RelayAliasWithoutFlowKeyMismatch()
     {
         var factory = new FakeTransportFactory();
         await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink());
@@ -82,7 +82,24 @@ public sealed class UdpProxyCoordinatorTests
 
         Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 1 }, CancellationToken.None));
         var transport = Assert.Single(factory.Transports);
+        Assert.Equal(AddressFamily.InterNetwork, transport.LocalEndpoint.AddressFamily);
+        Assert.Equal(1, factory.CreateCalls);
+        var sent = Assert.Single(transport.Sent);
+        Assert.Equal(flow.Remote.Address, sent.Destination.Address);
+        Assert.Equal(flow.Remote.Port, sent.Destination.Port);
+    }
+
+    [Fact]
+    public async Task Ipv6OriginalFlowStillSupportsMatchingIpv6Relay()
+    {
+        var factory = new FakeTransportFactory(AddressFamily.InterNetworkV6);
+        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink());
+        var flow = FlowKey.Create(Endpoint.From(IPAddress.Parse("2001:db8::10"), 53000), Endpoint.From(IPAddress.Parse("2001:db8::53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
+
+        Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 1 }, CancellationToken.None));
+        var transport = Assert.Single(factory.Transports);
         Assert.Equal(AddressFamily.InterNetworkV6, transport.LocalEndpoint.AddressFamily);
+        Assert.Equal(AddressFamily.InterNetworkV6, transport.RelayEndpoint.AddressFamily);
     }
 
     [Fact]
@@ -362,14 +379,24 @@ public sealed class UdpProxyCoordinatorTests
 
     private sealed class FakeTransportFactory : IUdpProxyTransportFactory
     {
+        private readonly AddressFamily _addressFamily;
         public List<FakeTransport> Transports { get; } = [];
         private int _nextLocalPort = 40000;
+        private int _createCalls;
 
-        public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, AddressFamily addressFamily, CancellationToken cancellationToken)
+        public FakeTransportFactory(AddressFamily addressFamily = AddressFamily.InterNetwork)
+        {
+            _addressFamily = addressFamily;
+        }
+
+        public int CreateCalls => Volatile.Read(ref _createCalls);
+
+        public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
         {
             // Each transport models a distinct bound UDP socket, so its local port is unique; the
             // relay alias collision guard in UdpProxyCoordinator must not reject distinct flows.
-            var transport = new FakeTransport(addressFamily, Interlocked.Increment(ref _nextLocalPort));
+            Interlocked.Increment(ref _createCalls);
+            var transport = new FakeTransport(_addressFamily, Interlocked.Increment(ref _nextLocalPort));
             lock (Transports) Transports.Add(transport);
             return ValueTask.FromResult<IUdpProxyTransport>(transport);
         }
@@ -383,11 +410,11 @@ public sealed class UdpProxyCoordinatorTests
         public TaskCompletionSource<bool> CreateFinished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public List<FakeTransport> CreatedTransports { get; } = [];
 
-        public async ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, AddressFamily addressFamily, CancellationToken cancellationToken)
+        public async ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
         {
             if (Interlocked.Increment(ref _calls) != 1)
             {
-                var transport = new FakeTransport(addressFamily, 40001);
+                var transport = new FakeTransport(AddressFamily.InterNetwork, 40001);
                 CreatedTransports.Add(transport);
                 return transport;
             }
@@ -410,7 +437,7 @@ public sealed class UdpProxyCoordinatorTests
     {
         public TaskCompletionSource<bool> CreateStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public async ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, AddressFamily addressFamily, CancellationToken cancellationToken)
+        public async ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
         {
             CreateStarted.TrySetResult(true);
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
@@ -420,8 +447,8 @@ public sealed class UdpProxyCoordinatorTests
 
     private sealed class CollidingAliasTransportFactory : IUdpProxyTransportFactory
     {
-        public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, AddressFamily addressFamily, CancellationToken cancellationToken) =>
-            ValueTask.FromResult<IUdpProxyTransport>(new FakeTransport(addressFamily, 40000));
+        public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken) =>
+            ValueTask.FromResult<IUdpProxyTransport>(new FakeTransport(AddressFamily.InterNetwork, 40000));
     }
 
     private sealed class ImmediateFaultTransportFactory : IUdpProxyTransportFactory
@@ -429,16 +456,16 @@ public sealed class UdpProxyCoordinatorTests
         private int _calls;
         public List<ImmediateFaultTransport> FaultedTransports { get; } = [];
 
-        public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, AddressFamily addressFamily, CancellationToken cancellationToken)
+        public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
         {
             if (Interlocked.Increment(ref _calls) == 1)
             {
-                var transport = new ImmediateFaultTransport(addressFamily, 40000);
+                var transport = new ImmediateFaultTransport(AddressFamily.InterNetwork, 40000);
                 FaultedTransports.Add(transport);
                 return ValueTask.FromResult<IUdpProxyTransport>(transport);
             }
 
-            return ValueTask.FromResult<IUdpProxyTransport>(new FakeTransport(addressFamily, 40001));
+            return ValueTask.FromResult<IUdpProxyTransport>(new FakeTransport(AddressFamily.InterNetwork, 40001));
         }
     }
 

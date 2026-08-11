@@ -1,0 +1,3 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"UDP coordinator setup, resource ownership, association keys, and proxy failures must preserve fail-closed behavior."}
+{"file":".trellis/spec/backend/windows-ndisapi.md","reason":"Preserve UDP relay loop-prevention and forwarded-response injection contracts."}
+{"file":".trellis/tasks/08-11-configure-forwarding-fix-udp-family/research/udp-family-mismatch.md","reason":"Contains the deterministic reproduction, protocol evidence, selected behavior, and required regression coverage."}

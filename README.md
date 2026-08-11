@@ -121,6 +121,10 @@ configured. WinForward may detect and diagnose missing prerequisites but never c
 - TCP and UDP over IPv4 and IPv6.
 - Proxy flows use SOCKS5 `CONNECT` (TCP) and `UDP ASSOCIATE` (UDP), with NO-AUTH or
   username/password (RFC 1929).
+- UDP setup sends an all-zero `UDP ASSOCIATE` endpoint in the TCP control connection's address
+  family, then binds the relay socket in the returned relay address family. The SOCKS5 UDP
+  destination `ATYP` and address remain those of the original datagram, so an IPv6 destination can
+  travel through an IPv4 relay when the SOCKS5 server supports it.
 - Ordinary, safely parseable, unfragmented flows observed after WinForward starts.
 
 Proxy-selected traffic is **blocked** (never silently passed) when it is malformed,

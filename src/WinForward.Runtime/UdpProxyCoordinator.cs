@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Sockets;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
@@ -162,13 +161,12 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
 
     private async Task<UdpProxySession> CreateSessionAsync(FlowKey flow, Socks5Server server, CancellationToken cancellationToken, Task registered)
     {
-        var addressFamily = flow.Local.AddressFamily == AddressFamilyKind.IPv4 ? AddressFamily.InterNetwork : AddressFamily.InterNetworkV6;
         IUdpProxyTransport? transport = null;
         UdpAssociation? association = null;
         var associationCreated = false;
         try
         {
-            transport = await _transportFactory.CreateAsync(server, addressFamily, cancellationToken).ConfigureAwait(false);
+            transport = await _transportFactory.CreateAsync(server, cancellationToken).ConfigureAwait(false);
             var relayAlias = new RelayAlias(FlowKey.Create(
                 Endpoint.From(transport.LocalEndpoint.Address, checked((ushort)transport.LocalEndpoint.Port)),
                 Endpoint.From(transport.RelayEndpoint.Address, checked((ushort)transport.RelayEndpoint.Port)),
