@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Packet rewrite/checksum invariants, flow-key ownership, deterministic concurrency testing, and association-table locking contract."}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Fail-closed proxy, attribution uncertainty, UDP alias collision, and cancellation semantics."}
+{"file":".trellis/spec/backend/windows-ndisapi.md","reason":"Hardware-verified adapter identity, adapter-handle, direction, transparent TCP redirect, UDP relay, and loop-prevention contracts."}
+{"file":".trellis/tasks/archive/2026-08/08-07-winforward-proxy/design.md","reason":"Original end-to-end architecture and declared packet, SOCKS5, flow ownership, lifecycle, and Windows release contracts."}
+{"file":".trellis/tasks/archive/2026-08/08-07-winforward-proxy/research/fix-plan-2026-08-09.md","reason":"Recently confirmed runtime/protocol findings, regression expectations, and outstanding hardware gates; prevents re-reporting fixed defects."}

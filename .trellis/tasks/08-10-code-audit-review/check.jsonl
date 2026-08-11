@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Required check criteria for bounds, checksum oracle, unchanged reject paths, flow ownership, and concurrency coverage."}
+{"file":".trellis/spec/backend/windows-ndisapi.md","reason":"Independent verification criteria for NDISABI, adapter identity/handles, direction flags, redirect/relay, and Windows gates."}
+{"file":".trellis/tasks/archive/2026-08/08-07-winforward-proxy/research/review-capture-lifecycle-config-2026.md","reason":"Prior unresolved lifecycle/config review evidence that must be revalidated against the current tree."}
+{"file":".trellis/tasks/archive/2026-08/08-07-winforward-proxy/research/fix-plan-2026-08-09.md","reason":"Prior confirmed H1-H3/M1-M5/L1-L4 fixes and tests to distinguish regressions from duplicate findings."}
+{"file":".trellis/tasks/archive/2026-08/08-07-winforward-proxy/research/winpkfilter-ndisapi-design-constraints.md","reason":"Recorded external API evidence for NDISAPI, attribution, direction, loop prevention, and jumbo-frame constraints."}
