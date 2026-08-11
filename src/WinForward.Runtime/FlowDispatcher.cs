@@ -129,7 +129,7 @@ public sealed class FlowDispatcher
             if (identity is not null) context = context with { ProcessName = identity.Value.Name, ProcessPath = identity.Value.FullPath };
         }
 
-        if (!_flows.TryClaimResolved(context.Key, () => _policy.Evaluate(context), out var claimed) || claimed is null)
+        if (!_flows.TryClaimResolved(context.Key, () => EvaluateNewFlow(context), out var claimed) || claimed is null)
         {
             await CompleteAsync(packet, PacketDisposition.Block, () => _executor.BlockAsync(packet, cancellationToken)).ConfigureAwait(false);
             return;
@@ -141,8 +141,9 @@ public sealed class FlowDispatcher
     /// <summary>
     /// Handles a frame that cannot be classified into a TCP/UDP flow (non-IP, fragmented, malformed,
     /// or a non-TCP/UDP protocol). Such traffic cannot match a TCP/UDP-only rule; it is evaluated
-    /// against the rules that can meaningfully match it (adapter-only rules) and otherwise the
-    /// fallback action. It is not cached in the flow table because these frames have no logical flow.
+    /// against the rules that can meaningfully match it (adapter-only rules). Host traffic uses the
+    /// configured fallback; forwarded traffic considers only adapter-qualified rules and otherwise
+    /// passes. It is not cached in the flow table because these frames have no logical flow.
     /// </summary>
     public async ValueTask DispatchNonFlowAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
@@ -169,14 +170,18 @@ public sealed class FlowDispatcher
         foreach (var rule in _policy.Rules)
         {
             var matcher = rule.Matcher;
+            if (context.Key.Origin == FlowOriginKind.Forwarded && !matcher.IsAdapterQualified) continue;
             if (matcher.Processes is not null || matcher.Protocols is not null || matcher.AddressFamilies is not null || matcher.RemoteNetworks is not null || matcher.RemotePorts is not null) continue;
             var adapterMatches = (matcher.AdapterIds is null || matcher.AdapterIds.Contains(context.AdapterId ?? string.Empty)) &&
                 (matcher.AdapterNames is null || matcher.AdapterNames.Contains(context.AdapterName ?? string.Empty));
             if (adapterMatches) return rule.Decision.Action;
         }
 
-        return _policy.FallbackAction;
+        return context.Key.Origin == FlowOriginKind.Forwarded ? FlowAction.Pass : _policy.FallbackAction;
     }
+
+    private FlowDecision EvaluateNewFlow(FlowContext context) =>
+        context.Key.Origin == FlowOriginKind.Forwarded ? _policy.EvaluateForwarded(context) : _policy.Evaluate(context);
 
     private static bool IsReverseOf(FlowKey stored, FlowKey observed) =>
         stored.AddressFamily == observed.AddressFamily &&

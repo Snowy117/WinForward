@@ -79,8 +79,11 @@ JSON, rejected on any unknown property. The top level is:
   `host` is an IPv4/IPv6 literal or DNS hostname. `username`/`password` are both optional or
   both present, and each UTF-8 encoding fits the RFC 1929 255-byte limit. Credentials are
   never logged; protect the configuration file's permissions.
-- `rules`: evaluated top to bottom; the first matching rule decides. Every match field is
-  optional; fields present together use AND semantics, alternatives inside one field use OR.
+- `rules`: evaluated top to bottom; the first matching rule decides. Host-originated traffic
+  considers every rule. New forwarded traffic considers only rules containing `adapterId` and/or
+  `adapterName`; if none match, it passes unchanged. The same split applies to packets that cannot
+  be classified as TCP/UDP flows. Every match field is optional; fields present together use AND
+  semantics, alternatives inside one field use OR.
   - `process`: exact executable filename (no slash) or normalized full path (contains `/` or
     `\`), case-insensitive. A value without a slash matches the filename; with a slash matches
     the full path. No substring/wildcard.
@@ -90,8 +93,8 @@ JSON, rejected on any unknown property. The top level is:
   - `remoteCidr`: CIDR prefixes. `remotePort`: decimal ports or inclusive ranges (`10000-20000`).
   - `action`: `proxy` (requires `proxyServer`), `pass`, or `block`.
   - Present match arrays must be non-empty; an omitted field imposes no condition.
-- `fallbackAction`: `pass` or `block` (required). A fallback proxy requires an explicit
-  catch-all `proxy` rule.
+- `fallbackAction`: `pass` or `block` (required) for host-originated traffic. A host fallback proxy
+  requires an explicit catch-all `proxy` rule. Forwarded traffic does not use this fallback.
 - `proxyUnavailableAction` / `processingFailureAction`: optional; both default to `block` and
   only `block` is accepted in the first release.
 
@@ -140,6 +143,10 @@ See `examples/`:
 
 - Transparent interception of host-originated flows is selected by owning process; forwarded
   traffic (e.g. from a Hyper-V guest) is selected by originating adapter. Forwarded traffic
-  has no host process owner, so process rules do not match it.
+  requires an adapter-qualified rule and otherwise passes, independently of unqualified rules and
+  `fallbackAction`. It has no host process owner, so process rules do not match it.
+- `Forwarded` is currently derived from NDIS receive direction. This includes both traffic Windows
+  may route across adapters and new inbound traffic addressed to a service on this host; both use
+  the adapter-qualified-only policy semantics.
 - The first release is a foreground console process; native Windows Service installation is
   deferred.

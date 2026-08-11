@@ -76,6 +76,63 @@ public sealed class FlowAndConfigurationTests
     }
 
     [Fact]
+    public void ForwardedPolicySkipsUnqualifiedRulesAndConfiguredFallback()
+    {
+        var key = FlowKey.Create(
+            Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000),
+            Endpoint.From(IPAddress.Parse("192.0.2.53"), 443),
+            TransportProtocol.Tcp,
+            FlowOriginKind.Forwarded,
+            new AdapterContext("id-b", "vEthernet B", 1));
+        var context = new FlowContext(key, null, null, "id-b", "vEthernet B", 443);
+        var policy = new PolicySnapshot(
+        [
+            new(new RuleMatcher(), new FlowDecision(FlowAction.Proxy, 0, "primary")),
+            new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Proxy, 1, "primary"))
+        ], FlowAction.Block);
+
+        var decision = policy.EvaluateForwarded(context);
+
+        Assert.Equal(FlowAction.Pass, decision.Action);
+        Assert.Null(decision.RuleIndex);
+        Assert.Equal(FlowAction.Proxy, policy.Evaluate(context).Action);
+    }
+
+    [Fact]
+    public void ForwardedPolicyPreservesQualifiedRuleOrderAndMatcherConditions()
+    {
+        Assert.True(IpPrefix.TryParse("192.0.2.0/24", out var network));
+        var key = FlowKey.Create(
+            Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000),
+            Endpoint.From(IPAddress.Parse("192.0.2.53"), 443),
+            TransportProtocol.Udp,
+            FlowOriginKind.Forwarded,
+            new AdapterContext("id-a", "vEthernet A", 1));
+        var context = new FlowContext(key, null, null, "id-a", "vEthernet A", 443);
+        var policy = new PolicySnapshot(
+        [
+            new(new RuleMatcher(), new FlowDecision(FlowAction.Block, 0, null)),
+            new(new RuleMatcher(
+                AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" },
+                Protocols: new HashSet<TransportProtocol> { TransportProtocol.Tcp }),
+                new FlowDecision(FlowAction.Block, 1, null)),
+            new(new RuleMatcher(
+                AdapterNames: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "vEthernet A" },
+                Protocols: new HashSet<TransportProtocol> { TransportProtocol.Udp },
+                AddressFamilies: new HashSet<AddressFamilyKind> { AddressFamilyKind.IPv4 },
+                RemoteNetworks: [network],
+                RemotePorts: [(443, 443)]),
+                new FlowDecision(FlowAction.Proxy, 2, "primary")),
+            new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Pass, 3, null))
+        ], FlowAction.Block);
+
+        var decision = policy.EvaluateForwarded(context);
+
+        Assert.Equal(FlowAction.Proxy, decision.Action);
+        Assert.Equal(2, decision.RuleIndex);
+    }
+
+    [Fact]
     public void ProcessSelectorMatchesFilenameOrNormalizedFullPathExactly()
     {
         var filenameContext = new FlowContext(

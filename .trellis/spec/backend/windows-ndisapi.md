@@ -165,3 +165,13 @@ Reverse-packet injection direction follows the flow origin:
 ### Native DLL resolution (fixed 2026-08-12)
 
 - `NdisApiNative` registers a `NativeLibrary.SetDllImportResolver` in its static constructor that loads `ndisapi.dll` only from `AppContext.BaseDirectory` — matching the README claim; there is no PATH/current-directory search. Other library names return zero and use default resolution. AOT-safe (no reflection).
+
+### Host vs forwarded policy domains (fixed 2026-08-11)
+
+- Policy eligibility is not the same as capture scope. Adapter-unqualified host rules may require all MSTCP-bound adapters to remain captured, so forwarded eligibility is enforced after self-traffic, TCP reverse handling, and existing-flow resolution, immediately before a genuinely new flow is claimed.
+- New `Host` flows evaluate the complete ordered rule list and use the configured `fallbackAction`.
+- New `Forwarded` flows evaluate only rules containing `adapterId` and/or `adapterName`, preserving original rule order and every additional matcher condition. If none match, they pass independently of adapter-unqualified rules and `fallbackAction`.
+- The same adapter-qualified-only/default-pass contract applies to forwarded packets that cannot be classified as TCP/UDP flows. Host non-flow behavior remains unchanged.
+- The implicit forwarded pass is cached in `FlowTable`; reverse and cross-adapter observations reuse it before origin-specific policy can run again. Flow-table capacity exhaustion still fails closed.
+- `Forwarded` is derived from NDIS `ON_RECEIVE`, not an authoritative Windows routing decision. It includes both traffic Windows may route across adapters and new inbound traffic addressed to a service on the host.
+- Regression coverage: `ForwardedPolicySkipsUnqualifiedRulesAndConfiguredFallback`, `DispatcherSeparatesForwardedAdaptersFromHostCatchAllPolicy`, `DispatcherCachesForwardedImplicitPassAcrossOriginsAndFailsClosedAtCapacity`, and forwarded non-flow tests.

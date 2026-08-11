@@ -9,6 +9,8 @@ public sealed record RuleMatcher(
     IReadOnlyList<IpPrefix>? RemoteNetworks = null,
     IReadOnlyList<(ushort Start, ushort End)>? RemotePorts = null)
 {
+    public bool IsAdapterQualified => AdapterIds is not null || AdapterNames is not null;
+
     public bool IsMatch(FlowContext context)
     {
         if (Processes is not null && !ProcessSelectorMatcher.IsMatch(Processes, context.ProcessName, context.ProcessPath)) return false;
@@ -44,5 +46,16 @@ public sealed class PolicySnapshot
         }
 
         return FlowDecision.Fallback(FallbackAction);
+    }
+
+    public FlowDecision EvaluateForwarded(FlowContext context)
+    {
+        for (var index = 0; index < Rules.Count; index++)
+        {
+            var rule = Rules[index];
+            if (rule.Matcher.IsAdapterQualified && rule.Matcher.IsMatch(context)) return rule.Decision with { RuleIndex = index };
+        }
+
+        return FlowDecision.Fallback(FlowAction.Pass);
     }
 }

@@ -1,0 +1,3 @@
+{"file":".trellis/spec/backend/windows-ndisapi.md","reason":"Preserve the stable adapter identity and NDISAPI correlation contract while separating forwarded eligibility."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"The change spans core policy, runtime dispatch, capture semantics, tests, and documentation."}
+{"file":".trellis/tasks/08-11-separate-interface-forwarding-routing/research/current-routing-behavior.md","reason":"Provides verified current behavior, code anchors, constraints, and selected product decisions."}

@@ -268,12 +268,84 @@ public sealed class CapturePipelineTests
         Assert.Equal(1, attributor.Calls);
         Assert.Equal(1, executor.PassCount);
 
-        var forwardedKey = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Forwarded);
+        var forwardedKey = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53001), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Forwarded);
         var forwardedPacket = new CapturedFlowPacket(new PacketLease(new byte[] { 2 }), FlowContext(forwardedKey));
         await dispatcher.DispatchAsync(forwardedPacket, CancellationToken.None);
-        // Forwarded traffic has no host owner; the process rule cannot match, so it falls back to pass.
         Assert.Equal(1, attributor.Calls);
         Assert.Equal(2, executor.PassCount);
+    }
+
+    [Fact]
+    public async Task DispatcherSeparatesForwardedAdaptersFromHostCatchAllPolicy()
+    {
+        var server = new Socks5Server("primary", "127.0.0.1", 1080, null, null);
+        var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase) { [server.Name] = server };
+        var config = new ValidatedConfiguration(servers, new PolicySnapshot(
+        [
+            new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Proxy, 0, server.Name)),
+            new(new RuleMatcher(), new FlowDecision(FlowAction.Proxy, 1, server.Name))
+        ], FlowAction.Block));
+        var executor = new FakeExecutor();
+        var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor);
+
+        var forwardedB = FlowPacket(53000, FlowOriginKind.Forwarded, "id-b", "vEthernet B");
+        var forwardedA = FlowPacket(53001, FlowOriginKind.Forwarded, "id-a", "vEthernet A");
+        var host = FlowPacket(53002, FlowOriginKind.Host, "id-b", "Ethernet");
+
+        await dispatcher.DispatchAsync(forwardedB, CancellationToken.None);
+        await dispatcher.DispatchAsync(forwardedA, CancellationToken.None);
+        await dispatcher.DispatchAsync(host, CancellationToken.None);
+
+        Assert.Equal(PacketDisposition.Pass, forwardedB.Lease.Disposition);
+        Assert.Equal(PacketDisposition.ProxyConsumed, forwardedA.Lease.Disposition);
+        Assert.Equal(PacketDisposition.ProxyConsumed, host.Lease.Disposition);
+        Assert.Equal(1, executor.PassCount);
+        Assert.Equal(2, executor.ProxyCount);
+        Assert.Equal(0, executor.BlockCount);
+    }
+
+    [Fact]
+    public async Task DispatcherReusesForwardedDecisionAcrossAdapterObservations()
+    {
+        var config = CreateConfig(
+            new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }),
+            FlowAction.Block,
+            ruleAction: FlowAction.Block);
+        var executor = new FakeExecutor();
+        var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor);
+        var first = FlowPacket(53000, FlowOriginKind.Forwarded, "id-a", "vEthernet A");
+        var second = FlowPacket(53000, FlowOriginKind.Forwarded, "id-b", "vEthernet B");
+
+        await dispatcher.DispatchAsync(first, CancellationToken.None);
+        await dispatcher.DispatchAsync(second, CancellationToken.None);
+
+        Assert.Equal(PacketDisposition.Block, first.Lease.Disposition);
+        Assert.Equal(PacketDisposition.Block, second.Lease.Disposition);
+        Assert.Equal(2, executor.BlockCount);
+        Assert.Equal(0, executor.PassCount);
+    }
+
+    [Fact]
+    public async Task DispatcherCachesForwardedImplicitPassAcrossOriginsAndFailsClosedAtCapacity()
+    {
+        var config = new ValidatedConfiguration(
+            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new PolicySnapshot([], FlowAction.Block));
+        var executor = new FakeExecutor();
+        var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor, flowCapacity: 1);
+        var first = FlowPacket(53000, FlowOriginKind.Forwarded, "id-b", "vEthernet B");
+        var observedAsHost = FlowPacket(53000, FlowOriginKind.Host, "id-a", "Ethernet A");
+        var second = FlowPacket(53001, FlowOriginKind.Forwarded, "id-b", "vEthernet B");
+
+        await dispatcher.DispatchAsync(first, CancellationToken.None);
+        await dispatcher.DispatchAsync(observedAsHost, CancellationToken.None);
+        await dispatcher.DispatchAsync(second, CancellationToken.None);
+
+        Assert.Equal(PacketDisposition.Pass, first.Lease.Disposition);
+        Assert.Equal(PacketDisposition.Pass, observedAsHost.Lease.Disposition);
+        Assert.Equal(PacketDisposition.Block, second.Lease.Disposition);
+        Assert.Equal(2, executor.PassCount);
+        Assert.Equal(1, executor.BlockCount);
     }
 
     [Fact]
@@ -295,18 +367,69 @@ public sealed class CapturePipelineTests
     }
 
     [Fact]
-    public async Task DispatcherNonFlowEvaluatesAdapterRuleOrFallback()
+    public async Task DispatcherForwardedNonFlowUsesQualifiedRulesAndOtherwisePasses()
     {
-        var adapter = new WindowsAdapter("id-a", "vEthernet 1", "b", 2, 1);
-        var config = CreateConfig(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), FlowAction.Pass, ruleAction: FlowAction.Block);
+        var config = new ValidatedConfiguration(
+            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new PolicySnapshot(
+            [
+                new(new RuleMatcher(), new FlowDecision(FlowAction.Block, 0, null)),
+                new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Block, 1, null))
+            ], FlowAction.Block));
         var executor = new FakeExecutor();
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor);
+        var adapterA = new WindowsAdapter("id-a", "vEthernet A", "a", 1, 1);
+        var adapterB = new WindowsAdapter("id-b", "vEthernet B", "b", 2, 1);
+        var selected = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), PacketFlowClassifier.ClassifyNonFlow(adapterA, isOnSend: false));
+        var unselected = new CapturedFlowPacket(new PacketLease(new byte[] { 2 }), PacketFlowClassifier.ClassifyNonFlow(adapterB, isOnSend: false));
 
-        var nonFlow = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), PacketFlowClassifier.ClassifyNonFlow(adapter, isOnSend: false));
-        await dispatcher.DispatchNonFlowAsync(nonFlow, CancellationToken.None);
+        await dispatcher.DispatchNonFlowAsync(selected, CancellationToken.None);
+        await dispatcher.DispatchNonFlowAsync(unselected, CancellationToken.None);
 
         Assert.Equal(1, executor.BlockCount);
-        Assert.Equal(PacketDisposition.Block, nonFlow.Lease.Disposition);
+        Assert.Equal(1, executor.PassCount);
+        Assert.Equal(PacketDisposition.Block, selected.Lease.Disposition);
+        Assert.Equal(PacketDisposition.Pass, unselected.Lease.Disposition);
+    }
+
+    [Fact]
+    public async Task DispatcherHostNonFlowKeepsConfiguredFallback()
+    {
+        var config = new ValidatedConfiguration(
+            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new PolicySnapshot([], FlowAction.Block));
+        var executor = new FakeExecutor();
+        var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor);
+        var adapter = new WindowsAdapter("id-a", "Ethernet", "a", 1, 1);
+        var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), PacketFlowClassifier.ClassifyNonFlow(adapter, isOnSend: true));
+
+        await dispatcher.DispatchNonFlowAsync(packet, CancellationToken.None);
+
+        Assert.Equal(1, executor.BlockCount);
+        Assert.Equal(PacketDisposition.Block, packet.Lease.Disposition);
+    }
+
+    [Fact]
+    public async Task DispatcherHostNonFlowKeepsMeaningfulRuleOrder()
+    {
+        var config = new ValidatedConfiguration(
+            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new PolicySnapshot(
+            [
+                new(new RuleMatcher(Protocols: new HashSet<TransportProtocol> { TransportProtocol.Tcp }), new FlowDecision(FlowAction.Block, 0, null)),
+                new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Pass, 1, null)),
+                new(new RuleMatcher(), new FlowDecision(FlowAction.Block, 2, null))
+            ], FlowAction.Block));
+        var executor = new FakeExecutor();
+        var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor);
+        var adapter = new WindowsAdapter("id-a", "Ethernet", "a", 1, 1);
+        var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), PacketFlowClassifier.ClassifyNonFlow(adapter, isOnSend: true));
+
+        await dispatcher.DispatchNonFlowAsync(packet, CancellationToken.None);
+
+        Assert.Equal(1, executor.PassCount);
+        Assert.Equal(0, executor.BlockCount);
+        Assert.Equal(PacketDisposition.Pass, packet.Lease.Disposition);
     }
 
     [Fact]
@@ -492,6 +615,19 @@ public sealed class CapturePipelineTests
     }
 
     private static FlowContext FlowContext(FlowKey key) => new(key, null, null, null, null, key.Remote.Port);
+
+    private static CapturedFlowPacket FlowPacket(ushort localPort, FlowOriginKind origin, string adapterId, string adapterName)
+    {
+        var adapter = new AdapterContext(adapterId, adapterName, 1);
+        var key = FlowKey.Create(
+            Endpoint.From(IPAddress.Parse("192.0.2.10"), localPort),
+            Endpoint.From(IPAddress.Parse("192.0.2.53"), 443),
+            TransportProtocol.Tcp,
+            origin,
+            adapter);
+        var context = new FlowContext(key, null, null, adapterId, adapterName, key.Remote.Port);
+        return new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), context);
+    }
 
     private sealed class FakeGuard : ISelfTrafficGuard
     {

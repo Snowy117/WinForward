@@ -67,17 +67,47 @@ public sealed class FlowDispatcherTests
     }
 
     [Fact]
-    public async Task SelfTrafficIsPassedBeforeCatchAllPolicy()
+    public async Task SelfTrafficIsPassedBeforeReverseHookAndCatchAllPolicy()
     {
         var config = CreateConfig();
         var executor = new FakeExecutor();
-        var dispatcher = new FlowDispatcher(config, new FakeGuard { Owned = true }, executor);
-        var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), Context(CreateKey()));
+        var reverseCalls = 0;
+        var dispatcher = new FlowDispatcher(config, new FakeGuard { Owned = true }, executor, reverseHandler: (packet, ct) =>
+        {
+            reverseCalls++;
+            return ValueTask.FromResult(TcpRedirectOutcome.Blocked);
+        });
+        var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), Context(CreateKey(TransportProtocol.Tcp)));
 
         await dispatcher.DispatchAsync(packet, CancellationToken.None);
 
+        Assert.Equal(0, reverseCalls);
         Assert.Equal(1, executor.PassCount);
         Assert.Equal(0, executor.ProxyCount);
+    }
+
+    [Fact]
+    public async Task ReverseHookRunsBeforeExistingFlowResolution()
+    {
+        var config = CreateConfig();
+        var executor = new FakeExecutor();
+        var reverseCalls = 0;
+        var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor, reverseHandler: (packet, ct) =>
+        {
+            reverseCalls++;
+            return ValueTask.FromResult(reverseCalls == 1 ? TcpRedirectOutcome.NotRelevant : TcpRedirectOutcome.Injected);
+        });
+        var key = CreateKey(TransportProtocol.Tcp);
+        var first = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), Context(key));
+        var reverse = new CapturedFlowPacket(new PacketLease(new byte[] { 2 }), Context(key.Reverse()));
+
+        await dispatcher.DispatchAsync(first, CancellationToken.None);
+        await dispatcher.DispatchAsync(reverse, CancellationToken.None);
+
+        Assert.Equal(2, reverseCalls);
+        Assert.Equal(1, executor.ProxyCount);
+        Assert.Equal(PacketDisposition.ProxyConsumed, first.Lease.Disposition);
+        Assert.Equal(PacketDisposition.ProxyConsumed, reverse.Lease.Disposition);
     }
 
     [Fact]
@@ -115,7 +145,7 @@ public sealed class FlowDispatcherTests
         return new ValidatedConfiguration(servers, new PolicySnapshot(rules, FlowAction.Block));
     }
 
-    private static FlowKey CreateKey() => FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
+    private static FlowKey CreateKey(TransportProtocol protocol = TransportProtocol.Udp) => FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), protocol, FlowOriginKind.Host);
     private static FlowContext Context(FlowKey key) => new(key, "dns.exe", null, null, null, key.Remote.Port);
 
     private sealed class FakeGuard : ISelfTrafficGuard { public bool Owned { get; init; } public bool IsOwned(FlowContext context) => Owned; }
