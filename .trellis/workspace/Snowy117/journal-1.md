@@ -145,3 +145,24 @@ Audited Core domain, policy, selectors, flow keys, and configuration loading. Fi
 ### Status
 
 [OK] **Completed**
+
+
+## Session 3: Separate forwarded adapter routing
+
+**Date**: 2026-08-11
+**Task**: Separate forwarded adapter routing
+**Branch**: `master`
+
+### Summary
+
+Separated Host and Forwarded policy domains: forwarded traffic now requires adapter-qualified rules and otherwise passes, with flow/non-flow regression coverage, documentation, and backend policy contract updates. Release build and all 240 tests passed.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b90fce7` | (see git log) |
+
+### Status
+
+[OK] **Completed**
