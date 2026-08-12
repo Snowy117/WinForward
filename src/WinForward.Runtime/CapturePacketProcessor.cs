@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Protocols;
@@ -18,11 +19,14 @@ namespace WinForward.Runtime;
 public sealed class CapturePacketProcessor
 {
     private readonly FlowDispatcher _dispatcher;
+    private readonly IRuntimeLogger _logger;
+    private long _nextPacketSequence;
 
-    public CapturePacketProcessor(FlowDispatcher dispatcher)
+    public CapturePacketProcessor(FlowDispatcher dispatcher, IRuntimeLogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
         _dispatcher = dispatcher;
+        _logger = logger ?? NullRuntimeLogger.Instance;
     }
 
     public async ValueTask ProcessAsync(NdisCapturedPacket packet, WindowsAdapter adapter, CancellationToken cancellationToken)
@@ -31,25 +35,44 @@ public sealed class CapturePacketProcessor
         var lease = new PacketLease(frame);
         var metadata = new PacketCaptureMetadata(packet.DeviceFlags, packet.AdapterHandle, packet.Flags);
         var isOnSend = (packet.DeviceFlags & NdisApiAbi.PacketFlagOnSend) != 0;
+        var sequence = Interlocked.Increment(ref _nextPacketSequence);
+        if (_logger.IsEnabled(RuntimeLogLevel.Trace))
+        {
+            _logger.Event(RuntimeLogLevel.Trace, "packet.captured",
+                new("packet", sequence), new("bytes", frame.Length), new("adapter", adapter.StableId),
+                new("adapterName", adapter.FriendlyName), new("adapterHandle", adapter.RuntimeHandle),
+                new("direction", isOnSend ? "send" : "receive"), new("flags", packet.Flags));
+        }
         try
         {
             if (!IpTcpUdpPacket.TryParse(frame, out var view))
             {
                 var nonFlowContext = PacketFlowClassifier.ClassifyNonFlow(adapter, isOnSend);
-                await _dispatcher.DispatchNonFlowAsync(new CapturedFlowPacket(lease, nonFlowContext, metadata), cancellationToken).ConfigureAwait(false);
+                await _dispatcher.DispatchNonFlowAsync(new CapturedFlowPacket(lease, nonFlowContext, metadata, sequence), cancellationToken).ConfigureAwait(false);
                 return;
             }
 
             var flowContext = PacketFlowClassifier.ClassifyFlow(view, adapter, isOnSend);
-            await _dispatcher.DispatchAsync(new CapturedFlowPacket(lease, flowContext, metadata), cancellationToken).ConfigureAwait(false);
+            await _dispatcher.DispatchAsync(new CapturedFlowPacket(lease, flowContext, metadata, sequence), cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            if (_logger.IsEnabled(RuntimeLogLevel.Trace))
+            {
+                _logger.Event(RuntimeLogLevel.Trace, "packet.failed",
+                    new("packet", sequence), new("bytes", frame.Length), new("reason", "canceled"));
+            }
             lease.Dispose();
             throw;
         }
-        catch
+        catch (Exception exception)
         {
+            if (_logger.IsEnabled(RuntimeLogLevel.Trace))
+            {
+                _logger.Event(RuntimeLogLevel.Trace, "packet.failed",
+                    new("packet", sequence), new("bytes", frame.Length),
+                    new("reason", exception.GetType().Name));
+            }
             lease.Dispose();
             throw;
         }

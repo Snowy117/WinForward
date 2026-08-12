@@ -634,6 +634,96 @@ public sealed class FlowAndConfigurationTests
     }
 
     [Fact]
+    public void ConfigurationDefaultsLogLevelToInfo()
+    {
+        const string json = """
+        {
+          "socks5Servers": [],
+          "rules": [],
+          "fallbackAction": "pass"
+        }
+        """;
+
+        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
+        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Equal(RuntimeLogLevel.Info, configuration!.LogLevel);
+    }
+
+    [Theory]
+    [InlineData("error", RuntimeLogLevel.Error)]
+    [InlineData("WARN", RuntimeLogLevel.Warn)]
+    [InlineData(" Info ", RuntimeLogLevel.Info)]
+    [InlineData("DeBuG", RuntimeLogLevel.Debug)]
+    [InlineData(" trace ", RuntimeLogLevel.Trace)]
+    public void ConfigurationNormalizesLogLevel(string value, RuntimeLogLevel expected)
+    {
+        var json = $$"""
+        {
+          "logLevel": "{{value}}",
+          "socks5Servers": [],
+          "rules": [],
+          "fallbackAction": "pass"
+        }
+        """;
+
+        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
+        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Equal(expected, configuration!.LogLevel);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("\"\"")]
+    [InlineData("\"verbose\"")]
+    public void ConfigurationRejectsInvalidLogLevel(string value)
+    {
+        var json = $$"""
+        {
+          "logLevel": {{value}},
+          "socks5Servers": [],
+          "rules": [],
+          "fallbackAction": "pass"
+        }
+        """;
+
+        AssertInvalid(json, "logLevel");
+    }
+
+    [Fact]
+    public void ConfigurationRejectsWrongLogLevelJsonTypeAtFieldPath()
+    {
+        const string json = """
+        {
+          "logLevel": 3,
+          "socks5Servers": [],
+          "rules": [],
+          "fallbackAction": "pass"
+        }
+        """;
+
+        Assert.False(ConfigurationLoader.TryParse(json, out _, out var diagnostics));
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Path.Contains("logLevel", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("browser.exe", false)]
+    [InlineData("C:\\\\Apps\\\\browser.exe", true)]
+    public void ConfigurationComputesProcessPathDisclosureNeed(string selector, bool expected)
+    {
+        var json = $$"""
+        {
+          "socks5Servers": [],
+          "rules": [{ "process": ["{{selector}}"], "action": "pass" }],
+          "fallbackAction": "pass"
+        }
+        """;
+
+        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
+        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Equal(expected, configuration!.IncludeProcessPathInLogs);
+    }
+
+    [Fact]
     public void ConfigurationRejectsUnknownJsonFields()
     {
         const string json = """

@@ -21,11 +21,12 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
     private readonly int _capacity;
     private readonly TimeProvider _timeProvider;
     private readonly Func<ValueTask>? _beforeExpiryRecheck;
+    private readonly IRuntimeLogger _logger;
     private Task? _disposeTask;
     private bool _disposed;
 
-    public UdpProxyCoordinator(IUdpProxyTransportFactory transportFactory, IUdpResponseSink responseSink, int capacity = 16_384)
-        : this(transportFactory, responseSink, capacity, TimeProvider.System, null)
+    public UdpProxyCoordinator(IUdpProxyTransportFactory transportFactory, IUdpResponseSink responseSink, int capacity = 16_384, IRuntimeLogger? logger = null)
+        : this(transportFactory, responseSink, capacity, TimeProvider.System, null, logger)
     {
     }
 
@@ -34,7 +35,8 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
         IUdpResponseSink responseSink,
         int capacity,
         TimeProvider timeProvider,
-        Func<ValueTask>? beforeExpiryRecheck)
+        Func<ValueTask>? beforeExpiryRecheck,
+        IRuntimeLogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(transportFactory);
         ArgumentNullException.ThrowIfNull(responseSink);
@@ -46,9 +48,10 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
         _capacity = capacity;
         _timeProvider = timeProvider;
         _beforeExpiryRecheck = beforeExpiryRecheck;
+        _logger = logger ?? NullRuntimeLogger.Instance;
     }
 
-    public async ValueTask<bool> TrySendAsync(FlowKey flow, Socks5Server server, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+    public async ValueTask<bool> TrySendAsync(FlowKey flow, Socks5Server server, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken, long packetSequence = 0, long flowGeneration = 0)
     {
         if (flow.Protocol != TransportProtocol.Udp) throw new ArgumentException("UDP coordinator accepts only UDP flow keys.", nameof(flow));
         Task<UdpProxySession> sessionTask;
@@ -58,9 +61,13 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (!_sessions.TryGetValue(flow, out sessionTask!))
             {
-                if (_sessions.Count >= _capacity) return false;
+                if (_sessions.Count >= _capacity)
+                {
+                    LogTrace("udp.session.rejected", flow, new RuntimeLogField("reason", "capacity"));
+                    return false;
+                }
                 var registered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                sessionTask = CreateSessionAsync(flow, server, _shutdown.Token, registered.Task);
+                sessionTask = CreateSessionAsync(flow, server, flowGeneration, _shutdown.Token, registered.Task);
                 _sessions.Add(flow, sessionTask);
                 registered.TrySetResult();
                 trackSetupFailure = true;
@@ -85,6 +92,7 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
         try
         {
             await session.SendAsync(flow.Remote, payload, cancellationToken).ConfigureAwait(false);
+            LogTrace("udp.packet.sent", flow, new RuntimeLogField("packet", packetSequence == 0 ? null : packetSequence), new RuntimeLogField("flow", session.FlowGeneration == 0 ? null : session.FlowGeneration), new RuntimeLogField("bytes", payload.Length), new RuntimeLogField("udpAssociation", session.Association.Generation));
             return true;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested && !_shutdown.IsCancellationRequested)
@@ -159,7 +167,7 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
         _shutdown.Dispose();
     }
 
-    private async Task<UdpProxySession> CreateSessionAsync(FlowKey flow, Socks5Server server, CancellationToken cancellationToken, Task registered)
+    private async Task<UdpProxySession> CreateSessionAsync(FlowKey flow, Socks5Server server, long flowGeneration, CancellationToken cancellationToken, Task registered)
     {
         IUdpProxyTransport? transport = null;
         UdpAssociation? association = null;
@@ -182,9 +190,10 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
                 throw new IOException("UDP flow association was already owned by another session; blocking the flow.");
             }
 
-            var session = new UdpProxySession(flow, association, transport, _responseSink, cancellationToken, _timeProvider, OnSessionActivity);
+            var session = new UdpProxySession(flow, flowGeneration, association, transport, _responseSink, cancellationToken, _timeProvider, OnSessionActivity, _logger);
             transport = null;
             session.Start(RemoveReceiveFailedSessionAsync, registered);
+            LogDebug("udp.session.created", flow, flowGeneration, association, server.Name);
             return session;
         }
         catch
@@ -233,6 +242,7 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
                     continue;
                 }
                 await session.DisposeAsync().ConfigureAwait(false);
+                LogDebug("udp.session.expired", session.Flow, session.FlowGeneration, session.Association, null);
                 removed++;
             }
             catch (Exception) when (task.IsFaulted || task.IsCanceled)
@@ -322,18 +332,41 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
         }
         if (!ownsSession) return;
         await session.DisposeAsync().ConfigureAwait(false);
+        LogDebug("udp.session.closed", session.Flow, session.FlowGeneration, session.Association, null);
+    }
+
+    private void LogDebug(string eventName, FlowKey flow, long flowGeneration, UdpAssociation association, string? serverName)
+    {
+        if (!_logger.IsEnabled(RuntimeLogLevel.Debug)) return;
+        _logger.Event(RuntimeLogLevel.Debug, eventName,
+            new("flow", flowGeneration == 0 ? null : flowGeneration),
+            new("udpAssociation", association.Generation), new("protocol", flow.Protocol),
+            new("source", flow.Local), new("destination", flow.Remote), new("proxy", serverName));
+    }
+
+    private void LogTrace(string eventName, FlowKey flow, params RuntimeLogField[] additional)
+    {
+        if (!_logger.IsEnabled(RuntimeLogLevel.Trace)) return;
+        var fields = new RuntimeLogField[additional.Length + 3];
+        fields[0] = new("protocol", flow.Protocol);
+        fields[1] = new("source", flow.Local);
+        fields[2] = new("destination", flow.Remote);
+        additional.CopyTo(fields, 3);
+        _logger.Event(RuntimeLogLevel.Trace, eventName, fields);
     }
 }
 
 internal sealed class UdpProxySession : IAsyncDisposable
 {
     private readonly FlowKey _flow;
+    private readonly long _flowGeneration;
     private readonly UdpAssociation _association;
     private readonly IUdpProxyTransport _transport;
     private readonly IUdpResponseSink _sink;
     private readonly CancellationToken _shutdown;
     private readonly TimeProvider _timeProvider;
     private readonly Action<UdpAssociation, DateTimeOffset> _activityObserver;
+    private readonly IRuntimeLogger _logger;
     private readonly Lock _activityGate = new();
     private readonly Lock _disposeGate = new();
     private Task? _receiveLoop;
@@ -345,24 +378,29 @@ internal sealed class UdpProxySession : IAsyncDisposable
 
     public UdpProxySession(
         FlowKey flow,
+        long flowGeneration,
         UdpAssociation association,
         IUdpProxyTransport transport,
         IUdpResponseSink sink,
         CancellationToken shutdown,
         TimeProvider timeProvider,
-        Action<UdpAssociation, DateTimeOffset> activityObserver)
+        Action<UdpAssociation, DateTimeOffset> activityObserver,
+        IRuntimeLogger logger)
     {
         _flow = flow;
+        _flowGeneration = flowGeneration;
         _association = association;
         _transport = transport;
         _sink = sink;
         _shutdown = shutdown;
         _timeProvider = timeProvider;
         _activityObserver = activityObserver;
+        _logger = logger;
         _lastActivityTicks = timeProvider.GetUtcNow().UtcTicks;
     }
 
     public FlowKey Flow => _flow;
+    public long FlowGeneration => _flowGeneration;
     public UdpAssociation Association => _association;
     public DateTimeOffset LastActivityUtc => new(Interlocked.Read(ref _lastActivityTicks), TimeSpan.Zero);
 
@@ -449,6 +487,13 @@ internal sealed class UdpProxySession : IAsyncDisposable
                 if (response.DestinationAddress is null) continue;
                 var source = Endpoint.From(response.DestinationAddress, response.DestinationPort);
                 await _sink.InjectAsync(_flow, source, response.Payload, _shutdown).ConfigureAwait(false);
+                if (_logger.IsEnabled(RuntimeLogLevel.Trace))
+                {
+                    _logger.Event(RuntimeLogLevel.Trace, "udp.packet.received",
+                        new("flow", _flowGeneration == 0 ? null : _flowGeneration),
+                        new("udpAssociation", _association.Generation), new("source", source),
+                        new("destination", _flow.Local), new("bytes", response.Payload.Length));
+                }
             }
         }
         catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)

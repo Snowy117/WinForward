@@ -114,9 +114,10 @@ internal static class Program
     [SupportedOSPlatform("windows")]
     private static async Task<int> RunCaptureAsync(ValidatedConfiguration configuration)
     {
-        var logger = new ConsoleRuntimeLogger();
+        var logger = new ConsoleRuntimeLogger(configuration.LogLevel);
         try
         {
+            logger.Info($"Runtime log level: {configuration.LogLevel.ToString().ToLowerInvariant()}.");
             return await RunInterceptionAsync(configuration, logger).ConfigureAwait(false);
         }
         catch (DllNotFoundException)
@@ -235,9 +236,10 @@ internal static class Program
                 var executor = new NdisPacketActionExecutor(reinjector, logger, tcpCoordinator, udpCoordinator);
                 var dispatcher = new FlowDispatcher(
                     configuration, selfTraffic, executor, new WindowsProcessAttributor(),
-                    reverseHandler: tcpCoordinator.HandleReverseIfApplicableAsync);
-                var captureLoop = new MultiAdapterCaptureLoop(driver, scope, new CapturePacketProcessor(dispatcher));
-                var idleExpirySweeper = new IdleExpirySweeper(dispatcher, tcpCoordinator, udpCoordinator);
+                    reverseHandler: tcpCoordinator.HandleReverseIfApplicableAsync,
+                    logger: logger);
+                var captureLoop = new MultiAdapterCaptureLoop(driver, scope, new CapturePacketProcessor(dispatcher, logger));
+                var idleExpirySweeper = new IdleExpirySweeper(dispatcher, tcpCoordinator, udpCoordinator, logger: logger);
                 idleExpirySweeper.Start();
                 return new CoordinatorShutdownCaptureLoop(captureLoop, idleExpirySweeper, udpCoordinator, tcpCoordinator);
             }
@@ -320,7 +322,8 @@ internal static class Program
                 localMac,
                 adaptersByStableId: adapterTargets,
                 maximumFrameSize: NdisApiAbi.MaximumEthernetFrame,
-                logger: logger));
+                logger: logger),
+            logger: logger);
     }
 
     private static int Validate(string[] args)
@@ -354,13 +357,6 @@ internal static class Program
     private static void PrintDiagnostics(IEnumerable<ConfigDiagnostic> diagnostics)
     {
         foreach (var diagnostic in diagnostics) Console.Error.WriteLine(diagnostic);
-    }
-
-    private sealed class ConsoleRuntimeLogger : IRuntimeLogger
-    {
-        public void Info(string message) => Console.Error.WriteLine($"[info] {message}");
-        public void Warn(string message) => Console.Error.WriteLine($"[warn] {message}");
-        public void Error(string message) => Console.Error.WriteLine($"[error] {message}");
     }
 
     /// <summary>

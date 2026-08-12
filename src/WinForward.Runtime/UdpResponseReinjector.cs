@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Protocols;
@@ -74,6 +75,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         {
             if (originalFlow.OriginAdapterId is null || !_byStableId.TryGetValue(originalFlow.OriginAdapterId, out var originAdapter))
             {
+                LogTrace("udp.response.dropped", originalFlow, new RuntimeLogField("reason", "missingOriginAdapter"));
                 LogMissingOriginAdapter();
                 return ValueTask.CompletedTask;
             }
@@ -92,6 +94,8 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
                 out var frame,
                 _maximumFrameSize))
         {
+            LogTrace("udp.response.dropped", originalFlow,
+                new RuntimeLogField("reason", "frameBuild"), new RuntimeLogField("bytes", payload.Length));
             _logger.Warn("UDP response frame build failed; dropping the response (fail-closed).");
             return ValueTask.CompletedTask;
         }
@@ -109,7 +113,22 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         {
             _reinjector.SendToAdapter(target.Handle, buffer);
         }
+        LogTrace("udp.response.reinjected", originalFlow,
+            new RuntimeLogField("target", towardMstcp ? "mstcp" : "adapter"),
+            new RuntimeLogField("bytes", payload.Length));
         return ValueTask.CompletedTask;
+    }
+
+    private void LogTrace(string eventName, FlowKey flow, params RuntimeLogField[] fields)
+    {
+        if (!_logger.IsEnabled(RuntimeLogLevel.Trace)) return;
+        var allFields = new RuntimeLogField[fields.Length + 4];
+        allFields[0] = new("protocol", flow.Protocol);
+        allFields[1] = new("origin", flow.Origin);
+        allFields[2] = new("source", flow.Local);
+        allFields[3] = new("destination", flow.Remote);
+        fields.CopyTo(allFields, 4);
+        _logger.Event(RuntimeLogLevel.Trace, eventName, allFields);
     }
 
     private void LogMissingOriginAdapter()

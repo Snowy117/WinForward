@@ -69,6 +69,7 @@ JSON, rejected on any unknown property. The top level is:
     },
     { "adapterName": ["vEthernet (MyVM)"], "action": "pass" }
   ],
+  "logLevel": "info",
   "fallbackAction": "pass",
   "proxyUnavailableAction": "block",
   "processingFailureAction": "block"
@@ -97,6 +98,15 @@ JSON, rejected on any unknown property. The top level is:
   requires an explicit catch-all `proxy` rule. Forwarded traffic does not use this fallback.
 - `proxyUnavailableAction` / `processingFailureAction`: optional; both default to `block` and
   only `block` is accepted in the first release.
+- `logLevel`: optional runtime verbosity: `error`, `warn`, `info`, `debug`, or `trace`. Values are
+  case-insensitive and surrounding whitespace is ignored; omitted `logLevel` defaults to `info`.
+  `info` retains concise lifecycle output, `debug` adds flow and proxy lifecycle events, and `trace`
+  adds per-packet classification, policy, proxy, reinjection, drop, and terminal events. Events are
+  single-line records written to stderr, such as `[trace] packet.completed packet=42 flow=7
+  disposition=pass`. Trace can be high volume and is intended for temporary diagnosis. Diagnostic
+  records contain metadata and byte counts only: credentials, authentication traffic, payloads, and
+  raw packet bytes are never logged. Process names are included when attribution succeeds; full
+  process paths are included only when a rule uses a path-based process selector.
 
 The configuration is validated fully before interception starts and is kept immutable for the
 lifetime of a run. Configuration hot reload is not supported.

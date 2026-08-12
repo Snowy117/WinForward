@@ -17,6 +17,7 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
     private readonly TimeSpan _redirectIdleTimeout;
     private readonly TimeSpan _relayIdleTimeout;
     private readonly CancellationTokenSource _shutdown = new();
+    private readonly IRuntimeLogger _logger;
     private Task? _loop;
 
     public IdleExpirySweeper(
@@ -26,7 +27,8 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
         TimeSpan? interval = null,
         TimeSpan? flowIdleTimeout = null,
         TimeSpan? redirectIdleTimeout = null,
-        TimeSpan? relayIdleTimeout = null)
+        TimeSpan? relayIdleTimeout = null,
+        IRuntimeLogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
         _dispatcher = dispatcher;
@@ -36,6 +38,7 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
         _flowIdleTimeout = flowIdleTimeout ?? TimeSpan.FromMinutes(5);
         _redirectIdleTimeout = redirectIdleTimeout ?? TimeSpan.FromMinutes(5);
         _relayIdleTimeout = relayIdleTimeout ?? TimeSpan.FromMinutes(2);
+        _logger = logger ?? NullRuntimeLogger.Instance;
     }
 
     public void Start()
@@ -54,9 +57,14 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
                 var now = DateTimeOffset.UtcNow;
                 try
                 {
-                    _dispatcher.RemoveExpiredFlows(now, _flowIdleTimeout);
-                    if (_tcp is not null) await _tcp.RemoveExpiredAsync(now, _redirectIdleTimeout).ConfigureAwait(false);
-                    if (_udp is not null) await _udp.RemoveExpiredAsync(now, _relayIdleTimeout).ConfigureAwait(false);
+                    var flowCount = _dispatcher.RemoveExpiredFlows(now, _flowIdleTimeout);
+                    var tcpCount = _tcp is null ? 0 : await _tcp.RemoveExpiredAsync(now, _redirectIdleTimeout).ConfigureAwait(false);
+                    var udpCount = _udp is null ? 0 : await _udp.RemoveExpiredAsync(now, _relayIdleTimeout).ConfigureAwait(false);
+                    if (_logger.IsEnabled(WinForward.Configuration.RuntimeLogLevel.Debug) && (flowCount != 0 || tcpCount != 0 || udpCount != 0))
+                    {
+                        _logger.Event(WinForward.Configuration.RuntimeLogLevel.Debug, "runtime.expired",
+                            new("flows", flowCount), new("tcpRedirects", tcpCount), new("udpSessions", udpCount));
+                    }
                 }
                 catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
                 {

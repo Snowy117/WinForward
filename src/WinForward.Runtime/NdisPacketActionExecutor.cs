@@ -40,12 +40,14 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         buffer.SetFrame(packet.Lease.Frame.Span, metadata.DeviceFlags, metadata.AdapterHandle, metadata.Flags);
         if (metadata.IsOnSend) _reinjector.SendToAdapter(metadata.AdapterHandle, buffer);
         else _reinjector.SendToMstcp(metadata.AdapterHandle, buffer);
+        LogPacket("packet.reinjected", packet, new RuntimeLogField("target", metadata.IsOnSend ? "adapter" : "mstcp"));
         return ValueTask.CompletedTask;
     }
 
     public ValueTask BlockAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
         // Consumed: the lease is already completed by the dispatcher; no reinjection occurs.
+        LogPacket("packet.dropped", packet, new RuntimeLogField("reason", "policy"));
         return ValueTask.CompletedTask;
     }
 
@@ -59,15 +61,17 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         {
             if (!IpUdpPacket.TryParse(packet.Lease.Frame.Span, out var udpView))
             {
+                LogPacket("udp.packet.rejected", packet, new RuntimeLogField("reason", "parse"));
                 LogProxyUnavailable();
                 return;
             }
 
             try
             {
-                var sent = await _udpProxy.TrySendAsync(packet.Context.Key, server, udpView.Payload, cancellationToken).ConfigureAwait(false);
+                var sent = await _udpProxy.TrySendAsync(packet.Context.Key, server, udpView.Payload, cancellationToken, packet.PacketSequence, packet.FlowGeneration).ConfigureAwait(false);
                 if (!sent)
                 {
+                    LogPacket("udp.packet.rejected", packet, new RuntimeLogField("reason", "send"));
                     LogProxyUnavailable();
                 }
             }
@@ -91,6 +95,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         try
         {
             var outcome = await _tcpProxy.HandlePacketAsync(packet, server, cancellationToken).ConfigureAwait(false);
+            LogPacket("tcp.packet.handled", packet, new RuntimeLogField("outcome", outcome));
             if (outcome == TcpRedirectOutcome.Blocked)
             {
                 LogProxyUnavailable();
@@ -107,6 +112,18 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         {
             _logger.Warn($"TCP proxy handling failed: {ex.GetType().Name}: {ex.Message}");
         }
+    }
+
+    private void LogPacket(string eventName, CapturedFlowPacket packet, params RuntimeLogField[] additional)
+    {
+        if (!_logger.IsEnabled(RuntimeLogLevel.Trace)) return;
+        var fields = new RuntimeLogField[additional.Length + 4];
+        fields[0] = new("packet", packet.PacketSequence == 0 ? null : packet.PacketSequence);
+        fields[1] = new("flow", packet.FlowGeneration == 0 ? null : packet.FlowGeneration);
+        fields[2] = new("protocol", packet.Context.Key.Protocol);
+        fields[3] = new("stage", eventName);
+        additional.CopyTo(fields, 4);
+        _logger.Event(RuntimeLogLevel.Trace, eventName, fields);
     }
 
     private void LogProxyUnavailable()

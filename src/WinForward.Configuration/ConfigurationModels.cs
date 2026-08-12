@@ -7,6 +7,9 @@ namespace WinForward.Configuration;
 
 public sealed class WinForwardConfigDto
 {
+    [JsonPropertyName("logLevel")]
+    public JsonElement LogLevel { get; init; }
+
     [JsonPropertyName("socks5Servers")]
     public IReadOnlyList<Socks5ServerDto?>? Socks5Servers { get; init; }
 
@@ -61,9 +64,20 @@ public sealed record ConfigDiagnostic(string Path, string Message)
     public override string ToString() => $"{Path}: {Message}";
 }
 
+public enum RuntimeLogLevel
+{
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
+
 public sealed record ValidatedConfiguration(
     IReadOnlyDictionary<string, Socks5Server> Servers,
-    PolicySnapshot Policy);
+    PolicySnapshot Policy,
+    RuntimeLogLevel LogLevel = RuntimeLogLevel.Info,
+    bool IncludeProcessPathInLogs = false);
 
 public static class ConfigurationLoader
 {
@@ -72,9 +86,18 @@ public static class ConfigurationLoader
         try
         {
             dto = JsonSerializer.Deserialize(json, ConfigurationJsonContext.Default.WinForwardConfigDto);
-            diagnostics = dto is null
-                ? [new ConfigDiagnostic("$", "Configuration must be a JSON object.")]
-                : [];
+            if (dto is null)
+            {
+                diagnostics = [new ConfigDiagnostic("$", "Configuration must be a JSON object.")];
+            }
+            else if (dto.LogLevel.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.String or JsonValueKind.Null))
+            {
+                diagnostics = [new ConfigDiagnostic("logLevel", "Log level must be a string.")];
+            }
+            else
+            {
+                diagnostics = [];
+            }
             return diagnostics.Count == 0;
         }
         catch (JsonException exception)
@@ -90,6 +113,7 @@ public static class ConfigurationLoader
     {
         var errors = new List<ConfigDiagnostic>();
         var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase);
+        var logLevel = ParseLogLevel(dto, errors);
 
         if (dto.Socks5Servers is null)
         {
@@ -128,10 +152,46 @@ public static class ConfigurationLoader
             return false;
         }
 
-        configuration = new ValidatedConfiguration(servers, new PolicySnapshot(rules, fallback.Value));
+        configuration = new ValidatedConfiguration(
+            servers,
+            new PolicySnapshot(rules, fallback.Value),
+            logLevel,
+            rules.Any(static rule => rule.Matcher.Processes?.Any(IsPathSelector) == true));
         diagnostics = [];
         return true;
     }
+
+    private static RuntimeLogLevel ParseLogLevel(WinForwardConfigDto dto, List<ConfigDiagnostic> errors)
+    {
+        if (dto.LogLevel.ValueKind == JsonValueKind.Undefined) return RuntimeLogLevel.Info;
+        if (dto.LogLevel.ValueKind != JsonValueKind.String)
+        {
+            errors.Add(new("logLevel", "Log level must be error, warn, info, debug, or trace."));
+            return RuntimeLogLevel.Info;
+        }
+
+        var value = dto.LogLevel.GetString();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            errors.Add(new("logLevel", "Log level must be error, warn, info, debug, or trace."));
+            return RuntimeLogLevel.Info;
+        }
+
+        var level = value.Trim().ToLowerInvariant() switch
+        {
+            "error" => RuntimeLogLevel.Error,
+            "warn" => RuntimeLogLevel.Warn,
+            "info" => RuntimeLogLevel.Info,
+            "debug" => RuntimeLogLevel.Debug,
+            "trace" => RuntimeLogLevel.Trace,
+            _ => (RuntimeLogLevel?)null,
+        };
+        if (level is not null) return level.Value;
+        errors.Add(new("logLevel", "Log level must be error, warn, info, debug, or trace."));
+        return RuntimeLogLevel.Info;
+    }
+
+    private static bool IsPathSelector(string selector) => selector.IndexOfAny(['/', '\\']) >= 0;
 
     private static void ValidateServer(Socks5ServerDto? dto, int index, Dictionary<string, Socks5Server> servers, List<ConfigDiagnostic> errors)
     {
