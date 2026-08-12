@@ -187,3 +187,24 @@ Fixed IPv6 original UDP flows through IPv4 SOCKS5 relays by associating before s
 ### Status
 
 [OK] **Completed**
+
+
+## Session 5: Configurable runtime logging
+
+**Date**: 2026-08-12
+**Task**: Configurable runtime logging
+**Branch**: `master`
+
+### Summary
+
+Added configurable error through trace runtime logging, packet and flow correlation, TCP/UDP diagnostic events, privacy-safe formatting, docs, specs, and tests.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4aebaa0` | (see git log) |
+
+### Status
+
+[OK] **Completed**
