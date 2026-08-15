@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 5
-- **Last Active**: 2026-08-12
+- **Total Sessions**: 6
+- **Last Active**: 2026-08-15
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~210 | Active |
+| `journal-1.md` | ~231 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 6 | 2026-08-15 | 修复抓包路径断网与转发TCP代理（08-14-fix-capture-tcp-proxy） | `8e3b9c9` | `master` |
 | 5 | 2026-08-12 | Configurable runtime logging | `4aebaa0` | `master` |
 | 4 | 2026-08-11 | Fix cross-family SOCKS5 UDP relay | `8baccbc` | `master` |
 | 3 | 2026-08-11 | Separate forwarded adapter routing | `b90fce7` | `master` |

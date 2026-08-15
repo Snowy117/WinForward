@@ -208,3 +208,24 @@ Added configurable error through trace runtime logging, packet and flow correlat
 ### Status
 
 [OK] **Completed**
+
+
+## Session 6: 修复抓包路径断网与转发TCP代理（08-14-fix-capture-tcp-proxy）
+
+**Date**: 2026-08-15
+**Task**: 修复抓包路径断网与转发TCP代理（08-14-fix-capture-tcp-proxy）
+**Branch**: `master`
+
+### Summary
+
+诊断并修复三处抓包/代理缺陷：nonFlow 帧被策略吞导致全网断连（R1 无条件 pass）；转发 TCP redirect 沿用 host IP-swap 形状永不可达 listener（R2 DNAT-to-local + 按 origin 成形 redirect 表 + IAdapterLocalAddressProvider）；存量连接被静默吞（R3 NotRelevant→pass）。附带 relay 失败注入 in-window RST（R4 TcpResetBuilder）。实机 smoke：AC1-3/6/7 通过（AC7 依赖 Windows 防火墙入站放行规则，已写入 spec 部署要求）；AC4 单元锁定。check 子代理 PASS，修复 TCP 校验和零值反转违例（复用 PacketChecksums.WriteTcpChecksum）。已知基线问题：Socks5ControlConnectionTests finalizer 偶发中止测试宿主（与本任务无关）。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8e3b9c9` | (see git log) |
+
+### Status
+
+[OK] **Completed**
