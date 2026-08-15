@@ -132,6 +132,25 @@ public sealed class UdpProxyCoordinatorTests
     }
 
     [Fact]
+    public async Task RelayResponseCarriesRecordedClientMac()
+    {
+        // R2: the client MAC captured with the first datagram must travel with the session into
+        // every response sink call so forwarded responses can be rebuilt toward the client.
+        var factory = new FakeTransportFactory();
+        var sink = new FakeResponseSink();
+        await using var coordinator = new UdpProxyCoordinator(factory, sink);
+        var flow = CreateFlow("192.0.2.53");
+        var clientMac = new byte[] { 0x02, 0x00, 0x00, 0x00, 0x00, 0x0a };
+
+        Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 1 }, CancellationToken.None, 0, 0, clientMac));
+
+        await factory.Transports[0].Responses.Writer.WriteAsync(new Socks5UdpDatagram(IPAddress.Parse("192.0.2.53"), null, 53, new byte[] { 9 }), CancellationToken.None);
+        var response = await sink.Responses.Reader.ReadAsync(CancellationToken.None);
+
+        Assert.Equal(clientMac, response.ClientMac);
+    }
+
+    [Fact]
     public async Task RemoveExpiredDisposesIdleSessionAndReleasesAssociation()
     {
         var factory = new FakeTransportFactory();
@@ -535,10 +554,10 @@ public sealed class UdpProxyCoordinatorTests
 
     private sealed class FakeResponseSink : IUdpResponseSink
     {
-        public Channel<(FlowKey Flow, Endpoint Remote, byte[] Payload)> Responses { get; } = Channel.CreateUnbounded<(FlowKey, Endpoint, byte[])>();
+        public Channel<(FlowKey Flow, Endpoint Remote, byte[] Payload, byte[]? ClientMac)> Responses { get; } = Channel.CreateUnbounded<(FlowKey, Endpoint, byte[], byte[]?)>();
 
-        public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken) =>
-            Responses.Writer.WriteAsync((originalFlow, remoteSource, payload.ToArray()), cancellationToken);
+        public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, byte[]? clientMac, CancellationToken cancellationToken) =>
+            Responses.Writer.WriteAsync((originalFlow, remoteSource, payload.ToArray(), clientMac), cancellationToken);
     }
 
     private sealed class MutableTimeProvider(DateTimeOffset initial) : TimeProvider

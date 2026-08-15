@@ -53,7 +53,8 @@ public static class Socks5UdpCodec
             if (frame.Length < offset + 1) return false;
             var domainLength = frame[offset++];
             if (domainLength == 0 || frame.Length < offset + domainLength + 2) return false;
-            domain = System.Text.Encoding.UTF8.GetString(frame.Slice(offset, domainLength));
+            // RFC 1928 domain names are ASCII; non-ASCII bytes decode as '?' rather than throwing.
+            domain = System.Text.Encoding.ASCII.GetString(frame.Slice(offset, domainLength));
             offset += domainLength;
         }
         if (frame.Length < offset + 2) return false;

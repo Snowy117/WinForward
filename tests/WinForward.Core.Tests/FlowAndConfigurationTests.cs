@@ -189,6 +189,22 @@ public sealed class FlowAndConfigurationTests
     }
 
     [Fact]
+    public void SocksUdpDomainDecodesAsAsciiAndReplacesNonAsciiBytes()
+    {
+        // R5: RFC 1928 domain names are ASCII. Non-ASCII bytes are replaced ('?') by the ASCII
+        // decoder rather than throwing, preserving the codec's fail-closed no-throw style.
+        var asciiFrame = new byte[] { 0, 0, 0, 3, 3, (byte)'d', (byte)'n', (byte)'s', 0, 53, 0xab };
+        Assert.True(Socks5UdpCodec.TryDecode(asciiFrame, out var ascii));
+        Assert.Equal("dns", ascii.DestinationDomain);
+        Assert.Equal(53, ascii.DestinationPort);
+        Assert.Equal(new byte[] { 0xab }, ascii.Payload.ToArray());
+
+        var nonAsciiFrame = new byte[] { 0, 0, 0, 3, 3, (byte)'d', 0xE9, (byte)'s', 0, 53, 0xab };
+        Assert.True(Socks5UdpCodec.TryDecode(nonAsciiFrame, out var replaced));
+        Assert.Equal("d?s", replaced.DestinationDomain);
+    }
+
+    [Fact]
     public void PolicyMatchesRemoteCidr()
     {
         Assert.True(IpPrefix.TryParse("192.0.2.0/24", out var network));
@@ -318,6 +334,13 @@ public sealed class FlowAndConfigurationTests
         Assert.Equal(new byte[] { 5, 1, 0 }, Socks5Messages.Greeting(credentials: false));
         Assert.Equal(new byte[] { 5, 2, 0, 2 }, Socks5Messages.Greeting(credentials: true));
         Assert.Equal(new byte[] { 1, 1, (byte)'u', 1, (byte)'p' }, Socks5Messages.UsernamePassword("u", "p"));
+    }
+
+    [Fact]
+    public void Socks5UsernamePasswordAllowsEmptySecret()
+    {
+        // R4: RFC 1929 permits a zero-length password; the encoded message carries a 0-length field.
+        Assert.Equal(new byte[] { 1, 4, (byte)'u', (byte)'s', (byte)'e', (byte)'r', 0 }, Socks5Messages.UsernamePassword("user", ""));
     }
 
     [Fact]

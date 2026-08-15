@@ -7,7 +7,7 @@ namespace WinForward.Runtime;
 
 public interface IUdpResponseSink
 {
-    ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken);
+    ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, byte[]? clientMac, CancellationToken cancellationToken);
 }
 
 public sealed class UdpProxyCoordinator : IAsyncDisposable
@@ -51,7 +51,7 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
         _logger = logger ?? NullRuntimeLogger.Instance;
     }
 
-    public async ValueTask<bool> TrySendAsync(FlowKey flow, Socks5Server server, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken, long packetSequence = 0, long flowGeneration = 0)
+    public async ValueTask<bool> TrySendAsync(FlowKey flow, Socks5Server server, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken, long packetSequence = 0, long flowGeneration = 0, byte[]? clientMac = null)
     {
         if (flow.Protocol != TransportProtocol.Udp) throw new ArgumentException("UDP coordinator accepts only UDP flow keys.", nameof(flow));
         Task<UdpProxySession> sessionTask;
@@ -67,7 +67,7 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
                     return false;
                 }
                 var registered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                sessionTask = CreateSessionAsync(flow, server, flowGeneration, _shutdown.Token, registered.Task);
+                sessionTask = CreateSessionAsync(flow, server, flowGeneration, clientMac, _shutdown.Token, registered.Task);
                 _sessions.Add(flow, sessionTask);
                 registered.TrySetResult();
                 trackSetupFailure = true;
@@ -167,7 +167,7 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
         _shutdown.Dispose();
     }
 
-    private async Task<UdpProxySession> CreateSessionAsync(FlowKey flow, Socks5Server server, long flowGeneration, CancellationToken cancellationToken, Task registered)
+    private async Task<UdpProxySession> CreateSessionAsync(FlowKey flow, Socks5Server server, long flowGeneration, byte[]? clientMac, CancellationToken cancellationToken, Task registered)
     {
         IUdpProxyTransport? transport = null;
         UdpAssociation? association = null;
@@ -190,7 +190,7 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
                 throw new IOException("UDP flow association was already owned by another session; blocking the flow.");
             }
 
-            var session = new UdpProxySession(flow, flowGeneration, association, transport, _responseSink, cancellationToken, _timeProvider, OnSessionActivity, _logger);
+            var session = new UdpProxySession(flow, flowGeneration, association, transport, _responseSink, clientMac, cancellationToken, _timeProvider, OnSessionActivity, _logger);
             transport = null;
             session.Start(RemoveReceiveFailedSessionAsync, registered);
             LogDebug("udp.session.created", flow, flowGeneration, association, server.Name);
@@ -382,6 +382,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
         UdpAssociation association,
         IUdpProxyTransport transport,
         IUdpResponseSink sink,
+        byte[]? clientMac,
         CancellationToken shutdown,
         TimeProvider timeProvider,
         Action<UdpAssociation, DateTimeOffset> activityObserver,
@@ -392,6 +393,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
         _association = association;
         _transport = transport;
         _sink = sink;
+        ClientMac = clientMac;
         _shutdown = shutdown;
         _timeProvider = timeProvider;
         _activityObserver = activityObserver;
@@ -403,6 +405,13 @@ internal sealed class UdpProxySession : IAsyncDisposable
     public long FlowGeneration => _flowGeneration;
     public UdpAssociation Association => _association;
     public DateTimeOffset LastActivityUtc => new(Interlocked.Read(ref _lastActivityTicks), TimeSpan.Zero);
+
+    /// <summary>
+    /// The client's Ethernet source MAC recorded from the first datagram of the flow. Forwarded
+    /// (VM-originated) flows use it as the destination MAC of rebuilt responses so the vSwitch
+    /// delivers them to the client instead of the host stack.
+    /// </summary>
+    public byte[]? ClientMac { get; }
 
     public void Start(Func<UdpProxySession, Task> receiveFailureHandler, Task registered)
     {
@@ -486,7 +495,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
                 TouchActivity();
                 if (response.DestinationAddress is null) continue;
                 var source = Endpoint.From(response.DestinationAddress, response.DestinationPort);
-                await _sink.InjectAsync(_flow, source, response.Payload, _shutdown).ConfigureAwait(false);
+                await _sink.InjectAsync(_flow, source, response.Payload, ClientMac, _shutdown).ConfigureAwait(false);
                 if (_logger.IsEnabled(RuntimeLogLevel.Trace))
                 {
                     _logger.Event(RuntimeLogLevel.Trace, "udp.packet.received",

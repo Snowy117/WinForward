@@ -109,9 +109,14 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
             return;
         }
 
+        // The Ethernet source MAC is the client's address (a VM NIC for forwarded flows). The
+        // coordinator records it so forwarded UDP responses can be rebuilt toward the client
+        // instead of this host's own NIC MAC.
+        var clientMac = packet.Lease.Frame.Span.Slice(6, 6).ToArray();
+
         try
         {
-            var sent = await udpProxy.TrySendAsync(packet.Context.Key, server, udpView.Payload, cancellationToken, packet.PacketSequence, packet.FlowGeneration).ConfigureAwait(false);
+            var sent = await udpProxy.TrySendAsync(packet.Context.Key, server, udpView.Payload, cancellationToken, packet.PacketSequence, packet.FlowGeneration, clientMac).ConfigureAwait(false);
             if (!sent)
             {
                 LogPacket("udp.packet.rejected", packet, new RuntimeLogField("reason", "send"));

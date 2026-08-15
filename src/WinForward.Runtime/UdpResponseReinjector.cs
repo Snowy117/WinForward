@@ -34,6 +34,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
     private readonly int _maximumFrameSize;
     private readonly IRuntimeLogger _logger;
     private long _lastMissingOriginLogTicks;
+    private long _lastMissingClientMacLogTicks;
 
     /// <summary>
     /// Creates a response reinjector for a capture scope whose host-side adapter is identified by
@@ -62,25 +63,11 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         _logger = logger ?? NullRuntimeLogger.Instance;
     }
 
-    public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+    public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, byte[]? clientMac, CancellationToken cancellationToken)
     {
-        // Host flows reinject toward MSTCP on the host adapter; forwarded flows reinject toward the
-        // origin adapter (the adapter the flow was first observed ON_RECEIVE on), using that
-        // adapter's handle and MAC (H2). If a forwarded flow's origin adapter cannot be resolved,
-        // the response is dropped fail-closed with a rate-limited log rather than sent out the
-        // wrong (host) adapter where the VM could never receive it.
-        var target = _host;
-        var towardMstcp = true;
-        if (originalFlow.Origin == FlowOriginKind.Forwarded)
+        if (!TryResolveTarget(originalFlow, clientMac, out var target, out var towardMstcp, out var destinationMac))
         {
-            if (originalFlow.OriginAdapterId is null || !_byStableId.TryGetValue(originalFlow.OriginAdapterId, out var originAdapter))
-            {
-                LogTrace("udp.response.dropped", originalFlow, new RuntimeLogField("reason", "missingOriginAdapter"));
-                LogMissingOriginAdapter();
-                return ValueTask.CompletedTask;
-            }
-            target = originAdapter;
-            towardMstcp = false;
+            return ValueTask.CompletedTask;
         }
 
         if (!UdpFrameBuilder.TryBuild(
@@ -90,7 +77,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
                 originalFlow.Local.Port,
                 payload,
                 target.Mac,
-                target.Mac,
+                destinationMac,
                 out var frame,
                 _maximumFrameSize))
         {
@@ -119,6 +106,44 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         return ValueTask.CompletedTask;
     }
 
+    /// <summary>
+    /// Resolves the reinjection target and the Ethernet destination MAC for a response. Host flows
+    /// reinject toward MSTCP on the host adapter with the host MAC on both header slots; forwarded
+    /// flows reinject toward the origin adapter (H2) with the origin adapter's MAC as source and the
+    /// recorded client MAC as destination so the vSwitch delivers to the VM instead of the host
+    /// stack. A forwarded flow with an unresolved origin adapter or without a recorded client MAC
+    /// is dropped fail-closed with a rate-limited log rather than sent out the wrong adapter.
+    /// </summary>
+    private bool TryResolveTarget(FlowKey originalFlow, byte[]? clientMac, out UdpAdapterTarget target, out bool towardMstcp, out byte[]? destinationMac)
+    {
+        target = _host;
+        towardMstcp = true;
+        if (originalFlow.Origin != FlowOriginKind.Forwarded)
+        {
+            destinationMac = target.Mac;
+            return true;
+        }
+
+        if (originalFlow.OriginAdapterId is null || !_byStableId.TryGetValue(originalFlow.OriginAdapterId, out var originAdapter))
+        {
+            destinationMac = null;
+            LogTrace("udp.response.dropped", originalFlow, new RuntimeLogField("reason", "missingOriginAdapter"));
+            LogMissingOriginAdapter();
+            return false;
+        }
+        target = originAdapter;
+        towardMstcp = false;
+        if (clientMac is null || clientMac.Length != 6)
+        {
+            destinationMac = null;
+            LogTrace("udp.response.dropped", originalFlow, new RuntimeLogField("reason", "missingClientMac"));
+            LogMissingClientMac();
+            return false;
+        }
+        destinationMac = clientMac;
+        return true;
+    }
+
     private void LogTrace(string eventName, FlowKey flow, params RuntimeLogField[] fields)
     {
         if (!_logger.IsEnabled(RuntimeLogLevel.Trace)) return;
@@ -138,6 +163,16 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         if (now - last >= MissingOriginLogInterval.Ticks && Interlocked.CompareExchange(ref _lastMissingOriginLogTicks, now, last) == last)
         {
             _logger.Warn("Forwarded UDP response dropped fail-closed: the flow's origin adapter is not resolved in the reinjection map.");
+        }
+    }
+
+    private void LogMissingClientMac()
+    {
+        var now = DateTime.UtcNow.Ticks;
+        var last = Interlocked.Read(ref _lastMissingClientMacLogTicks);
+        if (now - last >= MissingOriginLogInterval.Ticks && Interlocked.CompareExchange(ref _lastMissingClientMacLogTicks, now, last) == last)
+        {
+            _logger.Warn("Forwarded UDP response dropped fail-closed: the flow's client MAC was not recorded.");
         }
     }
 }

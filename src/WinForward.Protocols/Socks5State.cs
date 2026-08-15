@@ -31,7 +31,8 @@ public static class Socks5Messages
     {
         var user = System.Text.Encoding.UTF8.GetBytes(username);
         var secret = System.Text.Encoding.UTF8.GetBytes(password);
-        if (user.Length is 0 or > 255 || secret.Length is 0 or > 255) throw new ArgumentOutOfRangeException(nameof(username));
+        // RFC 1929 permits a zero-length password; only the username must be 1..255 bytes.
+        if (user.Length is 0 or > 255 || secret.Length > 255) throw new ArgumentOutOfRangeException(nameof(username));
         var message = new byte[3 + user.Length + secret.Length];
         message[0] = 1;
         message[1] = (byte)user.Length;

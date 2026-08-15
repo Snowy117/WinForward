@@ -202,7 +202,15 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
     /// Returns the authenticated, CONNECT-negotiated upstream stream for byte relaying. The caller
     /// does not take ownership; disposing the <see cref="Socks5ControlConnection"/> closes the stream.
     /// </summary>
-    internal Stream GetUpstreamStream() => _stream;
+    internal Stream GetUpstreamStream()
+    {
+        // The per-attempt socket timeouts must not survive into the long-lived relay phase: the
+        // relay's own 30-minute stall window is the only idle guard from here on, and an idle
+        // upstream would otherwise be killed by a stale 30s connect timeout (R1).
+        _socket.ReceiveTimeout = Timeout.Infinite;
+        _socket.SendTimeout = Timeout.Infinite;
+        return _stream;
+    }
 
     private async ValueTask<T> RunWithinAttemptAsync<T>(Func<CancellationToken, ValueTask<T>> operation, CancellationToken cancellationToken)
     {
@@ -284,7 +292,8 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
         {
             1 => new IPAddress(reply.AsSpan(4, 4)),
             4 => new IPAddress(reply.AsSpan(4, 16)),
-            3 => await ResolveDomainAsync(System.Text.Encoding.UTF8.GetString(reply.AsSpan(5, reply[4])), cancellationToken).ConfigureAwait(false),
+            // RFC 1928 domain names are ASCII; non-ASCII bytes decode as '?' rather than throwing (R5).
+            3 => await ResolveDomainAsync(System.Text.Encoding.ASCII.GetString(reply.AsSpan(5, reply[4])), cancellationToken).ConfigureAwait(false),
             _ => throw new IOException("SOCKS5 server returned an unsupported address type.")
         };
 
@@ -454,13 +463,22 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
     {
         EndPoint sender = RelayEndpoint.AddressFamily == AddressFamily.InterNetwork ? new IPEndPoint(IPAddress.Any, 0) : new IPEndPoint(IPAddress.IPv6Any, 0);
         var result = await _socket.ReceiveFromAsync(buffer, SocketFlags.None, sender, cancellationToken).ConfigureAwait(false);
-        if (!result.RemoteEndPoint.Equals(RelayEndpoint)) throw new IOException("SOCKS5 UDP packet came from an unexpected relay endpoint.");
+        if (!IsAcceptableRelaySource(result.RemoteEndPoint, RelayEndpoint)) throw new IOException("SOCKS5 UDP packet came from an unexpected relay endpoint.");
         // M2: the SOCKS5 UDP wire format carries no interface scope, so propagate the relay
         // endpoint's IPv6 scope into reconstruction to keep a link-local decoded address routable.
         var scopeId = RelayEndpoint.Address.AddressFamily == AddressFamily.InterNetworkV6 ? RelayEndpoint.Address.ScopeId : 0;
         if (!Socks5UdpCodec.TryDecode(buffer.Span[..result.ReceivedBytes], out var datagram, scopeId)) throw new IOException("SOCKS5 UDP relay returned a malformed datagram.");
         return datagram;
     }
+
+    /// <summary>
+    /// Validates the observed sender of a relay datagram against the negotiated relay endpoint.
+    /// RFC 1928 does not pin relay replies to the BND address, so a multi-homed or anycast relay
+    /// may answer from another address of the same scope; the port and address family must still
+    /// match exactly so clearly unrelated sources stay rejected (R3).
+    /// </summary>
+    internal static bool IsAcceptableRelaySource(EndPoint observed, IPEndPoint relay) =>
+        observed is IPEndPoint ip && ip.Port == relay.Port && ip.AddressFamily == relay.AddressFamily;
 
     public async ValueTask DisposeAsync()
     {
