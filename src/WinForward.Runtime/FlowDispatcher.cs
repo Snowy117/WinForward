@@ -155,10 +155,10 @@ public sealed class FlowDispatcher
 
     /// <summary>
     /// Handles a frame that cannot be classified into a TCP/UDP flow (non-IP, fragmented, malformed,
-    /// or a non-TCP/UDP protocol). Such traffic cannot match a TCP/UDP-only rule; it is evaluated
-    /// against the rules that can meaningfully match it (adapter-only rules). Host traffic uses the
-    /// configured fallback; forwarded traffic considers only adapter-qualified rules and otherwise
-    /// passes. It is not cached in the flow table because these frames have no logical flow.
+    /// or a non-TCP/UDP protocol). Such frames can never enter a proxy relay, so policy does not
+    /// apply to them: they are always passed. Blocking them blackholes ARP, ICMP/ND, and PMTUD and
+    /// severs the very connectivity proxied flows depend on. The frame is not cached in the flow
+    /// table because these frames have no logical flow.
     /// </summary>
     public async ValueTask DispatchNonFlowAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
@@ -171,31 +171,8 @@ public sealed class FlowDispatcher
             return;
         }
 
-        var action = EvaluateNonFlow(packet.Context);
-        LogPacketStage(RuntimeLogLevel.Trace, "packet.action", packet, new RuntimeLogField("action", action), new RuntimeLogField("rule", null), new RuntimeLogField("proxy", null));
-        if (action == FlowAction.Pass)
-        {
-            await CompleteAsync(packet, PacketDisposition.Pass, () => _executor.PassAsync(packet, cancellationToken)).ConfigureAwait(false);
-        }
-        else
-        {
-            await CompleteAsync(packet, PacketDisposition.Block, () => _executor.BlockAsync(packet, cancellationToken)).ConfigureAwait(false);
-        }
-    }
-
-    private FlowAction EvaluateNonFlow(FlowContext context)
-    {
-        foreach (var rule in _policy.Rules)
-        {
-            var matcher = rule.Matcher;
-            if (context.Key.Origin == FlowOriginKind.Forwarded && !matcher.IsAdapterQualified) continue;
-            if (matcher.Processes is not null || matcher.Protocols is not null || matcher.AddressFamilies is not null || matcher.RemoteNetworks is not null || matcher.RemotePorts is not null) continue;
-            var adapterMatches = (matcher.AdapterIds is null || matcher.AdapterIds.Contains(context.AdapterId ?? string.Empty)) &&
-                (matcher.AdapterNames is null || matcher.AdapterNames.Contains(context.AdapterName ?? string.Empty));
-            if (adapterMatches) return rule.Decision.Action;
-        }
-
-        return context.Key.Origin == FlowOriginKind.Forwarded ? FlowAction.Pass : _policy.FallbackAction;
+        LogPacketStage(RuntimeLogLevel.Trace, "packet.action", packet, new RuntimeLogField("action", FlowAction.Pass), new RuntimeLogField("rule", null), new RuntimeLogField("proxy", null), new RuntimeLogField("reason", "nonFlow"));
+        await CompleteAsync(packet, PacketDisposition.Pass, () => _executor.PassAsync(packet, cancellationToken)).ConfigureAwait(false);
     }
 
     private FlowDecision EvaluateNewFlow(FlowContext context) =>

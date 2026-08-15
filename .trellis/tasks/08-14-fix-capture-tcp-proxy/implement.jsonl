@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "NDIS 捕获/回注方向语义、自身注入帧行为是 R1-R4 改动的直接约束层。"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "fail-closed 姿态与降级边界（L 解析失败 Blocked、序号缺失不注入 RST）须符合项目错误处理规范。"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "新增 trace/debug 事件（nonFlow pass、转发 redirect、RST 注入）须沿用结构化字段风格。"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "测试与质量门槛要求。"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "新增文件（IAdapterLocalAddressProvider、AdapterLocalAddressProvider、TcpResetBuilder）的落层位置约束。"}

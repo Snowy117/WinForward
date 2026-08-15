@@ -147,7 +147,7 @@ public static class PacketChecksums
         return nextHeader == targetNextHeader;
     }
 
-    private static void WriteTcpChecksum(Span<byte> frame, int tcpOffset, int tcpLength, ReadOnlySpan<byte> source, ReadOnlySpan<byte> destination, bool isIpv6)
+    internal static void WriteTcpChecksum(Span<byte> frame, int tcpOffset, int tcpLength, ReadOnlySpan<byte> source, ReadOnlySpan<byte> destination, bool isIpv6)
     {
         frame[tcpOffset + 16] = 0;
         frame[tcpOffset + 17] = 0;

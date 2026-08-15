@@ -20,6 +20,8 @@ Questions to answer:
 
 - Unknown or ambiguous process attribution does not guess an owner; process rules do not match and evaluation continues to the next rule/fallback.
 - A proxy setup failure is fail-closed in release 1. Proxy-selected packets are never silently downgraded to pass.
+- One bounded exemption (2026-08-14): a packet on a proxy-decided TCP flow whose SYN was never observed (the connection pre-dates capture startup) was never proxyable — there is no relay it could join retroactively. That packet is passed (`TcpRedirectOutcome.NotRelevant` → reinject), so the pre-existing connection survives instead of hanging. This is not a downgrade of an established proxy path: the flow's decision stays `proxy`, every packet is re-evaluated, and the exemption ends with the connection's lifetime (the next connection has a SYN and is proxied normally). Locked by `ExecutorPassesTcpPacketWhenCoordinatorReportsNotRelevant`.
+- A failed relay setup after a successful redirect is surfaced to the client as a crafted in-window RST|ACK from the original server endpoint (`TcpResetBuilder`), not left to hang; the reset degrades to plain teardown only when the SYN or SYN-ACK sequence numbers were never observed.
 - UDP relay alias collisions are rejected because sharing an alias would make reverse routing nondeterministic.
 - Per-caller cancellation of a shared UDP send does not tear down a session unless the shared setup/send operation itself failed.
 - `ConfigurationLoader.TryParse` maps a `JsonException` to the serializer-supplied JSON path (or `$` when absent) and a fixed diagnostic template. It must not append `JsonException.Message` or raw JSON values, because malformed input can carry credential-like data.

@@ -1,6 +1,8 @@
+using System.Net;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
+using WinForward.Windows;
 
 namespace WinForward.Runtime;
 
@@ -20,6 +22,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     private readonly ITcpRedirectInjector _injector;
     private readonly TcpRedirectTable _table;
     private readonly SelfTrafficRegistry _selfTraffic;
+    private readonly IAdapterLocalAddressProvider _localAddresses;
     private readonly IRuntimeLogger _logger;
     private readonly int _capacity;
     private readonly Dictionary<FlowKey, TcpRedirectSession> _sessions = [];
@@ -37,6 +40,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         ITcpRedirectInjector injector,
         TcpRedirectTable table,
         SelfTrafficRegistry selfTraffic,
+        IAdapterLocalAddressProvider localAddresses,
         IRuntimeLogger? logger = null,
         int capacity = 16_384)
     {
@@ -45,12 +49,14 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(injector);
         ArgumentNullException.ThrowIfNull(table);
         ArgumentNullException.ThrowIfNull(selfTraffic);
+        ArgumentNullException.ThrowIfNull(localAddresses);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capacity);
         _listenerFactory = listenerFactory;
         _relayFactory = relayFactory;
         _injector = injector;
         _table = table;
         _selfTraffic = selfTraffic;
+        _localAddresses = localAddresses;
         _logger = logger ?? NullRuntimeLogger.Instance;
         _capacity = capacity;
     }
@@ -147,7 +153,16 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         var originAdapter = new AdapterContext(key.OriginAdapterId, packet.Context.AdapterName, key.OriginAdapterGeneration);
         var originalDestination = key.Remote;
 
-        if (!_table.TryClaim(key, originalDestination, originAdapter, packet.Metadata.AdapterHandle, translatedTuple, DateTimeOffset.UtcNow, out var association) || association is null)
+        var forwardLocalAddress = ResolveForwardLocalAddress(key);
+        if (key.Origin == FlowOriginKind.Forwarded && forwardLocalAddress is null)
+        {
+            await listener.DisposeAsync().ConfigureAwait(false);
+            LogTrace("tcp.redirect.rejected", packet, null, "localAddress");
+            _logger.Warn("TCP redirect failed: no local address available on the origin adapter, blocking the flow.");
+            return null;
+        }
+
+        if (!_table.TryClaim(key, originalDestination, originAdapter, packet.Metadata.AdapterHandle, translatedTuple, forwardLocalAddress, DateTimeOffset.UtcNow, out var association) || association is null)
         {
             await listener.DisposeAsync().ConfigureAwait(false);
             LogTrace("tcp.redirect.rejected", packet, null, "claim");
@@ -169,6 +184,23 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         return await CompleteNewRedirectAsync(packet, listener, association, translatedTuple, server, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Resolves the adapter-local redirect destination address for a forwarded flow's SYN
+    /// (DNAT-to-local). The host IP-swap shape would send the frame to the client's own address,
+    /// which is not local for a forwarded flow, so the listener would never see it. Loopback is
+    /// deliberately excluded by the provider: a martian-source reverse reply could be dropped by
+    /// the stack before it reaches the capture layer for rewriting. Returns null for host flows
+    /// (host shape needs no such address) and when the origin adapter owns no usable address of
+    /// the flow's family; the caller fails closed on the latter.
+    /// </summary>
+    private IPAddress? ResolveForwardLocalAddress(FlowKey key)
+    {
+        if (key.Origin != FlowOriginKind.Forwarded) return null;
+        return key.OriginAdapterId is { } originAdapterId
+            ? _localAddresses.SelectLocalAddress(originAdapterId, key.AddressFamily, key.Local.Address)
+            : null;
+    }
+
     private async ValueTask<RedirectSetup?> CompleteNewRedirectAsync(CapturedFlowPacket packet, ITcpRedirectListener listener, TcpRedirectAssociation association, Endpoint translatedTuple, Socks5Server server, CancellationToken cancellationToken)
     {
         var session = RegisterSession(listener, association, translatedTuple, server, packet.FlowGeneration);
@@ -183,19 +215,15 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         var originalClient = key.Local;
         var originalServer = key.Remote;
 
-        // Official WinpkFilter local_redirect pattern: swap MACs and IPs, rewrite the destination
-        // port to the proxy port. The SOURCE PORT is kept as the client's original port (the
-        // redirector only rewrites th_dport, never th_sport), so the local proxy server's accepted
-        // connection has peer = server:client_orig_port, which the per-flow mapping resolves by
-        // client source port.
-        if (!PacketChecksums.TryRewriteTcpEndpoints(rewrittenFrame, originalServer.Address, originalClient.Port, originalClient.Address, translatedTuple.Port))
+        if (!TryRewriteForwardLeg(rewrittenFrame, originalClient, originalServer, association, translatedTuple.Port))
         {
             await TearDownSessionAsync(session).ConfigureAwait(false);
             LogTrace("tcp.redirect.rejected", packet, association, "rewrite");
             _logger.Warn("TCP redirect failed: SYN endpoint rewrite failed, blocking the flow.");
             return null;
         }
-        SwapEthernetMacs(rewrittenFrame);
+
+        RecordClientSyn(packet.Lease.Frame.Span, association);
 
         // L4 clarity: this exact self-traffic key cannot be matched by the wildcard registry because
         // the observable reverse leg is (client:orig_port) -> (client_ip:proxy_port), and the
@@ -248,6 +276,28 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         => await ReinjectExistingFlowDataAsync(packet, association, cancellationToken).ConfigureAwait(false);
 
     /// <summary>
+    /// Rewrites one frame on the original client-to-listener leg toward the redirect listener and
+    /// applies the origin-specific MAC handling. The forwarded DNAT shape preserves the client's
+    /// source tuple and moves only the destination to the adapter-local listener address, so the
+    /// accepted peer is the client itself and the arrival MACs (already addressing this host) are
+    /// kept. The host shape follows the official WinpkFilter local_redirect pattern: swap MACs and
+    /// IPs, rewrite the destination port to the proxy port; the SOURCE PORT is kept as the client's
+    /// original port (the redirector only rewrites th_dport, never th_sport), so the accepted
+    /// connection has peer = server:client_orig_port, which the per-flow mapping resolves by client
+    /// source port.
+    /// </summary>
+    private static bool TryRewriteForwardLeg(Span<byte> frame, Endpoint originalClient, Endpoint originalServer, TcpRedirectAssociation association, ushort listenerPort)
+    {
+        if (association.ForwardLocalAddress is { } forwardLocalAddress)
+        {
+            return PacketChecksums.TryRewriteTcpEndpoints(frame, originalClient.Address, originalClient.Port, forwardLocalAddress, listenerPort);
+        }
+        if (!PacketChecksums.TryRewriteTcpEndpoints(frame, originalServer.Address, originalClient.Port, originalClient.Address, listenerPort)) return false;
+        SwapEthernetMacs(frame);
+        return true;
+    }
+
+    /// <summary>
     /// Swaps the Ethernet source and destination MAC addresses of a frame. The official WinpkFilter
     /// local-redirect pattern swaps MACs alongside IPs and ports so the redirected frame is accepted
     /// by the local stack as if it arrived from the original server.
@@ -263,17 +313,44 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         temp.CopyTo(source);
     }
 
+    /// <summary>
+    /// Records the client ISN and a bounded copy of the original SYN frame on the association.
+    /// Together with the server ISN captured by <see cref="RecordServerSynAck"/> this is everything
+    /// a relay setup failure needs to abort the client-visible connection with an in-window RST.
+    /// </summary>
+    private static void RecordClientSyn(ReadOnlySpan<byte> frame, TcpRedirectAssociation association)
+    {
+        if (!IpTcpUdpPacket.TryParse(frame, out var view) || view.Transport != PacketTransport.Tcp) return;
+        var sequenceOffset = 14 + view.IpHeaderLength + 4;
+        if (frame.Length < sequenceOffset + 4) return;
+        association.ClientInitialSeq = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(frame.Slice(sequenceOffset, 4));
+        association.OriginalSynFrameCopy = frame.Slice(0, Math.Min(frame.Length, 128)).ToArray();
+    }
+
+    /// <summary>
+    /// Captures the listener-side ISN when the reverse leg's SYN-ACK passes through, so a later
+    /// relay setup failure can craft a reset the client's stack accepts as in-window.
+    /// </summary>
+    private static void RecordServerSynAck(ReadOnlySpan<byte> frame, TcpRedirectAssociation association)
+    {
+        if (!IpTcpUdpPacket.TryParse(frame, out var view) || view.Transport != PacketTransport.Tcp) return;
+        var flagsOffset = 14 + view.IpHeaderLength + 13;
+        if (frame.Length <= flagsOffset || (frame[flagsOffset] & 0x12) != 0x12) return;
+        var sequenceOffset = 14 + view.IpHeaderLength + 4;
+        if (frame.Length < sequenceOffset + 4) return;
+        association.ServerInitialSeq = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(frame.Slice(sequenceOffset, 4));
+    }
+
     private async ValueTask<TcpRedirectOutcome> ReinjectExistingFlowDataAsync(CapturedFlowPacket packet, TcpRedirectAssociation association, CancellationToken cancellationToken)
     {
         var rewrittenFrame = packet.Lease.Frame.ToArray();
         var originalClient = packet.Context.Key.Local;
         var originalServer = association.OriginalKey.Remote;
-        if (!PacketChecksums.TryRewriteTcpEndpoints(rewrittenFrame, originalServer.Address, originalClient.Port, originalClient.Address, association.TranslatedListenerTuple.Port))
+        if (!TryRewriteForwardLeg(rewrittenFrame, originalClient, originalServer, association, association.TranslatedListenerTuple.Port))
         {
             await FailAssociationAsync(association).ConfigureAwait(false);
             return TcpRedirectOutcome.Blocked;
         }
-        SwapEthernetMacs(rewrittenFrame);
         try
         {
             await _injector.InjectAsync(rewrittenFrame, towardMstcp: true, packet.Metadata.AdapterHandle, cancellationToken).ConfigureAwait(false);
@@ -314,16 +391,20 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         var rewrittenFrame = packet.Lease.Frame.ToArray();
         var originalRemote = original.Remote;
         var originalClient = original.Local;
+        RecordServerSynAck(packet.Lease.Frame.Span, association);
+
+        // Host-originated flows terminate on this host (reverse to MSTCP); forwarded flows (client
+        // on a VM/remote side) must be sent back to the origin adapter instead.
+        var towardMstcp = original.Origin == FlowOriginKind.Host;
         if (!PacketChecksums.TryRewriteTcpEndpoints(rewrittenFrame, originalRemote.Address, originalRemote.Port, originalClient.Address, originalClient.Port))
         {
             await FailAssociationAsync(association).ConfigureAwait(false);
             return TcpRedirectOutcome.Blocked;
         }
-        SwapEthernetMacs(rewrittenFrame);
-
-        // Host-originated flows terminate on this host (reverse to MSTCP); forwarded flows (client
-        // on a VM/remote side) must be sent back to the origin adapter instead.
-        var towardMstcp = original.Origin == FlowOriginKind.Host;
+        // The MAC swap makes the looped-back frame look inbound from the router for a host flow.
+        // A forwarded flow's reversed frame is emitted on the origin adapter toward the client, and
+        // its arrival MACs (this host -> client) are already correct.
+        if (towardMstcp) SwapEthernetMacs(rewrittenFrame);
         try
         {
             if (!towardMstcp && association.OriginAdapterHandle == 0)
@@ -538,6 +619,47 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
 
 
 
+    /// <summary>
+    /// Surfaces a relay setup failure to the client as a protocol-correct RST|ACK from the original
+    /// server endpoint instead of leaving its established connection hanging. The reset is crafted
+    /// from the recorded SYN template and both initial sequence numbers, so it stays valid even
+    /// though the redirect-table alias is torn down right after. Degrades to plain teardown when
+    /// either sequence number was never observed.
+    /// </summary>
+    private async ValueTask TryInjectClientResetAsync(TcpRedirectSession session)
+    {
+        var association = session.Association;
+        if (association.OriginalSynFrameCopy is not { } synTemplate || association.ClientInitialSeq is not uint clientInitialSeq || association.ServerInitialSeq is not uint serverInitialSeq) return;
+        var reset = TcpResetBuilder.BuildReset(synTemplate, association.OriginalDestination.Address, association.OriginalDestination.Port,
+            association.OriginalKey.Local.Address, association.OriginalKey.Local.Port, serverInitialSeq + 1, clientInitialSeq + 1);
+        if (reset is null) return;
+        try
+        {
+            await _injector.InjectAsync(reset, association.OriginalKey.Origin != FlowOriginKind.Forwarded, association.OriginAdapterHandle, session.Token).ConfigureAwait(false);
+            LogDebug("tcp.redirect.clientReset", session, "injected");
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown or session teardown cancelled the best-effort reset.
+        }
+        catch (Exception exception)
+        {
+            _logger.Warn($"TCP redirect client reset injection failed ({exception.GetType().Name}).");
+        }
+    }
+
+    /// <summary>
+    /// Releases a flow whose upstream relay could not be established: closes the accepted socket,
+    /// best-effort resets the client-visible connection, then tears the session down.
+    /// </summary>
+    private async ValueTask HandleRelaySetupFailureAsync(TcpRedirectSession session, ITcpAcceptedConnection accepted)
+    {
+        _logger.Warn("TCP redirect relay setup failed; resetting the client connection and releasing the flow alias.");
+        await accepted.DisposeAsync().ConfigureAwait(false);
+        await TryInjectClientResetAsync(session).ConfigureAwait(false);
+        await TearDownSessionAsync(session).ConfigureAwait(false);
+    }
+
     private async Task RunAcceptLoopAsync(TcpRedirectSession session)
     {
         var token = session.Token;
@@ -593,9 +715,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
             }
             catch
             {
-                _logger.Warn("TCP redirect relay setup failed; releasing the flow alias.");
-                await accepted.DisposeAsync().ConfigureAwait(false);
-                await TearDownSessionAsync(session).ConfigureAwait(false);
+                await HandleRelaySetupFailureAsync(session, accepted).ConfigureAwait(false);
                 return;
             }
         }

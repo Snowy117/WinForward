@@ -134,6 +134,33 @@ Reverse-packet injection direction follows the flow origin:
 
 > **Note**: the current Win11 test host has no Hyper-V VM stack (the "Microsoft Hyper-V Network Adapter" interfaces exist but no vSwitch/VM is present), so guest-originated forwarded traffic cannot be exercised end-to-end here. The forwarded code path is unit-locked; a host with a real guest VM is required for the hardware matrix.
 
+### Forwarded flows use the DNAT-to-local transform (fixed 2026-08-14)
+
+The WinpkFilter IP-swap transform above is only valid for **host-originated** flows. Applied to a forwarded SYN it produces dst = client-ip:listener-port, which is not a local address — MSTCP routes the frame back out to the client, the listener never sees a SYN, and the flow hangs (observed on the 192.168.77.x gateway: `tcp.relay.started` stayed 0 while mangled frames were passed back to the client). Forwarded flows therefore use a different shape, selected per association by `TcpRedirectAssociation.ForwardLocalAddress`:
+
+- Forward leg (SYN and mid-flow data, `TryRewriteForwardLeg`): **src stays client:client-port; only dst moves to (adapter-local address L, listener port)**. L is resolved per origin adapter via `IAdapterLocalAddressProvider` (wired as `WindowsAdapterLocalAddressProvider`): IPv4 prefers a same-subnet address, IPv6 skips link-local and prefers a /64 prefix match. **Never 127.0.0.1** — the reverse reply from a loopback destination would carry a martian source and can be dropped by the stack before reaching the capture layer for rewriting. No L candidate → fail-closed `Blocked` (`tcp.redirect.rejected reason=localAddress`).
+- No MAC swap on the forward leg: the arrival frame's dst MAC already addresses this host. The MAC swap is now gated on `towardMstcp` everywhere (host shape swaps; forwarded never does).
+- Table endpoints follow the shape: forwarded `ReverseSource = (L, listener-port)`, `ReverseDestination = AcceptedPeer = (client, client-port)`, so the accept-loop peer validation and `TryResolveByReverse` see the real client tuple.
+- Reverse leg is unchanged textually (`src -> original server:port, dst -> original client:port`) and still injects to the origin adapter; the association's origin-shaped endpoints make the same rewrite call correct for both shapes.
+- The wildcard self-traffic registration `(Tcp, 0.0.0.0:P, 0.0.0.0:P)` cannot match the forwarded SYN-ACK `(L:P -> client:port)` because the remote leg must equal the observed remote exactly — the reverse hook still owns that packet.
+- Locked by `ForwardedFlowSynRewritesTowardAdapterLocalListener`, `ForwardedFlowWithoutLocalAddressFailsClosed`, `ForwardedFlowAcceptsClientTuplePeer`, and the rewritten `ForwardedFlowReverseInjectsTowardOriginAdapter`.
+
+### Relay setup failure resets the client (fixed 2026-08-14)
+
+When the SOCKS5 relay cannot be established after a successful redirect (proxy down, auth failure, upstream unreachable), the client's connection is already established through the redirect leg and would otherwise hang. The coordinator records the client ISN (+ a bounded copy of the original SYN) at setup and the server ISN when the reverse SYN-ACK passes the hook; on relay failure it crafts a standalone RST|ACK (`TcpResetBuilder`, fresh checksums, MACs mirrored from the SYN template) with seq = server-ISN + 1 — in-window for the client's established state — and injects it toward MSTCP (host) or the origin adapter (forwarded) before tearing the session down. Missing sequence numbers degrade to plain teardown. Locked by `RelaySetupFailureInjectsClientResetWhenSequencesKnown` / `ForwardedRelayFailureInjectsClientResetTowardOriginAdapter` / `RelaySetupFailureBlocksAndReleasesAlias` (degradation) and `TcpResetBuilderTests`.
+
+### Non-flow frames always pass (fixed 2026-08-14)
+
+Frames that cannot be classified as TCP/UDP flows (ARP, ICMPv6 ND, other L2/L3, unparseable, fragments) are never policy-evaluated: `FlowDispatcher.DispatchNonFlowAsync` passes them unconditionally after the self-traffic check. Policy exists to govern proxyable flows; blocking non-flow frames under a catch-all proxy/block rule silently broke ARP resolution and produced total L2 failure on the gateway (26 `packet.dropped reason=policy`, all nonFlow, 23 of them 42-byte ARP frames, while test traffic never even reached the capture layer). Locked by `DispatcherForwardedNonFlowAlwaysPassesRegardlessOfRules` / `DispatcherHostNonFlowAlwaysPassesRegardlessOfFallbackAndRules`.
+
+### Deployment: Windows Firewall inbound rule is required (hardware-verified 2026-08-15)
+
+Every redirect path terminates at a local listener socket, and the injected SYN is an unsolicited inbound TCP connection from the stack's perspective. On adapters whose network profile applies the default inbound block (typically Public), the Windows Firewall silently drops that SYN before it reaches TCP: `tcp.redirect.created` appears, no SYN-ACK ever leaves, and the flow hangs. Forwarded DNAT injections onto Private/unidentified-profile virtual adapters passed by default, which is why the failure only showed on the WLAN (Public) host path. Symptom trio: `tcp.redirect.created` present, `tcp.relay.started` absent, zero captures for the listener port. Diagnose with `Set-NetFirewallProfile -All -LogBlocked True` + `pfirewall.log` (DROP to the listener port) and `Get-NetTCPConnection -State SynReceived` (empty). Remedy is a deployment rule, not code: `New-NetFirewallRule -Direction Inbound -Action Allow -Program "<path>\WinForward.exe" -Profile Any`.
+
+### Policy authoring for gateway LANs (hardware-verified 2026-08-15)
+
+Because forwarded flows evaluate only adapter-qualified rules (see "Host vs forwarded policy domains"), a plain `remoteCidr`-only pass rule can never exempt LAN traffic that arrives on a bridged adapter — and a host flow egressing the bridge adapter DOES match `adapterId` rules, so rule ORDER decides whether LAN traffic is proxied (a remote upstream cannot reach 192.168.x and the connection blackholes after the redirect handshake). The working pattern is a combined rule placed before the adapter-proxy rule; matchers are AND-combined and the rule stays adapter-qualified: `{ "adapterId": [...], "remoteCidr": [LAN prefixes], "action": "pass" }`. It exempts both host-origin and forwarded LAN traffic without any `EvaluateForwarded` change.
+
 ### UDP relay wiring (wired 2026-08-09, hardware pass pending)
 
 - A proxy-decided UDP datagram is parsed for its payload (`IpUdpPacket.TryParse`) and handed to `UdpProxyCoordinator.TrySendAsync`; the original frame is consumed (never reinjected) — the SOCKS5 UDP relay transport owns forwarding.
@@ -171,10 +198,10 @@ Reverse-packet injection direction follows the flow origin:
 - Policy eligibility is not the same as capture scope. Adapter-unqualified host rules may require all MSTCP-bound adapters to remain captured, so forwarded eligibility is enforced after self-traffic, TCP reverse handling, and existing-flow resolution, immediately before a genuinely new flow is claimed.
 - New `Host` flows evaluate the complete ordered rule list and use the configured `fallbackAction`.
 - New `Forwarded` flows evaluate only rules containing `adapterId` and/or `adapterName`, preserving original rule order and every additional matcher condition. If none match, they pass independently of adapter-unqualified rules and `fallbackAction`.
-- The same adapter-qualified-only/default-pass contract applies to forwarded packets that cannot be classified as TCP/UDP flows. Host non-flow behavior remains unchanged.
+- The same adapter-qualified-only/default-pass contract applies to forwarded packets that cannot be classified as TCP/UDP flows. Host non-flow behavior remains unchanged. **Superseded 2026-08-14**: non-flow frames (non-IP, non-TCP/UDP, unparseable, fragmented) now always pass on both origins without any policy evaluation — blocking them broke ARP/ICMPv6-ND and silently severed L2 (see "Non-flow frames always pass").
 - The implicit forwarded pass is cached in `FlowTable`; reverse and cross-adapter observations reuse it before origin-specific policy can run again. Flow-table capacity exhaustion still fails closed.
 - `Forwarded` is derived from NDIS `ON_RECEIVE`, not an authoritative Windows routing decision. It includes both traffic Windows may route across adapters and new inbound traffic addressed to a service on the host.
-- Regression coverage: `ForwardedPolicySkipsUnqualifiedRulesAndConfiguredFallback`, `DispatcherSeparatesForwardedAdaptersFromHostCatchAllPolicy`, `DispatcherCachesForwardedImplicitPassAcrossOriginsAndFailsClosedAtCapacity`, and forwarded non-flow tests.
+- Regression coverage: `ForwardedPolicySkipsUnqualifiedRulesAndConfiguredFallback`, `DispatcherSeparatesForwardedAdaptersFromHostCatchAllPolicy`, `DispatcherCachesForwardedImplicitPassAcrossOriginsAndFailsClosedAtCapacity`; non-flow pass coverage moved to `DispatcherForwardedNonFlowAlwaysPassesRegardlessOfRules` / `DispatcherHostNonFlowAlwaysPassesRegardlessOfFallbackAndRules` (see "Non-flow frames always pass").
 
 ### Cross-family SOCKS5 UDP relay setup (fixed 2026-08-11)
 

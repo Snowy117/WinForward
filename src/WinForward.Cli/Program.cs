@@ -227,6 +227,7 @@ internal static class Program
             new TcpRedirectInjector(reinjector),
             new TcpRedirectTable(),
             selfTraffic,
+            new WindowsAdapterLocalAddressProvider(),
             logger);
         try
         {

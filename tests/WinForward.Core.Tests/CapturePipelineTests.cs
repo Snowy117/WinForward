@@ -367,14 +367,14 @@ public sealed class CapturePipelineTests
     }
 
     [Fact]
-    public async Task DispatcherForwardedNonFlowUsesQualifiedRulesAndOtherwisePasses()
+    public async Task DispatcherForwardedNonFlowAlwaysPassesRegardlessOfRules()
     {
         var config = new ValidatedConfiguration(
             new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot(
             [
                 new(new RuleMatcher(), new FlowDecision(FlowAction.Block, 0, null)),
-                new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Block, 1, null))
+                new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Proxy, 1, "proxy"))
             ], FlowAction.Block));
         var executor = new FakeExecutor();
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor);
@@ -386,38 +386,21 @@ public sealed class CapturePipelineTests
         await dispatcher.DispatchNonFlowAsync(selected, CancellationToken.None);
         await dispatcher.DispatchNonFlowAsync(unselected, CancellationToken.None);
 
-        Assert.Equal(1, executor.BlockCount);
-        Assert.Equal(1, executor.PassCount);
-        Assert.Equal(PacketDisposition.Block, selected.Lease.Disposition);
+        Assert.Equal(0, executor.BlockCount);
+        Assert.Equal(2, executor.PassCount);
+        Assert.Equal(PacketDisposition.Pass, selected.Lease.Disposition);
         Assert.Equal(PacketDisposition.Pass, unselected.Lease.Disposition);
     }
 
     [Fact]
-    public async Task DispatcherHostNonFlowKeepsConfiguredFallback()
-    {
-        var config = new ValidatedConfiguration(
-            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
-            new PolicySnapshot([], FlowAction.Block));
-        var executor = new FakeExecutor();
-        var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor);
-        var adapter = new WindowsAdapter("id-a", "Ethernet", "a", 1, 1);
-        var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), PacketFlowClassifier.ClassifyNonFlow(adapter, isOnSend: true));
-
-        await dispatcher.DispatchNonFlowAsync(packet, CancellationToken.None);
-
-        Assert.Equal(1, executor.BlockCount);
-        Assert.Equal(PacketDisposition.Block, packet.Lease.Disposition);
-    }
-
-    [Fact]
-    public async Task DispatcherHostNonFlowKeepsMeaningfulRuleOrder()
+    public async Task DispatcherHostNonFlowAlwaysPassesRegardlessOfFallbackAndRules()
     {
         var config = new ValidatedConfiguration(
             new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot(
             [
                 new(new RuleMatcher(Protocols: new HashSet<TransportProtocol> { TransportProtocol.Tcp }), new FlowDecision(FlowAction.Block, 0, null)),
-                new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Pass, 1, null)),
+                new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Proxy, 1, "proxy")),
                 new(new RuleMatcher(), new FlowDecision(FlowAction.Block, 2, null))
             ], FlowAction.Block));
         var executor = new FakeExecutor();
@@ -536,6 +519,47 @@ public sealed class CapturePipelineTests
 
         Assert.Equal(0, reinjector.ToAdapterCount);
         Assert.Equal(0, reinjector.ToMstcpCount);
+    }
+
+    [Fact]
+    public async Task ExecutorPassesTcpPacketWhenCoordinatorReportsNotRelevant()
+    {
+        var reinjector = new FakeReinjector();
+        await using var coordinator = new TcpProxyCoordinator(
+            new ThrowingRedirectListenerFactory(), new ThrowingRelayFactory(), new ThrowingRedirectInjector(),
+            new TcpRedirectTable(), new SelfTrafficRegistry(), new FakeLocalAddressProvider());
+        var executor = new NdisPacketActionExecutor(reinjector, tcpProxy: coordinator);
+        var key = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 443), TransportProtocol.Tcp, FlowOriginKind.Host);
+        var packet = new CapturedFlowPacket(new PacketLease(CreateIpv4TcpFrame()), FlowContext(key), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
+
+        await executor.ProxyAsync(packet, new Socks5Server("p", "127.0.0.1", 1080, null, null), CancellationToken.None);
+
+        Assert.Equal(1, reinjector.ToAdapterCount);
+        Assert.Equal(0, reinjector.ToMstcpCount);
+        Assert.Equal((nint)7, reinjector.LastAdapterHandle);
+    }
+
+    private sealed class ThrowingRedirectListenerFactory : ITcpRedirectListenerFactory
+    {
+        public ValueTask<ITcpRedirectListener> CreateAsync(AddressFamilyKind addressFamily, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("listener allocation is not expected on this path");
+    }
+
+    private sealed class FakeLocalAddressProvider : IAdapterLocalAddressProvider
+    {
+        public IPAddress? SelectLocalAddress(string adapterId, AddressFamilyKind family, IPAddress clientAddress) => null;
+    }
+
+    private sealed class ThrowingRelayFactory : ITcpProxyRelayFactory
+    {
+        public ValueTask<ITcpRelay> EstablishAsync(Endpoint originalDestination, ITcpAcceptedConnection acceptedConnection, Socks5Server server, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("relay setup is not expected on this path");
+    }
+
+    private sealed class ThrowingRedirectInjector : ITcpRedirectInjector
+    {
+        public ValueTask InjectAsync(ReadOnlyMemory<byte> rewrittenFrame, bool towardMstcp, nint adapterHandle, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("injection is not expected on this path");
     }
 
     // ---- Frame builders ----

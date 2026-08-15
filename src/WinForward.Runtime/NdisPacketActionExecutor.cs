@@ -53,36 +53,9 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
 
     public async ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
     {
-        // UDP datagram on a proxy-decided UDP flow: hand the payload to the SOCKS5 UDP relay
-        // coordinator. The original datagram is consumed (the relay transport owns forwarding,
-        // including any buffered setup traffic); it is never reinjected. A parse failure or an
-        // unsent datagram fails closed without a pass downgrade.
-        if (_udpProxy is not null && packet.Context.Key.Protocol == TransportProtocol.Udp)
+        if (_udpProxy is { } udpProxy && packet.Context.Key.Protocol == TransportProtocol.Udp)
         {
-            if (!IpUdpPacket.TryParse(packet.Lease.Frame.Span, out var udpView))
-            {
-                LogPacket("udp.packet.rejected", packet, new RuntimeLogField("reason", "parse"));
-                LogProxyUnavailable();
-                return;
-            }
-
-            try
-            {
-                var sent = await _udpProxy.TrySendAsync(packet.Context.Key, server, udpView.Payload, cancellationToken, packet.PacketSequence, packet.FlowGeneration).ConfigureAwait(false);
-                if (!sent)
-                {
-                    LogPacket("udp.packet.rejected", packet, new RuntimeLogField("reason", "send"));
-                    LogProxyUnavailable();
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.Warn($"UDP proxy handling failed: {ex.GetType().Name}: {ex.Message}");
-            }
+            await HandleUdpProxyAsync(udpProxy, packet, server, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -96,13 +69,20 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         {
             var outcome = await _tcpProxy.HandlePacketAsync(packet, server, cancellationToken).ConfigureAwait(false);
             LogPacket("tcp.packet.handled", packet, new RuntimeLogField("outcome", outcome));
-            if (outcome == TcpRedirectOutcome.Blocked)
+            if (outcome == TcpRedirectOutcome.NotRelevant)
+            {
+                // The flow is proxy-decided but this packet was never the coordinator's to handle
+                // (typically a connection established before capture started, so its SYN was never
+                // observed). It cannot join a relay retroactively; pass it so the pre-existing
+                // connection stays alive instead of hanging until timeout.
+                await PassAsync(packet, cancellationToken).ConfigureAwait(false);
+            }
+            else if (outcome == TcpRedirectOutcome.Blocked)
             {
                 LogProxyUnavailable();
             }
             // Injected: the coordinator rewrote and reinjected the frame itself; the lease is
-            // consumed. NotRelevant: the packet has no proxy-port or active-association relation,
-            // and the dispatcher already consumed the lease, so it is dropped rather than passed.
+            // consumed.
         }
         catch (OperationCanceledException)
         {
@@ -111,6 +91,40 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         catch (Exception ex)
         {
             _logger.Warn($"TCP proxy handling failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Hands a UDP datagram on a proxy-decided UDP flow to the SOCKS5 UDP relay coordinator. The
+    /// original datagram is consumed (the relay transport owns forwarding, including any buffered
+    /// setup traffic); it is never reinjected. A parse failure or an unsent datagram fails closed
+    /// without a pass downgrade.
+    /// </summary>
+    private async ValueTask HandleUdpProxyAsync(UdpProxyCoordinator udpProxy, CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
+    {
+        if (!IpUdpPacket.TryParse(packet.Lease.Frame.Span, out var udpView))
+        {
+            LogPacket("udp.packet.rejected", packet, new RuntimeLogField("reason", "parse"));
+            LogProxyUnavailable();
+            return;
+        }
+
+        try
+        {
+            var sent = await udpProxy.TrySendAsync(packet.Context.Key, server, udpView.Payload, cancellationToken, packet.PacketSequence, packet.FlowGeneration).ConfigureAwait(false);
+            if (!sent)
+            {
+                LogPacket("udp.packet.rejected", packet, new RuntimeLogField("reason", "send"));
+                LogProxyUnavailable();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn($"UDP proxy handling failed: {ex.GetType().Name}: {ex.Message}");
         }
     }
 

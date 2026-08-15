@@ -1,3 +1,4 @@
+using System.Net;
 using WinForward.Core;
 
 namespace WinForward.Runtime;
@@ -17,15 +18,29 @@ public enum RelayPhase
 
 public sealed class TcpRedirectAssociation
 {
-    internal TcpRedirectAssociation(FlowKey originalKey, Endpoint originalDestination, AdapterContext originAdapter, nint originAdapterHandle, Endpoint translatedListenerTuple, long generation, DateTimeOffset now)
+    internal TcpRedirectAssociation(FlowKey originalKey, Endpoint originalDestination, AdapterContext originAdapter, nint originAdapterHandle, Endpoint translatedListenerTuple, IPAddress? forwardLocalAddress, long generation, DateTimeOffset now)
     {
         OriginalKey = originalKey;
         OriginalDestination = originalDestination;
         OriginAdapter = originAdapter;
         OriginAdapterHandle = originAdapterHandle;
         TranslatedListenerTuple = translatedListenerTuple;
-        ReverseSourceEndpoint = Endpoint.From(originalKey.Local.Address, translatedListenerTuple.Port);
-        ReverseDestinationEndpoint = Endpoint.From(originalKey.Remote.Address, originalKey.Local.Port);
+        ForwardLocalAddress = forwardLocalAddress;
+        if (forwardLocalAddress is null)
+        {
+            // Host shape: the rewritten SYN arrives from server-address:client-port at the client's
+            // own address, so the listener peer and the reverse source are keyed on those.
+            ReverseSourceEndpoint = Endpoint.From(originalKey.Local.Address, translatedListenerTuple.Port);
+            ReverseDestinationEndpoint = Endpoint.From(originalKey.Remote.Address, originalKey.Local.Port);
+        }
+        else
+        {
+            // Forwarded DNAT shape: the rewritten SYN keeps the client's tuple and only the
+            // destination moves to the adapter-local address, so the listener peer is the client
+            // itself and the reverse source is the adapter-local address on the listener port.
+            ReverseSourceEndpoint = Endpoint.From(forwardLocalAddress, translatedListenerTuple.Port);
+            ReverseDestinationEndpoint = Endpoint.From(originalKey.Local.Address, originalKey.Local.Port);
+        }
         AcceptedPeerEndpoint = ReverseDestinationEndpoint;
         Generation = generation;
         LastActivityUtc = now;
@@ -36,12 +51,24 @@ public sealed class TcpRedirectAssociation
     public AdapterContext OriginAdapter { get; }
     public nint OriginAdapterHandle { get; }
     public Endpoint TranslatedListenerTuple { get; }
+    public IPAddress? ForwardLocalAddress { get; }
     public Endpoint ReverseSourceEndpoint { get; }
     public Endpoint ReverseDestinationEndpoint { get; }
     public Endpoint AcceptedPeerEndpoint { get; }
     public long Generation { get; }
     public RelayPhase Phase { get; internal set; }
     public DateTimeOffset LastActivityUtc { get; private set; }
+
+    /// <summary>
+    /// The client ISN observed on the original SYN and a bounded copy of that frame, recorded at
+    /// redirect setup so a relay setup failure can be surfaced to the client as a protocol-correct
+    /// RST crafted from real sequence numbers instead of a silent hang.
+    /// </summary>
+    public uint? ClientInitialSeq { get; internal set; }
+    public byte[]? OriginalSynFrameCopy { get; internal set; }
+
+    /// <summary>The listener-side ISN, observed when the reverse SYN-ACK passed the reverse hook.</summary>
+    public uint? ServerInitialSeq { get; internal set; }
 
     public void Touch(DateTimeOffset now) => LastActivityUtc = now;
 }
@@ -80,8 +107,10 @@ public sealed class TcpRedirectTable
     /// exists the existing association is touched and returned. If <paramref name="translatedTuple"/>
     /// already belongs to a different original key, the claim is rejected (fail-closed) so reverse
     /// packets never route nondeterministically. A full table is rejected the same way.
+    /// <paramref name="forwardLocalAddress"/> is the adapter-local redirect destination address for
+    /// forwarded flows (DNAT shape); null selects the host IP-swap shape.
     /// </summary>
-    public bool TryClaim(FlowKey originalKey, Endpoint originalDestination, AdapterContext originAdapter, nint originAdapterHandle, Endpoint translatedTuple, DateTimeOffset now, out TcpRedirectAssociation? association)
+    public bool TryClaim(FlowKey originalKey, Endpoint originalDestination, AdapterContext originAdapter, nint originAdapterHandle, Endpoint translatedTuple, IPAddress? forwardLocalAddress, DateTimeOffset now, out TcpRedirectAssociation? association)
     {
         lock (_gate)
         {
@@ -92,10 +121,8 @@ public sealed class TcpRedirectTable
                 return true;
             }
 
-            var reverse = new ReverseRedirectTuple(
-                Endpoint.From(originalKey.Local.Address, translatedTuple.Port),
-                Endpoint.From(originalKey.Remote.Address, originalKey.Local.Port));
-            if (_byTranslatedListener.ContainsKey(translatedTuple) || _byReverse.ContainsKey(reverse))
+            var created = new TcpRedirectAssociation(originalKey, originalDestination, originAdapter, originAdapterHandle, translatedTuple, forwardLocalAddress, ++_nextGeneration, now);
+            if (_byTranslatedListener.ContainsKey(translatedTuple) || _byReverse.ContainsKey(new ReverseRedirectTuple(created.ReverseSourceEndpoint, created.ReverseDestinationEndpoint)))
             {
                 association = null;
                 return false;
@@ -107,7 +134,6 @@ public sealed class TcpRedirectTable
                 return false;
             }
 
-            var created = new TcpRedirectAssociation(originalKey, originalDestination, originAdapter, originAdapterHandle, translatedTuple, ++_nextGeneration, now);
             _byOriginal.Add(originalKey, created);
             _byTranslatedListener.Add(translatedTuple, created);
             _byReverse.Add(new ReverseRedirectTuple(created.ReverseSourceEndpoint, created.ReverseDestinationEndpoint), created);
@@ -120,9 +146,10 @@ public sealed class TcpRedirectTable
         TryFind(_byTranslatedListener, translatedTuple, now, out association);
 
     /// <summary>
-    /// Resolves a reverse redirect frame by its complete pre-rewrite wire tuple. The wildcard
-    /// listener replies from the route-selected client address, so the source is
-    /// client-address:proxy-port and the destination is server-address:original-client-port.
+    /// Resolves a reverse redirect frame by its complete pre-rewrite wire tuple. The tuple shape
+    /// follows the association origin: a host flow's listener replies from
+    /// client-address:proxy-port to server-address:original-client-port, while a forwarded flow's
+    /// listener replies from adapter-local-address:proxy-port to client-address:original-client-port.
     /// </summary>
     public bool TryResolveByReverse(Endpoint local, Endpoint remote, DateTimeOffset now, out TcpRedirectAssociation? association)
     {
