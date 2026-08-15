@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "backend layer guideline index: logging, error-handling, quality conventions apply to all Runtime/Protocols edits"}
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "adapter identity and MAC semantics contract; R2 injects frames with adapter/client MACs"}
