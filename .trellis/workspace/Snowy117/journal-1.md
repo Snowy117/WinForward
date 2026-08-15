@@ -229,3 +229,24 @@ Added configurable error through trace runtime logging, packet and flow correlat
 ### Status
 
 [OK] **Completed**
+
+
+## Session 7: 修复网络协议审查发现的问题 (R1-R6)
+
+**Date**: 2026-08-15
+**Task**: 修复网络协议审查发现的问题 (R1-R6)
+**Branch**: `master`
+
+### Summary
+
+协议审查发现 6 个问题并全部修复: R1 TCP 中继 30s socket 超时误杀空闲连接(GetUpstreamStream 清除超时)、R2 转发流 UDP 响应目的 MAC(记录客户端 MAC 透传至注入器)、R3 SOCKS5 UDP relay 源校验放宽为端口+地址族、R4 允许空密码、R5 ATYP=3 域名改 ASCII、R6 测试宿主 finalizer 崩溃。289/289 测试通过,0 警告。spec windows-ndisapi.md 补充转发流 MAC 契约与 socket 超时生命周期。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7a0a43d` | (see git log) |
+
+### Status
+
+[OK] **Completed**
