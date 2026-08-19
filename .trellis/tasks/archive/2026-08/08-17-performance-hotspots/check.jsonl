@@ -1,0 +1,6 @@
+{"file":".trellis/tasks/08-17-performance-hotspots/research/performance-hotspots.md","reason":"Use the hotspot evidence and experiment matrix to verify that changes address measured costs rather than speculative code paths."}
+{"file":".trellis/spec/backend/windows-ndisapi.md","reason":"Check native ABI layout, enumeration-handle use, direction flags, metadata preservation, and event/batch compatibility."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review ownership, locking, packet rewrite, coordinator lifecycle, and test requirements against the implementation."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Verify logging optimizations preserve threshold, field, privacy, failure-isolation, and observational-only contracts."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Audit all data-flow boundaries and validation responsibilities after changes cross native, runtime, protocol, and core layers."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Check for missed duplicate allocation/parsing/logging patterns and ensure new helpers remain single-source-of-truth."}

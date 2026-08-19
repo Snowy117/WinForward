@@ -1,0 +1,6 @@
+{"file":".trellis/tasks/08-17-performance-hotspots/research/performance-hotspots.md","reason":"Evidence-backed hotspot inventory, file:line anchors, measured-baseline limitations, and profiling experiments."}
+{"file":".trellis/spec/backend/windows-ndisapi.md","reason":"Pinned NDISAPI handle, direction, metadata, serialization, event/batch, and historical RTT contracts."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Allocation-conscious packet rules, table-lock contracts, coordinator ownership, and required correctness tests."}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"High-frequency IsEnabled requirement, stable event/privacy contracts, and logger failure semantics."}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Required data-flow and boundary review for changes spanning NDIS, runtime, protocol, and core layers."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Search-first and shared-utility guidance for repeated parsing, buffer, lookup, and logging mechanisms."}
