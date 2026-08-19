@@ -250,3 +250,24 @@ Added configurable error through trace runtime logging, packet and flow correlat
 ### Status
 
 [OK] **Completed**
+
+
+## Session 8: Performance Hotspots Optimization
+
+**Date**: 2026-08-19
+**Task**: Performance Hotspots Optimization
+**Branch**: `master`
+
+### Summary
+
+Analyzed WinForward forwarding-path hotspots, added a managed benchmark harness, implemented measured portable optimizations (O(1) lookups, pooled UDP buffers, owner-bound payload views, native buffer reuse, attribution gating, logging guards), rolled back the TCP relay CTS candidate, updated quality-guidelines spec, and archived the task. NDIS event/batch ABI and Windows RTT validation remain deferred.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `58482da` | (see git log) |
+
+### Status
+
+[OK] **Completed**
