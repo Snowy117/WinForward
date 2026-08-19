@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>WinForward.Benchmarks</AssemblyName>
+    <RootNamespace>WinForward.Benchmarks</RootNamespace>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+    <EnableAotAnalyzer>false</EnableAotAnalyzer>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/WinForward.Configuration/WinForward.Configuration.csproj" />
+    <ProjectReference Include="../../src/WinForward.Core/WinForward.Core.csproj" />
+    <ProjectReference Include="../../src/WinForward.NdisApi/WinForward.NdisApi.csproj" />
+    <ProjectReference Include="../../src/WinForward.Protocols/WinForward.Protocols.csproj" />
+    <ProjectReference Include="../../src/WinForward.Runtime/WinForward.Runtime.csproj" />
+    <ProjectReference Include="../../src/WinForward.Windows/WinForward.Windows.csproj" />
+  </ItemGroup>
+</Project>

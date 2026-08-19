@@ -5,6 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="WinForward.Core.Tests" />
+    <InternalsVisibleTo Include="WinForward.Benchmarks" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../WinForward.Core/WinForward.Core.csproj" />

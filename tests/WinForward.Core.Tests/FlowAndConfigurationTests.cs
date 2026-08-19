@@ -166,6 +166,8 @@ public sealed class FlowAndConfigurationTests
         Assert.Equal(address, decoded.DestinationAddress);
         Assert.Equal((ushort)53, decoded.DestinationPort);
         Assert.Equal(payload, decoded.Payload.ToArray());
+        encoded[^1] = 0xff;
+        Assert.Equal(0xff, decoded.Payload.Span[^1]);
     }
 
     [Fact]
@@ -280,6 +282,31 @@ public sealed class FlowAndConfigurationTests
         Assert.InRange(claimed.LastActivityUtc, beforeLookup, DateTimeOffset.UtcNow);
         Assert.Equal(0, table.RemoveExpired(claimed.LastActivityUtc + TimeSpan.FromMinutes(1) - TimeSpan.FromTicks(1), TimeSpan.FromMinutes(1)));
         Assert.Equal(1, table.RemoveExpired(claimed.LastActivityUtc + TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1)));
+    }
+
+    [Fact]
+    public void FlowTableExpiryRemovesCrossAdapterTransportAliases()
+    {
+        var table = new FlowTable();
+        var key = FlowKey.Create(
+            Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000),
+            Endpoint.From(IPAddress.Parse("198.51.100.53"), 53),
+            TransportProtocol.Udp,
+            FlowOriginKind.Host,
+            new AdapterContext("host", "host", 1));
+        var claimed = table.Claim(key, () => FlowDecision.Fallback(FlowAction.Pass));
+        claimed.Touch(DateTimeOffset.UtcNow - TimeSpan.FromMinutes(2));
+        var crossAdapter = key with
+        {
+            Origin = FlowOriginKind.Forwarded,
+            OriginAdapterId = "forwarded",
+            OriginAdapterGeneration = 2,
+        };
+
+        Assert.Equal(1, table.RemoveExpired(DateTimeOffset.UtcNow, TimeSpan.FromMinutes(1)));
+        Assert.False(table.TryResolve(crossAdapter, out _));
+        Assert.True(table.TryClaimResolved(crossAdapter, () => FlowDecision.Fallback(FlowAction.Block), out var replacement));
+        Assert.Equal(FlowAction.Block, replacement!.Decision.Action);
     }
 
     [Fact]
@@ -552,6 +579,8 @@ public sealed class FlowAndConfigurationTests
         Assert.True(IpUdpPacket.TryParse(frame, out var packet));
         Assert.Equal((ushort)53000, packet.SourcePort);
         Assert.Equal(new byte[] { 1, 2, 3 }, packet.Payload.ToArray());
+        frame[44] = 4;
+        Assert.Equal(4, packet.Payload.Span[^1]);
         frame[20] = 0x20;
         Assert.False(IpUdpPacket.TryParse(frame, out _));
     }

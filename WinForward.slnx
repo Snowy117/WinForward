@@ -11,4 +11,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/WinForward.Core.Tests/WinForward.Core.Tests.csproj" />
   </Folder>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/WinForward.Benchmarks/WinForward.Benchmarks.csproj" />
+  </Folder>
 </Solution>

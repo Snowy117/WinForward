@@ -46,6 +46,71 @@ Questions to answer:
 - Configuration tests must cover null DTO array entries, merged adjacent/overlapping port ranges, unknown JSON field paths, and paired credential limits at both 255-byte accepted and 256-byte rejected UTF-8 boundaries.
 - Lifecycle tests must assert coordinator disposal precedes mode restoration on normal completion, capture failure, and concurrent stop, using an ordered event seam rather than scheduler timing.
 
+## Scenario: Bounded Pooled SOCKS5 UDP Receive Storage
+
+### 1. Scope / Trigger
+
+- Trigger: changing UDP relay receive storage, SOCKS5 UDP decoding, response reinjection, or the pinned NDIS maximum frame size.
+
+### 2. Signatures
+
+- `UdpProxyCoordinator(..., int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame)` owns the receive-window bound.
+- `UdpResponseReinjector(..., int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame, ...)` owns the rebuilt-frame bound.
+- `Socks5UdpTransport.ReceiveAsync(Memory<byte> buffer, CancellationToken)` must reject a receive whose byte count fills the supplied buffer.
+
+### 3. Contracts
+
+- Composition passes the same pinned `maximumFrameSize` to the coordinator and reinjector. A relay response that cannot fit the reinjection cap must never be accepted into a larger independent receive contract.
+- Per active UDP session, rent one buffer sized `maximumFrameSize + 22 + 1`: maximum Ethernet frame, maximum SOCKS5 UDP header, and one oversize sentinel byte.
+- The receive loop owns the rented array for its full lifetime and returns it exactly once in `finally`, including cancellation, socket disposal, malformed input, immediate receive failure, and normal session teardown.
+- `receivedBytes >= buffer.Length` means the datagram may be truncated. Reject it fail-closed before decoding or reinjection.
+- Decoded payloads are owner-bound `ReadOnlyMemory<byte>` slices and must be consumed before the next receive or buffer return; they must not escape the awaited response-sink call.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+| --- | --- |
+| `maximumFrameSize <= 0` | Constructor throws `ArgumentOutOfRangeException` |
+| Receive result is smaller than the sentinel window and decodes successfully | Await the response sink before reusing the buffer |
+| Receive result fills the sentinel window | Throw `IOException`; do not decode or reinject |
+| Malformed SOCKS5 UDP header/payload | Throw `IOException`; session fails closed |
+| Receive, decode, sink, cancellation, or disposal exits the loop | Return the rented array exactly once |
+| Rebuilt Ethernet frame exceeds the same pinned cap | Drop fail-closed without native injection |
+
+### 5. Good/Base/Bad Cases
+
+- Good: a 1514-byte frame cap rents a 1537-byte receive window; a valid smaller relay datagram is decoded as a view, awaited through the sink, then the buffer is reused.
+- Base: cancellation or socket disposal ends the receive loop and returns the pool rental.
+- Bad: rent 65,535 bytes per session, or accept `receivedBytes == buffer.Length` as complete; both defeat the memory bound and can silently process a truncated datagram.
+
+### 6. Tests Required
+
+- Assert coordinator and reinjector receive the same non-default frame cap from composition.
+- Inject a tracking `ArrayPool<byte>` and assert one rent/one return after normal shutdown and immediate receive failure.
+- Assert a receive that fills the sentinel window is rejected before decode/sink invocation.
+- Preserve malformed datagram, oversized rebuilt frame, host/forwarded reinjection direction, client-MAC, cancellation, expiry, and coordinator single-flight disposal tests.
+
+### 7. Wrong vs Correct
+
+```csharp
+// Wrong: independent unbounded receive storage can retain ~64 KiB per session
+// and gives no reliable truncation signal.
+var buffer = new byte[65_535];
+var received = await transport.ReceiveAsync(buffer, cancellationToken);
+
+// Correct: share the pinned frame cap, reserve one sentinel byte, and always return the rental.
+var buffer = pool.Rent(maximumFrameSize + MaximumSocks5UdpHeaderSize + 1);
+try
+{
+    var received = await transport.ReceiveAsync(buffer.AsMemory(0, receiveBufferSize), cancellationToken);
+    await sink.InjectAsync(flow, source, received.Payload, clientMac, cancellationToken);
+}
+finally
+{
+    pool.Return(buffer);
+}
+```
+
 ---
 
 ## Forbidden Patterns

@@ -35,30 +35,31 @@ public static class Socks5UdpCodec
         return result;
     }
 
-    public static bool TryDecode(ReadOnlySpan<byte> frame, out Socks5UdpDatagram datagram, long scopeId = 0)
+    public static bool TryDecode(ReadOnlyMemory<byte> frame, out Socks5UdpDatagram datagram, long scopeId = 0)
     {
         datagram = default;
-        if (frame.Length < 4 || frame[0] != 0 || frame[1] != 0 || frame[2] != 0 || frame[3] is not (1 or 3 or 4)) return false;
+        var bytes = frame.Span;
+        if (bytes.Length < 4 || bytes[0] != 0 || bytes[1] != 0 || bytes[2] != 0 || bytes[3] is not (1 or 3 or 4)) return false;
         var offset = 4;
         IPAddress? address = null;
         string? domain = null;
-        if (frame[3] is 1 or 4)
+        if (bytes[3] is 1 or 4)
         {
-            var addressLength = frame[3] == 1 ? 4 : 16;
-            if (frame.Length < offset + addressLength + 2 || !TryReadAddress(frame.Slice(offset, addressLength), frame[3], scopeId, out address)) return false;
+            var addressLength = bytes[3] == 1 ? 4 : 16;
+            if (bytes.Length < offset + addressLength + 2 || !TryReadAddress(bytes.Slice(offset, addressLength), bytes[3], scopeId, out address)) return false;
             offset += addressLength;
         }
         else
         {
-            if (frame.Length < offset + 1) return false;
-            var domainLength = frame[offset++];
-            if (domainLength == 0 || frame.Length < offset + domainLength + 2) return false;
+            if (bytes.Length < offset + 1) return false;
+            var domainLength = bytes[offset++];
+            if (domainLength == 0 || bytes.Length < offset + domainLength + 2) return false;
             // RFC 1928 domain names are ASCII; non-ASCII bytes decode as '?' rather than throwing.
-            domain = System.Text.Encoding.ASCII.GetString(frame.Slice(offset, domainLength));
+            domain = System.Text.Encoding.ASCII.GetString(bytes.Slice(offset, domainLength));
             offset += domainLength;
         }
-        if (frame.Length < offset + 2) return false;
-        datagram = new Socks5UdpDatagram(address, domain, BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(offset, 2)), frame[(offset + 2)..].ToArray());
+        if (bytes.Length < offset + 2) return false;
+        datagram = new Socks5UdpDatagram(address, domain, BinaryPrimitives.ReadUInt16BigEndian(bytes.Slice(offset, 2)), frame[(offset + 2)..]);
         return true;
     }
 

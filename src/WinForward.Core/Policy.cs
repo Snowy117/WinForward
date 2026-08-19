@@ -33,10 +33,12 @@ public sealed class PolicySnapshot
     {
         Rules = rules;
         FallbackAction = fallbackAction;
+        RequiresProcessAttribution = rules.Any(static rule => rule.Matcher.Processes is { Count: > 0 });
     }
 
     public IReadOnlyList<PolicyRule> Rules { get; }
     public FlowAction FallbackAction { get; }
+    public bool RequiresProcessAttribution { get; }
 
     public FlowDecision Evaluate(FlowContext context)
     {

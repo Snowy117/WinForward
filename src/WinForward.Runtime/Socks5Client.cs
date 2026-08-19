@@ -464,10 +464,11 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
         EndPoint sender = RelayEndpoint.AddressFamily == AddressFamily.InterNetwork ? new IPEndPoint(IPAddress.Any, 0) : new IPEndPoint(IPAddress.IPv6Any, 0);
         var result = await _socket.ReceiveFromAsync(buffer, SocketFlags.None, sender, cancellationToken).ConfigureAwait(false);
         if (!IsAcceptableRelaySource(result.RemoteEndPoint, RelayEndpoint)) throw new IOException("SOCKS5 UDP packet came from an unexpected relay endpoint.");
+        if (IsPossiblyTruncated(result.ReceivedBytes, buffer.Length)) throw new IOException("SOCKS5 UDP relay returned an oversized datagram.");
         // M2: the SOCKS5 UDP wire format carries no interface scope, so propagate the relay
         // endpoint's IPv6 scope into reconstruction to keep a link-local decoded address routable.
         var scopeId = RelayEndpoint.Address.AddressFamily == AddressFamily.InterNetworkV6 ? RelayEndpoint.Address.ScopeId : 0;
-        if (!Socks5UdpCodec.TryDecode(buffer.Span[..result.ReceivedBytes], out var datagram, scopeId)) throw new IOException("SOCKS5 UDP relay returned a malformed datagram.");
+        if (!Socks5UdpCodec.TryDecode(buffer[..result.ReceivedBytes], out var datagram, scopeId)) throw new IOException("SOCKS5 UDP relay returned a malformed datagram.");
         return datagram;
     }
 
@@ -479,6 +480,8 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
     /// </summary>
     internal static bool IsAcceptableRelaySource(EndPoint observed, IPEndPoint relay) =>
         observed is IPEndPoint ip && ip.Port == relay.Port && ip.AddressFamily == relay.AddressFamily;
+
+    internal static bool IsPossiblyTruncated(int receivedBytes, int bufferLength) => receivedBytes >= bufferLength;
 
     public async ValueTask DisposeAsync()
     {

@@ -276,6 +276,21 @@ public sealed class CapturePipelineTests
     }
 
     [Fact]
+    public async Task DispatcherSkipsAttributionWhenPolicyHasNoProcessSelectors()
+    {
+        var config = CreateConfig(new RuleMatcher(Protocols: new HashSet<TransportProtocol> { TransportProtocol.Udp }), FlowAction.Pass);
+        var attributor = new FakeAttributor("dns.exe");
+        var executor = new FakeExecutor();
+        var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor, attributor);
+        var key = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
+
+        await dispatcher.DispatchAsync(new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), FlowContext(key)), CancellationToken.None);
+
+        Assert.Equal(0, attributor.Calls);
+        Assert.Equal(1, executor.PassCount);
+    }
+
+    [Fact]
     public async Task DispatcherSeparatesForwardedAdaptersFromHostCatchAllPolicy()
     {
         var server = new Socks5Server("primary", "127.0.0.1", 1080, null, null);

@@ -73,7 +73,7 @@ public sealed class FlowDispatcher
     public async ValueTask DispatchAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(packet);
-        LogPacketStage(RuntimeLogLevel.Trace, "packet.classified", packet, new RuntimeLogField("kind", "flow"));
+        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.classified", packet, new RuntimeLogField("kind", "flow"));
         if (await TryHandleSelfTrafficAsync(packet, cancellationToken).ConfigureAwait(false)) return;
 
         // A packet on an active TCP redirect leg (a port matches a proxy listener port) must be
@@ -86,7 +86,7 @@ public sealed class FlowDispatcher
         if (_flows.TryResolve(packet.Context.Key, out var existing) && existing is not null)
         {
             packet = packet with { FlowGeneration = existing.Generation };
-            LogPacketStage(RuntimeLogLevel.Trace, "packet.flowResolved", packet, new RuntimeLogField("existing", true));
+            if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.flowResolved", packet, new RuntimeLogField("existing", true));
             // A UDP proxy response (server -> client on an actively proxied flow) is injected by
             // UdpResponseReinjector toward the local stack; when the capture path observes it again
             // it must be delivered to the client, not re-proxied back to the relay. Detect by
@@ -107,13 +107,13 @@ public sealed class FlowDispatcher
 
         if (!_flows.TryClaimResolved(context.Key, () => EvaluateNewFlow(context), out var claimed) || claimed is null)
         {
-            LogPacketStage(RuntimeLogLevel.Trace, "packet.flowResolved", packet, new RuntimeLogField("outcome", "capacity"));
+            if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.flowResolved", packet, new RuntimeLogField("outcome", "capacity"));
             await CompleteAsync(packet, PacketDisposition.Block, () => _executor.BlockAsync(packet, cancellationToken)).ConfigureAwait(false);
             return;
         }
 
         packet = packet with { Context = context, FlowGeneration = claimed.Generation };
-        LogPacketStage(RuntimeLogLevel.Trace, "packet.flowResolved", packet, new RuntimeLogField("existing", false));
+        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.flowResolved", packet, new RuntimeLogField("existing", false));
         if (_logger.IsEnabled(RuntimeLogLevel.Debug))
         {
             var fields = FlowFields(packet, 3);
@@ -128,7 +128,7 @@ public sealed class FlowDispatcher
     private async ValueTask<bool> TryHandleSelfTrafficAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
         if (!_selfTraffic.IsOwned(packet.Context)) return false;
-        LogPacketStage(RuntimeLogLevel.Trace, "packet.selfTraffic", packet, new RuntimeLogField("outcome", "pass"));
+        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.selfTraffic", packet, new RuntimeLogField("outcome", "pass"));
         await CompleteAsync(packet, PacketDisposition.Pass, () => _executor.PassAsync(packet, cancellationToken)).ConfigureAwait(false);
         return true;
     }
@@ -139,7 +139,7 @@ public sealed class FlowDispatcher
         var outcome = await _reverseHandler(packet, cancellationToken).ConfigureAwait(false);
         if (outcome == TcpRedirectOutcome.NotRelevant) return false;
         var disposition = outcome == TcpRedirectOutcome.Injected ? PacketDisposition.ProxyConsumed : PacketDisposition.Block;
-        LogPacketStage(RuntimeLogLevel.Trace, "packet.reverseHandled", packet, new RuntimeLogField("outcome", outcome));
+        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.reverseHandled", packet, new RuntimeLogField("outcome", outcome));
         await CompleteAsync(packet, disposition, disposition == PacketDisposition.Block
             ? () => _executor.BlockAsync(packet, cancellationToken)
             : () => ValueTask.CompletedTask).ConfigureAwait(false);
@@ -148,7 +148,7 @@ public sealed class FlowDispatcher
 
     private async ValueTask<FlowContext> AttributeProcessAsync(FlowContext context, CancellationToken cancellationToken)
     {
-        if (_attributor is null || context.ProcessName is not null || context.ProcessPath is not null || context.Key.Origin != FlowOriginKind.Host) return context;
+        if (!_policy.RequiresProcessAttribution || _attributor is null || context.ProcessName is not null || context.ProcessPath is not null || context.Key.Origin != FlowOriginKind.Host) return context;
         var identity = await _attributor.FindAsync(context.Key, cancellationToken).ConfigureAwait(false);
         return identity is null ? context : context with { ProcessName = identity.Value.Name, ProcessPath = identity.Value.FullPath };
     }
@@ -163,15 +163,15 @@ public sealed class FlowDispatcher
     public async ValueTask DispatchNonFlowAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(packet);
-        LogPacketStage(RuntimeLogLevel.Trace, "packet.classified", packet, new RuntimeLogField("kind", "nonFlow"));
+        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.classified", packet, new RuntimeLogField("kind", "nonFlow"));
         if (_selfTraffic.IsOwned(packet.Context))
         {
-            LogPacketStage(RuntimeLogLevel.Trace, "packet.selfTraffic", packet, new RuntimeLogField("outcome", "pass"));
+            if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.selfTraffic", packet, new RuntimeLogField("outcome", "pass"));
             await CompleteAsync(packet, PacketDisposition.Pass, () => _executor.PassAsync(packet, cancellationToken)).ConfigureAwait(false);
             return;
         }
 
-        LogPacketStage(RuntimeLogLevel.Trace, "packet.action", packet, new RuntimeLogField("action", FlowAction.Pass), new RuntimeLogField("rule", null), new RuntimeLogField("proxy", null), new RuntimeLogField("reason", "nonFlow"));
+        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.action", packet, new RuntimeLogField("action", FlowAction.Pass), new RuntimeLogField("rule", null), new RuntimeLogField("proxy", null), new RuntimeLogField("reason", "nonFlow"));
         await CompleteAsync(packet, PacketDisposition.Pass, () => _executor.PassAsync(packet, cancellationToken)).ConfigureAwait(false);
     }
 
@@ -186,7 +186,7 @@ public sealed class FlowDispatcher
 
     private async ValueTask ExecuteDecisionAsync(CapturedFlowPacket packet, FlowDecision decision, CancellationToken cancellationToken)
     {
-        LogPacketStage(RuntimeLogLevel.Trace, "packet.action", packet, new RuntimeLogField("action", decision.Action), new RuntimeLogField("rule", decision.RuleIndex), new RuntimeLogField("proxy", decision.ProxyServerName));
+        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.action", packet, new RuntimeLogField("action", decision.Action), new RuntimeLogField("rule", decision.RuleIndex), new RuntimeLogField("proxy", decision.ProxyServerName));
         switch (decision.Action)
         {
             case FlowAction.Pass:
@@ -208,7 +208,7 @@ public sealed class FlowDispatcher
     {
         if (!packet.Lease.TryComplete(disposition)) return;
         await execute().ConfigureAwait(false);
-        LogPacketStage(RuntimeLogLevel.Trace, "packet.completed", packet, new RuntimeLogField("disposition", disposition));
+        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.completed", packet, new RuntimeLogField("disposition", disposition));
     }
 
     private void LogPacketStage(RuntimeLogLevel level, string eventName, CapturedFlowPacket packet, params RuntimeLogField[] fields)

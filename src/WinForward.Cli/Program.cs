@@ -324,7 +324,8 @@ internal static class Program
                 adaptersByStableId: adapterTargets,
                 maximumFrameSize: NdisApiAbi.MaximumEthernetFrame,
                 logger: logger),
-            logger: logger);
+            logger: logger,
+            maximumFrameSize: NdisApiAbi.MaximumEthernetFrame);
     }
 
     private static int Validate(string[] args)

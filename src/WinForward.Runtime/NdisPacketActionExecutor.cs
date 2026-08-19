@@ -40,14 +40,14 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         buffer.SetFrame(packet.Lease.Frame.Span, metadata.DeviceFlags, metadata.AdapterHandle, metadata.Flags);
         if (metadata.IsOnSend) _reinjector.SendToAdapter(metadata.AdapterHandle, buffer);
         else _reinjector.SendToMstcp(metadata.AdapterHandle, buffer);
-        LogPacket("packet.reinjected", packet, new RuntimeLogField("target", metadata.IsOnSend ? "adapter" : "mstcp"));
+        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("packet.reinjected", packet, new RuntimeLogField("target", metadata.IsOnSend ? "adapter" : "mstcp"));
         return ValueTask.CompletedTask;
     }
 
     public ValueTask BlockAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
         // Consumed: the lease is already completed by the dispatcher; no reinjection occurs.
-        LogPacket("packet.dropped", packet, new RuntimeLogField("reason", "policy"));
+        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("packet.dropped", packet, new RuntimeLogField("reason", "policy"));
         return ValueTask.CompletedTask;
     }
 
@@ -68,7 +68,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         try
         {
             var outcome = await _tcpProxy.HandlePacketAsync(packet, server, cancellationToken).ConfigureAwait(false);
-            LogPacket("tcp.packet.handled", packet, new RuntimeLogField("outcome", outcome));
+            if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("tcp.packet.handled", packet, new RuntimeLogField("outcome", outcome));
             if (outcome == TcpRedirectOutcome.NotRelevant)
             {
                 // The flow is proxy-decided but this packet was never the coordinator's to handle
@@ -102,9 +102,9 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     /// </summary>
     private async ValueTask HandleUdpProxyAsync(UdpProxyCoordinator udpProxy, CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
     {
-        if (!IpUdpPacket.TryParse(packet.Lease.Frame.Span, out var udpView))
+        if (!IpUdpPacket.TryParse(packet.Lease.Frame, out var udpView))
         {
-            LogPacket("udp.packet.rejected", packet, new RuntimeLogField("reason", "parse"));
+            if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("udp.packet.rejected", packet, new RuntimeLogField("reason", "parse"));
             LogProxyUnavailable();
             return;
         }
@@ -112,14 +112,14 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         // The Ethernet source MAC is the client's address (a VM NIC for forwarded flows). The
         // coordinator records it so forwarded UDP responses can be rebuilt toward the client
         // instead of this host's own NIC MAC.
-        var clientMac = packet.Lease.Frame.Span.Slice(6, 6).ToArray();
+        var clientMac = packet.Lease.Frame.Slice(6, 6);
 
         try
         {
             var sent = await udpProxy.TrySendAsync(packet.Context.Key, server, udpView.Payload, cancellationToken, packet.PacketSequence, packet.FlowGeneration, clientMac).ConfigureAwait(false);
             if (!sent)
             {
-                LogPacket("udp.packet.rejected", packet, new RuntimeLogField("reason", "send"));
+                if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("udp.packet.rejected", packet, new RuntimeLogField("reason", "send"));
                 LogProxyUnavailable();
             }
         }

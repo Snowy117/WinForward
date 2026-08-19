@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading.Channels;
@@ -151,6 +152,36 @@ public sealed class UdpProxyCoordinatorTests
     }
 
     [Fact]
+    public async Task ReceiveBufferIsBoundedAndReturnedWhenCoordinatorStops()
+    {
+        var pool = new TrackingArrayPool();
+        var factory = new FakeTransportFactory();
+        var coordinator = new UdpProxyCoordinator(
+            factory,
+            new FakeResponseSink(),
+            1,
+            TimeProvider.System,
+            null,
+            maximumFrameSize: 1514,
+            receiveBufferPool: pool);
+
+        Assert.True(await coordinator.TrySendAsync(CreateFlow("192.0.2.53"), s_server, new byte[] { 1 }, CancellationToken.None));
+        Assert.Equal(1537, pool.LastMinimumLength);
+
+        await coordinator.DisposeAsync();
+
+        Assert.Equal(1, pool.ReturnCount);
+    }
+
+    [Theory]
+    [InlineData(1536, 1537, false)]
+    [InlineData(1537, 1537, true)]
+    public void FullReceiveBufferIsRejectedAsPossiblyTruncated(int receivedBytes, int bufferLength, bool expected)
+    {
+        Assert.Equal(expected, Socks5UdpTransport.IsPossiblyTruncated(receivedBytes, bufferLength));
+    }
+
+    [Fact]
     public async Task RemoveExpiredDisposesIdleSessionAndReleasesAssociation()
     {
         var factory = new FakeTransportFactory();
@@ -225,12 +256,20 @@ public sealed class UdpProxyCoordinatorTests
     public async Task ImmediateReceiveFaultRemovesSessionAfterCoordinatorRegistration()
     {
         var factory = new ImmediateFaultTransportFactory();
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 1, TimeProvider.System, null);
+        var pool = new TrackingArrayPool();
+        await using var coordinator = new UdpProxyCoordinator(
+            factory,
+            new FakeResponseSink(),
+            1,
+            TimeProvider.System,
+            null,
+            receiveBufferPool: pool);
         var flow = CreateFlow("192.0.2.53");
 
         await Assert.ThrowsAsync<IOException>(async () => await coordinator.TrySendAsync(flow, s_server, new byte[] { 1 }, CancellationToken.None));
 
         Assert.True(await WaitUntilAsync(() => Task.FromResult(Assert.Single(factory.FaultedTransports).IsDisposed)));
+        Assert.Equal(1, pool.ReturnCount);
         Assert.True(await WaitUntilAsync(() => coordinator.TrySendAsync(CreateFlow("192.0.2.54"), s_server, new byte[] { 2 }, CancellationToken.None).AsTask()));
     }
 
@@ -558,6 +597,20 @@ public sealed class UdpProxyCoordinatorTests
 
         public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, byte[]? clientMac, CancellationToken cancellationToken) =>
             Responses.Writer.WriteAsync((originalFlow, remoteSource, payload.ToArray(), clientMac), cancellationToken);
+    }
+
+    private sealed class TrackingArrayPool : ArrayPool<byte>
+    {
+        public int LastMinimumLength { get; private set; }
+        public int ReturnCount { get; private set; }
+
+        public override byte[] Rent(int minimumLength)
+        {
+            LastMinimumLength = minimumLength;
+            return new byte[minimumLength];
+        }
+
+        public override void Return(byte[] array, bool clearArray = false) => ReturnCount++;
     }
 
     private sealed class MutableTimeProvider(DateTimeOffset initial) : TimeProvider

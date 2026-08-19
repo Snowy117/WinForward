@@ -118,6 +118,7 @@ public sealed class FlowState
 public sealed class FlowTable
 {
     private readonly Dictionary<FlowKey, FlowState> _states = [];
+    private readonly Dictionary<TransportTuple, FlowState> _transportIndex = [];
     private readonly Lock _gate = new();
     private readonly int _capacity;
     private long _nextGeneration;
@@ -132,7 +133,7 @@ public sealed class FlowTable
     {
         lock (_gate)
         {
-            return _states.TryGetValue(key, out state) || _states.TryGetValue(key.Reverse(), out state);
+            return _states.TryGetValue(key, out state) || _transportIndex.TryGetValue(TransportTuple.From(key), out state);
         }
     }
 
@@ -141,8 +142,8 @@ public sealed class FlowTable
     /// kind, or origin adapter. A flow is identified by its transport tuple (address family,
     /// protocol, and the local/remote endpoint pair in either orientation); origin kind and origin
     /// adapter are provenance metadata that must not cause a reverse or cross-adapter observation
-    /// to be re-evaluated as a new flow. Dictionary lookups cover the common same-adapter cases;
-    /// the adapter-agnostic scan is a rare fallback for routed flows observed at another adapter.
+    /// to be re-evaluated as a new flow. A transport-tuple index resolves either orientation without
+    /// scanning the flow table.
     /// </summary>
     public bool TryResolve(FlowKey key, out FlowState? state)
     {
@@ -171,6 +172,7 @@ public sealed class FlowTable
 
             var created = new FlowState(key, decide(), ++_nextGeneration);
             _states.Add(key, created);
+            AddToTransportIndex(created);
             state = created;
             return true;
         }
@@ -186,7 +188,7 @@ public sealed class FlowTable
     {
         lock (_gate)
         {
-            if (_states.TryGetValue(key, out var existing) || _states.TryGetValue(key.Reverse(), out existing))
+            if (_states.TryGetValue(key, out var existing) || _transportIndex.TryGetValue(TransportTuple.From(key), out existing))
             {
                 existing.Touch(DateTimeOffset.UtcNow);
                 state = existing;
@@ -201,6 +203,7 @@ public sealed class FlowTable
 
             var created = new FlowState(key, decide(), ++_nextGeneration);
             _states.Add(key, created);
+            AddToTransportIndex(created);
             state = created;
             return true;
         }
@@ -213,7 +216,7 @@ public sealed class FlowTable
             var expired = _states.Where(pair => now - pair.Value.LastActivityUtc >= idleTimeout).Select(pair => pair.Key).ToArray();
             foreach (var key in expired)
             {
-                _states.Remove(key);
+                if (_states.Remove(key, out var state)) RemoveFromTransportIndex(state);
             }
 
             return expired.Length;
@@ -222,51 +225,37 @@ public sealed class FlowTable
 
     private bool TryResolveLocked(FlowKey key, out FlowState? state)
     {
-        if (_states.TryGetValue(key, out state))
+        if (_states.TryGetValue(key, out state) || _transportIndex.TryGetValue(TransportTuple.From(key), out state))
         {
             state.Touch(DateTimeOffset.UtcNow);
             return true;
         }
-        var reverse = key.Reverse();
-        if (_states.TryGetValue(reverse, out state))
-        {
-            state.Touch(DateTimeOffset.UtcNow);
-            return true;
-        }
-        var flippedReverse = reverse with { Origin = Flip(reverse.Origin) };
-        if (_states.TryGetValue(flippedReverse, out state))
-        {
-            state.Touch(DateTimeOffset.UtcNow);
-            return true;
-        }
-        var flipped = key with { Origin = Flip(key.Origin) };
-        if (_states.TryGetValue(flipped, out state))
-        {
-            state.Touch(DateTimeOffset.UtcNow);
-            return true;
-        }
-
-#pragma warning disable S3267 // Manual scan avoids per-packet LINQ allocation on the capture hot path.
-        foreach (var candidate in _states.Values)
-        {
-            if (SameLogicalFlow(candidate.Key, key))
-            {
-                candidate.Touch(DateTimeOffset.UtcNow);
-                state = candidate;
-                return true;
-            }
-        }
-#pragma warning restore S3267
 
         state = null;
         return false;
     }
 
-    private static bool SameLogicalFlow(FlowKey first, FlowKey second) =>
-        first.AddressFamily == second.AddressFamily &&
-        first.Protocol == second.Protocol &&
-        ((first.Local == second.Local && first.Remote == second.Remote) ||
-         (first.Local == second.Remote && first.Remote == second.Local));
+    private void AddToTransportIndex(FlowState state)
+    {
+        var tuple = TransportTuple.From(state.Key);
+        _transportIndex.Add(tuple, state);
+        _transportIndex.TryAdd(tuple.Reverse(), state);
+    }
 
-    private static FlowOriginKind Flip(FlowOriginKind origin) => origin == FlowOriginKind.Host ? FlowOriginKind.Forwarded : FlowOriginKind.Host;
+    private void RemoveFromTransportIndex(FlowState state)
+    {
+        var tuple = TransportTuple.From(state.Key);
+        _transportIndex.Remove(tuple);
+        _transportIndex.Remove(tuple.Reverse());
+    }
+
+    private readonly record struct TransportTuple(
+        AddressFamilyKind AddressFamily,
+        TransportProtocol Protocol,
+        Endpoint Local,
+        Endpoint Remote)
+    {
+        public static TransportTuple From(FlowKey key) => new(key.AddressFamily, key.Protocol, key.Local, key.Remote);
+        public TransportTuple Reverse() => this with { Local = Remote, Remote = Local };
+    }
 }

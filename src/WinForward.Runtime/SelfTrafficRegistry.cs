@@ -6,6 +6,7 @@ namespace WinForward.Runtime;
 public sealed class SelfTrafficRegistry : ISelfTrafficGuard
 {
     private readonly Dictionary<SelfTrafficKey, long> _entries = [];
+    private readonly Dictionary<WildcardKey, long> _wildcards = [];
     private readonly Lock _gate = new();
     private long _generation;
 
@@ -15,6 +16,7 @@ public sealed class SelfTrafficRegistry : ISelfTrafficGuard
         {
             var generation = ++_generation;
             _entries[key] = generation;
+            if (IsWildcardLocal(key.Local.Address)) _wildcards[WildcardKey.From(key)] = generation;
             return new SelfTrafficToken(this, key, generation);
         }
     }
@@ -26,38 +28,32 @@ public sealed class SelfTrafficRegistry : ISelfTrafficGuard
         lock (_gate)
         {
             if (_entries.ContainsKey(key) || _entries.ContainsKey(reverse)) return true;
-
-            // A socket bound to Any/IPv6Any (e.g. the UDP relay transport binds 0.0.0.0) emits
-            // packets whose source IP is chosen by routing, not the bind address. Match such
-            // registrations by port + remote regardless of the observed source IP. Entry counts are
-            // tiny (a few sockets), so the scan is not a hot-path concern.
-            foreach (var entry in _entries.Keys)
-            {
-                if (entry.Protocol != key.Protocol) continue;
-                if (MatchesWildcard(entry, key) || MatchesWildcard(entry, reverse)) return true;
-            }
-            return false;
+            return _wildcards.ContainsKey(WildcardKey.From(key)) || _wildcards.ContainsKey(WildcardKey.From(reverse));
         }
     }
 
-    private static bool MatchesWildcard(SelfTrafficKey registered, SelfTrafficKey observed)
-    {
-        if (registered.Local.Port != observed.Local.Port) return false;
-        if (registered.Remote != observed.Remote) return false;
-        return registered.Local.Address.Equals(IPAddress.Any) || registered.Local.Address.Equals(IPAddress.IPv6Any);
-    }
+    private static bool IsWildcardLocal(IPAddress address) => address.Equals(IPAddress.Any) || address.Equals(IPAddress.IPv6Any);
 
     private void Remove(SelfTrafficKey key, long generation)
     {
         lock (_gate)
         {
-            if (_entries.TryGetValue(key, out var current) && current == generation) _entries.Remove(key);
+            if (_entries.TryGetValue(key, out var current) && current == generation)
+            {
+                _entries.Remove(key);
+                if (IsWildcardLocal(key.Local.Address)) _wildcards.Remove(WildcardKey.From(key));
+            }
         }
     }
 
     public readonly record struct SelfTrafficKey(TransportProtocol Protocol, Endpoint Local, Endpoint Remote)
     {
         public static SelfTrafficKey From(FlowContext context) => new(context.Key.Protocol, context.Key.Local, context.Key.Remote);
+    }
+
+    private readonly record struct WildcardKey(TransportProtocol Protocol, ushort LocalPort, Endpoint Remote)
+    {
+        public static WildcardKey From(SelfTrafficKey key) => new(key.Protocol, key.Local.Port, key.Remote);
     }
 
     public sealed class SelfTrafficToken : IDisposable

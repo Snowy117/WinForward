@@ -34,9 +34,9 @@ public sealed class NdisCapturePump : IAsyncDisposable
 
     public async ValueTask RunAsync(CancellationToken cancellationToken)
     {
+        using var buffer = new NdisPacketBuffer();
         while (!cancellationToken.IsCancellationRequested && Volatile.Read(ref _stopped) == 0)
         {
-            using var buffer = new NdisPacketBuffer();
             if (!_driver.TryReadPacket(_adapterHandle, buffer))
             {
                 await Task.Delay(_pollDelay, cancellationToken).ConfigureAwait(false);

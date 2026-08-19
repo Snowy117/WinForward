@@ -81,8 +81,11 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
                 out var frame,
                 _maximumFrameSize))
         {
-            LogTrace("udp.response.dropped", originalFlow,
-                new RuntimeLogField("reason", "frameBuild"), new RuntimeLogField("bytes", payload.Length));
+            if (_logger.IsEnabled(RuntimeLogLevel.Trace))
+            {
+                LogTrace("udp.response.dropped", originalFlow,
+                    new RuntimeLogField("reason", "frameBuild"), new RuntimeLogField("bytes", payload.Length));
+            }
             _logger.Warn("UDP response frame build failed; dropping the response (fail-closed).");
             return ValueTask.CompletedTask;
         }
@@ -100,9 +103,12 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         {
             _reinjector.SendToAdapter(target.Handle, buffer);
         }
-        LogTrace("udp.response.reinjected", originalFlow,
-            new RuntimeLogField("target", towardMstcp ? "mstcp" : "adapter"),
-            new RuntimeLogField("bytes", payload.Length));
+        if (_logger.IsEnabled(RuntimeLogLevel.Trace))
+        {
+            LogTrace("udp.response.reinjected", originalFlow,
+                new RuntimeLogField("target", towardMstcp ? "mstcp" : "adapter"),
+                new RuntimeLogField("bytes", payload.Length));
+        }
         return ValueTask.CompletedTask;
     }
 
@@ -127,7 +133,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         if (originalFlow.OriginAdapterId is null || !_byStableId.TryGetValue(originalFlow.OriginAdapterId, out var originAdapter))
         {
             destinationMac = null;
-            LogTrace("udp.response.dropped", originalFlow, new RuntimeLogField("reason", "missingOriginAdapter"));
+            if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogTrace("udp.response.dropped", originalFlow, new RuntimeLogField("reason", "missingOriginAdapter"));
             LogMissingOriginAdapter();
             return false;
         }
@@ -136,7 +142,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         if (clientMac is null || clientMac.Length != 6)
         {
             destinationMac = null;
-            LogTrace("udp.response.dropped", originalFlow, new RuntimeLogField("reason", "missingClientMac"));
+            if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogTrace("udp.response.dropped", originalFlow, new RuntimeLogField("reason", "missingClientMac"));
             LogMissingClientMac();
             return false;
         }
