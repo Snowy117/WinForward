@@ -9,6 +9,9 @@ namespace WinForward.Core.Tests;
 
 public sealed class RuntimeLoggingTests
 {
+    private const string TimestampFormat = "yyyy-MM-dd HH:mm:ss.fff";
+    private const int TimestampLength = 23;
+
     [Theory]
     [InlineData(RuntimeLogLevel.Error, true, false, false, false, false)]
     [InlineData(RuntimeLogLevel.Warn, true, true, false, false, false)]
@@ -46,7 +49,45 @@ public sealed class RuntimeLoggingTests
             new("value", "a b=\"c\"\r\n"),
             new("missing", null));
 
-        Assert.Equal("[trace] packet.completed packet=42 endpoint=[2001:db8::1]:443 value=\"a b=\\\"c\\\"\\r\\n\"" + Environment.NewLine, writer.ToString());
+        var output = writer.ToString();
+        Assert.EndsWith(Environment.NewLine, output, StringComparison.Ordinal);
+        var (timestamp, remainder) = SplitTimestampPrefix(output[..^Environment.NewLine.Length]);
+        AssertTimestamp(timestamp);
+        Assert.Equal("[trace] packet.completed packet=42 endpoint=[2001:db8::1]:443 value=\"a b=\\\"c\\\"\\r\\n\"", remainder);
+    }
+
+    [Fact]
+    public void ConsoleLoggerPrefixesEveryLineWithLocalWallClockTimestamp()
+    {
+        var writer = new StringWriter(CultureInfo.InvariantCulture);
+        var logger = new ConsoleRuntimeLogger(RuntimeLogLevel.Trace, writer);
+
+        logger.Error("error");
+        logger.Info("info");
+        logger.Event(RuntimeLogLevel.Trace, "event.name", new RuntimeLogField("key", 1));
+
+        var lines = writer.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+        Assert.Equal(3, lines.Length);
+        foreach (var line in lines)
+        {
+            var (timestamp, remainder) = SplitTimestampPrefix(line);
+            AssertTimestamp(timestamp);
+            Assert.False(string.IsNullOrEmpty(remainder), $"Line has no content after the timestamp prefix: {line}");
+        }
+    }
+
+    private static (string Timestamp, string Remainder) SplitTimestampPrefix(string line)
+    {
+        Assert.True(line.Length > TimestampLength && line[TimestampLength] == ' ', $"Line is missing the timestamp prefix: {line}");
+        return (line[..TimestampLength], line[(TimestampLength + 1)..]);
+    }
+
+    private static void AssertTimestamp(string timestamp)
+    {
+        var parsed = DateTime.TryParseExact(timestamp, TimestampFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out var value);
+        Assert.True(parsed, $"Line has a malformed timestamp prefix: {timestamp}");
+        var local = DateTime.SpecifyKind(value, DateTimeKind.Local);
+        Assert.InRange(local.Subtract(DateTime.Now).TotalMinutes, -5, 5);
     }
 
     [Fact]

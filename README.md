@@ -102,11 +102,13 @@ JSON, rejected on any unknown property. The top level is:
   case-insensitive and surrounding whitespace is ignored; omitted `logLevel` defaults to `info`.
   `info` retains concise lifecycle output, `debug` adds flow and proxy lifecycle events, and `trace`
   adds per-packet classification, policy, proxy, reinjection, drop, and terminal events. Events are
-  single-line records written to stderr, such as `[trace] packet.completed packet=42 flow=7
-  disposition=pass`. Trace can be high volume and is intended for temporary diagnosis. Diagnostic
-  records contain metadata and byte counts only: credentials, authentication traffic, payloads, and
-  raw packet bytes are never logged. Process names are included when attribution succeeds; full
-  process paths are included only when a rule uses a path-based process selector.
+  single-line records written to stderr, each prefixed with the local wall-clock timestamp
+  (`yyyy-MM-dd HH:mm:ss.fff`) so field logs can be correlated with external events, such as
+  `2026-08-27 14:03:21.517 [trace] packet.completed packet=42 flow=7 disposition=pass`. Trace can
+  be high volume and is intended for temporary diagnosis. Diagnostic records contain metadata and
+  byte counts only: credentials, authentication traffic, payloads, and raw packet bytes are never
+  logged. Process names are included when attribution succeeds; full process paths are included
+  only when a rule uses a path-based process selector.
 
 The configuration is validated fully before interception starts and is kept immutable for the
 lifetime of a run. Configuration hot reload is not supported.

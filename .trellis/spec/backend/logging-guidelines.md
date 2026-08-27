@@ -17,10 +17,11 @@ must be guarded with `IsEnabled`.
 
 ## Structured Logging
 
-Existing operational lines retain `[info]`, `[warn]`, and `[error]` prefixes. Diagnostic lines
-use a stable lowercase event name followed by invariant `key=value` fields. Formatting owns
-escaping, quoting, IPv6 endpoint brackets, null omission, and atomic writes under concurrency.
-Packet diagnostics use the runtime packet sequence and flow-table generation when available.
+Existing operational lines retain `[info]`, `[warn]`, and `[error]` markers after a local
+wall-clock timestamp prefix. Diagnostic lines use a stable lowercase event name followed by
+invariant `key=value` fields. Formatting owns timestamps, escaping, quoting, IPv6 endpoint
+brackets, null omission, and atomic writes under concurrency. Packet diagnostics use the runtime
+packet sequence and flow-table generation when available.
 
 ## What to Log
 
@@ -52,8 +53,9 @@ the process-path privacy flag. High-frequency callers must check
   surrounding whitespace ignored. Omission means `info`.
 - Threshold ordering is `error < warn < info < debug < trace`; a threshold includes itself and all
   more-severe levels.
-- Lines use `[level] event.name key=value` on `stderr`, with invariant values, escaped/quoted
-  unsafe values, bracketed IPv6 endpoints, and omitted null fields.
+- Lines use `yyyy-MM-dd HH:mm:ss.fff [level] event.name key=value` on `stderr`. The timestamp is
+  local wall-clock time formatted with the invariant culture; values remain invariant,
+  escaped/quoted when unsafe, bracketed for IPv6 endpoints, and omitted when null.
 - Packet diagnostics use the runtime `packet` sequence; flow diagnostics use the `FlowTable`
   generation. TCP/UDP association generations may be additional fields.
 - Allowed metadata includes endpoints, adapters, process identity, rule/action, stage, reason, and
@@ -66,7 +68,7 @@ the process-path privacy flag. High-frequency callers must check
 | `logLevel` omitted | Validate successfully with `info` |
 | Valid level string | Normalize and store the matching enum |
 | Null, blank, unknown, or wrong type | Fail with a `logLevel` diagnostic without echoing raw input |
-| Event below the threshold | Skip formatting and output |
+| Event below the threshold | Skip timestamp/field formatting and output |
 | Logger writer/formatter failure | Do not affect packet behavior |
 | Classification/dispatch failure | Emit trace `packet.failed` when possible, dispose the lease, and rethrow |
 | Proxy or reinjection failure | Preserve existing fail-closed behavior and log metadata/reason only |
@@ -74,7 +76,7 @@ the process-path privacy flag. High-frequency callers must check
 ### Good / Base / Bad Cases
 
 - Good: `"logLevel": " Trace "` produces trace output such as
-  `[trace] packet.completed packet=42 flow=7 disposition=pass`.
+  `2026-08-27 14:03:21.517 [trace] packet.completed packet=42 flow=7 disposition=pass`.
 - Base: omitted `logLevel` preserves concise lifecycle, warning, and error output without
   per-packet formatting.
 - Bad: passing a SOCKS5 password, packet span, UDP payload, authentication frame, relay buffer,
@@ -84,8 +86,9 @@ the process-path privacy flag. High-frequency callers must check
 
 - Configuration tests cover defaulting, all five values, case/whitespace normalization, wrong
   types, blank/unknown values, and the `logLevel` diagnostic path.
-- Logger tests cover threshold filtering, stable field order, escaping, null omission, invariant
-  formatting, IPv6 rendering, and one-line output.
+- Logger tests cover threshold filtering, a parseable local `yyyy-MM-dd HH:mm:ss.fff` prefix on
+  every emitted line, stable field order, escaping, null omission, invariant formatting, IPv6
+  rendering, and one-line output.
 - Runtime tests cover packet/flow correlation, terminal completion/failure, process-path privacy,
   proxy lifecycle metadata, and unchanged packet dispositions.
 - Static review/search confirms credentials, payloads, raw frames, and relay buffers never reach

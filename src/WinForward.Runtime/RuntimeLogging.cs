@@ -36,6 +36,8 @@ public sealed class NullRuntimeLogger : IRuntimeLogger
 
 public sealed class ConsoleRuntimeLogger : IRuntimeLogger
 {
+    private const string TimestampFormat = "yyyy-MM-dd HH:mm:ss.fff";
+
     private readonly RuntimeLogLevel _threshold;
     private readonly TextWriter _writer;
     private readonly Lock _gate = new();
@@ -81,7 +83,8 @@ public sealed class ConsoleRuntimeLogger : IRuntimeLogger
         if (!IsEnabled(level)) return;
         try
         {
-            var line = $"[{level.ToString().ToLowerInvariant()}] {SanitizeMessage(message)}";
+            var timestamp = DateTime.Now.ToString(TimestampFormat, CultureInfo.InvariantCulture);
+            var line = $"{timestamp} [{level.ToString().ToLowerInvariant()}] {SanitizeMessage(message)}";
             lock (_gate) _writer.WriteLine(line);
         }
         catch (Exception exception)
