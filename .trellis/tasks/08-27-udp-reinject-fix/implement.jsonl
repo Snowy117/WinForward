@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "NDISAPI adapter identity contract and MAC-cloning pitfall; reinjection must use enumeration handles"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Existing logging conventions placeholder; timestamp work must stay plain-text sink"}

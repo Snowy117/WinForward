@@ -1,0 +1,26 @@
+{
+  "socks5Servers": [
+    {
+      "name": "main",
+      "host": "192.168.100.3",
+      "port": 30890
+    }
+  ],
+  "rules": [
+    {
+      "remoteCidr": [
+        "192.168.100.0/24",
+        "192.168.77.0/24"
+      ],
+      "action": "pass"
+    },
+    {
+      "action": "proxy",
+      "proxyServer": "main"
+    }
+  ],
+  "logLevel": "trace",
+  "fallbackAction": "pass",
+  "proxyUnavailableAction": "block",
+  "processingFailureAction": "block"
+}

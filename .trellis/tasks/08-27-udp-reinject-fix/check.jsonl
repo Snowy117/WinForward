@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "Verify reinjection changes respect the NDISAPI identity contract"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "General quality bar for the check pass"}

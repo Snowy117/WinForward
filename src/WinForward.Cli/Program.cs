@@ -281,11 +281,11 @@ internal static class Program
     }
 
     /// <summary>
-    /// Builds the UDP relay coordinator for a run. The response reinjector targets the capture
-    /// scope's first adapter for host flows; the injectable adapter map keys every capture-scope
-    /// adapter by stable ID so a forwarded (Hyper-V/VM) flow's response can be routed toward its
-    /// origin adapter (H2). When no real MAC is accessible a zero placeholder is used and the
-    /// hardware pass verifies whether SendToMstcp honors the destination MAC.
+    /// Builds the UDP relay coordinator for a run. The injectable adapter map keys every
+    /// capture-scope adapter by stable ID so host and forwarded (Hyper-V/VM) responses use their
+    /// flow's origin adapter. The scope's first adapter is retained only as a host-flow fallback
+    /// when an adapter disappears mid-flow. When no real fallback MAC is accessible a zero
+    /// placeholder is used.
     /// </summary>
     [SupportedOSPlatform("windows")]
     private static UdpProxyCoordinator CreateUdpCoordinator(NdisApiDriver driver, IReadOnlyList<WindowsAdapter> scope, IPacketReinjector reinjector, SelfTrafficRegistry selfTraffic, IRuntimeLogger logger)
@@ -298,18 +298,13 @@ internal static class Program
             localMac = new byte[NdisApiAbi.EthernetAddressLength];
         }
 
-        // H2: forwarded responses must reach the origin adapter, not always the host adapter. Each
-        // scope adapter is keyed by its stable ID so UdpResponseReinjector can resolve a flow's
-        // OriginAdapterId to that adapter's handle + MAC. An adapter whose MAC is unavailable is
-        // omitted so an unbuildable forwarded response drops fail-closed rather than going out the
-        // wrong adapter.
         var adapterTargets = new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase);
         foreach (var adapter in scope)
         {
             var mac = GetAdapterMac(driver, adapter.RuntimeHandle);
             if (mac is null)
             {
-                logger.Warn($"UDP response reinjection has no MAC for adapter '{adapter.FriendlyName}' ({adapter.StableId}); forwarded responses for it are dropped fail-closed.");
+                logger.Warn($"UDP response reinjection has no MAC for adapter '{adapter.FriendlyName}' ({adapter.StableId}); forwarded responses are dropped fail-closed and host responses use the fallback adapter.");
                 continue;
             }
             adapterTargets[adapter.StableId] = new UdpAdapterTarget(adapter.RuntimeHandle, mac);

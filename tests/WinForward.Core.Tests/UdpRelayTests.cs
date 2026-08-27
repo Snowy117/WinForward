@@ -198,6 +198,56 @@ public sealed class UdpRelayTests
 
     [Fact]
     [SupportedOSPlatform("windows")]
+    public async Task HostFlowResponseInjectsTowardItsOriginAdapter()
+    {
+        var reinjector = new FakeReinjector();
+        var originHandle = (nint)1234;
+        var adapters = new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["wlan-1"] = new(originHandle, s_macB)
+        };
+        var sink = new UdpResponseReinjector(reinjector, (nint)7, s_macA, adaptersByStableId: adapters);
+        var adapter = new AdapterContext("WLAN-1", "Wi-Fi", 3);
+        var client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000);
+        var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
+        var flow = FlowKey.Create(client, server, TransportProtocol.Udp, FlowOriginKind.Host, adapter);
+
+        await sink.InjectAsync(flow, server, new byte[] { 1 }, s_macC, CancellationToken.None);
+
+        Assert.Equal(1, reinjector.ToMstcpCount);
+        Assert.Equal(0, reinjector.ToAdapterCount);
+        Assert.Equal(originHandle, reinjector.LastAdapterHandle);
+        Assert.Equal(NdisApiAbi.PacketFlagOnReceive, reinjector.LastDeviceFlags);
+        Assert.True(reinjector.LastFrame.AsSpan(0, 6).SequenceEqual(s_macB));
+        Assert.True(reinjector.LastFrame.AsSpan(6, 6).SequenceEqual(s_macB));
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public async Task HostFlowWithUnresolvedOriginAdapterUsesFallbackAndWarns()
+    {
+        var reinjector = new FakeReinjector();
+        var logger = new RecordingLogger();
+        var fallbackHandle = (nint)7;
+        var sink = new UdpResponseReinjector(reinjector, fallbackHandle, s_macA, logger: logger);
+        var adapter = new AdapterContext("missing-wlan", "Wi-Fi", 3);
+        var client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000);
+        var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
+        var flow = FlowKey.Create(client, server, TransportProtocol.Udp, FlowOriginKind.Host, adapter);
+
+        await sink.InjectAsync(flow, server, new byte[] { 1 }, null, CancellationToken.None);
+        await sink.InjectAsync(flow, server, new byte[] { 2 }, null, CancellationToken.None);
+
+        Assert.Equal(2, reinjector.ToMstcpCount);
+        Assert.Equal(0, reinjector.ToAdapterCount);
+        Assert.Equal(fallbackHandle, reinjector.LastAdapterHandle);
+        Assert.True(reinjector.LastFrame.AsSpan(0, 6).SequenceEqual(s_macA));
+        Assert.True(reinjector.LastFrame.AsSpan(6, 6).SequenceEqual(s_macA));
+        Assert.Equal(1, logger.WarnCount);
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
     public async Task ForwardedFlowResponseInjectsTowardOriginAdapter()
     {
         var reinjector = new FakeReinjector();

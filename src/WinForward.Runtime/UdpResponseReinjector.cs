@@ -9,8 +9,8 @@ namespace WinForward.Runtime;
 /// <summary>
 /// A reinjection target for a UDP response: the NDISAPI enumeration handle of the adapter the
 /// response is injected toward and the MAC to use when rebuilding the Ethernet header. Keyed by
-/// adapter stable ID in <see cref="UdpResponseReinjector"/> so forwarded (Hyper-V/VM) flows can
-/// route responses toward their origin adapter instead of always the host adapter.
+/// adapter stable ID in <see cref="UdpResponseReinjector"/> so every flow can route responses
+/// toward the adapter on which it was captured instead of always using one startup-selected adapter.
 /// </summary>
 public readonly record struct UdpAdapterTarget(nint Handle, byte[] Mac);
 
@@ -21,7 +21,8 @@ public readonly record struct UdpAdapterTarget(nint Handle, byte[] Mac);
 /// endpoint as destination, then injects it toward MSTCP (host flow) or back to the origin adapter
 /// (forwarded flow), mirroring the TCP forwarded-direction fix. Frame-build failures, an unresolved
 /// forwarded origin adapter, or a payload over the pinned frame cap drop the response (fail-closed)
-/// without throwing into the coordinator's receive loop.
+/// without throwing into the coordinator's receive loop. A host flow whose origin adapter has
+/// disappeared falls back to the startup-selected host adapter with a rate-limited warning.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class UdpResponseReinjector : IUdpResponseSink
@@ -34,6 +35,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
     private readonly int _maximumFrameSize;
     private readonly IRuntimeLogger _logger;
     private long _lastMissingOriginLogTicks;
+    private long _lastHostFallbackLogTicks;
     private long _lastMissingClientMacLogTicks;
 
     /// <summary>
@@ -41,8 +43,8 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
     /// <paramref name="hostHandle"/> (the NDISAPI enumeration handle) and whose MAC is
     /// <paramref name="hostMac"/>. <paramref name="adaptersByStableId"/> maps adapter stable IDs
     /// (arbitrary injectable seam, fake-constructed in tests) to their reinjection targets so a
-    /// forwarded flow's response can be sent toward its origin adapter; the host entry is not
-    /// required in the map. <paramref name="maximumFrameSize"/> is the pinned NDISAPI frame cap
+    /// flow's response can be sent toward its origin adapter; the startup-selected host entry is
+    /// not required in the map. <paramref name="maximumFrameSize"/> is the pinned NDISAPI frame cap
     /// (default 1514, or 9014 for a jumbo-capable ABI) that bounds rebuilt frames (M3).
     /// </summary>
     public UdpResponseReinjector(
@@ -114,8 +116,9 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
 
     /// <summary>
     /// Resolves the reinjection target and the Ethernet destination MAC for a response. Host flows
-    /// reinject toward MSTCP on the host adapter with the host MAC on both header slots; forwarded
-    /// flows reinject toward the origin adapter (H2) with the origin adapter's MAC as source and the
+    /// reinject toward MSTCP on their capture adapter with that adapter's MAC on both header slots;
+    /// a missing capture adapter falls back to the startup-selected host adapter. Forwarded flows
+    /// reinject toward the origin adapter (H2) with the origin adapter's MAC as source and the
     /// recorded client MAC as destination so the vSwitch delivers to the VM instead of the host
     /// stack. A forwarded flow with an unresolved origin adapter or without a recorded client MAC
     /// is dropped fail-closed with a rate-limited log rather than sent out the wrong adapter.
@@ -126,6 +129,14 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         towardMstcp = true;
         if (originalFlow.Origin != FlowOriginKind.Forwarded)
         {
+            if (originalFlow.OriginAdapterId is { } originAdapterId && _byStableId.TryGetValue(originAdapterId, out var hostOriginAdapter))
+            {
+                target = hostOriginAdapter;
+            }
+            else
+            {
+                LogHostAdapterFallback();
+            }
             destinationMac = target.Mac;
             return true;
         }
@@ -179,6 +190,16 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         if (now - last >= MissingOriginLogInterval.Ticks && Interlocked.CompareExchange(ref _lastMissingClientMacLogTicks, now, last) == last)
         {
             _logger.Warn("Forwarded UDP response dropped fail-closed: the flow's client MAC was not recorded.");
+        }
+    }
+
+    private void LogHostAdapterFallback()
+    {
+        var now = DateTime.UtcNow.Ticks;
+        var last = Interlocked.Read(ref _lastHostFallbackLogTicks);
+        if (now - last >= MissingOriginLogInterval.Ticks && Interlocked.CompareExchange(ref _lastHostFallbackLogTicks, now, last) == last)
+        {
+            _logger.Warn("Host UDP response origin adapter is not resolved in the reinjection map; using the startup fallback adapter.");
         }
     }
 }
