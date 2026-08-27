@@ -27,6 +27,7 @@ public static class NdisApiAbi
         AssertSize<IntermediateBuffer>(1566);
         AssertSize<NdisrdEthernetPacket>(8);
         AssertSize<EthernetRequest>(16);
+        AssertSize<EthernetMultiRequest>(24);
         AssertSize<AdapterMode>(12);
         AssertOffset<TcpAdapterList>(nameof(TcpAdapterList.AdapterCount), 0);
         AssertOffset<TcpAdapterList>(nameof(TcpAdapterList.AdapterNames), 4);
@@ -46,6 +47,10 @@ public static class NdisApiAbi
         AssertOffset<NdisrdEthernetPacket>(nameof(NdisrdEthernetPacket.Buffer), 0);
         AssertOffset<EthernetRequest>(nameof(EthernetRequest.AdapterHandle), 0);
         AssertOffset<EthernetRequest>(nameof(EthernetRequest.Packet), 8);
+        AssertOffset<EthernetMultiRequest>(nameof(EthernetMultiRequest.AdapterHandle), 0);
+        AssertOffset<EthernetMultiRequest>(nameof(EthernetMultiRequest.PacketsNumber), 8);
+        AssertOffset<EthernetMultiRequest>(nameof(EthernetMultiRequest.PacketsSuccess), 12);
+        AssertOffset<EthernetMultiRequest>(nameof(EthernetMultiRequest.FirstBuffer), 16);
         AssertOffset<AdapterMode>(nameof(AdapterMode.AdapterHandle), 0);
         AssertOffset<AdapterMode>(nameof(AdapterMode.Flags), 8);
     }
@@ -99,6 +104,22 @@ public struct EthernetRequest
 {
     public nint AdapterHandle;
     public NdisrdEthernetPacket Packet;
+}
+
+/// <summary>
+/// Managed header of the variable-size native ETH_M_REQUEST (upstream ndisapi.h, Pack=1, x64):
+/// hAdapterHandle(8) + dwPacketsNumber(4, in) + dwPacketsSuccess(4, out) + NDISRD_ETH_Packet[N].
+/// The array is laid out manually in unmanaged memory: the fixed header occupies 16 bytes and
+/// each packet slot is one <see cref="NdisrdEthernetPacket"/> pointer (8 bytes), so a request for
+/// N buffers spans 16 + 8*N bytes. <see cref="FirstBuffer"/> aliases EthPacket[0].
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct EthernetMultiRequest
+{
+    public nint AdapterHandle;
+    public uint PacketsNumber;
+    public uint PacketsSuccess;
+    public nint FirstBuffer;
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -185,11 +206,23 @@ internal static partial class NdisApiNative
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
     internal static unsafe partial int ReadPacket(NdisApiSafeHandle handle, EthernetRequest* request);
 
+    [LibraryImport(LibraryName, EntryPoint = "ReadPackets", SetLastError = true)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    internal static unsafe partial int ReadPackets(NdisApiSafeHandle handle, EthernetMultiRequest* request);
+
     [LibraryImport(LibraryName, EntryPoint = "SendPacketToMstcp", SetLastError = true)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
     internal static unsafe partial int SendPacketToMstcp(NdisApiSafeHandle handle, EthernetRequest* request);
 
+    [LibraryImport(LibraryName, EntryPoint = "SendPacketsToMstcp", SetLastError = true)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    internal static unsafe partial int SendPacketsToMstcp(NdisApiSafeHandle handle, EthernetMultiRequest* request);
+
     [LibraryImport(LibraryName, EntryPoint = "SendPacketToAdapter", SetLastError = true)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
     internal static unsafe partial int SendPacketToAdapter(NdisApiSafeHandle handle, EthernetRequest* request);
+
+    [LibraryImport(LibraryName, EntryPoint = "SendPacketsToAdapter", SetLastError = true)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    internal static unsafe partial int SendPacketsToAdapter(NdisApiSafeHandle handle, EthernetMultiRequest* request);
 }

@@ -7,8 +7,10 @@ namespace WinForward.NdisApi;
 public sealed record NdisAdapter(nint RuntimeHandle, string InternalName, uint Medium, byte[] MacAddress, ushort Mtu);
 
 [SupportedOSPlatform("windows")]
-public sealed class NdisApiDriver : IDisposable
+public sealed class NdisApiDriver : IDisposable, INdisPacketReader
 {
+    private const int MaxStackMultiRequestBytes = 1024;
+
     private readonly NdisApiSafeHandle _handle;
     private readonly NdisNativeCallGate _nativeCallGate = new();
 
@@ -121,6 +123,139 @@ public sealed class NdisApiDriver : IDisposable
         return NdisNativeCallStatus.InterpretReadResult(queuedPacketCount, readResult, readError, adapterHandle);
     }
 
+    /// <summary>
+    /// Reads up to one batch of packets from the adapter queue into the caller-provided buffers
+    /// (one kernel round trip; the queue query and the batched read share a single gate lease).
+    /// Returns the number of buffers actually filled; 0 means the queue was empty. A queue
+    /// inspection failure, or a failed read from a non-empty queue, throws <see cref="Win32Exception"/>,
+    /// matching the single-packet error semantics.
+    /// </summary>
+    public unsafe int TryReadPackets(nint adapterHandle, NdisPacketBuffer[] buffers)
+    {
+        ArgumentNullException.ThrowIfNull(buffers);
+        if (buffers.Length == 0) return 0;
+
+        uint queuedPacketCount = 0;
+        uint packetsSuccess = 0;
+        int requestedCount = 0;
+        int readResult = 0;
+        int readError = 0;
+
+        using (var gateLease = _nativeCallGate.Enter())
+        {
+            var queueResult = NdisApiNative.GetAdapterPacketQueueSize(_handle, adapterHandle, &queuedPacketCount);
+            var queueError = queueResult == 0 ? Marshal.GetLastWin32Error() : 0;
+            if (NdisNativeCallStatus.HasQueuedPackets(queueResult, queueError, queuedPacketCount, adapterHandle))
+            {
+                requestedCount = (int)Math.Min(queuedPacketCount, (uint)buffers.Length);
+                readResult = ReadPacketsBatch(adapterHandle, buffers, requestedCount, out packetsSuccess, out readError);
+            }
+        }
+
+        return NdisNativeCallStatus.InterpretBatchReadResult(queuedPacketCount, requestedCount, readResult, readError, packetsSuccess, adapterHandle);
+    }
+
+    public unsafe void SendPacketsToMstcp(nint adapterHandle, NdisPacketBuffer[] buffers) =>
+        SendPacketsBatch(towardMstcp: true, adapterHandle, buffers);
+
+    public unsafe void SendPacketsToAdapter(nint adapterHandle, NdisPacketBuffer[] buffers) =>
+        SendPacketsBatch(towardMstcp: false, adapterHandle, buffers);
+
+    // The caller must already hold the native call gate; stack-allocates small requests and falls
+    // back to the unmanaged heap for oversized batches.
+    private unsafe int ReadPacketsBatch(nint adapterHandle, NdisPacketBuffer[] buffers, int count, out uint packetsSuccess, out int nativeError)
+    {
+        var requestByteCount = MultiRequestByteCount(count);
+        if (requestByteCount <= MaxStackMultiRequestBytes)
+        {
+            var stackBytes = stackalloc byte[(int)requestByteCount];
+            return ReadPacketsRequest(stackBytes, adapterHandle, buffers, count, out packetsSuccess, out nativeError);
+        }
+
+        var heapBytes = (byte*)NativeMemory.AllocZeroed(requestByteCount);
+        try
+        {
+            return ReadPacketsRequest(heapBytes, adapterHandle, buffers, count, out packetsSuccess, out nativeError);
+        }
+        finally
+        {
+            NativeMemory.Free(heapBytes);
+        }
+    }
+
+    private unsafe int ReadPacketsRequest(byte* requestMemory, nint adapterHandle, NdisPacketBuffer[] buffers, int count, out uint packetsSuccess, out int nativeError)
+    {
+        BuildMultiRequest(requestMemory, adapterHandle, buffers, count);
+        var request = (EthernetMultiRequest*)requestMemory;
+        var result = NdisApiNative.ReadPackets(_handle, request);
+        nativeError = result == 0 ? Marshal.GetLastWin32Error() : 0;
+        packetsSuccess = request->PacketsSuccess;
+        return result;
+    }
+
+    private unsafe void SendPacketsBatch(bool towardMstcp, nint adapterHandle, NdisPacketBuffer[] buffers)
+    {
+        ArgumentNullException.ThrowIfNull(buffers);
+        if (buffers.Length == 0) return;
+
+        int result;
+        int nativeError;
+        using (var gateLease = _nativeCallGate.Enter())
+        {
+            result = SendPacketsBatchCore(towardMstcp, adapterHandle, buffers, out nativeError);
+        }
+
+        if (result != 0) return;
+        var target = towardMstcp ? "MSTCP" : "the adapter";
+        throw new Win32Exception(nativeError, $"Unable to inject {buffers.Length} NDISAPI packet(s) toward {target} (native error {nativeError}, 0x{nativeError:X8}, adapter 0x{adapterHandle:X}).");
+    }
+
+    private unsafe int SendPacketsBatchCore(bool towardMstcp, nint adapterHandle, NdisPacketBuffer[] buffers, out int nativeError)
+    {
+        var requestByteCount = MultiRequestByteCount(buffers.Length);
+        if (requestByteCount <= MaxStackMultiRequestBytes)
+        {
+            var stackBytes = stackalloc byte[(int)requestByteCount];
+            return SendPacketsRequest(stackBytes, towardMstcp, adapterHandle, buffers, out nativeError);
+        }
+
+        var heapBytes = (byte*)NativeMemory.AllocZeroed(requestByteCount);
+        try
+        {
+            return SendPacketsRequest(heapBytes, towardMstcp, adapterHandle, buffers, out nativeError);
+        }
+        finally
+        {
+            NativeMemory.Free(heapBytes);
+        }
+    }
+
+    private unsafe int SendPacketsRequest(byte* requestMemory, bool towardMstcp, nint adapterHandle, NdisPacketBuffer[] buffers, out int nativeError)
+    {
+        BuildMultiRequest(requestMemory, adapterHandle, buffers, buffers.Length);
+        var request = (EthernetMultiRequest*)requestMemory;
+        var result = towardMstcp ? NdisApiNative.SendPacketsToMstcp(_handle, request) : NdisApiNative.SendPacketsToAdapter(_handle, request);
+        nativeError = result == 0 ? Marshal.GetLastWin32Error() : 0;
+        return result;
+    }
+
+    private static unsafe void BuildMultiRequest(byte* requestMemory, nint adapterHandle, NdisPacketBuffer[] buffers, int count)
+    {
+        var request = (EthernetMultiRequest*)requestMemory;
+        request->AdapterHandle = adapterHandle;
+        request->PacketsNumber = (uint)count;
+        request->PacketsSuccess = 0;
+        var slots = (NdisrdEthernetPacket*)&request->FirstBuffer;
+        for (var index = 0; index < count; index++)
+        {
+            if (buffers[index] is null) throw new ArgumentNullException(nameof(buffers));
+            slots[index] = new NdisrdEthernetPacket { Buffer = buffers[index].Pointer };
+        }
+    }
+
+    private static unsafe nuint MultiRequestByteCount(int count) =>
+        (nuint)sizeof(EthernetMultiRequest) + (nuint)(count - 1) * (nuint)sizeof(NdisrdEthernetPacket);
+
     public unsafe void SendPacketToMstcp(nint adapterHandle, NdisPacketBuffer buffer)
     {
         ArgumentNullException.ThrowIfNull(buffer);
@@ -188,6 +323,18 @@ internal static class NdisNativeCallStatus
         if (nativeResult != 0) return true;
         throw new Win32Exception(nativeError, $"Unable to read an NDISAPI packet from a non-empty queue (native error {nativeError}, queued {queuedPacketCount}, adapter 0x{adapterHandle:X}).");
     }
+
+    internal static int InterpretBatchReadResult(uint queuedPacketCount, int requestedCount, int nativeResult, int nativeError, uint packetsSuccess, nint adapterHandle)
+    {
+        if (queuedPacketCount == 0) return 0;
+        if (nativeResult == 0)
+        {
+            throw new Win32Exception(nativeError, $"Unable to read NDISAPI packets from a non-empty queue (native error {nativeError}, queued {queuedPacketCount}, requested {requestedCount}, adapter 0x{adapterHandle:X}).");
+        }
+        // The driver fills dwPacketsSuccess with the actual count; clamp defensively so a
+        // misbehaving driver can never make the pump read past the prepared buffers.
+        return (int)Math.Min(packetsSuccess, (uint)requestedCount);
+    }
 }
 
 internal sealed class NdisNativeCallGate
@@ -243,14 +390,39 @@ internal sealed class NdisNativeCallGate
     }
 }
 
+/// <summary>
+/// A managed wrapper over one native <see cref="IntermediateBuffer"/>. Buffers created with the
+/// public constructor are privately owned: <see cref="Dispose"/> frees the native memory. Buffers
+/// rented from <see cref="NdisPacketBufferPool"/> keep pool ownership: <see cref="Dispose"/>
+/// returns them to the pool instead of freeing, so <c>using</c>-style callers need no changes
+/// when switching from per-injection allocation to pooling.
+/// </summary>
 public sealed unsafe class NdisPacketBuffer : IDisposable
 {
+    private const int StateRented = 1;
+    private const int StateIdle = 2;
+
     private IntermediateBuffer* _buffer;
+    private NdisPacketBufferPool? _ownerPool;
+    private int _pooledState;
 
     public NdisPacketBuffer()
     {
-        _buffer = (IntermediateBuffer*)NativeMemory.AllocZeroed((nuint)sizeof(IntermediateBuffer));
-        if (_buffer is null) throw new InvalidOperationException("Unable to allocate an NDISAPI packet buffer.");
+        _buffer = Allocate();
+    }
+
+    internal NdisPacketBuffer(NdisPacketBufferPool ownerPool)
+    {
+        _buffer = Allocate();
+        _ownerPool = ownerPool;
+        _pooledState = StateRented;
+    }
+
+    private static IntermediateBuffer* Allocate()
+    {
+        var pointer = (IntermediateBuffer*)NativeMemory.AllocZeroed((nuint)sizeof(IntermediateBuffer));
+        if (pointer is null) throw new InvalidOperationException("Unable to allocate an NDISAPI packet buffer.");
+        return pointer;
     }
 
     internal nint Pointer
@@ -265,6 +437,23 @@ public sealed unsafe class NdisPacketBuffer : IDisposable
     public uint Flags => _buffer is null ? 0 : _buffer->Flags;
     public nint CapturedAdapterHandle => _buffer is null ? 0 : _buffer->AdapterHandle;
     public int Length => _buffer is null ? 0 : checked((int)_buffer->Length);
+
+    internal bool IsRentedFrom(NdisPacketBufferPool pool) =>
+        ReferenceEquals(_ownerPool, pool) && Volatile.Read(ref _pooledState) == StateRented;
+
+    internal bool TryMarkRented() => Interlocked.CompareExchange(ref _pooledState, StateRented, StateIdle) == StateIdle;
+
+    /// <summary>
+    /// Detaches pool ownership and frees the native memory. Called only by the owning pool, for
+    /// buffers it exclusively holds (returned past capacity, or drained at pool disposal).
+    /// </summary>
+    internal void ReleaseFromPool()
+    {
+        _ownerPool = null;
+        var pointer = _buffer;
+        _buffer = null;
+        if (pointer is not null) NativeMemory.Free(pointer);
+    }
 
     public Span<byte> GetFrame()
     {
@@ -290,6 +479,13 @@ public sealed unsafe class NdisPacketBuffer : IDisposable
 
     public void Dispose()
     {
+        if (_ownerPool is { } pool)
+        {
+            // A pooled buffer's Dispose returns it to its pool exactly once; a repeat Dispose of an
+            // already-returned buffer is a no-op because the pool owns it now.
+            if (Interlocked.CompareExchange(ref _pooledState, StateIdle, StateRented) == StateRented) pool.OnReturned(this);
+            return;
+        }
         if (_buffer is null) return;
         NativeMemory.Free(_buffer);
         _buffer = null;

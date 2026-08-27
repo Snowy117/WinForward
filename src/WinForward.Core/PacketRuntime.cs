@@ -9,9 +9,22 @@ public enum PacketDisposition
 
 public sealed class PacketLease : IDisposable
 {
+    private readonly Action<ReadOnlyMemory<byte>>? _onCompleted;
     private int _completed;
 
     public PacketLease(ReadOnlyMemory<byte> frame) => Frame = frame;
+
+    /// <summary>
+    /// Creates a lease whose frame is returned to its owner (for example an array pool) exactly
+    /// once, on the lease's unique completion path. The callback fires inside
+    /// <see cref="TryComplete(PacketDisposition)"/> (including the <see cref="Dispose"/> path), so
+    /// any frame read must happen before completion when this constructor is used.
+    /// </summary>
+    public PacketLease(ReadOnlyMemory<byte> frame, Action<ReadOnlyMemory<byte>>? onCompleted)
+    {
+        Frame = frame;
+        _onCompleted = onCompleted;
+    }
 
     public ReadOnlyMemory<byte> Frame { get; }
     public PacketDisposition? Disposition { get; private set; }
@@ -20,6 +33,7 @@ public sealed class PacketLease : IDisposable
     {
         if (Interlocked.Exchange(ref _completed, 1) != 0) return false;
         Disposition = disposition;
+        _onCompleted?.Invoke(Frame);
         return true;
     }
 

@@ -485,6 +485,66 @@ public sealed class CapturePipelineTests
     // ---- Packet action executor: pass direction mapping, block, proxy fail-closed ----
 
     [Fact]
+    public void PooledLeaseReturnsFrameExactlyOnce()
+    {
+        var returns = 0;
+        var lease = new PacketLease(new byte[] { 1, 2, 3 }, _ => returns++);
+
+        Assert.True(lease.TryComplete(PacketDisposition.Pass));
+        Assert.False(lease.TryComplete(PacketDisposition.Block));
+        lease.Dispose();
+
+        Assert.Equal(1, returns);
+        Assert.Equal(PacketDisposition.Pass, lease.Disposition);
+    }
+
+    [Fact]
+    public void PooledLeaseDisposeIsTheSoleCompletionPath()
+    {
+        var returns = 0;
+        var lease = new PacketLease(new byte[] { 1 }, _ => returns++);
+
+        lease.Dispose();
+        lease.Dispose();
+
+        Assert.Equal(1, returns);
+        Assert.Equal(PacketDisposition.Block, lease.Disposition);
+    }
+
+    [Fact]
+    public void PlainLeaseCompletionFiresNoReturnCallback()
+    {
+        var lease = new PacketLease(new byte[] { 1, 2, 3 });
+
+        Assert.True(lease.TryComplete(PacketDisposition.Pass));
+
+        Assert.Equal(PacketDisposition.Pass, lease.Disposition);
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public async Task ProcessorCopiesFrameBytesThroughPooledLease()
+    {
+        var reinjector = new FakeReinjector();
+        var dispatcher = new FlowDispatcher(CreateConfig(new RuleMatcher(), FlowAction.Pass), new FakeGuard(), new NdisPacketActionExecutor(reinjector));
+        var adapter = new WindowsAdapter("id-a", "Ethernet", "internal-a", 7, 1);
+        using var buffer = new NdisPacketBuffer();
+        var frame = CreateIpv4TcpFrame();
+        buffer.SetFrame(frame, NdisApiAbi.PacketFlagOnSend, (nint)7);
+
+        await new CapturePacketProcessor(dispatcher).ProcessAsync(
+            NdisCapturedPacket.FromCapture(buffer, (nint)7),
+            adapter,
+            CancellationToken.None);
+
+        // The pooled lease exposes exactly the captured frame: byte-identical content and no
+        // trailing pool slack beyond the actual frame length.
+        Assert.NotNull(reinjector.LastFrame);
+        Assert.Equal(frame.Length, reinjector.LastFrame!.Length);
+        Assert.Equal(frame, reinjector.LastFrame);
+    }
+
+    [Fact]
     public async Task ExecutorReinjectsOnSendTowardAdapterAndOnReceiveTowardMstcp()
     {
         var reinjector = new FakeReinjector();

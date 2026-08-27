@@ -82,6 +82,28 @@ public sealed class NdisApiAbiTests
     }
 
     [Fact]
+    public void BatchReadResultSeparatesEmptyQueueFromNativeFailures()
+    {
+        // An empty queue never reaches the batched read; the result is 0 without touching native error state.
+        Assert.Equal(0, NdisNativeCallStatus.InterpretBatchReadResult(queuedPacketCount: 0, requestedCount: 0, nativeResult: 0, nativeError: 87, packetsSuccess: 0, (nint)2));
+
+        var exception = Assert.Throws<Win32Exception>(() => NdisNativeCallStatus.InterpretBatchReadResult(queuedPacketCount: 5, requestedCount: 4, nativeResult: 0, nativeError: 87, packetsSuccess: 0, (nint)2));
+        Assert.Equal(87, exception.NativeErrorCode);
+        Assert.Contains("non-empty queue", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("requested 4", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BatchReadResultReturnsDriverCountClampedToRequest()
+    {
+        Assert.Equal(4, NdisNativeCallStatus.InterpretBatchReadResult(queuedPacketCount: 10, requestedCount: 4, nativeResult: 1, nativeError: 0, packetsSuccess: 4, (nint)2));
+        // A partial read (fewer packets than requested) reports the actual count.
+        Assert.Equal(2, NdisNativeCallStatus.InterpretBatchReadResult(queuedPacketCount: 10, requestedCount: 4, nativeResult: 1, nativeError: 0, packetsSuccess: 2, (nint)2));
+        // A driver over-reporting dwPacketsSuccess can never push the pump past the prepared buffers.
+        Assert.Equal(4, NdisNativeCallStatus.InterpretBatchReadResult(queuedPacketCount: 10, requestedCount: 4, nativeResult: 1, nativeError: 0, packetsSuccess: 99, (nint)2));
+    }
+
+    [Fact]
     public void PacketBufferPreservesExplicitNdisFlagsAndClearsThemForNewFrames()
     {
         using var buffer = new NdisPacketBuffer();

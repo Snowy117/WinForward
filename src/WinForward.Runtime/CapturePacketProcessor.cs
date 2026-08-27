@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.Versioning;
 using WinForward.Configuration;
 using WinForward.Core;
@@ -31,7 +32,15 @@ public sealed class CapturePacketProcessor
 
     public async ValueTask ProcessAsync(NdisCapturedPacket packet, WindowsAdapter adapter, CancellationToken cancellationToken)
     {
-        var frame = packet.Buffer.GetFrame().ToArray();
+        // The frame must leave the pump-owned native buffer before the pump reads its next packet,
+        // so it is copied into a pooled array exposed to the lease at its actual length. The array
+        // returns to the pool only after the whole dispatch completes: FlowDispatcher completes the
+        // lease BEFORE the executor reads Frame, so a completion-triggered return would expose a
+        // reused array to those readers (audit note in the task's design §4.4).
+        var frameSpan = packet.Buffer.GetFrame();
+        var pooledFrame = ArrayPool<byte>.Shared.Rent(frameSpan.Length);
+        frameSpan.CopyTo(pooledFrame);
+        var frame = new ReadOnlyMemory<byte>(pooledFrame, 0, frameSpan.Length);
         var lease = new PacketLease(frame);
         var metadata = new PacketCaptureMetadata(packet.DeviceFlags, packet.AdapterHandle, packet.Flags);
         var isOnSend = (packet.DeviceFlags & NdisApiAbi.PacketFlagOnSend) != 0;
@@ -45,7 +54,7 @@ public sealed class CapturePacketProcessor
         }
         try
         {
-            if (!IpTcpUdpPacket.TryParse(frame, out var view))
+            if (!IpTcpUdpPacket.TryParse(frame.Span, out var view))
             {
                 var nonFlowContext = PacketFlowClassifier.ClassifyNonFlow(adapter, isOnSend);
                 await _dispatcher.DispatchNonFlowAsync(new CapturedFlowPacket(lease, nonFlowContext, metadata, sequence), cancellationToken).ConfigureAwait(false);
@@ -75,6 +84,10 @@ public sealed class CapturePacketProcessor
             }
             lease.Dispose();
             throw;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(pooledFrame);
         }
     }
 }
