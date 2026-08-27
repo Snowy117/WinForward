@@ -1,0 +1,31 @@
+{
+  "id": "fix-eof-reset-design-flaws",
+  "name": "fix-eof-reset-design-flaws",
+  "title": "修复导致 EOF/connection reset 频率异常增高的设计缺陷",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "qmazon",
+  "assignee": "qmazon",
+  "createdAt": "2026-08-27",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-27-fix-datapath-throughput",
+    "08-27-fix-port-budget",
+    "08-27-fix-table-lifecycle",
+    "08-27-fix-minor-races"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

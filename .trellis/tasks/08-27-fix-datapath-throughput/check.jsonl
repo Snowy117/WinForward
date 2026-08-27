@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "检查批量 P/Invoke 与 gate 用法是否符合 NDISAPI 契约"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查 Core/Runtime/NdisApi 三层间数据流（lease 生命周期、池归属）的一致性"}

@@ -89,7 +89,7 @@ if (TryExtractGuid(adapter.InternalName, out var guid))
 - Fix: `NdisCapturedPacket(buffer, _adapterHandle, buffer.DeviceFlags)` in the pump.
 - Verification: scratch harness `sendtest` (read -> reinject captured buffer with enumeration handle: 97/97 OK, both directions). Product re-verified: 100/100 ICMP pass-through with 0% loss and no duplicates.
 
-**Performance note**: the current polling pump (`ReadPacket` + 1 ms delay) adds ~5-15 ms RTT under tunnel mode (observed avg 8 ms vs 0.6 ms direct). Event-driven reads (`SetPacketEvent` + `ReadPackets` batch, as in `simple_packet_filter`) are the documented upgrade path when throughput work starts.
+**Performance note**: the pump now reads in batches (`ReadPackets`, batch capacity 32, one gate lease per batch; wired 2026-08-27 — see "Batched capture reads and buffer pooling" below). The 1 ms poll delay remains only on empty batches; `SetPacketEvent` event-driven reads are the optional next upgrade if empty-to-first-packet latency still matters.
 
 ---
 
@@ -311,3 +311,88 @@ var relay = await control.UdpAssociateAsync(...);
 var relay = await control.UdpAssociateAsync(cancellationToken);
 var socket = new Socket(relay.AddressFamily, SocketType.Dgram, ProtocolType.Udp);
 ```
+
+---
+
+## Batched capture reads and buffer pooling (wired 2026-08-27)
+
+### 1. Scope / Trigger
+
+- Trigger: any change to the capture pump read loop, the frame copy path into `PacketLease`, TCP in-place rewrite, or `NdisPacketBuffer` allocation on the injection path.
+- Infra contract: the NDISAPI batched ABI shape, the gate lease granularity, and the pooled-frame lifetime boundary across `WinForward.NdisApi` → `WinForward.Core` → `WinForward.Runtime`.
+
+### 2. Signatures
+
+- `NdisApiDriver.TryReadPackets(nint adapterHandle, NdisPacketBuffer[] buffers) -> int` — queue query + batched read merged into a single `NdisNativeCallGate` lease; returns the driver-filled success count (0 = empty queue).
+- `NdisApiDriver.SendPacketsToMstcp/SendPacketsToAdapter(nint, NdisPacketBuffer[], int count)` — batched send overloads (declared and wrapped; the pump does not batch sends yet).
+- `PacketLease(ReadOnlyMemory<byte> frame, Action<ReadOnlyMemory<byte>>? onCompleted)` — completion-callback constructor; the plain constructor keeps null semantics.
+- `NdisPacketBufferPool` (process-wide `Shared`, capacity 256) with `Rent()`/`Return()`; `NdisPacketBuffer` carries an owner-pool state machine (private ctor → Dispose frees; pool-rented → Dispose returns, double-Dispose no-op).
+
+### 3. Contracts
+
+- **ETH_M_REQUEST ABI** (x64, Pack=1): `hAdapterHandle(8) + dwPacketsNumber(4,in) + dwPacketsSuccess(4,out) + NDISRD_ETH_Packet[N]` (one `INTERMEDIATE_BUFFER*` each, 8 bytes) = 16 + 8N total. Caller fills handle/count/buffer pointers; the driver fills `dwPacketsSuccess` and each buffer's contents on success. Managed shape is `EthernetMultiRequest` (24-byte fixed head, `FirstBuffer` aliases `EthPacket[0]`) with `AssertManagedX64Layout` size/offset assertions (24; 0/8/12/16). Exports verified against the pinned commit 417b8734 (`ndisapi.vs2012/ndisapi.def`, `include/ndisapi.h:300-302`): `ReadPackets`, `SendPacketsToMstcp`, `SendPacketsToAdapter` (all `BOOL __stdcall (HANDLE, PETH_M_REQUEST)`).
+- **Frame lifetime boundary (the load-bearing rule)**: `FlowDispatcher.CompleteAsync` calls `lease.TryComplete(disposition)` BEFORE `execute()`, so every frame consumer (pass injection copy, UDP payload parse, clientMac slice, TCP in-place rewrite, RST template) runs AFTER lease completion but must stay INSIDE `CapturePacketProcessor.ProcessAsync`'s await window. Therefore the `ArrayPool<byte>.Shared.Return` lives in `ProcessAsync`'s outer `finally` — never on the lease completion callback. Any new code that lets a `Frame`/`Memory` slice escape the `ProcessAsync` window (returning it, capturing it in a background task, storing it without copying) reintroduces a use-after-return.
+- **Copy-out points are mandatory**: data that must outlive the window is copied synchronously — UDP `clientMac` (`ToArray()` at session creation), SOCKS5 payload (`Encode` copies before any await), the bounded SYN template (recorded before rewrite).
+- **In-place rewrite ordering**: `RecordClientSyn`/`RecordServerSynAck` (reads of the original frame) MUST run BEFORE `TryRewriteTcpEndpoints` (write) on the same frame, or the RST template is polluted by rewritten endpoints/MACs. `TryRewriteIpv4Tcp/Ipv6Tcp` keeps the invariant "every parse/validation precedes the first field write; no failure branch after writing begins", so an in-place rewrite either leaves the frame untouched or fully rewrites it. A lease whose `Frame` is not array-backed fails closed (`reason=rewrite`).
+- **Pump batching**: batch buffers are pump-private for the pump's lifetime, released exactly once (run-loop exit or dispose); packets within a batch are awaited strictly in index order, so reinjection order matches arrival order. Empty batch keeps the poll-delay pacing.
+- **Gate granularity**: one gate lease per batch on the read path (query + read inside the same lease); one gate lease per injected packet remains on the send path until batched sends are adopted.
+
+### 4. Validation & Error Matrix
+
+| Condition | Result |
+|---|---|
+| Queue query native call fails | throw `Win32Exception` (existing `HasQueuedPackets` semantics) |
+| Queue empty (`queuedPacketCount == 0`) | `TryReadPackets` returns 0; pump takes poll delay |
+| `ReadPackets` returns FALSE with a non-empty queue | throw `Win32Exception` |
+| Driver fills `dwPacketsSuccess` > requested count | clamped to the request count (defensive; `InterpretBatchReadResult`) |
+| `buffers` empty or contains null entries | 0 / `ArgumentNullException` (parameter validation) |
+| Lease frame not array-backed at an in-place rewrite point | fail-closed `TcpRedirectOutcome.Blocked`, `reason=rewrite` |
+| Pool return above capacity (256) or after drain | buffer freed immediately, never double-returned |
+
+### 5. Good/Base/Bad Cases
+
+- Good: a full batch of 32 frames flows through classify → dispatch → in-place rewrite → pool-rented inject with zero per-packet managed allocations beyond the single `ArrayPool` copy and zero native allocs.
+- Base: zero-length frame (`ArrayPool.Rent(0)` returns an empty array; safe), partial batch (n < capacity) processed in order.
+- Bad: returning the pooled array from a lease `TryComplete` callback — the executor then reads a reused array (torn frame); storing `lease.Frame` in a session without copying and reading it after `ProcessAsync` returns.
+
+### 6. Tests Required
+
+- `NdisApiAbiTests`: batch read error matrix (partial-batch clamp, non-empty failure throws).
+- `NdisCapturePumpTests`: in-batch ordering with enumeration-handle stamping, partial batch, empty-batch poll, exactly-once batch-buffer release, capacity/null argument checks.
+- `CapturePipelineTests`: completion callback fires exactly once across double `TryComplete` + `Dispose`; `Dispose` is a completion path; plain constructor has no callback; pooled copy is byte-identical at actual length.
+- `TcpProxyCoordinatorTests`: `SynRewriteParseFailureLeavesFrameByteIdentical` (parse failure leaves the frame byte-identical, returns Blocked, releases resources) — the in-place-rewrite no-intermediate-state lock.
+- `NdisPacketBufferPoolTests`: rent/return round-trip reuse, over-capacity free, 64-thread rent uniqueness, double-Dispose no-op, drain-then-rent, foreign-buffer rejection, private-buffer (pump) dispose semantics regression.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```csharp
+// Returning the pooled frame when the lease completes: CompleteAsync runs
+// TryComplete BEFORE the executor reads Frame, so another pump's Rent() can
+// reuse this array before the pass injection copies it.
+var lease = new PacketLease(frame, _ => ArrayPool<byte>.Shared.Return(array));
+```
+
+#### Correct
+
+```csharp
+// The return point is ProcessAsync's outer finally — the proven boundary of
+// the whole dispatch chain. Every Frame consumer closes inside the window.
+var pooledFrame = ArrayPool<byte>.Shared.Rent(frameSpan.Length);
+try { ... await dispatcher.DispatchAsync(...); }
+finally { ArrayPool<byte>.Shared.Return(pooledFrame); }
+```
+
+```csharp
+// Wrong: record the SYN template after rewriting it in place — the RST
+// builder then inherits rewritten endpoints/MACs and the client rejects it.
+TryRewriteForwardLeg(frame, ...);
+RecordClientSyn(frame.Span, association);
+
+// Correct: read-then-write. The template keeps the original client bytes.
+RecordClientSyn(frame.Span, association);
+TryRewriteForwardLeg(frame, ...);
+```
+
+**Related**: task `08-27-fix-datapath-throughput` (prd/design/implement artifacts hold the full audit tables); the parent `08-27-fix-eof-reset-design-flaws` maps the throughput bottleneck to the RST/EOF frequency symptom.

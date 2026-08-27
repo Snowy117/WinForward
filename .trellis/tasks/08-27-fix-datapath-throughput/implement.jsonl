@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "NDISAPI 枚举句柄与 ABI 契约：批量读封装必须遵循的调用约定与句柄规则"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "池化/租借实现前先核对既有抽象（PacketLease、NdisPacketBuffer）的复用边界"}
