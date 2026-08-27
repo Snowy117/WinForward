@@ -52,26 +52,3 @@ Analyzed EOF/reset root causes into a parent task with four children; completed 
 
 [OK] **Completed**
 
-
-## Session 2: Datapath throughput: batched reads, pooling, hardware smoke
-
-**Date**: 2026-08-27
-**Task**: Datapath throughput: batched reads, pooling, hardware smoke
-**Branch**: `master`
-
-### Summary
-
-Analyzed EOF/reset root causes into a parent task with four children; completed the datapath-throughput child: ETH_M_REQUEST batched ReadPackets ABI (export-verified against the real DLL), pump batching (cap 32, in-order), ArrayPool-backed frame lease with the return point moved to ProcessAsync finally, in-place TCP rewrite, NdisPacketBufferPool for injection. Linux benchmark 2.44M pps steady; WinLtsc smoke with real ndisapi.dll: 1497/1497 paired, zero failed/warn. Spec contracts landed in windows-ndisapi.md.
-
-### Git Commits
-
-| Hash | Message |
-|------|---------|
-| `fec967a` | (see git log) |
-| `5ad8e60` | (see git log) |
-| `2519b0d` | (see git log) |
-| `3f30cf8` | (see git log) |
-
-### Status
-
-[OK] **Completed**
