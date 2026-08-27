@@ -6,8 +6,8 @@ using WinForward.Protocols;
 namespace WinForward.Runtime;
 
 /// <summary>
-/// Executes pass/block/proxy packet dispositions. A pass copies the captured frame into a native
-/// buffer and reinjects it exactly once in its captured direction through the <see cref="IPacketReinjector"/>;
+/// Executes pass/block/proxy packet dispositions. A pass copies the captured frame into a pooled
+/// native buffer and reinjects it exactly once in its captured direction through the <see cref="IPacketReinjector"/>;
 /// a block consumes the frame without reinjection. A proxy decision routes TCP packets through the
 /// <see cref="TcpProxyCoordinator"/> and UDP datagrams through the <see cref="UdpProxyCoordinator"/> when
 /// one is configured; if no matching coordinator is provided the flow fails closed with a rate-limited
@@ -21,22 +21,24 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     private readonly TcpProxyCoordinator? _tcpProxy;
     private readonly UdpProxyCoordinator? _udpProxy;
     private readonly IRuntimeLogger _logger;
+    private readonly NdisPacketBufferPool _bufferPool;
     private long _lastProxyUnavailableLogTicks;
 
-    public NdisPacketActionExecutor(IPacketReinjector reinjector, IRuntimeLogger? logger = null, TcpProxyCoordinator? tcpProxy = null, UdpProxyCoordinator? udpProxy = null)
+    public NdisPacketActionExecutor(IPacketReinjector reinjector, IRuntimeLogger? logger = null, TcpProxyCoordinator? tcpProxy = null, UdpProxyCoordinator? udpProxy = null, NdisPacketBufferPool? bufferPool = null)
     {
         ArgumentNullException.ThrowIfNull(reinjector);
         _reinjector = reinjector;
         _tcpProxy = tcpProxy;
         _udpProxy = udpProxy;
         _logger = logger ?? NullRuntimeLogger.Instance;
+        _bufferPool = bufferPool ?? NdisPacketBufferPool.Shared;
     }
 
     public ValueTask PassAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(packet);
         var metadata = packet.Metadata;
-        using var buffer = new NdisPacketBuffer();
+        using var buffer = _bufferPool.Rent();
         buffer.SetFrame(packet.Lease.Frame.Span, metadata.DeviceFlags, metadata.AdapterHandle, metadata.Flags);
         if (metadata.IsOnSend) _reinjector.SendToAdapter(metadata.AdapterHandle, buffer);
         else _reinjector.SendToMstcp(metadata.AdapterHandle, buffer);

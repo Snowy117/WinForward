@@ -177,38 +177,48 @@ internal static class Program
     {
         var selfTraffic = new SelfTrafficRegistry();
         var reinjector = new NdisPacketReinjector(driver);
-        await using var captureComposition = await CreateCaptureCompositionAsync(configuration, driver, scope, reinjector, selfTraffic, logger).ConfigureAwait(false);
-        var modeController = new NdisAdapterModeController(driver, scope);
-        await using var runtime = new TransactionalCaptureRuntime(modeController, captureComposition);
-
-        using var shutdown = new CancellationTokenSource();
-        void OnCancel(object? sender, ConsoleCancelEventArgs eventArgs)
-        {
-            eventArgs.Cancel = true;
-            shutdown.Cancel();
-        }
-
-        Console.CancelKeyPress += OnCancel;
         try
         {
-            logger.Info("Interception started. Press Ctrl+C to stop.");
-            await runtime.StartAsync(shutdown.Token).ConfigureAwait(false);
-            logger.Info("WinForward stopped cleanly.");
-            return 0;
-        }
-        catch (OperationCanceledException)
-        {
-            logger.Info("Shutdown requested; restoring adapter modes.");
-            return 0;
-        }
-        catch (Exception exception)
-        {
-            logger.Error($"Runtime failure: {exception.Message}");
-            return 3;
+            await using var captureComposition = await CreateCaptureCompositionAsync(configuration, driver, scope, reinjector, selfTraffic, logger).ConfigureAwait(false);
+            var modeController = new NdisAdapterModeController(driver, scope);
+            await using var runtime = new TransactionalCaptureRuntime(modeController, captureComposition);
+
+            using var shutdown = new CancellationTokenSource();
+            void OnCancel(object? sender, ConsoleCancelEventArgs eventArgs)
+            {
+                eventArgs.Cancel = true;
+                shutdown.Cancel();
+            }
+
+            Console.CancelKeyPress += OnCancel;
+            try
+            {
+                logger.Info("Interception started. Press Ctrl+C to stop.");
+                await runtime.StartAsync(shutdown.Token).ConfigureAwait(false);
+                logger.Info("WinForward stopped cleanly.");
+                return 0;
+            }
+            catch (OperationCanceledException)
+            {
+                logger.Info("Shutdown requested; restoring adapter modes.");
+                return 0;
+            }
+            catch (Exception exception)
+            {
+                logger.Error($"Runtime failure: {exception.Message}");
+                return 3;
+            }
+            finally
+            {
+                Console.CancelKeyPress -= OnCancel;
+            }
         }
         finally
         {
-            Console.CancelKeyPress -= OnCancel;
+            // The shared injection buffer pool is drained after the capture runtime (and the
+            // coordinator teardown injections it performs) has completed, releasing every idle
+            // native buffer back to the heap before the driver handle closes.
+            NdisPacketBufferPool.Shared.Dispose();
         }
     }
 

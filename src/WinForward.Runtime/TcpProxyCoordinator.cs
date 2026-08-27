@@ -1,4 +1,5 @@
 using System.Net;
+using System.Runtime.InteropServices;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
@@ -211,19 +212,29 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         }
 
         var key = packet.Context.Key;
-        var rewrittenFrame = packet.Lease.Frame.ToArray();
+        // The rewrite below mutates the lease's pooled frame in place, so the original-SYN
+        // template must be recorded first; afterwards the frame only holds the rewritten form.
+        var frame = packet.Lease.Frame;
         var originalClient = key.Local;
         var originalServer = key.Remote;
 
-        if (!TryRewriteForwardLeg(rewrittenFrame, originalClient, originalServer, association, translatedTuple.Port))
+        if (!TryGetWritableFrame(frame, out var writableFrame))
+        {
+            await TearDownSessionAsync(session).ConfigureAwait(false);
+            LogTrace("tcp.redirect.rejected", packet, association, "rewrite");
+            _logger.Warn("TCP redirect failed: the captured frame is not writable in place, blocking the flow.");
+            return null;
+        }
+
+        RecordClientSyn(frame.Span, association);
+
+        if (!TryRewriteForwardLeg(writableFrame, originalClient, originalServer, association, translatedTuple.Port))
         {
             await TearDownSessionAsync(session).ConfigureAwait(false);
             LogTrace("tcp.redirect.rejected", packet, association, "rewrite");
             _logger.Warn("TCP redirect failed: SYN endpoint rewrite failed, blocking the flow.");
             return null;
         }
-
-        RecordClientSyn(packet.Lease.Frame.Span, association);
 
         // L4 clarity: this exact self-traffic key cannot be matched by the wildcard registry because
         // the observable reverse leg is (client:orig_port) -> (client_ip:proxy_port), and the
@@ -234,7 +245,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         // the natural home for an exact local-loopback listener tuple when one becomes expressible.
         try
         {
-            await _injector.InjectAsync(rewrittenFrame, towardMstcp: true, packet.Metadata.AdapterHandle, cancellationToken).ConfigureAwait(false);
+            await _injector.InjectAsync(frame, towardMstcp: true, packet.Metadata.AdapterHandle, cancellationToken).ConfigureAwait(false);
             LogTrace("tcp.redirect.injected", packet, association);
         }
         catch (OperationCanceledException)
@@ -298,6 +309,19 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     }
 
     /// <summary>
+    /// Obtains a writable view of a captured frame for in-place rewriting. The capture path
+    /// always wraps a pooled <see cref="byte"/>[] in the lease, but a lease over non-array
+    /// memory cannot be rewritten in place; callers fail closed rather than fall back to a copy.
+    /// </summary>
+    private static bool TryGetWritableFrame(ReadOnlyMemory<byte> frame, out Span<byte> writable)
+    {
+        writable = default;
+        if (!MemoryMarshal.TryGetArray(frame, out var segment)) return false;
+        writable = segment.Array.AsSpan(segment.Offset, segment.Count);
+        return true;
+    }
+
+    /// <summary>
     /// Swaps the Ethernet source and destination MAC addresses of a frame. The official WinpkFilter
     /// local-redirect pattern swaps MACs alongside IPs and ports so the redirected frame is accepted
     /// by the local stack as if it arrived from the original server.
@@ -343,17 +367,22 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
 
     private async ValueTask<TcpRedirectOutcome> ReinjectExistingFlowDataAsync(CapturedFlowPacket packet, TcpRedirectAssociation association, CancellationToken cancellationToken)
     {
-        var rewrittenFrame = packet.Lease.Frame.ToArray();
+        var frame = packet.Lease.Frame;
+        if (!TryGetWritableFrame(frame, out var writableFrame))
+        {
+            await FailAssociationAsync(association).ConfigureAwait(false);
+            return TcpRedirectOutcome.Blocked;
+        }
         var originalClient = packet.Context.Key.Local;
         var originalServer = association.OriginalKey.Remote;
-        if (!TryRewriteForwardLeg(rewrittenFrame, originalClient, originalServer, association, association.TranslatedListenerTuple.Port))
+        if (!TryRewriteForwardLeg(writableFrame, originalClient, originalServer, association, association.TranslatedListenerTuple.Port))
         {
             await FailAssociationAsync(association).ConfigureAwait(false);
             return TcpRedirectOutcome.Blocked;
         }
         try
         {
-            await _injector.InjectAsync(rewrittenFrame, towardMstcp: true, packet.Metadata.AdapterHandle, cancellationToken).ConfigureAwait(false);
+            await _injector.InjectAsync(frame, towardMstcp: true, packet.Metadata.AdapterHandle, cancellationToken).ConfigureAwait(false);
             LogTrace("tcp.redirect.injected", packet, association);
         }
         catch (OperationCanceledException)
@@ -388,15 +417,17 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         if (!_table.TryResolveByReverse(key.Local, key.Remote, now, out var association) || association is null) return TcpRedirectOutcome.NotRelevant;
 
         var original = association.OriginalKey;
-        var rewrittenFrame = packet.Lease.Frame.ToArray();
+        var frame = packet.Lease.Frame;
         var originalRemote = original.Remote;
         var originalClient = original.Local;
-        RecordServerSynAck(packet.Lease.Frame.Span, association);
+        // Read-then-write: record the SYN-ACK sequence before the in-place rewrite mutates the frame.
+        RecordServerSynAck(frame.Span, association);
 
         // Host-originated flows terminate on this host (reverse to MSTCP); forwarded flows (client
         // on a VM/remote side) must be sent back to the origin adapter instead.
         var towardMstcp = original.Origin == FlowOriginKind.Host;
-        if (!PacketChecksums.TryRewriteTcpEndpoints(rewrittenFrame, originalRemote.Address, originalRemote.Port, originalClient.Address, originalClient.Port))
+        if (!TryGetWritableFrame(frame, out var writableFrame)
+            || !PacketChecksums.TryRewriteTcpEndpoints(writableFrame, originalRemote.Address, originalRemote.Port, originalClient.Address, originalClient.Port))
         {
             await FailAssociationAsync(association).ConfigureAwait(false);
             return TcpRedirectOutcome.Blocked;
@@ -404,7 +435,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         // The MAC swap makes the looped-back frame look inbound from the router for a host flow.
         // A forwarded flow's reversed frame is emitted on the origin adapter toward the client, and
         // its arrival MACs (this host -> client) are already correct.
-        if (towardMstcp) SwapEthernetMacs(rewrittenFrame);
+        if (towardMstcp) SwapEthernetMacs(writableFrame);
         try
         {
             if (!towardMstcp && association.OriginAdapterHandle == 0)
@@ -413,7 +444,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
                 return TcpRedirectOutcome.Blocked;
             }
             var targetHandle = towardMstcp ? packet.Metadata.AdapterHandle : association.OriginAdapterHandle;
-            await _injector.InjectAsync(rewrittenFrame, towardMstcp, targetHandle, cancellationToken).ConfigureAwait(false);
+            await _injector.InjectAsync(frame, towardMstcp, targetHandle, cancellationToken).ConfigureAwait(false);
             LogTrace("tcp.reverse.injected", packet, association);
         }
         catch (OperationCanceledException)

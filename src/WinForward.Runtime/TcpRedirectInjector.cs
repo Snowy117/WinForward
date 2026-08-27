@@ -4,11 +4,13 @@ using WinForward.NdisApi;
 namespace WinForward.Runtime;
 
 [SupportedOSPlatform("windows")]
-public sealed class TcpRedirectInjector(IPacketReinjector reinjector) : ITcpRedirectInjector
+public sealed class TcpRedirectInjector(IPacketReinjector reinjector, NdisPacketBufferPool? bufferPool = null) : ITcpRedirectInjector
 {
+    private readonly NdisPacketBufferPool _bufferPool = bufferPool ?? NdisPacketBufferPool.Shared;
+
     public ValueTask InjectAsync(ReadOnlyMemory<byte> rewrittenFrame, bool towardMstcp, nint adapterHandle, CancellationToken cancellationToken)
     {
-        using var buffer = new NdisPacketBuffer();
+        using var buffer = _bufferPool.Rent();
         // Per the WinpkFilter pass/revert matrix (design §1): an ON_RECEIVE frame simulates a
         // receive from the interface upward into MSTCP, and an ON_SEND frame injects toward the
         // interface. SendToMstcp therefore tags ON_RECEIVE; the forwarded-direction adapter path

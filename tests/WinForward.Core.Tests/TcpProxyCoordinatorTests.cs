@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using WinForward.Configuration;
 using WinForward.Core;
@@ -474,6 +475,33 @@ public sealed class TcpProxyCoordinatorTests
         Assert.Equal(53000u, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(36, 2)));
         Assert.Equal(0xCC, frame[0]);
         Assert.Equal(0xDD, frame[6]);
+    }
+
+    [Fact]
+    public async Task SynRewriteParseFailureLeavesFrameByteIdentical()
+    {
+        // Parse-before-write invariant of the in-place rewrite: a frame that fails the rewrite's
+        // parse stage must be left byte-identical (never a half-rewritten form), and the flow
+        // fails closed with the listener, association, and session all released.
+        var listenerFactory = new FakeListenerFactory();
+        var injector = new FakeInjector();
+        var selfTraffic = new SelfTrafficRegistry();
+        var table = new TcpRedirectTable();
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
+        var packet = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
+        Assert.True(MemoryMarshal.TryGetArray(packet.Lease.Frame, out var segment));
+        // An ARP ethertype cannot pass the rewrite's parse stage, so the rewrite fails before
+        // any field write.
+        BinaryPrimitives.WriteUInt16BigEndian(segment.Array.AsSpan(segment.Offset + 12, 2), 0x0806);
+        var expected = packet.Lease.Frame.ToArray();
+
+        var outcome = await coordinator.HandleSynAsync(packet, s_server, CancellationToken.None);
+
+        Assert.Equal(TcpRedirectOutcome.Blocked, outcome);
+        Assert.Equal(0, table.Count);
+        Assert.Empty(injector.InjectedFrames);
+        Assert.True(Assert.Single(listenerFactory.Listeners).IsDisposed);
+        Assert.Equal(expected, packet.Lease.Frame.ToArray());
     }
 
     [Fact]
