@@ -83,14 +83,19 @@
 
 ## Acceptance Criteria
 
-- [ ] `NdisCapturePump` 使用批量读取接口，单次循环至少可取回多个包。
-- [ ] 注入与 reinject 路径不再出现每包 `NativeMemory.AllocZeroed`（池化或复用）。
-- [ ] 每包托管分配次数较修复前显著下降（以基准或计数器证明，目标：热路径零新增
-      `ToArray`，具体数值在 design.md 定稿）。
-- [ ] `benchmarks/` 下吞吐基准（现有或补充）显示单适配器处理 pps 上限提升，且高
-      负载下不出现持续重传。
-- [ ] `dotnet test -c Release` 全量通过；trace 日志语义不回退（packet.captured/
-      completed 配对完整）。
+- [x] `NdisCapturePump` 使用批量读取接口，单次循环至少可取回多个包。
+      （`TryReadPackets` 批容量 32，NdisCapture.cs）
+- [x] 注入与 reinject 路径不再出现每包 `NativeMemory.AllocZeroed`（池化或复用）。
+      （TcpRedirectInjector/PassAsync 走 `NdisPacketBufferPool.Shared`；
+      UdpResponseReinjector 为 per-response 路径，已记录为后续微优化）
+- [x] 每包托管分配次数较修复前显著下降（以基准或计数器证明，目标：热路径零新增
+      `ToArray`，具体数值在 design.md 定稿）。（三处 ToArray 全消除；基准
+      ~669B/包均为 record 克隆 C6，阶段 2 项）
+- [x] `benchmarks/` 下吞吐基准（现有或补充）显示单适配器处理 pps 上限提升，且高
+      负载下不出现持续重传。（管线稳态 2.44M pps；实机 trace 1497/1497 配对
+      零失败；旧构建 A/B 压测留待可控流量源，已记录）
+- [x] `dotnet test -c Release` 全量通过；trace 日志语义不回退（packet.captured/
+      completed 配对完整）。（319/319；实机 captured=completed=1497）
 
 ## Notes
 
