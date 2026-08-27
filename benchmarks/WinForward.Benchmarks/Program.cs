@@ -9,6 +9,7 @@ using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Protocols;
 using WinForward.Runtime;
+using WinForward.Windows;
 
 namespace WinForward.Benchmarks;
 
@@ -44,6 +45,7 @@ internal static class Program
         }
 
         await RunDispatcherBenchmarksAsync(context).ConfigureAwait(false);
+        await RunCapturePumpBenchmarkAsync(context).ConfigureAwait(false);
 
         if (options.IncludeRelay)
         {
@@ -293,6 +295,139 @@ internal static class Program
             }).ConfigureAwait(false);
     }
 
+#pragma warning disable CA1416 // The pump and processor are Windows-attributed; the benchmark drives their managed-only pipeline through a fake reader, so it runs on any OS.
+    private static async ValueTask RunCapturePumpBenchmarkAsync(BenchmarkContext context)
+    {
+        foreach (var frameSize in new[] { 128, 1400 })
+        {
+            foreach (var batchCapacity in new[] { 32, 1 })
+            {
+                await RunCapturePumpCaseAsync(context, frameSize, batchCapacity).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private static async ValueTask RunCapturePumpCaseAsync(BenchmarkContext context, int frameSize, int batchCapacity)
+    {
+        const int steadyStateRounds = 5;
+        var measurements = new CapturePumpMeasurements(frameSize, batchCapacity, distinctFlows: 1_024);
+        // The sustained load must outlast the CPU frequency ramp-up, otherwise the first cases are
+        // measured at a cold clock: floor the warmup at 100k packets, bounded by the round size.
+        var warmupCount = Math.Min(context.Options.Count, Math.Max(context.Options.WarmupCount, 100_000));
+        if (warmupCount > 0) _ = await measurements.RunWarmupRoundAsync(warmupCount).ConfigureAwait(false);
+        for (var round = 1; round <= steadyStateRounds; round++)
+        {
+            await context.RunAsync(
+                "capturePump.endToEnd",
+                new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["frameBytes"] = frameSize,
+                    ["batchCapacity"] = batchCapacity,
+                    ["round"] = round,
+                    ["distinctFlows"] = measurements.DistinctFlows,
+                },
+                context.Options.Count,
+                measurements.RunMeasuredRoundAsync,
+                warmupIterations: 0).ConfigureAwait(false);
+        }
+
+        context.WriteRecord(new
+        {
+            type = "result",
+            scenario = "capturePump.steadyState",
+            parameters = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["frameBytes"] = frameSize,
+                ["batchCapacity"] = batchCapacity,
+                ["rounds"] = steadyStateRounds,
+            },
+            steadyStatePps = measurements.RoundPps.Count == 0 ? 0 : measurements.RoundPps.Max(),
+            measurements.RoundPps,
+            gen0PerMillionPackets = measurements.TotalPackets == 0 ? 0 : measurements.TotalGen0Collections * 1_000_000.0 / measurements.TotalPackets,
+        });
+    }
+
+    /// <summary>
+    /// Runs one finite pump workload per invocation and accumulates the per-round throughput and
+    /// Gen0 collection counts the steady-state aggregate is derived from. Warmup invocations run
+    /// the same pipeline but are excluded from the accumulated statistics.
+    /// </summary>
+    private sealed class CapturePumpMeasurements(int frameSize, int batchCapacity, int distinctFlows)
+    {
+        private long _totalPackets;
+        private long _totalGen0Collections;
+
+        public int DistinctFlows { get; } = distinctFlows;
+        public List<double> RoundPps { get; } = [];
+        public long TotalPackets => _totalPackets;
+        public long TotalGen0Collections => _totalGen0Collections;
+
+        public ValueTask<long> RunWarmupRoundAsync(int count) => RunRoundAsync(count, recordStats: false);
+
+        public ValueTask<long> RunMeasuredRoundAsync(int count) => RunRoundAsync(count, recordStats: true);
+
+        private async ValueTask<long> RunRoundAsync(int count, bool recordStats)
+        {
+            // Fresh pipeline state per invocation so the measured pass count matches the packet count.
+            var passConfiguration = new ValidatedConfiguration(
+                new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+                new PolicySnapshot([], FlowAction.Pass));
+            var executor = new CountingExecutor();
+            var logger = new ThresholdOnlyLogger(RuntimeLogLevel.Info);
+            var dispatcher = new FlowDispatcher(passConfiguration, new NeverOwnedGuard(), executor, logger: logger);
+            var processor = new CapturePacketProcessor(dispatcher, logger);
+            var adapter = new WindowsAdapter("bench-adapter", "Benchmark Adapter", @"\DEVICE\{00000000-B3NCH-4ARK-0000-000000000000}", (nint)0x55, 1);
+            var frame = CreateIpv4TcpFrame(frameSize);
+
+            using var completion = new CancellationTokenSource();
+            var reader = new FiniteCaptureReader(frame, count, DistinctFlows, completion, NdisApiAbi.PacketFlagOnSend);
+            await using var pump = new NdisCapturePump(reader, adapter.RuntimeHandle, (packet, cancellationToken) => processor.ProcessAsync(packet, adapter, cancellationToken), TimeSpan.FromMilliseconds(1), batchCapacity);
+
+            var gen0Before = GC.CollectionCount(0);
+            var stopwatch = Stopwatch.StartNew();
+            try
+            {
+                await pump.RunAsync(completion.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (completion.IsCancellationRequested)
+            {
+                // Exhaustion cancellation is the pump's normal shutdown path (NdisCapturePumpTests uses the same termination).
+            }
+
+            stopwatch.Stop();
+            if (recordStats)
+            {
+                _totalGen0Collections += GC.CollectionCount(0) - gen0Before;
+                _totalPackets += count;
+                if (count > 0) RoundPps.Add(count / stopwatch.Elapsed.TotalSeconds);
+            }
+
+            Volatile.Write(ref s_sink, executor.PassCount);
+            if (executor.PassCount != count) throw new InvalidOperationException($"The capture pump benchmark processed {executor.PassCount} of {count} packets.");
+            return (long)frameSize * count;
+        }
+
+        private static byte[] CreateIpv4TcpFrame(int frameSize)
+        {
+            if (frameSize < 64 || frameSize > UdpFrameBuilder.MaximumEthernetFrame) throw new ArgumentOutOfRangeException(nameof(frameSize));
+            var frame = new byte[frameSize];
+            BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(12, 2), 0x0800);
+            frame[14] = 0x45;
+            BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(16, 2), checked((ushort)(frameSize - 14)));
+            frame[22] = 64;
+            frame[23] = 6;
+            IPAddress.Parse("192.0.2.10").TryWriteBytes(frame.AsSpan(26, 4), out _);
+            IPAddress.Parse("192.0.2.80").TryWriteBytes(frame.AsSpan(30, 4), out _);
+            // The source port is rewritten per packet by the capture-pump reader to rotate flow keys.
+            BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(34, 2), 53_000);
+            BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(36, 2), 443);
+            frame[46] = 0x50;
+            for (var index = 54; index < frame.Length; index++) frame[index] = unchecked((byte)index);
+            return frame;
+        }
+    }
+#pragma warning restore CA1416
+
     private static async ValueTask RunUdpSessionBenchmarkAsync(BenchmarkContext context, int sessionCount)
     {
         UdpProxyCoordinator? coordinator = null;
@@ -491,6 +626,42 @@ internal static class Program
         private NoopUdpResponseSink() { }
         public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, byte[]? clientMac, CancellationToken cancellationToken) => ValueTask.CompletedTask;
     }
+
+    /// <summary>
+    /// Supplies a finite stream of synthetic frames to <see cref="NdisCapturePump"/> without native
+    /// hardware. Every call fills as many batch slots as requested (up to the remaining supply) so
+    /// the pump never pays the empty-queue poll delay; when the supply is exhausted the reader
+    /// cancels the completion token and reports an empty queue, which is the pump's normal
+    /// termination path. Each frame gets a rotating TCP source port so the pipeline observes a
+    /// bounded mix of first-observation flow claims and cached resolutions.
+    /// </summary>
+    private sealed class FiniteCaptureReader(byte[] frame, long totalPackets, int distinctFlows, CancellationTokenSource completion, uint deviceFlags) : INdisPacketReader
+    {
+        private long _remaining = totalPackets;
+        private int _sequence;
+
+        public int TryReadPackets(nint adapterHandle, NdisPacketBuffer[] buffers)
+        {
+            var remaining = _remaining;
+            if (remaining <= 0)
+            {
+                completion.Cancel();
+                return 0;
+            }
+
+            var count = (int)Math.Min(remaining, (long)buffers.Length);
+            for (var index = 0; index < count; index++)
+            {
+                var sourcePort = (ushort)(1_024 + _sequence % distinctFlows);
+                BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(34, 2), sourcePort);
+                buffers[index].SetFrame(frame, deviceFlags, adapterHandle);
+                _sequence++;
+            }
+
+            _remaining -= count;
+            return count;
+        }
+    }
 }
 
 internal sealed record BenchmarkOptions(
@@ -577,6 +748,12 @@ internal sealed class BenchmarkContext(BenchmarkOptions options, TextWriter? out
             relayChunkSizes = Options.RelayChunkSizes,
         });
     }
+
+    /// <summary>
+    /// Emits a derived record (for example a multi-round steady-state aggregate) through the same
+    /// JSON path as the standard results, so console and file outputs stay consistent.
+    /// </summary>
+    public void WriteRecord<T>(T value) => Write(value);
 
     public async ValueTask RunAsync(
         string scenario,
