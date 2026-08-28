@@ -74,3 +74,25 @@ Analyzed EOF/reset root causes into a parent task with four children; completed 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 4: fix-table-lifecycle: teardown 墓碑与 flow 豁免
+
+**Date**: 2026-08-28
+**Task**: fix-table-lifecycle: teardown 墓碑与 flow 豁免
+**Branch**: `master`
+
+### Summary
+
+表生命周期任务完成：TcpRedirectTombstoneTable 双键墓碑（60s 宽限、容量同源、单一写入点）+ Dropped 静默消费 + flow 谓词豁免（sweep 顺序 tcp→flows→udp）。Windows smoke：notrelevant 113→11（-90%），55 个 grace 丢弃，配对完整零错误。347/347 测试，spec 新增 teardown-grace 契约章节。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `604eeb3` | (see git log) |
+| `32fe5a8` | (see git log) |
+
+### Status
+
+[OK] **Completed**

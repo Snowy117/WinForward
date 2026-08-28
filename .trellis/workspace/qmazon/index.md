@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 3
+- **Total Sessions**: 4
 - **Last Active**: 2026-08-28
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~76 | Active |
+| `journal-1.md` | ~98 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 4 | 2026-08-28 | fix-table-lifecycle: teardown 墓碑与 flow 豁免 | `604eeb3`, `32fe5a8` | `master` |
 | 3 | 2026-08-28 | fix-port-budget: tcpFlowCapacity 预算落地 | `19ce572`, `16022a8` | `master` |
 | 2 | 2026-08-27 | Datapath throughput: batched reads, pooling, hardware smoke | `fec967a`, `5ad8e60`, `2519b0d`, `3f30cf8` | `master` |
 | 1 | 2026-08-27 | Fix host UDP reinjection delivery failure (hardware-verified) | `4e3c866`, `4c36ad4` | `master` |
