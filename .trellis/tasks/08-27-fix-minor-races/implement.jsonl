@@ -1,1 +1,2 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/tasks/08-27-fix-minor-races/research/minor-races-feasibility.md", "reason": "D组三项的现状锚点与seam清单（研究基线 HEAD 42a6516）"}
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "RST/注入/墓碑单写点等契约"}

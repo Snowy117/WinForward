@@ -460,3 +460,11 @@ if (tombstone.TryHit(key, now)) return TcpRedirectOutcome.Blocked;
 if (Tombstones.TryHitReverse(tuple, now) || Tombstones.TryHitForward(key, now))
     return TcpRedirectOutcome.Dropped;
 ```
+
+---
+
+## Client-reset sequence tracking and injection-failure exits (wired 2026-08-28)
+
+- **Tracked sequences beat ISN+1**: `TcpRedirectAssociation` observes both directions' `seq + payloadLen` (SYN/FIN each count 1, payload length from IP totalLength — never ethernet frame length, padding pollutes it; IPv6 extension headers deducted) at the two pre-rewrite points, wrap-aware advance-only. `TryInjectClientResetAsync` must use `ClientNextSeq ?? clientInitialSeq+1` (ack) and `ServerNextSeq ?? serverInitialSeq+1` (seq): ISN+1 is out-of-window once the client has sent data and the stack silently discards the RST (slow-EOF symptom). New observation sites must read the frame BEFORE rewrite (original bytes) and synchronously (Span must not cross an await).
+- **Every `SendPacketTo*` failure exits through `HandleInjectionFailureAsync`**: warn `tcp.redirect.failed reason=injectionFailure` with nativeError/adapterHandle/flow key → best-effort client RST → `FailAssociationAsync` (tombstone single write point). Free-text catches around injections are forbidden — a silent `FailAssociationAsync` after adapter-handle staleness is exactly the invisible-teardown defect this rule exists to prevent.
+- **SOCKS5 relay setup budget**: relay call site passes `maxAttempts: 2, perAttemptTimeout: 10s` (internal constants). The default 30s is per-attempt (worst ~150s over multi-address DNS); after redirect accept the client is already established, so every extra budget second is a "connected then reset" second.

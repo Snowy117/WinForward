@@ -3,7 +3,7 @@
   "name": "fix-minor-races",
   "title": "次要竞态修复（RST 序号、句柄时效、轮询延迟）",
   "description": "次因D组：RST 确认序号过期、OriginAdapterHandle 失效、1ms 轮询、30s 失败体验",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

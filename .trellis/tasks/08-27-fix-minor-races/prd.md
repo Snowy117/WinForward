@@ -65,14 +65,15 @@ reverse 注入依赖过期的适配器句柄、SOCKS5 30s 失败的用户体验�
 
 ## Acceptance Criteria
 
-- [ ] D1：单测覆盖"客户端已发送数据后注入 RST"场景，RST ack 序号在客户端当前
+- [x] D1：单测覆盖"客户端已发送数据后注入 RST"场景，RST ack 序号在客户端当前
       窗口内（或采用 design.md 定稿的替代构造并被单测验证）。
-- [ ] D2：适配器句柄失效场景的测试或仿真：连接被显式、可观测地拆除（日志含
+- [x] D2：适配器句柄失效场景的测试或仿真：连接被显式、可观测地拆除（日志含
       reason），不出现注入异常被动 fail。
-- [ ] D3：SOCKS5 不可达时客户端感知失败的时间从最长 30s 收敛到 design.md 定稿的
-      目标值，且有相应测试或 smoke 证据。
-- [ ] D4：结论被记录（由 `fix-datapath-throughput` 解决或本任务解决）。
-- [ ] `dotnet test -c Release` 全量通过。
+- [x] D3：SOCKS5 不可达时客户端感知失败的时间从最长 30s 收敛到 design.md 定稿的
+      目标值（10s×2，refused 仍亚秒级），且有相应测试。
+- [x] D4：结论被记录（design.md §4：1ms 空批轮询保留，空闲单核 <0.5%；事件化
+      维持 fix-datapath-throughput design §7 的否决结论）。
+- [x] `dotnet test -c Release` 全量通过（353/353）。
 
 ## Notes
 
