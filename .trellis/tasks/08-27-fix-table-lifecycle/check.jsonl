@@ -1,1 +1,3 @@
 {"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "检查墓碑查询点/枚举映射是否守住既有兜底语义"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "静默丢弃与 fail-closed 的边界（capacity 管理先例）"}

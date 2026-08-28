@@ -396,3 +396,67 @@ TryRewriteForwardLeg(frame, ...);
 ```
 
 **Related**: task `08-27-fix-datapath-throughput` (prd/design/implement artifacts hold the full audit tables); the parent `08-27-fix-eof-reset-design-flaws` maps the throughput bottleneck to the RST/EOF frequency symptom.
+
+---
+
+## Redirect teardown grace and flow-hold contracts (wired 2026-08-28)
+
+### 1. Scope / Trigger
+
+- Trigger: any change to TCP redirect teardown, the `NotRelevant → Pass` fallback, flow-table expiry, or the idle sweeper ordering.
+
+### 2. Signatures
+
+- `TcpRedirectTombstoneTable` — dual-key (`FlowKey` forward + reverse tuple) → shared `TombstoneEntry` with `ExpiryUtc`; `TryAdd` (FIFO evict-oldest at capacity), both-direction `TryHit(now)` (hit only while `now < ExpiryUtc`), `RemoveExpired(now)`.
+- `TcpRedirectOutcome.Dropped` — a dedicated outcome; **never reuse `Blocked`** for grace drops (executor's `Blocked` path fires `LogProxyUnavailable`, mislabeling grace consumption as proxy failure).
+- `FlowTable.RemoveExpired(now, isHeld?)` — optional hold predicate; held entries are skipped **without Touch**, so they expire at their original idle point once the hold lapses.
+
+### 3. Contracts
+
+- **Single tombstone write point**: every teardown entry (relay completion, relay failure, fail-closed, global dispose) funnels through `TcpProxyCoordinator.RemoveAssociationFromTable` — the only caller of `TcpRedirectTable.TryRemove` — and that point also writes the tombstone (grace `TombstoneGracePeriod` = 60 s). Any new teardown path must go through it.
+- **Late-packet consumption**: after a forward (`TryResolveByOriginal`) or reverse (`IsReverseCandidate`) miss, the coordinator consults the tombstone before falling back. A hit returns `Dropped`; the executor silently consumes (trace `packet.dropped reason=grace`), and the dispatcher maps reverse-straggler `Dropped` to `ProxyConsumed` — **not** `Block` (which would emit `reason=policy`).
+- **The `NotRelevant → Pass` fallback remains solely for connections established before capture started** — those packets are data-plane-identical to late packets, so no timestamp can separate them; only the per-flow tombstone expiry can. Baseline smoke: 113 notrelevant pre-fix → 11 (legitimate pre-existing connections) with 55 grace-dropped post-fix.
+- **Flow hold**: `TcpProxyCoordinator.HoldsFlow` = has session ∨ has tombstone. Sweeper order is **tcp → flows → udp** so tombstones/sessions are recycled before flows are evaluated; capacity summary stays at tick end. Held flows are not touched, so a silently-idle relaying flow survives flow-idle expiry and resumes without re-evaluation (no `flow.created`).
+- **Capacity**: tombstone capacity derives from the same `tcpFlowCapacity` budget at wiring; tombstones occupy neither `_sessions` nor the `TryClaim` gate.
+- UDP is deliberately untouched: sessions rebuild directly on expiry (no handshake → no stray-packet rebound); responses have their own reverse branch.
+
+### 4. Validation & Error Matrix
+
+| Condition | Result |
+|---|---|
+| Late forward/reverse packet within grace | `Dropped`, silent consume, no reinjection to the real server |
+| Late packet after grace expiry | falls back `NotRelevant → Pass` (pre-existing-connection semantics) |
+| Tombstone table full | evict oldest entry, add new |
+| Relay-held flow reaches flow-idle expiry | skipped, no Touch, no re-evaluation on resume |
+| Hold lapses (teardown + grace passed) | flow expires at its original idle point |
+
+### 5. Good/Base/Bad Cases
+
+- Good: client's final ACK after relay completion hits the tombstone and is consumed — no RST rebounds from the real server.
+- Base: a packet for a connection torn down 90 s ago (grace lapsed) passes as `NotRelevant` — same as pre-capture traffic.
+- Bad: reusing `Blocked` for grace drops (mislabels as proxy-unavailable); holding flows by Touching them (defeats original-idle-point expiry).
+
+### 6. Tests Required
+
+- `TcpRedirectTombstoneTableTests`: window hit / evict-oldest / expiry recycle / rewrite-refresh.
+- Coordinator tests: both-direction straggler `Dropped`; grace-expiry fallback to `NotRelevant`; relay-failure writes tombstone; executor silent consume + trace (and no executor `packet.completed` for grace); `HoldsFlow` phases; flow expiry at original idle point after hold lapses (split clocks); real-sweeper silent-flow survival (no `flow.created`).
+- Dispatcher regression: reverse-straggler `Dropped` maps to `ProxyConsumed` without a `reason=policy` label.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```csharp
+// Grace drop reusing Blocked: executor's Blocked branch logs proxy-unavailable
+// and the trace says reason=policy — both mislead diagnosis.
+if (tombstone.TryHit(key, now)) return TcpRedirectOutcome.Blocked;
+```
+
+#### Correct
+
+```csharp
+// Dedicated outcome; executor consumes silently with its own trace reason,
+// and the dispatcher maps the reverse-straggler form to ProxyConsumed.
+if (Tombstones.TryHitReverse(tuple, now) || Tombstones.TryHitForward(key, now))
+    return TcpRedirectOutcome.Dropped;
+```

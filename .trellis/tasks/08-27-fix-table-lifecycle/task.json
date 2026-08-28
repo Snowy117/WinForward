@@ -3,7 +3,7 @@
   "name": "fix-table-lifecycle",
   "title": "重定向表与流表生命周期修复",
   "description": "主因③④：teardown 后迟到包 TIME_WAIT 宽限；flow 表过期豁免 relaying 活跃流",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

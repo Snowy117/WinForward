@@ -1,1 +1,3 @@
 {"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/tasks/08-27-fix-table-lifecycle/research/table-lifecycle-feasibility.md", "reason": "teardown 链/迟到包分支/关联键/墓碑形态结论的行号锚点来源"}
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "NotRelevant→Pass 兜底与 reverse hook 的既有契约（防语义回退）"}

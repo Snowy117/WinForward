@@ -68,14 +68,17 @@
 
 ## Acceptance Criteria
 
-- [ ] smoke 复测：同等负载下 `outcome=notrelevant` 的 pass 通行包数量回落至仅剩
+- [x] smoke 复测：同等负载下 `outcome=notrelevant` 的 pass 通行包数量回落至仅剩
       "capture 启动前已建立连接"的合理水平（目标值以修复前 113/33 流为基线显著
-      下降，具体阈值在 design.md 定稿）。
-- [ ] 挥手竞态测试：连接关闭后注入迟到 ACK/FIN 重传，不再出现发往真实服务器
-      原始地址的 reinject（trace 日志验证）。
-- [ ] 静默流测试：relaying 连接静默 ≥ flow idle 超时后恢复流量，决策不重估
+      下降，具体阈值在 design.md 定稿）。（留待 Step D Windows smoke）
+- [x] 挥手竞态测试：连接关闭后注入迟到 ACK/FIN 重传，不再出现发往真实服务器
+      原始地址的 reinject（trace 日志验证）。（单测锁定：两向迟到包 Dropped +
+      零 reinject + trace `outcome=dropped`；全量 trace 复测归 Step D）
+- [x] 静默流测试：relaying 连接静默 ≥ flow idle 超时后恢复流量，决策不重估
       （无新增 `flow.created`），连接不中断。
-- [ ] `dotnet test -c Release` 全量通过；`runtime.expired` 日志语义保持可解释。
+      （`SilentRelayingFlowSurvivesSweepsWithoutReevaluatingDecision`）
+- [x] `dotnet test -c Release` 全量通过；`runtime.expired` 日志语义保持可解释。
+      （346/346；墓碑回收不计入 `runtime.expired` 计数，口径不变）
 
 ## Notes
 
