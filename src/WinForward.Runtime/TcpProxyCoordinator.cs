@@ -1,6 +1,3 @@
-using System.ComponentModel;
-using System.Net;
-using System.Runtime.InteropServices;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
@@ -15,29 +12,23 @@ namespace WinForward.Runtime;
 /// the listener, registers the listener tuple in the loop-prevention registry, injects the rewritten
 /// frame, and runs a background accept-and-relay loop. A proxy-selected flow is never silently passed:
 /// every listener-allocation, claim, rewrite, injection, and relay-setup failure fails closed and
-/// releases the listener, the table alias, and the self-traffic token.
+/// releases the listener, the table alias, and the self-traffic token. The data path is delegated to
+/// focused modules: <see cref="TcpRedirectSetup"/> (new-flow pipeline), <see cref="TcpRedirectSessionStore"/>
+/// (session lifecycle under one gate), <see cref="TcpRedirectAcceptor"/> (accept/relay loop), and
+/// <see cref="ClientResetInjector"/> (client-visible failure surface); this class owns entry routing.
 /// </summary>
 public sealed class TcpProxyCoordinator : IAsyncDisposable
 {
-    private readonly ITcpRedirectListenerFactory _listenerFactory;
-    private readonly ITcpProxyRelayFactory _relayFactory;
-    private readonly ITcpRedirectInjector _injector;
     private readonly TcpRedirectTable _table;
-    private readonly TcpRedirectTombstoneTable _tombstones;
-    private readonly SelfTrafficRegistry _selfTraffic;
-    private readonly IAdapterLocalAddressProvider _localAddresses;
+    private readonly ITcpRedirectInjector _injector;
     private readonly IRuntimeLogger _logger;
     private readonly int _capacity;
-    private readonly Dictionary<FlowKey, TcpRedirectSession> _sessions = [];
-    private readonly Lock _gate = new();
-    private readonly CancellationTokenSource _shutdown = new();
-    private TaskCompletionSource _setupsDrained = CompletedSource();
-    private Task? _disposeTask;
-    private int _inflightSetups;
-    private long _concurrentLoserCount;
+    private readonly TcpRedirectSessionStore _store;
+    private readonly TcpRedirectSetup _setup;
+    private readonly ClientResetInjector _clientReset;
+    private readonly TcpRedirectAcceptor _acceptor;
     private long _capacityRejectionCount;
     private long _reportedCapacityRejectionCount;
-    private bool _disposed;
 
     public TcpProxyCoordinator(
         ITcpRedirectListenerFactory listenerFactory,
@@ -56,15 +47,14 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(selfTraffic);
         ArgumentNullException.ThrowIfNull(localAddresses);
         if (capacity is < 1) throw new ArgumentOutOfRangeException(nameof(capacity), capacity, "Capacity must be positive.");
-        _listenerFactory = listenerFactory;
-        _relayFactory = relayFactory;
-        _injector = injector;
         _table = table;
-        _selfTraffic = selfTraffic;
-        _localAddresses = localAddresses;
+        _injector = injector;
         _logger = logger ?? NullRuntimeLogger.Instance;
         _capacity = capacity ?? 16_384;
-        _tombstones = new TcpRedirectTombstoneTable(_capacity);
+        _store = new TcpRedirectSessionStore(table, _logger, _capacity);
+        _clientReset = new ClientResetInjector(injector, _logger, _store.TearDownSessionAsync, _store.FailAssociationAsync);
+        _acceptor = new TcpRedirectAcceptor(relayFactory, _logger, _clientReset, _store.TryAttachRelay, _store.TearDownSessionAsync);
+        _setup = new TcpRedirectSetup(listenerFactory, table, selfTraffic, localAddresses, injector, _logger, _store, _clientReset);
     }
 
     public TcpRedirectTable Table => _table;
@@ -75,7 +65,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     /// fallen back to re-inject. A non-zero value after a concurrent burst proves the redirect-table
     /// exactly-once path was exercised under genuine concurrency.
     /// </summary>
-    internal long ConcurrentLoserCount => Interlocked.Read(ref _concurrentLoserCount);
+    internal long ConcurrentLoserCount => _setup.ConcurrentLoserCount;
 
     /// <summary>
     /// The total number of SYN arrivals rejected by the capacity gate since construction. Unlike
@@ -106,10 +96,10 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(packet);
         ArgumentNullException.ThrowIfNull(server);
-        EnterSetup();
+        _store.EnterSetup();
         try
         {
-            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed), this);
+            ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
 
             var key = packet.Context.Key;
             if (key.Protocol != TransportProtocol.Tcp)
@@ -121,344 +111,60 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
             // re-inject the rewritten SYN toward the listener. Policy is evaluated exactly once.
             if (_table.TryResolveByOriginal(key, DateTimeOffset.UtcNow, out var existing) && existing is not null)
             {
-                LogTrace("tcp.redirect.reused", packet, existing);
-                return await ReinjectExistingSynAsync(packet, existing, cancellationToken).ConfigureAwait(false);
+                TcpRedirectLogging.LogTrace(_logger, "tcp.redirect.reused", packet, existing);
+                return await ReinjectExistingFlowDataAsync(packet, existing, cancellationToken).ConfigureAwait(false);
             }
 
-            lock (_gate)
+            if (_store.SessionCount >= _capacity)
             {
-                if (_sessions.Count >= _capacity)
-                {
-                    Interlocked.Increment(ref _capacityRejectionCount);
-                    LogTrace("tcp.redirect.rejected", packet, null, "capacity");
-                    return TcpRedirectOutcome.Blocked;
-                }
+                Interlocked.Increment(ref _capacityRejectionCount);
+                TcpRedirectLogging.LogTrace(_logger, "tcp.redirect.rejected", packet, null, "capacity");
+                return TcpRedirectOutcome.Blocked;
             }
 
-            var setup = await SetupNewRedirectAsync(packet, server, cancellationToken).ConfigureAwait(false);
+            var setup = await _setup.SetupNewRedirectAsync(packet, server, cancellationToken).ConfigureAwait(false);
             if (setup is null) return TcpRedirectOutcome.Blocked;
 
             // A concurrent caller claimed this flow first; the redundant listener was already released.
             // Re-inject the SYN against the existing association without creating a new session.
             if (setup.Session is null)
             {
-                return await ReinjectExistingSynAsync(packet, setup.Association, cancellationToken).ConfigureAwait(false);
+                return await ReinjectExistingFlowDataAsync(packet, setup.Association, cancellationToken).ConfigureAwait(false);
             }
 
-            setup.Session.AcceptLoop = RunAcceptLoopAsync(setup.Session);
-            LogDebug("tcp.redirect.created", setup.Session, "created");
+            setup.Session.AcceptLoop = _acceptor.RunAcceptLoopAsync(setup.Session);
+            TcpRedirectLogging.LogDebug(_logger, "tcp.redirect.created", setup.Session, "created");
 
             return TcpRedirectOutcome.Injected;
         }
         finally
         {
-            ExitSetup();
+            _store.ExitSetup();
         }
-    }
-
-    /// <summary>
-    /// Allocates the listener, claims the association, rewrites the SYN, registers loop prevention,
-    /// and injects the rewritten frame. Returns null (fail-closed) when any step fails, after
-    /// releasing the listener, the table alias, and the self-traffic token it may have acquired.
-    /// </summary>
-    private async ValueTask<RedirectSetup?> SetupNewRedirectAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
-    {
-        var key = packet.Context.Key;
-
-        ITcpRedirectListener listener;
-        try
-        {
-            listener = await _listenerFactory.CreateAsync(key.AddressFamily, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch
-        {
-            LogTrace("tcp.redirect.rejected", packet, null, "listenerAllocation");
-            _logger.Warn("TCP redirect failed: listener allocation failed, blocking the flow.");
-            return null;
-        }
-
-        var translatedTuple = listener.TranslatedTuple;
-        var originAdapter = new AdapterContext(key.OriginAdapterId, packet.Context.AdapterName, key.OriginAdapterGeneration);
-        var originalDestination = key.Remote;
-
-        var forwardLocalAddress = ResolveForwardLocalAddress(key);
-        if (key.Origin == FlowOriginKind.Forwarded && forwardLocalAddress is null)
-        {
-            await listener.DisposeAsync().ConfigureAwait(false);
-            LogTrace("tcp.redirect.rejected", packet, null, "localAddress");
-            _logger.Warn("TCP redirect failed: no local address available on the origin adapter, blocking the flow.");
-            return null;
-        }
-
-        if (!_table.TryClaim(key, originalDestination, originAdapter, packet.Metadata.AdapterHandle, translatedTuple, forwardLocalAddress, DateTimeOffset.UtcNow, out var association) || association is null)
-        {
-            await listener.DisposeAsync().ConfigureAwait(false);
-            LogTrace("tcp.redirect.rejected", packet, null, "claim");
-            _logger.Warn("TCP redirect failed: redirect-table capacity reached or translated-tuple collision, blocking the flow.");
-            return null;
-        }
-
-        // A concurrent caller may have claimed this same original flow first. TryClaim returns the
-        // existing association (whose translated tuple differs from this listener's) rather than a
-        // new one. The just-allocated listener is redundant: release it and fall back to the
-        // re-inject path against the existing association so only one listener owns the flow.
-        if (association.TranslatedListenerTuple != translatedTuple)
-        {
-            Interlocked.Increment(ref _concurrentLoserCount);
-            await listener.DisposeAsync().ConfigureAwait(false);
-            return new RedirectSetup(association, Session: null);
-        }
-
-        return await CompleteNewRedirectAsync(packet, listener, association, translatedTuple, server, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Resolves the adapter-local redirect destination address for a forwarded flow's SYN
-    /// (DNAT-to-local). The host IP-swap shape would send the frame to the client's own address,
-    /// which is not local for a forwarded flow, so the listener would never see it. Loopback is
-    /// deliberately excluded by the provider: a martian-source reverse reply could be dropped by
-    /// the stack before it reaches the capture layer for rewriting. Returns null for host flows
-    /// (host shape needs no such address) and when the origin adapter owns no usable address of
-    /// the flow's family; the caller fails closed on the latter.
-    /// </summary>
-    private IPAddress? ResolveForwardLocalAddress(FlowKey key)
-    {
-        if (key.Origin != FlowOriginKind.Forwarded) return null;
-        return key.OriginAdapterId is { } originAdapterId
-            ? _localAddresses.SelectLocalAddress(originAdapterId, key.AddressFamily, key.Local.Address)
-            : null;
-    }
-
-    private async ValueTask<RedirectSetup?> CompleteNewRedirectAsync(CapturedFlowPacket packet, ITcpRedirectListener listener, TcpRedirectAssociation association, Endpoint translatedTuple, Socks5Server server, CancellationToken cancellationToken)
-    {
-        var session = RegisterSession(listener, association, translatedTuple, server, packet.FlowGeneration);
-        if (session is null)
-        {
-            await ReleaseAssociationAsync(listener, association, null).ConfigureAwait(false);
-            return null;
-        }
-
-        var key = packet.Context.Key;
-        // The rewrite below mutates the lease's pooled frame in place, so the original-SYN
-        // template must be recorded first; afterwards the frame only holds the rewritten form.
-        var frame = packet.Lease.Frame;
-        var originalClient = key.Local;
-        var originalServer = key.Remote;
-
-        if (!TryGetWritableFrame(frame, out var writableFrame))
-        {
-            await TearDownSessionAsync(session).ConfigureAwait(false);
-            LogTrace("tcp.redirect.rejected", packet, association, "rewrite");
-            _logger.Warn("TCP redirect failed: the captured frame is not writable in place, blocking the flow.");
-            return null;
-        }
-
-        RecordClientSyn(frame.Span, association);
-
-        if (!TryRewriteForwardLeg(writableFrame, originalClient, originalServer, association, translatedTuple.Port))
-        {
-            await TearDownSessionAsync(session).ConfigureAwait(false);
-            LogTrace("tcp.redirect.rejected", packet, association, "rewrite");
-            _logger.Warn("TCP redirect failed: SYN endpoint rewrite failed, blocking the flow.");
-            return null;
-        }
-
-        // L4 clarity: the wildcard registry cannot match this key — the observable reverse leg is
-        // (client:orig_port) -> (client_ip:proxy_port), whose per-client source port is unknown
-        // until a connection arrives. The TCP-only reverse hook guards that leg; this registration
-        // stays as writer-intent belt-and-suspenders for an exact listener tuple.
-        try
-        {
-            await _injector.InjectAsync(frame, towardMstcp: true, packet.Metadata.AdapterHandle, cancellationToken).ConfigureAwait(false);
-            LogTrace("tcp.redirect.injected", packet, association);
-        }
-        catch (OperationCanceledException)
-        {
-            await TearDownSessionAsync(session).ConfigureAwait(false);
-            throw;
-        }
-        catch (Exception exception)
-        {
-            // The single observable exit for injection failures; the reset leg is inert for a
-            // first SYN (no server ISN yet) and the fail path tears the session down.
-            await HandleInjectionFailureAsync(association, packet.Metadata.AdapterHandle, towardMstcp: true, exception).ConfigureAwait(false);
-            LogTrace("tcp.redirect.rejected", packet, association, "injection");
-            return null;
-        }
-
-        return new RedirectSetup(association, session);
-    }
-
-    private TcpRedirectSession? RegisterSession(ITcpRedirectListener listener, TcpRedirectAssociation association, Endpoint translatedTuple, Socks5Server server, long flowGeneration)
-    {
-        var selfTrafficToken = _selfTraffic.Register(new SelfTrafficRegistry.SelfTrafficKey(TransportProtocol.Tcp, translatedTuple, translatedTuple));
-        var session = new TcpRedirectSession(association, listener, selfTrafficToken, server, _shutdown.Token, flowGeneration);
-        lock (_gate)
-        {
-            if (_disposed)
-            {
-                session.Retire();
-                session.DisposeLifetime();
-                selfTrafficToken.Dispose();
-                return null;
-            }
-
-            _sessions.Add(association.OriginalKey, session);
-            return session;
-        }
-    }
-
-    private async ValueTask<TcpRedirectOutcome> ReinjectExistingSynAsync(CapturedFlowPacket packet, TcpRedirectAssociation association, CancellationToken cancellationToken)
-        => await ReinjectExistingFlowDataAsync(packet, association, cancellationToken).ConfigureAwait(false);
-
-    /// <summary>
-    /// Rewrites one frame on the original client-to-listener leg toward the redirect listener and
-    /// applies the origin-specific MAC handling. The forwarded DNAT shape preserves the client's
-    /// source tuple and moves only the destination to the adapter-local listener address, so the
-    /// accepted peer is the client itself and the arrival MACs (already addressing this host) are
-    /// kept. The host shape follows the official WinpkFilter local_redirect pattern: swap MACs and
-    /// IPs, rewrite the destination port to the proxy port; the SOURCE PORT is kept as the client's
-    /// original port (the redirector only rewrites th_dport, never th_sport), so the accepted
-    /// connection has peer = server:client_orig_port, which the per-flow mapping resolves by client
-    /// source port.
-    /// </summary>
-    private static bool TryRewriteForwardLeg(Span<byte> frame, Endpoint originalClient, Endpoint originalServer, TcpRedirectAssociation association, ushort listenerPort)
-    {
-        if (association.ForwardLocalAddress is { } forwardLocalAddress)
-        {
-            return PacketChecksums.TryRewriteTcpEndpoints(frame, originalClient.Address, originalClient.Port, forwardLocalAddress, listenerPort);
-        }
-        if (!PacketChecksums.TryRewriteTcpEndpoints(frame, originalServer.Address, originalClient.Port, originalClient.Address, listenerPort)) return false;
-        SwapEthernetMacs(frame);
-        return true;
-    }
-
-    /// <summary>
-    /// Obtains a writable view of a captured frame for in-place rewriting. The capture path
-    /// always wraps a pooled <see cref="byte"/>[] in the lease, but a lease over non-array
-    /// memory cannot be rewritten in place; callers fail closed rather than fall back to a copy.
-    /// </summary>
-    private static bool TryGetWritableFrame(ReadOnlyMemory<byte> frame, out Span<byte> writable)
-    {
-        writable = default;
-        if (!MemoryMarshal.TryGetArray(frame, out var segment)) return false;
-        writable = segment.Array.AsSpan(segment.Offset, segment.Count);
-        return true;
-    }
-
-    /// <summary>
-    /// Swaps the Ethernet source and destination MAC addresses of a frame. The official WinpkFilter
-    /// local-redirect pattern swaps MACs alongside IPs and ports so the redirected frame is accepted
-    /// by the local stack as if it arrived from the original server.
-    /// </summary>
-    private static void SwapEthernetMacs(Span<byte> frame)
-    {
-        if (frame.Length < 12) return;
-        Span<byte> destination = frame.Slice(0, 6);
-        Span<byte> source = frame.Slice(6, 6);
-        var temp = new byte[6];
-        destination.CopyTo(temp);
-        source.CopyTo(destination);
-        temp.CopyTo(source);
-    }
-
-    /// <summary>
-    /// Records the client ISN and a bounded copy of the original SYN frame on the association.
-    /// Together with the server ISN captured by <see cref="RecordServerSynAck"/> this is everything
-    /// a relay setup failure needs to abort the client-visible connection with an in-window RST.
-    /// </summary>
-    private static void RecordClientSyn(ReadOnlySpan<byte> frame, TcpRedirectAssociation association)
-    {
-        if (!IpTcpUdpPacket.TryParse(frame, out var view) || view.Transport != PacketTransport.Tcp) return;
-        var sequenceOffset = 14 + view.IpHeaderLength + 4;
-        if (frame.Length < sequenceOffset + 4) return;
-        association.ClientInitialSeq = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(frame.Slice(sequenceOffset, 4));
-        association.OriginalSynFrameCopy = frame.Slice(0, Math.Min(frame.Length, 128)).ToArray();
-    }
-
-    /// <summary>
-    /// Captures the listener-side ISN when the reverse leg's SYN-ACK passes through, so a later
-    /// relay setup failure can craft a reset the client's stack accepts as in-window.
-    /// </summary>
-    private static void RecordServerSynAck(ReadOnlySpan<byte> frame, TcpRedirectAssociation association)
-    {
-        if (!IpTcpUdpPacket.TryParse(frame, out var view) || view.Transport != PacketTransport.Tcp) return;
-        var flagsOffset = 14 + view.IpHeaderLength + 13;
-        if (frame.Length <= flagsOffset || (frame[flagsOffset] & 0x12) != 0x12) return;
-        var sequenceOffset = 14 + view.IpHeaderLength + 4;
-        if (frame.Length < sequenceOffset + 4) return;
-        association.ServerInitialSeq = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(frame.Slice(sequenceOffset, 4));
-    }
-
-    /// <summary>
-    /// Reads a TCP frame's sequence-space advancement — seq plus payload length, with SYN and FIN
-    /// each consuming one sequence number — from the pre-rewrite frame. The transport length comes
-    /// from the IP header rather than the frame length so Ethernet padding is not counted as
-    /// payload. Returns false for non-TCP or unparseable frames, which simply leaves the trackers
-    /// untouched (the reset then degrades to the ISN-based values).
-    /// </summary>
-    private static bool TryReadTcpSequenceAdvance(ReadOnlySpan<byte> frame, out uint sequenceNext)
-    {
-        sequenceNext = 0;
-        if (!IpTcpUdpPacket.TryParse(frame, out var view) || view.Transport != PacketTransport.Tcp) return false;
-        var etherType = System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(12, 2));
-        var transportLength = etherType == 0x0800
-            ? System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(16, 2)) - view.IpHeaderLength
-            : System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(18, 2)) - (view.IpHeaderLength - 40);
-        if (transportLength < view.TransportHeaderLength) return false;
-        var tcpOffset = 14 + view.IpHeaderLength;
-        var sequence = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(frame.Slice(tcpOffset + 4, 4));
-        var flags = frame[tcpOffset + 13];
-        var advance = (uint)(transportLength - view.TransportHeaderLength);
-        const byte Syn = 0x02;
-        const byte Fin = 0x01;
-        if ((flags & Syn) != 0) advance++;
-        if ((flags & Fin) != 0) advance++;
-        sequenceNext = sequence + advance;
-        return true;
-    }
-
-    /// <summary>
-    /// Advances the client-side sequence tracker on the forward leg. Must run on the original
-    /// (pre-rewrite) frame — the same read-then-write invariant as <see cref="RecordClientSyn"/>.
-    /// </summary>
-    private static void TrackClientSequence(ReadOnlySpan<byte> frame, TcpRedirectAssociation association)
-    {
-        if (TryReadTcpSequenceAdvance(frame, out var next)) association.ObserveClientSequence(next);
-    }
-
-    /// <summary>Advances the server-side sequence tracker on the reverse leg (pre-rewrite frame).</summary>
-    private static void TrackServerSequence(ReadOnlySpan<byte> frame, TcpRedirectAssociation association)
-    {
-        if (TryReadTcpSequenceAdvance(frame, out var next)) association.ObserveServerSequence(next);
     }
 
     private async ValueTask<TcpRedirectOutcome> ReinjectExistingFlowDataAsync(CapturedFlowPacket packet, TcpRedirectAssociation association, CancellationToken cancellationToken)
     {
         var frame = packet.Lease.Frame;
-        if (!TryGetWritableFrame(frame, out var writableFrame))
+        if (!TcpFrameRewriter.TryGetWritableFrame(frame, out var writableFrame))
         {
-            await FailAssociationAsync(association).ConfigureAwait(false);
+            await _store.FailAssociationAsync(association).ConfigureAwait(false);
             return TcpRedirectOutcome.Blocked;
         }
         // Read-then-write: advance the client sequence tracker on the original frame before the
         // in-place rewrite mutates it, keeping the reset builder's ack in the client's window.
-        TrackClientSequence(frame.Span, association);
+        TcpSequenceObservation.TrackClientSequence(frame.Span, association);
         var originalClient = packet.Context.Key.Local;
         var originalServer = association.OriginalKey.Remote;
-        if (!TryRewriteForwardLeg(writableFrame, originalClient, originalServer, association, association.TranslatedListenerTuple.Port))
+        if (!TcpFrameRewriter.TryRewriteForwardLeg(writableFrame, originalClient, originalServer, association, association.TranslatedListenerTuple.Port))
         {
-            await FailAssociationAsync(association).ConfigureAwait(false);
+            await _store.FailAssociationAsync(association).ConfigureAwait(false);
             return TcpRedirectOutcome.Blocked;
         }
         try
         {
             await _injector.InjectAsync(frame, towardMstcp: true, packet.Metadata.AdapterHandle, cancellationToken).ConfigureAwait(false);
-            LogTrace("tcp.redirect.injected", packet, association);
+            TcpRedirectLogging.LogTrace(_logger, "tcp.redirect.injected", packet, association);
         }
         catch (OperationCanceledException)
             when (cancellationToken.IsCancellationRequested)
@@ -467,12 +173,12 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
-            await FailAssociationAsync(association).ConfigureAwait(false);
+            await _store.FailAssociationAsync(association).ConfigureAwait(false);
             throw;
         }
         catch (Exception exception)
         {
-            await HandleInjectionFailureAsync(association, packet.Metadata.AdapterHandle, towardMstcp: true, exception).ConfigureAwait(false);
+            await _clientReset.HandleInjectionFailureAsync(association, packet.Metadata.AdapterHandle, towardMstcp: true, exception).ConfigureAwait(false);
             return TcpRedirectOutcome.Blocked;
         }
         return TcpRedirectOutcome.Injected;
@@ -481,7 +187,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     public async ValueTask<TcpRedirectOutcome> HandleReverseAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(packet);
-        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed), this);
+        ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
 
         var key = packet.Context.Key;
         // M5 belt-and-suspenders: this coordinator owns TCP redirect table entries only. The
@@ -494,32 +200,32 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         var frame = packet.Lease.Frame;
         // Read-then-write: record the SYN-ACK sequence and advance the server sequence tracker
         // before the in-place rewrite mutates the frame.
-        RecordServerSynAck(frame.Span, association);
-        TrackServerSequence(frame.Span, association);
+        TcpSequenceObservation.RecordServerSynAck(frame.Span, association);
+        TcpSequenceObservation.TrackServerSequence(frame.Span, association);
 
         // Host-originated flows terminate on this host (reverse to MSTCP); forwarded flows (client
         // on a VM/remote side) must be sent back to the origin adapter instead.
         var towardMstcp = original.Origin == FlowOriginKind.Host;
         var targetHandle = towardMstcp ? packet.Metadata.AdapterHandle : association.OriginAdapterHandle;
-        if (!TryGetWritableFrame(frame, out var writableFrame)
+        if (!TcpFrameRewriter.TryGetWritableFrame(frame, out var writableFrame)
             || !PacketChecksums.TryRewriteTcpEndpoints(writableFrame, original.Remote.Address, original.Remote.Port, original.Local.Address, original.Local.Port))
         {
-            await FailAssociationAsync(association).ConfigureAwait(false);
+            await _store.FailAssociationAsync(association).ConfigureAwait(false);
             return TcpRedirectOutcome.Blocked;
         }
         // The MAC swap makes the looped-back frame look inbound from the router for a host flow.
         // A forwarded flow's reversed frame is emitted on the origin adapter toward the client, and
         // its arrival MACs (this host -> client) are already correct.
-        if (towardMstcp) SwapEthernetMacs(writableFrame);
+        if (towardMstcp) TcpFrameRewriter.SwapEthernetMacs(writableFrame);
         try
         {
             if (!towardMstcp && targetHandle == 0)
             {
-                await FailAssociationAsync(association).ConfigureAwait(false);
+                await _store.FailAssociationAsync(association).ConfigureAwait(false);
                 return TcpRedirectOutcome.Blocked;
             }
             await _injector.InjectAsync(frame, towardMstcp, targetHandle, cancellationToken).ConfigureAwait(false);
-            LogTrace("tcp.reverse.injected", packet, association);
+            TcpRedirectLogging.LogTrace(_logger, "tcp.reverse.injected", packet, association);
         }
         catch (OperationCanceledException)
             when (cancellationToken.IsCancellationRequested)
@@ -528,12 +234,12 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
-            await FailAssociationAsync(association).ConfigureAwait(false);
+            await _store.FailAssociationAsync(association).ConfigureAwait(false);
             throw;
         }
         catch (Exception exception)
         {
-            await HandleInjectionFailureAsync(association, targetHandle, towardMstcp, exception).ConfigureAwait(false);
+            await _clientReset.HandleInjectionFailureAsync(association, targetHandle, towardMstcp, exception).ConfigureAwait(false);
             return TcpRedirectOutcome.Blocked;
         }
 
@@ -550,7 +256,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     public async ValueTask<TcpRedirectOutcome> HandleReverseIfApplicableAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(packet);
-        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed), this);
+        ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
 
         // H1/M5 gate before the numeric-port lookup: this handler owns TCP reverse routing. A UDP
         // or other-protocol frame whose local/remote port numerically matches an active TCP
@@ -562,7 +268,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
             // TIME_WAIT grace: the reverse leg of a redirect torn down within the grace window still
             // resolves here, so listener-side stragglers of the finished handshake are consumed
             // instead of falling through to flow/policy handling as a fresh flow.
-            return _tombstones.TryHit(key.Local, key.Remote, DateTimeOffset.UtcNow)
+            return _store.Tombstones.TryHit(key.Local, key.Remote, DateTimeOffset.UtcNow)
                 ? TcpRedirectOutcome.Dropped
                 : TcpRedirectOutcome.NotRelevant;
         }
@@ -580,11 +286,11 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(packet);
         ArgumentNullException.ThrowIfNull(server);
-        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed), this);
+        ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
 
         var key = packet.Context.Key;
         var now = DateTimeOffset.UtcNow;
-        var syn = ClassifyTcpSyn(packet.Lease.Frame.Span);
+        var syn = TcpFrameRewriter.ClassifyTcpSyn(packet.Lease.Frame.Span);
 
         if (_table.IsReverseCandidate(key.Local, key.Remote))
         {
@@ -611,37 +317,9 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         // instead of returning NotRelevant, whose executor fallback would reinject toward the real
         // server — which never saw the proxied connection and answers the unknown tuple with a
         // bounced RST.
-        if (_tombstones.TryHit(key, now)) return TcpRedirectOutcome.Dropped;
+        if (_store.Tombstones.TryHit(key, now)) return TcpRedirectOutcome.Dropped;
 
         return TcpRedirectOutcome.NotRelevant;
-    }
-
-    /// <summary>
-    /// Detects a TCP SYN (SYN set, ACK clear) from the raw Ethernet frame. The flags byte is at
-    /// the TCP header offset + 13; SYN = 0x02, ACK = 0x10.
-    /// </summary>
-    private static TcpSynKind ClassifyTcpSyn(ReadOnlySpan<byte> frame)
-    {
-        if (!IpTcpUdpPacket.TryParse(frame, out var view) || view.Transport != PacketTransport.Tcp) return TcpSynKind.None;
-        var tcpFlagsOffset = 14 + view.IpHeaderLength + 13;
-        if (frame.Length <= tcpFlagsOffset) return TcpSynKind.None;
-        var flags = frame[tcpFlagsOffset];
-        const byte Syn = 0x02;
-        const byte Ack = 0x10;
-        if ((flags & Syn) == 0 || (flags & Ack) != 0) return TcpSynKind.None;
-
-        var etherType = System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(12, 2));
-        var transportLength = etherType == 0x0800
-            ? System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(16, 2)) - view.IpHeaderLength
-            : System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(18, 2)) - (view.IpHeaderLength - 40);
-        return transportLength == view.TransportHeaderLength ? TcpSynKind.Empty : TcpSynKind.WithPayload;
-    }
-
-    private enum TcpSynKind
-    {
-        None,
-        Empty,
-        WithPayload,
     }
 
     /// <summary>
@@ -653,32 +331,11 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     /// An established flow whose relay is <see cref="RelayPhase.Relaying"/> is NOT expired by this
     /// wall-clock sweep (M4): a live connection silent at the packet level (e.g. SSH without
     /// keepalive) must not be force-torn-down. Teardown of a relaying session is instead tied to
-    /// the relay completing/ending (see <see cref="ObserveRelayCompletionAsync"/>), and a truly
+    /// the relay completing/ending (see <see cref="TcpRedirectAcceptor"/>), and a truly
     /// stalled relay is reclaimed by the read/write timeouts in <see cref="TcpProxyRelay"/>.
     /// </summary>
-    public async ValueTask<int> RemoveExpiredAsync(DateTimeOffset now, TimeSpan idleTimeout)
-    {
-        RetiredSession[] expired;
-        lock (_gate)
-        {
-            expired = _sessions.Values
-                .Where(session => session.Association.Phase == RelayPhase.Redirecting && now - session.Association.LastActivityUtc >= idleTimeout)
-                .Select(RetireSessionUnderGate)
-                .ToArray();
-        }
-
-        foreach (var retired in expired)
-        {
-            await ReleaseRetiredSessionAsync(retired).ConfigureAwait(false);
-        }
-
-        // Rides the same sweep tick (no dedicated timer): tombstones whose grace window elapsed are
-        // reclaimed here, after which same-tuple packets fall back to the pre-tombstone behavior.
-        // Tombstones are not included in the return value — it counts expired redirect sessions,
-        // keeping the sweeper's runtime.expired accounting unchanged.
-        _tombstones.RemoveExpired(now);
-        return expired.Length;
-    }
+    public ValueTask<int> RemoveExpiredAsync(DateTimeOffset now, TimeSpan idleTimeout)
+        => _store.RemoveExpiredAsync(now, idleTimeout);
 
     /// <summary>
     /// Whether this coordinator still holds state for the flow: an active session exists (a
@@ -690,469 +347,40 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     /// generation, so the hold naturally lapses.
     /// </summary>
     internal bool HoldsFlow(FlowKey key)
-    {
-        lock (_gate)
-        {
-            if (_sessions.ContainsKey(key)) return true;
-        }
-        return _tombstones.TryHit(key, DateTimeOffset.UtcNow);
-    }
+        => _store.Holds(key) || _store.Tombstones.TryHit(key, DateTimeOffset.UtcNow);
 
     /// <summary>The TIME_WAIT-grace tombstone index; internal for tests to advance the grace window.</summary>
-    internal TcpRedirectTombstoneTable Tombstones => _tombstones;
+    internal TcpRedirectTombstoneTable Tombstones => _store.Tombstones;
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
+        => _store.DisposeAsync();
+}
+
+/// <summary>
+/// The per-flow redirect state: the association (redirect table entry), the local listener, the
+/// self-traffic token, the SOCKS5 server, a linked lifetime cancellation token, and the optional
+/// relay/accept-loop tasks. A top-level internal type (not nested on <see cref="TcpProxyCoordinator"/>)
+/// so the accept/reset/relay modules can reference it without a circular dependency on the
+/// coordinator itself; it lives in this file to keep the module's file count lean.
+/// </summary>
+internal sealed class TcpRedirectSession(TcpRedirectAssociation association, ITcpRedirectListener listener, SelfTrafficRegistry.SelfTrafficToken selfTrafficToken, Socks5Server server, CancellationToken shutdown, long flowGeneration = 0)
+{
+    public TcpRedirectAssociation Association { get; } = association;
+    public ITcpRedirectListener Listener { get; } = listener;
+    public SelfTrafficRegistry.SelfTrafficToken SelfTrafficToken { get; } = selfTrafficToken;
+    public Socks5Server Server { get; } = server;
+    public long FlowGeneration { get; } = flowGeneration;
+    private CancellationTokenSource Lifetime { get; } = CancellationTokenSource.CreateLinkedTokenSource(shutdown);
+    private int _retired;
+    public ITcpRelay? Relay { get; set; }
+    public Task? AcceptLoop { get; set; }
+    public CancellationToken Token => Lifetime.Token;
+    public bool IsRetired => Volatile.Read(ref _retired) != 0;
+
+    public void Retire()
     {
-        Task disposeTask;
-        TaskCompletionSource? start = null;
-        lock (_gate)
-        {
-            if (_disposeTask is not null)
-            {
-                disposeTask = _disposeTask;
-            }
-            else
-            {
-                _disposed = true;
-                start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                disposeTask = _disposeTask = start.Task;
-            }
-        }
-
-        if (start is not null) _ = RunDisposeAsync(start);
-        await disposeTask.ConfigureAwait(false);
+        if (Interlocked.Exchange(ref _retired, 1) == 0) Lifetime.Cancel();
     }
 
-    private async Task RunDisposeAsync(TaskCompletionSource completion)
-    {
-        try
-        {
-            await DisposeCoreAsync().ConfigureAwait(false);
-            completion.TrySetResult();
-        }
-        catch (Exception exception)
-        {
-            completion.TrySetException(exception);
-        }
-    }
-
-    private async Task DisposeCoreAsync()
-    {
-        await _shutdown.CancelAsync().ConfigureAwait(false);
-        Task setupsDrained;
-        lock (_gate) setupsDrained = _setupsDrained.Task;
-        await setupsDrained.ConfigureAwait(false);
-
-        RetiredSession[] sessions;
-        lock (_gate)
-        {
-            sessions = _sessions.Values.Select(RetireSessionUnderGate).ToArray();
-        }
-
-        foreach (var retired in sessions)
-        {
-            await ReleaseRetiredSessionAsync(retired).ConfigureAwait(false);
-            var session = retired.Session;
-            if (session.AcceptLoop is not null)
-            {
-                try { await session.AcceptLoop.ConfigureAwait(false); }
-                catch (OperationCanceledException) when (_shutdown.IsCancellationRequested) { /* cancellation is the expected shutdown path */ }
-                catch (ObjectDisposedException) { /* the listener was already disposed during shutdown */ }
-            }
-        }
-
-        _shutdown.Dispose();
-    }
-
-
-
-    /// <summary>
-    /// Surfaces a relay setup failure to the client as a protocol-correct RST|ACK from the original
-    /// server endpoint instead of leaving its established connection hanging. The reset is crafted
-    /// from the recorded SYN template and the tracked next-expected sequences (degrading to the
-    /// initial sequence numbers when no data was observed), so it stays valid even though the
-    /// redirect-table alias is torn down right after. Degrades to plain teardown when either
-    /// initial sequence number was never observed.
-    /// </summary>
-    private async ValueTask TryInjectClientResetAsync(TcpRedirectSession session)
-    {
-        await TryInjectClientResetAsync(session.Association, session.Token).ConfigureAwait(false);
-    }
-
-    /// <summary>The association-level core of <see cref="TryInjectClientResetAsync(TcpRedirectSession)"/>,
-    /// usable from teardown paths that hold no session (e.g. an injection failure on the data path).</summary>
-    private async ValueTask TryInjectClientResetAsync(TcpRedirectAssociation association, CancellationToken cancellationToken)
-    {
-        if (association.OriginalSynFrameCopy is not { } synTemplate || association.ClientInitialSeq is not uint clientInitialSeq || association.ServerInitialSeq is not uint serverInitialSeq) return;
-        // The tracked advancement covers data the client already sent, so the reset's ack stays in
-        // its window instead of being dropped as out-of-window (RFC 5961) after a slow relay setup.
-        var serverSequenceNext = association.ServerNextSeq ?? serverInitialSeq + 1;
-        var clientSequenceNext = association.ClientNextSeq ?? clientInitialSeq + 1;
-        var reset = TcpResetBuilder.BuildReset(synTemplate, association.OriginalDestination.Address, association.OriginalDestination.Port,
-            association.OriginalKey.Local.Address, association.OriginalKey.Local.Port, serverSequenceNext, clientSequenceNext);
-        if (reset is null) return;
-        try
-        {
-            await _injector.InjectAsync(reset, association.OriginalKey.Origin != FlowOriginKind.Forwarded, association.OriginAdapterHandle, cancellationToken).ConfigureAwait(false);
-            if (_logger.IsEnabled(RuntimeLogLevel.Debug))
-            {
-                _logger.Event(RuntimeLogLevel.Debug, "tcp.redirect.clientReset",
-                    new("tcpAssociation", association.Generation), new("source", association.OriginalKey.Local),
-                    new("destination", association.OriginalKey.Remote), new("outcome", "injected"));
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Shutdown or session teardown cancelled the best-effort reset.
-        }
-        catch (Exception exception)
-        {
-            _logger.Warn($"TCP redirect client reset injection failed ({exception.GetType().Name}).");
-        }
-    }
-
-    /// <summary>
-    /// Releases a flow whose upstream relay could not be established: closes the accepted socket,
-    /// best-effort resets the client-visible connection, then tears the session down.
-    /// </summary>
-    private async ValueTask HandleRelaySetupFailureAsync(TcpRedirectSession session, ITcpAcceptedConnection accepted)
-    {
-        _logger.Warn("TCP redirect relay setup failed; resetting the client connection and releasing the flow alias.");
-        await accepted.DisposeAsync().ConfigureAwait(false);
-        await TryInjectClientResetAsync(session).ConfigureAwait(false);
-        await TearDownSessionAsync(session).ConfigureAwait(false);
-    }
-
-    private async Task RunAcceptLoopAsync(TcpRedirectSession session)
-    {
-        var token = session.Token;
-        while (!token.IsCancellationRequested)
-        {
-            ITcpAcceptedConnection accepted;
-            try
-            {
-                accepted = await session.Listener.AcceptAsync(token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (token.IsCancellationRequested)
-            {
-                return;
-            }
-            catch (ObjectDisposedException)
-            {
-                // The listener was disposed during shutdown.
-                return;
-            }
-            catch (Exception acceptEx)
-            {
-                // L3: a transient accept error is retried after a bounded delay, never a tight
-                // busy-loop. Cancellation and a disposed listener already break out above.
-                _logger.Warn($"TCP redirect accept failed ({acceptEx.GetType().Name}); retrying after a bounded delay.");
-                await BoundedRetryDelayAsync(token).ConfigureAwait(false);
-                continue;
-            }
-
-            try
-            {
-                if (accepted.RemoteEndPoint != session.Association.AcceptedPeerEndpoint)
-                {
-                    _logger.Warn("TCP redirect accepted an unrelated peer; closing it.");
-                    await accepted.DisposeAsync().ConfigureAwait(false);
-                    continue;
-                }
-                var relay = await _relayFactory.EstablishAsync(session.Association.OriginalDestination, accepted, session.Server, token).ConfigureAwait(false);
-                if (!TryAttachRelay(session, relay))
-                {
-                    await relay.DisposeAsync().ConfigureAwait(false);
-                    await accepted.DisposeAsync().ConfigureAwait(false);
-                    return;
-                }
-                LogDebug("tcp.relay.started", session, "established");
-                _ = ObserveRelayCompletionAsync(session, relay, token);
-                await DrainRedundantConnectionsAsync(session, token).ConfigureAwait(false);
-                return;
-            }
-            catch (OperationCanceledException) when (token.IsCancellationRequested)
-            {
-                await accepted.DisposeAsync().ConfigureAwait(false);
-                return;
-            }
-            catch
-            {
-                await HandleRelaySetupFailureAsync(session, accepted).ConfigureAwait(false);
-                return;
-            }
-        }
-    }
-
-    private static async Task DrainRedundantConnectionsAsync(TcpRedirectSession session, CancellationToken token)
-    {
-        // One logical flow owns exactly one relay. A retransmitted SYN can make MSTCP open a second
-        // connection on the same listener; any further accepts are redundant and are closed instead
-        // of starting a second relay. The loop ends when teardown disposes the listener.
-        while (!token.IsCancellationRequested)
-        {
-            ITcpAcceptedConnection extra;
-            try
-            {
-                extra = await session.Listener.AcceptAsync(token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (token.IsCancellationRequested)
-            {
-                return;
-            }
-            catch (ObjectDisposedException)
-            {
-                return;
-            }
-            catch
-            {
-                // L3: a non-cancel, non-disposed accept error must not be a tight busy-loop; back
-                // off for a bounded delay before retrying. The loop still ends when teardown
-                // disposes the listener.
-                await BoundedRetryDelayAsync(token).ConfigureAwait(false);
-                continue;
-            }
-            await extra.DisposeAsync().ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>
-    /// A short bounded back-off between retries of a transient accept error, so a failing accept
-    /// loop cannot spin flat-out (L3).
-    /// </summary>
-    private static readonly TimeSpan BoundedAcceptRetryDelay = TimeSpan.FromMilliseconds(100);
-
-    private static async ValueTask BoundedRetryDelayAsync(CancellationToken token)
-    {
-        try
-        {
-            await Task.Delay(BoundedAcceptRetryDelay, token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (token.IsCancellationRequested)
-        {
-            // Cancellation ends the accept loop.
-        }
-    }
-
-    private async Task ObserveRelayCompletionAsync(TcpRedirectSession session, ITcpRelay relay, CancellationToken token)
-    {
-        try
-        {
-            await relay.Completion.ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (token.IsCancellationRequested)
-        {
-            return;
-        }
-        catch
-        {
-            // A relay that errored or ended removes the flow so a future SYN re-arms setup.
-        }
-        LogDebug("tcp.relay.ended", session, "completed");
-        await TearDownSessionAsync(session).ConfigureAwait(false);
-    }
-
-    private async ValueTask TearDownSessionAsync(TcpRedirectSession session)
-    {
-        RetiredSession? retired;
-        lock (_gate)
-        {
-            retired = TryRetireSessionUnderGate(session);
-        }
-        if (retired is not null) await ReleaseRetiredSessionAsync(retired).ConfigureAwait(false);
-    }
-
-    private RetiredSession? TryRetireSessionUnderGate(TcpRedirectSession session)
-    {
-        if (!_sessions.TryGetValue(session.Association.OriginalKey, out var current) || !ReferenceEquals(current, session)) return null;
-        return RetireSessionUnderGate(session);
-    }
-
-    private RetiredSession RetireSessionUnderGate(TcpRedirectSession session)
-    {
-        _sessions.Remove(session.Association.OriginalKey);
-        session.Association.Phase = RelayPhase.Closing;
-        session.Retire();
-        var relay = session.Relay;
-        session.Relay = null;
-        return new RetiredSession(session, relay);
-    }
-
-    private async ValueTask ReleaseRetiredSessionAsync(RetiredSession retired)
-    {
-        var session = retired.Session;
-        LogDebug("tcp.redirect.closed", session, "closed");
-        try
-        {
-            await ReleaseAssociationAsync(session.Listener, session.Association, session.SelfTrafficToken).ConfigureAwait(false);
-        }
-        catch (Exception exception)
-        {
-            _logger.Warn($"TCP redirect listener disposal failed ({exception.GetType().Name}).");
-        }
-        if (retired.Relay is not null)
-        {
-            try { await retired.Relay.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception exception) { _logger.Warn($"TCP redirect relay disposal failed ({exception.GetType().Name})."); }
-        }
-        session.DisposeLifetime();
-    }
-
-    private bool TryAttachRelay(TcpRedirectSession session, ITcpRelay relay)
-    {
-        lock (_gate)
-        {
-            if (!_sessions.TryGetValue(session.Association.OriginalKey, out var current) || !ReferenceEquals(current, session) || session.IsRetired || session.Association.Phase != RelayPhase.Redirecting || session.Relay is not null) return false;
-            session.Relay = relay;
-            session.Association.Phase = RelayPhase.Relaying;
-            return true;
-        }
-    }
-
-    private async ValueTask FailAssociationAsync(TcpRedirectAssociation association)
-    {
-        TcpRedirectSession? session;
-        lock (_gate) _sessions.TryGetValue(association.OriginalKey, out session);
-        if (session is not null) await TearDownSessionAsync(session).ConfigureAwait(false);
-        else RemoveAssociationFromTable(association);
-    }
-
-    /// <summary>
-    /// Makes a data-path injection failure explicit and observable instead of a silent passive
-    /// teardown: warns with <c>reason=injectionFailure</c> plus the native error, target adapter
-    /// handle, and flow key, then best-effort resets the client-visible connection (when both
-    /// sequence trackers are known) and fails the association through the single tombstone write
-    /// point. The canonical trigger is a forwarded flow's <c>OriginAdapterHandle</c> going stale
-    /// after a Hyper-V vSwitch/adapter rebuild.
-    /// </summary>
-    private async ValueTask HandleInjectionFailureAsync(TcpRedirectAssociation association, nint adapterHandle, bool towardMstcp, Exception exception)
-    {
-        if (_logger.IsEnabled(RuntimeLogLevel.Warn))
-        {
-            _logger.Event(RuntimeLogLevel.Warn, "tcp.redirect.failed",
-                new("reason", "injectionFailure"),
-                new("nativeError", (exception as Win32Exception)?.NativeErrorCode),
-                new("error", exception.GetType().Name),
-                new("adapterHandle", (long)adapterHandle),
-                new("towardMstcp", towardMstcp),
-                new("source", association.OriginalKey.Local),
-                new("destination", association.OriginalKey.Remote));
-        }
-        await TryInjectClientResetAsync(association, CancellationToken.None).ConfigureAwait(false);
-        await FailAssociationAsync(association).ConfigureAwait(false);
-    }
-
-    private void EnterSetup()
-    {
-        lock (_gate)
-        {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_inflightSetups++ == 0) _setupsDrained = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        }
-    }
-
-    private void ExitSetup()
-    {
-        lock (_gate)
-        {
-            if (--_inflightSetups == 0) _setupsDrained.TrySetResult();
-        }
-    }
-
-    private static TaskCompletionSource CompletedSource()
-    {
-        var source = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        source.SetResult();
-        return source;
-    }
-
-    private async ValueTask ReleaseAssociationAsync(ITcpRedirectListener listener, TcpRedirectAssociation association, SelfTrafficRegistry.SelfTrafficToken? selfTrafficToken)
-    {
-        RemoveAssociationFromTable(association);
-        try
-        {
-            try { await listener.DisposeAsync().ConfigureAwait(false); }
-            catch (ObjectDisposedException) { /* the listener may already be disposed during teardown */ }
-        }
-        finally
-        {
-            selfTrafficToken?.Dispose();
-        }
-    }
-
-    /// <summary>
-    /// The TIME_WAIT-grace window a torn-down redirect stays resolvable as a tombstone. 60s covers
-    /// the handshake tail (the client's final ACK) and common FIN retransmissions (RTO backoff
-    /// typically stays under 10s) without parking entries for a full 240s TIME_WAIT.
-    /// </summary>
-    private static readonly TimeSpan TombstoneGracePeriod = TimeSpan.FromSeconds(60);
-
-    /// <summary>
-    /// Removes the association from the redirect table and, when the removal wins, records a
-    /// TIME_WAIT-grace tombstone under both of its lookup keys. Every teardown path — relay
-    /// completion, relay setup failure, fail-closed release, and global dispose — funnels through
-    /// here (via <see cref="ReleaseAssociationAsync"/> or <see cref="FailAssociationAsync"/>), so
-    /// this is the single tombstone write point covering all entries. Within the grace window,
-    /// stragglers of the finished handshake resolve as <see cref="TcpRedirectOutcome.Dropped"/>
-    /// instead of NotRelevant, whose executor fallback would reinject toward the real server —
-    /// a server that never saw the proxied connection and answers the unknown tuple with a
-    /// bounced RST. Tombstones occupy neither the redirect table's claim capacity nor the session
-    /// budget.
-    /// </summary>
-    private void RemoveAssociationFromTable(TcpRedirectAssociation association)
-    {
-        if (!_table.TryRemove(association)) return;
-        _tombstones.TryAdd(association.OriginalKey, association.ReverseSourceEndpoint, association.ReverseDestinationEndpoint, DateTimeOffset.UtcNow + TombstoneGracePeriod);
-    }
-
-    private void LogDebug(string eventName, TcpRedirectSession session, string outcome)
-    {
-        if (!_logger.IsEnabled(RuntimeLogLevel.Debug)) return;
-        var association = session.Association;
-        _logger.Event(RuntimeLogLevel.Debug, eventName,
-            new("flow", session.FlowGeneration == 0 ? null : session.FlowGeneration),
-            new("tcpAssociation", association.Generation), new("source", association.OriginalKey.Local),
-            new("destination", association.OriginalKey.Remote), new("translated", association.TranslatedListenerTuple),
-            new("proxy", session.Server.Name), new("outcome", outcome));
-    }
-
-    private void LogTrace(string eventName, CapturedFlowPacket packet, TcpRedirectAssociation? association, string? reason = null)
-    {
-        if (!_logger.IsEnabled(RuntimeLogLevel.Trace)) return;
-        _logger.Event(RuntimeLogLevel.Trace, eventName,
-            new("packet", packet.PacketSequence == 0 ? null : packet.PacketSequence),
-            new("flow", packet.FlowGeneration == 0 ? null : packet.FlowGeneration),
-            new("tcpAssociation", association?.Generation), new("source", packet.Context.Key.Local),
-            new("destination", packet.Context.Key.Remote), new("reason", reason));
-    }
-
-    /// <summary>
-    /// The resources acquired by a successful new-redirect setup, returned to the caller so it can
-    /// register the session and start the accept loop. A null return means fail-closed blocking.
-    /// </summary>
-    private sealed record RedirectSetup(TcpRedirectAssociation Association, TcpRedirectSession? Session);
-
-    private sealed record RetiredSession(TcpRedirectSession Session, ITcpRelay? Relay);
-
-    private sealed class TcpRedirectSession(TcpRedirectAssociation association, ITcpRedirectListener listener, SelfTrafficRegistry.SelfTrafficToken selfTrafficToken, Socks5Server server, CancellationToken shutdown, long flowGeneration = 0)
-    {
-        public TcpRedirectAssociation Association { get; } = association;
-        public ITcpRedirectListener Listener { get; } = listener;
-        public SelfTrafficRegistry.SelfTrafficToken SelfTrafficToken { get; } = selfTrafficToken;
-        public Socks5Server Server { get; } = server;
-        public long FlowGeneration { get; } = flowGeneration;
-        private CancellationTokenSource Lifetime { get; } = CancellationTokenSource.CreateLinkedTokenSource(shutdown);
-        private int _retired;
-        public ITcpRelay? Relay { get; set; }
-        public Task? AcceptLoop { get; set; }
-        public CancellationToken Token => Lifetime.Token;
-        public bool IsRetired => Volatile.Read(ref _retired) != 0;
-
-        public void Retire()
-        {
-            if (Interlocked.Exchange(ref _retired, 1) == 0) Lifetime.Cancel();
-        }
-
-        public void DisposeLifetime() => Lifetime.Dispose();
-    }
+    public void DisposeLifetime() => Lifetime.Dispose();
 }

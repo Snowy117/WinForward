@@ -15,6 +15,15 @@ namespace WinForward.Runtime;
 public readonly record struct UdpAdapterTarget(nint Handle, byte[] Mac);
 
 /// <summary>
+/// The seam a UDP proxy session calls to deliver a relay response back toward the original
+/// client. The coordinator owns session lifetimes; the sink only rebuilds and injects frames.
+/// </summary>
+public interface IUdpResponseSink
+{
+    ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, byte[]? clientMac, CancellationToken cancellationToken);
+}
+
+/// <summary>
 /// Reinjects SOCKS5 UDP relay responses back toward the original client. A response datagram
 /// arrives from the relay with the real server endpoint as its source; the sink rebuilds a complete
 /// Ethernet II + IPv4/IPv6 + UDP frame with that server as source and the original flow's local
