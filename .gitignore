@@ -18,3 +18,7 @@ evil_winrm_py.log
 
 # Local smoke-test artifacts
 smoke/
+
+# direnv local state (shell.nix itself is tracked)
+.direnv/
+.envrc
