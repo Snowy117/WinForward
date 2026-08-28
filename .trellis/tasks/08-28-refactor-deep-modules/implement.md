@@ -2,9 +2,9 @@
 
 ## 前置（Batch 0：基线）
 
-- [ ] `dotnet build WinForward.slnx` 确认零警告零错误（同时核实 NdisApiDriver.cs 的 LSP 报错为缓存假象）
-- [ ] `dotnet test` 记录基线：通过测试总数、警告数 → 写入本文件末尾"基线记录"
-- [ ] 记录重构前行数 top 榜（已知：1812/1275/1158/789/634/570/564/508/504/493/467/448/436）
+- [x] `dotnet build WinForward.slnx` 确认零警告零错误（同时核实 NdisApiDriver.cs 的 LSP 报错为缓存假象）— 见文末基线记录
+- [x] `dotnet test` 记录基线：通过测试总数、警告数 → 写入本文件末尾"基线记录"
+- [x] 记录重构前行数 top 榜（已知：1812/1275/1158/789/634/570/564/508/504/493/467/448/436）
 
 ## Batch T：测试侧拆分（纯移动，零产品代码变更）
 
@@ -17,7 +17,7 @@
 - [x] T7 拆 `UdpRelayTests.cs` — T1 后 398 行已 ≤400，主题拆分不再必要
 - [x] T8 `TcpEndpointRewriteTests.cs` helper 外移（ChecksumMath/FrameBuilders）— 已在 T1 中完成（467→331 行）
 - [x] T-gate：`dotnet test` 全绿且测试总数 == 基线；`wc -l` 检查 tests/ 无 >400（2026-08-28：Passed 353/353 == 基线；tests/ 最大文件 400 行 = FlowDispatcherExecutorTests）
-- [ ] T-commit：`refactor(tests): split oversized test files, extract shared TestHelpers`
+- [x] T-commit：`refactor(tests): split oversized test files, extract shared TestHelpers`（= ae30c1d）
 
 ## Batch R：Runtime 拆分
 
@@ -26,7 +26,7 @@
 - [x] R3 `TcpProxyCoordinator.cs`（2026-08-28 完成：1158→357 行；除 design §1 的 5 文件外，因"stays 清单合计 ≈790 行 > 400"，追加 3 个自然接缝提取以满足 PRD ≤400 硬约束：`TcpRedirectSessionStore.cs` 303 行——单锁并发核心（sessions/disposed/disposeTask/drain/tombstone 单写点）整体迁出，所有 lock body 逐字保留；`TcpRedirectSetup.cs` 193 行——setup pipeline + RedirectSetup record + ConcurrentLoserCount；`TcpRedirectLogging.cs` 33 行——LogDebug/LogTrace 静态化并去重 acceptor 内副本。`ClientResetInjector` 104 行（吸收 HandleInjectionFailureAsync，ctor 注入 tearDown/failAssociation 回调）；`TcpRedirectAcceptor` 154 行（ctor 注入 relayFactory/logger/clientReset + tryAttachRelay/tearDown 回调）；`TcpFrameRewriter` 91 / `TcpSequenceObservation` 82（static 纯簇）/ `TcpRedirectSession` 33（嵌套类提升）。`ReinjectExistingSynAsync` 别名已删，两调用点直调 `ReinjectExistingFlowDataAsync`。coordinator 保留：入口路由、ReinjectExistingFlowDataAsync、capacity 计数、委托属性（Table/Tombstones/ConcurrentLoserCount/HoldsFlow/RemoveExpiredAsync/DisposeAsync）。`dotnet test` 353/353 == 基线）
 - [x] R3a 收敛（2026-08-28 完成：`TcpRedirectSession` 并回 coordinator——coordinator 246 有效行 / 386 wc-l；`TcpRedirectLogging` **保留独立文件**，rg 复验被 4 文件 16 处调用：TcpProxyCoordinator 6 / TcpRedirectSetup 7 / TcpRedirectAcceptor 2 / TcpRedirectSessionStore 1，并回会造成跨文件反向引用；保留 6 个提取模块 FrameRewriter/SequenceObservation/ClientResetInjector/Acceptor/SessionStore/Setup；后续行数衡量统一用**有效行数（非空非注释）**）
 - [x] R-gate：`dotnet test` 全绿；`wc -l` 检查 src/WinForward.Runtime 无 >400（2026-08-28：353/353；Runtime 最大 362 = UdpProxyCoordinator）
-- [ ] R-commit：`refactor(runtime): split coordinators into focused modules`
+- [x] R-commit：`refactor(runtime): split coordinators into focused modules`（= d56b786）
 
 ## Batch N：NdisApi / Cli / Configuration 拆分（2026-08-28 缩减）
 
@@ -36,15 +36,15 @@
 - [x] N2 ~~`Cli/Program.cs` 拆分~~ — 取消（388 有效行已达标，不拆）
 - [x] N3 ~~`ConfigurationModels.cs` 拆分~~ — 取消（367 有效行已达标，不拆）
 - [x] N-gate：`dotnet build -warnaserror` + `dotnet test` 全绿；全仓有效行数复核无 >400（2026-08-28：0 Warning 0 Error；Passed 353/353 == 基线；全仓 106 个 .cs 文件 0 个超 400 有效行，top = Program.cs 388）
-- [ ] N-commit：`refactor(ndis): remove dead public surface, extract focused types`
+- [x] N-commit：`refactor(ndis): remove dead public surface, extract focused types`（= 068aa14）
 
 ## 收尾（Phase 3）
 
-- [ ] 全仓库 `wc -l` top ≤ 400（src + tests，排除 obj/bin）
-- [ ] 测试总数 ≥ 基线
-- [ ] trellis-check 全量质量检查
-- [ ] 更新 spec（若有可沉淀约定：类-每-文件、TestHelpers 组织方式）
-- [ ] 3.4 commit 收尾
+- [x] 全仓库 `wc -l` top ≤ 400（src + tests，排除 obj/bin）（2026-08-28 check 复验：106 个 .cs 文件 0 个超 400 有效行，top = Program.cs 388）
+- [x] 测试总数 ≥ 基线（2026-08-28 check 复验：353/353 == 基线，构建 0 Warning 0 Error）
+- [x] trellis-check 全量质量检查（2026-08-28 完成：验收标准逐条通过；R2/R3 语义抽查通过（lock body 8/10 逐字 + 2 处记录在案的机械调整）；Batch T 断言集合对比 318 方法不变、差异仅为 helper 重命名与 `!` 标注；自修 2 处 using 排序 + 补勾漏项）
+- [ ] 更新 spec（若有可沉淀约定：类-每-文件、TestHelpers 组织方式）— 未做，留待主会话决定是否沉淀
+- [ ] 3.4 commit 收尾 — 待用户提交（含 check 自修的 2 文件 using 排序修复）
 
 ## 回滚点
 
