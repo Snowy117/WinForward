@@ -21,19 +21,22 @@
 
 ## Batch R：Runtime 拆分
 
-- [ ] R1 `Socks5Client.cs` → `Socks5ControlConnection.cs` + `Socks5UdpTransport.cs`（最机械，先做）
-- [ ] R2 `UdpProxyCoordinator.cs`：`UdpProxySession` 迁出；`IUdpResponseSink` 移到 `UdpResponseReinjector.cs`；三个移除块合并为 `TryRemoveSession` 私有方法
-- [ ] R3 `TcpProxyCoordinator.cs`：提取 `TcpFrameRewriter` / `TcpSequenceObservation`（static 纯簇）→ `ClientResetInjector` → `TcpRedirectAcceptor` → `TcpRedirectSession` 提升；内联删除 `ReinjectExistingSynAsync` 别名
-- [ ] R-gate：`dotnet test` 全绿；`wc -l` 检查 src/WinForward.Runtime 无 >400
+- [x] R1 `Socks5Client.cs` → `Socks5ControlConnection.cs` + `Socks5UdpTransport.cs`（2026-08-28 完成：物理移动零逻辑改动，原 504 行删除；新文件 349 / 161 行）
+- [x] R2 `UdpProxyCoordinator.cs`：`UdpProxySession` 迁出；`IUdpResponseSink` 移到 `UdpResponseReinjector.cs`；三个移除块合并为 `TryRemoveSessionAsync(flow, expected, resolvedSession)` 私有方法（2026-08-28 完成：coordinator 570→362 行、UdpProxySession.cs 201 行、UdpResponseReinjector.cs 214 行；锁内查表+Task 身份校验+association 释放、锁外 dispose 时序不变，faulted-吞异常/CancelExpiry/日志差异留在调用点；`dotnet test` 353/353 == 基线）
+- [x] R3 `TcpProxyCoordinator.cs`（2026-08-28 完成：1158→357 行；除 design §1 的 5 文件外，因"stays 清单合计 ≈790 行 > 400"，追加 3 个自然接缝提取以满足 PRD ≤400 硬约束：`TcpRedirectSessionStore.cs` 303 行——单锁并发核心（sessions/disposed/disposeTask/drain/tombstone 单写点）整体迁出，所有 lock body 逐字保留；`TcpRedirectSetup.cs` 193 行——setup pipeline + RedirectSetup record + ConcurrentLoserCount；`TcpRedirectLogging.cs` 33 行——LogDebug/LogTrace 静态化并去重 acceptor 内副本。`ClientResetInjector` 104 行（吸收 HandleInjectionFailureAsync，ctor 注入 tearDown/failAssociation 回调）；`TcpRedirectAcceptor` 154 行（ctor 注入 relayFactory/logger/clientReset + tryAttachRelay/tearDown 回调）；`TcpFrameRewriter` 91 / `TcpSequenceObservation` 82（static 纯簇）/ `TcpRedirectSession` 33（嵌套类提升）。`ReinjectExistingSynAsync` 别名已删，两调用点直调 `ReinjectExistingFlowDataAsync`。coordinator 保留：入口路由、ReinjectExistingFlowDataAsync、capacity 计数、委托属性（Table/Tombstones/ConcurrentLoserCount/HoldsFlow/RemoveExpiredAsync/DisposeAsync）。`dotnet test` 353/353 == 基线）
+- [x] R3a 收敛（2026-08-28 完成：`TcpRedirectSession` 并回 coordinator——coordinator 246 有效行 / 386 wc-l；`TcpRedirectLogging` **保留独立文件**，rg 复验被 4 文件 16 处调用：TcpProxyCoordinator 6 / TcpRedirectSetup 7 / TcpRedirectAcceptor 2 / TcpRedirectSessionStore 1，并回会造成跨文件反向引用；保留 6 个提取模块 FrameRewriter/SequenceObservation/ClientResetInjector/Acceptor/SessionStore/Setup；后续行数衡量统一用**有效行数（非空非注释）**）
+- [x] R-gate：`dotnet test` 全绿；`wc -l` 检查 src/WinForward.Runtime 无 >400（2026-08-28：353/353；Runtime 最大 362 = UdpProxyCoordinator）
 - [ ] R-commit：`refactor(runtime): split coordinators into focused modules`
 
-## Batch N：NdisApi / Cli / Configuration 拆分
+## Batch N：NdisApi / Cli / Configuration 拆分（2026-08-28 缩减）
 
-- [ ] N1 `NdisApiDriver.cs`：迁出 `NdisAdapter` / `NdisNativeCallStatus` / `NdisNativeCallGate` / `NdisPacketBuffer` 四类型；删除死面（`Version`/`TryReadPacket`/批量 Send*，删除前 rg 复验零调用点）
-- [ ] N2 `Cli/Program.cs` → `Program.cs` + `AdaptersCommand.cs` + `CaptureHost.cs` + `CoordinatorShutdownCaptureLoop.cs`
-- [ ] N3 `ConfigurationModels.cs` → `ConfigurationJson.cs` + `ConfigurationContract.cs` + `PolicyRuleParser.cs` + 瘦身 `ConfigurationLoader` 所在文件
-- [ ] N-gate：`dotnet build -warnaserror` + `dotnet test` 全绿
-- [ ] N-commit：`refactor(ndis/cli/config): split oversized files, remove dead public surface`
+> 有效行数复核（非空非注释）：仅 NdisApiDriver(406) 超标；Program.cs(388) / ConfigurationModels(367) 已达标。用户决定：达标者不拆，保留 composition root 内聚性。
+
+- [x] N1 `NdisApiDriver.cs`（2026-08-28 完成：死面 rg 复验均零外部调用点——`Version` 0 / `TryReadPacket` 0 / 批量 `SendPacketsToMstcp[]`/`SendPacketsToAdapter[]` 0（L237 匹配为 ABI P/Invoke 非方法调用）；删除三组公共死面 + 只服务批量 send 的私有链 `SendPacketsBatch`/`SendPacketsBatchCore`/`SendPacketsRequest`（共 -85 行）；`NdisNativeCallStatus.EnsureDriverVersion`/`InterpretReadResult` 被 `NdisApiAbiTests` 直接调用故保留；`NdisAdapter`(2 有效行)/`NdisNativeCallStatus`(37)/`NdisNativeCallGate`+嵌套 GateLease(46)/`NdisPacketBuffer`(78) 四类型迁出各成文件；残留 driver 174 有效行 / 205 wc-l，保留 Open/adapters/mode/批量读/单包收发/dispose + ReadPacketsBatch/BuildMultiRequest 私有 helper）
+- [x] N2 ~~`Cli/Program.cs` 拆分~~ — 取消（388 有效行已达标，不拆）
+- [x] N3 ~~`ConfigurationModels.cs` 拆分~~ — 取消（367 有效行已达标，不拆）
+- [x] N-gate：`dotnet build -warnaserror` + `dotnet test` 全绿；全仓有效行数复核无 >400（2026-08-28：0 Warning 0 Error；Passed 353/353 == 基线；全仓 106 个 .cs 文件 0 个超 400 有效行，top = Program.cs 388）
+- [ ] N-commit：`refactor(ndis): remove dead public surface, extract focused types`
 
 ## 收尾（Phase 3）
 

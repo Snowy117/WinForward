@@ -32,8 +32,16 @@
 
 ## Acceptance Criteria
 
-- [ ] 仓库内所有 src/ 与 tests/ 下 .cs 文件 `wc -l` ≤ 400 行。
+（2026-08-28 用户澄清："有效行数" = 非空、非注释行；拆分不得严重损害可读性/性能，达标文件不为拆而拆）
+
+- [ ] 仓库内所有 src/ 与 tests/ 下 .cs 文件**有效行数 ≤ 400**（非空非注释；`wc -l` 总行数仅作参考）。
 - [ ] `dotnet build WinForward.slnx` 零警告零错误（TreatWarningsAsErrors 已开启）。
 - [ ] `dotnet test` 全绿，测试数量不少于重构前基线。
 - [ ] 死公共面成员已删除且编译通过。
 - [ ] 错位类型已归位（文件名与主类型一致）。
+
+## Scope adjustments (2026-08-28, user decision)
+
+- 有效行数复核：仅 `NdisApiDriver.cs`(406) 超标；`Program.cs`(388) / `ConfigurationModels.cs`(367) 已达标。
+- Program.cs / ConfigurationModels.cs **不再拆分**（composition root 与配置模型保持内聚；PRD Requirement 5/6 中对应条目作废）。
+- TcpProxyCoordinator 拆分收敛：TcpRedirectLogging / TcpRedirectSession 两个小碎片并回 coordinator；保留 6 个有真实职责的提取模块。
