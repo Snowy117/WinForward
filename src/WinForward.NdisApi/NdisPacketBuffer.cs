@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using WinForward.Core;
 
 namespace WinForward.NdisApi;
 
@@ -9,7 +10,7 @@ namespace WinForward.NdisApi;
 /// returns them to the pool instead of freeing, so <c>using</c>-style callers need no changes
 /// when switching from per-injection allocation to pooling.
 /// </summary>
-public sealed unsafe class NdisPacketBuffer : IDisposable
+public sealed unsafe class NdisPacketBuffer : IFrameSource, IDisposable
 {
     private const int StateRented = 1;
     private const int StateIdle = 2;
@@ -72,6 +73,23 @@ public sealed unsafe class NdisPacketBuffer : IDisposable
         ObjectDisposedException.ThrowIf(_buffer is null, this);
         if (_buffer->Length > NdisApiAbi.MaximumEthernetFrame) throw new InvalidDataException("NDISAPI returned a frame larger than the pinned ABI.");
         return new Span<byte>(_buffer->Buffer, checked((int)_buffer->Length));
+    }
+
+    int IFrameSource.FrameLength => Length;
+
+    ReadOnlySpan<byte> IFrameSource.GetFrameSpan() => GetFrame();
+
+    /// <summary>
+    /// Marks an unmodified captured frame for reinjection in place: only the enumeration adapter
+    /// handle is (re)targeted, so direction, length, flags, and payload stay exactly as captured.
+    /// The reinjection call consumes the frame synchronously; afterwards the buffer returns to its
+    /// owner's control (the capture pump's batch reuse ordering).
+    /// </summary>
+    public void PrepareForReinjection(nint adapterHandle)
+    {
+        ObjectDisposedException.ThrowIf(_buffer is null, this);
+        _buffer->AdapterHandle = adapterHandle;
+        _buffer->UnionPadding = 0;
     }
 
     public void SetFrame(ReadOnlySpan<byte> frame, uint deviceFlags, nint adapterHandle)

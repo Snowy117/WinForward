@@ -24,7 +24,7 @@ public sealed class ProtocolAuditTests
         BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(16, 2), 28);
         frame[23] = 6;
 
-        Assert.False(IpTcpUdpPacket.TryParse(frame, out _));
+        Assert.False(IPTcpUdpPacket.TryParse(frame, out _));
     }
 
     [Theory]
@@ -60,8 +60,8 @@ public sealed class ProtocolAuditTests
         var tcpOriginal = tcp.ToArray();
         var udpOriginal = udp.ToArray();
 
-        Assert.False(IpTcpUdpPacket.TryParse(tcp, out _));
-        Assert.False(IpUdpPacket.TryParse(udp, out _));
+        Assert.False(IPTcpUdpPacket.TryParse(tcp, out _));
+        Assert.False(IPUdpPacket.TryParse(udp, out _));
         Assert.False(PacketChecksums.TryRewriteTcpEndpoints(tcp, s_ipv4Destination, 1, s_ipv4Source, 2));
         Assert.False(PacketChecksums.TryRewriteUdpEndpoints(udp, s_ipv4Destination, 1, s_ipv4Source, 2));
         Assert.Equal(tcpOriginal, tcp);

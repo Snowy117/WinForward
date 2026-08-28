@@ -9,36 +9,36 @@ namespace WinForward.Core.Tests;
 
 public sealed class PacketParsingTests
 {
-    // ---- Packet parser (IpTcpUdpPacket) ----
+    // ---- Packet parser (IPTcpUdpPacket) ----
 
     [Fact]
     public void ParsesIpv4TcpAndUdpAndRejectsNonTcpUdp()
     {
-        Assert.True(IpTcpUdpPacket.TryParse(FrameBuilders.CreateIpv4TcpFrame(), out var tcp));
+        Assert.True(IPTcpUdpPacket.TryParse(FrameBuilders.CreateIpv4TcpFrame(), out var tcp));
         Assert.Equal(PacketTransport.Tcp, tcp.Transport);
         Assert.Equal((ushort)53000, tcp.SourcePort);
         Assert.Equal((ushort)443, tcp.DestinationPort);
         Assert.Equal(IPAddress.Parse("192.0.2.10"), tcp.SourceAddress);
         Assert.Equal(IPAddress.Parse("192.0.2.53"), tcp.DestinationAddress);
 
-        Assert.True(IpTcpUdpPacket.TryParse(FrameBuilders.CreateIpv4UdpFrame(), out var udp));
+        Assert.True(IPTcpUdpPacket.TryParse(FrameBuilders.CreateIpv4UdpFrame(), out var udp));
         Assert.Equal(PacketTransport.Udp, udp.Transport);
         Assert.Equal((ushort)53, udp.DestinationPort);
 
         var icmp = FrameBuilders.CreateIpv4UdpFrame();
         icmp[23] = 1; // ICMP
-        Assert.False(IpTcpUdpPacket.TryParse(icmp, out _));
+        Assert.False(IPTcpUdpPacket.TryParse(icmp, out _));
     }
 
     [Fact]
     public void ParsesIpv6TcpAndUdp()
     {
-        Assert.True(IpTcpUdpPacket.TryParse(FrameBuilders.CreateIpv6TcpFrame(), out var tcp));
+        Assert.True(IPTcpUdpPacket.TryParse(FrameBuilders.CreateIpv6TcpFrame(), out var tcp));
         Assert.Equal(PacketTransport.Tcp, tcp.Transport);
         Assert.Equal(IPAddress.Parse("2001:db8::10"), tcp.SourceAddress);
         Assert.Equal((ushort)443, tcp.DestinationPort);
 
-        Assert.True(IpTcpUdpPacket.TryParse(FrameBuilders.CreateIpv6UdpFrame(), out var udp));
+        Assert.True(IPTcpUdpPacket.TryParse(FrameBuilders.CreateIpv6UdpFrame(), out var udp));
         Assert.Equal(PacketTransport.Udp, udp.Transport);
         Assert.Equal(IPAddress.Parse("2001:db8::53"), udp.DestinationAddress);
     }
@@ -48,9 +48,9 @@ public sealed class PacketParsingTests
     {
         var frame = FrameBuilders.CreateIpv4TcpFrame();
         frame[20] = 0x20; // MF fragment flag
-        Assert.False(IpTcpUdpPacket.TryParse(frame, out _));
+        Assert.False(IPTcpUdpPacket.TryParse(frame, out _));
 
-        Assert.False(IpTcpUdpPacket.TryParse(frame.AsSpan(0, 14 + 12), out _));
+        Assert.False(IPTcpUdpPacket.TryParse(frame.AsSpan(0, 14 + 12), out _));
     }
 
     [Fact]
@@ -59,9 +59,9 @@ public sealed class PacketParsingTests
         var arp = new byte[14 + 28];
         arp[12] = 0x08;
         arp[13] = 0x06; // ARP
-        Assert.False(IpTcpUdpPacket.TryParse(arp, out _));
+        Assert.False(IPTcpUdpPacket.TryParse(arp, out _));
 
-        Assert.False(IpTcpUdpPacket.TryParse(new byte[10], out _));
+        Assert.False(IPTcpUdpPacket.TryParse(new byte[10], out _));
     }
 
     // ---- Flow classifier ----

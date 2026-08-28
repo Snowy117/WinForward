@@ -16,10 +16,10 @@ public sealed class AdapterLocalAddressProviderTests
     {
         var provider = new WindowsAdapterLocalAddressProvider(() =>
         [
-            new IpAdapterUnicastInfo(AdapterGuid,
+            new IPAdapterUnicastInfo(AdapterGuid,
             [
-                new IpAdapterUnicastAddress(IPAddress.Parse("192.168.77.1"), IPAddress.Parse("255.255.255.0")),
-                new IpAdapterUnicastAddress(IPAddress.Parse("192.168.100.1"), IPAddress.Parse("255.255.255.0"))
+                new IPAdapterUnicastAddress(IPAddress.Parse("192.168.77.1"), IPAddress.Parse("255.255.255.0")),
+                new IPAdapterUnicastAddress(IPAddress.Parse("192.168.100.1"), IPAddress.Parse("255.255.255.0"))
             ])
         ]);
 
@@ -34,10 +34,10 @@ public sealed class AdapterLocalAddressProviderTests
     {
         var provider = new WindowsAdapterLocalAddressProvider(() =>
         [
-            new IpAdapterUnicastInfo(AdapterGuid,
+            new IPAdapterUnicastInfo(AdapterGuid,
             [
-                new IpAdapterUnicastAddress(IPAddress.Parse("127.0.0.1"), IPAddress.Parse("255.0.0.0")),
-                new IpAdapterUnicastAddress(IPAddress.Parse("192.168.77.1"), IPAddress.Parse("255.255.255.0"))
+                new IPAdapterUnicastAddress(IPAddress.Parse("127.0.0.1"), IPAddress.Parse("255.0.0.0")),
+                new IPAdapterUnicastAddress(IPAddress.Parse("192.168.77.1"), IPAddress.Parse("255.255.255.0"))
             ])
         ]);
 
@@ -52,9 +52,9 @@ public sealed class AdapterLocalAddressProviderTests
     {
         var provider = new WindowsAdapterLocalAddressProvider(() =>
         [
-            new IpAdapterUnicastInfo("{e14a2a2e-f7e2-4428-942e-6d04d1c6d797}",
+            new IPAdapterUnicastInfo("{e14a2a2e-f7e2-4428-942e-6d04d1c6d797}",
             [
-                new IpAdapterUnicastAddress(IPAddress.Parse("192.168.77.1"), IPAddress.Parse("255.255.255.0"))
+                new IPAdapterUnicastAddress(IPAddress.Parse("192.168.77.1"), IPAddress.Parse("255.255.255.0"))
             ])
         ]);
 
@@ -69,9 +69,9 @@ public sealed class AdapterLocalAddressProviderTests
     {
         var provider = new WindowsAdapterLocalAddressProvider(() =>
         [
-            new IpAdapterUnicastInfo(AdapterGuid,
+            new IPAdapterUnicastInfo(AdapterGuid,
             [
-                new IpAdapterUnicastAddress(IPAddress.Parse("192.168.77.1"), IPAddress.Parse("255.255.255.0"))
+                new IPAdapterUnicastAddress(IPAddress.Parse("192.168.77.1"), IPAddress.Parse("255.255.255.0"))
             ])
         ]);
 
@@ -86,9 +86,9 @@ public sealed class AdapterLocalAddressProviderTests
     {
         var provider = new WindowsAdapterLocalAddressProvider(() =>
         [
-            new IpAdapterUnicastInfo(AdapterGuid,
+            new IPAdapterUnicastInfo(AdapterGuid,
             [
-                new IpAdapterUnicastAddress(IPAddress.Parse("192.168.77.1"), IPAddress.Parse("255.255.255.0"))
+                new IPAdapterUnicastAddress(IPAddress.Parse("192.168.77.1"), IPAddress.Parse("255.255.255.0"))
             ])
         ]);
 
@@ -102,11 +102,11 @@ public sealed class AdapterLocalAddressProviderTests
     {
         var provider = new WindowsAdapterLocalAddressProvider(() =>
         [
-            new IpAdapterUnicastInfo(AdapterGuid,
+            new IPAdapterUnicastInfo(AdapterGuid,
             [
-                new IpAdapterUnicastAddress(IPAddress.Parse("fe80::abcd"), null),
-                new IpAdapterUnicastAddress(IPAddress.Parse("fd00:1234:5678:2::1"), null),
-                new IpAdapterUnicastAddress(IPAddress.Parse("fd00:1234:5678:1::1"), null)
+                new IPAdapterUnicastAddress(IPAddress.Parse("fe80::abcd"), null),
+                new IPAdapterUnicastAddress(IPAddress.Parse("fd00:1234:5678:2::1"), null),
+                new IPAdapterUnicastAddress(IPAddress.Parse("fd00:1234:5678:1::1"), null)
             ])
         ]);
 
@@ -121,10 +121,10 @@ public sealed class AdapterLocalAddressProviderTests
     {
         var provider = new WindowsAdapterLocalAddressProvider(() =>
         [
-            new IpAdapterUnicastInfo(AdapterGuid,
+            new IPAdapterUnicastInfo(AdapterGuid,
             [
-                new IpAdapterUnicastAddress(IPAddress.Parse("192.168.77.1"), IPAddress.Parse("0.0.0.0")),
-                new IpAdapterUnicastAddress(IPAddress.Parse("10.0.0.1"), IPAddress.Parse("255.0.0.0"))
+                new IPAdapterUnicastAddress(IPAddress.Parse("192.168.77.1"), IPAddress.Parse("0.0.0.0")),
+                new IPAdapterUnicastAddress(IPAddress.Parse("10.0.0.1"), IPAddress.Parse("255.0.0.0"))
             ])
         ]);
 

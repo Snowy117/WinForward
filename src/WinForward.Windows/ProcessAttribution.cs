@@ -42,8 +42,8 @@ public sealed partial class WindowsProcessAttributor : IProcessAttributor
     {
         return key.Protocol switch
         {
-            TransportProtocol.Udp => IpHelperTables.FindUdpOwner(key.Local),
-            TransportProtocol.Tcp => IpHelperTables.FindTcpOwner(key.Local, key.Remote),
+            TransportProtocol.Udp => IPHelperTables.FindUdpOwner(key.Local),
+            TransportProtocol.Tcp => IPHelperTables.FindTcpOwner(key.Local, key.Remote),
             _ => null
         };
     }
@@ -169,7 +169,7 @@ public sealed partial class WindowsProcessAttributor : IProcessAttributor
     }
 }
 
-internal static partial class IpHelperTables
+internal static partial class IPHelperTables
 {
     private const int AfInet = 2;
     private const int AfInet6 = 23;
@@ -193,14 +193,14 @@ internal static partial class IpHelperTables
 
     private static unsafe IReadOnlyList<UdpOwner> ReadUdp4()
     {
-        var buffer = ReadTable(AfInet, IpHelperAbi.UdpTableOwnerPid, out var rowCount);
+        var buffer = ReadTable(AfInet, IPHelperAbi.UdpTableOwnerPid, out var rowCount);
         try
         {
             var rows = new UdpOwner[rowCount];
             for (var index = 0; index < rows.Length; index++)
             {
-                var row = ReadRow<IpHelperAbi.MibUdpRowOwnerPid>(buffer, index);
-                rows[index] = new UdpOwner(new IPAddress(row.LocalAddress), IpHelperAbi.DecodeNetworkPort(row.LocalPort), row.ProcessId);
+                var row = ReadRow<IPHelperAbi.MibUdpRowOwnerPid>(buffer, index);
+                rows[index] = new UdpOwner(new IPAddress(row.LocalAddress), IPHelperAbi.DecodeNetworkPort(row.LocalPort), row.ProcessId);
             }
             return rows;
         }
@@ -209,14 +209,14 @@ internal static partial class IpHelperTables
 
     private static unsafe IReadOnlyList<UdpOwner> ReadUdp6()
     {
-        var buffer = ReadTable(AfInet6, IpHelperAbi.UdpTableOwnerPid, out var rowCount);
+        var buffer = ReadTable(AfInet6, IPHelperAbi.UdpTableOwnerPid, out var rowCount);
         try
         {
             var rows = new UdpOwner[rowCount];
             for (var index = 0; index < rows.Length; index++)
             {
-                var row = ReadRow<IpHelperAbi.MibUdp6RowOwnerPid>(buffer, index);
-                rows[index] = new UdpOwner(IpHelperAbi.DecodeIpv6Address(new ReadOnlySpan<byte>(row.LocalAddress, 16), row.ScopeId), IpHelperAbi.DecodeNetworkPort(row.LocalPort), row.ProcessId);
+                var row = ReadRow<IPHelperAbi.MibUdp6RowOwnerPid>(buffer, index);
+                rows[index] = new UdpOwner(IPHelperAbi.DecodeIpv6Address(new ReadOnlySpan<byte>(row.LocalAddress, 16), row.ScopeId), IPHelperAbi.DecodeNetworkPort(row.LocalPort), row.ProcessId);
             }
             return rows;
         }
@@ -231,8 +231,8 @@ internal static partial class IpHelperTables
             var rows = new TcpOwner[rowCount];
             for (var index = 0; index < rows.Length; index++)
             {
-                var row = ReadRow<IpHelperAbi.MibTcpRowOwnerPid>(buffer, index);
-                rows[index] = new TcpOwner(new Endpoint(AddressFamilyKind.IPv4, new IPAddress(row.LocalAddress), IpHelperAbi.DecodeNetworkPort(row.LocalPort)), new Endpoint(AddressFamilyKind.IPv4, new IPAddress(row.RemoteAddress), IpHelperAbi.DecodeNetworkPort(row.RemotePort)), row.ProcessId);
+                var row = ReadRow<IPHelperAbi.MibTcpRowOwnerPid>(buffer, index);
+                rows[index] = new TcpOwner(new Endpoint(AddressFamilyKind.IPv4, new IPAddress(row.LocalAddress), IPHelperAbi.DecodeNetworkPort(row.LocalPort)), new Endpoint(AddressFamilyKind.IPv4, new IPAddress(row.RemoteAddress), IPHelperAbi.DecodeNetworkPort(row.RemotePort)), row.ProcessId);
             }
             return rows;
         }
@@ -247,8 +247,8 @@ internal static partial class IpHelperTables
             var rows = new TcpOwner[rowCount];
             for (var index = 0; index < rows.Length; index++)
             {
-                var row = ReadRow<IpHelperAbi.MibTcp6RowOwnerPid>(buffer, index);
-                rows[index] = new TcpOwner(new Endpoint(AddressFamilyKind.IPv6, IpHelperAbi.DecodeIpv6Address(new ReadOnlySpan<byte>(row.LocalAddress, 16), row.LocalScopeId), IpHelperAbi.DecodeNetworkPort(row.LocalPort)), new Endpoint(AddressFamilyKind.IPv6, IpHelperAbi.DecodeIpv6Address(new ReadOnlySpan<byte>(row.RemoteAddress, 16), row.RemoteScopeId), IpHelperAbi.DecodeNetworkPort(row.RemotePort)), row.ProcessId);
+                var row = ReadRow<IPHelperAbi.MibTcp6RowOwnerPid>(buffer, index);
+                rows[index] = new TcpOwner(new Endpoint(AddressFamilyKind.IPv6, IPHelperAbi.DecodeIpv6Address(new ReadOnlySpan<byte>(row.LocalAddress, 16), row.LocalScopeId), IPHelperAbi.DecodeNetworkPort(row.LocalPort)), new Endpoint(AddressFamilyKind.IPv6, IPHelperAbi.DecodeIpv6Address(new ReadOnlySpan<byte>(row.RemoteAddress, 16), row.RemoteScopeId), IPHelperAbi.DecodeNetworkPort(row.RemotePort)), row.ProcessId);
             }
             return rows;
         }
@@ -258,12 +258,12 @@ internal static partial class IpHelperTables
     private static nint ReadTable(int addressFamily, int tableClass, out int rowCount)
     {
         uint size = 0;
-        var result = tableClass == IpHelperAbi.UdpTableOwnerPid
+        var result = tableClass == IPHelperAbi.UdpTableOwnerPid
             ? Native.GetExtendedUdpTable(nint.Zero, ref size, false, addressFamily, tableClass, 0)
             : Native.GetExtendedTcpTable(nint.Zero, ref size, false, addressFamily, tableClass, 0);
         if (result != ErrorInsufficientBuffer || size < 4) throw new Win32Exception(result);
         var buffer = Marshal.AllocHGlobal(checked((int)size));
-        result = tableClass == IpHelperAbi.UdpTableOwnerPid
+        result = tableClass == IPHelperAbi.UdpTableOwnerPid
             ? Native.GetExtendedUdpTable(buffer, ref size, false, addressFamily, tableClass, 0)
             : Native.GetExtendedTcpTable(buffer, ref size, false, addressFamily, tableClass, 0);
         if (result != 0)
@@ -279,7 +279,7 @@ internal static partial class IpHelperTables
         Unsafe.ReadUnaligned<T>((void*)(buffer + 4 + index * sizeof(T)));
 
     private readonly record struct UdpOwner(IPAddress Address, ushort Port, uint ProcessId);
-    private readonly record struct TcpOwner(Endpoint Local, Endpoint Remote, uint ProcessId);
+    [StructLayout(LayoutKind.Auto)] private readonly record struct TcpOwner(Endpoint Local, Endpoint Remote, uint ProcessId);
 
     private static partial class Native
     {

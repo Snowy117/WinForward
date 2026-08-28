@@ -1,4 +1,5 @@
 using System.Net;
+using System.Runtime.InteropServices;
 using WinForward.Core;
 
 namespace WinForward.Runtime;
@@ -32,7 +33,7 @@ public sealed class SelfTrafficRegistry : ISelfTrafficGuard
         }
     }
 
-    private static bool IsWildcardLocal(IPAddress address) => address.Equals(IPAddress.Any) || address.Equals(IPAddress.IPv6Any);
+    private static bool IsWildcardLocal(IPAddressValue address) => address.IsIPv4Any || address.IsIPv6Any;
 
     private void Remove(SelfTrafficKey key, long generation)
     {
@@ -46,11 +47,13 @@ public sealed class SelfTrafficRegistry : ISelfTrafficGuard
         }
     }
 
+    [StructLayout(LayoutKind.Auto)]
     public readonly record struct SelfTrafficKey(TransportProtocol Protocol, Endpoint Local, Endpoint Remote)
     {
         public static SelfTrafficKey From(FlowContext context) => new(context.Key.Protocol, context.Key.Local, context.Key.Remote);
     }
 
+    [StructLayout(LayoutKind.Auto)]
     private readonly record struct WildcardKey(TransportProtocol Protocol, ushort LocalPort, Endpoint Remote)
     {
         public static WildcardKey From(SelfTrafficKey key) => new(key.Protocol, key.Local.Port, key.Remote);

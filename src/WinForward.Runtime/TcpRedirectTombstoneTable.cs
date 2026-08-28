@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using WinForward.Core;
 
 namespace WinForward.Runtime;
@@ -104,5 +105,6 @@ internal sealed class TcpRedirectTombstoneTable
 
     private sealed record TombstoneEntry(FlowKey Forward, ReverseTuple Reverse, DateTimeOffset ExpiryUtc);
 
+    [StructLayout(LayoutKind.Auto)]
     private readonly record struct ReverseTuple(Endpoint Source, Endpoint Destination);
 }

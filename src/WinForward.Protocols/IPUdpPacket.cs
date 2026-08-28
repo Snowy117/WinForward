@@ -1,11 +1,13 @@
 using System.Buffers.Binary;
-using System.Net;
+using System.Runtime.InteropServices;
+using WinForward.Core;
 
 namespace WinForward.Protocols;
 
-public readonly record struct UdpPacketView(IPAddress SourceAddress, IPAddress DestinationAddress, ushort SourcePort, ushort DestinationPort, ReadOnlyMemory<byte> Payload, int IpHeaderLength);
+[StructLayout(LayoutKind.Auto)]
+public readonly record struct UdpPacketView(IPAddressValue SourceAddress, IPAddressValue DestinationAddress, ushort SourcePort, ushort DestinationPort, ReadOnlyMemory<byte> Payload, int IPHeaderLength);
 
-public static class IpUdpPacket
+public static class IPUdpPacket
 {
     public static bool TryParse(ReadOnlyMemory<byte> frame, out UdpPacketView packet)
     {
@@ -34,8 +36,8 @@ public static class IpUdpPacket
         if (totalLength < headerLength + 8 || bytes.Length < offset + totalLength) return false;
         var fragment = BinaryPrimitives.ReadUInt16BigEndian(bytes.Slice(offset + 6, 2));
         if ((fragment & 0xbfff) != 0) return false;
-        var source = new IPAddress(bytes.Slice(offset + 12, 4));
-        var destination = new IPAddress(bytes.Slice(offset + 16, 4));
+        var source = IPAddressValue.FromIPv4(bytes.Slice(offset + 12, 4));
+        var destination = IPAddressValue.FromIPv4(bytes.Slice(offset + 16, 4));
         return TryParseUdp(frame, offset + headerLength, source, destination, headerLength, totalLength - headerLength, out packet);
     }
 
@@ -62,12 +64,12 @@ public static class IpUdpPacket
             extensionBytes += extensionLength;
         }
         if (nextHeader != 17) return false;
-        var sourceV6 = new IPAddress(bytes.Slice(offset + 8, 16));
-        var destinationV6 = new IPAddress(bytes.Slice(offset + 24, 16));
+        var sourceV6 = IPAddressValue.FromIPv6(bytes.Slice(offset + 8, 16));
+        var destinationV6 = IPAddressValue.FromIPv6(bytes.Slice(offset + 24, 16));
         return TryParseUdp(frame, transportOffset, sourceV6, destinationV6, transportOffset - offset, offset + 40 + payloadLength - transportOffset, out packet);
     }
 
-    private static bool TryParseUdp(ReadOnlyMemory<byte> frame, int offset, IPAddress source, IPAddress destination, int ipHeaderLength, int udpLength, out UdpPacketView packet)
+    private static bool TryParseUdp(ReadOnlyMemory<byte> frame, int offset, IPAddressValue source, IPAddressValue destination, int ipHeaderLength, int udpLength, out UdpPacketView packet)
     {
         packet = default;
         var bytes = frame.Span;

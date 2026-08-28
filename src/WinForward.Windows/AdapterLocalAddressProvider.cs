@@ -8,12 +8,12 @@ namespace WinForward.Windows;
 
 /// <summary>
 /// A hardware-independent projection of one network interface's unicast addresses, mirroring the
-/// <see cref="IpAdapterInfo"/> projection in <see cref="AdapterIdentity.cs"/>. The mask is captured
+/// <see cref="IPAdapterInfo"/> projection in <see cref="AdapterIdentity.cs"/>. The mask is captured
 /// only for IPv4 addresses; IPv6 subnet preference uses /64 prefix equality instead.
 /// </summary>
-public readonly record struct IpAdapterUnicastInfo(string Id, IReadOnlyList<IpAdapterUnicastAddress> Addresses);
+public readonly record struct IPAdapterUnicastInfo(string Id, IReadOnlyList<IPAdapterUnicastAddress> Addresses);
 
-public readonly record struct IpAdapterUnicastAddress(IPAddress Address, IPAddress? Ipv4Mask);
+public readonly record struct IPAdapterUnicastAddress(IPAddress Address, IPAddress? Ipv4Mask);
 
 public interface IAdapterLocalAddressProvider
 {
@@ -36,19 +36,19 @@ public interface IAdapterLocalAddressProvider
 [SupportedOSPlatform("windows")]
 public sealed class WindowsAdapterLocalAddressProvider : IAdapterLocalAddressProvider
 {
-    private readonly Func<IReadOnlyList<IpAdapterUnicastInfo>> _adapters;
+    private readonly Func<IReadOnlyList<IPAdapterUnicastInfo>> _adapters;
 
-    public WindowsAdapterLocalAddressProvider(Func<IReadOnlyList<IpAdapterUnicastInfo>>? adapters = null)
+    public WindowsAdapterLocalAddressProvider(Func<IReadOnlyList<IPAdapterUnicastInfo>>? adapters = null)
     {
         _adapters = adapters ?? GetWindowsAdapterAddresses;
     }
 
-    private static IReadOnlyList<IpAdapterUnicastInfo> GetWindowsAdapterAddresses()
+    private static IReadOnlyList<IPAdapterUnicastInfo> GetWindowsAdapterAddresses()
     {
-        var result = new List<IpAdapterUnicastInfo>();
+        var result = new List<IPAdapterUnicastInfo>();
         foreach (var network in NetworkInterface.GetAllNetworkInterfaces())
         {
-            var addresses = new List<IpAdapterUnicastAddress>();
+            var addresses = new List<IPAdapterUnicastAddress>();
             foreach (var unicast in network.GetIPProperties().UnicastAddresses)
             {
                 IPAddress? mask = null;
@@ -63,9 +63,9 @@ public sealed class WindowsAdapterLocalAddressProvider : IAdapterLocalAddressPro
                         // IPv4Mask is not available on every platform snapshot; treat as unknown.
                     }
                 }
-                addresses.Add(new IpAdapterUnicastAddress(unicast.Address, mask));
+                addresses.Add(new IPAdapterUnicastAddress(unicast.Address, mask));
             }
-            result.Add(new IpAdapterUnicastInfo(network.Id, addresses));
+            result.Add(new IPAdapterUnicastInfo(network.Id, addresses));
         }
         return result;
     }
@@ -106,7 +106,7 @@ public sealed class WindowsAdapterLocalAddressProvider : IAdapterLocalAddressPro
         _ => false,
     };
 
-    private static bool SharesClientSubnet(IpAdapterUnicastAddress candidate, IPAddress clientAddress)
+    private static bool SharesClientSubnet(IPAdapterUnicastAddress candidate, IPAddress clientAddress)
     {
         var address = candidate.Address;
         if (address.AddressFamily != clientAddress.AddressFamily) return false;

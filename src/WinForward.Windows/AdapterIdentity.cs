@@ -12,9 +12,9 @@ public interface IWindowsAdapterInventory
 /// A Windows IP Helper adapter snapshot projected onto the identity fields the
 /// inventory needs to correlate NDISAPI adapters with user-facing names.
 /// </summary>
-public readonly record struct IpAdapterInfo(string Id, string Name, byte[] Mac)
+public readonly record struct IPAdapterInfo(string Id, string Name, byte[] Mac)
 {
-    public static IpAdapterInfo From(NetworkInterface network) =>
+    public static IPAdapterInfo From(NetworkInterface network) =>
         new(network.Id, network.Name, network.GetPhysicalAddress().GetAddressBytes());
 }
 
@@ -22,24 +22,24 @@ public readonly record struct IpAdapterInfo(string Id, string Name, byte[] Mac)
 public sealed class WindowsAdapterInventory : IWindowsAdapterInventory
 {
     private readonly Func<IReadOnlyList<(string InternalName, nint Handle, byte[] Mac, ushort Mtu)>> _ndisAdapters;
-    private readonly Func<IReadOnlyList<IpAdapterInfo>> _ipAdapters;
+    private readonly Func<IReadOnlyList<IPAdapterInfo>> _ipAdapters;
     private long _generation;
 
     public WindowsAdapterInventory(
         Func<IReadOnlyList<(string InternalName, nint Handle, byte[] Mac, ushort Mtu)>> ndisAdapters,
-        Func<IReadOnlyList<IpAdapterInfo>>? ipAdapters = null)
+        Func<IReadOnlyList<IPAdapterInfo>>? ipAdapters = null)
     {
         ArgumentNullException.ThrowIfNull(ndisAdapters);
         _ndisAdapters = ndisAdapters;
         _ipAdapters = ipAdapters ?? GetWindowsIpAdapters;
     }
 
-    private static IReadOnlyList<IpAdapterInfo> GetWindowsIpAdapters()
+    private static IReadOnlyList<IPAdapterInfo> GetWindowsIpAdapters()
     {
-        var result = new List<IpAdapterInfo>();
+        var result = new List<IPAdapterInfo>();
         foreach (var network in NetworkInterface.GetAllNetworkInterfaces())
         {
-            result.Add(IpAdapterInfo.From(network));
+            result.Add(IPAdapterInfo.From(network));
         }
         return result;
     }
@@ -68,9 +68,9 @@ public sealed class WindowsAdapterInventory : IWindowsAdapterInventory
     /// because virtual/hidden adapters can share a MAC (or report none). MAC is
     /// kept as a sanity-check fallback when the internal name is not a GUID.
     /// </summary>
-    private static IpAdapterInfo? MatchAdapter(
+    private static IPAdapterInfo? MatchAdapter(
         (string InternalName, nint Handle, byte[] Mac, ushort Mtu) adapter,
-        IReadOnlyList<IpAdapterInfo> ipAdapters)
+        IReadOnlyList<IPAdapterInfo> ipAdapters)
     {
         if (TryExtractGuid(adapter.InternalName, out var internalGuid))
         {

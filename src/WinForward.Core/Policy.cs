@@ -6,7 +6,7 @@ public sealed record RuleMatcher(
     IReadOnlySet<string>? AdapterNames = null,
     IReadOnlySet<TransportProtocol>? Protocols = null,
     IReadOnlySet<AddressFamilyKind>? AddressFamilies = null,
-    IReadOnlyList<IpPrefix>? RemoteNetworks = null,
+    IReadOnlyList<IPPrefix>? RemoteNetworks = null,
     IReadOnlyList<(ushort Start, ushort End)>? RemotePorts = null)
 {
     public bool IsAdapterQualified => AdapterIds is not null || AdapterNames is not null;
@@ -19,7 +19,7 @@ public sealed record RuleMatcher(
         if (AdapterNames is not null && !AdapterNames.Contains(context.AdapterName ?? string.Empty)) return false;
         if (Protocols is not null && !Protocols.Contains(context.Key.Protocol)) return false;
         if (AddressFamilies is not null && !AddressFamilies.Contains(context.Key.AddressFamily)) return false;
-        if (RemoteNetworks is not null && !RemoteNetworks.Any(network => network.Contains(context.Key.Remote.Address))) return false;
+        if (RemoteNetworks is not null && !RemoteNetworks.Any(network => network.Contains(context.Key.Remote))) return false;
         if (RemotePorts is not null && !RemotePorts.Any(range => context.RemotePort >= range.Start && context.RemotePort <= range.End)) return false;
         return true;
     }

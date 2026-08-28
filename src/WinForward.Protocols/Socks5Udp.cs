@@ -8,6 +8,37 @@ public readonly record struct Socks5UdpDatagram(IPAddress? DestinationAddress, s
 
 public static class Socks5UdpCodec
 {
+    /// <summary>
+    /// Writes an address-typed SOCKS5 UDP datagram header plus payload into
+    /// <paramref name="destination"/> without allocating; the relay send path uses this with a
+    /// reusable buffer. Returns false when the destination is too small.
+    /// </summary>
+    public static bool TryEncode(IPAddressValue destinationAddress, ushort destinationPort, ReadOnlySpan<byte> payload, Span<byte> destination, out int written)
+    {
+        var isIpv4 = destinationAddress.Family == AddressFamilyKind.IPv4;
+        var addressLength = isIpv4 ? 4 : 16;
+        var totalLength = 6 + addressLength + payload.Length;
+        if (destination.Length < totalLength)
+        {
+            written = 0;
+            return false;
+        }
+
+        destination[0] = 0;
+        destination[1] = 0;
+        destination[2] = 0;
+        destination[3] = isIpv4 ? (byte)1 : (byte)4;
+        _ = destinationAddress.TryWrite(destination.Slice(4, addressLength), out _);
+        BinaryPrimitives.WriteUInt16BigEndian(destination.Slice(4 + addressLength, 2), destinationPort);
+        payload.CopyTo(destination.Slice(6 + addressLength));
+        written = totalLength;
+        return true;
+    }
+
+    /// <summary>Framework-address convenience wrapper over the span-writing encode.</summary>
+    public static bool TryEncode(IPAddress destinationAddress, ushort destinationPort, ReadOnlySpan<byte> payload, Span<byte> destination, out int written)
+        => TryEncode(IPAddressValue.From(destinationAddress), destinationPort, payload, destination, out written);
+
     public static byte[] Encode(IPAddress destinationAddress, ushort destinationPort, ReadOnlySpan<byte> payload)
     {
         var addressLength = destinationAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? 4 : 16;

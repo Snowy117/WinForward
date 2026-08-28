@@ -16,8 +16,8 @@ internal static class TcpSequenceObservation
     /// </summary>
     public static void RecordClientSyn(ReadOnlySpan<byte> frame, TcpRedirectAssociation association)
     {
-        if (!IpTcpUdpPacket.TryParse(frame, out var view) || view.Transport != PacketTransport.Tcp) return;
-        var sequenceOffset = 14 + view.IpHeaderLength + 4;
+        if (!IPTcpUdpPacket.TryParse(frame, out var view) || view.Transport != PacketTransport.Tcp) return;
+        var sequenceOffset = 14 + view.IPHeaderLength + 4;
         if (frame.Length < sequenceOffset + 4) return;
         association.ClientInitialSeq = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(frame.Slice(sequenceOffset, 4));
         association.OriginalSynFrameCopy = frame.Slice(0, Math.Min(frame.Length, 128)).ToArray();
@@ -29,10 +29,10 @@ internal static class TcpSequenceObservation
     /// </summary>
     public static void RecordServerSynAck(ReadOnlySpan<byte> frame, TcpRedirectAssociation association)
     {
-        if (!IpTcpUdpPacket.TryParse(frame, out var view) || view.Transport != PacketTransport.Tcp) return;
-        var flagsOffset = 14 + view.IpHeaderLength + 13;
+        if (!IPTcpUdpPacket.TryParse(frame, out var view) || view.Transport != PacketTransport.Tcp) return;
+        var flagsOffset = 14 + view.IPHeaderLength + 13;
         if (frame.Length <= flagsOffset || (frame[flagsOffset] & 0x12) != 0x12) return;
-        var sequenceOffset = 14 + view.IpHeaderLength + 4;
+        var sequenceOffset = 14 + view.IPHeaderLength + 4;
         if (frame.Length < sequenceOffset + 4) return;
         association.ServerInitialSeq = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(frame.Slice(sequenceOffset, 4));
     }
@@ -47,13 +47,13 @@ internal static class TcpSequenceObservation
     public static bool TryReadTcpSequenceAdvance(ReadOnlySpan<byte> frame, out uint sequenceNext)
     {
         sequenceNext = 0;
-        if (!IpTcpUdpPacket.TryParse(frame, out var view) || view.Transport != PacketTransport.Tcp) return false;
+        if (!IPTcpUdpPacket.TryParse(frame, out var view) || view.Transport != PacketTransport.Tcp) return false;
         var etherType = System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(12, 2));
         var transportLength = etherType == 0x0800
-            ? System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(16, 2)) - view.IpHeaderLength
-            : System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(18, 2)) - (view.IpHeaderLength - 40);
+            ? System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(16, 2)) - view.IPHeaderLength
+            : System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(18, 2)) - (view.IPHeaderLength - 40);
         if (transportLength < view.TransportHeaderLength) return false;
-        var tcpOffset = 14 + view.IpHeaderLength;
+        var tcpOffset = 14 + view.IPHeaderLength;
         var sequence = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(frame.Slice(tcpOffset + 4, 4));
         var flags = frame[tcpOffset + 13];
         var advance = (uint)(transportLength - view.TransportHeaderLength);

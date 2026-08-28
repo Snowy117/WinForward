@@ -1,4 +1,5 @@
 using System.Net;
+using System.Runtime.InteropServices;
 using WinForward.Core;
 
 namespace WinForward.Runtime;
@@ -266,5 +267,6 @@ public sealed class TcpRedirectTable
         }
     }
 
+    [StructLayout(LayoutKind.Auto)]
     private readonly record struct ReverseRedirectTuple(Endpoint Source, Endpoint Destination);
 }

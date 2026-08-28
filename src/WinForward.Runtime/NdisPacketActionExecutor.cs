@@ -36,12 +36,25 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
 
     public ValueTask PassAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(packet);
+        if (packet.Lease is null) throw new ArgumentNullException(nameof(packet));
         var metadata = packet.Metadata;
-        using var buffer = _bufferPool.Rent();
-        buffer.SetFrame(packet.Lease.Frame.Span, metadata.DeviceFlags, metadata.AdapterHandle, metadata.Flags);
-        if (metadata.IsOnSend) _reinjector.SendToAdapter(metadata.AdapterHandle, buffer);
-        else _reinjector.SendToMstcp(metadata.AdapterHandle, buffer);
+        if (packet.NativeFrame.Buffer is { } captureBuffer && !packet.Lease.IsMaterialized)
+        {
+            // Unmodified frame still sitting in its capture buffer: reinject it in place (only the
+            // enumeration handle is retargeted; direction, length, flags, and payload stay as
+            // captured). The synchronous send consumes the frame before the pump can reuse the
+            // batch slot, and no managed copy ever happens.
+            captureBuffer.PrepareForReinjection(metadata.AdapterHandle);
+            if (metadata.IsOnSend) _reinjector.SendToAdapter(metadata.AdapterHandle, captureBuffer);
+            else _reinjector.SendToMstcp(metadata.AdapterHandle, captureBuffer);
+        }
+        else
+        {
+            using var buffer = _bufferPool.Rent();
+            buffer.SetFrame(packet.Lease.Frame.Span, metadata.DeviceFlags, metadata.AdapterHandle, metadata.Flags);
+            if (metadata.IsOnSend) _reinjector.SendToAdapter(metadata.AdapterHandle, buffer);
+            else _reinjector.SendToMstcp(metadata.AdapterHandle, buffer);
+        }
         if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("packet.reinjected", packet, new RuntimeLogField("target", metadata.IsOnSend ? "adapter" : "mstcp"));
         return ValueTask.CompletedTask;
     }
@@ -115,7 +128,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     /// </summary>
     private async ValueTask HandleUdpProxyAsync(UdpProxyCoordinator udpProxy, CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
     {
-        if (!IpUdpPacket.TryParse(packet.Lease.Frame, out var udpView))
+        if (!IPUdpPacket.TryParse(packet.Lease.Frame, out var udpView))
         {
             if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("udp.packet.rejected", packet, new RuntimeLogField("reason", "parse"));
             LogProxyUnavailable();

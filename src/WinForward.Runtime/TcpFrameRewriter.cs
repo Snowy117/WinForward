@@ -22,7 +22,7 @@ internal static class TcpFrameRewriter
     {
         if (association.ForwardLocalAddress is { } forwardLocalAddress)
         {
-            return PacketChecksums.TryRewriteTcpEndpoints(frame, originalClient.Address, originalClient.Port, forwardLocalAddress, listenerPort);
+            return PacketChecksums.TryRewriteTcpEndpoints(frame, originalClient.Address, originalClient.Port, IPAddressValue.From(forwardLocalAddress), listenerPort);
         }
         if (!PacketChecksums.TryRewriteTcpEndpoints(frame, originalServer.Address, originalClient.Port, originalClient.Address, listenerPort)) return false;
         SwapEthernetMacs(frame);
@@ -66,8 +66,8 @@ internal static class TcpFrameRewriter
     /// </summary>
     public static TcpSynKind ClassifyTcpSyn(ReadOnlySpan<byte> frame)
     {
-        if (!IpTcpUdpPacket.TryParse(frame, out var view) || view.Transport != PacketTransport.Tcp) return TcpSynKind.None;
-        var tcpFlagsOffset = 14 + view.IpHeaderLength + 13;
+        if (!IPTcpUdpPacket.TryParse(frame, out var view) || view.Transport != PacketTransport.Tcp) return TcpSynKind.None;
+        var tcpFlagsOffset = 14 + view.IPHeaderLength + 13;
         if (frame.Length <= tcpFlagsOffset) return TcpSynKind.None;
         var flags = frame[tcpFlagsOffset];
         const byte Syn = 0x02;
@@ -76,8 +76,8 @@ internal static class TcpFrameRewriter
 
         var etherType = System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(12, 2));
         var transportLength = etherType == 0x0800
-            ? System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(16, 2)) - view.IpHeaderLength
-            : System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(18, 2)) - (view.IpHeaderLength - 40);
+            ? System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(16, 2)) - view.IPHeaderLength
+            : System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(18, 2)) - (view.IPHeaderLength - 40);
         return transportLength == view.TransportHeaderLength ? TcpSynKind.Empty : TcpSynKind.WithPayload;
     }
 }

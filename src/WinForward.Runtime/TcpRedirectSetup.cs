@@ -120,7 +120,7 @@ internal sealed class TcpRedirectSetup
     {
         if (key.Origin != FlowOriginKind.Forwarded) return null;
         return key.OriginAdapterId is { } originAdapterId
-            ? _localAddresses.SelectLocalAddress(originAdapterId, key.AddressFamily, key.Local.Address)
+            ? _localAddresses.SelectLocalAddress(originAdapterId, key.AddressFamily, key.Local.Address.ToIPAddress())
             : null;
     }
 

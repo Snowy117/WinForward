@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Net;
+using WinForward.Core;
 
 namespace WinForward.Protocols;
 
@@ -30,13 +31,25 @@ public static class UdpFrameBuilder
         ReadOnlySpan<byte> destinationMac,
         out byte[] frame,
         int maximumEthernetFrame = DefaultMaximumEthernetFrame)
+        => TryBuild(IPAddressValue.From(sourceAddress), sourcePort, IPAddressValue.From(destinationAddress), destinationPort, payload, sourceMac, destinationMac, out frame, maximumEthernetFrame);
+
+    public static bool TryBuild(
+        IPAddressValue sourceAddress,
+        ushort sourcePort,
+        IPAddressValue destinationAddress,
+        ushort destinationPort,
+        ReadOnlyMemory<byte> payload,
+        ReadOnlySpan<byte> sourceMac,
+        ReadOnlySpan<byte> destinationMac,
+        out byte[] frame,
+        int maximumEthernetFrame = DefaultMaximumEthernetFrame)
     {
         frame = [];
         if (sourceMac.Length != 6 || destinationMac.Length != 6) return false;
         if (maximumEthernetFrame <= 0) return false;
-        if (sourceAddress.AddressFamily != destinationAddress.AddressFamily) return false;
-        var isIpv4 = sourceAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork;
-        var isIpv6 = sourceAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6;
+        if (sourceAddress.Family != destinationAddress.Family) return false;
+        var isIpv4 = sourceAddress.Family == AddressFamilyKind.IPv4;
+        var isIpv6 = sourceAddress.Family == AddressFamilyKind.IPv6;
         if (!isIpv4 && !isIpv6) return false;
 
         if (payload.Length > ushort.MaxValue - 8) return false;
@@ -79,7 +92,7 @@ public static class UdpFrameBuilder
         return true;
     }
 
-    private static void WriteIpv4Header(Span<byte> frame, int ipOffset, IPAddress sourceAddress, IPAddress destinationAddress, int udpLength)
+    private static void WriteIpv4Header(Span<byte> frame, int ipOffset, IPAddressValue sourceAddress, IPAddressValue destinationAddress, int udpLength)
     {
         frame[ipOffset] = 0x45; // version 4, IHL 5 (no options)
         frame[ipOffset + 1] = 0; // DSCP/ECN
@@ -91,12 +104,12 @@ public static class UdpFrameBuilder
         // Header checksum is computed after the address fields are written.
         frame[ipOffset + 10] = 0;
         frame[ipOffset + 11] = 0;
-        sourceAddress.TryWriteBytes(frame.Slice(ipOffset + 12, 4), out _);
-        destinationAddress.TryWriteBytes(frame.Slice(ipOffset + 16, 4), out _);
+        sourceAddress.TryWrite(frame.Slice(ipOffset + 12, 4), out _);
+        destinationAddress.TryWrite(frame.Slice(ipOffset + 16, 4), out _);
         BinaryPrimitives.WriteUInt16BigEndian(frame.Slice(ipOffset + 10, 2), PacketChecksums.InternetChecksum(frame.Slice(ipOffset, 20)));
     }
 
-    private static void WriteIpv6Header(Span<byte> frame, int ipOffset, IPAddress sourceAddress, IPAddress destinationAddress, int udpLength)
+    private static void WriteIpv6Header(Span<byte> frame, int ipOffset, IPAddressValue sourceAddress, IPAddressValue destinationAddress, int udpLength)
     {
         frame[ipOffset] = 0x60; // version 6, traffic class 0
         frame[ipOffset + 1] = 0;
@@ -105,8 +118,8 @@ public static class UdpFrameBuilder
         BinaryPrimitives.WriteUInt16BigEndian(frame.Slice(ipOffset + 4, 2), checked((ushort)udpLength));
         frame[ipOffset + 6] = 17; // next header: UDP
         frame[ipOffset + 7] = 64; // hop limit
-        sourceAddress.TryWriteBytes(frame.Slice(ipOffset + 8, 16), out _);
-        destinationAddress.TryWriteBytes(frame.Slice(ipOffset + 24, 16), out _);
+        sourceAddress.TryWrite(frame.Slice(ipOffset + 8, 16), out _);
+        destinationAddress.TryWrite(frame.Slice(ipOffset + 24, 16), out _);
     }
 
     private static void WriteUdpHeader(Span<byte> frame, int udpOffset, ushort sourcePort, ushort destinationPort, int udpLength, ReadOnlySpan<byte> payload)

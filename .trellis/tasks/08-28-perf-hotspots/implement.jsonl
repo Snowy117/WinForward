@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/08-28-perf-hotspots/prd.md", "reason": "Requirements, baseline numbers, acceptance criteria (R1-R6)"}
+{"file": ".trellis/tasks/08-28-perf-hotspots/design.md", "reason": "Changes A/B/C: raw-address Endpoint, struct packet types, zero-copy pass, native lease lifetime contract"}
+{"file": ".trellis/tasks/08-28-perf-hotspots/bench-baseline-linux.json", "reason": "Full before benchmark data for comparison gates"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "File layout and split discipline when editing src/ modules"}
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "NDISAPI adapter-handle contract: reinjection must carry enumeration handle; MAC-cloning pitfall"}

@@ -42,7 +42,7 @@ public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic) : ITcp
         try
         {
             var destinationAddress = originalDestination.Address;
-            await control.ConnectDestinationAsync(new IPEndPoint(destinationAddress, originalDestination.Port), cancellationToken).ConfigureAwait(false);
+            await control.ConnectDestinationAsync(new IPEndPoint(destinationAddress.ToIPAddress(), originalDestination.Port), cancellationToken).ConfigureAwait(false);
 
             var upstream = control.GetUpstreamStream();
             return new TcpProxyRelay(concrete.Socket, upstream, control);

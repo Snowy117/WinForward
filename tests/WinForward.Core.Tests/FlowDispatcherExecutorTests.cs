@@ -282,7 +282,7 @@ public sealed class FlowDispatcherExecutorTests
 
     [Fact]
     [SupportedOSPlatform("windows")]
-    public async Task ProcessorCopiesFrameBytesThroughPooledLease()
+    public async Task ProcessorPassesCapturedFrameBytesThroughInPlace()
     {
         var reinjector = new FakeReinjector();
         var dispatcher = new FlowDispatcher(CreateConfig(new RuleMatcher(), FlowAction.Pass), new FakeGuard(), new NdisPacketActionExecutor(reinjector));
@@ -296,11 +296,53 @@ public sealed class FlowDispatcherExecutorTests
             adapter,
             CancellationToken.None);
 
-        // The pooled lease exposes exactly the captured frame: byte-identical content and no
-        // trailing pool slack beyond the actual frame length.
+        // The pass reinjects the capture buffer itself: exact frame bytes, and no materialized
+        // managed copy was ever needed.
         Assert.NotNull(reinjector.LastFrame);
         Assert.Equal(frame.Length, reinjector.LastFrame!.Length);
         Assert.Equal(frame, reinjector.LastFrame);
+        Assert.Same(buffer, reinjector.LastBuffer);
+        Assert.Equal(frame, buffer.GetFrame().ToArray());
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public async Task ExecutorPassUsesCaptureBufferInPlaceAndSkipsPoolWhenUnmaterialized()
+    {
+        var reinjector = new FakeReinjector();
+        var executor = new NdisPacketActionExecutor(reinjector);
+        using var buffer = new NdisPacketBuffer();
+        var frame = FrameBuilders.CreateIpv4UdpFrame();
+        buffer.SetFrame(frame, NdisApiAbi.PacketFlagOnReceive, (nint)9, flags: 0x21);
+        var lease = new PacketLease(buffer);
+        var packet = new CapturedFlowPacket(lease, FlowContext(FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 1), Endpoint.From(IPAddress.Parse("192.0.2.53"), 2), TransportProtocol.Udp, FlowOriginKind.Host)), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, 9, 0x21), NativeFrame: new NativeFrameHandle(buffer));
+
+        await executor.PassAsync(packet, CancellationToken.None);
+
+        Assert.Same(buffer, reinjector.LastBuffer);
+        Assert.Equal(1, reinjector.ToMstcpCount);
+        Assert.Equal((nint)9, reinjector.LastAdapterHandle);
+        Assert.False(lease.IsMaterialized, "The in-place pass must not materialize a managed copy.");
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public async Task ExecutorPassFallsBackToPooledCopyWhenLeaseWasMaterialized()
+    {
+        var reinjector = new FakeReinjector();
+        var executor = new NdisPacketActionExecutor(reinjector);
+        using var buffer = new NdisPacketBuffer();
+        var frame = FrameBuilders.CreateIpv4UdpFrame();
+        buffer.SetFrame(frame, NdisApiAbi.PacketFlagOnReceive, (nint)9);
+        var lease = new PacketLease(buffer);
+        _ = lease.Frame.Length; // Materialize before the pass, as a proxy/rewrite consumer would.
+        var packet = new CapturedFlowPacket(lease, FlowContext(FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 1), Endpoint.From(IPAddress.Parse("192.0.2.53"), 2), TransportProtocol.Udp, FlowOriginKind.Host)), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, 9), NativeFrame: new NativeFrameHandle(buffer));
+
+        await executor.PassAsync(packet, CancellationToken.None);
+
+        Assert.NotSame(buffer, reinjector.LastBuffer);
+        Assert.Equal(frame, reinjector.LastFrame);
+        lease.Release();
     }
 
     [Fact]

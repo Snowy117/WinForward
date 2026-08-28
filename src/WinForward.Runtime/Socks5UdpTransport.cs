@@ -112,9 +112,18 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
 
     public async ValueTask SendAsync(IPEndPoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
-        var framed = Socks5UdpCodec.Encode(destination.Address, (ushort)destination.Port, payload.Span);
-        _ = await _socket.SendToAsync(framed, SocketFlags.None, RelayEndpoint, cancellationToken).ConfigureAwait(false);
+        // The header buffer covers the worst SOCKS5 UDP overhead (6 + 16-byte IPv6) plus an
+        // Ethernet-sized payload; the encode writes into it and the socket send reads only the
+        // written slice, so a datagram send allocates nothing.
+        if (!Socks5UdpCodec.TryEncode(IPAddressValue.From(destination.Address), (ushort)destination.Port, payload.Span, _sendBuffer, out var written))
+        {
+            throw new IOException("A SOCKS5 UDP datagram exceeded the relay send buffer.");
+        }
+
+        _ = await _socket.SendToAsync(_sendBuffer.AsMemory(0, written), SocketFlags.None, RelayEndpoint, cancellationToken).ConfigureAwait(false);
     }
+
+    private readonly byte[] _sendBuffer = new byte[6 + 16 + UdpFrameBuilder.MaximumEthernetFrame];
 
     public async ValueTask<Socks5UdpDatagram> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
     {

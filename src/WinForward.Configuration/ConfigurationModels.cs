@@ -345,14 +345,14 @@ public static class ConfigurationLoader
 
     private static IReadOnlySet<string>? NormalizeSet(string?[]? values) => values is null ? null : values.Select(static value => value!.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-    private static IReadOnlyList<IpPrefix>? ParseNetworks(string?[]? values, string path, List<ConfigDiagnostic> errors)
+    private static IReadOnlyList<IPPrefix>? ParseNetworks(string?[]? values, string path, List<ConfigDiagnostic> errors)
     {
         if (values is null) return null;
-        var result = new List<IpPrefix>();
+        var result = new List<IPPrefix>();
         foreach (var value in values)
         {
             if (string.IsNullOrWhiteSpace(value)) continue;
-            if (!IpPrefix.TryParse(value, out var prefix)) errors.Add(new(path, $"Invalid CIDR '{value}'.")); else result.Add(prefix);
+            if (!IPPrefix.TryParse(value, out var prefix)) errors.Add(new(path, $"Invalid CIDR '{value}'.")); else result.Add(prefix);
         }
         return result;
     }

@@ -3,4 +3,7 @@
     <AssemblyName>WinForward.NdisApi</AssemblyName>
     <RootNamespace>WinForward.NdisApi</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../WinForward.Core/WinForward.Core.csproj" />
+  </ItemGroup>
 </Project>

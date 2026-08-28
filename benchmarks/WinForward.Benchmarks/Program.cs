@@ -76,7 +76,7 @@ internal static class Program
                 long value = 0;
                 for (var index = 0; index < iterations; index++)
                 {
-                    if (!IpTcpUdpPacket.TryParse(frame, out var packet)) throw new InvalidOperationException("Parser rejected the benchmark frame.");
+                    if (!IPTcpUdpPacket.TryParse(frame, out var packet)) throw new InvalidOperationException("Parser rejected the benchmark frame.");
                     value += packet.SourcePort + packet.DestinationPort;
                 }
                 Volatile.Write(ref s_sink, value);
@@ -92,7 +92,7 @@ internal static class Program
                 long value = 0;
                 for (var index = 0; index < iterations; index++)
                 {
-                    if (!IpUdpPacket.TryParse(frame, out var packet)) throw new InvalidOperationException("UDP parser rejected the benchmark frame.");
+                    if (!IPUdpPacket.TryParse(frame, out var packet)) throw new InvalidOperationException("UDP parser rejected the benchmark frame.");
                     value += packet.Payload.Length;
                 }
                 Volatile.Write(ref s_sink, value);
@@ -126,6 +126,24 @@ internal static class Program
                 for (var index = 0; index < iterations; index++)
                 {
                     value += Socks5UdpCodec.Encode(destination, 53, payload).Length;
+                }
+                Volatile.Write(ref s_sink, value);
+                return ValueTask.FromResult((long)(payloadLength + 10) * iterations);
+            }).ConfigureAwait(false);
+
+        await context.RunAsync(
+            "socks5Udp.encodeSpan",
+            new Dictionary<string, object?>(StringComparer.Ordinal) { ["payloadBytes"] = payloadLength },
+            Math.Min(context.Options.Count, 100_000),
+            iterations =>
+            {
+                long value = 0;
+                var payload = frame.AsSpan(frame.Length - payloadLength);
+                var reusable = new byte[22 + 65535];
+                for (var index = 0; index < iterations; index++)
+                {
+                    if (!Socks5UdpCodec.TryEncode(IPAddressValue.From(destination), 53, payload, reusable, out var written)) throw new InvalidOperationException("SOCKS5 UDP span encoder rejected the benchmark payload.");
+                    value += written;
                 }
                 Volatile.Write(ref s_sink, value);
                 return ValueTask.FromResult((long)(payloadLength + 10) * iterations);

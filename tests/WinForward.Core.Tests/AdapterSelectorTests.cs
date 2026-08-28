@@ -46,7 +46,7 @@ public sealed class AdapterSelectorTests
         const string Guid = "{DD8CD9A1-1111-2222-3333-444455556666}";
         var inventory = new WindowsAdapterInventory(
             () => [("\\DEVICE\\" + Guid, (nint)1, new byte[] { 1, 2, 3, 4, 5, 6 }, (ushort)1500)],
-            () => [new IpAdapterInfo(Guid, "Ethernet", new byte[] { 0, 0, 0, 0, 0, 0 })]);
+            () => [new IPAdapterInfo(Guid, "Ethernet", new byte[] { 0, 0, 0, 0, 0, 0 })]);
 
         var adapter = Assert.Single(inventory.GetCurrentAdapters());
 
@@ -59,14 +59,14 @@ public sealed class AdapterSelectorTests
     public void AdapterInventoryGuidCorrelationIsCaseInsensitiveAndBraceInsensitive()
     {
         const string InternalGuid = "\u007Bdd8cd9a1-1111-2222-3333-444455556666\u007D";
-        const string IpHelperId = "DD8CD9A1-1111-2222-3333-444455556666";
+        const string IPHelperId = "DD8CD9A1-1111-2222-3333-444455556666";
         var inventory = new WindowsAdapterInventory(
             () => [(InternalGuid, (nint)1, new byte[] { 1, 2, 3, 4, 5, 6 }, (ushort)1500)],
-            () => [new IpAdapterInfo(IpHelperId, "Ethernet", new byte[] { 0, 0, 0, 0, 0, 0 })]);
+            () => [new IPAdapterInfo(IPHelperId, "Ethernet", new byte[] { 0, 0, 0, 0, 0, 0 })]);
 
         var adapter = Assert.Single(inventory.GetCurrentAdapters());
 
-        Assert.Equal(IpHelperId, adapter.StableId);
+        Assert.Equal(IPHelperId, adapter.StableId);
         Assert.Equal("Ethernet", adapter.FriendlyName);
     }
 
@@ -77,7 +77,7 @@ public sealed class AdapterSelectorTests
         var mac = new byte[] { 1, 2, 3, 4, 5, 6 };
         var inventory = new WindowsAdapterInventory(
             () => [("Ethernet", (nint)1, mac, (ushort)1500)],
-            () => [new IpAdapterInfo("some-id", "vEthernet (Default)", mac)]);
+            () => [new IPAdapterInfo("some-id", "vEthernet (Default)", mac)]);
 
         var adapter = Assert.Single(inventory.GetCurrentAdapters());
 
@@ -91,7 +91,7 @@ public sealed class AdapterSelectorTests
     {
         var inventory = new WindowsAdapterInventory(
             () => [("not-a-guid", (nint)1, new byte[] { 0, 0, 0, 0, 0, 0 }, (ushort)1500)],
-            () => [new IpAdapterInfo("other-id", "Other", new byte[] { 0, 0, 0, 0, 0, 0 })]);
+            () => [new IPAdapterInfo("other-id", "Other", new byte[] { 0, 0, 0, 0, 0, 0 })]);
 
         var adapter = Assert.Single(inventory.GetCurrentAdapters());
 
@@ -108,8 +108,8 @@ public sealed class AdapterSelectorTests
             () => [("not-a-guid", (nint)1, mac, (ushort)1500)],
             () =>
             [
-                new IpAdapterInfo("first", "First", mac),
-                new IpAdapterInfo("second", "Second", mac)
+                new IPAdapterInfo("first", "First", mac),
+                new IPAdapterInfo("second", "Second", mac)
             ]);
 
         var adapter = Assert.Single(inventory.GetCurrentAdapters());
@@ -128,8 +128,8 @@ public sealed class AdapterSelectorTests
             () => [("\\DEVICE\\" + Guid, (nint)1, mac, (ushort)1500)],
             () =>
             [
-                new IpAdapterInfo(Guid, "Ethernet", mac),
-                new IpAdapterInfo("other-id", "Other", mac)
+                new IPAdapterInfo(Guid, "Ethernet", mac),
+                new IPAdapterInfo("other-id", "Other", mac)
             ]);
 
         var adapter = Assert.Single(inventory.GetCurrentAdapters());
@@ -148,9 +148,9 @@ public sealed class AdapterSelectorTests
             () => [("\\DEVICE\\" + Guid, (nint)1, mac, (ushort)1500)],
             () =>
             [
-                new IpAdapterInfo(Guid, "First", new byte[] { 6, 5, 4, 3, 2, 1 }),
-                new IpAdapterInfo(Guid, "Second", new byte[] { 9, 8, 7, 6, 5, 4 }),
-                new IpAdapterInfo("mac-match", "Fallback", mac)
+                new IPAdapterInfo(Guid, "First", new byte[] { 6, 5, 4, 3, 2, 1 }),
+                new IPAdapterInfo(Guid, "Second", new byte[] { 9, 8, 7, 6, 5, 4 }),
+                new IPAdapterInfo("mac-match", "Fallback", mac)
             ]);
 
         var adapter = Assert.Single(inventory.GetCurrentAdapters());
@@ -166,7 +166,7 @@ public sealed class AdapterSelectorTests
         const string Guid = "7C1A2B3C-4D5E-4F60-8A9B-0C1D2E3F4A5B";
         var inventory = new WindowsAdapterInventory(
             () => [(Guid, (nint)1, new byte[] { 1, 2, 3, 4, 5, 6 }, (ushort)1500)],
-            () => [new IpAdapterInfo(Guid, "Ethernet 8", new byte[] { 0, 0, 0, 0, 0, 0 })]);
+            () => [new IPAdapterInfo(Guid, "Ethernet 8", new byte[] { 0, 0, 0, 0, 0, 0 })]);
 
         var adapter = Assert.Single(inventory.GetCurrentAdapters());
 
@@ -180,7 +180,7 @@ public sealed class AdapterSelectorTests
     {
         var inventory = new WindowsAdapterInventory(
             () => [("not-a-guid-and-no-mac", (nint)1, new byte[] { 1, 2, 3, 4, 5, 6 }, (ushort)1500)],
-            () => [new IpAdapterInfo("other-id", "Other", new byte[] { 9, 9, 9, 9, 9, 9 })]);
+            () => [new IPAdapterInfo("other-id", "Other", new byte[] { 9, 9, 9, 9, 9, 9 })]);
 
         var adapter = Assert.Single(inventory.GetCurrentAdapters());
 

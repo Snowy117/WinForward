@@ -94,7 +94,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
 
     public async ValueTask<TcpRedirectOutcome> HandleSynAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(packet);
+        if (packet.Lease is null) throw new ArgumentNullException(nameof(packet));
         ArgumentNullException.ThrowIfNull(server);
         _store.EnterSetup();
         try
@@ -186,7 +186,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
 
     public async ValueTask<TcpRedirectOutcome> HandleReverseAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(packet);
+        if (packet.Lease is null) throw new ArgumentNullException(nameof(packet));
         ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
 
         var key = packet.Context.Key;
@@ -255,7 +255,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     /// </summary>
     public async ValueTask<TcpRedirectOutcome> HandleReverseIfApplicableAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(packet);
+        if (packet.Lease is null) throw new ArgumentNullException(nameof(packet));
         ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
 
         // H1/M5 gate before the numeric-port lookup: this handler owns TCP reverse routing. A UDP
@@ -284,7 +284,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     /// </summary>
     public async ValueTask<TcpRedirectOutcome> HandlePacketAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(packet);
+        if (packet.Lease is null) throw new ArgumentNullException(nameof(packet));
         ArgumentNullException.ThrowIfNull(server);
         ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
 

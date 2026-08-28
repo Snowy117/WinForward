@@ -27,14 +27,14 @@ public sealed class UdpRelayTests
         var payload = new byte[] { 0xde, 0xad, 0xbe, 0xef };
 
         Assert.True(UdpFrameBuilder.TryBuild(source, 53, destination, 53000, payload, s_macA, s_macB, out var frame));
-        Assert.True(IpUdpPacket.TryParse(frame, out var udp));
+        Assert.True(IPUdpPacket.TryParse(frame, out var udp));
 
         Assert.Equal(source, udp.SourceAddress);
         Assert.Equal(destination, udp.DestinationAddress);
         Assert.Equal((ushort)53, udp.SourcePort);
         Assert.Equal((ushort)53000, udp.DestinationPort);
         Assert.Equal(payload, udp.Payload.ToArray());
-        Assert.Equal(20, udp.IpHeaderLength);
+        Assert.Equal(20, udp.IPHeaderLength);
     }
 
     [Fact]
@@ -99,14 +99,14 @@ public sealed class UdpRelayTests
         var payload = new byte[] { 0x01, 0x02, 0x03, 0x04, 0x05 };
 
         Assert.True(UdpFrameBuilder.TryBuild(source, 53, destination, 53000, payload, s_macA, s_macB, out var frame));
-        Assert.True(IpUdpPacket.TryParse(frame, out var udp));
+        Assert.True(IPUdpPacket.TryParse(frame, out var udp));
 
         Assert.Equal(source, udp.SourceAddress);
         Assert.Equal(destination, udp.DestinationAddress);
         Assert.Equal((ushort)53, udp.SourcePort);
         Assert.Equal((ushort)53000, udp.DestinationPort);
         Assert.Equal(payload, udp.Payload.ToArray());
-        Assert.Equal(40, udp.IpHeaderLength);
+        Assert.Equal(40, udp.IPHeaderLength);
 
         var udpLength = 8 + payload.Length;
         var sum = Sum(source.GetAddressBytes()) + Sum(destination.GetAddressBytes()) + 17u + (uint)udpLength + Sum(frame.AsSpan(54, udpLength));
@@ -185,7 +185,7 @@ public sealed class UdpRelayTests
 
         Assert.Equal(1, reinjector.ToMstcpCount);
         Assert.Equal(0, reinjector.ToAdapterCount);
-        Assert.True(IpUdpPacket.TryParse(reinjector.LastFrame!, out var udp));
+        Assert.True(IPUdpPacket.TryParse(reinjector.LastFrame!, out var udp));
         Assert.Equal(server.Address, udp.SourceAddress);
         Assert.Equal(server.Port, udp.SourcePort);
         Assert.Equal(client.Address, udp.DestinationAddress);
@@ -275,7 +275,7 @@ public sealed class UdpRelayTests
         // the host stack and the VM would never receive it (R2).
         Assert.True(reinjector.LastFrame!.AsSpan(0, 6).SequenceEqual(s_macC));
         Assert.True(reinjector.LastFrame!.AsSpan(6, 6).SequenceEqual(s_macB));
-        Assert.True(IpUdpPacket.TryParse(reinjector.LastFrame!, out var udp));
+        Assert.True(IPUdpPacket.TryParse(reinjector.LastFrame!, out var udp));
         Assert.Equal(server.Address, udp.SourceAddress);
         Assert.Equal(client.Address, udp.DestinationAddress);
     }

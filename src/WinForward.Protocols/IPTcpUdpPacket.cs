@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
-using System.Net;
+using System.Runtime.InteropServices;
+using WinForward.Core;
 
 namespace WinForward.Protocols;
 
@@ -15,19 +16,20 @@ public enum PacketTransport : byte
 /// destination endpoints are exposed for flow-key construction. IP fragments and unsupported
 /// IPv6 extension-header chains are rejected because they cannot be classified safely.
 /// </summary>
+[StructLayout(LayoutKind.Auto)]
 public readonly record struct PacketView(
     PacketTransport Transport,
-    IPAddress SourceAddress,
-    IPAddress DestinationAddress,
+    IPAddressValue SourceAddress,
+    IPAddressValue DestinationAddress,
     ushort SourcePort,
     ushort DestinationPort,
-    int IpHeaderLength,
+    int IPHeaderLength,
     int TransportHeaderLength)
 {
     public ushort RemotePort => DestinationPort;
 }
 
-public static class IpTcpUdpPacket
+public static class IPTcpUdpPacket
 {
     private const ushort EtherTypeIpv4 = 0x0800;
     private const ushort EtherTypeIpv6 = 0x86dd;
@@ -38,7 +40,8 @@ public static class IpTcpUdpPacket
     /// <summary>
     /// Parses a captured Ethernet frame into a flow-classifiable TCP/UDP view. Returns false for
     /// non-Ethernet-II frames, non-IP frames, fragmented IP traffic, malformed or truncated headers,
-    /// and unsupported IPv6 extension-header chains. No allocation occurs on the parse path.
+    /// and unsupported IPv6 extension-header chains. Addresses are captured as fixed-size values:
+    /// the parse path performs no heap allocation.
     /// </summary>
     public static bool TryParse(ReadOnlySpan<byte> frame, out PacketView view)
     {
@@ -67,8 +70,8 @@ public static class IpTcpUdpPacket
         var fragment = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(ipOffset + 6, 2));
         if ((fragment & 0xbfff) != 0) return false;
 
-        var source = new IPAddress(frame.Slice(ipOffset + 12, 4));
-        var destination = new IPAddress(frame.Slice(ipOffset + 16, 4));
+        var source = IPAddressValue.FromIPv4(frame.Slice(ipOffset + 12, 4));
+        var destination = IPAddressValue.FromIPv4(frame.Slice(ipOffset + 16, 4));
         return TryParseTransport(frame, ipOffset + headerLength, totalLength - headerLength, protocol, source, destination, headerLength, out view);
     }
 
@@ -94,8 +97,8 @@ public static class IpTcpUdpPacket
         }
         if (nextHeader is not ProtocolTcp and not ProtocolUdp) return false;
 
-        var source = new IPAddress(frame.Slice(ipOffset + 8, 16));
-        var destination = new IPAddress(frame.Slice(ipOffset + 24, 16));
+        var source = IPAddressValue.FromIPv6(frame.Slice(ipOffset + 8, 16));
+        var destination = IPAddressValue.FromIPv6(frame.Slice(ipOffset + 24, 16));
         return TryParseTransport(frame, transportOffset, ipOffset + 40 + payloadLength - transportOffset, nextHeader, source, destination, transportOffset - ipOffset, out view);
     }
 
@@ -104,8 +107,8 @@ public static class IpTcpUdpPacket
         int transportOffset,
         int availableLength,
         byte protocol,
-        IPAddress source,
-        IPAddress destination,
+        IPAddressValue source,
+        IPAddressValue destination,
         int ipHeaderLength,
         out PacketView view)
     {

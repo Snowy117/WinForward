@@ -136,6 +136,51 @@ public sealed class NdisCapturePumpTests
         Assert.Throws<ArgumentNullException>(() => new NdisCapturePump(new ScriptedReader(_ => 0), (nint)1, null!));
     }
 
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public async Task PumpDoesNotReuseBatchSlotWhileHandlerIsInFlight()
+    {
+        // The zero-copy capture contract: a batch buffer stays untouched until its packet's
+        // handler completes, so in-place reinjection and native-span parsing inside the handler
+        // cannot observe a reused slot. The handler gates on a completion source; the second
+        // read must not start before the gate opens.
+        using var cts = new CancellationTokenSource();
+        var handlerStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handlerReleased = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondReadEnteredBeforeHandlerCompleted = false;
+
+        var reader = new ScriptedReader(
+            slots =>
+            {
+                Fill(slots[0], 0x50);
+                return 1;
+            },
+            slots =>
+            {
+                secondReadEnteredBeforeHandlerCompleted = !handlerReleased.Task.IsCompleted;
+                Fill(slots[0], 0x51);
+                return 1;
+            },
+            _ =>
+            {
+                cts.Cancel();
+                return 0;
+            });
+
+        await using var pump = new NdisCapturePump(reader, (nint)0x99, (packet, _) =>
+        {
+            if (!handlerStarted.TrySetResult()) return ValueTask.CompletedTask;
+            return new ValueTask(handlerReleased.Task);
+        }, TimeSpan.FromMilliseconds(1));
+
+        var pumpTask = pump.RunAsync(cts.Token).AsTask();
+        await handlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.Delay(50);
+        Assert.False(secondReadEnteredBeforeHandlerCompleted, "The pump started a second batch read before the previous handler completed.");
+        handlerReleased.SetResult();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pumpTask);
+    }
+
     private static Func<NdisCapturedPacket, CancellationToken, ValueTask> CaptureHandler(List<byte> observed, List<nint> handles) =>
         (packet, _) =>
         {

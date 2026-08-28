@@ -88,13 +88,13 @@ public sealed class UdpPacketParsingTests
         frame[43] = 2;
         frame[44] = 3;
 
-        Assert.True(IpUdpPacket.TryParse(frame, out var packet));
+        Assert.True(IPUdpPacket.TryParse(frame, out var packet));
         Assert.Equal((ushort)53000, packet.SourcePort);
         Assert.Equal(new byte[] { 1, 2, 3 }, packet.Payload.ToArray());
         frame[44] = 4;
         Assert.Equal(4, packet.Payload.Span[^1]);
         frame[20] = 0x20;
-        Assert.False(IpUdpPacket.TryParse(frame, out _));
+        Assert.False(IPUdpPacket.TryParse(frame, out _));
     }
 
     [Fact]
@@ -103,7 +103,7 @@ public sealed class UdpPacketParsingTests
         var frame = CreateIpv4UdpFrame();
 
         Assert.True(PacketChecksums.TryRewriteUdpEndpoints(frame, IPAddress.Parse("198.51.100.1"), 40000, IPAddress.Parse("203.0.113.2"), 5353));
-        Assert.True(IpUdpPacket.TryParse(frame, out var packet));
+        Assert.True(IPUdpPacket.TryParse(frame, out var packet));
         Assert.Equal(IPAddress.Parse("198.51.100.1"), packet.SourceAddress);
         Assert.Equal((ushort)40000, packet.SourcePort);
         Assert.Equal(IPAddress.Parse("203.0.113.2"), packet.DestinationAddress);
@@ -136,7 +136,7 @@ public sealed class UdpPacketParsingTests
     {
         var frame = CreateIpv6UdpFrame();
 
-        Assert.True(IpUdpPacket.TryParse(frame, out var packet));
+        Assert.True(IPUdpPacket.TryParse(frame, out var packet));
         Assert.Equal(IPAddress.Parse("2001:db8::10"), packet.SourceAddress);
         Assert.Equal(IPAddress.Parse("2001:db8::53"), packet.DestinationAddress);
         Assert.Equal((ushort)53000, packet.SourcePort);
@@ -150,7 +150,7 @@ public sealed class UdpPacketParsingTests
         var frame = CreateIpv6UdpFrame();
 
         Assert.True(PacketChecksums.TryRewriteUdpEndpoints(frame, IPAddress.Parse("2001:db8::99"), 40000, IPAddress.Parse("2001:db8::1"), 5353));
-        Assert.True(IpUdpPacket.TryParse(frame, out var packet));
+        Assert.True(IPUdpPacket.TryParse(frame, out var packet));
         Assert.Equal(IPAddress.Parse("2001:db8::99"), packet.SourceAddress);
         Assert.Equal((ushort)40000, packet.SourcePort);
         Assert.Equal(IPAddress.Parse("2001:db8::1"), packet.DestinationAddress);
@@ -176,7 +176,7 @@ public sealed class UdpPacketParsingTests
         var frame = CreateIpv6UdpFrame();
         frame[20] = 44; // next header = fragment
 
-        Assert.False(IpUdpPacket.TryParse(frame, out _));
+        Assert.False(IPUdpPacket.TryParse(frame, out _));
     }
 
     private static byte[] CreateIpv6UdpFrame()

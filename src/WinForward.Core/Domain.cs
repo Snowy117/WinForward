@@ -1,4 +1,5 @@
 using System.Net;
+using System.Runtime.InteropServices;
 
 namespace WinForward.Core;
 
@@ -27,41 +28,46 @@ public enum FlowAction
     Block
 }
 
+[StructLayout(LayoutKind.Auto)]
 public readonly struct Endpoint : IEquatable<Endpoint>
 {
     public Endpoint(AddressFamilyKind addressFamily, IPAddress address, ushort port)
+        : this(IPAddressValue.From(address), port)
     {
-        ArgumentNullException.ThrowIfNull(address);
-        var actualFamily = address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? AddressFamilyKind.IPv4 : AddressFamilyKind.IPv6;
-        if (addressFamily != actualFamily) throw new ArgumentException("Endpoint address family does not match the address.", nameof(addressFamily));
-        AddressFamily = addressFamily;
+        if (addressFamily != AddressFamily) throw new ArgumentException("Endpoint address family does not match the address.", nameof(addressFamily));
+    }
+
+    private Endpoint(IPAddressValue address, ushort port)
+    {
         Address = address;
         Port = port;
     }
 
-    public AddressFamilyKind AddressFamily { get; }
-    public IPAddress Address { get; }
+    public IPAddressValue Address { get; }
     public ushort Port { get; }
+    public AddressFamilyKind AddressFamily => Address.Family;
 
+    /// <summary>Cold-edge constructor from a framework address; allocates nothing but the conversion cost.</summary>
     public static Endpoint From(IPAddress address, ushort port)
     {
         ArgumentNullException.ThrowIfNull(address);
-        return new(address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? AddressFamilyKind.IPv4 : AddressFamilyKind.IPv6, address, port);
+        return new(IPAddressValue.From(address), port);
     }
 
-    public bool Equals(Endpoint other) => AddressFamily == other.AddressFamily && Port == other.Port && Address.Equals(other.Address);
+    /// <summary>Hot-path constructor used by packet classification; never allocates.</summary>
+    public static Endpoint From(IPAddressValue address, ushort port) => new(address, port);
+
+    public bool Equals(Endpoint other) => Port == other.Port && Address.Equals(other.Address);
     public override bool Equals(object? obj) => obj is Endpoint other && Equals(other);
-    public override int GetHashCode()
-    {
-        var hash = new HashCode();
-        hash.Add(AddressFamily);
-        hash.Add(Port);
-        hash.Add(Address);
-        return hash.ToHashCode();
-    }
+
+    public override int GetHashCode() => HashCode.Combine(Port, Address);
 
     public static bool operator ==(Endpoint left, Endpoint right) => left.Equals(right);
     public static bool operator !=(Endpoint left, Endpoint right) => !left.Equals(right);
+
+    public override string ToString() => AddressFamily == AddressFamilyKind.IPv6
+        ? $"[{Address}]:{Port}"
+        : $"{Address}:{Port}";
 }
 
 public readonly record struct AdapterContext(string? StableId, string? Name, long Generation);
@@ -81,6 +87,34 @@ public readonly record struct FlowKey(
         return new(local.AddressFamily, protocol, local, remote, origin, adapter?.StableId, adapter?.Generation ?? 0);
     }
 
+    /// <summary>Flat mix over the endpoint addresses and ports: one pass, no per-field chaining,
+    /// tuned for dictionary keys probed on every packet.</summary>
+    public override int GetHashCode() => HashCode.Combine(
+        (ulong)Local.Address.Bits,
+        (ulong)(Local.Address.Bits >> 64),
+        (ulong)Remote.Address.Bits,
+        (ulong)(Remote.Address.Bits >> 64),
+        Local.Port,
+        Remote.Port,
+        (byte)AddressFamily,
+        (byte)Protocol);
+
+    /// <summary>Cheapest discriminators first; addresses last because they are the widest fields.</summary>
+    public bool Equals(FlowKey other) =>
+        Protocol == other.Protocol &&
+        AddressFamily == other.AddressFamily &&
+        Origin == other.Origin &&
+        OriginAdapterGeneration == other.OriginAdapterGeneration &&
+        Local.Port == other.Local.Port &&
+        Remote.Port == other.Remote.Port &&
+        Local.Address.Bits == other.Local.Address.Bits &&
+        Remote.Address.Bits == other.Remote.Address.Bits &&
+        Local.Address.Family == other.Local.Address.Family &&
+        Remote.Address.Family == other.Remote.Address.Family &&
+        Local.Address.ScopeId == other.Local.Address.ScopeId &&
+        Remote.Address.ScopeId == other.Remote.Address.ScopeId &&
+        string.Equals(OriginAdapterId, other.OriginAdapterId, StringComparison.Ordinal);
+
     public FlowKey Reverse() => this with { Local = Remote, Remote = Local };
 }
 
@@ -89,7 +123,8 @@ public readonly record struct FlowDecision(FlowAction Action, int? RuleIndex, st
     public static FlowDecision Fallback(FlowAction action) => new(action, null, null);
 }
 
-public sealed record FlowContext(
+[StructLayout(LayoutKind.Auto)]
+public readonly record struct FlowContext(
     FlowKey Key,
     string? ProcessName,
     string? ProcessPath,
@@ -221,16 +256,23 @@ public sealed class FlowTable
     {
         lock (_gate)
         {
-            var expired = _states
-                .Where(pair => now - pair.Value.LastActivityUtc >= idleTimeout && (isHeld is null || !isHeld(pair.Key)))
-                .Select(pair => pair.Key)
-                .ToArray();
+            // One enumeration collecting expired keys (a snapshot: the removal below must not
+            // mutate the dictionary mid-enumeration), with no LINQ allocation.
+            List<FlowKey>? expired = null;
+            foreach (var pair in _states)
+            {
+                if (now - pair.Value.LastActivityUtc < idleTimeout) continue;
+                if (isHeld is not null && isHeld(pair.Key)) continue;
+                (expired ??= []).Add(pair.Key);
+            }
+
+            if (expired is null) return 0;
             foreach (var key in expired)
             {
                 if (_states.Remove(key, out var state)) RemoveFromTransportIndex(state);
             }
 
-            return expired.Length;
+            return expired.Count;
         }
     }
 
@@ -260,6 +302,7 @@ public sealed class FlowTable
         _transportIndex.Remove(tuple.Reverse());
     }
 
+    [StructLayout(LayoutKind.Auto)]
     private readonly record struct TransportTuple(
         AddressFamilyKind AddressFamily,
         TransportProtocol Protocol,
@@ -268,5 +311,27 @@ public sealed class FlowTable
     {
         public static TransportTuple From(FlowKey key) => new(key.AddressFamily, key.Protocol, key.Local, key.Remote);
         public TransportTuple Reverse() => this with { Local = Remote, Remote = Local };
+
+        public override int GetHashCode() => HashCode.Combine(
+            (ulong)Local.Address.Bits,
+            (ulong)(Local.Address.Bits >> 64),
+            (ulong)Remote.Address.Bits,
+            (ulong)(Remote.Address.Bits >> 64),
+            Local.Port,
+            Remote.Port,
+            (byte)AddressFamily,
+            (byte)Protocol);
+
+        public bool Equals(TransportTuple other) =>
+            Protocol == other.Protocol &&
+            AddressFamily == other.AddressFamily &&
+            Local.Port == other.Local.Port &&
+            Remote.Port == other.Remote.Port &&
+            Local.Address.Bits == other.Local.Address.Bits &&
+            Remote.Address.Bits == other.Remote.Address.Bits &&
+            Local.Address.Family == other.Local.Address.Family &&
+            Remote.Address.Family == other.Remote.Address.Family &&
+            Local.Address.ScopeId == other.Local.Address.ScopeId &&
+            Remote.Address.ScopeId == other.Remote.Address.ScopeId;
     }
 }

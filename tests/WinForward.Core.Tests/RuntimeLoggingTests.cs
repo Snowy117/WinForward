@@ -111,8 +111,8 @@ public sealed class RuntimeLoggingTests
         await dispatcher.DispatchAsync(packet, CancellationToken.None);
 
         Assert.NotNull(executor.LastPacket);
-        Assert.Equal(17, executor.LastPacket.PacketSequence);
-        Assert.True(executor.LastPacket.FlowGeneration > 0);
+        Assert.Equal(17, executor.LastPacket.Value.PacketSequence);
+        Assert.True(executor.LastPacket.Value.FlowGeneration > 0);
         var output = writer.ToString();
         Assert.Contains("flow.created flow=1", output, StringComparison.Ordinal);
         Assert.Contains("packet.completed packet=17 flow=1 disposition=pass", output, StringComparison.Ordinal);

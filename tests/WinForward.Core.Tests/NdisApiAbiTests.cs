@@ -14,9 +14,9 @@ public sealed class NdisApiAbiTests
     }
 
     [Fact]
-    public void IpHelperOwnerRowsMatchWindowsLayouts()
+    public void IPHelperOwnerRowsMatchWindowsLayouts()
     {
-        IpHelperAbi.AssertManagedLayout();
+        IPHelperAbi.AssertManagedLayout();
     }
 
     [Fact]

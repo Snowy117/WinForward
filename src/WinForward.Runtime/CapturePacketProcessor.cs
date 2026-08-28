@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Runtime.Versioning;
 using WinForward.Configuration;
 using WinForward.Core;
@@ -9,12 +8,14 @@ using WinForward.Windows;
 namespace WinForward.Runtime;
 
 /// <summary>
-/// Bridges a captured NDISAPI packet into the flow dispatcher. The native frame is copied into a
-/// managed <see cref="PacketLease"/> before the pump's native buffer is released, so no native memory
-/// outlives its batch. Frames that cannot be classified into a TCP/UDP flow (non-IP, fragmented,
-/// malformed, or a non-TCP/UDP protocol) take the non-flow path. The lease is always completed
-/// exactly once: on any unexpected exception it is disposed (fail-closed to block) and the exception
-/// is propagated so the runtime shuts down and restores adapter modes.
+/// Bridges a captured NDISAPI packet into the flow dispatcher. Parsing and classification run
+/// directly on the pump-owned native frame: the lease carries the native buffer as its frame
+/// source and materializes a pooled managed copy only when a consumer actually needs a stable
+/// view (proxy paths that rewrite or relay). Frames that cannot be classified into a TCP/UDP
+/// flow (non-IP, fragmented, malformed, or a non-TCP/UDP protocol) take the non-flow path.
+/// The lease is always completed exactly once: on any unexpected exception it is disposed
+/// (fail-closed to block) and the exception is propagated so the runtime shuts down and restores
+/// adapter modes.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class CapturePacketProcessor
@@ -32,44 +33,44 @@ public sealed class CapturePacketProcessor
 
     public async ValueTask ProcessAsync(NdisCapturedPacket packet, WindowsAdapter adapter, CancellationToken cancellationToken)
     {
-        // The frame must leave the pump-owned native buffer before the pump reads its next packet,
-        // so it is copied into a pooled array exposed to the lease at its actual length. The array
-        // returns to the pool only after the whole dispatch completes: FlowDispatcher completes the
-        // lease BEFORE the executor reads Frame, so a completion-triggered return would expose a
-        // reused array to those readers (audit note in the task's design §4.4).
+        // The native frame stays owned by the pump for the whole dispatch (the pump awaits this
+        // handler before touching its batch again), so parsing can run on the native span and the
+        // lease copies lazily only for consumers that keep the frame beyond the synchronous pass
+        // path. The materialized pooled array returns after the dispatch completes: the dispatcher
+        // completes the lease BEFORE the executor runs, so a completion-triggered return would
+        // expose a reused array to those readers.
         var frameSpan = packet.Buffer.GetFrame();
-        var pooledFrame = ArrayPool<byte>.Shared.Rent(frameSpan.Length);
-        frameSpan.CopyTo(pooledFrame);
-        var frame = new ReadOnlyMemory<byte>(pooledFrame, 0, frameSpan.Length);
-        var lease = new PacketLease(frame);
+        var lease = PacketLease.TakeNative(packet.Buffer);
         var metadata = new PacketCaptureMetadata(packet.DeviceFlags, packet.AdapterHandle, packet.Flags);
+        var nativeFrame = new NativeFrameHandle(packet.Buffer);
+        var frameLength = frameSpan.Length;
         var isOnSend = (packet.DeviceFlags & NdisApiAbi.PacketFlagOnSend) != 0;
         var sequence = Interlocked.Increment(ref _nextPacketSequence);
         if (_logger.IsEnabled(RuntimeLogLevel.Trace))
         {
             _logger.Event(RuntimeLogLevel.Trace, "packet.captured",
-                new("packet", sequence), new("bytes", frame.Length), new("adapter", adapter.StableId),
+                new("packet", sequence), new("bytes", frameLength), new("adapter", adapter.StableId),
                 new("adapterName", adapter.FriendlyName), new("adapterHandle", adapter.RuntimeHandle),
                 new("direction", isOnSend ? "send" : "receive"), new("flags", packet.Flags));
         }
         try
         {
-            if (!IpTcpUdpPacket.TryParse(frame.Span, out var view))
+            if (!IPTcpUdpPacket.TryParse(frameSpan, out var view))
             {
                 var nonFlowContext = PacketFlowClassifier.ClassifyNonFlow(adapter, isOnSend);
-                await _dispatcher.DispatchNonFlowAsync(new CapturedFlowPacket(lease, nonFlowContext, metadata, sequence), cancellationToken).ConfigureAwait(false);
+                await _dispatcher.DispatchNonFlowAsync(new CapturedFlowPacket(lease, nonFlowContext, metadata, sequence, NativeFrame: nativeFrame), cancellationToken).ConfigureAwait(false);
                 return;
             }
 
             var flowContext = PacketFlowClassifier.ClassifyFlow(view, adapter, isOnSend);
-            await _dispatcher.DispatchAsync(new CapturedFlowPacket(lease, flowContext, metadata, sequence), cancellationToken).ConfigureAwait(false);
+            await _dispatcher.DispatchAsync(new CapturedFlowPacket(lease, flowContext, metadata, sequence, NativeFrame: nativeFrame), cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             if (_logger.IsEnabled(RuntimeLogLevel.Trace))
             {
                 _logger.Event(RuntimeLogLevel.Trace, "packet.failed",
-                    new("packet", sequence), new("bytes", frame.Length), new("reason", "canceled"));
+                    new("packet", sequence), new("bytes", frameLength), new("reason", "canceled"));
             }
             lease.Dispose();
             throw;
@@ -79,7 +80,7 @@ public sealed class CapturePacketProcessor
             if (_logger.IsEnabled(RuntimeLogLevel.Trace))
             {
                 _logger.Event(RuntimeLogLevel.Trace, "packet.failed",
-                    new("packet", sequence), new("bytes", frame.Length),
+                    new("packet", sequence), new("bytes", frameLength),
                     new("reason", exception.GetType().Name));
             }
             lease.Dispose();
@@ -87,7 +88,7 @@ public sealed class CapturePacketProcessor
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(pooledFrame);
+            lease.Release();
         }
     }
 }

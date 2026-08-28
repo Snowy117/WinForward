@@ -9,7 +9,7 @@ public sealed class WindowsBoundaryAuditTests
     [Fact]
     public void UdpOwnerPidTableClassIsSharedByIpv4AndIpv6()
     {
-        Assert.Equal(1, IpHelperAbi.UdpTableOwnerPid);
+        Assert.Equal(1, IPHelperAbi.UdpTableOwnerPid);
     }
 
     [Fact]
@@ -17,7 +17,7 @@ public sealed class WindowsBoundaryAuditTests
     {
         const uint scopeId = 7;
 
-        var address = IpHelperAbi.DecodeIpv6Address(IPAddress.Parse("fe80::1").GetAddressBytes(), scopeId);
+        var address = IPHelperAbi.DecodeIpv6Address(IPAddress.Parse("fe80::1").GetAddressBytes(), scopeId);
 
         Assert.Equal(7L, address.ScopeId);
     }
@@ -27,6 +27,6 @@ public sealed class WindowsBoundaryAuditTests
     {
         var networkOrderPort = unchecked((uint)(ushort)IPAddress.HostToNetworkOrder((short)8080));
 
-        Assert.Equal((ushort)8080, IpHelperAbi.DecodeNetworkPort(networkOrderPort));
+        Assert.Equal((ushort)8080, IPHelperAbi.DecodeNetworkPort(networkOrderPort));
     }
 }

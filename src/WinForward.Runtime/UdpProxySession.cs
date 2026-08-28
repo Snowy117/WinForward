@@ -89,7 +89,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
 
         try
         {
-            await _transport.SendAsync(new IPEndPoint(destination.Address, destination.Port), payload, cancellationToken).ConfigureAwait(false);
+            await _transport.SendAsync(new IPEndPoint(destination.Address.ToIPAddress(), destination.Port), payload, cancellationToken).ConfigureAwait(false);
             TouchActivity();
         }
         finally

@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace WinForward.Windows;
 
-public static class IpHelperAbi
+public static class IPHelperAbi
 {
     internal const int UdpTableOwnerPid = 1;
 

@@ -16,6 +16,7 @@ internal sealed class FakeReinjector : IPacketReinjector
     public uint LastDeviceFlags { get; private set; }
     public uint LastFlags { get; private set; }
     public byte[]? LastFrame { get; private set; }
+    public NdisPacketBuffer? LastBuffer { get; private set; }
 
     public void SendToAdapter(nint adapterHandle, NdisPacketBuffer buffer)
     {
@@ -35,6 +36,7 @@ internal sealed class FakeReinjector : IPacketReinjector
         LastDeviceFlags = buffer.DeviceFlags;
         LastFlags = buffer.Flags;
         LastFrame = buffer.GetFrame().ToArray();
+        LastBuffer = buffer;
     }
 }
 

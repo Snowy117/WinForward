@@ -23,7 +23,7 @@ Runtime → { Configuration, Core, NdisApi, Protocols, Windows }
 src/
 ├── WinForward.Cli/            # 入口 + composition root（Program.cs）
 ├── WinForward.Configuration/  # JSON DTO + ConfigurationLoader + ValidatedConfiguration
-├── WinForward.Core/           # 零依赖基元（Endpoint、FlowKey、IpPrefix…）
+├── WinForward.Core/           # 零依赖基元（Endpoint、IPAddressValue、FlowKey、IPPrefix…）
 ├── WinForward.NdisApi/        # NDISAPI interop（Abi 声明 / Driver / Gate / Buffer）
 ├── WinForward.Protocols/      # 纯协议编解码（Socks5Messages、Socks5UdpCodec）
 ├── WinForward.Runtime/        # 协调器、改写器、注入器、捕获运行时
