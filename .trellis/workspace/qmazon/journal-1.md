@@ -142,3 +142,24 @@ Split all 13 oversized .cs files (metric clarified mid-task to effective lines =
 ### Status
 
 [OK] **Completed**
+
+
+## Session 7: Perf hotspots: zero-allocation packet pipeline
+
+**Date**: 2026-08-28
+**Task**: Perf hotspots: zero-allocation packet pipeline
+**Branch**: `master`
+
+### Summary
+
+Diagnosed per-packet hotspots via bench suite + alloc-probe bisect. Fixed: IPAddressValue raw UInt128 addresses end-to-end (parser/keys/CIDR/checksums, family-aligned IPv4 masks regression-locked); FlowContext/CapturedFlowPacket structified with enum-driven completion; DispatchAsync split into non-async sync fast path (fat async state machine was heap-allocating ~193B/call) + DispatchSlowAsync; zero-copy pass via native-span parse, lazy lease materialization, in-place capture-buffer reinjection (pump slot contract test); PacketLease per-thread recycle; Socks5Udp TryEncode span path; flat FlowKey hashing; Ip->IP renames. Results: 669->10 B/pkt, gen0 35->0/M pkts, +44-53% pps, encode 1512->4.2 B. Two trellis-check rounds (final CLEAN incl IPPrefix IPv4 always-true mask defect found+fixed). Spec: backend/hot-path.md contracts.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f161556` | (see git log) |
+
+### Status
+
+[OK] **Completed**
