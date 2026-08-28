@@ -52,3 +52,25 @@ Analyzed EOF/reset root causes into a parent task with four children; completed 
 
 [OK] **Completed**
 
+
+
+## Session 3: fix-port-budget: tcpFlowCapacity 预算落地
+
+**Date**: 2026-08-28
+**Task**: fix-port-budget: tcpFlowCapacity 预算落地
+**Branch**: `master`
+
+### Summary
+
+端口预算任务完成：tcpFlowCapacity 配置字段（默认 4096、1..8192、>4096 警告）、单一来源派生 coordinator+table 容量、复用 capacity gate + info 摘要计数；共享 listener 经可行性研究否决（byTranslatedListener 1:1 硬阻塞）。332/332 测试，trellis-check 零缺陷，README/spec 同步。Windows 压测为遗留可选项。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `19ce572` | (see git log) |
+| `16022a8` | (see git log) |
+
+### Status
+
+[OK] **Completed**
