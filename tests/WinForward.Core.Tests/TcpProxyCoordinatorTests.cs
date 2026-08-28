@@ -787,6 +787,268 @@ public sealed class TcpProxyCoordinatorTests
     }
 
     [Fact]
+    public async Task LateForwardPacketAfterTeardownIsDroppedWithinGrace()
+    {
+        // TIME_WAIT grace: after the relay completes and the redirect alias is removed, the
+        // client's straggler ACK on the original tuple is consumed as Dropped — passing it toward
+        // the real server would draw a bounced RST back into the client's finished connection.
+        var listenerFactory = new FakeListenerFactory();
+        var injector = new FakeInjector();
+        var relayFactory = new CompletableRelayFactory();
+        var selfTraffic = new SelfTrafficRegistry();
+        var table = new TcpRedirectTable();
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider());
+
+        var syn = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(syn, s_server, CancellationToken.None));
+        var listener = Assert.Single(listenerFactory.Listeners);
+        await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(Endpoint.From(s_destIpv4, 53000)), CancellationToken.None);
+        await WaitForAsync(() => relayFactory.Relay is not null);
+
+        relayFactory.Relay!.Complete();
+        await WaitForAsync(() => table.Count == 0);
+
+        injector.InjectedFrames.Clear();
+        var straggler = MakeForwardTcpPacket(s_clientIpv4, s_destIpv4, 53000, 443, TcpFlagAck);
+        var outcome = await coordinator.HandlePacketAsync(straggler, s_server, CancellationToken.None);
+
+        Assert.Equal(TcpRedirectOutcome.Dropped, outcome);
+        Assert.Empty(injector.InjectedFrames);
+    }
+
+    [Fact]
+    public async Task LateReversePacketAfterTeardownIsDroppedWithinGrace()
+    {
+        var listenerFactory = new FakeListenerFactory();
+        var injector = new FakeInjector();
+        var relayFactory = new CompletableRelayFactory();
+        var selfTraffic = new SelfTrafficRegistry();
+        var table = new TcpRedirectTable();
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider());
+
+        var syn = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(syn, s_server, CancellationToken.None));
+        var listener = Assert.Single(listenerFactory.Listeners);
+        var listenerTuple = listener.TranslatedTuple;
+        await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(Endpoint.From(s_destIpv4, 53000)), CancellationToken.None);
+        await WaitForAsync(() => relayFactory.Relay is not null);
+
+        relayFactory.Relay!.Complete();
+        await WaitForAsync(() => table.Count == 0);
+
+        injector.InjectedFrames.Clear();
+        var straggler = MakeReversePacketClassifierOrientation(s_clientIpv4, listenerTuple.Port, s_destIpv4, 53000, mutateFrame: f => f[47] = TcpFlagFinAck);
+        var outcome = await coordinator.HandleReverseIfApplicableAsync(straggler, CancellationToken.None);
+
+        Assert.Equal(TcpRedirectOutcome.Dropped, outcome);
+        Assert.Empty(injector.InjectedFrames);
+    }
+
+    [Fact]
+    public async Task DispatcherConsumesReverseStragglerAsProxyConsumedWithoutPolicyLabel()
+    {
+        // Through the wired dispatcher: a reverse straggler of a torn-down redirect completes as a
+        // proxy-consumed packet — no reinjection, and no policy-drop mislabel from BlockAsync.
+        var harness = CreateDispatcherHarness();
+        await using var coordinator = harness.Coordinator;
+        await EstablishRelayingSessionAsync(harness);
+        var listenerTuple = Assert.Single(harness.ListenerFactory.Listeners).TranslatedTuple;
+
+        harness.RelayFactory.Relay!.Complete();
+        await WaitForAsync(() => harness.Table.Count == 0);
+        harness.Injector.InjectedFrames.Clear();
+
+        var straggler = MakeReversePacketClassifierOrientation(s_clientIpv4, listenerTuple.Port, s_destIpv4, 53000, mutateFrame: f => f[47] = TcpFlagFinAck);
+        await harness.Dispatcher.DispatchAsync(straggler, CancellationToken.None);
+
+        Assert.Equal(PacketDisposition.ProxyConsumed, straggler.Lease.Disposition);
+        Assert.Empty(harness.Injector.InjectedFrames);
+        Assert.Contains(harness.Logger.Events, e => string.Equals(e.Name, "packet.reverseHandled", StringComparison.Ordinal)
+            && e.Fields.Any(field => string.Equals(field.Key, "outcome", StringComparison.Ordinal) && field.Value is TcpRedirectOutcome.Dropped));
+        Assert.DoesNotContain(harness.Logger.Events, e => string.Equals(e.Name, "packet.dropped", StringComparison.Ordinal)
+            && e.Fields.Any(field => string.Equals(field.Key, "reason", StringComparison.Ordinal) && field.Value is "policy"));
+    }
+
+    [Fact]
+    public async Task LatePacketFallsBackToNotRelevantAfterGraceExpiry()
+    {
+        var listenerFactory = new FakeListenerFactory();
+        var injector = new FakeInjector();
+        var relayFactory = new CompletableRelayFactory();
+        var selfTraffic = new SelfTrafficRegistry();
+        var table = new TcpRedirectTable();
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider());
+
+        var syn = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(syn, s_server, CancellationToken.None));
+        var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
+        await Assert.Single(listenerFactory.Listeners).AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(Endpoint.From(s_destIpv4, 53000)), CancellationToken.None);
+        await WaitForAsync(() => relayFactory.Relay is not null);
+        relayFactory.Relay!.Complete();
+        await WaitForAsync(() => table.Count == 0);
+
+        // Fast-forward past the grace window by overwriting the tombstone with an elapsed expiry.
+        coordinator.Tombstones.TryAdd(MakeHostFlowKey(), Endpoint.From(s_clientIpv4, listenerTuple.Port), Endpoint.From(s_destIpv4, 53000), DateTimeOffset.UtcNow - TimeSpan.FromSeconds(1));
+
+        var forwardStraggler = MakeForwardTcpPacket(s_clientIpv4, s_destIpv4, 53000, 443, TcpFlagAck);
+        Assert.Equal(TcpRedirectOutcome.NotRelevant, await coordinator.HandlePacketAsync(forwardStraggler, s_server, CancellationToken.None));
+        var reverseStraggler = MakeReversePacketClassifierOrientation(s_clientIpv4, listenerTuple.Port, s_destIpv4, 53000, mutateFrame: f => f[47] = TcpFlagAck);
+        Assert.Equal(TcpRedirectOutcome.NotRelevant, await coordinator.HandleReverseIfApplicableAsync(reverseStraggler, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task RelaySetupFailureTombstonesTheFlow()
+    {
+        // Every teardown entry point writes the tombstone, including the relay-setup-failure path.
+        var listenerFactory = new FakeListenerFactory();
+        var injector = new FakeInjector();
+        var selfTraffic = new SelfTrafficRegistry();
+        var table = new TcpRedirectTable();
+        var relayFactory = new FakeRelayFactory(throwOnEstablish: true);
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider());
+
+        var syn = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(syn, s_server, CancellationToken.None));
+        var listener = Assert.Single(listenerFactory.Listeners);
+        await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(Endpoint.From(s_destIpv4, 53000)), CancellationToken.None);
+        await WaitForAsync(() => table.Count == 0);
+
+        var straggler = MakeForwardTcpPacket(s_clientIpv4, s_destIpv4, 53000, 443, TcpFlagAck);
+        Assert.Equal(TcpRedirectOutcome.Dropped, await coordinator.HandlePacketAsync(straggler, s_server, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task ExecutorSilentlyConsumesTombstoneHitWithTraceAndNoReinjection()
+    {
+        var listenerFactory = new FakeListenerFactory();
+        var injector = new FakeInjector();
+        var relayFactory = new CompletableRelayFactory();
+        var logger = new RecordingRuntimeLogger();
+        var selfTraffic = new SelfTrafficRegistry();
+        var table = new TcpRedirectTable();
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider(), logger);
+
+        var syn = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(syn, s_server, CancellationToken.None));
+        var listener = Assert.Single(listenerFactory.Listeners);
+        await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(Endpoint.From(s_destIpv4, 53000)), CancellationToken.None);
+        await WaitForAsync(() => relayFactory.Relay is not null);
+        relayFactory.Relay!.Complete();
+        await WaitForAsync(() => table.Count == 0);
+
+        var reinjector = new CountingReinjector();
+        var executor = new NdisPacketActionExecutor(reinjector, logger, tcpProxy: coordinator);
+        var straggler = MakeForwardTcpPacket(s_clientIpv4, s_destIpv4, 53000, 443, TcpFlagAck);
+
+        await executor.ProxyAsync(straggler, s_server, CancellationToken.None);
+
+        Assert.Equal(0, reinjector.SendToAdapterCount);
+        Assert.Equal(0, reinjector.SendToMstcpCount);
+        Assert.Contains(logger.Events, e => string.Equals(e.Name, "tcp.packet.handled", StringComparison.Ordinal)
+            && e.Fields.Any(field => string.Equals(field.Key, "outcome", StringComparison.Ordinal) && field.Value is TcpRedirectOutcome.Dropped));
+        Assert.Contains(logger.Events, e => string.Equals(e.Name, "packet.dropped", StringComparison.Ordinal)
+            && e.Fields.Any(field => string.Equals(field.Key, "reason", StringComparison.Ordinal) && field.Value is "grace"));
+        // The grace drop must not emit its own packet.completed: the dispatcher owns that event and
+        // logs it exactly once per packet after the disposition executes.
+        Assert.DoesNotContain(logger.Events, e => string.Equals(e.Name, "packet.completed", StringComparison.Ordinal)
+            && e.Fields.Any(field => string.Equals(field.Key, "outcome", StringComparison.Ordinal)));
+        // Dropped must not trip the rate-limited proxy-unavailable warning (Blocked's side effect).
+        Assert.DoesNotContain(logger.Lines, line => line.Message.Contains("proxy relay support", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task HoldsFlowTracksSessionAndGraceWindow()
+    {
+        var listenerFactory = new FakeListenerFactory();
+        var injector = new FakeInjector();
+        var relayFactory = new CompletableRelayFactory();
+        var selfTraffic = new SelfTrafficRegistry();
+        var table = new TcpRedirectTable();
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider());
+
+        var key = MakeHostFlowKey();
+        Assert.False(coordinator.HoldsFlow(key));
+
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None));
+        Assert.True(coordinator.HoldsFlow(key));
+
+        var listener = Assert.Single(listenerFactory.Listeners);
+        var listenerTuple = listener.TranslatedTuple;
+        await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(Endpoint.From(s_destIpv4, 53000)), CancellationToken.None);
+        await WaitForAsync(() => relayFactory.Relay is not null);
+        Assert.True(coordinator.HoldsFlow(key));
+
+        relayFactory.Relay!.Complete();
+        await WaitForAsync(() => table.Count == 0);
+        Assert.True(coordinator.HoldsFlow(key));
+
+        // Once the grace window lapses, the hold releases and an unrelated flow never held.
+        coordinator.Tombstones.TryAdd(key, Endpoint.From(s_clientIpv4, listenerTuple.Port), Endpoint.From(s_destIpv4, 53000), DateTimeOffset.UtcNow - TimeSpan.FromSeconds(1));
+        Assert.False(coordinator.HoldsFlow(key));
+        var unrelated = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.99"), 53001), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
+        Assert.False(coordinator.HoldsFlow(unrelated));
+    }
+
+    [Fact]
+    public async Task HeldFlowExpiresAtOriginalIdlePointAfterGraceLapses()
+    {
+        // The wired sweep sequence (tcp first, then flows with the hold predicate): a torn-down
+        // session's flow decision is held by the grace tombstone, then removed at its original
+        // idle point once the grace lapses — without the idle window being re-armed.
+        var harness = CreateDispatcherHarness();
+        await using var coordinator = harness.Coordinator;
+        await EstablishRelayingSessionAsync(harness);
+        var key = MakeHostFlowKey();
+        Assert.True(coordinator.HoldsFlow(key));
+
+        harness.RelayFactory.Relay!.Complete();
+        await WaitForAsync(() => harness.Table.Count == 0);
+
+        // The tcp sweep uses the real clock (the live tombstone must survive it); only the flow
+        // sweep runs with a future clock to force the flow's idle boundary to have elapsed.
+        var flowSweepNow = DateTimeOffset.UtcNow.AddMinutes(10);
+        Assert.Equal(0, await coordinator.RemoveExpiredAsync(DateTimeOffset.UtcNow, TimeSpan.FromMinutes(1)));
+        Assert.Equal(0, harness.Dispatcher.RemoveExpiredFlows(flowSweepNow, TimeSpan.FromMinutes(1), coordinator.HoldsFlow));
+
+        var listenerTuple = Assert.Single(harness.ListenerFactory.Listeners).TranslatedTuple;
+        coordinator.Tombstones.TryAdd(key, Endpoint.From(s_clientIpv4, listenerTuple.Port), Endpoint.From(s_destIpv4, 53000), DateTimeOffset.UtcNow - TimeSpan.FromSeconds(1));
+        Assert.Equal(1, harness.Dispatcher.RemoveExpiredFlows(flowSweepNow, TimeSpan.FromMinutes(1), coordinator.HoldsFlow));
+    }
+
+    [Fact]
+    public async Task SilentRelayingFlowSurvivesSweepsWithoutReevaluatingDecision()
+    {
+        var harness = CreateDispatcherHarness();
+        await using var coordinator = harness.Coordinator;
+        await EstablishRelayingSessionAsync(harness);
+        Assert.Equal(1, harness.Logger.Events.Count(e => string.Equals(e.Name, "flow.created", StringComparison.Ordinal)));
+
+        await using var sweeper = new IdleExpirySweeper(
+            harness.Dispatcher,
+            coordinator,
+            udp: null,
+            interval: TimeSpan.FromMilliseconds(100),
+            flowIdleTimeout: TimeSpan.FromMilliseconds(250),
+            redirectIdleTimeout: TimeSpan.FromMinutes(5),
+            relayIdleTimeout: TimeSpan.FromMinutes(5),
+            logger: harness.Logger);
+        sweeper.Start();
+
+        // Silent across many sweep ticks, far past the flow idle timeout: the relaying session
+        // holds the flow decision, so a resumed connection is not re-evaluated.
+        await Task.Delay(900);
+        Assert.Equal(1, harness.Logger.Events.Count(e => string.Equals(e.Name, "flow.created", StringComparison.Ordinal)));
+        Assert.True(coordinator.HoldsFlow(MakeHostFlowKey()));
+
+        harness.Injector.InjectedFrames.Clear();
+        var resume = MakeForwardTcpPacket(s_clientIpv4, s_destIpv4, 53000, 443, TcpFlagAck);
+        await harness.Dispatcher.DispatchAsync(resume, CancellationToken.None);
+
+        Assert.Equal(1, harness.Logger.Events.Count(e => string.Equals(e.Name, "flow.created", StringComparison.Ordinal)));
+        Assert.Single(harness.Injector.InjectedFrames);
+    }
+
+    [Fact]
     public async Task DisposeWaitsForInFlightSetupAndReleasesLateListener()
     {
         var listenerFactory = new GatedListenerFactory();
@@ -974,6 +1236,69 @@ public sealed class TcpProxyCoordinatorTests
         var context = new FlowContext(key, "app.exe", null, null, "eth0", destinationPort);
         var lease = new PacketLease(frame);
         return new CapturedFlowPacket(lease, context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, adapterHandle));
+    }
+
+    private const byte TcpFlagAck = 0x10;
+    private const byte TcpFlagFinAck = 0x11;
+
+    /// <summary>
+    /// Builds a forward (client -> server) TCP packet on the original tuple with arbitrary flags —
+    /// e.g. a straggler ACK/FIN-ACK arriving after teardown. The checksum is intentionally stale:
+    /// the tombstone path consumes the frame without ever rewriting it.
+    /// </summary>
+    private static CapturedFlowPacket MakeForwardTcpPacket(IPAddress client, IPAddress destination, ushort clientPort, ushort destinationPort, byte tcpFlags)
+    {
+        var frame = BuildIpv4TcpSyn(client, destination, clientPort, destinationPort);
+        const int tcpFlagsOffset = 47;
+        frame[tcpFlagsOffset] = tcpFlags;
+        var local = Endpoint.From(client, clientPort);
+        var remote = Endpoint.From(destination, destinationPort);
+        var key = FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Host);
+        var context = new FlowContext(key, "app.exe", null, null, "eth0", destinationPort);
+        return new CapturedFlowPacket(new PacketLease(frame), context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 0x1234));
+    }
+
+    private static FlowKey MakeHostFlowKey() => FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
+
+    /// <summary>
+    /// A dispatcher wired to a real TCP coordinator over the standard fakes, for sweep-semantics
+    /// tests: the flow table, the redirect table, and the tombstones advance together exactly as
+    /// the runtime composition does.
+    /// </summary>
+    private sealed record DispatcherHarness(
+        TcpProxyCoordinator Coordinator,
+        FakeListenerFactory ListenerFactory,
+        FakeInjector Injector,
+        CompletableRelayFactory RelayFactory,
+        TcpRedirectTable Table,
+        FlowDispatcher Dispatcher,
+        RecordingRuntimeLogger Logger);
+
+    private static DispatcherHarness CreateDispatcherHarness()
+    {
+        var listenerFactory = new FakeListenerFactory();
+        var injector = new FakeInjector();
+        var relayFactory = new CompletableRelayFactory();
+        var logger = new RecordingRuntimeLogger();
+        var selfTraffic = new SelfTrafficRegistry();
+        var table = new TcpRedirectTable();
+        var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider(), logger);
+
+        var server = new Socks5Server("primary", "127.0.0.1", 1080, null, null);
+        var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase) { [server.Name] = server };
+        var rules = new[] { new PolicyRule(new RuleMatcher(), new FlowDecision(FlowAction.Proxy, 0, server.Name)) };
+        var config = new ValidatedConfiguration(servers, new PolicySnapshot(rules, FlowAction.Block));
+        var executor = new NdisPacketActionExecutor(new CountingReinjector(), logger, tcpProxy: coordinator);
+        var dispatcher = new FlowDispatcher(config, selfTraffic, executor, reverseHandler: coordinator.HandleReverseIfApplicableAsync, logger: logger);
+        return new DispatcherHarness(coordinator, listenerFactory, injector, relayFactory, table, dispatcher, logger);
+    }
+
+    private static async Task EstablishRelayingSessionAsync(DispatcherHarness harness)
+    {
+        await harness.Dispatcher.DispatchAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), CancellationToken.None);
+        var listener = Assert.Single(harness.ListenerFactory.Listeners);
+        await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(Endpoint.From(s_destIpv4, 53000)), CancellationToken.None);
+        await WaitForAsync(() => harness.RelayFactory.Relay is not null);
     }
 
     private static byte[] BuildIpv4TcpSyn(IPAddress source, IPAddress destination, ushort sourcePort, ushort destinationPort, byte[]? payload = null)
@@ -1288,5 +1613,42 @@ public sealed class TcpProxyCoordinatorTests
         }
 
         public void Release() => _release.TrySetResult();
+    }
+
+    private sealed class CountingReinjector : IPacketReinjector
+    {
+        public int SendToAdapterCount { get; private set; }
+        public int SendToMstcpCount { get; private set; }
+
+        public void SendToAdapter(nint adapterHandle, NdisPacketBuffer buffer) => SendToAdapterCount++;
+
+        public void SendToMstcp(nint adapterHandle, NdisPacketBuffer buffer) => SendToMstcpCount++;
+    }
+
+    private sealed class CompletableRelay : ITcpRelay
+    {
+        private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Completion => _completion.Task;
+        public bool IsDisposed { get; private set; }
+
+        public void Complete() => _completion.TrySetResult();
+
+        public ValueTask DisposeAsync()
+        {
+            IsDisposed = true;
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class CompletableRelayFactory : ITcpProxyRelayFactory
+    {
+        public CompletableRelay? Relay { get; private set; }
+
+        public ValueTask<ITcpRelay> EstablishAsync(Endpoint originalDestination, ITcpAcceptedConnection acceptedConnection, Socks5Server server, CancellationToken cancellationToken)
+        {
+            Relay = new CompletableRelay();
+            return ValueTask.FromResult<ITcpRelay>(Relay);
+        }
     }
 }

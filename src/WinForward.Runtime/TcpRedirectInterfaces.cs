@@ -73,10 +73,14 @@ public interface ITcpRedirectInjector
 /// silently passed: any setup, rewrite, or injection failure fails closed as <see cref="Blocked"/>.
 /// <see cref="NotRelevant"/> means the packet is not part of any active redirect (mid-flow data on
 /// the redirect leg that is handled by normal policy), so the caller continues normal processing.
+/// <see cref="Dropped"/> means the packet is a straggler of a redirect that was torn down within
+/// its TIME_WAIT grace window (a tombstone hit): the caller consumes it silently — no
+/// reinjection, no block logging — so the finished handshake's tail never reaches the real server.
 /// </summary>
 public enum TcpRedirectOutcome
 {
     Injected,
     Blocked,
     NotRelevant,
+    Dropped,
 }

@@ -173,5 +173,9 @@ See `examples/`:
 - `Forwarded` is currently derived from NDIS receive direction. This includes both traffic Windows
   may route across adapters and new inbound traffic addressed to a service on this host; both use
   the adapter-qualified-only policy semantics.
+- When a proxied TCP connection ends, WinForward keeps a short TIME_WAIT-like grace entry for the
+  flow's original tuple: stragglers of the finished handshake (the final ACK, a retransmitted
+  FIN/ACK) are silently dropped instead of being forwarded toward the real server, which never saw
+  the proxied connection and would answer the unknown tuple with a stray RST.
 - The first release is a foreground console process; native Windows Service installation is
   deferred.

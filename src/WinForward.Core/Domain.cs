@@ -209,11 +209,22 @@ public sealed class FlowTable
         }
     }
 
-    public int RemoveExpired(DateTimeOffset now, TimeSpan idleTimeout)
+    /// <summary>
+    /// Removes flow decisions idle past <paramref name="idleTimeout"/>. An entry whose idle has
+    /// elapsed but whose <paramref name="isHeld"/> predicate reports a live holder (e.g. a TCP
+    /// redirect session still relaying, or a flow inside its post-teardown grace window) is
+    /// skipped without touching <see cref="FlowState.LastActivityUtc"/>, so it expires at its
+    /// original idle point once the hold lapses instead of being re-armed. The predicate is only
+    /// consulted for idle-elapsed candidates. A null predicate removes every idle entry.
+    /// </summary>
+    public int RemoveExpired(DateTimeOffset now, TimeSpan idleTimeout, Func<FlowKey, bool>? isHeld = null)
     {
         lock (_gate)
         {
-            var expired = _states.Where(pair => now - pair.Value.LastActivityUtc >= idleTimeout).Select(pair => pair.Key).ToArray();
+            var expired = _states
+                .Where(pair => now - pair.Value.LastActivityUtc >= idleTimeout && (isHeld is null || !isHeld(pair.Key)))
+                .Select(pair => pair.Key)
+                .ToArray();
             foreach (var key in expired)
             {
                 if (_states.Remove(key, out var state)) RemoveFromTransportIndex(state);

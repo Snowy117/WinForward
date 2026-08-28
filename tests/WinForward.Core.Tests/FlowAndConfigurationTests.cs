@@ -285,6 +285,26 @@ public sealed class FlowAndConfigurationTests
     }
 
     [Fact]
+    public void FlowTableRemoveExpiredHonorsHoldPredicateWithoutTouchingActivity()
+    {
+        var table = new FlowTable();
+        var key = FlowKey.Create(Endpoint.From(IPAddress.Loopback, 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
+        var claimed = table.Claim(key, () => FlowDecision.Fallback(FlowAction.Pass));
+        var lastActivity = claimed.LastActivityUtc;
+        var now = lastActivity + TimeSpan.FromMinutes(10);
+
+        // A held entry (e.g. a silently relaying TCP redirect session) survives the idle sweep and
+        // keeps its activity timestamp untouched.
+        Assert.Equal(0, table.RemoveExpired(now, TimeSpan.FromMinutes(1), isHeld: heldKey => heldKey == key));
+        Assert.Equal(lastActivity, claimed.LastActivityUtc);
+
+        // Once the hold lapses, the very same sweep time removes the entry at its original idle
+        // point — the hold skipped removal without re-arming the idle window.
+        Assert.Equal(1, table.RemoveExpired(now, TimeSpan.FromMinutes(1), isHeld: _ => false));
+        Assert.False(table.TryResolve(key, out _));
+    }
+
+    [Fact]
     public void FlowTableExpiryRemovesCrossAdapterTransportAliases()
     {
         var table = new FlowTable();

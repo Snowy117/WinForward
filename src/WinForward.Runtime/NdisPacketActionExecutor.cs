@@ -71,7 +71,18 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         {
             var outcome = await _tcpProxy.HandlePacketAsync(packet, server, cancellationToken).ConfigureAwait(false);
             if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("tcp.packet.handled", packet, new RuntimeLogField("outcome", outcome));
-            if (outcome == TcpRedirectOutcome.NotRelevant)
+            if (outcome == TcpRedirectOutcome.Dropped)
+            {
+                // TIME_WAIT-grace tombstone hit: a straggler of a redirect torn down moments ago
+                // (final ACK, retransmitted FIN/ACK). It is consumed silently — reinjecting toward
+                // the original server would bounce an RST back at the client's finished connection,
+                // and Blocked would emit a misleading proxy-unavailable warning. The lease is
+                // already completed by the dispatcher. The trace follows the packet.dropped family
+                // (BlockAsync logs reason=policy); packet.completed belongs to the dispatcher, which
+                // emits it exactly once per packet.
+                if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("packet.dropped", packet, new RuntimeLogField("reason", "grace"));
+            }
+            else if (outcome == TcpRedirectOutcome.NotRelevant)
             {
                 // The flow is proxy-decided but this packet was never the coordinator's to handle
                 // (typically a connection established before capture started, so its SYN was never

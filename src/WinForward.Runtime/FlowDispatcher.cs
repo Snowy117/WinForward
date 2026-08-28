@@ -66,9 +66,13 @@ public sealed class FlowDispatcher
     /// <summary>
     /// Removes flow decisions idle past <paramref name="idleTimeout"/> so the bounded flow table
     /// does not accumulate stale one-shot flows (design §7). The runtime calls this on a periodic
-    /// sweep; active flows keep their decisions because observations touch them.
+    /// sweep; active flows keep their decisions because observations touch them. Entries whose
+    /// <paramref name="isHeld"/> predicate reports a live holder (e.g. a TCP redirect session
+    /// still relaying, or a flow inside its post-teardown grace window) are skipped with their
+    /// activity timestamp untouched, so they expire at their original idle point once the hold
+    /// lapses.
     /// </summary>
-    public int RemoveExpiredFlows(DateTimeOffset now, TimeSpan idleTimeout) => _flows.RemoveExpired(now, idleTimeout);
+    public int RemoveExpiredFlows(DateTimeOffset now, TimeSpan idleTimeout, Func<FlowKey, bool>? isHeld = null) => _flows.RemoveExpired(now, idleTimeout, isHeld);
 
     public async ValueTask DispatchAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
@@ -138,7 +142,10 @@ public sealed class FlowDispatcher
         if (_reverseHandler is null || packet.Context.Key.Protocol != TransportProtocol.Tcp) return false;
         var outcome = await _reverseHandler(packet, cancellationToken).ConfigureAwait(false);
         if (outcome == TcpRedirectOutcome.NotRelevant) return false;
-        var disposition = outcome == TcpRedirectOutcome.Injected ? PacketDisposition.ProxyConsumed : PacketDisposition.Block;
+        // Dropped is a TIME_WAIT-grace tombstone hit consumed by the proxy layer, like Injected.
+        // Block is reserved for outcome Blocked: routing a grace drop through BlockAsync would
+        // mislabel it as a policy drop (packet.dropped reason=policy) in the trace.
+        var disposition = outcome == TcpRedirectOutcome.Blocked ? PacketDisposition.Block : PacketDisposition.ProxyConsumed;
         if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.reverseHandled", packet, new RuntimeLogField("outcome", outcome));
         await CompleteAsync(packet, disposition, disposition == PacketDisposition.Block
             ? () => _executor.BlockAsync(packet, cancellationToken)

@@ -111,6 +111,26 @@ public sealed class FlowDispatcherTests
     }
 
     [Fact]
+    public async Task RemoveExpiredFlowsSkipsHeldEntriesAndDefaultsToRemoveAll()
+    {
+        var config = CreateConfig();
+        var dispatcher = new FlowDispatcher(config, new FakeGuard(), new FakeExecutor());
+        var key = CreateKey(TransportProtocol.Tcp);
+        await dispatcher.DispatchAsync(new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), Context(key)), CancellationToken.None);
+
+        var now = DateTimeOffset.UtcNow.AddMinutes(10);
+
+        // A held flow (relaying redirect session / grace tombstone) survives the sweep.
+        Assert.Equal(0, dispatcher.RemoveExpiredFlows(now, TimeSpan.FromMinutes(1), isHeld: _ => true));
+        // The hold lapsed: the entry expires at its original idle point.
+        Assert.Equal(1, dispatcher.RemoveExpiredFlows(now, TimeSpan.FromMinutes(1), isHeld: _ => false));
+
+        // A null predicate keeps the previous remove-everything behavior.
+        await dispatcher.DispatchAsync(new CapturedFlowPacket(new PacketLease(new byte[] { 2 }), Context(key)), CancellationToken.None);
+        Assert.Equal(1, dispatcher.RemoveExpiredFlows(now, TimeSpan.FromMinutes(1)));
+    }
+
+    [Fact]
     public void SelfTrafficTokenIsExactAndGenerationSafe()
     {
         var registry = new SelfTrafficRegistry();

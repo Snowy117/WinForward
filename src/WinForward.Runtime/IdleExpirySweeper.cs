@@ -1,3 +1,5 @@
+using WinForward.Core;
+
 namespace WinForward.Runtime;
 
 /// <summary>
@@ -57,8 +59,15 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
                 var now = DateTimeOffset.UtcNow;
                 try
                 {
-                    var flowCount = _dispatcher.RemoveExpiredFlows(now, _flowIdleTimeout);
+                    // TCP sweeps before flows: expiring a half-open session here releases its hold
+                    // (session first, then its grace tombstone) before the flow sweep runs, so a
+                    // dead session's flow decision expires on its own idle instead of being held a
+                    // round longer by a session that no longer exists. Flows held by a live
+                    // relaying session or a grace tombstone are skipped by the predicate and keep
+                    // their original idle point.
                     var tcpCount = _tcp is null ? 0 : await _tcp.RemoveExpiredAsync(now, _redirectIdleTimeout).ConfigureAwait(false);
+                    Func<FlowKey, bool>? isHeld = _tcp is null ? null : _tcp.HoldsFlow;
+                    var flowCount = _dispatcher.RemoveExpiredFlows(now, _flowIdleTimeout, isHeld);
                     var udpCount = _udp is null ? 0 : await _udp.RemoveExpiredAsync(now, _relayIdleTimeout).ConfigureAwait(false);
                     // Rides the existing sweep tick so the capacity summary needs no dedicated timer.
                     _tcp?.LogCapacitySummary();

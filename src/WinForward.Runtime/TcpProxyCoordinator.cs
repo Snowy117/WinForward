@@ -22,6 +22,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     private readonly ITcpProxyRelayFactory _relayFactory;
     private readonly ITcpRedirectInjector _injector;
     private readonly TcpRedirectTable _table;
+    private readonly TcpRedirectTombstoneTable _tombstones;
     private readonly SelfTrafficRegistry _selfTraffic;
     private readonly IAdapterLocalAddressProvider _localAddresses;
     private readonly IRuntimeLogger _logger;
@@ -62,6 +63,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         _localAddresses = localAddresses;
         _logger = logger ?? NullRuntimeLogger.Instance;
         _capacity = capacity ?? 16_384;
+        _tombstones = new TcpRedirectTombstoneTable(_capacity);
     }
 
     public TcpRedirectTable Table => _table;
@@ -495,12 +497,6 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     }
 
     /// <summary>
-    /// Routes a proxy-selected TCP packet to the correct redirect phase. The flow dispatcher sends
-    /// every packet on a proxy-decided TCP flow here. A SYN starts or re-injects the redirect; a
-    /// packet whose source is a known translated listener tuple is a reverse packet; anything else
-    /// is mid-flow data on the redirect leg and is passed through.
-    /// </summary>
-    /// <summary>
     /// Handles a packet that belongs to an active redirect leg (source or destination port is a
     /// proxy listener port) by reversing it back to the original server:client tuple. Returns
     /// <see cref="TcpRedirectOutcome.NotRelevant"/> when the packet has no proxy-port relationship,
@@ -517,11 +513,25 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         // listener port must be left to normal flow/policy handling, never dropped here.
         var key = packet.Context.Key;
         if (key.Protocol != TransportProtocol.Tcp) return TcpRedirectOutcome.NotRelevant;
-        if (!_table.IsReverseCandidate(key.Local, key.Remote)) return TcpRedirectOutcome.NotRelevant;
+        if (!_table.IsReverseCandidate(key.Local, key.Remote))
+        {
+            // TIME_WAIT grace: the reverse leg of a redirect torn down within the grace window still
+            // resolves here, so listener-side stragglers of the finished handshake are consumed
+            // instead of falling through to flow/policy handling as a fresh flow.
+            return _tombstones.TryHit(key.Local, key.Remote, DateTimeOffset.UtcNow)
+                ? TcpRedirectOutcome.Dropped
+                : TcpRedirectOutcome.NotRelevant;
+        }
 
         return await HandleReverseAsync(packet, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Routes a proxy-selected TCP packet to the correct redirect phase. The flow dispatcher sends
+    /// every packet on a proxy-decided TCP flow here. A SYN starts or re-injects the redirect; a
+    /// packet whose source is a known translated listener tuple is a reverse packet; anything else
+    /// is mid-flow data on the redirect leg and is passed through.
+    /// </summary>
     public async ValueTask<TcpRedirectOutcome> HandlePacketAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(packet);
@@ -551,6 +561,13 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         {
             return await ReinjectExistingFlowDataAsync(packet, existing, cancellationToken).ConfigureAwait(false);
         }
+
+        // TIME_WAIT grace: the redirect for this flow was torn down within the grace window, so
+        // this is a straggler of the finished handshake (retransmitted FIN/ACK, final ACK). Drop it
+        // instead of returning NotRelevant, whose executor fallback would reinject toward the real
+        // server — which never saw the proxied connection and answers the unknown tuple with a
+        // bounced RST.
+        if (_tombstones.TryHit(key, now)) return TcpRedirectOutcome.Dropped;
 
         return TcpRedirectOutcome.NotRelevant;
     }
@@ -610,8 +627,35 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         {
             await ReleaseRetiredSessionAsync(retired).ConfigureAwait(false);
         }
+
+        // Rides the same sweep tick (no dedicated timer): tombstones whose grace window elapsed are
+        // reclaimed here, after which same-tuple packets fall back to the pre-tombstone behavior.
+        // Tombstones are not included in the return value — it counts expired redirect sessions,
+        // keeping the sweeper's runtime.expired accounting unchanged.
+        _tombstones.RemoveExpired(now);
         return expired.Length;
     }
+
+    /// <summary>
+    /// Whether this coordinator still holds state for the flow: an active session exists (a
+    /// half-open redirect or a relaying connection) or the flow is inside its post-teardown grace
+    /// tombstone. The idle sweeper passes this as the flow-expiry hold predicate so a silently
+    /// relaying connection's flow-table decision is not expired out from under a live connection —
+    /// the flow-table counterpart of the M4 relaying exemption in <see cref="RemoveExpiredAsync"/>.
+    /// Generation is deliberately not compared: a new flow reusing the tuple claims a new table
+    /// generation, so the hold naturally lapses.
+    /// </summary>
+    internal bool HoldsFlow(FlowKey key)
+    {
+        lock (_gate)
+        {
+            if (_sessions.ContainsKey(key)) return true;
+        }
+        return _tombstones.TryHit(key, DateTimeOffset.UtcNow);
+    }
+
+    /// <summary>The TIME_WAIT-grace tombstone index; internal for tests to advance the grace window.</summary>
+    internal TcpRedirectTombstoneTable Tombstones => _tombstones;
 
     public async ValueTask DisposeAsync()
     {
@@ -910,7 +954,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         TcpRedirectSession? session;
         lock (_gate) _sessions.TryGetValue(association.OriginalKey, out session);
         if (session is not null) await TearDownSessionAsync(session).ConfigureAwait(false);
-        else _table.TryRemove(association);
+        else RemoveAssociationFromTable(association);
     }
 
     private void EnterSetup()
@@ -939,7 +983,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
 
     private async ValueTask ReleaseAssociationAsync(ITcpRedirectListener listener, TcpRedirectAssociation association, SelfTrafficRegistry.SelfTrafficToken? selfTrafficToken)
     {
-        _table.TryRemove(association);
+        RemoveAssociationFromTable(association);
         try
         {
             try { await listener.DisposeAsync().ConfigureAwait(false); }
@@ -949,6 +993,31 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         {
             selfTrafficToken?.Dispose();
         }
+    }
+
+    /// <summary>
+    /// The TIME_WAIT-grace window a torn-down redirect stays resolvable as a tombstone. 60s covers
+    /// the handshake tail (the client's final ACK) and common FIN retransmissions (RTO backoff
+    /// typically stays under 10s) without parking entries for a full 240s TIME_WAIT.
+    /// </summary>
+    private static readonly TimeSpan TombstoneGracePeriod = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Removes the association from the redirect table and, when the removal wins, records a
+    /// TIME_WAIT-grace tombstone under both of its lookup keys. Every teardown path — relay
+    /// completion, relay setup failure, fail-closed release, and global dispose — funnels through
+    /// here (via <see cref="ReleaseAssociationAsync"/> or <see cref="FailAssociationAsync"/>), so
+    /// this is the single tombstone write point covering all entries. Within the grace window,
+    /// stragglers of the finished handshake resolve as <see cref="TcpRedirectOutcome.Dropped"/>
+    /// instead of NotRelevant, whose executor fallback would reinject toward the real server —
+    /// a server that never saw the proxied connection and answers the unknown tuple with a
+    /// bounced RST. Tombstones occupy neither the redirect table's claim capacity nor the session
+    /// budget.
+    /// </summary>
+    private void RemoveAssociationFromTable(TcpRedirectAssociation association)
+    {
+        if (!_table.TryRemove(association)) return;
+        _tombstones.TryAdd(association.OriginalKey, association.ReverseSourceEndpoint, association.ReverseDestinationEndpoint, DateTimeOffset.UtcNow + TombstoneGracePeriod);
     }
 
     private void LogDebug(string eventName, TcpRedirectSession session, string outcome)
