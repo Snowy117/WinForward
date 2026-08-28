@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 4
+- **Total Sessions**: 5
 - **Last Active**: 2026-08-28
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~98 | Active |
+| `journal-1.md` | ~120 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 5 | 2026-08-28 | fix-minor-races 落地 + eof-reset 任务树整体收官 | `e2dd831`, `31eeb42` | `master` |
 | 4 | 2026-08-28 | fix-table-lifecycle: teardown 墓碑与 flow 豁免 | `604eeb3`, `32fe5a8` | `master` |
 | 3 | 2026-08-28 | fix-port-budget: tcpFlowCapacity 预算落地 | `19ce572`, `16022a8` | `master` |
 | 2 | 2026-08-27 | Datapath throughput: batched reads, pooling, hardware smoke | `fec967a`, `5ad8e60`, `2519b0d`, `3f30cf8` | `master` |

@@ -96,3 +96,25 @@ Analyzed EOF/reset root causes into a parent task with four children; completed 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 5: fix-minor-races 落地 + eof-reset 任务树整体收官
+
+**Date**: 2026-08-28
+**Task**: fix-minor-races 落地 + eof-reset 任务树整体收官
+**Branch**: `master`
+
+### Summary
+
+D 组竞态修复：RST 动态序号跟踪（RFC793 wrap-aware）、注入失败显式化（reason=injectionFailure 经墓碑单写点）、SOCKS5 预算 10s×2（原最坏 150s）；smoke 零回归（820/820 配对）。父任务 eof-reset-design-flaws 集成验收全勾选归档：notrelevant 113→11（-90%）、端口预算 4096 先行截流、基准 2.2-2.5M pps。四子任务全部完成，Windows A/B 压测为已知限制。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e2dd831` | (see git log) |
+| `31eeb42` | (see git log) |
+
+### Status
+
+[OK] **Completed**
