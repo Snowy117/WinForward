@@ -33,6 +33,8 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     private Task? _disposeTask;
     private int _inflightSetups;
     private long _concurrentLoserCount;
+    private long _capacityRejectionCount;
+    private long _reportedCapacityRejectionCount;
     private bool _disposed;
 
     public TcpProxyCoordinator(
@@ -43,7 +45,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         SelfTrafficRegistry selfTraffic,
         IAdapterLocalAddressProvider localAddresses,
         IRuntimeLogger? logger = null,
-        int capacity = 16_384)
+        int? capacity = null)
     {
         ArgumentNullException.ThrowIfNull(listenerFactory);
         ArgumentNullException.ThrowIfNull(relayFactory);
@@ -51,7 +53,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(table);
         ArgumentNullException.ThrowIfNull(selfTraffic);
         ArgumentNullException.ThrowIfNull(localAddresses);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capacity);
+        if (capacity is < 1) throw new ArgumentOutOfRangeException(nameof(capacity), capacity, "Capacity must be positive.");
         _listenerFactory = listenerFactory;
         _relayFactory = relayFactory;
         _injector = injector;
@@ -59,7 +61,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         _selfTraffic = selfTraffic;
         _localAddresses = localAddresses;
         _logger = logger ?? NullRuntimeLogger.Instance;
-        _capacity = capacity;
+        _capacity = capacity ?? 16_384;
     }
 
     public TcpRedirectTable Table => _table;
@@ -71,6 +73,31 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     /// exactly-once path was exercised under genuine concurrency.
     /// </summary>
     internal long ConcurrentLoserCount => Interlocked.Read(ref _concurrentLoserCount);
+
+    /// <summary>
+    /// The total number of SYN arrivals rejected by the capacity gate since construction. Unlike
+    /// error-type failures this counts explicit budget management: the flow was blocked because the
+    /// concurrent proxied-flow budget was exhausted, not because setup failed.
+    /// </summary>
+    internal long CapacityRejectionCount => Interlocked.Read(ref _capacityRejectionCount);
+
+    /// <summary>
+    /// Emits an info-level summary of capacity-gate rejections, but only when the count advanced
+    /// since the previous call. The idle-expiry sweeper invokes this on its existing periodic tick
+    /// so no dedicated timer is introduced. Per-rejection trace events already exist
+    /// (<c>tcp.redirect.rejected reason=capacity</c>); this is the info-level aggregate.
+    /// </summary>
+    internal void LogCapacitySummary()
+    {
+        if (!_logger.IsEnabled(RuntimeLogLevel.Info)) return;
+        var total = Interlocked.Read(ref _capacityRejectionCount);
+        var previouslyReported = Interlocked.Exchange(ref _reportedCapacityRejectionCount, total);
+        if (total == previouslyReported) return;
+        _logger.Event(RuntimeLogLevel.Info, "tcp.redirect.capacity",
+            new("budget", _capacity),
+            new("rejectedTotal", total),
+            new("rejectedSinceLastSummary", total - previouslyReported));
+    }
 
     public async ValueTask<TcpRedirectOutcome> HandleSynAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
     {
@@ -99,6 +126,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
             {
                 if (_sessions.Count >= _capacity)
                 {
+                    Interlocked.Increment(ref _capacityRejectionCount);
                     LogTrace("tcp.redirect.rejected", packet, null, "capacity");
                     return TcpRedirectOutcome.Blocked;
                 }

@@ -24,6 +24,9 @@ public sealed class WinForwardConfigDto
 
     [JsonPropertyName("processingFailureAction")]
     public string? ProcessingFailureAction { get; init; }
+
+    [JsonPropertyName("tcpFlowCapacity")]
+    public int? TcpFlowCapacity { get; init; }
 }
 
 public sealed class Socks5ServerDto
@@ -77,10 +80,30 @@ public sealed record ValidatedConfiguration(
     IReadOnlyDictionary<string, Socks5Server> Servers,
     PolicySnapshot Policy,
     RuntimeLogLevel LogLevel = RuntimeLogLevel.Info,
-    bool IncludeProcessPathInLogs = false);
+    bool IncludeProcessPathInLogs = false,
+    int TcpFlowCapacity = ConfigurationLoader.DefaultTcpFlowCapacity)
+{
+    /// <summary>
+    /// Non-blocking validation findings (for example a tcpFlowCapacity above the warning
+    /// threshold) surfaced alongside an otherwise valid configuration.
+    /// </summary>
+    public IReadOnlyList<ConfigDiagnostic> Warnings { get; init; } = [];
+}
 
 public static class ConfigurationLoader
 {
+    /// <summary>The default concurrent proxied TCP flow budget: 16,384 ephemeral ports x 50% headroom / 2 ports per flow.</summary>
+    public const int DefaultTcpFlowCapacity = 4_096;
+
+    /// <summary>The smallest accepted tcpFlowCapacity; a zero or negative budget would block every flow.</summary>
+    public const int MinimumTcpFlowCapacity = 1;
+
+    /// <summary>The largest accepted tcpFlowCapacity; above this the budget offers no port-pool protection at all.</summary>
+    public const int MaximumTcpFlowCapacity = 8_192;
+
+    /// <summary>Values above the default warn during validation because they shrink the reserved ephemeral-port headroom.</summary>
+    public const int TcpFlowCapacityWarningThreshold = 4_096;
+
     public static bool TryParse(string json, out WinForwardConfigDto? dto, out IReadOnlyList<ConfigDiagnostic> diagnostics)
     {
         try
@@ -112,8 +135,10 @@ public static class ConfigurationLoader
     public static bool TryValidate(WinForwardConfigDto dto, out ValidatedConfiguration? configuration, out IReadOnlyList<ConfigDiagnostic> diagnostics)
     {
         var errors = new List<ConfigDiagnostic>();
+        var warnings = new List<ConfigDiagnostic>();
         var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase);
         var logLevel = ParseLogLevel(dto, errors);
+        var tcpFlowCapacity = ParseTcpFlowCapacity(dto, errors, warnings);
 
         if (dto.Socks5Servers is null)
         {
@@ -156,7 +181,11 @@ public static class ConfigurationLoader
             servers,
             new PolicySnapshot(rules, fallback.Value),
             logLevel,
-            rules.Any(static rule => rule.Matcher.Processes?.Any(IsPathSelector) == true));
+            rules.Any(static rule => rule.Matcher.Processes?.Any(IsPathSelector) == true),
+            tcpFlowCapacity)
+        {
+            Warnings = warnings,
+        };
         diagnostics = [];
         return true;
     }
@@ -189,6 +218,26 @@ public static class ConfigurationLoader
         if (level is not null) return level.Value;
         errors.Add(new("logLevel", "Log level must be error, warn, info, debug, or trace."));
         return RuntimeLogLevel.Info;
+    }
+
+    /// <summary>
+    /// Normalizes the optional tcpFlowCapacity budget. Omitted values fall back to the default;
+    /// out-of-range values are rejected with the accepted range, and values above the default
+    /// collect a non-blocking warning because they shrink the reserved ephemeral-port headroom.
+    /// </summary>
+    private static int ParseTcpFlowCapacity(WinForwardConfigDto dto, List<ConfigDiagnostic> errors, List<ConfigDiagnostic> warnings)
+    {
+        if (dto.TcpFlowCapacity is not { } value) return DefaultTcpFlowCapacity;
+        if (value is < MinimumTcpFlowCapacity or > MaximumTcpFlowCapacity)
+        {
+            errors.Add(new("tcpFlowCapacity", $"TCP flow capacity must be in {MinimumTcpFlowCapacity}..{MaximumTcpFlowCapacity}."));
+            return DefaultTcpFlowCapacity;
+        }
+        if (value > TcpFlowCapacityWarningThreshold)
+        {
+            warnings.Add(new("tcpFlowCapacity", $"Values above {TcpFlowCapacityWarningThreshold} leave less ephemeral-port headroom; each proxied TCP flow consumes 2 local ports."));
+        }
+        return value;
     }
 
     private static bool IsPathSelector(string selector) => selector.IndexOfAny(['/', '\\']) >= 0;

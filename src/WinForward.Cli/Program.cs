@@ -118,6 +118,10 @@ internal static class Program
         try
         {
             logger.Info($"Runtime log level: {configuration.LogLevel.ToString().ToLowerInvariant()}.");
+            foreach (var warning in configuration.Warnings)
+            {
+                logger.Warn($"Configuration warning: {warning}");
+            }
             return await RunInterceptionAsync(configuration, logger).ConfigureAwait(false);
         }
         catch (DllNotFoundException)
@@ -231,14 +235,18 @@ internal static class Program
         SelfTrafficRegistry selfTraffic,
         IRuntimeLogger logger)
     {
+        // The tcpFlowCapacity budget is the single source of truth for both the coordinator's
+        // session gate and the redirect table's bounded capacity (design §4).
+        var redirectTable = new TcpRedirectTable(capacity: configuration.TcpFlowCapacity);
         var tcpCoordinator = new TcpProxyCoordinator(
             new TcpRedirectListenerFactory(),
             new TcpProxyRelayFactory(selfTraffic),
             new TcpRedirectInjector(reinjector),
-            new TcpRedirectTable(),
+            redirectTable,
             selfTraffic,
             new WindowsAdapterLocalAddressProvider(),
-            logger);
+            logger,
+            capacity: configuration.TcpFlowCapacity);
         try
         {
             var udpCoordinator = CreateUdpCoordinator(driver, scope, reinjector, selfTraffic, logger);
@@ -344,8 +352,12 @@ internal static class Program
 
         try
         {
-            if (!TryLoadConfig(path, out _)) return 1;
-            Console.WriteLine("Configuration is valid.");
+            if (!TryLoadConfig(path, out var configuration)) return 1;
+            Console.WriteLine($"Configuration is valid. tcpFlowCapacity: {configuration!.TcpFlowCapacity}");
+            foreach (var warning in configuration.Warnings)
+            {
+                Console.Error.WriteLine($"warning {warning}");
+            }
             return 0;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)

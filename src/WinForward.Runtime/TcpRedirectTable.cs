@@ -88,10 +88,10 @@ public sealed class TcpRedirectTable
     private readonly int _capacity;
     private long _nextGeneration;
 
-    public TcpRedirectTable(int capacity = 16_384)
+    public TcpRedirectTable(int? capacity = null)
     {
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capacity);
-        _capacity = capacity;
+        if (capacity is < 1) throw new ArgumentOutOfRangeException(nameof(capacity), capacity, "Capacity must be positive.");
+        _capacity = capacity ?? 16_384;
     }
 
     public int Count

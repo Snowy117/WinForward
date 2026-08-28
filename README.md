@@ -72,7 +72,8 @@ JSON, rejected on any unknown property. The top level is:
   "logLevel": "info",
   "fallbackAction": "pass",
   "proxyUnavailableAction": "block",
-  "processingFailureAction": "block"
+  "processingFailureAction": "block",
+  "tcpFlowCapacity": 4096
 }
 ```
 
@@ -98,6 +99,14 @@ JSON, rejected on any unknown property. The top level is:
   requires an explicit catch-all `proxy` rule. Forwarded traffic does not use this fallback.
 - `proxyUnavailableAction` / `processingFailureAction`: optional; both default to `block` and
   only `block` is accepted in the first release.
+- `tcpFlowCapacity`: optional concurrent proxied TCP flow budget, `1..8192`, default `4096`.
+  Each proxied TCP flow consumes two local ephemeral ports (redirect listener + SOCKS5 control),
+  so the budget keeps WinForward's consumption at a safe fraction of the default Windows dynamic
+  port range (~16K) including TIME_WAIT churn. New flows above the budget are blocked
+  fail-closed with a `reason=capacity` trace event and a periodic info summary. Values above
+  `4096` are accepted with a validation warning about port-pool pressure. Omitting the field
+  deliberately tightens the limit from the previous implicit 16,384 sessions; configure a higher
+  value explicitly (max 8192) if more concurrent flows are required.
 - `logLevel`: optional runtime verbosity: `error`, `warn`, `info`, `debug`, or `trace`. Values are
   case-insensitive and surrounding whitespace is ignored; omitted `logLevel` defaults to `info`.
   `info` retains concise lifecycle output, `debug` adds flow and proxy lifecycle events, and `trace`

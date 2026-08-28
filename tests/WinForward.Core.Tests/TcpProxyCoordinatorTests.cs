@@ -154,6 +154,47 @@ public sealed class TcpProxyCoordinatorTests
     }
 
     [Fact]
+    public async Task CapacityRejectionIsCountedTracedAndSummarizedAtInfoLevel()
+    {
+        var listenerFactory = new FakeListenerFactory();
+        var injector = new FakeInjector();
+        var selfTraffic = new SelfTrafficRegistry();
+        var table = new TcpRedirectTable(capacity: 1);
+        var logger = new RecordingRuntimeLogger();
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider(), logger, capacity: 1);
+
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None));
+        Assert.Equal(TcpRedirectOutcome.Blocked, await coordinator.HandleSynAsync(MakeSynPacket(IPAddress.Parse("192.0.2.11"), IPAddress.Parse("192.0.2.99"), 53001, 80), s_server, CancellationToken.None));
+
+        Assert.Equal(1, coordinator.CapacityRejectionCount);
+        var rejection = Assert.Single(logger.Events, item => string.Equals(item.Name, "tcp.redirect.rejected", StringComparison.Ordinal));
+        Assert.Contains(rejection.Fields, field => string.Equals(field.Key, "reason", StringComparison.Ordinal) && field.Value is "capacity");
+
+        coordinator.LogCapacitySummary();
+        var summary = Assert.Single(logger.Events, item => string.Equals(item.Name, "tcp.redirect.capacity", StringComparison.Ordinal));
+        Assert.Equal(RuntimeLogLevel.Info, summary.Level);
+        Assert.Contains(summary.Fields, field => string.Equals(field.Key, "budget", StringComparison.Ordinal) && field.Value is 1);
+        Assert.Contains(summary.Fields, field => string.Equals(field.Key, "rejectedTotal", StringComparison.Ordinal) && field.Value is 1L);
+        Assert.Contains(summary.Fields, field => string.Equals(field.Key, "rejectedSinceLastSummary", StringComparison.Ordinal) && field.Value is 1L);
+
+        // The summary repeats only when further rejections arrived.
+        var eventsAfterSummary = logger.Events.Count;
+        coordinator.LogCapacitySummary();
+        Assert.Equal(eventsAfterSummary, logger.Events.Count);
+    }
+
+    [Fact]
+    public async Task OmittedCapacityKeepsLegacyDefaultBudget()
+    {
+        var listenerFactory = new FakeListenerFactory();
+        var table = new TcpRedirectTable();
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), new FakeInjector(), table, new SelfTrafficRegistry(), new FakeLocalAddressProvider());
+
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None));
+        Assert.Equal(0, coordinator.CapacityRejectionCount);
+    }
+
+    [Fact]
     public async Task ListenerAllocationFailureBlocks()
     {
         var listenerFactory = new FakeListenerFactory(throwOnCreate: true);
@@ -1193,6 +1234,20 @@ public sealed class TcpProxyCoordinatorTests
             lock (InjectedFrames) InjectedFrames.Add((rewrittenFrame.ToArray(), towardMstcp, adapterHandle));
             return ValueTask.CompletedTask;
         }
+    }
+
+    private sealed class RecordingRuntimeLogger : IRuntimeLogger
+    {
+        public List<(RuntimeLogLevel Level, string Name, RuntimeLogField[] Fields)> Events { get; } = [];
+        public List<(RuntimeLogLevel Level, string Message)> Lines { get; } = [];
+
+        public bool IsEnabled(RuntimeLogLevel level) => true;
+        public void Trace(string message) => Lines.Add((RuntimeLogLevel.Trace, message));
+        public void Debug(string message) => Lines.Add((RuntimeLogLevel.Debug, message));
+        public void Info(string message) => Lines.Add((RuntimeLogLevel.Info, message));
+        public void Warn(string message) => Lines.Add((RuntimeLogLevel.Warn, message));
+        public void Error(string message) => Lines.Add((RuntimeLogLevel.Error, message));
+        public void Event(RuntimeLogLevel level, string eventName, params RuntimeLogField[] fields) => Events.Add((level, eventName, fields));
     }
 
     private sealed class GatedRelayFactory : ITcpProxyRelayFactory
