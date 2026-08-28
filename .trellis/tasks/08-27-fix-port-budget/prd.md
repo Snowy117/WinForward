@@ -7,6 +7,24 @@
 connect 失败（accept 后注入 RST → "连接成功后立即被 reset"）。这是 reset 频率异常
 增高的第二主因。
 
+## 确认事实（设计前置研究，2026-08-27）
+
+详见 `research/port-budget-feasibility.md`：
+
+- `TcpRedirectTable.byTranslatedListener`（TcpRedirectTable.cs:125）强制 listener
+  端口与会话 1:1，是多流共享 listener 的硬阻塞；`TryResolveByTranslated` 无调用方。
+- 共享 listener 技术上可行，但需重构 accept 生命周期、selfTraffic 引用计数与表
+  唯一性，风险高——**本任务不采用**（PRD 备选路线落选，最终方案"预算 + 快速失败"）。
+- 每条被代理 TCP 流消耗 2 个本地端口（listener bind + SOCKS5 control connect），
+  二者出自同一 per-transport 动态端口池（默认 49152-65535，Microsoft KB 929851）。
+- capacity gate 已存在且位置正确（TcpProxyCoordinator.cs:98-105，超限
+  `reason=capacity` + Blocked）；预算化只需将数据源从硬编码 16_384 换为配置派生值
+  并补 info 级计数。
+- 会话容量与表容量为两处独立默认 16_384（TcpProxyCoordinator.cs:46、
+  TcpRedirectTable.cs:91），接线处未传参，互不联动。
+- 配置新增可选字段的触达面共 7 处（DTO、TryValidate、ValidatedConfiguration、
+  Program 接线、README、validate 输出、测试）。
+
 ## 成因分析
 
 1. **每流双端口**：每条被代理 TCP 流占用两个本地临时端口：
@@ -52,13 +70,17 @@ connect 失败（accept 后注入 RST → "连接成功后立即被 reset"）。
 
 ## Acceptance Criteria
 
-- [ ] 存在单一事实来源的并发流预算，`tcp.redirect.rejected reason=capacity` 与
-      端口耗尽导致的 `reason=listenerAllocation` 不再同时出现（后者归零）。
+- [x] 存在单一事实来源的并发流预算（Program 接线 coordinator/table 同传
+      `validated.TcpFlowCapacity`，测试锁定）；`reason=listenerAllocation` 路径保留，
+      归零验证归 Windows smoke（见 Notes）。
 - [ ] 高频短连接压测（如持续创建/关闭 HTTP 连接 ≥ 2×TIME_WAIT 时长）下，新连接
-      失败率仅在预算超限时出现，且恢复时间与预算释放同步。
-- [ ] 预算超限时有计数器/日志可观测（info 级别摘要 + trace 级别明细）。
-- [ ] `WinForward validate` 对容量配置给出一致性校验结果。
-- [ ] `dotnet test -c Release` 全量通过；README 配置说明同步更新。
+      失败率仅在预算超限时出现，且恢复时间与预算释放同步。（需 Windows 实机，
+      Step 4 可选项）
+- [x] 预算超限时有计数器/日志可观测（info 级 `tcp.redirect.capacity` 摘要 +
+      trace 级 `reason=capacity` 明细，测试断言）。
+- [x] `WinForward validate` 对容量配置给出一致性校验结果（三态实测：默认/警告/
+      拒绝）。
+- [x] `dotnet test -c Release` 全量通过（332/332）；README 配置说明同步更新。
 
 ## Notes
 

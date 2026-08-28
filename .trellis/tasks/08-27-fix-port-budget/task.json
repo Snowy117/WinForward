@@ -3,7 +3,7 @@
   "name": "fix-port-budget",
   "title": "TCP 重定向端口预算与连接上限保护",
   "description": "主因②：控制每流双临时端口消耗，防止端口池耗尽导致的 bind 失败与 SOCKS5 失败 RST",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

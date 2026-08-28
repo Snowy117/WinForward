@@ -1,1 +1,2 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/tasks/08-27-fix-port-budget/research/port-budget-feasibility.md", "reason": "预算模型与触达面研究结论（本设计的事实依据）"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "fail-closed 拒绝路径与错误语义的既有约定"}
