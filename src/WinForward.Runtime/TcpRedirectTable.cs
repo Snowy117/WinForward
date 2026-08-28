@@ -70,6 +70,48 @@ public sealed class TcpRedirectAssociation
     /// <summary>The listener-side ISN, observed when the reverse SYN-ACK passed the reverse hook.</summary>
     public uint? ServerInitialSeq { get; internal set; }
 
+    /// <summary>
+    /// The highest client-side sequence advancement observed on the forward leg
+    /// (seq + payload length, SYN/FIN each counting one), or null before any forward frame
+    /// passed the redirect. A reset acknowledging this value stays in the client's window even
+    /// after it already sent request data; null degrades to <see cref="ClientInitialSeq"/> + 1.
+    /// </summary>
+    public uint? ClientNextSeq { get { lock (_sequenceGate) return _clientNextSeq; } }
+
+    /// <summary>The server-side counterpart of <see cref="ClientNextSeq"/>, tracked on the reverse leg.</summary>
+    public uint? ServerNextSeq { get { lock (_sequenceGate) return _serverNextSeq; } }
+
+    private readonly Lock _sequenceGate = new();
+    private uint? _clientNextSeq;
+    private uint? _serverNextSeq;
+
+    /// <summary>
+    /// Advances the forward-leg tracker to <paramref name="sequenceNext"/> when it lies ahead of
+    /// the tracked value (TCP wraparound-aware), so retransmissions and pure ACKs never move it
+    /// backwards. Guarded by its own lock: the trackers are written on the data path and read on
+    /// the teardown path, neither of which holds the table gate.
+    /// </summary>
+    internal void ObserveClientSequence(uint sequenceNext)
+    {
+        lock (_sequenceGate)
+        {
+            if (_clientNextSeq is not uint current || IsSequenceAhead(sequenceNext, current)) _clientNextSeq = sequenceNext;
+        }
+    }
+
+    /// <summary>The reverse-leg counterpart of <see cref="ObserveClientSequence"/>.</summary>
+    internal void ObserveServerSequence(uint sequenceNext)
+    {
+        lock (_sequenceGate)
+        {
+            if (_serverNextSeq is not uint current || IsSequenceAhead(sequenceNext, current)) _serverNextSeq = sequenceNext;
+        }
+    }
+
+    /// <summary>RFC 793-style serial-number comparison: candidate is ahead when the wrapped
+    /// difference is positive and non-zero (strictly forward within the comparison window).</summary>
+    private static bool IsSequenceAhead(uint candidate, uint current) => candidate != current && (int)(candidate - current) > 0;
+
     public void Touch(DateTimeOffset now) => LastActivityUtc = now;
 }
 

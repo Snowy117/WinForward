@@ -9,6 +9,14 @@ namespace WinForward.Runtime;
 [SupportedOSPlatform("windows")]
 public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic) : ITcpProxyRelayFactory
 {
+    // The redirect leg completes the client's TCP handshake in tens of milliseconds, so the relay's
+    // upstream connect budget bounds how long an unreachable/black-holed SOCKS5 server delays the
+    // client's reset: worst case DNS + two ten-second attempts instead of the per-attempt 30s
+    // defaults (worst case ~150s). Refused/unreachable failures still surface in sub-second time
+    // because a rejected connect fails the attempt immediately.
+    internal const int RelayConnectMaxAttempts = 2;
+    internal static readonly TimeSpan RelayConnectAttemptTimeout = TimeSpan.FromSeconds(10);
+
     public async ValueTask<ITcpRelay> EstablishAsync(Endpoint originalDestination, ITcpAcceptedConnection acceptedConnection, Socks5Server server, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(acceptedConnection);
@@ -28,7 +36,9 @@ public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic) : ITcp
             selfTraffic.Register(new SelfTrafficRegistry.SelfTrafficKey(
                 TransportProtocol.Tcp,
                 Endpoint.From(local.Address, checked((ushort)local.Port)),
-                Endpoint.From(remote.Address, checked((ushort)remote.Port))))).ConfigureAwait(false);
+                Endpoint.From(remote.Address, checked((ushort)remote.Port)))),
+            maxAttempts: RelayConnectMaxAttempts,
+            perAttemptTimeout: RelayConnectAttemptTimeout).ConfigureAwait(false);
         try
         {
             var destinationAddress = originalDestination.Address;

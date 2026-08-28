@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Net;
 using System.Runtime.InteropServices;
 using WinForward.Configuration;
@@ -266,13 +267,10 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
             return null;
         }
 
-        // L4 clarity: this exact self-traffic key cannot be matched by the wildcard registry because
-        // the observable reverse leg is (client:orig_port) -> (client_ip:proxy_port), and the
-        // per-client source port is unknown until a connection arrives. The listener/reverse leg is
-        // therefore guarded by the TCP-only reverse hook (see HandleReverseIfApplicableAsync, gated
-        // to TCP by H1 in the dispatcher), which reverses before flow lookup/policy. This
-        // registration is retained as writer-intent belt-and-suspenders and because the registry is
-        // the natural home for an exact local-loopback listener tuple when one becomes expressible.
+        // L4 clarity: the wildcard registry cannot match this key — the observable reverse leg is
+        // (client:orig_port) -> (client_ip:proxy_port), whose per-client source port is unknown
+        // until a connection arrives. The TCP-only reverse hook guards that leg; this registration
+        // stays as writer-intent belt-and-suspenders for an exact listener tuple.
         try
         {
             await _injector.InjectAsync(frame, towardMstcp: true, packet.Metadata.AdapterHandle, cancellationToken).ConfigureAwait(false);
@@ -283,11 +281,12 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
             await TearDownSessionAsync(session).ConfigureAwait(false);
             throw;
         }
-        catch
+        catch (Exception exception)
         {
-            await TearDownSessionAsync(session).ConfigureAwait(false);
+            // The single observable exit for injection failures; the reset leg is inert for a
+            // first SYN (no server ISN yet) and the fail path tears the session down.
+            await HandleInjectionFailureAsync(association, packet.Metadata.AdapterHandle, towardMstcp: true, exception).ConfigureAwait(false);
             LogTrace("tcp.redirect.rejected", packet, association, "injection");
-            _logger.Warn("TCP redirect failed: rewritten-frame injection failed, blocking the flow.");
             return null;
         }
 
@@ -395,6 +394,49 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         association.ServerInitialSeq = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(frame.Slice(sequenceOffset, 4));
     }
 
+    /// <summary>
+    /// Reads a TCP frame's sequence-space advancement — seq plus payload length, with SYN and FIN
+    /// each consuming one sequence number — from the pre-rewrite frame. The transport length comes
+    /// from the IP header rather than the frame length so Ethernet padding is not counted as
+    /// payload. Returns false for non-TCP or unparseable frames, which simply leaves the trackers
+    /// untouched (the reset then degrades to the ISN-based values).
+    /// </summary>
+    private static bool TryReadTcpSequenceAdvance(ReadOnlySpan<byte> frame, out uint sequenceNext)
+    {
+        sequenceNext = 0;
+        if (!IpTcpUdpPacket.TryParse(frame, out var view) || view.Transport != PacketTransport.Tcp) return false;
+        var etherType = System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(12, 2));
+        var transportLength = etherType == 0x0800
+            ? System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(16, 2)) - view.IpHeaderLength
+            : System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(18, 2)) - (view.IpHeaderLength - 40);
+        if (transportLength < view.TransportHeaderLength) return false;
+        var tcpOffset = 14 + view.IpHeaderLength;
+        var sequence = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(frame.Slice(tcpOffset + 4, 4));
+        var flags = frame[tcpOffset + 13];
+        var advance = (uint)(transportLength - view.TransportHeaderLength);
+        const byte Syn = 0x02;
+        const byte Fin = 0x01;
+        if ((flags & Syn) != 0) advance++;
+        if ((flags & Fin) != 0) advance++;
+        sequenceNext = sequence + advance;
+        return true;
+    }
+
+    /// <summary>
+    /// Advances the client-side sequence tracker on the forward leg. Must run on the original
+    /// (pre-rewrite) frame — the same read-then-write invariant as <see cref="RecordClientSyn"/>.
+    /// </summary>
+    private static void TrackClientSequence(ReadOnlySpan<byte> frame, TcpRedirectAssociation association)
+    {
+        if (TryReadTcpSequenceAdvance(frame, out var next)) association.ObserveClientSequence(next);
+    }
+
+    /// <summary>Advances the server-side sequence tracker on the reverse leg (pre-rewrite frame).</summary>
+    private static void TrackServerSequence(ReadOnlySpan<byte> frame, TcpRedirectAssociation association)
+    {
+        if (TryReadTcpSequenceAdvance(frame, out var next)) association.ObserveServerSequence(next);
+    }
+
     private async ValueTask<TcpRedirectOutcome> ReinjectExistingFlowDataAsync(CapturedFlowPacket packet, TcpRedirectAssociation association, CancellationToken cancellationToken)
     {
         var frame = packet.Lease.Frame;
@@ -403,6 +445,9 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
             await FailAssociationAsync(association).ConfigureAwait(false);
             return TcpRedirectOutcome.Blocked;
         }
+        // Read-then-write: advance the client sequence tracker on the original frame before the
+        // in-place rewrite mutates it, keeping the reset builder's ack in the client's window.
+        TrackClientSequence(frame.Span, association);
         var originalClient = packet.Context.Key.Local;
         var originalServer = association.OriginalKey.Remote;
         if (!TryRewriteForwardLeg(writableFrame, originalClient, originalServer, association, association.TranslatedListenerTuple.Port))
@@ -425,9 +470,9 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
             await FailAssociationAsync(association).ConfigureAwait(false);
             throw;
         }
-        catch
+        catch (Exception exception)
         {
-            await FailAssociationAsync(association).ConfigureAwait(false);
+            await HandleInjectionFailureAsync(association, packet.Metadata.AdapterHandle, towardMstcp: true, exception).ConfigureAwait(false);
             return TcpRedirectOutcome.Blocked;
         }
         return TcpRedirectOutcome.Injected;
@@ -443,21 +488,21 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         // dispatcher already gates the reverse handler to TCP (H1), but a non-TCP packet must never
         // be routed into reverse handling regardless of call context.
         if (key.Protocol != TransportProtocol.Tcp) return TcpRedirectOutcome.NotRelevant;
-        var now = DateTimeOffset.UtcNow;
-        if (!_table.TryResolveByReverse(key.Local, key.Remote, now, out var association) || association is null) return TcpRedirectOutcome.NotRelevant;
+        if (!_table.TryResolveByReverse(key.Local, key.Remote, DateTimeOffset.UtcNow, out var association) || association is null) return TcpRedirectOutcome.NotRelevant;
 
         var original = association.OriginalKey;
         var frame = packet.Lease.Frame;
-        var originalRemote = original.Remote;
-        var originalClient = original.Local;
-        // Read-then-write: record the SYN-ACK sequence before the in-place rewrite mutates the frame.
+        // Read-then-write: record the SYN-ACK sequence and advance the server sequence tracker
+        // before the in-place rewrite mutates the frame.
         RecordServerSynAck(frame.Span, association);
+        TrackServerSequence(frame.Span, association);
 
         // Host-originated flows terminate on this host (reverse to MSTCP); forwarded flows (client
         // on a VM/remote side) must be sent back to the origin adapter instead.
         var towardMstcp = original.Origin == FlowOriginKind.Host;
+        var targetHandle = towardMstcp ? packet.Metadata.AdapterHandle : association.OriginAdapterHandle;
         if (!TryGetWritableFrame(frame, out var writableFrame)
-            || !PacketChecksums.TryRewriteTcpEndpoints(writableFrame, originalRemote.Address, originalRemote.Port, originalClient.Address, originalClient.Port))
+            || !PacketChecksums.TryRewriteTcpEndpoints(writableFrame, original.Remote.Address, original.Remote.Port, original.Local.Address, original.Local.Port))
         {
             await FailAssociationAsync(association).ConfigureAwait(false);
             return TcpRedirectOutcome.Blocked;
@@ -468,12 +513,11 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         if (towardMstcp) SwapEthernetMacs(writableFrame);
         try
         {
-            if (!towardMstcp && association.OriginAdapterHandle == 0)
+            if (!towardMstcp && targetHandle == 0)
             {
                 await FailAssociationAsync(association).ConfigureAwait(false);
                 return TcpRedirectOutcome.Blocked;
             }
-            var targetHandle = towardMstcp ? packet.Metadata.AdapterHandle : association.OriginAdapterHandle;
             await _injector.InjectAsync(frame, towardMstcp, targetHandle, cancellationToken).ConfigureAwait(false);
             LogTrace("tcp.reverse.injected", packet, association);
         }
@@ -487,9 +531,9 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
             await FailAssociationAsync(association).ConfigureAwait(false);
             throw;
         }
-        catch
+        catch (Exception exception)
         {
-            await FailAssociationAsync(association).ConfigureAwait(false);
+            await HandleInjectionFailureAsync(association, targetHandle, towardMstcp, exception).ConfigureAwait(false);
             return TcpRedirectOutcome.Blocked;
         }
 
@@ -725,21 +769,37 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     /// <summary>
     /// Surfaces a relay setup failure to the client as a protocol-correct RST|ACK from the original
     /// server endpoint instead of leaving its established connection hanging. The reset is crafted
-    /// from the recorded SYN template and both initial sequence numbers, so it stays valid even
-    /// though the redirect-table alias is torn down right after. Degrades to plain teardown when
-    /// either sequence number was never observed.
+    /// from the recorded SYN template and the tracked next-expected sequences (degrading to the
+    /// initial sequence numbers when no data was observed), so it stays valid even though the
+    /// redirect-table alias is torn down right after. Degrades to plain teardown when either
+    /// initial sequence number was never observed.
     /// </summary>
     private async ValueTask TryInjectClientResetAsync(TcpRedirectSession session)
     {
-        var association = session.Association;
+        await TryInjectClientResetAsync(session.Association, session.Token).ConfigureAwait(false);
+    }
+
+    /// <summary>The association-level core of <see cref="TryInjectClientResetAsync(TcpRedirectSession)"/>,
+    /// usable from teardown paths that hold no session (e.g. an injection failure on the data path).</summary>
+    private async ValueTask TryInjectClientResetAsync(TcpRedirectAssociation association, CancellationToken cancellationToken)
+    {
         if (association.OriginalSynFrameCopy is not { } synTemplate || association.ClientInitialSeq is not uint clientInitialSeq || association.ServerInitialSeq is not uint serverInitialSeq) return;
+        // The tracked advancement covers data the client already sent, so the reset's ack stays in
+        // its window instead of being dropped as out-of-window (RFC 5961) after a slow relay setup.
+        var serverSequenceNext = association.ServerNextSeq ?? serverInitialSeq + 1;
+        var clientSequenceNext = association.ClientNextSeq ?? clientInitialSeq + 1;
         var reset = TcpResetBuilder.BuildReset(synTemplate, association.OriginalDestination.Address, association.OriginalDestination.Port,
-            association.OriginalKey.Local.Address, association.OriginalKey.Local.Port, serverInitialSeq + 1, clientInitialSeq + 1);
+            association.OriginalKey.Local.Address, association.OriginalKey.Local.Port, serverSequenceNext, clientSequenceNext);
         if (reset is null) return;
         try
         {
-            await _injector.InjectAsync(reset, association.OriginalKey.Origin != FlowOriginKind.Forwarded, association.OriginAdapterHandle, session.Token).ConfigureAwait(false);
-            LogDebug("tcp.redirect.clientReset", session, "injected");
+            await _injector.InjectAsync(reset, association.OriginalKey.Origin != FlowOriginKind.Forwarded, association.OriginAdapterHandle, cancellationToken).ConfigureAwait(false);
+            if (_logger.IsEnabled(RuntimeLogLevel.Debug))
+            {
+                _logger.Event(RuntimeLogLevel.Debug, "tcp.redirect.clientReset",
+                    new("tcpAssociation", association.Generation), new("source", association.OriginalKey.Local),
+                    new("destination", association.OriginalKey.Remote), new("outcome", "injected"));
+            }
         }
         catch (OperationCanceledException)
         {
@@ -955,6 +1015,31 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         lock (_gate) _sessions.TryGetValue(association.OriginalKey, out session);
         if (session is not null) await TearDownSessionAsync(session).ConfigureAwait(false);
         else RemoveAssociationFromTable(association);
+    }
+
+    /// <summary>
+    /// Makes a data-path injection failure explicit and observable instead of a silent passive
+    /// teardown: warns with <c>reason=injectionFailure</c> plus the native error, target adapter
+    /// handle, and flow key, then best-effort resets the client-visible connection (when both
+    /// sequence trackers are known) and fails the association through the single tombstone write
+    /// point. The canonical trigger is a forwarded flow's <c>OriginAdapterHandle</c> going stale
+    /// after a Hyper-V vSwitch/adapter rebuild.
+    /// </summary>
+    private async ValueTask HandleInjectionFailureAsync(TcpRedirectAssociation association, nint adapterHandle, bool towardMstcp, Exception exception)
+    {
+        if (_logger.IsEnabled(RuntimeLogLevel.Warn))
+        {
+            _logger.Event(RuntimeLogLevel.Warn, "tcp.redirect.failed",
+                new("reason", "injectionFailure"),
+                new("nativeError", (exception as Win32Exception)?.NativeErrorCode),
+                new("error", exception.GetType().Name),
+                new("adapterHandle", (long)adapterHandle),
+                new("towardMstcp", towardMstcp),
+                new("source", association.OriginalKey.Local),
+                new("destination", association.OriginalKey.Remote));
+        }
+        await TryInjectClientResetAsync(association, CancellationToken.None).ConfigureAwait(false);
+        await FailAssociationAsync(association).ConfigureAwait(false);
     }
 
     private void EnterSetup()

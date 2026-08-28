@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.ComponentModel;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
@@ -301,6 +302,161 @@ public sealed class TcpProxyCoordinatorTests
         Assert.Equal(s_destIpv4, new IPAddress(frame.AsSpan(26, 4).ToArray()));
         Assert.Equal(client, new IPAddress(frame.AsSpan(30, 4).ToArray()));
         Assert.Equal(0x14, frame[47]);
+    }
+
+    [Fact]
+    public async Task RelayFailureResetAcknowledgesObservedClientSequence()
+    {
+        // D1: the reset's ack must cover data the client already sent (plus FIN's sequence number),
+        // not the handshake-era ISN+1 — an out-of-window ack would be dropped as a slow EOF instead
+        // of aborting the connection.
+        var listenerFactory = new FakeListenerFactory();
+        var injector = new FakeInjector();
+        var selfTraffic = new SelfTrafficRegistry();
+        var table = new TcpRedirectTable();
+        var relayFactory = new FakeRelayFactory(throwOnEstablish: true);
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider());
+
+        var syn = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(syn, s_server, CancellationToken.None));
+
+        var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
+        var synAck = MakeReversePacketClassifierOrientation(s_clientIpv4, listenerTuple.Port, s_destIpv4, 53000, mutateFrame: f => f[47] = 0x12);
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleReverseAsync(synAck, CancellationToken.None));
+
+        // Client sends 5 bytes of request data (seq = ISN+1 = 2), then a FIN (seq = 7): the
+        // tracker must end at 8 — payload plus the FIN's one sequence number.
+        var data = MakeForwardTcpPacket(s_clientIpv4, s_destIpv4, 53000, 443, TcpFlagAck, [0x01, 0x02, 0x03, 0x04, 0x05],
+            f => BinaryPrimitives.WriteUInt32BigEndian(f.AsSpan(38, 4), 2));
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandlePacketAsync(data, s_server, CancellationToken.None));
+        var fin = MakeForwardTcpPacket(s_clientIpv4, s_destIpv4, 53000, 443, TcpFlagFinAck,
+            mutateFrame: f => BinaryPrimitives.WriteUInt32BigEndian(f.AsSpan(38, 4), 7));
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandlePacketAsync(fin, s_server, CancellationToken.None));
+
+        var listener = Assert.Single(listenerFactory.Listeners);
+        await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(Endpoint.From(s_destIpv4, 53000)), CancellationToken.None);
+        await WaitForAsync(() => table.Count == 0);
+
+        // Frame 5 is the crafted RST: server next seq (SYN-ACK only) = 2, client next seq = 8.
+        Assert.Equal(5, injector.InjectedFrames.Count);
+        var reset = injector.InjectedFrames[4];
+        Assert.True(reset.TowardMstcp);
+        var frame = reset.Frame;
+        Assert.Equal(2u, BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(38, 4)));
+        Assert.Equal(8u, BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(42, 4)));
+        Assert.Equal(0x14, frame[47]);
+    }
+
+    [Fact]
+    public async Task RelayFailureResetSequenceCoversObservedServerData()
+    {
+        // D1: the reset's seq must equally cover reverse-leg data (SYN counts one: SYN-ACK advanced
+        // the tracker to ISN+1, then 8 payload bytes advance it to ISN+9), so the reset stays
+        // in-window for the client's receive side too.
+        var listenerFactory = new FakeListenerFactory();
+        var injector = new FakeInjector();
+        var selfTraffic = new SelfTrafficRegistry();
+        var table = new TcpRedirectTable();
+        var relayFactory = new FakeRelayFactory(throwOnEstablish: true);
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider());
+
+        var syn = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(syn, s_server, CancellationToken.None));
+
+        var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
+        var synAck = MakeReversePacketClassifierOrientation(s_clientIpv4, listenerTuple.Port, s_destIpv4, 53000, mutateFrame: f => f[47] = 0x12);
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleReverseAsync(synAck, CancellationToken.None));
+        var serverData = MakeReversePacketClassifierOrientation(s_clientIpv4, listenerTuple.Port, s_destIpv4, 53000,
+            payload: [1, 2, 3, 4, 5, 6, 7, 8],
+            mutateFrame: f =>
+            {
+                f[47] = TcpFlagAck;
+                BinaryPrimitives.WriteUInt32BigEndian(f.AsSpan(38, 4), 2);
+            });
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleReverseAsync(serverData, CancellationToken.None));
+
+        var listener = Assert.Single(listenerFactory.Listeners);
+        await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(Endpoint.From(s_destIpv4, 53000)), CancellationToken.None);
+        await WaitForAsync(() => table.Count == 0);
+
+        // Frame 4 is the RST: server next seq = SYN-ACK(1) + 1 + 8 payload = 10; the client sent
+        // no data, so its side degrades to the ISN+1 fallback.
+        Assert.Equal(4, injector.InjectedFrames.Count);
+        var frame = injector.InjectedFrames[3].Frame;
+        Assert.Equal(10u, BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(38, 4)));
+        Assert.Equal(2u, BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(42, 4)));
+        Assert.Equal(0x14, frame[47]);
+    }
+
+    [Fact]
+    public async Task ReverseInjectionWin32FailureFailsExplicitlyWithReasonTombstoneAndReset()
+    {
+        // D2: a stale-handle SendPacketToAdapter/ToMstcp failure (Win32Exception from the driver)
+        // must surface as a warned, observable teardown — reason=injectionFailure with the native
+        // error and flow key — plus a best-effort client reset and the grace tombstone, never a
+        // silent passive fail.
+        var listenerFactory = new FakeListenerFactory();
+        var injector = new FakeInjector(throwOnCall: 2, exception: new Win32Exception(87));
+        var selfTraffic = new SelfTrafficRegistry();
+        var table = new TcpRedirectTable();
+        var logger = new RecordingRuntimeLogger();
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider(), logger);
+
+        var syn = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(syn, s_server, CancellationToken.None));
+
+        var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
+        var synAck = MakeReversePacketClassifierOrientation(s_clientIpv4, listenerTuple.Port, s_destIpv4, 53000, mutateFrame: f => f[47] = 0x12);
+        Assert.Equal(TcpRedirectOutcome.Blocked, await coordinator.HandleReverseAsync(synAck, CancellationToken.None));
+
+        var failure = Assert.Single(logger.Events, item => string.Equals(item.Name, "tcp.redirect.failed", StringComparison.Ordinal));
+        Assert.Equal(RuntimeLogLevel.Warn, failure.Level);
+        Assert.Contains(failure.Fields, field => string.Equals(field.Key, "reason", StringComparison.Ordinal) && field.Value is "injectionFailure");
+        Assert.Contains(failure.Fields, field => string.Equals(field.Key, "nativeError", StringComparison.Ordinal) && field.Value is 87);
+        Assert.Contains(failure.Fields, field => string.Equals(field.Key, "error", StringComparison.Ordinal) && field.Value is "Win32Exception");
+        Assert.Contains(failure.Fields, field => string.Equals(field.Key, "adapterHandle", StringComparison.Ordinal) && field.Value is 0x1234L);
+        Assert.Contains(failure.Fields, field => string.Equals(field.Key, "source", StringComparison.Ordinal) && field.Value is Endpoint source && source.Equals(Endpoint.From(s_clientIpv4, 53000)));
+        Assert.Contains(failure.Fields, field => string.Equals(field.Key, "destination", StringComparison.Ordinal) && field.Value is Endpoint destination && destination.Equals(Endpoint.From(s_destIpv4, 443)));
+
+        // The sequence recorders ran before the failed injection, so the best-effort reset was
+        // still crafted: injected frames are exactly the SYN and the RST.
+        Assert.Equal(2, injector.InjectedFrames.Count);
+        Assert.Equal(0x14, injector.InjectedFrames[1].Frame[47]);
+        Assert.Equal(0, table.Count);
+        Assert.True(Assert.Single(listenerFactory.Listeners).IsDisposed);
+
+        // The teardown went through the tombstone write point: a straggler on the original tuple is
+        // consumed within the grace window instead of falling through to the executor.
+        var straggler = MakeForwardTcpPacket(s_clientIpv4, s_destIpv4, 53000, 443, TcpFlagAck);
+        Assert.Equal(TcpRedirectOutcome.Dropped, await coordinator.HandlePacketAsync(straggler, s_server, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task SynInjectionWin32FailureFailsExplicitlyWithoutReset()
+    {
+        // A first-SYN injection failure surfaces through the same structured warn exit
+        // (reason=injectionFailure with the native error) and releases the fresh session; no
+        // reset is crafted because no server ISN was ever observed.
+        var listenerFactory = new FakeListenerFactory();
+        var injector = new FakeInjector(throwOnCall: 1, exception: new Win32Exception(87));
+        var selfTraffic = new SelfTrafficRegistry();
+        var table = new TcpRedirectTable();
+        var logger = new RecordingRuntimeLogger();
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider(), logger);
+
+        Assert.Equal(TcpRedirectOutcome.Blocked, await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None));
+
+        var failure = Assert.Single(logger.Events, item => string.Equals(item.Name, "tcp.redirect.failed", StringComparison.Ordinal));
+        Assert.Equal(RuntimeLogLevel.Warn, failure.Level);
+        Assert.Contains(failure.Fields, field => string.Equals(field.Key, "reason", StringComparison.Ordinal) && field.Value is "injectionFailure");
+        Assert.Contains(failure.Fields, field => string.Equals(field.Key, "nativeError", StringComparison.Ordinal) && field.Value is 87);
+        Assert.Contains(failure.Fields, field => string.Equals(field.Key, "adapterHandle", StringComparison.Ordinal) && field.Value is 0x1234L);
+
+        Assert.Empty(injector.InjectedFrames);
+        Assert.Equal(0, table.Count);
+        Assert.True(Assert.Single(listenerFactory.Listeners).IsDisposed);
+        var straggler = MakeForwardTcpPacket(s_clientIpv4, s_destIpv4, 53000, 443, TcpFlagAck);
+        Assert.Equal(TcpRedirectOutcome.Dropped, await coordinator.HandlePacketAsync(straggler, s_server, CancellationToken.None));
     }
 
     [Fact]
@@ -1224,10 +1380,10 @@ public sealed class TcpProxyCoordinatorTests
         return new CapturedFlowPacket(lease, context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, 0x1234));
     }
 
-    private static CapturedFlowPacket MakeReversePacketClassifierOrientation(IPAddress source, ushort sourcePort, IPAddress destination, ushort destinationPort, nint adapterHandle = 0x1234, Action<byte[]>? mutateFrame = null)
+    private static CapturedFlowPacket MakeReversePacketClassifierOrientation(IPAddress source, ushort sourcePort, IPAddress destination, ushort destinationPort, nint adapterHandle = 0x1234, Action<byte[]>? mutateFrame = null, byte[]? payload = null)
     {
         var frame = source.AddressFamily == AddressFamily.InterNetwork
-            ? BuildIpv4TcpSyn(source, destination, sourcePort, destinationPort)
+            ? BuildIpv4TcpSyn(source, destination, sourcePort, destinationPort, payload)
             : BuildIpv6TcpSyn(source, destination, sourcePort, destinationPort);
         mutateFrame?.Invoke(frame);
         var local = Endpoint.From(source, sourcePort);
@@ -1244,13 +1400,15 @@ public sealed class TcpProxyCoordinatorTests
     /// <summary>
     /// Builds a forward (client -> server) TCP packet on the original tuple with arbitrary flags —
     /// e.g. a straggler ACK/FIN-ACK arriving after teardown. The checksum is intentionally stale:
-    /// the tombstone path consumes the frame without ever rewriting it.
+    /// the tombstone path consumes the frame without ever rewriting it. The sequence number can be
+    /// set via <paramref name="mutateFrame"/> to emulate in-flight data.
     /// </summary>
-    private static CapturedFlowPacket MakeForwardTcpPacket(IPAddress client, IPAddress destination, ushort clientPort, ushort destinationPort, byte tcpFlags)
+    private static CapturedFlowPacket MakeForwardTcpPacket(IPAddress client, IPAddress destination, ushort clientPort, ushort destinationPort, byte tcpFlags, byte[]? payload = null, Action<byte[]>? mutateFrame = null)
     {
-        var frame = BuildIpv4TcpSyn(client, destination, clientPort, destinationPort);
+        var frame = BuildIpv4TcpSyn(client, destination, clientPort, destinationPort, payload);
         const int tcpFlagsOffset = 47;
         frame[tcpFlagsOffset] = tcpFlags;
+        mutateFrame?.Invoke(frame);
         var local = Endpoint.From(client, clientPort);
         var remote = Endpoint.From(destination, destinationPort);
         var key = FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Host);
@@ -1547,7 +1705,7 @@ public sealed class TcpProxyCoordinatorTests
         }
     }
 
-    private sealed class FakeInjector(int? throwOnCall = null, bool throwIfCanceled = false) : ITcpRedirectInjector
+    private sealed class FakeInjector(int? throwOnCall = null, bool throwIfCanceled = false, Exception? exception = null) : ITcpRedirectInjector
     {
         public List<(byte[] Frame, bool TowardMstcp, nint AdapterHandle)> InjectedFrames { get; } = [];
         private int _calls;
@@ -1555,7 +1713,7 @@ public sealed class TcpProxyCoordinatorTests
         public ValueTask InjectAsync(ReadOnlyMemory<byte> rewrittenFrame, bool towardMstcp, nint adapterHandle, CancellationToken cancellationToken)
         {
             if (throwIfCanceled) cancellationToken.ThrowIfCancellationRequested();
-            if (throwOnCall is int call && Interlocked.Increment(ref _calls) == call) throw new IOException("injection failed");
+            if (throwOnCall is int call && Interlocked.Increment(ref _calls) == call) throw exception ?? new IOException("injection failed");
             lock (InjectedFrames) InjectedFrames.Add((rewrittenFrame.ToArray(), towardMstcp, adapterHandle));
             return ValueTask.CompletedTask;
         }

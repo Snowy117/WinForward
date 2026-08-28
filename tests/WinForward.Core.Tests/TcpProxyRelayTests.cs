@@ -1,6 +1,9 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.Versioning;
+using WinForward.Configuration;
+using WinForward.Core;
 using WinForward.Runtime;
 using Xunit;
 
@@ -9,6 +12,44 @@ namespace WinForward.Core.Tests;
 [SupportedOSPlatform("windows")]
 public sealed class TcpProxyRelayTests
 {
+    [Fact]
+    public void RelayFactoryCapsSocks5ConnectBudgetToTenSecondsTwoAttempts()
+    {
+        // D3: the redirect leg completes the client's handshake in tens of milliseconds, so the
+        // relay's upstream budget bounds the client's perceived failure window. The call site
+        // binds to these constants, which cap the worst case at DNS + 2 x 10s instead of the
+        // 4 x 30s per-attempt defaults (worst case ~150s).
+        Assert.Equal(2, TcpProxyRelayFactory.RelayConnectMaxAttempts);
+        Assert.Equal(TimeSpan.FromSeconds(10), TcpProxyRelayFactory.RelayConnectAttemptTimeout);
+    }
+
+    [Fact]
+    public async Task RelayFactorySurfacesRefusedProxyConnectionFailFast()
+    {
+        // A refused proxy endpoint fails the attempt immediately (no budget is consumed), so the
+        // tightened connect budget must not slow down the typical failure path.
+        var refused = new TcpListener(IPAddress.Loopback, 0);
+        refused.Start();
+        var port = ((IPEndPoint)refused.LocalEndpoint!).Port;
+        refused.Stop();
+
+        var (localPeer, relayLocal) = await CreateSocketPairAsync();
+        using var local = localPeer;
+        var accepted = new TcpAcceptedConnection(relayLocal, Endpoint.From(IPAddress.Loopback, 40000));
+        var factory = new TcpProxyRelayFactory(new SelfTrafficRegistry());
+        var server = new Socks5Server("refused", "127.0.0.1", checked((ushort)port), null, null);
+
+        var started = Stopwatch.StartNew();
+        await Assert.ThrowsAsync<IOException>(() =>
+            factory.EstablishAsync(Endpoint.From(IPAddress.Parse("192.0.2.9"), 80), accepted, server, CancellationToken.None).AsTask());
+        started.Stop();
+
+        Assert.True(started.Elapsed < TcpProxyRelayFactory.RelayConnectAttemptTimeout,
+            $"a refused connect must fail fast, took {started.Elapsed.TotalMilliseconds:F0}ms");
+        local.Dispose();
+        relayLocal.Dispose();
+    }
+
     [Fact]
     public async Task HalfClosePropagatesFinAndAllowsReverseResponse()
     {
