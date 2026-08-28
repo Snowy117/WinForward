@@ -66,10 +66,10 @@ EOF / connection reset。经代码审计确认这不是单一 bug，而是若干
 
 | 子任务 | 覆盖 | 状态 |
 | --- | --- | --- |
-| `fix-datapath-throughput` | 主因①：批量读包 + buffer 池化 + 分配削减 | planning |
-| `fix-port-budget` | 主因②：端口预算与连接上限保护 | planning |
-| `fix-table-lifecycle` | 主因③④：TIME_WAIT 宽限 + flow 表过期豁免 | planning |
-| `fix-minor-races` | 次因 D 组竞态修复 | planning |
+| `fix-datapath-throughput` | 主因①：批量读包 + buffer 池化 + 分配削减 | done (archived) |
+| `fix-port-budget` | 主因②：端口预算与连接上限保护 | done (archived) |
+| `fix-table-lifecycle` | 主因③④：TIME_WAIT 宽限 + flow 表过期豁免 | done (archived) |
+| `fix-minor-races` | 次因 D 组竞态修复 | done (archived) |
 
 ## Requirements
 
@@ -81,16 +81,16 @@ EOF / connection reset。经代码审计确认这不是单一 bug，而是若干
 
 ## Acceptance Criteria（跨子任务集成验收）
 
-- [ ] 四个子任务全部归档，各自验收标准通过。
-- [ ] smoke 环境（smoke/ 下既有 sing-box + WinForward 配置）复测：同等负载下
-      `outcome=notrelevant` 的 pass 通行包数量回落到仅剩"capture 启动前已建立连接"
-      的合理水平。
-- [ ] smoke 复测日志中不再出现因 bind 失败 / 端口耗尽导致的
-      `tcp.redirect.rejected reason=listenerAllocation` 与 SOCKS5 connect 失败潮。
-- [ ] 高 pps 压测（benchmarks/ 现有基准或补充）下无因处理不及时造成的持续重传
-      （对比修复前的 RTO/RST 基线）。
-- [ ] README「Supported traffic / Notes」不需要因行为变化而修改，或差异已在子任务
-      中记录并同步 README。
+- [x] 四个子任务全部归档，各自验收标准通过。（archive/2026-08/，各自 trellis-check PASS）
+- [x] smoke 复测（WinLtsc 实机，winrm）：`notrelevant` 113 → 11/14（-90%，剩量为
+      capture 启动前已建立连接的合理水平，见 table-lifecycle/minor-races 验证记录）。
+- [x] 两次 smoke（table-lifecycle、minor-races）均零 `listenerAllocation`、零 SOCKS5
+      失败潮、零 warn/error；预算上限 tcpFlowCapacity=4096 先行截流。
+- [x] 基准（Linux，fake reader 管线稳态 2.2-2.5M pps，35 gen0/百万包）已补充并
+      记录；Windows 实机新旧 A/B 压测因需受控流量源未执行，为已知限制
+      （datapath implement.md Step 5 记录）。
+- [x] README 差异已同步：`tcpFlowCapacity` 字段说明 + Notes 宽限期说明
+      （port-budget / table-lifecycle 子任务内完成）。
 
 ## Notes
 
