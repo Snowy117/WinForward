@@ -1,0 +1,1 @@
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "Batch N 拆分 NdisApiDriver.cs 时必须遵守的适配器身份契约（GUID 主键关联、MAC 克隆陷阱）"}

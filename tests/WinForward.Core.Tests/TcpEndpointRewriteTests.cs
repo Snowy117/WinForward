@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Net;
 using WinForward.Protocols;
 using Xunit;
+using static WinForward.Core.Tests.ChecksumMath;
 
 namespace WinForward.Core.Tests;
 
@@ -278,21 +279,6 @@ public sealed class TcpEndpointRewriteTests
         return Finish(sum);
     }
 
-    private static uint Sum(ReadOnlySpan<byte> data)
-    {
-        uint sum = 0;
-        var index = 0;
-        for (; index + 1 < data.Length; index += 2) sum += BinaryPrimitives.ReadUInt16BigEndian(data.Slice(index, 2));
-        if (index < data.Length) sum += (uint)data[index] << 8;
-        return sum;
-    }
-
-    private static ushort Finish(uint sum)
-    {
-        while (sum >> 16 != 0) sum = (sum & 0xffff) + (sum >> 16);
-        return (ushort)~sum;
-    }
-
     private static HashSet<int> Ipv4ExpectedMutableOffsets()
         => [24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 50, 51];
 
@@ -331,137 +317,15 @@ public sealed class TcpEndpointRewriteTests
         }
     }
 
-    private static byte[] BuildIpv4TcpFrame(int tcpDataOffsetWords = 5, byte[]? options = null, byte[]? payload = null)
-    {
-        options ??= [];
-        var tcpHeaderLength = tcpDataOffsetWords * 4;
-        var optionPadding = new byte[tcpHeaderLength - 20 - options.Length];
-        var payloadBytes = payload ?? [];
-        var totalLength = 20 + tcpHeaderLength + payloadBytes.Length;
-        var frame = new byte[14 + totalLength];
+    private static byte[] BuildIpv4TcpFrame(int tcpDataOffsetWords = 5, byte[]? options = null, byte[]? payload = null) =>
+        FrameBuilders.BuildIpv4TcpFrame(s_ipv4Source, s_ipv4Dest, 53000, 443, tcpDataOffsetWords: tcpDataOffsetWords, options: options, payload: payload);
 
-        frame[12] = 0x08;
-        frame[13] = 0x00;
-        frame[14] = 0x45;
-        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(16, 2), (ushort)totalLength);
-        frame[23] = 6;
-        s_ipv4Source.TryWriteBytes(frame.AsSpan(26, 4), out _);
-        s_ipv4Dest.TryWriteBytes(frame.AsSpan(30, 4), out _);
+    private static byte[] BuildIpv6TcpFrameWithHopByHop() =>
+        FrameBuilders.BuildIpv6TcpFrameWithHopByHop(s_ipv6Source, s_ipv6Dest, 53000, 443);
 
-        const int tcp = 34;
-        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(tcp, 2), 53000);
-        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(tcp + 2, 2), 443);
-        BinaryPrimitives.WriteUInt32BigEndian(frame.AsSpan(tcp + 4, 4), 0x00000001);
-        BinaryPrimitives.WriteUInt32BigEndian(frame.AsSpan(tcp + 8, 4), 0x00000000);
-        frame[tcp + 12] = (byte)(tcpDataOffsetWords << 4);
-        frame[tcp + 13] = 0x18;
-        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(tcp + 14, 2), 0xffff);
-        options.CopyTo(frame, tcp + 20);
-        optionPadding.CopyTo(frame, tcp + 20 + options.Length);
-        payloadBytes.CopyTo(frame, tcp + tcpHeaderLength);
+    private static byte[] BuildIpv6TcpFrame(byte[]? payload = null) =>
+        FrameBuilders.BuildIpv6TcpFrame(s_ipv6Source, s_ipv6Dest, 53000, 443, payload);
 
-        SetIpv4HeaderChecksum(frame);
-        SetIpv4TcpChecksum(frame, tcp, totalLength - 20);
-        return frame;
-    }
-
-    private static byte[] BuildIpv6TcpFrameWithHopByHop()
-    {
-        // Layout: Ethernet(14) + IPv6(40) + Hop-by-Hop(8) + TCP(20).
-        // IPv6 next-header byte (offset 20) = 0 (Hop-by-Hop).
-        // Hop-by-Hop next-header (offset 54) = 6 (TCP); length (offset 55) = 0 => (0+1)*8 = 8 bytes.
-        const int tcpHeaderLength = 20;
-        const int extensionLength = 8;
-        const int ipv6PayloadLength = extensionLength + tcpHeaderLength;
-        var frame = new byte[14 + 40 + ipv6PayloadLength];
-
-        frame[12] = 0x86;
-        frame[13] = 0xdd;
-        frame[14] = 0x60;
-        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(18, 2), (ushort)ipv6PayloadLength);
-        frame[20] = 0;
-        s_ipv6Source.TryWriteBytes(frame.AsSpan(22, 16), out _);
-        s_ipv6Dest.TryWriteBytes(frame.AsSpan(38, 16), out _);
-
-        const int extension = 54;
-        frame[extension] = 6;
-        frame[extension + 1] = 0;
-
-        const int tcp = 62;
-        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(tcp, 2), 53000);
-        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(tcp + 2, 2), 443);
-        BinaryPrimitives.WriteUInt32BigEndian(frame.AsSpan(tcp + 4, 4), 0x00000003);
-        frame[tcp + 12] = 0x50;
-        frame[tcp + 13] = 0x02;
-
-        SetIpv6TcpChecksum(frame, tcp, tcpHeaderLength);
-        return frame;
-    }
-
-    private static byte[] BuildIpv6TcpFrame(byte[]? payload = null)
-    {
-        var payloadBytes = payload ?? [];
-        var tcpLength = 20 + payloadBytes.Length;
-        var frame = new byte[14 + 40 + tcpLength];
-
-        frame[12] = 0x86;
-        frame[13] = 0xdd;
-        frame[14] = 0x60;
-        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(18, 2), (ushort)tcpLength);
-        frame[20] = 6;
-        s_ipv6Source.TryWriteBytes(frame.AsSpan(22, 16), out _);
-        s_ipv6Dest.TryWriteBytes(frame.AsSpan(38, 16), out _);
-
-        const int tcp = 54;
-        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(tcp, 2), 53000);
-        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(tcp + 2, 2), 443);
-        BinaryPrimitives.WriteUInt32BigEndian(frame.AsSpan(tcp + 4, 4), 0x00000002);
-        frame[tcp + 12] = 0x50;
-        frame[tcp + 13] = 0x02;
-        payloadBytes.CopyTo(frame, tcp + 20);
-
-        SetIpv6TcpChecksum(frame, tcp, tcpLength);
-        return frame;
-    }
-
-    private static byte[] BuildIpv4UdpFrame()
-    {
-        var frame = new byte[14 + 20 + 8];
-        frame[12] = 0x08;
-        frame[13] = 0x00;
-        frame[14] = 0x45;
-        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(16, 2), 28);
-        frame[23] = 17;
-        s_ipv4Source.TryWriteBytes(frame.AsSpan(26, 4), out _);
-        s_ipv4Dest.TryWriteBytes(frame.AsSpan(30, 4), out _);
-        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(34, 2), 53000);
-        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(36, 2), 53);
-        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(38, 2), 8);
-        SetIpv4HeaderChecksum(frame);
-        return frame;
-    }
-
-    private static void SetIpv4HeaderChecksum(byte[] frame)
-    {
-        var headerLength = (frame[14] & 0x0f) * 4;
-        frame[24] = 0;
-        frame[25] = 0;
-        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(24, 2), PacketChecksums.InternetChecksum(frame.AsSpan(14, headerLength)));
-    }
-
-    private static void SetIpv4TcpChecksum(byte[] frame, int tcp, int tcpLength)
-    {
-        frame[tcp + 16] = 0;
-        frame[tcp + 17] = 0;
-        var sum = Sum(frame.AsSpan(26, 4)) + Sum(frame.AsSpan(30, 4)) + 6u + (uint)tcpLength + Sum(frame.AsSpan(tcp, tcpLength));
-        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(tcp + 16, 2), Finish(sum));
-    }
-
-    private static void SetIpv6TcpChecksum(byte[] frame, int tcp, int tcpLength)
-    {
-        frame[tcp + 16] = 0;
-        frame[tcp + 17] = 0;
-        var sum = Sum(frame.AsSpan(22, 16)) + Sum(frame.AsSpan(38, 16)) + 6u + (uint)tcpLength + Sum(frame.AsSpan(tcp, tcpLength));
-        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(tcp + 16, 2), Finish(sum));
-    }
+    private static byte[] BuildIpv4UdpFrame() =>
+        FrameBuilders.BuildIpv4UdpFrame(s_ipv4Source, s_ipv4Dest, 53000, 53);
 }

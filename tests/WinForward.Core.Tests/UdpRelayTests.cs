@@ -1,13 +1,13 @@
 using System.Buffers.Binary;
 using System.Net;
 using System.Runtime.Versioning;
-using System.Threading.Channels;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Protocols;
 using WinForward.Runtime;
 using Xunit;
+using static WinForward.Core.Tests.ChecksumMath;
 
 namespace WinForward.Core.Tests;
 
@@ -185,15 +185,15 @@ public sealed class UdpRelayTests
 
         Assert.Equal(1, reinjector.ToMstcpCount);
         Assert.Equal(0, reinjector.ToAdapterCount);
-        Assert.True(IpUdpPacket.TryParse(reinjector.LastFrame, out var udp));
+        Assert.True(IpUdpPacket.TryParse(reinjector.LastFrame!, out var udp));
         Assert.Equal(server.Address, udp.SourceAddress);
         Assert.Equal(server.Port, udp.SourcePort);
         Assert.Equal(client.Address, udp.DestinationAddress);
         Assert.Equal(client.Port, udp.DestinationPort);
         Assert.Equal(payload, udp.Payload.ToArray());
         // Host flows ignore the recorded client MAC: both header slots carry the host adapter MAC.
-        Assert.True(reinjector.LastFrame.AsSpan(0, 6).SequenceEqual(s_macA));
-        Assert.True(reinjector.LastFrame.AsSpan(6, 6).SequenceEqual(s_macA));
+        Assert.True(reinjector.LastFrame!.AsSpan(0, 6).SequenceEqual(s_macA));
+        Assert.True(reinjector.LastFrame!.AsSpan(6, 6).SequenceEqual(s_macA));
     }
 
     [Fact]
@@ -218,8 +218,8 @@ public sealed class UdpRelayTests
         Assert.Equal(0, reinjector.ToAdapterCount);
         Assert.Equal(originHandle, reinjector.LastAdapterHandle);
         Assert.Equal(NdisApiAbi.PacketFlagOnReceive, reinjector.LastDeviceFlags);
-        Assert.True(reinjector.LastFrame.AsSpan(0, 6).SequenceEqual(s_macB));
-        Assert.True(reinjector.LastFrame.AsSpan(6, 6).SequenceEqual(s_macB));
+        Assert.True(reinjector.LastFrame!.AsSpan(0, 6).SequenceEqual(s_macB));
+        Assert.True(reinjector.LastFrame!.AsSpan(6, 6).SequenceEqual(s_macB));
     }
 
     [Fact]
@@ -227,7 +227,7 @@ public sealed class UdpRelayTests
     public async Task HostFlowWithUnresolvedOriginAdapterUsesFallbackAndWarns()
     {
         var reinjector = new FakeReinjector();
-        var logger = new RecordingLogger();
+        var logger = new RecordingRuntimeLogger();
         var fallbackHandle = (nint)7;
         var sink = new UdpResponseReinjector(reinjector, fallbackHandle, s_macA, logger: logger);
         var adapter = new AdapterContext("missing-wlan", "Wi-Fi", 3);
@@ -241,8 +241,8 @@ public sealed class UdpRelayTests
         Assert.Equal(2, reinjector.ToMstcpCount);
         Assert.Equal(0, reinjector.ToAdapterCount);
         Assert.Equal(fallbackHandle, reinjector.LastAdapterHandle);
-        Assert.True(reinjector.LastFrame.AsSpan(0, 6).SequenceEqual(s_macA));
-        Assert.True(reinjector.LastFrame.AsSpan(6, 6).SequenceEqual(s_macA));
+        Assert.True(reinjector.LastFrame!.AsSpan(0, 6).SequenceEqual(s_macA));
+        Assert.True(reinjector.LastFrame!.AsSpan(6, 6).SequenceEqual(s_macA));
         Assert.Equal(1, logger.WarnCount);
     }
 
@@ -273,9 +273,9 @@ public sealed class UdpRelayTests
         // The rebuilt frame uses the origin adapter's MAC and addresses the recorded client (VM)
         // MAC as its destination: without the client MAC the vSwitch would deliver the response to
         // the host stack and the VM would never receive it (R2).
-        Assert.True(reinjector.LastFrame.AsSpan(0, 6).SequenceEqual(s_macC));
-        Assert.True(reinjector.LastFrame.AsSpan(6, 6).SequenceEqual(s_macB));
-        Assert.True(IpUdpPacket.TryParse(reinjector.LastFrame, out var udp));
+        Assert.True(reinjector.LastFrame!.AsSpan(0, 6).SequenceEqual(s_macC));
+        Assert.True(reinjector.LastFrame!.AsSpan(6, 6).SequenceEqual(s_macB));
+        Assert.True(IpUdpPacket.TryParse(reinjector.LastFrame!, out var udp));
         Assert.Equal(server.Address, udp.SourceAddress);
         Assert.Equal(client.Address, udp.DestinationAddress);
     }
@@ -289,7 +289,7 @@ public sealed class UdpRelayTests
         // (host) adapter where the VM could never receive it.
         var reinjector = new FakeReinjector();
         // Map intentionally omits "veth-1" so the origin adapter cannot be resolved.
-        var logger = new RecordingLogger();
+        var logger = new RecordingRuntimeLogger();
         var sink = new UdpResponseReinjector(reinjector, (nint)7, s_macA, logger: logger);
         var adapter = new AdapterContext("veth-1", "vEthernet 1", 3);
         var client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000);
@@ -320,7 +320,7 @@ public sealed class UdpRelayTests
         {
             ["veth-1"] = new(originHandle, s_macB)
         };
-        var logger = new RecordingLogger();
+        var logger = new RecordingRuntimeLogger();
         var sink = new UdpResponseReinjector(reinjector, (nint)7, s_macA, adaptersByStableId: adapters, logger: logger);
         var adapter = new AdapterContext("veth-1", "vEthernet 1", 3);
         var client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000);
@@ -395,114 +395,4 @@ public sealed class UdpRelayTests
     }
 
     private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, null, null);
-
-    private static uint Sum(ReadOnlySpan<byte> data)
-    {
-        uint sum = 0;
-        var index = 0;
-        for (; index + 1 < data.Length; index += 2) sum += BinaryPrimitives.ReadUInt16BigEndian(data.Slice(index, 2));
-        if (index < data.Length) sum += (uint)data[index] << 8;
-        return sum;
-    }
-
-    private static ushort Fold(uint sum)
-    {
-        while (sum >> 16 != 0) sum = (sum & 0xffff) + (sum >> 16);
-        return (ushort)sum;
-    }
-
-    private static ushort Finish(uint sum) => (ushort)~Fold(sum);
-
-    private sealed class FakeReinjector : IPacketReinjector
-    {
-        public int ToAdapterCount { get; private set; }
-        public int ToMstcpCount { get; private set; }
-        public nint LastAdapterHandle { get; private set; }
-        public uint LastDeviceFlags { get; private set; }
-        public byte[] LastFrame { get; private set; } = [];
-
-        public void SendToAdapter(nint adapterHandle, NdisPacketBuffer buffer)
-        {
-            ToAdapterCount++;
-            Record(adapterHandle, buffer);
-        }
-
-        public void SendToMstcp(nint adapterHandle, NdisPacketBuffer buffer)
-        {
-            ToMstcpCount++;
-            Record(adapterHandle, buffer);
-        }
-
-        private void Record(nint adapterHandle, NdisPacketBuffer buffer)
-        {
-            LastAdapterHandle = adapterHandle;
-            LastDeviceFlags = buffer.DeviceFlags;
-            LastFrame = buffer.GetFrame().ToArray();
-        }
-    }
-
-    private sealed class FakeTransportFactory : IUdpProxyTransportFactory
-    {
-        public List<FakeTransport> Transports { get; } = [];
-        private int _nextLocalPort = 40000;
-
-        public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
-        {
-            // Each transport models a distinct bound UDP socket, so its local port is unique; the
-            // relay alias collision guard in UdpProxyCoordinator must not reject distinct flows.
-            var transport = new FakeTransport(System.Net.Sockets.AddressFamily.InterNetwork, Interlocked.Increment(ref _nextLocalPort));
-            lock (Transports) Transports.Add(transport);
-            return ValueTask.FromResult<IUdpProxyTransport>(transport);
-        }
-    }
-
-    private sealed class FakeTransport : IUdpProxyTransport
-    {
-        public FakeTransport(System.Net.Sockets.AddressFamily addressFamily, int localPort)
-        {
-            var loopback = addressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? IPAddress.Loopback : IPAddress.IPv6Loopback;
-            LocalEndpoint = new IPEndPoint(loopback, localPort);
-            RelayEndpoint = new IPEndPoint(loopback, 50000);
-        }
-
-        public IPEndPoint RelayEndpoint { get; }
-        public IPEndPoint LocalEndpoint { get; }
-        public bool IsDisposed { get; private set; }
-        public List<(IPEndPoint Destination, byte[] Payload)> Sent { get; } = [];
-        public Channel<Socks5UdpDatagram> Responses { get; } = Channel.CreateUnbounded<Socks5UdpDatagram>();
-
-        public ValueTask SendAsync(IPEndPoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
-        {
-            lock (Sent) Sent.Add((destination, payload.ToArray()));
-            return ValueTask.CompletedTask;
-        }
-
-        public ValueTask<Socks5UdpDatagram> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
-        {
-            // A disposed transport models a closed socket: the pump's pending receive must end
-            // promptly instead of blocking forever, mirroring the real socket's throw.
-            ObjectDisposedException.ThrowIf(IsDisposed, this);
-            return Responses.Reader.ReadAsync(cancellationToken);
-        }
-
-        public ValueTask DisposeAsync()
-        {
-            IsDisposed = true;
-            Responses.Writer.TryComplete();
-            return ValueTask.CompletedTask;
-        }
-    }
-
-    private sealed class FakeResponseSink : IUdpResponseSink
-    {
-        public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, byte[]? clientMac, CancellationToken cancellationToken) => ValueTask.CompletedTask;
-    }
-
-    private sealed class RecordingLogger : IRuntimeLogger
-    {
-        public int WarnCount { get; private set; }
-        public void Info(string message) { }
-        public void Warn(string message) => WarnCount++;
-        public void Error(string message) { }
-    }
 }

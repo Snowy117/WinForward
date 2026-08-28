@@ -1,0 +1,1 @@
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "校验 NdisApi 拆分未破坏适配器身份语义"}
