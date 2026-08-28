@@ -118,3 +118,27 @@ D 组竞态修复：RST 动态序号跟踪（RFC793 wrap-aware）、注入失败
 ### Status
 
 [OK] **Completed**
+
+
+## Session 6: Refactor oversized files into deep modules
+
+**Date**: 2026-08-28
+**Task**: Refactor oversized files into deep modules
+**Branch**: `master`
+
+### Summary
+
+Split all 13 oversized .cs files (metric clarified mid-task to effective lines = non-blank non-comment, cap 400). Tests: extracted 13 TestHelpers files (~620 dup lines removed), split god-class test files into theme files, 353/353 green throughout. Runtime: Socks5Client -> ControlConnection+UdpTransport; UdpProxyCoordinator -> coordinator+Session with TryRemoveSessionAsync merge; TcpProxyCoordinator 1158 -> coordinator+6 modules (FrameRewriter/SequenceObservation/ClientResetInjector/Acceptor/SessionStore/Setup) after user-directed coalescing. NdisApi: deleted dead surface (Version/TryReadPacket/batch SendPackets) and extracted 4 types. Program.cs/ConfigurationModels.cs descoped per user decision (already compliant). Conventions captured in backend spec (directory-structure.md filled, quality-guidelines.md refactor gate).
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ae30c1d` | (see git log) |
+| `d56b786` | (see git log) |
+| `068aa14` | (see git log) |
+| `7934468` | (see git log) |
+
+### Status
+
+[OK] **Completed**
