@@ -25,6 +25,13 @@ public enum Socks5UdpReceiveSkipReason
 
     /// <summary>The datagram is not a decodable SOCKS5 UDP datagram.</summary>
     Malformed = 3,
+
+    /// <summary>
+    /// The receive call itself faulted with <see cref="SocketError.ConnectionReset"/>: on Windows an
+    /// ICMP port-unreachable answering one of this socket's sends surfaces this way. Skip-class like
+    /// the datagram anomalies: the session keeps receiving (S2).
+    /// </summary>
+    ConnectionReset = 4,
 }
 
 /// <summary>
@@ -81,6 +88,20 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
     /// </summary>
     private const int RelaySocketReceiveBufferSize = 512 * 1024;
 
+    /// <summary>
+    /// SIO_UDP_CONNRESET (vendor IOCTL 0x9800000C). While TRUE (the Windows default for UDP
+    /// sockets), an ICMP port-unreachable answering one of this socket's sends is surfaced as
+    /// <see cref="SocketError.ConnectionReset"/> on the next receive, which would terminate the
+    /// relay session's receive loop (S2).
+    /// </summary>
+    private const int SIOUdpConnreset = unchecked((int)0x9800000C);
+
+    /// <summary>A 4-byte Win32 BOOL FALSE, the SIO_UDP_CONNRESET input value.</summary>
+    private static readonly byte[] DisableValue = { 0, 0, 0, 0 };
+
+    /// <summary>Cached default for <c>disableUdpConnectionReset</c> so session setup never converts the method group per call.</summary>
+    private static readonly Action<Socket> DisableUdpConnectionResetAction = DisableUdpConnectionReset;
+
     private readonly Socket _socket;
     private readonly Socks5ControlConnection _control;
     private readonly SelfTrafficRegistry.SelfTrafficToken? _selfTrafficToken;
@@ -105,7 +126,8 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
         SelfTrafficRegistry selfTraffic,
         CancellationToken cancellationToken,
         Func<CancellationToken, ValueTask<Socks5ControlConnection>>? createControl,
-        Func<AddressFamily, Socket>? socketFactory)
+        Func<AddressFamily, Socket>? socketFactory,
+        Action<Socket>? disableUdpConnectionReset = null)
     {
         Socks5ControlConnection? control = null;
         Socket? socket = null;
@@ -125,6 +147,9 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
             var relayAddressFamily = relay.AddressFamily;
             socket = (socketFactory ?? (family => new Socket(family, SocketType.Dgram, ProtocolType.Udp)))(relayAddressFamily);
             socket.ReceiveBufferSize = RelaySocketReceiveBufferSize;
+            // Applied before bind per the IOCTL's contract (S2): an ICMP-driven reset must never
+            // reach the receive loop. Injectable so tests can assert the call without a Windows socket.
+            (disableUdpConnectionReset ?? DisableUdpConnectionResetAction)(socket);
             socket.Bind(new IPEndPoint(relayAddressFamily == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any, 0));
             // Non-blocking mode keeps the send warm path synchronous: the kernel either takes
             // the datagram inline or reports WouldBlock, which falls back to the overlapped
@@ -244,7 +269,15 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
     public async ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
     {
         EndPoint sender = RelayEndpoint.AddressFamily == AddressFamily.InterNetwork ? new IPEndPoint(IPAddress.Any, 0) : new IPEndPoint(IPAddress.IPv6Any, 0);
-        var result = await _socket.ReceiveFromAsync(buffer, SocketFlags.None, sender, cancellationToken).ConfigureAwait(false);
+        SocketReceiveFromResult result;
+        try
+        {
+            result = await _socket.ReceiveFromAsync(buffer, SocketFlags.None, sender, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception fault) when (ClassifyReceiveFault(fault) is { } skipReason)
+        {
+            return Socks5UdpReceiveResult.Skipped(skipReason);
+        }
         // Per-datagram anomalies skip one datagram instead of throwing: a single bad relay
         // datagram must not terminate the session's receive loop (R2).
         if (!IsAcceptableRelaySource(result.RemoteEndPoint, RelayEndpoint)) return Socks5UdpReceiveResult.Skipped(Socks5UdpReceiveSkipReason.UnexpectedSource);
@@ -266,6 +299,27 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
         observed is IPEndPoint ip && ip.Port == relay.Port && ip.AddressFamily == relay.AddressFamily;
 
     internal static bool IsPossiblyTruncated(int receivedBytes, int bufferLength) => receivedBytes >= bufferLength;
+
+    /// <summary>
+    /// Disables SIO_UDP_CONNRESET on a relay socket so an ICMP port-unreachable answering one of
+    /// its sends is not surfaced as <see cref="SocketError.ConnectionReset"/> on the next receive
+    /// (S2). Windows-only at runtime: the Linux test host rejects vendor IOCTLs, and tests assert
+    /// the call through the injectable seam instead of executing it.
+    /// </summary>
+    internal static void DisableUdpConnectionReset(Socket socket)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        socket.IOControl(SIOUdpConnreset, DisableValue, null);
+    }
+
+    /// <summary>
+    /// Maps a receive-path fault to its skip reason, or null when the fault is socket-level fatal
+    /// and must keep tearing the session down. Only the ICMP-driven reset is skip-class (S2).
+    /// </summary>
+    internal static Socks5UdpReceiveSkipReason? ClassifyReceiveFault(Exception exception) =>
+        exception is SocketException { SocketErrorCode: SocketError.ConnectionReset }
+            ? Socks5UdpReceiveSkipReason.ConnectionReset
+            : null;
 
     public async ValueTask DisposeAsync()
     {

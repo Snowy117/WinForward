@@ -191,8 +191,121 @@ public sealed class UdpReceiveResilienceTests
         await IgnoreExpectedCancellationAsync(server);
     }
 
+    [Fact]
+    public async Task ReceiveLoopSurvivesTransportConnectionReset()
+    {
+        // S2: one ICMP-driven ConnectionReset from the transport must skip (never kill the
+        // session); datagrams after it are delivered and further sends reuse the same session.
+        var transport = new ConnectionResetOnceTransport();
+        var factory = new SingleTransportFactory(transport);
+        var sink = new FakeResponseSink();
+        var logger = new RecordingRuntimeLogger();
+        await using var coordinator = new UdpProxyCoordinator(factory, sink, logger: logger);
+        var flow = CreateFlow("192.0.2.53");
+
+        Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 1 }, CancellationToken.None));
+        await WaitForAsync(() => transport.SendCount == 1);
+
+        transport.EnqueueResponse(Datagram(1));
+        transport.EnqueueResponse(Datagram(2));
+
+        for (var expected = 1; expected <= 2; expected++)
+        {
+            using var readTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var response = await sink.Responses.Reader.ReadAsync(readTimeout.Token);
+            Assert.Equal(expected, Assert.Single(response.Payload));
+        }
+
+        // The session survived: another send flows through the same transport, and the reset was
+        // counted in the skip summary instead of tearing the session down.
+        Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 3 }, CancellationToken.None));
+        await WaitForAsync(() => transport.SendCount == 2);
+        Assert.False(transport.IsDisposed);
+        Assert.Contains(logger.Lines, line => line.Level == RuntimeLogLevel.Debug && line.Message.Contains("connectionReset=1", StringComparison.Ordinal));
+
+        static Socks5UdpDatagram Datagram(byte payload) => new(IPAddress.Parse("192.0.2.53"), null, 53, new[] { payload });
+    }
+
+    [Fact]
+    public async Task DomainTypedResponseIsCountedAndSkipped()
+    {
+        // S6a: a domain-typed relay response cannot be reinjected (no IP source to rebuild the
+        // frame from); it is counted in the skip summary while address-typed responses flow on.
+        var factory = new FakeTransportFactory();
+        var sink = new FakeResponseSink();
+        var logger = new RecordingRuntimeLogger();
+        await using var coordinator = new UdpProxyCoordinator(factory, sink, logger: logger);
+        var flow = CreateFlow("192.0.2.53");
+
+        Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 1 }, CancellationToken.None));
+        await WaitForAsync(() => factory.Transports.Count == 1);
+        var transport = Assert.Single(factory.Transports);
+        await WaitForAsync(() =>
+        {
+            lock (transport.Sent) return transport.Sent.Count == 1;
+        });
+
+        transport.EnqueueResponse(new Socks5UdpDatagram(null, "example.com", 53, new byte[] { 0x7f }));
+        transport.EnqueueResponse(Datagram(2));
+
+        await WaitForAsync(() => logger.Lines.Any(line => line.Level == RuntimeLogLevel.Debug && line.Message.Contains("domainDestination=1", StringComparison.Ordinal)));
+        using var readTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var response = await sink.Responses.Reader.ReadAsync(readTimeout.Token);
+        Assert.Equal(2, Assert.Single(response.Payload));
+        Assert.False(sink.Responses.Reader.TryRead(out _), "The domain-typed datagram must never reach the response sink.");
+
+        // The session survived: another send flows through the same transport.
+        Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 3 }, CancellationToken.None));
+        await WaitForAsync(() =>
+        {
+            lock (transport.Sent) return transport.Sent.Count == 2;
+        });
+        Assert.False(transport.IsDisposed);
+
+        static Socks5UdpDatagram Datagram(byte payload) => new(IPAddress.Parse("192.0.2.53"), null, 53, new[] { payload });
+    }
+
     private static FlowKey CreateFlow(string remoteAddress) =>
         FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse(remoteAddress), 53), TransportProtocol.Udp, FlowOriginKind.Host);
+
+    /// <summary>Yields one predetermined transport regardless of how many sessions ask for a relay.</summary>
+    private sealed class SingleTransportFactory(IUdpProxyTransport transport) : IUdpProxyTransportFactory
+    {
+        public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken) =>
+            ValueTask.FromResult(transport);
+    }
+
+    /// <summary>
+    /// A transport whose first receive throws the ICMP-driven ConnectionReset (S2) and whose later
+    /// receives behave like the channel-backed fake: proves the session loop treats the fault as
+    /// skip-class and keeps delivering.
+    /// </summary>
+    private sealed class ConnectionResetOnceTransport : IUdpProxyTransport
+    {
+        private readonly FakeTransport _inner = new(AddressFamily.InterNetwork, 40010);
+        private int _receiveCalls;
+
+        public IPEndPoint RelayEndpoint => _inner.RelayEndpoint;
+        public IPEndPoint LocalEndpoint => _inner.LocalEndpoint;
+        public bool IsDisposed => _inner.IsDisposed;
+        public int SendCount
+        {
+            get { lock (_inner.Sent) return _inner.Sent.Count; }
+        }
+
+        public void EnqueueResponse(Socks5UdpDatagram datagram) => _inner.EnqueueResponse(datagram);
+
+        public ValueTask SendAsync(IPEndPoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken) =>
+            _inner.SendAsync(destination, payload, cancellationToken);
+
+        public async ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref _receiveCalls) == 1) throw new SocketException((int)SocketError.ConnectionReset);
+            return await _inner.ReceiveAsync(buffer, cancellationToken);
+        }
+
+        public ValueTask DisposeAsync() => _inner.DisposeAsync();
+    }
 
     /// <summary>A response sink that records every injection attempt and fails each one like a vanished adapter would.</summary>
     private sealed class ThrowingResponseSink : IUdpResponseSink

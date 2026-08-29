@@ -13,6 +13,8 @@ namespace WinForward.Runtime;
 /// </summary>
 public sealed class IdleExpirySweeper : IAsyncDisposable
 {
+    private static readonly TimeSpan SweepFailureLogInterval = TimeSpan.FromSeconds(5);
+
     private readonly FlowDispatcher _dispatcher;
     private readonly TcpProxyCoordinator? _tcp;
     private readonly UdpProxyCoordinator? _udp;
@@ -22,6 +24,7 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
     private readonly TimeSpan _relayIdleTimeout;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly IRuntimeLogger _logger;
+    private long _lastSweepFailureLogTicks;
     private Task? _loop;
 
     public IdleExpirySweeper(
@@ -83,18 +86,27 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
                 {
                     return;
                 }
-#pragma warning disable RCS1075 // A sweep failure must not stop the capture loop; the next tick retries.
-                catch (Exception)
+                catch (Exception exception)
                 {
-                    // A sweep failure must not stop the capture loop; the next tick retries.
+                    // A sweep failure must not stop the capture loop; the next tick retries. It is
+                    // still surfaced (rate-limited) so a persistently failing sweep is diagnosable (S6d).
+                    LogSweepFailureRateLimited(exception);
                 }
-#pragma warning restore RCS1075
             }
         }
         catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
         {
             // Normal shutdown path.
         }
+    }
+
+    private void LogSweepFailureRateLimited(Exception exception)
+    {
+        var now = DateTime.UtcNow.Ticks;
+        var last = Interlocked.Read(ref _lastSweepFailureLogTicks);
+        if (now - last < SweepFailureLogInterval.Ticks) return;
+        if (Interlocked.CompareExchange(ref _lastSweepFailureLogTicks, now, last) != last) return;
+        _logger.Warn($"Idle-expiry sweep failed and will retry on the next tick: {exception.GetType().Name}: {exception.Message}");
     }
 
     public async ValueTask DisposeAsync()

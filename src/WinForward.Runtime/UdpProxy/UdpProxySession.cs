@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Net;
+using System.Net.Sockets;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
@@ -45,6 +46,8 @@ internal sealed class UdpProxySession : IAsyncDisposable
     private long _skippedUnexpectedSource;
     private long _skippedOversized;
     private long _skippedMalformed;
+    private long _skippedConnectionReset;
+    private long _skippedDomainDestination;
     private bool _expiring;
     private int _activeSends;
 
@@ -166,7 +169,18 @@ internal sealed class UdpProxySession : IAsyncDisposable
         {
             while (!_shutdown.IsCancellationRequested)
             {
-                var receive = await _transport.ReceiveAsync(buffer.AsMemory(0, _receiveBufferSize), _shutdown).ConfigureAwait(false);
+                Socks5UdpReceiveResult receive;
+                try
+                {
+                    receive = await _transport.ReceiveAsync(buffer.AsMemory(0, _receiveBufferSize), _shutdown).ConfigureAwait(false);
+                }
+                catch (SocketException exception) when (exception.SocketErrorCode == SocketError.ConnectionReset)
+                {
+                    // An ICMP port-unreachable answering one of this session's relay sends (S2),
+                    // skip-class even from transports that surface it directly, so never fatal
+                    RecordSkippedDatagram(Socks5UdpReceiveSkipReason.ConnectionReset);
+                    continue;
+                }
                 TouchActivity();
                 if (!receive.HasDatagram)
                 {
@@ -175,11 +189,15 @@ internal sealed class UdpProxySession : IAsyncDisposable
                     RecordSkippedDatagram(receive.SkipReason);
                     continue;
                 }
-
                 var response = receive.Datagram;
-                if (response.DestinationAddress is null) continue;
-                var source = Endpoint.From(response.DestinationAddress, response.DestinationPort);
-                await InjectResponseAsync(source, response).ConfigureAwait(false);
+                if (response.DestinationAddress is null)
+                {
+                    // A domain-typed response has no IP source to rebuild the frame from (S6a):
+                    // counted with the other skip-class anomalies, then skipped.
+                    RecordSkippedDomainDestination();
+                    continue;
+                }
+                await InjectResponseAsync(Endpoint.From(response.DestinationAddress, response.DestinationPort), response).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
@@ -246,11 +264,20 @@ internal sealed class UdpProxySession : IAsyncDisposable
             case Socks5UdpReceiveSkipReason.Malformed:
                 Interlocked.Increment(ref _skippedMalformed);
                 break;
+            case Socks5UdpReceiveSkipReason.ConnectionReset:
+                Interlocked.Increment(ref _skippedConnectionReset);
+                break;
             case Socks5UdpReceiveSkipReason.None:
             default:
                 return;
         }
 
+        MaybeLogSkipSummary();
+    }
+
+    private void RecordSkippedDomainDestination()
+    {
+        Interlocked.Increment(ref _skippedDomainDestination);
         MaybeLogSkipSummary();
     }
 
@@ -263,8 +290,10 @@ internal sealed class UdpProxySession : IAsyncDisposable
         var unexpected = Interlocked.Exchange(ref _skippedUnexpectedSource, 0);
         var oversized = Interlocked.Exchange(ref _skippedOversized, 0);
         var malformed = Interlocked.Exchange(ref _skippedMalformed, 0);
-        if (unexpected + oversized + malformed == 0) return;
-        _logger.Debug($"SOCKS5 UDP relay skipped datagrams in the last window: unexpectedSource={unexpected} oversized={oversized} malformed={malformed}.");
+        var connectionReset = Interlocked.Exchange(ref _skippedConnectionReset, 0);
+        var domainDestination = Interlocked.Exchange(ref _skippedDomainDestination, 0);
+        if (unexpected + oversized + malformed + connectionReset + domainDestination == 0) return;
+        _logger.Debug($"SOCKS5 UDP relay skipped datagrams in the last window: unexpectedSource={unexpected} oversized={oversized} malformed={malformed} connectionReset={connectionReset} domainDestination={domainDestination}.");
     }
 
     private void LogInjectionFailureRateLimited(Exception exception)

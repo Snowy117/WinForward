@@ -25,6 +25,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     private readonly IRuntimeLogger _logger;
     private readonly NdisPacketBufferPool _bufferPool;
     private long _lastProxyUnavailableLogTicks;
+    private long _lastUdpFailureLogTicks;
 
     public NdisPacketActionExecutor(IPacketReinjector reinjector, IRuntimeLogger? logger = null, TcpProxyCoordinator? tcpProxy = null, UdpProxyCoordinator? udpProxy = null, NdisPacketBufferPool? bufferPool = null)
     {
@@ -78,7 +79,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
 
         if (_tcpProxy is null)
         {
-            LogProxyUnavailable();
+            LogProxyNotInitialized();
             return;
         }
 
@@ -107,7 +108,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
             }
             else if (outcome == TcpRedirectOutcome.Blocked)
             {
-                LogProxyUnavailable();
+                LogProxyBlocked("redirect");
             }
             // Injected: the coordinator rewrote and reinjected the frame itself; the lease is
             // consumed.
@@ -133,7 +134,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         if (!IPUdpPacket.TryParse(packet.Lease.Frame, out var udpView))
         {
             if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("udp.packet.rejected", packet, new RuntimeLogField("reason", "parse"));
-            LogProxyUnavailable();
+            LogProxyBlocked("parse");
             return;
         }
 
@@ -148,7 +149,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
             if (!sent)
             {
                 if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("udp.packet.rejected", packet, new RuntimeLogField("reason", "send"));
-                LogProxyUnavailable();
+                LogProxyBlocked("send");
             }
         }
         catch (OperationCanceledException)
@@ -157,7 +158,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         }
         catch (Exception ex)
         {
-            _logger.Warn($"UDP proxy handling failed: {ex.GetType().Name}: {ex.Message}");
+            LogUdpFailureRateLimited(ex);
         }
     }
 
@@ -173,13 +174,43 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         _logger.Event(RuntimeLogLevel.Trace, eventName, fields);
     }
 
-    private void LogProxyUnavailable()
+    /// <summary>
+    /// The genuinely-uninitialized case: no proxy coordinator was wired, so no relay could ever
+    /// exist. Every other blocked path reports its own reason through <see cref="LogProxyBlocked"/>
+    /// instead — claiming "not initialized" for a capacity or parse rejection misleads diagnosis (S6c).
+    /// </summary>
+    private void LogProxyNotInitialized()
+    {
+        if (!ShouldWarn(ref _lastProxyUnavailableLogTicks)) return;
+        _logger.Warn("A proxy-selected flow was blocked because proxy relay support is not initialized in this build.");
+    }
+
+    /// <summary>
+    /// Reports why a proxy-selected flow was blocked (S6c). The reason values mirror the
+    /// executor-level trace vocabulary: <c>redirect</c> (the TCP redirect coordinator rejected the
+    /// flow — its per-event <c>tcp.redirect.rejected</c> trace carries the specific sub-reason),
+    /// <c>parse</c>, and <c>send</c> match the <c>udp.packet.rejected</c> trace reasons.
+    /// </summary>
+    private void LogProxyBlocked(string reason)
+    {
+        if (!ShouldWarn(ref _lastProxyUnavailableLogTicks)) return;
+        _logger.Warn($"A proxy-selected flow was blocked: reason={reason}.");
+    }
+
+    private void LogUdpFailureRateLimited(Exception exception)
+    {
+        if (!ShouldWarn(ref _lastUdpFailureLogTicks)) return;
+        _logger.Warn($"UDP proxy handling failed: {exception.GetType().Name}: {exception.Message}");
+    }
+
+    /// <summary>
+    /// True for the single caller allowed to warn in the current window (CAS-guarded). Checked
+    /// before message formatting so a suppressed call never allocates the message string.
+    /// </summary>
+    private static bool ShouldWarn(ref long lastLogTicks)
     {
         var now = DateTime.UtcNow.Ticks;
-        var last = Interlocked.Read(ref _lastProxyUnavailableLogTicks);
-        if (now - last >= ProxyUnavailableLogInterval.Ticks && Interlocked.CompareExchange(ref _lastProxyUnavailableLogTicks, now, last) == last)
-        {
-            _logger.Warn("A proxy-selected flow was blocked because proxy relay support is not initialized in this build.");
-        }
+        var last = Interlocked.Read(ref lastLogTicks);
+        return now - last >= ProxyUnavailableLogInterval.Ticks && Interlocked.CompareExchange(ref lastLogTicks, now, last) == last;
     }
 }
