@@ -163,3 +163,24 @@ Diagnosed per-packet hotspots via bench suite + alloc-probe bisect. Fixed: IPAdd
 ### Status
 
 [OK] **Completed**
+
+
+## Session 8: Fix UDP loss design flaws (R1-R6) with hardware smoke test
+
+**Date**: 2026-08-29
+**Task**: Fix UDP loss design flaws (R1-R6) with hardware smoke test
+**Branch**: `master`
+
+### Summary
+
+Fixed 6 UDP loss amplifiers: non-blocking session setup with bounded FIFO setup queues + 1s cooldown tombstones + SemaphoreSlim(8) cap; skip-and-continue receive loop (oversized/malformed/unexpected-source no longer kill sessions); per-adapter native call gates replacing the global Monitor; 512KB relay socket buffers + pooled in-place response frame building (zero per-datagram managed alloc); serialized transport sends; scoped timeBeginPeriod(1). 380/380 tests, 0 warnings. Hardware-verified on WinLtsc via WinRM + Linux sing-box: 30-query bursts zero loss, SOCKS5 blackhole (SIGSTOP) left adapter traffic healthy with 385ms recovery, adapter modes auto-restored after hard kills. Specs updated (windows-ndisapi gate topology, quality-guidelines skip matrix, error-handling setup convention). Residual: AC6 timing smoke done behaviorally; Windows-side timing instrumentation deferred.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d9a61ed` | (see git log) |
+
+### Status
+
+[OK] **Completed**

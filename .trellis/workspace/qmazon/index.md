@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 7
-- **Last Active**: 2026-08-28
+- **Total Sessions**: 8
+- **Last Active**: 2026-08-29
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~165 | Active |
+| `journal-1.md` | ~186 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 8 | 2026-08-29 | Fix UDP loss design flaws (R1-R6) with hardware smoke test | `d9a61ed` | `master` |
 | 7 | 2026-08-28 | Perf hotspots: zero-allocation packet pipeline | `f161556` | `master` |
 | 6 | 2026-08-28 | Refactor oversized files into deep modules | `ae30c1d`, `d56b786`, `068aa14`, `7934468` | `master` |
 | 5 | 2026-08-28 | fix-minor-races 落地 + eof-reset 任务树整体收官 | `e2dd831`, `31eeb42` | `master` |
