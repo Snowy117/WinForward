@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Verify moves follow split discipline and naming conventions"}
+{"file": ".trellis/tasks/08-29-runtime-namespaces/prd.md", "reason": "Acceptance criteria to verify: build/test green, diff is moves+namespace+using only"}
