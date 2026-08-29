@@ -226,3 +226,24 @@ Replaced the 840-line hand-rolled benchmark harness with two modes: BenchmarkDot
 ### Status
 
 [OK] **Completed**
+
+
+## Session 10: UDP stability: patient setup admission, sync-send fast path, zero loss on both OSes
+
+**Date**: 2026-08-29
+**Task**: UDP stability: patient setup admission, sync-send fast path, zero loss on both OSes
+**Branch**: `master`
+
+### Summary
+
+Root-caused the UDP soak loss to the setup fail-fast chain (zero-wait cap probe dropped one accepted datagram per failed retry; per-hop census closed the books exactly). Fixes: D6 patient semaphore admission, D2 non-blocking sync-send warm path (hot-path #3), D3 100ms activity-propagation throttling. Harness: udp.rawBaseline scenario, 1ms Windows timer, warmup/windowing, parallel echo loops. Results: Linux exact zero loss at full 25k target (achieved 99.99%, was 89.6%/0.19%); Windows exact zero at T_zero, product = 100.1% of raw baseline (VM environment identified as the throughput gap). 386 tests green, specs updated (error-handling/hot-path/udp-relay), acceptance artifacts under benchmarks/results/2026-08-29-udp-fix/.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `47735b6` | (see git log) |
+
+### Status
+
+[OK] **Completed**
