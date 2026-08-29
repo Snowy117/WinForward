@@ -8,7 +8,7 @@ using WinForward.Runtime.Socks5;
 namespace WinForward.Runtime.TcpRedirect;
 
 [SupportedOSPlatform("windows")]
-public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic) : ITcpProxyRelayFactory
+public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic, IRuntimeLogger? logger = null) : ITcpProxyRelayFactory
 {
     // The redirect leg completes the client's TCP handshake in tens of milliseconds, so the relay's
     // upstream connect budget bounds how long an unreachable/black-holed SOCKS5 server delays the
@@ -46,7 +46,7 @@ public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic) : ITcp
             await control.ConnectDestinationAsync(new IPEndPoint(destinationAddress.ToIPAddress(), originalDestination.Port), cancellationToken).ConfigureAwait(false);
 
             var upstream = control.GetUpstreamStream();
-            return new TcpProxyRelay(concrete.Socket, upstream, control);
+            return new TcpProxyRelay(concrete.Socket, upstream, control, logger);
         }
         catch
         {
@@ -70,16 +70,18 @@ internal sealed class TcpProxyRelay : ITcpRelay
 
     private readonly Socket _localSocket;
     private readonly IAsyncDisposable _control;
+    private readonly IRuntimeLogger _logger;
     private readonly Task _completion;
     private int _disposed;
 
-    public TcpProxyRelay(Socket localSocket, Stream upstream, IAsyncDisposable control)
+    public TcpProxyRelay(Socket localSocket, Stream upstream, IAsyncDisposable control, IRuntimeLogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(localSocket);
         ArgumentNullException.ThrowIfNull(upstream);
         ArgumentNullException.ThrowIfNull(control);
         _localSocket = localSocket;
         _control = control;
+        _logger = logger ?? NullRuntimeLogger.Instance;
         _completion = RunPumpAsync(upstream);
     }
 
@@ -196,6 +198,10 @@ internal sealed class TcpProxyRelay : ITcpRelay
     public ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return ValueTask.CompletedTask;
+        // The dispose path discards the relay without ever awaiting its completion — and the
+        // disposal itself faults an in-flight pump read — so the fault observer must be hooked
+        // before the sockets go away (S3).
+        TcpRelayFaultObserver.Observe(this, _logger);
         _localSocket.Dispose();
         return _control.DisposeAsync();
     }

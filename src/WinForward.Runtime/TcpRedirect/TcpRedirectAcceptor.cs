@@ -55,36 +55,51 @@ internal sealed class TcpRedirectAcceptor
                 continue;
             }
 
-            try
+            if (!await TryEstablishRelayAsync(session, accepted).ConfigureAwait(false)) return;
+        }
+    }
+
+    /// <summary>
+    /// Establishes the relay for an accepted connection whose peer was already validated. Returns
+    /// false when the accept loop must stop (relay established or the session is finished); the
+    /// unrelated-peer and cancellation cases return true so the loop waits for the next accept.
+    /// </summary>
+    private async Task<bool> TryEstablishRelayAsync(TcpRedirectSession session, ITcpAcceptedConnection accepted)
+    {
+        var token = session.Token;
+        try
+        {
+            if (accepted.RemoteEndPoint != session.Association.AcceptedPeerEndpoint)
             {
-                if (accepted.RemoteEndPoint != session.Association.AcceptedPeerEndpoint)
-                {
-                    _logger.Warn("TCP redirect accepted an unrelated peer; closing it.");
-                    await accepted.DisposeAsync().ConfigureAwait(false);
-                    continue;
-                }
-                var relay = await _relayFactory.EstablishAsync(session.Association.OriginalDestination, accepted, session.Server, token).ConfigureAwait(false);
-                if (!_tryAttachRelay(session, relay))
-                {
-                    await relay.DisposeAsync().ConfigureAwait(false);
-                    await accepted.DisposeAsync().ConfigureAwait(false);
-                    return;
-                }
-                TcpRedirectLogging.LogDebug(_logger, "tcp.relay.started", session, "established");
-                _ = ObserveRelayCompletionAsync(session, relay, token);
-                await DrainRedundantConnectionsAsync(session, token).ConfigureAwait(false);
-                return;
-            }
-            catch (OperationCanceledException) when (token.IsCancellationRequested)
-            {
+                _logger.Warn("TCP redirect accepted an unrelated peer; closing it.");
                 await accepted.DisposeAsync().ConfigureAwait(false);
-                return;
+                return true;
             }
-            catch
+            var relay = await _relayFactory.EstablishAsync(session.Association.OriginalDestination, accepted, session.Server, token).ConfigureAwait(false);
+            if (!_tryAttachRelay(session, relay))
             {
-                await _clientReset.HandleRelaySetupFailureAsync(session, accepted).ConfigureAwait(false);
-                return;
+                // The relay is discarded without an owner that would await its completion;
+                // observe it now so a later fault never surfaces as an unobserved task
+                // exception (S3).
+                TcpRelayFaultObserver.Observe(relay, _logger);
+                await relay.DisposeAsync().ConfigureAwait(false);
+                await accepted.DisposeAsync().ConfigureAwait(false);
+                return false;
             }
+            TcpRedirectLogging.LogDebug(_logger, "tcp.relay.started", session, "established");
+            _ = ObserveRelayCompletionAsync(session, relay, token);
+            await DrainRedundantConnectionsAsync(session, token).ConfigureAwait(false);
+            return false;
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            await accepted.DisposeAsync().ConfigureAwait(false);
+            return false;
+        }
+        catch
+        {
+            await _clientReset.HandleRelaySetupFailureAsync(session, accepted).ConfigureAwait(false);
+            return false;
         }
     }
 
