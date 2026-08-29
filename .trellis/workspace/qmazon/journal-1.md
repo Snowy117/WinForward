@@ -205,3 +205,24 @@ Split the flat 32-file WinForward.Runtime project into domain sub-namespaces: ro
 ### Status
 
 [OK] **Completed**
+
+
+## Session 9: Rewrite benchmarks on BenchmarkDotNet with stability soak runner
+
+**Date**: 2026-08-29
+**Task**: Rewrite benchmarks on BenchmarkDotNet with stability soak runner
+**Branch**: `master`
+
+### Summary
+
+Replaced the 840-line hand-rolled benchmark harness with two modes: BenchmarkDotNet 0.15.8 perf benchmarks (all 9 scenario families migrated, statistics from BDN) and a stability soak runner (udp.lossRate via real SOCKS5 UDP dial path, tcp.unexpectedEof with adversarial abort mix, udp.sessionFootprint). Benchmarks now subject to the 400-effective-line limit (spec updated); test baseline corrected to 380. Full gate: zero-warning build, 380/380 tests, full BDN matrix --job short, --stability --quick all green.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7cf8b9d` | (see git log) |
+
+### Status
+
+[OK] **Completed**
