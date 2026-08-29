@@ -41,11 +41,13 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
     private readonly IPacketReinjector _reinjector;
     private readonly UdpAdapterTarget _host;
     private readonly IReadOnlyDictionary<string, UdpAdapterTarget> _byStableId;
+    private readonly NdisPacketBufferPool _bufferPool;
     private readonly int _maximumFrameSize;
     private readonly IRuntimeLogger _logger;
     private long _lastMissingOriginLogTicks;
     private long _lastHostFallbackLogTicks;
     private long _lastMissingClientMacLogTicks;
+    private long _lastFrameBuildFailureLogTicks;
 
     /// <summary>
     /// Creates a response reinjector for a capture scope whose host-side adapter is identified by
@@ -55,6 +57,8 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
     /// flow's response can be sent toward its origin adapter; the startup-selected host entry is
     /// not required in the map. <paramref name="maximumFrameSize"/> is the pinned NDISAPI frame cap
     /// (default 1514, or 9014 for a jumbo-capable ABI) that bounds rebuilt frames (M3).
+    /// <paramref name="bufferPool"/> supplies the native buffers responses are built into
+    /// (pooled reuse instead of a per-response allocation).
     /// </summary>
     public UdpResponseReinjector(
         IPacketReinjector reinjector,
@@ -62,7 +66,8 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         ReadOnlySpan<byte> hostMac,
         IReadOnlyDictionary<string, UdpAdapterTarget>? adaptersByStableId = null,
         int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame,
-        IRuntimeLogger? logger = null)
+        IRuntimeLogger? logger = null,
+        NdisPacketBufferPool? bufferPool = null)
     {
         ArgumentNullException.ThrowIfNull(reinjector);
         if (hostMac.Length != 6) throw new ArgumentOutOfRangeException(nameof(hostMac), "The host adapter MAC must be exactly 6 bytes.");
@@ -72,6 +77,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         _byStableId = adaptersByStableId ?? new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase);
         _maximumFrameSize = maximumFrameSize;
         _logger = logger ?? NullRuntimeLogger.Instance;
+        _bufferPool = bufferPool ?? NdisPacketBufferPool.Shared;
     }
 
     public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, byte[]? clientMac, CancellationToken cancellationToken)
@@ -81,46 +87,57 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
             return ValueTask.CompletedTask;
         }
 
-        if (!UdpFrameBuilder.TryBuild(
-                remoteSource.Address,
-                remoteSource.Port,
-                originalFlow.Local.Address,
-                originalFlow.Local.Port,
-                payload,
-                target.Mac,
-                destinationMac,
-                out var frame,
-                _maximumFrameSize))
+        var buffer = _bufferPool.Rent();
+        try
         {
+            // The frame is built in place into the pooled native buffer (R4): no managed byte[]
+            // per response on the steady path.
+            if (!UdpFrameBuilder.TryBuildInto(
+                    remoteSource.Address,
+                    remoteSource.Port,
+                    originalFlow.Local.Address,
+                    originalFlow.Local.Port,
+                    payload,
+                    target.Mac,
+                    destinationMac,
+                    buffer.GetFrameStorage(),
+                    out var frameLength,
+                    _maximumFrameSize))
+            {
+                if (_logger.IsEnabled(RuntimeLogLevel.Trace))
+                {
+                    LogTrace("udp.response.dropped", originalFlow,
+                        new RuntimeLogField("reason", "frameBuild"), new RuntimeLogField("bytes", payload.Length));
+                }
+                LogFrameBuildFailure();
+                return ValueTask.CompletedTask;
+            }
+
+            // Per the WinpkFilter pass/revert matrix (design §1): toward MSTCP the frame simulates a
+            // receive (ON_RECEIVE); toward an adapter it is an ON_SEND. The forwarded (Hyper-V)
+            // direction previously reused the ON_RECEIVE flag and could not reach the VM (H3).
+            buffer.CompleteFrame(frameLength, towardMstcp ? NdisApiAbi.PacketFlagOnReceive : NdisApiAbi.PacketFlagOnSend, target.Handle);
+            if (towardMstcp)
+            {
+                _reinjector.SendToMstcp(target.Handle, buffer);
+            }
+            else
+            {
+                _reinjector.SendToAdapter(target.Handle, buffer);
+            }
             if (_logger.IsEnabled(RuntimeLogLevel.Trace))
             {
-                LogTrace("udp.response.dropped", originalFlow,
-                    new RuntimeLogField("reason", "frameBuild"), new RuntimeLogField("bytes", payload.Length));
+                LogTrace("udp.response.reinjected", originalFlow,
+                    new RuntimeLogField("target", towardMstcp ? "mstcp" : "adapter"),
+                    new RuntimeLogField("bytes", payload.Length));
             }
-            _logger.Warn("UDP response frame build failed; dropping the response (fail-closed).");
             return ValueTask.CompletedTask;
         }
-
-        using var buffer = new NdisPacketBuffer();
-        // Per the WinpkFilter pass/revert matrix (design §1): toward MSTCP the frame simulates a
-        // receive (ON_RECEIVE); toward an adapter it is an ON_SEND. The forwarded (Hyper-V)
-        // direction previously reused the ON_RECEIVE flag and could not reach the VM (H3).
-        buffer.SetFrame(frame, towardMstcp ? NdisApiAbi.PacketFlagOnReceive : NdisApiAbi.PacketFlagOnSend, target.Handle);
-        if (towardMstcp)
+        finally
         {
-            _reinjector.SendToMstcp(target.Handle, buffer);
+            // Dispose of a pooled buffer returns it to the pool exactly once.
+            buffer.Dispose();
         }
-        else
-        {
-            _reinjector.SendToAdapter(target.Handle, buffer);
-        }
-        if (_logger.IsEnabled(RuntimeLogLevel.Trace))
-        {
-            LogTrace("udp.response.reinjected", originalFlow,
-                new RuntimeLogField("target", towardMstcp ? "mstcp" : "adapter"),
-                new RuntimeLogField("bytes", payload.Length));
-        }
-        return ValueTask.CompletedTask;
     }
 
     /// <summary>
@@ -180,6 +197,16 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         allFields[3] = new("destination", flow.Remote);
         fields.CopyTo(allFields, 4);
         _logger.Event(RuntimeLogLevel.Trace, eventName, allFields);
+    }
+
+    private void LogFrameBuildFailure()
+    {
+        var now = DateTime.UtcNow.Ticks;
+        var last = Interlocked.Read(ref _lastFrameBuildFailureLogTicks);
+        if (now - last >= MissingOriginLogInterval.Ticks && Interlocked.CompareExchange(ref _lastFrameBuildFailureLogTicks, now, last) == last)
+        {
+            _logger.Warn("UDP response frame build failed; dropping the response (fail-closed).");
+        }
     }
 
     private void LogMissingOriginAdapter()

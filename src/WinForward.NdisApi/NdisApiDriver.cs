@@ -4,13 +4,28 @@ using System.Runtime.Versioning;
 
 namespace WinForward.NdisApi;
 
+/// <summary>
+/// NDISAPI driver wrapper. Native calls use a two-level gate topology (design D3 of task
+/// 08-28-udp-loss-design-flaws): cold control operations (adapter enumeration, adapter mode
+/// snapshot/set, close) share one control gate, while hot data operations (batched reads,
+/// packet reinjection) serialize per adapter enumeration handle, so a slow IOCTL on one
+/// adapter cannot stall every pump.
+/// </summary>
+/// <remarks>
+/// The per-adapter split deliberately supersedes the single process-wide gate previously pinned
+/// in .trellis/spec/backend/windows-ndisapi.md: the mutable-OVERLAPPED concern is scoped to each
+/// request structure (all of them are method-local here), ndisrd already serves concurrent
+/// client processes, and within one adapter handle every call remains serialized, preserving
+/// per-adapter reinjection order.
+/// </remarks>
 [SupportedOSPlatform("windows")]
 public sealed class NdisApiDriver : IDisposable, INdisPacketReader
 {
     private const int MaxStackMultiRequestBytes = 1024;
 
     private readonly NdisApiSafeHandle _handle;
-    private readonly NdisNativeCallGate _nativeCallGate = new();
+    private readonly NdisNativeCallGate _controlGate = new();
+    private readonly NdisAdapterGateMap _adapterGates = new();
 
     private NdisApiDriver(NdisApiSafeHandle handle) => _handle = handle;
 
@@ -40,7 +55,7 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
     public unsafe IReadOnlyList<NdisAdapter> GetAdapters()
     {
         TcpAdapterList native = default;
-        using (var gateLease = _nativeCallGate.Enter())
+        using (var gateLease = _controlGate.Enter())
         {
             if (NdisApiNative.GetTcpipBoundAdaptersInfo(_handle, &native) == 0)
             {
@@ -64,7 +79,7 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
     public unsafe uint GetAdapterMode(nint adapterHandle)
     {
         var mode = new AdapterMode { AdapterHandle = adapterHandle };
-        using (var gateLease = _nativeCallGate.Enter())
+        using (var gateLease = _controlGate.Enter())
         {
             if (NdisApiNative.GetAdapterMode(_handle, &mode) == 0)
             {
@@ -78,7 +93,7 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
     public unsafe void SetAdapterMode(nint adapterHandle, uint flags)
     {
         var mode = new AdapterMode { AdapterHandle = adapterHandle, Flags = flags };
-        using var gateLease = _nativeCallGate.Enter();
+        using var gateLease = _controlGate.Enter();
         if (NdisApiNative.SetAdapterMode(_handle, &mode) == 0)
         {
             var nativeError = Marshal.GetLastWin32Error();
@@ -103,7 +118,8 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
         int readResult = 0;
         int readError = 0;
 
-        using (var gateLease = _nativeCallGate.Enter())
+        var adapterGate = _adapterGates.Get(adapterHandle);
+        using (var gateLease = adapterGate.Enter())
         {
             var queueResult = NdisApiNative.GetAdapterPacketQueueSize(_handle, adapterHandle, &queuedPacketCount);
             var queueError = queueResult == 0 ? Marshal.GetLastWin32Error() : 0;
@@ -170,7 +186,8 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
     {
         ArgumentNullException.ThrowIfNull(buffer);
         var request = new EthernetRequest { AdapterHandle = adapterHandle, Packet = new NdisrdEthernetPacket { Buffer = buffer.Pointer } };
-        using var gateLease = _nativeCallGate.Enter();
+        var adapterGate = _adapterGates.Get(adapterHandle);
+        using var gateLease = adapterGate.Enter();
         if (NdisApiNative.SendPacketToMstcp(_handle, &request) == 0)
         {
             var error = Marshal.GetLastWin32Error();
@@ -182,7 +199,8 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
     {
         ArgumentNullException.ThrowIfNull(buffer);
         var request = new EthernetRequest { AdapterHandle = adapterHandle, Packet = new NdisrdEthernetPacket { Buffer = buffer.Pointer } };
-        using var gateLease = _nativeCallGate.Enter();
+        var adapterGate = _adapterGates.Get(adapterHandle);
+        using var gateLease = adapterGate.Enter();
         if (NdisApiNative.SendPacketToAdapter(_handle, &request) == 0)
         {
             var error = Marshal.GetLastWin32Error();
@@ -192,9 +210,18 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
 
     public void Dispose()
     {
-        using var gateLease = _nativeCallGate.Enter();
+        using var gateLease = _controlGate.Enter();
         _handle.Dispose();
     }
+
+    /// <summary>Telemetry: maximum concurrent native calls observed on the control gate.</summary>
+    internal int ControlGateMaxConcurrentCalls => _controlGate.MaxConcurrentCalls;
+
+    /// <summary>
+    /// Telemetry snapshot of the maximum concurrent native calls observed per adapter gate,
+    /// keyed by adapter enumeration handle.
+    /// </summary>
+    internal IReadOnlyDictionary<nint, int> GetAdapterGateMaxConcurrentCalls() => _adapterGates.GetMaxConcurrentCalls();
 
     private static unsafe string ReadAscii(byte* source, int offset, int capacity)
     {

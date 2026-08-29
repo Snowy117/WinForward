@@ -5,6 +5,7 @@ using WinForward.Core;
 using WinForward.Protocols;
 using WinForward.Runtime;
 using Xunit;
+using static WinForward.Core.Tests.AsyncTestExtensions;
 
 namespace WinForward.Core.Tests;
 
@@ -23,10 +24,18 @@ public sealed class UdpProxyCoordinatorTests
         Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 0x12, 0x34 }, CancellationToken.None));
         Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 0x56, 0x78 }, CancellationToken.None));
 
+        await WaitForAsync(() => factory.Transports.Count == 1);
         var transport = Assert.Single(factory.Transports);
-        Assert.Equal(2, transport.Sent.Count);
-        Assert.Equal(new byte[] { 0x12, 0x34 }, transport.Sent[0].Payload);
-        Assert.Equal(new byte[] { 0x56, 0x78 }, transport.Sent[1].Payload);
+        // Session setup runs in the background; wait for both buffered datagrams to flush FIFO.
+        await WaitForAsync(() =>
+        {
+            lock (transport.Sent) return transport.Sent.Count == 2;
+        });
+        lock (transport.Sent)
+        {
+            Assert.Equal(new byte[] { 0x12, 0x34 }, transport.Sent[0].Payload);
+            Assert.Equal(new byte[] { 0x56, 0x78 }, transport.Sent[1].Payload);
+        }
     }
 
     [Fact]
@@ -43,12 +52,16 @@ public sealed class UdpProxyCoordinatorTests
             .ToArray();
         Assert.All(await Task.WhenAll(sends), Assert.True);
 
+        await WaitForAsync(() => factory.Transports.Count == 1);
         var transport = Assert.Single(factory.Transports);
-        lock (transport.Sent) Assert.Equal(count, transport.Sent.Count);
+        await WaitForAsync(() =>
+        {
+            lock (transport.Sent) return transport.Sent.Count == count;
+        });
 
         for (var index = 0; index < count; index++)
         {
-            await transport.Responses.Writer.WriteAsync(new Socks5UdpDatagram(IPAddress.Parse("192.0.2.53"), null, 53, new[] { (byte)index }), CancellationToken.None);
+            transport.EnqueueResponse(new Socks5UdpDatagram(IPAddress.Parse("192.0.2.53"), null, 53, new[] { (byte)index }));
         }
 
         for (var index = 0; index < count; index++)
@@ -69,6 +82,7 @@ public sealed class UdpProxyCoordinatorTests
             .ToArray();
 
         Assert.All(await Task.WhenAll(sends), Assert.True);
+        await WaitForAsync(() => factory.Transports.Count == 2);
         Assert.Equal(2, factory.Transports.Count);
     }
 
@@ -80,10 +94,16 @@ public sealed class UdpProxyCoordinatorTests
         var flow = FlowKey.Create(Endpoint.From(IPAddress.Parse("2001:db8::10"), 53000), Endpoint.From(IPAddress.Parse("2001:db8::53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
 
         Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 1 }, CancellationToken.None));
+        await WaitForAsync(() => factory.Transports.Count == 1);
         var transport = Assert.Single(factory.Transports);
+        await WaitForAsync(() =>
+        {
+            lock (transport.Sent) return transport.Sent.Count == 1;
+        });
         Assert.Equal(AddressFamily.InterNetwork, transport.LocalEndpoint.AddressFamily);
         Assert.Equal(1, factory.CreateCalls);
-        var sent = Assert.Single(transport.Sent);
+        (IPEndPoint Destination, byte[] Payload) sent;
+        lock (transport.Sent) sent = transport.Sent[0];
         Assert.Equal(flow.Remote.Address, sent.Destination.Address);
         Assert.Equal(flow.Remote.Port, sent.Destination.Port);
     }
@@ -96,6 +116,7 @@ public sealed class UdpProxyCoordinatorTests
         var flow = FlowKey.Create(Endpoint.From(IPAddress.Parse("2001:db8::10"), 53000), Endpoint.From(IPAddress.Parse("2001:db8::53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
 
         Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 1 }, CancellationToken.None));
+        await WaitForAsync(() => factory.Transports.Count == 1);
         var transport = Assert.Single(factory.Transports);
         Assert.Equal(AddressFamily.InterNetworkV6, transport.LocalEndpoint.AddressFamily);
         Assert.Equal(AddressFamily.InterNetworkV6, transport.RelayEndpoint.AddressFamily);
@@ -110,6 +131,7 @@ public sealed class UdpProxyCoordinatorTests
         Assert.True(await coordinator.TrySendAsync(CreateFlow("192.0.2.53"), s_server, new byte[] { 1 }, CancellationToken.None));
         Assert.True(await coordinator.TrySendAsync(CreateFlow("192.0.2.54"), s_server, new byte[] { 2 }, CancellationToken.None));
 
+        await WaitForAsync(() => factory.Transports.Count == 2);
         Assert.Equal(2, factory.Transports.Count);
     }
 
@@ -121,8 +143,14 @@ public sealed class UdpProxyCoordinatorTests
         await using var coordinator = new UdpProxyCoordinator(factory, sink);
         var flow = CreateFlow("192.0.2.53");
         Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 1 }, CancellationToken.None));
+        await WaitForAsync(() => factory.Transports.Count == 1);
+        var transport = Assert.Single(factory.Transports);
+        await WaitForAsync(() =>
+        {
+            lock (transport.Sent) return transport.Sent.Count == 1;
+        });
 
-        await factory.Transports[0].Responses.Writer.WriteAsync(new Socks5UdpDatagram(IPAddress.Parse("192.0.2.53"), null, 53, new byte[] { 9, 8 }), CancellationToken.None);
+        transport.EnqueueResponse(new Socks5UdpDatagram(IPAddress.Parse("192.0.2.53"), null, 53, new byte[] { 9, 8 }));
         var response = await sink.Responses.Reader.ReadAsync(CancellationToken.None);
 
         Assert.Equal(flow, response.Flow);
@@ -142,8 +170,14 @@ public sealed class UdpProxyCoordinatorTests
         var clientMac = new byte[] { 0x02, 0x00, 0x00, 0x00, 0x00, 0x0a };
 
         Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 1 }, CancellationToken.None, 0, 0, clientMac));
+        await WaitForAsync(() => factory.Transports.Count == 1);
+        var transport = Assert.Single(factory.Transports);
+        await WaitForAsync(() =>
+        {
+            lock (transport.Sent) return transport.Sent.Count == 1;
+        });
 
-        await factory.Transports[0].Responses.Writer.WriteAsync(new Socks5UdpDatagram(IPAddress.Parse("192.0.2.53"), null, 53, new byte[] { 9 }), CancellationToken.None);
+        transport.EnqueueResponse(new Socks5UdpDatagram(IPAddress.Parse("192.0.2.53"), null, 53, new byte[] { 9 }));
         var response = await sink.Responses.Reader.ReadAsync(CancellationToken.None);
 
         Assert.Equal(clientMac, response.ClientMac);
@@ -164,7 +198,8 @@ public sealed class UdpProxyCoordinatorTests
             receiveBufferPool: pool);
 
         Assert.True(await coordinator.TrySendAsync(CreateFlow("192.0.2.53"), s_server, new byte[] { 1 }, CancellationToken.None));
-        Assert.Equal(1537, pool.LastMinimumLength);
+        // The receive buffer is rented when the background setup starts the session's receive loop.
+        await WaitForAsync(() => pool.LastMinimumLength == 1537);
 
         await coordinator.DisposeAsync();
 

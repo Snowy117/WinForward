@@ -183,6 +183,15 @@ internal static class Program
         var reinjector = new NdisPacketReinjector(driver);
         try
         {
+            // Scoped 1 ms timer resolution for the whole run: the pump's empty-queue poll delay
+            // rounds up to ~15.6 ms at the default resolution (task 08-28 R6). Declared first so
+            // the scope outlives the capture runtime and its teardown-time reinjections.
+            using var timerScope = new HighResolutionTimerScope();
+            if (!timerScope.IsEnabled)
+            {
+                logger.Warn("High-resolution timer resolution was not applied; the empty-queue poll granularity stays at about 15.6 ms instead of about 1 ms.");
+            }
+
             await using var captureComposition = await CreateCaptureCompositionAsync(configuration, driver, scope, reinjector, selfTraffic, logger).ConfigureAwait(false);
             var modeController = new NdisAdapterModeController(driver, scope);
             await using var runtime = new TransactionalCaptureRuntime(modeController, captureComposition);

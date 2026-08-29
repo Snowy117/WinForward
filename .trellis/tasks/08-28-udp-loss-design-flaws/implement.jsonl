@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Zero-allocation contracts for the per-packet path; R1 keeps the Ready-path inline send and R4 removes per-response allocations, both must not regress rules 1-9."}
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "NDISAPI call contracts incl. queue query + batched read under one gate lease and enumeration-handle rules; R3 restructures gate topology and must preserve these semantics."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Fail-closed and rate-limited logging conventions used by the new skip/continue receive handling, setup queue drops, and cooldown paths."}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Structured event naming (udp.setupqueue.dropped, udp.setup.cooldown) and log-level rules for the new trace/debug/warn emissions."}

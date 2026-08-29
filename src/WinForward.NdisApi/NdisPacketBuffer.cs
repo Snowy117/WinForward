@@ -75,6 +75,35 @@ public sealed unsafe class NdisPacketBuffer : IFrameSource, IDisposable
         return new Span<byte>(_buffer->Buffer, checked((int)_buffer->Length));
     }
 
+    /// <summary>
+    /// Returns the buffer's full native frame storage for an in-place frame build: a caller
+    /// writes the frame bytes into the span and then stamps the buffer with
+    /// <see cref="CompleteFrame"/>, avoiding the copy that <see cref="SetFrame"/> performs. Unlike
+    /// <see cref="GetFrame"/> the span is not bounded by the current length.
+    /// </summary>
+    public Span<byte> GetFrameStorage()
+    {
+        ObjectDisposedException.ThrowIf(_buffer is null, this);
+        return new Span<byte>(_buffer->Buffer, NdisApiAbi.MaximumEthernetFrame);
+    }
+
+    /// <summary>
+    /// Completes an in-place frame build started through <see cref="GetFrameStorage"/>: stamps
+    /// the frame length, the MSTCP-relative direction flag, and the enumeration adapter handle
+    /// (the NDIS packet metadata flag starts zero, matching a fresh synthetic frame) without
+    /// copying any frame bytes.
+    /// </summary>
+    public void CompleteFrame(int frameLength, uint deviceFlags, nint adapterHandle)
+    {
+        ObjectDisposedException.ThrowIf(_buffer is null, this);
+        if ((uint)frameLength > NdisApiAbi.MaximumEthernetFrame) throw new ArgumentOutOfRangeException(nameof(frameLength));
+        _buffer->AdapterHandle = adapterHandle;
+        _buffer->UnionPadding = 0;
+        _buffer->DeviceFlags = deviceFlags;
+        _buffer->Length = (uint)frameLength;
+        _buffer->Flags = 0;
+    }
+
     int IFrameSource.FrameLength => Length;
 
     ReadOnlySpan<byte> IFrameSource.GetFrameSpan() => GetFrame();

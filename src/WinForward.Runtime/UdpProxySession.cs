@@ -7,6 +7,9 @@ namespace WinForward.Runtime;
 
 internal sealed class UdpProxySession : IAsyncDisposable
 {
+    /// <summary>Interval between per-session rate-limited summaries (skipped datagrams, injection failures).</summary>
+    private static readonly TimeSpan RateLimitedLogInterval = TimeSpan.FromSeconds(5);
+
     private readonly FlowKey _flow;
     private readonly long _flowGeneration;
     private readonly UdpAssociation _association;
@@ -24,6 +27,11 @@ internal sealed class UdpProxySession : IAsyncDisposable
     private Task? _disposeTask;
     private Exception? _receiveFailure;
     private long _lastActivityTicks;
+    private long _lastSkipSummaryTicks;
+    private long _lastInjectionFailureLogTicks;
+    private long _skippedUnexpectedSource;
+    private long _skippedOversized;
+    private long _skippedMalformed;
     private bool _expiring;
     private int _activeSends;
 
@@ -146,11 +154,33 @@ internal sealed class UdpProxySession : IAsyncDisposable
         {
             while (!_shutdown.IsCancellationRequested)
             {
-                var response = await _transport.ReceiveAsync(buffer.AsMemory(0, _receiveBufferSize), _shutdown).ConfigureAwait(false);
+                var receive = await _transport.ReceiveAsync(buffer.AsMemory(0, _receiveBufferSize), _shutdown).ConfigureAwait(false);
                 TouchActivity();
+                if (!receive.HasDatagram)
+                {
+                    // One anomalous datagram (unexpected relay source, oversized, malformed) skips
+                    // and the loop keeps receiving; only socket-level failures tear the session down.
+                    RecordSkippedDatagram(receive.SkipReason);
+                    continue;
+                }
+
+                var response = receive.Datagram;
                 if (response.DestinationAddress is null) continue;
                 var source = Endpoint.From(response.DestinationAddress, response.DestinationPort);
-                await _sink.InjectAsync(_flow, source, response.Payload, ClientMac, _shutdown).ConfigureAwait(false);
+                try
+                {
+                    await _sink.InjectAsync(_flow, source, response.Payload, ClientMac, _shutdown).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    // A failed reinjection of one response must not kill the flow; skip it and continue.
+                    LogInjectionFailureRateLimited(exception);
+                }
+
                 if (_logger.IsEnabled(RuntimeLogLevel.Trace))
                 {
                     _logger.Event(RuntimeLogLevel.Trace, "udp.packet.received",
@@ -176,6 +206,49 @@ internal sealed class UdpProxySession : IAsyncDisposable
         {
             _receiveBufferPool.Return(buffer);
         }
+    }
+
+    private void RecordSkippedDatagram(Socks5UdpReceiveSkipReason reason)
+    {
+        switch (reason)
+        {
+            case Socks5UdpReceiveSkipReason.UnexpectedSource:
+                Interlocked.Increment(ref _skippedUnexpectedSource);
+                break;
+            case Socks5UdpReceiveSkipReason.Oversized:
+                Interlocked.Increment(ref _skippedOversized);
+                break;
+            case Socks5UdpReceiveSkipReason.Malformed:
+                Interlocked.Increment(ref _skippedMalformed);
+                break;
+            case Socks5UdpReceiveSkipReason.None:
+            default:
+                return;
+        }
+
+        MaybeLogSkipSummary();
+    }
+
+    private void MaybeLogSkipSummary()
+    {
+        var now = _timeProvider.GetUtcNow().UtcTicks;
+        var last = Interlocked.Read(ref _lastSkipSummaryTicks);
+        if (now - last < RateLimitedLogInterval.Ticks) return;
+        if (Interlocked.CompareExchange(ref _lastSkipSummaryTicks, now, last) != last) return;
+        var unexpected = Interlocked.Exchange(ref _skippedUnexpectedSource, 0);
+        var oversized = Interlocked.Exchange(ref _skippedOversized, 0);
+        var malformed = Interlocked.Exchange(ref _skippedMalformed, 0);
+        if (unexpected + oversized + malformed == 0) return;
+        _logger.Debug($"SOCKS5 UDP relay skipped datagrams in the last window: unexpectedSource={unexpected} oversized={oversized} malformed={malformed}.");
+    }
+
+    private void LogInjectionFailureRateLimited(Exception exception)
+    {
+        var now = _timeProvider.GetUtcNow().UtcTicks;
+        var last = Interlocked.Read(ref _lastInjectionFailureLogTicks);
+        if (now - last < RateLimitedLogInterval.Ticks) return;
+        if (Interlocked.CompareExchange(ref _lastInjectionFailureLogTicks, now, last) != last) return;
+        _logger.Warn($"UDP response reinjection failed; the response was skipped: {exception.GetType().Name}: {exception.Message}");
     }
 
     private void TouchActivity()

@@ -52,3 +52,42 @@ internal sealed class NdisNativeCallGate
         }
     }
 }
+
+/// <summary>
+/// Maps NDISAPI adapter enumeration handles to per-adapter native call gates (design D3 of task
+/// 08-28-udp-loss-design-flaws): native calls on one adapter stay serialized, while calls on
+/// distinct adapters proceed in parallel, so a slow IOCTL on one adapter cannot stall every
+/// pump. Gates are keyed by the enumeration handle carried by requests, and the map only grows
+/// (bounded by the adapter count for the driver's lifetime). The map lock guards the lookup
+/// itself and is always released before the caller enters the returned gate, so waiting on one
+/// adapter's gate never blocks lookups for other adapters.
+/// </summary>
+internal sealed class NdisAdapterGateMap
+{
+    private readonly Lock _mapLock = new();
+    private readonly Dictionary<nint, NdisNativeCallGate> _gates = [];
+
+    internal NdisNativeCallGate Get(nint adapterHandle)
+    {
+        lock (_mapLock)
+        {
+            if (!_gates.TryGetValue(adapterHandle, out var gate))
+            {
+                gate = new NdisNativeCallGate();
+                _gates.Add(adapterHandle, gate);
+            }
+
+            return gate;
+        }
+    }
+
+    internal IReadOnlyDictionary<nint, int> GetMaxConcurrentCalls()
+    {
+        lock (_mapLock)
+        {
+            var snapshot = new Dictionary<nint, int>(_gates.Count);
+            foreach (var (adapterHandle, gate) in _gates) snapshot.Add(adapterHandle, gate.MaxConcurrentCalls);
+            return snapshot;
+        }
+    }
+}

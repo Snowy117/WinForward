@@ -50,7 +50,13 @@ internal sealed class FakeTransport : IUdpProxyTransport
     public IPEndPoint LocalEndpoint { get; }
     public bool IsDisposed { get; private set; }
     public List<(IPEndPoint Destination, byte[] Payload)> Sent { get; } = [];
-    public Channel<Socks5UdpDatagram> Responses { get; } = Channel.CreateUnbounded<Socks5UdpDatagram>();
+    public Channel<Socks5UdpReceiveResult> Received { get; } = Channel.CreateUnbounded<Socks5UdpReceiveResult>();
+
+    /// <summary>Queues a valid decoded relay datagram for the session's receive loop.</summary>
+    public void EnqueueResponse(Socks5UdpDatagram datagram) => Received.Writer.TryWrite(Socks5UdpReceiveResult.Received(datagram));
+
+    /// <summary>Queues a per-datagram anomaly the real transport would surface as a skip result.</summary>
+    public void EnqueueSkip(Socks5UdpReceiveSkipReason reason) => Received.Writer.TryWrite(Socks5UdpReceiveResult.Skipped(reason));
 
     public ValueTask SendAsync(IPEndPoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
@@ -58,18 +64,18 @@ internal sealed class FakeTransport : IUdpProxyTransport
         return ValueTask.CompletedTask;
     }
 
-    public ValueTask<Socks5UdpDatagram> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+    public ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
     {
         // A disposed transport models a closed socket: the pump's pending receive must end
         // promptly instead of blocking forever, mirroring the real socket's throw.
         ObjectDisposedException.ThrowIf(IsDisposed, this);
-        return Responses.Reader.ReadAsync(cancellationToken);
+        return Received.Reader.ReadAsync(cancellationToken);
     }
 
     public ValueTask DisposeAsync()
     {
         IsDisposed = true;
-        Responses.Writer.TryComplete();
+        Received.Writer.TryComplete();
         return ValueTask.CompletedTask;
     }
 }
@@ -118,8 +124,8 @@ internal sealed class ImmediateFaultTransport : IUdpProxyTransport
     public ValueTask SendAsync(IPEndPoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken) =>
         ValueTask.FromException(new IOException("relay receive already failed"));
 
-    public ValueTask<Socks5UdpDatagram> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken) =>
-        ValueTask.FromException<Socks5UdpDatagram>(new IOException("relay receive failed"));
+    public ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken) =>
+        ValueTask.FromException<Socks5UdpReceiveResult>(new IOException("relay receive failed"));
 
     public ValueTask DisposeAsync()
     {

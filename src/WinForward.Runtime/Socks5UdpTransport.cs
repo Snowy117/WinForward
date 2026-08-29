@@ -1,17 +1,56 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
 
 namespace WinForward.Runtime;
 
+/// <summary>
+/// The per-datagram anomaly that made a relay receive undeliverable. Skip reasons are surfaced
+/// as results instead of exceptions so a single bad relay datagram never terminates a session's
+/// receive loop; only socket-level failures keep throwing.
+/// </summary>
+public enum Socks5UdpReceiveSkipReason
+{
+    /// <summary>Not a skip: the datagram was decoded successfully.</summary>
+    None = 0,
+
+    /// <summary>The datagram arrived from an endpoint other than the negotiated relay (port or address-family mismatch).</summary>
+    UnexpectedSource = 1,
+
+    /// <summary>The datagram filled the receive buffer completely and may be truncated.</summary>
+    Oversized = 2,
+
+    /// <summary>The datagram is not a decodable SOCKS5 UDP datagram.</summary>
+    Malformed = 3,
+}
+
+/// <summary>
+/// The discriminated result of <see cref="IUdpProxyTransport.ReceiveAsync"/>: either a decoded
+/// datagram (<see cref="HasDatagram"/>) or a <see cref="SkipReason"/> that skips exactly one
+/// datagram. A struct result keeps the receive hot path allocation-free.
+/// </summary>
+[StructLayout(LayoutKind.Auto)]
+public readonly record struct Socks5UdpReceiveResult(Socks5UdpDatagram Datagram, Socks5UdpReceiveSkipReason SkipReason)
+{
+    /// <summary>True when <see cref="Datagram"/> carries a decoded relay datagram.</summary>
+    public bool HasDatagram => SkipReason == Socks5UdpReceiveSkipReason.None;
+
+    /// <summary>Wraps a successfully decoded relay datagram.</summary>
+    public static Socks5UdpReceiveResult Received(Socks5UdpDatagram datagram) => new(datagram, Socks5UdpReceiveSkipReason.None);
+
+    /// <summary>Marks one per-datagram anomaly; the caller must skip the datagram and keep receiving.</summary>
+    public static Socks5UdpReceiveResult Skipped(Socks5UdpReceiveSkipReason reason) => new(default, reason);
+}
+
 public interface IUdpProxyTransport : IAsyncDisposable
 {
     IPEndPoint RelayEndpoint { get; }
     IPEndPoint LocalEndpoint { get; }
     ValueTask SendAsync(IPEndPoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken);
-    ValueTask<Socks5UdpDatagram> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken);
+    ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken);
 }
 
 public interface IUdpProxyTransportFactory
@@ -35,9 +74,17 @@ public sealed class Socks5UdpTransportFactory : IUdpProxyTransportFactory
 
 public sealed class Socks5UdpTransport : IUdpProxyTransport
 {
+    /// <summary>
+    /// Explicit relay-socket receive headroom (R4): relayed responses can burst far faster than
+    /// the single receive loop reinjects them, and the OS default datagram buffer would overflow
+    /// and drop responses that were already relayed. Not a config knob; the schema is frozen.
+    /// </summary>
+    private const int RelaySocketReceiveBufferSize = 512 * 1024;
+
     private readonly Socket _socket;
     private readonly Socks5ControlConnection _control;
     private readonly SelfTrafficRegistry.SelfTrafficToken? _selfTrafficToken;
+    private readonly SemaphoreSlim _sendGate = new(1, 1);
 
     private Socks5UdpTransport(Socket socket, Socks5ControlConnection control, IPEndPoint relayEndpoint, SelfTrafficRegistry.SelfTrafficToken? selfTrafficToken)
     {
@@ -77,6 +124,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
             var relay = await control.UdpAssociateAsync(cancellationToken).ConfigureAwait(false);
             var relayAddressFamily = relay.AddressFamily;
             socket = (socketFactory ?? (family => new Socket(family, SocketType.Dgram, ProtocolType.Udp)))(relayAddressFamily);
+            socket.ReceiveBufferSize = RelaySocketReceiveBufferSize;
             socket.Bind(new IPEndPoint(relayAddressFamily == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any, 0));
             // Register the relay transport tuple in the loop-prevention registry so catch-all proxy
             // rules never recursively intercept WinForward's own UDP relay traffic (design §10).
@@ -112,30 +160,43 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
 
     public async ValueTask SendAsync(IPEndPoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
-        // The header buffer covers the worst SOCKS5 UDP overhead (6 + 16-byte IPv6) plus an
-        // Ethernet-sized payload; the encode writes into it and the socket send reads only the
-        // written slice, so a datagram send allocates nothing.
-        if (!Socks5UdpCodec.TryEncode(IPAddressValue.From(destination.Address), (ushort)destination.Port, payload.Span, _sendBuffer, out var written))
+        // Serialize the encode + send pair (R5): the shared send buffer must never observe
+        // interleaved writers when one flow is dispatched from two pumps. Uncontended
+        // WaitAsync completes synchronously, so the steady single-sender path allocates nothing.
+        await _sendGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            throw new IOException("A SOCKS5 UDP datagram exceeded the relay send buffer.");
-        }
+            // The header buffer covers the worst SOCKS5 UDP overhead (6 + 16-byte IPv6) plus an
+            // Ethernet-sized payload; the encode writes into it and the socket send reads only the
+            // written slice, so a datagram send allocates nothing.
+            if (!Socks5UdpCodec.TryEncode(IPAddressValue.From(destination.Address), (ushort)destination.Port, payload.Span, _sendBuffer, out var written))
+            {
+                throw new IOException("A SOCKS5 UDP datagram exceeded the relay send buffer.");
+            }
 
-        _ = await _socket.SendToAsync(_sendBuffer.AsMemory(0, written), SocketFlags.None, RelayEndpoint, cancellationToken).ConfigureAwait(false);
+            _ = await _socket.SendToAsync(_sendBuffer.AsMemory(0, written), SocketFlags.None, RelayEndpoint, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _sendGate.Release();
+        }
     }
 
     private readonly byte[] _sendBuffer = new byte[6 + 16 + UdpFrameBuilder.MaximumEthernetFrame];
 
-    public async ValueTask<Socks5UdpDatagram> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+    public async ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
     {
         EndPoint sender = RelayEndpoint.AddressFamily == AddressFamily.InterNetwork ? new IPEndPoint(IPAddress.Any, 0) : new IPEndPoint(IPAddress.IPv6Any, 0);
         var result = await _socket.ReceiveFromAsync(buffer, SocketFlags.None, sender, cancellationToken).ConfigureAwait(false);
-        if (!IsAcceptableRelaySource(result.RemoteEndPoint, RelayEndpoint)) throw new IOException("SOCKS5 UDP packet came from an unexpected relay endpoint.");
-        if (IsPossiblyTruncated(result.ReceivedBytes, buffer.Length)) throw new IOException("SOCKS5 UDP relay returned an oversized datagram.");
+        // Per-datagram anomalies skip one datagram instead of throwing: a single bad relay
+        // datagram must not terminate the session's receive loop (R2).
+        if (!IsAcceptableRelaySource(result.RemoteEndPoint, RelayEndpoint)) return Socks5UdpReceiveResult.Skipped(Socks5UdpReceiveSkipReason.UnexpectedSource);
+        if (IsPossiblyTruncated(result.ReceivedBytes, buffer.Length)) return Socks5UdpReceiveResult.Skipped(Socks5UdpReceiveSkipReason.Oversized);
         // M2: the SOCKS5 UDP wire format carries no interface scope, so propagate the relay
         // endpoint's IPv6 scope into reconstruction to keep a link-local decoded address routable.
         var scopeId = RelayEndpoint.Address.AddressFamily == AddressFamily.InterNetworkV6 ? RelayEndpoint.Address.ScopeId : 0;
-        if (!Socks5UdpCodec.TryDecode(buffer[..result.ReceivedBytes], out var datagram, scopeId)) throw new IOException("SOCKS5 UDP relay returned a malformed datagram.");
-        return datagram;
+        if (!Socks5UdpCodec.TryDecode(buffer[..result.ReceivedBytes], out var datagram, scopeId)) return Socks5UdpReceiveResult.Skipped(Socks5UdpReceiveSkipReason.Malformed);
+        return Socks5UdpReceiveResult.Received(datagram);
     }
 
     /// <summary>
@@ -163,7 +224,16 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
             }
             finally
             {
-                await _control.DisposeAsync().ConfigureAwait(false);
+                try
+                {
+                    await _control.DisposeAsync().ConfigureAwait(false);
+                }
+                finally
+                {
+                    // Disposed last: in-flight senders release the gate from their finally blocks
+                    // as the disposed socket faults their pending sends.
+                    _sendGate.Dispose();
+                }
             }
         }
     }

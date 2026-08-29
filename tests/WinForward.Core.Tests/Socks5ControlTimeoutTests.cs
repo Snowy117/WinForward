@@ -137,9 +137,10 @@ public sealed class Socks5ControlTimeoutTests
 
         var buffer = new byte[65_535];
         var response = await transport.ReceiveAsync(buffer, CancellationToken.None);
-        Assert.Equal(IPAddress.Parse("192.0.2.53"), response.DestinationAddress);
-        Assert.Equal(53, response.DestinationPort);
-        Assert.Equal(new byte[] { 0xab }, response.Payload.ToArray());
+        Assert.True(response.HasDatagram);
+        Assert.Equal(IPAddress.Parse("192.0.2.53"), response.Datagram.DestinationAddress);
+        Assert.Equal(53, response.Datagram.DestinationPort);
+        Assert.Equal(new byte[] { 0xab }, response.Datagram.Payload.ToArray());
 
         await transport.DisposeAsync();
         await server;

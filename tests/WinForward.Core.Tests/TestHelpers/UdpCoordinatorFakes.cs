@@ -41,6 +41,46 @@ internal sealed class GatedTransportFactory : IUdpProxyTransportFactory
     public void Fail(Exception exception) => _create.TrySetException(exception);
 }
 
+/// <summary>
+/// A factory whose CreateAsync stalls until a gate task completes (optionally at least a minimum
+/// delay, modeling a slow SOCKS5 UDP ASSOCIATE), then returns transports with distinct local
+/// ports so the relay alias collision guard never rejects distinct flows.
+/// </summary>
+internal sealed class DelayedTransportFactory(Task gate, TimeSpan? minimumDelay = null) : IUdpProxyTransportFactory
+{
+    private int _nextLocalPort = 41000;
+    private int _calls;
+
+    /// <summary>Counts CreateAsync attempts from method entry, so in-flight (gated) setups are visible.</summary>
+    public int CreateCalls => Volatile.Read(ref _calls);
+    public List<FakeTransport> Transports { get; } = [];
+
+    public async ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref _calls);
+        // The gate models a stalled SOCKS5 handshake, but coordinator shutdown must still be
+        // able to interrupt the pending setup, so the wait honors the cancellation token.
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        if (minimumDelay is { } delay) await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+        var transport = new FakeTransport(System.Net.Sockets.AddressFamily.InterNetwork, Interlocked.Increment(ref _nextLocalPort));
+        lock (Transports) Transports.Add(transport);
+        return transport;
+    }
+}
+
+/// <summary>A factory whose every CreateAsync attempt fails, modeling an unreachable SOCKS5 server.</summary>
+internal sealed class FailingTransportFactory : IUdpProxyTransportFactory
+{
+    private int _calls;
+    public int CreateCalls => Volatile.Read(ref _calls);
+
+    public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref _calls);
+        throw new IOException("SOCKS5 server is unreachable (synthetic).");
+    }
+}
+
 internal sealed class CancellationAwareTransportFactory : IUdpProxyTransportFactory
 {
     public TaskCompletionSource<bool> CreateStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -55,8 +95,14 @@ internal sealed class CancellationAwareTransportFactory : IUdpProxyTransportFact
 
 internal sealed class CollidingAliasTransportFactory : IUdpProxyTransportFactory
 {
-    public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken) =>
-        ValueTask.FromResult<IUdpProxyTransport>(new FakeTransport(AddressFamily.InterNetwork, 40000));
+    public List<FakeTransport> Transports { get; } = [];
+
+    public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
+    {
+        var transport = new FakeTransport(AddressFamily.InterNetwork, 40000);
+        lock (Transports) Transports.Add(transport);
+        return ValueTask.FromResult<IUdpProxyTransport>(transport);
+    }
 }
 
 internal sealed class TrackingArrayPool : ArrayPool<byte>

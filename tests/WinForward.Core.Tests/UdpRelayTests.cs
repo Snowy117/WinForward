@@ -7,6 +7,7 @@ using WinForward.NdisApi;
 using WinForward.Protocols;
 using WinForward.Runtime;
 using Xunit;
+using static WinForward.Core.Tests.AsyncTestExtensions;
 using static WinForward.Core.Tests.ChecksumMath;
 
 namespace WinForward.Core.Tests;
@@ -147,6 +148,48 @@ public sealed class UdpRelayTests
         var overflow = cap - 41;
         Assert.True(UdpFrameBuilder.TryBuild(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[fits], s_macA, s_macB, out _, cap));
         Assert.False(UdpFrameBuilder.TryBuild(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[overflow], s_macA, s_macB, out _, cap));
+    }
+
+    [Theory]
+    [InlineData("192.0.2.53", "192.0.2.10")]
+    [InlineData("2001:db8::53", "2001:db8::10")]
+    public void TryBuildIntoMatchesTheAllocatingTryBuildByteForByte(string source, string destination)
+    {
+        // R4: the span-writing overload must produce byte-identical frames so the pooled
+        // reinjection path shares one header/checksum code path with the allocating builder.
+        var payload = new byte[] { 0xde, 0xad, 0xbe, 0xef, 0x01 };
+        var sourceAddress = IPAddress.Parse(source);
+        var destinationAddress = IPAddress.Parse(destination);
+
+        Assert.True(UdpFrameBuilder.TryBuild(sourceAddress, 53, destinationAddress, 53000, payload, s_macA, s_macB, out var frame));
+        var storage = new byte[9014];
+        Assert.True(UdpFrameBuilder.TryBuildInto(
+            WinForward.Core.IPAddressValue.From(sourceAddress), 53,
+            WinForward.Core.IPAddressValue.From(destinationAddress), 53000,
+            payload, s_macA, s_macB, storage, out var frameLength));
+
+        Assert.Equal(frame.Length, frameLength);
+        Assert.True(storage.AsSpan(0, frameLength).SequenceEqual(frame));
+    }
+
+    [Fact]
+    public void TryBuildIntoRejectsShortDestinationAndInvalidInputs()
+    {
+        var payload = new byte[] { 1, 2, 3 };
+        var storage = new byte[9014];
+
+        // Destination shorter than the computed frame.
+        Assert.False(UdpFrameBuilder.TryBuildInto(
+            WinForward.Core.IPAddressValue.From(IPAddress.Parse("192.0.2.53")), 53,
+            WinForward.Core.IPAddressValue.From(IPAddress.Parse("192.0.2.10")), 53000,
+            payload, s_macA, s_macB, storage.AsSpan(0, 40), out var length));
+        Assert.Equal(0, length);
+
+        // MAC length rejections shared with the allocating overload.
+        Assert.False(UdpFrameBuilder.TryBuildInto(
+            WinForward.Core.IPAddressValue.From(IPAddress.Parse("192.0.2.53")), 53,
+            WinForward.Core.IPAddressValue.From(IPAddress.Parse("192.0.2.10")), 53000,
+            payload, new byte[] { 1, 2, 3, 4, 5 }, s_macB, storage, out _));
     }
 
     [Fact]
@@ -352,6 +395,34 @@ public sealed class UdpRelayTests
         Assert.Equal(0, reinjector.ToAdapterCount);
     }
 
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public async Task ResponseInjectionUsesPooledBuffersWithoutPerDatagramManagedAllocation()
+    {
+        // R4/AC4: the steady-state response path rents pooled native buffers, builds each frame
+        // in place, and returns them — no managed byte[] per datagram, and the rented buffer
+        // comes back to the pool (a never-returned buffer would leave the pool empty).
+        using var pool = new NdisPacketBufferPool();
+        var reinjector = new CountingReinjector();
+        var sink = new UdpResponseReinjector(reinjector, (nint)7, s_macA, bufferPool: pool);
+        var client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000);
+        var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
+        var flow = FlowKey.Create(client, server, TransportProtocol.Udp, FlowOriginKind.Host);
+        var payload = new byte[64];
+
+        // Warm up the JIT and the pool so the measured loop sees only steady-state behavior.
+        for (var index = 0; index < 3; index++) await sink.InjectAsync(flow, server, payload, null, CancellationToken.None);
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        const int count = 16;
+        for (var index = 0; index < count; index++) await sink.InjectAsync(flow, server, payload, null, CancellationToken.None);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(0, allocated);
+        Assert.Equal(3 + count, reinjector.SendToMstcpCount);
+        Assert.Equal(1, pool.Count);
+    }
+
     // ---- Executor UDP wiring ----
 
     [Fact]
@@ -372,8 +443,14 @@ public sealed class UdpRelayTests
 
         await executor.ProxyAsync(packet, s_server, CancellationToken.None);
 
+        await WaitForAsync(() => factory.Transports.Count == 1);
         var transport = Assert.Single(factory.Transports);
-        var sent = Assert.Single(transport.Sent);
+        await WaitForAsync(() =>
+        {
+            lock (transport.Sent) return transport.Sent.Count == 1;
+        });
+        (IPEndPoint Destination, byte[] Payload) sent;
+        lock (transport.Sent) sent = transport.Sent[0];
         Assert.Equal(payload, sent.Payload);
         // The original datagram is consumed by the relay forward; it is never reinjected.
         Assert.Equal(0, reinjector.ToMstcpCount);

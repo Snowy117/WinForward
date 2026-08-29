@@ -57,14 +57,15 @@ Questions to answer:
 
 - `UdpProxyCoordinator(..., int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame)` owns the receive-window bound.
 - `UdpResponseReinjector(..., int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame, ...)` owns the rebuilt-frame bound.
-- `Socks5UdpTransport.ReceiveAsync(Memory<byte> buffer, CancellationToken)` must reject a receive whose byte count fills the supplied buffer.
+- `Socks5UdpTransport.ReceiveAsync(Memory<byte> buffer, CancellationToken)` returns a discriminated `Socks5UdpReceiveResult`; a receive whose byte count fills the supplied buffer reports the `Oversized` skip instead of a datagram.
 
 ### 3. Contracts
 
 - Composition passes the same pinned `maximumFrameSize` to the coordinator and reinjector. A relay response that cannot fit the reinjection cap must never be accepted into a larger independent receive contract.
 - Per active UDP session, rent one buffer sized `maximumFrameSize + 22 + 1`: maximum Ethernet frame, maximum SOCKS5 UDP header, and one oversize sentinel byte.
 - The receive loop owns the rented array for its full lifetime and returns it exactly once in `finally`, including cancellation, socket disposal, malformed input, immediate receive failure, and normal session teardown.
-- `receivedBytes >= buffer.Length` means the datagram may be truncated. Reject it fail-closed before decoding or reinjection.
+- `receivedBytes >= buffer.Length` means the datagram may be truncated — it is a **skip**, not a session failure (superseded 2026-08-28, task 08-28-udp-loss-design-flaws D2).
+- **Per-datagram anomalies skip, never tear down** (supersedes the earlier throw-based matrix): `Socks5UdpTransport.ReceiveAsync` returns a discriminated `Socks5UdpReceiveResult` — a valid datagram, or a skip with reason `UnexpectedSource` / `Oversized` / `Malformed`. The session receive loop counts skips, emits a per-session rate-limited (>=5s) summary log, and continues; only socket-level exceptions (`SocketException`, `ObjectDisposedException`, shutdown cancellation) are fatal via `_receiveFailure`. Per-response sink (`InjectAsync`) failures are likewise isolated per response. A single >=1537B or malformed relay datagram must NOT stop response delivery for the flow.
 - Decoded payloads are owner-bound `ReadOnlyMemory<byte>` slices and must be consumed before the next receive or buffer return; they must not escape the awaited response-sink call.
 
 ### 4. Validation & Error Matrix
@@ -73,10 +74,13 @@ Questions to answer:
 | --- | --- |
 | `maximumFrameSize <= 0` | Constructor throws `ArgumentOutOfRangeException` |
 | Receive result is smaller than the sentinel window and decodes successfully | Await the response sink before reusing the buffer |
-| Receive result fills the sentinel window | Throw `IOException`; do not decode or reinject |
-| Malformed SOCKS5 UDP header/payload | Throw `IOException`; session fails closed |
+| Receive result fills the sentinel window | Skip (`Oversized`); do not decode or reinject; do NOT tear down the session |
+| Malformed SOCKS5 UDP header/payload | Skip (`Malformed`); rate-limited summary log; session survives |
+| Datagram source port/family does not match the relay | Skip (`UnexpectedSource`); session survives |
+| Socket-level receive failure / disposal / shutdown cancellation | Fatal: `_receiveFailure` -> session teardown (existing path) |
+| Response sink (`InjectAsync`) throws non-cancellation | Rate-limited warn, skip that one response, loop continues |
 | Receive, decode, sink, cancellation, or disposal exits the loop | Return the rented array exactly once |
-| Rebuilt Ethernet frame exceeds the same pinned cap | Drop fail-closed without native injection |
+| Rebuilt Ethernet frame exceeds the same pinned cap | Drop fail-closed (rate-limited log) without native injection |
 
 ### 5. Good/Base/Bad Cases
 

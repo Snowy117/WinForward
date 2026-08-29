@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "General quality gate and review expectations for the final full-scope check."}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Verify steady-state pass/block path remains allocation-free after R1/R4 changes (AC7 benchmark evidence)."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Check new failure paths (skip-and-continue, cooldown, setup queue overflow) follow fail-closed and error-isolation conventions."}

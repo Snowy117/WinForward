@@ -45,6 +45,54 @@ public static class UdpFrameBuilder
         int maximumEthernetFrame = DefaultMaximumEthernetFrame)
     {
         frame = [];
+        if (!TryComputeFrameLength(sourceAddress, destinationAddress, payload, sourceMac, destinationMac, maximumEthernetFrame, out var totalLength)) return false;
+        var result = new byte[totalLength];
+        if (!TryBuildInto(sourceAddress, sourcePort, destinationAddress, destinationPort, payload, sourceMac, destinationMac, result, out _, maximumEthernetFrame)) return false;
+        frame = result;
+        return true;
+    }
+
+    /// <summary>
+    /// Writes the complete Ethernet II + IPv4/IPv6 + UDP frame directly into
+    /// <paramref name="destination"/> (for example a pooled native buffer's frame storage) so the
+    /// response reinjection path allocates no managed frame per datagram. The allocating
+    /// <see cref="TryBuild"/> delegates here, so both entry points share one header/checksum code
+    /// path. Returns false for the same rejections as <see cref="TryBuild"/> or when the
+    /// destination span is shorter than the computed frame.
+    /// </summary>
+    public static bool TryBuildInto(
+        IPAddressValue sourceAddress,
+        ushort sourcePort,
+        IPAddressValue destinationAddress,
+        ushort destinationPort,
+        ReadOnlyMemory<byte> payload,
+        ReadOnlySpan<byte> sourceMac,
+        ReadOnlySpan<byte> destinationMac,
+        Span<byte> destination,
+        out int frameLength,
+        int maximumEthernetFrame = DefaultMaximumEthernetFrame)
+    {
+        if (!TryComputeFrameLength(sourceAddress, destinationAddress, payload, sourceMac, destinationMac, maximumEthernetFrame, out frameLength)) return false;
+        if (destination.Length < frameLength)
+        {
+            frameLength = 0;
+            return false;
+        }
+
+        WriteFrame(destination, sourceAddress, sourcePort, destinationAddress, destinationPort, payload, sourceMac, destinationMac, frameLength);
+        return true;
+    }
+
+    private static bool TryComputeFrameLength(
+        IPAddressValue sourceAddress,
+        IPAddressValue destinationAddress,
+        ReadOnlyMemory<byte> payload,
+        ReadOnlySpan<byte> sourceMac,
+        ReadOnlySpan<byte> destinationMac,
+        int maximumEthernetFrame,
+        out int totalLength)
+    {
+        totalLength = 0;
         if (sourceMac.Length != 6 || destinationMac.Length != 6) return false;
         if (maximumEthernetFrame <= 0) return false;
         if (sourceAddress.Family != destinationAddress.Family) return false;
@@ -56,17 +104,37 @@ public static class UdpFrameBuilder
         var udpLength = 8 + payload.Length;
         if (isIpv4 && udpLength > ushort.MaxValue - 20) return false;
         var ipHeaderLength = isIpv4 ? 20 : 40;
-        var totalLength = 14 + ipHeaderLength + udpLength;
-        if (totalLength > maximumEthernetFrame) return false;
+        totalLength = 14 + ipHeaderLength + udpLength;
+        if (totalLength > maximumEthernetFrame)
+        {
+            totalLength = 0;
+            return false;
+        }
 
-        var result = new byte[totalLength];
+        return true;
+    }
+
+    private static void WriteFrame(
+        Span<byte> result,
+        IPAddressValue sourceAddress,
+        ushort sourcePort,
+        IPAddressValue destinationAddress,
+        ushort destinationPort,
+        ReadOnlyMemory<byte> payload,
+        ReadOnlySpan<byte> sourceMac,
+        ReadOnlySpan<byte> destinationMac,
+        int totalLength)
+    {
+        var isIpv4 = sourceAddress.Family == AddressFamilyKind.IPv4;
 
         // Ethernet II header: destination MAC, source MAC, ethertype.
-        destinationMac.CopyTo(result.AsSpan(0, 6));
-        sourceMac.CopyTo(result.AsSpan(6, 6));
-        BinaryPrimitives.WriteUInt16BigEndian(result.AsSpan(12, 2), isIpv4 ? (ushort)0x0800 : (ushort)0x86dd);
+        destinationMac.CopyTo(result[..6]);
+        sourceMac.CopyTo(result.Slice(6, 6));
+        BinaryPrimitives.WriteUInt16BigEndian(result.Slice(12, 2), isIpv4 ? (ushort)0x0800 : (ushort)0x86dd);
 
         const int ipOffset = 14;
+        var ipHeaderLength = isIpv4 ? 20 : 40;
+        var udpLength = totalLength - ipOffset - ipHeaderLength;
         if (isIpv4)
         {
             WriteIpv4Header(result, ipOffset, sourceAddress, destinationAddress, udpLength);
@@ -81,15 +149,12 @@ public static class UdpFrameBuilder
 
         if (isIpv4)
         {
-            PacketChecksums.WriteUdpChecksum(result, udpOffset, udpLength, result.AsSpan(ipOffset + 12, 4), result.AsSpan(ipOffset + 16, 4), isIpv6: false);
+            PacketChecksums.WriteUdpChecksum(result, udpOffset, udpLength, result.Slice(ipOffset + 12, 4), result.Slice(ipOffset + 16, 4), isIpv6: false);
         }
         else
         {
-            PacketChecksums.WriteUdpChecksum(result, udpOffset, udpLength, result.AsSpan(ipOffset + 8, 16), result.AsSpan(ipOffset + 24, 16), isIpv6: true);
+            PacketChecksums.WriteUdpChecksum(result, udpOffset, udpLength, result.Slice(ipOffset + 8, 16), result.Slice(ipOffset + 24, 16), isIpv6: true);
         }
-
-        frame = result;
-        return true;
     }
 
     private static void WriteIpv4Header(Span<byte> frame, int ipOffset, IPAddressValue sourceAddress, IPAddressValue destinationAddress, int udpLength)
