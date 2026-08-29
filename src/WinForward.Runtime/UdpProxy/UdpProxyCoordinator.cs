@@ -262,12 +262,13 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
 
     private async Task CreateSessionAsync(FlowKey flow, Socks5Server server, long flowGeneration, byte[]? clientMac, CancellationToken cancellationToken, Task registered, UdpSessionSlot slot)
     {
-        if (!await _setupLimiter.WaitAsync(TimeSpan.Zero, cancellationToken).ConfigureAwait(false))
-        {
-            // The concurrent-setup cap: thousands of simultaneous new flows must not open
-            // thousands of SOCKS5 handshakes; flows beyond the cap retry after the cooldown.
-            throw new IOException("UDP session setup concurrency cap reached; retrying after cooldown.");
-        }
+        // Patient admission: a flash crowd of new flows must queue behind the 8-wide setup
+        // gate rather than fail into the cooldown tombstone, because a failed setup's teardown
+        // drains the setup queue and drops the already-accepted triggering datagram (that
+        // drop, not the steady-state relay, was the entire measured in-window soak loss).
+        // Queued setups observe shutdown cancellation here (no tombstone); genuine setup
+        // failures below still fail closed with the cooldown tombstone.
+        await _setupLimiter.WaitAsync(cancellationToken).ConfigureAwait(false);
 
         IUdpProxyTransport? transport = null;
         UdpAssociation? association = null;

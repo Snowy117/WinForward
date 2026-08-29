@@ -8,6 +8,7 @@ internal enum SoakScenario
     Udp,
     Tcp,
     Footprint,
+    Baseline,
 }
 
 internal enum AbortKind
@@ -160,7 +161,8 @@ internal sealed record SoakOptions
         "udp" => SoakScenario.Udp,
         "tcp" => SoakScenario.Tcp,
         "footprint" => SoakScenario.Footprint,
-        _ => throw new ArgumentException($"Unknown scenario '{raw}'; expected all, udp, tcp, or footprint.", nameof(raw)),
+        "baseline" => SoakScenario.Baseline,
+        _ => throw new ArgumentException($"Unknown scenario '{raw}'; expected all, udp, tcp, footprint, or baseline.", nameof(raw)),
     };
 
     private static int PositiveInt(string name, string raw) =>

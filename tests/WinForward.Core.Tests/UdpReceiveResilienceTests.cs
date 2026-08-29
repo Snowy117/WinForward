@@ -113,7 +113,7 @@ public sealed class UdpReceiveResilienceTests
         var controlEndpoint = (IPEndPoint)tcpListener.LocalEndpoint;
         using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var associateRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var server = ServeAssociateOnlyAsync(tcpListener, relayEndpoint, associateRead, serverCancellation.Token);
+        var server = Socks5TestServer.ServeAssociateOnlyAsync(tcpListener, relayEndpoint, associateRead, serverCancellation.Token);
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), null, null);
         var transport = await Socks5UdpTransport.CreateAsync(socksServer, new SelfTrafficRegistry(), CancellationToken.None);
         var transportEndpoint = new IPEndPoint(IPAddress.Loopback, transport.LocalEndpoint.Port);
@@ -167,7 +167,7 @@ public sealed class UdpReceiveResilienceTests
         using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         const int datagramCount = 16;
         var received = new TaskCompletionSource<List<byte[]>>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var server = ServeAssociateAndCollectAsync(tcpListener, relaySocket, relayEndpoint, datagramCount, received, serverCancellation.Token);
+        var server = Socks5TestServer.ServeAssociateAndCollectAsync(tcpListener, relaySocket, relayEndpoint, datagramCount, received, serverCancellation.Token);
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), null, null);
         var transport = await Socks5UdpTransport.CreateAsync(socksServer, new SelfTrafficRegistry(), CancellationToken.None);
         var destination = new IPEndPoint(IPAddress.Parse("192.0.2.53"), 53);
@@ -189,60 +189,6 @@ public sealed class UdpReceiveResilienceTests
         await transport.DisposeAsync();
         serverCancellation.Cancel();
         await IgnoreExpectedCancellationAsync(server);
-    }
-
-    /// <summary>Serves the SOCKS5 greeting + UDP ASSOCIATE exchange and then stops (no relay traffic).</summary>
-    private static async Task ServeAssociateOnlyAsync(TcpListener listener, IPEndPoint relayEndpoint, TaskCompletionSource associateRead, CancellationToken cancellationToken)
-    {
-        using var client = await listener.AcceptSocketAsync(cancellationToken).ConfigureAwait(false);
-        await using var stream = new NetworkStream(client, ownsSocket: false);
-        var greeting = new byte[3];
-        await stream.ReadExactlyAsync(greeting, cancellationToken).ConfigureAwait(false);
-        await stream.WriteAsync(new byte[] { 5, 0 }, cancellationToken).ConfigureAwait(false);
-        _ = await Socks5TestServer.ReadSocksRequestAsync(stream, cancellationToken).ConfigureAwait(false);
-        associateRead.TrySetResult();
-
-        var addressBytes = relayEndpoint.Address.GetAddressBytes();
-        var reply = new byte[4 + addressBytes.Length + 2];
-        reply[0] = 5;
-        reply[1] = 0;
-        reply[2] = 0;
-        reply[3] = relayEndpoint.AddressFamily == AddressFamily.InterNetwork ? (byte)1 : (byte)4;
-        addressBytes.CopyTo(reply, 4);
-        BinaryPrimitives.WriteUInt16BigEndian(reply.AsSpan(4 + addressBytes.Length), checked((ushort)relayEndpoint.Port));
-        await stream.WriteAsync(reply, cancellationToken).ConfigureAwait(false);
-        await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>Serves the SOCKS5 greeting + UDP ASSOCIATE exchange, then collects sent relay datagrams.</summary>
-    private static async Task ServeAssociateAndCollectAsync(TcpListener listener, Socket relaySocket, IPEndPoint relayEndpoint, int count, TaskCompletionSource<List<byte[]>> received, CancellationToken cancellationToken)
-    {
-        using var client = await listener.AcceptSocketAsync(cancellationToken).ConfigureAwait(false);
-        await using var stream = new NetworkStream(client, ownsSocket: false);
-        var greeting = new byte[3];
-        await stream.ReadExactlyAsync(greeting, cancellationToken).ConfigureAwait(false);
-        await stream.WriteAsync(new byte[] { 5, 0 }, cancellationToken).ConfigureAwait(false);
-        _ = await Socks5TestServer.ReadSocksRequestAsync(stream, cancellationToken).ConfigureAwait(false);
-
-        var addressBytes = relayEndpoint.Address.GetAddressBytes();
-        var reply = new byte[4 + addressBytes.Length + 2];
-        reply[0] = 5;
-        reply[1] = 0;
-        reply[2] = 0;
-        reply[3] = relayEndpoint.AddressFamily == AddressFamily.InterNetwork ? (byte)1 : (byte)4;
-        addressBytes.CopyTo(reply, 4);
-        BinaryPrimitives.WriteUInt16BigEndian(reply.AsSpan(4 + addressBytes.Length), checked((ushort)relayEndpoint.Port));
-        await stream.WriteAsync(reply, cancellationToken).ConfigureAwait(false);
-
-        var buffer = new byte[65_535];
-        EndPoint sender = new IPEndPoint(IPAddress.Any, 0);
-        var datagrams = new List<byte[]>();
-        while (datagrams.Count < count)
-        {
-            var result = await relaySocket.ReceiveFromAsync(buffer, SocketFlags.None, sender, cancellationToken).ConfigureAwait(false);
-            lock (datagrams) datagrams.Add(buffer.AsSpan(0, result.ReceivedBytes).ToArray());
-            if (datagrams.Count == count) received.TrySetResult(datagrams);
-        }
     }
 
     private static FlowKey CreateFlow(string remoteAddress) =>

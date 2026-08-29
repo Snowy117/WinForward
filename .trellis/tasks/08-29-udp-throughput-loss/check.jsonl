@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Verify zero-allocation steady state and warm/slow path split still hold after changes."}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "Verify relay contracts (source validation, loop prevention, cross-family setup) unchanged."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Check code standards and test coverage requirements."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Fail-closed semantics must be preserved on the new send fallback path."}

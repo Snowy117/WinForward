@@ -126,6 +126,10 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
             socket = (socketFactory ?? (family => new Socket(family, SocketType.Dgram, ProtocolType.Udp)))(relayAddressFamily);
             socket.ReceiveBufferSize = RelaySocketReceiveBufferSize;
             socket.Bind(new IPEndPoint(relayAddressFamily == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any, 0));
+            // Non-blocking mode keeps the send warm path synchronous: the kernel either takes
+            // the datagram inline or reports WouldBlock, which falls back to the overlapped
+            // send. Async receive operations are unaffected by the non-blocking mode.
+            socket.Blocking = false;
             // Register the relay transport tuple in the loop-prevention registry so catch-all proxy
             // rules never recursively intercept WinForward's own UDP relay traffic (design §10).
             var local = Endpoint.From(((IPEndPoint)socket.LocalEndPoint!).Address, checked((ushort)((IPEndPoint)socket.LocalEndPoint!).Port));
@@ -158,12 +162,21 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
         }
     }
 
-    public async ValueTask SendAsync(IPEndPoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+    public ValueTask SendAsync(IPEndPoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
         // Serialize the encode + send pair (R5): the shared send buffer must never observe
-        // interleaved writers when one flow is dispatched from two pumps. Uncontended
-        // WaitAsync completes synchronously, so the steady single-sender path allocates nothing.
-        await _sendGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        // interleaved writers when one flow is dispatched from two pumps. This is a
+        // non-async entry (hot-path convention #3): the warm shape — uncontended gate
+        // (WaitAsync completes synchronously), encode into the reusable buffer, non-blocking
+        // send the kernel accepts inline — runs without a state machine or any allocation,
+        // removing the per-datagram IOCP hop; every other shape falls back to async slow
+        // paths that honor the cancellation token.
+        var gateWait = _sendGate.WaitAsync(cancellationToken);
+        if (!gateWait.IsCompletedSuccessfully)
+        {
+            return SendAfterGateAsync(gateWait, destination, payload, cancellationToken);
+        }
+
         try
         {
             // The header buffer covers the worst SOCKS5 UDP overhead (6 + 16-byte IPv6) plus an
@@ -174,6 +187,50 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
                 throw new IOException("A SOCKS5 UDP datagram exceeded the relay send buffer.");
             }
 
+            try
+            {
+                _ = _socket.SendTo(_sendBuffer.AsSpan(0, written), SocketFlags.None, RelayEndpoint);
+            }
+            catch (SocketException)
+            {
+                // WouldBlock (kernel send queue momentarily full) or any other socket fault:
+                // retry the datagram through the overlapped send, which parks until the socket
+                // accepts it, and keep the gate until the buffer is consumed.
+                return SendOverlappedAsync(written, cancellationToken);
+            }
+
+            _sendGate.Release();
+            return ValueTask.CompletedTask;
+        }
+        catch
+        {
+            _sendGate.Release();
+            throw;
+        }
+    }
+
+    private async ValueTask SendAfterGateAsync(Task gateWait, IPEndPoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+    {
+        await gateWait.ConfigureAwait(false);
+        try
+        {
+            if (!Socks5UdpCodec.TryEncode(IPAddressValue.From(destination.Address), (ushort)destination.Port, payload.Span, _sendBuffer, out var written))
+            {
+                throw new IOException("A SOCKS5 UDP datagram exceeded the relay send buffer.");
+            }
+
+            _ = await _socket.SendToAsync(_sendBuffer.AsMemory(0, written), SocketFlags.None, RelayEndpoint, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _sendGate.Release();
+        }
+    }
+
+    private async ValueTask SendOverlappedAsync(int written, CancellationToken cancellationToken)
+    {
+        try
+        {
             _ = await _socket.SendToAsync(_sendBuffer.AsMemory(0, written), SocketFlags.None, RelayEndpoint, cancellationToken).ConfigureAwait(false);
         }
         finally

@@ -11,6 +11,15 @@ internal sealed class UdpProxySession : IAsyncDisposable
     /// <summary>Interval between per-session rate-limited summaries (skipped datagrams, injection failures).</summary>
     private static readonly TimeSpan RateLimitedLogInterval = TimeSpan.FromSeconds(5);
 
+    /// <summary>
+    /// Minimum interval between activity propagations to the association table. The table
+    /// serves reverse-leg classification and idle-sweep pruning on seconds-scale timeouts, so
+    /// coarser propagation granularity is unobservable there, while the per-datagram cost of
+    /// the touch drops to one Interlocked exchange. <see cref="LastActivityUtc"/> stays exact
+    /// per operation, so idle-expiry semantics are unaffected.
+    /// </summary>
+    private static readonly TimeSpan ActivityPropagationInterval = TimeSpan.FromMilliseconds(100);
+
     private readonly FlowKey _flow;
     private readonly long _flowGeneration;
     private readonly UdpAssociation _association;
@@ -28,6 +37,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
     private Task? _disposeTask;
     private Exception? _receiveFailure;
     private long _lastActivityTicks;
+    private long _lastActivityPropagationTicks;
     private long _lastSkipSummaryTicks;
     private long _lastInjectionFailureLogTicks;
     private long _skippedUnexpectedSource;
@@ -260,6 +270,14 @@ internal sealed class UdpProxySession : IAsyncDisposable
             if (_expiring) return;
             Interlocked.Exchange(ref _lastActivityTicks, now.UtcTicks);
         }
+
+        // Propagate to the association table at most once per interval. Zero means "never
+        // propagated", so a session's first activity — and the first activity after any
+        // quieter-than-interval gap — is delivered immediately.
+        var nowTicks = now.UtcTicks;
+        var lastPropagation = Interlocked.Read(ref _lastActivityPropagationTicks);
+        if (nowTicks - lastPropagation < ActivityPropagationInterval.Ticks) return;
+        if (Interlocked.CompareExchange(ref _lastActivityPropagationTicks, nowTicks, lastPropagation) != lastPropagation) return;
         _activityObserver(_association, now);
     }
 

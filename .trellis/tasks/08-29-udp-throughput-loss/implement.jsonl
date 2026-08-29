@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Sync warm path / async slow path split (contract #3), zero-allocation gates, measurement discipline — the send-path restructure must follow these."}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "UDP relay wiring, relay-source validation, loop-prevention registration contracts that the transport changes must not regress."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Code standards, forbidden patterns, testing requirements for Runtime changes."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Where new benchmark scenario files and tests belong; Runtime sub-namespace layout."}
+{"file": "benchmarks/results/2026-08-29-windows-real-machine/README.md", "reason": "Measured baseline data, environment notes, Windows runbook and the three open issues this task addresses."}

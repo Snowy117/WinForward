@@ -9,6 +9,9 @@ internal sealed class StabilityContext : IDisposable
     private static readonly JsonSerializerOptions Serialization = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        // Opt-off diagnostics (e.g. UdpLossScenario's productEvents) omit their field
+        // instead of serializing an explicit null.
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 

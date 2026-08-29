@@ -25,6 +25,13 @@ attribution, socket setup, logging, tests) are exempt.
    that runs the synchronous warm shape (trace-off ∧ no reverse handler ∧ not self-owned ∧
    resolved ∧ Pass/Block) and returns the executor's ValueTask directly; everything else
    falls into `DispatchSlowAsync`. Any new per-packet stage must follow the same split.
+   **Socket sends follow it too** (task 08-29-udp-throughput-loss D2): the sending socket is
+   non-blocking (`Blocking = false`; .NET 10 renamed `NonBlocking`), and the warm shape is an
+   inline sync `SendTo(span)` — on Windows this removes a per-datagram IOCP→thread-pool hop
+   (the mechanism behind a 3.5× loopback pps gap), on Linux the sync send was already the
+   fast path. Any `SocketException` falls back to the overlapped async send, which parks on a
+   full kernel queue instead of busy-failing; every gate/buffer-release path must release
+   exactly once per call.
 4. **Packets are structs.** `FlowContext`, `CapturedFlowPacket`, `NativeFrameHandle` are
    `readonly record struct` with `[StructLayout(LayoutKind.Auto)]`; completion is
    enum-driven (`PacketAction`), never closures/delegates.

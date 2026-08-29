@@ -54,7 +54,7 @@ Count-based reliability metrics under sustained load. One JSONL record per scena
 
 ```text
 dotnet run -c Release --project benchmarks/WinForward.Benchmarks -- \
-  --stability [--scenario all|udp|tcp|footprint] [--duration 60] [--pps 25000] \
+  --stability [--scenario all|udp|tcp|footprint|baseline] [--duration 60] [--pps 25000] \
   [--payload-bytes 512] [--flows 256] [--tcp-concurrency 64] [--tcp-transfer-bytes 1048576] \
   [--abort-mix clean=25,clientRst=25,relayCancel=25,upstreamTruncate=25] [--seed 42] \
   [--output <path>] [--quick]
@@ -62,15 +62,40 @@ dotnet run -c Release --project benchmarks/WinForward.Benchmarks -- \
 
 `--quick` = `--duration 15 --pps 10000 --tcp-concurrency 16 --flows 64`.
 
+Stability runs hold the Windows system timer at 1 ms resolution (`timeBeginPeriod(1)` through the
+production `HighResolutionTimerScope`) for the whole run so the 10 ms pacing ticks fire on time;
+non-Windows hosts are unaffected. Windows stability numbers from before 2026-08-29 were paced at
+the ~15.6 ms default granularity and are **not comparable** with current rows — the same series
+break the BenchmarkDotNet rewrite introduced for perf numbers.
+
+The UDP scenarios broke series once more with the 2026-08-29 windowing change: `udp.lossRate`
+and `udp.rawBaseline` now count only the steady-state window (warmup establishes every flow
+first, per-flow sequence markers snapshot at window start, and the post-window drain still
+credits in-window stragglers), so earlier rows — which included the flow-establishment and
+teardown tails — are **not comparable** with current rows either.
+
 ### Scenarios
 
 - **`udp.lossRate`** — drives the real dial path (`UdpProxyCoordinator` + real
   `Socks5UdpTransportFactory` + `Socks5ControlConnection`) against a harness loopback SOCKS5 UDP
   server. Sequenced datagrams across `--flows` flows at target `--pps`; the destination echo
-  receiver tracks loss, reordering, and duplicates (64-entry per-flow sequence window). Reports
-  `sentDatagrams`, `destinationReceived`, `lossRate`, `outOfOrder`, `duplicates`,
-  `responsesInjected` (response path through the counting sink), `achievedPps`,
-  `sendLoopOverflows`.
+  receiver tracks loss, reordering, and duplicates (64-entry per-flow sequence window). Metrics
+  count only the steady-state window: warmup sends one datagram per flow and waits (≤10 s) until
+  the destination has observed every flow, sequence markers snapshot at window start, and the
+  2 s drain before teardown still credits in-window stragglers — establishment and teardown-tail
+  loss is excluded by design. Reports `sentDatagrams`, `destinationReceived`, `lossRate`,
+  `outOfOrder`, `duplicates`, `responsesInjected` (response path through the counting sink),
+  `achievedPps`, `sendLoopOverflows`.
+- **`udp.rawBaseline`** — the bare OS + runtime loopback UDP ceiling, built from the exact
+  `udp.lossRate` socket topology minus all WinForward product code (no coordinator, session, or
+  SOCKS5 codec): one paced sender round-robining over per-flow client sockets (512 KiB), one
+  dedicated forwarder socket per flow playing the SOCKS5 relay role (4 MiB, matching the harness
+  relay), and a single echo destination (16 MiB) tracking loss/reordering/duplicates with the
+  same 64-entry per-flow
+  sequence window; it shares `udp.lossRate`'s warmup/window semantics so both rows count the
+  same steady-state shape. Its `achievedPps` is the environment baseline (B_linux / B_windows)
+  that acceptance comparisons compute product overhead from; `responsesInjected` counts the
+  in-window datagrams that made it back to the client sockets.
 - **`tcp.unexpectedEof`** — concurrent one-way transfers through `TcpProxyRelay` with an
   adversarial event fired mid-stream per transfer (weighted mix: clean / client RST / relay
   cancellation / upstream truncation at a random 20–80 % of the transfer). Receiver-side

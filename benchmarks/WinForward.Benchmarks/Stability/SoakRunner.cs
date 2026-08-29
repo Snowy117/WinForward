@@ -1,8 +1,27 @@
+using WinForward.Windows;
+
 namespace WinForward.Benchmarks.Stability;
 
 internal static class SoakRunner
 {
     public static async Task<int> RunAsync(SoakOptions options)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            // 10 ms pacing ticks need the 1 ms system timer; the ~15.6 ms default starves them.
+            using var timer = new HighResolutionTimerScope();
+            if (!timer.IsEnabled)
+            {
+                await Console.Error.WriteLineAsync("Failed to raise the Windows timer resolution to 1 ms; pacing-sensitive stability numbers are degraded.").ConfigureAwait(false);
+            }
+
+            return await RunScenariosAsync(options).ConfigureAwait(false);
+        }
+
+        return await RunScenariosAsync(options).ConfigureAwait(false);
+    }
+
+    private static async Task<int> RunScenariosAsync(SoakOptions options)
     {
         var fileOutput = OpenOutput(options.OutputPath);
         using var context = new StabilityContext(options, fileOutput);
@@ -38,11 +57,13 @@ internal static class SoakRunner
             SoakScenario.Udp => new List<(string, Func<StabilityContext, SoakOptions, Task>)> { ("udp", UdpLossScenario.RunAsync) },
             SoakScenario.Tcp => new List<(string, Func<StabilityContext, SoakOptions, Task>)> { ("tcp", TcpEofScenario.RunAsync) },
             SoakScenario.Footprint => new List<(string, Func<StabilityContext, SoakOptions, Task>)> { ("footprint", SessionFootprintScenario.RunAsync) },
+            SoakScenario.Baseline => new List<(string, Func<StabilityContext, SoakOptions, Task>)> { ("baseline", UdpRawBaselineScenario.RunAsync) },
             _ => new List<(string, Func<StabilityContext, SoakOptions, Task>)>
             {
                 ("udp", UdpLossScenario.RunAsync),
                 ("tcp", TcpEofScenario.RunAsync),
                 ("footprint", SessionFootprintScenario.RunAsync),
+                ("baseline", UdpRawBaselineScenario.RunAsync),
             },
         };
     }

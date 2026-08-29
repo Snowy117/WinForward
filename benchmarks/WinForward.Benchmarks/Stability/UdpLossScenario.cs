@@ -1,7 +1,5 @@
-using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Net;
-using System.Net.Sockets;
 using WinForward.Benchmarks.Perf;
 using WinForward.Configuration;
 using WinForward.Core;
@@ -11,24 +9,48 @@ using WinForward.Runtime.UdpProxy;
 
 namespace WinForward.Benchmarks.Stability;
 
+/// <summary>
+/// UDP loss soak through the real proxy dial path. Every metric counts only the steady-state
+/// window: warmup first establishes all flows, per-flow sequence markers snapshot at window
+/// start, and the post-window drain still credits in-window stragglers, so flow-establishment
+/// and teardown-tail datagrams are excluded by design.
+/// </summary>
 internal static class UdpLossScenario
 {
     private static readonly TimeSpan DrainTime = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan WarmupTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan WarmupPollInterval = TimeSpan.FromMilliseconds(50);
     private const int TickMilliseconds = 10;
+
+    /// <summary>
+    /// Opt-in switch for the trace-capturing product-event census. Enabling Trace makes the
+    /// product emit per-datagram events (udp.packet.sent/received), which allocates and slows
+    /// the send/receive paths; default runs must stay undistorted, so productEvents is omitted
+    /// from the row unless this is flipped for a loss-localization session. The Interlocked
+    /// hops counters stay unconditional (zero distortion).
+    /// </summary>
+    private const bool CaptureProductEvents = false;
 
     public static async Task RunAsync(StabilityContext context, SoakOptions options)
     {
-        await using var receiver = new EchoReceiver();
+        await using var receiver = new EchoReceiver(options.Flows);
         await using var server = new LoopbackSocks5UdpServer(receiver.Endpoint);
         var sink = new CountingUdpResponseSink();
-        var coordinator = new UdpProxyCoordinator(new Socks5UdpTransportFactory(new SelfTrafficRegistry()), sink, options.Flows);
+        var productEvents = CaptureProductEvents ? new CountingRuntimeLogger() : null;
+        var coordinator = new UdpProxyCoordinator(new Socks5UdpTransportFactory(new SelfTrafficRegistry()), sink, options.Flows, logger: productEvents is not null ? productEvents : NullRuntimeLogger.Instance);
         SenderStats stats;
         try
         {
             var socksServer = new Socks5Server("soak", "127.0.0.1", checked((ushort)server.ControlEndpoint.Port), null, null);
             var flows = new FlowKey[options.Flows];
             for (var index = 0; index < flows.Length; index++) flows[index] = BenchmarkShared.CreateFlowKey(index);
-            stats = await RunSenderAsync(coordinator, socksServer, flows, options).ConfigureAwait(false);
+            var sequences = new long[flows.Length];
+            var payload = new byte[options.PayloadBytes];
+            await WarmupAsync(coordinator, socksServer, flows, sequences, payload, receiver).ConfigureAwait(false);
+            var markers = (long[])sequences.Clone();
+            receiver.BeginWindow(markers);
+            sink.BeginWindow(markers);
+            stats = await RunWindowAsync(coordinator, socksServer, flows, sequences, payload, options).ConfigureAwait(false);
             await Task.Delay(DrainTime).ConfigureAwait(false);
         }
         finally
@@ -51,13 +73,60 @@ internal static class UdpLossScenario
                 responsesInjected = sink.ResponsesInjected,
                 achievedPps,
                 sendLoopOverflows = stats.SendLoopOverflows,
+                hops = new
+                {
+                    relayReceived = server.RelayReceived,
+                    relayDecodeDropped = server.RelayDecodeDropped,
+                    relayForwarded = server.RelayForwarded,
+                    relayReplies = server.RelayReplies,
+                    relaySendFaults = server.RelaySendFaults,
+                },
+                productEvents = productEvents is not null ? BuildProductEvents(productEvents) : null,
             });
     }
 
-    private static async Task<SenderStats> RunSenderAsync(UdpProxyCoordinator coordinator, Socks5Server server, FlowKey[] flows, SoakOptions options)
+    /// <summary>Product trace/debug event names surfaced in the result row; absent names count as zero.</summary>
+    private static readonly string[] ProductEventNames =
+    [
+        "udp.setupqueue.dropped",
+        "udp.session.rejected",
+        "udp.setup.failed",
+        "udp.setup.cooldown",
+        "udp.packet.sent",
+        "udp.session.created",
+        "udp.session.closed",
+        "udp.session.expired",
+    ];
+
+    private static Dictionary<string, long> BuildProductEvents(CountingRuntimeLogger logger)
     {
-        var sequences = new long[flows.Length];
-        var payload = new byte[options.PayloadBytes];
+        var snapshot = new Dictionary<string, long>(ProductEventNames.Length, StringComparer.Ordinal);
+        foreach (var name in ProductEventNames)
+        {
+            snapshot[name] = logger.Events.TryGetValue(name, out var count) ? count : 0;
+        }
+
+        return snapshot;
+    }
+
+    private static async Task WarmupAsync(UdpProxyCoordinator coordinator, Socks5Server server, FlowKey[] flows, long[] sequences, byte[] payload, EchoReceiver receiver)
+    {
+        for (var flow = 0; flow < flows.Length; flow++)
+        {
+            sequences[flow]++;
+            DatagramHeader.Write(payload, sequences[flow], flow);
+            _ = await coordinator.TrySendAsync(flows[flow], server, payload, CancellationToken.None).ConfigureAwait(false);
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        while (receiver.ObservedFlowCount < flows.Length && stopwatch.Elapsed < WarmupTimeout)
+        {
+            await Task.Delay(WarmupPollInterval).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task<SenderStats> RunWindowAsync(UdpProxyCoordinator coordinator, Socks5Server server, FlowKey[] flows, long[] sequences, byte[] payload, SoakOptions options)
+    {
         long sent = 0;
         long overflows = 0;
         var perTick = options.Pps * TickMilliseconds / 1000.0;
@@ -78,8 +147,7 @@ internal static class UdpLossScenario
                 {
                     var flow = nextFlow++ % flows.Length;
                     sequences[flow]++;
-                    BinaryPrimitives.WriteUInt64BigEndian(payload.AsSpan(0, 8), (ulong)sequences[flow]);
-                    BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(8, 4), flow);
+                    DatagramHeader.Write(payload, sequences[flow], flow);
                     if (await coordinator.TrySendAsync(flows[flow], server, payload, cancellation.Token).ConfigureAwait(false)) sent++;
                 }
 
@@ -98,7 +166,7 @@ internal static class UdpLossScenario
         }
         catch (OperationCanceledException)
         {
-            // The duration elapsed; the sender exits through the drain phase.
+            // The window elapsed; the sender exits through the drain phase.
         }
 
         return new SenderStats(sent, overflows, stopwatch.Elapsed.TotalSeconds);
@@ -106,135 +174,48 @@ internal static class UdpLossScenario
 
     private sealed record SenderStats(long SentDatagrams, long SendLoopOverflows, double ElapsedSeconds);
 
-    private sealed class EchoReceiver : IAsyncDisposable
-    {
-        private readonly Socket _socket;
-        private readonly Task _loop;
-        private readonly Dictionary<int, FlowState> _flows = new();
-
-        public EchoReceiver()
-        {
-            _socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-            _socket.ReceiveBufferSize = 4 << 20;
-            _socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
-            Endpoint = (IPEndPoint)_socket.LocalEndPoint!;
-            _loop = Task.Run(ReceiveLoopAsync);
-        }
-
-        public IPEndPoint Endpoint { get; }
-
-        public long Received { get; private set; }
-
-        public long OutOfOrder { get; private set; }
-
-        public long Duplicates { get; private set; }
-
-        public async ValueTask DisposeAsync()
-        {
-            _socket.Dispose();
-            await _loop.ConfigureAwait(false);
-        }
-
-        private async Task ReceiveLoopAsync()
-        {
-            var buffer = new byte[65_536];
-            EndPoint anySource = new IPEndPoint(IPAddress.Any, 0);
-            while (true)
-            {
-                SocketReceiveFromResult result;
-                try
-                {
-                    result = await _socket.ReceiveFromAsync(buffer, SocketFlags.None, anySource).ConfigureAwait(false);
-                }
-                catch (SocketException)
-                {
-                    continue;
-                }
-                catch (ObjectDisposedException)
-                {
-                    break;
-                }
-
-                var payload = buffer.AsMemory(0, result.ReceivedBytes);
-                if (payload.Length >= 12)
-                {
-                    var sequence = BinaryPrimitives.ReadInt64BigEndian(payload.Span[..8]);
-                    var flowId = BinaryPrimitives.ReadInt32BigEndian(payload.Span.Slice(8, 4));
-                    if (!_flows.TryGetValue(flowId, out var state))
-                    {
-                        state = new FlowState();
-                        _flows.Add(flowId, state);
-                    }
-
-                    if (sequence > state.LastSeen)
-                    {
-                        state.LastSeen = sequence;
-                    }
-                    else if (state.RingContains(sequence))
-                    {
-                        Duplicates++;
-                    }
-                    else
-                    {
-                        OutOfOrder++;
-                    }
-
-                    state.Push(sequence);
-                    Received++;
-                }
-
-                try
-                {
-                    _ = await _socket.SendToAsync(payload, SocketFlags.None, result.RemoteEndPoint!).ConfigureAwait(false);
-                }
-                catch (SocketException)
-                {
-                    // A relay socket that vanished mid-echo must not end the measurement loop.
-                }
-                catch (ObjectDisposedException)
-                {
-                    break;
-                }
-            }
-        }
-    }
-
-    private sealed class FlowState
-    {
-        private readonly long[] _recent = new long[64];
-        private int _count;
-        private int _next;
-
-        public long LastSeen { get; set; }
-
-        public bool RingContains(long sequence)
-        {
-            for (var index = 0; index < _count; index++)
-            {
-                if (_recent[index] == sequence) return true;
-            }
-
-            return false;
-        }
-
-        public void Push(long sequence)
-        {
-            _recent[_next] = sequence;
-            _next = (_next + 1) % _recent.Length;
-            if (_count < _recent.Length) _count++;
-        }
-    }
-
     private sealed class CountingUdpResponseSink : IUdpResponseSink
     {
         private long _injected;
+        private volatile long[]? _windowMarkers;
 
         public long ResponsesInjected => Interlocked.Read(ref _injected);
 
+        public void BeginWindow(long[] markers) => _windowMarkers = markers;
+
         public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, byte[]? clientMac, CancellationToken cancellationToken)
         {
-            Interlocked.Increment(ref _injected);
+            if (DatagramHeader.TryRead(payload.Span, out var sequence, out var flowId)
+                && DatagramHeader.IsInWindow(sequence, flowId, _windowMarkers))
+            {
+                Interlocked.Increment(ref _injected);
+            }
+
             return ValueTask.CompletedTask;
         }
+    }
+
+    /// <summary>
+    /// Diagnostic-only product-event census: counts every Event() call by name (both Trace and
+    /// Debug) with no formatting or I/O. Enabling Trace makes the product emit its per-datagram
+    /// trace events (udp.packet.sent/received), which allocates and slows the send/receive paths —
+    /// rows produced this way localize loss but are not throughput-comparable with uninstrumented runs.
+    /// </summary>
+    private sealed class CountingRuntimeLogger : IRuntimeLogger
+    {
+        private readonly ConcurrentDictionary<string, long> _events = new(StringComparer.Ordinal);
+
+        public IReadOnlyDictionary<string, long> Events => _events;
+
+        public bool IsEnabled(RuntimeLogLevel level) => true;
+
+        public void Info(string message) { }
+
+        public void Warn(string message) { }
+
+        public void Error(string message) { }
+
+        public void Event(RuntimeLogLevel level, string eventName, params RuntimeLogField[] fields)
+            => _events.AddOrUpdate(eventName, 1, static (_, count) => count + 1);
     }
 }

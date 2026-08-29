@@ -23,6 +23,11 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
     private readonly ConcurrentDictionary<RelayConnection, byte> _connections = new();
     private readonly CancellationTokenSource _shutdown = new();
     private readonly Task _acceptLoop;
+    private long _relayReceived;
+    private long _relayDecodeDropped;
+    private long _relayForwarded;
+    private long _relayReplies;
+    private long _relaySendFaults;
     private int _connectionCount;
     private int _disposed;
 
@@ -36,6 +41,21 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
     }
 
     public IPEndPoint ControlEndpoint { get; }
+
+    /// <summary>Raw total (includes warmup) of datagrams the relays received from non-echo sources, i.e. datagrams that reached the harness forwarder.</summary>
+    public long RelayReceived => Interlocked.Read(ref _relayReceived);
+
+    /// <summary>Raw total of received-but-not-decoded datagrams (SOCKS5 decode failures) silently dropped by the relays.</summary>
+    public long RelayDecodeDropped => Interlocked.Read(ref _relayDecodeDropped);
+
+    /// <summary>Raw total of datagrams successfully forwarded by the relays toward the echo destination.</summary>
+    public long RelayForwarded => Interlocked.Read(ref _relayForwarded);
+
+    /// <summary>Raw total of echo-source datagrams the relays replied to (the return leg entering the relay).</summary>
+    public long RelayReplies => Interlocked.Read(ref _relayReplies);
+
+    /// <summary>Raw total of SocketExceptions caught by the relay loops' forward/reply sends.</summary>
+    public long RelaySendFaults => Interlocked.Read(ref _relaySendFaults);
 
     public async ValueTask DisposeAsync()
     {
@@ -80,7 +100,7 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
                 continue;
             }
 
-            var connection = new RelayConnection(socket, _echoDestination, cancellation);
+            var connection = new RelayConnection(socket, this, _echoDestination, cancellation);
             _connections.TryAdd(connection, 0);
             _ = connection.RunAsync().ContinueWith(
                 completed => { _ = completed; _connections.TryRemove(connection, out _); Interlocked.Decrement(ref _connectionCount); },
@@ -97,6 +117,7 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
 
         private readonly Socket _control;
         private readonly Socket _relay;
+        private readonly LoopbackSocks5UdpServer _owner;
         private readonly IPEndPoint _echoDestination;
         private readonly CancellationToken _shutdown;
         private IPEndPoint? _lastClient;
@@ -104,13 +125,15 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
         private ushort _lastDestinationPort;
         private int _disposed;
 
-        public RelayConnection(Socket control, IPEndPoint echoDestination, CancellationToken shutdown)
+        public RelayConnection(Socket control, LoopbackSocks5UdpServer owner, IPEndPoint echoDestination, CancellationToken shutdown)
         {
             _control = control;
+            _owner = owner;
             _echoDestination = echoDestination;
             _shutdown = shutdown;
             _relay = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-            _relay.ReceiveBufferSize = 1 << 20;
+            _relay.ReceiveBufferSize = 4 << 20;
+            _relay.Blocking = false;
             _relay.Bind(new IPEndPoint(IPAddress.Loopback, 0));
         }
 
@@ -219,15 +242,26 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
                     if (IsEchoSource(sender))
                     {
                         await SendReplyAsync(payload).ConfigureAwait(false);
+                        Interlocked.Increment(ref _owner._relayReplies);
                     }
-                    else if (Socks5UdpCodec.TryDecode(payload, out var request))
+                    else
                     {
-                        await ForwardAsync(sender, request).ConfigureAwait(false);
+                        Interlocked.Increment(ref _owner._relayReceived);
+                        if (Socks5UdpCodec.TryDecode(payload, out var request))
+                        {
+                            await ForwardAsync(sender, request).ConfigureAwait(false);
+                            Interlocked.Increment(ref _owner._relayForwarded);
+                        }
+                        else
+                        {
+                            Interlocked.Increment(ref _owner._relayDecodeDropped);
+                        }
                     }
                 }
                 catch (SocketException)
                 {
                     // The peer vanished mid-datagram; the loop keeps serving the soak.
+                    Interlocked.Increment(ref _owner._relaySendFaults);
                 }
                 catch (ObjectDisposedException)
                 {
@@ -243,6 +277,16 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
             _lastClient = client;
             _lastDestinationAddress = request.DestinationAddress;
             _lastDestinationPort = request.DestinationPort;
+            try
+            {
+                _ = _relay.SendTo(request.Payload.Span, SocketFlags.None, _echoDestination);
+                return;
+            }
+            catch (SocketException)
+            {
+                // WouldBlock: the kernel send queue is momentarily full; use the overlapped send below.
+            }
+
             _ = await _relay.SendToAsync(request.Payload, SocketFlags.None, _echoDestination).ConfigureAwait(false);
         }
 
@@ -252,6 +296,16 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
             var address = _lastDestinationAddress ?? _echoDestination.Address;
             var port = _lastDestinationAddress is not null ? _lastDestinationPort : checked((ushort)_echoDestination.Port);
             var datagram = Socks5UdpCodec.Encode(address, port, payload.Span);
+            try
+            {
+                _ = _relay.SendTo(datagram.AsSpan(), SocketFlags.None, _lastClient);
+                return;
+            }
+            catch (SocketException)
+            {
+                // WouldBlock: the kernel send queue is momentarily full; use the overlapped send below.
+            }
+
             _ = await _relay.SendToAsync(datagram, SocketFlags.None, _lastClient).ConfigureAwait(false);
         }
 

@@ -3,6 +3,7 @@ using System.Net;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
+using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
 using Xunit;
 using static WinForward.Core.Tests.AsyncTestExtensions;
@@ -141,38 +142,85 @@ public sealed class UdpSetupQueueTests
     }
 
     [Fact]
-    public async Task SetupConcurrencyCapFailsFastIntoCooldownForFlowsBeyondTheCap()
+    public async Task SetupConcurrencyCapQueuesFlowsBeyondTheCapUntilASlotFrees()
     {
+        // Patient admission: the 8-wide setup cap must queue the ninth flow's setup, not fail
+        // it into the cooldown tombstone (whose teardown drops the buffered datagram).
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new DelayedTransportFactory(gate.Task);
-        var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 16, time, null);
+        var logger = new RecordingRuntimeLogger();
+        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 16, TimeProvider.System, null, logger);
         const int cappedFlows = 8;
         var flows = Enumerable.Range(0, cappedFlows + 1).Select(index => CreateFlow($"192.0.2.{index + 1}")).ToArray();
 
-        for (var index = 0; index < cappedFlows; index++)
+        for (var index = 0; index <= cappedFlows; index++)
         {
             Assert.True(await coordinator.TrySendAsync(flows[index], s_server, new[] { (byte)index }, CancellationToken.None));
         }
 
+        // The first eight setups occupy the limiter; the ninth setup is queued on it.
         await WaitForAsync(() => factory.CreateCalls == cappedFlows);
-        // The ninth flow is accepted (buffered) but its setup fails fast into the cooldown path.
-        Assert.True(await coordinator.TrySendAsync(flows[cappedFlows], s_server, new byte[] { 9 }, CancellationToken.None));
-        Assert.True(await WaitUntilFalseAsync(() => coordinator.TrySendAsync(flows[cappedFlows], s_server, new byte[] { 10 }, CancellationToken.None).AsTask()));
 
         gate.TrySetResult();
-        await WaitForAsync(() => factory.Transports.Count == cappedFlows);
-        // The capped setups release the limiter only after their flush completes; the ninth
-        // flow's retried setup may briefly hit a still-held slot and re-enter the cooldown, so
-        // keep expiring the (frozen-time) cooldown and retrying until the slot is free.
-        for (var attempt = 0; attempt < 100 && factory.Transports.Count == cappedFlows; attempt++)
+        // The ninth setup runs once a slot frees and its buffered datagram is forwarded.
+        await WaitForAsync(() => factory.Transports.Count == cappedFlows + 1);
+        await WaitForAsync(() =>
         {
-            time.Advance(TimeSpan.FromSeconds(1));
-            await coordinator.TrySendAsync(flows[cappedFlows], s_server, new byte[] { 11 }, CancellationToken.None);
-            await Task.Delay(10);
+            return factory.Transports.Any(transport =>
+            {
+                lock (transport.Sent) return transport.Sent.Count == 1 && Assert.Single(transport.Sent[0].Payload) == cappedFlows;
+            });
+        });
+        Assert.DoesNotContain(logger.Events, item => string.Equals(item.Name, "udp.setup.failed", StringComparison.Ordinal));
+        Assert.DoesNotContain(logger.Events, item => string.Equals(item.Name, "udp.setupqueue.dropped", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task SetupFlashCrowdOfDistinctFlowsQueuesThroughTheCapWithoutLoss()
+    {
+        // A flash crowd of first datagrams (the 2026-08-29 soak shape: every flow starts at
+        // once) must all be admitted through the 8-wide setup gate: every accepted datagram
+        // is forwarded, no setup queue is drained, no tombstone is written. The barrier holds
+        // the first eight handshakes until all 64 datagrams have been accepted, proving the
+        // burst is genuinely concurrent rather than scheduler luck.
+        const int flowCount = 64;
+        const int concurrentSetupCap = 8;
+        var barrier = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var factory = new BarrierTransportFactory(barrier, concurrentSetupCap);
+        var logger = new RecordingRuntimeLogger();
+        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), flowCount, TimeProvider.System, null, logger);
+        var flows = Enumerable.Range(0, flowCount).Select(index => CreateFlow($"198.51.100.{index + 1}")).ToArray();
+
+        var sends = Enumerable.Range(0, flowCount)
+            .Select(index => coordinator.TrySendAsync(flows[index], s_server, new[] { (byte)index }, CancellationToken.None).AsTask())
+            .ToArray();
+        // Every first datagram of the crowd is accepted before any handshake completes.
+        await factory.GatesHeld.Task.WaitAsync(CancellationToken.None);
+        Assert.All(await Task.WhenAll(sends), Assert.True);
+        barrier.TrySetResult();
+
+        await WaitForAsync(() => factory.Transports.Count == flowCount, timeoutMs: 30_000);
+        await WaitForAsync(() =>
+        {
+            return factory.Transports.Sum(transport =>
+            {
+                lock (transport.Sent) return transport.Sent.Count;
+            }) == flowCount;
+        }, timeoutMs: 30_000);
+
+        var forwarded = new HashSet<byte>();
+        foreach (var transport in factory.Transports)
+        {
+            lock (transport.Sent)
+            {
+                foreach (var sent in transport.Sent) forwarded.Add(Assert.Single(sent.Payload));
+            }
         }
 
-        await WaitForAsync(() => factory.Transports.Count == cappedFlows + 1);
+        Assert.Equal(flowCount, forwarded.Count);
+        Assert.DoesNotContain(logger.Events, item => string.Equals(item.Name, "udp.setupqueue.dropped", StringComparison.Ordinal));
+        Assert.DoesNotContain(logger.Events, item => string.Equals(item.Name, "udp.setup.failed", StringComparison.Ordinal));
+        Assert.DoesNotContain(logger.Events, item => string.Equals(item.Name, "udp.setup.cooldown", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -204,5 +252,27 @@ public sealed class UdpSetupQueueTests
             await Task.Delay(10).ConfigureAwait(false);
         }
         return !await condition().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// A factory whose first <paramref name="gateWidth"/> handshakes hold on a shared barrier
+    /// (modeling a slow SOCKS5 ASSOCIATE) so a flash crowd provably queues behind the setup
+    /// limiter before any handshake completes.
+    /// </summary>
+    private sealed class BarrierTransportFactory(TaskCompletionSource barrier, int gateWidth) : IUdpProxyTransportFactory
+    {
+        private int _nextLocalPort = 42000;
+        private int _entered;
+        public TaskCompletionSource<bool> GatesHeld { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public List<FakeTransport> Transports { get; } = [];
+
+        public async ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref _entered) == gateWidth) GatesHeld.TrySetResult(true);
+            await barrier.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            var transport = new FakeTransport(System.Net.Sockets.AddressFamily.InterNetwork, Interlocked.Increment(ref _nextLocalPort));
+            lock (Transports) Transports.Add(transport);
+            return transport;
+        }
     }
 }
