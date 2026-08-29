@@ -247,3 +247,24 @@ Root-caused the UDP soak loss to the setup fail-fast chain (zero-wait cap probe 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 11: SOCKS5 full-path benchmarks and performance
+
+**Date**: 2026-08-29
+**Task**: SOCKS5 full-path benchmarks and performance
+**Branch**: `master`
+
+### Summary
+
+Closed the SOCKS5-measurement gap (product positioning: proxy forwarding is the main path, pass/block are byproducts). Phase A: RFC1928 LoopbackSocks5TcpServer, FrameRewriter/Socks5Handshake micro-benchmarks, dispatcher proxy-branch benchmark, UdpSession on real transport with await-ready semantics (old 29x superlinearity was a Noop-enqueue artifact; real path scales linearly), tcp.throughput soak with socks5/bare control modes. Baselines under benchmarks/results/2026-08-29-socks5-perf/. Phase C: C2 cold-edge IPAddressValue storage closed the forwarded-shape 4.8x gap (2887.9->607ns @1400, equals host shape); C2b Proxy joined the dispatcher non-async warm entry (352B->160B, alloc equals Pass) and the always-false action gate it left behind was caught by user review and removed; C1 indexed MAC swap; C3 UDP session bookkeeping 2.1KB->0.4KB (single-slot setup queue, no registered TCS, inlined failure handling, cached delegates, clamped pre-sizing); C4 socks5/bare = 86-94% (acceptance >=70%). trellis-check 7/7 PASS; one pre-existing flaky localized (TcpRedirectSessionStore.cs:293-294 two-lock window, residual fix recommendation). Windows WinLtsc smoke: udp.lossRate zero loss twice, 3 complete TCP redirect/relay cycles via real sing-box (server-side ESTABLISHED connections as evidence, 61 debug events 0 warnings), 6 UDP sessions. Methodology finding recorded: fake-IP upstream router makes egress-IP proof invalid; reliable evidence is the SOCKS5-server connection table plus product debug events. Spec: hot-path.md contract 3 extended + new SOCKS5 Path Contracts section. 386/386 tests, zero warnings.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e5c9bf2` | (see git log) |
+
+### Status
+
+[OK] **Completed**

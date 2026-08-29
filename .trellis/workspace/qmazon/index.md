@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 10
+- **Total Sessions**: 11
 - **Last Active**: 2026-08-29
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~249 | Active |
+| `journal-1.md` | ~270 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 11 | 2026-08-29 | SOCKS5 full-path benchmarks and performance | `e5c9bf2` | `master` |
 | 10 | 2026-08-29 | UDP stability: patient setup admission, sync-send fast path, zero loss on both OSes | `47735b6` | `master` |
 | 9 | 2026-08-29 | Rewrite benchmarks on BenchmarkDotNet with stability soak runner | `7cf8b9d` | `master` |
 | 8 | 2026-08-29 | Fix UDP loss design flaws (R1-R6) with hardware smoke test | `d9a61ed` | `master` |
