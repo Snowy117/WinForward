@@ -15,11 +15,10 @@ workspace/
 |-- index.md              # This file - main index
 +-- {developer}/          # Per-developer directory
     |-- index.md          # Personal index with session history
-    |-- tasks/         # Task files
-    |   |-- *.json        # Active tasks
-    |   +-- archive/      # Archived tasks by month
-    +-- journal-N.md     # Journal files (sequential: 1, 2, 3...)
+    +-- journal-N.md      # Journal files (sequential: 1, 2, 3...)
 ```
+
+Tasks live in `.trellis/tasks/` (active) and `.trellis/tasks/archive/{year-month}/` (archived), not in per-developer directories.
 
 ---
 
@@ -27,7 +26,8 @@ workspace/
 
 | Developer | Last Active | Sessions | Active File |
 |-----------|-------------|----------|-------------|
-| (none yet) | - | - | - |
+| qmazon | 2026-08-29 | 8 | journal-1.md |
+| Snowy117 | 2026-08-19 | 8 | journal-1.md |
 
 ---
 

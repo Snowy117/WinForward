@@ -9,7 +9,7 @@
 WinForward 是 .NET 10 解决方案（`WinForward.slnx`），按层分项目，依赖方向固定：
 
 ```
-Cli → { Configuration, NdisApi, Runtime, Windows }
+Cli → { Core, Configuration, Protocols, NdisApi, Runtime, Windows }
 Runtime → { Configuration, Core, NdisApi, Protocols, Windows }
 ```
 
@@ -56,7 +56,7 @@ benchmarks/                    # throwaway 基准宿主（不适用文件行数�
 
 - 每个 .cs 文件**有效行数 ≤ 400**：有效行 = 非空、非注释行（`wc -l` 总行数仅作参考，不作为超标依据）。
 - 行数超标时的拆分顺序：先找自然接缝（static 纯函数簇、嵌套类提升、`// ----` 分区注释、第二顶层类型），再考虑新模块。
-- **不为拆而拆**：拆分不得严重损害可读性或性能。先例：`Cli/Program.cs`（388 有效行）与 `ConfigurationModels.cs`（367）达标后保持内聚不拆；`TcpRedirectLogging` 因被 4 个文件 16 处调用而保留独立文件，即使只有 25 有效行。
+- **不为拆而拆**：拆分不得严重损害可读性或性能。先例：`Cli/Program.cs`（397 有效行）与 `ConfigurationModels.cs`（367）达标后保持内聚不拆；`TcpRedirectLogging` 因被 4 个文件 15 处调用而保留独立文件，即使只有 25 有效行。
 
 ### 文件与类型的关系
 

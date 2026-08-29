@@ -30,12 +30,12 @@ These guides help you **ask the right questions before coding**.
 
 ### When to Think About Cross-Layer Issues
 
-- [ ] Feature touches 3+ layers (API, Service, Component, Database)
+- [ ] Feature touches 3+ layers (Config, Runtime, NdisApi/Protocols, Cli)
 - [ ] Data format changes between layers
 - [ ] Multiple consumers need the same data
 - [ ] You're not sure where to put some logic
-- [ ] You are adding an event kind, JSONL record, RPC payload, or config field
-- [ ] UI / command code starts casting raw payload fields directly
+- [ ] You are adding a config field, wire-format field, ABI member, or trace event
+- [ ] Consumer code starts parsing raw payload/frame fields inline
 
 → Read [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md)
 
@@ -73,7 +73,7 @@ These guides help you **ask the right questions before coding**.
 
 ```bash
 # Search for the value you're about to change
-grep -r "value_to_change" .
+rg -uu -n "value_to_change" .
 ```
 
 This single habit prevents most "forgot to update X" bugs.

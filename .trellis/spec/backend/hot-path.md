@@ -28,7 +28,7 @@ attribution, socket setup, logging, tests) are exempt.
 4. **Packets are structs.** `FlowContext`, `CapturedFlowPacket`, `NativeFrameHandle` are
    `readonly record struct` with `[StructLayout(LayoutKind.Auto)]`; completion is
    enum-driven (`PacketAction`), never closures/delegates.
-5. **Native-frame lease lifetime.** `PacketLease.TakeNative(NdisPacketBuffer)` recycles
+5. **Native-frame lease lifetime.** `PacketLease.TakeNative(IFrameSource)` recycles
    per-thread. The native frame stays valid for the whole dispatch (the pump awaits each
    handler, so batch slots cannot be reused earlier — locked by
    `PumpDoesNotReuseBatchSlotWhileHandlerIsInFlight`). Consumers that keep frame bytes past
