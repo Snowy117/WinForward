@@ -78,6 +78,50 @@ public class TcpResetBuilderTests
         Assert.Null(TcpResetBuilder.BuildReset(v4, s_serverV4, 443, s_clientV6, 53000, 1, 1));
     }
 
+    [Fact]
+    public void BuildResetFromSynReadsClientIsnAndBuildsSynSentAbort()
+    {
+        // S4: a capacity-rejected SYN must draw an RST|ACK whose ack = client-ISN + 1 — the
+        // value a SYN_SENT stack accepts as acknowledging its SYN — with seq = 0.
+        var syn = FrameBuilders.BuildIpv4TcpFrame(s_clientV4, s_serverV4, 53000, 443, FrameBuilders.TcpFlagSyn, sequence: 0x11223344);
+        var frame = TcpResetBuilder.BuildResetFromSyn(syn, WinForward.Core.IPAddressValue.From(s_serverV4), 443, WinForward.Core.IPAddressValue.From(s_clientV4), 53000);
+
+        Assert.NotNull(frame);
+        Assert.Equal(0x14, frame[47]);
+        Assert.Equal(0u, BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(38, 4)));
+        Assert.Equal(0x11223345u, BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(42, 4)));
+        Assert.Equal(s_serverV4, new IPAddress(frame.AsSpan(26, 4).ToArray()));
+        Assert.Equal(s_clientV4, new IPAddress(frame.AsSpan(30, 4).ToArray()));
+        Assert.Equal(443, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(34, 2)));
+        Assert.Equal(53000, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(36, 2)));
+        Assert.Equal(0, IndependentChecksum(frame.AsSpan(14, 20)));
+        Assert.Equal(0, TcpChecksumContribution(frame.AsSpan(26, 8), frame.AsSpan(34, 20), isIpv6: false));
+    }
+
+    [Fact]
+    public void BuildResetFromSynIpv6ReadsClientIsn()
+    {
+        var syn = FrameBuilders.BuildIpv6TcpFrame(s_clientV6, s_serverV6, 53000, 443, sequence: 0xA0B0C0D0);
+        var frame = TcpResetBuilder.BuildResetFromSyn(syn, WinForward.Core.IPAddressValue.From(s_serverV6), 443, WinForward.Core.IPAddressValue.From(s_clientV6), 53000);
+
+        Assert.NotNull(frame);
+        var tcp = frame.AsSpan(54, 20);
+        Assert.Equal(0x14, tcp[13]);
+        Assert.Equal(0u, BinaryPrimitives.ReadUInt32BigEndian(tcp.Slice(4, 4)));
+        Assert.Equal(0xA0B0C0D1u, BinaryPrimitives.ReadUInt32BigEndian(tcp.Slice(8, 4)));
+        Assert.Equal(0, TcpChecksumContribution(frame.AsSpan(22, 32), tcp, isIpv6: true));
+    }
+
+    [Fact]
+    public void BuildResetFromSynRejectsUnparseableFrames()
+    {
+        var udp = FrameBuilders.BuildIpv4UdpFrame(s_clientV4, s_serverV4, 53000, 443);
+        Assert.Null(TcpResetBuilder.BuildResetFromSyn(udp, WinForward.Core.IPAddressValue.From(s_serverV4), 443, WinForward.Core.IPAddressValue.From(s_clientV4), 53000));
+        Assert.Null(TcpResetBuilder.BuildResetFromSyn(new byte[20], WinForward.Core.IPAddressValue.From(s_serverV4), 443, WinForward.Core.IPAddressValue.From(s_clientV4), 53000));
+        var arp = BuildTemplateSyn(0x0806, 0x11, 0x22);
+        Assert.Null(TcpResetBuilder.BuildResetFromSyn(arp, WinForward.Core.IPAddressValue.From(s_serverV4), 443, WinForward.Core.IPAddressValue.From(s_clientV4), 53000));
+    }
+
     private static byte[] BuildTemplateSyn(ushort etherType, byte srcMac, byte dstMac)
     {
         var frame = new byte[14 + 20 + 20];

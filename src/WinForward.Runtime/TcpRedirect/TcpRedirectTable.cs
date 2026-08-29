@@ -130,6 +130,7 @@ public sealed class TcpRedirectTable
     private readonly Dictionary<FlowKey, TcpRedirectAssociation> _byOriginal = [];
     private readonly Dictionary<Endpoint, TcpRedirectAssociation> _byTranslatedListener = [];
     private readonly Dictionary<ReverseRedirectTuple, TcpRedirectAssociation> _byReverse = [];
+    private readonly Dictionary<AddressPair, TcpRedirectAssociation> _byAddressPair = [];
     private readonly Lock _gate = new();
     private readonly int _capacity;
     private long _nextGeneration;
@@ -183,6 +184,10 @@ public sealed class TcpRedirectTable
             _byOriginal.Add(originalKey, created);
             _byTranslatedListener.Add(translatedTuple, created);
             _byReverse.Add(new ReverseRedirectTuple(created.ReverseSourceEndpoint, created.ReverseDestinationEndpoint), created);
+            // Last writer wins when several associations share an address pair: a fragment
+            // carries no ports, so attribution is inherently ambiguous there and the newest
+            // claim is the best guess (S1).
+            _byAddressPair[NormalizeAddressPair(originalKey.Local.Address, originalKey.Remote.Address)] = created;
             association = created;
             return true;
         }
@@ -220,6 +225,30 @@ public sealed class TcpRedirectTable
         TryFind(_byOriginal, originalKey, now, out association);
 
     /// <summary>
+    /// Resolves an association whose original flow endpoints match the given IP address pair in
+    /// either orientation — the fragment match (S1): a non-first IP fragment carries no ports,
+    /// so the address pair is the finest key it can be attributed by. When several associations
+    /// share the pair, the most recently claimed one wins (see <see cref="TryClaim"/>). A
+    /// mixed-family pair never matches: a flow's endpoints always share one family.
+    /// </summary>
+    public bool TryResolveByAddressPair(IPAddressValue first, IPAddressValue second, DateTimeOffset now, out TcpRedirectAssociation? association)
+    {
+        association = null;
+        if (first.Family != second.Family) return false;
+        var pair = NormalizeAddressPair(first, second);
+        lock (_gate)
+        {
+            if (_byAddressPair.TryGetValue(pair, out var found))
+            {
+                found.Touch(now);
+                association = found;
+                return true;
+            }
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Removes a specific association from both indexes. Used by the coordinator's fail-closed
     /// teardown when a listener, rewrite, or relay setup fails so the alias is released for reuse
     /// and no half-claimed flow lingers. <paramref name="onRemoved"/>, when supplied, runs inside
@@ -235,6 +264,7 @@ public sealed class TcpRedirectTable
             _byOriginal.Remove(association.OriginalKey);
             _byTranslatedListener.Remove(association.TranslatedListenerTuple);
             _byReverse.Remove(new ReverseRedirectTuple(association.ReverseSourceEndpoint, association.ReverseDestinationEndpoint));
+            RemoveAddressPairUnderGate(association);
             onRemoved?.Invoke(association);
             return true;
         }
@@ -250,6 +280,7 @@ public sealed class TcpRedirectTable
                 _byOriginal.Remove(association.OriginalKey);
                 _byTranslatedListener.Remove(association.TranslatedListenerTuple);
                 _byReverse.Remove(new ReverseRedirectTuple(association.ReverseSourceEndpoint, association.ReverseDestinationEndpoint));
+                RemoveAddressPairUnderGate(association);
             }
             return expired.Length;
         }
@@ -259,6 +290,16 @@ public sealed class TcpRedirectTable
     {
         lock (_gate) return _byOriginal.Values.ToArray();
     }
+
+    private void RemoveAddressPairUnderGate(TcpRedirectAssociation association)
+    {
+        var pair = NormalizeAddressPair(association.OriginalKey.Local.Address, association.OriginalKey.Remote.Address);
+        // A newer association on the same pair may own the slot; only clear what this one owns.
+        if (ReferenceEquals(_byAddressPair.GetValueOrDefault(pair), association)) _byAddressPair.Remove(pair);
+    }
+
+    private static AddressPair NormalizeAddressPair(IPAddressValue first, IPAddressValue second)
+        => first.Bits <= second.Bits ? new AddressPair(first, second) : new AddressPair(second, first);
 
     private bool TryFind<TKey>(Dictionary<TKey, TcpRedirectAssociation> table, TKey key, DateTimeOffset now, out TcpRedirectAssociation? association) where TKey : notnull
     {
@@ -276,4 +317,8 @@ public sealed class TcpRedirectTable
 
     [StructLayout(LayoutKind.Auto)]
     private readonly record struct ReverseRedirectTuple(Endpoint Source, Endpoint Destination);
+
+    /// <summary>An orientation-independent endpoint address pair; the fragment match key.</summary>
+    [StructLayout(LayoutKind.Auto)]
+    private readonly record struct AddressPair(IPAddressValue Lesser, IPAddressValue Greater);
 }

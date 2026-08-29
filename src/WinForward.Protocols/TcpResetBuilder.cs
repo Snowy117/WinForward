@@ -64,6 +64,29 @@ public static class TcpResetBuilder
         };
     }
 
+    /// <summary>
+    /// Builds the abort for a SYN that was rejected before any redirect state existed (the
+    /// capacity gate): source = the server tuple the client dialed, destination = the client,
+    /// <c>seq = 0</c>, <c>ack = client-ISN + 1</c>, flags RST|ACK. A client in SYN_SENT accepts
+    /// this reset — its ACK acknowledges the client's SYN — and fails the connect immediately
+    /// with ECONNREFUSED instead of retransmitting for the full OS timeout. The client ISN is
+    /// read from <paramref name="synFrame"/> itself; returns null when the frame is not a
+    /// parseable IPv4/IPv6 TCP segment or the address families do not match it.
+    /// </summary>
+    public static byte[]? BuildResetFromSyn(
+        ReadOnlySpan<byte> synFrame,
+        IPAddressValue serverAddress,
+        ushort serverPort,
+        IPAddressValue clientAddress,
+        ushort clientPort)
+    {
+        if (!IPTcpUdpPacket.TryParse(synFrame, out var view) || view.Transport != PacketTransport.Tcp) return null;
+        var sequenceOffset = EthernetHeaderLength + view.IPHeaderLength + 4;
+        if (synFrame.Length < sequenceOffset + 4) return null;
+        var clientInitialSeq = BinaryPrimitives.ReadUInt32BigEndian(synFrame.Slice(sequenceOffset, 4));
+        return BuildReset(synFrame, serverAddress, serverPort, clientAddress, clientPort, serverSequenceNext: 0, clientSequenceNext: clientInitialSeq + 1);
+    }
+
     private static byte[] BuildIpv4(ReadOnlySpan<byte> synTemplate, IPAddressValue serverAddress, ushort serverPort, IPAddressValue clientAddress, ushort clientPort, uint serverSequenceNext, uint clientSequenceNext)
     {
         var frame = new byte[EthernetHeaderLength + Ipv4HeaderLength + TcpHeaderLength];

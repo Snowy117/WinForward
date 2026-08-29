@@ -104,7 +104,11 @@ internal static DispatcherHarness CreateDispatcherHarness()
     var rules = new[] { new PolicyRule(new RuleMatcher(), new FlowDecision(FlowAction.Proxy, 0, server.Name)) };
     var config = new ValidatedConfiguration(servers, new PolicySnapshot(rules, FlowAction.Block));
     var executor = new NdisPacketActionExecutor(new CountingReinjector(), logger, tcpProxy: coordinator);
-    var dispatcher = new FlowDispatcher(config, selfTraffic, executor, reverseHandler: coordinator.HandleReverseIfApplicableAsync, logger: logger);
+    var dispatcher = new FlowDispatcher(
+        config, selfTraffic, executor,
+        reverseHandler: coordinator.HandleReverseIfApplicableAsync,
+        fragmentHandler: coordinator.HandleFragmentAsync,
+        logger: logger);
     return new DispatcherHarness(coordinator, listenerFactory, injector, relayFactory, table, dispatcher, logger);
 }
 

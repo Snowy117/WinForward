@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
+using WinForward.Protocols;
 using WinForward.Runtime.TcpRedirect;
 using WinForward.Windows;
 
@@ -36,7 +37,17 @@ public readonly record struct CapturedFlowPacket(
     PacketCaptureMetadata Metadata = default,
     long PacketSequence = 0,
     long FlowGeneration = 0,
-    NativeFrameHandle NativeFrame = default);
+    NativeFrameHandle NativeFrame = default)
+{
+    /// <summary>
+    /// A read-only view of the frame bytes for synchronous header inspection: the native capture
+    /// buffer while the lease has not materialized (so bit-test paths like fragment detection
+    /// never force a pooled managed copy), otherwise the lease's managed frame. Requires a
+    /// non-null <see cref="Lease"/> (every dispatch entry rejects a leaseless packet first); the
+    /// span must be consumed synchronously and must not escape the dispatch section.
+    /// </summary>
+    internal ReadOnlySpan<byte> InspectionSpan => NativeFrame.Buffer is { } buffer ? buffer.GetFrame() : Lease!.Frame.Span;
+}
 
 public interface ISelfTrafficGuard
 {
@@ -69,10 +80,11 @@ public sealed class FlowDispatcher
     private readonly IPacketActionExecutor _executor;
     private readonly IProcessAttributor? _attributor;
     private readonly Func<CapturedFlowPacket, CancellationToken, ValueTask<TcpRedirectOutcome>>? _reverseHandler;
+    private readonly Func<CapturedFlowPacket, CancellationToken, ValueTask<TcpRedirectOutcome>>? _fragmentHandler;
     private readonly IRuntimeLogger _logger;
     private readonly bool _includeProcessPathInLogs;
 
-    public FlowDispatcher(ValidatedConfiguration configuration, ISelfTrafficGuard selfTraffic, IPacketActionExecutor executor, IProcessAttributor? attributor = null, int flowCapacity = 65_536, Func<CapturedFlowPacket, CancellationToken, ValueTask<TcpRedirectOutcome>>? reverseHandler = null, IRuntimeLogger? logger = null)
+    public FlowDispatcher(ValidatedConfiguration configuration, ISelfTrafficGuard selfTraffic, IPacketActionExecutor executor, IProcessAttributor? attributor = null, int flowCapacity = 65_536, Func<CapturedFlowPacket, CancellationToken, ValueTask<TcpRedirectOutcome>>? reverseHandler = null, Func<CapturedFlowPacket, CancellationToken, ValueTask<TcpRedirectOutcome>>? fragmentHandler = null, IRuntimeLogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(selfTraffic);
@@ -84,6 +96,7 @@ public sealed class FlowDispatcher
         _executor = executor;
         _attributor = attributor;
         _reverseHandler = reverseHandler;
+        _fragmentHandler = fragmentHandler;
         _logger = logger ?? NullRuntimeLogger.Instance;
         _includeProcessPathInLogs = configuration.IncludeProcessPathInLogs;
     }
@@ -242,8 +255,27 @@ public sealed class FlowDispatcher
             return;
         }
 
+        // An IP fragment cannot be classified as a flow, but its address pair may belong to an
+        // active TCP redirect: such fragments must never pass toward the real server (S1). The
+        // check is a bounded bit test over the raw header — the non-fragment non-flow majority
+        // (ARP, ND, L2) pays only an ether-type compare.
+        if (await TryHandleFragmentAsync(packet, cancellationToken).ConfigureAwait(false)) return;
+
         if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.action", packet, new RuntimeLogField("action", FlowAction.Pass), new RuntimeLogField("rule", null), new RuntimeLogField("proxy", null), new RuntimeLogField("reason", "nonFlow"));
         await CompleteAsync(packet, PacketDisposition.Pass, PacketAction.Pass, null, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async ValueTask<bool> TryHandleFragmentAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
+    {
+        if (_fragmentHandler is null || !IPFragment.IsFragment(packet.InspectionSpan)) return false;
+        var outcome = await _fragmentHandler(packet, cancellationToken).ConfigureAwait(false);
+        if (outcome == TcpRedirectOutcome.NotRelevant) return false;
+        // Dropped is an attributed fragment consumed by the proxy layer, like a grace drop;
+        // Blocked (a disposed-coordinator race) keeps the policy-drop executor path.
+        var disposition = outcome == TcpRedirectOutcome.Blocked ? PacketDisposition.Block : PacketDisposition.ProxyConsumed;
+        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.fragmentHandled", packet, new RuntimeLogField("outcome", outcome));
+        await CompleteAsync(packet, disposition, disposition == PacketDisposition.Block ? PacketAction.Block : PacketAction.None, null, cancellationToken).ConfigureAwait(false);
+        return true;
     }
 
     private FlowDecision EvaluateNewFlow(FlowContext context) =>

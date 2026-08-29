@@ -52,7 +52,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         _logger = logger ?? NullRuntimeLogger.Instance;
         _capacity = capacity ?? 16_384;
         _store = new TcpRedirectSessionStore(table, _logger, _capacity);
-        _clientReset = new ClientResetInjector(injector, _logger, _store.TearDownSessionAsync, _store.FailAssociationAsync);
+        _clientReset = new ClientResetInjector(injector, _logger, _store.TearDownSessionAsync, _store.FailAssociationAsync, _capacity);
         _acceptor = new TcpRedirectAcceptor(relayFactory, _logger, _clientReset, _store.TryAttachRelay, _store.TearDownSessionAsync);
         _setup = new TcpRedirectSetup(listenerFactory, table, selfTraffic, localAddresses, injector, _logger, _store, _clientReset);
     }
@@ -119,6 +119,10 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
             {
                 Interlocked.Increment(ref _capacityRejectionCount);
                 TcpRedirectLogging.LogTrace(_logger, "tcp.redirect.rejected", packet, null, "capacity");
+                // The client is still in SYN_SENT: an immediate RST|ACK fails its connect fast
+                // (ECONNREFUSED) instead of a 20-60s retransmission timeout, and the per-tuple
+                // cooldown keeps the guard amplification-free (S4).
+                await _clientReset.InjectCapacityRejectedResetAsync(packet, cancellationToken).ConfigureAwait(false);
                 return TcpRedirectOutcome.Blocked;
             }
 
@@ -323,6 +327,27 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
     }
 
     /// <summary>
+    /// Handles an IP-fragment frame (IPv4 fragment bits or an IPv6 fragment header) whose IP
+    /// address pair matches an active redirect association in either orientation (S1). Such a
+    /// frame can never be rewritten or relayed, and passing it toward the real server would
+    /// cross-talk an unknown tuple onto a proxied connection, so the association is torn down
+    /// client-visibly and the fragment is consumed. Frames that match no association are not
+    /// ours to attribute and keep the unconditional non-flow pass.
+    /// </summary>
+    public async ValueTask<TcpRedirectOutcome> HandleFragmentAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
+    {
+        if (packet.Lease is null) throw new ArgumentNullException(nameof(packet));
+        ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
+
+        if (!IPFragment.TryReadAddressPair(packet.InspectionSpan, out var source, out var destination)) return TcpRedirectOutcome.NotRelevant;
+        if (!_table.TryResolveByAddressPair(source, destination, DateTimeOffset.UtcNow, out var association) || association is null) return TcpRedirectOutcome.NotRelevant;
+
+        TcpRedirectLogging.LogTrace(_logger, "tcp.redirect.fragment", packet, association, "fragment");
+        await _clientReset.HandleFragmentTeardownAsync(association).ConfigureAwait(false);
+        return TcpRedirectOutcome.Dropped;
+    }
+
+    /// <summary>
     /// Removes half-open redirect associations still in <see cref="RelayPhase.Redirecting"/> that
     /// have observed no activity for <paramref name="idleTimeout"/> and tears down their sessions
     /// (listener, relay, self-traffic token, table alias). A session is only removed while it is
@@ -351,6 +376,9 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
 
     /// <summary>The TIME_WAIT-grace tombstone index; internal for tests to advance the grace window.</summary>
     internal TcpRedirectTombstoneTable Tombstones => _store.Tombstones;
+
+    /// <summary>The capacity-reset cooldown index; internal for tests to advance the window.</summary>
+    internal TcpResetCooldownTable CapacityResetCooldowns => _clientReset.CapacityResets;
 
     public ValueTask DisposeAsync()
         => _store.DisposeAsync();

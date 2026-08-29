@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Net;
 using WinForward.Configuration;
 using WinForward.Core;
+using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.Capture;
 using WinForward.Runtime.TcpRedirect;
@@ -32,7 +33,10 @@ public sealed class TcpProxyCoordinatorCapacityTests
         Assert.Equal(TcpRedirectOutcome.Injected, first);
         Assert.Equal(TcpRedirectOutcome.Blocked, second);
         Assert.Single(listenerFactory.Listeners);
-        Assert.Single(injector.InjectedFrames);
+        // Frame 1 is the accepted flow's rewritten SYN; frame 2 is the S4 capacity RST|ACK that
+        // fails the rejected client fast instead of leaving it to retransmit for the OS timeout.
+        Assert.Equal(2, injector.InjectedFrames.Count);
+        Assert.Equal(0x14, injector.InjectedFrames[1].Frame[47]);
     }
 
     [Fact]
@@ -374,5 +378,106 @@ public sealed class TcpProxyCoordinatorCapacityTests
         var listenerTuple = Assert.Single(harness.ListenerFactory.Listeners).TranslatedTuple;
         coordinator.Tombstones.TryAdd(key, Endpoint.From(s_clientIpv4, listenerTuple.Port), Endpoint.From(s_destIpv4, 53000), DateTimeOffset.UtcNow - TimeSpan.FromSeconds(1));
         Assert.Equal(1, harness.Dispatcher.RemoveExpiredFlows(flowSweepNow, TimeSpan.FromMinutes(1), coordinator.HoldsFlow));
+    }
+
+    [Fact]
+    public async Task CapacityRejectedSynInjectsSingleRstPerTuplePerCooldownWindow()
+    {
+        // S4: the client is still in SYN_SENT, so the RST|ACK (ack = ISN+1) aborts it with
+        // ECONNREFUSED; retransmissions inside the 1s window stay silent so a spoofed-source
+        // flood cannot use the proxy as a reflection amplifier.
+        var listenerFactory = new FakeListenerFactory();
+        var injector = new FakeInjector();
+        var selfTraffic = new SelfTrafficRegistry();
+        var logger = new RecordingRuntimeLogger();
+        var table = new TcpRedirectTable(capacity: 1);
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider(), logger, capacity: 1);
+
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None));
+        var rejectedTuple = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.11"), 53001), Endpoint.From(IPAddress.Parse("192.0.2.99"), 80), TransportProtocol.Tcp, FlowOriginKind.Host);
+        var rejectedSyn = MakeSynPacketWithSequence(IPAddress.Parse("192.0.2.11"), IPAddress.Parse("192.0.2.99"), 53001, 80, 0x11223344);
+
+        Assert.Equal(TcpRedirectOutcome.Blocked, await coordinator.HandleSynAsync(rejectedSyn, s_server, CancellationToken.None));
+
+        // Frame 1 is the first flow's rewritten SYN; frame 2 is the capacity RST.
+        Assert.Equal(2, injector.InjectedFrames.Count);
+        var reset = injector.InjectedFrames[1];
+        Assert.True(reset.TowardMstcp);
+        Assert.Equal(0x14, reset.Frame[47]);
+        Assert.Equal(0u, System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(reset.Frame.AsSpan(38, 4)));
+        Assert.Equal(0x11223345u, System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(reset.Frame.AsSpan(42, 4)));
+        Assert.Contains(logger.Events, e => string.Equals(e.Name, "tcp.redirect.capacityReset", StringComparison.Ordinal));
+
+        // A retransmitted SYN inside the cooldown window is still consumed (Blocked) and draws no
+        // second reset.
+        Assert.Equal(TcpRedirectOutcome.Blocked, await coordinator.HandleSynAsync(MakeSynPacketWithSequence(IPAddress.Parse("192.0.2.11"), IPAddress.Parse("192.0.2.99"), 53001, 80, 0x11223345), s_server, CancellationToken.None));
+        Assert.Equal(2, injector.InjectedFrames.Count);
+
+        // Once the window lapses, the next SYN earns a fresh reset.
+        Assert.True(coordinator.CapacityResetCooldowns.Remove(rejectedTuple));
+        Assert.Equal(TcpRedirectOutcome.Blocked, await coordinator.HandleSynAsync(MakeSynPacketWithSequence(IPAddress.Parse("192.0.2.11"), IPAddress.Parse("192.0.2.99"), 53001, 80, 0x11223346), s_server, CancellationToken.None));
+        Assert.Equal(3, injector.InjectedFrames.Count);
+        Assert.Equal(0x14, injector.InjectedFrames[2].Frame[47]);
+
+        // The rejection accounting is unchanged.
+        Assert.Equal(3, coordinator.CapacityRejectionCount);
+        Assert.Contains(logger.Events, e => string.Equals(e.Name, "tcp.redirect.rejected", StringComparison.Ordinal)
+            && e.Fields.Any(field => string.Equals(field.Key, "reason", StringComparison.Ordinal) && field.Value is "capacity"));
+    }
+
+    [Fact]
+    public async Task CapacityResetFollowsOriginDirectionMatrix()
+    {
+        // Host shape injects the reset toward MSTCP; a forwarded flow's reset returns to the
+        // origin adapter (the adapter the SYN was captured on) — same matrix as the redirect
+        // and client-reset legs.
+        var listenerFactory = new FakeListenerFactory();
+        var injector = new FakeInjector();
+        var selfTraffic = new SelfTrafficRegistry();
+        var table = new TcpRedirectTable(capacity: 1);
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider(), capacity: 1);
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None));
+
+        var hostSyn = MakeSynPacket(IPAddress.Parse("192.0.2.11"), IPAddress.Parse("192.0.2.99"), 53001, 80);
+        Assert.Equal(TcpRedirectOutcome.Blocked, await coordinator.HandleSynAsync(hostSyn, s_server, CancellationToken.None));
+        var hostReset = injector.InjectedFrames[1];
+        Assert.True(hostReset.TowardMstcp);
+        Assert.Equal((nint)0x1234, hostReset.AdapterHandle);
+
+        injector.InjectedFrames.Clear();
+        var forwardedSyn = MakeForwardedSynPacket(IPAddress.Parse("192.0.2.12"), IPAddress.Parse("192.0.2.99"), 53002, 80);
+        Assert.Equal(TcpRedirectOutcome.Blocked, await coordinator.HandleSynAsync(forwardedSyn, s_server, CancellationToken.None));
+        var forwardedReset = injector.InjectedFrames[0];
+        Assert.False(forwardedReset.TowardMstcp);
+        Assert.Equal((nint)0x1234, forwardedReset.AdapterHandle);
+        Assert.Equal(0x14, forwardedReset.Frame[47]);
+    }
+
+    [Fact]
+    public async Task CapacityResetInjectionFailureWarnsWithoutChangingOutcome()
+    {
+        var listenerFactory = new FakeListenerFactory();
+        var injector = new FakeInjector(throwOnCall: 2, exception: new System.ComponentModel.Win32Exception(87));
+        var selfTraffic = new SelfTrafficRegistry();
+        var logger = new RecordingRuntimeLogger();
+        var table = new TcpRedirectTable(capacity: 1);
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider(), logger, capacity: 1);
+
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None));
+        Assert.Equal(TcpRedirectOutcome.Blocked, await coordinator.HandleSynAsync(MakeSynPacket(IPAddress.Parse("192.0.2.11"), IPAddress.Parse("192.0.2.99"), 53001, 80), s_server, CancellationToken.None));
+
+        // The best-effort reset never fails the rejection path: warned, no throw, and the tuple's
+        // cooldown claim still holds (the retransmission draws nothing).
+        Assert.Contains(logger.Lines, line => line.Message.Contains("capacity reset injection failed", StringComparison.Ordinal));
+        Assert.Equal(TcpRedirectOutcome.Blocked, await coordinator.HandleSynAsync(MakeSynPacket(IPAddress.Parse("192.0.2.11"), IPAddress.Parse("192.0.2.99"), 53001, 80), s_server, CancellationToken.None));
+        Assert.Single(injector.InjectedFrames);
+    }
+
+    private static CapturedFlowPacket MakeSynPacketWithSequence(IPAddress client, IPAddress destination, ushort clientPort, ushort destinationPort, uint sequence)
+    {
+        var frame = FrameBuilders.BuildIpv4TcpFrame(client, destination, clientPort, destinationPort, FrameBuilders.TcpFlagSyn, sequence: sequence);
+        var key = FlowKey.Create(Endpoint.From(client, clientPort), Endpoint.From(destination, destinationPort), TransportProtocol.Tcp, FlowOriginKind.Host);
+        var context = new FlowContext(key, "app.exe", null, null, "eth0", destinationPort);
+        return new CapturedFlowPacket(new PacketLease(frame), context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 0x1234));
     }
 }

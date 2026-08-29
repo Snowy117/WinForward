@@ -253,7 +253,7 @@ internal static class Program
         var redirectTable = new TcpRedirectTable(capacity: configuration.TcpFlowCapacity);
         var tcpCoordinator = new TcpProxyCoordinator(
             new TcpRedirectListenerFactory(),
-            new TcpProxyRelayFactory(selfTraffic),
+            new TcpProxyRelayFactory(selfTraffic, logger),
             new TcpRedirectInjector(reinjector),
             redirectTable,
             selfTraffic,
@@ -269,6 +269,7 @@ internal static class Program
                 var dispatcher = new FlowDispatcher(
                     configuration, selfTraffic, executor, new WindowsProcessAttributor(),
                     reverseHandler: tcpCoordinator.HandleReverseIfApplicableAsync,
+                    fragmentHandler: tcpCoordinator.HandleFragmentAsync,
                     logger: logger);
                 var captureLoop = new MultiAdapterCaptureLoop(driver, scope, new CapturePacketProcessor(dispatcher, logger));
                 var idleExpirySweeper = new IdleExpirySweeper(dispatcher, tcpCoordinator, udpCoordinator, logger: logger);

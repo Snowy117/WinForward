@@ -17,18 +17,30 @@ namespace WinForward.Runtime.TcpRedirect;
 /// </summary>
 internal sealed class ClientResetInjector
 {
+    /// <summary>
+    /// The per-tuple cooldown window for capacity-rejection resets: at most one RST|ACK per
+    /// 4-tuple per second (the UDP setup-cooldown precedent) bounds reflection amplification
+    /// from spoofed sources while still failing well-behaved clients fast.
+    /// </summary>
+    internal static readonly TimeSpan CapacityResetCooldownWindow = TimeSpan.FromSeconds(1);
+
     private readonly ITcpRedirectInjector _injector;
     private readonly IRuntimeLogger _logger;
     private readonly Func<TcpRedirectSession, ValueTask> _tearDownSession;
     private readonly Func<TcpRedirectAssociation, ValueTask> _failAssociation;
+    private readonly TcpResetCooldownTable _capacityResets;
 
-    public ClientResetInjector(ITcpRedirectInjector injector, IRuntimeLogger logger, Func<TcpRedirectSession, ValueTask> tearDownSession, Func<TcpRedirectAssociation, ValueTask> failAssociation)
+    public ClientResetInjector(ITcpRedirectInjector injector, IRuntimeLogger logger, Func<TcpRedirectSession, ValueTask> tearDownSession, Func<TcpRedirectAssociation, ValueTask> failAssociation, int? capacity = null)
     {
         _injector = injector;
         _logger = logger;
         _tearDownSession = tearDownSession;
         _failAssociation = failAssociation;
+        _capacityResets = new TcpResetCooldownTable(capacity ?? 16_384);
     }
+
+    /// <summary>The capacity-reset cooldown index; surfaced so tests can advance the window.</summary>
+    internal TcpResetCooldownTable CapacityResets => _capacityResets;
 
     public ValueTask TryInjectClientResetAsync(TcpRedirectSession session)
         => TryInjectClientResetAsync(session.Association, session.Token);
@@ -63,6 +75,57 @@ internal sealed class ClientResetInjector
         {
             _logger.Warn($"TCP redirect client reset injection failed ({exception.GetType().Name}).");
         }
+    }
+
+    /// <summary>
+    /// Surfaces a capacity-gate rejection to the client as an immediate RST|ACK from the server
+    /// tuple it dialed (S4). The client is still in SYN_SENT, so <c>ack = ISN + 1</c> aborts the
+    /// connect with ECONNREFUSED instead of a 20-60s retransmission timeout. Guarded by the
+    /// per-tuple cooldown so retransmitted SYNs inside the window stay silently dropped; host
+    /// shape injects toward MSTCP, forwarded shape toward the origin adapter (the capture
+    /// handle), matching the redirect direction matrix. Never throws: a failed best-effort
+    /// reset is warned and the Blocked rejection outcome stands unchanged.
+    /// </summary>
+    public async ValueTask InjectCapacityRejectedResetAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
+    {
+        var key = packet.Context.Key;
+        if (!_capacityResets.TryClaim(key, DateTimeOffset.UtcNow, CapacityResetCooldownWindow)) return;
+        var reset = TcpResetBuilder.BuildResetFromSyn(packet.InspectionSpan, key.Remote.Address, key.Remote.Port, key.Local.Address, key.Local.Port);
+        if (reset is null) return;
+        try
+        {
+            await _injector.InjectAsync(reset, key.Origin != FlowOriginKind.Forwarded, packet.Metadata.AdapterHandle, cancellationToken).ConfigureAwait(false);
+            if (_logger.IsEnabled(RuntimeLogLevel.Debug))
+            {
+                _logger.Event(RuntimeLogLevel.Debug, "tcp.redirect.capacityReset",
+                    new("source", key.Local), new("destination", key.Remote), new("outcome", "injected"));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown cancelled the best-effort reset; the rejection itself already stands.
+        }
+        catch (Exception exception)
+        {
+            _logger.Warn($"TCP redirect capacity reset injection failed ({exception.GetType().Name}).");
+        }
+    }
+
+    /// <summary>
+    /// Releases a flow whose association was hit by an IP fragment it can never rewrite or relay
+    /// (S1). The teardown is client-visible whenever the tracked sequences allow an in-window
+    /// RST|ACK; otherwise it degrades to a warned silent teardown (the client then observes the
+    /// connection failing on its own retransmission timeout). The removal still funnels through
+    /// the single tombstone write point.
+    /// </summary>
+    public async ValueTask HandleFragmentTeardownAsync(TcpRedirectAssociation association)
+    {
+        if (association.OriginalSynFrameCopy is null || association.ClientInitialSeq is not uint || association.ServerInitialSeq is not uint)
+        {
+            _logger.Warn($"TCP redirect torn down by an IP fragment without observed sequences ({association.OriginalKey.Local} -> {association.OriginalKey.Remote}); no client reset is possible.");
+        }
+        await TryInjectClientResetAsync(association, CancellationToken.None).ConfigureAwait(false);
+        await _failAssociation(association).ConfigureAwait(false);
     }
 
     /// <summary>
