@@ -31,7 +31,7 @@ src/
 tests/
 └── WinForward.Core.Tests/     # xunit；类-每-文件
     └── TestHelpers/           # 跨测试文件共享的 fakes/helpers
-benchmarks/                    # throwaway 基准宿主（不适用文件行数约定）
+benchmarks/                    # 基准宿主（BenchmarkDotNet 性能基准 + 稳定性 soak 运行器，同样受文件行数约定约束）
 ```
 
 ### Runtime 子命名空间（2026-08-29 确立）
@@ -52,9 +52,10 @@ benchmarks/                    # throwaway 基准宿主（不适用文件行数�
 
 ## Module Organization
 
-### 文件行数上限（2026-08-28 重构确立）
+### 文件行数上限（2026-08-28 重构确立；2026-08-29 扩展到 benchmarks/）
 
 - 每个 .cs 文件**有效行数 ≤ 400**：有效行 = 非空、非注释行（`wc -l` 总行数仅作参考，不作为超标依据）。
+- **benchmarks/ 同样受此约束**（2026-08-29 用户决策，任务 08-29-benchmark-rewrite 起）：基准宿主按场景族拆文件（`Perf/` 每基准类一文件 + `BenchmarkShared.cs` 共享夹具，`Stability/` 每 scenario 一文件）。BDN 基准类不能 `sealed`（BDN 生成派生代理）；async 基准方法带 `Async` 后缀（VSTHRD200 在 benchmarks 下 fatal）。
 - 行数超标时的拆分顺序：先找自然接缝（static 纯函数簇、嵌套类提升、`// ----` 分区注释、第二顶层类型），再考虑新模块。
 - **不为拆而拆**：拆分不得严重损害可读性或性能。先例：`Cli/Program.cs`（397 有效行）与 `ConfigurationModels.cs`（367）达标后保持内聚不拆；`TcpRedirectLogging` 因被 4 个文件 15 处调用而保留独立文件，即使只有 25 有效行。
 

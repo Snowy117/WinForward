@@ -23,7 +23,7 @@
 - Boundary constructors and parsers must be intentional about null inputs: `Endpoint.From(IPAddress, ushort)` rejects a null address with `ArgumentNullException`, while `IPPrefix.TryParse(string?, out IPPrefix)` returns `false` without throwing. Configuration validation must turn null JSON array elements into indexed diagnostics rather than allowing a `NullReferenceException`.
 - Normalized remote-port intervals are sorted by start/end and merged when overlapping or adjacent. Downstream rule matching receives the canonical disjoint interval list, never user ordering or duplicate ranges.
 - Capture composition owns proxy coordinators inside the capture-loop disposal boundary: stop the sweeper and capture pumps, then dispose UDP/TCP sessions, and only afterward restore adapter modes. Active `StopAsync` must cancel and await the capture run before releasing those resources.
-- Structural refactors are behavior-zero and gate on the test baseline: prefer mechanical line-range moves (script-assisted) over retyping, never modify assertion semantics in test moves, and require `dotnet test` totals to equal the recorded baseline (344 as of 2026-08-29) plus a zero-warning build before committing each batch. See directory-structure.md for file-size and split conventions.
+- Structural refactors are behavior-zero and gate on the test baseline: prefer mechanical line-range moves (script-assisted) over retyping, never modify assertion semantics in test moves, and require `dotnet test` totals to equal the recorded baseline (380 as of 2026-08-29, observed during 08-29-benchmark-rewrite) plus a zero-warning build before committing each batch. See directory-structure.md for file-size and split conventions.
 
 ## Testing Requirements
 

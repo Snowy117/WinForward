@@ -4,6 +4,9 @@
 *.user
 *.suo
 
+# BenchmarkDotNet generated results
+BenchmarkDotNet.Artifacts/
+
 # Local Trellis runtime state
 .trellis/.runtime/
 

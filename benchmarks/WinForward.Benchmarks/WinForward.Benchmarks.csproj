@@ -7,6 +7,9 @@
     <EnableAotAnalyzer>false</EnableAotAnalyzer>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../../src/WinForward.Configuration/WinForward.Configuration.csproj" />
     <ProjectReference Include="../../src/WinForward.Core/WinForward.Core.csproj" />
     <ProjectReference Include="../../src/WinForward.NdisApi/WinForward.NdisApi.csproj" />
