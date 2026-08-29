@@ -9,6 +9,10 @@ using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Protocols;
 using WinForward.Runtime;
+using WinForward.Runtime.Capture;
+using WinForward.Runtime.Socks5;
+using WinForward.Runtime.TcpRedirect;
+using WinForward.Runtime.UdpProxy;
 using WinForward.Windows;
 
 namespace WinForward.Benchmarks;

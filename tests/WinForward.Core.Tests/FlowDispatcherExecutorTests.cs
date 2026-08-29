@@ -4,6 +4,8 @@ using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Runtime;
+using WinForward.Runtime.Capture;
+using WinForward.Runtime.TcpRedirect;
 using WinForward.Windows;
 using Xunit;
 

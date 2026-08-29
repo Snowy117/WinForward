@@ -3,8 +3,9 @@ using System.Net.Sockets;
 using System.Runtime.Versioning;
 using WinForward.Configuration;
 using WinForward.Core;
+using WinForward.Runtime.Socks5;
 
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.TcpRedirect;
 
 [SupportedOSPlatform("windows")]
 public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic) : ITcpProxyRelayFactory

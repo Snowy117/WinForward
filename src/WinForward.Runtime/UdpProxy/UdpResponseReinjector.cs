@@ -3,8 +3,9 @@ using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Protocols;
+using WinForward.Runtime.Capture;
 
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.UdpProxy;
 
 /// <summary>
 /// A reinjection target for a UDP response: the NDISAPI enumeration handle of the adapter the

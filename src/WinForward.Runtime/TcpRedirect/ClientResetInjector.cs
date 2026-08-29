@@ -3,7 +3,7 @@ using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
 
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.TcpRedirect;
 
 /// <summary>
 /// The client-visible failure surface of the TCP redirect data path. When an upstream relay

@@ -1,6 +1,6 @@
 using System.Net;
 using WinForward.Core;
-using WinForward.Runtime;
+using WinForward.Runtime.UdpProxy;
 using Xunit;
 
 namespace WinForward.Core.Tests;

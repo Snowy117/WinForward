@@ -1,7 +1,7 @@
 using System.Buffers;
 using System.Net.Sockets;
 using WinForward.Configuration;
-using WinForward.Runtime;
+using WinForward.Runtime.Socks5;
 
 namespace WinForward.Core.Tests;
 

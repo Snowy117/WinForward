@@ -2,7 +2,7 @@ using System.Net;
 using System.Runtime.InteropServices;
 using WinForward.Core;
 
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.TcpRedirect;
 
 /// <summary>
 /// The lifecycle phase of a TCP redirect flow. A flow starts <see cref="Redirecting"/> when its SYN

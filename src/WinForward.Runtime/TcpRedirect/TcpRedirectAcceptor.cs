@@ -1,4 +1,4 @@
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.TcpRedirect;
 
 /// <summary>
 /// The accept-and-relay loop for a TCP redirect session. A background task per session accepts

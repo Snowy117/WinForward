@@ -1,5 +1,5 @@
 using WinForward.Cli;
-using WinForward.Runtime;
+using WinForward.Runtime.Capture;
 using Xunit;
 
 namespace WinForward.Core.Tests;

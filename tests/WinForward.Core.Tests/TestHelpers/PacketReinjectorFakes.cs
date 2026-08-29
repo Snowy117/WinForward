@@ -1,5 +1,5 @@
 using WinForward.NdisApi;
-using WinForward.Runtime;
+using WinForward.Runtime.Capture;
 
 namespace WinForward.Core.Tests;
 

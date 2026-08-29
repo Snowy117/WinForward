@@ -1,7 +1,7 @@
 using WinForward.Configuration;
 using WinForward.Core;
 
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.TcpRedirect;
 
 /// <summary>
 /// Creates the local TCP listener that redirected client connections arrive on. The concrete

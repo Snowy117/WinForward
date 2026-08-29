@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using WinForward.Core;
 
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.TcpRedirect;
 
 /// <summary>
 /// The TIME_WAIT-grace tombstone index for torn-down TCP redirects. When a redirect association

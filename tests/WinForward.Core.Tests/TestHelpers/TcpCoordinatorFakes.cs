@@ -6,6 +6,8 @@ using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Runtime;
+using WinForward.Runtime.Capture;
+using WinForward.Runtime.TcpRedirect;
 using Xunit;
 using static WinForward.Core.Tests.AsyncTestExtensions;
 using static WinForward.Core.Tests.FrameBuilders;

@@ -4,7 +4,8 @@ using System.Threading.Channels;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
-using WinForward.Runtime;
+using WinForward.Runtime.Socks5;
+using WinForward.Runtime.UdpProxy;
 
 namespace WinForward.Core.Tests;
 

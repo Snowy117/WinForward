@@ -1,6 +1,6 @@
 using WinForward.Core;
 
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.Capture;
 
 public enum CaptureRuntimeState
 {

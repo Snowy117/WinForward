@@ -3,7 +3,7 @@ using System.Net.Sockets;
 using WinForward.Configuration;
 using WinForward.Protocols;
 
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.Socks5;
 
 public sealed class Socks5ControlConnection : IAsyncDisposable
 {

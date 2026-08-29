@@ -2,8 +2,9 @@ using System.Buffers;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
+using WinForward.Runtime.Socks5;
 
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.UdpProxy;
 
 public sealed class UdpProxyCoordinator : IAsyncDisposable
 {

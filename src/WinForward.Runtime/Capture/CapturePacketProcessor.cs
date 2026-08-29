@@ -5,7 +5,7 @@ using WinForward.NdisApi;
 using WinForward.Protocols;
 using WinForward.Windows;
 
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.Capture;
 
 /// <summary>
 /// Bridges a captured NDISAPI packet into the flow dispatcher. Parsing and classification run

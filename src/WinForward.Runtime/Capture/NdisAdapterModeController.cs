@@ -2,7 +2,7 @@ using System.Runtime.Versioning;
 using WinForward.NdisApi;
 using WinForward.Windows;
 
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.Capture;
 
 /// <summary>
 /// An <see cref="IAdapterModeController"/> that drives the NDISAPI adapter modes for the adapters in

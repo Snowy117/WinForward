@@ -1,7 +1,7 @@
 using WinForward.Core;
 using WinForward.Windows;
 
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.Capture;
 
 /// <summary>
 /// Resolves the set of adapters that must be placed in capture tunnel mode for a run. A rule that

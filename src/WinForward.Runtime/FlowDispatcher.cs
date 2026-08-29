@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
+using WinForward.Runtime.TcpRedirect;
 using WinForward.Windows;
 
 namespace WinForward.Runtime;

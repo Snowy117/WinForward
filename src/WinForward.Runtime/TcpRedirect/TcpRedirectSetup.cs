@@ -3,7 +3,7 @@ using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Windows;
 
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.TcpRedirect;
 
 /// <summary>
 /// The resources acquired by a successful new-redirect setup, returned to the caller so it can

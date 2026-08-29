@@ -1,6 +1,7 @@
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Runtime;
+using WinForward.Runtime.TcpRedirect;
 using WinForward.Windows;
 
 namespace WinForward.Core.Tests;

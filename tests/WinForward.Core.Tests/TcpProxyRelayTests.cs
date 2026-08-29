@@ -5,6 +5,7 @@ using System.Runtime.Versioning;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Runtime;
+using WinForward.Runtime.TcpRedirect;
 using Xunit;
 
 namespace WinForward.Core.Tests;

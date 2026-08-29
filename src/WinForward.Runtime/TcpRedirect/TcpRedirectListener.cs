@@ -3,7 +3,7 @@ using System.Net.Sockets;
 using System.Runtime.Versioning;
 using WinForward.Core;
 
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.TcpRedirect;
 
 [SupportedOSPlatform("windows")]
 public sealed class TcpRedirectListenerFactory : ITcpRedirectListenerFactory

@@ -5,7 +5,7 @@ using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
 
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.Socks5;
 
 /// <summary>
 /// The per-datagram anomaly that made a relay receive undeliverable. Skip reasons are surfaced

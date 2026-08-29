@@ -1,7 +1,7 @@
 using WinForward.Configuration;
 using WinForward.Core;
 
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.TcpRedirect;
 
 /// <summary>
 /// Shared trace/debug event formatting for the TCP redirect path, so the coordinator, the setup

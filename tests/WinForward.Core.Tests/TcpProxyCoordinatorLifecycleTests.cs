@@ -3,6 +3,7 @@ using System.Net;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Runtime;
+using WinForward.Runtime.TcpRedirect;
 using Xunit;
 using static WinForward.Core.Tests.AsyncTestExtensions;
 using static WinForward.Core.Tests.TcpCoordinatorFakes;

@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 using WinForward.Core;
 using WinForward.Protocols;
 
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.TcpRedirect;
 
 /// <summary>
 /// Static pure-function cluster for TCP frame rewriting: classifying SYN packets, obtaining a

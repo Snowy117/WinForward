@@ -26,13 +26,27 @@ src/
 ├── WinForward.Core/           # 零依赖基元（Endpoint、IPAddressValue、FlowKey、IPPrefix…）
 ├── WinForward.NdisApi/        # NDISAPI interop（Abi 声明 / Driver / Gate / Buffer）
 ├── WinForward.Protocols/      # 纯协议编解码（Socks5Messages、Socks5UdpCodec）
-├── WinForward.Runtime/        # 协调器、改写器、注入器、捕获运行时
+├── WinForward.Runtime/        # 捕获/调度运行时；内部分 4 个子命名空间（见下节）
 └── WinForward.Windows/        # Windows 专属（AdapterIdentity 等）
 tests/
 └── WinForward.Core.Tests/     # xunit；类-每-文件
     └── TestHelpers/           # 跨测试文件共享的 fakes/helpers
 benchmarks/                    # throwaway 基准宿主（不适用文件行数约定）
 ```
+
+### Runtime 子命名空间（2026-08-29 确立）
+
+`WinForward.Runtime` 根只放调度核心与日志：`FlowDispatcher`（含 `CapturedFlowPacket`、`PacketCaptureMetadata`、`NativeFrameHandle`、`IPacketActionExecutor`、`ISelfTrafficGuard`）、`PacketFlowClassifier`、`IdleExpirySweeper`、`SelfTrafficRegistry`（含嵌套 `SelfTrafficKey`/`SelfTrafficToken`）、`RuntimeLogging`（共 15 个类型）。其余按域分子目录，目录名 = 命名空间后缀：
+
+| 命名空间 | 内容 |
+|---|---|
+| `WinForward.Runtime.Capture` | NDIS 抓包：生命周期、适配器模式控制、包处理、再注入（`IPacketReinjector` 在此） |
+| `WinForward.Runtime.TcpRedirect` | TCP 全链路：redirect 表/会话/监听/注入、relay、frame 改写、`ClientResetInjector`（按类型依赖归 TCP，勿移回根） |
+| `WinForward.Runtime.UdpProxy` | UDP 会话与响应再注入 |
+| `WinForward.Runtime.Socks5` | TCP/UDP 共用的 SOCKS5 拨号与 UDP 传输（编解码仍在 `WinForward.Protocols`） |
+
+- 新文件按域归组；根命名空间只进"所有组都引用的调度词汇"。
+- 跨组引用直接 `using`，允许的既有边：根→TcpRedirect（`TcpRedirectOutcome`）、根/Capture→两个 Coordinator、TcpRedirect/UdpProxy→Capture 的 `IPacketReinjector`、TcpRedirect→Socks5。出现新的组间循环时先考虑挪类型再考虑加 using。
 
 ---
 

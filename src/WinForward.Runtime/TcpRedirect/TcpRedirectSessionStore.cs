@@ -1,6 +1,6 @@
 using WinForward.Core;
 
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.TcpRedirect;
 
 /// <summary>
 /// A retired session and its (already detached) relay, captured atomically under the store gate

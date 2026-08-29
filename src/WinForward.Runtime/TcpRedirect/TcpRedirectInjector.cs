@@ -1,7 +1,8 @@
 using System.Runtime.Versioning;
 using WinForward.NdisApi;
+using WinForward.Runtime.Capture;
 
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.TcpRedirect;
 
 [SupportedOSPlatform("windows")]
 public sealed class TcpRedirectInjector(IPacketReinjector reinjector, NdisPacketBufferPool? bufferPool = null) : ITcpRedirectInjector

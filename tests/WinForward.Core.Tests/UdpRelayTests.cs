@@ -6,6 +6,8 @@ using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Protocols;
 using WinForward.Runtime;
+using WinForward.Runtime.Capture;
+using WinForward.Runtime.UdpProxy;
 using Xunit;
 using static WinForward.Core.Tests.AsyncTestExtensions;
 using static WinForward.Core.Tests.ChecksumMath;

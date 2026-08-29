@@ -1,6 +1,6 @@
 using WinForward.Core;
 
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.UdpProxy;
 
 public readonly record struct RelayAlias(FlowKey LocalRelayToRemoteRelay) : IEquatable<RelayAlias>;
 

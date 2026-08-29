@@ -3,6 +3,10 @@ using System.Text.Json;
 using WinForward.Configuration;
 using WinForward.NdisApi;
 using WinForward.Runtime;
+using WinForward.Runtime.Capture;
+using WinForward.Runtime.Socks5;
+using WinForward.Runtime.TcpRedirect;
+using WinForward.Runtime.UdpProxy;
 using WinForward.Windows;
 
 namespace WinForward.Cli;

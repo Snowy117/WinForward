@@ -2,8 +2,9 @@ using System.Buffers;
 using System.Net;
 using WinForward.Configuration;
 using WinForward.Core;
+using WinForward.Runtime.Socks5;
 
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.UdpProxy;
 
 internal sealed class UdpProxySession : IAsyncDisposable
 {

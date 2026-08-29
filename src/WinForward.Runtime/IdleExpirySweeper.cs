@@ -1,4 +1,6 @@
 using WinForward.Core;
+using WinForward.Runtime.TcpRedirect;
+using WinForward.Runtime.UdpProxy;
 
 namespace WinForward.Runtime;
 

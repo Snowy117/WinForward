@@ -3,7 +3,7 @@ using WinForward.Core;
 using WinForward.Protocols;
 using WinForward.Windows;
 
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.TcpRedirect;
 
 /// <summary>
 /// Coordinates the transparent TCP redirect data path described in design §8 behind abstraction seams,

@@ -1,7 +1,7 @@
 using System.Runtime.Versioning;
 using WinForward.NdisApi;
 
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.Capture;
 
 /// <summary>
 /// The NDISAPI reinjection primitive used by a pass disposition. Captured frames are sent back

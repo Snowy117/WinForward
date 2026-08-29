@@ -1,6 +1,6 @@
 using WinForward.Protocols;
 
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.TcpRedirect;
 
 /// <summary>
 /// Static pure-function cluster for observing TCP sequence numbers on redirect flows: recording

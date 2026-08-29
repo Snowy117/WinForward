@@ -2,8 +2,10 @@ using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Protocols;
+using WinForward.Runtime.TcpRedirect;
+using WinForward.Runtime.UdpProxy;
 
-namespace WinForward.Runtime;
+namespace WinForward.Runtime.Capture;
 
 /// <summary>
 /// Executes pass/block/proxy packet dispositions. A pass copies the captured frame into a pooled
