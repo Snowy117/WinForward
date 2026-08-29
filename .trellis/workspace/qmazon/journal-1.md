@@ -184,3 +184,24 @@ Fixed 6 UDP loss amplifiers: non-blocking session setup with bounded FIFO setup 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 9: Reorganize WinForward.Runtime into sub-namespaces
+
+**Date**: 2026-08-29
+**Task**: Reorganize WinForward.Runtime into sub-namespaces
+**Branch**: `master`
+
+### Summary
+
+Split the flat 32-file WinForward.Runtime project into domain sub-namespaces: root keeps dispatch core + logging (FlowDispatcher incl. CapturedFlowPacket/PacketCaptureMetadata/NativeFrameHandle/IPacketActionExecutor/ISelfTrafficGuard, PacketFlowClassifier, IdleExpirySweeper, SelfTrafficRegistry, RuntimeLogging — 15 types total); Capture/ (7), TcpRedirect/ (14, ClientResetInjector reassigned by type dependency, dissolving the Dispatch↔TcpRedirect cycle), UdpProxy/ (4), Socks5/ (2, shared by TCP relay + UDP transport). Pure git mv + namespace rewrite + scripted using fixup (53 files, 12 pruned); zero behavior change, 27×R100 renames verified, build 0 warnings, tests 380/380 identical to baseline. Layout rules and allowed cross-group using edges recorded in .trellis/spec/backend/directory-structure.md. Note for future: root namespace carries 15 types, not just the 5 files' primary types.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d4464c6` | refactor(runtime): split flat project into Capture/TcpRedirect/UdpProxy/Socks5 sub-namespaces |
+
+### Status
+
+[OK] **Completed**
