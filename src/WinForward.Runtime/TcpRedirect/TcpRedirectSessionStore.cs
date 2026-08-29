@@ -279,7 +279,9 @@ internal sealed class TcpRedirectSessionStore
 
     /// <summary>
     /// Removes the association from the redirect table and, when the removal wins, records a
-    /// TIME_WAIT-grace tombstone under both of its lookup keys. Every teardown path — relay
+    /// TIME_WAIT-grace tombstone under both of its lookup keys. The tombstone write runs inside
+    /// the table's removal critical section, so once the flow is observably gone its tombstone is
+    /// already armed — a straggler can never race between the two. Every teardown path — relay
     /// completion, relay setup failure, fail-closed release, and global dispose — funnels through
     /// here, so this is the single tombstone write point covering all entries. Within the grace
     /// window, stragglers of the finished handshake resolve as <see cref="TcpRedirectOutcome.Dropped"/>
@@ -290,8 +292,7 @@ internal sealed class TcpRedirectSessionStore
     /// </summary>
     private void RemoveAssociationFromTable(TcpRedirectAssociation association)
     {
-        if (!_table.TryRemove(association)) return;
-        _tombstones.TryAdd(association.OriginalKey, association.ReverseSourceEndpoint, association.ReverseDestinationEndpoint, DateTimeOffset.UtcNow + TombstoneGracePeriod);
+        _table.TryRemove(association, removed => _tombstones.TryAdd(removed.OriginalKey, removed.ReverseSourceEndpoint, removed.ReverseDestinationEndpoint, DateTimeOffset.UtcNow + TombstoneGracePeriod));
     }
 
     private static TaskCompletionSource CompletedSource()

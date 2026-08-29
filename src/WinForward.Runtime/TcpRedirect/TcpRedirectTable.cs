@@ -222,9 +222,12 @@ public sealed class TcpRedirectTable
     /// <summary>
     /// Removes a specific association from both indexes. Used by the coordinator's fail-closed
     /// teardown when a listener, rewrite, or relay setup fails so the alias is released for reuse
-    /// and no half-claimed flow lingers.
+    /// and no half-claimed flow lingers. <paramref name="onRemoved"/>, when supplied, runs inside
+    /// the table gate after the indexes are updated, so observers that see the association gone
+    /// also see whatever the callback published (e.g. the TIME_WAIT tombstone) — there is no
+    /// window between removal and publication.
     /// </summary>
-    public bool TryRemove(TcpRedirectAssociation association)
+    public bool TryRemove(TcpRedirectAssociation association, Action<TcpRedirectAssociation>? onRemoved = null)
     {
         lock (_gate)
         {
@@ -232,6 +235,7 @@ public sealed class TcpRedirectTable
             _byOriginal.Remove(association.OriginalKey);
             _byTranslatedListener.Remove(association.TranslatedListenerTuple);
             _byReverse.Remove(new ReverseRedirectTuple(association.ReverseSourceEndpoint, association.ReverseDestinationEndpoint));
+            onRemoved?.Invoke(association);
             return true;
         }
     }
