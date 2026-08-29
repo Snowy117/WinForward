@@ -7,8 +7,15 @@ internal enum SoakScenario
     All,
     Udp,
     Tcp,
+    TcpThroughput,
     Footprint,
     Baseline,
+}
+
+internal enum TcpRelayMode
+{
+    Socks5,
+    Bare,
 }
 
 internal enum AbortKind
@@ -86,6 +93,7 @@ internal sealed record SoakOptions
     public int Flows { get; init; } = 256;
     public int TcpConcurrency { get; init; } = 64;
     public int TcpTransferBytes { get; init; } = 1_048_576;
+    public TcpRelayMode TcpRelayMode { get; init; } = TcpRelayMode.Socks5;
     public AbortMix AbortMix { get; init; } = AbortMix.Default;
     public int Seed { get; init; } = 42;
     public string? OutputPath { get; init; }
@@ -121,6 +129,9 @@ internal sealed record SoakOptions
                     break;
                 case "--tcp-transfer-bytes":
                     options = options with { TcpTransferBytes = PositiveInt("--tcp-transfer-bytes", Value(args, ref index)) };
+                    break;
+                case "--tcp-relay-mode":
+                    options = options with { TcpRelayMode = ParseTcpRelayMode(Value(args, ref index)) };
                     break;
                 case "--abort-mix":
                     options = options with { AbortMix = AbortMix.Parse(Value(args, ref index)) };
@@ -160,9 +171,17 @@ internal sealed record SoakOptions
         "all" => SoakScenario.All,
         "udp" => SoakScenario.Udp,
         "tcp" => SoakScenario.Tcp,
+        "tcpthroughput" => SoakScenario.TcpThroughput,
         "footprint" => SoakScenario.Footprint,
         "baseline" => SoakScenario.Baseline,
-        _ => throw new ArgumentException($"Unknown scenario '{raw}'; expected all, udp, tcp, footprint, or baseline.", nameof(raw)),
+        _ => throw new ArgumentException($"Unknown scenario '{raw}'; expected all, udp, tcp, tcpthroughput, footprint, or baseline.", nameof(raw)),
+    };
+
+    private static TcpRelayMode ParseTcpRelayMode(string raw) => raw.ToLowerInvariant() switch
+    {
+        "socks5" => TcpRelayMode.Socks5,
+        "bare" => TcpRelayMode.Bare,
+        _ => throw new ArgumentException($"Unknown TCP relay mode '{raw}'; expected socks5 or bare.", nameof(raw)),
     };
 
     private static int PositiveInt(string name, string raw) =>

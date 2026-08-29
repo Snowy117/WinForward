@@ -1,4 +1,3 @@
-using System.Net;
 using System.Runtime.InteropServices;
 using WinForward.Core;
 
@@ -19,7 +18,7 @@ public enum RelayPhase
 
 public sealed class TcpRedirectAssociation
 {
-    internal TcpRedirectAssociation(FlowKey originalKey, Endpoint originalDestination, AdapterContext originAdapter, nint originAdapterHandle, Endpoint translatedListenerTuple, IPAddress? forwardLocalAddress, long generation, DateTimeOffset now)
+    internal TcpRedirectAssociation(FlowKey originalKey, Endpoint originalDestination, AdapterContext originAdapter, nint originAdapterHandle, Endpoint translatedListenerTuple, IPAddressValue? forwardLocalAddress, long generation, DateTimeOffset now)
     {
         OriginalKey = originalKey;
         OriginalDestination = originalDestination;
@@ -39,7 +38,7 @@ public sealed class TcpRedirectAssociation
             // Forwarded DNAT shape: the rewritten SYN keeps the client's tuple and only the
             // destination moves to the adapter-local address, so the listener peer is the client
             // itself and the reverse source is the adapter-local address on the listener port.
-            ReverseSourceEndpoint = Endpoint.From(forwardLocalAddress, translatedListenerTuple.Port);
+            ReverseSourceEndpoint = Endpoint.From(forwardLocalAddress.Value, translatedListenerTuple.Port);
             ReverseDestinationEndpoint = Endpoint.From(originalKey.Local.Address, originalKey.Local.Port);
         }
         AcceptedPeerEndpoint = ReverseDestinationEndpoint;
@@ -52,7 +51,11 @@ public sealed class TcpRedirectAssociation
     public AdapterContext OriginAdapter { get; }
     public nint OriginAdapterHandle { get; }
     public Endpoint TranslatedListenerTuple { get; }
-    public IPAddress? ForwardLocalAddress { get; }
+    /// <summary>
+    /// The adapter-local DNAT destination for forwarded flows. Stored raw (hot-path contract 1)
+    /// because the per-packet rewrite consumes it directly; null selects the host IP-swap shape.
+    /// </summary>
+    public IPAddressValue? ForwardLocalAddress { get; }
     public Endpoint ReverseSourceEndpoint { get; }
     public Endpoint ReverseDestinationEndpoint { get; }
     public Endpoint AcceptedPeerEndpoint { get; }
@@ -153,7 +156,7 @@ public sealed class TcpRedirectTable
     /// <paramref name="forwardLocalAddress"/> is the adapter-local redirect destination address for
     /// forwarded flows (DNAT shape); null selects the host IP-swap shape.
     /// </summary>
-    public bool TryClaim(FlowKey originalKey, Endpoint originalDestination, AdapterContext originAdapter, nint originAdapterHandle, Endpoint translatedTuple, IPAddress? forwardLocalAddress, DateTimeOffset now, out TcpRedirectAssociation? association)
+    public bool TryClaim(FlowKey originalKey, Endpoint originalDestination, AdapterContext originAdapter, nint originAdapterHandle, Endpoint translatedTuple, IPAddressValue? forwardLocalAddress, DateTimeOffset now, out TcpRedirectAssociation? association)
     {
         lock (_gate)
         {

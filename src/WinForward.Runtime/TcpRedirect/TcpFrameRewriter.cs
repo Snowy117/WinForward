@@ -22,7 +22,7 @@ internal static class TcpFrameRewriter
     {
         if (association.ForwardLocalAddress is { } forwardLocalAddress)
         {
-            return PacketChecksums.TryRewriteTcpEndpoints(frame, originalClient.Address, originalClient.Port, IPAddressValue.From(forwardLocalAddress), listenerPort);
+            return PacketChecksums.TryRewriteTcpEndpoints(frame, originalClient.Address, originalClient.Port, forwardLocalAddress, listenerPort);
         }
         if (!PacketChecksums.TryRewriteTcpEndpoints(frame, originalServer.Address, originalClient.Port, originalClient.Address, listenerPort)) return false;
         SwapEthernetMacs(frame);
@@ -50,12 +50,12 @@ internal static class TcpFrameRewriter
     public static void SwapEthernetMacs(Span<byte> frame)
     {
         if (frame.Length < 12) return;
-        Span<byte> destination = frame.Slice(0, 6);
-        Span<byte> source = frame.Slice(6, 6);
-        var temp = new byte[6];
-        destination.CopyTo(temp);
-        source.CopyTo(destination);
-        temp.CopyTo(source);
+        // Allocation-free by construction: no heap temp whose elision would depend on JIT
+        // escape analysis.
+        for (var i = 0; i < 6; i++)
+        {
+            (frame[i], frame[i + 6]) = (frame[i + 6], frame[i]);
+        }
     }
 
     /// <summary>

@@ -19,7 +19,7 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
     private readonly IUdpProxyTransportFactory _transportFactory;
     private readonly IUdpResponseSink _responseSink;
     private readonly UdpAssociationTable _associations;
-    private readonly Dictionary<FlowKey, UdpSessionSlot> _sessions = [];
+    private readonly Dictionary<FlowKey, UdpSessionSlot> _sessions;
     private readonly Dictionary<FlowKey, DateTimeOffset> _setupTombstones = [];
     private readonly Lock _gate = new();
     private readonly CancellationTokenSource _shutdown = new();
@@ -30,10 +30,15 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
     private readonly IRuntimeLogger _logger;
     private readonly ArrayPool<byte> _receiveBufferPool;
     private readonly int _receiveBufferSize;
+    private readonly Action<UdpAssociation, DateTimeOffset> _onSessionActivity;
+    private readonly Func<UdpProxySession, Task> _removeReceiveFailedSession;
     private long _lastSetupQueueDropLogTicks;
     private long _setupQueueDroppedTotal;
     private Task? _disposeTask;
     private bool _disposed;
+
+    /// <summary>Upper bound on eagerly seeded dictionary capacity; growth beyond it stays lazy.</summary>
+    private const int MaximumPreSeedCapacity = 1_024;
 
     public UdpProxyCoordinator(
         IUdpProxyTransportFactory transportFactory,
@@ -62,13 +67,17 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
         if (maximumFrameSize <= 0) throw new ArgumentOutOfRangeException(nameof(maximumFrameSize));
         _transportFactory = transportFactory;
         _responseSink = responseSink;
-        _associations = new UdpAssociationTable(capacity);
+        var preSeed = Math.Min(capacity, MaximumPreSeedCapacity);
+        _associations = new UdpAssociationTable(capacity, preSeed);
+        _sessions = new Dictionary<FlowKey, UdpSessionSlot>(preSeed);
         _capacity = capacity;
         _timeProvider = timeProvider;
         _beforeExpiryRecheck = beforeExpiryRecheck;
         _logger = logger ?? NullRuntimeLogger.Instance;
         _receiveBufferPool = receiveBufferPool ?? ArrayPool<byte>.Shared;
         _receiveBufferSize = checked(maximumFrameSize + MaximumSocks5UdpHeaderSize + OversizeSentinelSize);
+        _onSessionActivity = OnSessionActivity;
+        _removeReceiveFailedSession = RemoveReceiveFailedSessionAsync;
     }
 
     /// <summary>
@@ -109,16 +118,16 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
                 }
 
                 slot = new UdpSessionSlot();
-                var registered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 // The client MAC rides in the pump's native batch slot; copy it before the
                 // background task can outlive the dispatch. The setup task itself runs off the
                 // pump AND off the coordinator gate, so even a synchronously completing factory
-                // never blocks other flows' dispatch.
+                // never blocks other flows' dispatch. Registration ordering (the slot must be
+                // in _sessions before the session's receive-failure handler can run) is carried
+                // by this gate: the setup task's own `lock (_gate)` can only be acquired after
+                // this critical section (including the Add below) has released it.
                 var capturedClientMac = clientMac.IsEmpty ? null : clientMac.ToArray();
-                slot.Completion = Task.Run(() => CreateSessionAsync(flow, server, flowGeneration, capturedClientMac, _shutdown.Token, registered.Task, slot));
+                slot.Completion = Task.Run(() => CreateSessionAsync(flow, server, flowGeneration, capturedClientMac, _shutdown.Token, slot));
                 _sessions.Add(flow, slot);
-                registered.TrySetResult();
-                TrackFailedSetup(flow, slot);
             }
 
             if (slot.Ready)
@@ -260,7 +269,7 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
         _shutdown.Dispose();
     }
 
-    private async Task CreateSessionAsync(FlowKey flow, Socks5Server server, long flowGeneration, byte[]? clientMac, CancellationToken cancellationToken, Task registered, UdpSessionSlot slot)
+    private async Task CreateSessionAsync(FlowKey flow, Socks5Server server, long flowGeneration, byte[]? clientMac, CancellationToken cancellationToken, UdpSessionSlot slot)
     {
         // Patient admission: a flash crowd of new flows must queue behind the 8-wide setup
         // gate rather than fail into the cooldown tombstone, because a failed setup's teardown
@@ -292,18 +301,23 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
                 throw new IOException("UDP flow association was already owned by another session; blocking the flow.");
             }
 
-            var session = new UdpProxySession(flow, flowGeneration, association, transport, _responseSink, clientMac, cancellationToken, _timeProvider, OnSessionActivity, _logger, _receiveBufferPool, _receiveBufferSize);
+            var session = new UdpProxySession(flow, flowGeneration, association, transport, _responseSink, clientMac, cancellationToken, _timeProvider, _onSessionActivity, _logger, _receiveBufferPool, _receiveBufferSize);
             transport = null;
             lock (_gate) slot.Session = session;
-            session.Start(RemoveReceiveFailedSessionAsync, registered);
+            session.Start(_removeReceiveFailedSession);
             LogDebug("udp.session.created", flow, flowGeneration, association, server.Name);
             await FlushSetupQueueAsync(flow, slot, session, cancellationToken).ConfigureAwait(false);
         }
-        catch
+        catch (Exception exception)
         {
             if (associationCreated && association is not null) _associations.TryRemove(association);
             if (transport is not null) await transport.DisposeAsync().ConfigureAwait(false);
-            throw;
+            // Handle the failure here instead of rethrowing through a second observer task:
+            // the setup state machine is already boxed at its first await, so the log, the
+            // cooldown tombstone, and the slot removal ride this frame at no extra cost.
+            // Shutdown cancellation keeps the no-tombstone semantics the observer had.
+            LogSetupFailure(flow, exception);
+            await RemoveSlotAsync(flow, slot, writeTombstone: exception is not OperationCanceledException).ConfigureAwait(false);
         }
         finally
         {
@@ -423,24 +437,6 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
 
         if (session is not null) await session.DisposeAsync().ConfigureAwait(false);
         return owned;
-    }
-
-    private void TrackFailedSetup(FlowKey flow, UdpSessionSlot slot)
-    {
-        _ = ObserveFailedSetupAsync(flow, slot);
-    }
-
-    private async Task ObserveFailedSetupAsync(FlowKey flow, UdpSessionSlot slot)
-    {
-        try
-        {
-            await slot.Completion.ConfigureAwait(false);
-        }
-        catch (Exception exception) when (slot.Completion.IsFaulted || slot.Completion.IsCanceled)
-        {
-            LogSetupFailure(flow, exception);
-            await RemoveSlotAsync(flow, slot, writeTombstone: slot.Completion.IsFaulted).ConfigureAwait(false);
-        }
     }
 
     private void LogSetupFailure(FlowKey flow, Exception exception)

@@ -48,6 +48,31 @@ internal static class BenchmarkShared
         return frame;
     }
 
+    /// <summary>
+    /// Builds a TCP frame variant for the redirect-rewrite benchmarks: a bare SYN carries no
+    /// payload (IP total length covers only the headers; trailing bytes are Ethernet padding),
+    /// while the mid-flow data variant fills the frame to the end. TCP flags distinguish the
+    /// shapes (SYN vs ACK); header checksums stay zero because neither the classifier nor the
+    /// endpoint rewriter validates the input checksum — the rewriter recomputes both.
+    /// </summary>
+    public static byte[] CreateIpv4TcpFrame(int frameSize, bool bareSyn)
+    {
+        var frame = CreateIpv4TcpFrame(frameSize);
+        const int IpTotalLengthOffset = 16;
+        const int TcpFlagsOffset = 47;
+        if (bareSyn)
+        {
+            BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(IpTotalLengthOffset, 2), 40);
+            frame[TcpFlagsOffset] = 0x02;
+        }
+        else
+        {
+            frame[TcpFlagsOffset] = 0x10;
+        }
+
+        return frame;
+    }
+
     public static FlowKey CreateFlowKey(int index)
     {
         var first = index / 65_536;
@@ -68,13 +93,18 @@ internal sealed class NeverOwnedGuard : ISelfTrafficGuard
 internal sealed class CountingExecutor : IPacketActionExecutor
 {
     public long PassCount { get; private set; }
+    public long ProxyCount { get; private set; }
     public ValueTask PassAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
         PassCount++;
         return ValueTask.CompletedTask;
     }
     public ValueTask BlockAsync(CapturedFlowPacket packet, CancellationToken cancellationToken) => ValueTask.CompletedTask;
-    public ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken) => ValueTask.CompletedTask;
+    public ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
+    {
+        ProxyCount++;
+        return ValueTask.CompletedTask;
+    }
 }
 
 internal sealed class ThresholdOnlyLogger(RuntimeLogLevel threshold) : IRuntimeLogger
@@ -95,17 +125,27 @@ internal sealed class NoopAsyncDisposable : IAsyncDisposable
 internal sealed class BenchmarkUdpTransportFactory : IUdpProxyTransportFactory
 {
     private int _nextPort = 10_000;
+    private long _sends;
+
+    /// <summary>Total datagrams handed to fake transports' <c>SendAsync</c>; the setup-queue flush increments it once per drained datagram.</summary>
+    public long Sends => Interlocked.Read(ref _sends);
+
+    internal void NoteSend() => Interlocked.Increment(ref _sends);
 
     public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken) =>
-        ValueTask.FromResult<IUdpProxyTransport>(new BenchmarkUdpTransport(Interlocked.Increment(ref _nextPort)));
+        ValueTask.FromResult<IUdpProxyTransport>(new BenchmarkUdpTransport(Interlocked.Increment(ref _nextPort), this));
 }
 
-internal sealed class BenchmarkUdpTransport(int localPort) : IUdpProxyTransport
+internal sealed class BenchmarkUdpTransport(int localPort, BenchmarkUdpTransportFactory owner) : IUdpProxyTransport
 {
     public IPEndPoint RelayEndpoint { get; } = new(IPAddress.Loopback, 50_000);
     public IPEndPoint LocalEndpoint { get; } = new(IPAddress.Loopback, localPort);
 
-    public ValueTask SendAsync(IPEndPoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken) => ValueTask.CompletedTask;
+    public ValueTask SendAsync(IPEndPoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+    {
+        owner.NoteSend();
+        return ValueTask.CompletedTask;
+    }
 
     public async ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
     {

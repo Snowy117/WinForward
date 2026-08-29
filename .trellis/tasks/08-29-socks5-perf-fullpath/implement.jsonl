@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Zero-allocation pipeline contracts; C-phase optimizations must comply and later extend this doc with SOCKS5 datapath contracts"}
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "FrameRewriter DNAT vs host-shape semantics that M2 benchmarks must cover; teardown grace context for relay work"}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "UDP session/transport wiring contracts backing A5 (real-transport benchmark) and C3 (session cold-path work)"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Benchmark file layout, 400-effective-line limit, and Runtime sub-namespace using edges for new files"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Code standards, forbidden patterns, and testing requirements for benchmark and product changes"}

@@ -101,12 +101,13 @@ public sealed class FlowDispatcher
 
     /// <summary>
     /// Dispatches a classified flow packet. The steady-state shape (self traffic excluded, flow
-    /// already resolved, pass or block decision) runs entirely synchronously on this non-async
-    /// entry so the per-packet path allocates nothing: the executor call is returned directly and
-    /// awaited exactly once by the caller. Every other shape — trace logging, a TCP redirect
-    /// reverse handler, self traffic, reverse UDP responses, new flows needing attribution, and
-    /// proxy execution — falls into <see cref="DispatchSlowAsync"/>, which keeps the full state
-    /// machine and all diagnostic logging.
+    /// already resolved, pass, block, or a proxy decision that resolves inline to a known server)
+    /// runs entirely synchronously on this non-async entry so the per-packet path allocates
+    /// nothing: the executor call is returned directly and awaited exactly once by the caller.
+    /// Every other shape — trace logging, a TCP redirect reverse handler, self traffic, reverse
+    /// UDP responses, new flows needing attribution, and proxy decisions that cannot resolve
+    /// inline — falls into <see cref="DispatchSlowAsync"/>, which keeps the full state machine
+    /// and all diagnostic logging.
     /// </summary>
     public ValueTask DispatchAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
@@ -117,7 +118,19 @@ public sealed class FlowDispatcher
         if (!_flows.TryResolve(packet.Context.Key, out var existing) || existing is null) return DispatchSlowAsync(packet, cancellationToken);
 
         var decision = existing.Decision;
-        if (decision.Action != FlowAction.Pass && decision.Action != FlowAction.Block) return DispatchSlowAsync(packet, cancellationToken);
+        if (decision.Action == FlowAction.Proxy)
+        {
+            // Proxy is the main-path action (hot-path contract 3), so a decision that resolves
+            // inline to a known server stays on the synchronous warm shape: the executor's
+            // ValueTask is returned directly, allocating nothing when it completes synchronously.
+            // An unresolved server name and the UDP reverse-response special case handled by
+            // DispatchSlowAsync keep their slow-path behavior.
+            if (decision.ProxyServerName is null || !_servers.TryGetValue(decision.ProxyServerName, out var server)) return DispatchSlowAsync(packet, cancellationToken);
+            if (packet.Context.Key.Protocol == TransportProtocol.Udp && IsReverseOf(existing.Key, packet.Context.Key)) return DispatchSlowAsync(packet, cancellationToken);
+            packet = packet with { FlowGeneration = existing.Generation };
+            if (!packet.Lease.TryComplete(PacketDisposition.ProxyConsumed)) return ValueTask.CompletedTask;
+            return _executor.ProxyAsync(packet, server, cancellationToken);
+        }
 
         packet = packet with { FlowGeneration = existing.Generation };
         var disposition = decision.Action == FlowAction.Pass ? PacketDisposition.Pass : PacketDisposition.Block;

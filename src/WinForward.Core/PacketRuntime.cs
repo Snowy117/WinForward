@@ -146,7 +146,12 @@ public sealed class PacketLease : IDisposable
 
 public sealed class BoundedSetupQueue
 {
-    private readonly Queue<ReadOnlyMemory<byte>> _items = new();
+    // The common UDP setup window buffers a single datagram (the DNS query that triggered the
+    // flow), so the first buffered frame lives inline and the Queue only materializes when a
+    // second datagram overlaps the setup.
+    private Queue<ReadOnlyMemory<byte>>? _items;
+    private ReadOnlyMemory<byte> _pending;
+    private bool _hasPending;
     private readonly int _maxPackets;
     private readonly int _maxBytes;
     private int _bytes;
@@ -159,13 +164,28 @@ public sealed class BoundedSetupQueue
         _maxBytes = maxBytes;
     }
 
-    public int Count => _items.Count;
+    public int Count => (_hasPending ? 1 : 0) + (_items?.Count ?? 0);
     public int Bytes => _bytes;
 
     public bool TryEnqueue(ReadOnlyMemory<byte> frame)
     {
-        if (frame.Length > _maxBytes || _items.Count >= _maxPackets || _bytes > _maxBytes - frame.Length) return false;
+        if (frame.Length > _maxBytes || Count >= _maxPackets || _bytes > _maxBytes - frame.Length) return false;
         var copy = frame.ToArray();
+        if (_items is null)
+        {
+            if (!_hasPending)
+            {
+                _pending = copy;
+                _hasPending = true;
+                _bytes += copy.Length;
+                return true;
+            }
+
+            _items = new Queue<ReadOnlyMemory<byte>>(4);
+            _items.Enqueue(_pending);
+            _hasPending = false;
+        }
+
         _items.Enqueue(copy);
         _bytes += copy.Length;
         return true;
@@ -173,13 +193,27 @@ public sealed class BoundedSetupQueue
 
     public bool TryDequeue(out ReadOnlyMemory<byte> frame)
     {
-        if (_items.Count == 0)
+        if (_items is not null)
+        {
+            if (_items.Count == 0)
+            {
+                frame = default;
+                return false;
+            }
+
+            frame = _items.Dequeue();
+            _bytes -= frame.Length;
+            return true;
+        }
+
+        if (!_hasPending)
         {
             frame = default;
             return false;
         }
 
-        frame = _items.Dequeue();
+        frame = _pending;
+        _hasPending = false;
         _bytes -= frame.Length;
         return true;
     }

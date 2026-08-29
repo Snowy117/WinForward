@@ -1,0 +1,61 @@
+2026-08-29 20:08:03.448 [info] Runtime log level: debug.
+2026-08-29 20:08:03.681 [info] Capture scope: 2 adapter(s) in tunnel mode.
+2026-08-29 20:08:03.722 [info] Interception started. Press Ctrl+C to stop.
+2026-08-29 20:08:07.726 [debug] flow.created flow=1 protocol=tcp origin=host source=192.168.77.2:49639 destination=220.181.174.34:80 action=proxy rule=1 proxy=main
+2026-08-29 20:08:07.745 [debug] flow.created flow=2 protocol=tcp origin=host source=192.168.77.2:49642 destination=222.199.191.35:80 action=proxy rule=1 proxy=main
+2026-08-29 20:08:07.767 [debug] flow.created flow=3 protocol=tcp origin=forwarded source=192.168.77.1:62618 destination=192.168.77.2:49642 action=pass
+2026-08-29 20:08:07.771 [debug] flow.created flow=4 protocol=tcp origin=forwarded source=192.168.77.1:62604 destination=192.168.77.2:49639 action=pass
+2026-08-29 20:08:10.057 [debug] flow.created flow=5 protocol=tcp origin=host source=192.168.77.2:49637 destination=198.18.0.25:443 action=proxy rule=1 proxy=main
+2026-08-29 20:08:10.063 [debug] flow.created flow=6 protocol=tcp origin=forwarded source=192.168.77.1:53076 destination=192.168.77.2:49637 action=pass
+2026-08-29 20:08:10.745 [debug] flow.created flow=7 protocol=tcp origin=host source=192.168.77.2:49641 destination=198.18.0.99:80 action=proxy rule=1 proxy=main
+2026-08-29 20:08:10.747 [debug] flow.created flow=8 protocol=tcp origin=host source=192.168.77.2:49640 destination=198.18.0.98:80 action=proxy rule=1 proxy=main
+2026-08-29 20:08:11.000 [debug] flow.created flow=9 protocol=tcp origin=host source=192.168.77.2:49643 destination=198.18.0.87:443 action=proxy rule=1 proxy=main
+2026-08-29 20:08:11.016 [debug] flow.created flow=10 protocol=tcp origin=host source=192.168.77.2:49644 destination=198.18.0.87:443 action=proxy rule=1 proxy=main
+2026-08-29 20:08:11.265 [debug] flow.created flow=11 protocol=tcp origin=host source=192.168.100.2:5985 destination=192.168.100.3:50108 action=pass rule=0
+2026-08-29 20:08:19.704 [debug] flow.created flow=12 protocol=tcp origin=host source=[fd00:1234:5678:1::2]:49645 destination=[2001:2::379]:443 action=proxy rule=1 proxy=main
+2026-08-29 20:08:41.659 [debug] flow.created flow=13 protocol=tcp origin=host source=[fd00:1234:5678:1::2]:49646 destination=[2001:2::379]:443 action=proxy rule=1 proxy=main
+2026-08-29 20:08:41.704 [debug] tcp.redirect.created flow=13 tcpAssociation=1 source=[fd00:1234:5678:1::2]:49646 destination=[2001:2::379]:443 translated=[::]:49647 proxy=main outcome=created
+2026-08-29 20:08:41.792 [debug] tcp.relay.started flow=13 tcpAssociation=1 source=[fd00:1234:5678:1::2]:49646 destination=[2001:2::379]:443 translated=[::]:49647 proxy=main outcome=established
+2026-08-29 20:08:42.068 [debug] tcp.relay.ended flow=13 tcpAssociation=1 source=[fd00:1234:5678:1::2]:49646 destination=[2001:2::379]:443 translated=[::]:49647 proxy=main outcome=completed
+2026-08-29 20:08:42.074 [debug] tcp.redirect.closed flow=13 tcpAssociation=1 source=[fd00:1234:5678:1::2]:49646 destination=[2001:2::379]:443 translated=[::]:49647 proxy=main outcome=closed
+2026-08-29 20:08:42.146 [debug] flow.created flow=14 protocol=udp origin=host source=192.168.77.2:64322 destination=8.8.8.8:53 action=proxy rule=1 proxy=main
+2026-08-29 20:08:42.190 [debug] udp.session.created flow=14 udpAssociation=1 protocol=udp source=192.168.77.2:64322 destination=8.8.8.8:53 proxy=main
+2026-08-29 20:08:42.229 [debug] flow.created flow=15 protocol=udp origin=host source=192.168.77.2:64324 destination=8.8.8.8:53 action=proxy rule=1 proxy=main
+2026-08-29 20:08:42.247 [debug] udp.session.created flow=15 udpAssociation=2 protocol=udp source=192.168.77.2:64324 destination=8.8.8.8:53 proxy=main
+2026-08-29 20:08:42.267 [debug] flow.created flow=16 protocol=udp origin=host source=192.168.77.2:64326 destination=8.8.8.8:53 action=proxy rule=1 proxy=main
+2026-08-29 20:08:42.283 [debug] udp.session.created flow=16 udpAssociation=3 protocol=udp source=192.168.77.2:64326 destination=8.8.8.8:53 proxy=main
+2026-08-29 20:08:42.399 [debug] flow.created flow=17 protocol=udp origin=host source=[fd00:1234:5678:1::2]:62935 destination=[fd00:1234:5678:1::1]:53 action=proxy rule=1 proxy=main
+2026-08-29 20:08:42.401 [debug] flow.created flow=18 protocol=udp origin=host source=[fd00:1234:5678:1::2]:63263 destination=[fd00:1234:5678:1::1]:53 action=proxy rule=1 proxy=main
+2026-08-29 20:08:42.413 [debug] udp.session.created flow=17 udpAssociation=4 protocol=udp source=[fd00:1234:5678:1::2]:62935 destination=[fd00:1234:5678:1::1]:53 proxy=main
+2026-08-29 20:08:42.415 [debug] udp.session.created flow=18 udpAssociation=5 protocol=udp source=[fd00:1234:5678:1::2]:63263 destination=[fd00:1234:5678:1::1]:53 proxy=main
+2026-08-29 20:08:42.439 [debug] flow.created flow=19 protocol=udp origin=host source=192.168.77.2:63263 destination=192.168.77.1:53 action=pass rule=0
+2026-08-29 20:08:42.441 [debug] flow.created flow=20 protocol=udp origin=host source=192.168.77.2:62935 destination=192.168.77.1:53 action=pass rule=0
+2026-08-29 20:08:42.457 [debug] flow.created flow=21 protocol=tcp origin=host source=[fd00:1234:5678:1::2]:49654 destination=[2001:2::2d]:443 action=proxy rule=1 proxy=main
+2026-08-29 20:08:42.459 [debug] tcp.redirect.created flow=21 tcpAssociation=2 source=[fd00:1234:5678:1::2]:49654 destination=[2001:2::2d]:443 translated=[::]:49655 proxy=main outcome=created
+2026-08-29 20:08:42.508 [debug] tcp.relay.started flow=21 tcpAssociation=2 source=[fd00:1234:5678:1::2]:49654 destination=[2001:2::2d]:443 translated=[::]:49655 proxy=main outcome=established
+2026-08-29 20:08:42.669 [debug] flow.created flow=22 protocol=udp origin=host source=[fd00:1234:5678:1::2]:55292 destination=[fd00:1234:5678:1::1]:53 action=proxy rule=1 proxy=main
+2026-08-29 20:08:42.686 [debug] udp.session.created flow=22 udpAssociation=6 protocol=udp source=[fd00:1234:5678:1::2]:55292 destination=[fd00:1234:5678:1::1]:53 proxy=main
+2026-08-29 20:08:42.710 [debug] flow.created flow=23 protocol=udp origin=host source=192.168.77.2:55292 destination=192.168.77.1:53 action=pass rule=0
+2026-08-29 20:08:42.713 [debug] flow.created flow=24 protocol=tcp origin=host source=192.168.77.2:49658 destination=220.181.174.34:80 action=proxy rule=1 proxy=main
+2026-08-29 20:08:42.715 [debug] tcp.redirect.created flow=24 tcpAssociation=3 source=192.168.77.2:49658 destination=220.181.174.34:80 translated=0.0.0.0:49659 proxy=main outcome=created
+2026-08-29 20:08:42.773 [debug] tcp.relay.started flow=24 tcpAssociation=3 source=192.168.77.2:49658 destination=220.181.174.34:80 translated=0.0.0.0:49659 proxy=main outcome=established
+2026-08-29 20:08:43.705 [debug] tcp.relay.ended flow=21 tcpAssociation=2 source=[fd00:1234:5678:1::2]:49654 destination=[2001:2::2d]:443 translated=[::]:49655 proxy=main outcome=completed
+2026-08-29 20:08:43.711 [debug] tcp.redirect.closed flow=21 tcpAssociation=2 source=[fd00:1234:5678:1::2]:49654 destination=[2001:2::2d]:443 translated=[::]:49655 proxy=main outcome=closed
+2026-08-29 20:08:56.242 [debug] flow.created flow=25 protocol=tcp origin=host source=192.168.77.2:49638 destination=198.18.0.31:443 action=proxy rule=1 proxy=main
+2026-08-29 20:09:18.731 [debug] flow.created flow=26 protocol=tcp origin=host source=192.168.77.2:49634 destination=198.18.0.87:443 action=proxy rule=1 proxy=main
+2026-08-29 20:09:18.745 [debug] flow.created flow=27 protocol=tcp origin=host source=192.168.77.2:49636 destination=198.18.0.87:443 action=proxy rule=1 proxy=main
+2026-08-29 20:09:43.347 [debug] tcp.relay.ended flow=24 tcpAssociation=3 source=192.168.77.2:49658 destination=220.181.174.34:80 translated=0.0.0.0:49659 proxy=main outcome=completed
+2026-08-29 20:09:43.348 [debug] tcp.redirect.closed flow=24 tcpAssociation=3 source=192.168.77.2:49658 destination=220.181.174.34:80 translated=0.0.0.0:49659 proxy=main outcome=closed
+2026-08-29 20:11:03.723 [debug] flow.created flow=28 protocol=tcp origin=forwarded source=192.168.100.3:30890 destination=192.168.100.2:49649 action=pass
+2026-08-29 20:11:03.727 [debug] udp.session.expired flow=14 udpAssociation=1 protocol=udp source=192.168.77.2:64322 destination=8.8.8.8:53
+2026-08-29 20:11:03.729 [debug] udp.session.expired flow=15 udpAssociation=2 protocol=udp source=192.168.77.2:64324 destination=8.8.8.8:53
+2026-08-29 20:11:03.731 [debug] flow.created flow=29 protocol=tcp origin=host source=192.168.100.2:49650 destination=192.168.100.3:30890 action=pass rule=0
+2026-08-29 20:11:03.731 [debug] udp.session.expired flow=16 udpAssociation=3 protocol=udp source=192.168.77.2:64326 destination=8.8.8.8:53
+2026-08-29 20:11:03.732 [debug] flow.created flow=30 protocol=tcp origin=host source=192.168.100.2:49651 destination=192.168.100.3:30890 action=pass rule=0
+2026-08-29 20:11:03.733 [debug] udp.session.expired flow=17 udpAssociation=4 protocol=udp source=[fd00:1234:5678:1::2]:62935 destination=[fd00:1234:5678:1::1]:53
+2026-08-29 20:11:03.734 [debug] flow.created flow=31 protocol=tcp origin=host source=192.168.100.2:49652 destination=192.168.100.3:30890 action=pass rule=0
+2026-08-29 20:11:03.736 [debug] udp.session.expired flow=18 udpAssociation=5 protocol=udp source=[fd00:1234:5678:1::2]:63263 destination=[fd00:1234:5678:1::1]:53
+2026-08-29 20:11:03.736 [debug] flow.created flow=32 protocol=tcp origin=host source=192.168.100.2:49653 destination=192.168.100.3:30890 action=pass rule=0
+2026-08-29 20:11:03.738 [debug] udp.session.expired flow=22 udpAssociation=6 protocol=udp source=[fd00:1234:5678:1::2]:55292 destination=[fd00:1234:5678:1::1]:53
+2026-08-29 20:11:03.738 [debug] flow.created flow=33 protocol=tcp origin=host source=192.168.100.2:49657 destination=192.168.100.3:30890 action=pass rule=0
+2026-08-29 20:11:03.739 [debug] runtime.expired flows=0 tcpRedirects=0 udpSessions=6

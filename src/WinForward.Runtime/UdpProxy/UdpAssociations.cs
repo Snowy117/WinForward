@@ -30,10 +30,16 @@ public sealed class UdpAssociationTable
     private readonly int _capacity;
     private long _nextGeneration;
 
-    public UdpAssociationTable(int capacity = 16_384)
+    public UdpAssociationTable(int capacity = 16_384, int initialCapacity = 0)
     {
         if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(capacity));
+        if (initialCapacity < 0) throw new ArgumentOutOfRangeException(nameof(initialCapacity));
         _capacity = capacity;
+        if (initialCapacity > 0)
+        {
+            _byOriginal = new Dictionary<FlowKey, UdpAssociation>(initialCapacity);
+            _byRelay = new Dictionary<RelayAlias, UdpAssociation>(initialCapacity);
+        }
     }
 
     public UdpAssociation Claim(FlowKey originalKey, RelayAlias relayAlias, DateTimeOffset now)

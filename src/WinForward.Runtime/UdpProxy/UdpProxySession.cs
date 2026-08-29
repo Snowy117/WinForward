@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Net;
 using WinForward.Configuration;
 using WinForward.Core;
+using WinForward.Protocols;
 using WinForward.Runtime.Socks5;
 
 namespace WinForward.Runtime.UdpProxy;
@@ -36,6 +37,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
     private Task? _receiveLoop;
     private Task? _disposeTask;
     private Exception? _receiveFailure;
+    private Func<UdpProxySession, Task>? _receiveFailureHandler;
     private long _lastActivityTicks;
     private long _lastActivityPropagationTicks;
     private long _lastSkipSummaryTicks;
@@ -87,13 +89,12 @@ internal sealed class UdpProxySession : IAsyncDisposable
     /// </summary>
     public byte[]? ClientMac { get; }
 
-    public void Start(Func<UdpProxySession, Task> receiveFailureHandler, Task registered)
+    public void Start(Func<UdpProxySession, Task> receiveFailureHandler)
     {
         ArgumentNullException.ThrowIfNull(receiveFailureHandler);
-        ArgumentNullException.ThrowIfNull(registered);
+        _receiveFailureHandler = receiveFailureHandler;
         var receiveLoop = ReceiveLoopAsync();
         _receiveLoop = receiveLoop;
-        _ = ObserveReceiveLoopAsync(receiveLoop, receiveFailureHandler, registered);
     }
 
     public async ValueTask SendAsync(Endpoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
@@ -178,27 +179,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
                 var response = receive.Datagram;
                 if (response.DestinationAddress is null) continue;
                 var source = Endpoint.From(response.DestinationAddress, response.DestinationPort);
-                try
-                {
-                    await _sink.InjectAsync(_flow, source, response.Payload, ClientMac, _shutdown).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch (Exception exception)
-                {
-                    // A failed reinjection of one response must not kill the flow; skip it and continue.
-                    LogInjectionFailureRateLimited(exception);
-                }
-
-                if (_logger.IsEnabled(RuntimeLogLevel.Trace))
-                {
-                    _logger.Event(RuntimeLogLevel.Trace, "udp.packet.received",
-                        new("flow", _flowGeneration == 0 ? null : _flowGeneration),
-                        new("udpAssociation", _association.Generation), new("source", source),
-                        new("destination", _flow.Local), new("bytes", response.Payload.Length));
-                }
+                await InjectResponseAsync(source, response).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
@@ -216,6 +197,39 @@ internal sealed class UdpProxySession : IAsyncDisposable
         finally
         {
             _receiveBufferPool.Return(buffer);
+        }
+
+        if (Volatile.Read(ref _receiveFailure) is not null)
+        {
+            // Fire-and-forget on purpose: the handler tears this session down, and awaiting it
+            // here would make session disposal (which awaits this loop) re-enter itself.
+            _ = _receiveFailureHandler!(this);
+        }
+    }
+
+    /// <summary>Hands one decoded relay response to the reinjection sink; per-response failures skip.</summary>
+    private async Task InjectResponseAsync(Endpoint source, Socks5UdpDatagram response)
+    {
+        try
+        {
+            await _sink.InjectAsync(_flow, source, response.Payload, ClientMac, _shutdown).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            // A failed reinjection of one response must not kill the flow; skip it and continue.
+            LogInjectionFailureRateLimited(exception);
+        }
+
+        if (_logger.IsEnabled(RuntimeLogLevel.Trace))
+        {
+            _logger.Event(RuntimeLogLevel.Trace, "udp.packet.received",
+                new("flow", _flowGeneration == 0 ? null : _flowGeneration),
+                new("udpAssociation", _association.Generation), new("source", source),
+                new("destination", _flow.Local), new("bytes", response.Payload.Length));
         }
     }
 
@@ -279,15 +293,5 @@ internal sealed class UdpProxySession : IAsyncDisposable
         if (nowTicks - lastPropagation < ActivityPropagationInterval.Ticks) return;
         if (Interlocked.CompareExchange(ref _lastActivityPropagationTicks, nowTicks, lastPropagation) != lastPropagation) return;
         _activityObserver(_association, now);
-    }
-
-    private async Task ObserveReceiveLoopAsync(Task receiveLoop, Func<UdpProxySession, Task> receiveFailureHandler, Task registered)
-    {
-        await registered.ConfigureAwait(false);
-        await receiveLoop.ConfigureAwait(false);
-        if (Volatile.Read(ref _receiveFailure) is not null)
-        {
-            await receiveFailureHandler(this).ConfigureAwait(false);
-        }
     }
 }

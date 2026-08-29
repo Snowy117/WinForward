@@ -116,12 +116,15 @@ internal sealed class TcpRedirectSetup
     /// (host shape needs no such address) and when the origin adapter owns no usable address of
     /// the flow's family; the caller fails closed on the latter.
     /// </summary>
-    private IPAddress? ResolveForwardLocalAddress(FlowKey key)
+    private IPAddressValue? ResolveForwardLocalAddress(FlowKey key)
     {
         if (key.Origin != FlowOriginKind.Forwarded) return null;
-        return key.OriginAdapterId is { } originAdapterId
-            ? _localAddresses.SelectLocalAddress(originAdapterId, key.AddressFamily, key.Local.Address.ToIPAddress())
-            : null;
+        if (key.OriginAdapterId is not { } originAdapterId) return null;
+        // Hot-path contract 1: this cold edge performs the flow's only From(IPAddress)
+        // conversion; the per-packet rewrite reads the stored raw address instead.
+        var address = _localAddresses.SelectLocalAddress(originAdapterId, key.AddressFamily, key.Local.Address.ToIPAddress());
+        if (address is not { } raw) return null;
+        return IPAddressValue.From(raw);
     }
 
     private async ValueTask<RedirectSetup?> CompleteNewRedirectAsync(CapturedFlowPacket packet, ITcpRedirectListener listener, TcpRedirectAssociation association, Endpoint translatedTuple, Socks5Server server, CancellationToken cancellationToken)

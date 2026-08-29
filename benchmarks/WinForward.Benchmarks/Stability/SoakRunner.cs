@@ -56,12 +56,14 @@ internal static class SoakRunner
         {
             SoakScenario.Udp => new List<(string, Func<StabilityContext, SoakOptions, Task>)> { ("udp", UdpLossScenario.RunAsync) },
             SoakScenario.Tcp => new List<(string, Func<StabilityContext, SoakOptions, Task>)> { ("tcp", TcpEofScenario.RunAsync) },
+            SoakScenario.TcpThroughput => new List<(string, Func<StabilityContext, SoakOptions, Task>)> { ("tcpThroughput", TcpThroughputScenario.RunAsync) },
             SoakScenario.Footprint => new List<(string, Func<StabilityContext, SoakOptions, Task>)> { ("footprint", SessionFootprintScenario.RunAsync) },
             SoakScenario.Baseline => new List<(string, Func<StabilityContext, SoakOptions, Task>)> { ("baseline", UdpRawBaselineScenario.RunAsync) },
             _ => new List<(string, Func<StabilityContext, SoakOptions, Task>)>
             {
                 ("udp", UdpLossScenario.RunAsync),
                 ("tcp", TcpEofScenario.RunAsync),
+                ("tcpThroughput", TcpThroughputScenario.RunAsync),
                 ("footprint", SessionFootprintScenario.RunAsync),
                 ("baseline", UdpRawBaselineScenario.RunAsync),
             },
