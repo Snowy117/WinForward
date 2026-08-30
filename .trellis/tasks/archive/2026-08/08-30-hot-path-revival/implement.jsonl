@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Warm-entry contract 3 (non-async dispatch shape, 160B gate) is the thing being revived; C2b proxy-warm semantics and the UDP IsReverseOf special case must be preserved"}
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "Reverse-hook contract: dispatcher-level hook runs before flow lookup/policy; H1/M5 TCP-only gate; tombstone grace handling the prefilter must not break"}
+{"file": ".trellis/spec/backend/traffic-policy-lifecycle.md", "reason": "Flow resolution modes, non-flow pass, loop prevention — the fall-through theorem depends on TryResolve semantics"}
+{"file": ".trellis/tasks/archive/2026-08/08-30-proxy-perf-stability-research/research/socks5-capture-dispatch.md", "reason": "B.2.1 is the full X1 analysis: dead warm entry, fix (a)/(b) sketches, lock/probe context"}
+{"file": ".trellis/tasks/archive/2026-08/08-30-proxy-perf-stability-research/research/synthesis-and-backlog.md", "reason": "Backlog #1 definition and spot-check verification evidence for X1"}

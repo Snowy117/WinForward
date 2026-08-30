@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Verify warm-entry allocation contract intact (160B gate) and no async-state-machine regression on the dispatch path"}
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "Verify reverse-hook ordering (before flow lookup) and H1/M5 TCP-only gating unchanged; tombstone grace paths intact"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Test standards: concurrency tests genuinely overlapping; behavior-zero for slow-path shapes"}
