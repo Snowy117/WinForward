@@ -232,6 +232,49 @@ internal sealed class FakeListener(Endpoint translatedTuple) : ITcpRedirectListe
     }
 }
 
+/// <summary>
+/// A listener whose DisposeAsync parks on a shared gate until released, holding a teardown's
+/// trailing disposal mid-flight while the retire critical section has already committed — the
+/// exact window the atomic retire contract (R2) is asserted against.
+/// </summary>
+internal sealed class ParkingDisposeListener(FakeListener inner, TaskCompletionSource release) : ITcpRedirectListener
+{
+    private readonly TaskCompletionSource _disposeStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public Endpoint TranslatedTuple => inner.TranslatedTuple;
+    public FakeListener Inner => inner;
+    public Task DisposalStarted => _disposeStarted.Task;
+    public bool IsDisposed { get; private set; }
+
+    public ValueTask<ITcpAcceptedConnection> AcceptAsync(CancellationToken cancellationToken) => inner.AcceptAsync(cancellationToken);
+
+    public async ValueTask DisposeAsync()
+    {
+        _disposeStarted.TrySetResult();
+        await release.Task.ConfigureAwait(false);
+        await inner.DisposeAsync().ConfigureAwait(false);
+        IsDisposed = true;
+    }
+}
+
+internal sealed class ParkingListenerFactory : ITcpRedirectListenerFactory
+{
+    private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _nextPort = 40000;
+
+    public List<ParkingDisposeListener> Listeners { get; } = [];
+
+    public ValueTask<ITcpRedirectListener> CreateAsync(AddressFamilyKind addressFamily, CancellationToken _)
+    {
+        var loopback = addressFamily == AddressFamilyKind.IPv4 ? IPAddress.Loopback : IPAddress.IPv6Loopback;
+        var listener = new ParkingDisposeListener(new FakeListener(Endpoint.From(loopback, checked((ushort)Interlocked.Increment(ref _nextPort)))), _release);
+        lock (Listeners) Listeners.Add(listener);
+        return ValueTask.FromResult<ITcpRedirectListener>(listener);
+    }
+
+    public void Release() => _release.TrySetResult();
+}
+
 internal sealed class FakeAcceptedConnection(Endpoint remoteEndPoint) : ITcpAcceptedConnection
 {
     public Endpoint RemoteEndPoint { get; } = remoteEndPoint;

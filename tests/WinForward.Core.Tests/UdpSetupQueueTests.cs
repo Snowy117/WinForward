@@ -23,10 +23,11 @@ public sealed class UdpSetupQueueTests
     [Fact]
     public async Task FirstDatagramDoesNotAwaitAStalledSetupAndDatagramsRelayInFifoOrder()
     {
-        // N >= 5s per AC1: the factory's UDP ASSOCIATE stalls for at least five seconds; the
-        // dispatcher-side send must return long before that stall can elapse.
+        // The factory's UDP ASSOCIATE stalls for multiple seconds; the dispatcher-side send must
+        // return long before that stall can elapse. The stall stays under the setup datagram TTL
+        // (5 s): a setup stalled beyond it legitimately drops its buffered datagrams by contract.
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var factory = new DelayedTransportFactory(gate.Task, TimeSpan.FromSeconds(5));
+        var factory = new DelayedTransportFactory(gate.Task, TimeSpan.FromSeconds(2));
         await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink());
         var flow = CreateFlow("192.0.2.53");
 
@@ -84,6 +85,10 @@ public sealed class UdpSetupQueueTests
         }
 
         Assert.Contains(logger.Events, item => string.Equals(item.Name, "udp.setupqueue.dropped", StringComparison.Ordinal));
+
+        // The drop-oldest evictions and the flush deliveries each credited their charge: the
+        // aggregate returns to zero once the queue is fully drained.
+        Assert.Equal(0, coordinator.PendingSetupBytesForDiagnostics);
     }
 
     [Fact]
@@ -139,6 +144,42 @@ public sealed class UdpSetupQueueTests
         time.Advance(TimeSpan.FromSeconds(1));
         Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 3 }, CancellationToken.None));
         await WaitForAsync(() => factory.CreateCalls == 2);
+    }
+
+    [Fact]
+    public async Task SetupTombstonesAreBoundedAndEvictTheOldestAtCapacity()
+    {
+        // R3-UDP: the cooldown dictionary is bounded by the session capacity; at capacity the
+        // oldest retry deadline is evicted, so a failing-server storm cannot grow it without
+        // bound while every recent flow keeps its cooldown (eviction, never refusal).
+        var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
+        var factory = new FailingTransportFactory();
+        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 4, time, null);
+        const int flowCount = 5;
+        var flows = Enumerable.Range(0, flowCount).Select(index => CreateFlow($"192.0.2.{index + 1}")).ToArray();
+
+        for (var index = 0; index < flowCount; index++)
+        {
+            Assert.True(await coordinator.TrySendAsync(flows[index], s_server, new byte[] { 1 }, CancellationToken.None));
+            // The failure surfaces through the background task: wait for the flow's cooldown to
+            // arm, then advance the clock so each flow earns a distinct retry deadline.
+            Assert.True(await WaitUntilFalseAsync(() => coordinator.TrySendAsync(flows[index], s_server, new byte[] { 2 }, CancellationToken.None).AsTask()));
+            time.Advance(TimeSpan.FromMilliseconds(100));
+        }
+
+        // Bounded at capacity: the first flow's tombstone (the oldest deadline) was evicted.
+        Assert.Equal(4, coordinator.SetupTombstoneCountForDiagnostics);
+
+        // Every surviving tombstone still cools down its flow at the frozen clock...
+        for (var index = 1; index < flowCount; index++)
+        {
+            Assert.False(await coordinator.TrySendAsync(flows[index], s_server, new byte[] { 3 }, CancellationToken.None));
+        }
+
+        // ...while the evicted flow retries immediately instead of being cooldown-rejected.
+        Assert.True(await coordinator.TrySendAsync(flows[0], s_server, new byte[] { 3 }, CancellationToken.None));
+        await WaitForAsync(() => factory.CreateCalls == flowCount + 1);
+        Assert.Equal(4, coordinator.SetupTombstoneCountForDiagnostics);
     }
 
     [Fact]
@@ -221,6 +262,112 @@ public sealed class UdpSetupQueueTests
         Assert.DoesNotContain(logger.Events, item => string.Equals(item.Name, "udp.setupqueue.dropped", StringComparison.Ordinal));
         Assert.DoesNotContain(logger.Events, item => string.Equals(item.Name, "udp.setup.failed", StringComparison.Ordinal));
         Assert.DoesNotContain(logger.Events, item => string.Equals(item.Name, "udp.setup.cooldown", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task GlobalSetupBudgetRejectsBeyondTheAggregateAndCreditsBackOnFlush()
+    {
+        // R4: per-flow bounds alone allow capacity × 32 KiB of buffered datagrams; the global
+        // byte budget rejects the datagram that would cross the aggregate, without a cooldown
+        // tombstone (backpressure, not a setup failure), and every flushed byte is credited
+        // back so the budget recovers once the setup completes.
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var factory = new DelayedTransportFactory(gate.Task);
+        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 16, TimeProvider.System, null, setupQueueGlobalByteBudget: 4096);
+        var flow = CreateFlow("192.0.2.53");
+
+        Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[3000], CancellationToken.None));
+        Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 1 }, CancellationToken.None));
+        Assert.Equal(3001, coordinator.PendingSetupBytesForDiagnostics);
+
+        // 3001 + 2000 crosses the 4096-byte aggregate: the new datagram is rejected and counted.
+        Assert.False(await coordinator.TrySendAsync(flow, s_server, new byte[2000], CancellationToken.None));
+        Assert.Equal(1, coordinator.SetupBudgetRejectionCount);
+        Assert.Equal(3001, coordinator.PendingSetupBytesForDiagnostics);
+
+        gate.TrySetResult();
+        await WaitForAsync(() => factory.Transports.Count == 1);
+        var transport = Assert.Single(factory.Transports);
+        await WaitForAsync(() =>
+        {
+            lock (transport.Sent) return transport.Sent.Count == 2;
+        });
+        lock (transport.Sent)
+        {
+            Assert.Equal(3000, transport.Sent[0].Payload.Length);
+            Assert.Equal(new byte[] { 1 }, transport.Sent[1].Payload);
+        }
+
+        // The flush credited both charges back: admission recovers for a brand-new flow.
+        Assert.Equal(0, coordinator.PendingSetupBytesForDiagnostics);
+        Assert.True(await coordinator.TrySendAsync(CreateFlow("192.0.2.54"), s_server, new byte[] { 9 }, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task SetupFailureCreditsBackThePendingBudget()
+    {
+        // A gated, then failed, setup makes the charge observable while parked and the credit
+        // observable after the failure teardown drains the queue.
+        var factory = new GatedTransportFactory();
+        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 16, TimeProvider.System, null, setupQueueGlobalByteBudget: 4096);
+        var flow = CreateFlow("192.0.2.53");
+
+        Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[3000], CancellationToken.None));
+        await factory.CreateStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(3000, coordinator.PendingSetupBytesForDiagnostics);
+
+        // The failure teardown drains the setup queue fail-closed and releases its charge.
+        factory.Fail(new IOException("SOCKS5 server is unreachable (synthetic)."));
+        await WaitForAsync(() => coordinator.PendingSetupBytesForDiagnostics == 0);
+    }
+
+    [Fact]
+    public async Task DisposeCreditsBackDatagramsStillQueuedForSetup()
+    {
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var factory = new DelayedTransportFactory(gate.Task);
+        var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 16, TimeProvider.System, null, setupQueueGlobalByteBudget: 4096);
+        var flow = CreateFlow("192.0.2.53");
+
+        Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[3000], CancellationToken.None));
+        Assert.Equal(3000, coordinator.PendingSetupBytesForDiagnostics);
+
+        await coordinator.DisposeAsync();
+        Assert.Equal(0, coordinator.PendingSetupBytesForDiagnostics);
+
+        // The gate never opens: disposal must complete without waiting for the stalled setup.
+        gate.TrySetResult();
+    }
+
+    [Fact]
+    public async Task FlushDropsSetupDatagramsOlderThanTheTtl()
+    {
+        // R4 TTL: a datagram still buffered after the setup window has long been retransmitted
+        // or abandoned at the application layer — the flush delivers only fresh state.
+        var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var factory = new DelayedTransportFactory(gate.Task);
+        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 16, time, null);
+        var flow = CreateFlow("192.0.2.53");
+
+        Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 1 }, CancellationToken.None));
+        time.Advance(TimeSpan.FromSeconds(6));
+        Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 2 }, CancellationToken.None));
+
+        gate.TrySetResult();
+        await WaitForAsync(() => factory.Transports.Count == 1);
+        var transport = Assert.Single(factory.Transports);
+        await WaitForAsync(() =>
+        {
+            lock (transport.Sent) return transport.Sent.Count == 1;
+        });
+        lock (transport.Sent)
+        {
+            Assert.Equal((byte)2, Assert.Single(transport.Sent[0].Payload));
+        }
+
+        Assert.Equal(1, coordinator.SetupTtlExpiredCount);
+        Assert.Equal(0, coordinator.PendingSetupBytesForDiagnostics);
     }
 
     [Fact]

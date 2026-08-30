@@ -272,6 +272,43 @@ public sealed class TcpProxyCoordinatorLifecycleTests
     }
 
     [Fact]
+    public async Task RetireRemovesTableAliasAndArmsTombstoneBeforeListenerDisposalCompletes()
+    {
+        // R2: retire (store gate) and table-alias removal + tombstone arming (table gate) are one
+        // atomic step. The teardown's trailing listener disposal is parked mid-flight — at that
+        // point the session is already retired, and in the old retire→removal gap a same-tuple
+        // SYN/data was still resolved and honored against the dying listener (reinject →
+        // connect-then-death). Atomic retire makes the same packets observe tombstone grace.
+        var listenerFactory = new ParkingListenerFactory();
+        var injector = new FakeInjector();
+        var relayFactory = new CompletableRelayFactory();
+        var selfTraffic = new SelfTrafficRegistry();
+        var table = new TcpRedirectTable();
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider());
+
+        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None));
+        var listener = Assert.Single(listenerFactory.Listeners);
+        await listener.Inner.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(Endpoint.From(s_destIpv4, 53000)), CancellationToken.None);
+        await WaitForAsync(() => relayFactory.Relay is not null);
+
+        // Ending the relay starts teardown; the retire commits and the listener disposal parks.
+        relayFactory.Relay!.Complete();
+        await listener.DisposalStarted.WaitAsync(TimeSpan.FromSeconds(2));
+
+        // Teardown is mid-flight: the alias is already gone and the tombstone armed, so both a
+        // same-tuple retransmitted SYN and a straggler ACK are grace-dropped — never re-injected
+        // toward the dying listener and never re-armed as a fresh redirect.
+        injector.InjectedFrames.Clear();
+        Assert.Equal(TcpRedirectOutcome.Dropped, await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None));
+        Assert.Equal(TcpRedirectOutcome.Dropped, await coordinator.HandlePacketAsync(MakeForwardTcpPacket(s_clientIpv4, s_destIpv4, 53000, 443, TcpFlagAck), s_server, CancellationToken.None));
+        Assert.Equal(0, table.Count);
+        Assert.Empty(injector.InjectedFrames);
+
+        listenerFactory.Release();
+        await WaitForAsync(() => listener.IsDisposed);
+    }
+
+    [Fact]
     public async Task ShutdownDisposesAllSessionsAndListeners()
     {
         var listenerFactory = new FakeListenerFactory();

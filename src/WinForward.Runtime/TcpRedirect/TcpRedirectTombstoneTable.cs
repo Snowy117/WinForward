@@ -40,6 +40,20 @@ internal sealed class TcpRedirectTombstoneTable
     }
 
     /// <summary>
+    /// The insertion-order queue length, including stale records pending reclamation; for tests
+    /// and diagnostics. Without the <see cref="RemoveExpired"/> head drain this grows with total
+    /// TryAdd calls (every refresh leaks its superseded record), which is exactly what it exists
+    /// to observe.
+    /// </summary>
+    internal int QueueCountForDiagnostics
+    {
+        get
+        {
+            lock (_gate) return _insertionOrder.Count;
+        }
+    }
+
+    /// <summary>
     /// Records both lookup keys of a torn-down redirect with a shared expiry timestamp. The write
     /// never fails: when the table is full the oldest tombstone is evicted first, and a key pair
     /// torn down again is refreshed with the newest expiry. Both indexes stay in lockstep — every
@@ -81,7 +95,26 @@ internal sealed class TcpRedirectTombstoneTable
         {
             var expired = _byForward.Values.Where(entry => now >= entry.ExpiryUtc).ToArray();
             foreach (var entry in expired) RemoveEntryUnderGate(entry);
+            DrainStaleQueueHeadUnderGate(now);
             return expired.Length;
+        }
+    }
+
+    /// <summary>
+    /// Reclaims queue records whose dictionary slot is gone (expired above, evicted, or replaced
+    /// by a refresh's newer tail record). Order-safe: a refresh appends a fresh tail record with a
+    /// newer expiry, so queue order tracks expiry order — once the head is a live, unexpired,
+    /// current record, nothing behind it can be drainable. Records that go stale deeper in the
+    /// queue surface at the head on later sweeps, so the queue length converges to the live entry
+    /// count under refresh/expiry churn instead of growing with total TryAdd calls.
+    /// </summary>
+    private void DrainStaleQueueHeadUnderGate(DateTimeOffset now)
+    {
+        while (_insertionOrder.Count > 0)
+        {
+            var head = _insertionOrder.Peek();
+            if (now < head.ExpiryUtc && ReferenceEquals(_byForward.GetValueOrDefault(head.Forward), head)) break;
+            _insertionOrder.Dequeue();
         }
     }
 

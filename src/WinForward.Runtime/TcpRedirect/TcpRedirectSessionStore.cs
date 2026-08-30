@@ -3,8 +3,10 @@ using WinForward.Core;
 namespace WinForward.Runtime.TcpRedirect;
 
 /// <summary>
-/// A retired session and its (already detached) relay, captured atomically under the store gate
-/// so release (listener, relay, self-traffic token, table alias, tombstone) runs outside the lock.
+/// A retired session and its (already detached) relay, captured atomically under the store gate.
+/// Retire itself already removed the table alias and armed the tombstone inside that critical
+/// section (R2); only the trailing disposals (listener, relay, self-traffic token, lifetime CTS)
+/// run outside the lock.
 /// </summary>
 internal sealed record RetiredSession(TcpRedirectSession Session, ITcpRelay? Relay);
 
@@ -14,8 +16,14 @@ internal sealed record RetiredSession(TcpRedirectSession Session, ITcpRelay? Rel
 /// under one gate, so registration, teardown, expiry, and dispose remain mutually exclusive. It is
 /// also the single tombstone write point: every teardown path funnels through
 /// <see cref="RemoveAssociationFromTable"/>, which records the TIME_WAIT-grace tombstone when the
-/// removal wins. The coordinator and setup pipeline reach the session set only through this
-/// module's methods.
+/// removal wins. The retire path removes the table alias and arms the tombstone while still
+/// holding the store gate, so session-dictionary removal, Phase=Closing, lifetime retire, table
+/// alias removal, and tombstone arming are ONE atomic step — a same-tuple packet can never land
+/// in a window where the session is gone but the alias still resolves (R2); only disposal trails
+/// outside the gate. The resulting lock order is store gate → table gate → tombstone gate; it is
+/// acyclic repo-wide (no path acquires them in reverse), and the table/tombstone critical
+/// sections are synchronous and non-blocking, so nesting them under the store gate is safe.
+/// The coordinator and setup pipeline reach the session set only through this module's methods.
 /// </summary>
 internal sealed class TcpRedirectSessionStore
 {
@@ -221,6 +229,11 @@ internal sealed class TcpRedirectSessionStore
         session.Retire();
         var relay = session.Relay;
         session.Relay = null;
+        // Runs while the store gate is still held (R2): a same-tuple SYN or data packet can
+        // never observe the session gone from the dictionary while the alias still resolves —
+        // the removal and the grace tombstone land in the same critical section as the retire.
+        // Lock order store → table → tombstone is documented on the class.
+        RemoveAssociationFromTable(session.Association);
         return new RetiredSession(session, relay);
     }
 
@@ -230,7 +243,9 @@ internal sealed class TcpRedirectSessionStore
         TcpRedirectLogging.LogDebug(_logger, "tcp.redirect.closed", session, "closed");
         try
         {
-            await ReleaseAssociationAsync(session.Listener, session.Association, session.SelfTrafficToken).ConfigureAwait(false);
+            // The retire critical section already removed the table alias and armed the
+            // tombstone; only the disposals trail here.
+            await DisposeListenerAndTokenAsync(session.Listener, session.SelfTrafficToken).ConfigureAwait(false);
         }
         catch (Exception exception)
         {
@@ -263,9 +278,20 @@ internal sealed class TcpRedirectSessionStore
         else RemoveAssociationFromTable(association);
     }
 
+    /// <summary>
+    /// Releases an association that never had a registered session (the store was disposed during
+    /// setup registration): removes the table alias with its grace tombstone, then disposes the
+    /// listener and the self-traffic token. The retire path does NOT come through here — its alias
+    /// removal and tombstone already ran atomically inside <see cref="RetireSessionUnderGate"/>.
+    /// </summary>
     public async ValueTask ReleaseAssociationAsync(ITcpRedirectListener listener, TcpRedirectAssociation association, SelfTrafficRegistry.SelfTrafficToken? selfTrafficToken)
     {
         RemoveAssociationFromTable(association);
+        await DisposeListenerAndTokenAsync(listener, selfTrafficToken).ConfigureAwait(false);
+    }
+
+    private static async ValueTask DisposeListenerAndTokenAsync(ITcpRedirectListener listener, SelfTrafficRegistry.SelfTrafficToken? selfTrafficToken)
+    {
         try
         {
             try { await listener.DisposeAsync().ConfigureAwait(false); }

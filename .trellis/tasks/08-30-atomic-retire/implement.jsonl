@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "Teardown lifecycle, tombstone grace, exactly-once claim, and lock conventions — D1/D2 rewrite the teardown and tombstone internals"}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "Setup queue, cooldown tombstones, sweep, and slot ownership rules — D3/D4 add bounds and TTL to those structures"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Fail-closed semantics — budget-exhaustion drops and TTL drops must follow the bounded-exemption discipline"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Testing requirements and forbidden patterns for the new red-to-green and budget/TTL tests"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Allocation-gate conventions — D4 adds per-entry timestamps on a Core warm-path structure; verify no warm-path allocation regression"}
+{"file": ".trellis/tasks/08-30-atomic-retire/research/current-state.md", "reason": "Primary evidence: R2/R3/R4 re-validated at HEAD 0596a74 with file:line, lock-order audit, call-site inventory, and design decision points"}
+{"file": ".trellis/tasks/archive/2026-08/08-30-proxy-perf-stability-research/research/synthesis-and-backlog.md", "reason": "Backlog item #4 definition (R2, R3, R4) and cross-child invariants the fix must not break"}

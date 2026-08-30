@@ -144,13 +144,22 @@ public sealed class PacketLease : IDisposable
     public void Dispose() => TryComplete(PacketDisposition.Block);
 }
 
+/// <summary>
+/// A per-flow FIFO buffer for datagrams accepted while the flow's session is setting up. Dual
+/// bounded in packets and bytes; the caller implements drop-oldest by dequeuing on overflow and
+/// retrying. Entries may carry an enqueue timestamp (R4 setup TTL); the timestamp-free overloads
+/// forward with a default stamp, which carries no age. Not thread-safe by design: each queue is
+/// owned by one flow's slot and every access is serialized by the owning coordinator's gate.
+/// </summary>
 public sealed class BoundedSetupQueue
 {
     // The common UDP setup window buffers a single datagram (the DNS query that triggered the
     // flow), so the first buffered frame lives inline and the Queue only materializes when a
     // second datagram overlaps the setup.
-    private Queue<ReadOnlyMemory<byte>>? _items;
-    private ReadOnlyMemory<byte> _pending;
+    private readonly record struct Entry(ReadOnlyMemory<byte> Frame, DateTimeOffset EnqueuedAt);
+
+    private Queue<Entry>? _items;
+    private Entry _pending;
     private bool _hasPending;
     private readonly int _maxPackets;
     private readonly int _maxBytes;
@@ -167,54 +176,64 @@ public sealed class BoundedSetupQueue
     public int Count => (_hasPending ? 1 : 0) + (_items?.Count ?? 0);
     public int Bytes => _bytes;
 
-    public bool TryEnqueue(ReadOnlyMemory<byte> frame)
+    public bool TryEnqueue(ReadOnlyMemory<byte> frame) => TryEnqueue(frame, default);
+
+    public bool TryEnqueue(ReadOnlyMemory<byte> frame, DateTimeOffset enqueuedAt)
     {
         if (frame.Length > _maxBytes || Count >= _maxPackets || _bytes > _maxBytes - frame.Length) return false;
         var copy = frame.ToArray();
+        var entry = new Entry(copy, enqueuedAt);
         if (_items is null)
         {
             if (!_hasPending)
             {
-                _pending = copy;
+                _pending = entry;
                 _hasPending = true;
                 _bytes += copy.Length;
                 return true;
             }
 
-            _items = new Queue<ReadOnlyMemory<byte>>(4);
+            _items = new Queue<Entry>(4);
             _items.Enqueue(_pending);
             _hasPending = false;
         }
 
-        _items.Enqueue(copy);
+        _items.Enqueue(entry);
         _bytes += copy.Length;
         return true;
     }
 
-    public bool TryDequeue(out ReadOnlyMemory<byte> frame)
+    public bool TryDequeue(out ReadOnlyMemory<byte> frame) => TryDequeue(out frame, out _);
+
+    public bool TryDequeue(out ReadOnlyMemory<byte> frame, out DateTimeOffset enqueuedAt)
     {
+        Entry entry;
         if (_items is not null)
         {
             if (_items.Count == 0)
             {
                 frame = default;
+                enqueuedAt = default;
                 return false;
             }
 
-            frame = _items.Dequeue();
-            _bytes -= frame.Length;
-            return true;
+            entry = _items.Dequeue();
         }
-
-        if (!_hasPending)
+        else if (!_hasPending)
         {
             frame = default;
+            enqueuedAt = default;
             return false;
         }
+        else
+        {
+            entry = _pending;
+            _hasPending = false;
+        }
 
-        frame = _pending;
-        _hasPending = false;
-        _bytes -= frame.Length;
+        frame = entry.Frame;
+        enqueuedAt = entry.EnqueuedAt;
+        _bytes -= entry.Frame.Length;
         return true;
     }
 }

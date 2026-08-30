@@ -126,3 +126,82 @@ var relay = await control.UdpAssociateAsync(...);
 var relay = await control.UdpAssociateAsync(cancellationToken);
 var socket = new Socket(relay.AddressFamily, SocketType.Dgram, ProtocolType.Udp);
 ```
+
+---
+
+## Bounded UDP setup memory: global budget + datagram TTL + cooldown bound (wired 2026-08-30)
+
+Task 08-30-atomic-retire (research R4/R3-UDP). Pre-fix worst case: 16,384 flows
+× 32 KiB queues = 512 MiB held for hours against a dead SOCKS5 server, then
+delivered long-expired; `_setupTombstones` was unbounded between 60 s sweeps.
+
+### 1. Scope / Trigger
+
+- Trigger: any change to `UdpProxyCoordinator` setup admission, the setup
+  queue's drain/dispose paths, `_setupTombstones`, or `BoundedSetupQueue`'s
+  entry shape.
+
+### 2. Signatures
+
+- `UdpProxyCoordinator`: `SetupQueueGlobalByteBudget` (8 MiB default; internal
+  ctor override for tests), `long _pendingSetupBytes` (Interlocked),
+  `SetupQueueDatagramTtl` (5 s), counters `SetupBudgetRejectionCount` /
+  `SetupTtlExpiredCount`, diagnostics `PendingSetupBytesForDiagnostics`.
+- `BoundedSetupQueue` (`WinForward.Core/PacketRuntime.cs`): public class; entry
+  shape is `(ReadOnlyMemory<byte>, DateTimeOffset)`. Timestamp overloads
+  `TryEnqueue(frame, enqueuedAt)` / `TryDequeue(out frame, out enqueuedAt)`;
+  the timestamp-less overloads forward with a default stamp — additive only,
+  never break the existing signatures.
+
+### 3. Contracts
+
+- **Charge/credit exactly-once**: the global budget is charged at enqueue
+  (before per-flow `TryEnqueue`) and credited back exactly once wherever the
+  datagram leaves the pending set — flush send, flush TTL drop, drop-oldest
+  eviction, per-flow-bounds rejection rollback, slot drain (setup failure),
+  dispose drain. Every `BoundedSetupQueue.TryDequeue` call site MUST credit;
+  a new dequeue sink without a credit is a budget leak (a leaked charge
+  permanently shrinks the budget).
+- **TTL at flush, entry-stamp granularity**: flush drops entries whose own
+  enqueue stamp is older than the TTL (5 s — normal setup <1 s; older
+  datagrams were retransmitted or expired at the application layer). Age
+  filtering belongs to flush only; drop-oldest eviction credits regardless of
+  age. Stamps come from the coordinator's `_timeProvider` (fake-time
+  testable).
+- **Budget exhaustion rejects the new datagram** (rollback the charge, count
+  it, take the existing drop-counter path) — no failure tombstone, no
+  teardown; the flow retries on its next datagram.
+- **Cooldown tombstones are bounded**: `_setupTombstones` capacity = the
+  coordinator's session `capacity`; a write at capacity evicts the
+  oldest-deadline entry (refusal would degrade the cooldown into an
+  immediate-retry storm). Lazy prune on touch and the 60 s sweep are unchanged.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Aggregate pending bytes + new datagram > 8 MiB | enqueue rejected, charge rolled back, counter++ |
+| Queued entry older than 5 s at flush | dropped (not delivered), credited, counter++ |
+| Setup failure drains the slot queue | every drained byte credited |
+| Dispose drains pending queues | every drained byte credited (previously a silent abandon) |
+| `_setupTombstones` at capacity on a new failure | oldest-deadline entry evicted, write proceeds |
+
+### 5. Good/Base/Bad Cases
+
+- Good: a flash crowd against a dead server holds ≤8 MiB; TTL-discards
+  long-queued datagrams; after failure/dispose the budget is fully credited.
+- Base: normal <1 s setups never observe the budget or the TTL.
+- Bad: a `TryDequeue` sink without a credit; TTL compared against the slot's
+  creation time instead of the entry's stamp; refusing the cooldown tombstone
+  at capacity.
+
+### 6. Tests Required
+
+- `UdpSetupQueueTests`: `GlobalSetupBudgetRejectsBeyondTheAggregateAndCreditsBackOnFlush`,
+  `SetupFailureCreditsBackThePendingBudget`, `DisposeCreditsBackDatagramsStillQueuedForSetup`,
+  `FlushDropsSetupDatagramsOlderThanTheTtl` (fake TimeProvider; a late-arriving
+  fresh entry on an old slot must still be delivered — entry-stamp, not
+  slot-stamp), `SetupTombstonesAreBoundedAndEvictTheOldestAtCapacity`, and the
+  credit-zero assertion appended to the drop-oldest FIFO test.
+- Existing FIFO / drop-oldest / no-bypass / 1 s-cooldown / 8-way-cap /
+  flash-crowd / dispose-drain tests stay green.

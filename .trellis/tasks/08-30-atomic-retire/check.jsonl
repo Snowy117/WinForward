@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "Verify teardown single-writer semantics, tombstone grace, exactly-once claims, and the documented store→table→tombstone lock order hold after D1/D2"}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "Verify setup-queue FIFO/drop-oldest/no-bypass, slot ownership, and cooldown semantics preserved under the new budget/TTL/bound"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Test-coverage standards for the new red-to-green, budget, TTL, and queue-drain tests"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Verify no allocation regression on dispatch/UDP warm paths (D4 touches a Core structure)"}
+{"file": ".trellis/tasks/08-30-atomic-retire/research/current-state.md", "reason": "Checker's ground truth: verdicts, invariants (credit exactly-once, idempotent TryRemove), and the test files that pin current behavior"}

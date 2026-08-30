@@ -1,0 +1,30 @@
+{
+  "id": "proxy-perf-stability",
+  "name": "proxy-perf-stability",
+  "title": "Proxy perf/stability improvement program",
+  "description": "Parent task: owns the ranked backlog from the 2026-08-30 deep-dive research (archive/2026-08/08-30-proxy-perf-stability-research), cross-child acceptance, and integration review. Children: fast-hardening, hot-path-revival, plus later children (atomic-retire, udp-alloc-jumbo, zero-copy, batched-ioctls, windows-reality) opened on demand.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "qmazon",
+  "assignee": "qmazon",
+  "createdAt": "2026-08-30",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-30-fast-hardening",
+    "08-30-hot-path-revival",
+    "08-30-atomic-retire"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

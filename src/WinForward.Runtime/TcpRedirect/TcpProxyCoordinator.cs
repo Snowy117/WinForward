@@ -115,6 +115,13 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
                 return await ReinjectExistingFlowDataAsync(packet, existing, cancellationToken).ConfigureAwait(false);
             }
 
+            // TIME_WAIT grace: a same-tuple SYN whose redirect was torn down within the grace
+            // window is a retransmission of the finished flow's handshake, never a fresh
+            // connection — re-arming setup would honor the dead flow (or leak the straggler
+            // toward the real server via the NotRelevant fallback), so it is consumed like every
+            // other straggler. The next connection claims a new source port and a new key.
+            if (_store.Tombstones.TryHit(key, DateTimeOffset.UtcNow)) return TcpRedirectOutcome.Dropped;
+
             if (_store.SessionCount >= _capacity)
             {
                 Interlocked.Increment(ref _capacityRejectionCount);

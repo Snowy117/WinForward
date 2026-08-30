@@ -13,6 +13,21 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
     private const int SetupQueueMaximumPackets = 32;
     private const int SetupQueueMaximumBytes = 32_768;
     private const int MaximumConcurrentSetups = 8;
+
+    /// <summary>
+    /// The default cross-flow bound on aggregate setup-queue memory (~250 full 32 KiB queues;
+    /// DNS-sized traffic is ~100k datagrams). Per-flow bounds alone would permit
+    /// capacity × 32 KiB to accumulate while every setup parks on the 8-wide limiter.
+    /// </summary>
+    private const long SetupQueueGlobalByteBudget = 8 * 1024 * 1024;
+
+    /// <summary>
+    /// How long a buffered setup datagram stays deliverable. A normal SOCKS5 setup completes in
+    /// well under a second; a datagram still queued after this window has already been
+    /// retransmitted or abandoned by the application, so the flush delivers only fresh state.
+    /// </summary>
+    private static readonly TimeSpan SetupQueueDatagramTtl = TimeSpan.FromSeconds(5);
+
     private static readonly TimeSpan SetupFailureCooldown = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan SetupQueueDropLogInterval = TimeSpan.FromSeconds(5);
 
@@ -34,6 +49,10 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
     private readonly Func<UdpProxySession, Task> _removeReceiveFailedSession;
     private long _lastSetupQueueDropLogTicks;
     private long _setupQueueDroppedTotal;
+    private readonly long _setupQueueByteBudget;
+    private long _pendingSetupBytes;
+    private long _setupBudgetRejectionCount;
+    private long _setupTtlExpiredCount;
     private Task? _disposeTask;
     private bool _disposed;
 
@@ -58,13 +77,15 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
         Func<ValueTask>? beforeExpiryRecheck,
         IRuntimeLogger? logger = null,
         int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame,
-        ArrayPool<byte>? receiveBufferPool = null)
+        ArrayPool<byte>? receiveBufferPool = null,
+        long setupQueueGlobalByteBudget = SetupQueueGlobalByteBudget)
     {
         ArgumentNullException.ThrowIfNull(transportFactory);
         ArgumentNullException.ThrowIfNull(responseSink);
         ArgumentNullException.ThrowIfNull(timeProvider);
         if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(capacity));
         if (maximumFrameSize <= 0) throw new ArgumentOutOfRangeException(nameof(maximumFrameSize));
+        if (setupQueueGlobalByteBudget <= 0) throw new ArgumentOutOfRangeException(nameof(setupQueueGlobalByteBudget));
         _transportFactory = transportFactory;
         _responseSink = responseSink;
         var preSeed = Math.Min(capacity, MaximumPreSeedCapacity);
@@ -72,6 +93,7 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
         _sessions = new Dictionary<FlowKey, UdpSessionSlot>(preSeed);
         _capacity = capacity;
         _timeProvider = timeProvider;
+        _setupQueueByteBudget = setupQueueGlobalByteBudget;
         _beforeExpiryRecheck = beforeExpiryRecheck;
         _logger = logger ?? NullRuntimeLogger.Instance;
         _receiveBufferPool = receiveBufferPool ?? ArrayPool<byte>.Shared;
@@ -79,6 +101,21 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
         _onSessionActivity = OnSessionActivity;
         _removeReceiveFailedSession = RemoveReceiveFailedSessionAsync;
     }
+
+    /// <summary>The live setup-failure cooldown count (bounded by <c>capacity</c>); for tests and diagnostics.</summary>
+    internal int SetupTombstoneCountForDiagnostics
+    {
+        get { lock (_gate) return _setupTombstones.Count; }
+    }
+
+    /// <summary>The aggregate setup-queue bytes currently charged against the global budget; for tests and diagnostics.</summary>
+    internal long PendingSetupBytesForDiagnostics => Interlocked.Read(ref _pendingSetupBytes);
+
+    /// <summary>The total datagrams rejected because the global setup byte budget was exhausted; for tests and diagnostics.</summary>
+    internal long SetupBudgetRejectionCount => Interlocked.Read(ref _setupBudgetRejectionCount);
+
+    /// <summary>The total buffered datagrams dropped at flush for exceeding the setup TTL; for tests and diagnostics.</summary>
+    internal long SetupTtlExpiredCount => Interlocked.Read(ref _setupTtlExpiredCount);
 
     /// <summary>
     /// Hands a datagram to the flow's relay session without ever awaiting session setup network
@@ -172,24 +209,60 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
     /// Buffers one datagram while the flow's session is setting up or flushing. The queue is
     /// bounded (packets and bytes); on overflow the oldest datagrams are dropped so the freshest
     /// state survives, with drops surfaced through the trace event and a rate-limited debug
-    /// summary. Returns true when the datagram (or a newer one in its place) is retained.
+    /// summary. A datagram that does not fit the global setup byte budget is rejected without a
+    /// cooldown tombstone — budget exhaustion is backpressure, not a setup failure. Returns true
+    /// when the datagram (or a newer one in its place) is retained.
     /// </summary>
     private bool EnqueueSetupDatagram(FlowKey flow, UdpSessionSlot slot, ReadOnlyMemory<byte> payload)
     {
-        // The captured frame lives in the pump's native batch slot only for the dispatch; the
-        // setup queue copies every datagram so buffered traffic survives the pump moving on.
-        var enqueued = slot.SetupQueue.TryEnqueue(payload);
-        var dropped = 0;
-        while (!enqueued && slot.SetupQueue.TryDequeue(out _))
+        // R4: charge the global budget before the per-flow enqueue. Every charged byte is
+        // credited back exactly once at whichever sink dequeues it: the flush below, the
+        // drop-oldest loop here, the slot drain (RemoveSlotAsync), or the dispose drain.
+        if (!TryChargePendingSetupBytes(payload.Length))
         {
-            dropped++;
-            enqueued = slot.SetupQueue.TryEnqueue(payload);
+            Interlocked.Increment(ref _setupBudgetRejectionCount);
+            NoteSetupQueueDrop(flow, 1);
+            return false;
         }
 
-        if (!enqueued) dropped++;
+        // The captured frame lives in the pump's native batch slot only for the dispatch; the
+        // setup queue copies every datagram so buffered traffic survives the pump moving on.
+        var enqueued = slot.SetupQueue.TryEnqueue(payload, _timeProvider.GetUtcNow());
+        var dropped = 0;
+        while (!enqueued && slot.SetupQueue.TryDequeue(out var evicted, out _))
+        {
+            dropped++;
+            CreditPendingSetupBytes(evicted.Length);
+            enqueued = slot.SetupQueue.TryEnqueue(payload, _timeProvider.GetUtcNow());
+        }
+
+        if (!enqueued)
+        {
+            // The per-flow bounds refused the datagram outright: release its charge.
+            dropped++;
+            CreditPendingSetupBytes(payload.Length);
+        }
         if (dropped > 0) NoteSetupQueueDrop(flow, dropped);
         return enqueued;
     }
+
+    /// <summary>
+    /// Charges <paramref name="length"/> bytes against the global setup budget; on exhaustion the
+    /// charge is rolled back and the datagram must not be enqueued. A transient overshoot from
+    /// racing adders is accepted (bounded by the in-flight adders).
+    /// </summary>
+    private bool TryChargePendingSetupBytes(int length)
+    {
+        if (Interlocked.Add(ref _pendingSetupBytes, length) > _setupQueueByteBudget)
+        {
+            Interlocked.Add(ref _pendingSetupBytes, -length);
+            return false;
+        }
+
+        return true;
+    }
+
+    private void CreditPendingSetupBytes(int length) => Interlocked.Add(ref _pendingSetupBytes, -length);
 
     private void NoteSetupQueueDrop(FlowKey flow, int dropped)
     {
@@ -244,6 +317,20 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
             slots = _sessions.Values.ToArray();
             _sessions.Clear();
             _setupTombstones.Clear();
+            // The cleared slots are unreachable for every other drain path (a setup task's
+            // RemoveSlotAsync observes the removal first), so the queued datagrams are drained
+            // here — the disposal edge must still credit every budget charge back exactly once.
+            foreach (var slot in slots)
+            {
+                var dropped = 0;
+                while (slot.SetupQueue.TryDequeue(out var drained, out _))
+                {
+                    CreditPendingSetupBytes(drained.Length);
+                    dropped++;
+                }
+
+                if (dropped > 0) Interlocked.Add(ref _setupQueueDroppedTotal, dropped);
+            }
         }
         foreach (var slot in slots)
         {
@@ -331,22 +418,36 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
     /// concurrent send either enqueued before this loop finished (and is drained here) or sees
     /// the ready slot and sends inline: no datagram can bypass the queue and then be followed by
     /// an older queued one. A send failure propagates to the setup task's failure observer.
+    /// Datagrams buffered longer than the setup TTL are dropped at this boundary: the flush is
+    /// the single point where age is observable against the dequeue time, and delivering them
+    /// would replay state the application has already retransmitted or abandoned.
     /// </summary>
     private async Task FlushSetupQueueAsync(FlowKey flow, UdpSessionSlot slot, UdpProxySession session, CancellationToken cancellationToken)
     {
         while (true)
         {
             ReadOnlyMemory<byte> pending;
+            DateTimeOffset enqueuedAt;
             lock (_gate)
             {
                 // Another owner (receive failure, expiry, disposal, a replacement setup) took over
                 // this slot's teardown and owns the session and the queued datagrams.
                 if (!_sessions.TryGetValue(flow, out var current) || !ReferenceEquals(current, slot)) return;
-                if (!slot.SetupQueue.TryDequeue(out pending))
+                if (!slot.SetupQueue.TryDequeue(out pending, out enqueuedAt))
                 {
                     slot.Ready = true;
                     return;
                 }
+
+                // The datagram left the pending set under the coordinator gate: its budget
+                // charge is released here, exactly once, regardless of the sink outcome.
+                CreditPendingSetupBytes(pending.Length);
+            }
+
+            if (_timeProvider.GetUtcNow() - enqueuedAt > SetupQueueDatagramTtl)
+            {
+                Interlocked.Increment(ref _setupTtlExpiredCount);
+                continue;
             }
 
             await session.SendAsync(flow.Remote, pending, cancellationToken).ConfigureAwait(false);
@@ -403,6 +504,25 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
     }
 
     /// <summary>
+    /// Removes the setup-failure cooldown entry with the earliest retry deadline. A linear scan is
+    /// deliberate: setup failure is a cold path, and the timestamp value doubles as the age order.
+    /// Callers must hold the coordinator gate.
+    /// </summary>
+    private void EvictOldestSetupTombstoneUnderGate()
+    {
+        FlowKey? oldest = null;
+        var oldestRetryAt = DateTimeOffset.MaxValue;
+        foreach (var pair in _setupTombstones)
+        {
+            if (pair.Value >= oldestRetryAt) continue;
+            oldestRetryAt = pair.Value;
+            oldest = pair.Key;
+        }
+
+        if (oldest is { } evicted) _setupTombstones.Remove(evicted);
+    }
+
+    /// <summary>
     /// Shared owns-slot removal protocol for every teardown path: under the gate, the slot mapped
     /// to <paramref name="flow"/> is removed only when it is still the exact slot instance
     /// <paramref name="expected"/> (a newer generation may have replaced it); the resolved
@@ -426,10 +546,20 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
                 session = expected.Session;
                 if (session is not null) _associations.TryRemove(session.Association);
                 var dropped = 0;
-                while (expected.SetupQueue.TryDequeue(out _)) dropped++;
+                while (expected.SetupQueue.TryDequeue(out var drained, out _))
+                {
+                    CreditPendingSetupBytes(drained.Length);
+                    dropped++;
+                }
                 if (dropped > 0) NoteSetupQueueDrop(flow, dropped);
                 if (writeTombstone && !_shutdown.IsCancellationRequested)
                 {
+                    // R3-UDP: the cooldown dictionary is bounded at the session capacity (one
+                    // tombstone per distinct flow is the natural upper bound). At capacity the
+                    // oldest-timestamp entry is evicted rather than refusing the write — refusal
+                    // would skip the cooldown and turn a failing-server storm into an
+                    // immediate-retry storm. Refreshing an existing key never grows the count.
+                    if (_setupTombstones.Count >= _capacity && !_setupTombstones.ContainsKey(flow)) EvictOldestSetupTombstoneUnderGate();
                     _setupTombstones[flow] = _timeProvider.GetUtcNow() + SetupFailureCooldown;
                 }
             }

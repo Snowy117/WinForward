@@ -70,6 +70,56 @@ public sealed class TcpRedirectTombstoneTableTests
         Assert.True(table.TryHit(ReverseSource(), ReverseDestination(53000), now.AddSeconds(59)));
     }
 
+    [Fact]
+    public void RemoveExpiredDrainsStaleQueueRecordsFromRefreshChurn()
+    {
+        // Without the head drain, every refresh leaks its superseded queue record: this churn
+        // would leave 50 records for one live entry. After the drain sweep the queue holds only
+        // the live entry's current record.
+        var table = new TcpRedirectTombstoneTable(capacity: 64);
+        var now = DateTimeOffset.UtcNow;
+        const int refreshes = 50;
+        for (var index = 0; index < refreshes; index++) Add(table, clientPort: 53000, now.AddSeconds(60));
+
+        Assert.Equal(1, table.Count);
+        Assert.Equal(refreshes, table.QueueCountForDiagnostics);
+
+        // The sweep clock is inside the grace window: nothing expires from the dictionaries, the
+        // head drain still reclaims every superseded record.
+        table.RemoveExpired(now.AddSeconds(30));
+
+        Assert.Equal(1, table.Count);
+        Assert.Equal(1, table.QueueCountForDiagnostics);
+    }
+
+    [Fact]
+    public void QueueLengthConvergesToLiveEntriesUnderRefreshAndExpiryChurn()
+    {
+        // Repeated teardown/refresh cycles below capacity (the churny-uptime shape): queue length
+        // must track the live entry count, never the total TryAdd count.
+        var table = new TcpRedirectTombstoneTable(capacity: 64);
+        var now = DateTimeOffset.UtcNow;
+        const int liveKeys = 4;
+        const int rounds = 20;
+        for (var round = 0; round < rounds; round++)
+        {
+            for (var clientPort = 53000; clientPort < 53000 + liveKeys; clientPort++)
+            {
+                Add(table, (ushort)clientPort, now.AddSeconds(60));
+            }
+
+            table.RemoveExpired(now.AddSeconds(30));
+        }
+
+        Assert.Equal(liveKeys, table.Count);
+        Assert.Equal(liveKeys, table.QueueCountForDiagnostics);
+
+        // Full expiry drains everything: dictionaries and queue both return to zero.
+        Assert.Equal(liveKeys, table.RemoveExpired(now.AddSeconds(61)));
+        Assert.Equal(0, table.Count);
+        Assert.Equal(0, table.QueueCountForDiagnostics);
+    }
+
     private static FlowKey Key(ushort clientPort) => FlowKey.Create(Endpoint.From(s_client, clientPort), Endpoint.From(s_dest, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
 
     private static Endpoint ReverseSource() => Endpoint.From(s_client, 42000);
