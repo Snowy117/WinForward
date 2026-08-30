@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/08-30-udp-alloc-jumbo/research/current-state.md", "reason": "Primary evidence: X6/R5 re-validated at HEAD c91ab68 with file:line, call-site inventory for both breaking changes, and the do-not-touch invariant list"}
+{"file": ".trellis/tasks/08-30-udp-alloc-jumbo/prd.md", "reason": "Requirements R1-R5 and acceptance criteria the implementation must satisfy"}
+{"file": ".trellis/tasks/08-30-udp-alloc-jumbo/design.md", "reason": "D1-D5 seam decisions: Endpoint signature, IPAddressValue? datagram, sender template, cap-derived send buffer, documentation-only S4"}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "UDP relay wiring, skip-class semantics, and the atomic-retire charge/credit contract that bounds what this task may touch"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Zero-allocation conventions this task extends to the SOCKS5 datagram decode/endpoint paths"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Testing requirements and forbidden patterns for the migrated + new tests"}
+{"file": ".trellis/tasks/archive/2026-08/08-30-proxy-perf-stability-research/research/udp-proxy-path.md", "reason": "Original research findings P1/P2/P3/P6, S3/S4 with rationale and impact ranking"}
