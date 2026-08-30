@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using WinForward.Configuration;
+using WinForward.Core;
 using WinForward.Protocols;
 using WinForward.Runtime;
 using WinForward.Runtime.Socks5;
@@ -157,7 +158,7 @@ public sealed class Socks5ControlTimeoutTests
         var buffer = new byte[65_535];
         var response = await transport.ReceiveAsync(buffer, CancellationToken.None);
         Assert.True(response.HasDatagram);
-        Assert.Equal(IPAddress.Parse("192.0.2.53"), response.Datagram.DestinationAddress);
+        Assert.Equal((IPAddressValue?)IPAddress.Parse("192.0.2.53"), response.Datagram.DestinationAddress);
         Assert.Equal(53, response.Datagram.DestinationPort);
         Assert.Equal(new byte[] { 0xab }, response.Datagram.Payload.ToArray());
 

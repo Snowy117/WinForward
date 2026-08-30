@@ -103,7 +103,7 @@ public sealed class UdpProxyCoordinatorTests
         });
         Assert.Equal(AddressFamily.InterNetwork, transport.LocalEndpoint.AddressFamily);
         Assert.Equal(1, factory.CreateCalls);
-        (IPEndPoint Destination, byte[] Payload) sent;
+        (Endpoint Destination, byte[] Payload) sent;
         lock (transport.Sent) sent = transport.Sent[0];
         Assert.Equal(flow.Remote.Address, sent.Destination.Address);
         Assert.Equal(flow.Remote.Port, sent.Destination.Port);

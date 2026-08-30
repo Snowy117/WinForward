@@ -342,17 +342,22 @@ internal static class Program
             adapterTargets[adapter.StableId] = new UdpAdapterTarget(adapter.RuntimeHandle, mac);
         }
 
+        // Single source of truth for every datagram-path buffer bound: the transport send buffer
+        // (6 + 16 + cap), the coordinator receive windows (cap + 22 + 1), the reinjector's
+        // rebuilt-frame cap, and the native ABI capture size must all agree. Only the ABI
+        // constant should ever change; every component follows it from here.
+        var maximumFrameSize = NdisApiAbi.MaximumEthernetFrame;
         return new UdpProxyCoordinator(
-            new Socks5UdpTransportFactory(selfTraffic),
+            new Socks5UdpTransportFactory(selfTraffic, maximumFrameSize),
             new UdpResponseReinjector(
                 reinjector,
                 hostAdapter.RuntimeHandle,
                 localMac,
                 adaptersByStableId: adapterTargets,
-                maximumFrameSize: NdisApiAbi.MaximumEthernetFrame,
+                maximumFrameSize: maximumFrameSize,
                 logger: logger),
             logger: logger,
-            maximumFrameSize: NdisApiAbi.MaximumEthernetFrame);
+            maximumFrameSize: maximumFrameSize);
     }
 
     private static int Validate(string[] args)

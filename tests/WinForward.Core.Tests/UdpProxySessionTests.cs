@@ -61,7 +61,26 @@ public sealed class UdpProxySessionTests
         }
     }
 
-    private static UdpProxySession CreateSession(TimeProvider time, List<DateTimeOffset> propagationStamps)
+    [Fact]
+    public async Task SendAsyncForwardsTheSessionEndpointToTheTransportUnchanged()
+    {
+        // R1: the session hands its Endpoint struct straight through to the transport — no
+        // IPEndPoint round-trip on the forward leg — so address, port, and family arrive intact.
+        var transport = new FakeTransport(System.Net.Sockets.AddressFamily.InterNetwork, 40000);
+        var session = CreateSession(new MutableTimeProvider(DateTimeOffset.UnixEpoch), [], transport);
+        await using (session)
+        {
+            await session.SendAsync(session.Flow.Remote, new byte[] { 1 }, CancellationToken.None);
+        }
+
+        (Endpoint Destination, byte[] Payload) sent;
+        lock (transport.Sent) sent = Assert.Single(transport.Sent);
+        Assert.Equal(Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), sent.Destination);
+        Assert.Equal(AddressFamilyKind.IPv4, sent.Destination.AddressFamily);
+        Assert.Equal((ushort)53, sent.Destination.Port);
+    }
+
+    private static UdpProxySession CreateSession(TimeProvider time, List<DateTimeOffset> propagationStamps, FakeTransport? transport = null)
     {
         var flow = FlowKey.Create(
             Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000),
@@ -81,7 +100,7 @@ public sealed class UdpProxySessionTests
             flow,
             1,
             association,
-            new FakeTransport(System.Net.Sockets.AddressFamily.InterNetwork, 40000),
+            transport ?? new FakeTransport(System.Net.Sockets.AddressFamily.InterNetwork, 40000),
             new FakeResponseSink(),
             null,
             CancellationToken.None,

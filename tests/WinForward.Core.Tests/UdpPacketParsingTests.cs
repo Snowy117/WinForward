@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Net;
+using WinForward.Core;
 using WinForward.Protocols;
 using Xunit;
 
@@ -15,11 +16,26 @@ public sealed class UdpPacketParsingTests
         var encoded = Socks5UdpCodec.Encode(address, 53, payload);
 
         Assert.True(Socks5UdpCodec.TryDecode(encoded, out var decoded));
-        Assert.Equal(address, decoded.DestinationAddress);
+        Assert.Equal((IPAddressValue?)address, decoded.DestinationAddress);
         Assert.Equal((ushort)53, decoded.DestinationPort);
         Assert.Equal(payload, decoded.Payload.ToArray());
         encoded[^1] = 0xff;
         Assert.Equal(0xff, decoded.Payload.Span[^1]);
+    }
+
+    [Fact]
+    public void SocksUdpIpv4RoundTripDecodesToTheRawAddressValue()
+    {
+        // R2: address-typed datagrams decode straight to IPAddressValue — no framework address
+        // on the decode path; IPv4 keeps its four big-endian bytes in the low 32 bits.
+        var payload = new byte[] { 0x01 };
+        var encoded = Socks5UdpCodec.Encode(IPAddress.Parse("192.0.2.53"), 53, payload);
+
+        Assert.True(Socks5UdpCodec.TryDecode(encoded, out var decoded));
+        Assert.Equal((IPAddressValue?)IPAddress.Parse("192.0.2.53"), decoded.DestinationAddress);
+        Assert.Null(decoded.DestinationDomain);
+        Assert.Equal((ushort)53, decoded.DestinationPort);
+        Assert.Equal(payload, decoded.Payload.ToArray());
     }
 
     [Fact]
@@ -67,7 +83,7 @@ public sealed class UdpPacketParsingTests
         var encoded = Socks5UdpCodec.Encode(address, 53, [1, 2, 3]);
         Assert.True(Socks5UdpCodec.TryDecode(encoded, out var decoded, scopeId: 9));
         Assert.NotNull(decoded.DestinationAddress);
-        Assert.Equal((uint)9, decoded.DestinationAddress!.ScopeId);
+        Assert.Equal((uint)9, decoded.DestinationAddress!.Value.ScopeId);
     }
 
     [Fact]

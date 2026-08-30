@@ -124,7 +124,7 @@ public sealed class UdpReceiveResilienceTests
         await relaySocket.SendToAsync(Socks5UdpCodec.Encode(destination, 53, new byte[] { 1 }), SocketFlags.None, transportEndpoint, CancellationToken.None);
         var valid = await transport.ReceiveAsync(buffer, CancellationToken.None);
         Assert.True(valid.HasDatagram);
-        Assert.Equal(destination, valid.Datagram.DestinationAddress);
+        Assert.Equal((IPAddressValue?)destination, valid.Datagram.DestinationAddress);
 
         // Unexpected source (same family, different port): skipped, not thrown.
         await strangerSocket.SendToAsync(Socks5UdpCodec.Encode(destination, 53, new byte[] { 2 }), SocketFlags.None, transportEndpoint, CancellationToken.None);
@@ -170,7 +170,7 @@ public sealed class UdpReceiveResilienceTests
         var server = Socks5TestServer.ServeAssociateAndCollectAsync(tcpListener, relaySocket, relayEndpoint, datagramCount, received, serverCancellation.Token);
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), null, null);
         var transport = await Socks5UdpTransport.CreateAsync(socksServer, new SelfTrafficRegistry(), CancellationToken.None);
-        var destination = new IPEndPoint(IPAddress.Parse("192.0.2.53"), 53);
+        var destination = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
 
         var payloads = Enumerable.Range(0, datagramCount)
             .Select(index => Enumerable.Repeat((byte)(0xA0 + index), 1024).ToArray())
@@ -295,7 +295,7 @@ public sealed class UdpReceiveResilienceTests
 
         public void EnqueueResponse(Socks5UdpDatagram datagram) => _inner.EnqueueResponse(datagram);
 
-        public ValueTask SendAsync(IPEndPoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken) =>
+        public ValueTask SendAsync(Endpoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken) =>
             _inner.SendAsync(destination, payload, cancellationToken);
 
         public async ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)

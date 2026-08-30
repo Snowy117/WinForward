@@ -4,7 +4,12 @@ using WinForward.Core;
 
 namespace WinForward.Protocols;
 
-public readonly record struct Socks5UdpDatagram(IPAddress? DestinationAddress, string? DestinationDomain, ushort DestinationPort, ReadOnlyMemory<byte> Payload);
+/// <summary>
+/// A decoded SOCKS5 UDP datagram. <see cref="DestinationAddress"/> is the raw value-type
+/// representation (zero-allocation decode; scope propagated by the caller), and null marks a
+/// domain-typed datagram.
+/// </summary>
+public readonly record struct Socks5UdpDatagram(IPAddressValue? DestinationAddress, string? DestinationDomain, ushort DestinationPort, ReadOnlyMemory<byte> Payload);
 
 public static class Socks5UdpCodec
 {
@@ -39,6 +44,14 @@ public static class Socks5UdpCodec
     public static bool TryEncode(IPAddress destinationAddress, ushort destinationPort, ReadOnlySpan<byte> payload, Span<byte> destination, out int written)
         => TryEncode(IPAddressValue.From(destinationAddress), destinationPort, payload, destination, out written);
 
+    /// <summary>Raw-address convenience over the span-writing encode; cold edges (tests, loopback servers).</summary>
+    public static byte[] Encode(IPAddressValue destinationAddress, ushort destinationPort, ReadOnlySpan<byte> payload)
+    {
+        var result = new byte[6 + (destinationAddress.Family == AddressFamilyKind.IPv4 ? 4 : 16) + payload.Length];
+        _ = TryEncode(destinationAddress, destinationPort, payload, result, out _);
+        return result;
+    }
+
     public static byte[] Encode(IPAddress destinationAddress, ushort destinationPort, ReadOnlySpan<byte> payload)
     {
         var addressLength = destinationAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? 4 : 16;
@@ -72,7 +85,7 @@ public static class Socks5UdpCodec
         var bytes = frame.Span;
         if (bytes.Length < 4 || bytes[0] != 0 || bytes[1] != 0 || bytes[2] != 0 || bytes[3] is not (1 or 3 or 4)) return false;
         var offset = 4;
-        IPAddress? address = null;
+        IPAddressValue? address = null;
         string? domain = null;
         if (bytes[3] is 1 or 4)
         {
@@ -95,23 +108,19 @@ public static class Socks5UdpCodec
     }
 
     /// <summary>
-    /// Reads an IPv4 or IPv6 address from SOCKS5 UDP frame bytes. <paramref name="scopeId"/> is the
+    /// Reads an IPv4 or IPv6 address from SOCKS5 UDP frame bytes into a raw
+    /// <see cref="IPAddressValue"/> without allocating. <paramref name="scopeId"/> is the
     /// interface scope to apply to a decoded IPv6 address (M2): the SOCKS5 UDP wire format does not
     /// carry a scope, so the caller propagates one from the known relay/control endpoint so a
-    /// link-local address reconstructed from raw bytes keeps a non-zero <see cref="IPAddress.ScopeId"/>
-    /// and can route on the correct interface.
+    /// link-local address reconstructed from raw bytes keeps a non-zero
+    /// <see cref="IPAddressValue.ScopeId"/> and can route on the correct interface.
     /// </summary>
-    private static bool TryReadAddress(ReadOnlySpan<byte> bytes, byte type, long scopeId, out IPAddress address)
+    private static bool TryReadAddress(ReadOnlySpan<byte> bytes, byte type, long scopeId, out IPAddressValue? address)
     {
-        try
-        {
-            address = type == 4 && scopeId != 0 ? new IPAddress(bytes, scopeId) : new IPAddress(bytes);
-            return (type == 1 && bytes.Length == 4) || (type == 4 && bytes.Length == 16);
-        }
-        catch (ArgumentException)
-        {
-            address = IPAddress.None;
-            return false;
-        }
+        // The raw constructors cannot fail on the length-checked slices: a 4-byte FromIPv4
+        // cannot violate the IPv4 upper-bits invariant, so no framework-address exception
+        // path remains on the decode.
+        address = type == 1 ? IPAddressValue.FromIPv4(bytes) : IPAddressValue.FromIPv6(bytes, checked((uint)scopeId));
+        return (type == 1 && bytes.Length == 4) || (type == 4 && bytes.Length == 16);
     }
 }

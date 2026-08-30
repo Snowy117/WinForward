@@ -89,7 +89,7 @@ public sealed class IdleExpirySweeperFailureTests
         public IPEndPoint RelayEndpoint { get; } = new(IPAddress.Loopback, 50000);
         public IPEndPoint LocalEndpoint { get; } = new(IPAddress.Loopback, 40010);
 
-        public ValueTask SendAsync(IPEndPoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken) => ValueTask.CompletedTask;
+        public ValueTask SendAsync(Endpoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken) => ValueTask.CompletedTask;
 
         public ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken) => new(_parkedReceive.Task);
 

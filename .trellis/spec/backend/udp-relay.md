@@ -205,3 +205,61 @@ delivered long-expired; `_setupTombstones` was unbounded between 60 s sweeps.
   credit-zero assertion appended to the drop-oldest FIFO test.
 - Existing FIFO / drop-oldest / no-bypass / 1 s-cooldown / 8-way-cap /
   flash-crowd / dispose-drain tests stay green.
+
+---
+
+## UDP endpoint zero-allocation + frame-cap buffer sizing (wired 2026-08-30)
+
+Task 08-30-udp-alloc-jumbo (backlog #5, research X6 + R5). Pre-fix: 3 heap
+allocations per forwarded datagram (`IPEndPoint` round-trip in
+`UdpProxySession.SendAsync`), 2 per relay response (`new IPAddress(bytes)` in
+`Socks5UdpCodec.TryDecode`, immediately converted and discarded), 1-2 per
+receive (`new IPEndPoint(Any/IPv6Any, 0)` sender template), and the transport
+send buffer hard-wired to the Protocols constant instead of the frame cap the
+coordinator/reinjector already honor — on a jumbo-capable ABI every payload
+> 1508 would fail `TryEncode` → IOException → catch-all teardown → full
+	SOCKS5 handshake re-run per datagram (storm).
+
+### 1. Scope / Trigger
+
+- Trigger: any change to `IUdpProxyTransport.SendAsync`'s signature,
+  `Socks5UdpDatagram`'s address field, SOCKS5 UDP decode address materialization,
+  the transport send-buffer sizing, or the composition of
+  `Socks5UdpTransportFactory`.
+
+### 2. Signatures
+
+- `IUdpProxyTransport.SendAsync(Endpoint destination, ReadOnlyMemory<byte> payload, CancellationToken)` — the Core struct, not `IPEndPoint`.
+- `Socks5UdpDatagram(IPAddressValue? DestinationAddress, string? DestinationDomain, ushort DestinationPort, ReadOnlyMemory<byte> Payload)` — `null` (nullable struct) still marks a domain-typed datagram.
+- `Socks5UdpTransportFactory(SelfTrafficRegistry selfTraffic, int maximumFrameSize)` — required cap parameter; internal `Socks5UdpTransport.CreateAsync` seam mirrors it with a `UdpFrameBuilder.DefaultMaximumEthernetFrame` default.
+- Per-transport cached `_receiveSenderTemplate` (`IPEndPoint`, ctor-computed from the relay address family).
+
+### 3. Contracts
+
+- **Forward leg passes `Endpoint` straight through** (`UdpProxySession.SendAsync` → transport): no `ToIPAddress()`/`new IPEndPoint` materialization anywhere on the send path; the transport encodes via `Socks5UdpCodec.TryEncode(IPAddressValue, ...)` and the actual `SendTo` target stays the fixed `RelayEndpoint`.
+- **Decode produces `IPAddressValue?` directly** (`FromIPv4` / `FromIPv6(bytes, scopeId)`): the caller-supplied relay scope lands in `IPAddressValue.ScopeId` exactly as it previously landed in `IPAddress.ScopeId`; the session's reverse leg builds `Endpoint.From(address, port)` with zero framework-address round-trips. `IPAddress`-taking `TryEncode`/`Encode` overloads remain for cold edges (tests, loopback server echo).
+- **One sender template per transport**: `ReceiveFromAsync` does not mutate the passed endpoint (the observed remote arrives in `SocketReceiveFromResult.RemoteEndPoint`), so a readonly ctor-computed template is shared across receives.
+- **Send buffer derives from the same frame cap as every sibling**: `_sendBuffer = new byte[6 + 16 + maximumFrameSize]` (guard `> 0`), mirroring the coordinator's receive sizing (`cap + 22 + 1`) and the reinjector's frame bound (`cap`). Capture bounds payloads at `cap − 42`, so the send buffer always encodes anything the pipeline can capture; the fail-closed IOException for a genuinely larger datagram stays as the assumption guard.
+- **Composition single source of truth** (`Program.cs` `CreateUdpCoordinator`): one hoisted `NdisApiAbi.MaximumEthernetFrame` flows to `Socks5UdpTransportFactory`, `UdpResponseReinjector`, and `UdpProxyCoordinator`. Send buffer, receive buffer, reinjector cap, and the native ABI must agree; only the ABI constant should ever change.
+- **Oversized-response boundary**: the deliverable relay-response payload ceiling is `cap − 42` (1472 B at the pinned 1514 ABI — standard-MTU QUIC/WireGuard 1472 B packets pass exactly); larger responses skip as `Oversized` (5 s summary counter) and oversized rebuilt frames drop fail-closed. A jumbo-capable ABI lifts the ceiling end-to-end now that the send buffer follows the cap.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Session sends a datagram | transport receives the same `Endpoint` (address, port, family); 0 endpoint allocations |
+| Relay response decodes (IPv4 / IPv6 / IPv6-with-scope) | `DestinationAddress` is the raw `IPAddressValue` with `ScopeId` propagated from the relay endpoint |
+| Transport constructed with cap 9014, payload 2000 B | encodes and delivers without the buffer-size IOException |
+| Transport constructed with default cap, payload > `6 + 16 + cap` | fail-closed IOException (assumption guard) |
+| Negative scopeId into decode | `OverflowException` from `checked` cast (unreachable: scope comes from `IPAddress.ScopeId`, always ≥ 0) |
+
+### 5. Tests
+
+- `SendAsyncForwardsTheSessionEndpointToTheTransportUnchanged` (endpoint fidelity through the session).
+- `SocksUdpIpv4RoundTripDecodesToTheRawAddressValue`, `Socks5UdpDecodeCarriesRelayScopeForIpv6Address` (`.Value.ScopeId == 9`).
+- `JumboCapSendBufferEncodesPayloadsBeyondTheDefaultCap` (9014 cap, 2000 B payload, end-to-end through a loopback relay), `DefaultCapSendBufferFailsClosedOnOversizedPayloads`.
+- Existing skip-class/connreset/reinjection suites stay green (463/463 at landing).
+
+### 6. Migration note
+
+xUnit `Assert.Equal` generic inference does not apply the `IPAddress` → `IPAddressValue` implicit conversion; migrated assertions cast explicitly (`(IPAddressValue?)expected`). `Assert.Equal(IPAddress, IPAddressValue)` still compiles elsewhere (e.g. `UdpPacketView` assertions) through inference participation — do not mistake those sites for unmigrated ones.

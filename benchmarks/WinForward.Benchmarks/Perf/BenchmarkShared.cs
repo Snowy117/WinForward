@@ -175,7 +175,7 @@ internal sealed class BenchmarkUdpTransport(int localPort, BenchmarkUdpTransport
     public IPEndPoint RelayEndpoint { get; } = new(IPAddress.Loopback, 50_000);
     public IPEndPoint LocalEndpoint { get; } = new(IPAddress.Loopback, localPort);
 
-    public ValueTask SendAsync(IPEndPoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+    public ValueTask SendAsync(Endpoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
         owner.NoteSend();
         return ValueTask.CompletedTask;

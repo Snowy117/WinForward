@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
+using WinForward.Core;
 using WinForward.Protocols;
 
 namespace WinForward.Benchmarks.Stability;
@@ -119,9 +120,10 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
         private readonly Socket _relay;
         private readonly LoopbackSocks5UdpServer _owner;
         private readonly IPEndPoint _echoDestination;
+        private readonly IPAddressValue _echoAddress;
         private readonly CancellationToken _shutdown;
         private IPEndPoint? _lastClient;
-        private IPAddress? _lastDestinationAddress;
+        private IPAddressValue? _lastDestinationAddress;
         private ushort _lastDestinationPort;
         private int _disposed;
 
@@ -130,6 +132,7 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
             _control = control;
             _owner = owner;
             _echoDestination = echoDestination;
+            _echoAddress = IPAddressValue.From(echoDestination.Address);
             _shutdown = shutdown;
             _relay = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
             _relay.ReceiveBufferSize = 4 << 20;
@@ -293,7 +296,7 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
         private async Task SendReplyAsync(ReadOnlyMemory<byte> payload)
         {
             if (_lastClient is null) return;
-            var address = _lastDestinationAddress ?? _echoDestination.Address;
+            var address = _lastDestinationAddress ?? _echoAddress;
             var port = _lastDestinationAddress is not null ? _lastDestinationPort : checked((ushort)_echoDestination.Port);
             var datagram = Socks5UdpCodec.Encode(address, port, payload.Span);
             try

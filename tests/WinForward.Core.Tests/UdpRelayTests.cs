@@ -451,7 +451,7 @@ public sealed class UdpRelayTests
         {
             lock (transport.Sent) return transport.Sent.Count == 1;
         });
-        (IPEndPoint Destination, byte[] Payload) sent;
+        (Endpoint Destination, byte[] Payload) sent;
         lock (transport.Sent) sent = transport.Sent[0];
         Assert.Equal(payload, sent.Payload);
         // The original datagram is consumed by the relay forward; it is never reinjected.

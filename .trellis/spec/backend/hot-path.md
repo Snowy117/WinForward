@@ -14,7 +14,11 @@ attribution, socket setup, logging, tests) are exempt.
 1. **Raw addresses only on the hot path.** `IPAddress` (class) never appears in
    parse/classify/flow-key code; use `IPAddressValue` (UInt128 bits, IPv4 in the low 32 bits,
    family + scope). Convert via `ToIPAddress()` / `From(IPAddress)` on cold edges only.
-   `Endpoint` stores `IPAddressValue` by value.
+   `Endpoint` stores `IPAddressValue` by value. Since 2026-08-30 (task
+   08-30-udp-alloc-jumbo) this extends to the SOCKS5 UDP datagram product type —
+   `Socks5UdpDatagram.DestinationAddress` is `IPAddressValue?` and
+   `IUdpProxyTransport.SendAsync` takes an `Endpoint` — no framework addresses
+   remain on any UDP datagram path.
 2. **IPv4 masks stay inside the low 32 bits.** `IPPrefix.PrefixMask(prefixLength, family)`:
    IPv4 = `0xFFFFFFFF << (32 - len)` (/0→0, /32→0xFFFFFFFF); IPv6 = left-aligned 128-bit.
    A left-aligned mask over low-32 IPv4 bits matches everything — regression-locked by

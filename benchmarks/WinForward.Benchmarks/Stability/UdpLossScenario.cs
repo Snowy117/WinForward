@@ -3,6 +3,7 @@ using System.Diagnostics;
 using WinForward.Benchmarks.Perf;
 using WinForward.Configuration;
 using WinForward.Core;
+using WinForward.Protocols;
 using WinForward.Runtime;
 using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
@@ -37,7 +38,7 @@ internal static class UdpLossScenario
         await using var server = new LoopbackSocks5UdpServer(receiver.Endpoint);
         var sink = new CountingUdpResponseSink();
         var productEvents = CaptureProductEvents ? new CountingRuntimeLogger() : null;
-        var coordinator = new UdpProxyCoordinator(new Socks5UdpTransportFactory(new SelfTrafficRegistry()), sink, options.Flows, logger: productEvents is not null ? productEvents : NullRuntimeLogger.Instance);
+        var coordinator = new UdpProxyCoordinator(new Socks5UdpTransportFactory(new SelfTrafficRegistry(), UdpFrameBuilder.DefaultMaximumEthernetFrame), sink, options.Flows, logger: productEvents is not null ? productEvents : NullRuntimeLogger.Instance);
         SenderStats stats;
         try
         {

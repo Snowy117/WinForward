@@ -56,7 +56,13 @@ public interface IUdpProxyTransport : IAsyncDisposable
 {
     IPEndPoint RelayEndpoint { get; }
     IPEndPoint LocalEndpoint { get; }
-    ValueTask SendAsync(IPEndPoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Encodes one datagram with <paramref name="destination"/> as the SOCKS5 UDP header target and
+    /// sends it to the negotiated relay endpoint. The destination is a raw struct so the forward
+    /// warm path (uncontended gate, sync kernel send) allocates nothing.
+    /// </summary>
+    ValueTask SendAsync(Endpoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken);
     ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken);
 }
 
@@ -68,15 +74,24 @@ public interface IUdpProxyTransportFactory
 public sealed class Socks5UdpTransportFactory : IUdpProxyTransportFactory
 {
     private readonly SelfTrafficRegistry _selfTraffic;
+    private readonly int _maximumFrameSize;
 
-    public Socks5UdpTransportFactory(SelfTrafficRegistry selfTraffic)
+    /// <summary>
+    /// Creates transports whose send buffer follows the pinned frame cap (6 + 16 + cap) — the
+    /// same single source of truth the coordinator's receive windows (cap + 22 + 1) and the
+    /// reinjector's rebuilt frames (cap) already use. Composition passes the native ABI
+    /// constant explicitly.
+    /// </summary>
+    public Socks5UdpTransportFactory(SelfTrafficRegistry selfTraffic, int maximumFrameSize)
     {
         ArgumentNullException.ThrowIfNull(selfTraffic);
+        if (maximumFrameSize <= 0) throw new ArgumentOutOfRangeException(nameof(maximumFrameSize));
         _selfTraffic = selfTraffic;
+        _maximumFrameSize = maximumFrameSize;
     }
 
     public async ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken) =>
-        await Socks5UdpTransport.CreateAsync(server, _selfTraffic, cancellationToken).ConfigureAwait(false);
+        await Socks5UdpTransport.CreateAsync(server, _selfTraffic, cancellationToken, null, null, maximumFrameSize: _maximumFrameSize).ConfigureAwait(false);
 }
 
 public sealed class Socks5UdpTransport : IUdpProxyTransport
@@ -106,13 +121,28 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
     private readonly Socks5ControlConnection _control;
     private readonly SelfTrafficRegistry.SelfTrafficToken? _selfTrafficToken;
     private readonly SemaphoreSlim _sendGate = new(1, 1);
+    private readonly byte[] _sendBuffer;
+    private readonly IPEndPoint _receiveSenderTemplate;
 
-    private Socks5UdpTransport(Socket socket, Socks5ControlConnection control, IPEndPoint relayEndpoint, SelfTrafficRegistry.SelfTrafficToken? selfTrafficToken)
+    private Socks5UdpTransport(Socket socket, Socks5ControlConnection control, IPEndPoint relayEndpoint, SelfTrafficRegistry.SelfTrafficToken? selfTrafficToken, int maximumFrameSize)
     {
+        if (maximumFrameSize <= 0) throw new ArgumentOutOfRangeException(nameof(maximumFrameSize));
         _socket = socket;
         _control = control;
         RelayEndpoint = relayEndpoint;
         _selfTrafficToken = selfTrafficToken;
+        // Sized from the same pinned frame cap the coordinator's receive windows (cap + 22 + 1)
+        // and the reinjector's rebuilt frames (cap) use: 6 + 16 covers the worst SOCKS5 UDP
+        // header (IPv6), and a captured payload can never exceed cap - 42 (Ethernet + IPv4 +
+        // UDP), so the buffer always fits anything the pipeline can capture — including on a
+        // jumbo-capable ABI fed a larger cap.
+        _sendBuffer = new byte[6 + 16 + maximumFrameSize];
+        // The receive-sender family is fixed by the relay endpoint, so one template per
+        // transport replaces the per-receive endpoint allocation; ReceiveFromAsync reports the
+        // actual remote in its result and never mutates the template.
+        _receiveSenderTemplate = relayEndpoint.AddressFamily == AddressFamily.InterNetwork
+            ? new IPEndPoint(IPAddress.Any, 0)
+            : new IPEndPoint(IPAddress.IPv6Any, 0);
     }
 
     public IPEndPoint RelayEndpoint { get; }
@@ -127,7 +157,8 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
         CancellationToken cancellationToken,
         Func<CancellationToken, ValueTask<Socks5ControlConnection>>? createControl,
         Func<AddressFamily, Socket>? socketFactory,
-        Action<Socket>? disableUdpConnectionReset = null)
+        Action<Socket>? disableUdpConnectionReset = null,
+        int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame)
     {
         Socks5ControlConnection? control = null;
         Socket? socket = null;
@@ -160,7 +191,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
             var local = Endpoint.From(((IPEndPoint)socket.LocalEndPoint!).Address, checked((ushort)((IPEndPoint)socket.LocalEndPoint!).Port));
             var remote = Endpoint.From(relay.Address, checked((ushort)relay.Port));
             selfTrafficToken = selfTraffic.Register(new SelfTrafficRegistry.SelfTrafficKey(TransportProtocol.Udp, local, remote));
-            var transport = new Socks5UdpTransport(socket, control, relay, selfTrafficToken);
+            var transport = new Socks5UdpTransport(socket, control, relay, selfTrafficToken, maximumFrameSize);
             socket = null;
             control = null;
             selfTrafficToken = null;
@@ -187,7 +218,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
         }
     }
 
-    public ValueTask SendAsync(IPEndPoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+    public ValueTask SendAsync(Endpoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
         // Serialize the encode + send pair (R5): the shared send buffer must never observe
         // interleaved writers when one flow is dispatched from two pumps. This is a
@@ -204,10 +235,10 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
 
         try
         {
-            // The header buffer covers the worst SOCKS5 UDP overhead (6 + 16-byte IPv6) plus an
-            // Ethernet-sized payload; the encode writes into it and the socket send reads only the
-            // written slice, so a datagram send allocates nothing.
-            if (!Socks5UdpCodec.TryEncode(IPAddressValue.From(destination.Address), (ushort)destination.Port, payload.Span, _sendBuffer, out var written))
+            // The header buffer covers the worst SOCKS5 UDP overhead (6 + 16-byte IPv6) plus the
+            // cap-derived payload bound; the encode writes into it and the socket send reads only
+            // the written slice, so a datagram send allocates nothing.
+            if (!Socks5UdpCodec.TryEncode(destination.Address, destination.Port, payload.Span, _sendBuffer, out var written))
             {
                 throw new IOException("A SOCKS5 UDP datagram exceeded the relay send buffer.");
             }
@@ -234,12 +265,12 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
         }
     }
 
-    private async ValueTask SendAfterGateAsync(Task gateWait, IPEndPoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+    private async ValueTask SendAfterGateAsync(Task gateWait, Endpoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
         await gateWait.ConfigureAwait(false);
         try
         {
-            if (!Socks5UdpCodec.TryEncode(IPAddressValue.From(destination.Address), (ushort)destination.Port, payload.Span, _sendBuffer, out var written))
+            if (!Socks5UdpCodec.TryEncode(destination.Address, destination.Port, payload.Span, _sendBuffer, out var written))
             {
                 throw new IOException("A SOCKS5 UDP datagram exceeded the relay send buffer.");
             }
@@ -264,11 +295,18 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
         }
     }
 
-    private readonly byte[] _sendBuffer = new byte[6 + 16 + UdpFrameBuilder.MaximumEthernetFrame];
-
+    /// <summary>
+    /// Receives one datagram from the relay. <paramref name="buffer"/> is the caller's receive
+    /// window — at composition sized cap + 22 + 1 (frame cap, maximum SOCKS5 UDP header, one
+    /// oversize sentinel) — so a datagram that fills it reports the
+    /// <see cref="Socks5UdpReceiveSkipReason.Oversized"/> skip: the deliverable response-payload
+    /// ceiling is cap - 42 (Ethernet + IPv4 + UDP; 1472 bytes at the pinned 1514 ABI), and larger
+    /// relay responses surface in the session's rate-limited skip summary. A jumbo-capable ABI
+    /// lifts the ceiling end-to-end because the send buffer follows the same cap.
+    /// </summary>
     public async ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
     {
-        EndPoint sender = RelayEndpoint.AddressFamily == AddressFamily.InterNetwork ? new IPEndPoint(IPAddress.Any, 0) : new IPEndPoint(IPAddress.IPv6Any, 0);
+        EndPoint sender = _receiveSenderTemplate;
         SocketReceiveFromResult result;
         try
         {
@@ -298,6 +336,14 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
     internal static bool IsAcceptableRelaySource(EndPoint observed, IPEndPoint relay) =>
         observed is IPEndPoint ip && ip.Port == relay.Port && ip.AddressFamily == relay.AddressFamily;
 
+    /// <summary>
+    /// A receive that fills the caller's buffer may be truncated, so it is skipped instead of
+    /// decoded. The session's receive window is cap + 22 + 1, which makes cap - 42 (Ethernet +
+    /// IPv4 + UDP) the deliverable payload ceiling — 1472 bytes at the pinned 1514 ABI; larger
+    /// relay responses skip as <see cref="Socks5UdpReceiveSkipReason.Oversized"/> and surface in
+    /// the session's rate-limited skip summary. A jumbo-capable ABI lifts the ceiling end-to-end
+    /// because the send buffer follows the same cap.
+    /// </summary>
     internal static bool IsPossiblyTruncated(int receivedBytes, int bufferLength) => receivedBytes >= bufferLength;
 
     /// <summary>

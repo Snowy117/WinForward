@@ -112,7 +112,9 @@ internal sealed class UdpProxySession : IAsyncDisposable
 
         try
         {
-            await _transport.SendAsync(new IPEndPoint(destination.Address.ToIPAddress(), destination.Port), payload, cancellationToken).ConfigureAwait(false);
+            // The raw Endpoint flows straight through: the transport encodes it into the SOCKS5
+            // header, so the forward warm path allocates nothing for endpoint handling.
+            await _transport.SendAsync(destination, payload, cancellationToken).ConfigureAwait(false);
             TouchActivity();
         }
         finally
@@ -190,14 +192,14 @@ internal sealed class UdpProxySession : IAsyncDisposable
                     continue;
                 }
                 var response = receive.Datagram;
-                if (response.DestinationAddress is null)
+                if (response.DestinationAddress is not { } address)
                 {
                     // A domain-typed response has no IP source to rebuild the frame from (S6a):
                     // counted with the other skip-class anomalies, then skipped.
                     RecordSkippedDomainDestination();
                     continue;
                 }
-                await InjectResponseAsync(Endpoint.From(response.DestinationAddress, response.DestinationPort), response).ConfigureAwait(false);
+                await InjectResponseAsync(Endpoint.From(address, response.DestinationPort), response).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)

@@ -53,11 +53,11 @@ public sealed class Socks5UdpAssociateTests
             serverCancellation.Token);
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), null, null);
         var registry = new SelfTrafficRegistry();
-        var coordinator = new UdpProxyCoordinator(new Socks5UdpTransportFactory(registry), new NoopResponseSink());
-        var destination = new IPEndPoint(IPAddress.Parse("2001:db8::53"), 5353);
+        var coordinator = new UdpProxyCoordinator(new Socks5UdpTransportFactory(registry, UdpFrameBuilder.DefaultMaximumEthernetFrame), new NoopResponseSink());
+        var destination = Endpoint.From(IPAddress.Parse("2001:db8::53"), 5353);
         var flow = FlowKey.Create(
             Endpoint.From(IPAddress.Parse("2001:db8::10"), 53000),
-            Endpoint.From(destination.Address, checked((ushort)destination.Port)),
+            destination,
             TransportProtocol.Udp,
             FlowOriginKind.Host);
         var payload = new byte[] { 0xde, 0xad, 0xbe, 0xef };
@@ -71,8 +71,8 @@ public sealed class Socks5UdpAssociateTests
         Assert.Equal(AddressFamily.InterNetwork, packet.Sender.AddressFamily);
         Assert.Equal(4, packet.Datagram[3]);
         Assert.True(Socks5UdpCodec.TryDecode(packet.Datagram, out var decoded));
-        Assert.Equal(destination.Address, decoded.DestinationAddress);
-        Assert.Equal((ushort)destination.Port, decoded.DestinationPort);
+        Assert.Equal((IPAddressValue?)destination.Address, decoded.DestinationAddress);
+        Assert.Equal(destination.Port, decoded.DestinationPort);
         Assert.Equal(payload, decoded.Payload.ToArray());
 
         var local = Endpoint.From(packet.Sender.Address, checked((ushort)packet.Sender.Port));
@@ -109,7 +109,7 @@ public sealed class Socks5UdpAssociateTests
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), null, null);
         var registry = new SelfTrafficRegistry();
         var transport = await Socks5UdpTransport.CreateAsync(socksServer, registry, CancellationToken.None);
-        var destination = new IPEndPoint(IPAddress.Parse("2001:db8::53"), 5353);
+        var destination = Endpoint.From(IPAddress.Parse("2001:db8::53"), 5353);
         var payload = new byte[] { 1, 2, 3 };
 
         Assert.Equal(AddressFamily.InterNetworkV6, transport.LocalEndpoint.AddressFamily);
@@ -123,8 +123,8 @@ public sealed class Socks5UdpAssociateTests
         var packet = await relayPacket.Task.WaitAsync(CancellationToken.None);
         Assert.Equal(AddressFamily.InterNetworkV6, packet.Sender.AddressFamily);
         Assert.True(Socks5UdpCodec.TryDecode(packet.Datagram, out var decoded));
-        Assert.Equal(destination.Address, decoded.DestinationAddress);
-        Assert.Equal((ushort)destination.Port, decoded.DestinationPort);
+        Assert.Equal((IPAddressValue?)destination.Address, decoded.DestinationAddress);
+        Assert.Equal(destination.Port, decoded.DestinationPort);
         Assert.Equal(payload, decoded.Payload.ToArray());
 
         await transport.DisposeAsync();
@@ -226,7 +226,7 @@ public sealed class Socks5UdpAssociateTests
             CancellationToken.None,
             null,
             family => socket = new TrackingSocket(family));
-        await transport.SendAsync(new IPEndPoint(IPAddress.Loopback, 53), new byte[] { 1 }, CancellationToken.None);
+        await transport.SendAsync(Endpoint.From(IPAddress.Loopback, 53), new byte[] { 1 }, CancellationToken.None);
         var packet = await relayPacket.Task.WaitAsync(CancellationToken.None);
         var local = Endpoint.From(packet.Sender.Address, checked((ushort)packet.Sender.Port));
         var relay = Endpoint.From(relayEndpoint.Address, checked((ushort)relayEndpoint.Port));

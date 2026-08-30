@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using BenchmarkDotNet.Attributes;
 using WinForward.Benchmarks.Stability;
 using WinForward.Configuration;
+using WinForward.Protocols;
 using WinForward.Runtime;
 using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
@@ -53,7 +54,7 @@ public class UdpSessionBenchmarks
     [Benchmark]
     public async Task PopulateSessionsAsync()
     {
-        await using var coordinator = new UdpProxyCoordinator(new Socks5UdpTransportFactory(new SelfTrafficRegistry()), NoopUdpResponseSink.Instance, Sessions);
+        await using var coordinator = new UdpProxyCoordinator(new Socks5UdpTransportFactory(new SelfTrafficRegistry(), UdpFrameBuilder.DefaultMaximumEthernetFrame), NoopUdpResponseSink.Instance, Sessions);
         var forwardedBaseline = _server.RelayForwarded;
         for (var index = 0; index < Sessions; index++)
         {

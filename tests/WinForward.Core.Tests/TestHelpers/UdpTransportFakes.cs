@@ -50,7 +50,7 @@ internal sealed class FakeTransport : IUdpProxyTransport
     public IPEndPoint RelayEndpoint { get; }
     public IPEndPoint LocalEndpoint { get; }
     public bool IsDisposed { get; private set; }
-    public List<(IPEndPoint Destination, byte[] Payload)> Sent { get; } = [];
+    public List<(Endpoint Destination, byte[] Payload)> Sent { get; } = [];
     public Channel<Socks5UdpReceiveResult> Received { get; } = Channel.CreateUnbounded<Socks5UdpReceiveResult>();
 
     /// <summary>Queues a valid decoded relay datagram for the session's receive loop.</summary>
@@ -59,7 +59,7 @@ internal sealed class FakeTransport : IUdpProxyTransport
     /// <summary>Queues a per-datagram anomaly the real transport would surface as a skip result.</summary>
     public void EnqueueSkip(Socks5UdpReceiveSkipReason reason) => Received.Writer.TryWrite(Socks5UdpReceiveResult.Skipped(reason));
 
-    public ValueTask SendAsync(IPEndPoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
+    public ValueTask SendAsync(Endpoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
         lock (Sent) Sent.Add((destination, payload.ToArray()));
         return ValueTask.CompletedTask;
@@ -122,7 +122,7 @@ internal sealed class ImmediateFaultTransport : IUdpProxyTransport
     public IPEndPoint LocalEndpoint { get; }
     public bool IsDisposed { get; private set; }
 
-    public ValueTask SendAsync(IPEndPoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken) =>
+    public ValueTask SendAsync(Endpoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken) =>
         ValueTask.FromException(new IOException("relay receive already failed"));
 
     public ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken) =>
