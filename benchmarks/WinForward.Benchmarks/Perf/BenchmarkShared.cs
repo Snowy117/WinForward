@@ -52,8 +52,9 @@ internal static class BenchmarkShared
     /// Builds a TCP frame variant for the redirect-rewrite benchmarks: a bare SYN carries no
     /// payload (IP total length covers only the headers; trailing bytes are Ethernet padding),
     /// while the mid-flow data variant fills the frame to the end. TCP flags distinguish the
-    /// shapes (SYN vs ACK); header checksums stay zero because neither the classifier nor the
-    /// endpoint rewriter validates the input checksum — the rewriter recomputes both.
+    /// shapes (SYN vs ACK). Both variants carry valid IPv4 header and TCP checksums, matching
+    /// captured traffic — required since the endpoint rewriter updates checksums incrementally
+    /// from the incoming values (RFC 1624).
     /// </summary>
     public static byte[] CreateIpv4TcpFrame(int frameSize, bool bareSyn)
     {
@@ -70,7 +71,31 @@ internal static class BenchmarkShared
             frame[TcpFlagsOffset] = 0x10;
         }
 
+        var headerLength = (frame[14] & 0x0f) * 4;
+        var totalLength = BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(IpTotalLengthOffset, 2));
+        var tcpOffset = 14 + headerLength;
+        var tcpLength = totalLength - headerLength;
+        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(24, 2), PacketChecksums.InternetChecksum(frame.AsSpan(14, headerLength)));
+        frame[tcpOffset + 16] = 0;
+        frame[tcpOffset + 17] = 0;
+        var sum = Sum16(frame.AsSpan(26, 4)) + Sum16(frame.AsSpan(30, 4)) + 6u + (uint)tcpLength + Sum16(frame.AsSpan(tcpOffset, tcpLength));
+        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(tcpOffset + 16, 2), (ushort)~Fold16(sum));
         return frame;
+    }
+
+    private static uint Sum16(ReadOnlySpan<byte> data)
+    {
+        uint sum = 0;
+        var index = 0;
+        for (; index + 1 < data.Length; index += 2) sum += BinaryPrimitives.ReadUInt16BigEndian(data.Slice(index, 2));
+        if (index < data.Length) sum += (uint)data[index] << 8;
+        return sum;
+    }
+
+    private static ushort Fold16(uint sum)
+    {
+        while (sum >> 16 != 0) sum = (sum & 0xffff) + (sum >> 16);
+        return (ushort)sum;
     }
 
     public static FlowKey CreateFlowKey(int index)

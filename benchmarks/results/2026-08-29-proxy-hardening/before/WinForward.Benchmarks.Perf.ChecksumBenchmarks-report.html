@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8' />
+<title>WinForward.Benchmarks.Perf.ChecksumBenchmarks-20260829-154311</title>
+
+<style type="text/css">
+	table { border-collapse: collapse; display: block; width: 100%; overflow: auto; }
+	td, th { padding: 6px 13px; border: 1px solid #ddd; text-align: right; }
+	tr { background-color: #fff; border-top: 1px solid #ccc; }
+	tr:nth-child(even) { background: #f8f8f8; }
+</style>
+</head>
+<body>
+<pre><code>
+BenchmarkDotNet v0.15.8, Linux Ubuntu 24.04.4 LTS (Noble Numbat)
+AMD Ryzen 9 9955HX 2.50GHz, 1 CPU, 16 logical and 8 physical cores
+.NET SDK 10.0.302
+  [Host]   : .NET 10.0.10 (10.0.10, 10.0.1026.32716), X64 RyuJIT x86-64-v4
+  ShortRun : .NET 10.0.10 (10.0.10, 10.0.1026.32716), X64 RyuJIT x86-64-v4
+</code></pre>
+<pre><code>Job=ShortRun  IterationCount=3  LaunchCount=1  
+WarmupCount=3  
+</code></pre>
+
+<table>
+<thead><tr><th>Method   </th><th>FrameBytes</th><th>Mean</th><th>Error</th><th>StdDev</th><th>Ratio</th><th>RatioSD</th><th>Allocated</th><th>Alloc Ratio</th>
+</tr>
+</thead><tbody><tr><td>Scalar</td><td>64</td><td>39.293 ns</td><td>9.106 ns</td><td>0.4991 ns</td><td>1.00</td><td>0.02</td><td>-</td><td>NA</td>
+</tr><tr><td>VectorCandidate</td><td>64</td><td>3.825 ns</td><td>4.160 ns</td><td>0.2280 ns</td><td>0.10</td><td>0.01</td><td>-</td><td>NA</td>
+</tr><tr><td>Scalar</td><td>512</td><td>354.442 ns</td><td>149.825 ns</td><td>8.2124 ns</td><td>1.00</td><td>0.03</td><td>-</td><td>NA</td>
+</tr><tr><td>VectorCandidate</td><td>512</td><td>17.808 ns</td><td>65.013 ns</td><td>3.5636 ns</td><td>0.05</td><td>0.01</td><td>-</td><td>NA</td>
+</tr><tr><td>Scalar</td><td>1514</td><td>989.033 ns</td><td>541.308 ns</td><td>29.6709 ns</td><td>1.00</td><td>0.04</td><td>-</td><td>NA</td>
+</tr><tr><td>VectorCandidate</td><td>1514</td><td>41.913 ns</td><td>10.775 ns</td><td>0.5906 ns</td><td>0.04</td><td>0.00</td><td>-</td><td>NA</td>
+</tr></tbody></table>
+</body>
+</html>

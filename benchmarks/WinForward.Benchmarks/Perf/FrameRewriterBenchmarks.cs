@@ -1,6 +1,7 @@
 using System.Net;
 using BenchmarkDotNet.Attributes;
 using WinForward.Core;
+using WinForward.Protocols;
 using WinForward.Runtime.TcpRedirect;
 
 namespace WinForward.Benchmarks.Perf;
@@ -69,5 +70,16 @@ public class FrameRewriterBenchmarks
     {
         _dataFrame.AsSpan().CopyTo(_scratch);
         return TcpFrameRewriter.TryRewriteForwardLeg(_scratch, _client, _server, _forwardedAssociation, ListenerPort);
+    }
+
+    /// <summary>
+    /// Direct endpoint rewrite (the checksum work P2a isolates): addresses + ports + checksum
+    /// update only, no MAC swap or association branching. Same restore-then-rewrite structure.
+    /// </summary>
+    [Benchmark]
+    public bool TryRewriteEndpointsDirect()
+    {
+        _dataFrame.AsSpan().CopyTo(_scratch);
+        return PacketChecksums.TryRewriteTcpEndpoints(_scratch, _server.Address, _server.Port, _client.Address, ListenerPort);
     }
 }

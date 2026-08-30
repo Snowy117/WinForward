@@ -29,8 +29,9 @@ dotnet run -c Release --project benchmarks/WinForward.Benchmarks -- --job short
 dotnet run -c Release --project benchmarks/WinForward.Benchmarks -- --filter *Parser* --job short
 ```
 
-Scenario families (classes under `Perf/`, each with `[MemoryDiagnoser]` except the relay where
-socket buffers would mislead the allocation columns):
+Scenario families (classes under `Perf/`, each with `[MemoryDiagnoser]` — for the relay the
+absolute allocation includes one-time socket-buffer scaffolding per invocation, so gate on the
+before/after delta at equal chunk sizes rather than the raw number):
 
 | Class | Covers | Sweep |
 |---|---|---|
@@ -42,6 +43,7 @@ socket buffers would mislead the allocation columns):
 | `CapturePumpBenchmarks` | end-to-end pump round: 200 000 synthetic packets through dispatcher + processor | frame 128/1400 × batch 32/1 |
 | `UdpSessionBenchmarks` | UDP session populate + dispose cost | 1 / 100 / 1000 sessions |
 | `TcpRelayBenchmarks` | one-way relay transfer (256 KiB–16 MiB) | chunk 1 / 1024 / 8192 / 65536 |
+| `ChecksumBenchmarks` | scalar vs vectorized Internet checksum (P2b decision data; scalar is the baseline) | frame bytes 64 / 512 / 1514 |
 
 Interpretation guidance from the hot-path conventions still applies: treat ns/pps deltas under
 ~2× as noise on a dev box; allocation bytes and GC counts are the exact gates. Use the same
