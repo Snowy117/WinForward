@@ -151,13 +151,15 @@ Trigger: any change to `TcpProxyRelay`'s pump loop, `PacketChecksums`, or the ch
 
 ### 2. Signatures
 
-- `TcpProxyRelay` owns one reusable `StallWindow` (linked CTS) **per direction per session**; `Arm()` runs before every `ReadAsync`/`WriteAsync`.
+- `TcpProxyRelay` owns one reusable `StallWindow` (linked CTS) **per direction per session**; `Arm()` runs before every `ReadAsync`/`WriteAsync`, throttled to at most once per second (task 08-30-fast-hardening X8a): the first arm is unconditional, subsequent arms only when >1 s (`Stopwatch` ticks, internal static `StallWindow.IsRearmDue(lastArmTicks, nowTicks)`, strictly greater) has elapsed since the last arm.
+- Each pump direction rents one 64 KiB buffer from `ArrayPool<byte>.Shared` (`PumpBufferSize = 64 * 1024`, task 08-30-fast-hardening X5) for its whole lifetime — one rent per direction (half-close gives independent lifetimes), returned exactly once in `finally` on every exit path; loop bounds use `buffer.Length` (the pool may return a larger array).
 - `PacketChecksums.TryRewriteIpv4Tcp/TryRewriteIpv6Tcp` use RFC 1624 incremental update; the internal full-recompute oracle is kept for property tests (`InternalsVisibleTo("WinForward.Core.Tests")`).
 - `PacketChecksums.Sum` is `Vector256`-vectorized when hardware-accelerated, scalar fold-while-adding otherwise.
 
 ### 3. Contracts
 
 - **Stall-window CTS reuse (P1)**: `Arm()` = `TryReset()` + `CancelAfter(StallTimeout)`; only when `TryReset` returns false (raced with the timer firing) is the CTS recreated — re-linked to the lifetime token, so lifetime/peer cancellation still lands instantly. `TryReset` clears any pending `CancelAfter` timer (verified on .NET 10), so each window arms from its own `Arm()` with no residual-timer leakage. Measured per-op pump allocation 160 B → 0 B; `TcpRelayBenchmarks.OneWayAsync` chunk-8192 allocation −77% (828→188 KB/op) with no throughput regression. Do not reintroduce per-chunk `CreateLinkedTokenSource` + `CancelAfter`.
+- **Re-arm throttle (X8a, 2026-08-30)**: the throttle only skips `Arm()` re-invocations within 1 s — it never disarms, never recreates the CTS, and never breaks the lifetime-token link; the previously armed timer simply stays armed, so the 30-min stall window drifts by at most 1 s. Motivation: unconditional `Arm()` cost ~100–200 ns per timer op, ≈5–10% of a core at 10 Gbps single-flow. Kept the P1 contract intact (when `Arm()` does run, it is still `TryReset` + `CancelAfter`, never per-chunk CTS creation). Both relay legs set `NoDelay = true` (listener accept + upstream `ConnectAsync` success) — Nagle has no upside for a byte-pipe relay and produces 40–200 ms delayed-ACK cliffs on interactive traffic.
 - **Incremental endpoint rewrite (P2a)**: `HC' = ~(~HC + Σ(~m + m'))` folded over only the changed words (IPv4: address words counted in header + pseudo-header, ports; IPv6: 16 address words + ports, no header checksum). New words are read back **from the frame after the write** (single encoding source). **Precondition: the input checksum is valid** — that is the capture-pipeline contract; on invalid-checksum input the result differs from a full recompute (garbage-in-garbage-out, documented in-code). Bit-identical to full recompute on valid inputs: property-pinned (512+512 random frames, 65,536-port sweep incl. computed-zero, three-way vs independent test helpers). EndpointsDirect micro: 626→33 ns @1400 B (0 B).
 - **Vectorized `Sum` (P2b) — fold invariants are load-bearing**: `uint` wraparound is NOT one's-complement neutral (`2^32 ≡ 1 mod 65535`), so any deferred-fold scheme must keep partial sums strictly bounded. The landed version folds to ≤0xFFFF after every accumulation step (vector lanes folded fully per block; bound exactly 0xFFFF_FFFF, never overflows). The scalar fallback must stay fold-while-adding (bare accumulation overflows ≥131,076 B of 0xFF — the `ProtocolAuditTests` shape — and broke host-independence on non-AVX hosts). Packet paths never reach the risky sizes (IP ≤64 KiB), but the function is size-public; keep the invariants for all inputs. Measured 989→61.7 ns @1514 B (16×).
 - **Benchmark frames must carry valid checksums**: incremental rewrite's precondition means `BenchmarkShared` frames with zeroed checksums measure an invalid-input shape — benchmark frames are built with correct checksums before/after so the delta is real.
@@ -167,7 +169,10 @@ Trigger: any change to `TcpProxyRelay`'s pump loop, `PacketChecksums`, or the ch
 | Condition | Required result |
 |---|---|
 | Pump op completes within window | CTS reused via `TryReset`, 0 B allocated per op |
+| Arm invoked within 1 s of the previous arm | skipped (`IsRearmDue` false); previously armed timer stays armed |
+| Arm invoked >1 s after the previous arm / first arm | `Arm()` runs (`IsRearmDue` true, first arm unconditional) |
 | Stall timer fires between ops / `TryReset` returns false | CTS recreated linked to lifetime token; semantics unchanged |
+| Pump exits on any path (normal, fault, dispose, stall) | pooled 64 KiB direction buffer returned exactly once |
 | Rewrite with valid input checksum | incremental ≡ full recompute, byte-identical frame |
 | Rewrite with invalid input checksum | garbage-in-garbage-out vs full recompute (documented precondition) |
 | `Sum` on any size/fill incl. 131,076 B 0xFF, ≥393,216 B adversarial | bit-identical scalar vs vector, no overflow |

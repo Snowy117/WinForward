@@ -91,6 +91,15 @@ Task 08-29-proxy-stability-perf (S3/S4/S1).
 - `TcpRelayFaultObserver.Observe(relay, logger)` (`TcpRedirect/TcpRelayFaultObserver.cs`) attaches an `OnlyOnFaulted | ExecuteSynchronously` continuation on every path that discards a relay without awaiting `Completion`: `TcpProxyRelay.DisposeAsync` (before disposal faults the pumps) and the acceptor's attach-failure branch. Debug event `tcp.relay.faulted`.
 - **.NET gotcha (load-bearing)**: attaching a `OnlyOnFaulted` continuation does NOT mark a faulted task observed — only **reading `Task.Exception`** (or awaiting) does. The observer must read `task.Exception` BEFORE any `IsEnabled` log gate; the original implementation checked the log level first and silently left exceptions unobserved under the default `info` threshold (tests passed because the recording logger was always-enabled). Do not reorder.
 
+### Mid-flow relay fault/stall must reset the client (R1, wired 2026-08-30)
+
+Task 08-30-fast-hardening (research R1).
+
+- **Contract**: every relay end that is not a clean FIN-propagated end is surfaced to the client as an in-window RST|ACK via `ClientResetInjector.TryInjectClientResetAsync`, injected in `TcpRedirectAcceptor.ObserveRelayCompletionAsync` **before** `_tearDownSession` — while the association still holds the SYN template and `ClientNextSeq`/`ServerNextSeq` trackers. Without this, the teardown tombstone eats every subsequent client retransmission and the client hangs to ETIMEDOUT (minutes) instead of aborting instantly.
+- **Surface**: `TcpProxyRelay` implements the internal capability `ITcpRelayEndInfo { RelayEndKind EndKind }` with `RelayEndKind { CleanEnded, Stalled, Faulted }`, valid after `Completion` completes. The enum is internal, so it lives on a separate capability interface rather than the public `ITcpRelay`; a relay not implementing it is treated as `CleanEnded` (no reset). Derivation: pump returns `PumpResult.Stalled` → `Stalled`; pump faults → `Faulted`; both pumps complete cleanly (FINs propagated via `ShutdownSend`) → `CleanEnded`. **`_endKind` initializes to `Faulted`**: if `RunPumpAsync` throws before its first classification write (e.g. `NetworkStream`/CTS construction), `Completion` faults with the field still at its default — a `CleanEnded` default there would silently skip the client reset and reproduce the blackhole (caught in review 2026-08-30).
+- **Ordering & containment**: reset → teardown (injector reads live-association state, matching the `HandleRelaySetupFailureAsync` precedent); the inject is wrapped so a reset failure warns but never blocks teardown; the whole completion tail is wrapped so nothing escapes the fire-and-forget task as an unobserved task exception. OCE on an externally-cancelled (retired) session still returns early without a reset.
+- Locked by `TcpRelayEndResetTests`: fault→RST and stall→RST with seq/ack asserted from the advanced trackers (not ISN+1), reset-then-teardown ordering; clean end and end-info-less relay → no injection; real-relay `EndKind` derivation on all three terminal paths.
+
 ---
 
 ## SOCKS5 control-socket timeout lifecycle (fixed 2026-08-15)
