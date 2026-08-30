@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+
 namespace WinForward.NdisApi;
 
 internal sealed class NdisNativeCallGate
@@ -58,36 +60,23 @@ internal sealed class NdisNativeCallGate
 /// 08-28-udp-loss-design-flaws): native calls on one adapter stay serialized, while calls on
 /// distinct adapters proceed in parallel, so a slow IOCTL on one adapter cannot stall every
 /// pump. Gates are keyed by the enumeration handle carried by requests, and the map only grows
-/// (bounded by the adapter count for the driver's lifetime). The map lock guards the lookup
-/// itself and is always released before the caller enters the returned gate, so waiting on one
-/// adapter's gate never blocks lookups for other adapters.
+/// (bounded by the adapter count for the driver's lifetime). Lookup is lock-free on the fast
+/// path (a <see cref="ConcurrentDictionary{TKey,TValue}"/> read); first sight of a handle
+/// creates the gate under the dictionary's bucket, and a racing creator may construct a gate
+/// that is discarded — harmless, because a gate is a lazily-registered passive object and every
+/// caller still resolves to the single stored instance.
 /// </summary>
 internal sealed class NdisAdapterGateMap
 {
-    private readonly Lock _mapLock = new();
-    private readonly Dictionary<nint, NdisNativeCallGate> _gates = [];
+    private readonly ConcurrentDictionary<nint, NdisNativeCallGate> _gates = new();
 
-    internal NdisNativeCallGate Get(nint adapterHandle)
-    {
-        lock (_mapLock)
-        {
-            if (!_gates.TryGetValue(adapterHandle, out var gate))
-            {
-                gate = new NdisNativeCallGate();
-                _gates.Add(adapterHandle, gate);
-            }
-
-            return gate;
-        }
-    }
+    internal NdisNativeCallGate Get(nint adapterHandle) =>
+        _gates.GetOrAdd(adapterHandle, static _ => new NdisNativeCallGate());
 
     internal IReadOnlyDictionary<nint, int> GetMaxConcurrentCalls()
     {
-        lock (_mapLock)
-        {
-            var snapshot = new Dictionary<nint, int>(_gates.Count);
-            foreach (var (adapterHandle, gate) in _gates) snapshot.Add(adapterHandle, gate.MaxConcurrentCalls);
-            return snapshot;
-        }
+        var snapshot = new Dictionary<nint, int>(_gates.Count);
+        foreach (var (adapterHandle, gate) in _gates) snapshot.Add(adapterHandle, gate.MaxConcurrentCalls);
+        return snapshot;
     }
 }

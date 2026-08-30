@@ -37,10 +37,11 @@ public sealed class NdisCapturePump : IAsyncDisposable
     private readonly Func<NdisCapturedPacket, CancellationToken, ValueTask> _handler;
     private readonly TimeSpan _pollDelay;
     private readonly NdisPacketBuffer[] _batchBuffers;
+    private readonly Action? _onBatchCompleted;
     private int _stopped;
     private int _buffersReleased;
 
-    public NdisCapturePump(INdisPacketReader driver, nint adapterHandle, Func<NdisCapturedPacket, CancellationToken, ValueTask> handler, TimeSpan? pollDelay = null, int? batchCapacity = null)
+    public NdisCapturePump(INdisPacketReader driver, nint adapterHandle, Func<NdisCapturedPacket, CancellationToken, ValueTask> handler, TimeSpan? pollDelay = null, int? batchCapacity = null, Action? onBatchCompleted = null)
     {
         ArgumentNullException.ThrowIfNull(driver);
         ArgumentNullException.ThrowIfNull(handler);
@@ -52,13 +53,17 @@ public sealed class NdisCapturePump : IAsyncDisposable
         _pollDelay = pollDelay ?? TimeSpan.FromMilliseconds(1);
         _batchBuffers = new NdisPacketBuffer[capacity];
         for (var index = 0; index < capacity; index++) _batchBuffers[index] = new NdisPacketBuffer();
+        _onBatchCompleted = onBatchCompleted;
     }
 
     /// <summary>
     /// Pumps captured packets until cancelled or stopped. Each iteration fetches one batch
     /// (single kernel round trip) and awaits the handler for slots 0..readCount-1 strictly in
     /// order, so reinjection order within an adapter matches arrival order. An empty batch keeps
-    /// the poll-delay pacing of the single-packet loop. Batch buffers live for the pump's
+    /// the poll-delay pacing of the single-packet loop. The optional batch-completed callback
+    /// (constructor) runs after the slot loop of every iteration — before the next read can reuse
+    /// batch slots — and once more when the run loop exits, so deferred work (batched
+    /// reinjection) never outlives the batch it belongs to. Batch buffers live for the pump's
     /// lifetime and are released exactly once, when the run loop exits or the pump is disposed.
     /// </summary>
     public async ValueTask RunAsync(CancellationToken cancellationToken)
@@ -70,6 +75,9 @@ public sealed class NdisCapturePump : IAsyncDisposable
                 var readCount = _driver.TryReadPackets(_adapterHandle, _batchBuffers);
                 if (readCount == 0)
                 {
+                    // The every-iteration callback contract holds on empty queues too: a flush
+                    // side effect must not wait for the next non-empty batch.
+                    _onBatchCompleted?.Invoke();
                     await Task.Delay(_pollDelay, cancellationToken).ConfigureAwait(false);
                     continue;
                 }
@@ -82,10 +90,15 @@ public sealed class NdisCapturePump : IAsyncDisposable
                     var packet = NdisCapturedPacket.FromCapture(_batchBuffers[index], _adapterHandle);
                     await _handler(packet, cancellationToken).ConfigureAwait(false);
                 }
+
+                _onBatchCompleted?.Invoke();
             }
         }
         finally
         {
+            // Loop exit (stop, cancellation, or failure) must not strand deferred work: the
+            // callback runs while the batch buffers are still valid, before their release.
+            _onBatchCompleted?.Invoke();
             ReleaseBatchBuffers();
         }
     }

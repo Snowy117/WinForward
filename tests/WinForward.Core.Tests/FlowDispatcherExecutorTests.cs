@@ -287,7 +287,8 @@ public sealed class FlowDispatcherExecutorTests
     public async Task ProcessorPassesCapturedFrameBytesThroughInPlace()
     {
         var reinjector = new FakeReinjector();
-        var dispatcher = new FlowDispatcher(CreateConfig(new RuleMatcher(), FlowAction.Pass), new FakeGuard(), new NdisPacketActionExecutor(reinjector));
+        var executor = new NdisPacketActionExecutor(reinjector);
+        var dispatcher = new FlowDispatcher(CreateConfig(new RuleMatcher(), FlowAction.Pass), new FakeGuard(), executor);
         var adapter = new WindowsAdapter("id-a", "Ethernet", "internal-a", 7, 1);
         using var buffer = new NdisPacketBuffer();
         var frame = FrameBuilders.CreateIpv4TcpFrame();
@@ -297,6 +298,7 @@ public sealed class FlowDispatcherExecutorTests
             NdisCapturedPacket.FromCapture(buffer, (nint)7),
             adapter,
             CancellationToken.None);
+        executor.FlushPendingPasses((nint)7);
 
         // The pass reinjects the capture buffer itself: exact frame bytes, and no materialized
         // managed copy was ever needed.
@@ -320,9 +322,10 @@ public sealed class FlowDispatcherExecutorTests
         var packet = new CapturedFlowPacket(lease, FlowContext(FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 1), Endpoint.From(IPAddress.Parse("192.0.2.53"), 2), TransportProtocol.Udp, FlowOriginKind.Host)), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, 9, 0x21), NativeFrame: new NativeFrameHandle(buffer));
 
         await executor.PassAsync(packet, CancellationToken.None);
+        executor.FlushPendingPasses((nint)9);
 
         Assert.Same(buffer, reinjector.LastBuffer);
-        Assert.Equal(1, reinjector.ToMstcpCount);
+        Assert.Equal(1, reinjector.BatchToMstcpCount);
         Assert.Equal((nint)9, reinjector.LastAdapterHandle);
         Assert.False(lease.IsMaterialized, "The in-place pass must not materialize a managed copy.");
     }
@@ -341,6 +344,7 @@ public sealed class FlowDispatcherExecutorTests
         var packet = new CapturedFlowPacket(lease, FlowContext(FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 1), Endpoint.From(IPAddress.Parse("192.0.2.53"), 2), TransportProtocol.Udp, FlowOriginKind.Host)), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, 9), NativeFrame: new NativeFrameHandle(buffer));
 
         await executor.PassAsync(packet, CancellationToken.None);
+        executor.FlushPendingPasses((nint)9);
 
         Assert.NotSame(buffer, reinjector.LastBuffer);
         Assert.Equal(frame, reinjector.LastFrame);
@@ -355,14 +359,16 @@ public sealed class FlowDispatcherExecutorTests
 
         var send = new CapturedFlowPacket(new PacketLease(new byte[] { 1, 2, 3 }), FlowContext(FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 1), Endpoint.From(IPAddress.Parse("192.0.2.53"), 2), TransportProtocol.Tcp, FlowOriginKind.Host)), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
         await executor.PassAsync(send, CancellationToken.None);
-        Assert.Equal(1, reinjector.ToAdapterCount);
-        Assert.Equal(0, reinjector.ToMstcpCount);
+        executor.FlushPendingPasses((nint)7);
+        Assert.Equal(1, reinjector.BatchToAdapterCount);
+        Assert.Equal(0, reinjector.BatchToMstcpCount);
         Assert.Equal((nint)7, reinjector.LastAdapterHandle);
         Assert.Equal(new byte[] { 1, 2, 3 }, reinjector.LastFrame!);
 
         var receive = new CapturedFlowPacket(new PacketLease(new byte[] { 4, 5 }), FlowContext(FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.53"), 2), Endpoint.From(IPAddress.Parse("192.0.2.10"), 1), TransportProtocol.Tcp, FlowOriginKind.Forwarded)), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, 8));
         await executor.PassAsync(receive, CancellationToken.None);
-        Assert.Equal(1, reinjector.ToMstcpCount);
+        executor.FlushPendingPasses((nint)8);
+        Assert.Equal(1, reinjector.BatchToMstcpCount);
         Assert.Equal((nint)8, reinjector.LastAdapterHandle);
     }
 
@@ -371,7 +377,8 @@ public sealed class FlowDispatcherExecutorTests
     public async Task ProcessorPreservesCapturedNdisFlagsThroughPassReinjection()
     {
         var reinjector = new FakeReinjector();
-        var dispatcher = new FlowDispatcher(CreateConfig(new RuleMatcher(), FlowAction.Pass), new FakeGuard(), new NdisPacketActionExecutor(reinjector));
+        var executor = new NdisPacketActionExecutor(reinjector);
+        var dispatcher = new FlowDispatcher(CreateConfig(new RuleMatcher(), FlowAction.Pass), new FakeGuard(), executor);
         var adapter = new WindowsAdapter("id-a", "Ethernet", "internal-a", 7, 1);
         using var buffer = new NdisPacketBuffer();
         buffer.SetFrame(FrameBuilders.CreateIpv4TcpFrame(), NdisApiAbi.PacketFlagOnSend, (nint)7, flags: 0x4000_0021);
@@ -380,8 +387,9 @@ public sealed class FlowDispatcherExecutorTests
             NdisCapturedPacket.FromCapture(buffer, (nint)7),
             adapter,
             CancellationToken.None);
+        executor.FlushPendingPasses((nint)7);
 
-        Assert.Equal(1, reinjector.ToAdapterCount);
+        Assert.Equal(1, reinjector.BatchToAdapterCount);
         Assert.Equal(0x4000_0021u, reinjector.LastFlags);
     }
 
@@ -394,9 +402,12 @@ public sealed class FlowDispatcherExecutorTests
 
         await executor.BlockAsync(packet, CancellationToken.None);
         await executor.ProxyAsync(packet, new Socks5Server("p", "127.0.0.1", 1080, null, null), CancellationToken.None);
+        executor.FlushPendingPasses((nint)7);
 
         Assert.Equal(0, reinjector.ToAdapterCount);
         Assert.Equal(0, reinjector.ToMstcpCount);
+        Assert.Equal(0, reinjector.BatchToAdapterCount);
+        Assert.Equal(0, reinjector.BatchToMstcpCount);
     }
 
     [Fact]
@@ -411,9 +422,11 @@ public sealed class FlowDispatcherExecutorTests
         var packet = new CapturedFlowPacket(new PacketLease(FrameBuilders.CreateIpv4TcpFrame()), FlowContext(key), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
 
         await executor.ProxyAsync(packet, new Socks5Server("p", "127.0.0.1", 1080, null, null), CancellationToken.None);
+        executor.FlushPendingPasses((nint)7);
 
-        Assert.Equal(1, reinjector.ToAdapterCount);
-        Assert.Equal(0, reinjector.ToMstcpCount);
+        Assert.Equal(0, reinjector.ToAdapterCount);
+        Assert.Equal(1, reinjector.BatchToAdapterCount);
+        Assert.Equal(0, reinjector.BatchToMstcpCount);
         Assert.Equal((nint)7, reinjector.LastAdapterHandle);
     }
 

@@ -23,7 +23,13 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
 {
     private const int MaxStackMultiRequestBytes = 1024;
 
+    // One batched send request spans 16 + 8*N bytes (ETH_M_REQUEST header plus one pointer slot
+    // per packet); this chunk size keeps a full request inside the stackalloc budget above.
+    internal const int MaxPacketsPerSendRequest = (MaxStackMultiRequestBytes - 16) / 8;
+
     private readonly NdisApiSafeHandle _handle;
+    private long _batchedSendFlushCount;
+    private long _batchedSendPacketCount;
     private readonly NdisNativeCallGate _controlGate = new();
     private readonly NdisAdapterGateMap _adapterGates = new();
 
@@ -157,7 +163,7 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
 
     private unsafe int ReadPacketsRequest(byte* requestMemory, nint adapterHandle, NdisPacketBuffer[] buffers, int count, out uint packetsSuccess, out int nativeError)
     {
-        BuildMultiRequest(requestMemory, adapterHandle, buffers, count);
+        BuildMultiRequest(requestMemory, adapterHandle, buffers, count, offset: 0);
         var request = (EthernetMultiRequest*)requestMemory;
         var result = NdisApiNative.ReadPackets(_handle, request);
         nativeError = result == 0 ? Marshal.GetLastWin32Error() : 0;
@@ -165,7 +171,9 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
         return result;
     }
 
-    private static unsafe void BuildMultiRequest(byte* requestMemory, nint adapterHandle, NdisPacketBuffer[] buffers, int count)
+    // Fills the request header and the packet-pointer slots [0, count) from buffers[offset, offset+count).
+    // Visible to tests for direct ABI-layer slot verification (same layout discipline as NdisApiAbiTests).
+    internal static unsafe void BuildMultiRequest(byte* requestMemory, nint adapterHandle, NdisPacketBuffer[] buffers, int count, int offset)
     {
         var request = (EthernetMultiRequest*)requestMemory;
         request->AdapterHandle = adapterHandle;
@@ -174,8 +182,9 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
         var slots = (NdisrdEthernetPacket*)&request->FirstBuffer;
         for (var index = 0; index < count; index++)
         {
-            if (buffers[index] is null) throw new ArgumentNullException(nameof(buffers));
-            slots[index] = new NdisrdEthernetPacket { Buffer = buffers[index].Pointer };
+            var buffer = buffers[offset + index];
+            if (buffer is null) throw new ArgumentNullException(nameof(buffers));
+            slots[index] = new NdisrdEthernetPacket { Buffer = buffer.Pointer };
         }
     }
 
@@ -208,6 +217,56 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
         }
     }
 
+    /// <summary>
+    /// Injects <paramref name="count"/> packets from <paramref name="buffers"/> toward MSTCP in one
+    /// batched request (chunks of at most <see cref="MaxPacketsPerSendRequest"/> keep each
+    /// ETH_M_REQUEST inside the stackalloc budget; one adapter-gate lease spans the whole call).
+    /// The batched send IOCTLs report no per-packet success count — the user-mode DLL passes no
+    /// output buffer, so <c>dwPacketsSuccess</c> never returns (task 08-30-batched-ioctls research:
+    /// wiresock/ndisapi@417b8734 ndisapi.cpp + local DLL disassembly) — so a failed batch throws
+    /// with the same fail-closed semantics as a failed single send.
+    /// </summary>
+    public unsafe void SendPacketsToMstcp(nint adapterHandle, NdisPacketBuffer[] buffers, int count) =>
+        SendPacketsBatch(adapterHandle, buffers, count, toMstcp: true);
+
+    /// <summary>
+    /// Injects <paramref name="count"/> packets from <paramref name="buffers"/> toward the adapter
+    /// in one batched request. See <see cref="SendPacketsToMstcp(nint, NdisPacketBuffer[], int)"/>
+    /// for the chunking, gate-lease, and all-or-nothing failure contract.
+    /// </summary>
+    public unsafe void SendPacketsToAdapter(nint adapterHandle, NdisPacketBuffer[] buffers, int count) =>
+        SendPacketsBatch(adapterHandle, buffers, count, toMstcp: false);
+
+    private unsafe void SendPacketsBatch(nint adapterHandle, NdisPacketBuffer[] buffers, int count, bool toMstcp)
+    {
+        ArgumentNullException.ThrowIfNull(buffers);
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(count, buffers.Length);
+        if (count == 0) return;
+
+        var adapterGate = _adapterGates.Get(adapterHandle);
+        using var gateLease = adapterGate.Enter();
+        var chunkCapacity = Math.Min(count, MaxPacketsPerSendRequest);
+        var requestBytes = stackalloc byte[(int)MultiRequestByteCount(chunkCapacity)];
+        for (var offset = 0; offset < count; offset += chunkCapacity)
+        {
+            var chunkCount = Math.Min(chunkCapacity, count - offset);
+            BuildMultiRequest(requestBytes, adapterHandle, buffers, chunkCount, offset);
+            var request = (EthernetMultiRequest*)requestBytes;
+            var result = toMstcp
+                ? NdisApiNative.SendPacketsToMstcp(_handle, request)
+                : NdisApiNative.SendPacketsToAdapter(_handle, request);
+            if (result == 0)
+            {
+                var error = Marshal.GetLastWin32Error();
+                var target = toMstcp ? "MSTCP" : "the adapter";
+                throw new Win32Exception(error, $"Unable to inject {chunkCount} NDISAPI packets toward {target} (native error {error}, packets {offset}..{offset + chunkCount - 1} of {count}, adapter 0x{adapterHandle:X}).");
+            }
+        }
+        Interlocked.Increment(ref _batchedSendFlushCount);
+        Interlocked.Add(ref _batchedSendPacketCount, count);
+    }
+
     public void Dispose()
     {
         using var gateLease = _controlGate.Enter();
@@ -216,6 +275,16 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
 
     /// <summary>Telemetry: maximum concurrent native calls observed on the control gate.</summary>
     internal int ControlGateMaxConcurrentCalls => _controlGate.MaxConcurrentCalls;
+
+    /// <summary>
+    /// Telemetry: successful batched send flushes. Compared with <see cref="BatchedSendPacketCount"/>
+    /// this yields the average reinjection batch size — the syscall-amortization evidence for the
+    /// batched pass path (task 08-30-batched-ioctls).
+    /// </summary>
+    internal long BatchedSendFlushCount => Volatile.Read(ref _batchedSendFlushCount);
+
+    /// <summary>Telemetry: packets delivered through successful batched send flushes.</summary>
+    internal long BatchedSendPacketCount => Volatile.Read(ref _batchedSendPacketCount);
 
     /// <summary>
     /// Telemetry snapshot of the maximum concurrent native calls observed per adapter gate,

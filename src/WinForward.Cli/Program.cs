@@ -271,7 +271,7 @@ internal static class Program
                     reverseHandler: tcpCoordinator,
                     fragmentHandler: tcpCoordinator.HandleFragmentAsync,
                     logger: logger);
-                var captureLoop = new MultiAdapterCaptureLoop(driver, scope, new CapturePacketProcessor(dispatcher, logger));
+                var captureLoop = new MultiAdapterCaptureLoop(driver, scope, new CapturePacketProcessor(dispatcher, logger, executor.FlushPendingPasses));
                 var idleExpirySweeper = new IdleExpirySweeper(dispatcher, tcpCoordinator, udpCoordinator, logger: logger);
                 idleExpirySweeper.Start();
                 return new CoordinatorShutdownCaptureLoop(captureLoop, idleExpirySweeper, udpCoordinator, tcpCoordinator);

@@ -81,7 +81,7 @@ if (TryExtractGuid(adapter.InternalName, out var guid))
 
 - `NdisCapturePump` must stamp captured packets with the pump's enumeration handle (`NdisCapture.cs`), never with `NdisPacketBuffer.CapturedAdapterHandle`.
 - A captured packet carries two distinct flag values: `DeviceFlags` selects MSTCP-relative direction, while `INTERMEDIATE_BUFFER.m_Flags` is NDIS packet metadata. Preserve both through the managed capture record and ordinary pass reinjection; a fresh synthetic frame intentionally starts with metadata flags zero.
-- **Native-call gate topology (superseded 2026-08-28, task 08-28-udp-loss-design-flaws D3)**: `NdisApiDriver` splits serialization into a **control gate** (open/close/enumeration/mode snapshot+set+restore — cold path) and a **per-adapter-handle gate map** (`NdisAdapterGateMap` in `NdisNativeCallGate.cs`: leaf `Lock` + `Dictionary<nint, NdisNativeCallGate>`, grow-only) used by `TryReadPackets`, `SendPacketToMstcp`, `SendPacketToAdapter`, keyed by the enumeration handle the request carries. Within one adapter handle every native call stays serialized (preserves per-adapter read/reinject ordering and the historical OVERLAPPED concern — each request struct is method-local); **across adapters calls proceed in parallel**, so a slow IOCTL on adapter A can no longer stall adapter B's pump reads. The queue query + batch read pair keeps sharing ONE lease of the adapter's gate. Lock order is fixed: the map lock is a leaf (never held across `gate.Enter()`), and the control gate is never nested inside an adapter gate or vice versa. This replaces the earlier "serialize every operation on one driver instance" contract: that single-Monitor design coupled all adapters through one lock and was a confirmed driver-queue-overflow (silent loss) amplifier under multi-adapter/high-pps load. Gate contention telemetry (`MaxConcurrentCalls`) is preserved per gate. Rollback shape if driver-level coupling ever shows up on hardware: a single send-gate + per-adapter read-gates.
+- **Native-call gate topology (superseded 2026-08-28, task 08-28-udp-loss-design-flaws D3)**: `NdisApiDriver` splits serialization into a **control gate** (open/close/enumeration/mode snapshot+set+restore — cold path) and a **per-adapter-handle gate map** (`NdisAdapterGateMap` in `NdisNativeCallGate.cs`; since 2026-08-30, task 08-30-batched-ioctls D4, a `ConcurrentDictionary.GetOrAdd` — no per-call lock; the map only grows, bounded by the adapter count, and a racing `GetOrAdd` may construct a discarded gate at most once per handle, which is harmless for these lazily-registered passive objects) used by `TryReadPackets`, `SendPacketToMstcp`, `SendPacketToAdapter`, keyed by the enumeration handle the request carries. Within one adapter handle every native call stays serialized (preserves per-adapter read/reinject ordering and the historical OVERLAPPED concern — each request struct is method-local); **across adapters calls proceed in parallel**, so a slow IOCTL on adapter A can no longer stall adapter B's pump reads. The queue query + batch read pair keeps sharing ONE lease of the adapter's gate. Lock order is fixed: the map is never held across `gate.Enter()` (leaf-free by construction in the concurrent map), and the control gate is never nested inside an adapter gate or vice versa. This replaces the earlier "serialize every operation on one driver instance" contract: that single-Monitor design coupled all adapters through one lock and was a confirmed driver-queue-overflow (silent loss) amplifier under multi-adapter/high-pps load. Gate contention telemetry (`MaxConcurrentCalls`) is preserved per gate. Rollback shape if driver-level coupling ever shows up on hardware: a single send-gate + per-adapter read-gates.
 - This matches the official samples: `ETH_M_REQUEST.hAdapterHandle` is set once from the adapter list and reused for read/write requests.
 - All NDISAPI `[LibraryImport]` declarations use `SetLastError = true`; send-path exceptions must include `Marshal.GetLastWin32Error()` — driver-side rejections are otherwise undiagnosable.
 - Diagnostics context worth logging on send failure: native error, frame length, device flags, adapter handle.
@@ -94,6 +94,63 @@ if (TryExtractGuid(adapter.InternalName, out var guid))
 - Verification: scratch harness `sendtest` (read -> reinject captured buffer with enumeration handle: 97/97 OK, both directions). Product re-verified: 100/100 ICMP pass-through with 0% loss and no duplicates.
 
 **Performance note**: the pump now reads in batches (`ReadPackets`, batch capacity 32, one gate lease per batch; wired 2026-08-27 — see "Batched capture reads and buffer pooling" below). The 1 ms poll delay remains only on empty batches; since 2026-08-28 the capture run is wrapped in `WinForward.Windows.HighResolutionTimerScope` (winmm `timeBeginPeriod(1)`, fail-open with a one-shot warn), so the 1 ms delay resolves to ~1–2 ms instead of the ~15.6 ms default timer tick; `SetPacketEvent` event-driven reads are the optional next upgrade if empty-to-first-packet latency still matters.
+
+---
+
+## Batched reinjection sends (wired 2026-08-30, task 08-30-batched-ioctls)
+
+### 1. Scope / Trigger
+
+- Trigger: any change to the executor Pass path, the pump batch-end callback, or the
+  driver's batched send surface.
+- Infra contract: which reinjections may be deferred into a batch, the ordering
+  guarantees while deferring, and the observed all-or-nothing failure semantics.
+
+### 2. Signatures
+
+- `NdisApiDriver.SendPacketsToMstcp/SendPacketsToAdapter(nint adapterHandle, NdisPacketBuffer[] buffers, int count)` — batched native send; one adapter-gate lease across all chunks.
+- `NdisPacketActionExecutor.FlushPendingPasses(nint adapterHandle)` — flush the executor's pending Pass lanes for that adapter.
+- `NdisCapturePump` optional `onBatchCompleted` callback — invoked after every batch's slot loop (empty batches included) and from the run loop's `finally` before `ReleaseBatchBuffers()`.
+- Telemetry: `NdisApiDriver.BatchedSendFlushCount` / `BatchedSendPacketCount` (average batch size = packet/flush — the syscall-amortization evidence).
+
+### 3. Contracts
+
+- **PacketsSuccess is unobservable on the send path (export-verified 2026-08-30)**: the send IOCTLs pass `lpOutBuffer=NULL, nOutBufferSize=0` and both IOCTLs are `METHOD_BUFFERED` (verified against the pinned ndisapi source `417b8734` and the local DLL's disassembly — evidence in the task's `research/abi-packets-success.md`). Batched send is therefore **all-or-nothing**: failure throws the same `Win32Exception` (native error, direction, chunk range, adapter) as the single-packet path. Never build resend logic on `PacketsSuccess` for sends.
+- **Batching scope**: only executor Pass dispositions are deferred. Per-(adapterHandle, direction) lanes (fixed capacity, linear scan) accumulate in-place capture buffers and rented pool buffers; `PassAsync` appends instead of sending. TCP redirect SYN/RST injection and UDP response reinjection stay immediate single sends (they share only the adapter gates).
+- **Flush points**: once per pump iteration via `onBatchCompleted` (before the next `TryReadPackets`) and on run-loop exit (before batch-buffer release) — teardown never drops pending frames. `FlushPendingPasses` is adapter-scoped because one executor serves every pump; pump A must never flush pump B's mid-iteration frames.
+- **Serialization rests on the pump's strictly-ordered await chain, not thread identity** — `ConfigureAwait(false)` may resume on any thread-pool thread, but exactly one pump chain calls into a given adapter's lane at a time. A `PassAsync` caller outside a pump chain would break this; the audit in the task's `research/passasync-call-site-audit.md` pins the current callers.
+- **Ordering**: same (adapter, direction) Pass frames are reinjected in capture order (append order == slot order). Cross-lane reordering is not a contract: flows never mix dispositions, so per-flow order is untouched. Pass sends may shift relative to interleaved cold injections of other flows within one iteration.
+- **Lane overflow** (>4 adapters × 2 directions) degrades those Passes to immediate single sends — defensive; production shapes are single-adapter.
+- **Exactly-once pool return**: rented buffers return in the flush's `finally` (including the throwing path); in-place capture buffers are never pool-returned.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Pass disposition inside pump iteration | appended to its lane; no native call until flush |
+| Flush with N pending in one lane | one batched send for the lane; rented buffers returned exactly once |
+| Batched send returns FALSE | `Win32Exception` (all-or-nothing); rented buffers still returned |
+| Count > 126 | chunked inside one gate lease |
+| Run loop exits (cancel/stop/fault) | pending lanes flushed from `finally` before batch-buffer release |
+| Lane capacity exceeded | overflow Pass sends immediately as single send |
+| Non-batched reinjector callers | unchanged single-packet path |
+
+### 5. Tests Required
+
+- `NdisPacketActionExecutorBatchingTests`: same-lane append order; two keys flush independently; mixed materialized/in-place frames; exactly-once pool return on success and on batch failure; empty flush no-op; lane-overflow fallback.
+- `NdisApiBatchedSendAbiTests`: request-slot layout/chunk-budget derivation.
+- `BatchedPassReinjectionE2eTests`: N frames → one batched call per direction per iteration (measured 96 frames → 6 calls = 16× reduction vs single sends); strictly increasing per-direction markers (order); flush-on-exit with a faulting handler slot.
+
+### 6. Wrong vs Correct
+
+```csharp
+// Wrong: trusting PacketsSuccess on the send path to resend a "suffix" —
+// the field never comes back (lpOutBuffer=NULL, METHOD_BUFFERED).
+if (request->PacketsSuccess < count) ResendSuffix(...); // dead code at best
+
+// Correct: fail the batch wholesale, same diagnostics as the single path.
+if (result == 0) throw new Win32Exception(error, $"...packets {offset}..{end} of {count}...");
+```
 
 ---
 
@@ -113,7 +170,7 @@ if (TryExtractGuid(adapter.InternalName, out var guid))
 ### 2. Signatures
 
 - `NdisApiDriver.TryReadPackets(nint adapterHandle, NdisPacketBuffer[] buffers) -> int` — queue query + batched read merged into a single `NdisNativeCallGate` lease; returns the driver-filled success count (0 = empty queue).
-- Batched send overloads exist only at the ABI layer (`NdisApiNative.SendPacketsToMstcp` / `SendPacketsToAdapter` over `EthernetMultiRequest*` in `NdisApiAbi.cs`); the driver's public send surface is single-packet `SendPacketToMstcp/SendPacketToAdapter(nint, NdisPacketBuffer)` — one gate lease per injected packet until batched sends are adopted.
+- Batched send since 2026-08-30 (task 08-30-batched-ioctls): `NdisApiDriver.SendPacketsToMstcp/SendPacketsToAdapter(nint, NdisPacketBuffer[], int)` submit up to `MaxPacketsPerSendRequest` (126) packets per `EthernetMultiRequest`, chunking larger counts inside one adapter-gate lease. See "Batched reinjection sends" below for the executor-side batching contract.
 - `PacketLease(ReadOnlyMemory<byte> frame, Action<ReadOnlyMemory<byte>>? onCompleted)` — completion-callback constructor; the plain constructor keeps null semantics.
 - `NdisPacketBufferPool` (process-wide `Shared`, capacity 256) with `Rent()`/`Return()`; `NdisPacketBuffer` carries an owner-pool state machine (private ctor → Dispose frees; pool-rented → Dispose returns, double-Dispose no-op).
 
@@ -124,7 +181,7 @@ if (TryExtractGuid(adapter.InternalName, out var guid))
 - **Copy-out points are mandatory**: data that must outlive the window is copied synchronously — UDP `clientMac` (`ToArray()` at session creation), SOCKS5 payload (`Encode` copies before any await), the bounded SYN template (recorded before rewrite).
 - **In-place rewrite ordering**: `RecordClientSyn`/`RecordServerSynAck` (reads of the original frame) MUST run BEFORE `TryRewriteTcpEndpoints` (write) on the same frame, or the RST template is polluted by rewritten endpoints/MACs. `TryRewriteIpv4Tcp/Ipv6Tcp` keeps the invariant "every parse/validation precedes the first field write; no failure branch after writing begins", so an in-place rewrite either leaves the frame untouched or fully rewrites it. A lease whose `Frame` is not array-backed fails closed (`reason=rewrite`).
 - **Pump batching**: batch buffers are pump-private for the pump's lifetime, released exactly once (run-loop exit or dispose); packets within a batch are awaited strictly in index order, so reinjection order matches arrival order. Empty batch keeps the poll-delay pacing.
-- **Gate granularity**: one gate lease per batch on the read path (query + read inside the same lease); one gate lease per injected packet remains on the send path until batched sends are adopted.
+- **Gate granularity**: one gate lease per batch on the read path (query + read inside the same lease); since 2026-08-30 one gate lease per flush on the batched send path (all chunks inside one lease), with the single-packet sends kept for non-batched callers (TCP injector, UDP response reinjector).
 
 ### 4. Validation & Error Matrix
 

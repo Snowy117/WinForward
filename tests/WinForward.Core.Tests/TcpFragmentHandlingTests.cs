@@ -127,9 +127,11 @@ public sealed class TcpFragmentHandlingTests
 
         var fragment = MakeNonFlowPacket(BuildIpv4Fragment(s_clientIpv4, s_destIpv4, 53000, 443), isOnSend: true);
         await harness.Dispatcher.DispatchNonFlowAsync(fragment, CancellationToken.None);
+        harness.Executor.FlushPendingPasses((nint)0x1234);
 
         Assert.Equal(PacketDisposition.Pass, fragment.Lease.Disposition);
-        Assert.Equal(1, harness.Reinjector.SendToAdapterCount);
+        Assert.Equal(0, harness.Reinjector.SendToAdapterCount);
+        Assert.Equal(1, harness.Reinjector.BatchSendToAdapterCount);
         Assert.DoesNotContain(harness.Logger.Events, e => string.Equals(e.Name, "tcp.redirect.fragment", StringComparison.Ordinal));
     }
 
@@ -227,6 +229,7 @@ public sealed class TcpFragmentHandlingTests
         CompletableRelayFactory relayFactory,
         FakeInjector injector,
         CountingReinjector reinjector,
+        NdisPacketActionExecutor executor,
         RecordingRuntimeLogger logger,
         FlowDispatcher dispatcher,
         bool forwarded,
@@ -234,6 +237,7 @@ public sealed class TcpFragmentHandlingTests
     {
         public FlowDispatcher Dispatcher => dispatcher;
         public CountingReinjector Reinjector => reinjector;
+        public NdisPacketActionExecutor Executor => executor;
         public FakeInjector Injector => injector;
         public RecordingRuntimeLogger Logger => logger;
         public TcpRedirectTable Table => coordinator.Table;
@@ -277,7 +281,7 @@ public sealed class TcpFragmentHandlingTests
             var key = forwarded
                 ? FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Forwarded, adapter)
                 : FlowKey.Create(Endpoint.From(client, 53000), Endpoint.From(destination, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
-            return new FragmentHarness(coordinator, listenerFactory, relayFactory, injector, reinjector, logger, dispatcher, forwarded, key);
+            return new FragmentHarness(coordinator, listenerFactory, relayFactory, injector, reinjector, executor, logger, dispatcher, forwarded, key);
         }
 
         public async Task EstablishRelayingAsync()

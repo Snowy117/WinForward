@@ -22,14 +22,24 @@ public sealed class CapturePacketProcessor
 {
     private readonly FlowDispatcher _dispatcher;
     private readonly IRuntimeLogger _logger;
+    private readonly Action<nint>? _onBatchCompleted;
     private long _nextPacketSequence;
 
-    public CapturePacketProcessor(FlowDispatcher dispatcher, IRuntimeLogger? logger = null)
+    public CapturePacketProcessor(FlowDispatcher dispatcher, IRuntimeLogger? logger = null, Action<nint>? onBatchCompleted = null)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
         _dispatcher = dispatcher;
         _logger = logger ?? NullRuntimeLogger.Instance;
+        _onBatchCompleted = onBatchCompleted;
     }
+
+    /// <summary>
+    /// Optional batch-completed pass-through handed to each capture pump (invoked once per pump
+    /// iteration and once at loop exit, carrying the pump adapter's enumeration handle). The
+    /// runtime composition wires it to the executor's pending-pass flush so accumulated pass
+    /// reinjections leave as batched IOCTLs; this holder keeps the executor out of the pump layer.
+    /// </summary>
+    public Action<nint>? OnBatchCompleted => _onBatchCompleted;
 
     public async ValueTask ProcessAsync(NdisCapturedPacket packet, WindowsAdapter adapter, CancellationToken cancellationToken)
     {

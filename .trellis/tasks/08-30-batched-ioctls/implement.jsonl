@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "NDISAPI driver contract: adapter gates, EthernetMultiRequest, batch-slot stability, enumeration-handle rule — S3/S4/S5 all touch this layer; must be updated in S6"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Warm-path allocation gates and zero-allocation dispatch conventions — S4 modifies the Pass hot path (executor) and must not regress allocation discipline"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Testing requirements and forbidden patterns for new red-to-green tests (S3/S4/S5)"}
+{"file": ".trellis/tasks/08-30-batched-ioctls/design.md", "reason": "Verified code-level facts (pump serialization, slot stability, in-place pass) and D1-D4 design decisions; implementation must follow these exactly"}
+{"file": ".trellis/tasks/08-30-batched-ioctls/implement.md", "reason": "Ordered step checklist S1-S7 with validation commands and two review gates (S2 ABI semantics, S5 counting evidence)"}
+{"file": ".trellis/tasks/archive/2026-08/08-30-proxy-perf-stability-research/research/tcp-redirect-path.md", "reason": "Research §B.3: batched action executor findings — ABI imports, BuildMultiRequest reuse, gate-lock observation, per-batch marshal costs"}
+{"file": "benchmarks/results/2026-08-30-windows-vm/README.md", "reason": "VM data that motivated #7: per-IO cost is the structural Windows gap (TcpRelay 12.4x→2.9x); syscall amortization is the goal"}

@@ -21,8 +21,14 @@ public sealed class MultiAdapterCaptureLoop : IPacketCaptureLoop
         ArgumentNullException.ThrowIfNull(driver);
         ArgumentNullException.ThrowIfNull(adapters);
         ArgumentNullException.ThrowIfNull(processor);
+        var onBatchCompleted = processor.OnBatchCompleted;
         _pumps = adapters
-            .Select(adapter => new NdisCapturePump(driver, adapter.RuntimeHandle, (packet, cancellationToken) => processor.ProcessAsync(packet, adapter, cancellationToken), pollDelay))
+            .Select(adapter => new NdisCapturePump(
+                driver,
+                adapter.RuntimeHandle,
+                (packet, cancellationToken) => processor.ProcessAsync(packet, adapter, cancellationToken),
+                pollDelay,
+                onBatchCompleted: onBatchCompleted is null ? null : () => onBatchCompleted(adapter.RuntimeHandle)))
             .ToArray();
     }
 

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
@@ -8,22 +9,34 @@ using WinForward.Runtime.UdpProxy;
 namespace WinForward.Runtime.Capture;
 
 /// <summary>
-/// Executes pass/block/proxy packet dispositions. A pass copies the captured frame into a pooled
-/// native buffer and reinjects it exactly once in its captured direction through the <see cref="IPacketReinjector"/>;
-/// a block consumes the frame without reinjection. A proxy decision routes TCP packets through the
-/// <see cref="TcpProxyCoordinator"/> and UDP datagrams through the <see cref="UdpProxyCoordinator"/> when
-/// one is configured; if no matching coordinator is provided the flow fails closed with a rate-limited
-/// structured log.
+/// Executes pass/block/proxy packet dispositions. A pass accumulates its frame for reinjection
+/// exactly once in its captured direction through the <see cref="IPacketReinjector"/>: unmodified
+/// frames are deferred in their capture buffer, materialized frames in a pooled native copy, and
+/// <see cref="FlushPendingPasses"/> sends each (adapter, direction) lane as one batched request at
+/// the end of the pump iteration that accumulated it (the pump's batch-completed callback; see
+/// design 08-30-batched-ioctls D2 — every <see cref="PassAsync"/> caller lives inside the pump's
+/// serialized batch-loop chain). A block consumes the frame without reinjection. A proxy decision
+/// routes TCP packets through the <see cref="TcpProxyCoordinator"/> and UDP datagrams through the
+/// <see cref="UdpProxyCoordinator"/> when one is configured; if no matching coordinator is provided
+/// the flow fails closed with a rate-limited structured log.
 /// </summary>
 public sealed class NdisPacketActionExecutor : IPacketActionExecutor
 {
     private static readonly TimeSpan ProxyUnavailableLogInterval = TimeSpan.FromSeconds(5);
+
+    // One lane per (adapter handle, direction). Lanes cover the expected adapter scope with room
+    // to spare; a configuration beyond this many concurrent lanes degrades those passes to
+    // immediate single sends instead of batching them.
+    private const int PendingLaneCapacity = 8;
+    private const int InitialLaneFrames = 8;
 
     private readonly IPacketReinjector _reinjector;
     private readonly TcpProxyCoordinator? _tcpProxy;
     private readonly UdpProxyCoordinator? _udpProxy;
     private readonly IRuntimeLogger _logger;
     private readonly NdisPacketBufferPool _bufferPool;
+    private readonly Lock _pendingLaneLock = new();
+    private readonly PendingPassLane?[] _pendingLanes = new PendingPassLane?[PendingLaneCapacity];
     private long _lastProxyUnavailableLogTicks;
     private long _lastUdpFailureLogTicks;
 
@@ -45,21 +58,159 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         {
             // Unmodified frame still sitting in its capture buffer: reinject it in place (only the
             // enumeration handle is retargeted; direction, length, flags, and payload stay as
-            // captured). The synchronous send consumes the frame before the pump can reuse the
-            // batch slot, and no managed copy ever happens.
+            // captured). The send is deferred to the iteration-end flush, which the pump runs
+            // before its next batch read — batch slots stay stable for the whole iteration, so no
+            // managed copy ever happens.
             captureBuffer.PrepareForReinjection(metadata.AdapterHandle);
-            if (metadata.IsOnSend) _reinjector.SendToAdapter(metadata.AdapterHandle, captureBuffer);
-            else _reinjector.SendToMstcp(metadata.AdapterHandle, captureBuffer);
+            AppendPass(metadata.AdapterHandle, metadata.IsOnSend, captureBuffer, rented: false);
         }
         else
         {
-            using var buffer = _bufferPool.Rent();
+            // The rented native buffer copies the frame synchronously here, so the lease's pooled
+            // managed array can return when ProcessAsync completes; the flush owns the native
+            // buffer from this point and returns it exactly once after sending.
+            var buffer = _bufferPool.Rent();
             buffer.SetFrame(packet.Lease.Frame.Span, metadata.DeviceFlags, metadata.AdapterHandle, metadata.Flags);
-            if (metadata.IsOnSend) _reinjector.SendToAdapter(metadata.AdapterHandle, buffer);
-            else _reinjector.SendToMstcp(metadata.AdapterHandle, buffer);
+            AppendPass(metadata.AdapterHandle, metadata.IsOnSend, buffer, rented: true);
         }
         if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("packet.reinjected", packet, new RuntimeLogField("target", metadata.IsOnSend ? "adapter" : "mstcp"));
         return ValueTask.CompletedTask;
+    }
+
+    private void AppendPass(nint adapterHandle, bool isOnSend, NdisPacketBuffer buffer, bool rented)
+    {
+        var lane = TryGetOrAddPendingLane(adapterHandle, isOnSend);
+        if (lane is null)
+        {
+            // More concurrent (adapter, direction) lanes than the fixed capacity: send now so the
+            // frame still goes out exactly once instead of being dropped from batching.
+            if (isOnSend) _reinjector.SendToAdapter(adapterHandle, buffer);
+            else _reinjector.SendToMstcp(adapterHandle, buffer);
+            if (rented) buffer.Dispose();
+            return;
+        }
+        var count = lane.Count;
+        if (count == lane.Buffers.Length)
+        {
+            Array.Resize(ref lane.Buffers, checked(count * 2));
+            Array.Resize(ref lane.Rented, checked(count * 2));
+        }
+        lane.Buffers[count] = buffer;
+        lane.Rented[count] = rented;
+        lane.Count = count + 1;
+    }
+
+    /// <summary>
+    /// Resolves the accumulation lane for one (adapter handle, direction). The scan is lock-free
+    /// once a lane exists (lanes are published fully constructed with volatile semantics and are
+    /// never removed); first sight of a key creates its lane under the creation lock. A lane is
+    /// only ever touched by its adapter's pump chain — every <see cref="PassAsync"/> caller runs
+    /// inside that pump's serialized batch loop, and flushes are issued per adapter — so appends
+    /// and flushes need no per-lane lock.
+    /// </summary>
+    private PendingPassLane? TryGetOrAddPendingLane(nint adapterHandle, bool isOnSend)
+    {
+        for (var index = 0; index < _pendingLanes.Length; index++)
+        {
+            if (MatchLane(index, adapterHandle, isOnSend) is { } existing) return existing;
+        }
+        lock (_pendingLaneLock)
+        {
+            var freeIndex = -1;
+            for (var index = 0; index < _pendingLanes.Length; index++)
+            {
+                if (MatchLane(index, adapterHandle, isOnSend) is { } existing) return existing;
+                if (freeIndex < 0 && Volatile.Read(ref _pendingLanes[index]) is null) freeIndex = index;
+            }
+            if (freeIndex < 0) return null;
+            var lane = new PendingPassLane(adapterHandle, isOnSend, InitialLaneFrames);
+            Volatile.Write(ref _pendingLanes[freeIndex], lane);
+            return lane;
+        }
+    }
+
+    private PendingPassLane? MatchLane(int index, nint adapterHandle, bool isOnSend) =>
+        Volatile.Read(ref _pendingLanes[index]) is { } lane && lane.AdapterHandle == adapterHandle && lane.ToAdapter == isOnSend ? lane : null;
+
+    /// <summary>
+    /// Sends every pass frame accumulated for one adapter, one batched reinjector call per
+    /// direction lane in lane-creation order, preserving append (capture) order within each lane.
+    /// Rented pooled buffers are returned exactly once in a <c>finally</c>, so a failed batch
+    /// still releases them; in-place capture buffers are never returned (the pump owns them).
+    /// Called by the pump's batch-completed callback once per iteration and once on loop exit.
+    /// </summary>
+    public void FlushPendingPasses(nint adapterHandle)
+    {
+        for (var index = 0; index < _pendingLanes.Length; index++)
+        {
+            if (Volatile.Read(ref _pendingLanes[index]) is not { } lane) continue;
+            if (lane.AdapterHandle != adapterHandle) continue;
+            FlushLane(lane);
+        }
+    }
+
+    private void FlushLane(PendingPassLane lane)
+    {
+        var count = lane.Count;
+        lane.Count = 0;
+        if (count == 0) return;
+        try
+        {
+            if (lane.ToAdapter) _reinjector.SendPacketsToAdapter(lane.AdapterHandle, lane.Buffers, count);
+            else _reinjector.SendPacketsToMstcp(lane.AdapterHandle, lane.Buffers, count);
+        }
+        finally
+        {
+            for (var index = 0; index < count; index++)
+            {
+                if (lane.Rented[index]) lane.Buffers[index].Dispose();
+                lane.Buffers[index] = null!;
+            }
+        }
+    }
+
+    /// <summary>Telemetry/diagnostic surface: pass frames currently waiting for a flush.</summary>
+    internal int PendingPassCount
+    {
+        get
+        {
+            var total = 0;
+            for (var index = 0; index < _pendingLanes.Length; index++)
+            {
+                if (Volatile.Read(ref _pendingLanes[index]) is { } lane) total += lane.Count;
+            }
+            return total;
+        }
+    }
+
+    /// <summary>
+    /// Debug-only guard for the batching contract: pins that one adapter's lanes are fully
+    /// drained (a flush ran and nothing new accumulated), so a <see cref="PassAsync"/> caller
+    /// escaping the pump's batch-loop chain — whose frames would never be sent — is caught in
+    /// debug builds and tests instead of silently stranding frames.
+    /// </summary>
+    [Conditional("DEBUG")]
+    internal void DebugAssertNoPendingPasses(nint adapterHandle)
+    {
+        for (var index = 0; index < _pendingLanes.Length; index++)
+        {
+            if (MatchLane(index, adapterHandle, isOnSend: false) is { } mstcpLane) Debug.Assert(mstcpLane.Count == 0, $"Pass frames for adapter 0x{adapterHandle:X} are still pending outside a pump iteration; every iteration must flush (batched reinjection contract).");
+            if (MatchLane(index, adapterHandle, isOnSend: true) is { } adapterLane) Debug.Assert(adapterLane.Count == 0, $"Pass frames for adapter 0x{adapterHandle:X} are still pending outside a pump iteration; every iteration must flush (batched reinjection contract).");
+        }
+    }
+
+    /// <summary>
+    /// One (adapter handle, direction) accumulation lane: frames in append order, each flagged
+    /// for whether the flush must return it to the buffer pool (pooled copies) or leave it alone
+    /// (in-place capture buffers owned by the pump).
+    /// </summary>
+    private sealed class PendingPassLane(nint adapterHandle, bool toAdapter, int initialFrames)
+    {
+        public readonly nint AdapterHandle = adapterHandle;
+        public readonly bool ToAdapter = toAdapter;
+        public NdisPacketBuffer[] Buffers = new NdisPacketBuffer[initialFrames];
+        public bool[] Rented = new bool[initialFrames];
+        public int Count;
     }
 
     public ValueTask BlockAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)

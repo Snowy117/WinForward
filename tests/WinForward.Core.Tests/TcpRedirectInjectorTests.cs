@@ -65,6 +65,20 @@ public sealed class TcpRedirectInjectorTests
             record(adapterHandle, buffer);
         }
 
+        /// <summary>
+        /// The TCP redirect injector only ever sends single packets (per-flow SYN/RST, cold path);
+        /// batched calls are interface completeness and behave as per-packet singles.
+        /// </summary>
+        public void SendPacketsToAdapter(nint adapterHandle, NdisPacketBuffer[] buffers, int count)
+        {
+            for (var index = 0; index < count; index++) SendToAdapter(adapterHandle, buffers[index]);
+        }
+
+        public void SendPacketsToMstcp(nint adapterHandle, NdisPacketBuffer[] buffers, int count)
+        {
+            for (var index = 0; index < count; index++) SendToMstcp(adapterHandle, buffers[index]);
+        }
+
         private void record(nint adapterHandle, NdisPacketBuffer buffer)
         {
             Handle = adapterHandle;
