@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "Client-reset lifecycle, teardown grace, and redirect invariants — D1 touches the reset path"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Pump-path conventions: allocation gates, native lease lifetime — D3/D4 touch the pump loop"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Fail-closed semantics and bounded exemptions — reset failure must not block teardown"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Testing requirements and forbidden patterns for new tests"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Rate-limited warn logging rules for the reset/teardown catch paths"}
+{"file": ".trellis/tasks/archive/2026-08/08-30-proxy-perf-stability-research/research/tcp-redirect-path.md", "reason": "Primary evidence: S1 (RST), P1 (NoDelay), P2 (buffers), P3 (re-arm) with file:line and fix sketches"}
+{"file": ".trellis/tasks/archive/2026-08/08-30-proxy-perf-stability-research/research/synthesis-and-backlog.md", "reason": "Backlog items #2/#3 definitions and spot-check verification evidence"}

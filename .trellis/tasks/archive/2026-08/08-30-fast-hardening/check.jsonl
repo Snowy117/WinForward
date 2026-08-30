@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Test coverage standards the checker must apply to the new RST/EndKind/buffer tests"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Verify no allocation regression on the pump path and lease conventions respected"}
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "Verify reset ordering (inject before teardown) and teardown single-writer semantics preserved"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify fail-closed semantics: reset failure contained, teardown proceeds"}
