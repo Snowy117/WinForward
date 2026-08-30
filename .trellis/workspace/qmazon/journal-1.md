@@ -386,3 +386,24 @@ Third implementation child of 08-30-proxy-perf-stability landed R2/R3/R4. Resear
 ### Summary
 
 Fourth implementation child of 08-30-proxy-perf-stability landed backlog #5 (X6 + R5). Planning re-validated all findings at HEAD c91ab68 (all CONFIRMED; refinements: _sendBuffer now references the UdpFrameBuilder constant but still ignores the factory cap; the oversized-response drop policy already follows the cap consistently, only documentation was missing; capture-side payloads are bounded at cap−42 so 6+16+cap always suffices). Implementation (D1-D5): IUdpProxyTransport.SendAsync takes Endpoint (3 fwd allocs/datagram gone); Socks5UdpDatagram.DestinationAddress is IPAddressValue? with scope preserved into .ScopeId (2 rev allocs/response gone); per-transport cached receive sender template; _sendBuffer = 6+16+factory-fed cap with Program.cs hoisting one NdisApiAbi.MaximumEthernetFrame for send/receive/reinjector (single source of truth, jumbo-ABI safe); oversized boundary documented (1472B @ 1514 ABI). One implement run + check run (PASS, 0 fixes). 463/463 tests (459+4), zero warnings; UdpSession benchmarks: Noop probe ≈3.9 KB/session (within ≤~4 KB anchor), populate paths no regression. Documented deviations: factory cap param required (3 non-prod sites pass default explicitly); new cold-edge Encode(IPAddressValue) overload for the loopback-server echo; one compiler-found migration beyond inventory (UdpProxyCoordinatorTests tuple type). Coordinator diff = 0 bytes (OCE filter/teardown/charge-credit physically untouched). Specs updated: udp-relay.md (endpoint zero-allocation + frame-cap buffer sizing section, migration note re Assert.Equal inference), hot-path.md (contract #1 extends raw addresses to SOCKS5 datagram decode). Parent backlog remaining: zero-copy (#6), batched-ioctls (#7), hardening-bundle (#8), windows-reality (#9), driver-resilience (#10).
+
+## Session 9: 08-30-windows-reality — Windows VM 测量程序（backlog #9）
+
+**Date**: 2026-08-30
+**Task**: 08-30-windows-reality (child of 08-30-proxy-perf-stability)
+**Branch**: `master`
+
+### Summary
+
+在 Win11 IoT LTSC 虚机（32C/4GB，winrm/evil-winrm-py + tmux PTY 驱动）完成 backlog #9：R1 stability 矩阵（UDP 丢失 2.475%→0、overflow -43%、footprint -54% 确认 #5 收益；WSAEADDRINUSE 8.2%→13.9%/96.65% throughput）；R2 BDN 双侧 in-process（托管路径平台等价、分配门 byte 级一致；TcpRelay 12.4×→2.9× 揭示 per-IO 成本是结构差距）；R3 一小时 soak（928k 换联/219GB，WS +0.9% 句柄 -4.0%，无泄漏 PASS）；R4 归因实验（仅扩端口池 96.65%→0.40%，纯 OS 容量问题，产品无罪）。父 backlog 更新：#7 升权、#6 降权，新候选 port-budget-windows / local-mux-transport(VLESS+mux, sing-box 无 UDS) / windows-real-nic。方法论沉淀到 benchmarks/README（无 SDK guest 需 --inProcess、单 --filter 多值、须仓库根启动、高性能电源）。trellis-check 全 AC PASS、数字抽查全吻合、构建 0w0e。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `eecbb27` | bench(benchmarks): Windows VM measurement program — stability, BDN, 1h soak, port attribution |
+| (auto) | chore(task): archive 08-30-windows-reality |
+
+### Status
+
+[OK] **Completed**
