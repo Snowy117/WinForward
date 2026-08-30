@@ -295,3 +295,22 @@ Fixed all audit findings from the 2026-08-29 proxy audit: UDP relay sockets disa
 ### Status
 
 [OK] **Completed**
+
+
+## Session 13: Preserve 2026-08-30 proxy perf/stability deep-dive research
+
+**Date**: 2026-08-30
+**Task**: Preserve 2026-08-30 proxy perf/stability deep-dive research
+**Branch**: `master`
+
+### Summary
+
+Four read-only review agents (TCP redirect/relay, UDP relay, SOCKS5 control + capture/dispatch, measurement gaps) analyzed the SOCKS5 proxy forwarding paths at baseline e5667af; main agent spot-verified the three highest-impact claims (dead production hot dispatch entry, missing client RST on mid-flow relay end, missing NoDelay). Five research docs persisted with file:line evidence and a ranked improvement backlog (top items: hot-path revival via TCP-gated reverse diversion, client-visible RST on relay fault/stall, NoDelay + 64KiB pooled pump buffers, atomic retire+remove+tombstone, UDP allocation zero-out + jumbo sizing). Task archived; next step agreed with user: parent task + child tasks for fast-hardening and hot-path-revival.
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
