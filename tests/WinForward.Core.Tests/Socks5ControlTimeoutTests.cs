@@ -111,6 +111,24 @@ public sealed class Socks5ControlTimeoutTests
     }
 
     [Fact]
+    public async Task UpstreamSocketDisablesNagle()
+    {
+        // X4: the upstream leg is a byte pipe; Nagle x delayed-ACK would stall small proxied
+        // writes 40-200 ms, so the connect path must turn TCP_NODELAY on for the relay socket.
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var server = AcceptGreetingAsync(listener, CancellationToken.None);
+        var endpoint = (IPEndPoint)listener.LocalEndpoint;
+        var socksServer = new Socks5Server("test", endpoint.Address.ToString(), checked((ushort)endpoint.Port), null, null);
+
+        await using var control = await Socks5ControlConnection.ConnectAsync(socksServer, CancellationToken.None);
+        var stream = Assert.IsType<NetworkStream>(control.GetUpstreamStream());
+
+        Assert.True(stream.Socket.NoDelay);
+        await server;
+    }
+
+    [Fact]
     public async Task RelayDatagramFromSiblingAddressIsAccepted()
     {
         // R3: RFC 1928 does not pin the relay reply to the BND address. A multi-homed/anycast relay

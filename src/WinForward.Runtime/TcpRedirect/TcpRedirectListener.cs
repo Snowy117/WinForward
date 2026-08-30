@@ -42,6 +42,9 @@ internal sealed class TcpRedirectListener(Socket socket, Endpoint translatedTupl
     public async ValueTask<ITcpAcceptedConnection> AcceptAsync(CancellationToken cancellationToken)
     {
         var accepted = await socket.AcceptAsync(cancellationToken).ConfigureAwait(false);
+        // The accepted leg is a byte pipe: Nagle x delayed-ACK would stall small proxied
+        // writes 40-200 ms (X4), so TCP_NODELAY goes on immediately after accept.
+        accepted.NoDelay = true;
         var remote = (IPEndPoint)accepted.RemoteEndPoint!;
         var remoteEndpoint = Endpoint.From(remote.Address, checked((ushort)remote.Port));
         return new TcpAcceptedConnection(accepted, remoteEndpoint);

@@ -151,19 +151,45 @@ internal sealed class TcpRedirectAcceptor
 
     private async Task ObserveRelayCompletionAsync(TcpRedirectSession session, ITcpRelay relay, CancellationToken token)
     {
+        // Fire-and-forget (S5): nothing awaits this task, so a throw here would surface as an
+        // unobserved task exception. The end handling itself is best-effort and must never block
+        // the teardown that follows.
         try
         {
-            await relay.Completion.ConfigureAwait(false);
+            try
+            {
+                await relay.Completion.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                return;
+            }
+            catch
+            {
+                // A relay that errored or ended removes the flow so a future SYN re-arms setup.
+            }
+            // A relay that stalled or faulted mid-flow blackholes the client's established
+            // connection — the teardown tombstone would eat every subsequent retransmission — so
+            // the end is surfaced client-visibly while the association still holds the SYN
+            // template and sequence trackers. A clean end already propagated FINs and must not
+            // be reset.
+            if (relay is ITcpRelayEndInfo { EndKind: not RelayEndKind.CleanEnded })
+            {
+                try
+                {
+                    await _clientReset.TryInjectClientResetAsync(session.Association, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception exception)
+                {
+                    _logger.Warn($"TCP redirect relay-end client reset failed ({exception.GetType().Name}).");
+                }
+            }
+            TcpRedirectLogging.LogDebug(_logger, "tcp.relay.ended", session, "completed");
+            await _tearDownSession(session).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        catch (Exception exception)
         {
-            return;
+            _logger.Warn($"TCP redirect relay completion handling failed ({exception.GetType().Name}).");
         }
-        catch
-        {
-            // A relay that errored or ended removes the flow so a future SYN re-arms setup.
-        }
-        TcpRedirectLogging.LogDebug(_logger, "tcp.relay.ended", session, "completed");
-        await _tearDownSession(session).ConfigureAwait(false);
     }
 }

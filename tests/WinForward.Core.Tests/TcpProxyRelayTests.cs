@@ -93,10 +93,11 @@ public sealed class TcpProxyRelayTests
     [Fact]
     public async Task MidStreamFailureCancelsSiblingPumpAfterRepeatedStallWindowRearms()
     {
-        // P1: the stall window is one reused CTS per direction, re-armed per operation via
-        // TryReset. After both pumps have completed several read+write cycles (several re-arms),
-        // a fault in one pump must still cancel the sibling immediately through the surviving
-        // lifetime-token link — re-arming must never unlink session cancellation.
+        // P1/X8a: the stall window is one reused CTS per direction, re-armed at most once per
+        // second via TryReset. After both pumps have completed several read+write cycles, a
+        // fault in one pump must still cancel the sibling immediately through the surviving
+        // lifetime-token link — re-arming (and throttling it) must never unlink session
+        // cancellation.
         var (localPeer, relayLocal) = await CreateSocketPairAsync();
         var (upstreamPeer, relayUpstream) = await CreateSocketPairAsync();
         using var local = localPeer;
@@ -113,6 +114,28 @@ public sealed class TcpProxyRelayTests
 
         await local.SendAsync(new byte[] { 6 }, SocketFlags.None);
         await Assert.ThrowsAsync<IOException>(async () => await relay.Completion.WaitAsync(TimeSpan.FromSeconds(2)));
+    }
+
+    [Fact]
+    public void StallRearmThrottleIsOneSecond()
+    {
+        Assert.Equal(Stopwatch.Frequency, TcpProxyRelay.ArmThrottleTicks);
+    }
+
+    [Fact]
+    public void StallRearmIsDueOnlyForFirstArmAndAfterThrottleInterval()
+    {
+        // X8a: the first arm is unconditional; within one second of the last arm the re-arm is
+        // skipped (the previous arm's 30-minute window still covers the operations), and an
+        // arm past the interval goes through.
+        var now = Stopwatch.GetTimestamp();
+        var halfSecond = TcpProxyRelay.ArmThrottleTicks / 2;
+
+        Assert.True(TcpProxyRelay.IsRearmDue(0, now));
+        Assert.False(TcpProxyRelay.IsRearmDue(now, now + halfSecond));
+        Assert.False(TcpProxyRelay.IsRearmDue(now, now + TcpProxyRelay.ArmThrottleTicks));
+        Assert.True(TcpProxyRelay.IsRearmDue(now, now + TcpProxyRelay.ArmThrottleTicks + 1));
+        Assert.True(TcpProxyRelay.IsRearmDue(now, now + 10 * TcpProxyRelay.ArmThrottleTicks));
     }
 
     private static async Task<(Socket Peer, Socket Relay)> CreateSocketPairAsync()

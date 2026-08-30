@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.Versioning;
@@ -56,10 +58,33 @@ public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic, IRunti
     }
 }
 
-[SupportedOSPlatform("windows")]
-internal sealed class TcpProxyRelay : ITcpRelay
+/// <summary>
+/// Why a relay ended: both pumps completed with FINs propagated, a pump stalled past the stall
+/// window (the relay then completes without faulting), or a pump faulted. Meaningful only once
+/// <see cref="ITcpRelay.Completion"/> completes; drives the acceptor's client-reset decision.
+/// </summary>
+internal enum RelayEndKind
 {
-    private const int BufferSize = 8192;
+    CleanEnded,
+    Stalled,
+    Faulted,
+}
+
+/// <summary>
+/// The relay surface that reports <see cref="EndKind"/> to the acceptor. A separate internal
+/// capability because <see cref="ITcpRelay"/> is public while the end kind is not; a relay that
+/// does not implement it is treated as a clean end (no client reset).
+/// </summary>
+internal interface ITcpRelayEndInfo
+{
+    /// <summary>Why the relay ended; meaningful only after <see cref="ITcpRelay.Completion"/> completes.</summary>
+    RelayEndKind EndKind { get; }
+}
+
+[SupportedOSPlatform("windows")]
+internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
+{
+    private const int PumpBufferSize = 64 * 1024;
     // A relay that makes no progress in one direction for this long is considered stalled and the
     // whole relay is reclaimed (M4). Established connections that are merely idle at the packet
     // level (e.g. SSH with keepalives) keep traffic flowing in both directions (data + ACKs), so
@@ -67,11 +92,20 @@ internal sealed class TcpProxyRelay : ITcpRelay
     // by <see cref="TcpProxyRelay"/>. Teardown is otherwise tied to the relay ending, not to a
     // per-flow wall-clock idle timeout.
     internal static readonly TimeSpan StallTimeout = TimeSpan.FromMinutes(30);
+    // One re-arm per second is enough for a 30-minute window (X8a): the window drifts by at most
+    // one second, while skipping the per-chunk TryReset + CancelAfter timer-queue updates saves
+    // ~100-200 ns per operation at 10 Gbps single-flow chunk rates.
+    internal static readonly long ArmThrottleTicks = Stopwatch.Frequency;
 
     private readonly Socket _localSocket;
     private readonly IAsyncDisposable _control;
     private readonly IRuntimeLogger _logger;
     private readonly Task _completion;
+    // Defaults to the fail-visible kind: a relay whose pumps never started (a construction-time
+    // throw before the run body) completes faulted without ever classifying itself, and that end
+    // must still surface as a client reset. CleanEnded is only ever assigned explicitly, after
+    // both pumps verifiably completed.
+    private RelayEndKind _endKind = RelayEndKind.Faulted;
     private int _disposed;
 
     public TcpProxyRelay(Socket localSocket, Stream upstream, IAsyncDisposable control, IRuntimeLogger? logger = null)
@@ -86,6 +120,8 @@ internal sealed class TcpProxyRelay : ITcpRelay
     }
 
     public Task Completion => _completion;
+
+    public RelayEndKind EndKind => _endKind;
 
     private async Task RunPumpAsync(Stream upstream)
     {
@@ -102,6 +138,7 @@ internal sealed class TcpProxyRelay : ITcpRelay
             {
                 await pumpCancellation.CancelAsync().ConfigureAwait(false);
                 ObservePump(first == localToUpstream ? upstreamToLocal : localToUpstream);
+                _endKind = RelayEndKind.Stalled;
                 return;
             }
 
@@ -112,26 +149,34 @@ internal sealed class TcpProxyRelay : ITcpRelay
             if (results[0] == PumpResult.Stalled || results[1] == PumpResult.Stalled)
             {
                 await pumpCancellation.CancelAsync().ConfigureAwait(false);
+                _endKind = RelayEndKind.Stalled;
+            }
+            else
+            {
+                _endKind = RelayEndKind.CleanEnded;
             }
         }
         catch
         {
             await pumpCancellation.CancelAsync().ConfigureAwait(false);
             ObservePump(localToUpstream.IsCompleted ? upstreamToLocal : localToUpstream);
+            _endKind = RelayEndKind.Faulted;
             throw;
         }
     }
 
     // One reusable per-operation stall window per pump direction (P1): re-arms a single linked
     // CTS via TryReset + CancelAfter instead of allocating a fresh linked source + timer per
-    // 8 KiB chunk, which dominated relay allocations at high throughput (measured 160 B/chunk).
+    // chunk, which dominated relay allocations at high throughput (measured 160 B/chunk).
     // TryReset keeps the lifetime-token link armed, so session-wide and cross-pump cancellation
     // still cancel an in-flight operation immediately; the source is recreated only when a
-    // previous stall timer raced with operation completion (TryReset returns false).
+    // previous stall timer raced with operation completion (TryReset returns false). Re-arms are
+    // throttled to one per second (X8a); the window is never disarmed between operations.
     private sealed class StallWindow : IDisposable
     {
         private readonly CancellationToken _lifetime;
         private CancellationTokenSource _source;
+        private long _lastArmTicks;
 
         public StallWindow(CancellationToken lifetime)
         {
@@ -143,6 +188,9 @@ internal sealed class TcpProxyRelay : ITcpRelay
 
         public void Arm()
         {
+            var now = Stopwatch.GetTimestamp();
+            if (!IsRearmDue(_lastArmTicks, now)) return;
+            _lastArmTicks = now;
             if (_source.TryReset())
             {
                 _source.CancelAfter(StallTimeout);
@@ -162,43 +210,59 @@ internal sealed class TcpProxyRelay : ITcpRelay
         }
     }
 
+    // The first arm is unconditional; a later arm within one second of the last is skipped
+    // because the window from the previous arm still covers the operations.
+    internal static bool IsRearmDue(long lastArmTicks, long nowTicks)
+        => lastArmTicks == 0 || nowTicks - lastArmTicks > ArmThrottleTicks;
+
     private static async Task<PumpResult> PumpAsync(Stream source, Stream destination, CancellationToken cancellationToken)
     {
-        var buffer = new byte[BufferSize];
-        using var stall = new StallWindow(cancellationToken);
-        while (true)
+        // One pooled 64 KiB buffer per pump direction (X5): directions have independent
+        // lifetimes via half-close, so the rent brackets this whole pump and the pool bounds
+        // steady-state memory while an 8 KiB fixed buffer paid ~8x the per-byte
+        // syscall/memcpy cost.
+        var buffer = ArrayPool<byte>.Shared.Rent(PumpBufferSize);
+        try
         {
-            int read;
-            try
+            using var stall = new StallWindow(cancellationToken);
+            while (true)
             {
-                stall.Arm();
-                read = await source.ReadAsync(buffer.AsMemory(0, BufferSize), stall.Token).ConfigureAwait(false);
+                int read;
+                try
+                {
+                    stall.Arm();
+                    read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), stall.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    return PumpResult.Stalled;
+                }
+                catch (OperationCanceledException)
+                {
+                    return PumpResult.Stalled;
+                }
+                if (read == 0)
+                {
+                    return PumpResult.Ended;
+                }
+                try
+                {
+                    stall.Arm();
+                    await destination.WriteAsync(buffer.AsMemory(0, read), stall.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    return PumpResult.Stalled;
+                }
+                catch (OperationCanceledException)
+                {
+                    return PumpResult.Stalled;
+                }
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                return PumpResult.Stalled;
-            }
-            catch (OperationCanceledException)
-            {
-                return PumpResult.Stalled;
-            }
-            if (read == 0)
-            {
-                return PumpResult.Ended;
-            }
-            try
-            {
-                stall.Arm();
-                await destination.WriteAsync(buffer.AsMemory(0, read), stall.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                return PumpResult.Stalled;
-            }
-            catch (OperationCanceledException)
-            {
-                return PumpResult.Stalled;
-            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
         }
     }
 

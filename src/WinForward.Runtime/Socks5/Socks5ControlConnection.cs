@@ -125,6 +125,9 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
             attemptCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             attemptCancellation.CancelAfter(timeout);
             await socket.ConnectAsync(new IPEndPoint(address, server.Port), attemptCancellation.Token).ConfigureAwait(false);
+            // The upstream leg is a byte pipe: Nagle x delayed-ACK would stall small proxied
+            // writes 40-200 ms (X4), so TCP_NODELAY goes on as soon as the connect succeeds.
+            socket.NoDelay = true;
 
             connection = new Socks5ControlConnection(socket, registration, attemptCancellation, cancellationToken);
             socket = null;
