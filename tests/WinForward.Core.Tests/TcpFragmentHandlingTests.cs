@@ -270,7 +270,7 @@ public sealed class TcpFragmentHandlingTests
             var rules = new[] { new PolicyRule(matcher, new FlowDecision(FlowAction.Proxy, 0, s_server.Name)) };
             var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase) { [s_server.Name] = s_server };
             var config = new ValidatedConfiguration(servers, new PolicySnapshot(rules, FlowAction.Block));
-            var dispatcher = new FlowDispatcher(config, selfTraffic, executor, reverseHandler: coordinator.HandleReverseIfApplicableAsync, fragmentHandler: coordinator.HandleFragmentAsync);
+            var dispatcher = new FlowDispatcher(config, selfTraffic, executor, reverseHandler: coordinator, fragmentHandler: coordinator.HandleFragmentAsync);
             // The tombstone is keyed by the association's original key, which carries the
             // forwarded origin and its adapter context.
             var adapter = new AdapterContext("veth-1", "vEthernet 1", 7);

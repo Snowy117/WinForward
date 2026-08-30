@@ -106,7 +106,7 @@ internal static DispatcherHarness CreateDispatcherHarness()
     var executor = new NdisPacketActionExecutor(new CountingReinjector(), logger, tcpProxy: coordinator);
     var dispatcher = new FlowDispatcher(
         config, selfTraffic, executor,
-        reverseHandler: coordinator.HandleReverseIfApplicableAsync,
+        reverseHandler: coordinator,
         fragmentHandler: coordinator.HandleFragmentAsync,
         logger: logger);
     return new DispatcherHarness(coordinator, listenerFactory, injector, relayFactory, table, dispatcher, logger);

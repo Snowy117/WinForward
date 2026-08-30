@@ -268,7 +268,7 @@ internal static class Program
                 var executor = new NdisPacketActionExecutor(reinjector, logger, tcpCoordinator, udpCoordinator);
                 var dispatcher = new FlowDispatcher(
                     configuration, selfTraffic, executor, new WindowsProcessAttributor(),
-                    reverseHandler: tcpCoordinator.HandleReverseIfApplicableAsync,
+                    reverseHandler: tcpCoordinator,
                     fragmentHandler: tcpCoordinator.HandleFragmentAsync,
                     logger: logger);
                 var captureLoop = new MultiAdapterCaptureLoop(driver, scope, new CapturePacketProcessor(dispatcher, logger));

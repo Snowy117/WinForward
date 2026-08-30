@@ -45,14 +45,8 @@ public sealed class FlowDispatcherTests
         var config = new ValidatedConfiguration(servers, new PolicySnapshot(rules, FlowAction.Block));
 
         var executor = new FakeExecutor();
-        var reverseCalls = 0;
-        var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor, reverseHandler: (packet, ct) =>
-        {
-            // If the dispatcher routed a UDP packet here, it would drop it (Blocked). The H1 gate
-            // must prevent that.
-            reverseCalls++;
-            return ValueTask.FromResult(TcpRedirectOutcome.Blocked);
-        });
+        var reverse = new RecordingReverseHandler(() => TcpRedirectOutcome.Blocked);
+        var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor, reverseHandler: reverse);
 
         var key = FlowKey.Create(
             Endpoint.From(IPAddress.Parse("192.0.2.10"), collidingPort),
@@ -62,7 +56,7 @@ public sealed class FlowDispatcherTests
 
         await dispatcher.DispatchAsync(packet, CancellationToken.None);
 
-        Assert.Equal(0, reverseCalls);
+        Assert.Equal(0, reverse.HandleCount);
         Assert.Equal(1, executor.ProxyCount);
         Assert.Equal(PacketDisposition.ProxyConsumed, packet.Lease.Disposition);
     }
@@ -72,17 +66,13 @@ public sealed class FlowDispatcherTests
     {
         var config = CreateConfig();
         var executor = new FakeExecutor();
-        var reverseCalls = 0;
-        var dispatcher = new FlowDispatcher(config, new FakeGuard { Owned = true }, executor, reverseHandler: (packet, ct) =>
-        {
-            reverseCalls++;
-            return ValueTask.FromResult(TcpRedirectOutcome.Blocked);
-        });
+        var reverse = new RecordingReverseHandler(() => TcpRedirectOutcome.Blocked);
+        var dispatcher = new FlowDispatcher(config, new FakeGuard { Owned = true }, executor, reverseHandler: reverse);
         var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), Context(CreateKey(TransportProtocol.Tcp)));
 
         await dispatcher.DispatchAsync(packet, CancellationToken.None);
 
-        Assert.Equal(0, reverseCalls);
+        Assert.Equal(0, reverse.HandleCount);
         Assert.Equal(1, executor.PassCount);
         Assert.Equal(0, executor.ProxyCount);
     }
@@ -92,23 +82,19 @@ public sealed class FlowDispatcherTests
     {
         var config = CreateConfig();
         var executor = new FakeExecutor();
-        var reverseCalls = 0;
-        var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor, reverseHandler: (packet, ct) =>
-        {
-            reverseCalls++;
-            return ValueTask.FromResult(reverseCalls == 1 ? TcpRedirectOutcome.NotRelevant : TcpRedirectOutcome.Injected);
-        });
+        var reverse = new RecordingReverseHandler();
+        var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor, reverseHandler: reverse);
         var key = CreateKey(TransportProtocol.Tcp);
         var first = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), Context(key));
-        var reverse = new CapturedFlowPacket(new PacketLease(new byte[] { 2 }), Context(key.Reverse()));
+        var reversePacket = new CapturedFlowPacket(new PacketLease(new byte[] { 2 }), Context(key.Reverse()));
 
         await dispatcher.DispatchAsync(first, CancellationToken.None);
-        await dispatcher.DispatchAsync(reverse, CancellationToken.None);
+        await dispatcher.DispatchAsync(reversePacket, CancellationToken.None);
 
-        Assert.Equal(2, reverseCalls);
+        Assert.Equal(2, reverse.HandleCount);
         Assert.Equal(1, executor.ProxyCount);
         Assert.Equal(PacketDisposition.ProxyConsumed, first.Lease.Disposition);
-        Assert.Equal(PacketDisposition.ProxyConsumed, reverse.Lease.Disposition);
+        Assert.Equal(PacketDisposition.ProxyConsumed, reversePacket.Lease.Disposition);
     }
 
     [Fact]
@@ -170,6 +156,22 @@ public sealed class FlowDispatcherTests
     private static FlowContext Context(FlowKey key) => new(key, "dns.exe", null, null, null, key.Remote.Port);
 
     private sealed class FakeGuard : ISelfTrafficGuard { public bool Owned { get; init; } public bool IsOwned(FlowContext context) => Owned; }
+
+    /// <summary>
+    /// A reverse handler whose <see cref="WantsPacket"/> always diverts — the pre-X1 dispatcher
+    /// shape these slow-path tests were written against — and whose handling outcome is scripted.
+    /// </summary>
+    private sealed class RecordingReverseHandler(Func<TcpRedirectOutcome>? outcome = null) : ITcpReverseHandler
+    {
+        private int _calls;
+        public int HandleCount => _calls;
+        public bool WantsPacket(in CapturedFlowPacket packet) => true;
+        public ValueTask<TcpRedirectOutcome> HandleReverseIfApplicableAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
+        {
+            var calls = ++_calls;
+            return ValueTask.FromResult(outcome?.Invoke() ?? (calls == 1 ? TcpRedirectOutcome.NotRelevant : TcpRedirectOutcome.Injected));
+        }
+    }
 
     private sealed class FakeExecutor : IPacketActionExecutor
     {

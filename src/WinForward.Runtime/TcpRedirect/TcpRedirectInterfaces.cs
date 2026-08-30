@@ -69,6 +69,28 @@ public interface ITcpRedirectInjector
 }
 
 /// <summary>
+/// The dispatcher-level TCP reverse-routing seam (X1). <see cref="WantsPacket"/> is the warm-entry
+/// diversion predicate: the dispatcher consults it to decide whether a packet MIGHT belong to a
+/// redirect reverse leg and should fall into the slow path where
+/// <see cref="HandleReverseIfApplicableAsync"/> runs. A false answer is allowed to be merely
+/// conservative in one direction: it only skips the proactive diversion, because a miss-fallthrough
+/// packet still reaches the full handler on the slow path, so false must imply the handler itself
+/// would find the packet <see cref="TcpRedirectOutcome.NotRelevant"/> on the resolved-flow shapes.
+/// The slow path never consults <see cref="WantsPacket"/> — it always runs the full handler, so
+/// tombstone stragglers of a torn-down redirect keep their grace-drop behavior.
+/// </summary>
+public interface ITcpReverseHandler
+{
+    /// <summary>
+    /// Whether the dispatcher should divert this packet to the slow path before the warm entry
+    /// resolves it. Must stay a synchronous, allocation-free check (hot-path contract 3).
+    /// </summary>
+    bool WantsPacket(in CapturedFlowPacket packet);
+
+    ValueTask<TcpRedirectOutcome> HandleReverseIfApplicableAsync(CapturedFlowPacket packet, CancellationToken cancellationToken);
+}
+
+/// <summary>
 /// The terminal outcome of handling a proxy-selected TCP packet. A proxy-selected flow is never
 /// silently passed: any setup, rewrite, or injection failure fails closed as <see cref="Blocked"/>.
 /// <see cref="NotRelevant"/> means the packet is not part of any active redirect (mid-flow data on

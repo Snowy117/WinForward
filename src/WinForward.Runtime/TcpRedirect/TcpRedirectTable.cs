@@ -133,6 +133,11 @@ public sealed class TcpRedirectTable
     private readonly Dictionary<AddressPair, TcpRedirectAssociation> _byAddressPair = [];
     private readonly Lock _gate = new();
     private readonly int _capacity;
+    // X1: reference count per listener port. A reverse candidate's source port is always a live
+    // listener port, so a zero count proves the packet cannot match the reverse index. Mutations
+    // run under _gate with Interlocked ops; consults are lock-free Volatile reads safe for the
+    // per-packet warm path.
+    private readonly int[] _candidatePorts = new int[65_536];
     private long _nextGeneration;
 
     public TcpRedirectTable(int? capacity = null)
@@ -188,6 +193,10 @@ public sealed class TcpRedirectTable
             // carries no ports, so attribution is inherently ambiguous there and the newest
             // claim is the best guess (S1).
             _byAddressPair[NormalizeAddressPair(originalKey.Local.Address, originalKey.Remote.Address)] = created;
+            // X1: the count rises inside the claim gate before the caller can rewrite and inject
+            // the SYN, so the listener's first reverse candidate (the SYN-ACK) can never arrive
+            // before its port is observable on the warm path.
+            Interlocked.Increment(ref _candidatePorts[translatedTuple.Port]);
             association = created;
             return true;
         }
@@ -220,6 +229,14 @@ public sealed class TcpRedirectTable
     {
         lock (_gate) return _byReverse.ContainsKey(new ReverseRedirectTuple(local, remote));
     }
+
+    /// <summary>
+    /// Whether any live association's listener occupies <paramref name="port"/> (the X1 warm-path
+    /// prefilter). A reverse candidate's source port is always a listener port, so a miss proves
+    /// the packet cannot match the reverse index; a hit is merely a candidate — the full
+    /// <see cref="IsReverseCandidate"/> tuple check runs on the slow path.
+    /// </summary>
+    internal bool IsReverseCandidatePort(ushort port) => Volatile.Read(ref _candidatePorts[port]) != 0;
 
     public bool TryResolveByOriginal(FlowKey originalKey, DateTimeOffset now, out TcpRedirectAssociation? association) =>
         TryFind(_byOriginal, originalKey, now, out association);
@@ -265,6 +282,9 @@ public sealed class TcpRedirectTable
             _byTranslatedListener.Remove(association.TranslatedListenerTuple);
             _byReverse.Remove(new ReverseRedirectTuple(association.ReverseSourceEndpoint, association.ReverseDestinationEndpoint));
             RemoveAddressPairUnderGate(association);
+            // X1: released under the same gate; the ReferenceEquals guard above makes idempotent
+            // removals a no-op here, so the count never double-decrements.
+            Interlocked.Decrement(ref _candidatePorts[association.TranslatedListenerTuple.Port]);
             onRemoved?.Invoke(association);
             return true;
         }
@@ -281,6 +301,7 @@ public sealed class TcpRedirectTable
                 _byTranslatedListener.Remove(association.TranslatedListenerTuple);
                 _byReverse.Remove(new ReverseRedirectTuple(association.ReverseSourceEndpoint, association.ReverseDestinationEndpoint));
                 RemoveAddressPairUnderGate(association);
+                Interlocked.Decrement(ref _candidatePorts[association.TranslatedListenerTuple.Port]);
             }
             return expired.Length;
         }

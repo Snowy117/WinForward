@@ -17,7 +17,7 @@ namespace WinForward.Runtime.TcpRedirect;
 /// (session lifecycle under one gate), <see cref="TcpRedirectAcceptor"/> (accept/relay loop), and
 /// <see cref="ClientResetInjector"/> (client-visible failure surface); this class owns entry routing.
 /// </summary>
-public sealed class TcpProxyCoordinator : IAsyncDisposable
+public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
 {
     private readonly TcpRedirectTable _table;
     private readonly ITcpRedirectInjector _injector;
@@ -248,6 +248,20 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable
         }
 
         return TcpRedirectOutcome.Injected;
+    }
+
+    /// <summary>
+    /// The warm-entry diversion predicate (X1). TCP-only, then the listener-port prefilter: a
+    /// reverse candidate's source port is always a live listener port, so a miss cannot match the
+    /// reverse index and the packet falls through to the slow path only when the flow table also
+    /// misses it — where the full handler still runs, so tombstone stragglers of a torn-down
+    /// redirect keep their grace-drop behavior (the fall-through theorem, design D3). Diversion
+    /// knowledge lives here so the dispatcher stays free of reverse-handler internals.
+    /// </summary>
+    public bool WantsPacket(in CapturedFlowPacket packet)
+    {
+        var key = packet.Context.Key;
+        return key.Protocol == TransportProtocol.Tcp && _table.IsReverseCandidatePort(key.Local.Port);
     }
 
     /// <summary>

@@ -107,6 +107,15 @@ internal static class BenchmarkShared
         return FlowKey.Create(local, remote, TransportProtocol.Udp, FlowOriginKind.Host, new AdapterContext($"adapter-{index % 4}", null, index % 4));
     }
 
+    /// <summary>A TCP flow key with a controllable local (source) port, for the reverse-prefilter
+    /// benchmark shapes (X1): a candidate key's source port matches a claimed listener port.</summary>
+    public static FlowKey CreateTcpFlowKey(ushort localPort)
+    {
+        var local = Endpoint.From(IPAddress.Parse("10.0.0.1"), localPort);
+        var remote = Endpoint.From(IPAddress.Parse("172.16.0.1"), 443);
+        return FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Host, new AdapterContext("adapter-0", null, 0));
+    }
+
     public static FlowContext CreateContext(FlowKey key) => new(key, null, null, key.OriginAdapterId, null, key.Remote.Port);
 }
 

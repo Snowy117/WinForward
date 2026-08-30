@@ -79,12 +79,12 @@ public sealed class FlowDispatcher
     private readonly ISelfTrafficGuard _selfTraffic;
     private readonly IPacketActionExecutor _executor;
     private readonly IProcessAttributor? _attributor;
-    private readonly Func<CapturedFlowPacket, CancellationToken, ValueTask<TcpRedirectOutcome>>? _reverseHandler;
+    private readonly ITcpReverseHandler? _reverseHandler;
     private readonly Func<CapturedFlowPacket, CancellationToken, ValueTask<TcpRedirectOutcome>>? _fragmentHandler;
     private readonly IRuntimeLogger _logger;
     private readonly bool _includeProcessPathInLogs;
 
-    public FlowDispatcher(ValidatedConfiguration configuration, ISelfTrafficGuard selfTraffic, IPacketActionExecutor executor, IProcessAttributor? attributor = null, int flowCapacity = 65_536, Func<CapturedFlowPacket, CancellationToken, ValueTask<TcpRedirectOutcome>>? reverseHandler = null, Func<CapturedFlowPacket, CancellationToken, ValueTask<TcpRedirectOutcome>>? fragmentHandler = null, IRuntimeLogger? logger = null)
+    public FlowDispatcher(ValidatedConfiguration configuration, ISelfTrafficGuard selfTraffic, IPacketActionExecutor executor, IProcessAttributor? attributor = null, int flowCapacity = 65_536, ITcpReverseHandler? reverseHandler = null, Func<CapturedFlowPacket, CancellationToken, ValueTask<TcpRedirectOutcome>>? fragmentHandler = null, IRuntimeLogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(selfTraffic);
@@ -117,16 +117,21 @@ public sealed class FlowDispatcher
     /// already resolved, pass, block, or a proxy decision that resolves inline to a known server)
     /// runs entirely synchronously on this non-async entry so the per-packet path allocates
     /// nothing: the executor call is returned directly and awaited exactly once by the caller.
-    /// Every other shape — trace logging, a TCP redirect reverse handler, self traffic, reverse
-    /// UDP responses, new flows needing attribution, and proxy decisions that cannot resolve
-    /// inline — falls into <see cref="DispatchSlowAsync"/>, which keeps the full state machine
-    /// and all diagnostic logging.
+    /// Every other shape — trace logging, a packet the wired reverse handler's diversion
+    /// predicate claims (X1: TCP with a live listener source port), self traffic, reverse UDP
+    /// responses, new flows needing attribution, and proxy decisions that cannot resolve inline —
+    /// falls into <see cref="DispatchSlowAsync"/>, which keeps the full state machine and all
+    /// diagnostic logging.
     /// </summary>
     public ValueTask DispatchAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
         if (packet.Lease is null) throw new ArgumentNullException(nameof(packet));
 
-        if (_logger.IsEnabled(RuntimeLogLevel.Trace) || _reverseHandler is not null) return DispatchSlowAsync(packet, cancellationToken);
+        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) return DispatchSlowAsync(packet, cancellationToken);
+        // X1: only packets the reverse handler itself claims can be reverse candidates divert;
+        // a miss falls through here, and when the flow table also misses, the slow path still
+        // runs the full handler — so tombstone stragglers keep their grace-drop behavior.
+        if (_reverseHandler is { } handler && handler.WantsPacket(packet)) return DispatchSlowAsync(packet, cancellationToken);
         if (_selfTraffic.IsOwned(packet.Context)) return DispatchSlowAsync(packet, cancellationToken);
         if (!_flows.TryResolve(packet.Context.Key, out var existing) || existing is null) return DispatchSlowAsync(packet, cancellationToken);
 
@@ -219,7 +224,7 @@ public sealed class FlowDispatcher
     private async ValueTask<bool> TryHandleReverseAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
         if (_reverseHandler is null || packet.Context.Key.Protocol != TransportProtocol.Tcp) return false;
-        var outcome = await _reverseHandler(packet, cancellationToken).ConfigureAwait(false);
+        var outcome = await _reverseHandler.HandleReverseIfApplicableAsync(packet, cancellationToken).ConfigureAwait(false);
         if (outcome == TcpRedirectOutcome.NotRelevant) return false;
         // Dropped is a TIME_WAIT-grace tombstone hit consumed by the proxy layer, like Injected.
         // Block is reserved for outcome Blocked: routing a grace drop through BlockAsync would
