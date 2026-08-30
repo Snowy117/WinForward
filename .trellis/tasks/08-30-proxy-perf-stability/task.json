@@ -23,7 +23,8 @@
     "08-30-hot-path-revival",
     "08-30-atomic-retire",
     "08-30-udp-alloc-jumbo",
-    "08-30-windows-reality"
+    "08-30-windows-reality",
+    "08-30-batched-ioctls"
   ],
   "parent": null,
   "relatedFiles": [],

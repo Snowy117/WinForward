@@ -407,3 +407,24 @@ Fourth implementation child of 08-30-proxy-perf-stability landed backlog #5 (X6 
 ### Status
 
 [OK] **Completed**
+
+## Session 10: 08-30-batched-ioctls — 批量重注入 IOCTL（backlog #7 Phase 1）
+
+**Date**: 2026-08-30
+**Task**: 08-30-batched-ioctls (child of 08-30-proxy-perf-stability)
+**Branch**: `master`
+
+### Summary
+
+落地批量重注入：executor Pass 处置按 (adapter, direction) lane 累积，pump 批尾/退出时统一 flush——一次迭代同方向 Pass 从 N 次内核穿越降到 1 次（E2E 实测 96 帧→6 调用=16×）。S2 导出验证推翻了部分成功语义假设（send IOCTL lpOutBuffer=NULL + METHOD_BUFFERED ⇒ PacketsSuccess 不可观测），D1 采用 fail-the-batch 分支。driver 批量 send ≤126/chunk 单 gate lease；gate map 换 ConcurrentDictionary 免锁；遥测 BatchedSendFlushCount/PacketCount。476/476 测试（+13），分配门字节级不变（Dispatcher 160/352B、CapturePump 1.86MB）。check 确证 UdpProxyCoordinatorLifecycleTests 一个用例 pre-existing flaky（干净基线 4/6 失败）。spec windows-ndisapi.md 新增批量 send 契约节。Phase 2（UDP response 微批）按 PRD 条件触发待 DNS 密集测量。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f9fdb67` | perf(ndisapi,capture): batch Pass reinjection IOCTLs (backlog #7 / X3) |
+| (auto) | chore(task): archive 08-30-batched-ioctls |
+
+### Status
+
+[OK] **Completed**
