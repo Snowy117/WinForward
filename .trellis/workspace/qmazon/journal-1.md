@@ -358,3 +358,25 @@ Second implementation child of 08-30-proxy-perf-stability landed backlog #1 (X1)
 ### Status
 
 [OK] **Completed**
+
+
+## Session 16: atomic-retire child landed: atomic teardown + bounded setup memory
+
+**Date**: 2026-08-30
+**Task**: atomic-retire child landed: atomic retire+remove+tombstone + bounded queues (backlog #4)
+**Branch**: `master`
+
+### Summary
+
+Third implementation child of 08-30-proxy-perf-stability landed R2/R3/R4. Research agent re-validated all findings at HEAD 0596a74 (all CONFIRMED; key refinement: table-removal+tombstone were already atomic at baseline, the genuine gap was only retire→table-removal). User decision: R4 = 8 MiB global byte budget + 5 s per-entry TTL (8 MiB = 256 full queues / ~3600 DNS flows / 32× setup-concurrency headroom; precision insensitive because TTL bounds hold-duration). Implementation: D1 RetireSessionUnderGate performs session removal+Closing+retire+alias removal+tombstone in one store-gate critical section (lock order store→table→tombstone, repo-verified acyclic; disposal trails outside); necessary deviation: HandleSynAsync gained a tombstone check after resolve-miss (closes a pre-existing SYN-grace gap, required by AC1). D2 tombstone queue head-drains on RemoveExpired (order-safe: refresh appends fresh tail, queue order ≈ expiry order). D3 _setupTombstones bounded by session capacity, oldest-deadline eviction. D4 BoundedSetupQueue timestamped entries (additive overloads), charge/credit exactly-once across all dequeue sinks (incl. new dispose-drain credit and per-flow-rejection rollback). One implement run + check run (PASS-WITH-FIXES: credit-zero assertion added to drop-oldest test). 459/459 tests (451+8), zero warnings, dispatcher 160 B gate exact, UDP Noop +16 B/slot (entry timestamp, within design budget). Specs updated: tcp-local-redirect.md (atomic retire contract, queue drain, SYN grace check), udp-relay.md (bounded-setup-memory scenario), error-handling.md. Task archived; parent backlog remaining: udp-alloc-jumbo (#5), zero-copy (#6), batched-ioctls (#7), hardening-bundle (#8), windows-reality (#9), driver-resilience (#10). Checker noted pre-existing residual: FailAssociationAsync looks up session by key not instance (narrow, grace-protected).
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f0ac4ec` | feat(tcp,udp): atomic retire+remove+tombstone and bounded setup memory (R2/R3/R4) |
+| (auto) | chore(task): archive 08-30-atomic-retire |
+
+### Status
+
+[OK] **Completed**
