@@ -29,10 +29,10 @@ happens in child tasks.
 | `08-30-atomic-retire` | #4 atomic retire+remove+tombstone + bounded queues (R2, R3, R4): global 8 MiB setup budget + 5 s datagram TTL + tombstone bounds; SYN-path grace check | completed 2026-08-30 |
 | `08-30-udp-alloc-jumbo` | #5 UDP allocation zero-out + buffer sizing consistency (X6, R5) | completed 2026-08-30 |
 | `08-30-windows-reality` | #9 Windows measurement program (executed on Win11 IoT LTSC VM per user decision): stability matrix, BDN subset, 1h soak, port-pool attribution | completed 2026-08-30 |
+| `08-30-batched-ioctls` | #7 batched reinjection IOCTLs (X3) — elevated by 08-30 VM data: Windows per-IO cost is the structural gap (batching amortizes it); Phase 2 UDP response micro-batch pending DNS-dense measurement per its PRD trigger | completed 2026-08-30 |
+| `08-30-driver-resilience` | #10 transient driver-error retry/backoff with single-pump degradation + TCP SYN setup off the pump thread (R7, R8) | completed 2026-08-30 |
 | later: zero-copy-datapath | #6 zero-copy proxy data path (X2) — deprioritized by 08-30 VM data: managed path is platform-equivalent, not the Windows bottleneck | on demand |
-| later: batched-ioctls | #7 batched reinjection IOCTLs (X3) — elevated by 08-30 VM data: Windows per-IO cost is the structural gap (batching amortizes it) | on demand |
 | later: hardening-bundle | #8 keepalive + lock cleanup + ServerGC (R6, X7, X8, R11) | on demand |
-| later: driver-resilience | #10 transient driver-error retry + offload listener alloc (R7, R8) | on demand |
 
 New candidates from 08-30-windows-reality (see
 `benchmarks/results/2026-08-30-windows-vm/README.md`):
