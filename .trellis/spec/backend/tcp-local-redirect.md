@@ -70,6 +70,29 @@ When the SOCKS5 relay cannot be established after a successful redirect (proxy d
 
 ---
 
+## Capacity RST, fragment consume+RST, and relay-completion observation (wired 2026-08-29)
+
+Task 08-29-proxy-stability-perf (S3/S4/S1).
+
+### Capacity-rejected SYN → RST|ACK (S4)
+
+- `TcpResetBuilder.BuildResetFromSyn(synFrame, serverTuple, clientTuple)` (`src/WinForward.Protocols/TcpResetBuilder.cs`) reads the client ISN from the observed SYN and builds `seq=0, ack=clientISN+1, flags=RST|ACK` (0x14) — in-window for a SYN_SENT client, which aborts immediately with ECONNREFUSED. No association exists on this path; MACs/IPs are mirrored from the SYN template.
+- `ClientResetInjector.InjectCapacityRejectedResetAsync` is **claim-then-inject**: `TcpResetCooldownTable` (`TcpRedirect/TcpResetCooldownTable.cs`, per-4-tuple 1 s window, capacity = session budget, FIFO evict-oldest; a refreshed tuple is NOT re-enqueued) claims the window before any build/inject attempt, so even a failed injection consumes the cooldown — strongest anti-amplification. Injection follows the direction matrix (host → MSTCP, forwarded → origin adapter capture handle); it never throws and never changes the `Blocked` result. Debug event `tcp.redirect.capacityReset`; the existing `tcp.redirect.rejected reason=capacity` trace and `tcp.redirect.capacity` summary are unchanged.
+- Locked by the capacity coordinator tests: exactly one RST per tuple per window, retransmissions inside the window silent, new RST after window expiry, direction matrix, injection-failure warn leaves the result unchanged.
+
+### Fragments on associated flows (S1)
+
+- `TcpProxyCoordinator.HandleFragmentAsync` (wired as the `FlowDispatcher` fragment handler, consulted in `DispatchNonFlowAsync` after the self-traffic check): `IPFragment.IsFragment`/`TryReadAddressPair` (`src/WinForward.Protocols/IPFragment.cs`, IPv4 mask `0xbfff`; IPv6 extension-chain walk, nextHeader 44) → `TcpRedirectTable.TryResolveByAddressPair` (third index `_byAddressPair`, direction-agnostic normalized IP pair, same-family gated, last-writer-wins for multi-flow pairs, `ReferenceEquals`-guarded removal — all under the single `_gate`) → hit: trace `tcp.redirect.fragment reason=fragment`, `HandleFragmentTeardownAsync` (best-effort RST via tracked sequences; warn + silent teardown when sequences were never observed; unconditional `_failAssociation` → single tombstone write point), outcome `Dropped`; miss: `NotRelevant` keeps the non-flow pass.
+- Dispatcher mapping: fragment-handler `Dropped` → `ProxyConsumed` (silent), `Blocked` → policy path. `CapturedFlowPacket.InspectionSpan` reads the frame without forcing a pooled materialization (ARP/ND frequency on the non-flow path). The hot flow path (`DispatchAsync`) is untouched — non-fragment frames pay one ether-type compare.
+- Known residual (accepted): post-tombstone fragments fall back to pass (bounded window); address-pair granularity can tear down the newer of two same-IP-pair associations.
+
+### Faulted relay completions must be observed (S3)
+
+- `TcpRelayFaultObserver.Observe(relay, logger)` (`TcpRedirect/TcpRelayFaultObserver.cs`) attaches an `OnlyOnFaulted | ExecuteSynchronously` continuation on every path that discards a relay without awaiting `Completion`: `TcpProxyRelay.DisposeAsync` (before disposal faults the pumps) and the acceptor's attach-failure branch. Debug event `tcp.relay.faulted`.
+- **.NET gotcha (load-bearing)**: attaching a `OnlyOnFaulted` continuation does NOT mark a faulted task observed — only **reading `Task.Exception`** (or awaiting) does. The observer must read `task.Exception` BEFORE any `IsEnabled` log gate; the original implementation checked the log level first and silently left exceptions unobserved under the default `info` threshold (tests passed because the recording logger was always-enabled). Do not reorder.
+
+---
+
 ## SOCKS5 control-socket timeout lifecycle (fixed 2026-08-15)
 
 - `Socks5ControlConnection.ConnectOnceAsync` (`Socks5/Socks5ControlConnection.cs`) sets `socket.ReceiveTimeout`/`socket.SendTimeout` to the per-attempt timeout (default 30s; the TCP relay call site passes 10s) as the connect/authenticate ceiling. In .NET, async socket reads/writes honor these timeouts, so any socket handed to a long-lived consumer keeps that per-attempt ceiling.

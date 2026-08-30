@@ -142,3 +142,49 @@ var raw = IPAddressValue.From(association.ForwardLocalAddress);
 // Correct: the association stores the raw value once at creation; the rewrite uses it.
 var raw = association.ForwardLocalAddress; // IPAddressValue?
 ```
+
+## Relay pump and checksum contracts (task 08-29-proxy-stability-perf, 2026-08-29)
+
+### 1. Scope / Trigger
+
+Trigger: any change to `TcpProxyRelay`'s pump loop, `PacketChecksums`, or the checksum/relay benchmark suite.
+
+### 2. Signatures
+
+- `TcpProxyRelay` owns one reusable `StallWindow` (linked CTS) **per direction per session**; `Arm()` runs before every `ReadAsync`/`WriteAsync`.
+- `PacketChecksums.TryRewriteIpv4Tcp/TryRewriteIpv6Tcp` use RFC 1624 incremental update; the internal full-recompute oracle is kept for property tests (`InternalsVisibleTo("WinForward.Core.Tests")`).
+- `PacketChecksums.Sum` is `Vector256`-vectorized when hardware-accelerated, scalar fold-while-adding otherwise.
+
+### 3. Contracts
+
+- **Stall-window CTS reuse (P1)**: `Arm()` = `TryReset()` + `CancelAfter(StallTimeout)`; only when `TryReset` returns false (raced with the timer firing) is the CTS recreated — re-linked to the lifetime token, so lifetime/peer cancellation still lands instantly. `TryReset` clears any pending `CancelAfter` timer (verified on .NET 10), so each window arms from its own `Arm()` with no residual-timer leakage. Measured per-op pump allocation 160 B → 0 B; `TcpRelayBenchmarks.OneWayAsync` chunk-8192 allocation −77% (828→188 KB/op) with no throughput regression. Do not reintroduce per-chunk `CreateLinkedTokenSource` + `CancelAfter`.
+- **Incremental endpoint rewrite (P2a)**: `HC' = ~(~HC + Σ(~m + m'))` folded over only the changed words (IPv4: address words counted in header + pseudo-header, ports; IPv6: 16 address words + ports, no header checksum). New words are read back **from the frame after the write** (single encoding source). **Precondition: the input checksum is valid** — that is the capture-pipeline contract; on invalid-checksum input the result differs from a full recompute (garbage-in-garbage-out, documented in-code). Bit-identical to full recompute on valid inputs: property-pinned (512+512 random frames, 65,536-port sweep incl. computed-zero, three-way vs independent test helpers). EndpointsDirect micro: 626→33 ns @1400 B (0 B).
+- **Vectorized `Sum` (P2b) — fold invariants are load-bearing**: `uint` wraparound is NOT one's-complement neutral (`2^32 ≡ 1 mod 65535`), so any deferred-fold scheme must keep partial sums strictly bounded. The landed version folds to ≤0xFFFF after every accumulation step (vector lanes folded fully per block; bound exactly 0xFFFF_FFFF, never overflows). The scalar fallback must stay fold-while-adding (bare accumulation overflows ≥131,076 B of 0xFF — the `ProtocolAuditTests` shape — and broke host-independence on non-AVX hosts). Packet paths never reach the risky sizes (IP ≤64 KiB), but the function is size-public; keep the invariants for all inputs. Measured 989→61.7 ns @1514 B (16×).
+- **Benchmark frames must carry valid checksums**: incremental rewrite's precondition means `BenchmarkShared` frames with zeroed checksums measure an invalid-input shape — benchmark frames are built with correct checksums before/after so the delta is real.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Pump op completes within window | CTS reused via `TryReset`, 0 B allocated per op |
+| Stall timer fires between ops / `TryReset` returns false | CTS recreated linked to lifetime token; semantics unchanged |
+| Rewrite with valid input checksum | incremental ≡ full recompute, byte-identical frame |
+| Rewrite with invalid input checksum | garbage-in-garbage-out vs full recompute (documented precondition) |
+| `Sum` on any size/fill incl. 131,076 B 0xFF, ≥393,216 B adversarial | bit-identical scalar vs vector, no overflow |
+
+### 5. Tests Required
+
+- Relay: existing half-close/sibling-cancel/fast-fail suite unchanged + multi-rearm mid-stream failure regression (`MidStreamFailureCancelsSiblingPumpAfterRepeatedStallWindowRearms`).
+- Checksums: `TcpEndpointRewriteIncrementalTests` (random-frame equivalence, port sweep, three-way vs independent helpers); `ProtocolAuditTests` 131,076 B audit shape stays green on all hosts; baseline 431 tests behavior-zero.
+
+### 6. Wrong vs Correct
+
+```csharp
+// Wrong: bare uint accumulation "folded at the end" — overflows on ≥131k B of 0xFF.
+uint acc = 0;
+foreach (var w in words) acc += w; // 65,538 × 65,535 > 2^32 — result ≠ one's-complement sum
+
+// Correct: fold-while-adding keeps the partial sum ≤ 0xFFFF forever.
+uint acc = 0;
+foreach (var w in words) { acc += w; while (acc > 0xFFFF) acc = (acc & 0xFFFF) + (acc >> 16); }
+```
