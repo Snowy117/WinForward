@@ -22,9 +22,21 @@ attribution, socket setup, logging, tests) are exempt.
 3. **No async state machines on the steady-state path.** A fat async method (large struct
    locals hoisted into the state machine) heap-allocates per call even when it completes
    synchronously (~193 B/op measured). `FlowDispatcher.DispatchAsync` is a non-async entry
-   that runs the synchronous warm shape (trace-off ∧ no reverse handler ∧ not self-owned ∧
-   resolved ∧ (Pass ∨ Block ∨ Proxy-with-inline-server-hit)) and returns the executor's
-   ValueTask directly; everything else falls into `DispatchSlowAsync`. Proxy is the product's
+   that runs the synchronous warm shape (trace-off ∧ reverse-diversion declined ∧ not
+   self-owned ∧ resolved ∧ (Pass ∨ Block ∨ Proxy-with-inline-server-hit)) and returns the
+   executor's ValueTask directly; everything else falls into `DispatchSlowAsync`. The
+   reverse diversion is decided by `ITcpReverseHandler.WantsPacket(in CapturedFlowPacket)`
+   (task 08-30-hot-path-revival, X1): TCP ∧ src port ∈ active listener-port set
+   (`TcpRedirectTable` `int[65536]` reference counts, Inc in `TryClaim` under the gate
+   before SYN injection, Dec in `TryRemove`/`RemoveExpired`; query `Volatile.Read != 0`).
+   `WantsPacket` is ONLY the warm-entry diversion precheck — the slow path's
+   `TryHandleReverseAsync` always calls the full handler (protocol gate + full-tuple
+   `IsReverseCandidate` + tombstone), so prefilter misses degrade to the slow path, never
+   to wrong routing (listener-shaped tuples cannot resolve in any `FlowTable.TryResolve`
+   mode; pinned by the tombstone-straggler test). Production-composition benchmarks
+   (`WarmPassProductionAsync`/`WarmProxyProductionAsync`, real-predicate fake handler) gate
+   the warm shape at 160 B — handler-less benchmarks alone proved nothing while X1 made
+   the warm entry dead code in production. Proxy is the product's
    main path (task 08-29-socks5-perf-fullpath C2b), so a resolved proxy decision whose
    `ProxyServerName` hits `_servers` stays on the warm entry — measured 352 B → 160 B and
    596 ns → 258 ns per packet; an unresolved server name (fail-closed via slow path) and the
