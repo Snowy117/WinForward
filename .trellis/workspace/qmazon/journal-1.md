@@ -336,3 +336,25 @@ First implementation child of 08-30-proxy-perf-stability landed all four researc
 ### Status
 
 [OK] **Completed**
+
+
+## Session 15: hot-path-revival child landed: warm entry revived in production via WantsPacket prefilter
+
+**Date**: 2026-08-30
+**Task**: hot-path-revival child landed: warm entry revived in production via WantsPacket prefilter
+**Branch**: `master`
+
+### Summary
+
+Second implementation child of 08-30-proxy-perf-stability landed backlog #1 (X1): replaced the bare Func reverse handler with ITcpReverseHandler exposing WantsPacket (protocol gate + TcpRedirectTable int[65536] port reference counts, Inc-before-inject in TryClaim, guarded Dec in TryRemove/RemoveExpired); FlowDispatcher warm entry diverts only true reverse candidates. Slow path keeps the full handler so prefilter misses degrade to old behavior (fall-through theorem, pinned by tombstone-straggler test). Per user direction, benchmarks gained production-composition variants with real-predicate fakes; pre-fix evidence 352B==diverted control (warm entry dead in production), post-fix 160B==warm baseline (-55% alloc, ~2x ns). 451/451 tests, zero warnings, stability clean. Specs updated (hot-path.md contract 3, tcp-local-redirect.md reverse hook). Task archived; parent remains open with backlog items 4-10 (atomic-retire, udp-alloc-jumbo, zero-copy, batched-ioctls, hardening-bundle, windows-reality, driver-resilience).
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `795cc1f` | (see git log) |
+| `679428a` | (see git log) |
+
+### Status
+
+[OK] **Completed**
