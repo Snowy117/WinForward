@@ -6,6 +6,10 @@ using WinForward.Runtime.TcpRedirect;
 
 namespace WinForward.Benchmarks.Perf;
 
+// MemoryDiagnoser gates P1: per-chunk managed allocation of the relay pumps (the absolute
+// number includes one-time socket-buffer scaffolding per invocation; the gate is the
+// before/after delta at equal chunk sizes).
+[MemoryDiagnoser]
 public class TcpRelayBenchmarks
 {
     private static long s_sink;

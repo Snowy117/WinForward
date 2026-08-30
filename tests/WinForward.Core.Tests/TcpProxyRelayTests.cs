@@ -90,6 +90,31 @@ public sealed class TcpProxyRelayTests
         await Assert.ThrowsAsync<IOException>(async () => await relay.Completion.WaitAsync(TimeSpan.FromSeconds(2)));
     }
 
+    [Fact]
+    public async Task MidStreamFailureCancelsSiblingPumpAfterRepeatedStallWindowRearms()
+    {
+        // P1: the stall window is one reused CTS per direction, re-armed per operation via
+        // TryReset. After both pumps have completed several read+write cycles (several re-arms),
+        // a fault in one pump must still cancel the sibling immediately through the surviving
+        // lifetime-token link — re-arming must never unlink session cancellation.
+        var (localPeer, relayLocal) = await CreateSocketPairAsync();
+        var (upstreamPeer, relayUpstream) = await CreateSocketPairAsync();
+        using var local = localPeer;
+        using var upstream = upstreamPeer;
+        using var relayUpstreamStream = new NetworkStream(relayUpstream, ownsSocket: true);
+        await using var relay = new TcpProxyRelay(relayLocal, new FaultAfterWritesStream(relayUpstreamStream, allowedWrites: 1), new NoopAsyncDisposable());
+
+        await local.SendAsync(new byte[] { 1, 2, 3 }, SocketFlags.None);
+        var request = new byte[3];
+        Assert.Equal(3, await upstream.ReceiveAsync(request, SocketFlags.None));
+        await upstream.SendAsync(new byte[] { 4, 5 }, SocketFlags.None);
+        var response = new byte[2];
+        Assert.Equal(2, await local.ReceiveAsync(response, SocketFlags.None));
+
+        await local.SendAsync(new byte[] { 6 }, SocketFlags.None);
+        await Assert.ThrowsAsync<IOException>(async () => await relay.Completion.WaitAsync(TimeSpan.FromSeconds(2)));
+    }
+
     private static async Task<(Socket Peer, Socket Relay)> CreateSocketPairAsync()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -141,6 +166,42 @@ public sealed class TcpProxyRelayTests
         {
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             return 0;
+        }
+    }
+
+    /// <summary>Transparently relays reads and the first N writes, then faults every later write.</summary>
+    private sealed class FaultAfterWritesStream(Stream inner, int allowedWrites) : Stream
+    {
+        private int _remainingWrites = allowedWrites;
+
+        public override bool CanRead => inner.CanRead;
+        public override bool CanSeek => false;
+        public override bool CanWrite => inner.CanWrite;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+        public override void Flush() => inner.Flush();
+        public override Task FlushAsync(CancellationToken cancellationToken) => inner.FlushAsync(cancellationToken);
+        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            if (Interlocked.Decrement(ref _remainingWrites) < 0) throw new IOException("relay write failed");
+            inner.Write(buffer, offset, count);
+        }
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => inner.ReadAsync(buffer, offset, count, cancellationToken);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => inner.ReadAsync(buffer, cancellationToken);
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            => Interlocked.Decrement(ref _remainingWrites) < 0 ? Task.FromException(new IOException("relay write failed")) : inner.WriteAsync(buffer, offset, count, cancellationToken);
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+            => Interlocked.Decrement(ref _remainingWrites) < 0 ? ValueTask.FromException(new IOException("relay write failed")) : inner.WriteAsync(buffer, cancellationToken);
+
+        public override ValueTask DisposeAsync() => inner.DisposeAsync();
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) inner.Dispose();
+            base.Dispose(disposing);
         }
     }
 }

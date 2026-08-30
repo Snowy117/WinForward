@@ -122,17 +122,57 @@ internal sealed class TcpProxyRelay : ITcpRelay
         }
     }
 
+    // One reusable per-operation stall window per pump direction (P1): re-arms a single linked
+    // CTS via TryReset + CancelAfter instead of allocating a fresh linked source + timer per
+    // 8 KiB chunk, which dominated relay allocations at high throughput (measured 160 B/chunk).
+    // TryReset keeps the lifetime-token link armed, so session-wide and cross-pump cancellation
+    // still cancel an in-flight operation immediately; the source is recreated only when a
+    // previous stall timer raced with operation completion (TryReset returns false).
+    private sealed class StallWindow : IDisposable
+    {
+        private readonly CancellationToken _lifetime;
+        private CancellationTokenSource _source;
+
+        public StallWindow(CancellationToken lifetime)
+        {
+            _lifetime = lifetime;
+            _source = CreateArmed(lifetime);
+        }
+
+        public CancellationToken Token => _source.Token;
+
+        public void Arm()
+        {
+            if (_source.TryReset())
+            {
+                _source.CancelAfter(StallTimeout);
+                return;
+            }
+            _source.Dispose();
+            _source = CreateArmed(_lifetime);
+        }
+
+        public void Dispose() => _source.Dispose();
+
+        private static CancellationTokenSource CreateArmed(CancellationToken lifetime)
+        {
+            var source = CancellationTokenSource.CreateLinkedTokenSource(lifetime);
+            source.CancelAfter(StallTimeout);
+            return source;
+        }
+    }
+
     private static async Task<PumpResult> PumpAsync(Stream source, Stream destination, CancellationToken cancellationToken)
     {
         var buffer = new byte[BufferSize];
+        using var stall = new StallWindow(cancellationToken);
         while (true)
         {
             int read;
             try
             {
-                using var readTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                readTimeout.CancelAfter(StallTimeout);
-                read = await source.ReadAsync(buffer.AsMemory(0, BufferSize), readTimeout.Token).ConfigureAwait(false);
+                stall.Arm();
+                read = await source.ReadAsync(buffer.AsMemory(0, BufferSize), stall.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -148,9 +188,8 @@ internal sealed class TcpProxyRelay : ITcpRelay
             }
             try
             {
-                using var writeTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                writeTimeout.CancelAfter(StallTimeout);
-                await destination.WriteAsync(buffer.AsMemory(0, read), writeTimeout.Token).ConfigureAwait(false);
+                stall.Arm();
+                await destination.WriteAsync(buffer.AsMemory(0, read), stall.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
