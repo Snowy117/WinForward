@@ -28,11 +28,24 @@ happens in child tasks.
 | `08-30-hot-path-revival` | #1 revive hot dispatch path (X1): (a) TCP-gate reverse diversion, (b) port bitmap prefilter | completed 2026-08-30 |
 | `08-30-atomic-retire` | #4 atomic retire+remove+tombstone + bounded queues (R2, R3, R4): global 8 MiB setup budget + 5 s datagram TTL + tombstone bounds; SYN-path grace check | completed 2026-08-30 |
 | `08-30-udp-alloc-jumbo` | #5 UDP allocation zero-out + buffer sizing consistency (X6, R5) | completed 2026-08-30 |
-| later: zero-copy-datapath | #6 zero-copy proxy data path (X2) | on demand |
-| later: batched-ioctls | #7 batched reinjection IOCTLs (X3) | on demand |
+| `08-30-windows-reality` | #9 Windows measurement program (executed on Win11 IoT LTSC VM per user decision): stability matrix, BDN subset, 1h soak, port-pool attribution | completed 2026-08-30 |
+| later: zero-copy-datapath | #6 zero-copy proxy data path (X2) — deprioritized by 08-30 VM data: managed path is platform-equivalent, not the Windows bottleneck | on demand |
+| later: batched-ioctls | #7 batched reinjection IOCTLs (X3) — elevated by 08-30 VM data: Windows per-IO cost is the structural gap (batching amortizes it) | on demand |
 | later: hardening-bundle | #8 keepalive + lock cleanup + ServerGC (R6, X7, X8, R11) | on demand |
-| later: windows-reality-program | #9 Windows real-machine benchmark + hours-scale soak program | on demand |
 | later: driver-resilience | #10 transient driver-error retry + offload listener alloc (R7, R8) | on demand |
+
+New candidates from 08-30-windows-reality (see
+`benchmarks/results/2026-08-30-windows-vm/README.md`):
+
+- `port-budget-windows` — high-churn port-pool capacity: deployment guidance (widen
+  dynamic range / TcpTimedWaitDelay), loopback-aware upstream error-path RST close
+  (symmetric to #2's client RST), harness-side port accounting. Attribution: 96.65 % →
+  0.40 % failures on widened pool, pure OS capacity, not a product defect.
+- `local-mux-transport` (research first) — fixed connection pool + stream multiplexing
+  to the local SOCKS5 server (e.g. VLESS inbound + multiplex) eliminating port churn,
+  per-flow handshake cost, and loopback connects; sing-box has no UDS inbound.
+- `windows-real-nic` — real-NIC/ETW measurement past the ~4.7k pps loopback ceiling.
+- small: UdpSession real-transport populate[1000] NA on Windows.
 
 Deferred (from research §5): SOCKS5 handshake allocation diet, tighter 150s setup budget
 (X9), TCP socket buffer sizing docs (R10), per-flow DNS cache, IPv6 perf (fold into

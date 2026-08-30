@@ -22,7 +22,8 @@
     "08-30-fast-hardening",
     "08-30-hot-path-revival",
     "08-30-atomic-retire",
-    "08-30-udp-alloc-jumbo"
+    "08-30-udp-alloc-jumbo",
+    "08-30-windows-reality"
   ],
   "parent": null,
   "relatedFiles": [],

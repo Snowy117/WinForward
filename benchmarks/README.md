@@ -49,6 +49,23 @@ Interpretation guidance from the hot-path conventions still applies: treat ns/pp
 ~2× as noise on a dev box; allocation bytes and GC counts are the exact gates. Use the same
 command, machine, power settings, and runtime for before/after comparisons.
 
+## Running on a Windows guest (no .NET SDK)
+
+Learned in the 2026-08-30 VM program (`results/2026-08-30-windows-vm/README.md`):
+
+- BDN's default process-isolated toolchain needs the `dotnet` CLI; on an SDK-less guest
+  it prints "requires dotnet SDK" and executes 0 benchmarks. Add `--inProcess` there —
+  and use the same toolchain on the Linux side when comparing platforms.
+- Multi-family selection uses one `--filter` with several glob values:
+  `-f '*CapturePump*' '*Dispatcher*' ...`. A repeated `--filter` is silently ignored.
+- Launch BDN from the repo root on every OS; from another cwd the generated boilerplate
+  fails with "Unable to find WinForward.Benchmarks".
+- Self-contained single-file publish (`-r win-x64 --self-contained
+  -p:PublishSingleFile=true`) is the transportable shape; the stability runner works
+  anywhere, elevated or not.
+- Switch the guest to the High Performance power plan before measuring, and compare
+  Windows numbers only against Linux runs taken the same way.
+
 ## Stability mode
 
 Count-based reliability metrics under sustained load. One JSONL record per scenario execution
