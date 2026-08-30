@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Full quality gate: zero-warning build, full test suite, soak regression rules"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify fail-closed semantics preserved for every S-fix (no silent pass introduced)"}
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "Audit RST/teardown/grace behavior changes against documented redirect contracts"}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "Audit S2/S6 changes against UDP session lifecycle and resilience contracts"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Verify zero-allocation and benchmark-gate acceptance criteria actually met (P1/P2)"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Check new events/counters/warn texts comply with level, format, and privacy rules"}

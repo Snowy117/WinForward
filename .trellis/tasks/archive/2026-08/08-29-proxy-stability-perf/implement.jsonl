@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "Teardown grace, client-reset lifecycle, and RST injection contracts backing S1/S3/S4"}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "UDP session/transport wiring and skip-class resilience pattern backing S2/S6a"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Fail-closed semantics boundaries all S-fixes must preserve"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Zero-allocation pipeline contracts governing S5 cache, P1 CTS reuse, P2 checksum work"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Level discipline, rate-limiter pattern, and privacy rules for new events/counters in S1/S6"}
+{"file": ".trellis/spec/backend/traffic-policy-lifecycle.md", "reason": "Non-flow pass rule and idle sweep semantics that S1 fragment matching and S6d touch"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Testing requirements, forbidden patterns, zero-warning gate for all new code"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "File placement and size limits if new files/seams are introduced"}
