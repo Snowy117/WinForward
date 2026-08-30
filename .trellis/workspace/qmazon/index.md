@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 15
+- **Total Sessions**: 16
 - **Last Active**: 2026-08-30
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~360 | Active |
+| `journal-1.md` | ~451 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 16 | 2026-08-30 | Driver resilience: transient-read retry + single-pump degradation, off-pump TCP SYN setup (backlog #10) | `461df0d` | `master` |
 | 15 | 2026-08-30 | hot-path-revival child landed: warm entry revived in production via WantsPacket prefilter | `795cc1f`, `679428a` | `master` |
 | 14 | 2026-08-30 | fast-hardening child landed: client RST + NoDelay + pooled buffers + throttle | `b0e0c6d`, `a06a587` | `master` |
 | 13 | 2026-08-30 | Preserve 2026-08-30 proxy perf/stability deep-dive research | - | `master` |

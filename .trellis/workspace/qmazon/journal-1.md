@@ -428,3 +428,24 @@ Fourth implementation child of 08-30-proxy-perf-stability landed backlog #5 (X6 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 16: Driver resilience: transient-read retry + single-pump degradation, off-pump TCP SYN setup (backlog #10)
+
+**Date**: 2026-08-30
+**Task**: Driver resilience: transient-read retry + single-pump degradation, off-pump TCP SYN setup (backlog #10)
+**Branch**: `master`
+
+### Summary
+
+Landed backlog #10 (R7+R8) as child 08-30-driver-resilience. R7: NdisNativeCallStatus.IsTransientReadError (21/170/1237/995/1167/31; ndisrd closed-source, classification evidence-anchored via Npcap nmap#2036, unknown codes permanent-conservative); NdisCapturePump bounded backoff retry (5x100ms doubling, ~3.1s worst) then degraded exit (onDegraded once, finally flush+release); MultiAdapterCaptureLoop no-sibling-cancel + onAdapterDegraded; TransactionalCaptureRuntime.MarkAdapterDegradedAsync restores only the degraded adapter; Program structured events adapter.degraded/adapter.retry carrying full native error for future table refinement. R8: TcpRedirectOutcome.SetupPending; TcpPendingSynSetupIndex (1024 cap, 1MiB exactly-once budget, 5s TTL, 1s failure cooldown); HandleSynAsync fast path fully synchronous (reuse/tombstone/cooldown/capacity untouched, capacity now counts pending), listener bind+claim+rewrite-inject in Task.Run background wrapped by EnterSetup/ExitSetup; retransmitted SYN overwrites pending (single listener); executor consumes SetupPending silently. Tests 476 to 496 (3 green runs), zero-warning build; trellis-check passed all 12 focus areas, fixed 2 issues (structured events, fakes format). Deviations accepted: pending-cap reject returns Blocked+trace; barrier exactly-once test replaced by pending-absorption tests (loser branch kept as defense-in-depth). S8 VM spot-check skipped (no VM available). Spec updated: windows-ndisapi.md, error-handling.md, tcp-local-redirect.md. Parent child-map synced (#7, #10).
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `461df0d` | (see git log) |
+
+### Status
+
+[OK] **Completed**
