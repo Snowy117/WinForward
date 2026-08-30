@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify R7/R8 amendments landed: process survives transient driver disturbances, single-adapter degradation semantics, and the TCP-side setup-never-blocks clause paralleling the UDP contract"}
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "Verify failure-table rows and pump-ordering notes reflect retry/degrade and deferred-SYN ordering scope; batching contract (strict index order, slot lifetime) not regressed"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Check the synchronous SYN fast path kept allocation discipline (no new per-packet allocations on the pump side)"}
+{"file": ".trellis/tasks/08-30-driver-resilience/design.md", "reason": "Check implementation against the approved decisions: error-classification table (S1 evidence gate), retry constants, degradation plumbing, pending-state bounds (1024/1MiB/5s TTL), store-gate hold rules"}
+{"file": ".trellis/tasks/08-30-driver-resilience/implement.md", "reason": "Step checklist S1-S8 acceptance: full dotnet test -c Release green, review gates honored, spec updates complete"}
