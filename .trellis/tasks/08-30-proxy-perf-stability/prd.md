@@ -27,7 +27,7 @@ happens in child tasks.
 | `08-30-fast-hardening` | #2 client RST (R1) + #3 NoDelay/64KiB buffers/stall re-arm throttle (X4, X5, X8a) | completed 2026-08-30 |
 | `08-30-hot-path-revival` | #1 revive hot dispatch path (X1): (a) TCP-gate reverse diversion, (b) port bitmap prefilter | completed 2026-08-30 |
 | `08-30-atomic-retire` | #4 atomic retire+remove+tombstone + bounded queues (R2, R3, R4): global 8 MiB setup budget + 5 s datagram TTL + tombstone bounds; SYN-path grace check | completed 2026-08-30 |
-| later: udp-alloc-jumbo | #5 UDP allocation zero-out + buffer sizing consistency (X6, R5) | on demand |
+| `08-30-udp-alloc-jumbo` | #5 UDP allocation zero-out + buffer sizing consistency (X6, R5) | completed 2026-08-30 |
 | later: zero-copy-datapath | #6 zero-copy proxy data path (X2) | on demand |
 | later: batched-ioctls | #7 batched reinjection IOCTLs (X3) | on demand |
 | later: hardening-bundle | #8 keepalive + lock cleanup + ServerGC (R6, X7, X8, R11) | on demand |
