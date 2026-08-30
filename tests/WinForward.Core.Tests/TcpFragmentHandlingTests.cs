@@ -290,6 +290,9 @@ public sealed class TcpFragmentHandlingTests
                 ? MakeForwardedSynPacket(s_clientIpv4, s_destIpv4, 53000, 443)
                 : MakeSynPacket(Client, Destination, 53000, 443);
             await Dispatcher.DispatchAsync(syn, CancellationToken.None);
+            // R8: the SYN dispatch defers the redirect setup to the background; the listener
+            // exists only after the pending setup settles.
+            await Coordinator.DrainPendingSetupsAsync();
             var listener = listenerFactory.Listeners[0];
             // Host shape: the accepted peer is the server-address:client-port tuple the IP-swap
             // SYN presented; forwarded shape: the client itself (DNAT keeps its tuple).

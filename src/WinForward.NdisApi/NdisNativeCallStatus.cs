@@ -43,4 +43,25 @@ internal static class NdisNativeCallStatus
         // misbehaving driver can never make the pump read past the prepared buffers.
         return (int)Math.Min(packetsSuccess, (uint)requestedCount);
     }
+
+    /// <summary>
+    /// Whether a native packet-read failure is plausibly transient (adapter power transition,
+    /// driver pause, a removal in progress) and therefore worth a bounded retry before the
+    /// adapter's interception degrades. Evidence: the ndisrd driver is closed-source, so the
+    /// table is cross-checked against the adjacent NDIS filter-driver class (Npcap, nmap#2036):
+    /// sleep-wake/removal transitions surface as <c>ERROR_OPERATION_ABORTED</c> (995) and
+    /// <c>STATUS_DEVICE_REMOVED</c>-projected codes (<c>ERROR_GEN_FAILURE</c> 31 /
+    /// <c>ERROR_DEVICE_NOT_CONNECTED</c> 1167). Every unlisted code classifies as permanent —
+    /// fail-closed conservative: a mis-classified permanent error only costs one bounded retry
+    /// window before degradation, while a mis-classified transient code would silently keep the
+    /// historical global-exit behavior. The degraded-exit log records the full native error so a
+    /// real run can refine this table.
+    /// </summary>
+    internal static bool IsTransientReadError(int nativeError) =>
+        nativeError is 21         // ERROR_NOT_READY
+            or 170                // ERROR_BUSY
+            or 1237               // ERROR_RETRY
+            or 995                // ERROR_OPERATION_ABORTED (STATUS_CANCELLED projection)
+            or 1167               // ERROR_DEVICE_NOT_CONNECTED
+            or 31;                // ERROR_GEN_FAILURE (STATUS_DEVICE_REMOVED projection)
 }

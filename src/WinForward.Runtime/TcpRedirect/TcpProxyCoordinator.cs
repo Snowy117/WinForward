@@ -12,10 +12,14 @@ namespace WinForward.Runtime.TcpRedirect;
 /// the listener, registers the listener tuple in the loop-prevention registry, injects the rewritten
 /// frame, and runs a background accept-and-relay loop. A proxy-selected flow is never silently passed:
 /// every listener-allocation, claim, rewrite, injection, and relay-setup failure fails closed and
-/// releases the listener, the table alias, and the self-traffic token. The data path is delegated to
-/// focused modules: <see cref="TcpRedirectSetup"/> (new-flow pipeline), <see cref="TcpRedirectSessionStore"/>
-/// (session lifecycle under one gate), <see cref="TcpRedirectAcceptor"/> (accept/relay loop), and
-/// <see cref="ClientResetInjector"/> (client-visible failure surface); this class owns entry routing.
+/// releases the listener, the table alias, and the self-traffic token. New-flow SYN setup never blocks
+/// the capture pump (R8, mirroring the UDP contract): the pump-side handler retains a bounded copy of
+/// the SYN in <see cref="TcpPendingSynSetupIndex"/> and returns <see cref="TcpRedirectOutcome.SetupPending"/>,
+/// and a background task performs the allocation/claim/rewrite/injection under the store's setup gate.
+/// The data path is delegated to focused modules: <see cref="TcpRedirectSetup"/> (new-flow pipeline),
+/// <see cref="TcpRedirectSessionStore"/> (session lifecycle under one gate), <see cref="TcpRedirectAcceptor"/>
+/// (accept/relay loop), and <see cref="ClientResetInjector"/> (client-visible failure surface); this
+/// class owns entry routing.
 /// </summary>
 public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
 {
@@ -27,6 +31,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
     private readonly TcpRedirectSetup _setup;
     private readonly ClientResetInjector _clientReset;
     private readonly TcpRedirectAcceptor _acceptor;
+    private readonly TcpPendingSynSetupIndex _pendingSyn = new();
     private long _capacityRejectionCount;
     private long _reportedCapacityRejectionCount;
 
@@ -96,62 +101,153 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
     {
         if (packet.Lease is null) throw new ArgumentNullException(nameof(packet));
         ArgumentNullException.ThrowIfNull(server);
-        _store.EnterSetup();
+        ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
+
+        var key = packet.Context.Key;
+        if (key.Protocol != TransportProtocol.Tcp)
+        {
+            throw new ArgumentException("TCP coordinator accepts only TCP flow keys.", nameof(packet));
+        }
+
+        // A flow already claimed by a prior SYN reuses its decision: touch the association and
+        // re-inject the rewritten SYN toward the listener. Policy is evaluated exactly once.
+        if (_table.TryResolveByOriginal(key, DateTimeOffset.UtcNow, out var existing) && existing is not null)
+        {
+            TcpRedirectLogging.LogTrace(_logger, "tcp.redirect.reused", packet, existing);
+            return await ReinjectExistingFlowDataAsync(packet, existing, cancellationToken).ConfigureAwait(false);
+        }
+
+        // TIME_WAIT grace: a same-tuple SYN whose redirect was torn down within the grace
+        // window is a retransmission of the finished flow's handshake, never a fresh
+        // connection — re-arming setup would honor the dead flow (or leak the straggler
+        // toward the real server via the NotRelevant fallback), so it is consumed like every
+        // other straggler. The next connection claims a new source port and a new key.
+        if (_store.Tombstones.TryHit(key, DateTimeOffset.UtcNow)) return TcpRedirectOutcome.Dropped;
+
+        // Setup-failure cooldown (R8): a redirect setup for this flow genuinely failed within
+        // the last second — the failure path already logged and released its resources, and a
+        // retransmitted SYN inside the window is consumed so a dead setup path is not re-armed
+        // at the client's retransmission rate.
+        if (_pendingSyn.IsInSetupCooldown(key, DateTimeOffset.UtcNow))
+        {
+            TcpRedirectLogging.LogTrace(_logger, "tcp.setup.cooldown", packet, null, "cooldown");
+            return TcpRedirectOutcome.Dropped;
+        }
+
+        // The capacity gate counts pending SYN setups alongside live sessions: each retained
+        // entry becomes at most one session, so the budget holds even while setups are in
+        // flight (the RST fast-fail below must not depend on background registration timing).
+        if (_store.SessionCount + _pendingSyn.ActiveCount >= _capacity)
+        {
+            Interlocked.Increment(ref _capacityRejectionCount);
+            TcpRedirectLogging.LogTrace(_logger, "tcp.redirect.rejected", packet, null, "capacity");
+            // The client is still in SYN_SENT: an immediate RST|ACK fails its connect fast
+            // (ECONNREFUSED) instead of a 20-60s retransmission timeout, and the per-tuple
+            // cooldown keeps the guard amplification-free (S4).
+            await _clientReset.InjectCapacityRejectedResetAsync(packet, cancellationToken).ConfigureAwait(false);
+            return TcpRedirectOutcome.Blocked;
+        }
+
+        // New flow (R8): retain a materialized copy of the SYN and hand setup to a background
+        // task, so the pump's strictly-ordered handler chain never waits on listener bind. The
+        // copy is synchronous and inside the dispatch window (the pump's native batch slot is
+        // recycled the moment this handler returns); every later step reads the retained copy.
+        return StartPendingSetup(packet, key, server);
+    }
+
+    /// <summary>
+    /// Retains the SYN copy and launches the background setup (R8). A retransmission inside the
+    /// pending window overwrites the retained copy and never starts a second task. Returns
+    /// <see cref="TcpRedirectOutcome.SetupPending"/> on accept or <see cref="TcpRedirectOutcome.Blocked"/>
+    /// when the bounded pending index refuses the retain.
+    /// </summary>
+    private TcpRedirectOutcome StartPendingSetup(CapturedFlowPacket packet, FlowKey key, Socks5Server server)
+    {
+        var frameCopy = packet.InspectionSpan.ToArray();
+        if (!_pendingSyn.TryRetain(key, frameCopy, packet.Context, packet.Metadata, packet.PacketSequence, packet.FlowGeneration, DateTimeOffset.UtcNow, out var created))
+        {
+            // Bounded pending index (entry cap or global byte budget): explicit backpressure,
+            // the same posture as the session-capacity gate — the client retries on its next
+            // retransmission once the window clears.
+            Interlocked.Increment(ref _capacityRejectionCount);
+            TcpRedirectLogging.LogTrace(_logger, "tcp.setup.pending.dropped", packet, null, "pendingBudget");
+            return TcpRedirectOutcome.Blocked;
+        }
+
+        if (created is null) return TcpRedirectOutcome.SetupPending;
+
+        // The launch captures the entry's current copy by value: retransmissions only ever
+        // REPLACE the entry's array (never mutate it in place), so the task's reference stays a
+        // valid frame regardless of later overwrites, and retransmitted SYNs share the client
+        // ISN — the injected rewrite is equivalent either way.
+        var frame = created.RetainedFrame;
+        var setupTask = Task.Run(() => SetupPendingAsync(key, created, frame, server));
+        _pendingSyn.AttachSetup(created, setupTask);
+        return TcpRedirectOutcome.SetupPending;
+    }
+
+    /// <summary>
+    /// The background half of new-flow SYN setup (R8): runs off the pump thread under the store's
+    /// inflight-setup drain, so dispose waits for it exactly like the historical inline setups.
+    /// Claim exactly-once, the concurrent-loser release, and the rewrite/inject tail are the
+    /// existing <see cref="TcpRedirectSetup"/> pipeline fed from the retained copy. A genuine
+    /// failure fails closed for the flow and arms the per-flow setup cooldown; shutdown
+    /// cancellation unwinds without one.
+    /// </summary>
+    private async Task SetupPendingAsync(FlowKey key, PendingSynSetup entry, byte[] frame, Socks5Server server)
+    {
+        var writeCooldown = false;
         try
         {
-            ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
+            _store.EnterSetup();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Disposal began between the pump-side retain and this task's start: the setup was
+            // never observed, and shutdown unwinds without a cooldown.
+            _pendingSyn.Complete(key, entry, writeCooldown: false, DateTimeOffset.UtcNow);
+            return;
+        }
 
-            var key = packet.Context.Key;
-            if (key.Protocol != TransportProtocol.Tcp)
+        try
+        {
+            var packet = new CapturedFlowPacket(new PacketLease(frame), entry.Context, entry.Metadata, entry.PacketSequence, entry.FlowGeneration);
+            var setup = await _setup.SetupNewRedirectAsync(packet, server, _store.ShutdownToken).ConfigureAwait(false);
+            if (setup is null)
             {
-                throw new ArgumentException("TCP coordinator accepts only TCP flow keys.", nameof(packet));
+                // Fail-closed null return: the pipeline already logged, released its listener
+                // and alias, and wrote the grace tombstone where one applies.
+                writeCooldown = !_store.ShutdownToken.IsCancellationRequested;
             }
-
-            // A flow already claimed by a prior SYN reuses its decision: touch the association and
-            // re-inject the rewritten SYN toward the listener. Policy is evaluated exactly once.
-            if (_table.TryResolveByOriginal(key, DateTimeOffset.UtcNow, out var existing) && existing is not null)
+            else if (setup.Session is null)
             {
-                TcpRedirectLogging.LogTrace(_logger, "tcp.redirect.reused", packet, existing);
-                return await ReinjectExistingFlowDataAsync(packet, existing, cancellationToken).ConfigureAwait(false);
+                // A concurrent caller claimed this flow first; the redundant listener was already
+                // released. Re-inject the retained copy against the existing association without
+                // creating a new session.
+                await ReinjectExistingFlowDataAsync(packet, setup.Association, _store.ShutdownToken).ConfigureAwait(false);
             }
-
-            // TIME_WAIT grace: a same-tuple SYN whose redirect was torn down within the grace
-            // window is a retransmission of the finished flow's handshake, never a fresh
-            // connection — re-arming setup would honor the dead flow (or leak the straggler
-            // toward the real server via the NotRelevant fallback), so it is consumed like every
-            // other straggler. The next connection claims a new source port and a new key.
-            if (_store.Tombstones.TryHit(key, DateTimeOffset.UtcNow)) return TcpRedirectOutcome.Dropped;
-
-            if (_store.SessionCount >= _capacity)
+            else
             {
-                Interlocked.Increment(ref _capacityRejectionCount);
-                TcpRedirectLogging.LogTrace(_logger, "tcp.redirect.rejected", packet, null, "capacity");
-                // The client is still in SYN_SENT: an immediate RST|ACK fails its connect fast
-                // (ECONNREFUSED) instead of a 20-60s retransmission timeout, and the per-tuple
-                // cooldown keeps the guard amplification-free (S4).
-                await _clientReset.InjectCapacityRejectedResetAsync(packet, cancellationToken).ConfigureAwait(false);
-                return TcpRedirectOutcome.Blocked;
+                setup.Session.AcceptLoop = _acceptor.RunAcceptLoopAsync(setup.Session);
+                TcpRedirectLogging.LogDebug(_logger, "tcp.redirect.created", setup.Session, "created");
             }
-
-            var setup = await _setup.SetupNewRedirectAsync(packet, server, cancellationToken).ConfigureAwait(false);
-            if (setup is null) return TcpRedirectOutcome.Blocked;
-
-            // A concurrent caller claimed this flow first; the redundant listener was already released.
-            // Re-inject the SYN against the existing association without creating a new session.
-            if (setup.Session is null)
-            {
-                return await ReinjectExistingFlowDataAsync(packet, setup.Association, cancellationToken).ConfigureAwait(false);
-            }
-
-            setup.Session.AcceptLoop = _acceptor.RunAcceptLoopAsync(setup.Session);
-            TcpRedirectLogging.LogDebug(_logger, "tcp.redirect.created", setup.Session, "created");
-
-            return TcpRedirectOutcome.Injected;
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown cancellation: the store's teardown released whatever the pipeline had
+            // acquired; no cooldown (mirrors the UDP setup contract).
+        }
+        catch (Exception exception)
+        {
+            _logger.Warn($"TCP redirect setup failed: {exception.GetType().Name}: {exception.Message}");
+            writeCooldown = !_store.ShutdownToken.IsCancellationRequested;
         }
         finally
         {
             _store.ExitSetup();
         }
+
+        _pendingSyn.Complete(key, entry, writeCooldown, DateTimeOffset.UtcNow);
     }
 
     private async ValueTask<TcpRedirectOutcome> ReinjectExistingFlowDataAsync(CapturedFlowPacket packet, TcpRedirectAssociation association, CancellationToken cancellationToken)
@@ -381,7 +477,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
     /// stalled relay is reclaimed by the read/write timeouts in <see cref="TcpProxyRelay"/>.
     /// </summary>
     public ValueTask<int> RemoveExpiredAsync(DateTimeOffset now, TimeSpan idleTimeout)
-        => _store.RemoveExpiredAsync(now, idleTimeout);
+        => _store.RemoveExpiredAsync(now, idleTimeout, () => _pendingSyn.RemoveExpired(now));
 
     /// <summary>
     /// Whether this coordinator still holds state for the flow: an active session exists (a
@@ -398,11 +494,33 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
     /// <summary>The TIME_WAIT-grace tombstone index; internal for tests to advance the grace window.</summary>
     internal TcpRedirectTombstoneTable Tombstones => _store.Tombstones;
 
+    /// <summary>The pending new-flow SYN setups; internal for tests to observe R8 bounds.</summary>
+    internal TcpPendingSynSetupIndex PendingSetups => _pendingSyn;
+
+    /// <summary>
+    /// Awaits every pending background setup launched so far (internal test/diagnostic seam):
+    /// the pump-side SYN handler returns <see cref="TcpRedirectOutcome.SetupPending"/> long
+    /// before the listener exists, so callers that need the settled state (listener created,
+    /// SYN injected, failure logged) await this after dispatching the SYN.
+    /// </summary>
+    internal Task DrainPendingSetupsAsync() => _pendingSyn.DrainAsync();
+
     /// <summary>The capacity-reset cooldown index; internal for tests to advance the window.</summary>
     internal TcpResetCooldownTable CapacityResetCooldowns => _clientReset.CapacityResets;
 
     public ValueTask DisposeAsync()
-        => _store.DisposeAsync();
+        => DisposeAsyncCore();
+
+    private async ValueTask DisposeAsyncCore()
+    {
+        // The store's dispose drains every started background setup (R8 moved EnterSetup into
+        // the task, so the inflight counter covers them); the pending drain afterwards closes the
+        // window between a task's final ExitSetup and its entry removal, crediting every
+        // retained copy exactly once and dropping cooldowns so a disposed coordinator leaves no
+        // per-flow state behind.
+        await _store.DisposeAsync().ConfigureAwait(false);
+        _pendingSyn.RemoveAll();
+    }
 }
 
 /// <summary>

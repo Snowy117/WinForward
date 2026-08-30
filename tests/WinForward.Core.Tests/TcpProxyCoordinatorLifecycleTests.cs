@@ -17,7 +17,7 @@ public sealed class TcpProxyCoordinatorLifecycleTests
     private static readonly IPAddress s_destIpv4 = IPAddress.Parse("192.0.2.53");
 
     [Fact]
-    public async Task ListenerAllocationFailureBlocks()
+    public async Task ListenerAllocationFailureFailsClosedWithCooldown()
     {
         var listenerFactory = new FakeListenerFactory(throwOnCreate: true);
         var injector = new FakeInjector();
@@ -27,9 +27,14 @@ public sealed class TcpProxyCoordinatorLifecycleTests
 
         var outcome = await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None);
 
-        Assert.Equal(TcpRedirectOutcome.Blocked, outcome);
+        // R8: the SYN dispatch returns SetupPending; the failure lands in the background task,
+        // which logs, fails closed, and arms the per-flow setup cooldown.
+        Assert.Equal(TcpRedirectOutcome.SetupPending, outcome);
+        await coordinator.DrainPendingSetupsAsync();
         Assert.Empty(injector.InjectedFrames);
         Assert.Equal(0, table.Count);
+        Assert.Equal(1, coordinator.PendingSetups.CooldownCount);
+        Assert.Equal(TcpRedirectOutcome.Dropped, await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None));
     }
 
     [Fact]
@@ -43,7 +48,7 @@ public sealed class TcpProxyCoordinatorLifecycleTests
         await using var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider());
 
         var syn = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
-        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(syn, s_server, CancellationToken.None));
+        await HandleSynSettledAsync(coordinator, syn, s_server);
 
         var listener = Assert.Single(listenerFactory.Listeners);
         await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(Endpoint.From(s_destIpv4, 53000)), CancellationToken.None);
@@ -67,7 +72,7 @@ public sealed class TcpProxyCoordinatorLifecycleTests
         await using var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider());
 
         var syn = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
-        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(syn, s_server, CancellationToken.None));
+        await HandleSynSettledAsync(coordinator, syn, s_server);
 
         // The listener's SYN-ACK passes the reverse hook, which records the server ISN.
         var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
@@ -105,7 +110,7 @@ public sealed class TcpProxyCoordinatorLifecycleTests
 
         var client = IPAddress.Parse("192.0.2.10");
         var syn = MakeForwardedSynPacket(client, s_destIpv4, 53000, 443);
-        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(syn, s_server, CancellationToken.None));
+        await HandleSynSettledAsync(coordinator, syn, s_server);
 
         var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
         var synAck = MakeReversePacketClassifierOrientation(forwardLocal, listenerTuple.Port, client, 53000, mutateFrame: f => f[47] = 0x12);
@@ -139,7 +144,7 @@ public sealed class TcpProxyCoordinatorLifecycleTests
         await using var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider());
 
         var syn = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
-        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(syn, s_server, CancellationToken.None));
+        await HandleSynSettledAsync(coordinator, syn, s_server);
 
         var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
         var synAck = MakeReversePacketClassifierOrientation(s_clientIpv4, listenerTuple.Port, s_destIpv4, 53000, mutateFrame: f => f[47] = 0x12);
@@ -182,7 +187,7 @@ public sealed class TcpProxyCoordinatorLifecycleTests
         await using var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider());
 
         var syn = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
-        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(syn, s_server, CancellationToken.None));
+        await HandleSynSettledAsync(coordinator, syn, s_server);
 
         var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
         var synAck = MakeReversePacketClassifierOrientation(s_clientIpv4, listenerTuple.Port, s_destIpv4, 53000, mutateFrame: f => f[47] = 0x12);
@@ -219,7 +224,7 @@ public sealed class TcpProxyCoordinatorLifecycleTests
         await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
         var syn = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
 
-        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(syn, s_server, CancellationToken.None));
+        await HandleSynSettledAsync(coordinator, syn, s_server);
         var listener = Assert.Single(listenerFactory.Listeners);
 
         Assert.Equal(TcpRedirectOutcome.Blocked, await coordinator.HandleSynAsync(syn, s_server, CancellationToken.None));
@@ -238,7 +243,7 @@ public sealed class TcpProxyCoordinatorLifecycleTests
         await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
         var syn = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
 
-        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(syn, s_server, CancellationToken.None));
+        await HandleSynSettledAsync(coordinator, syn, s_server);
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
 
@@ -260,7 +265,7 @@ public sealed class TcpProxyCoordinatorLifecycleTests
         var syn = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
         using var cancellation = new CancellationTokenSource();
 
-        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(syn, s_server, cancellation.Token));
+        await HandleSynSettledAsync(coordinator, syn, s_server, cancellation.Token);
         cancellation.Cancel();
 
         var listener = Assert.Single(listenerFactory.Listeners);
@@ -286,7 +291,7 @@ public sealed class TcpProxyCoordinatorLifecycleTests
         var table = new TcpRedirectTable();
         await using var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider());
 
-        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None));
+        await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
         var listener = Assert.Single(listenerFactory.Listeners);
         await listener.Inner.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(Endpoint.From(s_destIpv4, 53000)), CancellationToken.None);
         await WaitForAsync(() => relayFactory.Relay is not null);
@@ -317,9 +322,9 @@ public sealed class TcpProxyCoordinatorLifecycleTests
         var table = new TcpRedirectTable();
         var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
 
-        await coordinator.HandleSynAsync(MakeSynPacket(IPAddress.Parse("192.0.2.10"), IPAddress.Parse("192.0.2.53"), 53000, 443), s_server, CancellationToken.None);
-        await coordinator.HandleSynAsync(MakeSynPacket(IPAddress.Parse("192.0.2.11"), IPAddress.Parse("192.0.2.54"), 53001, 443), s_server, CancellationToken.None);
-        await coordinator.HandleSynAsync(MakeSynPacket(IPAddress.Parse("192.0.2.12"), IPAddress.Parse("192.0.2.55"), 53002, 443), s_server, CancellationToken.None);
+        await HandleSynSettledAsync(coordinator, MakeSynPacket(IPAddress.Parse("192.0.2.10"), IPAddress.Parse("192.0.2.53"), 53000, 443), s_server);
+        await HandleSynSettledAsync(coordinator, MakeSynPacket(IPAddress.Parse("192.0.2.11"), IPAddress.Parse("192.0.2.54"), 53001, 443), s_server);
+        await HandleSynSettledAsync(coordinator, MakeSynPacket(IPAddress.Parse("192.0.2.12"), IPAddress.Parse("192.0.2.55"), 53002, 443), s_server);
 
         await coordinator.DisposeAsync();
 
@@ -334,14 +339,16 @@ public sealed class TcpProxyCoordinatorLifecycleTests
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable();
         var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
-        var setup = StartSynAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443));
 
+        // R8: the SYN dispatch returns immediately; the background setup task is the part that
+        // parks inside the gated listener factory, and dispose must drain it (the inflight-setup
+        // counter covers background setups) before reclaiming the session set.
+        Assert.Equal(TcpRedirectOutcome.SetupPending, await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None));
         await listenerFactory.CreateStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
         var disposal = coordinator.DisposeAsync().AsTask();
         Assert.False(disposal.IsCompleted);
 
         listenerFactory.Release();
-        Assert.Equal(TcpRedirectOutcome.Blocked, await setup);
         await disposal;
         Assert.Equal(0, table.Count);
         Assert.True(Assert.Single(listenerFactory.Listeners).IsDisposed);
@@ -357,7 +364,7 @@ public sealed class TcpProxyCoordinatorLifecycleTests
         var table = new TcpRedirectTable();
         await using var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider());
 
-        await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None);
+        await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
         var listener = Assert.Single(listenerFactory.Listeners);
         var unrelated = new FakeAcceptedConnection(Endpoint.From(IPAddress.Loopback, 1));
         await listener.AcceptChannel.Writer.WriteAsync(unrelated, CancellationToken.None);
@@ -382,7 +389,7 @@ public sealed class TcpProxyCoordinatorLifecycleTests
         var selfTraffic = new SelfTrafficRegistry();
         await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, new TcpRedirectTable(), selfTraffic, new FakeLocalAddressProvider());
 
-        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None));
+        await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
 
         // Allow the accept loop to make a handful of backed-off attempts. With a 100 ms back-off
         // between transient failures, this window yields a few calls, and the elapsed time proves
@@ -406,7 +413,4 @@ public sealed class TcpProxyCoordinatorLifecycleTests
         }
         return DateTime.UtcNow - started;
     }
-
-    private static async Task<TcpRedirectOutcome> StartSynAsync(TcpProxyCoordinator coordinator, CapturedFlowPacket packet) =>
-        await coordinator.HandleSynAsync(packet, s_server, CancellationToken.None).ConfigureAwait(false);
 }

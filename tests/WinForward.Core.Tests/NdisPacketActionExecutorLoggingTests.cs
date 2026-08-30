@@ -47,9 +47,10 @@ public sealed class NdisPacketActionExecutorLoggingTests
             new FakeLocalAddressProvider());
         var executor = new NdisPacketActionExecutor(new FakeReinjector(), logger, tcpProxy: coordinator);
 
-        // The listener-allocation failure makes the coordinator return Blocked without ever
-        // touching the (throwing) relay or injector.
-        await executor.ProxyAsync(MakeSynPacket(s_client, s_destination, 53000, 443), s_server, CancellationToken.None);
+        // A SYN carrying payload is rejected synchronously by the coordinator (Blocked) without
+        // ever touching the (throwing) factory, relay, or injector — R8 moved only the bare-SYN
+        // new-flow setup into the background; this fast-path block keeps its executor warn.
+        await executor.ProxyAsync(MakeSynPacket(s_client, s_destination, 53000, 443, payload: [0x01]), s_server, CancellationToken.None);
 
         var warn = Assert.Single(logger.Lines, line => line.Level == RuntimeLogLevel.Warn && line.Message.Contains("reason=redirect", StringComparison.Ordinal));
         Assert.DoesNotContain("not initialized", warn.Message, StringComparison.Ordinal);

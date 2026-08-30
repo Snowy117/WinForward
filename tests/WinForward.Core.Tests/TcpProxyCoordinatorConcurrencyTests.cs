@@ -28,12 +28,14 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
         var packet = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
 
         var first = await coordinator.HandleSynAsync(packet, s_server, CancellationToken.None);
+        await coordinator.DrainPendingSetupsAsync();
         var second = await coordinator.HandleSynAsync(packet, s_server, CancellationToken.None);
 
-        Assert.Equal(TcpRedirectOutcome.Injected, first);
+        Assert.Equal(TcpRedirectOutcome.SetupPending, first);
+        // A retransmitted SYN after setup settles resolves the association and re-injects toward
+        // the listener; the flow is still one association (claim exactly-once).
         Assert.Equal(TcpRedirectOutcome.Injected, second);
         Assert.Single(listenerFactory.Listeners);
-        // A retransmitted SYN re-injects toward the listener; the flow is still one association.
         Assert.Equal(2, injector.InjectedFrames.Count);
         Assert.Equal(1, table.Count);
     }
@@ -65,10 +67,15 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
         await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
 
         var first = await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None);
+        await coordinator.DrainPendingSetupsAsync();
         var second = await coordinator.HandleSynAsync(MakeSynPacket(IPAddress.Parse("192.0.2.11"), IPAddress.Parse("192.0.2.99"), 53001, 80), s_server, CancellationToken.None);
+        await coordinator.DrainPendingSetupsAsync();
 
-        Assert.Equal(TcpRedirectOutcome.Injected, first);
-        Assert.Equal(TcpRedirectOutcome.Blocked, second);
+        Assert.Equal(TcpRedirectOutcome.SetupPending, first);
+        // The second flow's claim fails closed in the background (alias collision); the outcome
+        // surface for the failure is the released listener and unchanged table, plus the setup
+        // cooldown that consumes a same-tuple retransmission.
+        Assert.Equal(TcpRedirectOutcome.SetupPending, second);
         Assert.Single(listenerFactory.Listeners, listener => !listener.IsDisposed);
         Assert.Single(injector.InjectedFrames);
         Assert.Equal(1, table.Count);
@@ -83,7 +90,7 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
         var table = new TcpRedirectTable();
         await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
 
-        await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None);
+        await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
 
         var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
         var key = FlowKey.Create(listenerTuple, listenerTuple, TransportProtocol.Tcp, FlowOriginKind.Host);
@@ -108,38 +115,80 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
             .ToArray();
         var outcomes = await Task.WhenAll(tasks);
 
-        Assert.All(outcomes, outcome => Assert.Equal(TcpRedirectOutcome.Injected, outcome));
-        Assert.Single(listenerFactory.Listeners);
+        // R8: callers inside the pending window return SetupPending; a caller that lands after
+        // the background setup completes resolves the association and re-injects (Injected).
+        // Both are exactly-once accepts — one association, at most one LIVE listener: a racer
+        // whose fast path missed the claim but whose retain landed after the entry removal may
+        // start a redundant setup whose loser branch releases it immediately.
+        Assert.All(outcomes, outcome => Assert.True(outcome is TcpRedirectOutcome.SetupPending or TcpRedirectOutcome.Injected));
+        await coordinator.DrainPendingSetupsAsync();
+        Assert.Single(listenerFactory.Listeners, listener => !listener.IsDisposed);
         Assert.Equal(1, table.Count);
+        Assert.Equal(0, coordinator.CapacityRejectionCount);
     }
 
     [Fact]
-    public async Task ConcurrentSynBurstWithAsyncListenerStaysExactlyOnce()
+    public async Task ConcurrentSynBurstWhileListenerSetupIsParkedIsAbsorbedIntoOneSetup()
     {
-        // Deterministically force the redirect-table exactly-once race: every caller's
-        // CreateAsync blocks at a barrier until all N have arrived, guaranteeing every caller
-        // passed the TryResolveByOriginal fast path (empty table) before any TryClaim runs. The
-        // coordinator's concurrent-loser counter then proves N-1 callers hit the existing-
-        // association branch, released their redundant listener, and fell back to re-inject.
-        const int count = 8;
-        var listenerFactory = new BarrierListenerFactory(count);
+        // R8 moved new-flow setup off the pump path, so the redirect-table exactly-once race the
+        // historical barrier test forced is now unreachable through the coordinator: every burst
+        // caller returns SetupPending immediately and the pending index absorbs retransmissions
+        // (overwrite, never a second setup task) while the ONE background setup is parked inside
+        // the gated factory. Exactly-once now holds by construction; the loser branch keeps its
+        // own test below (pre-claim).
+        var listenerFactory = new GatedListenerFactory();
         var injector = new FakeInjector();
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable();
         await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
         var packet = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
+        const int count = 8;
 
         var tasks = Enumerable.Range(0, count)
             .Select(_ => coordinator.HandleSynAsync(packet, s_server, CancellationToken.None).AsTask())
             .ToArray();
         var outcomes = await Task.WhenAll(tasks);
 
-        Assert.All(outcomes, outcome => Assert.Equal(TcpRedirectOutcome.Injected, outcome));
+        Assert.All(outcomes, outcome => Assert.Equal(TcpRedirectOutcome.SetupPending, outcome));
+        // The single background setup is parked inside the factory while the whole burst is
+        // already absorbed — the pump-side handler never waited on the bind.
+        await listenerFactory.CreateStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        listenerFactory.Release();
+        await coordinator.DrainPendingSetupsAsync();
+
+        Assert.Single(listenerFactory.Listeners);
+        Assert.Single(injector.InjectedFrames);
         Assert.Equal(1, table.Count);
-        // The N-1 losing callers each detected an existing association, released their redundant
-        // listener, and re-injected. This is the load-bearing assertion the synchronous fake masked.
-        Assert.Equal(count - 1, coordinator.ConcurrentLoserCount);
-        Assert.Single(listenerFactory.Listeners, listener => !listener.IsDisposed);
+        Assert.Equal(0, coordinator.ConcurrentLoserCount);
+    }
+
+    [Fact]
+    public async Task PreClaimedAssociationReinjectsAgainstExistingClaim()
+    {
+        // A flow key claimed by an earlier association (e.g. a same-tuple SYN racing a teardown
+        // whose tombstone has not armed yet, or any external pre-claim): the pump-side fast path
+        // resolves the existing association and re-injects toward ITS listener tuple — no second
+        // listener, no second session. The background concurrent-loser branch remains as
+        // defense-in-depth for the TTL-expiry interleaving where two setup tasks can still meet
+        // at the table claim.
+        var listenerFactory = new FakeListenerFactory();
+        var injector = new FakeInjector();
+        var selfTraffic = new SelfTrafficRegistry();
+        var table = new TcpRedirectTable();
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
+        var key = FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
+        var adapter = new AdapterContext("eth0", "Ethernet", 1);
+        var now = DateTimeOffset.UtcNow;
+        Assert.True(table.TryClaim(key, key.Remote, adapter, (nint)0x1234, Endpoint.From(IPAddress.Loopback, 42000), null, now, out _));
+
+        var outcome = await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None);
+
+        Assert.Equal(TcpRedirectOutcome.Injected, outcome);
+        Assert.Equal(1, table.Count);
+        Assert.Empty(listenerFactory.Listeners);
+        // The re-inject rewrote the SYN toward the pre-claimed association's listener tuple.
+        var injected = Assert.Single(injector.InjectedFrames);
+        Assert.Equal(42000, injected.Frame[14 + 20 + 2] << 8 | injected.Frame[14 + 20 + 3]);
     }
 
     [Fact]
@@ -151,7 +200,7 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
         var table = new TcpRedirectTable();
         await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
 
-        await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None);
+        await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
         Assert.Equal(1, table.Count);
 
         var removed = table.RemoveExpired(DateTimeOffset.UtcNow.AddMinutes(5), TimeSpan.FromMinutes(1));
@@ -173,9 +222,9 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
         await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
 
         // Session 1 remains Redirecting (no accepted connection ever relayed).
-        await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None);
+        await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
         // Session 2 is promoted to Relaying once its accepted connection establishes a relay.
-        await coordinator.HandleSynAsync(MakeSynPacket(IPAddress.Parse("192.0.2.11"), IPAddress.Parse("192.0.2.54"), 53001, 443), s_server, CancellationToken.None);
+        await HandleSynSettledAsync(coordinator, MakeSynPacket(IPAddress.Parse("192.0.2.11"), IPAddress.Parse("192.0.2.54"), 53001, 443), s_server);
         var relayingListener = listenerFactory.Listeners[1];
         await relayingListener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(Endpoint.From(IPAddress.Parse("192.0.2.54"), 53001)), CancellationToken.None);
         await WaitForAsync(() => table.Snapshot().Any(a => a.Phase == RelayPhase.Relaying));
@@ -198,7 +247,7 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
         var table = new TcpRedirectTable();
         await using var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider());
 
-        await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None);
+        await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
         var listener = Assert.Single(listenerFactory.Listeners);
         var accepted = new FakeAcceptedConnection(Endpoint.From(s_destIpv4, 53000));
         await listener.AcceptChannel.Writer.WriteAsync(accepted, CancellationToken.None);

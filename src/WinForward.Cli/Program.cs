@@ -196,39 +196,18 @@ internal static class Program
                 logger.Warn("High-resolution timer resolution was not applied; the empty-queue poll granularity stays at about 15.6 ms instead of about 1 ms.");
             }
 
-            await using var captureComposition = await CreateCaptureCompositionAsync(configuration, driver, scope, reinjector, selfTraffic, logger).ConfigureAwait(false);
+            // The degraded-adapter callback only fires while the runtime is running, so the
+            // reference is assigned below before StartAsync; the closure defers the dereference.
+            TransactionalCaptureRuntime? runtimeRef = null;
+            var lastRetryLogTicks = 0L;
+            await using var captureComposition = await CreateCaptureCompositionAsync(configuration, driver, scope, reinjector, selfTraffic, logger,
+                onAdapterDegraded: (adapter, nativeError) => OnAdapterDegradedAsync(runtimeRef!, adapter, nativeError, logger),
+                onAdapterTransientRetry: (adapter, nativeError, attempt) => LogAdapterTransientRetry(ref lastRetryLogTicks, adapter, nativeError, attempt, logger)).ConfigureAwait(false);
             var modeController = new NdisAdapterModeController(driver, scope);
             await using var runtime = new TransactionalCaptureRuntime(modeController, captureComposition);
+            runtimeRef = runtime;
 
-            using var shutdown = new CancellationTokenSource();
-            void OnCancel(object? sender, ConsoleCancelEventArgs eventArgs)
-            {
-                eventArgs.Cancel = true;
-                shutdown.Cancel();
-            }
-
-            Console.CancelKeyPress += OnCancel;
-            try
-            {
-                logger.Info("Interception started. Press Ctrl+C to stop.");
-                await runtime.StartAsync(shutdown.Token).ConfigureAwait(false);
-                logger.Info("WinForward stopped cleanly.");
-                return 0;
-            }
-            catch (OperationCanceledException)
-            {
-                logger.Info("Shutdown requested; restoring adapter modes.");
-                return 0;
-            }
-            catch (Exception exception)
-            {
-                logger.Error($"Runtime failure: {exception.Message}");
-                return 3;
-            }
-            finally
-            {
-                Console.CancelKeyPress -= OnCancel;
-            }
+            return await RunUntilCancelledAsync(runtime, logger).ConfigureAwait(false);
         }
         finally
         {
@@ -240,13 +219,85 @@ internal static class Program
     }
 
     [SupportedOSPlatform("windows")]
+    private static async Task<int> RunUntilCancelledAsync(TransactionalCaptureRuntime runtime, IRuntimeLogger logger)
+    {
+        using var shutdown = new CancellationTokenSource();
+        void OnCancel(object? sender, ConsoleCancelEventArgs eventArgs)
+        {
+            eventArgs.Cancel = true;
+            shutdown.Cancel();
+        }
+
+        Console.CancelKeyPress += OnCancel;
+        try
+        {
+            logger.Info("Interception started. Press Ctrl+C to stop.");
+            await runtime.StartAsync(shutdown.Token).ConfigureAwait(false);
+            logger.Info("WinForward stopped cleanly.");
+            return 0;
+        }
+        catch (OperationCanceledException)
+        {
+            logger.Info("Shutdown requested; restoring adapter modes.");
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            logger.Error($"Runtime failure: {exception.Message}");
+            return 3;
+        }
+        finally
+        {
+            Console.CancelKeyPress -= OnCancel;
+        }
+    }
+
+    /// <summary>
+    /// R7 degraded-adapter surface: the adapter's interception stopped after its pump exhausted
+    /// transient-read retries (or hit a permanent native read error); its filter mode is restored
+    /// immediately while the process and the remaining adapters keep running. The full native
+    /// error code is recorded verbatim so production ground truth can refine the transient-class
+    /// table in <c>NdisNativeCallStatus</c>.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private static async ValueTask OnAdapterDegradedAsync(TransactionalCaptureRuntime runtime, WindowsAdapter adapter, int nativeError, IRuntimeLogger logger)
+    {
+        logger.Event(RuntimeLogLevel.Error, "adapter.degraded",
+            new RuntimeLogField("adapter", adapter.StableId),
+            new RuntimeLogField("name", adapter.FriendlyName),
+            new RuntimeLogField("nativeError", nativeError));
+        await runtime.MarkAdapterDegradedAsync(adapter.StableId).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Rate-limited (5 s) warn for transient read retries (R7). Per-retry invocation is naturally
+    /// bounded by the retry budget; this window keeps a persistently flapping adapter from
+    /// flooding the console.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private static void LogAdapterTransientRetry(ref long lastLogTicks, WindowsAdapter adapter, int nativeError, int attempt, IRuntimeLogger logger)
+    {
+        var now = DateTime.UtcNow.Ticks;
+        var last = Interlocked.Read(ref lastLogTicks);
+        if (now - last < TimeSpan.FromSeconds(5).Ticks) return;
+        if (Interlocked.CompareExchange(ref lastLogTicks, now, last) != last) return;
+        logger.Event(RuntimeLogLevel.Warn, "adapter.retry",
+            new RuntimeLogField("adapter", adapter.StableId),
+            new RuntimeLogField("name", adapter.FriendlyName),
+            new RuntimeLogField("nativeError", nativeError),
+            new RuntimeLogField("attempt", attempt));
+    }
+
+    [SupportedOSPlatform("windows")]
     private static async ValueTask<CoordinatorShutdownCaptureLoop> CreateCaptureCompositionAsync(
         ValidatedConfiguration configuration,
         NdisApiDriver driver,
         IReadOnlyList<WindowsAdapter> scope,
         IPacketReinjector reinjector,
         SelfTrafficRegistry selfTraffic,
-        IRuntimeLogger logger)
+        IRuntimeLogger logger,
+        Func<WindowsAdapter, int, ValueTask>? onAdapterDegraded = null,
+        Action<WindowsAdapter, int, int>? onAdapterTransientRetry = null)
     {
         // The tcpFlowCapacity budget is the single source of truth for both the coordinator's
         // session gate and the redirect table's bounded capacity (design §4).
@@ -271,7 +322,9 @@ internal static class Program
                     reverseHandler: tcpCoordinator,
                     fragmentHandler: tcpCoordinator.HandleFragmentAsync,
                     logger: logger);
-                var captureLoop = new MultiAdapterCaptureLoop(driver, scope, new CapturePacketProcessor(dispatcher, logger, executor.FlushPendingPasses));
+                var captureLoop = new MultiAdapterCaptureLoop(driver, scope, new CapturePacketProcessor(dispatcher, logger, executor.FlushPendingPasses),
+                    onAdapterDegraded: onAdapterDegraded,
+                    onAdapterTransientRetry: onAdapterTransientRetry);
                 var idleExpirySweeper = new IdleExpirySweeper(dispatcher, tcpCoordinator, udpCoordinator, logger: logger);
                 idleExpirySweeper.Start();
                 return new CoordinatorShutdownCaptureLoop(captureLoop, idleExpirySweeper, udpCoordinator, tcpCoordinator);

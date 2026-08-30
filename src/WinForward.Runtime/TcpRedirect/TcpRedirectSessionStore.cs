@@ -119,8 +119,16 @@ internal sealed class TcpRedirectSessionStore
     /// no activity for the idle timeout, then reclaims elapsed tombstones. A relaying session is
     /// deliberately not expired here (M4); its teardown is tied to relay completion.
     /// </summary>
-    public async ValueTask<int> RemoveExpiredAsync(DateTimeOffset now, TimeSpan idleTimeout)
+    public ValueTask<int> RemoveExpiredAsync(DateTimeOffset now, TimeSpan idleTimeout) => RemoveExpiredAsync(now, idleTimeout, prunePending: null);
+
+    /// <summary>
+    /// Same sweep with an optional pending-SYN prune hook (R8): the coordinator's retained-SYN
+    /// TTL and setup-cooldown expiry ride this existing sweep tick (no dedicated timer), running
+    /// inside the same sweep phase as the store's own expiry so their clocks agree.
+    /// </summary>
+    public async ValueTask<int> RemoveExpiredAsync(DateTimeOffset now, TimeSpan idleTimeout, Action? prunePending)
     {
+        prunePending?.Invoke();
         RetiredSession[] expired;
         lock (_gate)
         {

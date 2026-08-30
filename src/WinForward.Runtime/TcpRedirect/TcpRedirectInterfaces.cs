@@ -98,6 +98,10 @@ public interface ITcpReverseHandler
 /// <see cref="Dropped"/> means the packet is a straggler of a redirect that was torn down within
 /// its TIME_WAIT grace window (a tombstone hit): the caller consumes it silently — no
 /// reinjection, no block logging — so the finished handshake's tail never reaches the real server.
+/// <see cref="SetupPending"/> means a genuinely new SYN was retained and its redirect setup
+/// continues in the background (R8): nothing was injected yet and nothing failed; the caller
+/// consumes the packet silently exactly like <see cref="Dropped"/>, and the background setup
+/// injects the rewritten SYN from the retained copy once the listener exists.
 /// </summary>
 public enum TcpRedirectOutcome
 {
@@ -105,4 +109,5 @@ public enum TcpRedirectOutcome
     Blocked,
     NotRelevant,
     Dropped,
+    SetupPending,
 }

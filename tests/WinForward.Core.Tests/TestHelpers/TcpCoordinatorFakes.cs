@@ -36,89 +36,105 @@ internal static class TcpCoordinatorFakes
         return new CapturedFlowPacket(lease, context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 0x1234));
     }
 
-internal static CapturedFlowPacket MakeForwardedSynPacket(IPAddress client, IPAddress destination, ushort clientPort, ushort destinationPort, Action<byte[]>? mutateFrame = null)
-{
-    var frame = client.AddressFamily == AddressFamily.InterNetwork
-        ? BuildIpv4TcpSyn(client, destination, clientPort, destinationPort)
-        : BuildIpv6TcpSyn(client, destination, clientPort, destinationPort);
-    mutateFrame?.Invoke(frame);
-    var local = Endpoint.From(client, clientPort);
-    var remote = Endpoint.From(destination, destinationPort);
-    var adapter = new AdapterContext("veth-1", "vEthernet 1", 7);
-    var key = FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Forwarded, adapter);
-    var context = new FlowContext(key, null, null, "veth-1", "vEthernet 1", destinationPort);
-    var lease = new PacketLease(frame);
-    return new CapturedFlowPacket(lease, context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, 0x1234));
-}
+    internal static CapturedFlowPacket MakeForwardedSynPacket(IPAddress client, IPAddress destination, ushort clientPort, ushort destinationPort, Action<byte[]>? mutateFrame = null)
+    {
+        var frame = client.AddressFamily == AddressFamily.InterNetwork
+            ? BuildIpv4TcpSyn(client, destination, clientPort, destinationPort)
+            : BuildIpv6TcpSyn(client, destination, clientPort, destinationPort);
+        mutateFrame?.Invoke(frame);
+        var local = Endpoint.From(client, clientPort);
+        var remote = Endpoint.From(destination, destinationPort);
+        var adapter = new AdapterContext("veth-1", "vEthernet 1", 7);
+        var key = FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Forwarded, adapter);
+        var context = new FlowContext(key, null, null, "veth-1", "vEthernet 1", destinationPort);
+        var lease = new PacketLease(frame);
+        return new CapturedFlowPacket(lease, context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, 0x1234));
+    }
 
-internal static CapturedFlowPacket MakeReversePacketClassifierOrientation(IPAddress source, ushort sourcePort, IPAddress destination, ushort destinationPort, nint adapterHandle = 0x1234, Action<byte[]>? mutateFrame = null, byte[]? payload = null)
-{
-    var frame = source.AddressFamily == AddressFamily.InterNetwork
-        ? BuildIpv4TcpSyn(source, destination, sourcePort, destinationPort, payload)
-        : BuildIpv6TcpSyn(source, destination, sourcePort, destinationPort);
-    mutateFrame?.Invoke(frame);
-    var local = Endpoint.From(source, sourcePort);
-    var remote = Endpoint.From(destination, destinationPort);
-    var key = FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Host);
-    var context = new FlowContext(key, "app.exe", null, null, "eth0", destinationPort);
-    var lease = new PacketLease(frame);
-    return new CapturedFlowPacket(lease, context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, adapterHandle));
-}
+    internal static CapturedFlowPacket MakeReversePacketClassifierOrientation(IPAddress source, ushort sourcePort, IPAddress destination, ushort destinationPort, nint adapterHandle = 0x1234, Action<byte[]>? mutateFrame = null, byte[]? payload = null)
+    {
+        var frame = source.AddressFamily == AddressFamily.InterNetwork
+            ? BuildIpv4TcpSyn(source, destination, sourcePort, destinationPort, payload)
+            : BuildIpv6TcpSyn(source, destination, sourcePort, destinationPort);
+        mutateFrame?.Invoke(frame);
+        var local = Endpoint.From(source, sourcePort);
+        var remote = Endpoint.From(destination, destinationPort);
+        var key = FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Host);
+        var context = new FlowContext(key, "app.exe", null, null, "eth0", destinationPort);
+        var lease = new PacketLease(frame);
+        return new CapturedFlowPacket(lease, context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, adapterHandle));
+    }
 
-internal const byte TcpFlagAck = 0x10;
-internal const byte TcpFlagFinAck = 0x11;
+    internal const byte TcpFlagAck = 0x10;
+    internal const byte TcpFlagFinAck = 0x11;
 
-/// <summary>
-/// Builds a forward (client -> server) TCP packet on the original tuple with arbitrary flags —
-/// e.g. a straggler ACK/FIN-ACK arriving after teardown. The checksum is intentionally stale:
-/// the tombstone path consumes the frame without ever rewriting it. The sequence number can be
-/// set via <paramref name="mutateFrame"/> to emulate in-flight data.
-/// </summary>
-internal static CapturedFlowPacket MakeForwardTcpPacket(IPAddress client, IPAddress destination, ushort clientPort, ushort destinationPort, byte tcpFlags, byte[]? payload = null, Action<byte[]>? mutateFrame = null)
-{
-    var frame = BuildIpv4TcpSyn(client, destination, clientPort, destinationPort, payload);
-    const int tcpFlagsOffset = 47;
-    frame[tcpFlagsOffset] = tcpFlags;
-    mutateFrame?.Invoke(frame);
-    var local = Endpoint.From(client, clientPort);
-    var remote = Endpoint.From(destination, destinationPort);
-    var key = FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Host);
-    var context = new FlowContext(key, "app.exe", null, null, "eth0", destinationPort);
-    return new CapturedFlowPacket(new PacketLease(frame), context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 0x1234));
-}
+    /// <summary>
+    /// Builds a forward (client -> server) TCP packet on the original tuple with arbitrary flags —
+    /// e.g. a straggler ACK/FIN-ACK arriving after teardown. The checksum is intentionally stale:
+    /// the tombstone path consumes the frame without ever rewriting it. The sequence number can be
+    /// set via <paramref name="mutateFrame"/> to emulate in-flight data.
+    /// </summary>
+    internal static CapturedFlowPacket MakeForwardTcpPacket(IPAddress client, IPAddress destination, ushort clientPort, ushort destinationPort, byte tcpFlags, byte[]? payload = null, Action<byte[]>? mutateFrame = null)
+    {
+        var frame = BuildIpv4TcpSyn(client, destination, clientPort, destinationPort, payload);
+        const int tcpFlagsOffset = 47;
+        frame[tcpFlagsOffset] = tcpFlags;
+        mutateFrame?.Invoke(frame);
+        var local = Endpoint.From(client, clientPort);
+        var remote = Endpoint.From(destination, destinationPort);
+        var key = FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Host);
+        var context = new FlowContext(key, "app.exe", null, null, "eth0", destinationPort);
+        return new CapturedFlowPacket(new PacketLease(frame), context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 0x1234));
+    }
 
-internal static FlowKey MakeHostFlowKey() => FlowKey.Create(Endpoint.From(ClientIpv4, 53000), Endpoint.From(DestIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
+    internal static FlowKey MakeHostFlowKey() => FlowKey.Create(Endpoint.From(ClientIpv4, 53000), Endpoint.From(DestIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
 
-internal static DispatcherHarness CreateDispatcherHarness()
-{
-    var listenerFactory = new FakeListenerFactory();
-    var injector = new FakeInjector();
-    var relayFactory = new CompletableRelayFactory();
-    var logger = new RecordingRuntimeLogger();
-    var selfTraffic = new SelfTrafficRegistry();
-    var table = new TcpRedirectTable();
-    var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider(), logger);
+    internal static DispatcherHarness CreateDispatcherHarness()
+    {
+        var listenerFactory = new FakeListenerFactory();
+        var injector = new FakeInjector();
+        var relayFactory = new CompletableRelayFactory();
+        var logger = new RecordingRuntimeLogger();
+        var selfTraffic = new SelfTrafficRegistry();
+        var table = new TcpRedirectTable();
+        var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider(), logger);
 
-    var server = new Socks5Server("primary", "127.0.0.1", 1080, null, null);
-    var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase) { [server.Name] = server };
-    var rules = new[] { new PolicyRule(new RuleMatcher(), new FlowDecision(FlowAction.Proxy, 0, server.Name)) };
-    var config = new ValidatedConfiguration(servers, new PolicySnapshot(rules, FlowAction.Block));
-    var executor = new NdisPacketActionExecutor(new CountingReinjector(), logger, tcpProxy: coordinator);
-    var dispatcher = new FlowDispatcher(
-        config, selfTraffic, executor,
-        reverseHandler: coordinator,
-        fragmentHandler: coordinator.HandleFragmentAsync,
-        logger: logger);
-    return new DispatcherHarness(coordinator, listenerFactory, injector, relayFactory, table, dispatcher, logger);
-}
+        var server = new Socks5Server("primary", "127.0.0.1", 1080, null, null);
+        var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase) { [server.Name] = server };
+        var rules = new[] { new PolicyRule(new RuleMatcher(), new FlowDecision(FlowAction.Proxy, 0, server.Name)) };
+        var config = new ValidatedConfiguration(servers, new PolicySnapshot(rules, FlowAction.Block));
+        var executor = new NdisPacketActionExecutor(new CountingReinjector(), logger, tcpProxy: coordinator);
+        var dispatcher = new FlowDispatcher(
+            config, selfTraffic, executor,
+            reverseHandler: coordinator,
+            fragmentHandler: coordinator.HandleFragmentAsync,
+            logger: logger);
+        return new DispatcherHarness(coordinator, listenerFactory, injector, relayFactory, table, dispatcher, logger);
+    }
 
-internal static async Task EstablishRelayingSessionAsync(DispatcherHarness harness)
-{
-    await harness.Dispatcher.DispatchAsync(MakeSynPacket(ClientIpv4, DestIpv4, 53000, 443), CancellationToken.None);
-    var listener = Assert.Single(harness.ListenerFactory.Listeners);
-    await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(Endpoint.From(DestIpv4, 53000)), CancellationToken.None);
-    await WaitForAsync(() => harness.RelayFactory.Relay is not null);
-}
+    internal static async Task EstablishRelayingSessionAsync(DispatcherHarness harness)
+    {
+        await harness.Dispatcher.DispatchAsync(MakeSynPacket(ClientIpv4, DestIpv4, 53000, 443), CancellationToken.None);
+        // R8: the SYN dispatch returns SetupPending; the listener exists only after the
+        // background setup settles, so drain before touching the factory's recordings.
+        await harness.Coordinator.DrainPendingSetupsAsync();
+        var listener = Assert.Single(harness.ListenerFactory.Listeners);
+        await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(Endpoint.From(DestIpv4, 53000)), CancellationToken.None);
+        await WaitForAsync(() => harness.RelayFactory.Relay is not null);
+    }
+
+    /// <summary>
+    /// Dispatches a SYN through the coordinator and awaits the background redirect setup R8 moved
+    /// off the pump thread, so tests observe the settled state (listener created, rewritten SYN
+    /// injected, failure logged and cooldown armed). The synchronous fast paths — flow reuse,
+    /// TIME_WAIT grace, setup cooldown, capacity — return their outcome directly and skip the
+    /// drain.
+    /// </summary>
+    internal static async Task HandleSynSettledAsync(TcpProxyCoordinator coordinator, CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken = default)
+    {
+        await coordinator.HandleSynAsync(packet, server, cancellationToken);
+        await coordinator.DrainPendingSetupsAsync();
+    }
 }
 
 /// <summary>

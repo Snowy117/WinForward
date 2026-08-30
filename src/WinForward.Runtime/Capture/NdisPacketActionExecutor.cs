@@ -249,6 +249,14 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
                 // emits it exactly once per packet.
                 if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("packet.dropped", packet, new RuntimeLogField("reason", "grace"));
             }
+            else if (outcome == TcpRedirectOutcome.SetupPending)
+            {
+                // R8: the SYN was retained by the coordinator and its listener setup continues in
+                // the background; nothing was injected now and nothing failed. Consume silently
+                // (same family as the grace drop — no pass, no block warning): the background
+                // setup injects the rewritten SYN from the retained copy.
+                if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("packet.dropped", packet, new RuntimeLogField("reason", "setupPending"));
+            }
             else if (outcome == TcpRedirectOutcome.NotRelevant)
             {
                 // The flow is proxy-decided but this packet was never the coordinator's to handle

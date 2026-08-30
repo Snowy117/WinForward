@@ -116,9 +116,56 @@ public sealed class TransactionalCaptureRuntime : IAsyncDisposable
 
     public ValueTask DisposeAsync() => StopAsync();
 
+    /// <summary>
+    /// Marks one adapter's interception as degraded (R7) and restores its captured mode early:
+    /// the adapter's pump has stopped after exhausting transient-read retries (or a permanent
+    /// native read error) while the run continues on the remaining adapters. The snapshot is
+    /// removed from the applied set under the gate so the normal-shutdown restore does not repeat
+    /// it (a double restore would be harmless — mode flags are idempotent — but the bookkeeping
+    /// stays honest), and the restore itself runs outside the lock, best-effort: a restore
+    /// failure is swallowed, matching <see cref="RestoreBestEffortAsync"/>, and never throws to
+    /// the degraded-exit path. An unknown or already-degraded adapter is a no-op.
+    /// </summary>
+    public ValueTask MarkAdapterDegradedAsync(string adapterId)
+    {
+        ArgumentNullException.ThrowIfNull(adapterId);
+        AdapterModeSnapshot? snapshot = null;
+        lock (_gate)
+        {
+            for (var index = 0; index < _applied.Count; index++)
+            {
+                if (!string.Equals(_applied[index].AdapterId, adapterId, StringComparison.OrdinalIgnoreCase)) continue;
+                snapshot = _applied[index];
+                _applied.RemoveAt(index);
+                break;
+            }
+        }
+
+        return snapshot is { } degraded ? RestoreDegradedAsync(degraded) : ValueTask.CompletedTask;
+    }
+
+    private async ValueTask RestoreDegradedAsync(AdapterModeSnapshot snapshot)
+    {
+        try
+        {
+            await _modes.RestoreAsync(snapshot, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            // Best-effort restore; the degraded-exit error log in the wiring carries the incident.
+            GC.KeepAlive(exception);
+        }
+    }
+
     private async ValueTask RestoreBestEffortAsync()
     {
-        foreach (var adapter in _applied.AsEnumerable().Reverse())
+        // Snapshot under the gate: a concurrent MarkAdapterDegradedAsync may remove an entry while
+        // the shutdown restore iterates (the degraded path and the shutdown path can overlap when
+        // Ctrl+C lands right after a degradation). A snapshot makes the iteration stable; entries
+        // removed mid-restore are simply gone, and a double restore is idempotent.
+        AdapterModeSnapshot[] applied;
+        lock (_gate) applied = _applied.ToArray();
+        foreach (var adapter in applied.AsEnumerable().Reverse())
         {
             try { await _modes.RestoreAsync(adapter, CancellationToken.None).ConfigureAwait(false); }
 #pragma warning disable RCS1075 // Rollback must continue restoring the remaining adapters.
@@ -128,7 +175,7 @@ public sealed class TransactionalCaptureRuntime : IAsyncDisposable
             }
 #pragma warning restore RCS1075
         }
-        _applied.Clear();
+        lock (_gate) _applied.Clear();
         await _modes.DisposeAsync().ConfigureAwait(false);
         _shutdown.Dispose();
     }
