@@ -314,3 +314,25 @@ Four read-only review agents (TCP redirect/relay, UDP relay, SOCKS5 control + ca
 ### Status
 
 [OK] **Completed**
+
+
+## Session 14: fast-hardening child landed: client RST + NoDelay + pooled buffers + throttle
+
+**Date**: 2026-08-30
+**Task**: fast-hardening child landed: client RST + NoDelay + pooled buffers + throttle
+**Branch**: `master`
+
+### Summary
+
+First implementation child of 08-30-proxy-perf-stability landed all four research items: R1 client-visible RST on relay fault/stall (RelayEndKind surface, inject-before-teardown, _endKind defaults Faulted after review catch), X4 NoDelay on both relay legs, X5 64KiB ArrayPool pump buffers (chunk-8192 alloc 188->171KB), X8a 1s stall re-arm throttle. Two implement-agent runs + one check-agent pass (PASS-WITH-FIXES). 442/442 tests, zero warnings, tcp stability otherErrors=0, socks5/bare 92.0%. Specs updated (hot-path.md, tcp-local-redirect.md). Task archived; next: 08-30-hot-path-revival (PRD ready, needs design.md+implement.md before start).
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b0e0c6d` | (see git log) |
+| `a06a587` | (see git log) |
+
+### Status
+
+[OK] **Completed**
