@@ -268,3 +268,30 @@ Closed the SOCKS5-measurement gap (product positioning: proxy forwarding is the 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 12: Proxy stability and performance hardening (S1-S6, P1-P2)
+
+**Date**: 2026-08-30
+**Task**: Proxy stability and performance hardening (S1-S6, P1-P2)
+**Branch**: `master`
+
+### Summary
+
+Fixed all audit findings from the 2026-08-29 proxy audit: UDP relay sockets disable SIO_UDP_CONNRESET with ConnectionReset-as-skip + observability counters/warn fixes (S2/S6); relay completions observed on all paths incl. the read-Exception-before-log-gate fix (S3); capacity-rejected SYNs get in-window RST|ACK with 1s/tuple cooldown (S4); fragments on associated flows consumed+RST instead of policy-leaking pass (S1, address-pair index); adapter local addresses cached behind change-event+TTL snapshot, allocation-free read (S5); relay stall-window CTS reuse (per-op 160B->0B, -77% alloc) + RFC1624 incremental endpoint checksums (18.7x) + vectorized Internet checksum with fold invariants (16x) (P1/P2). Suite 386->431 tests, zero-warning build, quick soak zero loss, artifacts under benchmarks/results/2026-08-29-proxy-hardening/. Specs updated: error-handling, tcp-local-redirect, udp-relay, hot-path.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `11acc06` | (see git log) |
+| `d0bcd83` | (see git log) |
+| `2f544ab` | (see git log) |
+| `1e94849` | (see git log) |
+| `adfb4ec` | (see git log) |
+| `a0d87da` | (see git log) |
+| `323f747` | (see git log) |
+
+### Status
+
+[OK] **Completed**
