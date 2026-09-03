@@ -1,7 +1,10 @@
 namespace WinForward.Core;
 
 /// <summary>
-/// Applies the exact process selector semantics used by the policy layer.
+/// Applies the process selector semantics used by the policy layer: filename-only
+/// selectors match the executable name; path selectors match the normalized full path
+/// exactly and, when the path denotes a directory, also match every executable located
+/// in that directory or any of its subdirectories.
 /// </summary>
 public static class ProcessSelectorMatcher
 {
@@ -16,7 +19,11 @@ public static class ProcessSelectorMatcher
 
             if (ContainsDirectorySeparator(selector))
             {
-                if (processPath is not null && string.Equals(NormalizePath(selector), NormalizePath(processPath), StringComparison.OrdinalIgnoreCase)) return true;
+                if (processPath is null) continue;
+                var normalizedSelector = NormalizePath(selector);
+                var normalizedPath = NormalizePath(processPath);
+                if (string.Equals(normalizedSelector, normalizedPath, StringComparison.OrdinalIgnoreCase)) return true;
+                if (IsInsideDirectory(normalizedPath, normalizedSelector)) return true;
                 continue;
             }
 
@@ -41,6 +48,14 @@ public static class ProcessSelectorMatcher
     }
 
     private static bool ContainsDirectorySeparator(string value) => value.IndexOfAny(['/', '\\']) >= 0;
+
+    private static bool IsInsideDirectory(string normalizedPath, string normalizedDirectory)
+    {
+        var prefixLength = normalizedDirectory.Length;
+        return normalizedPath.Length > prefixLength
+            && normalizedPath[prefixLength] == '\\'
+            && normalizedPath.AsSpan(0, prefixLength).Equals(normalizedDirectory.AsSpan(), StringComparison.OrdinalIgnoreCase);
+    }
 
     private static string GetFileName(string value)
     {

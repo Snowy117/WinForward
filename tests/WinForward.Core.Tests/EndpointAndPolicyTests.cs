@@ -121,6 +121,58 @@ public sealed class EndpointAndPolicyTests
     }
 
     [Fact]
+    public void ProcessSelectorDirectoryMatchesProgramsInDirectoryAndSubdirectories()
+    {
+        var context = new FlowContext(
+            FlowKey.Create(Endpoint.From(IPAddress.Loopback, 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host),
+            "tool.exe", @"C:\Program Files\MyApp\Bin\Sub\TOOL.EXE", null, null, 53);
+        var policy = new PolicySnapshot(
+            [new(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { @"c:\program files\myapp" }), new FlowDecision(FlowAction.Block, 0, null))],
+            FlowAction.Pass);
+
+        Assert.Equal(FlowAction.Block, policy.Evaluate(context).Action);
+    }
+
+    [Fact]
+    public void ProcessSelectorDirectoryMatchesDirectChildAndTrailingSeparatorForm()
+    {
+        var context = new FlowContext(
+            FlowKey.Create(Endpoint.From(IPAddress.Loopback, 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host),
+            "app.exe", @"C:\Program Files\MyApp\App.EXE", null, null, 53);
+        var policy = new PolicySnapshot(
+            [new(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "c:/program files/myapp/" }), new FlowDecision(FlowAction.Block, 0, null))],
+            FlowAction.Pass);
+
+        Assert.Equal(FlowAction.Block, policy.Evaluate(context).Action);
+    }
+
+    [Fact]
+    public void ProcessSelectorDirectoryDoesNotMatchSiblingPrefix()
+    {
+        var context = new FlowContext(
+            FlowKey.Create(Endpoint.From(IPAddress.Loopback, 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host),
+            "app.exe", @"C:\ToolsFoo\App.EXE", null, null, 53);
+        var policy = new PolicySnapshot(
+            [new(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { @"c:\tools" }), new FlowDecision(FlowAction.Block, 0, null))],
+            FlowAction.Pass);
+
+        Assert.Equal(FlowAction.Pass, policy.Evaluate(context).Action);
+    }
+
+    [Fact]
+    public void ProcessSelectorDirectoryDoesNotMatchParentOrUnrelatedPaths()
+    {
+        var context = new FlowContext(
+            FlowKey.Create(Endpoint.From(IPAddress.Loopback, 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host),
+            "app.exe", @"C:\Other\App.EXE", null, null, 53);
+        var policy = new PolicySnapshot(
+            [new(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { @"C:\Tools" }), new FlowDecision(FlowAction.Block, 0, null))],
+            FlowAction.Pass);
+
+        Assert.Equal(FlowAction.Pass, policy.Evaluate(context).Action);
+    }
+
+    [Fact]
     public void PolicyMatchesRemoteCidr()
     {
         Assert.True(IPPrefix.TryParse("192.0.2.0/24", out var network));

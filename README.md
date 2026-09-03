@@ -86,9 +86,11 @@ JSON, rejected on any unknown property. The top level is:
   `adapterName`; if none match, it passes unchanged. The same split applies to packets that cannot
   be classified as TCP/UDP flows. Every match field is optional; fields present together use AND
   semantics, alternatives inside one field use OR.
-  - `process`: exact executable filename (no slash) or normalized full path (contains `/` or
-    `\`), case-insensitive. A value without a slash matches the filename; with a slash matches
-    the full path. No substring/wildcard.
+  - `process`: executable filename (no slash) or path (contains `/` or `\`),
+    case-insensitive. A value without a slash matches the filename; a path value matches the
+    normalized full path exactly, and also matches every program in that directory or any
+    subdirectory below it (e.g. `C:\Program Files\MyApp` matches `MyApp\bin\tool.exe`).
+    No substring/wildcard.
   - `adapterId` / `adapterName`: stable id / exact friendly name. Both present = AND (must
     resolve to the same adapter). Name-only is for dynamically recreated adapters.
   - `protocol`: `tcp` / `udp`. `addressFamily`: `ipv4` / `ipv6`.
