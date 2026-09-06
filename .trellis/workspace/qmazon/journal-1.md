@@ -470,3 +470,25 @@ TFO data-bearing SYNs were fail-closed as Blocked and silently consumed, blackho
 ### Status
 
 [OK] **Completed**
+
+
+## Session 18: UDP burst-establishment benchmark + baseline matrix
+
+**Date**: 2026-09-06
+**Task**: UDP burst-establishment benchmark + baseline matrix
+**Branch**: `master`
+
+### Summary
+
+Built the udp.burstEstablishment stability scenario (burst N new UDP flows at one instant, background flows pacing through control/burst/post windows, --dial-delay-ms knob modeling remote dial). 19-point baseline matrix + TTL corner probe: establishment latency = ceil(N/8)xD wave serialization (fit +2.9-4.3%), zero head-of-line impact on established flows, first-datagram TTL loss begins at N > 8 x floor(5s/D) (93.75% at 128x4s). Spec contract added to udp-relay.md; follow-up children created: 09-06-udp-burst-ttl-attribution (small fix) + 09-06-local-mux-transport (research).
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4a4d6a6` | (see git log) |
+| `4b00d0b` | (see git log) |
+
+### Status
+
+[OK] **Completed**
