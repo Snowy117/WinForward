@@ -411,17 +411,19 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
 
         var key = packet.Context.Key;
         var now = DateTimeOffset.UtcNow;
-        var syn = TcpFrameRewriter.ClassifyTcpSyn(packet.Lease.Frame.Span);
+        var syn = TcpFrameRewriter.IsTcpSyn(packet.Lease.Frame.Span);
 
         if (_table.IsReverseCandidate(key.Local, key.Remote))
         {
             return await HandleReverseAsync(packet, cancellationToken).ConfigureAwait(false);
         }
 
-        if (syn == TcpSynKind.WithPayload) return TcpRedirectOutcome.Blocked;
-
-        if (syn == TcpSynKind.Empty)
+        if (syn)
         {
+            // Data-bearing SYNs (TCP Fast Open, RFC 7413) ride the same pipeline as bare SYNs:
+            // the forward-leg rewrite only touches addresses/ports, and the local non-TFO
+            // listener stack either queues or drops the SYN data — the client retransmits it
+            // as a normal segment (graceful degradation), so the flow connects either way.
             return await HandleSynAsync(packet, server, cancellationToken).ConfigureAwait(false);
         }
 

@@ -8,7 +8,7 @@ namespace WinForward.Benchmarks.Perf;
 
 /// <summary>
 /// Per-packet TCP frame rewriting for proxied TCP flows — the only per-packet work the proxy
-/// data plane adds over a plain pass. Covers <see cref="TcpFrameRewriter.ClassifyTcpSyn"/> (the
+/// data plane adds over a plain pass. Covers <see cref="TcpFrameRewriter.IsTcpSyn"/> (the
 /// SYN gate every captured TCP frame passes), <see cref="TcpFrameRewriter.SwapEthernetMacs"/>
 /// (host-shape MAC swap), and <see cref="TcpFrameRewriter.TryRewriteForwardLeg"/> in both
 /// association shapes (host IP-swap vs forwarded DNAT).
@@ -47,7 +47,7 @@ public class FrameRewriterBenchmarks
     }
 
     [Benchmark]
-    public int ClassifyTcpSyn() => (int)TcpFrameRewriter.ClassifyTcpSyn(_synFrame);
+    public int IsTcpSyn() => TcpFrameRewriter.IsTcpSyn(_synFrame) ? 1 : 0;
 
     [Benchmark]
     public void SwapEthernetMacs() => TcpFrameRewriter.SwapEthernetMacs(_scratch);

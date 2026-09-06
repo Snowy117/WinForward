@@ -60,32 +60,18 @@ internal static class TcpFrameRewriter
 
     /// <summary>
     /// Detects a TCP SYN (SYN set, ACK clear) from the raw Ethernet frame. The flags byte is at
-    /// the TCP header offset + 13; SYN = 0x02, ACK = 0x10. Returns <see cref="TcpSynKind.Empty"/>
-    /// for a bare SYN, <see cref="TcpSynKind.WithPayload"/> for a SYN with data (which is blocked),
-    /// and <see cref="TcpSynKind.None"/> for a non-SYN or unparseable frame.
+    /// the TCP header offset + 13; SYN = 0x02, ACK = 0x10. Any SYN qualifies — including a
+    /// data-bearing SYN (TCP Fast Open, RFC 7413), which the redirect path tolerates by treating
+    /// it exactly like a bare SYN.
     /// </summary>
-    public static TcpSynKind ClassifyTcpSyn(ReadOnlySpan<byte> frame)
+    public static bool IsTcpSyn(ReadOnlySpan<byte> frame)
     {
-        if (!IPTcpUdpPacket.TryParse(frame, out var view) || view.Transport != PacketTransport.Tcp) return TcpSynKind.None;
+        if (!IPTcpUdpPacket.TryParse(frame, out var view) || view.Transport != PacketTransport.Tcp) return false;
         var tcpFlagsOffset = 14 + view.IPHeaderLength + 13;
-        if (frame.Length <= tcpFlagsOffset) return TcpSynKind.None;
+        if (frame.Length <= tcpFlagsOffset) return false;
         var flags = frame[tcpFlagsOffset];
         const byte Syn = 0x02;
         const byte Ack = 0x10;
-        if ((flags & Syn) == 0 || (flags & Ack) != 0) return TcpSynKind.None;
-
-        var etherType = System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(12, 2));
-        var transportLength = etherType == 0x0800
-            ? System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(16, 2)) - view.IPHeaderLength
-            : System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(18, 2)) - (view.IPHeaderLength - 40);
-        return transportLength == view.TransportHeaderLength ? TcpSynKind.Empty : TcpSynKind.WithPayload;
+        return (flags & Syn) != 0 && (flags & Ack) == 0;
     }
-}
-
-/// <summary>Classification of a captured TCP frame's SYN status.</summary>
-internal enum TcpSynKind
-{
-    None,
-    Empty,
-    WithPayload,
 }

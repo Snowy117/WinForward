@@ -344,20 +344,65 @@ public sealed class TcpProxyCoordinatorRewriteTests
     }
 
     [Fact]
-    public async Task SynWithPayloadIsBlockedWithoutClaim()
+    public async Task SynWithPayloadIsRedirectedLikeBareSyn()
     {
+        // A data-bearing SYN (TCP Fast Open, RFC 7413) takes the same redirect pipeline as a
+        // bare SYN: pending retain, listener, claim, forward-leg rewrite, injection. The
+        // rewrite only touches addresses/ports, so the payload survives in place and the
+        // segment's TCP checksum still validates.
         var listenerFactory = new FakeListenerFactory();
         var injector = new FakeInjector();
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable();
         await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
 
-        var packet = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443, [0x01, 0x02, 0x03]);
+        var packet = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443, [0xde, 0xad, 0xbe, 0xef]);
         var outcome = await coordinator.HandlePacketAsync(packet, s_server, CancellationToken.None);
 
-        Assert.Equal(TcpRedirectOutcome.Blocked, outcome);
-        Assert.Equal(0, table.Count);
-        Assert.Empty(listenerFactory.Listeners);
-        Assert.Empty(injector.InjectedFrames);
+        Assert.Equal(TcpRedirectOutcome.SetupPending, outcome);
+        await coordinator.DrainPendingSetupsAsync();
+        Assert.Equal(1, table.Count);
+        Assert.Single(listenerFactory.Listeners);
+        var frame = Assert.Single(injector.InjectedFrames).Frame;
+        var ipHeaderLength = (frame[14] & 0x0f) * 4;
+        var tcp = 14 + ipHeaderLength;
+        var dataOffset = (frame[tcp + 12] >> 4) * 4;
+        Assert.Equal((byte)0xde, frame[tcp + dataOffset]);
+        Assert.Equal((byte)0xad, frame[tcp + dataOffset + 1]);
+        Assert.Equal((byte)0xbe, frame[tcp + dataOffset + 2]);
+        Assert.Equal((byte)0xef, frame[tcp + dataOffset + 3]);
+        var totalLength = BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(16, 2));
+        var tcpLength = totalLength - ipHeaderLength;
+        var checksumSum = ChecksumMath.Sum(frame.AsSpan(26, 4)) + ChecksumMath.Sum(frame.AsSpan(30, 4)) + 6u + (uint)tcpLength + ChecksumMath.Sum(frame.AsSpan(tcp, tcpLength));
+        Assert.Equal((ushort)0xffff, ChecksumMath.Fold(checksumSum));
+    }
+
+    [Fact]
+    public async Task RetransmittedSynWithPayloadReusesAssociation()
+    {
+        // A retransmitted TFO SYN resolves to the existing association (no second listener or
+        // session) and advances the client sequence tracker past ISN + 1 + payloadLen — a
+        // later reset must stay in the client's window even for SYN data it already sent.
+        var listenerFactory = new FakeListenerFactory();
+        var injector = new FakeInjector();
+        var selfTraffic = new SelfTrafficRegistry();
+        var table = new TcpRedirectTable();
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
+
+        var payload = new byte[] { 0x01, 0x02, 0x03 };
+        await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443, payload), s_server);
+        Assert.Single(listenerFactory.Listeners);
+        injector.InjectedFrames.Clear();
+
+        var retransmission = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443, payload);
+        var outcome = await coordinator.HandlePacketAsync(retransmission, s_server, CancellationToken.None);
+
+        Assert.Equal(TcpRedirectOutcome.Injected, outcome);
+        Assert.Single(listenerFactory.Listeners);
+        Assert.Single(injector.InjectedFrames);
+        var key = retransmission.Context.Key;
+        Assert.True(table.TryResolveByOriginal(key, DateTimeOffset.UtcNow, out var association));
+        Assert.NotNull(association);
+        Assert.Equal(association.ClientInitialSeq!.Value + 1u + (uint)payload.Length, association.ClientNextSeq);
     }
 }

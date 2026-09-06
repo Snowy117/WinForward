@@ -29,6 +29,10 @@ The SYN-ACK that MSTCP emits in response to an injected (`SendPacketsToMstcp`) S
 
 After the handshake, client -> listener data on the original flow must also be rewritten to the proxy tuple and reinjected (`ReinjectExistingFlowDataAsync`: same swap, dst -> proxy port). A flow with an active redirect association is recognized by `TryResolveByOriginal` (`TcpRedirectTable`); anything else is not ours.
 
+### Data-bearing SYNs (TCP Fast Open) are tolerated, never blocked (2026-09-06)
+
+A client SYN carrying data (TFO, RFC 7413) rides the exact same redirect pipeline as a bare SYN: `TcpFrameRewriter.IsTcpSyn` is a boolean SYN predicate (SYN set, ACK clear — no payload discrimination), and `TcpProxyCoordinator.HandlePacketAsync` routes every SYN into `HandleSynAsync`. Why tolerance needs no extra support: the forward-leg rewrite is an RFC 1624 incremental update over addresses/ports only (payload bytes are never touched), `TcpSequenceObservation.TryReadTcpSequenceAdvance` already counts SYN data in the sequence advance (`payloadLen + SYN + FIN` from IP totalLength), the RST template is header-only, and the non-TFO local listener stack queues or drops the SYN data, after which the client retransmits it post-handshake (RFC 7413 graceful degradation) — the relay sees a normal stream either way. Blocking data-bearing SYNs (the pre-2026-09-06 `TcpSynKind.WithPayload → Blocked` fast path) only blackholed TFO clients: the executor consumed every retransmission silently and the client died at ETIMEDOUT. Locked by `SynWithPayloadIsRedirectedLikeBareSyn` (payload survival + checksum validity) and `RetransmittedSynWithPayloadReusesAssociation` (`ClientNextSeq == ISN + 1 + payloadLen`) in `TcpProxyCoordinatorRewriteTests`.
+
 ### Redundant accepts
 
 A retransmitted SYN can make MSTCP open a second connection on the same listener. After the first relay is established, further accepts must be drained and closed immediately (`DrainRedundantConnectionsAsync`, `TcpRedirectAcceptor.cs`) rather than starting a second relay — otherwise every extra accept fails with SocketException and the log floods.

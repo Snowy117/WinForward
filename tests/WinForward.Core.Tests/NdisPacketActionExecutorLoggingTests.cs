@@ -1,4 +1,6 @@
+using System.Buffers.Binary;
 using System.Net;
+using System.Runtime.InteropServices;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
@@ -39,18 +41,26 @@ public sealed class NdisPacketActionExecutorLoggingTests
     {
         var logger = new RecordingRuntimeLogger();
         await using var coordinator = new TcpProxyCoordinator(
-            new ThrowingRedirectListenerFactory(),
-            new ThrowingRelayFactory(),
-            new ThrowingRedirectInjector(),
+            new FakeListenerFactory(),
+            new FakeRelayFactory(),
+            new FakeInjector(),
             new TcpRedirectTable(),
             new SelfTrafficRegistry(),
             new FakeLocalAddressProvider());
         var executor = new NdisPacketActionExecutor(new FakeReinjector(), logger, tcpProxy: coordinator);
 
-        // A SYN carrying payload is rejected synchronously by the coordinator (Blocked) without
-        // ever touching the (throwing) factory, relay, or injector — R8 moved only the bare-SYN
-        // new-flow setup into the background; this fast-path block keeps its executor warn.
-        await executor.ProxyAsync(MakeSynPacket(s_client, s_destination, 53000, 443, payload: [0x01]), s_server, CancellationToken.None);
+        // Establish the association first (R8 settles the new-flow setup in the background),
+        // then send a mid-flow frame on the same flow whose ethertype defeats the rewrite's
+        // parse stage: the association-reuse fast path fails closed synchronously (Blocked),
+        // and the executor must label it reason=redirect — never "not initialized".
+        var syn = MakeSynPacket(s_client, s_destination, 53000, 443);
+        await executor.ProxyAsync(syn, s_server, CancellationToken.None);
+        await coordinator.DrainPendingSetupsAsync();
+
+        var malformed = MakeSynPacket(s_client, s_destination, 53000, 443);
+        Assert.True(MemoryMarshal.TryGetArray(malformed.Lease.Frame, out var segment));
+        BinaryPrimitives.WriteUInt16BigEndian(segment.Array.AsSpan(segment.Offset + 12, 2), 0x0806);
+        await executor.ProxyAsync(malformed, s_server, CancellationToken.None);
 
         var warn = Assert.Single(logger.Lines, line => line.Level == RuntimeLogLevel.Warn && line.Message.Contains("reason=redirect", StringComparison.Ordinal));
         Assert.DoesNotContain("not initialized", warn.Message, StringComparison.Ordinal);
