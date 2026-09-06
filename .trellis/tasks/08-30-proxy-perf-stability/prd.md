@@ -31,6 +31,9 @@ happens in child tasks.
 | `08-30-windows-reality` | #9 Windows measurement program (executed on Win11 IoT LTSC VM per user decision): stability matrix, BDN subset, 1h soak, port-pool attribution | completed 2026-08-30 |
 | `08-30-batched-ioctls` | #7 batched reinjection IOCTLs (X3) — elevated by 08-30 VM data: Windows per-IO cost is the structural gap (batching amortizes it); Phase 2 UDP response micro-batch pending DNS-dense measurement per its PRD trigger | completed 2026-08-30 |
 | `08-30-driver-resilience` | #10 transient driver-error retry/backoff with single-pump degradation + TCP SYN setup off the pump thread (R7, R8) | completed 2026-08-30 |
+| `09-06-udp-burst-establishment` | burst-shape benchmark for the reported UDP establishment issue (dozens of new flows at one instant, DNS-wave): `udp.burstEstablishment` stability scenario + dial-delay knob + baseline matrix; findings gate follow-up fix children | completed 2026-09-06 (commit pending archive) |
+| `09-06-udp-burst-ttl-attribution` | burst follow-up #1 (small, targeted): re-age setup-queue datagrams from dial start so limiter queue-wait stops counting as client staleness; acceptance gate = burst matrix re-run (128×4000 probe 93.75 % loss → 0) | planning |
+| `09-06-local-mux-transport` | burst follow-up #2 (structural, research first): fixed connection pool + stream multiplexing to the local SOCKS5 server — collapses wave latency, removes the TTL interaction and port churn; go/no-go memo | planning |
 | later: zero-copy-datapath | #6 zero-copy proxy data path (X2) — deprioritized by 08-30 VM data: managed path is platform-equivalent, not the Windows bottleneck | on demand |
 | later: hardening-bundle | #8 keepalive + lock cleanup + ServerGC (R6, X7, X8, R11) | on demand |
 
@@ -41,9 +44,11 @@ New candidates from 08-30-windows-reality (see
   dynamic range / TcpTimedWaitDelay), loopback-aware upstream error-path RST close
   (symmetric to #2's client RST), harness-side port accounting. Attribution: 96.65 % →
   0.40 % failures on widened pool, pure OS capacity, not a product defect.
-- `local-mux-transport` (research first) — fixed connection pool + stream multiplexing
-  to the local SOCKS5 server (e.g. VLESS inbound + multiplex) eliminating port churn,
-  per-flow handshake cost, and loopback connects; sing-box has no UDS inbound.
+- `local-mux-transport` → now task `09-06-local-mux-transport` (research first) — fixed
+  connection pool + stream multiplexing to the local SOCKS5 server (e.g. VLESS inbound +
+  multiplex) eliminating port churn, per-flow handshake cost, and loopback connects;
+  sing-box has no UDS inbound. Elevated by the 09-06 burst findings (wave latency +
+  TTL loss both root in per-flow dialing).
 - `windows-real-nic` — real-NIC/ETW measurement past the ~4.7k pps loopback ceiling.
 - small: UdpSession real-transport populate[1000] NA on Windows.
 

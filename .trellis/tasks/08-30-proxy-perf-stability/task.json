@@ -25,7 +25,10 @@
     "08-30-udp-alloc-jumbo",
     "08-30-windows-reality",
     "08-30-batched-ioctls",
-    "08-30-driver-resilience"
+    "08-30-driver-resilience",
+    "09-06-udp-burst-establishment",
+    "09-06-udp-burst-ttl-attribution",
+    "09-06-local-mux-transport"
   ],
   "parent": null,
   "relatedFiles": [],

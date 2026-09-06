@@ -1,0 +1,5 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "UDP establishment path semantics: setup queue, 8MiB budget/5s TTL, tombstones, setup limiter"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "hot-path and benchmark perf conventions (allocation gates, comparability rules)"}
+{"file": ".trellis/tasks/archive/2026-08/08-30-proxy-perf-stability-research/research/udp-proxy-path.md", "reason": "annotated UDP proxy-path audit with file:line evidence incl. coordinator gate P4"}
+{"file": "benchmarks/results/2026-08-30-windows-vm/README.md", "reason": "Windows loopback ~4.7k pps ceiling and VM invocation learnings"}
