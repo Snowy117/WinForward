@@ -22,9 +22,11 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
     private const long SetupQueueGlobalByteBudget = 8 * 1024 * 1024;
 
     /// <summary>
-    /// How long a buffered setup datagram stays deliverable. A normal SOCKS5 setup completes in
-    /// well under a second; a datagram still queued after this window has already been
-    /// retransmitted or abandoned by the application, so the flush delivers only fresh state.
+    /// How long a buffered setup datagram stays deliverable, measured from its flow's dial
+    /// start (the re-stamp applied when the setup leaves the limiter queue). A normal SOCKS5
+    /// dial completes in well under a second; a datagram still queued after this window has
+    /// already been retransmitted or abandoned by the application, so the flush delivers only
+    /// fresh state.
     /// </summary>
     private static readonly TimeSpan SetupQueueDatagramTtl = TimeSpan.FromSeconds(5);
 
@@ -53,6 +55,7 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
     private long _pendingSetupBytes;
     private long _setupBudgetRejectionCount;
     private long _setupTtlExpiredCount;
+    private long _setupStampsRefreshedCount;
     private Task? _disposeTask;
     private bool _disposed;
 
@@ -116,6 +119,9 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
 
     /// <summary>The total buffered datagrams dropped at flush for exceeding the setup TTL; for tests and diagnostics.</summary>
     internal long SetupTtlExpiredCount => Interlocked.Read(ref _setupTtlExpiredCount);
+
+    /// <summary>The total queue entries re-stamped at setup dial start (limiter queue-wait does not age a datagram); for tests and diagnostics.</summary>
+    internal long SetupStampsRefreshedCount => Interlocked.Read(ref _setupStampsRefreshedCount);
 
     /// <summary>
     /// Hands a datagram to the flow's relay session without ever awaiting session setup network
@@ -372,6 +378,9 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
+            // Dial start: the datagram waited on the setup limiter, not on the network, so its
+            // queue is re-stamped before the dial and the TTL below measures dial age.
+            RefreshSetupStampsAtDialStart(flow, slot);
             transport = await _transportFactory.CreateAsync(server, cancellationToken).ConfigureAwait(false);
             var relayAlias = new RelayAlias(FlowKey.Create(
                 Endpoint.From(transport.LocalEndpoint.Address, checked((ushort)transport.LocalEndpoint.Port)),
@@ -413,14 +422,36 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
     }
 
     /// <summary>
+    /// Re-stamps the slot's queued datagrams at dial start: the setup just left the setup
+    /// limiter, and the queue-wait so far was admission delay on WinForward's side rather than
+    /// client-side staleness, so the flush TTL measures age from this boundary instead of from
+    /// the enqueue. A lost slot owner (teardown raced the limiter wait) skips the refresh; its
+    /// flush returns at the ownership check anyway.
+    /// </summary>
+    private void RefreshSetupStampsAtDialStart(FlowKey flow, UdpSessionSlot slot)
+    {
+        int refreshed;
+        lock (_gate)
+        {
+            refreshed = _sessions.TryGetValue(flow, out var current) && ReferenceEquals(current, slot)
+                ? slot.SetupQueue.RefreshEnqueuedStamps(_timeProvider.GetUtcNow())
+                : 0;
+        }
+
+        Interlocked.Add(ref _setupStampsRefreshedCount, refreshed);
+    }
+
+    /// <summary>
     /// Drains the flow's setup queue in FIFO order through the live session, then flips the slot
     /// to ready. The queue-empty check and the ready transition share one critical section, so a
     /// concurrent send either enqueued before this loop finished (and is drained here) or sees
     /// the ready slot and sends inline: no datagram can bypass the queue and then be followed by
     /// an older queued one. A send failure propagates to the setup task's failure observer.
-    /// Datagrams buffered longer than the setup TTL are dropped at this boundary: the flush is
-    /// the single point where age is observable against the dequeue time, and delivering them
-    /// would replay state the application has already retransmitted or abandoned.
+    /// Datagrams whose age exceeds the setup TTL are dropped at this boundary — the flush is the
+    /// single point where age is observable against the dequeue time, and delivering them would
+    /// replay state the application has already retransmitted or abandoned. Age runs from the
+    /// dial-start re-stamp (see <see cref="RefreshSetupStampsAtDialStart"/>): enqueue stamps
+    /// older than that reflect admission queue-wait, which is not client staleness.
     /// </summary>
     private async Task FlushSetupQueueAsync(FlowKey flow, UdpSessionSlot slot, UdpProxySession session, CancellationToken cancellationToken)
     {

@@ -14,7 +14,9 @@ namespace WinForward.Core.Tests;
 /// R1: the first datagram of a new UDP flow must never drag the capture pump through the SOCKS5
 /// setup. These tests pin the non-blocking setup contract: prompt dispatcher return during a
 /// long stall, FIFO delivery of buffered datagrams, drop-oldest overflow, the setup-failure
-/// cooldown tombstone, and the concurrent-setup cap.
+/// cooldown tombstone, and the concurrent-setup cap. The setup TTL's dial-start age basis —
+/// limiter queue-wait is admission delay, not client staleness — is pinned at both the queue
+/// level (bulk re-stamp) and the coordinator level (burst shape).
 /// </summary>
 public sealed class UdpSetupQueueTests
 {
@@ -343,7 +345,12 @@ public sealed class UdpSetupQueueTests
     public async Task FlushDropsSetupDatagramsOlderThanTheTtl()
     {
         // R4 TTL: a datagram still buffered after the setup window has long been retransmitted
-        // or abandoned at the application layer — the flush delivers only fresh state.
+        // or abandoned at the application layer — the flush delivers only fresh state. The
+        // window runs from the dial start (the re-stamp applied when the setup leaves the
+        // limiter), so the test pins the dial boundary first (CreateAsync entered) before
+        // stalling the fake clock: with the limiter free the re-stamp lands at the enqueue,
+        // the 6 s dial stall then ages the first datagram out while the second, queued after
+        // the stall, stays fresh.
         var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new DelayedTransportFactory(gate.Task);
@@ -351,6 +358,7 @@ public sealed class UdpSetupQueueTests
         var flow = CreateFlow("192.0.2.53");
 
         Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 1 }, CancellationToken.None));
+        await WaitForAsync(() => factory.CreateCalls == 1);
         time.Advance(TimeSpan.FromSeconds(6));
         Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 2 }, CancellationToken.None));
 
@@ -367,6 +375,75 @@ public sealed class UdpSetupQueueTests
         }
 
         Assert.Equal(1, coordinator.SetupTtlExpiredCount);
+        Assert.True(coordinator.SetupStampsRefreshedCount >= 1);
+        Assert.Equal(0, coordinator.PendingSetupBytesForDiagnostics);
+    }
+
+    [Fact]
+    public async Task LimiterQueueWaitDoesNotExpireTheTriggeringDatagram()
+    {
+        // TTL re-attribution at dial start: a datagram's staleness must not accrue while its
+        // flow's setup waits on the 8-wide setup limiter (2026-09-06 burst baseline: wave k's
+        // triggering datagram waited (k−1)×dial on the limiter and the enqueue-stamp TTL
+        // dropped it). Flow #9 queues 4 s behind the occupants, then its dial stalls another
+        // 2 s: 6 s total from enqueue — past the 5 s TTL under the enqueue-stamp semantics —
+        // but only the 2 s dial age survives the re-stamp, so the datagram is delivered and
+        // nothing expires. The occupants' own dials (4 s) stay under the TTL, so all nine
+        // datagrams deliver.
+        var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
+        var occupantGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        const int occupants = 8;
+        var factory = new StagedGateTransportFactory(occupantGate, occupants);
+        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), occupants + 8, time, null);
+        var flows = Enumerable.Range(0, occupants + 1).Select(index => CreateFlow($"192.0.2.{index + 1}")).ToArray();
+
+        for (var index = 0; index < occupants; index++)
+        {
+            Assert.True(await coordinator.TrySendAsync(flows[index], s_server, new[] { (byte)index }, CancellationToken.None));
+        }
+
+        // The occupants hold every limiter slot; flow #9's datagram is accepted (buffered)
+        // while its setup queues on the limiter.
+        await WaitForAsync(() => factory.CreateCalls == occupants);
+        Assert.True(await coordinator.TrySendAsync(flows[occupants], s_server, new[] { (byte)occupants }, CancellationToken.None));
+
+        // 4 s of limiter queue-wait for flow #9 (and 4 s of dial for the occupants, under the
+        // TTL). Releasing the occupants lets flow #9's dial start: its queue is re-stamped at
+        // that boundary, observable once its CreateAsync is entered.
+        time.Advance(TimeSpan.FromSeconds(4));
+        occupantGate.TrySetResult();
+        await factory.QueuedCreateStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // The occupants' datagrams flush before the clock moves again (their dial was 4 s).
+        await WaitForAsync(() => factory.Transports.Sum(transport =>
+        {
+            lock (transport.Sent) return transport.Sent.Count;
+        }) == occupants, timeoutMs: 10_000);
+
+        // Flow #9's dial stalls another 2 s: 6 s from enqueue, 2 s from the re-stamp.
+        time.Advance(TimeSpan.FromSeconds(2));
+        factory.QueuedGate.TrySetResult();
+
+        await WaitForAsync(() =>
+        {
+            return factory.Transports.Sum(transport =>
+            {
+                lock (transport.Sent) return transport.Sent.Count;
+            }) == occupants + 1;
+        }, timeoutMs: 10_000);
+
+        var forwarded = new HashSet<byte>();
+        foreach (var transport in factory.Transports)
+        {
+            lock (transport.Sent)
+            {
+                foreach (var sent in transport.Sent) forwarded.Add(Assert.Single(sent.Payload));
+            }
+        }
+
+        Assert.Equal(occupants + 1, forwarded.Count);
+        Assert.Equal(0, coordinator.SetupTtlExpiredCount);
+        Assert.True(coordinator.SetupStampsRefreshedCount >= 1);
         Assert.Equal(0, coordinator.PendingSetupBytesForDiagnostics);
     }
 
@@ -386,6 +463,62 @@ public sealed class UdpSetupQueueTests
         await Assert.ThrowsAsync<ObjectDisposedException>(async () =>
             await coordinator.TrySendAsync(flow, s_server, new byte[] { 2 }, CancellationToken.None));
         Assert.Empty(factory.Transports);
+    }
+
+    [Fact]
+    public void RefreshEnqueuedStampsReturnsZeroOnAnEmptyQueue()
+    {
+        var queue = new BoundedSetupQueue(4, 1024);
+        var refreshAt = new DateTimeOffset(2026, 9, 6, 0, 0, 0, TimeSpan.Zero);
+
+        Assert.Equal(0, queue.RefreshEnqueuedStamps(refreshAt));
+        Assert.Equal(0, queue.Count);
+        Assert.Equal(0, queue.Bytes);
+    }
+
+    [Fact]
+    public void RefreshEnqueuedStampsReStampsTheSinglePendingEntry()
+    {
+        var queue = new BoundedSetupQueue(4, 1024);
+        var enqueuedAt = new DateTimeOffset(2026, 9, 6, 0, 0, 0, TimeSpan.Zero);
+        var refreshAt = enqueuedAt + TimeSpan.FromSeconds(10);
+        Assert.True(queue.TryEnqueue(new byte[] { 1 }, enqueuedAt));
+
+        Assert.Equal(1, queue.RefreshEnqueuedStamps(refreshAt));
+
+        Assert.True(queue.TryDequeue(out var frame, out var stamp));
+        Assert.Equal(refreshAt, stamp);
+        Assert.Equal(new byte[] { 1 }, frame.ToArray());
+        Assert.Equal(0, queue.Count);
+        Assert.Equal(0, queue.Bytes);
+    }
+
+    [Fact]
+    public void RefreshEnqueuedStampsReStampsEveryEntryAndPreservesFifoOrder()
+    {
+        // Three entries cross the single-slot fast path into the Queue<>; the refresh must
+        // re-stamp all of them while preserving membership, FIFO order, and byte accounting.
+        var queue = new BoundedSetupQueue(8, 1024);
+        var baseStamp = new DateTimeOffset(2026, 9, 6, 0, 0, 0, TimeSpan.Zero);
+        for (var index = 0; index < 3; index++)
+        {
+            Assert.True(queue.TryEnqueue(new[] { (byte)index }, baseStamp + TimeSpan.FromSeconds(index)));
+        }
+
+        var refreshAt = baseStamp + TimeSpan.FromMinutes(1);
+        Assert.Equal(3, queue.RefreshEnqueuedStamps(refreshAt));
+        Assert.Equal(3, queue.Count);
+        Assert.Equal(3, queue.Bytes);
+
+        for (var index = 0; index < 3; index++)
+        {
+            Assert.True(queue.TryDequeue(out var frame, out var stamp));
+            Assert.Equal(refreshAt, stamp);
+            Assert.Equal((byte)index, Assert.Single(frame.ToArray()));
+        }
+
+        Assert.Equal(0, queue.Count);
+        Assert.Equal(0, queue.Bytes);
     }
 
     private static FlowKey CreateFlow(string remoteAddress) =>
@@ -417,6 +550,41 @@ public sealed class UdpSetupQueueTests
         {
             if (Interlocked.Increment(ref _entered) == gateWidth) GatesHeld.TrySetResult(true);
             await barrier.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            var transport = new FakeTransport(System.Net.Sockets.AddressFamily.InterNetwork, Interlocked.Increment(ref _nextLocalPort));
+            lock (Transports) Transports.Add(transport);
+            return transport;
+        }
+    }
+
+    /// <summary>
+    /// A factory whose first <paramref name="gateWidth"/> handshakes hold on a shared gate
+    /// (occupying every setup-limiter slot) while every later handshake first signals its
+    /// entry, then holds on a second gate — so a queued flow's dial start is observable
+    /// before its dial completes, and the two populations can be stalled for different
+    /// fake-clock durations.
+    /// </summary>
+    private sealed class StagedGateTransportFactory(TaskCompletionSource occupantGate, int gateWidth) : IUdpProxyTransportFactory
+    {
+        private int _nextLocalPort = 43000;
+        private int _entered;
+        public TaskCompletionSource<bool> QueuedCreateStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource QueuedGate { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public List<FakeTransport> Transports { get; } = [];
+
+        public int CreateCalls => Volatile.Read(ref _entered);
+
+        public async ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref _entered) <= gateWidth)
+            {
+                await occupantGate.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                QueuedCreateStarted.TrySetResult(true);
+                await QueuedGate.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+
             var transport = new FakeTransport(System.Net.Sockets.AddressFamily.InterNetwork, Interlocked.Increment(ref _nextLocalPort));
             lock (Transports) Transports.Add(transport);
             return transport;

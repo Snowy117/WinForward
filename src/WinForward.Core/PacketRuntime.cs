@@ -148,8 +148,10 @@ public sealed class PacketLease : IDisposable
 /// A per-flow FIFO buffer for datagrams accepted while the flow's session is setting up. Dual
 /// bounded in packets and bytes; the caller implements drop-oldest by dequeuing on overflow and
 /// retrying. Entries may carry an enqueue timestamp (R4 setup TTL); the timestamp-free overloads
-/// forward with a default stamp, which carries no age. Not thread-safe by design: each queue is
-/// owned by one flow's slot and every access is serialized by the owning coordinator's gate.
+/// forward with a default stamp, which carries no age, and the owner may re-stamp the queue in
+/// bulk when the age basis shifts (see <see cref="RefreshEnqueuedStamps"/>). Not thread-safe by
+/// design: each queue is owned by one flow's slot and every access is serialized by the owning
+/// coordinator's gate.
 /// </summary>
 public sealed class BoundedSetupQueue
 {
@@ -235,5 +237,36 @@ public sealed class BoundedSetupQueue
         enqueuedAt = entry.EnqueuedAt;
         _bytes -= entry.Frame.Length;
         return true;
+    }
+
+    /// <summary>
+    /// Re-stamps every buffered entry to <paramref name="enqueuedAt"/> and returns how many
+    /// entries were refreshed. Membership, FIFO order, and byte accounting are untouched: only
+    /// the ages observed by the flush TTL change. The setup path calls this when its flow's
+    /// setup leaves the setup limiter (dial start) — datagrams buffered so far waited on
+    /// admission, not on the client, so their staleness must not accrue from the enqueue.
+    /// </summary>
+    public int RefreshEnqueuedStamps(DateTimeOffset enqueuedAt)
+    {
+        var refreshed = 0;
+        if (_hasPending)
+        {
+            _pending = _pending with { EnqueuedAt = enqueuedAt };
+            refreshed++;
+        }
+
+        if (_items is { } items)
+        {
+            // Rotate the queue in place (bounded by the per-flow packet cap, cold path) so the
+            // FIFO order survives the re-stamp.
+            for (var index = 0; index < items.Count; index++)
+            {
+                var entry = items.Dequeue();
+                items.Enqueue(entry with { EnqueuedAt = enqueuedAt });
+                refreshed++;
+            }
+        }
+
+        return refreshed;
     }
 }

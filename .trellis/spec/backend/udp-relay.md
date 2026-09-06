@@ -168,17 +168,21 @@ delivered long-expired; `_setupTombstones` was unbounded between 60 s sweeps.
   filtering belongs to flush only; drop-oldest eviction credits regardless of
   age. Stamps come from the coordinator's `_timeProvider` (fake-time
   testable).
-- **TTL ages from enqueue — limiter queue-wait counts as staleness (measured
-  2026-09-06)**: setups serialize on the 8-wide `_setupLimiter`, so under a
-  burst of N new flows with effective dial latency D, wave k's triggering
-  datagram is k×D old at flush and is delivered only while k×D ≤ TTL
-  (first-datagram loss begins at N > 8 × floor(TTL/D); e.g. D=1 s → N > 40,
-  D=4 s → only wave 1 survives, 93.75 % loss at N=128 measured). Established
-  sessions are immune — the same matrix shows zero background loss and
-  sub-0.1 ms send p95 in every window. Any change that re-attributs the stamp
-  (e.g. aging from dial start) or widens the limiter must re-run the
-  `udp.burstEstablishment` matrix (`benchmarks/results/2026-09-06-udp-burst/`)
-  as its acceptance gate.
+- **TTL ages from dial start — limiter queue-wait is not staleness (fixed 2026-09-06,
+  measured pre-fix 2026-09-06)**: `CreateSessionAsync` re-stamps the slot's queued
+  datagrams (`BoundedSetupQueue.RefreshEnqueuedStamps`, under the coordinator gate with
+  the flush-style slot-ownership check) right after the setup leaves the 8-wide
+  `_setupLimiter`, so the 5 s TTL at flush measures dial age. Pre-fix, wave k's
+  triggering datagram under a burst of N flows with dial latency D was k×D old at flush
+  (first-datagram loss began at N > 8 × floor(TTL/D); 93.75 % at 128 × 4 s); post-fix
+  the same probe delivers 128/128 with timeToLast ≈ ceil(N/8)×D (acceptance matrix
+  `benchmarks/results/2026-09-06-udp-burst-ttl-fix/`). Consequences: total retention is
+  bounded by dial start + TTL (the 32-pkt/32-KiB slot bounds and the 8 MiB global
+  budget cap the limiter-wait component); `SetupStampsRefreshedCount` is the diagnostic.
+  Established sessions are immune either way — the same matrices show zero background
+  loss and sub-0.1 ms send p95 in every window. Any change that re-attributs the stamp
+  again or widens the limiter must re-run the `udp.burstEstablishment` matrix as its
+  acceptance gate.
 - **Budget exhaustion rejects the new datagram** (rollback the charge, count
   it, take the existing drop-counter path) — no failure tombstone, no
   teardown; the flow retries on its next datagram.
