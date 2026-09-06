@@ -3,7 +3,7 @@
   "name": "udp-burst-ttl-attribution",
   "title": "UDP burst first-datagram TTL re-attribution",
   "description": "Re-age setup-queue datagrams from dial start so limiter queue-wait stops counting as client staleness; acceptance gate = udp.burstEstablishment matrix",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

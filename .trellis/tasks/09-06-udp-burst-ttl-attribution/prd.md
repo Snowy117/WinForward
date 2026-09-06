@@ -46,7 +46,8 @@ client-stale; it merely waited on our own admission queue.
 
 ## Acceptance Criteria
 
-- [ ] R3 matrix re-run recorded under `benchmarks/results/` with before/after probe
-      comparison (93.75 % → target 0 %).
-- [ ] Spec contract bullet updated with post-fix semantics.
-- [ ] Unit tests per R4; existing suite green.
+- [x] R3 matrix re-run recorded under `benchmarks/results/` with before/after probe
+      comparison (93.75 % → target 0 %). — `2026-09-06-udp-burst-ttl-fix/`:
+      probe 8/128 → 128/128, loss 0.9375 → 0; spot points within noise.
+- [x] Spec contract bullet updated with post-fix semantics.
+- [x] Unit tests per R4; existing suite green (505/505; mutation-verified).

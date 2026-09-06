@@ -1,1 +1,4 @@
 {"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "Setup-path contracts: budget charge/credit exactly-once, TTL at flush, tombstone bounds — the seams this task touches"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "gate discipline and counter/diagnostic conventions"}
+{"file": "benchmarks/results/2026-09-06-udp-burst/README.md", "reason": "pre-fix baseline the acceptance matrix compares against"}
