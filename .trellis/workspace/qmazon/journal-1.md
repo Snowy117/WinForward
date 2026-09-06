@@ -449,3 +449,24 @@ Landed backlog #10 (R7+R8) as child 08-30-driver-resilience. R7: NdisNativeCallS
 ### Status
 
 [OK] **Completed**
+
+
+## Session 17: Tolerate TFO SYN-with-payload in TCP redirect
+
+**Date**: 2026-09-06
+**Task**: Tolerate TFO SYN-with-payload in TCP redirect
+**Branch**: `master`
+
+### Summary
+
+TFO data-bearing SYNs were fail-closed as Blocked and silently consumed, blackholing TFO clients (ETIMEDOUT). Now they ride the bare-SYN pipeline: forward-leg rewrite is RFC 1624 incremental over addresses/ports only, sequence tracking already counts SYN data, and the non-TFO listener relies on RFC 7413 graceful degradation. TcpSynKind/ClassifyTcpSyn collapsed into boolean predicate IsTcpSyn (user review); executor logging test retriggered via genuine sync reuse-path rewrite failure; spec contract recorded in tcp-local-redirect.md. 501/501 tests green, build 0 warnings.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d06f002` | (see git log) |
+
+### Status
+
+[OK] **Completed**
