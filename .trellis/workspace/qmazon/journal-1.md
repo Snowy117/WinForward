@@ -492,3 +492,25 @@ Built the udp.burstEstablishment stability scenario (burst N new UDP flows at on
 ### Status
 
 [OK] **Completed**
+
+
+## Session 19: UDP burst TTL re-attribution fix
+
+**Date**: 2026-09-06
+**Task**: UDP burst TTL re-attribution fix
+**Branch**: `master`
+
+### Summary
+
+Landed the burst follow-up fix: BoundedSetupQueue.RefreshEnqueuedStamps + UdpProxyCoordinator.RefreshSetupStampsAtDialStart re-stamp a slot's queued datagrams when its setup leaves the 8-wide limiter (dial start), so the 5s setup TTL measures dial age instead of enqueue age. Acceptance matrix: 128x4s probe 8/128 -> 128/128 first responses, loss 93.75% -> 0, timeToLast 64037ms matching the 16-wave model; spot points within noise; background windows zero loss. Mutation-verified unit coverage (LimiterQueueWaitDoesNotExpireTheTriggeringDatagram). Spec contract in udp-relay.md updated to post-fix semantics with matrix re-run gate.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `76abc37` | (see git log) |
+| `dd3985b` | (see git log) |
+
+### Status
+
+[OK] **Completed**

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 18
+- **Total Sessions**: 19
 - **Last Active**: 2026-09-06
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~494 | Active |
+| `journal-1.md` | ~516 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 19 | 2026-09-06 | UDP burst TTL re-attribution fix | `76abc37`, `dd3985b` | `master` |
 | 18 | 2026-09-06 | UDP burst-establishment benchmark + baseline matrix | `4a4d6a6`, `4b00d0b` | `master` |
 | 17 | 2026-09-06 | Tolerate TFO SYN-with-payload in TCP redirect | `d06f002` | `master` |
 | 16 | 2026-08-30 | Driver resilience: transient-read retry + single-pump degradation, off-pump TCP SYN setup (backlog #10) | `461df0d` | `master` |
