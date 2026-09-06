@@ -10,6 +10,7 @@ internal enum SoakScenario
     TcpThroughput,
     Footprint,
     Baseline,
+    Burst,
 }
 
 internal enum TcpRelayMode
@@ -98,6 +99,8 @@ internal sealed record SoakOptions
     public int Seed { get; init; } = 42;
     public string? OutputPath { get; init; }
     public bool Quick { get; init; }
+    public int BurstFlows { get; init; } = 48;
+    public int DialDelayMs { get; init; }
 
     public static SoakOptions Parse(string[] args)
     {
@@ -142,6 +145,12 @@ internal sealed record SoakOptions
                 case "--output":
                     options = options with { OutputPath = Value(args, ref index) };
                     break;
+                case "--burst-flows":
+                    options = options with { BurstFlows = PositiveInt("--burst-flows", Value(args, ref index)) };
+                    break;
+                case "--dial-delay-ms":
+                    options = options with { DialDelayMs = AtLeast("--dial-delay-ms", Value(args, ref index), 0) };
+                    break;
                 default:
                     throw new ArgumentException($"Unknown stability argument '{args[index]}'.", nameof(args));
             }
@@ -174,7 +183,8 @@ internal sealed record SoakOptions
         "tcpthroughput" => SoakScenario.TcpThroughput,
         "footprint" => SoakScenario.Footprint,
         "baseline" => SoakScenario.Baseline,
-        _ => throw new ArgumentException($"Unknown scenario '{raw}'; expected all, udp, tcp, tcpthroughput, footprint, or baseline.", nameof(raw)),
+        "udpburst" => SoakScenario.Burst,
+        _ => throw new ArgumentException($"Unknown scenario '{raw}'; expected all, udp, udpburst, tcp, tcpthroughput, footprint, or baseline.", nameof(raw)),
     };
 
     private static TcpRelayMode ParseTcpRelayMode(string raw) => raw.ToLowerInvariant() switch

@@ -73,8 +73,9 @@ Count-based reliability metrics under sustained load. One JSONL record per scena
 
 ```text
 dotnet run -c Release --project benchmarks/WinForward.Benchmarks -- \
-  --stability [--scenario all|udp|tcp|footprint|baseline] [--duration 60] [--pps 25000] \
-  [--payload-bytes 512] [--flows 256] [--tcp-concurrency 64] [--tcp-transfer-bytes 1048576] \
+  --stability [--scenario all|udp|udpBurst|tcp|tcpthroughput|footprint|baseline] [--duration 60] [--pps 25000] \
+  [--payload-bytes 512] [--flows 256] [--burst-flows 48] [--dial-delay-ms 0] \
+  [--tcp-concurrency 64] [--tcp-transfer-bytes 1048576] \
   [--abort-mix clean=25,clientRst=25,relayCancel=25,upstreamTruncate=25] [--seed 42] \
   [--output <path>] [--quick]
 ```
@@ -115,6 +116,20 @@ teardown tails — are **not comparable** with current rows either.
   same steady-state shape. Its `achievedPps` is the environment baseline (B_linux / B_windows)
   that acceptance comparisons compute product overhead from; `responsesInjected` counts the
   in-window datagrams that made it back to the client sockets.
+- **`udp.burstEstablishment`** — the flow-establishment burst shape (DNS-wave startup):
+  `--burst-flows` new flows fire their first datagrams back-to-back while `--flows`
+  pre-established background flows keep pacing through control / burst / post windows. Reports
+  per-flow first-response latency distribution (`firstResponseMs` min/p50/p95/p99/max/mean,
+  `timeToFirstMs` / `timeToLastMs`), admission (`burstAccepted` / `burstRejected` /
+  `establishmentLossRate`), harness cost (`timeToIssueMs`), and per-window background metrics
+  (`sent`, `injected`, `lossRate`, `sendP95Ms`, `sendMaxMs`, `achievedPps`) so burst-window
+  degradation against the control window is a within-row comparison. `--dial-delay-ms`
+  delays the harness SOCKS5 server's UDP-ASSOCIATE reply to model a remote dial — on loopback
+  the sub-millisecond dial hides the 8-wide setup limiter's queuing, so nonzero delays are how
+  the serialization wave (`ceil(N/8) × delay`) becomes visible. Recommended invocation
+  `--flows 16 --pps 4000` (stays under the Windows ~4.7k pps loopback ceiling);
+  `--duration`/`--quick` do not apply — the scenario has fixed window lengths. Series started
+  2026-09-06; baseline matrix under `results/2026-09-06-udp-burst/`.
 - **`tcp.unexpectedEof`** — concurrent one-way transfers through `TcpProxyRelay` with an
   adversarial event fired mid-stream per transfer (weighted mix: clean / client RST / relay
   cancellation / upstream truncation at a random 20–80 % of the transfer). Receiver-side

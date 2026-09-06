@@ -20,6 +20,7 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
     private const int MaximumControlConnections = 4096;
 
     private readonly IPEndPoint _echoDestination;
+    private readonly TimeSpan _associateDelay;
     private readonly TcpListener _controlListener;
     private readonly ConcurrentDictionary<RelayConnection, byte> _connections = new();
     private readonly CancellationTokenSource _shutdown = new();
@@ -32,9 +33,10 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
     private int _connectionCount;
     private int _disposed;
 
-    public LoopbackSocks5UdpServer(IPEndPoint echoDestination)
+    public LoopbackSocks5UdpServer(IPEndPoint echoDestination, TimeSpan associateDelay = default)
     {
         _echoDestination = echoDestination;
+        _associateDelay = associateDelay;
         _controlListener = new TcpListener(IPAddress.Loopback, 0);
         _controlListener.Start(1024);
         ControlEndpoint = (IPEndPoint)_controlListener.LocalEndpoint!;
@@ -197,14 +199,7 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
             await stream.ReadExactlyAsync(remainder, _shutdown).ConfigureAwait(false);
             if (request[1] == (byte)Socks5Command.UdpAssociate)
             {
-                var reply = new byte[10];
-                reply[0] = 5;
-                reply[1] = 0;
-                reply[2] = 0;
-                reply[3] = 1;
-                _ = IPAddress.Loopback.TryWriteBytes(reply.AsSpan(4, 4), out _);
-                BinaryPrimitives.WriteUInt16BigEndian(reply.AsSpan(8, 2), checked((ushort)RelayEndpoint.Port));
-                await stream.WriteAsync(reply, _shutdown).ConfigureAwait(false);
+                await SendAssociateReplyAsync(stream).ConfigureAwait(false);
             }
             else
             {
@@ -216,6 +211,27 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
             {
                 if (await stream.ReadAsync(scratch, _shutdown).ConfigureAwait(false) == 0) return;
             }
+        }
+
+        /// <summary>
+        /// Sends the UDP ASSOCIATE success reply advertising this connection's relay socket,
+        /// honoring the server's configured artificial dial delay (zero by default).
+        /// </summary>
+        private async Task SendAssociateReplyAsync(NetworkStream stream)
+        {
+            if (_owner._associateDelay > TimeSpan.Zero)
+            {
+                await Task.Delay(_owner._associateDelay, _shutdown).ConfigureAwait(false);
+            }
+
+            var reply = new byte[10];
+            reply[0] = 5;
+            reply[1] = 0;
+            reply[2] = 0;
+            reply[3] = 1;
+            _ = IPAddress.Loopback.TryWriteBytes(reply.AsSpan(4, 4), out _);
+            BinaryPrimitives.WriteUInt16BigEndian(reply.AsSpan(8, 2), checked((ushort)RelayEndpoint.Port));
+            await stream.WriteAsync(reply, _shutdown).ConfigureAwait(false);
         }
 
         private async Task RelayLoopAsync()
