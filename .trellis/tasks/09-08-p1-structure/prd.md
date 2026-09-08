@@ -69,16 +69,22 @@ Collapse into an options record/struct (`NdisCapture.cs:63`); pure mechanical, b
 
 ## Acceptance criteria
 
-- [ ] All touched files ≤400 effective lines; no new file violates file=main-type.
-- [ ] `dotnet test` totals identical before/after each batch (recorded); zero-warning build.
-- [ ] UdpProxyCoordinator concerns (admission/budget/dial/cooldown/logging) live in separately
+- [x] All touched files ≤400 effective lines; no new file violates file=main-type.
+- [x] `dotnet test` totals identical before/after each batch (recorded); zero-warning build.
+- [x] UdpProxyCoordinator concerns (admission/budget/dial/cooldown/logging) live in separately
       named types; no public-behavior change (public surface may shrink, never grow).
-- [ ] UdpBurstScenario + UdpLossScenario share StabilityShared with zero private duplicates.
-- [ ] Cross-group using audit (research 03 §5 method) passes against the updated sanctioned set.
-- [ ] Spec docs updated as listed above.
+- [x] UdpBurstScenario + UdpLossScenario share StabilityShared with zero private duplicates.
+- [x] Cross-group using audit (research 03 §5 method) passes against the updated sanctioned set.
+- [x] Spec docs updated as listed above.
 
 ## Notes
 
 - Complex task: `design.md` (R1 lock/gate migration map + R4 decision) and `implement.md`
   (batch-by-batch checklist with rollback points) required before `task.py start`.
 - Execute after `09-08-p2-hygiene` (dead-surface deletion shrinks what moves).
+
+## Completion evidence (2026-09-08)
+
+- Commits b15358a/61171f9/734f326/6ea13b0/2ff9fe1 + PruneExpired leaf-lock fix (check finding) on branch p1-structure; trellis-check PASS (independent re-run: build 0 warnings, 578/578, benchmarks 0 warnings).
+- B4 audit: charge 1×TryCharge / credit 5 sinks one call site each; coordinator gate sole slot-state gate (delegates only); UdpSetupCooldownTable leaf lock, no call-outs; budget Interlocked-only; public API unchanged; rg tombstone in UdpProxy/ = 0.
+- Effective lines: coordinator 329; FlowTable 110 / BoundedSetupQueue 92 / StabilityShared 72 / UdpBurstInstrumentation 182 / UdpBurstScenario 196 — all ≤400.

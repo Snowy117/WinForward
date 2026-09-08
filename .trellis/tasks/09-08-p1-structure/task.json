@@ -3,7 +3,7 @@
   "name": "p1-structure",
   "title": "P1: behavior-zero structural refactors",
   "description": "UdpProxyCoordinator split, UdpBurstScenario split + StabilityShared, Domain.cs/PacketRuntime re-homing, UdpProxy->Socks5 edge normalization, tombstone renaming",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
