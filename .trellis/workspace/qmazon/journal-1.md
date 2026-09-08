@@ -514,3 +514,24 @@ Landed the burst follow-up fix: BoundedSetupQueue.RefreshEnqueuedStamps + UdpPro
 ### Status
 
 [OK] **Completed**
+
+
+## Session 20: Fix adapter.degraded nativeError=87 storm via in-process layered refresh
+
+**Date**: 2026-09-08
+**Task**: Fix adapter.degraded nativeError=87 storm via in-process layered refresh
+**Branch**: `master`
+
+### Summary
+
+Diagnosed production adapter.degraded nativeError=87: ndisrd rebuilds its bound-adapter list on NIC changes, invalidating all enumeration handles. Implemented layered capture refresh (task 09-07-adapter-list-refresh): SetAdapterListChangeEvent watcher + durable/generation split (coordinators survive, pumps/modes/UDP targets rebuild), non-fatal scope re-resolution, 87-as-refresh-signal. 555/555 tests, trellis-check 5-dim pass, hardware smoke on Win11 dev host via WinRM (87 -> refresh in 77ms, cage-crossing connections survived, R-2 auto-reset verified). Spec contract added to windows-ndisapi.md.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `398376e` | (see git log) |
+
+### Status
+
+[OK] **Completed**
