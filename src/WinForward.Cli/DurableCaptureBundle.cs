@@ -30,7 +30,13 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
     private readonly Lock _gate = new();
     private Task? _disposeTask;
 
-    private DurableCaptureBundle(
+    /// <summary>
+    /// Direct fabrication over already-built collaborators; the production path is
+    /// <see cref="CreateAsync"/>. Internal (not private) so tests can exercise
+    /// <see cref="UpdateUdpTargets"/> against fake coordinators without the driver-backed
+    /// composition.
+    /// </summary>
+    internal DurableCaptureBundle(
         FlowDispatcher dispatcher,
         NdisPacketActionExecutor executor,
         UdpAdapterTargetSource udpTargets,

@@ -202,7 +202,7 @@ internal static class Program
                 // runtime. The closure dereferences the runner only while a generation runs, after
                 // the reference below is assigned.
                 LayeredCaptureRunner? runnerRef = null;
-                var lastRetryLogTicks = 0L;
+                var retryLogGate = new AdapterTransientRetryLogGate(logger);
                 using var watcher = new NdisAdapterListWatcher(driver);
                 var runner = new LayeredCaptureRunner(
                     new NdisAdapterEnumerationProvider(driver),
@@ -215,7 +215,7 @@ internal static class Program
                             runnerRef!.SignalDegraded(adapter, nativeError);
                             return ValueTask.CompletedTask;
                         },
-                        onAdapterTransientRetry: (adapter, nativeError, attempt) => LogAdapterTransientRetry(ref lastRetryLogTicks, adapter, nativeError, attempt, logger)),
+                        onAdapterTransientRetry: (adapter, nativeError, attempt) => retryLogGate.Log(adapter.StableId, adapter.FriendlyName, nativeError, attempt)),
                     watcher,
                     configuration.Policy,
                     logger,
@@ -271,25 +271,6 @@ internal static class Program
         {
             Console.CancelKeyPress -= OnCancel;
         }
-    }
-
-    /// <summary>
-    /// Rate-limited (5 s) warn for transient read retries (R7). Per-retry invocation is naturally
-    /// bounded by the retry budget; this window keeps a persistently flapping adapter from
-    /// flooding the console.
-    /// </summary>
-    [SupportedOSPlatform("windows")]
-    private static void LogAdapterTransientRetry(ref long lastLogTicks, WindowsAdapter adapter, int nativeError, int attempt, IRuntimeLogger logger)
-    {
-        var now = DateTime.UtcNow.Ticks;
-        var last = Interlocked.Read(ref lastLogTicks);
-        if (now - last < TimeSpan.FromSeconds(5).Ticks) return;
-        if (Interlocked.CompareExchange(ref lastLogTicks, now, last) != last) return;
-        logger.Event(RuntimeLogLevel.Warn, "adapter.retry",
-            new RuntimeLogField("adapter", adapter.StableId),
-            new RuntimeLogField("name", adapter.FriendlyName),
-            new RuntimeLogField("nativeError", nativeError),
-            new RuntimeLogField("attempt", attempt));
     }
 
     [SupportedOSPlatform("windows")]
