@@ -63,6 +63,9 @@ public readonly struct IPAddressValue : IEquatable<IPAddressValue>
     /// configuration, tests, and other cold edges. Hot paths construct from wire bytes instead.</summary>
     public static implicit operator IPAddressValue(IPAddress address) => From(address);
 
+    /// <summary>The IPv4 any-address (0.0.0.0) as a precomputed constant for hot paths that must not touch the <see cref="IPAddress"/> class.</summary>
+    public static readonly IPAddressValue IPv4Any = new(0, AddressFamilyKind.IPv4);
+
     public bool IsIPv4Any => Family == AddressFamilyKind.IPv4 && Bits == 0;
     public bool IsIPv6Any => Family == AddressFamilyKind.IPv6 && Bits == 0 && ScopeId == 0;
 

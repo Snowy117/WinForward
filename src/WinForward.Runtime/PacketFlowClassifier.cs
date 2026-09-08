@@ -1,4 +1,3 @@
-using System.Net;
 using WinForward.Core;
 using WinForward.Protocols;
 using WinForward.Windows;
@@ -37,7 +36,7 @@ public static class PacketFlowClassifier
     {
         var adapterContext = new AdapterContext(adapter.StableId, adapter.FriendlyName, adapter.Generation);
         var origin = isOnSend ? FlowOriginKind.Host : FlowOriginKind.Forwarded;
-        var key = FlowKey.Create(Endpoint.From(IPAddress.Any, 0), Endpoint.From(IPAddress.Any, 0), TransportProtocol.Udp, origin, adapterContext);
+        var key = FlowKey.Create(Endpoint.From(IPAddressValue.IPv4Any, 0), Endpoint.From(IPAddressValue.IPv4Any, 0), TransportProtocol.Udp, origin, adapterContext);
         return new FlowContext(key, null, null, adapter.StableId, adapter.FriendlyName, 0);
     }
 }
