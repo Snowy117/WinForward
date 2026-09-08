@@ -88,3 +88,7 @@ Lightweight task: PRD-only, executed as ordered mechanical batches.
 
 - Execute before `09-08-p1-structure` (shrinks the surface P1 moves). Independent of P0.
 - If R6's LogLevel piece turns out non-mechanical, defer only that piece with a note here.
+- **R6 LogLevel deferral (2026-09-08, R5–R8 pass)**: the `JsonElement` → `string?` unification is
+  deferred — a `string?` property cannot distinguish `"logLevel": null` (a pinned validation
+  error) from an absent field (defaults to Info) without custom-converter machinery. See
+  `implement-notes.md` for details.

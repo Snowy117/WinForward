@@ -8,7 +8,11 @@ namespace WinForward.NdisApi;
 /// public constructor are privately owned: <see cref="Dispose"/> frees the native memory. Buffers
 /// rented from <see cref="NdisPacketBufferPool"/> keep pool ownership: <see cref="Dispose"/>
 /// returns them to the pool instead of freeing, so <c>using</c>-style callers need no changes
-/// when switching from per-injection allocation to pooling.
+/// when switching from per-injection allocation to pooling. A pooled buffer's Dispose contract is
+/// rental-window-scoped: disposing again while the buffer sits idle in the pool is a no-op, but
+/// once the pool has re-rented the buffer a stale Dispose flips it back to idle and returns it
+/// under the current renter — a rental-contract violation whose effects are confined to that
+/// renter (the pool itself never double-frees). Renters must Dispose exactly once per rental.
 /// </summary>
 public sealed unsafe class NdisPacketBuffer : IFrameSource, IDisposable
 {
@@ -140,8 +144,10 @@ public sealed unsafe class NdisPacketBuffer : IFrameSource, IDisposable
     {
         if (_ownerPool is { } pool)
         {
-            // A pooled buffer's Dispose returns it to its pool exactly once; a repeat Dispose of an
-            // already-returned buffer is a no-op because the pool owns it now.
+            // A pooled buffer's Dispose returns it to its pool exactly once per rental window:
+            // while the buffer sits idle (already returned) the CAS fails and the repeat Dispose
+            // is a no-op; after a re-rental a stale Dispose succeeds under the current renter
+            // (see the class doc's rental-window contract).
             if (Interlocked.CompareExchange(ref _pooledState, StateIdle, StateRented) == StateRented) pool.OnReturned(this);
             return;
         }

@@ -3,7 +3,7 @@
   "name": "p2-hygiene",
   "title": "P2: dead-surface deletion and hygiene",
   "description": "FlowTable dead members, dead interface, TestHelpers convergence, indexed config diagnostics, Cli test coverage",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
