@@ -349,10 +349,11 @@ public static class ConfigurationLoader
     {
         if (values is null) return null;
         var result = new List<IPPrefix>();
-        foreach (var value in values)
+        for (var index = 0; index < values.Length; index++)
         {
+            var value = values[index];
             if (string.IsNullOrWhiteSpace(value)) continue;
-            if (!IPPrefix.TryParse(value, out var prefix)) errors.Add(new(path, $"Invalid CIDR '{value}'.")); else result.Add(prefix);
+            if (!IPPrefix.TryParse(value, out var prefix)) errors.Add(new($"{path}[{index}]", $"Invalid CIDR '{value}'.")); else result.Add(prefix);
         }
         return result;
     }
@@ -361,11 +362,12 @@ public static class ConfigurationLoader
     {
         if (values is null) return null;
         var result = new HashSet<T>();
-        foreach (var value in values)
+        for (var index = 0; index < values.Length; index++)
         {
+            var value = values[index];
             if (string.IsNullOrWhiteSpace(value)) continue;
             var parsed = parser(value);
-            if (parsed is null) errors.Add(new(path, $"Unsupported value '{value}'.")); else result.Add(parsed.Value);
+            if (parsed is null) errors.Add(new($"{path}[{index}]", $"Unsupported value '{value}'.")); else result.Add(parsed.Value);
         }
         return result;
     }
@@ -374,20 +376,21 @@ public static class ConfigurationLoader
     {
         if (values is null) return null;
         var result = new List<(ushort Start, ushort End)>();
-        foreach (var value in values)
+        for (var index = 0; index < values.Length; index++)
         {
+            var value = values[index];
             if (string.IsNullOrWhiteSpace(value)) continue;
             var parts = value.Split('-', StringSplitOptions.TrimEntries);
             if (parts.Length is < 1 or > 2 || !ushort.TryParse(parts[0], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var start) || start == 0)
             {
-                errors.Add(new(path, $"Invalid port or range '{value}'."));
+                errors.Add(new($"{path}[{index}]", $"Invalid port or range '{value}'."));
                 continue;
             }
 
             var end = start;
             if (parts.Length == 2 && (!ushort.TryParse(parts[1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out end) || end == 0 || end < start))
             {
-                errors.Add(new(path, $"Invalid port or range '{value}'."));
+                errors.Add(new($"{path}[{index}]", $"Invalid port or range '{value}'."));
                 continue;
             }
 

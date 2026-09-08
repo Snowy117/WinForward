@@ -365,6 +365,70 @@ public sealed class ConfigurationValidationTests
         Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, $"{section}[0]", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// Shared helper for the invalid-element tests: the diagnostic must land on the failing
+    /// element's indexed field path (matching the null-element behavior) with the offending value
+    /// named in the message.
+    /// </summary>
+    private static ConfigDiagnostic SingleInvalidElement(string json, string expectedPath)
+    {
+        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
+        Assert.NotNull(dto);
+        Assert.False(ConfigurationLoader.TryValidate(dto!, out _, out var diagnostics));
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(expectedPath, diagnostic.Path);
+        return diagnostic;
+    }
+
+    [Fact]
+    public void ConfigurationIndexesInvalidCidrElements()
+    {
+        const string json = """
+        {
+          "socks5Servers": [],
+          "rules": [{ "remoteCidr": ["192.0.2.0/24", "not-a-cidr"], "action": "pass" }],
+          "fallbackAction": "pass"
+        }
+        """;
+
+        var diagnostic = SingleInvalidElement(json, "rules[0].remoteCidr[1]");
+        Assert.Equal("Invalid CIDR 'not-a-cidr'.", diagnostic.Message);
+    }
+
+    [Fact]
+    public void ConfigurationIndexesUnsupportedSetElements()
+    {
+        const string json = """
+        {
+          "socks5Servers": [],
+          "rules": [{ "protocol": ["tcp", "sctp"], "action": "pass" }],
+          "fallbackAction": "pass"
+        }
+        """;
+
+        var diagnostic = SingleInvalidElement(json, "rules[0].protocol[1]");
+        Assert.Equal("Unsupported value 'sctp'.", diagnostic.Message);
+    }
+
+    [Fact]
+    public void ConfigurationIndexesEachInvalidPortElementIndependently()
+    {
+        const string json = """
+        {
+          "socks5Servers": [],
+          "rules": [{ "remotePort": ["0", "443", "500-100"], "action": "pass" }],
+          "fallbackAction": "pass"
+        }
+        """;
+
+        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
+        Assert.NotNull(dto);
+        Assert.False(ConfigurationLoader.TryValidate(dto!, out _, out var diagnostics));
+        Assert.Equal(2, diagnostics.Count);
+        Assert.Equal(new ConfigDiagnostic("rules[0].remotePort[0]", "Invalid port or range '0'."), diagnostics[0]);
+        Assert.Equal(new ConfigDiagnostic("rules[0].remotePort[2]", "Invalid port or range '500-100'."), diagnostics[1]);
+    }
+
     [Fact]
     public void ConfigurationNormalizesAndMergesRemotePortRanges()
     {
