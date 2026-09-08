@@ -11,9 +11,15 @@ namespace WinForward.Core.Tests;
 /// self-traffic guard, a counting process attributor, counting and throwing action executors,
 /// and throwing TCP redirect collaborators that prove a proxy path never allocates.
 /// </summary>
+/// <summary>
+/// A self-traffic guard that reports nothing owned by default; flip <see cref="Owned"/> to script
+/// the dispatcher's self-traffic early-pass path.
+/// </summary>
 internal sealed class FakeGuard : ISelfTrafficGuard
 {
-    public bool IsOwned(FlowContext context) => false;
+    public bool Owned { get; init; }
+
+    public bool IsOwned(FlowContext context) => Owned;
 }
 
 internal sealed class FakeAttributor : IProcessAttributor

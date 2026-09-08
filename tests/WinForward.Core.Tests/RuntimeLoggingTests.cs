@@ -100,7 +100,7 @@ public sealed class RuntimeLoggingTests
             new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Pass),
             RuntimeLogLevel.Trace);
-        var dispatcher = new FlowDispatcher(configuration, new NoSelfTraffic(), executor, logger: logger);
+        var dispatcher = new FlowDispatcher(configuration, new FakeGuard(), executor, logger: logger);
         var key = FlowKey.Create(
             Endpoint.From(IPAddress.Parse("192.0.2.10"), 50000),
             Endpoint.From(IPAddress.Parse("198.51.100.20"), 443),
@@ -130,18 +130,13 @@ public sealed class RuntimeLoggingTests
             new PolicySnapshot([], FlowAction.Pass),
             RuntimeLogLevel.Debug,
             IncludeProcessPathInLogs: true);
-        var dispatcher = new FlowDispatcher(configuration, new NoSelfTraffic(), new RecordingExecutor(), logger: logger);
+        var dispatcher = new FlowDispatcher(configuration, new FakeGuard(), new RecordingExecutor(), logger: logger);
         var key = FlowKey.Create(Endpoint.From(IPAddress.Loopback, 50000), Endpoint.From(IPAddress.Parse("198.51.100.20"), 443), TransportProtocol.Tcp, FlowOriginKind.Host);
         var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), new FlowContext(key, "browser.exe", "C:\\Apps\\browser.exe", null, null, 443));
 
         await dispatcher.DispatchAsync(packet, CancellationToken.None);
 
         Assert.Contains("processPath=C:\\Apps\\browser.exe", writer.ToString(), StringComparison.Ordinal);
-    }
-
-    private sealed class NoSelfTraffic : ISelfTrafficGuard
-    {
-        public bool IsOwned(FlowContext context) => false;
     }
 
     private sealed class RecordingExecutor : IPacketActionExecutor

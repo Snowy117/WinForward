@@ -14,18 +14,20 @@ public sealed class NdisCapturePumpTests
         var handles = new List<nint>();
         using var cts = new CancellationTokenSource();
         var reader = new ScriptedReader(
-            slots =>
-            {
-                Fill(slots[0], 0x10);
-                Fill(slots[1], 0x11);
-                Fill(slots[2], 0x12);
-                return 3;
-            },
-            _ =>
-            {
-                cts.Cancel();
-                return 0;
-            });
+            [
+                slots =>
+                {
+                    Fill(slots[0], 0x10);
+                    Fill(slots[1], 0x11);
+                    Fill(slots[2], 0x12);
+                    return 3;
+                },
+                _ =>
+                {
+                    cts.Cancel();
+                    return 0;
+                },
+            ]);
 
         await using var pump = new NdisCapturePump(reader, (nint)0x55, CaptureHandler(observed, handles), TimeSpan.FromMilliseconds(1));
 
@@ -43,18 +45,20 @@ public sealed class NdisCapturePumpTests
         var handles = new List<nint>();
         using var cts = new CancellationTokenSource();
         var reader = new ScriptedReader(
-            slots =>
-            {
-                Fill(slots[0], 0x20);
-                Fill(slots[1], 0x21);
-                // Slots 2..7 stay untouched: the driver returned fewer packets than requested.
-                return 2;
-            },
-            _ =>
-            {
-                cts.Cancel();
-                return 0;
-            });
+            [
+                slots =>
+                {
+                    Fill(slots[0], 0x20);
+                    Fill(slots[1], 0x21);
+                    // Slots 2..7 stay untouched: the driver returned fewer packets than requested.
+                    return 2;
+                },
+                _ =>
+                {
+                    cts.Cancel();
+                    return 0;
+                },
+            ]);
 
         await using var pump = new NdisCapturePump(reader, (nint)0x66, CaptureHandler(observed, handles), TimeSpan.FromMilliseconds(1), batchCapacity: 8);
 
@@ -72,13 +76,15 @@ public sealed class NdisCapturePumpTests
         var handles = new List<nint>();
         using var cts = new CancellationTokenSource();
         var reader = new ScriptedReader(
-            _ => 0,
-            _ => 0,
-            _ =>
-            {
-                cts.Cancel();
-                return 0;
-            });
+            [
+                _ => 0,
+                _ => 0,
+                _ =>
+                {
+                    cts.Cancel();
+                    return 0;
+                },
+            ]);
 
         await using var pump = new NdisCapturePump(reader, (nint)0x77, CaptureHandler(observed, handles), TimeSpan.FromMilliseconds(1));
 
@@ -97,16 +103,18 @@ public sealed class NdisCapturePumpTests
         var buffers = new List<NdisPacketBuffer>();
         using var cts = new CancellationTokenSource();
         var reader = new ScriptedReader(
-            slots =>
-            {
-                Fill(slots[0], 0x30);
-                return 1;
-            },
-            _ =>
-            {
-                cts.Cancel();
-                return 0;
-            });
+            [
+                slots =>
+                {
+                    Fill(slots[0], 0x30);
+                    return 1;
+                },
+                _ =>
+                {
+                    cts.Cancel();
+                    return 0;
+                },
+            ]);
 
         var pump = new NdisCapturePump(reader, (nint)0x88, (packet, _) => { buffers.Add(packet.Buffer); return ValueTask.CompletedTask; }, TimeSpan.FromMilliseconds(1));
 
@@ -125,7 +133,7 @@ public sealed class NdisCapturePumpTests
     [SupportedOSPlatform("windows")]
     public void PumpRejectsNonPositiveBatchCapacity(int batchCapacity)
     {
-        Assert.Throws<ArgumentOutOfRangeException>(() => new NdisCapturePump(new ScriptedReader(_ => 0), (nint)1, static (_, _) => ValueTask.CompletedTask, TimeSpan.FromMilliseconds(1), batchCapacity));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new NdisCapturePump(new ScriptedReader([_ => 0]), (nint)1, static (_, _) => ValueTask.CompletedTask, TimeSpan.FromMilliseconds(1), batchCapacity));
     }
 
     [Fact]
@@ -133,7 +141,7 @@ public sealed class NdisCapturePumpTests
     public void PumpRejectsNullDriverAndHandler()
     {
         Assert.Throws<ArgumentNullException>(() => new NdisCapturePump(null!, (nint)1, static (_, _) => ValueTask.CompletedTask));
-        Assert.Throws<ArgumentNullException>(() => new NdisCapturePump(new ScriptedReader(_ => 0), (nint)1, null!));
+        Assert.Throws<ArgumentNullException>(() => new NdisCapturePump(new ScriptedReader([_ => 0]), (nint)1, null!));
     }
 
     [Fact]
@@ -150,22 +158,24 @@ public sealed class NdisCapturePumpTests
         var secondReadEnteredBeforeHandlerCompleted = false;
 
         var reader = new ScriptedReader(
-            slots =>
-            {
-                Fill(slots[0], 0x50);
-                return 1;
-            },
-            slots =>
-            {
-                secondReadEnteredBeforeHandlerCompleted = !handlerReleased.Task.IsCompleted;
-                Fill(slots[0], 0x51);
-                return 1;
-            },
-            _ =>
-            {
-                cts.Cancel();
-                return 0;
-            });
+            [
+                slots =>
+                {
+                    Fill(slots[0], 0x50);
+                    return 1;
+                },
+                slots =>
+                {
+                    secondReadEnteredBeforeHandlerCompleted = !handlerReleased.Task.IsCompleted;
+                    Fill(slots[0], 0x51);
+                    return 1;
+                },
+                _ =>
+                {
+                    cts.Cancel();
+                    return 0;
+                },
+            ]);
 
         await using var pump = new NdisCapturePump(reader, (nint)0x99, (packet, _) =>
         {
@@ -214,7 +224,7 @@ public sealed class NdisCapturePumpTests
     [SupportedOSPlatform("windows")]
     public async Task DisposeBeforeAnyRunCompletesSynchronously()
     {
-        var pump = new NdisCapturePump(new ScriptedReader(_ => 0), (nint)1, static (_, _) => ValueTask.CompletedTask);
+        var pump = new NdisCapturePump(new ScriptedReader([_ => 0]), (nint)1, static (_, _) => ValueTask.CompletedTask);
 
         var dispose = pump.DisposeAsync();
 
@@ -232,20 +242,6 @@ public sealed class NdisCapturePumpTests
 
     private static void Fill(NdisPacketBuffer buffer, byte marker) =>
         buffer.SetFrame([marker, 0xAA, 0xBB], NdisApiAbi.PacketFlagOnReceive, (nint)0x99, flags: 0x40);
-
-    private sealed class ScriptedReader(params Func<NdisPacketBuffer[], int>[] reads) : INdisPacketReader
-    {
-        private readonly Func<NdisPacketBuffer[], int>[] _reads = reads;
-        private int _calls;
-
-        public int Calls => _calls;
-
-        public int TryReadPackets(nint adapterHandle, NdisPacketBuffer[] buffers)
-        {
-            var index = Math.Min(_calls++, _reads.Length - 1);
-            return _reads[index](buffers);
-        }
-    }
 
     /// <summary>
     /// A reader that parks every read until the test releases it, making "the run loop is in

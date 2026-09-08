@@ -172,25 +172,6 @@ public sealed class NdisCaptureResilienceTests
 
     private static void Fill(NdisPacketBuffer buffer, byte marker) =>
         buffer.SetFrame([marker, 0xAA, 0xBB], NdisApiAbi.PacketFlagOnReceive, (nint)0x55, flags: 0x40);
-
-    /// <summary>
-    /// A reader over a fixed script: each call advances to the next behavior (a throw or a read
-    /// function); a fixed throw repeats forever. Mirrors <c>NdisCapturePumpTests.ScriptedReader</c>
-    /// with failure injection for the R7 paths.
-    /// </summary>
-    private sealed class ScriptedReader(Func<NdisPacketBuffer[], int>[] reads, Win32Exception? throwAlways = null) : INdisPacketReader
-    {
-        private readonly Func<NdisPacketBuffer[], int>[] _reads = reads;
-        private readonly Win32Exception? _throwAlways = throwAlways;
-        private int _calls;
-
-        public int TryReadPackets(nint adapterHandle, NdisPacketBuffer[] buffers)
-        {
-            if (_throwAlways is not null) throw _throwAlways;
-            var index = Math.Min(_calls++, _reads.Length - 1);
-            return _reads[index](buffers);
-        }
-    }
 }
 
 /// <summary>
@@ -215,7 +196,7 @@ public sealed class CaptureDegradationPlumbingTests
             [(nint)0x10] = new PermanentFailureReader(87),
             [(nint)0x11] = new CancellingReader(cts, readsBeforeCancel: 3),
         };
-        var dispatcher = new FlowDispatcher(CreatePassConfiguration(), new NoSelfTraffic(), new NoopExecutor());
+        var dispatcher = new FlowDispatcher(CreatePassConfiguration(), new FakeGuard(), new NoopExecutor());
         var processor = new CapturePacketProcessor(dispatcher);
         var loop = new MultiAdapterCaptureLoop(new PerHandleReader(readers), adapters, processor,
             TimeSpan.FromMilliseconds(1),
@@ -311,38 +292,11 @@ public sealed class CaptureDegradationPlumbingTests
         Assert.Empty(modes.Restored);
     }
 
-    private sealed class NoSelfTraffic : ISelfTrafficGuard
-    {
-        public bool IsOwned(FlowContext context) => false;
-    }
-
     private sealed class NoopExecutor : IPacketActionExecutor
     {
         public ValueTask PassAsync(CapturedFlowPacket packet, CancellationToken cancellationToken) => ValueTask.CompletedTask;
         public ValueTask BlockAsync(CapturedFlowPacket packet, CancellationToken cancellationToken) => ValueTask.CompletedTask;
         public ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken) => ValueTask.CompletedTask;
-    }
-
-    private sealed class CompletingCapture : IPacketCaptureLoop
-    {
-        public ValueTask RunAsync(CancellationToken cancellationToken) => ValueTask.CompletedTask;
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-    }
-
-    private sealed class BlockingCapture : IPacketCaptureLoop
-    {
-        private readonly TaskCompletionSource _complete = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public async ValueTask RunAsync(CancellationToken cancellationToken)
-        {
-            Started.TrySetResult();
-            await _complete.Task;
-        }
-
-        public void Complete() => _complete.TrySetResult();
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     private sealed class FailingRestoreModes : IAdapterModeController
@@ -352,17 +306,6 @@ public sealed class CaptureDegradationPlumbingTests
         public ValueTask<IReadOnlyList<AdapterModeSnapshot>> SnapshotAsync(CancellationToken cancellationToken) => ValueTask.FromResult<IReadOnlyList<AdapterModeSnapshot>>([new("a", 7)]);
         public ValueTask ApplyCaptureModeAsync(AdapterModeSnapshot adapter, CancellationToken cancellationToken) => ValueTask.CompletedTask;
         public ValueTask RestoreAsync(AdapterModeSnapshot adapter, CancellationToken cancellationToken) { RestoreAttempts++; throw new InvalidOperationException("restore failed"); }
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-    }
-
-    private sealed class FakeModes : IAdapterModeController
-    {
-        private readonly IReadOnlyList<AdapterModeSnapshot> _snapshots;
-        public FakeModes(IReadOnlyList<AdapterModeSnapshot> snapshots) => _snapshots = snapshots;
-        public List<string> Restored { get; } = [];
-        public ValueTask<IReadOnlyList<AdapterModeSnapshot>> SnapshotAsync(CancellationToken cancellationToken) => ValueTask.FromResult(_snapshots);
-        public ValueTask ApplyCaptureModeAsync(AdapterModeSnapshot adapter, CancellationToken cancellationToken) => ValueTask.CompletedTask;
-        public ValueTask RestoreAsync(AdapterModeSnapshot adapter, CancellationToken cancellationToken) { Restored.Add(adapter.AdapterId); return ValueTask.CompletedTask; }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

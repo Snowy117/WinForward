@@ -100,9 +100,4 @@ public sealed class IdleExpirySweeperFailureTests
         }
     }
 
-    private sealed class NoopResponseSink : IUdpResponseSink
-    {
-        public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, byte[]? clientMac, CancellationToken cancellationToken) =>
-            ValueTask.CompletedTask;
-    }
 }

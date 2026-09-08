@@ -247,12 +247,6 @@ public sealed class Socks5UdpAssociateTests
         await server;
     }
 
-    private sealed class NoopResponseSink : IUdpResponseSink
-    {
-        public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, byte[]? clientMac, CancellationToken cancellationToken) =>
-            ValueTask.CompletedTask;
-    }
-
     private sealed class OrderingRegistration(Func<bool> socketIsDisposed) : IDisposable
     {
         private readonly Func<bool> _socketIsDisposed = socketIsDisposed;

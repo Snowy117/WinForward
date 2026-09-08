@@ -101,35 +101,10 @@ public sealed class CaptureLifecycleTests
         Assert.Equal(1, capture.DisposeCount);
     }
 
-    private sealed class FakeModes : IAdapterModeController
-    {
-        private readonly IReadOnlyList<AdapterModeSnapshot> _snapshots;
-        private readonly int _failOnApply;
-        public FakeModes(IReadOnlyList<AdapterModeSnapshot> snapshots, int failOnApply = -1) { _snapshots = snapshots; _failOnApply = failOnApply; }
-        public List<string> Applied { get; } = [];
-        public List<string> Restored { get; } = [];
-        public ValueTask<IReadOnlyList<AdapterModeSnapshot>> SnapshotAsync(CancellationToken cancellationToken) => ValueTask.FromResult(_snapshots);
-        public ValueTask ApplyCaptureModeAsync(AdapterModeSnapshot adapter, CancellationToken cancellationToken)
-        {
-            if (Applied.Count == _failOnApply) throw new InvalidOperationException("mode apply failed");
-            Applied.Add(adapter.AdapterId);
-            return ValueTask.CompletedTask;
-        }
-        public ValueTask RestoreAsync(AdapterModeSnapshot adapter, CancellationToken cancellationToken) { Restored.Add(adapter.AdapterId); return ValueTask.CompletedTask; }
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-    }
-
     private sealed class FakeCapture : IPacketCaptureLoop
     {
         public async ValueTask RunAsync(CancellationToken cancellationToken) => await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-    }
-
-    private sealed class CompletingCapture : IPacketCaptureLoop
-    {
-        public bool Disposed { get; private set; }
-        public ValueTask RunAsync(CancellationToken cancellationToken) => ValueTask.CompletedTask;
-        public ValueTask DisposeAsync() { Disposed = true; return ValueTask.CompletedTask; }
     }
 
     private sealed class BlockingDisposeCapture : IPacketCaptureLoop
@@ -149,22 +124,5 @@ public sealed class CaptureLifecycleTests
         }
 
         public void CompleteDispose() => _complete.TrySetResult();
-    }
-
-    private sealed class BlockingCapture : IPacketCaptureLoop
-    {
-        private readonly TaskCompletionSource _complete = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public TaskCompletionSource CancellationObserved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public async ValueTask RunAsync(CancellationToken cancellationToken)
-        {
-            Started.TrySetResult();
-            using var registration = cancellationToken.Register(() => CancellationObserved.TrySetResult());
-            await _complete.Task;
-        }
-
-        public void Complete() => _complete.TrySetResult();
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

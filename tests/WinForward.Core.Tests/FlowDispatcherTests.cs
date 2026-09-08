@@ -155,8 +155,6 @@ public sealed class FlowDispatcherTests
     private static FlowKey CreateKey(TransportProtocol protocol = TransportProtocol.Udp) => FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), protocol, FlowOriginKind.Host);
     private static FlowContext Context(FlowKey key) => new(key, "dns.exe", null, null, null, key.Remote.Port);
 
-    private sealed class FakeGuard : ISelfTrafficGuard { public bool Owned { get; init; } public bool IsOwned(FlowContext context) => Owned; }
-
     /// <summary>
     /// A reverse handler whose <see cref="WantsPacket"/> always diverts — the pre-X1 dispatcher
     /// shape these slow-path tests were written against — and whose handling outcome is scripted.
@@ -171,14 +169,5 @@ public sealed class FlowDispatcherTests
             var calls = ++_calls;
             return ValueTask.FromResult(outcome?.Invoke() ?? (calls == 1 ? TcpRedirectOutcome.NotRelevant : TcpRedirectOutcome.Injected));
         }
-    }
-
-    private sealed class FakeExecutor : IPacketActionExecutor
-    {
-        public int PassCount { get; private set; }
-        public int ProxyCount { get; private set; }
-        public ValueTask PassAsync(CapturedFlowPacket packet, CancellationToken cancellationToken) { PassCount++; return ValueTask.CompletedTask; }
-        public ValueTask BlockAsync(CapturedFlowPacket packet, CancellationToken cancellationToken) => ValueTask.CompletedTask;
-        public ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken) { ProxyCount++; return ValueTask.CompletedTask; }
     }
 }

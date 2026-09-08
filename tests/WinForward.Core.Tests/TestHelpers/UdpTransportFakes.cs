@@ -90,6 +90,13 @@ internal sealed class FakeResponseSink : IUdpResponseSink
         Responses.Writer.WriteAsync((originalFlow, remoteSource, payload.ToArray(), clientMac), cancellationToken);
 }
 
+/// <summary>A sink that accepts every response without recording: for tests that exercise a coordinator but never assert on responses.</summary>
+internal sealed class NoopResponseSink : IUdpResponseSink
+{
+    public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, byte[]? clientMac, CancellationToken cancellationToken) =>
+        ValueTask.CompletedTask;
+}
+
 /// <summary>Fails the first receive immediately; used to prove session removal fires without another send.</summary>
 internal sealed class ImmediateFaultTransportFactory : IUdpProxyTransportFactory
 {
