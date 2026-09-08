@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "R2 must not regress the warm path; lease/flush discipline constrains R1/R4"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "New rate-limited Warn sites (lane overflow, retire drain) must follow IRuntimeLogger conventions"}
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "Batched capture ABI, pooling, and pump contracts touched by R1/R4"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Testing requirements incl. barrier/TCS concurrency gating and baseline discipline"}
+{"file": ".trellis/tasks/09-08-design-review-remediation/research/03-runtime-root-capture.md", "reason": "P0 evidence: lane leak, IPAddress classify path, executor issues with file:line"}
+{"file": ".trellis/tasks/09-08-design-review-remediation/research/02-ndisapi-windows.md", "reason": "Interop evidence: ReadTable bounds asymmetry, pump DisposeAsync convention"}
+{"file": ".trellis/tasks/09-08-design-review-remediation/research/00-synthesis.md", "reason": "Priority table and cross-area scope for the P0 workstream"}

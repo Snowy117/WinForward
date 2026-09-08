@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify test requirements, deterministic concurrency, and recorded baselines"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Verify no IPAddress class on classify paths and no allocation regressions"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Verify new logs follow level/rate-limit/privacy rules"}
+{"file": ".trellis/tasks/09-08-design-review-remediation/research/00-synthesis.md", "reason": "Verify each P0 table row is resolved by the implemented fixes"}
