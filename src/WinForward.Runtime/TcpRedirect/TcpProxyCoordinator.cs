@@ -99,7 +99,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
 
     public async ValueTask<TcpRedirectOutcome> HandleSynAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
     {
-        if (packet.Lease is null) throw new ArgumentNullException(nameof(packet));
+        if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
         ArgumentNullException.ThrowIfNull(server);
         ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
 
@@ -293,7 +293,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
 
     public async ValueTask<TcpRedirectOutcome> HandleReverseAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
-        if (packet.Lease is null) throw new ArgumentNullException(nameof(packet));
+        if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
         ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
 
         var key = packet.Context.Key;
@@ -376,7 +376,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
     /// </summary>
     public async ValueTask<TcpRedirectOutcome> HandleReverseIfApplicableAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
-        if (packet.Lease is null) throw new ArgumentNullException(nameof(packet));
+        if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
         ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
 
         // H1/M5 gate before the numeric-port lookup: this handler owns TCP reverse routing. A UDP
@@ -405,7 +405,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
     /// </summary>
     public async ValueTask<TcpRedirectOutcome> HandlePacketAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
     {
-        if (packet.Lease is null) throw new ArgumentNullException(nameof(packet));
+        if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
         ArgumentNullException.ThrowIfNull(server);
         ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
 
@@ -455,7 +455,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
     /// </summary>
     public async ValueTask<TcpRedirectOutcome> HandleFragmentAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
-        if (packet.Lease is null) throw new ArgumentNullException(nameof(packet));
+        if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
         ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
 
         if (!IPFragment.TryReadAddressPair(packet.InspectionSpan, out var source, out var destination)) return TcpRedirectOutcome.NotRelevant;

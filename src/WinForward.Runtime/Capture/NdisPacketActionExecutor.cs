@@ -52,7 +52,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
 
     public ValueTask PassAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
-        if (packet.Lease is null) throw new ArgumentNullException(nameof(packet));
+        if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
         var metadata = packet.Metadata;
         if (packet.NativeFrame.Buffer is { } captureBuffer && !packet.Lease.IsMaterialized)
         {

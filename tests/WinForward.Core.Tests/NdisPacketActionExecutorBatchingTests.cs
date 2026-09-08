@@ -188,6 +188,21 @@ public sealed class NdisPacketActionExecutorBatchingTests
         Assert.Equal(0, executor.PendingPassCount);
     }
 
+    [Fact]
+    public void PassAsyncWithoutLeaseThrowsArgumentNullExceptionNamingTheLease()
+    {
+        // The packet is a struct and can never be null itself; when the lease is the null part,
+        // the guard's ParamName must point at packet.Lease so stack traces name the real problem.
+        var executor = new NdisPacketActionExecutor(new CountingReinjector());
+        var packet = new CapturedFlowPacket(
+            null!,
+            FlowContext(FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 1), Endpoint.From(IPAddress.Parse("192.0.2.53"), 2), TransportProtocol.Tcp, FlowOriginKind.Host)));
+
+        var exception = Assert.Throws<ArgumentNullException>(() => executor.PassAsync(packet, CancellationToken.None));
+
+        Assert.Equal("packet.Lease", exception.ParamName);
+    }
+
     private static CapturedFlowPacket InPlacePass(NdisPacketBuffer buffer, TransportProtocol protocol = TransportProtocol.Tcp)
     {
         var lease = new PacketLease(buffer);

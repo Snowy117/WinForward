@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using WinForward.Configuration;
 using WinForward.Core;
@@ -47,6 +48,21 @@ public readonly record struct CapturedFlowPacket(
     /// span must be consumed synchronously and must not escape the dispatch section.
     /// </summary>
     internal ReadOnlySpan<byte> InspectionSpan => NativeFrame.Buffer is { } buffer ? buffer.GetFrame() : Lease!.Frame.Span;
+}
+
+/// <summary>
+/// The shared entry guard for captured packets: rejects a packet whose <see cref="PacketLease"/>
+/// is null. Every dispatch entry (dispatcher, TCP coordinator, executor) enforces the same
+/// contract through this helper so the <see cref="ArgumentNullException.ParamName"/> points at
+/// the member that is actually null — the packet itself is a struct and can never be null.
+/// </summary>
+internal static class CapturedFlowPacketGuards
+{
+    [DoesNotReturn]
+#pragma warning disable MA0015, S3928 // The paramName deliberately names the null member (the packet struct is never itself null); both analyzers only accept declared parameter names, which would point diagnosis at a phantom "packet".
+    public static void ThrowLeaseRequired() =>
+        throw new ArgumentNullException("packet.Lease", "The captured packet requires a lease.");
+#pragma warning restore MA0015, S3928
 }
 
 public interface ISelfTrafficGuard
@@ -125,7 +141,7 @@ public sealed class FlowDispatcher
     /// </summary>
     public ValueTask DispatchAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
-        if (packet.Lease is null) throw new ArgumentNullException(nameof(packet));
+        if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
 
         if (_logger.IsEnabled(RuntimeLogLevel.Trace)) return DispatchSlowAsync(packet, cancellationToken);
         // X1: only packets the reverse handler itself claims can be reverse candidates divert;
@@ -160,7 +176,7 @@ public sealed class FlowDispatcher
 
     private async ValueTask DispatchSlowAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
-        if (packet.Lease is null) throw new ArgumentNullException(nameof(packet));
+        if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
         if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.classified", packet, new RuntimeLogField("kind", "flow"));
         if (await TryHandleSelfTrafficAsync(packet, cancellationToken).ConfigureAwait(false)) return;
 
@@ -251,7 +267,7 @@ public sealed class FlowDispatcher
     /// </summary>
     public async ValueTask DispatchNonFlowAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
-        if (packet.Lease is null) throw new ArgumentNullException(nameof(packet));
+        if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
         if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.classified", packet, new RuntimeLogField("kind", "nonFlow"));
         if (_selfTraffic.IsOwned(packet.Context))
         {
