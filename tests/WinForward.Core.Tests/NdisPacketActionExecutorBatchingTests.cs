@@ -203,6 +203,125 @@ public sealed class NdisPacketActionExecutorBatchingTests
         Assert.Equal("packet.Lease", exception.ParamName);
     }
 
+    [Fact]
+    public async Task LaneOverflowIsCountedAndWarnedOncePerWindow()
+    {
+        var reinjector = new FakeReinjector();
+        var logger = new RecordingRuntimeLogger();
+        var executor = new NdisPacketActionExecutor(reinjector, logger);
+
+        // Fill the fixed lane capacity (8) with four adapters × two directions.
+        for (var adapter = 1; adapter <= 4; adapter++)
+        {
+            await executor.PassAsync(MaterializedPass([0x40], (nint)adapter, isOnSend: true), CancellationToken.None);
+            await executor.PassAsync(MaterializedPass([0x41], (nint)adapter, isOnSend: false), CancellationToken.None);
+        }
+
+        // The 9th distinct (adapter, direction) key degrades to the immediate single send —
+        // observed, never silent: the overflow counter ticks and the warn fires.
+        await executor.PassAsync(MaterializedPass([0x42], (nint)5, isOnSend: true), CancellationToken.None);
+        Assert.Equal(1L, executor.ImmediateSendLaneOverflowCount);
+        Assert.Equal(1, reinjector.ToAdapterCount + reinjector.ToMstcpCount);
+        Assert.Equal(new byte[] { 0x42 }, reinjector.LastFrame);
+
+        // A second overflow inside the rate-limit window still counts and still sends exactly
+        // once, but the warn fires at most once per window.
+        await executor.PassAsync(MaterializedPass([0x43], (nint)5, isOnSend: false), CancellationToken.None);
+        Assert.Equal(2L, executor.ImmediateSendLaneOverflowCount);
+        Assert.Equal(2, reinjector.ToAdapterCount + reinjector.ToMstcpCount);
+        Assert.Equal(1, logger.Lines.Count(line => line.Level == RuntimeLogLevel.Warn && line.Message.Contains("degraded", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task RetireLanesExceptFreesSlotsForFreshHandles()
+    {
+        var reinjector = new FakeReinjector();
+        var executor = new NdisPacketActionExecutor(reinjector);
+
+        // One generation's whole lane table (handles 1..4, two directions each), flushed as the
+        // pump's iteration-end callback would before the generation stops.
+        for (var adapter = 1; adapter <= 4; adapter++)
+        {
+            await executor.PassAsync(MaterializedPass([0x50], (nint)adapter, isOnSend: true), CancellationToken.None);
+            await executor.PassAsync(MaterializedPass([0x51], (nint)adapter, isOnSend: false), CancellationToken.None);
+        }
+        for (var adapter = 1; adapter <= 4; adapter++) executor.FlushPendingPasses((nint)adapter);
+
+        // Generation switch on fresh handles: the stale lanes retire, so the table has room
+        // again — the next generation's keys accumulate instead of degrading to immediate sends.
+        executor.RetireLanesExcept([(nint)101, (nint)102]);
+
+        await executor.PassAsync(MaterializedPass([0x52], (nint)101, isOnSend: true), CancellationToken.None);
+        await executor.PassAsync(MaterializedPass([0x53], (nint)101, isOnSend: false), CancellationToken.None);
+        await executor.PassAsync(MaterializedPass([0x54], (nint)102, isOnSend: true), CancellationToken.None);
+        await executor.PassAsync(MaterializedPass([0x55], (nint)102, isOnSend: false), CancellationToken.None);
+
+        Assert.Equal(0L, executor.ImmediateSendLaneOverflowCount);
+        Assert.Equal(0, reinjector.ToAdapterCount + reinjector.ToMstcpCount);
+        Assert.Equal(4, executor.PendingPassCount);
+    }
+
+    [Fact]
+    public async Task RetireLanesExceptWithEmptySpanRetiresEveryLane()
+    {
+        var reinjector = new FakeReinjector();
+        var executor = new NdisPacketActionExecutor(reinjector);
+
+        for (var adapter = 1; adapter <= 4; adapter++)
+        {
+            await executor.PassAsync(MaterializedPass([0x60], (nint)adapter, isOnSend: true), CancellationToken.None);
+            await executor.PassAsync(MaterializedPass([0x61], (nint)adapter, isOnSend: false), CancellationToken.None);
+        }
+        for (var adapter = 1; adapter <= 4; adapter++) executor.FlushPendingPasses((nint)adapter);
+
+        // Empty scope = interception paused: every lane retires, so a full table's worth of
+        // fresh keys fits again once capture resumes.
+        executor.RetireLanesExcept(ReadOnlySpan<nint>.Empty);
+
+        for (var adapter = 11; adapter <= 14; adapter++)
+        {
+            await executor.PassAsync(MaterializedPass([0x62], (nint)adapter, isOnSend: true), CancellationToken.None);
+            await executor.PassAsync(MaterializedPass([0x63], (nint)adapter, isOnSend: false), CancellationToken.None);
+        }
+
+        Assert.Equal(0L, executor.ImmediateSendLaneOverflowCount);
+        Assert.Equal(0, reinjector.ToAdapterCount + reinjector.ToMstcpCount);
+        Assert.Equal(8, executor.PendingPassCount);
+    }
+
+    [Fact]
+    public async Task RetiringALaneWithPendingFramesWarnsAndReturnsRentedBuffersExactlyOnce()
+    {
+        var reinjector = new FakeReinjector();
+        var logger = new RecordingRuntimeLogger();
+        var pool = new NdisPacketBufferPool(4);
+        var executor = new NdisPacketActionExecutor(reinjector, logger, bufferPool: pool);
+        using var inPlace = new NdisPacketBuffer();
+        inPlace.SetFrame([0x70], NdisApiAbi.PacketFlagOnReceive, (nint)7);
+
+        // Breach the between-generations contract on purpose: retire a lane that still holds one
+        // rented pooled copy and one in-place capture buffer (no iteration-end flush ran).
+        await executor.PassAsync(MaterializedPass([0x71], (nint)7, isOnSend: false), CancellationToken.None);
+        await executor.PassAsync(InPlacePass(inPlace), CancellationToken.None);
+        Assert.Equal(0, pool.Count);
+
+        executor.RetireLanesExcept([(nint)8]);
+
+        // The frames drop fail-closed (their adapter is gone — no send of any kind), the rented
+        // buffer returns exactly once, the in-place buffer stays pump-owned, and the breach
+        // surfaces as a warn.
+        Assert.Equal(0, reinjector.ToAdapterCount + reinjector.ToMstcpCount);
+        Assert.Empty(reinjector.BatchCalls);
+        Assert.Equal(1, pool.Count);
+        Assert.Equal(0, executor.PendingPassCount);
+        Assert.Equal(new byte[] { 0x70 }, inPlace.GetFrame().ToArray());
+        Assert.Contains(logger.Lines, line => line.Level == RuntimeLogLevel.Warn && line.Message.Contains("pass lane retired", StringComparison.Ordinal));
+
+        // A repeated retire finds no lane and must not double-return anything.
+        executor.RetireLanesExcept([(nint)8]);
+        Assert.Equal(1, pool.Count);
+    }
+
     private static CapturedFlowPacket InPlacePass(NdisPacketBuffer buffer, TransportProtocol protocol = TransportProtocol.Tcp)
     {
         var lease = new PacketLease(buffer);

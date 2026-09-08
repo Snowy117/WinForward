@@ -220,7 +220,7 @@ internal static class Program
                     configuration.Policy,
                     logger,
                     disposeDurableAsync: _ => bundle.DisposeAsync(),
-                    onScopeInstalled: bundle.UpdateUdpTargets);
+                    onScopeInstalled: bundle.OnScopeInstalled);
                 runnerRef = runner;
 
                 return await RunUntilCancelledAsync(runner, logger).ConfigureAwait(false);

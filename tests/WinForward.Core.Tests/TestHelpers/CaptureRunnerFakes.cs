@@ -133,7 +133,7 @@ internal sealed class CaptureRunnerHarness : IAsyncDisposable
     private readonly List<string> _events = [];
     private int _durableDisposeCount;
 
-    public CaptureRunnerHarness(IReadOnlyList<AdapterEnumerationItem> initialAdapters, WinForward.Core.PolicySnapshot policy, TimeSpan? minimumRefreshInterval = null)
+    public CaptureRunnerHarness(IReadOnlyList<AdapterEnumerationItem> initialAdapters, WinForward.Core.PolicySnapshot policy, TimeSpan? minimumRefreshInterval = null, Action<IReadOnlyList<AdapterEnumerationItem>>? onScopeInstalled = null)
     {
         Enumeration = new FakeAdapterEnumerationProvider(initialAdapters);
         Generations.OnCreated = generation =>
@@ -157,6 +157,9 @@ internal sealed class CaptureRunnerHarness : IAsyncDisposable
             {
                 lock (InstalledScopes) InstalledScopes.Add(scope);
                 AddEvent($"scope-installed({scope.Count})");
+                // Composed after the harness's own bookkeeping, mirroring how the production
+                // bundle's scope-installed callback composes its durable-layer updates.
+                onScopeInstalled?.Invoke(scope);
             },
             minimumRefreshInterval: minimumRefreshInterval);
     }
@@ -193,7 +196,8 @@ internal sealed class CaptureRunnerHarness : IAsyncDisposable
 
     public FakeCaptureGeneration Generation(int index) => Generations.Generations[index];
 
-    private void AddEvent(string name)
+    /// <summary>Records into the ordered event timeline, so tests can interleave their own markers with generation lifecycle events.</summary>
+    internal void AddEvent(string name)
     {
         lock (_eventGate) _events.Add(name);
     }

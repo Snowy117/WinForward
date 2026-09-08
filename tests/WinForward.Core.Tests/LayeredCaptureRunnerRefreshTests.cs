@@ -1,4 +1,6 @@
 using WinForward.Configuration;
+using WinForward.Core;
+using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.Capture;
 using Xunit;
@@ -7,6 +9,78 @@ namespace WinForward.Core.Tests;
 
 public sealed class LayeredCaptureRunnerRefreshTests
 {
+    [Fact]
+    public async Task RefreshChurnKeepsPassBatchingAliveAcrossGenerations()
+    {
+        // The design-review P0-1 leak: the durable executor's pass lanes were keyed by
+        // (adapter handle, direction) and never removed, while every adapter-list refresh mints
+        // fresh handles — after a handful of refreshes the fixed lane table filled with dead
+        // keys and every pass silently degraded to an immediate single send. This regression
+        // drives five generations × two adapters (ten distinct handles) through the runner with
+        // the production shape of the scope-installed callback (retire lanes outside the
+        // installed scope) and proves the final generation still batches.
+        var reinjector = new FakeReinjector();
+        var executor = new NdisPacketActionExecutor(reinjector);
+        CaptureRunnerHarness? harness = null;
+        await using var capture = new CaptureRunnerHarness(
+            [CaptureRunnerFakes.AdapterItem("id-a", (nint)1001), CaptureRunnerFakes.AdapterItem("id-b", (nint)1002)],
+            CaptureRunnerFakes.UnconstrainedPolicy(),
+            minimumRefreshInterval: TimeSpan.FromMilliseconds(50),
+            onScopeInstalled: scope =>
+            {
+                var handles = new nint[scope.Count];
+                for (var index = 0; index < scope.Count; index++) handles[index] = scope[index].Adapter.RuntimeHandle;
+                executor.RetireLanesExcept(handles);
+                harness!.AddEvent("retire-lanes");
+            });
+        harness = capture;
+        capture.Start();
+        await capture.WaitForGenerationStartedAsync(0).ConfigureAwait(false);
+
+        for (var generation = 1; generation <= 4; generation++)
+        {
+            var firstHandle = (nint)(1001 + generation * 2);
+            capture.Enumeration.SetAdapters(
+                CaptureRunnerFakes.AdapterItem("id-a", firstHandle),
+                CaptureRunnerFakes.AdapterItem("id-b", firstHandle + 1));
+            capture.ChangeSource.Trigger();
+            await AsyncTestExtensions.WaitForAsync(() => capture.Generations.Generations.Count == generation + 1).ConfigureAwait(false);
+            await capture.WaitForGenerationStartedAsync(generation).ConfigureAwait(false);
+        }
+
+        // Traffic on the final generation's fresh handles still batches: batched reinjector
+        // calls observed, zero immediate sends, zero overflow. Without retirement, ten distinct
+        // handle keys would have exhausted the eight-lane table generations ago.
+        var finalA = (nint)(1001 + 4 * 2);
+        var finalB = finalA + 1;
+        await executor.PassAsync(PassPacket(finalA, isOnSend: true), CancellationToken.None);
+        await executor.PassAsync(PassPacket(finalA, isOnSend: true), CancellationToken.None);
+        await executor.PassAsync(PassPacket(finalB, isOnSend: false), CancellationToken.None);
+        await executor.PassAsync(PassPacket(finalB, isOnSend: false), CancellationToken.None);
+        executor.FlushPendingPasses(finalA);
+        executor.FlushPendingPasses(finalB);
+
+        Assert.Equal(0L, executor.ImmediateSendLaneOverflowCount);
+        Assert.Equal(0, reinjector.ToAdapterCount + reinjector.ToMstcpCount);
+        Assert.Equal(2, reinjector.BatchCalls.Count);
+        Assert.All(reinjector.BatchCalls, call => Assert.Equal(2, call.Frames.Length));
+
+        // Ordering proof at the runner level: every retire ran after the outgoing generation
+        // was disposed and before the next generation was created — the between-generations
+        // contract RetireLanesExcept depends on. All recorded events come from the runner's
+        // sequential refresh pipeline, so the timeline is deterministic.
+        var timeline = capture.Events.Where(e => !string.Equals(e, "durable-dispose", StringComparison.Ordinal)).ToArray();
+        var expected = new List<string>();
+        for (var generation = 0; generation < 5; generation++)
+        {
+            if (generation > 0) expected.Add($"generation-{generation - 1}-disposed");
+            expected.Add($"generation-{generation}-created");
+            expected.Add("scope-installed(2)");
+            expected.Add("retire-lanes");
+        }
+        Assert.Equal(expected, timeline);
+    }
+
     [Fact]
     public async Task RefreshRebuildsGenerationOnFreshHandlesWithoutDisposingDurable()
     {
@@ -125,5 +199,21 @@ public sealed class LayeredCaptureRunnerRefreshTests
         await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
         Assert.Equal([909], harness.Generation(1).Scope.Select(item => item.Adapter.RuntimeHandle).ToArray());
         Assert.False(harness.RunTask.IsCompleted);
+    }
+
+    /// <summary>A materialized pass packet for one (adapter handle, direction) — the shape a pump hands the executor after a rewrite consumer materialized the lease.</summary>
+    private static CapturedFlowPacket PassPacket(nint adapterHandle, bool isOnSend)
+    {
+        var lease = new PacketLease(new byte[] { 0x2A });
+        _ = lease.Frame.Length; // materialize, as a rewriting consumer would
+        var key = FlowKey.Create(
+            Endpoint.From(IPAddressValue.IPv4Any, 1),
+            Endpoint.From(IPAddressValue.IPv4Any, 2),
+            TransportProtocol.Tcp,
+            FlowOriginKind.Host);
+        return new CapturedFlowPacket(
+            lease,
+            new FlowContext(key, null, null, null, null, key.Remote.Port),
+            new PacketCaptureMetadata(isOnSend ? NdisApiAbi.PacketFlagOnSend : NdisApiAbi.PacketFlagOnReceive, adapterHandle));
     }
 }

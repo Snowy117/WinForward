@@ -154,6 +154,22 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         UdpTargets.Update(new UdpAdapterTarget(host.Adapter.RuntimeHandle, hostMac), adapterTargets);
     }
 
+    /// <summary>
+    /// The capture runner's scope-installed callback home: swaps the UDP reinjection-target
+    /// snapshot (see <see cref="UpdateUdpTargets"/>) and then retires the executor's pass lanes
+    /// for adapters that left the scope. Both steps run strictly between generations — the runner
+    /// completes the outgoing generation's run (including its loop-exit lane flush) before
+    /// installing the next scope, so no pump can still be appending to a retired lane. An empty
+    /// scope retires every lane: interception is paused, so no lane can accumulate.
+    /// </summary>
+    internal void OnScopeInstalled(IReadOnlyList<AdapterEnumerationItem> scope)
+    {
+        UpdateUdpTargets(scope);
+        var handles = new nint[scope.Count];
+        for (var index = 0; index < scope.Count; index++) handles[index] = scope[index].Adapter.RuntimeHandle;
+        Executor.RetireLanesExcept(handles);
+    }
+
     public ValueTask DisposeAsync()
     {
         lock (_gate)

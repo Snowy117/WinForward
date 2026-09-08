@@ -15,18 +15,24 @@ namespace WinForward.Runtime.Capture;
 /// <see cref="FlushPendingPasses"/> sends each (adapter, direction) lane as one batched request at
 /// the end of the pump iteration that accumulated it (the pump's batch-completed callback; see
 /// design 08-30-batched-ioctls D2 — every <see cref="PassAsync"/> caller lives inside the pump's
-/// serialized batch-loop chain). A block consumes the frame without reinjection. A proxy decision
+/// serialized batch-loop chain). Lanes live for their capture generation:
+/// <see cref="RetireLanesExcept"/> frees the lanes of adapters that left the scope when the next
+/// scope installs, so refresh-churned handles cannot silently fill the fixed lane table. A block
+/// consumes the frame without reinjection. A proxy decision
 /// routes TCP packets through the <see cref="TcpProxyCoordinator"/> and UDP datagrams through the
 /// <see cref="UdpProxyCoordinator"/> when one is configured; if no matching coordinator is provided
 /// the flow fails closed with a rate-limited structured log.
 /// </summary>
 public sealed class NdisPacketActionExecutor : IPacketActionExecutor
 {
-    private static readonly TimeSpan ProxyUnavailableLogInterval = TimeSpan.FromSeconds(5);
+    /// <summary>Shared rate-limit window for this executor's recoverable-fault warnings.</summary>
+    private static readonly TimeSpan RateLimitedWarnInterval = TimeSpan.FromSeconds(5);
 
     // One lane per (adapter handle, direction). Lanes cover the expected adapter scope with room
     // to spare; a configuration beyond this many concurrent lanes degrades those passes to
-    // immediate single sends instead of batching them.
+    // immediate single sends instead of batching them (counted and warned, never silent). Lanes
+    // outlived by an adapter-list refresh are retired at scope install, so the fixed table only
+    // ever holds the live scope's lanes.
     private const int PendingLaneCapacity = 8;
     private const int InitialLaneFrames = 8;
 
@@ -39,6 +45,9 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     private readonly PendingPassLane?[] _pendingLanes = new PendingPassLane?[PendingLaneCapacity];
     private long _lastProxyUnavailableLogTicks;
     private long _lastUdpFailureLogTicks;
+    private long _lastLaneOverflowLogTicks;
+    private long _lastLaneRetireLogTicks;
+    private long _immediateSendLaneOverflowCount;
 
     public NdisPacketActionExecutor(IPacketReinjector reinjector, IRuntimeLogger? logger = null, TcpProxyCoordinator? tcpProxy = null, UdpProxyCoordinator? udpProxy = null, NdisPacketBufferPool? bufferPool = null)
     {
@@ -83,7 +92,12 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         if (lane is null)
         {
             // More concurrent (adapter, direction) lanes than the fixed capacity: send now so the
-            // frame still goes out exactly once instead of being dropped from batching.
+            // frame still goes out exactly once instead of being dropped from batching. The
+            // degradation is observable by design (P0-1): counted for tests/telemetry, warned
+            // rate-limited for operators.
+            Interlocked.Increment(ref _immediateSendLaneOverflowCount);
+            if (ShouldWarn(ref _lastLaneOverflowLogTicks))
+                _logger.Warn($"Pass batching is degraded to immediate single sends because more than {PendingLaneCapacity} concurrent (adapter, direction) lanes are active.");
             if (isOnSend) _reinjector.SendToAdapter(adapterHandle, buffer);
             else _reinjector.SendToMstcp(adapterHandle, buffer);
             if (rented) buffer.Dispose();
@@ -103,10 +117,11 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     /// <summary>
     /// Resolves the accumulation lane for one (adapter handle, direction). The scan is lock-free
     /// once a lane exists (lanes are published fully constructed with volatile semantics and are
-    /// never removed); first sight of a key creates its lane under the creation lock. A lane is
+    /// removed only between generations by <see cref="RetireLanesExcept"/>, under this same
+    /// creation lock); first sight of a key creates its lane under the creation lock. A lane is
     /// only ever touched by its adapter's pump chain — every <see cref="PassAsync"/> caller runs
-    /// inside that pump's serialized batch loop, and flushes are issued per adapter — so appends
-    /// and flushes need no per-lane lock.
+    /// inside that pump's serialized batch loop within one generation, and flushes are issued per
+    /// adapter — so appends and flushes need no per-lane lock.
     /// </summary>
     private PendingPassLane? TryGetOrAddPendingLane(nint adapterHandle, bool isOnSend)
     {
@@ -161,11 +176,51 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         }
         finally
         {
-            for (var index = 0; index < count; index++)
+            ReleaseLaneBuffers(lane, count);
+        }
+    }
+
+    /// <summary>
+    /// Retires every pass lane whose adapter handle is absent from
+    /// <paramref name="activeAdapterHandles"/> — the between-generations contract that keeps the
+    /// fixed lane table from silently filling with dead keys as adapter-list refreshes mint fresh
+    /// handles. An empty span retires every lane (interception paused). Precondition: no pump for
+    /// a retired handle may still be running — the capture runner invokes this from its
+    /// scope-installed callback, strictly after the outgoing generation's run task (including its
+    /// loop-exit flush) has completed and before the next generation starts. A retired lane that
+    /// still holds frames indicates a breach of that contract: the frames are dropped fail-closed
+    /// (their adapter is gone) with a rate-limited warn, and their rented buffers are still
+    /// returned exactly once. Driver handle-value reuse is safe: a numerically reused handle is
+    /// indistinguishable from — and behaviorally equivalent to — the old lane key.
+    /// </summary>
+    internal void RetireLanesExcept(ReadOnlySpan<nint> activeAdapterHandles)
+    {
+        lock (_pendingLaneLock)
+        {
+            for (var index = 0; index < _pendingLanes.Length; index++)
             {
-                if (lane.Rented[index]) lane.Buffers[index].Dispose();
-                lane.Buffers[index] = null!;
+                if (Volatile.Read(ref _pendingLanes[index]) is not { } lane) continue;
+                if (activeAdapterHandles.Contains(lane.AdapterHandle)) continue;
+                var stale = lane.Count;
+                lane.Count = 0;
+                if (stale > 0)
+                {
+                    if (ShouldWarn(ref _lastLaneRetireLogTicks))
+                        _logger.Warn($"A pass lane retired for adapter 0x{lane.AdapterHandle:X} still held {stale} frame(s); the frames are dropped and their rented buffers returned because the iteration-end flush contract was breached.");
+                    ReleaseLaneBuffers(lane, stale);
+                }
+                Volatile.Write(ref _pendingLanes[index], null);
             }
+        }
+    }
+
+    /// <summary>Returns exactly the first <paramref name="count"/> lane entries: pooled copies back to the pool, in-place capture buffers untouched.</summary>
+    private static void ReleaseLaneBuffers(PendingPassLane lane, int count)
+    {
+        for (var index = 0; index < count; index++)
+        {
+            if (lane.Rented[index]) lane.Buffers[index].Dispose();
+            lane.Buffers[index] = null!;
         }
     }
 
@@ -182,6 +237,13 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
             return total;
         }
     }
+
+    /// <summary>
+    /// Telemetry/diagnostic surface: pass frames forced onto the immediate single-send path
+    /// because more concurrent (adapter, direction) lanes than the fixed capacity were active —
+    /// the more-than-four-NIC overflow and any lane-table exhaustion alike.
+    /// </summary>
+    internal long ImmediateSendLaneOverflowCount => Volatile.Read(ref _immediateSendLaneOverflowCount);
 
     /// <summary>
     /// Debug-only guard for the batching contract: pins that one adapter's lanes are fully
@@ -370,6 +432,6 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     {
         var now = DateTime.UtcNow.Ticks;
         var last = Interlocked.Read(ref lastLogTicks);
-        return now - last >= ProxyUnavailableLogInterval.Ticks && Interlocked.CompareExchange(ref lastLogTicks, now, last) == last;
+        return now - last >= RateLimitedWarnInterval.Ticks && Interlocked.CompareExchange(ref lastLogTicks, now, last) == last;
     }
 }
