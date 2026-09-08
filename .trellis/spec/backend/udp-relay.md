@@ -64,6 +64,7 @@
 - `IUdpProxyTransportFactory.CreateAsync(Socks5Server, CancellationToken)` and
   `Socks5UdpTransport.CreateAsync(Socks5Server, SelfTrafficRegistry,
   CancellationToken)` (`src/WinForward.Runtime/Socks5/Socks5UdpTransport.cs`) do not accept the original flow's address family.
+- Module boundary: the transport seam (`IUdpProxyTransport`/`IUdpProxyTransportFactory` and their receive-result vocabulary `Socks5UdpReceiveResult`/`Socks5UdpReceiveSkipReason`) lives in `src/WinForward.Runtime/Socks5/Socks5UdpTransport.cs` and is UdpProxy's sanctioned cross-group edge into Socks5 (mirroring TcpRedirect→Socks5); the datagram wire codec itself (`Socks5UdpDatagram`, `Socks5UdpCodec`) lives in `src/WinForward.Protocols/Socks5Udp.cs`.
 
 ### 3. Contracts
 
@@ -147,7 +148,7 @@ delivered long-expired; `_setupTombstones` was unbounded between 60 s sweeps.
   ctor override for tests), `long _pendingSetupBytes` (Interlocked),
   `SetupQueueDatagramTtl` (5 s), counters `SetupBudgetRejectionCount` /
   `SetupTtlExpiredCount`, diagnostics `PendingSetupBytesForDiagnostics`.
-- `BoundedSetupQueue` (`WinForward.Core/PacketRuntime.cs`): public class; entry
+- `BoundedSetupQueue` (`WinForward.Core/BoundedSetupQueue.cs`): public class; entry
   shape is `(ReadOnlyMemory<byte>, DateTimeOffset)`. Timestamp overloads
   `TryEnqueue(frame, enqueuedAt)` / `TryDequeue(out frame, out enqueuedAt)`;
   the timestamp-less overloads forward with a default stamp — additive only,

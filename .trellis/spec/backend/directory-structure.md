@@ -46,7 +46,7 @@ benchmarks/                    # 基准宿主（BenchmarkDotNet 性能基准 + �
 | `WinForward.Runtime.Socks5` | TCP/UDP 共用的 SOCKS5 拨号与 UDP 传输（编解码仍在 `WinForward.Protocols`） |
 
 - 新文件按域归组；根命名空间只进"所有组都引用的调度词汇"。
-- 跨组引用直接 `using`，允许的既有边：根→TcpRedirect（`TcpRedirectOutcome`）、根/Capture→两个 Coordinator、TcpRedirect/UdpProxy→Capture 的 `IPacketReinjector`、TcpRedirect→Socks5。出现新的组间循环时先考虑挪类型再考虑加 using。
+- 跨组引用直接 `using`，允许的既有边：根→TcpRedirect（`TcpRedirectOutcome`）、根/Capture→两个 Coordinator、TcpRedirect/UdpProxy→Capture 的 `IPacketReinjector`、TcpRedirect→Socks5、UdpProxy→Socks5（`IUdpProxyTransport` 工厂/传输接缝及其接收结果类型，镜像 TcpRedirect→Socks5；数据报线上编解码在 `WinForward.Protocols`）。出现新的组间循环时先考虑挪类型再考虑加 using。
 
 ---
 
