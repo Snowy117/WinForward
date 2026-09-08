@@ -88,7 +88,12 @@ public readonly record struct FlowKey(
     }
 
     /// <summary>Flat mix over the endpoint addresses and ports: one pass, no per-field chaining,
-    /// tuned for dictionary keys probed on every packet.</summary>
+    /// tuned for dictionary keys probed on every packet. Deliberately omits the origin fields that
+    /// <see cref="Equals(FlowKey)"/> compares: keys differing only in origin kind or origin adapter
+    /// are the same logical flow seen from another orientation and must share a hash bucket — the
+    /// same field set TransportTuple hashes for its orientation-agnostic index. An origin-aware
+    /// equality over this transport-only hash can collide but never diverge, so the asymmetry is
+    /// hash-consistent.</summary>
     public override int GetHashCode() => HashCode.Combine(
         (ulong)Local.Address.Bits,
         (ulong)(Local.Address.Bits >> 64),
@@ -164,14 +169,6 @@ public sealed class FlowTable
         _capacity = capacity;
     }
 
-    public bool TryGet(FlowKey key, out FlowState? state)
-    {
-        lock (_gate)
-        {
-            return _states.TryGetValue(key, out state) || _transportIndex.TryGetValue(TransportTuple.From(key), out state);
-        }
-    }
-
     /// <summary>
     /// Resolves a flow for a packet whose key may differ from the stored key in direction, origin
     /// kind, or origin adapter. A flow is identified by its transport tuple (address family,
@@ -199,37 +196,6 @@ public sealed class FlowTable
         lock (_gate)
         {
             if (TryResolveLocked(key, out state)) return state is not null;
-            if (_states.Count >= _capacity)
-            {
-                state = null;
-                return false;
-            }
-
-            var created = new FlowState(key, decide(), ++_nextGeneration);
-            _states.Add(key, created);
-            AddToTransportIndex(created);
-            state = created;
-            return true;
-        }
-    }
-
-    public FlowState Claim(FlowKey key, Func<FlowDecision> decide)
-    {
-        if (!TryClaim(key, decide, out var state) || state is null) throw new InvalidOperationException("Flow table capacity has been reached.");
-        return state;
-    }
-
-    public bool TryClaim(FlowKey key, Func<FlowDecision> decide, out FlowState? state)
-    {
-        lock (_gate)
-        {
-            if (_states.TryGetValue(key, out var existing) || _transportIndex.TryGetValue(TransportTuple.From(key), out existing))
-            {
-                existing.Touch(DateTimeOffset.UtcNow);
-                state = existing;
-                return true;
-            }
-
             if (_states.Count >= _capacity)
             {
                 state = null;
@@ -312,6 +278,10 @@ public sealed class FlowTable
         public static TransportTuple From(FlowKey key) => new(key.AddressFamily, key.Protocol, key.Local, key.Remote);
         public TransportTuple Reverse() => this with { Local = Remote, Remote = Local };
 
+        // Mirrors FlowKey.GetHashCode's field set on purpose: FlowKey hashes exactly these
+        // transport fields while also comparing origin, and TransportTuple is the
+        // orientation-agnostic index key. Two equivalence relations over one endpoint shape —
+        // parallel by design, not a dedup candidate.
         public override int GetHashCode() => HashCode.Combine(
             (ulong)Local.Address.Bits,
             (ulong)(Local.Address.Bits >> 64),

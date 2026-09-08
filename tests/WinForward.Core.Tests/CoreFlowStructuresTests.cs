@@ -16,21 +16,21 @@ public sealed class CoreFlowStructuresTests
         var table = new FlowTable();
         var decisionCount = 0;
 
-        var first = table.Claim(FlowKey.Create(local, dns1, TransportProtocol.Udp, FlowOriginKind.Host), () =>
+        Assert.True(table.TryClaimResolved(FlowKey.Create(local, dns1, TransportProtocol.Udp, FlowOriginKind.Host), () =>
         {
             decisionCount++;
             return new FlowDecision(FlowAction.Proxy, 0, "dns");
-        });
-        var second = table.Claim(FlowKey.Create(local, dns1, TransportProtocol.Udp, FlowOriginKind.Host), () =>
+        }, out var first));
+        Assert.True(table.TryClaimResolved(FlowKey.Create(local, dns1, TransportProtocol.Udp, FlowOriginKind.Host), () =>
         {
             decisionCount++;
             return new FlowDecision(FlowAction.Block, 1, null);
-        });
-        var third = table.Claim(FlowKey.Create(local, dns2, TransportProtocol.Udp, FlowOriginKind.Host), () =>
+        }, out var second));
+        Assert.True(table.TryClaimResolved(FlowKey.Create(local, dns2, TransportProtocol.Udp, FlowOriginKind.Host), () =>
         {
             decisionCount++;
             return new FlowDecision(FlowAction.Proxy, 0, "dns");
-        });
+        }, out var third));
 
         Assert.Same(first, second);
         Assert.NotSame(first, third);
@@ -65,9 +65,9 @@ public sealed class CoreFlowStructuresTests
         var table = new FlowTable(capacity: 1);
         var first = FlowKey.Create(Endpoint.From(IPAddress.Loopback, 1), Endpoint.From(IPAddress.Parse("192.0.2.1"), 2), TransportProtocol.Udp, FlowOriginKind.Host);
         var second = FlowKey.Create(Endpoint.From(IPAddress.Loopback, 3), Endpoint.From(IPAddress.Parse("192.0.2.1"), 4), TransportProtocol.Udp, FlowOriginKind.Host);
-        Assert.True(table.TryClaim(first, () => FlowDecision.Fallback(FlowAction.Pass), out _));
+        Assert.True(table.TryClaimResolved(first, () => FlowDecision.Fallback(FlowAction.Pass), out _));
 
-        Assert.False(table.TryClaim(second, () => FlowDecision.Fallback(FlowAction.Pass), out _));
+        Assert.False(table.TryClaimResolved(second, () => FlowDecision.Fallback(FlowAction.Pass), out _));
     }
 
     [Fact]
@@ -75,7 +75,9 @@ public sealed class CoreFlowStructuresTests
     {
         var table = new FlowTable();
         var key = FlowKey.Create(Endpoint.From(IPAddress.Loopback, 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
-        var claimed = table.Claim(key, () => FlowDecision.Fallback(FlowAction.Pass));
+        var claimed = table.TryClaimResolved(key, () => FlowDecision.Fallback(FlowAction.Pass), out var state)
+            ? state!
+            : throw new InvalidOperationException("Flow table claim failed.");
         var beforeLookup = DateTimeOffset.UtcNow;
         claimed.Touch(beforeLookup - TimeSpan.FromMinutes(2));
 
@@ -91,7 +93,9 @@ public sealed class CoreFlowStructuresTests
     {
         var table = new FlowTable();
         var key = FlowKey.Create(Endpoint.From(IPAddress.Loopback, 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
-        var claimed = table.Claim(key, () => FlowDecision.Fallback(FlowAction.Pass));
+        var claimed = table.TryClaimResolved(key, () => FlowDecision.Fallback(FlowAction.Pass), out var state)
+            ? state!
+            : throw new InvalidOperationException("Flow table claim failed.");
         var lastActivity = claimed.LastActivityUtc;
         var now = lastActivity + TimeSpan.FromMinutes(10);
 
@@ -116,7 +120,9 @@ public sealed class CoreFlowStructuresTests
             TransportProtocol.Udp,
             FlowOriginKind.Host,
             new AdapterContext("host", "host", 1));
-        var claimed = table.Claim(key, () => FlowDecision.Fallback(FlowAction.Pass));
+        var claimed = table.TryClaimResolved(key, () => FlowDecision.Fallback(FlowAction.Pass), out var state)
+            ? state!
+            : throw new InvalidOperationException("Flow table claim failed.");
         claimed.Touch(DateTimeOffset.UtcNow - TimeSpan.FromMinutes(2));
         var crossAdapter = key with
         {

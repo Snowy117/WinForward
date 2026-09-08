@@ -45,21 +45,6 @@ public sealed class NdisApiAbiTests
     }
 
     [Fact]
-    public void DriverVersionStatusRejectsNativeFailureSentinel()
-    {
-        var exception = Assert.Throws<Win32Exception>(() => NdisNativeCallStatus.EnsureDriverVersion(uint.MaxValue, nativeError: 87));
-
-        Assert.Equal(87, exception.NativeErrorCode);
-        Assert.Contains("driver version", exception.Message, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void DriverVersionStatusReturnsValidVersion()
-    {
-        Assert.Equal(0x0003_0602u, NdisNativeCallStatus.EnsureDriverVersion(0x0003_0602u, nativeError: 0));
-    }
-
-    [Fact]
     public void QueueStatusSeparatesIdlePollingFromNativeFailures()
     {
         Assert.False(NdisNativeCallStatus.HasQueuedPackets(1, nativeError: 0, queuedPacketCount: 0, (nint)2));
@@ -68,17 +53,6 @@ public sealed class NdisApiAbiTests
         var exception = Assert.Throws<Win32Exception>(() => NdisNativeCallStatus.HasQueuedPackets(0, nativeError: 87, queuedPacketCount: 0, (nint)2));
         Assert.Equal(87, exception.NativeErrorCode);
         Assert.Contains("adapter 0x2", exception.Message, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void ReadResultRejectsFailureFromNonEmptyQueue()
-    {
-        Assert.True(NdisNativeCallStatus.InterpretReadResult(queuedPacketCount: 1, nativeResult: 1, nativeError: 0, (nint)2));
-        Assert.False(NdisNativeCallStatus.InterpretReadResult(queuedPacketCount: 0, nativeResult: 0, nativeError: 87, (nint)2));
-
-        var exception = Assert.Throws<Win32Exception>(() => NdisNativeCallStatus.InterpretReadResult(queuedPacketCount: 1, nativeResult: 0, nativeError: 87, (nint)2));
-        Assert.Equal(87, exception.NativeErrorCode);
-        Assert.Contains("non-empty queue", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

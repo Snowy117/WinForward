@@ -34,7 +34,7 @@ public static class ProcessSelectorMatcher
         return false;
     }
 
-    public static string NormalizePath(string value)
+    private static string NormalizePath(string value)
     {
         ArgumentNullException.ThrowIfNull(value);
         var normalized = value.Trim().Replace('/', '\\');

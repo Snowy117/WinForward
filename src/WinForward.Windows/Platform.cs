@@ -1,5 +1,4 @@
 using System.Runtime.Versioning;
-using WinForward.Core;
 
 namespace WinForward.Windows;
 
@@ -25,45 +24,4 @@ public static class PlatformRequirements
         var principal = new System.Security.Principal.WindowsPrincipal(identity);
         return principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
     }
-}
-
-public sealed record WindowsAdapter(
-    string StableId,
-    string FriendlyName,
-    string InternalName,
-    nint RuntimeHandle,
-    long Generation);
-
-public static class AdapterSelector
-{
-    public static bool Matches(WindowsAdapter adapter, string? stableId, string? friendlyName) =>
-        (stableId is null || string.Equals(adapter.StableId, stableId, StringComparison.OrdinalIgnoreCase)) &&
-        (friendlyName is null || string.Equals(adapter.FriendlyName, friendlyName, StringComparison.OrdinalIgnoreCase));
-
-    public static bool TryResolve(IEnumerable<WindowsAdapter> adapters, string? stableId, string? friendlyName, out WindowsAdapter? resolved, out string? error)
-    {
-        var matches = adapters.Where(adapter => Matches(adapter, stableId, friendlyName)).ToArray();
-        if (matches.Length == 1)
-        {
-            resolved = matches[0];
-            error = null;
-            return true;
-        }
-
-        resolved = null;
-        error = matches.Length == 0 ? "No adapter matches the configured selector." : "Adapter selector is ambiguous.";
-        return false;
-    }
-}
-
-public readonly record struct ProcessIdentity(uint ProcessId, DateTime CreationTimeUtc, string? Name, string? FullPath);
-
-public interface IProcessAttributor
-{
-    ValueTask<ProcessIdentity?> FindAsync(FlowKey key, CancellationToken cancellationToken);
-}
-
-public sealed class UnsupportedProcessAttributor : IProcessAttributor
-{
-    public ValueTask<ProcessIdentity?> FindAsync(FlowKey key, CancellationToken cancellationToken) => ValueTask.FromResult<ProcessIdentity?>(null);
 }

@@ -3,11 +3,6 @@ using System.Runtime.Versioning;
 
 namespace WinForward.Windows;
 
-public interface IWindowsAdapterInventory
-{
-    IReadOnlyList<WindowsAdapter> GetCurrentAdapters();
-}
-
 /// <summary>
 /// A Windows IP Helper adapter snapshot projected onto the identity fields the
 /// inventory needs to correlate NDISAPI adapters with user-facing names.
@@ -19,7 +14,7 @@ public readonly record struct IPAdapterInfo(string Id, string Name, byte[] Mac)
 }
 
 [SupportedOSPlatform("windows")]
-public sealed class WindowsAdapterInventory : IWindowsAdapterInventory
+public sealed class WindowsAdapterInventory
 {
     private readonly Func<IReadOnlyList<(string InternalName, nint Handle, byte[] Mac, ushort Mtu)>> _ndisAdapters;
     private readonly Func<IReadOnlyList<IPAdapterInfo>> _ipAdapters;
