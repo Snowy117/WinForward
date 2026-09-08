@@ -50,7 +50,7 @@ public sealed class NdisCaptureResilienceTests
                 },
             ]);
 
-        await using var pump = new NdisCapturePump(reader, (nint)0x55, CaptureHandler(observed), TimeSpan.FromMilliseconds(1), transientRetryBaseDelay: TimeSpan.FromMilliseconds(1));
+        await using var pump = new NdisCapturePump(reader, (nint)0x55, CaptureHandler(observed), new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), TransientRetryBaseDelay = TimeSpan.FromMilliseconds(1) });
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pump.RunAsync(cts.Token).AsTask());
 
@@ -77,7 +77,7 @@ public sealed class NdisCaptureResilienceTests
                 },
             ]);
 
-        await using var pump = new NdisCapturePump(reader, (nint)0x55, static (_, _) => ValueTask.CompletedTask, TimeSpan.FromMilliseconds(1), transientRetryBaseDelay: TimeSpan.FromMilliseconds(1));
+        await using var pump = new NdisCapturePump(reader, (nint)0x55, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), TransientRetryBaseDelay = TimeSpan.FromMilliseconds(1) });
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pump.RunAsync(cts.Token).AsTask());
 
@@ -93,7 +93,7 @@ public sealed class NdisCaptureResilienceTests
         using var cts = new CancellationTokenSource();
         var reader = new ScriptedReader([], throwAlways: Transient());
 
-        var pump = new NdisCapturePump(reader, (nint)0x55, CaptureHandler(observed), TimeSpan.FromMilliseconds(1), onDegraded: degradedErrors.Add, transientRetryBaseDelay: TimeSpan.FromMilliseconds(1));
+        var pump = new NdisCapturePump(reader, (nint)0x55, CaptureHandler(observed), new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), OnDegraded = degradedErrors.Add, TransientRetryBaseDelay = TimeSpan.FromMilliseconds(1) });
 
         await pump.RunAsync(cts.Token);
         await pump.DisposeAsync();
@@ -114,7 +114,7 @@ public sealed class NdisCaptureResilienceTests
         using var cts = new CancellationTokenSource();
         var reader = new ScriptedReader([], throwAlways: Permanent());
 
-        var pump = new NdisCapturePump(reader, (nint)0x55, static (_, _) => ValueTask.CompletedTask, TimeSpan.FromMilliseconds(1), onDegraded: degradedErrors.Add);
+        var pump = new NdisCapturePump(reader, (nint)0x55, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), OnDegraded = degradedErrors.Add });
 
         await pump.RunAsync(cts.Token);
 
@@ -139,7 +139,7 @@ public sealed class NdisCaptureResilienceTests
                 },
             ]);
 
-        await using var pump = new NdisCapturePump(reader, (nint)0x55, static (_, _) => ValueTask.CompletedTask, TimeSpan.FromMilliseconds(1), onTransientRetry: (error, attempt) => attempts.Add((error, attempt)), transientRetryBaseDelay: TimeSpan.FromMilliseconds(1));
+        await using var pump = new NdisCapturePump(reader, (nint)0x55, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), OnTransientRetry = (error, attempt) => attempts.Add((error, attempt)), TransientRetryBaseDelay = TimeSpan.FromMilliseconds(1) });
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pump.RunAsync(cts.Token).AsTask());
 
@@ -152,7 +152,7 @@ public sealed class NdisCaptureResilienceTests
         using var cts = new CancellationTokenSource();
         var reader = new ScriptedReader([], throwAlways: Transient());
 
-        var pump = new NdisCapturePump(reader, (nint)0x55, static (_, _) => ValueTask.CompletedTask, TimeSpan.FromMilliseconds(1), transientRetryBaseDelay: TimeSpan.FromSeconds(30));
+        var pump = new NdisCapturePump(reader, (nint)0x55, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), TransientRetryBaseDelay = TimeSpan.FromSeconds(30) });
 
         var run = pump.RunAsync(cts.Token).AsTask();
         await Task.Delay(50, CancellationToken.None);

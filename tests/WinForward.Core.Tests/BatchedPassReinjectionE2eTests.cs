@@ -42,9 +42,12 @@ public sealed class BatchedPassReinjectionE2eTests
             reader,
             adapter.RuntimeHandle,
             (packet, cancellationToken) => processor.ProcessAsync(packet, adapter, cancellationToken),
-            TimeSpan.FromMilliseconds(1),
-            BatchCapacity,
-            onBatchCompleted: () => executor.FlushPendingPasses(adapter.RuntimeHandle));
+            new NdisCapturePumpOptions
+            {
+                PollDelay = TimeSpan.FromMilliseconds(1),
+                BatchCapacity = BatchCapacity,
+                OnBatchCompleted = () => executor.FlushPendingPasses(adapter.RuntimeHandle),
+            });
         await RunPumpAsync(pump, cts);
 
         // Every frame went out exactly once, through the batched path, and nothing stayed pending.
@@ -90,7 +93,7 @@ public sealed class BatchedPassReinjectionE2eTests
                 new PacketCaptureMetadata(packet.DeviceFlags, packet.AdapterHandle, packet.Flags),
                 NativeFrame: new NativeFrameHandle(packet.Buffer));
             return executor.PassAsync(packet2, CancellationToken.None);
-        }, TimeSpan.FromMilliseconds(1), onBatchCompleted: () => executor.FlushPendingPasses((nint)0x66));
+        }, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), OnBatchCompleted = () => executor.FlushPendingPasses((nint)0x66) });
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => RunPumpAsync(pump, cts).AsTask());
 

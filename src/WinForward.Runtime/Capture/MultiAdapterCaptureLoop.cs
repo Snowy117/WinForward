@@ -34,10 +34,13 @@ public sealed class MultiAdapterCaptureLoop : IPacketCaptureLoop
                 driver,
                 adapter.RuntimeHandle,
                 (packet, cancellationToken) => processor.ProcessAsync(packet, adapter, cancellationToken),
-                pollDelay,
-                onBatchCompleted: onBatchCompleted is null ? null : () => onBatchCompleted(adapter.RuntimeHandle),
-                onTransientRetry: onAdapterTransientRetry is null ? null : (nativeError, attempt) => onAdapterTransientRetry(adapter, nativeError, attempt),
-                onDegraded: nativeError => OnPumpDegraded(adapter, nativeError)))
+                new NdisCapturePumpOptions
+                {
+                    PollDelay = pollDelay,
+                    OnBatchCompleted = onBatchCompleted is null ? null : () => onBatchCompleted(adapter.RuntimeHandle),
+                    OnTransientRetry = onAdapterTransientRetry is null ? null : (nativeError, attempt) => onAdapterTransientRetry(adapter, nativeError, attempt),
+                    OnDegraded = nativeError => OnPumpDegraded(adapter, nativeError),
+                }))
             .ToArray();
     }
 

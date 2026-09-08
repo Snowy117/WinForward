@@ -28,6 +28,19 @@ public interface INdisPacketReader
     int TryReadPackets(nint adapterHandle, NdisPacketBuffer[] buffers);
 }
 
+/// <summary>
+/// The optional knobs of the <see cref="NdisCapturePump"/> constructor, collapsed into one
+/// record (six former optional positional parameters) so call sites name only the knobs they
+/// set. Every member defaults to null, which selects the pump's built-in default for that knob.
+/// </summary>
+public sealed record NdisCapturePumpOptions(
+    TimeSpan? PollDelay = null,
+    int? BatchCapacity = null,
+    Action? OnBatchCompleted = null,
+    Action<int, int>? OnTransientRetry = null,
+    Action<int>? OnDegraded = null,
+    TimeSpan? TransientRetryBaseDelay = null);
+
 [SupportedOSPlatform("windows")]
 public sealed class NdisCapturePump : IAsyncDisposable
 {
@@ -64,22 +77,23 @@ public sealed class NdisCapturePump : IAsyncDisposable
     private int _degraded;
     private int _lastDegradedNativeError;
 
-    public NdisCapturePump(INdisPacketReader driver, nint adapterHandle, Func<NdisCapturedPacket, CancellationToken, ValueTask> handler, TimeSpan? pollDelay = null, int? batchCapacity = null, Action? onBatchCompleted = null, Action<int, int>? onTransientRetry = null, Action<int>? onDegraded = null, TimeSpan? transientRetryBaseDelay = null)
+    public NdisCapturePump(INdisPacketReader driver, nint adapterHandle, Func<NdisCapturedPacket, CancellationToken, ValueTask> handler, NdisCapturePumpOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(driver);
         ArgumentNullException.ThrowIfNull(handler);
-        var capacity = batchCapacity ?? DefaultBatchCapacity;
-        if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(batchCapacity));
+        var capacity = options?.BatchCapacity ?? DefaultBatchCapacity;
+        // The default is always positive, so a non-positive capacity can only come from options.
+        if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(options), capacity, "BatchCapacity must be positive.");
         _driver = driver;
         _adapterHandle = adapterHandle;
         _handler = handler;
-        _pollDelay = pollDelay ?? TimeSpan.FromMilliseconds(1);
+        _pollDelay = options?.PollDelay ?? TimeSpan.FromMilliseconds(1);
         _batchBuffers = new NdisPacketBuffer[capacity];
         for (var index = 0; index < capacity; index++) _batchBuffers[index] = new NdisPacketBuffer();
-        _onBatchCompleted = onBatchCompleted;
-        _onTransientRetry = onTransientRetry;
-        _onDegraded = onDegraded;
-        _transientRetryBaseDelay = transientRetryBaseDelay ?? DefaultTransientRetryBaseDelay;
+        _onBatchCompleted = options?.OnBatchCompleted;
+        _onTransientRetry = options?.OnTransientRetry;
+        _onDegraded = options?.OnDegraded;
+        _transientRetryBaseDelay = options?.TransientRetryBaseDelay ?? DefaultTransientRetryBaseDelay;
     }
 
     /// <summary>

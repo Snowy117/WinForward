@@ -40,7 +40,7 @@ public class CapturePumpBenchmarks
 
         using var completion = new CancellationTokenSource();
         var reader = new FiniteCaptureReader(frame, PacketsPerRound, DistinctFlows, completion, NdisApiAbi.PacketFlagOnSend);
-        await using var pump = new NdisCapturePump(reader, adapter.RuntimeHandle, (packet, cancellationToken) => processor.ProcessAsync(packet, adapter, cancellationToken), TimeSpan.FromMilliseconds(1), BatchCapacity);
+        await using var pump = new NdisCapturePump(reader, adapter.RuntimeHandle, (packet, cancellationToken) => processor.ProcessAsync(packet, adapter, cancellationToken), new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), BatchCapacity = BatchCapacity });
 
         try
         {

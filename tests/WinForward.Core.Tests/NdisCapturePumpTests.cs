@@ -29,7 +29,7 @@ public sealed class NdisCapturePumpTests
                 },
             ]);
 
-        await using var pump = new NdisCapturePump(reader, (nint)0x55, CaptureHandler(observed, handles), TimeSpan.FromMilliseconds(1));
+        await using var pump = new NdisCapturePump(reader, (nint)0x55, CaptureHandler(observed, handles), new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1) });
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pump.RunAsync(cts.Token).AsTask());
 
@@ -60,7 +60,7 @@ public sealed class NdisCapturePumpTests
                 },
             ]);
 
-        await using var pump = new NdisCapturePump(reader, (nint)0x66, CaptureHandler(observed, handles), TimeSpan.FromMilliseconds(1), batchCapacity: 8);
+        await using var pump = new NdisCapturePump(reader, (nint)0x66, CaptureHandler(observed, handles), new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), BatchCapacity = 8 });
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pump.RunAsync(cts.Token).AsTask());
 
@@ -86,7 +86,7 @@ public sealed class NdisCapturePumpTests
                 },
             ]);
 
-        await using var pump = new NdisCapturePump(reader, (nint)0x77, CaptureHandler(observed, handles), TimeSpan.FromMilliseconds(1));
+        await using var pump = new NdisCapturePump(reader, (nint)0x77, CaptureHandler(observed, handles), new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1) });
 
         // Two empty polls go through the poll-delay branch; the cancelled third poll surfaces as
         // the pump's normal cancellation propagation, not a failure.
@@ -116,7 +116,7 @@ public sealed class NdisCapturePumpTests
                 },
             ]);
 
-        var pump = new NdisCapturePump(reader, (nint)0x88, (packet, _) => { buffers.Add(packet.Buffer); return ValueTask.CompletedTask; }, TimeSpan.FromMilliseconds(1));
+        var pump = new NdisCapturePump(reader, (nint)0x88, (packet, _) => { buffers.Add(packet.Buffer); return ValueTask.CompletedTask; }, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1) });
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pump.RunAsync(cts.Token).AsTask());
         await pump.DisposeAsync();
@@ -133,7 +133,7 @@ public sealed class NdisCapturePumpTests
     [SupportedOSPlatform("windows")]
     public void PumpRejectsNonPositiveBatchCapacity(int batchCapacity)
     {
-        Assert.Throws<ArgumentOutOfRangeException>(() => new NdisCapturePump(new ScriptedReader([_ => 0]), (nint)1, static (_, _) => ValueTask.CompletedTask, TimeSpan.FromMilliseconds(1), batchCapacity));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new NdisCapturePump(new ScriptedReader([_ => 0]), (nint)1, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), BatchCapacity = batchCapacity }));
     }
 
     [Fact]
@@ -181,7 +181,7 @@ public sealed class NdisCapturePumpTests
         {
             if (!handlerStarted.TrySetResult()) return ValueTask.CompletedTask;
             return new ValueTask(handlerReleased.Task);
-        }, TimeSpan.FromMilliseconds(1));
+        }, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1) });
 
         var pumpTask = pump.RunAsync(cts.Token).AsTask();
         await handlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -204,7 +204,7 @@ public sealed class NdisCapturePumpTests
         var readReleased = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var reader = new GatedReader(readEntered, readReleased);
 
-        var pump = new NdisCapturePump(reader, (nint)0xBB, static (_, _) => ValueTask.CompletedTask, TimeSpan.FromMilliseconds(1));
+        var pump = new NdisCapturePump(reader, (nint)0xBB, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1) });
 
         // Task.Run: the run's synchronous prefix blocks inside the gated read, so it cannot
         // start on the test thread.
