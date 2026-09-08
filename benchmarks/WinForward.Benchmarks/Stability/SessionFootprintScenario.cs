@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using WinForward.Benchmarks.Perf;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Runtime.Socks5;

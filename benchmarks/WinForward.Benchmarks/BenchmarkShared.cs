@@ -7,7 +7,7 @@ using WinForward.Runtime;
 using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
 
-namespace WinForward.Benchmarks.Perf;
+namespace WinForward.Benchmarks;
 
 internal static class BenchmarkShared
 {

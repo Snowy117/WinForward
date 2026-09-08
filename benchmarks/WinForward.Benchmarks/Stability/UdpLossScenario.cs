@@ -1,6 +1,4 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
-using WinForward.Benchmarks.Perf;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
@@ -82,32 +80,8 @@ internal static class UdpLossScenario
                     relayReplies = server.RelayReplies,
                     relaySendFaults = server.RelaySendFaults,
                 },
-                productEvents = productEvents is not null ? BuildProductEvents(productEvents) : null,
+                productEvents = productEvents is not null ? StabilityShared.BuildProductEvents(productEvents) : null,
             });
-    }
-
-    /// <summary>Product trace/debug event names surfaced in the result row; absent names count as zero.</summary>
-    private static readonly string[] ProductEventNames =
-    [
-        "udp.setupqueue.dropped",
-        "udp.session.rejected",
-        "udp.setup.failed",
-        "udp.setup.cooldown",
-        "udp.packet.sent",
-        "udp.session.created",
-        "udp.session.closed",
-        "udp.session.expired",
-    ];
-
-    private static Dictionary<string, long> BuildProductEvents(CountingRuntimeLogger logger)
-    {
-        var snapshot = new Dictionary<string, long>(ProductEventNames.Length, StringComparer.Ordinal);
-        foreach (var name in ProductEventNames)
-        {
-            snapshot[name] = logger.Events.TryGetValue(name, out var count) ? count : 0;
-        }
-
-        return snapshot;
     }
 
     private static async Task WarmupAsync(UdpProxyCoordinator coordinator, Socks5Server server, FlowKey[] flows, long[] sequences, byte[] payload, EchoReceiver receiver)
@@ -194,29 +168,5 @@ internal static class UdpLossScenario
 
             return ValueTask.CompletedTask;
         }
-    }
-
-    /// <summary>
-    /// Diagnostic-only product-event census: counts every Event() call by name (both Trace and
-    /// Debug) with no formatting or I/O. Enabling Trace makes the product emit its per-datagram
-    /// trace events (udp.packet.sent/received), which allocates and slows the send/receive paths —
-    /// rows produced this way localize loss but are not throughput-comparable with uninstrumented runs.
-    /// </summary>
-    private sealed class CountingRuntimeLogger : IRuntimeLogger
-    {
-        private readonly ConcurrentDictionary<string, long> _events = new(StringComparer.Ordinal);
-
-        public IReadOnlyDictionary<string, long> Events => _events;
-
-        public bool IsEnabled(RuntimeLogLevel level) => true;
-
-        public void Info(string message) { }
-
-        public void Warn(string message) { }
-
-        public void Error(string message) { }
-
-        public void Event(RuntimeLogLevel level, string eventName, params RuntimeLogField[] fields)
-            => _events.AddOrUpdate(eventName, 1, static (_, count) => count + 1);
     }
 }
