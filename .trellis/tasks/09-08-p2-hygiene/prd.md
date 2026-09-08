@@ -74,15 +74,25 @@ Lightweight task: PRD-only, executed as ordered mechanical batches.
 
 ## Acceptance criteria
 
-- [ ] All deletions carry an rg re-verification note (command + zero-hit result) in the task notes
-      or commit message.
-- [ ] Production code compiles with no reference to any deleted symbol; tests migrated, not
-      weakened (assertion semantics unchanged).
-- [ ] TestHelpers audit clean: none of the R5-listed fakes remain privately duplicated; no
-      same-name-different-behavior fakes.
-- [ ] Config tests cover indexed paths for invalid (not just null) array elements.
-- [ ] Cli: `LogAdapterTransientRetry` semantics + `UpdateUdpTargets` policy under test.
-- [ ] Zero-warning build; green tests; before/after totals recorded.
+- [x] All deletions carry an rg re-verification note (command + zero-hit result) in the task notes
+      or commit message. (All in `implement-notes.md` — R5–R8 by the implement agent, R1–R4
+      backfilled by the check agent.)
+- [x] Production code compiles with no reference to any deleted symbol; tests migrated, not
+      weakened (assertion semantics unchanged). (5 FlowTable tests migrated to
+      `TryClaimResolved`; 3 helper-only NdisApiAbi tests deleted — expected −3, documented.)
+- [x] TestHelpers audit clean: none of the R5-listed fakes remain privately duplicated; no
+      same-name-different-behavior fakes. (FakeModes/capture loops → CaptureLifecycleFakes.cs;
+      ScriptedReader → own file; NoopResponseSink → UdpTransportFakes.cs; FakeGuard gained
+      `Owned` switch; private FakeExecutor subset deleted — promoted fake is a superset.)
+- [x] Config tests cover indexed paths for invalid (not just null) array elements. (3 new exact
+      path assertions; LogLevel JsonElement→string? unification deferred — needs custom
+      converter to distinguish explicit-null from absent; see Notes.)
+- [x] Cli: `LogAdapterTransientRetry` semantics + `UpdateUdpTargets` policy under test.
+      (`AdapterTransientRetryLogGate` relocated to Runtime with injectable clock, 4 deterministic
+      tests; 5 `DurableCaptureBundleTests` cover zero-MAC/fallback/empty-scope/snapshot.)
+- [x] Zero-warning build; green tests; before/after totals recorded.
+      (569 → 566 (−3 deleted helper-only tests) → 578 (+12 new); final 578/578. Commits:
+      de1152a, 01326fc, a8836b7, bcdf50a, a8e5cfc on branch `p2-hygiene`. trellis-check: PASS.)
 
 ## Notes
 

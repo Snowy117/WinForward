@@ -1,3 +1,19 @@
+# P2 R1–R4 rg re-verification (2026-09-08, check pass)
+
+Commands run from repo root over `src/` + `tests/` + `benchmarks/` (zero-hit result noted
+per sweep; recorded post-hoc by the check agent — the R1–R4 commit itself carried no note):
+
+- `rg -n "IWindowsAdapterInventory" src/ tests/ benchmarks/` → zero hits.
+- `rg -n "EnsureDriverVersion|InterpretReadResult" src/ tests/ benchmarks/` → zero hits
+  (`NdisNativeCallStatus.InterpretBatchReadResult`, the live batch path, is retained).
+- `rg -n "\.TryGet\(" src/ tests/ benchmarks/` → zero hits (`FlowTable.TryGet` fully gone).
+- `rg -n "\.Claim\(|\.TryClaim\(" src/ tests/ benchmarks/` → every remaining hit binds to a
+  different class with a different signature (`UdpAssociationTable.Claim/TryClaim`,
+  `TcpRedirectTable.TryClaim`, cooldown tables); `FlowTable` (Domain.cs:158) now exposes only
+  `TryResolve` / `TryClaimResolved` / `RemoveExpired`.
+- ABI preservation rule honored: `GetDriverVersion` (NdisApiAbi.cs:187), `ReadPacket`
+  (NdisApiAbi.cs:211), and `ReadPackets` (NdisApiAbi.cs:215) P/Invoke declarations all retained.
+
 # P2 R5–R8 implementation notes (2026-09-08)
 
 Baseline: HEAD = de1152a (R1–R4 committed). 566/566 tests green, zero warnings.
