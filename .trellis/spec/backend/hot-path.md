@@ -95,7 +95,7 @@ UDP session setup, or the SOCKS5 benchmark/soak suite.
 - `TcpFrameRewriter.SwapEthernetMacs` swaps via byte-index pairs (`(frame[i], frame[i+6])`),
   constructively allocation-free — do not reintroduce a heap temp (`new byte[6]` measured 0 B
   only under JIT escape analysis; the indexed swap is a source-level guarantee).
-- `BoundedSetupQueue.TryEnqueue/TryDequeue` (`WinForward.Core/PacketRuntime.cs`) keeps a
+- `BoundedSetupQueue.TryEnqueue/TryDequeue` (`WinForward.Core/BoundedSetupQueue.cs`) keeps a
   single-slot fast path (≤1 buffered datagram skips the `Queue<>` object + array).
 - `TcpThroughputScenario` soak modes: `--tcp-relay-mode socks5|bare`.
 

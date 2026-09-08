@@ -141,7 +141,7 @@ Every redirect path terminates at a local listener socket, and the injected SYN 
 
 - `TcpRedirectTombstoneTable` (`TcpRedirect/TcpRedirectTombstoneTable.cs`) — dual-key (`FlowKey` forward + reverse `Endpoint` pair) → shared entry with `ExpiryUtc`; `TryAdd(forward, reverseSource, reverseDestination, expiryUtc)` (FIFO evict-oldest at capacity), `TryHit(FlowKey, now)` and `TryHit(reverseSource, reverseDestination, now)` (hit only while `now < ExpiryUtc`), `RemoveExpired(now)` (also head-drains the insertion-order queue).
 - `TcpRedirectOutcome.Dropped` (`TcpRedirectInterfaces.cs`) — a dedicated outcome; **never reuse `Blocked`** for grace drops (executor's `Blocked` path fires `LogProxyUnavailable`, mislabeling grace consumption as proxy failure).
-- `FlowTable.RemoveExpired(now, isHeld?)` (`src/WinForward.Core/Domain.cs`) — optional hold predicate; held entries are skipped **without Touch**, so they expire at their original idle point once the hold lapses.
+- `FlowTable.RemoveExpired(now, isHeld?)` (`src/WinForward.Core/FlowTable.cs`) — optional hold predicate; held entries are skipped **without Touch**, so they expire at their original idle point once the hold lapses.
 
 ### 3. Contracts
 
