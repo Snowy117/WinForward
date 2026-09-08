@@ -201,7 +201,7 @@ public sealed class UdpRelayTests
         // M3: the reinjector threads the configured cap into frame building; a payload over the cap
         // is dropped fail-closed, never injected.
         var reinjector = new FakeReinjector();
-        var sink = new UdpResponseReinjector(reinjector, (nint)7, s_macA, maximumFrameSize: 1514);
+        var sink = new UdpResponseReinjector(reinjector, new UdpAdapterTargetSource(new UdpAdapterTarget((nint)7, s_macA)), maximumFrameSize: 1514);
         var client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000);
         var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
         var flow = FlowKey.Create(client, server, TransportProtocol.Udp, FlowOriginKind.Host);
@@ -220,7 +220,7 @@ public sealed class UdpRelayTests
     public async Task HostFlowResponseInjectsTowardMstcpWithServerAsSource()
     {
         var reinjector = new FakeReinjector();
-        var sink = new UdpResponseReinjector(reinjector, (nint)7, s_macA);
+        var sink = new UdpResponseReinjector(reinjector, new UdpAdapterTargetSource(new UdpAdapterTarget((nint)7, s_macA)));
         var client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000);
         var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
         var flow = FlowKey.Create(client, server, TransportProtocol.Udp, FlowOriginKind.Host);
@@ -251,7 +251,7 @@ public sealed class UdpRelayTests
         {
             ["wlan-1"] = new(originHandle, s_macB)
         };
-        var sink = new UdpResponseReinjector(reinjector, (nint)7, s_macA, adaptersByStableId: adapters);
+        var sink = new UdpResponseReinjector(reinjector, new UdpAdapterTargetSource(new UdpAdapterTarget((nint)7, s_macA), adapters));
         var adapter = new AdapterContext("WLAN-1", "Wi-Fi", 3);
         var client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000);
         var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
@@ -274,7 +274,7 @@ public sealed class UdpRelayTests
         var reinjector = new FakeReinjector();
         var logger = new RecordingRuntimeLogger();
         var fallbackHandle = (nint)7;
-        var sink = new UdpResponseReinjector(reinjector, fallbackHandle, s_macA, logger: logger);
+        var sink = new UdpResponseReinjector(reinjector, new UdpAdapterTargetSource(new UdpAdapterTarget(fallbackHandle, s_macA)), logger: logger);
         var adapter = new AdapterContext("missing-wlan", "Wi-Fi", 3);
         var client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000);
         var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
@@ -301,7 +301,7 @@ public sealed class UdpRelayTests
         {
             ["veth-1"] = new(originHandle, s_macB)
         };
-        var sink = new UdpResponseReinjector(reinjector, (nint)7, s_macA, adaptersByStableId: adapters);
+        var sink = new UdpResponseReinjector(reinjector, new UdpAdapterTargetSource(new UdpAdapterTarget((nint)7, s_macA), adapters));
         var adapter = new AdapterContext("veth-1", "vEthernet 1", 3);
         var client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000);
         var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
@@ -335,7 +335,7 @@ public sealed class UdpRelayTests
         var reinjector = new FakeReinjector();
         // Map intentionally omits "veth-1" so the origin adapter cannot be resolved.
         var logger = new RecordingRuntimeLogger();
-        var sink = new UdpResponseReinjector(reinjector, (nint)7, s_macA, logger: logger);
+        var sink = new UdpResponseReinjector(reinjector, new UdpAdapterTargetSource(new UdpAdapterTarget((nint)7, s_macA)), logger: logger);
         var adapter = new AdapterContext("veth-1", "vEthernet 1", 3);
         var client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000);
         var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
@@ -366,7 +366,7 @@ public sealed class UdpRelayTests
             ["veth-1"] = new(originHandle, s_macB)
         };
         var logger = new RecordingRuntimeLogger();
-        var sink = new UdpResponseReinjector(reinjector, (nint)7, s_macA, adaptersByStableId: adapters, logger: logger);
+        var sink = new UdpResponseReinjector(reinjector, new UdpAdapterTargetSource(new UdpAdapterTarget((nint)7, s_macA), adapters), logger: logger);
         var adapter = new AdapterContext("veth-1", "vEthernet 1", 3);
         var client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000);
         var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
@@ -384,7 +384,7 @@ public sealed class UdpRelayTests
     public async Task UnbuildableResponseIsDroppedFailClosed()
     {
         var reinjector = new FakeReinjector();
-        var sink = new UdpResponseReinjector(reinjector, (nint)7, s_macA);
+        var sink = new UdpResponseReinjector(reinjector, new UdpAdapterTargetSource(new UdpAdapterTarget((nint)7, s_macA)));
         var client = Endpoint.From(IPAddress.Parse("2001:db8::10"), 53000);
         var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53); // family mismatch with the flow
         // FlowKey.Create rejects mismatched families, so the key is built directly to reach the
@@ -406,7 +406,7 @@ public sealed class UdpRelayTests
         // comes back to the pool (a never-returned buffer would leave the pool empty).
         using var pool = new NdisPacketBufferPool();
         var reinjector = new CountingReinjector();
-        var sink = new UdpResponseReinjector(reinjector, (nint)7, s_macA, bufferPool: pool);
+        var sink = new UdpResponseReinjector(reinjector, new UdpAdapterTargetSource(new UdpAdapterTarget((nint)7, s_macA)), bufferPool: pool);
         var client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000);
         var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
         var flow = FlowKey.Create(client, server, TransportProtocol.Udp, FlowOriginKind.Host);

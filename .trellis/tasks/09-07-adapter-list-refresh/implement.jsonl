@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "ABI discipline (layout assertions, gates, handle semantics), enumeration vs captured handles, and where the new SetAdapterListChangeEvent surface must be documented"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Where new Runtime/Capture files (watcher, runner, target source) belong and size/split limits"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Fail-closed semantics govern refresh decisions: non-fatal refresh-time scope resolution vs fatal startup, degrade-path handling"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Structured adapter.refresh / adapter.degraded events must follow IRuntimeLogger conventions and privacy rules"}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "UdpResponseReinjector refactor (IUdpAdapterTargetSource) must preserve documented response reinjection semantics"}
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "Generation refresh must not break redirect table/relay lifetime contracts documented here"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Forbidden patterns and testing requirements for new seams and units"}
+{"file": ".trellis/tasks/archive/2026-08/08-07-winforward-proxy/research/winpkfilter-ndisapi-design-constraints.md", "reason": "Primary evidence: SetAdapterListChangeEvent official guidance, handle-as-runtime-state citations"}
+{"file": ".trellis/tasks/09-07-adapter-list-refresh/design.md", "reason": "Task-local design: layer split, seams, risks R-1..R-5, sequencing"}

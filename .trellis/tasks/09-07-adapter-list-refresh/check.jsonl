@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Check against forbidden patterns and required test coverage"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Verify adapter.refresh / degrade log fields and levels comply"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify refresh-time non-fatal policy stays bounded and fail-closed where required"}
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "Verify ABI/gate/handle discipline for the new P/Invoke and driver methods"}
+{"file": ".trellis/tasks/09-07-adapter-list-refresh/prd.md", "reason": "Acceptance criteria AC1-AC7 are the check oracle"}
+{"file": ".trellis/tasks/09-07-adapter-list-refresh/design.md", "reason": "Design conformance: layer boundaries, storm guard, no-op skip, R-1 fallback readiness"}

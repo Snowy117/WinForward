@@ -4,9 +4,6 @@ using WinForward.Configuration;
 using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.Capture;
-using WinForward.Runtime.Socks5;
-using WinForward.Runtime.TcpRedirect;
-using WinForward.Runtime.UdpProxy;
 using WinForward.Windows;
 
 namespace WinForward.Cli;
@@ -159,17 +156,15 @@ internal static class Program
     private static async Task<int> RunInterceptionAsync(ValidatedConfiguration configuration, IRuntimeLogger logger)
     {
         using var driver = NdisApiDriver.Open();
+        // Startup pre-flight for the exit-code surface (exit 1 selector errors, exit 3 empty
+        // enumeration): the layered capture runner re-enumerates and owns the live scope,
+        // repeating this resolution fail-closed for generation 0 (design §3.5/§3.6).
         var adapters = EnumerateAdapters(driver);
         if (adapters.Count == 0)
         {
             logger.Error("No MSTCP-bound adapters are available to capture.");
             return 3;
         }
-
-        // ADAPTER-LIST CHANGE SEAM (deferred): the runtime resolves the capture scope once against
-        // this startup snapshot. SetAdapterListChangeEvent-driven re-resolution and fail-closed
-        // handling of a configured adapter disappearing after startup are a later milestone; the
-        // resolver's TryResolve is the single point where a re-resolved snapshot would be injected.
         if (!CaptureAdapterScopeResolver.TryResolve(adapters, configuration.Policy, out var scope, out var scopeErrors))
         {
             foreach (var error in scopeErrors) logger.Error(error);
@@ -177,11 +172,11 @@ internal static class Program
         }
         logger.Info($"Capture scope: {scope.Count} adapter(s) in tunnel mode.");
 
-        return await RunCaptureLoopAsync(configuration, driver, scope, logger).ConfigureAwait(false);
+        return await RunCaptureLoopAsync(configuration, driver, logger).ConfigureAwait(false);
     }
 
     [SupportedOSPlatform("windows")]
-    private static async Task<int> RunCaptureLoopAsync(ValidatedConfiguration configuration, NdisApiDriver driver, IReadOnlyList<WindowsAdapter> scope, IRuntimeLogger logger)
+    private static async Task<int> RunCaptureLoopAsync(ValidatedConfiguration configuration, NdisApiDriver driver, IRuntimeLogger logger)
     {
         var selfTraffic = new SelfTrafficRegistry();
         var reinjector = new NdisPacketReinjector(driver);
@@ -196,18 +191,44 @@ internal static class Program
                 logger.Warn("High-resolution timer resolution was not applied; the empty-queue poll granularity stays at about 15.6 ms instead of about 1 ms.");
             }
 
-            // The degraded-adapter callback only fires while the runtime is running, so the
-            // reference is assigned below before StartAsync; the closure defers the dereference.
-            TransactionalCaptureRuntime? runtimeRef = null;
-            var lastRetryLogTicks = 0L;
-            await using var captureComposition = await CreateCaptureCompositionAsync(configuration, driver, scope, reinjector, selfTraffic, logger,
-                onAdapterDegraded: (adapter, nativeError) => OnAdapterDegradedAsync(runtimeRef!, adapter, nativeError, logger),
-                onAdapterTransientRetry: (adapter, nativeError, attempt) => LogAdapterTransientRetry(ref lastRetryLogTicks, adapter, nativeError, attempt, logger)).ConfigureAwait(false);
-            var modeController = new NdisAdapterModeController(driver, scope);
-            await using var runtime = new TransactionalCaptureRuntime(modeController, captureComposition);
-            runtimeRef = runtime;
+            // The durable layer survives every adapter-list refresh; the runner disposes it exactly
+            // once after the final generation (design §3.6). The local finally only covers failures
+            // around the runner itself — bundle disposal is single-flight, so it never runs twice.
+            var bundle = await DurableCaptureBundle.CreateAsync(configuration, reinjector, selfTraffic, logger).ConfigureAwait(false);
+            try
+            {
+                // The degraded forwarder feeds error 87 into the runner's refresh channel (R3); the
+                // factory logs adapter.degraded and restores the adapter's mode through its own
+                // runtime. The closure dereferences the runner only while a generation runs, after
+                // the reference below is assigned.
+                LayeredCaptureRunner? runnerRef = null;
+                var lastRetryLogTicks = 0L;
+                using var watcher = new NdisAdapterListWatcher(driver);
+                var runner = new LayeredCaptureRunner(
+                    new NdisAdapterEnumerationProvider(driver),
+                    new NdisCaptureGenerationFactory(
+                        driver,
+                        new CapturePacketProcessor(bundle.Dispatcher, logger, bundle.Executor.FlushPendingPasses),
+                        logger,
+                        onAdapterDegraded: (adapter, nativeError) =>
+                        {
+                            runnerRef!.SignalDegraded(adapter, nativeError);
+                            return ValueTask.CompletedTask;
+                        },
+                        onAdapterTransientRetry: (adapter, nativeError, attempt) => LogAdapterTransientRetry(ref lastRetryLogTicks, adapter, nativeError, attempt, logger)),
+                    watcher,
+                    configuration.Policy,
+                    logger,
+                    disposeDurableAsync: _ => bundle.DisposeAsync(),
+                    onScopeInstalled: bundle.UpdateUdpTargets);
+                runnerRef = runner;
 
-            return await RunUntilCancelledAsync(runtime, logger).ConfigureAwait(false);
+                return await RunUntilCancelledAsync(runner, logger).ConfigureAwait(false);
+            }
+            finally
+            {
+                await bundle.DisposeAsync().ConfigureAwait(false);
+            }
         }
         finally
         {
@@ -219,7 +240,7 @@ internal static class Program
     }
 
     [SupportedOSPlatform("windows")]
-    private static async Task<int> RunUntilCancelledAsync(TransactionalCaptureRuntime runtime, IRuntimeLogger logger)
+    private static async Task<int> RunUntilCancelledAsync(LayeredCaptureRunner runner, IRuntimeLogger logger)
     {
         using var shutdown = new CancellationTokenSource();
         void OnCancel(object? sender, ConsoleCancelEventArgs eventArgs)
@@ -232,7 +253,7 @@ internal static class Program
         try
         {
             logger.Info("Interception started. Press Ctrl+C to stop.");
-            await runtime.StartAsync(shutdown.Token).ConfigureAwait(false);
+            await runner.RunAsync(shutdown.Token).ConfigureAwait(false);
             logger.Info("WinForward stopped cleanly.");
             return 0;
         }
@@ -250,23 +271,6 @@ internal static class Program
         {
             Console.CancelKeyPress -= OnCancel;
         }
-    }
-
-    /// <summary>
-    /// R7 degraded-adapter surface: the adapter's interception stopped after its pump exhausted
-    /// transient-read retries (or hit a permanent native read error); its filter mode is restored
-    /// immediately while the process and the remaining adapters keep running. The full native
-    /// error code is recorded verbatim so production ground truth can refine the transient-class
-    /// table in <c>NdisNativeCallStatus</c>.
-    /// </summary>
-    [SupportedOSPlatform("windows")]
-    private static async ValueTask OnAdapterDegradedAsync(TransactionalCaptureRuntime runtime, WindowsAdapter adapter, int nativeError, IRuntimeLogger logger)
-    {
-        logger.Event(RuntimeLogLevel.Error, "adapter.degraded",
-            new RuntimeLogField("adapter", adapter.StableId),
-            new RuntimeLogField("name", adapter.FriendlyName),
-            new RuntimeLogField("nativeError", nativeError));
-        await runtime.MarkAdapterDegradedAsync(adapter.StableId).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -289,128 +293,12 @@ internal static class Program
     }
 
     [SupportedOSPlatform("windows")]
-    private static async ValueTask<CoordinatorShutdownCaptureLoop> CreateCaptureCompositionAsync(
-        ValidatedConfiguration configuration,
-        NdisApiDriver driver,
-        IReadOnlyList<WindowsAdapter> scope,
-        IPacketReinjector reinjector,
-        SelfTrafficRegistry selfTraffic,
-        IRuntimeLogger logger,
-        Func<WindowsAdapter, int, ValueTask>? onAdapterDegraded = null,
-        Action<WindowsAdapter, int, int>? onAdapterTransientRetry = null)
-    {
-        // The tcpFlowCapacity budget is the single source of truth for both the coordinator's
-        // session gate and the redirect table's bounded capacity (design §4).
-        var redirectTable = new TcpRedirectTable(capacity: configuration.TcpFlowCapacity);
-        var tcpCoordinator = new TcpProxyCoordinator(
-            new TcpRedirectListenerFactory(),
-            new TcpProxyRelayFactory(selfTraffic, logger),
-            new TcpRedirectInjector(reinjector),
-            redirectTable,
-            selfTraffic,
-            new WindowsAdapterLocalAddressProvider(),
-            logger,
-            capacity: configuration.TcpFlowCapacity);
-        try
-        {
-            var udpCoordinator = CreateUdpCoordinator(driver, scope, reinjector, selfTraffic, logger);
-            try
-            {
-                var executor = new NdisPacketActionExecutor(reinjector, logger, tcpCoordinator, udpCoordinator);
-                var dispatcher = new FlowDispatcher(
-                    configuration, selfTraffic, executor, new WindowsProcessAttributor(),
-                    reverseHandler: tcpCoordinator,
-                    fragmentHandler: tcpCoordinator.HandleFragmentAsync,
-                    logger: logger);
-                var captureLoop = new MultiAdapterCaptureLoop(driver, scope, new CapturePacketProcessor(dispatcher, logger, executor.FlushPendingPasses),
-                    onAdapterDegraded: onAdapterDegraded,
-                    onAdapterTransientRetry: onAdapterTransientRetry);
-                var idleExpirySweeper = new IdleExpirySweeper(dispatcher, tcpCoordinator, udpCoordinator, logger: logger);
-                idleExpirySweeper.Start();
-                return new CoordinatorShutdownCaptureLoop(captureLoop, idleExpirySweeper, udpCoordinator, tcpCoordinator);
-            }
-            catch
-            {
-                await udpCoordinator.DisposeAsync().ConfigureAwait(false);
-                throw;
-            }
-        }
-        catch
-        {
-            await tcpCoordinator.DisposeAsync().ConfigureAwait(false);
-            throw;
-        }
-    }
-
-    [SupportedOSPlatform("windows")]
     private static IReadOnlyList<WindowsAdapter> EnumerateAdapters(NdisApiDriver driver)
     {
         var inventory = new WindowsAdapterInventory(() => driver.GetAdapters()
             .Select(adapter => (adapter.InternalName, adapter.RuntimeHandle, adapter.MacAddress, adapter.Mtu))
             .ToArray());
         return inventory.GetCurrentAdapters();
-    }
-
-    /// <summary>
-    /// Returns the NDISAPI CurrentAddress (MAC) of the adapter identified by
-    /// <paramref name="adapterHandle"/>, or null when the adapter is not currently enumerated.
-    /// </summary>
-    [SupportedOSPlatform("windows")]
-    private static byte[]? GetAdapterMac(NdisApiDriver driver, nint adapterHandle)
-    {
-        foreach (var adapter in driver.GetAdapters())
-        {
-            if (adapter.RuntimeHandle == adapterHandle) return adapter.MacAddress;
-        }
-        return null;
-    }
-
-    /// <summary>
-    /// Builds the UDP relay coordinator for a run. The injectable adapter map keys every
-    /// capture-scope adapter by stable ID so host and forwarded (Hyper-V/VM) responses use their
-    /// flow's origin adapter. The scope's first adapter is retained only as a host-flow fallback
-    /// when an adapter disappears mid-flow. When no real fallback MAC is accessible a zero
-    /// placeholder is used.
-    /// </summary>
-    [SupportedOSPlatform("windows")]
-    private static UdpProxyCoordinator CreateUdpCoordinator(NdisApiDriver driver, IReadOnlyList<WindowsAdapter> scope, IPacketReinjector reinjector, SelfTrafficRegistry selfTraffic, IRuntimeLogger logger)
-    {
-        var hostAdapter = scope[0];
-        var localMac = GetAdapterMac(driver, hostAdapter.RuntimeHandle);
-        if (localMac is null)
-        {
-            logger.Warn("UDP response reinjection will use a zero MAC because the adapter MAC is unavailable; verify on the target host.");
-            localMac = new byte[NdisApiAbi.EthernetAddressLength];
-        }
-
-        var adapterTargets = new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase);
-        foreach (var adapter in scope)
-        {
-            var mac = GetAdapterMac(driver, adapter.RuntimeHandle);
-            if (mac is null)
-            {
-                logger.Warn($"UDP response reinjection has no MAC for adapter '{adapter.FriendlyName}' ({adapter.StableId}); forwarded responses are dropped fail-closed and host responses use the fallback adapter.");
-                continue;
-            }
-            adapterTargets[adapter.StableId] = new UdpAdapterTarget(adapter.RuntimeHandle, mac);
-        }
-
-        // Single source of truth for every datagram-path buffer bound: the transport send buffer
-        // (6 + 16 + cap), the coordinator receive windows (cap + 22 + 1), the reinjector's
-        // rebuilt-frame cap, and the native ABI capture size must all agree. Only the ABI
-        // constant should ever change; every component follows it from here.
-        var maximumFrameSize = NdisApiAbi.MaximumEthernetFrame;
-        return new UdpProxyCoordinator(
-            new Socks5UdpTransportFactory(selfTraffic, maximumFrameSize),
-            new UdpResponseReinjector(
-                reinjector,
-                hostAdapter.RuntimeHandle,
-                localMac,
-                adaptersByStableId: adapterTargets,
-                maximumFrameSize: maximumFrameSize,
-                logger: logger),
-            logger: logger,
-            maximumFrameSize: maximumFrameSize);
     }
 
     private static int Validate(string[] args)
@@ -448,73 +336,5 @@ internal static class Program
     private static void PrintDiagnostics(IEnumerable<ConfigDiagnostic> diagnostics)
     {
         foreach (var diagnostic in diagnostics) Console.Error.WriteLine(diagnostic);
-    }
-
-    /// <summary>
-    /// Keeps proxy-session teardown within the capture runtime's disposal boundary. The runtime
-    /// disposes its capture loop before restoring adapter modes, so this ordered composition closes
-    /// the sweeper, packet pumps, and proxy coordinators while tunnel modes are still active.
-    /// </summary>
-    internal sealed class CoordinatorShutdownCaptureLoop : IPacketCaptureLoop
-    {
-        private readonly IPacketCaptureLoop _captureLoop;
-        private readonly IAsyncDisposable _idleExpirySweeper;
-        private readonly IAsyncDisposable _udpCoordinator;
-        private readonly IAsyncDisposable _tcpCoordinator;
-        private readonly Lock _gate = new();
-        private Task? _disposeTask;
-
-        public CoordinatorShutdownCaptureLoop(
-            IPacketCaptureLoop captureLoop,
-            IAsyncDisposable idleExpirySweeper,
-            IAsyncDisposable udpCoordinator,
-            IAsyncDisposable tcpCoordinator)
-        {
-            ArgumentNullException.ThrowIfNull(captureLoop);
-            ArgumentNullException.ThrowIfNull(idleExpirySweeper);
-            ArgumentNullException.ThrowIfNull(udpCoordinator);
-            ArgumentNullException.ThrowIfNull(tcpCoordinator);
-            _captureLoop = captureLoop;
-            _idleExpirySweeper = idleExpirySweeper;
-            _udpCoordinator = udpCoordinator;
-            _tcpCoordinator = tcpCoordinator;
-        }
-
-        public ValueTask RunAsync(CancellationToken cancellationToken) => _captureLoop.RunAsync(cancellationToken);
-
-        public ValueTask DisposeAsync()
-        {
-            lock (_gate)
-            {
-                _disposeTask ??= DisposeCoreAsync();
-                return new ValueTask(_disposeTask);
-            }
-        }
-
-        private async Task DisposeCoreAsync()
-        {
-            try
-            {
-                await _idleExpirySweeper.DisposeAsync().ConfigureAwait(false);
-            }
-            finally
-            {
-                try
-                {
-                    await _captureLoop.DisposeAsync().ConfigureAwait(false);
-                }
-                finally
-                {
-                    try
-                    {
-                        await _udpCoordinator.DisposeAsync().ConfigureAwait(false);
-                    }
-                    finally
-                    {
-                        await _tcpCoordinator.DisposeAsync().ConfigureAwait(false);
-                    }
-                }
-            }
-        }
     }
 }

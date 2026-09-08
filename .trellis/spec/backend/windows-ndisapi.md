@@ -97,6 +97,124 @@ if (TryExtractGuid(adapter.InternalName, out var guid))
 
 ---
 
+## Adapter list change refresh — layered capture generations (wired 2026-09-07, task 09-07-adapter-list-refresh)
+
+> Windows rebuilds the NDISRD TCP/IP-bound adapter list on plug/unplug, enable/disable,
+> standby/resume, and Wi-Fi Direct virtual-adapter churn (`本地连接* N`). Every enumeration
+> handle is a runtime pointer into that list and goes stale at once; adapter-associated IOCTLs
+> then fail with `ERROR_INVALID_PARAMETER` (87) — production ground truth 2026-09-07: four
+> adapters (incl. the physical NIC) degraded together. 87 stays in the permanent-error class
+> (`IsTransientReadError` is NOT extended); the fix is recovery, not retry: the official
+> `SetAdapterListChangeEvent` + re-enumeration guidance. Unit-locked end to end; hardware
+> smoke passed 2026-09-08 (task S7, evidence in the task's `smoke-evidence.md`): 87 degrade →
+> refresh in 77 ms, session survival across the cage, interception resumed; **R-2 auto-reset
+> event mode verified against the real driver**. R-1 final-shutdown ordering verified per
+> refresh (generation teardown ran cleanly on hardware twice); the terminal Ctrl+C exit could
+> not be exercised from a headless remote session — recorded as an environment limitation,
+> no residual risk identified (teardown injections use the same code path).
+
+### 1. Scope / Trigger
+
+- Trigger: any change to capture startup/teardown wiring (`Program.cs`,
+  `DurableCaptureBundle`), the refresh loop (`LayeredCaptureRunner`), per-generation
+  composition (`NdisCaptureGenerationFactory`), adapter enumeration plumbing
+  (`AdapterEnumeration.cs`), or the list-change watcher (`AdapterListWatcher.cs`).
+
+### 2. Signatures
+
+- `NdisApiDriver.SetAdapterListChangeEvent(nint win32Event)` — control-gated registration of a
+  caller-owned Win32 event; `nint.Zero` releases (official NULL semantics). Native FALSE throws
+  `Win32Exception` — registration failure is fatal at startup by design.
+- `IAdapterListChangeSource { bool WaitOne(CancellationToken); }` — true = bound list rebuilt
+  (all enumeration handles stale), false = cancelled/disposed. Native impl
+  `NdisAdapterListWatcher` registers an **auto-reset** `EventWaitHandle` (bursts coalesce; the
+  ground truth is the re-enumeration, never the signal count) and blocks via
+  `WaitHandle.WaitAny` (no spin).
+- `CaptureAdapterScopeResolver.ResolveForRefresh(adapters, policy, out warnings)` — refresh
+  semantics twin of `TryResolve`; the startup overload stays byte-identical and fatal.
+- `IUdpAdapterTargetSource { UdpAdapterTarget? Host; UdpAdapterTarget? Resolve(stableId); }`
+  with the mutable `UdpAdapterTargetSource` (immutable snapshot record swapped via
+  `Volatile.Write`; zero-allocation reads). `UdpResponseReinjector` consults it per response.
+- `LayeredCaptureRunner(enumerationProvider, generationFactory, changeSource, policy, logger,
+  disposeDurableAsync, onScopeInstalled)` + `SignalDegraded(adapter, nativeError)`;
+  `ICaptureGeneration`/`ICaptureGenerationFactory` are the test seam, `NdisCaptureGenerationFactory`
+  (windows-gated) composes `NdisAdapterModeController` + `MultiAdapterCaptureLoop` +
+  `TransactionalCaptureRuntime` per generation.
+- `DurableCaptureBundle` (Cli) — built once per run: redirect table, TCP/UDP coordinators,
+  dispatcher/executor chain, idle sweeper, refreshable UDP target source; `DisposeAsync`
+  single-flight, order sweeper → udp → tcp.
+
+### 3. Contracts
+
+- **Two lifetimes**: durable components survive a refresh (sessions recover via retransmission;
+  relays stay open); only the generation layer (scope, mode controller, pump set,
+  per-generation runtime) is rebuilt. No dynamic pump membership — list rebuilds invalidate all
+  handles at once, so whole-generation replacement is the correct granularity.
+- **Refresh semantics are deliberately non-fatal** (PRD R4, the documented bounded exemption
+  from startup-fatal scope resolution): gone selector → warn + rule contributes nothing;
+  ambiguous selector → warn + skip the addition; id/name disagreement → warn + rule skipped.
+  Widening to all MSTCP-bound adapters requires an unconstrained rule or a zero-warning empty
+  selector set — a fully-constrained policy whose adapters ALL disappeared must NOT widen.
+- **No-op skip before stopping the generation**: a pending refresh demand re-enumerates and
+  diffs `(StableId → handle, MAC, MTU)` against the running generation; identical in-scope maps
+  log `adapter.refresh` no-op and never touch pumps/modes (no mode flap, AC4/AC5).
+- **Storm guard**: minimum 1 s between executed rebuilds (TimeProvider-injectable); signals
+  during a rebuild or inside the window coalesce into one pending rebuild.
+- **87 as defense-in-depth trigger**: a pump degrading with 87 enters the pending-refresh
+  channel (`SignalDegraded`); the enumeration diff then decides rebuild vs honest no-change
+  log. 87 on a present adapter remains a genuine defect signal — never add it to the transient
+  table.
+- **Shutdown order (R-1 deviation, documented)**: generation cleanup (pump stop + best-effort
+  mode restore with old handles) runs BEFORE durable disposal, which is the reverse of the
+  pre-2026-09-07 capture-loop wrapper in one respect: coordinators now dispose after mode
+  restore. Neither coordinator's `DisposeAsync` invokes the reinjector and NDISRD injection is
+  capture-mode-independent, so the deviation is believed benign — smoke must confirm teardown
+  injections still land.
+- **Mode restore across refresh**: old-handle restore failures (87) are swallowed best-effort —
+  the driver's rebuilt context starts in default mode; unchanged handles accept a one-window
+  tunnel-off→on flap (no-op skip avoids the common case).
+- Old-handle `MarkAdapterDegradedAsync` restore and `adapter.degraded` logging live INSIDE
+  `NdisCaptureGenerationFactory`'s degrade callback; outer wiring only forwards to
+  `SignalDegraded` — never restore twice.
+- UDP reinjection targets resolve against the current snapshot per response: gone adapters drop
+  fail-closed with the existing rate-limited warn (host flows fall back to the host target;
+  missing host target is itself fail-closed — the seam legitimately has no target to invent).
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Driver signals list change | watcher `WaitOne` returns true; runner re-enumerates and diffs |
+| Enumeration identical to current generation | `adapter.refresh` no-op log; pumps/modes untouched |
+| Scope adapter disappeared | warn + dropped from scope; run continues on remaining |
+| New adapter + unconstrained rule | adopted into scope and intercepted after refresh |
+| New adapter + fully constrained policy | NOT adopted |
+| Ambiguous name selector at refresh | warn + addition skipped, non-fatal |
+| Pump degrades with 87, enumeration unchanged | honest no-change log; no rebuild loop |
+| Signals faster than the storm window | coalesce into one rebuild |
+| gen0 scope resolution failure | fatal startup error (unchanged `TryResolve` surface) |
+| Empty scope at refresh | pause (no pumps), await next signal; startup empty stays fatal |
+| Watcher registration native FALSE | `Win32Exception` → startup fatal (feature unusable) |
+
+### 5. Tests Required
+
+- `LayeredCaptureRunnerTests` / `LayeredCaptureRunnerRefreshTests` (AC1–AC5: rebuild on fresh
+  handles without disposing durable; drop-with-warn; adopt via unconstrained rule; 87 no-op
+  re-check; storm coalescing + no-op skip; generation-before-durable disposal ordering on
+  natural end, fault, and user cancel).
+- `AdapterScopeRefreshTests` (R4 semantics matrix + ordering + zero-warning equivalence with
+  `TryResolve`); `AdapterEnumerationDiffTests` (handle/MAC/MTU diff).
+- `AdapterListWatcherTests` (signal/cancel/dispose semantics via the OS-agnostic wait core);
+  `UdpAdapterTargetSourceTests` (snapshot swap without reconstruction, fail-closed miss,
+  host-null drop, frozen-snapshot immunity).
+- Windows hardware smoke (AC6, passed 2026-09-08): disable/enable a NIC under a live run →
+  `adapter.refresh` logs the transition and interception resumes without a process restart.
+  Evidence: task `09-07-adapter-list-refresh/smoke-evidence.md` (87→refresh 77 ms; hidden
+  Wi-Fi Direct adapter membership change does NOT rebuild the bound list — zero events,
+  pump rides transient retries).
+
+---
+
 ## Batched reinjection sends (wired 2026-08-30, task 08-30-batched-ioctls)
 
 ### 1. Scope / Trigger

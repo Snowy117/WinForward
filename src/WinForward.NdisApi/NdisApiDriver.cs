@@ -82,6 +82,33 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
         return adapters;
     }
 
+    /// <summary>
+    /// Registers or releases the driver's TCP/IP bound adapter-list-change notification
+    /// (native <c>SetAdapterListChangeEvent</c>). While registered, the driver signals the
+    /// caller-provided Win32 event whenever the bound adapter list is rebuilt (adapter
+    /// plug/unplug, enable/disable, standby/resume) — every enumeration handle previously
+    /// returned by <see cref="GetAdapters"/> is stale from that point and must be
+    /// re-enumerated. Passing 0 (<see cref="nint.Zero"/>) releases the registration. The
+    /// caller owns the event lifetime: the handle must remain valid for as long as the
+    /// registration is active; the driver never closes it.
+    /// </summary>
+    /// <remarks>
+    /// Cold-path control operation (one-time registration at startup, release at shutdown)
+    /// routed through the control gate. A native FALSE throws <see cref="Win32Exception"/> —
+    /// startup treats a registration failure as fatal because the in-process adapter
+    /// refresh is unusable without the notification.
+    /// </remarks>
+    public void SetAdapterListChangeEvent(nint win32Event)
+    {
+        using var gateLease = _controlGate.Enter();
+        if (NdisApiNative.SetAdapterListChangeEvent(_handle, win32Event) == 0)
+        {
+            var nativeError = Marshal.GetLastWin32Error();
+            var operation = win32Event == nint.Zero ? "release" : "register";
+            throw new Win32Exception(nativeError, $"Unable to {operation} the NDISAPI adapter-list-change event (native error {nativeError}, 0x{nativeError:X8}).");
+        }
+    }
+
     public unsafe uint GetAdapterMode(nint adapterHandle)
     {
         var mode = new AdapterMode { AdapterHandle = adapterHandle };

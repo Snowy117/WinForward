@@ -190,6 +190,10 @@ internal static partial class NdisApiNative
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
     internal static unsafe partial int GetTcpipBoundAdaptersInfo(NdisApiSafeHandle handle, TcpAdapterList* adapters);
 
+    [LibraryImport(LibraryName, EntryPoint = "SetAdapterListChangeEvent", SetLastError = true)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    internal static partial int SetAdapterListChangeEvent(NdisApiSafeHandle handle, nint win32Event);
+
     [LibraryImport(LibraryName, EntryPoint = "SetAdapterMode", SetLastError = true)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
     internal static unsafe partial int SetAdapterMode(NdisApiSafeHandle handle, AdapterMode* mode);

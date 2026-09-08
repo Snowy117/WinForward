@@ -1,4 +1,3 @@
-using WinForward.Cli;
 using WinForward.Runtime.Capture;
 using Xunit;
 
@@ -102,71 +101,6 @@ public sealed class CaptureLifecycleTests
         Assert.Equal(1, capture.DisposeCount);
     }
 
-    [Fact]
-    public async Task CoordinatorShutdownCompositionClosesProxySessionsBeforeRestoringModes()
-    {
-        var events = new List<string>();
-        var modes = new RecordingModes(events);
-        var capture = new RecordingCapture(events);
-        var sweeper = new RecordingDisposable(events, "sweeper");
-        var udpCoordinator = new RecordingDisposable(events, "udp coordinator");
-        var tcpCoordinator = new RecordingDisposable(events, "tcp coordinator");
-        await using var composition = new Program.CoordinatorShutdownCaptureLoop(capture, sweeper, udpCoordinator, tcpCoordinator);
-        await using var runtime = new TransactionalCaptureRuntime(modes, composition);
-
-        await runtime.StartAsync(CancellationToken.None);
-
-        Assert.Equal(
-            ["capture run", "sweeper", "capture", "udp coordinator", "tcp coordinator", "restore"],
-            events);
-    }
-
-    [Fact]
-    public async Task CoordinatorShutdownCompositionClosesProxySessionsBeforeRestoringModesOnCaptureFailure()
-    {
-        var events = new List<string>();
-        var modes = new RecordingModes(events);
-        var capture = new FailingRecordingCapture(events);
-        var sweeper = new RecordingDisposable(events, "sweeper");
-        var udpCoordinator = new RecordingDisposable(events, "udp coordinator");
-        var tcpCoordinator = new RecordingDisposable(events, "tcp coordinator");
-        await using var composition = new Program.CoordinatorShutdownCaptureLoop(capture, sweeper, udpCoordinator, tcpCoordinator);
-        await using var runtime = new TransactionalCaptureRuntime(modes, composition);
-
-        await Assert.ThrowsAsync<InvalidOperationException>(async () => await runtime.StartAsync(CancellationToken.None));
-
-        Assert.Equal(
-            ["capture run", "sweeper", "capture", "udp coordinator", "tcp coordinator", "restore"],
-            events);
-    }
-
-    [Fact]
-    public async Task CoordinatorShutdownCompositionWaitsForCaptureRunBeforeClosingProxySessionsOnStop()
-    {
-        var events = new List<string>();
-        var modes = new RecordingModes(events);
-        var capture = new BlockingRecordingCapture(events);
-        var sweeper = new RecordingDisposable(events, "sweeper");
-        var udpCoordinator = new RecordingDisposable(events, "udp coordinator");
-        var tcpCoordinator = new RecordingDisposable(events, "tcp coordinator");
-        await using var composition = new Program.CoordinatorShutdownCaptureLoop(capture, sweeper, udpCoordinator, tcpCoordinator);
-        await using var runtime = new TransactionalCaptureRuntime(modes, composition);
-
-        var start = Task.Run(async () => await runtime.StartAsync(CancellationToken.None));
-        await capture.Started.Task;
-        var stop = Task.Run(async () => await runtime.StopAsync());
-
-        await capture.CancellationObserved.Task;
-        Assert.Equal(["capture run"], events);
-
-        capture.Complete();
-        await Task.WhenAll(start, stop);
-
-        Assert.Equal(
-            ["capture run", "sweeper", "capture", "udp coordinator", "tcp coordinator", "restore"],
-            events);
-    }
-
     private sealed class FakeModes : IAdapterModeController
     {
         private readonly IReadOnlyList<AdapterModeSnapshot> _snapshots;
@@ -189,79 +123,6 @@ public sealed class CaptureLifecycleTests
     {
         public async ValueTask RunAsync(CancellationToken cancellationToken) => await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-    }
-
-    private sealed class RecordingModes(List<string> events) : IAdapterModeController
-    {
-        public ValueTask<IReadOnlyList<AdapterModeSnapshot>> SnapshotAsync(CancellationToken cancellationToken) => ValueTask.FromResult<IReadOnlyList<AdapterModeSnapshot>>([new("adapter", 1)]);
-        public ValueTask ApplyCaptureModeAsync(AdapterModeSnapshot adapter, CancellationToken cancellationToken) => ValueTask.CompletedTask;
-        public ValueTask RestoreAsync(AdapterModeSnapshot adapter, CancellationToken cancellationToken)
-        {
-            events.Add("restore");
-            return ValueTask.CompletedTask;
-        }
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-    }
-
-    private sealed class RecordingCapture(List<string> events) : IPacketCaptureLoop
-    {
-        public ValueTask RunAsync(CancellationToken cancellationToken)
-        {
-            events.Add("capture run");
-            return ValueTask.CompletedTask;
-        }
-        public ValueTask DisposeAsync()
-        {
-            events.Add("capture");
-            return ValueTask.CompletedTask;
-        }
-    }
-
-    private sealed class FailingRecordingCapture(List<string> events) : IPacketCaptureLoop
-    {
-        public ValueTask RunAsync(CancellationToken cancellationToken)
-        {
-            events.Add("capture run");
-            return ValueTask.FromException(new InvalidOperationException("capture failed"));
-        }
-        public ValueTask DisposeAsync()
-        {
-            events.Add("capture");
-            return ValueTask.CompletedTask;
-        }
-    }
-
-    private sealed class BlockingRecordingCapture(List<string> events) : IPacketCaptureLoop
-    {
-        private readonly TaskCompletionSource _complete = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public TaskCompletionSource CancellationObserved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public async ValueTask RunAsync(CancellationToken cancellationToken)
-        {
-            events.Add("capture run");
-            Started.TrySetResult();
-            using var registration = cancellationToken.Register(() => CancellationObserved.TrySetResult());
-            await _complete.Task;
-        }
-
-        public void Complete() => _complete.TrySetResult();
-
-        public ValueTask DisposeAsync()
-        {
-            events.Add("capture");
-            return ValueTask.CompletedTask;
-        }
-    }
-
-    private sealed class RecordingDisposable(List<string> events, string name) : IAsyncDisposable
-    {
-        public ValueTask DisposeAsync()
-        {
-            events.Add(name);
-            return ValueTask.CompletedTask;
-        }
     }
 
     private sealed class CompletingCapture : IPacketCaptureLoop
