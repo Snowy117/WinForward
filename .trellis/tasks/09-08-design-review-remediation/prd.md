@@ -37,20 +37,27 @@ child PRDs.
 
 ## Cross-child acceptance criteria
 
-- [ ] All three children planned, executed, checked, and archived independently.
-- [ ] Full solution builds with zero warnings (`TreatWarningsAsErrors` on).
-- [ ] `dotnet test` green; final test count = recorded pre-remediation baseline (463 as of
+- [x] All three children planned, executed, checked, and archived independently.
+- [x] Full solution builds with zero warnings (`TreatWarningsAsErrors` on).
+- [x] `dotnet test` green; final test count = recorded pre-remediation baseline (463 as of
       2026-08-29) + P0 regressions + P2 additions; each child records its own before/after totals
       (P1 batches must be behavior-zero: totals unchanged within the child).
-- [ ] No `.cs` file in `src/` or `benchmarks/` exceeds 400 effective lines (non-blank, non-comment).
-- [ ] file-name = main-type convention holds repo-wide (spec-exempted `ConfigurationModels.cs`
+- [x] No `.cs` file in `src/` or `benchmarks/` exceeds 400 effective lines (non-blank, non-comment).
+- [x] file-name = main-type convention holds repo-wide (spec-exempted `ConfigurationModels.cs`
       excepted).
-- [ ] Spec updates landed via trellis-update-spec: sanctioned-edge set current (UdpProxy→Socks5
+- [x] Spec updates landed via trellis-update-spec: sanctioned-edge set current (UdpProxy→Socks5
       resolution), tombstone naming unified, any new lessons from P0 debugging captured.
 
 ## Integration review (parent responsibility)
 
-- [ ] After children complete: verify P2 deletions removed nothing P1 later needed (rg re-check of
+- [x] After children complete: verify P2 deletions removed nothing P1 later needed (rg re-check of
       every deleted symbol against final tree).
-- [ ] Re-run the design-review spot checks from `research/00-synthesis.md` P0/P1/P2 tables and
+- [x] Re-run the design-review spot checks from `research/00-synthesis.md` P0/P1/P2 tables and
       confirm each row is resolved or explicitly waived with rationale.
+
+## Integration review evidence (2026-09-08)
+
+- All 3 children archived (P0 569/569 PASS, P2 578/578 PASS, P1 578/578 PASS; final suite 578/578 re-verified on master post-merge, zero warnings, benchmarks build clean).
+- Original 400-line violators resolved: UdpProxyCoordinator 471->329 eff, UdpBurstScenario 437->196 eff; Domain.cs 122 eff remaining. file=main-type restored (FlowTable.cs, BoundedSetupQueue.cs, WindowsAdapter.cs, IProcessAttributor.cs).
+- Spec deltas landed across children: lane lifecycle/pump dispose/iphlpapi bounds (windows-ndisapi.md), lease-guard paramName + tombstone/cooldown split + UDP decomposition + baseline 578 (quality-guidelines.md), sanctioned UdpProxy->Socks5 edge + UDP 471->5 precedent + BenchmarkShared note (directory-structure.md), udp-relay.md cooldown types, indexed [i] config diagnostics per error-handling spec.
+- P2 deletions removed nothing P1 needed (P1 executed after P2, zero conflicts); design-review P0/P1/P2 table rows all resolved (synthesis 00-synthesis.md) except explicitly deferred: R6 LogLevel JsonElement->string? unification (needs custom converter; recorded in 09-08-p2-hygiene archive).
