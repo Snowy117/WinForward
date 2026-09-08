@@ -88,5 +88,6 @@ benchmarks/                    # 基准宿主（BenchmarkDotNet 性能基准 + �
 ## Examples
 
 - 深模块拆分范例：`TcpProxyCoordinator.cs`（原 1158 行）→ coordinator（入口路由）+ `TcpRedirectSessionStore`（单锁并发核心）+ `TcpRedirectSetup` + `TcpRedirectAcceptor` + `ClientResetInjector` + `TcpFrameRewriter`/`TcpSequenceObservation`（static 纯簇，OS 无关可测）。
+- 深模块拆分范例（UDP，2026-09-08）：`UdpProxyCoordinator.cs`（原 471 有效行）→ coordinator（槽字典 + 入场 + 拆除）+ `UdpSetupCooldownTable`（setup 失败冷却，叶子锁）+ `UdpSetupQueueBudget`（全局 setup 字节预算，仅 Interlocked）+ `UdpSessionSetup`（dial/claim/construct/flush 管线，构造函数委托回协调器门）+ `UdpProxyLogging`（static 事件格式化）——镜像 TCP 1158→5 先例；协调器 `_gate` 仍是槽状态的唯一门。
 - 接缝归位范例：`IUdpResponseSink` 从 `UdpProxyCoordinator.cs` 移到唯一实现所在的 `UdpResponseReinjector.cs`。
 - 重复消除范例：校验和数学（`Sum`/`Finish`/`Set*Checksum`）与帧构造器统一进 `TestHelpers/ChecksumMath.cs` / `FrameBuilders.cs`，调用点留 1 行 wrapper 固定默认参数。

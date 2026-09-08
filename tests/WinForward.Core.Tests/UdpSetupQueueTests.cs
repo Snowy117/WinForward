@@ -149,7 +149,7 @@ public sealed class UdpSetupQueueTests
     }
 
     [Fact]
-    public async Task SetupTombstonesAreBoundedAndEvictTheOldestAtCapacity()
+    public async Task SetupCooldownsAreBoundedAndEvictTheOldestAtCapacity()
     {
         // R3-UDP: the cooldown dictionary is bounded by the session capacity; at capacity the
         // oldest retry deadline is evicted, so a failing-server storm cannot grow it without
@@ -169,10 +169,10 @@ public sealed class UdpSetupQueueTests
             time.Advance(TimeSpan.FromMilliseconds(100));
         }
 
-        // Bounded at capacity: the first flow's tombstone (the oldest deadline) was evicted.
-        Assert.Equal(4, coordinator.SetupTombstoneCountForDiagnostics);
+        // Bounded at capacity: the first flow's cooldown entry (the oldest deadline) was evicted.
+        Assert.Equal(4, coordinator.SetupCooldownCountForDiagnostics);
 
-        // Every surviving tombstone still cools down its flow at the frozen clock...
+        // Every surviving cooldown entry still cools down its flow at the frozen clock...
         for (var index = 1; index < flowCount; index++)
         {
             Assert.False(await coordinator.TrySendAsync(flows[index], s_server, new byte[] { 3 }, CancellationToken.None));
@@ -181,7 +181,7 @@ public sealed class UdpSetupQueueTests
         // ...while the evicted flow retries immediately instead of being cooldown-rejected.
         Assert.True(await coordinator.TrySendAsync(flows[0], s_server, new byte[] { 3 }, CancellationToken.None));
         await WaitForAsync(() => factory.CreateCalls == flowCount + 1);
-        Assert.Equal(4, coordinator.SetupTombstoneCountForDiagnostics);
+        Assert.Equal(4, coordinator.SetupCooldownCountForDiagnostics);
     }
 
     [Fact]

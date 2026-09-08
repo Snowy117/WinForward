@@ -134,20 +134,41 @@ var socket = new Socket(relay.AddressFamily, SocketType.Dgram, ProtocolType.Udp)
 
 Task 08-30-atomic-retire (research R4/R3-UDP). Pre-fix worst case: 16,384 flows
 × 32 KiB queues = 512 MiB held for hours against a dead SOCKS5 server, then
-delivered long-expired; `_setupTombstones` was unbounded between 60 s sweeps.
+delivered long-expired; the setup-cooldown index (`UdpSetupCooldownTable`) was
+unbounded between 60 s sweeps.
+
+Structure note (2026-09-08, P1): the concerns live in separately named types —
+`UdpProxyCoordinator` (slot dict + admission + teardown) composes
+`UdpSetupCooldownTable` (setup-failure cooldowns, own leaf lock),
+`UdpSetupQueueBudget` (global byte budget, Interlocked-only), `UdpSessionSetup`
+(dial/claim/construct/flush pipeline via ctor delegates), and `UdpProxyLogging`
+(static event formatting) — mirroring the TCP 1158→5 coordinator split.
+Terminology: TCP "tombstone" = 60 s TIME_WAIT grace; the UDP 1 s setup-failure
+window is always "setup cooldown" (the word tombstone is retired from UDP).
 
 ### 1. Scope / Trigger
 
 - Trigger: any change to `UdpProxyCoordinator` setup admission, the setup
-  queue's drain/dispose paths, `_setupTombstones`, or `BoundedSetupQueue`'s
-  entry shape.
+  queue's drain/dispose paths, `UdpSetupCooldownTable` / `UdpSetupQueueBudget`
+  / `UdpSessionSetup`, or `BoundedSetupQueue`'s entry shape.
 
 ### 2. Signatures
 
-- `UdpProxyCoordinator`: `SetupQueueGlobalByteBudget` (8 MiB default; internal
-  ctor override for tests), `long _pendingSetupBytes` (Interlocked),
-  `SetupQueueDatagramTtl` (5 s), counters `SetupBudgetRejectionCount` /
-  `SetupTtlExpiredCount`, diagnostics `PendingSetupBytesForDiagnostics`.
+- `UdpSetupQueueBudget` (`UdpProxy/UdpSetupQueueBudget.cs`):
+  `SetupQueueGlobalByteBudget` (8 MiB default; coordinator internal ctor
+  override for tests), `PendingBytes` (Interlocked), `RejectionCount`,
+  `TryCharge`/`Credit` (exactly-once contract), `NoteDrop` (rate-limited drop
+  logging). Diagnostics surface as coordinator
+  `PendingSetupBytesForDiagnostics` / `SetupBudgetRejectionCount`.
+- `UdpSessionSetup` (`UdpProxy/UdpSessionSetup.cs`): `SetupQueueDatagramTtl`
+  (5 s), counters surfaced as coordinator `SetupTtlExpiredCount` /
+  `SetupStampsRefreshedCount`; the 8-wide `_setupLimiter` and the dial-start
+  re-stamp live here (coordinator slot state touched only via ctor delegates
+  that take the coordinator gate).
+- `UdpSetupCooldownTable` (`UdpProxy/UdpSetupCooldownTable.cs`): bounded
+  retry-deadline index (`TryHit`/`Write`/`PruneExpired`), capacity = the
+  coordinator's session capacity; diagnostics surface as coordinator
+  `SetupCooldownCountForDiagnostics`.
 - `BoundedSetupQueue` (`WinForward.Core/BoundedSetupQueue.cs`): public class; entry
   shape is `(ReadOnlyMemory<byte>, DateTimeOffset)`. Timestamp overloads
   `TryEnqueue(frame, enqueuedAt)` / `TryDequeue(out frame, out enqueuedAt)`;
@@ -170,10 +191,10 @@ delivered long-expired; `_setupTombstones` was unbounded between 60 s sweeps.
   age. Stamps come from the coordinator's `_timeProvider` (fake-time
   testable).
 - **TTL ages from dial start — limiter queue-wait is not staleness (fixed 2026-09-06,
-  measured pre-fix 2026-09-06)**: `CreateSessionAsync` re-stamps the slot's queued
+  measured pre-fix 2026-09-06)**: `UdpSessionSetup.CreateSessionAsync` re-stamps the slot's queued
   datagrams (`BoundedSetupQueue.RefreshEnqueuedStamps`, under the coordinator gate with
   the flush-style slot-ownership check) right after the setup leaves the 8-wide
-  `_setupLimiter`, so the 5 s TTL at flush measures dial age. Pre-fix, wave k's
+  setup limiter, so the 5 s TTL at flush measures dial age. Pre-fix, wave k's
   triggering datagram under a burst of N flows with dial latency D was k×D old at flush
   (first-datagram loss began at N > 8 × floor(TTL/D); 93.75 % at 128 × 4 s); post-fix
   the same probe delivers 128/128 with timeToLast ≈ ceil(N/8)×D (acceptance matrix
@@ -185,9 +206,9 @@ delivered long-expired; `_setupTombstones` was unbounded between 60 s sweeps.
   again or widens the limiter must re-run the `udp.burstEstablishment` matrix as its
   acceptance gate.
 - **Budget exhaustion rejects the new datagram** (rollback the charge, count
-  it, take the existing drop-counter path) — no failure tombstone, no
+  it, take the existing drop-counter path) — no setup cooldown is armed, no
   teardown; the flow retries on its next datagram.
-- **Cooldown tombstones are bounded**: `_setupTombstones` capacity = the
+- **Setup cooldowns are bounded**: `UdpSetupCooldownTable` capacity = the
   coordinator's session `capacity`; a write at capacity evicts the
   oldest-deadline entry (refusal would degrade the cooldown into an
   immediate-retry storm). Lazy prune on touch and the 60 s sweep are unchanged.
@@ -200,7 +221,7 @@ delivered long-expired; `_setupTombstones` was unbounded between 60 s sweeps.
 | Queued entry older than 5 s at flush | dropped (not delivered), credited, counter++ |
 | Setup failure drains the slot queue | every drained byte credited |
 | Dispose drains pending queues | every drained byte credited (previously a silent abandon) |
-| `_setupTombstones` at capacity on a new failure | oldest-deadline entry evicted, write proceeds |
+| Setup cooldown table at capacity on a new failure | oldest-deadline entry evicted, write proceeds |
 
 ### 5. Good/Base/Bad Cases
 
@@ -208,7 +229,7 @@ delivered long-expired; `_setupTombstones` was unbounded between 60 s sweeps.
   long-queued datagrams; after failure/dispose the budget is fully credited.
 - Base: normal <1 s setups never observe the budget or the TTL.
 - Bad: a `TryDequeue` sink without a credit; TTL compared against the slot's
-  creation time instead of the entry's stamp; refusing the cooldown tombstone
+  creation time instead of the entry's stamp; refusing the setup cooldown
   at capacity.
 
 ### 6. Tests Required
@@ -217,7 +238,7 @@ delivered long-expired; `_setupTombstones` was unbounded between 60 s sweeps.
   `SetupFailureCreditsBackThePendingBudget`, `DisposeCreditsBackDatagramsStillQueuedForSetup`,
   `FlushDropsSetupDatagramsOlderThanTheTtl` (fake TimeProvider; a late-arriving
   fresh entry on an old slot must still be delivered — entry-stamp, not
-  slot-stamp), `SetupTombstonesAreBoundedAndEvictTheOldestAtCapacity`, and the
+  slot-stamp), `SetupCooldownsAreBoundedAndEvictTheOldestAtCapacity`, and the
   credit-zero assertion appended to the drop-oldest FIFO test.
 - Existing FIFO / drop-oldest / no-bypass / 1 s-cooldown / 8-way-cap /
   flash-crowd / dispose-drain tests stay green.
