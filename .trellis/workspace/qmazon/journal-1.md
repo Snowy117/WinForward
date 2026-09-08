@@ -535,3 +535,11 @@ Diagnosed production adapter.degraded nativeError=87: ndisrd rebuilds its bound-
 ### Status
 
 [OK] **Completed**
+
+## 2026-09-08 — design review -> full remediation (qmazon)
+
+Full-codebase deep-module design review (5 explore agents) -> parent task 09-08-design-review-remediation with 3 children, all archived same day:
+- P0 correctness (branch p0-correctness, merged): lane retirement RetireLanesExcept + OnScopeInstalled wiring + overflow observability; IPv4Any classify fix; iphlpapi ReadTable bounds; pump DisposeAsync awaits run exit; lease-guard paramName via CapturedFlowPacketGuards. 555->569 tests.
+- P2 hygiene (branch p2-hygiene, merged): FlowTable dead surface, IWindowsAdapterInventory, Platform.cs split, TestHelpers convergence (CaptureLifecycleFakes/ScriptedReader promoted), indexed [i] config diagnostics, AdapterTransientRetryLogGate + DurableCaptureBundle tests. 569->578. Deferred: logLevel JsonElement->string? (custom converter needed).
+- P1 structure (branch p1-structure, merged): FlowTable/BoundedSetupQueue re-homed; NdisCapturePumpOptions; UdpProxy->Socks5 edge sanctioned (codec already in Protocols); UdpProxyCoordinator 471->329 via 4-part split (tombstone->cooldown rename, check found+fixed one PruneExpired leaf-lock gap); benchmarks StabilityShared + burst instrumentation, BenchmarkShared to root. 578 throughout.
+Final: 578/578, zero warnings, master ~20 commits ahead of origin (not pushed). Gateway note: upstream "No active API keys" errors hit twice mid-session; resuming the same subagent conversation worked both times.
