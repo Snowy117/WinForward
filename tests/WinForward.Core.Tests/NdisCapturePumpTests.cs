@@ -181,6 +181,47 @@ public sealed class NdisCapturePumpTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pumpTask);
     }
 
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public async Task DisposeDuringRunWaitsForTheRunLoopToExit()
+    {
+        // Mid-run disposal must never free the batch buffers under the loop's feet:
+        // DisposeAsync parks on the run's completion source, which the loop's finally signals
+        // only after the final batch callback and the buffer release. The gated reader makes
+        // "the run is still in flight" a deterministic fact rather than a scheduler race.
+        using var cts = new CancellationTokenSource();
+        var readEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var readReleased = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reader = new GatedReader(readEntered, readReleased);
+
+        var pump = new NdisCapturePump(reader, (nint)0xBB, static (_, _) => ValueTask.CompletedTask, TimeSpan.FromMilliseconds(1));
+
+        // Task.Run: the run's synchronous prefix blocks inside the gated read, so it cannot
+        // start on the test thread.
+        var runTask = Task.Run(() => pump.RunAsync(cts.Token));
+        await readEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var disposeTask = pump.DisposeAsync().AsTask();
+        await Task.Delay(50); // negative window, same shape as the slot-reuse regression above
+        Assert.False(disposeTask.IsCompleted, "DisposeAsync completed while the run loop was still inside its first read.");
+
+        readReleased.SetResult();
+        await disposeTask.WaitAsync(TimeSpan.FromSeconds(5));
+        await runTask.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public async Task DisposeBeforeAnyRunCompletesSynchronously()
+    {
+        var pump = new NdisCapturePump(new ScriptedReader(_ => 0), (nint)1, static (_, _) => ValueTask.CompletedTask);
+
+        var dispose = pump.DisposeAsync();
+
+        Assert.True(dispose.IsCompletedSuccessfully);
+        await dispose;
+    }
+
     private static Func<NdisCapturedPacket, CancellationToken, ValueTask> CaptureHandler(List<byte> observed, List<nint> handles) =>
         (packet, _) =>
         {
@@ -203,6 +244,20 @@ public sealed class NdisCapturePumpTests
         {
             var index = Math.Min(_calls++, _reads.Length - 1);
             return _reads[index](buffers);
+        }
+    }
+
+    /// <summary>
+    /// A reader that parks every read until the test releases it, making "the run loop is in
+    /// flight" deterministic. The bounded wait keeps a lost release from hanging the suite.
+    /// </summary>
+    private sealed class GatedReader(TaskCompletionSource entered, TaskCompletionSource release) : INdisPacketReader
+    {
+        public int TryReadPackets(nint adapterHandle, NdisPacketBuffer[] buffers)
+        {
+            entered.TrySetResult();
+            release.Task.Wait(TimeSpan.FromSeconds(10));
+            return 0;
         }
     }
 }

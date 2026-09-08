@@ -54,6 +54,10 @@ public sealed class NdisCapturePump : IAsyncDisposable
     private readonly TimeSpan _transientRetryBaseDelay;
     private int _stopped;
     private int _buffersReleased;
+    private int _runStarted;
+    // Completed by the run loop's finally (after the buffer release); DisposeAsync parks on it
+    // so native batch buffers are never freed under a loop that is still in flight.
+    private readonly TaskCompletionSource _runCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private long _transientReadRetryCount;
     private long _transientReadIncidentCount;
     private int _transientRetryAttempt;
@@ -86,7 +90,9 @@ public sealed class NdisCapturePump : IAsyncDisposable
     /// (constructor) runs after the slot loop of every iteration — before the next read can reuse
     /// batch slots — and once more when the run loop exits, so deferred work (batched
     /// reinjection) never outlives the batch it belongs to. Batch buffers live for the pump's
-    /// lifetime and are released exactly once, when the run loop exits or the pump is disposed.
+    /// lifetime and are released exactly once, when the run loop exits or the pump is disposed;
+    /// disposal parks on the run's completion when a run is in flight, so the buffers are never
+    /// freed under a live loop.
     /// A transient native read failure (see <see cref="NdisNativeCallStatus.IsTransientReadError"/>)
     /// is retried with bounded exponential backoff; exhaustion or a permanent failure is a
     /// degraded exit — the loop returns normally (no throw) and the optional
@@ -95,6 +101,7 @@ public sealed class NdisCapturePump : IAsyncDisposable
     /// </summary>
     public async ValueTask RunAsync(CancellationToken cancellationToken)
     {
+        Interlocked.Exchange(ref _runStarted, 1);
         try
         {
             while (!cancellationToken.IsCancellationRequested && Volatile.Read(ref _stopped) == 0)
@@ -146,6 +153,9 @@ public sealed class NdisCapturePump : IAsyncDisposable
             // work: the callback runs while the batch buffers are still valid, before their release.
             _onBatchCompleted?.Invoke();
             ReleaseBatchBuffers();
+            // Signaled only after the buffers are released, so a disposal parked on this
+            // completion resumes into a pump whose native memory is already gone.
+            _runCompletion.TrySetResult();
         }
     }
 
@@ -191,9 +201,20 @@ public sealed class NdisCapturePump : IAsyncDisposable
         return delay > TransientRetryDelayCap ? TransientRetryDelayCap : delay;
     }
 
+    /// <summary>
+    /// Stops the pump and returns only once an in-flight run has fully exited, so the native
+    /// batch buffers are never freed while the loop — or a handler it awaits — may still be
+    /// using them (previously safe only by the caller convention of awaiting
+    /// <see cref="RunAsync"/> first). Disposal signals stop but never cancels the run: the loop
+    /// re-checks the stop flag every iteration and its only waits are bounded by the configured
+    /// poll delay (default 1 ms) plus any in-flight handler, so this await is bounded too. A
+    /// run that already started owns the buffer release in its own finally; a pump whose run
+    /// never started releases the buffers directly and completes synchronously.
+    /// </summary>
     public ValueTask DisposeAsync()
     {
         Interlocked.Exchange(ref _stopped, 1);
+        if (Volatile.Read(ref _runStarted) != 0) return new ValueTask(_runCompletion.Task);
         ReleaseBatchBuffers();
         return ValueTask.CompletedTask;
     }
