@@ -193,9 +193,10 @@ internal static partial class IPHelperTables
 
     private static unsafe IReadOnlyList<UdpOwner> ReadUdp4()
     {
-        var buffer = ReadTable(AfInet, IPHelperAbi.UdpTableOwnerPid, out var rowCount);
+        var buffer = ReadTable(AfInet, IPHelperAbi.UdpTableOwnerPid, out var rowCount, out var bytesWritten);
         try
         {
+            ValidateRowCount(rowCount, bytesWritten, sizeof(IPHelperAbi.MibUdpRowOwnerPid), "IPv4 UDP owner table");
             var rows = new UdpOwner[rowCount];
             for (var index = 0; index < rows.Length; index++)
             {
@@ -209,9 +210,10 @@ internal static partial class IPHelperTables
 
     private static unsafe IReadOnlyList<UdpOwner> ReadUdp6()
     {
-        var buffer = ReadTable(AfInet6, IPHelperAbi.UdpTableOwnerPid, out var rowCount);
+        var buffer = ReadTable(AfInet6, IPHelperAbi.UdpTableOwnerPid, out var rowCount, out var bytesWritten);
         try
         {
+            ValidateRowCount(rowCount, bytesWritten, sizeof(IPHelperAbi.MibUdp6RowOwnerPid), "IPv6 UDP owner table");
             var rows = new UdpOwner[rowCount];
             for (var index = 0; index < rows.Length; index++)
             {
@@ -225,9 +227,10 @@ internal static partial class IPHelperTables
 
     private static unsafe IReadOnlyList<TcpOwner> ReadTcp4()
     {
-        var buffer = ReadTable(AfInet, TcpTableOwnerPidAll, out var rowCount);
+        var buffer = ReadTable(AfInet, TcpTableOwnerPidAll, out var rowCount, out var bytesWritten);
         try
         {
+            ValidateRowCount(rowCount, bytesWritten, sizeof(IPHelperAbi.MibTcpRowOwnerPid), "IPv4 TCP owner table");
             var rows = new TcpOwner[rowCount];
             for (var index = 0; index < rows.Length; index++)
             {
@@ -241,9 +244,10 @@ internal static partial class IPHelperTables
 
     private static unsafe IReadOnlyList<TcpOwner> ReadTcp6()
     {
-        var buffer = ReadTable(AfInet6, TcpTableOwnerPidAll, out var rowCount);
+        var buffer = ReadTable(AfInet6, TcpTableOwnerPidAll, out var rowCount, out var bytesWritten);
         try
         {
+            ValidateRowCount(rowCount, bytesWritten, sizeof(IPHelperAbi.MibTcp6RowOwnerPid), "IPv6 TCP owner table");
             var rows = new TcpOwner[rowCount];
             for (var index = 0; index < rows.Length; index++)
             {
@@ -255,7 +259,7 @@ internal static partial class IPHelperTables
         finally { Marshal.FreeHGlobal(buffer); }
     }
 
-    private static nint ReadTable(int addressFamily, int tableClass, out int rowCount)
+    private static nint ReadTable(int addressFamily, int tableClass, out int rowCount, out uint bytesWritten)
     {
         uint size = 0;
         var result = tableClass == IPHelperAbi.UdpTableOwnerPid
@@ -272,7 +276,24 @@ internal static partial class IPHelperTables
             throw new Win32Exception(result);
         }
         rowCount = Marshal.ReadInt32(buffer);
+        // The in/out size parameter carries the driver-written byte count on success; callers
+        // cross-check it against the announced row count before dereferencing any row.
+        bytesWritten = size;
         return buffer;
+    }
+
+    /// <summary>
+    /// Fails closed when an iphlpapi owner table announces a row count its own written byte
+    /// count cannot hold. The row count is read from the driver-filled buffer itself, so a
+    /// stale or corrupt count would otherwise let <see cref="ReadRow{T}"/> walk past the
+    /// allocation — the same driver-reported-count discipline the NDISAPI seam enforces on
+    /// batch sizes. A negative count is equally inconsistent and rejected. Attribution callers
+    /// tolerate the throw as "no attribution" (retry / null-identity path), never a wrong PID.
+    /// </summary>
+    internal static void ValidateRowCount(int rowCount, uint bytesWritten, int rowSize, string tableName)
+    {
+        if (rowCount < 0 || 4 + (long)rowCount * rowSize > bytesWritten)
+            throw new InvalidOperationException($"The {tableName} announced {rowCount} rows of {rowSize} bytes each but wrote only {bytesWritten} bytes; refusing to read rows beyond the table payload.");
     }
 
     private static unsafe T ReadRow<T>(nint buffer, int index) where T : unmanaged =>
