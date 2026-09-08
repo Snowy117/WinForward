@@ -61,15 +61,18 @@ internal sealed class UdpSetupCooldownTable
     /// <summary>Removes cooldown entries whose retry deadline has elapsed; runs on the periodic sweep.</summary>
     public void PruneExpired(DateTimeOffset now)
     {
-        if (_retryAtByFlow.Count == 0) return;
-        List<FlowKey>? expired = null;
-        foreach (var pair in _retryAtByFlow)
+        lock (_gate)
         {
-            if (pair.Value <= now) (expired ??= []).Add(pair.Key);
-        }
+            if (_retryAtByFlow.Count == 0) return;
+            List<FlowKey>? expired = null;
+            foreach (var pair in _retryAtByFlow)
+            {
+                if (pair.Value <= now) (expired ??= []).Add(pair.Key);
+            }
 
-        if (expired is null) return;
-        foreach (var flow in expired) _retryAtByFlow.Remove(flow);
+            if (expired is null) return;
+            foreach (var flow in expired) _retryAtByFlow.Remove(flow);
+        }
     }
 
     /// <summary>Clears every cooldown; the dispose drain makes the entries unreachable anyway.</summary>
