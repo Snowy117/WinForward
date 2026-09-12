@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Check forbidden patterns and required test coverage"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Verify generation.startup-fault / adapter.refresh forced=true fields and levels comply"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify the absorb path is classification-scoped and capped; everything else stays fail-closed"}
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "Verify refresh invariants: no-op skip only for live generations, storm guard, no transient-table change"}
+{"file": ".trellis/tasks/09-11-startup-stale-handle-recovery/prd.md", "reason": "Acceptance criteria AC1-AC7 are the check oracle"}
+{"file": ".trellis/tasks/09-11-startup-stale-handle-recovery/design.md", "reason": "Design conformance: latch race-freedom argument, both absorb points, streak reset rules"}

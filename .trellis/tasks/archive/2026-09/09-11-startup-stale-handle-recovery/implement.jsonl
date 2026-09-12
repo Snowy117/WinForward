@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Fail-closed vs bounded-recovery semantics: the new absorb path must stay classified, capped, and logged; every other escape stays fatal"}
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "Adapter-list refresh section (task 09-07): generation lifecycle, no-op skip invariant, 87 defense-in-depth trigger, handles-are-not-identity rule"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "generation.startup-fault warn event and adapter.refresh forced=true field must follow IRuntimeLogger structured conventions"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Forbidden patterns and testing requirements for the new seams and units"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "No new files expected (edits in existing Capture files); size/split limits still apply"}
+{"file": ".trellis/tasks/09-11-startup-stale-handle-recovery/design.md", "reason": "Task-local design: fault path, phase latch, runner recovery, edge cases, test map"}
