@@ -101,6 +101,43 @@ public sealed class CaptureLifecycleTests
         Assert.Equal(1, capture.DisposeCount);
     }
 
+    [Fact]
+    public async Task ReachedPumpRunStaysFalseWhenSnapshotFailsDuringStart()
+    {
+        var modes = new FakeModes([new("a", 7)], failOnSnapshot: true);
+        await using var runtime = new TransactionalCaptureRuntime(modes, new FakeCapture());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await runtime.StartAsync(CancellationToken.None));
+
+        Assert.False(runtime.ReachedPumpRun);
+    }
+
+    [Fact]
+    public async Task ReachedPumpRunStaysFalseWhenModeApplyFailsDuringStart()
+    {
+        var modes = new FakeModes([new("a", 7), new("b", 9)], failOnApply: 1);
+        await using var runtime = new TransactionalCaptureRuntime(modes, new FakeCapture());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await runtime.StartAsync(CancellationToken.None));
+
+        Assert.False(runtime.ReachedPumpRun);
+    }
+
+    [Fact]
+    public async Task ReachedPumpRunLatchesTrueOnceTheCaptureLoopRunStarted()
+    {
+        var modes = new FakeModes([new("a", 7)]);
+        var capture = new BlockingCapture();
+        await using var runtime = new TransactionalCaptureRuntime(modes, capture);
+
+        var start = Task.Run(async () => await runtime.StartAsync(CancellationToken.None));
+        await capture.Started.Task;
+        capture.Complete();
+        await start;
+
+        Assert.True(runtime.ReachedPumpRun);
+    }
+
     private sealed class FakeCapture : IPacketCaptureLoop
     {
         public async ValueTask RunAsync(CancellationToken cancellationToken) => await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);

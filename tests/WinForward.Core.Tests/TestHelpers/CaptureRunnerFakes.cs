@@ -32,6 +32,9 @@ internal sealed class FakeAdapterEnumerationProvider(IReadOnlyList<AdapterEnumer
 /// <summary>
 /// Scriptable <see cref="ICaptureGeneration"/>: runs until cancelled (returns normally, like the
 /// real runtime), the test completes it, or the test faults it (the exception propagates).
+/// Latches <see cref="ReachedPumpRun"/> once its run starts, mirroring the latch position of
+/// the real runtime's start sequence; a <see cref="FaultAtStartupWith"/> exception escapes
+/// before that latch — the pre-pump startup signature (task 09-11).
 /// </summary>
 internal sealed class FakeCaptureGeneration : ICaptureGeneration
 {
@@ -48,11 +51,28 @@ internal sealed class FakeCaptureGeneration : ICaptureGeneration
     public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public int DisposeCount { get; private set; }
     public bool CancelObserved { get; private set; }
+    public bool ReachedPumpRun { get; private set; }
     public Action? OnDisposed { get; set; }
+
+    /// <summary>The startup fault thrown before the pumps-started latch; null keeps the generation healthy.</summary>
+    public Exception? FaultAtStartupWith { get; set; }
+
+    /// <summary>
+    /// When set, a pending <see cref="FaultAtStartupWith"/> is held until this source completes
+    /// (or the run is cancelled), so a test can stage a racing refresh demand before the fault
+    /// lands and the demand deterministically wins the runner's wait.
+    /// </summary>
+    public TaskCompletionSource? StartupFaultRelease { get; set; }
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         using var registration = cancellationToken.Register(() => CancelObserved = true);
+        if (FaultAtStartupWith is { } startupFault)
+        {
+            if (StartupFaultRelease is { } release) await release.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            throw startupFault;
+        }
+        ReachedPumpRun = true;
         Started.TrySetResult();
         try
         {
@@ -83,6 +103,9 @@ internal sealed class FakeCaptureGenerationFactory : ICaptureGenerationFactory
 
     public Action<FakeCaptureGeneration>? OnCreated { get; set; }
 
+    /// <summary>Per-creation script (task 09-11): assigns the startup-fault knobs on each freshly created generation before it can run.</summary>
+    public Action<FakeCaptureGeneration>? StartupFaultScript { get; set; }
+
     public IReadOnlyList<FakeCaptureGeneration> Generations
     {
         get
@@ -99,6 +122,7 @@ internal sealed class FakeCaptureGenerationFactory : ICaptureGenerationFactory
             generation = new FakeCaptureGeneration(_generations.Count, scope);
             _generations.Add(generation);
         }
+        StartupFaultScript?.Invoke(generation);
         OnCreated?.Invoke(generation);
         return generation;
     }

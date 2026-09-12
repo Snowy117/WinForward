@@ -18,6 +18,14 @@ public interface ICaptureGeneration : IAsyncDisposable
 {
     /// <summary>Runs the generation until it ends; faults propagate as the fail-closed exit.</summary>
     Task RunAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Whether this generation's start sequence reached its pump run (task 09-11): still false
+    /// while the mode snapshot/apply phase is in flight. A fault observed on a completed
+    /// generation whose latch is still false never reached the pumps, which distinguishes a
+    /// recoverable startup stale-handle fault from an in-run fault.
+    /// </summary>
+    bool ReachedPumpRun { get; }
 }
 
 /// <summary>
@@ -111,6 +119,8 @@ internal sealed class RuntimeCaptureGeneration : ICaptureGeneration
     {
         await _runtime.StartAsync(cancellationToken).ConfigureAwait(false);
     }
+
+    public bool ReachedPumpRun => _runtime.ReachedPumpRun;
 
     public ValueTask DisposeAsync() => _runtime.DisposeAsync();
 }

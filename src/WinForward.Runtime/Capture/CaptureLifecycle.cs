@@ -37,6 +37,7 @@ public sealed class TransactionalCaptureRuntime : IAsyncDisposable
     private Task? _runTask;
     private Task? _cleanupTask;
     private int _captureDisposed;
+    private bool _reachedPumpRun;
 
     public TransactionalCaptureRuntime(IAdapterModeController modes, IPacketCaptureLoop capture)
     {
@@ -51,6 +52,22 @@ public sealed class TransactionalCaptureRuntime : IAsyncDisposable
         get
         {
             lock (_gate) return _state;
+        }
+    }
+
+    /// <summary>
+    /// Whether the start sequence reached the pump run: latched under the gate immediately
+    /// before the capture loop starts, so a caller reading it after the run task completed sees
+    /// a race-free answer (the latch write — or its absence — is already visible). A fault
+    /// while this is still false escaped the startup mode snapshot/apply phase and never
+    /// reached the pumps, which is the signature the runner uses to classify a stale-handle
+    /// startup fault as recoverable (task 09-11).
+    /// </summary>
+    public bool ReachedPumpRun
+    {
+        get
+        {
+            lock (_gate) return _reachedPumpRun;
         }
     }
 
@@ -79,6 +96,7 @@ public sealed class TransactionalCaptureRuntime : IAsyncDisposable
             }
             SetActiveState(CaptureRuntimeState.ModesApplied);
             SetActiveState(CaptureRuntimeState.Running);
+            lock (_gate) _reachedPumpRun = true;
             await _capture.RunAsync(runtimeCancellation).ConfigureAwait(false);
         }
         finally

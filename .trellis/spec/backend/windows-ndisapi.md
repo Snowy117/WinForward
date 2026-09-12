@@ -98,7 +98,7 @@ if (TryExtractGuid(adapter.InternalName, out var guid))
 
 ---
 
-## Adapter list change refresh — layered capture generations (wired 2026-09-07, task 09-07-adapter-list-refresh)
+## Adapter list change refresh — layered capture generations (wired 2026-09-07, task 09-07-adapter-list-refresh; startup stale-handle recovery added 2026-09-11, task 09-11)
 
 > Windows rebuilds the NDISRD TCP/IP-bound adapter list on plug/unplug, enable/disable,
 > standby/resume, and Wi-Fi Direct virtual-adapter churn (`本地连接* N`). Every enumeration
@@ -106,7 +106,9 @@ if (TryExtractGuid(adapter.InternalName, out var guid))
 > then fail with `ERROR_INVALID_PARAMETER` (87) — production ground truth 2026-09-07: four
 > adapters (incl. the physical NIC) degraded together. 87 stays in the permanent-error class
 > (`IsTransientReadError` is NOT extended); the fix is recovery, not retry: the official
-> `SetAdapterListChangeEvent` + re-enumeration guidance. Unit-locked end to end; hardware
+> `SetAdapterListChangeEvent` + re-enumeration guidance. Since 2026-09-11 the fourth 87 surface
+> — a rebuild racing the generation's mode snapshot/apply phase, before the pumps ever start —
+> is also recovered in the runner instead of exiting the process. Unit-locked end to end; hardware
 > smoke passed 2026-09-08 (task S7, evidence in the task's `smoke-evidence.md`): 87 degrade →
 > refresh in 77 ms, session survival across the cage, interception resumed; **R-2 auto-reset
 > event mode verified against the real driver**. R-1 final-shutdown ordering verified per
@@ -141,6 +143,14 @@ if (TryExtractGuid(adapter.InternalName, out var guid))
   `ICaptureGeneration`/`ICaptureGenerationFactory` are the test seam, `NdisCaptureGenerationFactory`
   (windows-gated) composes `NdisAdapterModeController` + `MultiAdapterCaptureLoop` +
   `TransactionalCaptureRuntime` per generation.
+- `ICaptureGeneration.ReachedPumpRun` / `TransactionalCaptureRuntime.ReachedPumpRun` (task
+  09-11) — phase latch set under the runtime gate immediately before the capture loop run
+  starts; read after the generation task completes it is race-free by await ordering. This is
+  the classification input that keeps NDIS error-code knowledge out of the runtime itself.
+- `LayeredCaptureRunner.MaxConsecutiveStartupRecoveries = 3` (internal const, task 09-11) —
+  consecutive recoverable startup faults beyond this count rethrow the original fault
+  fail-closed (genuine-defect guard; a settling adapter-list churn recovers within two or three
+  rebuilds because every retry re-enumerates).
 - `DurableCaptureBundle` (Cli) — built once per run: redirect table, TCP/UDP coordinators,
   dispatcher/executor chain, idle sweeper, refreshable UDP target source; `DisposeAsync`
   single-flight, order sweeper → udp → tcp.
@@ -165,6 +175,26 @@ if (TryExtractGuid(adapter.InternalName, out var guid))
   channel (`SignalDegraded`); the enumeration diff then decides rebuild vs honest no-change
   log. 87 on a present adapter remains a genuine defect signal — never add it to the transient
   table.
+- **Startup stale-handle recovery (task 09-11)**: a generation fault is classified recoverable
+  iff it is `Win32Exception` with `NativeErrorCode == 87` AND the generation's `ReachedPumpRun`
+  latch is still false (during startup the only adapter-associated native calls are the mode
+  snapshot/apply, so that signature means the list rebuilt between the runner's enumeration and
+  the snapshot). Classification lives in the runner (`IsRecoverableStartupFault`), next to
+  `AdapterListRebuiltNativeError`. Absorption happens at exactly the two points where a
+  generation task is awaited: exit observation (fault won — release the dead generation exactly
+  like a refresh stop, arm a forced demand) and `StopGenerationAsync`'s fault-capture branch
+  (demand won — absorb with no extra signal; the in-flight demand installs the replacement).
+  Every other escape — non-87 startup faults, 87 after the pumps started, over-cap streaks —
+  keeps the fail-closed rethrow. The streak resets wherever a generation with
+  `ReachedPumpRun == true` completes.
+- **Forced rebuild honesty (task 09-11)**: a recovery-armed demand consumes `_forceRebuild` at
+  `ProcessRefreshDemandAsync` entry and bypasses the empty-diff no-op skip — the current
+  generation is dead, so an empty diff must still install a replacement (pointer-reuse makes
+  empty diffs genuinely possible after a rebuild). `adapter.refresh` records `forced=true`
+  (never `noop=true`) on forced installs; the force flag clears on the next install, so a live
+  generation never loses its no-op protection. Telemetry per absorption: structured warn
+  `generation.startup-fault` with `nativeError` + `attempt=k/{limit}`; a final error-level
+  variant precedes the fail-closed exit when the cap is exceeded.
 - **Shutdown order (R-1 deviation, documented)**: generation cleanup (pump stop + best-effort
   mode restore with old handles) runs BEFORE durable disposal, which is the reverse of the
   pre-2026-09-07 capture-loop wrapper in one respect: coordinators now dispose after mode
@@ -192,6 +222,11 @@ if (TryExtractGuid(adapter.InternalName, out var guid))
 | New adapter + fully constrained policy | NOT adopted |
 | Ambiguous name selector at refresh | warn + addition skipped, non-fatal |
 | Pump degrades with 87, enumeration unchanged | honest no-change log; no rebuild loop |
+| Generation startup faults with 87 before its pump run (task 09-11) | absorbed: warn `generation.startup-fault attempt=k/3`, dead generation released, forced storm-guarded refresh installs a replacement even on an empty diff (`forced=true`) |
+| > 3 consecutive recoverable startup faults | final error-level `generation.startup-fault`, original fault rethrown fail-closed |
+| Startup fault with native error ≠ 87, or 87 after `ReachedPumpRun` | fail-closed rethrow; no warn event, no recovery |
+| Refresh demand races a startup-87 fault (demand wins the await) | demand processing absorbs the classified fault; ends with a live generation |
+| Generation reaches its pump run, later isolated startup-87 | streak was reset; recovery starts from attempt 1/3 |
 | Signals faster than the storm window | coalesce into one rebuild |
 | gen0 scope resolution failure | fatal startup error (unchanged `TryResolve` surface) |
 | Empty scope at refresh | pause (no pumps), await next signal; startup empty stays fatal |
@@ -202,7 +237,15 @@ if (TryExtractGuid(adapter.InternalName, out var guid))
 - `LayeredCaptureRunnerTests` / `LayeredCaptureRunnerRefreshTests` (AC1–AC5: rebuild on fresh
   handles without disposing durable; drop-with-warn; adopt via unconstrained rule; 87 no-op
   re-check; storm coalescing + no-op skip; generation-before-durable disposal ordering on
-  natural end, fault, and user cancel).
+  natural end, fault, and user cancel). Since task 09-11 the refresh suite also locks the
+  startup recovery ACs: recovery on fresh handles; forced install on unchanged enumeration
+  (`forced=true`, no `noop`); cap exceeded → original `Win32Exception` survives to `RunAsync`
+  with the warn×3+error event sequence and `attempt=1/3..4/3`; non-87 startup fault and
+  post-pump 87 propagate with zero `generation.startup-fault` events; demand-races-fault ends
+  with a live generation; streak reset proven by two recoveries both logging `attempt=1/3`.
+- `CaptureLifecycleTests` (task 09-11): `TransactionalCaptureRuntime.ReachedPumpRun` stays
+  false when `SnapshotAsync`/`ApplyCaptureModeAsync` throws during start, latches true once
+  the capture loop run started (fakes carry `failOnSnapshot`/`failOnApply` knobs).
 - `AdapterScopeRefreshTests` (R4 semantics matrix + ordering + zero-warning equivalence with
   `TryResolve`); `AdapterEnumerationDiffTests` (handle/MAC/MTU diff).
 - `AdapterListWatcherTests` (signal/cancel/dispose semantics via the OS-agnostic wait core);

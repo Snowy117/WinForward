@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Runtime.ExceptionServices;
 using WinForward.Configuration;
 using WinForward.Core;
@@ -17,7 +18,10 @@ namespace WinForward.Runtime.Capture;
 /// best-effort mode restore), swaps the durable layer's adapter views via <c>onScopeInstalled</c>,
 /// and starts the next generation on fresh handles. The durable layer is disposed exactly once,
 /// after the final generation completes. A generation fault is fail-closed: it propagates out of
-/// <see cref="RunAsync"/> after teardown.
+/// <see cref="RunAsync"/> after teardown — except a stale-handle startup fault (native 87 before
+/// the generation reached its pump run), which is absorbed and rebuilt through a forced,
+/// storm-guarded refresh, bounded by <see cref="MaxConsecutiveStartupRecoveries"/> consecutive
+/// recoveries (task 09-11).
 /// </summary>
 public sealed class LayeredCaptureRunner
 {
@@ -25,6 +29,13 @@ public sealed class LayeredCaptureRunner
 
     /// <summary>ERROR_INVALID_PARAMETER: every cached handle went stale because the driver rebuilt its bound-adapter list.</summary>
     internal const int AdapterListRebuiltNativeError = 87;
+
+    /// <summary>
+    /// Consecutive recoverable startup faults beyond this count rethrow the original fault
+    /// fail-closed: a settling adapter-list churn recovers within two or three rebuilds, so a
+    /// longer streak is a genuine defect, not a race (task 09-11 R3).
+    /// </summary>
+    internal const int MaxConsecutiveStartupRecoveries = 3;
 
     private readonly IAdapterEnumerationProvider _enumerationProvider;
     private readonly ICaptureGenerationFactory _generationFactory;
@@ -45,6 +56,8 @@ public sealed class LayeredCaptureRunner
     private Task? _runTask;
     private IReadOnlyList<AdapterEnumerationItem> _currentScope = [];
     private DateTimeOffset _lastRebuildUtc;
+    private int _startupFaultStreak;
+    private bool _forceRebuild;
 
     public LayeredCaptureRunner(
         IAdapterEnumerationProvider enumerationProvider,
@@ -164,6 +177,8 @@ public sealed class LayeredCaptureRunner
     private async Task<RefreshDemandOutcome> ProcessRefreshDemandAsync(CancellationToken cancellationToken)
     {
         _demandGate.Consume();
+        var forced = _forceRebuild;
+        _forceRebuild = false;
         var degraded = DrainDegradedAdapters();
         var guardRemaining = _lastRebuildUtc + _minimumRefreshInterval - _time.GetUtcNow();
         if (guardRemaining > TimeSpan.Zero)
@@ -177,7 +192,7 @@ public sealed class LayeredCaptureRunner
         var nextScope = CaptureAdapterScopeResolver.ResolveForRefresh(AdaptersOf(fresh), _policy, out var warnings);
         var nextItems = ScopeItemsOf(fresh, nextScope);
         var diff = AdapterEnumerationDiff.Diff(_currentScope, nextItems);
-        if (diff.IsEmpty)
+        if (diff.IsEmpty && !forced)
         {
             LogRefresh(diff, degraded, fresh);
             return RefreshDemandOutcome.Continue;
@@ -186,7 +201,7 @@ public sealed class LayeredCaptureRunner
         foreach (var warning in warnings) _logger.Warn(warning);
         _lastRebuildUtc = _time.GetUtcNow();
         await StopGenerationAsync().ConfigureAwait(false);
-        LogRefresh(diff, degraded, fresh);
+        LogRefresh(diff, degraded, fresh, forced);
         if (cancellationToken.IsCancellationRequested) return RefreshDemandOutcome.Exit;
         if (nextItems.Count == 0)
         {
@@ -201,6 +216,11 @@ public sealed class LayeredCaptureRunner
         return RefreshDemandOutcome.Continue;
     }
 
+    /// <summary>
+    /// Installs a freshly created generation as the current one. Any install satisfies a pending
+    /// forced rebuild — including one armed mid-demand by an absorbed startup fault, whose
+    /// in-flight replacement install follows the stop — so the force flag clears here.
+    /// </summary>
     private async ValueTask InstallGenerationAsync(IReadOnlyList<AdapterEnumerationItem> scope, CancellationToken cancellationToken)
     {
         var generation = _generationFactory.Create(scope);
@@ -222,10 +242,15 @@ public sealed class LayeredCaptureRunner
         _generationCancellation = generationCancellation;
         _currentScope = scope;
         _lastRebuildUtc = _time.GetUtcNow();
+        _forceRebuild = false;
         _onScopeInstalled?.Invoke(scope);
     }
 
-    /// <summary>Stops the running generation and rethrows the fault it ended with, if any.</summary>
+    /// <summary>
+    /// Stops the running generation and rethrows the fault it ended with, if any; a classified
+    /// startup stale-handle fault is absorbed into a forced rebuild instead (task 09-11), with
+    /// no extra demand signal — the caller's demand processing installs the replacement next.
+    /// </summary>
     private async Task StopGenerationAsync()
     {
         if (_generation is not { } generation) return;
@@ -241,7 +266,12 @@ public sealed class LayeredCaptureRunner
             {
                 // The refresh token fired; the generation stopped gracefully.
             }
+            catch (Exception exception) when (IsRecoverableStartupFault(generation, exception))
+            {
+                if (!TryAbsorbStartupFault((Win32Exception)exception)) fault = exception;
+            }
             catch (Exception exception) { fault = exception; }
+            if (fault is null && generation.ReachedPumpRun) _startupFaultStreak = 0;
         }
         await generation.DisposeAsync().ConfigureAwait(false);
         _generationCancellation?.Dispose();
@@ -253,12 +283,73 @@ public sealed class LayeredCaptureRunner
 
     private async Task ObserveGenerationExitAsync()
     {
+        var generation = _generation!;
         try { await _runTask!.ConfigureAwait(false); }
         catch (OperationCanceledException)
         {
             // Only the runner's own links carry this token; user cancel is handled by the loop.
         }
+        catch (Exception fault) when (IsRecoverableStartupFault(generation, fault))
+        {
+            await RecoverFromStartupFaultAsync(generation, fault).ConfigureAwait(false);
+            return;
+        }
+        if (generation.ReachedPumpRun) _startupFaultStreak = 0;
         _logger.Info("The capture generation ended; stopping the run.");
+    }
+
+    /// <summary>
+    /// A generation fault is a recoverable startup stale-handle fault (task 09-11 R1) exactly when
+    /// it is the adapter-list-rebuilt native error and the generation never reached its pump run:
+    /// during startup the only adapter-associated native calls are the mode snapshot/apply, so
+    /// this signature means the list rebuilt after the runner's enumeration.
+    /// </summary>
+    private static bool IsRecoverableStartupFault(ICaptureGeneration generation, Exception fault) =>
+        fault is Win32Exception { NativeErrorCode: AdapterListRebuiltNativeError }
+        && !generation.ReachedPumpRun;
+
+    /// <summary>
+    /// Records one classified startup fault against the consecutive-recovery budget: bumps the
+    /// streak, emits the <c>generation.startup-fault</c> warn, and arms the forced rebuild.
+    /// Returns false — after the final error-level event — when the budget is exhausted; the
+    /// caller then rethrows the original fault fail-closed.
+    /// </summary>
+    private bool TryAbsorbStartupFault(Win32Exception fault)
+    {
+        if (_startupFaultStreak >= MaxConsecutiveStartupRecoveries)
+        {
+            _logger.Event(RuntimeLogLevel.Error, "generation.startup-fault",
+                new RuntimeLogField("nativeError", fault.NativeErrorCode),
+                new RuntimeLogField("attempt", $"{_startupFaultStreak + 1}/{MaxConsecutiveStartupRecoveries}"));
+            return false;
+        }
+        _startupFaultStreak++;
+        _forceRebuild = true;
+        _logger.Event(RuntimeLogLevel.Warn, "generation.startup-fault",
+            new RuntimeLogField("nativeError", fault.NativeErrorCode),
+            new RuntimeLogField("attempt", $"{_startupFaultStreak}/{MaxConsecutiveStartupRecoveries}"));
+        return true;
+    }
+
+    /// <summary>
+    /// Exit-observation recovery (task 09-11 R2): the faulted generation is released exactly as a
+    /// refresh stop would release it, the forced rebuild is armed, and a refresh demand is raised
+    /// so the loop reconciles on fresh handles. Over cap, the original fault is rethrown
+    /// fail-closed after the release, so the subsequent teardown finds no generation to stop.
+    /// </summary>
+    private async Task RecoverFromStartupFaultAsync(ICaptureGeneration generation, Exception fault)
+    {
+        var absorbed = TryAbsorbStartupFault((Win32Exception)fault);
+        _generation = null;
+        _runTask = null;
+        await CancelBestEffortAsync(_refreshCancellation).ConfigureAwait(false);
+        await generation.DisposeAsync().ConfigureAwait(false);
+        _generationCancellation?.Dispose();
+        _generationCancellation = null;
+        _refreshCancellation?.Dispose();
+        _refreshCancellation = null;
+        if (!absorbed) ExceptionDispatchInfo.Capture(fault).Throw();
+        _demandGate.Signal();
     }
 
     /// <summary>Cancels a refresh token source that may already have been disposed concurrently.</summary>
@@ -304,10 +395,11 @@ public sealed class LayeredCaptureRunner
         return degraded;
     }
 
-    private void LogRefresh(AdapterScopeDiff diff, IReadOnlyList<string> degraded, IReadOnlyList<AdapterEnumerationItem> fresh)
+    private void LogRefresh(AdapterScopeDiff diff, IReadOnlyList<string> degraded, IReadOnlyList<AdapterEnumerationItem> fresh, bool forced = false)
     {
-        var fields = new List<RuntimeLogField>(4);
-        if (diff.IsEmpty) fields.Add(new("noop", "true"));
+        var fields = new List<RuntimeLogField>(5);
+        if (diff.IsEmpty && !forced) fields.Add(new("noop", "true"));
+        if (forced) fields.Add(new("forced", "true"));
         AddScopeList(fields, "added", diff.Added);
         AddScopeList(fields, "removed", diff.Removed);
         AddScopeList(fields, "changed", diff.Changed);

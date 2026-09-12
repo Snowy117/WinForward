@@ -11,15 +11,19 @@ namespace WinForward.Core.Tests;
 
 /// <summary>
 /// Scriptable <see cref="IAdapterModeController"/>: serves a fixed snapshot list, records applied
-/// and restored adapters in order, and optionally fails the Nth apply (0-based) so startup
-/// rollback paths can be exercised deterministically.
+/// and restored adapters in order, and optionally fails the snapshot itself or the Nth apply
+/// (0-based) so startup rollback paths can be exercised deterministically.
 /// </summary>
-internal sealed class FakeModes(IReadOnlyList<AdapterModeSnapshot> snapshots, int failOnApply = -1) : IAdapterModeController
+internal sealed class FakeModes(IReadOnlyList<AdapterModeSnapshot> snapshots, int failOnApply = -1, bool failOnSnapshot = false) : IAdapterModeController
 {
     public List<string> Applied { get; } = [];
     public List<string> Restored { get; } = [];
 
-    public ValueTask<IReadOnlyList<AdapterModeSnapshot>> SnapshotAsync(CancellationToken cancellationToken) => ValueTask.FromResult(snapshots);
+    public ValueTask<IReadOnlyList<AdapterModeSnapshot>> SnapshotAsync(CancellationToken cancellationToken)
+    {
+        if (failOnSnapshot) throw new InvalidOperationException("mode snapshot failed");
+        return ValueTask.FromResult(snapshots);
+    }
 
     public ValueTask ApplyCaptureModeAsync(AdapterModeSnapshot adapter, CancellationToken cancellationToken)
     {

@@ -1,8 +1,10 @@
+using System.ComponentModel;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.Capture;
+using WinForward.Windows;
 using Xunit;
 
 namespace WinForward.Core.Tests;
@@ -199,6 +201,199 @@ public sealed class LayeredCaptureRunnerRefreshTests
         await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
         Assert.Equal([909], harness.Generation(1).Scope.Select(item => item.Adapter.RuntimeHandle).ToArray());
         Assert.False(harness.RunTask.IsCompleted);
+    }
+
+    [Fact]
+    public async Task StartupStaleHandleFaultIsRecoveredOnFreshHandles()
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var harness = new CaptureRunnerHarness(
+            [CaptureRunnerFakes.AdapterItem("id-a", 101)],
+            CaptureRunnerFakes.UnconstrainedPolicy(),
+            minimumRefreshInterval: TimeSpan.FromMilliseconds(50));
+        harness.Generations.StartupFaultScript = generation =>
+        {
+            if (generation.Index != 0) return;
+            generation.FaultAtStartupWith = new Win32Exception(87, "stale adapter handle");
+            generation.StartupFaultRelease = release;
+        };
+        harness.Start();
+        await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 1).ConfigureAwait(false);
+
+        harness.Enumeration.SetAdapters(CaptureRunnerFakes.AdapterItem("id-a", 202));
+        release.TrySetResult();
+
+        await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 2).ConfigureAwait(false);
+        await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
+
+        Assert.False(harness.RunTask.IsCompleted);
+        Assert.True(harness.Enumeration.EnumerationCount >= 2);
+        Assert.Equal([202], harness.Generation(1).Scope.Select(item => item.Adapter.RuntimeHandle).ToArray());
+        Assert.Equal(1, harness.Generation(0).DisposeCount);
+        Assert.Equal(0, harness.Generation(1).DisposeCount);
+        Assert.Equal(0, harness.DurableDisposeCount);
+        var refresh = harness.RefreshEvents[^1];
+        Assert.Equal("true", CaptureRunnerHarness.FieldValue(refresh, "forced"));
+        Assert.Null(CaptureRunnerHarness.FieldValue(refresh, "noop"));
+    }
+
+    [Fact]
+    public async Task StartupStaleHandleRecoveryWithUnchangedEnumerationInstallsForcedReplacement()
+    {
+        await using var harness = new CaptureRunnerHarness(
+            [CaptureRunnerFakes.AdapterItem("id-a", 101)],
+            CaptureRunnerFakes.UnconstrainedPolicy(),
+            minimumRefreshInterval: TimeSpan.FromMilliseconds(50));
+        harness.Generations.StartupFaultScript = generation =>
+        {
+            if (generation.Index == 0) generation.FaultAtStartupWith = new Win32Exception(87, "stale adapter handle");
+        };
+        harness.Start();
+
+        await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 2).ConfigureAwait(false);
+        await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
+
+        Assert.False(harness.RunTask.IsCompleted);
+        Assert.Equal([101], harness.Generation(1).Scope.Select(item => item.Adapter.RuntimeHandle).ToArray());
+        Assert.Equal(1, harness.Generation(0).DisposeCount);
+        Assert.Equal(0, harness.DurableDisposeCount);
+        var refresh = harness.RefreshEvents[^1];
+        Assert.Equal("true", CaptureRunnerHarness.FieldValue(refresh, "forced"));
+        Assert.Null(CaptureRunnerHarness.FieldValue(refresh, "noop"));
+        Assert.Single(harness.Logger.Events, entry =>
+            string.Equals(entry.Name, "generation.startup-fault", StringComparison.Ordinal)
+            && entry.Level == RuntimeLogLevel.Warn
+            && string.Equals(CaptureRunnerHarness.FieldValue(entry.Fields, "attempt"), "1/3", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ConsecutiveStartupStaleHandleFaultsBeyondTheLimitFailClosedWithTheOriginalFault()
+    {
+        var fault = new Win32Exception(87, "stale adapter handle");
+        await using var harness = new CaptureRunnerHarness(
+            [CaptureRunnerFakes.AdapterItem("id-a", 101)],
+            CaptureRunnerFakes.UnconstrainedPolicy(),
+            minimumRefreshInterval: TimeSpan.FromMilliseconds(50));
+        harness.Generations.StartupFaultScript = generation => generation.FaultAtStartupWith = fault;
+        harness.Start();
+
+        var thrown = await Assert.ThrowsAsync<Win32Exception>(() => harness.RunTask).ConfigureAwait(false);
+
+        Assert.Same(fault, thrown);
+        Assert.Equal(4, harness.Generations.Generations.Count);
+        Assert.All(harness.Generations.Generations, generation => Assert.Equal(1, generation.DisposeCount));
+        Assert.Equal(1, harness.DurableDisposeCount);
+        var faultEvents = harness.Logger.Events
+            .Where(entry => string.Equals(entry.Name, "generation.startup-fault", StringComparison.Ordinal))
+            .ToArray();
+        Assert.Equal(
+            [RuntimeLogLevel.Warn, RuntimeLogLevel.Warn, RuntimeLogLevel.Warn, RuntimeLogLevel.Error],
+            faultEvents.Select(entry => entry.Level).ToArray());
+        Assert.Equal("1/3,2/3,3/3,4/3", string.Join(",",
+            faultEvents.Select(entry => CaptureRunnerHarness.FieldValue(entry.Fields, "attempt"))));
+        Assert.All(faultEvents, entry => Assert.Equal("87", CaptureRunnerHarness.FieldValue(entry.Fields, "nativeError")));
+    }
+
+    [Fact]
+    public async Task StartupFaultWithOtherNativeErrorPropagatesFailClosed()
+    {
+        await using var harness = new CaptureRunnerHarness(
+            [CaptureRunnerFakes.AdapterItem("id-a", 101)],
+            CaptureRunnerFakes.UnconstrainedPolicy(),
+            minimumRefreshInterval: TimeSpan.FromMilliseconds(50));
+        harness.Generations.StartupFaultScript = generation => generation.FaultAtStartupWith = new Win32Exception(6, "invalid handle state");
+        harness.Start();
+
+        var thrown = await Assert.ThrowsAsync<Win32Exception>(() => harness.RunTask).ConfigureAwait(false);
+
+        Assert.Equal(6, thrown.NativeErrorCode);
+        Assert.Single(harness.Generations.Generations);
+        Assert.Equal(1, harness.Generation(0).DisposeCount);
+        Assert.Equal(1, harness.DurableDisposeCount);
+        Assert.DoesNotContain(harness.Logger.Events, entry => string.Equals(entry.Name, "generation.startup-fault", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task StaleHandleFaultAfterPumpRunPropagatesFailClosed()
+    {
+        await using var harness = new CaptureRunnerHarness(
+            [CaptureRunnerFakes.AdapterItem("id-a", 101)],
+            CaptureRunnerFakes.UnconstrainedPolicy());
+        harness.Start();
+        await harness.WaitForGenerationStartedAsync(0).ConfigureAwait(false);
+
+        harness.Generation(0).Fault(new Win32Exception(87, "stale adapter handle"));
+        var thrown = await Assert.ThrowsAsync<Win32Exception>(() => harness.RunTask).ConfigureAwait(false);
+
+        Assert.Equal(87, thrown.NativeErrorCode);
+        Assert.Equal(1, harness.Generation(0).DisposeCount);
+        Assert.Equal(1, harness.DurableDisposeCount);
+        Assert.DoesNotContain(harness.Logger.Events, entry => string.Equals(entry.Name, "generation.startup-fault", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RefreshDemandRacingAStartupStaleHandleFaultIsAbsorbedIntoARebuild()
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var harness = new CaptureRunnerHarness(
+            [CaptureRunnerFakes.AdapterItem("id-a", 101)],
+            CaptureRunnerFakes.UnconstrainedPolicy(),
+            minimumRefreshInterval: TimeSpan.FromMilliseconds(50));
+        harness.Generations.StartupFaultScript = generation =>
+        {
+            if (generation.Index != 0) return;
+            generation.FaultAtStartupWith = new Win32Exception(87, "stale adapter handle");
+            generation.StartupFaultRelease = release;
+        };
+        harness.Start();
+        await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 1).ConfigureAwait(false);
+
+        harness.Enumeration.SetAdapters(CaptureRunnerFakes.AdapterItem("id-a", 202));
+        harness.Runner.SignalDegraded(new WindowsAdapter("id-a", "id-a", "id-a", 101, 0), 87);
+        release.TrySetResult();
+
+        await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 2).ConfigureAwait(false);
+        await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
+
+        Assert.False(harness.RunTask.IsCompleted);
+        Assert.Equal([202], harness.Generation(1).Scope.Select(item => item.Adapter.RuntimeHandle).ToArray());
+        Assert.Equal(1, harness.Generation(0).DisposeCount);
+        Assert.Equal(0, harness.DurableDisposeCount);
+        var refresh = harness.RefreshEvents[^1];
+        Assert.Null(CaptureRunnerHarness.FieldValue(refresh, "forced"));
+        Assert.Equal("id-a=true", CaptureRunnerHarness.FieldValue(refresh, "degraded"));
+        Assert.Single(harness.Logger.Events, entry =>
+            string.Equals(entry.Name, "generation.startup-fault", StringComparison.Ordinal)
+            && string.Equals(CaptureRunnerHarness.FieldValue(entry.Fields, "attempt"), "1/3", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RecoveryStreakResetsAfterAGenerationReachesItsPumpRun()
+    {
+        await using var harness = new CaptureRunnerHarness(
+            [CaptureRunnerFakes.AdapterItem("id-a", 101)],
+            CaptureRunnerFakes.UnconstrainedPolicy(),
+            minimumRefreshInterval: TimeSpan.FromMilliseconds(50));
+        harness.Generations.StartupFaultScript = generation =>
+        {
+            if (generation.Index is 0 or 2) generation.FaultAtStartupWith = new Win32Exception(87, "stale adapter handle");
+        };
+        harness.Start();
+        await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 2).ConfigureAwait(false);
+        await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
+
+        harness.Enumeration.SetAdapters(CaptureRunnerFakes.AdapterItem("id-a", 202));
+        harness.ChangeSource.Trigger();
+        await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 3).ConfigureAwait(false);
+        await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 4).ConfigureAwait(false);
+        await harness.WaitForGenerationStartedAsync(3).ConfigureAwait(false);
+
+        Assert.False(harness.RunTask.IsCompleted);
+        Assert.Equal(0, harness.DurableDisposeCount);
+        Assert.Equal("1/3,1/3", string.Join(",",
+            harness.Logger.Events
+                .Where(entry => string.Equals(entry.Name, "generation.startup-fault", StringComparison.Ordinal))
+                .Select(entry => CaptureRunnerHarness.FieldValue(entry.Fields, "attempt"))));
     }
 
     /// <summary>A materialized pass packet for one (adapter handle, direction) — the shape a pump hands the executor after a rewrite consumer materialized the lease.</summary>
