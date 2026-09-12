@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "Owns the batching/lane contracts (§2 surfaces, §3 contracts incl. lane lifecycle and lane overflow, §4 validation matrix, §5 tests) that this task modifies; must be updated alongside the code"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "PassAsync is the warm path: append must stay allocation-free except the documented lane-array growth; the rebuild stays on the between-generations cold path"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Red-to-green test discipline and forbidden patterns for the updated/new executor tests"}

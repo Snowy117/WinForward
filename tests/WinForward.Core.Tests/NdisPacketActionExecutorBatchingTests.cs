@@ -13,7 +13,12 @@ namespace WinForward.Core.Tests;
 /// Batched pass accumulation of <see cref="NdisPacketActionExecutor"/> (task 08-30-batched-ioctls
 /// D2): same-(adapter, direction) passes accumulate in capture order and leave in one batched
 /// reinjector call at flush; rented pooled buffers return exactly once; in-place capture buffers
-/// are never returned; lane overflow degrades to the immediate single send.
+/// are never returned; lane overflow degrades to the immediate single send. Since task
+/// 09-12-lane-table-scope-sizing the lane table is sized from the capture scope: every
+/// <see cref="NdisPacketActionExecutor.RetireLanesExcept"/> call (the scope-installed callback)
+/// rebuilds the table at 2 × scope-count lanes, migrating in-scope lanes with their pending
+/// frames, so in-scope keys never overflow; overflow remains reachable only against the
+/// pre-install table (capacity 8) or the zero-capacity paused table.
 /// </summary>
 public sealed class NdisPacketActionExecutorBatchingTests
 {
@@ -134,8 +139,9 @@ public sealed class NdisPacketActionExecutorBatchingTests
         var reinjector = new CountingReinjector();
         var executor = new NdisPacketActionExecutor(reinjector);
 
-        // 5 adapters x 2 directions = 10 lanes; the fixed capacity is 8, so the last lane pair
-        // must fall back to the immediate single send instead of being silently batched.
+        // Pre-install lane table (no scope installed yet): 5 adapters x 2 directions = 10 lanes
+        // exceed the capacity of 8, so the last lane pair must fall back to the immediate single
+        // send instead of being silently batched.
         for (var adapter = 1; adapter <= 5; adapter++)
         {
             await executor.PassAsync(MaterializedPass([0x21], (nint)adapter, isOnSend: true), CancellationToken.None);
@@ -210,7 +216,8 @@ public sealed class NdisPacketActionExecutorBatchingTests
         var logger = new RecordingRuntimeLogger();
         var executor = new NdisPacketActionExecutor(reinjector, logger);
 
-        // Fill the fixed lane capacity (8) with four adapters × two directions.
+        // Fill the pre-install lane capacity (8) with four adapters × two directions; no scope
+        // has been installed, so the table still holds its compile-time pre-install size.
         for (var adapter = 1; adapter <= 4; adapter++)
         {
             await executor.PassAsync(MaterializedPass([0x40], (nint)adapter, isOnSend: true), CancellationToken.None);
@@ -247,8 +254,9 @@ public sealed class NdisPacketActionExecutorBatchingTests
         }
         for (var adapter = 1; adapter <= 4; adapter++) executor.FlushPendingPasses((nint)adapter);
 
-        // Generation switch on fresh handles: the stale lanes retire, so the table has room
-        // again — the next generation's keys accumulate instead of degrading to immediate sends.
+        // Generation switch on fresh handles: the scope install rebuilds the table for the new
+        // scope (handles 101, 102 — the old generation's lanes are retired, not migrated), so
+        // the next generation's keys accumulate instead of degrading to immediate sends.
         executor.RetireLanesExcept([(nint)101, (nint)102]);
 
         await executor.PassAsync(MaterializedPass([0x52], (nint)101, isOnSend: true), CancellationToken.None);
@@ -274,19 +282,69 @@ public sealed class NdisPacketActionExecutorBatchingTests
         }
         for (var adapter = 1; adapter <= 4; adapter++) executor.FlushPendingPasses((nint)adapter);
 
-        // Empty scope = interception paused: every lane retires, so a full table's worth of
-        // fresh keys fits again once capture resumes.
+        // Empty scope = interception paused: the rebuild installs a zero-capacity table (no
+        // lane can accumulate while no pump runs), so a stray pass cannot batch — it degrades
+        // to the immediate single send, still going out exactly once.
         executor.RetireLanesExcept(ReadOnlySpan<nint>.Empty);
+
+        await executor.PassAsync(MaterializedPass([0x62], (nint)11, isOnSend: true), CancellationToken.None);
+        await executor.PassAsync(MaterializedPass([0x63], (nint)11, isOnSend: false), CancellationToken.None);
+        Assert.Equal(2L, executor.ImmediateSendLaneOverflowCount);
+        Assert.Equal(2, reinjector.ToAdapterCount + reinjector.ToMstcpCount);
+        Assert.Equal(0, executor.PendingPassCount);
+
+        // The next scope install rebuilds capacity: batching resumes on the fresh keys with
+        // zero further overflow growth.
+        executor.RetireLanesExcept([(nint)11, (nint)12, (nint)13, (nint)14]);
 
         for (var adapter = 11; adapter <= 14; adapter++)
         {
-            await executor.PassAsync(MaterializedPass([0x62], (nint)adapter, isOnSend: true), CancellationToken.None);
-            await executor.PassAsync(MaterializedPass([0x63], (nint)adapter, isOnSend: false), CancellationToken.None);
+            await executor.PassAsync(MaterializedPass([0x64], (nint)adapter, isOnSend: true), CancellationToken.None);
+            await executor.PassAsync(MaterializedPass([0x65], (nint)adapter, isOnSend: false), CancellationToken.None);
         }
 
-        Assert.Equal(0L, executor.ImmediateSendLaneOverflowCount);
-        Assert.Equal(0, reinjector.ToAdapterCount + reinjector.ToMstcpCount);
+        Assert.Equal(2L, executor.ImmediateSendLaneOverflowCount);
+        Assert.Equal(2, reinjector.ToAdapterCount + reinjector.ToMstcpCount);
         Assert.Equal(8, executor.PendingPassCount);
+    }
+
+    [Fact]
+    public async Task ScopeInstallRebuildsLaneCapacityBeyondThePreInstallTableAndMigratesPendingLanes()
+    {
+        var reinjector = new FakeReinjector();
+        var executor = new NdisPacketActionExecutor(reinjector);
+
+        // Pre-install table: 5 adapters × 2 directions = 10 lanes against a capacity of 8, so
+        // the fifth adapter's lane pair overflows to immediate single sends. The other eight
+        // lanes keep their pending frames (no iteration-end flush ran).
+        for (var adapter = 1; adapter <= 5; adapter++)
+        {
+            await executor.PassAsync(MaterializedPass([0x80], (nint)adapter, isOnSend: true), CancellationToken.None);
+            await executor.PassAsync(MaterializedPass([0x81], (nint)adapter, isOnSend: false), CancellationToken.None);
+        }
+        Assert.Equal(2L, executor.ImmediateSendLaneOverflowCount);
+        Assert.Equal(2, reinjector.ToAdapterCount + reinjector.ToMstcpCount);
+        Assert.Equal(8, executor.PendingPassCount);
+
+        // Scope install with all five adapters: the table is rebuilt at 2 × 5 = 10 lanes and
+        // every in-scope lane migrates with its pending frames — nothing is stranded.
+        executor.RetireLanesExcept([(nint)1, (nint)2, (nint)3, (nint)4, (nint)5]);
+        Assert.Equal(8, executor.PendingPassCount);
+
+        // The previously-overflowing adapter's both directions now accumulate in lanes: with a
+        // scope-sized table, in-scope keys can never overflow.
+        await executor.PassAsync(MaterializedPass([0x82], (nint)5, isOnSend: true), CancellationToken.None);
+        await executor.PassAsync(MaterializedPass([0x83], (nint)5, isOnSend: false), CancellationToken.None);
+        Assert.Equal(2L, executor.ImmediateSendLaneOverflowCount);
+        Assert.Equal(2, reinjector.ToAdapterCount + reinjector.ToMstcpCount);
+        Assert.Equal(10, executor.PendingPassCount);
+
+        // Migration kept the frames deliverable: every lane flushes exactly its accumulated
+        // frames in one batched call — the eight pre-rebuild frames and the two fresh ones.
+        for (var adapter = 1; adapter <= 5; adapter++) executor.FlushPendingPasses((nint)adapter);
+        Assert.Equal(10, reinjector.BatchCalls.Count);
+        Assert.Equal(10, reinjector.BatchCalls.Sum(call => call.Frames.Length));
+        Assert.Equal(0, executor.PendingPassCount);
     }
 
     [Fact]

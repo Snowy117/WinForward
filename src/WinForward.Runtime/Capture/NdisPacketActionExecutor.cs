@@ -15,10 +15,12 @@ namespace WinForward.Runtime.Capture;
 /// <see cref="FlushPendingPasses"/> sends each (adapter, direction) lane as one batched request at
 /// the end of the pump iteration that accumulated it (the pump's batch-completed callback; see
 /// design 08-30-batched-ioctls D2 — every <see cref="PassAsync"/> caller lives inside the pump's
-/// serialized batch-loop chain). Lanes live for their capture generation:
-/// <see cref="RetireLanesExcept"/> frees the lanes of adapters that left the scope when the next
-/// scope installs, so refresh-churned handles cannot silently fill the fixed lane table. A block
-/// consumes the frame without reinjection. A proxy decision
+/// serialized batch-loop chain). The lane table is sized from the capture scope:
+/// <see cref="RetireLanesExcept"/> rebuilds it at <c>2 × scope-count</c> lanes when a scope
+/// installs (task 09-12-lane-table-scope-sizing), so in-scope adapters can never overflow to
+/// immediate single sends and refresh-churned handles can never fill the table with dead keys —
+/// the rebuild subsumes lane retirement because the fresh table only ever holds live-scope lanes.
+/// A block consumes the frame without reinjection. A proxy decision
 /// routes TCP packets through the <see cref="TcpProxyCoordinator"/> and UDP datagrams through the
 /// <see cref="UdpProxyCoordinator"/> when one is configured; if no matching coordinator is provided
 /// the flow fails closed with a rate-limited structured log.
@@ -28,12 +30,14 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     /// <summary>Shared rate-limit window for this executor's recoverable-fault warnings.</summary>
     private static readonly TimeSpan RateLimitedWarnInterval = TimeSpan.FromSeconds(5);
 
-    // One lane per (adapter handle, direction). Lanes cover the expected adapter scope with room
-    // to spare; a configuration beyond this many concurrent lanes degrades those passes to
-    // immediate single sends instead of batching them (counted and warned, never silent). Lanes
-    // outlived by an adapter-list refresh are retired at scope install, so the fixed table only
-    // ever holds the live scope's lanes.
-    private const int PendingLaneCapacity = 8;
+    // One lane per (adapter handle, direction). The table starts at a pre-install capacity (the
+    // window before the first scope install, when the adapter count is still unknown) and is
+    // rebuilt at 2 × scope-count lanes on every scope install — each in-scope adapter needs at
+    // most a send and a receive lane, so in-scope keys can never overflow. The overflow path
+    // (immediate single send, counted and warned, never silent) remains as a defensive backstop,
+    // reachable only pre-install or while interception is paused with an empty scope (a stray
+    // pass then still goes out exactly once).
+    private const int PreInstallLaneCapacity = 8;
     private const int InitialLaneFrames = 8;
 
     private readonly IPacketReinjector _reinjector;
@@ -42,7 +46,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     private readonly IRuntimeLogger _logger;
     private readonly NdisPacketBufferPool _bufferPool;
     private readonly Lock _pendingLaneLock = new();
-    private readonly PendingPassLane?[] _pendingLanes = new PendingPassLane?[PendingLaneCapacity];
+    private PendingPassLane?[] _pendingLanes = new PendingPassLane?[PreInstallLaneCapacity];
     private long _lastProxyUnavailableLogTicks;
     private long _lastUdpFailureLogTicks;
     private long _lastLaneOverflowLogTicks;
@@ -91,13 +95,14 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         var lane = TryGetOrAddPendingLane(adapterHandle, isOnSend);
         if (lane is null)
         {
-            // More concurrent (adapter, direction) lanes than the fixed capacity: send now so the
-            // frame still goes out exactly once instead of being dropped from batching. The
+            // More concurrent (adapter, direction) lanes than the current table holds — possible
+            // only pre-install or while interception is paused with an empty scope: send now so
+            // the frame still goes out exactly once instead of being dropped from batching. The
             // degradation is observable by design (P0-1): counted for tests/telemetry, warned
             // rate-limited for operators.
             Interlocked.Increment(ref _immediateSendLaneOverflowCount);
             if (ShouldWarn(ref _lastLaneOverflowLogTicks))
-                _logger.Warn($"Pass batching is degraded to immediate single sends because more than {PendingLaneCapacity} concurrent (adapter, direction) lanes are active.");
+                _logger.Warn($"Pass batching is degraded to immediate single sends because more than {Volatile.Read(ref _pendingLanes).Length} concurrent (adapter, direction) lanes are active.");
             if (isOnSend) _reinjector.SendToAdapter(adapterHandle, buffer);
             else _reinjector.SendToMstcp(adapterHandle, buffer);
             if (rented) buffer.Dispose();
@@ -117,35 +122,41 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     /// <summary>
     /// Resolves the accumulation lane for one (adapter handle, direction). The scan is lock-free
     /// once a lane exists (lanes are published fully constructed with volatile semantics and are
-    /// removed only between generations by <see cref="RetireLanesExcept"/>, under this same
-    /// creation lock); first sight of a key creates its lane under the creation lock. A lane is
-    /// only ever touched by its adapter's pump chain — every <see cref="PassAsync"/> caller runs
-    /// inside that pump's serialized batch loop within one generation, and flushes are issued per
-    /// adapter — so appends and flushes need no per-lane lock.
+    /// replaced only between generations by <see cref="RetireLanesExcept"/>'s table rebuild, under
+    /// this same creation lock); first sight of a key creates its lane under the creation lock. A
+    /// lane is only ever touched by its adapter's pump chain — every <see cref="PassAsync"/>
+    /// caller runs inside that pump's serialized batch loop within one generation, and flushes are
+    /// issued per adapter — so appends and flushes need no per-lane lock. The table reference is
+    /// snapshotted once per call: the rebuild swaps the array between generations, and a caller
+    /// may safely observe either the old or the new table, never a torn mix.
     /// </summary>
     private PendingPassLane? TryGetOrAddPendingLane(nint adapterHandle, bool isOnSend)
     {
-        for (var index = 0; index < _pendingLanes.Length; index++)
+        var lanes = Volatile.Read(ref _pendingLanes);
+        for (var index = 0; index < lanes.Length; index++)
         {
-            if (MatchLane(index, adapterHandle, isOnSend) is { } existing) return existing;
+            if (MatchLane(lanes, index, adapterHandle, isOnSend) is { } existing) return existing;
         }
         lock (_pendingLaneLock)
         {
+            // Re-read the table inside the lock: a rebuild may have swapped it while this caller
+            // was waiting, and lane creation must land in the current table.
+            lanes = Volatile.Read(ref _pendingLanes);
             var freeIndex = -1;
-            for (var index = 0; index < _pendingLanes.Length; index++)
+            for (var index = 0; index < lanes.Length; index++)
             {
-                if (MatchLane(index, adapterHandle, isOnSend) is { } existing) return existing;
-                if (freeIndex < 0 && Volatile.Read(ref _pendingLanes[index]) is null) freeIndex = index;
+                if (MatchLane(lanes, index, adapterHandle, isOnSend) is { } existing) return existing;
+                if (freeIndex < 0 && Volatile.Read(ref lanes[index]) is null) freeIndex = index;
             }
             if (freeIndex < 0) return null;
             var lane = new PendingPassLane(adapterHandle, isOnSend, InitialLaneFrames);
-            Volatile.Write(ref _pendingLanes[freeIndex], lane);
+            Volatile.Write(ref lanes[freeIndex], lane);
             return lane;
         }
     }
 
-    private PendingPassLane? MatchLane(int index, nint adapterHandle, bool isOnSend) =>
-        Volatile.Read(ref _pendingLanes[index]) is { } lane && lane.AdapterHandle == adapterHandle && lane.ToAdapter == isOnSend ? lane : null;
+    private static PendingPassLane? MatchLane(PendingPassLane?[] lanes, int index, nint adapterHandle, bool isOnSend) =>
+        Volatile.Read(ref lanes[index]) is { } lane && lane.AdapterHandle == adapterHandle && lane.ToAdapter == isOnSend ? lane : null;
 
     /// <summary>
     /// Sends every pass frame accumulated for one adapter, one batched reinjector call per
@@ -156,9 +167,10 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     /// </summary>
     public void FlushPendingPasses(nint adapterHandle)
     {
-        for (var index = 0; index < _pendingLanes.Length; index++)
+        var lanes = Volatile.Read(ref _pendingLanes);
+        for (var index = 0; index < lanes.Length; index++)
         {
-            if (Volatile.Read(ref _pendingLanes[index]) is not { } lane) continue;
+            if (Volatile.Read(ref lanes[index]) is not { } lane) continue;
             if (lane.AdapterHandle != adapterHandle) continue;
             FlushLane(lane);
         }
@@ -181,26 +193,52 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     }
 
     /// <summary>
-    /// Retires every pass lane whose adapter handle is absent from
-    /// <paramref name="activeAdapterHandles"/> — the between-generations contract that keeps the
-    /// fixed lane table from silently filling with dead keys as adapter-list refreshes mint fresh
-    /// handles. An empty span retires every lane (interception paused). Precondition: no pump for
-    /// a retired handle may still be running — the capture runner invokes this from its
-    /// scope-installed callback, strictly after the outgoing generation's run task (including its
-    /// loop-exit flush) has completed and before the next generation starts. A retired lane that
-    /// still holds frames indicates a breach of that contract: the frames are dropped fail-closed
-    /// (their adapter is gone) with a rate-limited warn, and their rented buffers are still
-    /// returned exactly once. Driver handle-value reuse is safe: a numerically reused handle is
-    /// indistinguishable from — and behaviorally equivalent to — the old lane key.
+    /// Rebuilds the lane table at <c>2 × <paramref name="activeAdapterHandles"/>.Length</c> slots
+    /// — the scope-installed callback's between-generations contract (task
+    /// 09-12-lane-table-scope-sizing), which sizes the table from the installed capture scope so
+    /// an in-scope adapter can never overflow to immediate single sends, and subsumes lane
+    /// retirement: the fresh table only ever holds live-scope keys. Lanes whose adapter handle is
+    /// in scope are MIGRATED — the lane object moves with its identity and any pending frames
+    /// intact. Migration is mandatory, not an optimization:
+    /// <see cref="LayeredCaptureRunner"/> starts the new generation's run before invoking the
+    /// scope-installed callback, so the new generation's pumps may already have appended passes
+    /// to the old table; lane creation is serialized by this same lock, so no lane can be created
+    /// in the old table while the rebuild runs, and lock-free appends only touch lane objects
+    /// that migration preserves. Dropping in-scope lanes instead of migrating them would silently
+    /// stranded those pending frames. A lane absent from
+    /// <paramref name="activeAdapterHandles"/> is retired with today's breach semantics; an empty
+    /// span therefore retires every lane and installs a zero-capacity table (interception paused;
+    /// a stray pass then takes the immediate single-send backstop). Precondition: no pump for a
+    /// retired handle may still be running —
+    /// the capture runner invokes this from its scope-installed callback, strictly after the
+    /// outgoing generation's run task (including its loop-exit flush) has completed and before
+    /// the next generation starts. A retired lane that still holds frames indicates a breach of
+    /// that contract: the frames are dropped fail-closed (their adapter is gone) with a
+    /// rate-limited warn, and their rented buffers are still returned exactly once. Driver
+    /// handle-value reuse is safe: a numerically reused handle is indistinguishable from — and
+    /// behaviorally equivalent to — the old lane key.
     /// </summary>
     internal void RetireLanesExcept(ReadOnlySpan<nint> activeAdapterHandles)
     {
         lock (_pendingLaneLock)
         {
-            for (var index = 0; index < _pendingLanes.Length; index++)
+            // Holding the lock pins the current table: the rebuild is the only writer of the
+            // field, and lane creation re-reads the field under this same lock.
+            var current = _pendingLanes;
+            var next = new PendingPassLane?[activeAdapterHandles.Length * 2];
+            var nextIndex = 0;
+            for (var index = 0; index < current.Length; index++)
             {
-                if (Volatile.Read(ref _pendingLanes[index]) is not { } lane) continue;
-                if (activeAdapterHandles.Contains(lane.AdapterHandle)) continue;
+                if (Volatile.Read(ref current[index]) is not { } lane) continue;
+                // At most two lanes exist per adapter handle (one per direction) by construction,
+                // so in-scope migration can never overflow a 2 × scope-count table; the bound
+                // check stays as a defensive guard for an impossible invariant breach.
+                if (activeAdapterHandles.Contains(lane.AdapterHandle) && nextIndex < next.Length)
+                {
+                    next[nextIndex] = lane;
+                    nextIndex++;
+                    continue;
+                }
                 var stale = lane.Count;
                 lane.Count = 0;
                 if (stale > 0)
@@ -209,8 +247,8 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
                         _logger.Warn($"A pass lane retired for adapter 0x{lane.AdapterHandle:X} still held {stale} frame(s); the frames are dropped and their rented buffers returned because the iteration-end flush contract was breached.");
                     ReleaseLaneBuffers(lane, stale);
                 }
-                Volatile.Write(ref _pendingLanes[index], null);
             }
+            Volatile.Write(ref _pendingLanes, next);
         }
     }
 
@@ -229,10 +267,11 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     {
         get
         {
+            var lanes = Volatile.Read(ref _pendingLanes);
             var total = 0;
-            for (var index = 0; index < _pendingLanes.Length; index++)
+            for (var index = 0; index < lanes.Length; index++)
             {
-                if (Volatile.Read(ref _pendingLanes[index]) is { } lane) total += lane.Count;
+                if (Volatile.Read(ref lanes[index]) is { } lane) total += lane.Count;
             }
             return total;
         }
@@ -240,8 +279,10 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
 
     /// <summary>
     /// Telemetry/diagnostic surface: pass frames forced onto the immediate single-send path
-    /// because more concurrent (adapter, direction) lanes than the fixed capacity were active —
-    /// the more-than-four-NIC overflow and any lane-table exhaustion alike.
+    /// because more concurrent (adapter, direction) lanes than the current table holds were
+    /// active — reachable only before the first scope install (pre-install capacity) or while
+    /// interception is paused with an empty scope; a scope-sized table never overflows for
+    /// in-scope adapters.
     /// </summary>
     internal long ImmediateSendLaneOverflowCount => Volatile.Read(ref _immediateSendLaneOverflowCount);
 
@@ -254,10 +295,11 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     [Conditional("DEBUG")]
     internal void DebugAssertNoPendingPasses(nint adapterHandle)
     {
-        for (var index = 0; index < _pendingLanes.Length; index++)
+        var lanes = Volatile.Read(ref _pendingLanes);
+        for (var index = 0; index < lanes.Length; index++)
         {
-            if (MatchLane(index, adapterHandle, isOnSend: false) is { } mstcpLane) Debug.Assert(mstcpLane.Count == 0, $"Pass frames for adapter 0x{adapterHandle:X} are still pending outside a pump iteration; every iteration must flush (batched reinjection contract).");
-            if (MatchLane(index, adapterHandle, isOnSend: true) is { } adapterLane) Debug.Assert(adapterLane.Count == 0, $"Pass frames for adapter 0x{adapterHandle:X} are still pending outside a pump iteration; every iteration must flush (batched reinjection contract).");
+            if (MatchLane(lanes, index, adapterHandle, isOnSend: false) is { } mstcpLane) Debug.Assert(mstcpLane.Count == 0, $"Pass frames for adapter 0x{adapterHandle:X} are still pending outside a pump iteration; every iteration must flush (batched reinjection contract).");
+            if (MatchLane(lanes, index, adapterHandle, isOnSend: true) is { } adapterLane) Debug.Assert(adapterLane.Count == 0, $"Pass frames for adapter 0x{adapterHandle:X} are still pending outside a pump iteration; every iteration must flush (batched reinjection contract).");
         }
     }
 

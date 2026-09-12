@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "Check §3 lane lifecycle / lane overflow contracts and §4 validation matrix against the implemented rebuild semantics; spec must have been updated in the same change"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify tests follow the red-to-green and forbidden-patterns rules"}
