@@ -564,3 +564,24 @@ Closed the last unhandled 87 surface: a bound-adapter-list rebuild racing the ge
 ### Status
 
 [OK] **Completed**
+
+
+## Session 22: Scope-sized pass-lane table
+
+**Date**: 2026-09-12
+**Task**: Scope-sized pass-lane table
+**Branch**: `master`
+
+### Summary
+
+Diagnosed the frequent 'pass batching degraded' warn: the fixed 8-slot lane table (4 NICs x 2 directions) overflowed on multi-NIC hosts whose capture scope widens to every MSTCP-bound adapter. Implemented scope-sized rebuild: RetireLanesExcept now rebuilds the lane table at 2 x scope-count under the lane-creation lock, migrating in-scope lanes with pending frames (runner starts new-generation pumps before the scope-installed callback, so dropping would strand frames); overflow stays a defensive pre-install/paused backstop. Tests updated + new rebuild/migration test; spec windows-ndisapi.md lane contracts refreshed; 589 tests green, 0 warnings.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f1d1c1b` | (see git log) |
+
+### Status
+
+[OK] **Completed**
