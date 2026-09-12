@@ -543,3 +543,24 @@ Full-codebase deep-module design review (5 explore agents) -> parent task 09-08-
 - P2 hygiene (branch p2-hygiene, merged): FlowTable dead surface, IWindowsAdapterInventory, Platform.cs split, TestHelpers convergence (CaptureLifecycleFakes/ScriptedReader promoted), indexed [i] config diagnostics, AdapterTransientRetryLogGate + DurableCaptureBundle tests. 569->578. Deferred: logLevel JsonElement->string? (custom converter needed).
 - P1 structure (branch p1-structure, merged): FlowTable/BoundedSetupQueue re-homed; NdisCapturePumpOptions; UdpProxy->Socks5 edge sanctioned (codec already in Protocols); UdpProxyCoordinator 471->329 via 4-part split (tombstone->cooldown rename, check found+fixed one PruneExpired leaf-lock gap); benchmarks StabilityShared + burst instrumentation, BenchmarkShared to root. 578 throughout.
 Final: 578/578, zero warnings, master ~20 commits ahead of origin (not pushed). Gateway note: upstream "No active API keys" errors hit twice mid-session; resuming the same subagent conversation worked both times.
+
+
+## Session 21: Recover generation startup from stale adapter handles (native 87)
+
+**Date**: 2026-09-12
+**Task**: Recover generation startup from stale adapter handles (native 87)
+**Branch**: `master`
+
+### Summary
+
+Closed the last unhandled 87 surface: a bound-adapter-list rebuild racing the generation install phase faulted the mode snapshot before pumps started and exited the process. TransactionalCaptureRuntime gained a race-free ReachedPumpRun latch (set under the gate immediately before the capture run) exposed via ICaptureGeneration; LayeredCaptureRunner classifies Win32Exception(87) && !ReachedPumpRun as recoverable, absorbs it at both generation-await points (exit observation releases the dead generation like a refresh stop + signals a demand; StopGenerationAsync absorbs with no extra signal), and rebuilds through the forced storm-guarded refresh - empty diff still installs a replacement (forced=true, never noop=true), streak capped at MaxConsecutiveStartupRecoveries=3 with fail-closed rethrow of the original fault beyond it, reset on any pump-run completion. 10 new tests (3 lifecycle latch + 7 refresh AC1-AC6); trellis-check 7-dim PASS, 588/588, zero warnings. Spec contracts updated in windows-ndisapi.md (signatures/contracts/matrix/tests) + error-handling.md (new bounded-recovery exemption). Deleted stray duplicate RefreshDemandGate.cs; noted 10 pre-existing format violations in untouched files for a future cleanup.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `975aede` | (see git log) |
+
+### Status
+
+[OK] **Completed**

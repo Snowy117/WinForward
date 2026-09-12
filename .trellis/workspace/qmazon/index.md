@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 20
-- **Last Active**: 2026-09-08
+- **Total Sessions**: 21
+- **Last Active**: 2026-09-12
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~537 | Active |
+| `journal-1.md` | ~566 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 21 | 2026-09-12 | Recover generation startup from stale adapter handles (native 87) | `975aede` | `master` |
 | 20 | 2026-09-08 | Fix adapter.degraded nativeError=87 storm via in-process layered refresh | `398376e` | `master` |
 | 19 | 2026-09-06 | UDP burst TTL re-attribution fix | `76abc37`, `dd3985b` | `master` |
 | 18 | 2026-09-06 | UDP burst-establishment benchmark + baseline matrix | `4a4d6a6`, `4b00d0b` | `master` |
