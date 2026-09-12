@@ -11,12 +11,9 @@ BenchmarkDotNet.Artifacts/
 .trellis/.runtime/
 
 # Local agent/IDE tooling state (not project sources)
-.pi-subagents/
 .idea/
-.qodana/
 .repograph/
 dist/
-qodana-results/
 evil_winrm_py.log
 
 # Local smoke-test artifacts
