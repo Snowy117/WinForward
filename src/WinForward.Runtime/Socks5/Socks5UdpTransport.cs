@@ -134,6 +134,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
     private readonly SelfTrafficRegistry.SelfTrafficToken? _selfTrafficToken;
     private readonly SemaphoreSlim _sendGate = new(1, 1);
     private readonly byte[] _sendBuffer;
+    private readonly SocketAddress _relaySocketAddress;
     private readonly IPEndPoint _receiveSenderTemplate;
 
     private Socks5UdpTransport(Socket socket, Socks5ControlConnection control, IPEndPoint relayEndpoint, SelfTrafficRegistry.SelfTrafficToken? selfTrafficToken, int maximumFrameSize)
@@ -142,6 +143,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
         _socket = socket;
         _control = control;
         RelayEndpoint = relayEndpoint;
+        _relaySocketAddress = relayEndpoint.Serialize();
         _selfTrafficToken = selfTrafficToken;
         // Sized from the same pinned frame cap the coordinator's receive windows (cap + 22 + 1)
         // and the reinjector's rebuilt frames (cap) use: 6 + 16 covers the worst SOCKS5 UDP
@@ -259,7 +261,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
 
             try
             {
-                _ = _socket.SendTo(_sendBuffer.AsSpan(0, written), SocketFlags.None, RelayEndpoint);
+                _ = _socket.SendTo(_sendBuffer.AsSpan(0, written), SocketFlags.None, _relaySocketAddress);
             }
             catch (SocketException)
             {
@@ -303,7 +305,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
 
             try
             {
-                _ = _socket.SendTo(_sendBuffer.AsSpan(0, written), SocketFlags.None, RelayEndpoint);
+                _ = _socket.SendTo(_sendBuffer.AsSpan(0, written), SocketFlags.None, _relaySocketAddress);
             }
             catch (SocketException)
             {
@@ -330,7 +332,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
                 throw new IOException("A SOCKS5 UDP datagram exceeded the relay send buffer.");
             }
 
-            _ = await _socket.SendToAsync(_sendBuffer.AsMemory(0, written), SocketFlags.None, RelayEndpoint, cancellationToken).ConfigureAwait(false);
+            _ = await _socket.SendToAsync(_sendBuffer.AsMemory(0, written), SocketFlags.None, _relaySocketAddress, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -342,7 +344,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
     {
         try
         {
-            _ = await _socket.SendToAsync(_sendBuffer.AsMemory(0, written), SocketFlags.None, RelayEndpoint, cancellationToken).ConfigureAwait(false);
+            _ = await _socket.SendToAsync(_sendBuffer.AsMemory(0, written), SocketFlags.None, _relaySocketAddress, cancellationToken).ConfigureAwait(false);
         }
         finally
         {

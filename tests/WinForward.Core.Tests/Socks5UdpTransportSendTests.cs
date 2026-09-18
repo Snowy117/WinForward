@@ -167,4 +167,52 @@ public sealed class Socks5UdpTransportSendTests
         Assert.NotNull(method);
         Assert.Null(method.GetCustomAttribute<AsyncStateMachineAttribute>());
     }
+
+    [Fact]
+    public async Task WarmSyncSendAllocatesNoManagedBytes()
+    {
+        // Regression gate for the real relay send path: serializing the destination EndPoint on
+        // every SendTo allocated 72 B/datagram (the fake-transport allocation gates could not see
+        // it). The warm shape must hand the pre-serialized SocketAddress to the kernel inline.
+        using var tcpListener = new TcpListener(IPAddress.Loopback, 0);
+        using var relaySocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        tcpListener.Start();
+        relaySocket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+
+        var relayEndpoint = (IPEndPoint)relaySocket.LocalEndPoint!;
+        var controlEndpoint = (IPEndPoint)tcpListener.LocalEndpoint;
+        using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var server = ServeAssociateOnlyAsync(tcpListener, relayEndpoint, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), serverCancellation.Token);
+        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), null, null);
+        var transport = await Socks5UdpTransport.CreateAsync(socksServer, new SelfTrafficRegistry(), CancellationToken.None);
+        var destination = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
+        var payload = new byte[] { 0x51, 0x52, 0x53 };
+        try
+        {
+            for (var warm = 0; warm < 8; warm++)
+            {
+                var warmSend = transport.SendAsync(destination, payload, CancellationToken.None);
+                Assert.True(warmSend.IsCompletedSuccessfully);
+                await warmSend;
+            }
+
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            const int count = 64;
+            for (var index = 0; index < count; index++)
+            {
+                var send = transport.SendAsync(destination, payload, CancellationToken.None);
+                Assert.True(send.IsCompletedSuccessfully, "the warm send must complete synchronously on the calling thread");
+                await send;
+            }
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.Equal(0, allocated);
+        }
+        finally
+        {
+            await transport.DisposeAsync();
+            serverCancellation.Cancel();
+            await IgnoreExpectedCancellationAsync(server);
+        }
+    }
 }
