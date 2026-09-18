@@ -172,11 +172,14 @@ internal static class Program
         }
         logger.Info($"Capture scope: {scope.Count} adapter(s) in tunnel mode.");
 
-        return await RunCaptureLoopAsync(configuration, driver, logger).ConfigureAwait(false);
+        // Shared by the durable bundle (its failure-reporting sites) and the capture runner
+        // (its forced-refresh trigger) — task 09-17 R1-B.
+        var healthMonitor = new InterceptionHealthMonitor(logger);
+        return await RunCaptureLoopAsync(configuration, driver, logger, healthMonitor).ConfigureAwait(false);
     }
 
     [SupportedOSPlatform("windows")]
-    private static async Task<int> RunCaptureLoopAsync(ValidatedConfiguration configuration, NdisApiDriver driver, IRuntimeLogger logger)
+    private static async Task<int> RunCaptureLoopAsync(ValidatedConfiguration configuration, NdisApiDriver driver, IRuntimeLogger logger, InterceptionHealthMonitor healthMonitor)
     {
         var selfTraffic = new SelfTrafficRegistry();
         var reinjector = new NdisPacketReinjector(driver);
@@ -194,34 +197,26 @@ internal static class Program
             // The durable layer survives every adapter-list refresh; the runner disposes it exactly
             // once after the final generation (design §3.6). The local finally only covers failures
             // around the runner itself — bundle disposal is single-flight, so it never runs twice.
-            var bundle = await DurableCaptureBundle.CreateAsync(configuration, reinjector, selfTraffic, logger).ConfigureAwait(false);
+            var bundle = await DurableCaptureBundle.CreateAsync(configuration, reinjector, selfTraffic, logger, healthSignal: healthMonitor).ConfigureAwait(false);
             try
             {
                 // The degraded forwarder feeds error 87 into the runner's refresh channel (R3); the
-                // factory logs adapter.degraded and restores the adapter's mode through its own
-                // runtime. The closure dereferences the runner only while a generation runs, after
-                // the reference below is assigned.
+                // callback closure dereferences the runner only while a generation runs, after the
+                // reference below is assigned.
                 LayeredCaptureRunner? runnerRef = null;
-                var retryLogGate = new AdapterTransientRetryLogGate(logger);
                 using var watcher = new NdisAdapterListWatcher(driver);
-                var runner = new LayeredCaptureRunner(
-                    new NdisAdapterEnumerationProvider(driver),
-                    new NdisCaptureGenerationFactory(
-                        driver,
-                        new CapturePacketProcessor(bundle.Dispatcher, logger, bundle.Executor.FlushPendingPasses),
-                        logger,
-                        onAdapterDegraded: (adapter, nativeError) =>
-                        {
-                            runnerRef!.SignalDegraded(adapter, nativeError);
-                            return ValueTask.CompletedTask;
-                        },
-                        onAdapterTransientRetry: (adapter, nativeError, attempt) => retryLogGate.Log(adapter.StableId, adapter.FriendlyName, nativeError, attempt)),
-                    watcher,
-                    configuration.Policy,
-                    logger,
-                    disposeDurableAsync: _ => bundle.DisposeAsync(),
-                    onScopeInstalled: bundle.OnScopeInstalled);
+                var runner = CreateCaptureRunner(
+                    configuration, driver, bundle, logger, healthMonitor, watcher,
+                    (adapter, nativeError) =>
+                    {
+                        runnerRef!.SignalDegraded(adapter, nativeError);
+                        return ValueTask.CompletedTask;
+                    });
                 runnerRef = runner;
+
+                // Observational periodic summary (task 09-17 R2.3); the using disposes it before
+                // the bundle's finally, so its last ticks never observe coordinator teardown.
+                await using var heartbeat = StartHeartbeat(bundle, runner, healthMonitor, logger);
 
                 return await RunUntilCancelledAsync(runner, logger).ConfigureAwait(false);
             }
@@ -237,6 +232,59 @@ internal static class Program
             // native buffer back to the heap before the driver handle closes.
             NdisPacketBufferPool.Shared.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Composes the layered capture runner over the durable bundle's shared packet processor: the
+    /// generation factory logs <c>adapter.degraded</c>, restores the degraded adapter's mode through
+    /// its own runtime, and forwards to <paramref name="onAdapterDegraded"/> so the runner can feed
+    /// error 87 into its refresh channel (R3); transient-read retries ride the shared log gate.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private static LayeredCaptureRunner CreateCaptureRunner(
+        ValidatedConfiguration configuration,
+        NdisApiDriver driver,
+        DurableCaptureBundle bundle,
+        IRuntimeLogger logger,
+        InterceptionHealthMonitor healthMonitor,
+        NdisAdapterListWatcher watcher,
+        Func<WindowsAdapter, int, ValueTask> onAdapterDegraded)
+    {
+        var retryLogGate = new AdapterTransientRetryLogGate(logger);
+        return new LayeredCaptureRunner(
+            new NdisAdapterEnumerationProvider(driver, logger),
+            new NdisCaptureGenerationFactory(
+                driver,
+                new CapturePacketProcessor(bundle.Dispatcher, logger, bundle.Executor.FlushPendingPasses),
+                logger,
+                onAdapterDegraded: onAdapterDegraded,
+                onAdapterTransientRetry: (adapter, nativeError, attempt) => retryLogGate.Log(adapter.StableId, adapter.FriendlyName, nativeError, attempt)),
+            watcher,
+            configuration.Policy,
+            logger,
+            disposeDurableAsync: _ => bundle.DisposeAsync(),
+            onScopeInstalled: bundle.OnScopeInstalled, interceptionHealthMonitor: healthMonitor);
+    }
+
+    /// <summary>
+    /// Starts the periodic <c>runner.heartbeat</c> info summary (task 09-17 R2.3): flow/TCP/UDP
+    /// usage against capacities, the current generation's pump counts, interception-health state,
+    /// and per-counter deltas since the previous heartbeat. Purely observational — a fault while
+    /// gathering usage is logged and retried on the next tick.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private static RuntimeHeartbeat StartHeartbeat(DurableCaptureBundle bundle, LayeredCaptureRunner runner, InterceptionHealthMonitor healthMonitor, IRuntimeLogger logger)
+    {
+        var heartbeat = new RuntimeHeartbeat(
+            logger,
+            usage: () => new RuntimeHeartbeatUsage(
+                bundle.Dispatcher.FlowCount, bundle.Dispatcher.FlowCapacity,
+                bundle.Tcp.SessionCount, bundle.Tcp.Capacity,
+                bundle.Udp.SessionCount, bundle.Udp.Capacity,
+                runner.PumpState.Running, runner.PumpState.Degraded),
+            health: healthMonitor);
+        heartbeat.Start();
+        return heartbeat;
     }
 
     [SupportedOSPlatform("windows")]

@@ -124,6 +124,31 @@ JSON, rejected on any unknown property. The top level is:
 The configuration is validated fully before interception starts and is kept immutable for the
 lifetime of a run. Configuration hot reload is not supported.
 
+### Runtime diagnostic events
+
+Beyond the lifecycle messages, the runtime emits structured events (single-line
+`key=value` records) that make silent failure paths and adapter-view recovery observable.
+The operationally relevant ones:
+
+| Event | Level | Meaning |
+| --- | --- | --- |
+| `runner.heartbeat` | info | Periodic summary (60 s): uptime, active flows, TCP/UDP sessions against their capacities, running/degraded adapter pumps, interception-health state, and key counter deltas since the previous heartbeat. |
+| `flow.capacity-block` | warn | A new flow was blocked fail-closed because the flow table is at capacity (rate-limited). |
+| `flow.attribution-miss` | warn | Process attribution found no owner for a host flow, so process rules did not match (rate-limited). |
+| `reinject.pass-failed` | warn | The native reinjection of a pass-through frame failed (rate-limited). |
+| `tcp.redirect.relaySetupFailed` | warn | The SOCKS5 relay setup for an already-redirected TCP flow failed; the client receives a RST. Carries the error kind, socket error, upstream endpoint, and attempt count. |
+| `tcp.redirect.unrelatedPeer` | warn | The redirect listener accepted a peer that does not match the expected client tuple. |
+| `udp.reinject.unresolved` | warn | A host UDP response could not resolve its origin adapter and fell back to the host target (rate-limited, counted). |
+| `udp.reinject.drop` | warn | A UDP response was dropped fail-closed (unresolvable origin or missing client MAC; rate-limited, counted). |
+| `udp.targets.noMac` | warn | The capture scope contains adapters without a usable MAC (forwarded responses to them drop fail-closed); emitted on first occurrence and when the affected adapter set changes, not on every adapter refresh. |
+| `adapter.addressQuery.failed` | debug | The periodic adapter address-fingerprint query failed (non-fatal; the refresh diff continues without addresses). |
+| `runner.forcedRefresh` | warn | Interception-path failure rates crossed their thresholds, so a forced adapter-view refresh (generation rebuild) was armed. |
+| `runner.forcedRefresh.degraded` | error | Forced refreshes keep triggering without a successful refresh in between; the trigger cadence drops to one per 5 minutes. |
+
+Sustained `reinject.pass-failed`/`udp.reinject.*` clusters followed by `runner.forcedRefresh`
+indicate the adapter view went stale outside WinForward's visibility (for example IPv6
+temporary-address rotation); the forced refresh rebuilds the view on fresh handles.
+
 ### No implicit rules
 
 WinForward adds **no** user-visible policy rules for its own process, DNS, loopback, or any

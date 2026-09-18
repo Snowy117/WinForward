@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using WinForward.Configuration;
 using WinForward.Core;
@@ -44,8 +45,10 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     private readonly TcpProxyCoordinator? _tcpProxy;
     private readonly UdpProxyCoordinator? _udpProxy;
     private readonly IRuntimeLogger _logger;
+    private readonly IInterceptionHealthSignal _healthSignal;
     private readonly NdisPacketBufferPool _bufferPool;
     private readonly Lock _pendingLaneLock = new();
+    private readonly RuntimeLogThrottle _passFailedWarn = new(RateLimitedWarnInterval);
     private PendingPassLane?[] _pendingLanes = new PendingPassLane?[PreInstallLaneCapacity];
     private long _lastProxyUnavailableLogTicks;
     private long _lastUdpFailureLogTicks;
@@ -53,7 +56,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     private long _lastLaneRetireLogTicks;
     private long _immediateSendLaneOverflowCount;
 
-    public NdisPacketActionExecutor(IPacketReinjector reinjector, IRuntimeLogger? logger = null, TcpProxyCoordinator? tcpProxy = null, UdpProxyCoordinator? udpProxy = null, NdisPacketBufferPool? bufferPool = null)
+    public NdisPacketActionExecutor(IPacketReinjector reinjector, IRuntimeLogger? logger = null, TcpProxyCoordinator? tcpProxy = null, UdpProxyCoordinator? udpProxy = null, NdisPacketBufferPool? bufferPool = null, IInterceptionHealthSignal? healthSignal = null)
     {
         ArgumentNullException.ThrowIfNull(reinjector);
         _reinjector = reinjector;
@@ -61,6 +64,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         _udpProxy = udpProxy;
         _logger = logger ?? NullRuntimeLogger.Instance;
         _bufferPool = bufferPool ?? NdisPacketBufferPool.Shared;
+        _healthSignal = healthSignal ?? InterceptionHealthMonitor.Noop;
     }
 
     public ValueTask PassAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
@@ -75,7 +79,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
             // before its next batch read — batch slots stay stable for the whole iteration, so no
             // managed copy ever happens.
             captureBuffer.PrepareForReinjection(metadata.AdapterHandle);
-            AppendPass(metadata.AdapterHandle, metadata.IsOnSend, captureBuffer, rented: false);
+            AppendPass(packet, captureBuffer, rented: false);
         }
         else
         {
@@ -84,14 +88,16 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
             // buffer from this point and returns it exactly once after sending.
             var buffer = _bufferPool.Rent();
             buffer.SetFrame(packet.Lease.Frame.Span, metadata.DeviceFlags, metadata.AdapterHandle, metadata.Flags);
-            AppendPass(metadata.AdapterHandle, metadata.IsOnSend, buffer, rented: true);
+            AppendPass(packet, buffer, rented: true);
         }
         if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("packet.reinjected", packet, new RuntimeLogField("target", metadata.IsOnSend ? "adapter" : "mstcp"));
         return ValueTask.CompletedTask;
     }
 
-    private void AppendPass(nint adapterHandle, bool isOnSend, NdisPacketBuffer buffer, bool rented)
+    private void AppendPass(in CapturedFlowPacket packet, NdisPacketBuffer buffer, bool rented)
     {
+        var adapterHandle = packet.Metadata.AdapterHandle;
+        var isOnSend = packet.Metadata.IsOnSend;
         var lane = TryGetOrAddPendingLane(adapterHandle, isOnSend);
         if (lane is null)
         {
@@ -103,8 +109,16 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
             Interlocked.Increment(ref _immediateSendLaneOverflowCount);
             if (ShouldWarn(ref _lastLaneOverflowLogTicks))
                 _logger.Warn($"Pass batching is degraded to immediate single sends because more than {Volatile.Read(ref _pendingLanes).Length} concurrent (adapter, direction) lanes are active.");
-            if (isOnSend) _reinjector.SendToAdapter(adapterHandle, buffer);
-            else _reinjector.SendToMstcp(adapterHandle, buffer);
+            try
+            {
+                if (isOnSend) _reinjector.SendToAdapter(adapterHandle, buffer);
+                else _reinjector.SendToMstcp(adapterHandle, buffer);
+            }
+            catch (Exception exception)
+            {
+                LogPassReinjectFailed(adapterHandle, isOnSend, exception, frames: 1, packet.Context.Key, packet.Context.AdapterId);
+                throw;
+            }
             if (rented) buffer.Dispose();
             return;
         }
@@ -185,6 +199,15 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         {
             if (lane.ToAdapter) _reinjector.SendPacketsToAdapter(lane.AdapterHandle, lane.Buffers, count);
             else _reinjector.SendPacketsToMstcp(lane.AdapterHandle, lane.Buffers, count);
+        }
+        catch (Exception exception)
+        {
+            // A batched send is all-or-nothing, so every frame in the lane failed; the flush-site
+            // event carries the adapter handle and direction instead of the flow key (one lane
+            // spans many flows). The failure stays fail-closed: logged, then rethrown so the
+            // pump's caller observes the same fault as before.
+            LogPassReinjectFailed(lane.AdapterHandle, lane.ToAdapter, exception, count, flowKey: null, adapterStableId: null);
+            throw;
         }
         finally
         {
@@ -464,6 +487,31 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     {
         if (!ShouldWarn(ref _lastUdpFailureLogTicks)) return;
         _logger.Warn($"UDP proxy handling failed: {exception.GetType().Name}: {exception.Message}");
+    }
+
+    /// <summary>
+    /// The pass-through reinjection failure warn (<c>reinject.pass-failed</c>): a native send of
+    /// pass frames failed (a lane flush or an overflow immediate send — both all-or-nothing). The
+    /// native error and adapter handle are the correlation keys; the flow key and adapter stable
+    /// ID are only available on the single-send overflow path (a flush spans many flows). Always
+    /// counted, throttled to one line per window; the fault itself propagates unchanged, so the
+    /// fail-closed behavior is identical with or without this log.
+    /// </summary>
+    private void LogPassReinjectFailed(nint adapterHandle, bool toAdapter, Exception exception, int frames, FlowKey? flowKey, string? adapterStableId)
+    {
+        RuntimeCounters.Shared.Increment(RuntimeCounters.PassReinjectFailed);
+        _healthSignal.ReportFailure(RuntimeCounters.PassReinjectFailed);
+        if (!_passFailedWarn.ShouldEmit() || !_logger.IsEnabled(RuntimeLogLevel.Warn)) return;
+        _logger.Event(RuntimeLogLevel.Warn, "reinject.pass-failed",
+            new("nativeError", (exception as Win32Exception)?.NativeErrorCode),
+            new("error", exception.GetType().Name),
+            new("adapter", adapterStableId),
+            new("adapterHandle", (long)adapterHandle),
+            new("direction", toAdapter ? "adapter" : "mstcp"),
+            new("frames", frames),
+            new("source", flowKey?.Local),
+            new("destination", flowKey?.Remote),
+            new("protocol", flowKey?.Protocol));
     }
 
     /// <summary>

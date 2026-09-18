@@ -288,7 +288,8 @@ public sealed class UdpRelayTests
         Assert.Equal(fallbackHandle, reinjector.LastAdapterHandle);
         Assert.True(reinjector.LastFrame!.AsSpan(0, 6).SequenceEqual(s_macA));
         Assert.True(reinjector.LastFrame!.AsSpan(6, 6).SequenceEqual(s_macA));
-        Assert.Equal(1, logger.WarnCount);
+        var unresolved = Assert.Single(logger.Events, e => e.Level == RuntimeLogLevel.Warn && string.Equals(e.Name, "udp.reinject.unresolved", StringComparison.Ordinal));
+        Assert.Contains(unresolved.Fields, field => string.Equals(field.Key, "mapAdapters", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -347,7 +348,8 @@ public sealed class UdpRelayTests
         // missing-origin is surfaced via a log rather than silently dropped (H2).
         Assert.Equal(0, reinjector.ToMstcpCount);
         Assert.Equal(0, reinjector.ToAdapterCount);
-        Assert.Equal(1, logger.WarnCount);
+        var drop = Assert.Single(logger.Events, e => e.Level == RuntimeLogLevel.Warn && string.Equals(e.Name, "udp.reinject.drop", StringComparison.Ordinal));
+        Assert.Contains(drop.Fields, field => string.Equals(field.Key, "originKind", StringComparison.Ordinal) && Equals(field.Value, FlowOriginKind.Forwarded));
     }
 
     [Theory]

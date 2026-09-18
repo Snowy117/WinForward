@@ -1,3 +1,5 @@
+using WinForward.Configuration;
+
 namespace WinForward.Runtime.TcpRedirect;
 
 /// <summary>
@@ -71,7 +73,13 @@ internal sealed class TcpRedirectAcceptor
         {
             if (accepted.RemoteEndPoint != session.Association.AcceptedPeerEndpoint)
             {
-                _logger.Warn("TCP redirect accepted an unrelated peer; closing it.");
+                if (_logger.IsEnabled(RuntimeLogLevel.Warn))
+                {
+                    _logger.Event(RuntimeLogLevel.Warn, "tcp.redirect.unrelatedPeer",
+                        new("listener", session.Listener.TranslatedTuple),
+                        new("expected", session.Association.AcceptedPeerEndpoint),
+                        new("actual", accepted.RemoteEndPoint));
+                }
                 await accepted.DisposeAsync().ConfigureAwait(false);
                 return true;
             }
@@ -96,9 +104,9 @@ internal sealed class TcpRedirectAcceptor
             await accepted.DisposeAsync().ConfigureAwait(false);
             return false;
         }
-        catch
+        catch (Exception exception)
         {
-            await _clientReset.HandleRelaySetupFailureAsync(session, accepted).ConfigureAwait(false);
+            await _clientReset.HandleRelaySetupFailureAsync(session, accepted, exception).ConfigureAwait(false);
             return false;
         }
     }

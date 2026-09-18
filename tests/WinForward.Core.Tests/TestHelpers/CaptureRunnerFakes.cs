@@ -52,6 +52,10 @@ internal sealed class FakeCaptureGeneration : ICaptureGeneration
     public int DisposeCount { get; private set; }
     public bool CancelObserved { get; private set; }
     public bool ReachedPumpRun { get; private set; }
+
+    /// <summary>Scriptable pump telemetry for the runner's heartbeat snapshot accessor; default reports none.</summary>
+    public CapturePumpState Pumps { get; set; }
+
     public Action? OnDisposed { get; set; }
 
     /// <summary>The startup fault thrown before the pumps-started latch; null keeps the generation healthy.</summary>
@@ -130,8 +134,8 @@ internal sealed class FakeCaptureGenerationFactory : ICaptureGenerationFactory
 
 internal static class CaptureRunnerFakes
 {
-    public static AdapterEnumerationItem AdapterItem(string stableId, nint handle, ushort mtu = 1500, byte firstMacOctet = 1) =>
-        new(new WindowsAdapter(stableId, stableId, stableId, handle, 0), [firstMacOctet, 2, 3, 4, 5, 6], mtu);
+    public static AdapterEnumerationItem AdapterItem(string stableId, nint handle, ushort mtu = 1500, byte firstMacOctet = 1, string addressFingerprint = "") =>
+        new(new WindowsAdapter(stableId, stableId, stableId, handle, 0), [firstMacOctet, 2, 3, 4, 5, 6], mtu, addressFingerprint);
 
     /// <summary>A policy whose process rule constrains nothing, so capture scope widens to every adapter.</summary>
     public static WinForward.Core.PolicySnapshot UnconstrainedPolicy() => new(
@@ -157,7 +161,7 @@ internal sealed class CaptureRunnerHarness : IAsyncDisposable
     private readonly List<string> _events = [];
     private int _durableDisposeCount;
 
-    public CaptureRunnerHarness(IReadOnlyList<AdapterEnumerationItem> initialAdapters, WinForward.Core.PolicySnapshot policy, TimeSpan? minimumRefreshInterval = null, Action<IReadOnlyList<AdapterEnumerationItem>>? onScopeInstalled = null)
+    public CaptureRunnerHarness(IReadOnlyList<AdapterEnumerationItem> initialAdapters, WinForward.Core.PolicySnapshot policy, TimeSpan? minimumRefreshInterval = null, Action<IReadOnlyList<AdapterEnumerationItem>>? onScopeInstalled = null, TimeSpan? periodicRefreshInterval = null)
     {
         Enumeration = new FakeAdapterEnumerationProvider(initialAdapters);
         Generations.OnCreated = generation =>
@@ -185,7 +189,8 @@ internal sealed class CaptureRunnerHarness : IAsyncDisposable
                 // bundle's scope-installed callback composes its durable-layer updates.
                 onScopeInstalled?.Invoke(scope);
             },
-            minimumRefreshInterval: minimumRefreshInterval);
+            minimumRefreshInterval: minimumRefreshInterval,
+            periodicRefreshInterval: periodicRefreshInterval);
     }
 
     public FakeAdapterEnumerationProvider Enumeration { get; }

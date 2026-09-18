@@ -84,6 +84,15 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
     /// <summary>The live setup-failure cooldown count (bounded by <c>capacity</c>); for tests and diagnostics.</summary>
     internal int SetupCooldownCountForDiagnostics => _cooldowns.Count;
 
+    /// <summary>The number of live UDP sessions (heartbeat diagnostics; gate-consistent).</summary>
+    public int SessionCount
+    {
+        get { lock (_gate) return _sessions.Count; }
+    }
+
+    /// <summary>The session budget this coordinator was constructed with (heartbeat diagnostics).</summary>
+    public int Capacity => _capacity;
+
     /// <summary>The aggregate setup-queue bytes currently charged against the global budget; for tests and diagnostics.</summary>
     internal long PendingSetupBytesForDiagnostics => _budget.PendingBytes;
 

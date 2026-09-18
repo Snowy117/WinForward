@@ -12,20 +12,28 @@ namespace WinForward.Runtime.Capture;
 /// design §3.5). Generation 0 resolves its scope with fail-closed startup semantics; every later
 /// generation is rebuilt through the refresh pipeline: the change source — or a pump degradation
 /// with native error 87 (R3) — raises a refresh demand, the runner waits out the storm-guard
-/// interval, re-enumerates, and diffs the fresh in-scope link state (stable ID → handle/MAC/MTU)
-/// against the running generation's. An identical diff is a logged no-op that never touches the
-/// running pumps; a real change stops the current generation (its runtime cleanup performs the
-/// best-effort mode restore), swaps the durable layer's adapter views via <c>onScopeInstalled</c>,
-/// and starts the next generation on fresh handles. The durable layer is disposed exactly once,
-/// after the final generation completes. A generation fault is fail-closed: it propagates out of
-/// <see cref="RunAsync"/> after teardown — except a stale-handle startup fault (native 87 before
-/// the generation reached its pump run), which is absorbed and rebuilt through a forced,
-/// storm-guarded refresh, bounded by <see cref="MaxConsecutiveStartupRecoveries"/> consecutive
-/// recoveries (task 09-11).
+/// interval, re-enumerates, and diffs the fresh in-scope link state (stable ID →
+/// handle/MAC/MTU/address fingerprint) against the running generation's. An identical diff is a
+/// logged no-op that never touches the running pumps; a real change stops the current generation
+/// (its runtime cleanup performs the best-effort mode restore), swaps the durable layer's adapter
+/// views via <c>onScopeInstalled</c>, and starts the next generation on fresh handles. The durable
+/// layer is disposed exactly once, after the final generation completes. A generation fault is
+/// fail-closed: it propagates out of <see cref="RunAsync"/> after teardown — except a stale-handle
+/// startup fault (native 87 before the generation reached its pump run), which is absorbed and
+/// rebuilt through a forced, storm-guarded refresh, bounded by
+/// <see cref="MaxConsecutiveStartupRecoveries"/> consecutive recoveries (task 09-11). Since task
+/// 09-17 a NON-forced periodic refresh demand (default every 30 s, disabled with
+/// <see cref="TimeSpan.Zero"/>) re-checks the enumeration so host link-state changes the NDISRD
+/// list never signals — IPv6 temporary-address rotation above all — still refresh the adapter
+/// view, and interception-path failure rates reaching their health thresholds arm a FORCED
+/// refresh through the same pipeline (<see cref="HealthSignal"/>, task 09-17 R1-B).
 /// </summary>
 public sealed class LayeredCaptureRunner
 {
     internal static readonly TimeSpan DefaultMinimumRefreshInterval = TimeSpan.FromSeconds(1);
+
+    /// <summary>The periodic link-state re-check interval (task 09-17 R1-A); <see cref="TimeSpan.Zero"/> disables it.</summary>
+    internal static readonly TimeSpan DefaultPeriodicRefreshInterval = TimeSpan.FromSeconds(30);
 
     /// <summary>ERROR_INVALID_PARAMETER: every cached handle went stale because the driver rebuilt its bound-adapter list.</summary>
     internal const int AdapterListRebuiltNativeError = 87;
@@ -45,7 +53,9 @@ public sealed class LayeredCaptureRunner
     private readonly Func<CancellationToken, ValueTask> _disposeDurableAsync;
     private readonly Action<IReadOnlyList<AdapterEnumerationItem>>? _onScopeInstalled;
     private readonly TimeSpan _minimumRefreshInterval;
+    private readonly TimeSpan _periodicRefreshInterval;
     private readonly TimeProvider _time;
+    private readonly InterceptionHealthMonitor _healthMonitor;
     private readonly RefreshDemandGate _demandGate = new();
     private readonly ConcurrentQueue<string> _pendingDegradedAdapters = new();
     private int _started;
@@ -68,7 +78,9 @@ public sealed class LayeredCaptureRunner
         Func<CancellationToken, ValueTask> disposeDurableAsync,
         Action<IReadOnlyList<AdapterEnumerationItem>>? onScopeInstalled = null,
         TimeSpan? minimumRefreshInterval = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        TimeSpan? periodicRefreshInterval = null,
+        InterceptionHealthMonitor? interceptionHealthMonitor = null)
     {
         ArgumentNullException.ThrowIfNull(enumerationProvider);
         ArgumentNullException.ThrowIfNull(generationFactory);
@@ -76,6 +88,10 @@ public sealed class LayeredCaptureRunner
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(disposeDurableAsync);
+        if (periodicRefreshInterval is { } periodic && periodic < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(periodicRefreshInterval), periodicRefreshInterval, "The periodic refresh interval cannot be negative; use TimeSpan.Zero to disable periodic refresh.");
+        }
         _enumerationProvider = enumerationProvider;
         _generationFactory = generationFactory;
         _changeSource = changeSource;
@@ -84,8 +100,27 @@ public sealed class LayeredCaptureRunner
         _disposeDurableAsync = disposeDurableAsync;
         _onScopeInstalled = onScopeInstalled;
         _minimumRefreshInterval = minimumRefreshInterval ?? DefaultMinimumRefreshInterval;
+        _periodicRefreshInterval = periodicRefreshInterval ?? DefaultPeriodicRefreshInterval;
         _time = timeProvider ?? TimeProvider.System;
+        _healthMonitor = interceptionHealthMonitor ?? new InterceptionHealthMonitor(logger, timeProvider: timeProvider);
+        _healthMonitor.AttachTrigger(OnForcedRefreshTriggered);
     }
+
+    /// <summary>
+    /// The interception-health signal the durable layer reports reinject/forward failures into
+    /// (task 09-17 R1-B). A threshold crossing arms a forced refresh demand through the runner's
+    /// existing forced semantics — never a direct rebuild.
+    /// </summary>
+    public IInterceptionHealthSignal HealthSignal => _healthMonitor;
+
+    /// <summary>
+    /// The current generation's pump snapshot (task 09-17 R2.3, heartbeat source): running and
+    /// degraded adapter-pump counts, default (0/0) while no generation is installed. The
+    /// generation reference is read without a lock — reference reads are atomic, a torn read is
+    /// impossible, and the worst outcome is one heartbeat reporting the previous generation's
+    /// counts (or none) during a refresh swap, which is an acceptable stale read for telemetry.
+    /// </summary>
+    public CapturePumpState PumpState => _generation?.Pumps ?? default;
 
     /// <summary>
     /// Feeds a degraded-pump observation into the refresh pipeline (R3): a degradation with
@@ -111,6 +146,9 @@ public sealed class LayeredCaptureRunner
         var monitor = Task.Factory.StartNew(
             () => MonitorAsync(monitorCancellation.Token),
             CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
+        var periodicTick = _periodicRefreshInterval > TimeSpan.Zero
+            ? Task.Run(() => PeriodicRefreshTickAsync(monitorCancellation.Token))
+            : null;
         try
         {
             var initial = _enumerationProvider.Enumerate();
@@ -149,7 +187,31 @@ public sealed class LayeredCaptureRunner
         }
         finally
         {
-            await TeardownAsync(monitor, monitorCancellation).ConfigureAwait(false);
+            await TeardownAsync(monitor, monitorCancellation, periodicTick).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Periodic link-state re-check (task 09-17 R1-A): the NDISRD bound-adapter list is not
+    /// rebuilt by host address changes (IPv6 temporary-address rotation), so a timer raises a
+    /// NON-forced refresh demand every interval. An unchanged enumeration still resolves as the
+    /// no-op skip, and the storm guard absorbs races with NDISRD signals; the demand gate sees
+    /// tick signals exactly like watcher signals, so no new state machine exists. The timer is
+    /// TimeProvider-backed to stay fake-time testable.
+    /// </summary>
+    private async Task PeriodicRefreshTickAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(_periodicRefreshInterval, _time);
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+            {
+                _demandGate.Signal();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Run shutdown; a signal that can no longer be consumed changes nothing.
         }
     }
 
@@ -195,6 +257,7 @@ public sealed class LayeredCaptureRunner
         if (diff.IsEmpty && !forced)
         {
             LogRefresh(diff, degraded, fresh);
+            _healthMonitor.NoteRefreshCompleted();
             return RefreshDemandOutcome.Continue;
         }
 
@@ -208,12 +271,39 @@ public sealed class LayeredCaptureRunner
             _currentScope = nextItems;
             _onScopeInstalled?.Invoke(nextItems);
             _logger.Warn("Every capture-scope adapter disappeared; interception is paused until an adapter returns.");
+            return RefreshDemandOutcome.Continue;
         }
-        else
-        {
-            await InstallGenerationAsync(nextItems, cancellationToken).ConfigureAwait(false);
-        }
+        await InstallGenerationAsync(nextItems, cancellationToken).ConfigureAwait(false);
+        _healthMonitor.NoteRefreshCompleted();
         return RefreshDemandOutcome.Continue;
+    }
+
+    /// <summary>
+    /// The health monitor's trigger (task 09-17 R1-B): an interception-path failure rate crossed
+    /// its threshold, so a forced refresh demand reconciles the adapter view on fresh handles
+    /// even when the NDISRD list never signalled — the outage shape the periodic re-check cannot
+    /// catch faster than its interval. Arming rides the existing forced semantics (the flag is
+    /// consumed once by the next demand; an install clears it), and the storm guard still paces
+    /// the rebuild itself. The warn is observational and never changes the refresh outcome.
+    /// </summary>
+    private void OnForcedRefreshTriggered(string counter)
+    {
+        _forceRebuild = true;
+        _demandGate.Signal();
+        if (!_logger.IsEnabled(RuntimeLogLevel.Warn)) return;
+        var counters = _healthMonitor.WindowSnapshot();
+        var fields = new List<RuntimeLogField>(4 + counters.Count)
+        {
+            new("reason", counter),
+            new("consecutive", _healthMonitor.ConsecutiveForcedTriggers),
+            new("cooldownSeconds", (long)_healthMonitor.CooldownRemaining.TotalSeconds),
+        };
+        if (_healthMonitor.IsDegraded) fields.Add(new("degraded", "true"));
+        foreach (var pair in counters.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
+        {
+            fields.Add(new RuntimeLogField(pair.Key, pair.Value));
+        }
+        _logger.Event(RuntimeLogLevel.Warn, "runner.forcedRefresh", fields.ToArray());
     }
 
     /// <summary>
@@ -363,13 +453,14 @@ public sealed class LayeredCaptureRunner
         }
     }
 
-    private async Task TeardownAsync(Task monitor, CancellationTokenSource monitorCancellation)
+    private async Task TeardownAsync(Task monitor, CancellationTokenSource monitorCancellation, Task? periodicTick)
     {
         Exception? stopFault = null;
         try { await StopGenerationAsync().ConfigureAwait(false); }
         catch (Exception exception) { stopFault = exception; }
         await CancelBestEffortAsync(monitorCancellation).ConfigureAwait(false);
         await monitor.ConfigureAwait(false);
+        if (periodicTick is { } tick) await tick.ConfigureAwait(false);
         try
         {
             await _disposeDurableAsync(CancellationToken.None).ConfigureAwait(false);

@@ -34,14 +34,19 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
 {
     private static readonly TimeSpan MissingOriginLogInterval = TimeSpan.FromSeconds(5);
 
+    /// <summary>Throttle window for the structured reinjection diagnostics: these failures can
+    /// repeat at query rate, and the drop shape is an aggregate staleness signal, so one line per
+    /// window plus the counter suffices.</summary>
+    private static readonly TimeSpan StructuredReinjectLogInterval = TimeSpan.FromSeconds(30);
+
     private readonly IPacketReinjector _reinjector;
     private readonly IUdpAdapterTargetSource _adapterTargets;
     private readonly NdisPacketBufferPool _bufferPool;
     private readonly int _maximumFrameSize;
     private readonly IRuntimeLogger _logger;
-    private long _lastMissingOriginLogTicks;
-    private long _lastHostFallbackLogTicks;
-    private long _lastMissingHostTargetLogTicks;
+    private readonly IInterceptionHealthSignal _healthSignal;
+    private readonly RuntimeLogThrottle _originUnresolvedWarn = new(StructuredReinjectLogInterval);
+    private readonly RuntimeLogThrottle _failClosedDropWarn = new(StructuredReinjectLogInterval);
     private long _lastMissingClientMacLogTicks;
     private long _lastFrameBuildFailureLogTicks;
 
@@ -52,14 +57,17 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
     /// its origin adapter). <paramref name="maximumFrameSize"/> is the pinned NDISAPI frame cap
     /// (default 1514, or 9014 for a jumbo-capable ABI) that bounds rebuilt frames (M3).
     /// <paramref name="bufferPool"/> supplies the native buffers responses are built into
-    /// (pooled reuse instead of a per-response allocation).
+    /// (pooled reuse instead of a per-response allocation). <paramref name="healthSignal"/>
+    /// receives the staleness-shaped failures (host fallback and fail-closed drops) that the
+    /// capture runner may answer with a forced adapter-view refresh; null means no-op.
     /// </summary>
     public UdpResponseReinjector(
         IPacketReinjector reinjector,
         IUdpAdapterTargetSource adapterTargets,
         int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame,
         IRuntimeLogger? logger = null,
-        NdisPacketBufferPool? bufferPool = null)
+        NdisPacketBufferPool? bufferPool = null,
+        IInterceptionHealthSignal? healthSignal = null)
     {
         ArgumentNullException.ThrowIfNull(reinjector);
         ArgumentNullException.ThrowIfNull(adapterTargets);
@@ -69,6 +77,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         _maximumFrameSize = maximumFrameSize;
         _logger = logger ?? NullRuntimeLogger.Instance;
         _bufferPool = bufferPool ?? NdisPacketBufferPool.Shared;
+        _healthSignal = healthSignal ?? InterceptionHealthMonitor.Noop;
     }
 
     public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, byte[]? clientMac, CancellationToken cancellationToken)
@@ -155,7 +164,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
             }
             if (_adapterTargets.Host is { } hostTarget)
             {
-                LogHostAdapterFallback();
+                LogHostAdapterFallback(originalFlow);
                 target = hostTarget;
                 destinationMac = target.Mac;
                 return true;
@@ -163,7 +172,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
             target = default;
             destinationMac = null;
             if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogTrace("udp.response.dropped", originalFlow, new RuntimeLogField("reason", "missingHostTarget"));
-            LogMissingHostTarget();
+            LogMissingHostTarget(originalFlow);
             return false;
         }
 
@@ -172,7 +181,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
             target = default;
             destinationMac = null;
             if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogTrace("udp.response.dropped", originalFlow, new RuntimeLogField("reason", "missingOriginAdapter"));
-            LogMissingOriginAdapter();
+            LogMissingOriginAdapter(originalFlow);
             return false;
         }
         target = originAdapter;
@@ -210,14 +219,9 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         }
     }
 
-    private void LogMissingOriginAdapter()
+    private void LogMissingOriginAdapter(FlowKey originalFlow)
     {
-        var now = DateTime.UtcNow.Ticks;
-        var last = Interlocked.Read(ref _lastMissingOriginLogTicks);
-        if (now - last >= MissingOriginLogInterval.Ticks && Interlocked.CompareExchange(ref _lastMissingOriginLogTicks, now, last) == last)
-        {
-            _logger.Warn("Forwarded UDP response dropped fail-closed: the flow's origin adapter is not resolved in the reinjection map.");
-        }
+        LogFailClosedDrop(originalFlow, "missingOriginAdapter");
     }
 
     private void LogMissingClientMac()
@@ -230,23 +234,39 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         }
     }
 
-    private void LogHostAdapterFallback()
+    private void LogHostAdapterFallback(FlowKey originalFlow)
     {
-        var now = DateTime.UtcNow.Ticks;
-        var last = Interlocked.Read(ref _lastHostFallbackLogTicks);
-        if (now - last >= MissingOriginLogInterval.Ticks && Interlocked.CompareExchange(ref _lastHostFallbackLogTicks, now, last) == last)
-        {
-            _logger.Warn("Host UDP response origin adapter is not resolved in the reinjection map; using the host fallback adapter.");
-        }
+        RuntimeCounters.Shared.Increment(RuntimeCounters.UdpOriginUnresolved);
+        _healthSignal.ReportFailure(RuntimeCounters.UdpOriginUnresolved);
+        if (!_originUnresolvedWarn.ShouldEmit() || !_logger.IsEnabled(RuntimeLogLevel.Warn)) return;
+        _logger.Event(RuntimeLogLevel.Warn, "udp.reinject.unresolved",
+            new("source", originalFlow.Local),
+            new("destination", originalFlow.Remote),
+            new("originAdapter", originalFlow.OriginAdapterId),
+            new("mapAdapters", string.Join(",", _adapterTargets.AdapterIds)),
+            new("fallback", "host"));
     }
 
-    private void LogMissingHostTarget()
+    private void LogMissingHostTarget(FlowKey originalFlow)
     {
-        var now = DateTime.UtcNow.Ticks;
-        var last = Interlocked.Read(ref _lastMissingHostTargetLogTicks);
-        if (now - last >= MissingOriginLogInterval.Ticks && Interlocked.CompareExchange(ref _lastMissingHostTargetLogTicks, now, last) == last)
-        {
-            _logger.Warn("Host UDP response dropped fail-closed: no host fallback adapter is currently available.");
-        }
+        LogFailClosedDrop(originalFlow, "missingHostTarget");
+    }
+
+    /// <summary>
+    /// The structured fail-closed-drop warn (<c>udp.reinject.drop</c>): throttled to one line per
+    /// window with the flow key and origin kind, always counted. The drop itself is unchanged —
+    /// the response is never sent out an adapter it cannot belong to.
+    /// </summary>
+    private void LogFailClosedDrop(FlowKey originalFlow, string reason)
+    {
+        RuntimeCounters.Shared.Increment(RuntimeCounters.UdpFailClosedDrop);
+        _healthSignal.ReportFailure(RuntimeCounters.UdpFailClosedDrop);
+        if (!_failClosedDropWarn.ShouldEmit() || !_logger.IsEnabled(RuntimeLogLevel.Warn)) return;
+        _logger.Event(RuntimeLogLevel.Warn, "udp.reinject.drop",
+            new("source", originalFlow.Local),
+            new("destination", originalFlow.Remote),
+            new("originKind", originalFlow.Origin),
+            new("originAdapter", originalFlow.OriginAdapterId),
+            new("reason", reason));
     }
 }

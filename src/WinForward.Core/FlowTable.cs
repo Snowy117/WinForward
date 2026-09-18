@@ -16,6 +16,15 @@ public sealed class FlowTable
         _capacity = capacity;
     }
 
+    /// <summary>The bounded capacity the table was constructed with.</summary>
+    public int Capacity => _capacity;
+
+    /// <summary>The number of tracked flows (a gate-consistent snapshot; diagnostics only).</summary>
+    public int Count
+    {
+        get { lock (_gate) return _states.Count; }
+    }
+
     /// <summary>
     /// Resolves a flow for a packet whose key may differ from the stored key in direction, origin
     /// kind, or origin adapter. A flow is identified by its transport tuple (address family,

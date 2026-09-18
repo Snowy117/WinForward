@@ -296,8 +296,16 @@ internal static partial class IPHelperTables
             throw new InvalidOperationException($"The {tableName} announced {rowCount} rows of {rowSize} bytes each but wrote only {bytesWritten} bytes; refusing to read rows beyond the table payload.");
     }
 
-    private static unsafe T ReadRow<T>(nint buffer, int index) where T : unmanaged =>
-        Unsafe.ReadUnaligned<T>((void*)(buffer + 4 + index * sizeof(T)));
+    /// <summary>
+    /// Reads one table row at its native offset; shared by every iphlpapi table reader. The
+    /// DWORD-only owner-pid rows are 4-byte aligned, so their <c>Table[0]</c> sits directly after
+    /// the count (offset 4, the default); a row carrying 8-byte-aligned members — the unicast
+    /// address row's <c>NET_LUID</c>/<c>LARGE_INTEGER</c> — forces the table header to pad
+    /// <c>Table[0]</c> to <paramref name="firstRowOffset"/> 8 (documented in netioapi.h: access
+    /// must assume padding between <c>NumEntries</c> and the first row).
+    /// </summary>
+    internal static unsafe T ReadRow<T>(nint buffer, int index, int firstRowOffset = 4) where T : unmanaged =>
+        Unsafe.ReadUnaligned<T>((void*)(buffer + firstRowOffset + index * sizeof(T)));
 
     private readonly record struct UdpOwner(IPAddress Address, ushort Port, uint ProcessId);
     [StructLayout(LayoutKind.Auto)] private readonly record struct TcpOwner(Endpoint Local, Endpoint Remote, uint ProcessId);

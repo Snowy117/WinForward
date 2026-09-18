@@ -29,6 +29,8 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
     private readonly IRuntimeLogger _logger;
     private readonly Lock _gate = new();
     private Task? _disposeTask;
+    private HashSet<string>? _lastNoMacAdapters;
+    private string? _lastZeroMacHostId;
 
     /// <summary>
     /// Direct fabrication over already-built collaborators; the production path is
@@ -61,16 +63,26 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
     /// <summary>The refreshable UDP reinjection-target snapshot, swapped at every scope install.</summary>
     internal UdpAdapterTargetSource UdpTargets { get; }
 
+    /// <summary>The durable TCP redirect coordinator (heartbeat usage source).</summary>
+    internal TcpProxyCoordinator Tcp => _tcp;
+
+    /// <summary>The durable UDP session coordinator (heartbeat usage source).</summary>
+    internal UdpProxyCoordinator Udp => _udp;
+
     /// <summary>
     /// Builds the durable layer for a run. Nothing in the bundle references a specific adapter
     /// enumeration: the UDP target snapshot starts scope-less and is populated by the capture
     /// runner's scope-installed callback at generation 0 and after every refresh.
+    /// <paramref name="healthSignal"/> (task 09-17 R1-B) receives the interception-path failure
+    /// observations the capture runner may answer with a forced refresh; null keeps every site
+    /// on the no-op signal, so existing compositions are unchanged.
     /// </summary>
     internal static async ValueTask<DurableCaptureBundle> CreateAsync(
         ValidatedConfiguration configuration,
         IPacketReinjector reinjector,
         SelfTrafficRegistry selfTraffic,
-        IRuntimeLogger logger)
+        IRuntimeLogger logger,
+        IInterceptionHealthSignal? healthSignal = null)
     {
         // The tcpFlowCapacity budget is the single source of truth for both the coordinator's
         // session gate and the redirect table's bounded capacity (design §4).
@@ -83,7 +95,8 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
             selfTraffic,
             new WindowsAdapterLocalAddressProvider(),
             logger,
-            capacity: configuration.TcpFlowCapacity);
+            capacity: configuration.TcpFlowCapacity,
+            healthSignal: healthSignal);
         try
         {
             // Single source of truth for every datagram-path buffer bound: the transport send
@@ -94,12 +107,12 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
             var udpTargets = new UdpAdapterTargetSource();
             var udpCoordinator = new UdpProxyCoordinator(
                 new Socks5UdpTransportFactory(selfTraffic, maximumFrameSize),
-                new UdpResponseReinjector(reinjector, udpTargets, maximumFrameSize: maximumFrameSize, logger: logger),
+                new UdpResponseReinjector(reinjector, udpTargets, maximumFrameSize: maximumFrameSize, logger: logger, healthSignal: healthSignal),
                 logger: logger,
                 maximumFrameSize: maximumFrameSize);
             try
             {
-                var executor = new NdisPacketActionExecutor(reinjector, logger, tcpCoordinator, udpCoordinator);
+                var executor = new NdisPacketActionExecutor(reinjector, logger, tcpCoordinator, udpCoordinator, healthSignal: healthSignal);
                 var dispatcher = new FlowDispatcher(
                     configuration, selfTraffic, executor, new WindowsProcessAttributor(),
                     reverseHandler: tcpCoordinator,
@@ -128,13 +141,19 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
     /// fallback; adapters reporting an all-zero MAC are skipped with a warn (forwarded responses
     /// toward them drop fail-closed, host responses use the fallback), and a zero-MAC host
     /// fallback keeps today's zero-placeholder semantics. An empty scope clears the snapshot —
-    /// interception is paused, so every response resolution drops fail-closed.
+    /// interception is paused, so every response resolution drops fail-closed. The no-MAC warns
+    /// are change-gated (task 09-17 R2.4): every refresh re-installs the scope, so per-install
+    /// warns flooded the log with the same line — the group warn fires only on the first
+    /// occurrence and whenever the zero-MAC adapter set changes, and an empty zero-MAC set
+    /// resets the memory so the next occurrence warns again.
     /// </summary>
     internal void UpdateUdpTargets(IReadOnlyList<AdapterEnumerationItem> scope)
     {
         if (scope.Count == 0)
         {
             UdpTargets.Update(null, new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase));
+            _lastNoMacAdapters = null;
+            _lastZeroMacHostId = null;
             return;
         }
 
@@ -142,22 +161,58 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         var hostMac = host.Mac;
         if (IsZeroMac(hostMac))
         {
-            _logger.Warn("UDP response reinjection will use a zero MAC because the adapter MAC is unavailable; verify on the target host.");
+            if (!string.Equals(_lastZeroMacHostId, host.StableId, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.Event(RuntimeLogLevel.Warn, "udp.targets.noMac",
+                    new("kind", "hostFallback"),
+                    new("host", host.StableId),
+                    new("name", host.Adapter.FriendlyName));
+            }
+            _lastZeroMacHostId = host.StableId;
             hostMac = new byte[NdisApiAbi.EthernetAddressLength];
         }
+        else
+        {
+            _lastZeroMacHostId = null;
+        }
 
+        var noMacAdapters = new List<AdapterEnumerationItem>();
         var adapterTargets = new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase);
         foreach (var adapter in scope)
         {
             if (IsZeroMac(adapter.Mac))
             {
-                _logger.Warn($"UDP response reinjection has no MAC for adapter '{adapter.Adapter.FriendlyName}' ({adapter.StableId}); forwarded responses are dropped fail-closed and host responses use the fallback adapter.");
+                noMacAdapters.Add(adapter);
                 continue;
             }
             adapterTargets[adapter.StableId] = new UdpAdapterTarget(adapter.Adapter.RuntimeHandle, adapter.Mac);
         }
+        WarnNoMacAdaptersOnChange(noMacAdapters);
 
         UdpTargets.Update(new UdpAdapterTarget(host.Adapter.RuntimeHandle, hostMac), adapterTargets);
+    }
+
+    /// <summary>
+    /// The change-gated group warn for zero-MAC adapters: compares the current zero-MAC stable-ID
+    /// set against the last emitted one and warns only on the first occurrence or a membership
+    /// change. An all-zero set (every adapter has a MAC) resets the memory, so the next
+    /// occurrence warns again instead of being compared against a stale set. Called only between
+    /// generations from the runner's scope-installed callback, so plain fields need no lock.
+    /// </summary>
+    private void WarnNoMacAdaptersOnChange(List<AdapterEnumerationItem> noMacAdapters)
+    {
+        var current = new HashSet<string>(noMacAdapters.Select(static adapter => adapter.StableId), StringComparer.OrdinalIgnoreCase);
+        if (current.Count == 0)
+        {
+            _lastNoMacAdapters = null;
+            return;
+        }
+        if (_lastNoMacAdapters is { } previous && previous.SetEquals(current)) return;
+        _lastNoMacAdapters = current;
+        _logger.Event(RuntimeLogLevel.Warn, "udp.targets.noMac",
+            new("kind", "adapters"),
+            new("adapters", string.Join("; ", noMacAdapters.Select(static adapter => $"{adapter.Adapter.FriendlyName}({adapter.StableId})"))),
+            new("count", (long)noMacAdapters.Count));
     }
 
     /// <summary>

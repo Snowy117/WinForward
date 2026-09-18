@@ -43,7 +43,8 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         SelfTrafficRegistry selfTraffic,
         IAdapterLocalAddressProvider localAddresses,
         IRuntimeLogger? logger = null,
-        int? capacity = null)
+        int? capacity = null,
+        IInterceptionHealthSignal? healthSignal = null)
     {
         ArgumentNullException.ThrowIfNull(listenerFactory);
         ArgumentNullException.ThrowIfNull(relayFactory);
@@ -57,12 +58,18 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         _logger = logger ?? NullRuntimeLogger.Instance;
         _capacity = capacity ?? 16_384;
         _store = new TcpRedirectSessionStore(table, _logger, _capacity);
-        _clientReset = new ClientResetInjector(injector, _logger, _store.TearDownSessionAsync, _store.FailAssociationAsync, _capacity);
+        _clientReset = new ClientResetInjector(injector, _logger, _store.TearDownSessionAsync, _store.FailAssociationAsync, _capacity, healthSignal);
         _acceptor = new TcpRedirectAcceptor(relayFactory, _logger, _clientReset, _store.TryAttachRelay, _store.TearDownSessionAsync);
         _setup = new TcpRedirectSetup(listenerFactory, table, selfTraffic, localAddresses, injector, _logger, _store, _clientReset);
     }
 
     public TcpRedirectTable Table => _table;
+
+    /// <summary>The number of live redirect sessions (heartbeat diagnostics; gate-consistent).</summary>
+    public int SessionCount => _store.SessionCount;
+
+    /// <summary>The concurrent proxied-flow budget this coordinator was constructed with (heartbeat diagnostics).</summary>
+    public int Capacity => _capacity;
 
     /// <summary>
     /// The number of concurrent SYN callers that arrived after another caller had already claimed

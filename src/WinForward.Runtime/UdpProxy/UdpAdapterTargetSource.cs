@@ -24,6 +24,12 @@ public interface IUdpAdapterTargetSource
 
     /// <summary>Resolves an adapter stable ID to its current reinjection target; null when the adapter is not currently enumerated.</summary>
     UdpAdapterTarget? Resolve(string stableId);
+
+    /// <summary>
+    /// The stable IDs currently present in the map (sorted for deterministic output), so a
+    /// diagnostic event can summarize which adapters the reinjection map still knows about.
+    /// </summary>
+    IReadOnlyCollection<string> AdapterIds { get; }
 }
 
 /// <summary>
@@ -35,26 +41,37 @@ public interface IUdpAdapterTargetSource
 /// </summary>
 public sealed class UdpAdapterTargetSource : IUdpAdapterTargetSource
 {
-    private sealed record Snapshot(UdpAdapterTarget? Host, IReadOnlyDictionary<string, UdpAdapterTarget> ByStableId);
+    private sealed record Snapshot(UdpAdapterTarget? Host, IReadOnlyDictionary<string, UdpAdapterTarget> ByStableId, IReadOnlyList<string> SortedAdapterIds);
 
     private Snapshot _snapshot;
 
     public UdpAdapterTargetSource(UdpAdapterTarget? host = null, IReadOnlyDictionary<string, UdpAdapterTarget>? byStableId = null)
     {
-        ValidateHostMac(host);
-        _snapshot = new Snapshot(host, CopyMap(byStableId));
+        _snapshot = CreateSnapshot(host, CopyMap(byStableId));
     }
 
     public UdpAdapterTarget? Host => Volatile.Read(ref _snapshot).Host;
 
     public UdpAdapterTarget? Resolve(string stableId) => Volatile.Read(ref _snapshot).ByStableId.TryGetValue(stableId, out var target) ? target : null;
 
+    public IReadOnlyCollection<string> AdapterIds => Volatile.Read(ref _snapshot).SortedAdapterIds;
+
     /// <summary>Replaces the whole snapshot (host fallback + per-adapter map) atomically.</summary>
     public void Update(UdpAdapterTarget? host, IReadOnlyDictionary<string, UdpAdapterTarget> byStableId)
     {
         ArgumentNullException.ThrowIfNull(byStableId);
         ValidateHostMac(host);
-        Volatile.Write(ref _snapshot, new Snapshot(host, CopyMap(byStableId)));
+        Volatile.Write(ref _snapshot, CreateSnapshot(host, CopyMap(byStableId)));
+    }
+
+    private static Snapshot CreateSnapshot(UdpAdapterTarget? host, IReadOnlyDictionary<string, UdpAdapterTarget> byStableId)
+    {
+        ValidateHostMac(host);
+        var sortedIds = new string[byStableId.Count];
+        var index = 0;
+        foreach (var stableId in byStableId.Keys) sortedIds[index++] = stableId;
+        Array.Sort(sortedIds, StringComparer.OrdinalIgnoreCase);
+        return new Snapshot(host, byStableId, sortedIds);
     }
 
     private static IReadOnlyDictionary<string, UdpAdapterTarget> CopyMap(IReadOnlyDictionary<string, UdpAdapterTarget>? byStableId) =>

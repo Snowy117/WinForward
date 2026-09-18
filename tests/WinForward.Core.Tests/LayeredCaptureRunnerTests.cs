@@ -158,4 +158,24 @@ public sealed class LayeredCaptureRunnerTests
         Assert.Equal(0, harness.Generation(0).DisposeCount);
         Assert.False(harness.RunTask.IsCompleted);
     }
+
+    [Fact]
+    public async Task PumpStateSnapshotReflectsTheCurrentGenerationAndClearsAtExit()
+    {
+        await using var harness = new CaptureRunnerHarness([CaptureRunnerFakes.AdapterItem("id-a", 101)], CaptureRunnerFakes.UnconstrainedPolicy());
+
+        // Before the run starts there is no generation, so the heartbeat source reports none.
+        Assert.Equal(default(CapturePumpState), harness.Runner.PumpState);
+        harness.Start();
+        await harness.WaitForGenerationStartedAsync(0).ConfigureAwait(false);
+
+        harness.Generation(0).Pumps = new CapturePumpState(3, 1);
+        Assert.Equal(new CapturePumpState(3, 1), harness.Runner.PumpState);
+
+        harness.Cancel.Cancel();
+        await harness.RunTask.ConfigureAwait(false);
+
+        // The teardown releases the generation, so the snapshot falls back to "no pumps".
+        Assert.Equal(default(CapturePumpState), harness.Runner.PumpState);
+    }
 }

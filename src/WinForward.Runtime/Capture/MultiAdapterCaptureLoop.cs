@@ -47,6 +47,20 @@ public sealed class MultiAdapterCaptureLoop : IPacketCaptureLoop
     /// <summary>How many adapter pumps exited through the degraded path (telemetry, R7).</summary>
     internal long DegradedAdapterCount => Interlocked.Read(ref _degradedAdapterCount);
 
+    /// <summary>
+    /// Live pump counts for the heartbeat (task 09-17 R2.3): running excludes pumps that exited
+    /// through the degraded path, because a degraded pump never returns to its loop. Both reads
+    /// are lock-free monotonic counters — the value is observational telemetry only.
+    /// </summary>
+    internal CapturePumpState PumpState
+    {
+        get
+        {
+            var degraded = (int)Interlocked.Read(ref _degradedAdapterCount);
+            return new CapturePumpState(_pumps.Length - degraded, degraded);
+        }
+    }
+
     public async ValueTask RunAsync(CancellationToken cancellationToken)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

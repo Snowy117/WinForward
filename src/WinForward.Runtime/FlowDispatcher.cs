@@ -99,6 +99,8 @@ public sealed class FlowDispatcher
     private readonly Func<CapturedFlowPacket, CancellationToken, ValueTask<TcpRedirectOutcome>>? _fragmentHandler;
     private readonly IRuntimeLogger _logger;
     private readonly bool _includeProcessPathInLogs;
+    private readonly RuntimeLogThrottle _capacityBlockWarn = new(TimeSpan.FromSeconds(5));
+    private readonly RuntimeLogThrottle _attributionMissWarn = new(TimeSpan.FromSeconds(5));
 
     public FlowDispatcher(ValidatedConfiguration configuration, ISelfTrafficGuard selfTraffic, IPacketActionExecutor executor, IProcessAttributor? attributor = null, int flowCapacity = 65_536, ITcpReverseHandler? reverseHandler = null, Func<CapturedFlowPacket, CancellationToken, ValueTask<TcpRedirectOutcome>>? fragmentHandler = null, IRuntimeLogger? logger = null)
     {
@@ -127,6 +129,12 @@ public sealed class FlowDispatcher
     /// lapses.
     /// </summary>
     public int RemoveExpiredFlows(DateTimeOffset now, TimeSpan idleTimeout, Func<FlowKey, bool>? isHeld = null) => _flows.RemoveExpired(now, idleTimeout, isHeld);
+
+    /// <summary>The number of flow decisions currently cached in the flow table (heartbeat diagnostics).</summary>
+    public int FlowCount => _flows.Count;
+
+    /// <summary>The flow table's fixed capacity (heartbeat diagnostics).</summary>
+    public int FlowCapacity => _flows.Capacity;
 
     /// <summary>
     /// Dispatches a classified flow packet. The steady-state shape (self traffic excluded, flow
@@ -211,6 +219,7 @@ public sealed class FlowDispatcher
 
         if (!_flows.TryClaimResolved(context.Key, () => EvaluateNewFlow(context), out var claimed) || claimed is null)
         {
+            LogCapacityBlock(context);
             if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.flowResolved", packet, new RuntimeLogField("outcome", "capacity"));
             await CompleteAsync(packet, PacketDisposition.Block, PacketAction.Block, null, cancellationToken).ConfigureAwait(false);
             return;
@@ -255,7 +264,50 @@ public sealed class FlowDispatcher
     {
         if (!_policy.RequiresProcessAttribution || _attributor is null || context.ProcessName is not null || context.ProcessPath is not null || context.Key.Origin != FlowOriginKind.Host) return context;
         var identity = await _attributor.FindAsync(context.Key, cancellationToken).ConfigureAwait(false);
-        return identity is null ? context : context with { ProcessName = identity.Value.Name, ProcessPath = identity.Value.FullPath };
+        if (identity is null)
+        {
+            LogAttributionMiss(context);
+            return context;
+        }
+        return context with { ProcessName = identity.Value.Name, ProcessPath = identity.Value.FullPath };
+    }
+
+    /// <summary>
+    /// The capacity-gate block warn (<c>flow.capacity-block</c>): the flow table is full, so a new
+    /// flow is blocked fail-closed; the trace-only record does not surface sustained capacity
+    /// exhaustion to operators. Throttled to one line per window (the block itself repeats per
+    /// packet); the counter aggregates every occurrence. Logging only: the Block disposition is
+    /// unchanged.
+    /// </summary>
+    private void LogCapacityBlock(FlowContext context)
+    {
+        RuntimeCounters.Shared.Increment(RuntimeCounters.FlowCapacityBlock);
+        if (!_capacityBlockWarn.ShouldEmit() || !_logger.IsEnabled(RuntimeLogLevel.Warn)) return;
+        _logger.Event(RuntimeLogLevel.Warn, "flow.capacity-block",
+            new("protocol", context.Key.Protocol),
+            new("origin", context.Key.Origin),
+            new("source", context.Key.Local),
+            new("destination", context.Key.Remote),
+            new("tableSize", _flows.Count),
+            new("capacity", _flows.Capacity));
+    }
+
+    /// <summary>
+    /// The attribution-miss warn (<c>flow.attribution-miss</c>): process attribution returned no
+    /// owner for a host flow. The production attributor already retried once internally before
+    /// returning null, so the miss is always post-retry (<c>afterRetry=true</c>). Throttled to one
+    /// line per window; the counter aggregates every occurrence. Logging only: an unresolved owner
+    /// still matches no process rule and evaluation continues unchanged.
+    /// </summary>
+    private void LogAttributionMiss(FlowContext context)
+    {
+        RuntimeCounters.Shared.Increment(RuntimeCounters.AttributionMiss);
+        if (!_attributionMissWarn.ShouldEmit() || !_logger.IsEnabled(RuntimeLogLevel.Warn)) return;
+        _logger.Event(RuntimeLogLevel.Warn, "flow.attribution-miss",
+            new("protocol", context.Key.Protocol),
+            new("local", context.Key.Local),
+            new("remote", context.Key.Remote),
+            new("afterRetry", true));
     }
 
     /// <summary>

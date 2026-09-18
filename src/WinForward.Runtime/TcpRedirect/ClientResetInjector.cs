@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Globalization;
+using System.Net.Sockets;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
@@ -26,17 +28,19 @@ internal sealed class ClientResetInjector
 
     private readonly ITcpRedirectInjector _injector;
     private readonly IRuntimeLogger _logger;
+    private readonly IInterceptionHealthSignal _healthSignal;
     private readonly Func<TcpRedirectSession, ValueTask> _tearDownSession;
     private readonly Func<TcpRedirectAssociation, ValueTask> _failAssociation;
     private readonly TcpResetCooldownTable _capacityResets;
 
-    public ClientResetInjector(ITcpRedirectInjector injector, IRuntimeLogger logger, Func<TcpRedirectSession, ValueTask> tearDownSession, Func<TcpRedirectAssociation, ValueTask> failAssociation, int? capacity = null)
+    public ClientResetInjector(ITcpRedirectInjector injector, IRuntimeLogger logger, Func<TcpRedirectSession, ValueTask> tearDownSession, Func<TcpRedirectAssociation, ValueTask> failAssociation, int? capacity = null, IInterceptionHealthSignal? healthSignal = null)
     {
         _injector = injector;
         _logger = logger;
         _tearDownSession = tearDownSession;
         _failAssociation = failAssociation;
         _capacityResets = new TcpResetCooldownTable(capacity ?? 16_384);
+        _healthSignal = healthSignal ?? InterceptionHealthMonitor.Noop;
     }
 
     /// <summary>The capacity-reset cooldown index; surfaced so tests can advance the window.</summary>
@@ -130,11 +134,37 @@ internal sealed class ClientResetInjector
 
     /// <summary>
     /// Releases a flow whose upstream relay could not be established: closes the accepted socket,
-    /// best-effort resets the client-visible connection, then tears the session down.
+    /// best-effort resets the client-visible connection, then tears the session down. The failure
+    /// itself is surfaced as a structured warn (<c>tcp.redirect.relaySetupFailed</c>) carrying the
+    /// error type, the socket/Win32 error code when available, the SOCKS5 upstream endpoint, the
+    /// connect-attempt budget, and the original flow key. Teardown/alias-release behavior is
+    /// unchanged.
     /// </summary>
-    public async ValueTask HandleRelaySetupFailureAsync(TcpRedirectSession session, ITcpAcceptedConnection accepted)
+    public async ValueTask HandleRelaySetupFailureAsync(TcpRedirectSession session, ITcpAcceptedConnection accepted, Exception exception)
     {
-        _logger.Warn("TCP redirect relay setup failed; resetting the client connection and releasing the flow alias.");
+        RuntimeCounters.Shared.Increment(RuntimeCounters.RelaySetupFailed);
+        _healthSignal.ReportFailure(RuntimeCounters.RelaySetupFailed);
+        if (_logger.IsEnabled(RuntimeLogLevel.Warn))
+        {
+            var association = session.Association;
+            // SocketException derives from Win32Exception, so the Win32 probe covers both shapes;
+            // the socket error name only exists on SocketException. An IPv6-literal host gets the
+            // bracket convention the log formatter applies to Endpoint values.
+#pragma warning disable CA1416 // Reading the const inlines a literal from the windows-gated relay factory; the value (the dial budget this event reports) is inert on every platform.
+            var connectAttempts = TcpProxyRelayFactory.RelayConnectMaxAttempts;
+#pragma warning restore CA1416
+            _logger.Event(RuntimeLogLevel.Warn, "tcp.redirect.relaySetupFailed",
+                new("error", exception.GetType().Name),
+                new("socketError", (exception as SocketException)?.SocketErrorCode),
+                new("nativeError", (exception as Win32Exception)?.NativeErrorCode),
+                new("upstream", session.Server.Host.Contains(':')
+                    ? $"[{session.Server.Host}]:{session.Server.Port.ToString(CultureInfo.InvariantCulture)}"
+                    : $"{session.Server.Host}:{session.Server.Port.ToString(CultureInfo.InvariantCulture)}"),
+                new("proxy", session.Server.Name),
+                new("source", association.OriginalKey.Local),
+                new("destination", association.OriginalDestination),
+                new("attempts", connectAttempts));
+        }
         await accepted.DisposeAsync().ConfigureAwait(false);
         await TryInjectClientResetAsync(session).ConfigureAwait(false);
         await _tearDownSession(session).ConfigureAwait(false);

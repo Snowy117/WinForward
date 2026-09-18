@@ -75,4 +75,45 @@ public sealed class AdapterEnumerationDiffTests
 
         Assert.Equal(["id-a"], diff.Changed.Select(item => item.StableId).ToArray());
     }
+
+    [Fact]
+    public void AddressFingerprintChangeAloneIsChanged()
+    {
+        // The task 09-17 outage shape: identical handle/MAC/MTU, only the host addresses rotated
+        // (IPv6 temporary-address churn) while the NDISRD bound-adapter list never rebuilt.
+        var current = new[] { CaptureRunnerFakes.AdapterItem("id-a", 101, addressFingerprint: "192.168.77.2;240c:c001:101::1") };
+        var next = new[] { CaptureRunnerFakes.AdapterItem("id-a", 101, addressFingerprint: "192.168.77.2;240c:c001:202::9") };
+
+        var diff = AdapterEnumerationDiff.Diff(current, next);
+
+        Assert.Equal(["id-a"], diff.Changed.Select(item => item.StableId).ToArray());
+        Assert.Empty(diff.Added);
+        Assert.Empty(diff.Removed);
+    }
+
+    [Fact]
+    public void IdenticalAddressFingerprintStaysEmpty()
+    {
+        var current = new[] { CaptureRunnerFakes.AdapterItem("id-a", 101, addressFingerprint: "192.168.77.2;240c:c001:101::1") };
+        var next = new[] { CaptureRunnerFakes.AdapterItem("id-a", 101, addressFingerprint: "192.168.77.2;240c:c001:101::1") };
+
+        var diff = AdapterEnumerationDiff.Diff(current, next);
+
+        Assert.True(diff.IsEmpty);
+    }
+
+    [Fact]
+    public void EmptyVersusPopulatedFingerprintIsChanged()
+    {
+        // An address query that fails (empty fingerprint) after one that succeeded is a real
+        // link-state observation transition: exactly one rebuild, then equality — never a loop.
+        var current = new[] { CaptureRunnerFakes.AdapterItem("id-a", 101, addressFingerprint: "192.168.77.2") };
+        var next = new[] { CaptureRunnerFakes.AdapterItem("id-a", 101, addressFingerprint: "") };
+
+        var diff = AdapterEnumerationDiff.Diff(current, next);
+        Assert.False(diff.IsEmpty);
+
+        var settled = AdapterEnumerationDiff.Diff(next, next);
+        Assert.True(settled.IsEmpty);
+    }
 }

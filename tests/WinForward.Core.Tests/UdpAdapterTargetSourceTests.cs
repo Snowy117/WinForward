@@ -1,5 +1,6 @@
 using System.Net;
 using System.Runtime.Versioning;
+using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Runtime.UdpProxy;
@@ -118,7 +119,7 @@ public sealed class UdpAdapterTargetSourceTests
 
         Assert.Equal(0, reinjector.ToMstcpCount);
         Assert.Equal(0, reinjector.ToAdapterCount);
-        Assert.Equal(1, logger.WarnCount);
+        Assert.Single(logger.Events, e => e.Level == RuntimeLogLevel.Warn && string.Equals(e.Name, "udp.reinject.drop", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -137,7 +138,7 @@ public sealed class UdpAdapterTargetSourceTests
 
         Assert.Equal(0, reinjector.ToMstcpCount);
         Assert.Equal(0, reinjector.ToAdapterCount);
-        Assert.Equal(1, logger.WarnCount);
+        Assert.Single(logger.Events, e => e.Level == RuntimeLogLevel.Warn && string.Equals(e.Name, "udp.reinject.drop", StringComparison.Ordinal));
     }
 
     [Fact]

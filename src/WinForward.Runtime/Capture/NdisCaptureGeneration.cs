@@ -6,6 +6,15 @@ using WinForward.Windows;
 namespace WinForward.Runtime.Capture;
 
 /// <summary>
+/// Point-in-time adapter-pump counts for one generation (the heartbeat's pump summary,
+/// task 09-17 R2.3): how many pumps are still running and how many exited through the
+/// degraded path. A generation that reports the default value (0/0) simply has no pump
+/// state to share.
+/// </summary>
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
+public readonly record struct CapturePumpState(int Running, int Degraded);
+
+/// <summary>
 /// One capture generation (task 09-07-adapter-list-refresh, design §3.5): a full
 /// <see cref="TransactionalCaptureRuntime"/> lifetime — mode snapshot, tunnel apply, the pump
 /// run, and the cleanup/mode-restore tail — over the durable shared packet processor.
@@ -26,6 +35,13 @@ public interface ICaptureGeneration : IAsyncDisposable
     /// recoverable startup stale-handle fault from an in-run fault.
     /// </summary>
     bool ReachedPumpRun { get; }
+
+    /// <summary>
+    /// This generation's live pump counts (task 09-17 R2.3, heartbeat source). Reading is
+    /// observational: a benign stale value during a generation swap is acceptable, and a
+    /// generation without pump telemetry reports the default.
+    /// </summary>
+    CapturePumpState Pumps { get; }
 }
 
 /// <summary>
@@ -87,7 +103,7 @@ public sealed class NdisCaptureGenerationFactory : ICaptureGenerationFactory
             onAdapterDegraded: (adapter, nativeError) => HandleDegradedAsync(runtime!, adapter, nativeError),
             onAdapterTransientRetry: _onAdapterTransientRetry);
         runtime = new TransactionalCaptureRuntime(new NdisAdapterModeController(_driver, adapters), loop);
-        return new RuntimeCaptureGeneration(runtime);
+        return new RuntimeCaptureGeneration(runtime, () => loop.PumpState);
     }
 
     private async ValueTask HandleDegradedAsync(TransactionalCaptureRuntime runtime, WindowsAdapter adapter, int nativeError)
@@ -108,11 +124,13 @@ public sealed class NdisCaptureGenerationFactory : ICaptureGenerationFactory
 internal sealed class RuntimeCaptureGeneration : ICaptureGeneration
 {
     private readonly TransactionalCaptureRuntime _runtime;
+    private readonly Func<CapturePumpState>? _pumps;
 
-    public RuntimeCaptureGeneration(TransactionalCaptureRuntime runtime)
+    public RuntimeCaptureGeneration(TransactionalCaptureRuntime runtime, Func<CapturePumpState>? pumps = null)
     {
         ArgumentNullException.ThrowIfNull(runtime);
         _runtime = runtime;
+        _pumps = pumps;
     }
 
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -121,6 +139,8 @@ internal sealed class RuntimeCaptureGeneration : ICaptureGeneration
     }
 
     public bool ReachedPumpRun => _runtime.ReachedPumpRun;
+
+    public CapturePumpState Pumps => _pumps is { } pumps ? pumps() : default;
 
     public ValueTask DisposeAsync() => _runtime.DisposeAsync();
 }
