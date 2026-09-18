@@ -25,33 +25,80 @@ public enum Socks5ReplyKind
 
 public static class Socks5Messages
 {
-    public static byte[] Greeting(bool credentials) => credentials ? [5, 2, 0, 2] : [5, 1, 0];
+    /// <summary>
+    /// The process-lifetime constant greeting frames: <c>[5,1,0]</c> (no authentication offered)
+    /// and <c>[5,2,0,2]</c> (username/password). Built once; callers never copy or mutate them.
+    /// </summary>
+    public static ReadOnlyMemory<byte> GreetingNoCredentials { get; } = new byte[] { 5, 1, 0 };
+
+    public static ReadOnlyMemory<byte> GreetingWithCredentials { get; } = new byte[] { 5, 2, 0, 2 };
+
+    public static ReadOnlyMemory<byte> Greeting(bool credentials) => credentials ? GreetingWithCredentials : GreetingNoCredentials;
+
+    /// <summary>The byte length of the RFC 1929 username/password message for a credential pair.</summary>
+    public static int UsernamePasswordLength(string username, string password)
+    {
+        var userLength = System.Text.Encoding.UTF8.GetByteCount(username);
+        var secretLength = System.Text.Encoding.UTF8.GetByteCount(password);
+        // RFC 1929 permits a zero-length password; only the username must be 1..255 bytes.
+        if (userLength is 0 or > 255 || secretLength > 255) throw new ArgumentOutOfRangeException(nameof(username));
+        return 3 + userLength + secretLength;
+    }
+
+    /// <summary>
+    /// Writes the RFC 1929 username/password message into <paramref name="destination"/> and
+    /// returns its length. Zero-allocation counterpart of <see cref="UsernamePassword"/>.
+    /// </summary>
+    public static int WriteUsernamePassword(string username, string password, Span<byte> destination)
+    {
+        var length = UsernamePasswordLength(username, password);
+        if (destination.Length < length) throw new ArgumentException("The destination span is too small for the username/password message.", nameof(destination));
+        var userLength = System.Text.Encoding.UTF8.GetByteCount(username);
+        destination[0] = 1;
+        destination[1] = (byte)userLength;
+        System.Text.Encoding.UTF8.GetBytes(username.AsSpan(), destination.Slice(2, userLength));
+        destination[2 + userLength] = (byte)(length - 3 - userLength);
+        System.Text.Encoding.UTF8.GetBytes(password.AsSpan(), destination.Slice(3 + userLength));
+        return length;
+    }
 
     public static byte[] UsernamePassword(string username, string password)
     {
-        var user = System.Text.Encoding.UTF8.GetBytes(username);
-        var secret = System.Text.Encoding.UTF8.GetBytes(password);
-        // RFC 1929 permits a zero-length password; only the username must be 1..255 bytes.
-        if (user.Length is 0 or > 255 || secret.Length > 255) throw new ArgumentOutOfRangeException(nameof(username));
-        var message = new byte[3 + user.Length + secret.Length];
-        message[0] = 1;
-        message[1] = (byte)user.Length;
-        user.CopyTo(message.AsSpan(2));
-        message[2 + user.Length] = (byte)secret.Length;
-        secret.CopyTo(message.AsSpan(3 + user.Length));
+        var message = new byte[UsernamePasswordLength(username, password)];
+        WriteUsernamePassword(username, password, message);
         return message;
+    }
+
+    /// <summary>The byte length of the SOCKS5 request for <paramref name="address"/>.</summary>
+    public static int RequestLength(IPAddress address) =>
+        4 + (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? 4 : 16) + 2;
+
+    /// <summary>
+    /// Writes a SOCKS5 request (RFC 1928 section 4) into <paramref name="destination"/> and
+    /// returns its length. Zero-allocation counterpart of <see cref="Request"/>; the reserved
+    /// byte is written explicitly because the caller's scratch span is reused.
+    /// </summary>
+    public static int WriteRequest(Socks5Command command, IPAddress address, ushort port, Span<byte> destination)
+    {
+        var addressLength = address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? 4 : 16;
+        var length = 4 + addressLength + 2;
+        if (destination.Length < length) throw new ArgumentException("The destination span is too small for the request.", nameof(destination));
+        destination[0] = 5;
+        destination[1] = (byte)command;
+        destination[2] = 0;
+        destination[3] = addressLength == 4 ? (byte)1 : (byte)4;
+        if (!address.TryWriteBytes(destination.Slice(4, addressLength), out var written) || written != addressLength)
+        {
+            throw new ArgumentException("The address does not have a writable network-order form.", nameof(address));
+        }
+        BinaryPrimitives.WriteUInt16BigEndian(destination.Slice(4 + addressLength, 2), port);
+        return length;
     }
 
     public static byte[] Request(Socks5Command command, IPAddress address, ushort port)
     {
-        var addressBytes = address.GetAddressBytes();
-        var addressType = address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? (byte)1 : (byte)4;
-        var result = new byte[4 + addressBytes.Length + 2];
-        result[0] = 5;
-        result[1] = (byte)command;
-        result[3] = addressType;
-        addressBytes.CopyTo(result.AsSpan(4));
-        BinaryPrimitives.WriteUInt16BigEndian(result.AsSpan(4 + addressBytes.Length, 2), port);
+        var result = new byte[RequestLength(address)];
+        WriteRequest(command, address, port, result);
         return result;
     }
 

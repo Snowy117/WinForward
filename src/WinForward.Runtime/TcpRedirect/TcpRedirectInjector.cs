@@ -22,4 +22,16 @@ public sealed class TcpRedirectInjector(IPacketReinjector reinjector, NdisPacket
         else reinjector.SendToAdapter(adapterHandle, buffer);
         return ValueTask.CompletedTask;
     }
+
+    public void Inject(NdisPacketBuffer stagedFrame, bool towardMstcp, nint adapterHandle, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(stagedFrame);
+        // The caller staged the frame (bytes, direction flag, adapter handle) into the buffer it
+        // rented — the same tag matrix as the copy-based overload applies through its CompleteFrame
+        // — so this path only performs the native send and hands the buffer straight back. The
+        // token is intentionally unread: the native send is synchronous and unconditional, exactly
+        // like the copy-based overload's.
+        if (towardMstcp) reinjector.SendToMstcp(adapterHandle, stagedFrame);
+        else reinjector.SendToAdapter(adapterHandle, stagedFrame);
+    }
 }

@@ -7,14 +7,45 @@ namespace WinForward.Protocols;
 [StructLayout(LayoutKind.Auto)]
 public readonly record struct UdpPacketView(IPAddressValue SourceAddress, IPAddressValue DestinationAddress, ushort SourcePort, ushort DestinationPort, ReadOnlyMemory<byte> Payload, int IPHeaderLength);
 
+/// <summary>
+/// The synchronous-inspection twin of <see cref="UdpPacketView"/>: identical header fields, but the
+/// UDP payload is an offset/length pair into the parsed frame instead of a
+/// <see cref="ReadOnlyMemory{T}"/> slice, so a consumer holding only a span (a native capture
+/// buffer viewed through <c>CapturedFlowPacket.InspectionSpan</c>) can parse and slice without any
+/// managed backing. Use <see cref="Payload"/> to recover the payload slice from the same span.
+/// </summary>
+[StructLayout(LayoutKind.Auto)]
+public readonly record struct UdpPacketSpanView(IPAddressValue SourceAddress, IPAddressValue DestinationAddress, ushort SourcePort, ushort DestinationPort, int PayloadOffset, int PayloadLength, int IPHeaderLength)
+{
+    /// <summary>The payload slice of the frame this view was parsed from.</summary>
+    public ReadOnlySpan<byte> Payload(ReadOnlySpan<byte> frame) => frame.Slice(PayloadOffset, PayloadLength);
+}
+
 public static class IPUdpPacket
 {
     public static bool TryParse(ReadOnlyMemory<byte> frame, out UdpPacketView packet)
     {
+        if (!TryParseSpan(frame.Span, out UdpPacketSpanView view))
+        {
+            packet = default;
+            return false;
+        }
+        packet = new UdpPacketView(view.SourceAddress, view.DestinationAddress, view.SourcePort, view.DestinationPort, frame.Slice(view.PayloadOffset, view.PayloadLength), view.IPHeaderLength);
+        return true;
+    }
+
+    /// <summary>
+    /// Span-based parse for synchronous hot-path consumers: identical validation to the memory
+    /// overload, with the payload reported as an offset/length pair into <paramref name="frame"/>.
+    /// Deliberately named apart from <see cref="TryParse(ReadOnlyMemory{byte}, out UdpPacketView)"/>
+    /// so byte[]-backed call sites keep binding to the memory view (a span overload would capture
+    /// them and strand the <c>Payload</c> property consumers on the offset-based twin).
+    /// </summary>
+    public static bool TryParseSpan(ReadOnlySpan<byte> frame, out UdpPacketSpanView packet)
+    {
         packet = default;
-        var bytes = frame.Span;
-        if (bytes.Length < 14 + 20) return false;
-        var etherType = BinaryPrimitives.ReadUInt16BigEndian(bytes.Slice(12, 2));
+        if (frame.Length < 14 + 20) return false;
+        var etherType = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(12, 2));
         return etherType switch
         {
             0x0800 => TryParseIpv4(frame, out packet),
@@ -23,10 +54,9 @@ public static class IPUdpPacket
         };
     }
 
-    private static bool TryParseIpv4(ReadOnlyMemory<byte> frame, out UdpPacketView packet)
+    private static bool TryParseIpv4(ReadOnlySpan<byte> bytes, out UdpPacketSpanView packet)
     {
         packet = default;
-        var bytes = frame.Span;
         const int offset = 14;
         if (bytes.Length < offset + 20) return false;
         var versionAndHeader = bytes[offset];
@@ -38,13 +68,12 @@ public static class IPUdpPacket
         if ((fragment & 0xbfff) != 0) return false;
         var source = IPAddressValue.FromIPv4(bytes.Slice(offset + 12, 4));
         var destination = IPAddressValue.FromIPv4(bytes.Slice(offset + 16, 4));
-        return TryParseUdp(frame, offset + headerLength, source, destination, headerLength, totalLength - headerLength, out packet);
+        return TryParseUdp(bytes, offset + headerLength, source, destination, headerLength, totalLength - headerLength, out packet);
     }
 
-    private static bool TryParseIpv6(ReadOnlyMemory<byte> frame, out UdpPacketView packet)
+    private static bool TryParseIpv6(ReadOnlySpan<byte> bytes, out UdpPacketSpanView packet)
     {
         packet = default;
-        var bytes = frame.Span;
         const int offset = 14;
         if (bytes.Length < offset + 40) return false;
         if (bytes[offset] >> 4 != 6) return false;
@@ -66,17 +95,16 @@ public static class IPUdpPacket
         if (nextHeader != 17) return false;
         var sourceV6 = IPAddressValue.FromIPv6(bytes.Slice(offset + 8, 16));
         var destinationV6 = IPAddressValue.FromIPv6(bytes.Slice(offset + 24, 16));
-        return TryParseUdp(frame, transportOffset, sourceV6, destinationV6, transportOffset - offset, offset + 40 + payloadLength - transportOffset, out packet);
+        return TryParseUdp(bytes, transportOffset, sourceV6, destinationV6, transportOffset - offset, offset + 40 + payloadLength - transportOffset, out packet);
     }
 
-    private static bool TryParseUdp(ReadOnlyMemory<byte> frame, int offset, IPAddressValue source, IPAddressValue destination, int ipHeaderLength, int udpLength, out UdpPacketView packet)
+    private static bool TryParseUdp(ReadOnlySpan<byte> bytes, int offset, IPAddressValue source, IPAddressValue destination, int ipHeaderLength, int udpLength, out UdpPacketSpanView packet)
     {
         packet = default;
-        var bytes = frame.Span;
         if (udpLength < 8 || bytes.Length < offset + udpLength) return false;
         var declaredLength = BinaryPrimitives.ReadUInt16BigEndian(bytes.Slice(offset + 4, 2));
         if (declaredLength < 8 || declaredLength > udpLength) return false;
-        packet = new UdpPacketView(source, destination, BinaryPrimitives.ReadUInt16BigEndian(bytes.Slice(offset, 2)), BinaryPrimitives.ReadUInt16BigEndian(bytes.Slice(offset + 2, 2)), frame.Slice(offset + 8, declaredLength - 8), ipHeaderLength);
+        packet = new UdpPacketSpanView(source, destination, BinaryPrimitives.ReadUInt16BigEndian(bytes.Slice(offset, 2)), BinaryPrimitives.ReadUInt16BigEndian(bytes.Slice(offset + 2, 2)), offset + 8, declaredLength - 8, ipHeaderLength);
         return true;
     }
 }

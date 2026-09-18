@@ -79,6 +79,16 @@ public class TcpResetBuilderTests
     }
 
     [Fact]
+    public void TryBuildResetRejectsTooSmallDestinationWithoutWriting()
+    {
+        var template = BuildTemplateSyn(0x0800, srcMac: 0x11, dstMac: 0x22);
+        Span<byte> destination = stackalloc byte[14 + 20 + 20 - 1];
+
+        Assert.False(TcpResetBuilder.TryBuildReset(template, WinForward.Core.IPAddressValue.From(s_serverV4), 443, WinForward.Core.IPAddressValue.From(s_clientV4), 53000, 1001, 2002, destination, out var written));
+        Assert.Equal(0, written);
+    }
+
+    [Fact]
     public void BuildResetFromSynReadsClientIsnAndBuildsSynSentAbort()
     {
         // S4: a capacity-rejected SYN must draw an RST|ACK whose ack = client-ISN + 1 — the

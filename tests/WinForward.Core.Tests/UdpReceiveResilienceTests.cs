@@ -298,6 +298,9 @@ public sealed class UdpReceiveResilienceTests
         public ValueTask SendAsync(Endpoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken) =>
             _inner.SendAsync(destination, payload, cancellationToken);
 
+        public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken) =>
+            _inner.SendSpanAsync(destination, payload, cancellationToken);
+
         public async ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
         {
             if (Interlocked.Increment(ref _receiveCalls) == 1) throw new SocketException((int)SocketError.ConnectionReset);
@@ -313,7 +316,7 @@ public sealed class UdpReceiveResilienceTests
         private int _injections;
         public int Injections => Volatile.Read(ref _injections);
 
-        public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, byte[]? clientMac, CancellationToken cancellationToken)
+        public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, MacAddress clientMac, CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref _injections);
             throw new IOException("The adapter handle is no longer valid (synthetic reinjection failure).");

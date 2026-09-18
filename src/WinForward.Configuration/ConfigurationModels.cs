@@ -27,6 +27,9 @@ public sealed class WinForwardConfigDto
 
     [JsonPropertyName("tcpFlowCapacity")]
     public int? TcpFlowCapacity { get; init; }
+
+    [JsonPropertyName("setupWorkerCount")]
+    public int? SetupWorkerCount { get; init; }
 }
 
 public sealed class Socks5ServerDto
@@ -81,7 +84,8 @@ public sealed record ValidatedConfiguration(
     PolicySnapshot Policy,
     RuntimeLogLevel LogLevel = RuntimeLogLevel.Info,
     bool IncludeProcessPathInLogs = false,
-    int TcpFlowCapacity = ConfigurationLoader.DefaultTcpFlowCapacity)
+    int TcpFlowCapacity = ConfigurationLoader.DefaultTcpFlowCapacity,
+    int SetupWorkerCount = 0)
 {
     /// <summary>
     /// Non-blocking validation findings (for example a tcpFlowCapacity above the warning
@@ -103,6 +107,12 @@ public static class ConfigurationLoader
 
     /// <summary>Values above the default warn during validation because they shrink the reserved ephemeral-port headroom.</summary>
     public const int TcpFlowCapacityWarningThreshold = 4_096;
+
+    /// <summary>The smallest accepted setupWorkerCount; at least one worker must exist to drain new-flow setup.</summary>
+    public const int MinimumSetupWorkerCount = 1;
+
+    /// <summary>The largest accepted setupWorkerCount; beyond this the dedicated threads outweigh any setup throughput gain.</summary>
+    public const int MaximumSetupWorkerCount = 256;
 
     public static bool TryParse(string json, out WinForwardConfigDto? dto, out IReadOnlyList<ConfigDiagnostic> diagnostics)
     {
@@ -139,6 +149,7 @@ public static class ConfigurationLoader
         var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase);
         var logLevel = ParseLogLevel(dto, errors);
         var tcpFlowCapacity = ParseTcpFlowCapacity(dto, errors, warnings);
+        var setupWorkerCount = ParseSetupWorkerCount(dto, errors);
 
         if (dto.Socks5Servers is null)
         {
@@ -182,7 +193,8 @@ public static class ConfigurationLoader
             new PolicySnapshot(rules, fallback.Value),
             logLevel,
             rules.Any(static rule => rule.Matcher.Processes?.Any(IsPathSelector) == true),
-            tcpFlowCapacity)
+            tcpFlowCapacity,
+            setupWorkerCount)
         {
             Warnings = warnings,
         };
@@ -236,6 +248,21 @@ public static class ConfigurationLoader
         if (value > TcpFlowCapacityWarningThreshold)
         {
             warnings.Add(new("tcpFlowCapacity", $"Values above {TcpFlowCapacityWarningThreshold} leave less ephemeral-port headroom; each proxied TCP flow consumes 2 local ports."));
+        }
+        return value;
+    }
+
+    /// <summary>
+    /// Normalizes the optional setupWorkerCount override. An omitted value means auto (the executor's
+    /// 2x-logical-processor default); out-of-range values are rejected.
+    /// </summary>
+    private static int ParseSetupWorkerCount(WinForwardConfigDto dto, List<ConfigDiagnostic> errors)
+    {
+        if (dto.SetupWorkerCount is not { } value) return 0;
+        if (value is < MinimumSetupWorkerCount or > MaximumSetupWorkerCount)
+        {
+            errors.Add(new("setupWorkerCount", $"Setup worker count must be in {MinimumSetupWorkerCount}..{MaximumSetupWorkerCount}."));
+            return 0;
         }
         return value;
     }

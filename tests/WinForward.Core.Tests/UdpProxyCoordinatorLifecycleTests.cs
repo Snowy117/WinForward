@@ -101,14 +101,14 @@ public sealed class UdpProxyCoordinatorLifecycleTests
     public async Task ImmediateReceiveFaultRemovesSessionAfterCoordinatorRegistration()
     {
         var factory = new ImmediateFaultTransportFactory();
-        var pool = new TrackingArrayPool();
+        using var pool = new NativeBufferPool(1537);
         await using var coordinator = new UdpProxyCoordinator(
             factory,
             new FakeResponseSink(),
             1,
             TimeProvider.System,
             null,
-            receiveBufferPool: pool);
+            receiveWindowPool: pool);
         var flow = CreateFlow("192.0.2.53");
 
         // The datagram is accepted and buffered; the receive fault surfaces through the
@@ -116,7 +116,8 @@ public sealed class UdpProxyCoordinatorLifecycleTests
         Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 1 }, CancellationToken.None));
 
         await WaitForAsync(() => factory.FaultedTransports.Count == 1 && factory.FaultedTransports[0].IsDisposed);
-        Assert.Equal(1, pool.ReturnCount);
+        Assert.Equal(1, pool.Stats.Returned);
+        Assert.Equal(0, pool.Stats.Outstanding);
         Assert.True(await WaitUntilTrueAsync(() => coordinator.TrySendAsync(CreateFlow("192.0.2.54"), s_server, new byte[] { 2 }, CancellationToken.None).AsTask()));
     }
 

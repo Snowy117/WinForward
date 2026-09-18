@@ -173,6 +173,38 @@ public sealed class NdisPacketActionExecutorBatchingTests
     }
 
     [Fact]
+    public async Task LaneOverflowSendFailureStillReturnsTheRentedBuffer()
+    {
+        // L1 regression: the overflow path's immediate single send can throw, and the rented
+        // pooled copy must still return exactly once — the release used to sit after the
+        // catch-rethrow, where a throw made it unreachable and leaked the native buffer.
+        var reinjector = new ThrowingSingleReinjector();
+        var logger = new RecordingRuntimeLogger();
+        var pool = new NdisPacketBufferPool(4);
+        var executor = new NdisPacketActionExecutor(reinjector, logger, bufferPool: pool);
+
+        // Fill the pre-install lane table (8 lanes) with four adapters × two directions so the
+        // next distinct key degrades to the immediate single-send overflow path.
+        for (var adapter = 1; adapter <= 4; adapter++)
+        {
+            await executor.PassAsync(MaterializedPass([0x24], (nint)adapter, isOnSend: true), CancellationToken.None);
+            await executor.PassAsync(MaterializedPass([0x25], (nint)adapter, isOnSend: false), CancellationToken.None);
+        }
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => executor.PassAsync(MaterializedPass([0x26], (nint)5, isOnSend: true), CancellationToken.None).AsTask());
+
+        // Nine materialized passes rented nine pooled copies: eight sit pending in their lanes,
+        // and the overflow copy that failed to send came back despite the throw. The failure
+        // keeps its logging semantics — counted, warned once, then rethrown.
+        var stats = pool.Stats;
+        Assert.Equal(9, stats.Rented);
+        Assert.Equal(1, stats.Returned);
+        Assert.Equal(1, pool.Count);
+        Assert.Equal(1, logger.Events.Count(@event => string.Equals(@event.Name, "reinject.pass-failed", StringComparison.Ordinal)));
+    }
+
+    [Fact]
     public async Task ImmediateFlushMatchesSingleSendBehavior()
     {
         // Compatibility shape: a pass followed by an immediate flush behaves exactly like the
@@ -411,5 +443,16 @@ public sealed class NdisPacketActionExecutorBatchingTests
         public void SendPacketsToAdapter(nint adapterHandle, NdisPacketBuffer[] buffers, int count) => throw new InvalidOperationException("batched injection failed");
 
         public void SendPacketsToMstcp(nint adapterHandle, NdisPacketBuffer[] buffers, int count) => throw new InvalidOperationException("batched injection failed");
+    }
+
+    private sealed class ThrowingSingleReinjector : IPacketReinjector
+    {
+        public void SendToAdapter(nint adapterHandle, NdisPacketBuffer buffer) => throw new InvalidOperationException("single injection failed");
+
+        public void SendToMstcp(nint adapterHandle, NdisPacketBuffer buffer) => throw new InvalidOperationException("single injection failed");
+
+        public void SendPacketsToAdapter(nint adapterHandle, NdisPacketBuffer[] buffers, int count) { }
+
+        public void SendPacketsToMstcp(nint adapterHandle, NdisPacketBuffer[] buffers, int count) { }
     }
 }

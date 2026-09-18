@@ -31,10 +31,18 @@ public sealed class RuntimeCounters
     /// <summary>A pass-through reinjection native send failed; see <c>reinject.pass-failed</c>.</summary>
     public const string PassReinjectFailed = "passReinjectFailed";
 
+    /// <summary>
+    /// The native-pool diagnostic key prefix (task 09-18 M0): every registered pool records
+    /// cumulative rents and returns under <c>pool.&lt;name&gt;.rented</c> / <c>pool.&lt;name&gt;.returned</c>,
+    /// which the heartbeat surfaces as per-key deltas plus the aggregate occupancy (rented − returned).
+    /// </summary>
+    public const string PoolCounterPrefix = "pool.";
+
     /// <summary>The process-wide aggregate wired into production call sites; tests use private instances for isolation.</summary>
     public static RuntimeCounters Shared { get; } = new();
 
     private readonly ConcurrentDictionary<string, StrongBox<long>> _counters = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, byte> _pools = new(StringComparer.Ordinal);
 
     /// <summary>Atomically increments <paramref name="key"/> and returns the new value; the counter box is created on first hit.</summary>
     public long Increment(string key)
@@ -59,6 +67,67 @@ public sealed class RuntimeCounters
         var snapshot = new Dictionary<string, long>(_counters.Count, StringComparer.Ordinal);
         foreach (var pair in _counters) snapshot[pair.Key] = Interlocked.Read(ref pair.Value.Value);
         return snapshot;
+    }
+
+    /// <summary>The cumulative-rents key for a registered pool; see <see cref="PoolCounterPrefix"/>.</summary>
+    public static string PoolRentedKey(string poolName) => $"{PoolCounterPrefix}{poolName}.rented";
+
+    /// <summary>The cumulative-returns key for a registered pool; see <see cref="PoolCounterPrefix"/>.</summary>
+    public static string PoolReturnedKey(string poolName) => $"{PoolCounterPrefix}{poolName}.returned";
+
+    /// <summary>
+    /// The registered pool names in ordinal order (snapshot copy). Pools register once at
+    /// creation; rent/return activity also implies registration, so a pool with recorded
+    /// activity is never missing from the aggregate occupancy.
+    /// </summary>
+    public IReadOnlyList<string> GetRegisteredPools() =>
+        _pools.Keys.OrderBy(static name => name, StringComparer.Ordinal).ToArray();
+
+    /// <summary>
+    /// Registers a native buffer pool under <paramref name="poolName"/> (idempotent) and pre-creates
+    /// its counters so occupancy reads are race-free. Task 09-18 M0 wires the registry; M1 registers
+    /// <c>NdisPacketBufferPool</c> and later pools follow.
+    /// </summary>
+    public void RegisterPool(string poolName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(poolName);
+        _ = _pools.TryAdd(poolName, 0);
+        _ = GetOrAddCounter(PoolRentedKey(poolName));
+        _ = GetOrAddCounter(PoolReturnedKey(poolName));
+    }
+
+    /// <summary>Records one buffer rent for the pool (cumulative counter increment).</summary>
+    public void RecordPoolRent(string poolName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(poolName);
+        _ = _pools.TryAdd(poolName, 0);
+        _ = Increment(PoolRentedKey(poolName));
+    }
+
+    /// <summary>Records one buffer return for the pool (cumulative counter increment).</summary>
+    public void RecordPoolReturn(string poolName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(poolName);
+        _ = _pools.TryAdd(poolName, 0);
+        _ = Increment(PoolReturnedKey(poolName));
+    }
+
+    /// <summary>
+    /// Buffers currently held by consumers of the pool: cumulative rents minus returns. The
+    /// value is reported honestly (a negative result indicates double-reported returns, which
+    /// the aggregate is meant to make visible); pools never influence behavior.
+    /// </summary>
+    public long GetPoolOccupancy(string poolName) => Get(PoolRentedKey(poolName)) - Get(PoolReturnedKey(poolName));
+
+    /// <summary>The sum of every registered pool's occupancy (the heartbeat's leak-watch aggregate).</summary>
+    public long GetTotalPoolOccupancy()
+    {
+        long total = 0;
+        foreach (var name in _pools.Keys)
+        {
+            total += GetPoolOccupancy(name);
+        }
+        return total;
     }
 
     private StrongBox<long> GetOrAddCounter(string key) =>

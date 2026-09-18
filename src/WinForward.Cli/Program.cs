@@ -194,6 +194,8 @@ internal static class Program
                 logger.Warn("High-resolution timer resolution was not applied; the empty-queue poll granularity stays at about 15.6 ms instead of about 1 ms.");
             }
 
+            WireFramePoolDiagnostics();
+
             // The durable layer survives every adapter-list refresh; the runner disposes it exactly
             // once after the final generation (design §3.6). The local finally only covers failures
             // around the runner itself — bundle disposal is single-flight, so it never runs twice.
@@ -232,6 +234,29 @@ internal static class Program
             // native buffer back to the heap before the driver handle closes.
             NdisPacketBufferPool.Shared.Dispose();
         }
+    }
+
+    /// <summary>
+    /// Registers the shared native frame pool with the diagnostics counter registry (task
+    /// 09-18 M1): the heartbeat then reports the pool's rent and return deltas and its occupancy
+    /// (rents minus returns) in every periodic summary. The sink is set once, before any capture
+    /// pump can rent, and only ever increments counters — it cannot throw and never touches
+    /// packet disposition. The sink fires per injected packet on the hot path, so it must stay
+    /// allocation-free: the counter key strings are built once here (the <c>RecordPoolRent</c>
+    /// helpers rebuild their keys per call, which would allocate on every rent/return) and the
+    /// sink increments the pre-created counter boxes through the cached references.
+    /// </summary>
+    private static void WireFramePoolDiagnostics()
+    {
+        const string FramePoolName = "ndis.frame";
+        var counters = RuntimeCounters.Shared;
+        counters.RegisterPool(FramePoolName);
+        var rentKey = RuntimeCounters.PoolRentedKey(FramePoolName);
+        var returnKey = RuntimeCounters.PoolReturnedKey(FramePoolName);
+        NdisPacketBufferPool.Shared.AccountingSink = rented =>
+        {
+            _ = counters.Increment(rented ? rentKey : returnKey);
+        };
     }
 
     /// <summary>

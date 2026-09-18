@@ -158,7 +158,7 @@ internal static class UdpLossScenario
 
         public void BeginWindow(long[] markers) => _windowMarkers = markers;
 
-        public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, byte[]? clientMac, CancellationToken cancellationToken)
+        public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, MacAddress clientMac, CancellationToken cancellationToken)
         {
             if (DatagramHeader.TryRead(payload.Span, out var sequence, out var flowId)
                 && DatagramHeader.IsInWindow(sequence, flowId, _windowMarkers))

@@ -52,53 +52,63 @@ public sealed class TcpPendingSynSetupTests
         public void Release() => _release.TrySetResult();
     }
 
-    private static bool TryRetain(TcpPendingSynSetupIndex index, FlowKey key, int byteCount, DateTimeOffset now, out PendingSynSetup? created) =>
-        index.TryRetain(key, new byte[byteCount], Context(key), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 0x1234), 1, 1, now, out created);
+    private static bool TryRetain(TcpPendingSynSetupIndex index, NativeBufferPool pool, FlowKey key, int byteCount, DateTimeOffset now, out PendingSynSetup? created)
+    {
+        var lease = pool.Rent();
+        if (index.TryRetain(key, lease, Math.Min(byteCount, lease.Length), Context(key), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 0x1234), 1, 1, now, out created)) return true;
+        lease.Dispose();
+        return false;
+    }
 
     [Fact]
     public void EntryCapRejectsAndTracesAsBackpressure()
     {
+        using var pool = new NativeBufferPool(2048);
         var index = new TcpPendingSynSetupIndex(capacity: 2);
         var now = DateTimeOffset.UtcNow;
 
-        Assert.True(TryRetain(index, Key(53000), 10, now, out _));
-        Assert.True(TryRetain(index, Key(53001), 10, now, out _));
-        Assert.False(TryRetain(index, Key(53002), 10, now, out var created));
+        Assert.True(TryRetain(index, pool, Key(53000), 10, now, out _));
+        Assert.True(TryRetain(index, pool, Key(53001), 10, now, out _));
+        Assert.False(TryRetain(index, pool, Key(53002), 10, now, out var created));
 
         Assert.Null(created);
         Assert.Equal(2, index.ActiveCount);
         Assert.Equal(1, index.RejectionCount);
+        index.RemoveAll();
     }
 
     [Fact]
     public void ByteBudgetRejectsAndKeepsOlderRetainOnOverwriteFailure()
     {
+        using var pool = new NativeBufferPool(2048);
         var index = new TcpPendingSynSetupIndex(byteBudget: 24);
         var now = DateTimeOffset.UtcNow;
         var key = Key(53000);
 
-        Assert.True(TryRetain(index, key, 10, now, out _));
+        Assert.True(TryRetain(index, pool, key, 10, now, out _));
         // An overwrite that does not fit is refused: the older copy and its running setup stay.
-        Assert.False(TryRetain(index, key, 20, now, out var overwrite));
+        Assert.False(TryRetain(index, pool, key, 20, now, out var overwrite));
         Assert.Null(overwrite);
         Assert.Equal(10, index.ChargedBytes);
         Assert.Equal(1, index.RejectionCount);
         Assert.Equal(1, index.ActiveCount);
+        index.RemoveAll();
     }
 
     [Fact]
     public void OverwriteCreditsOlderCopyExactlyOnce()
     {
+        using var pool = new NativeBufferPool(2048);
         var index = new TcpPendingSynSetupIndex();
         var now = DateTimeOffset.UtcNow;
         var key = Key(53000);
 
-        Assert.True(TryRetain(index, key, 10, now, out var first));
+        Assert.True(TryRetain(index, pool, key, 10, now, out var first));
         Assert.Equal(10, index.ChargedBytes);
 
         // A retransmission overwrites the retained copy: the older charge is credited, the
         // newest copy charged, and no second entry (no second setup task) is created.
-        Assert.True(TryRetain(index, key, 20, now, out var overwrite));
+        Assert.True(TryRetain(index, pool, key, 20, now, out var overwrite));
         Assert.Null(overwrite);
         Assert.Equal(20, index.ChargedBytes);
         Assert.Equal(1, index.ActiveCount);
@@ -113,10 +123,11 @@ public sealed class TcpPendingSynSetupTests
     [Fact]
     public void TtlExpiryReclaimsStuckEntriesAndCreditsOnce()
     {
+        using var pool = new NativeBufferPool(2048);
         var index = new TcpPendingSynSetupIndex();
         var now = DateTimeOffset.UtcNow;
 
-        Assert.True(TryRetain(index, Key(53000), 10, now, out var entry));
+        Assert.True(TryRetain(index, pool, Key(53000), 10, now, out var entry));
         index.RemoveExpired(now.AddSeconds(6));
 
         Assert.Equal(0, index.ActiveCount);
@@ -132,11 +143,12 @@ public sealed class TcpPendingSynSetupTests
     [Fact]
     public void CooldownConsumesRetransmissionsThenSelfPrunes()
     {
+        using var pool = new NativeBufferPool(2048);
         var index = new TcpPendingSynSetupIndex();
         var now = DateTimeOffset.UtcNow;
         var key = Key(53000);
 
-        Assert.True(TryRetain(index, key, 10, now, out var entry));
+        Assert.True(TryRetain(index, pool, key, 10, now, out var entry));
         index.Complete(key, entry!, writeCooldown: true, now);
 
         Assert.Equal(1, index.CooldownCount);
@@ -146,24 +158,87 @@ public sealed class TcpPendingSynSetupTests
         index.RemoveExpired(now.AddSeconds(2));
         Assert.Equal(0, index.CooldownCount);
         Assert.False(index.IsInSetupCooldown(key, now.AddSeconds(2)));
-        Assert.True(TryRetain(index, key, 10, now.AddSeconds(2), out var reentry));
+        Assert.True(TryRetain(index, pool, key, 10, now.AddSeconds(2), out var reentry));
         Assert.NotNull(reentry);
+        index.RemoveAll();
     }
 
     [Fact]
     public void DisposeDrainCreditsEveryRetainedCopy()
     {
+        using var pool = new NativeBufferPool(2048);
         var index = new TcpPendingSynSetupIndex();
         var now = DateTimeOffset.UtcNow;
 
-        Assert.True(TryRetain(index, Key(53000), 10, now, out _));
-        Assert.True(TryRetain(index, Key(53001), 20, now, out _));
+        Assert.True(TryRetain(index, pool, Key(53000), 10, now, out _));
+        Assert.True(TryRetain(index, pool, Key(53001), 20, now, out _));
         Assert.Equal(30, index.ChargedBytes);
 
         index.RemoveAll();
 
         Assert.Equal(0, index.ActiveCount);
         Assert.Equal(0, index.ChargedBytes);
+    }
+
+    [Fact]
+    public void SynCopyPoolBalancesAcrossEveryRetentionSink()
+    {
+        using var pool = new NativeBufferPool(2048, capacity: 64);
+        var index = new TcpPendingSynSetupIndex(capacity: 16);
+        var now = DateTimeOffset.UtcNow;
+
+        var completionKey = Key(53000);
+        Assert.True(TryRetain(index, pool, completionKey, 64, now, out var completed));
+        Assert.True(TryRetain(index, pool, completionKey, 64, now, out _));
+        index.Complete(completionKey, completed!, writeCooldown: false, now);
+
+        Assert.True(TryRetain(index, pool, Key(53001), 64, now, out _));
+        index.RemoveExpired(now.AddSeconds(6));
+
+        var removeAllKey = Key(53002);
+        Assert.True(TryRetain(index, pool, removeAllKey, 64, now, out _));
+        Assert.True(TryRetain(index, pool, removeAllKey, 64, now, out _));
+        index.RemoveAll();
+
+        // Five rents (two overwritten copies, one TTL-expired, two RemoveAll-drained) all return
+        // exactly once: completion, overwrite, TTL expiry, and the dispose drain each release the
+        // lease they own.
+        var stats = pool.Stats;
+        Assert.Equal(5, stats.Rented);
+        Assert.Equal(5, stats.Returned);
+        Assert.Equal(0, stats.Outstanding);
+        Assert.Equal(2, stats.OverflowAllocations);
+        Assert.Equal(2, stats.InPool);
+        Assert.Equal(0, stats.DisposedCount);
+        Assert.Equal(0, index.ChargedBytes);
+        Assert.Equal(0, index.ActiveCount);
+    }
+
+    [Fact]
+    public async Task SynCopyPoolReturnsRacingDisposeNeverStrandLeases()
+    {
+        for (var iteration = 0; iteration < 25; iteration++)
+        {
+            var pool = new NativeBufferPool(2048, capacity: 8);
+            var index = new TcpPendingSynSetupIndex(capacity: 32);
+            var now = DateTimeOffset.UtcNow;
+            var keys = Enumerable.Range(0, 16).Select(index => Key(checked((ushort)(53000 + index)))).ToArray();
+            var entries = new PendingSynSetup?[keys.Length];
+            for (var i = 0; i < keys.Length; i++) Assert.True(TryRetain(index, pool, keys[i], 64, now, out entries[i]));
+
+            var returning = Task.WhenAll(keys.Select((key, i) => Task.Run(() => index.Complete(key, entries[i]!, writeCooldown: false, now))));
+            pool.Dispose();
+            await returning;
+
+            // Every release either enqueued before the drain or was freed by the returner's
+            // post-enqueue recheck, so no lease is stranded and none is freed twice.
+            var stats = pool.Stats;
+            Assert.Equal(keys.Length, stats.Rented);
+            Assert.Equal(keys.Length, stats.Returned);
+            Assert.Equal(keys.Length, stats.DisposedCount);
+            Assert.Equal(0, stats.Outstanding);
+            Assert.Equal(0, stats.InPool);
+        }
     }
 
     [Fact]

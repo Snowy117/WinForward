@@ -119,7 +119,13 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
                 LogPassReinjectFailed(adapterHandle, isOnSend, exception, frames: 1, packet.Context.Key, packet.Context.AdapterId);
                 throw;
             }
-            if (rented) buffer.Dispose();
+            finally
+            {
+                // The overflow path owns its rented copy exactly like a lane flush: the release
+                // must run on the throwing path too, or a failed immediate send leaks the native
+                // buffer (a Dispose placed after the catch-rethrow would be unreachable).
+                if (rented) buffer.Dispose();
+            }
             return;
         }
         var count = lane.Count;
@@ -411,13 +417,21 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
 
     /// <summary>
     /// Hands a UDP datagram on a proxy-decided UDP flow to the SOCKS5 UDP relay coordinator. The
-    /// original datagram is consumed (the relay transport owns forwarding, including any buffered
-    /// setup traffic); it is never reinjected. A parse failure or an unsent datagram fails closed
-    /// without a pass downgrade.
+    /// datagram is parsed and dispatched from the synchronous frame view
+    /// (<see cref="CapturedFlowPacket.InspectionSpan"/>) — the native capture buffer when the
+    /// lease never materialized — so an established flow's datagram allocates nothing (A4): the
+    /// coordinator's ready-session path consumes the payload synchronously and only the setup
+    /// window copies it into the bounded queue. The original datagram is consumed (the relay
+    /// transport owns forwarding, including any buffered setup traffic); it is never reinjected. A
+    /// parse failure or an unsent datagram fails closed without a pass downgrade.
     /// </summary>
     private async ValueTask HandleUdpProxyAsync(UdpProxyCoordinator udpProxy, CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
     {
-        if (!IPUdpPacket.TryParse(packet.Lease.Frame, out var udpView))
+        // Every frame read below is synchronous; the spans' last use is the dispatch call, before
+        // the first await, so the native capture buffer backing them is free to recycle once the
+        // coordinator entry returns.
+        var frame = packet.InspectionSpan;
+        if (!IPUdpPacket.TryParseSpan(frame, out var datagram))
         {
             if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("udp.packet.rejected", packet, new RuntimeLogField("reason", "parse"));
             LogProxyBlocked("parse");
@@ -425,13 +439,14 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         }
 
         // The Ethernet source MAC is the client's address (a VM NIC for forwarded flows). The
-        // coordinator records it so forwarded UDP responses can be rebuilt toward the client
-        // instead of this host's own NIC MAC.
-        var clientMac = packet.Lease.Frame.Slice(6, 6);
+        // coordinator records it as an inline value so forwarded UDP responses can be rebuilt
+        // toward the client instead of this host's own NIC MAC.
+        var clientMac = MacAddress.From(frame.Slice(6, 6));
+        var payload = datagram.Payload(frame);
 
         try
         {
-            var sent = await udpProxy.TrySendAsync(packet.Context.Key, server, udpView.Payload, cancellationToken, packet.PacketSequence, packet.FlowGeneration, clientMac).ConfigureAwait(false);
+            var sent = await udpProxy.TrySendSpanAsync(packet.Context.Key, server, payload, clientMac, cancellationToken, packet.PacketSequence, packet.FlowGeneration).ConfigureAwait(false);
             if (!sent)
             {
                 if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("udp.packet.rejected", packet, new RuntimeLogField("reason", "send"));

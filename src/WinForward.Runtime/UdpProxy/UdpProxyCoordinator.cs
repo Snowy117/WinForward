@@ -1,4 +1,3 @@
-using System.Buffers;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
@@ -6,7 +5,7 @@ using WinForward.Runtime.Socks5;
 
 namespace WinForward.Runtime.UdpProxy;
 
-public sealed class UdpProxyCoordinator : IAsyncDisposable
+public sealed partial class UdpProxyCoordinator : IAsyncDisposable
 {
     private const int MaximumSocks5UdpHeaderSize = 22;
     private const int OversizeSentinelSize = 1;
@@ -18,6 +17,13 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
     private readonly UdpSetupCooldownTable _cooldowns;
     private readonly UdpSetupQueueBudget _budget;
     private readonly UdpSessionSetup _setup;
+    private readonly NativeBufferPool _setupQueuePool;
+    private readonly bool _ownsSetupQueuePool;
+    private readonly NativeBufferPool _receiveWindowPool;
+    private readonly bool _ownsReceiveWindowPool;
+    private readonly ISetupExecutor _setupExecutor;
+    private readonly bool _ownsSetupExecutor;
+    private readonly Func<SetupWorkItem, Task> _setupHandler;
     private readonly Lock _gate = new();
     private readonly CancellationTokenSource _shutdown = new();
     private readonly int _capacity;
@@ -35,8 +41,11 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
         IUdpResponseSink responseSink,
         int capacity = 16_384,
         IRuntimeLogger? logger = null,
-        int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame)
-        : this(transportFactory, responseSink, capacity, TimeProvider.System, null, logger, maximumFrameSize)
+        int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame,
+        NativeBufferPool? receiveWindowPool = null,
+        NativeBufferPool? setupQueuePool = null,
+        ISetupExecutor? setupExecutor = null)
+        : this(transportFactory, responseSink, capacity, TimeProvider.System, null, logger, maximumFrameSize, receiveWindowPool: receiveWindowPool, setupQueuePool: setupQueuePool, setupExecutor: setupExecutor)
     {
     }
 
@@ -48,8 +57,10 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
         Func<ValueTask>? beforeExpiryRecheck,
         IRuntimeLogger? logger = null,
         int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame,
-        ArrayPool<byte>? receiveBufferPool = null,
-        long setupQueueGlobalByteBudget = UdpSetupQueueBudget.SetupQueueGlobalByteBudget)
+        NativeBufferPool? receiveWindowPool = null,
+        long setupQueueGlobalByteBudget = UdpSetupQueueBudget.SetupQueueGlobalByteBudget,
+        NativeBufferPool? setupQueuePool = null,
+        ISetupExecutor? setupExecutor = null)
     {
         ArgumentNullException.ThrowIfNull(transportFactory);
         ArgumentNullException.ThrowIfNull(responseSink);
@@ -66,14 +77,22 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
         _beforeExpiryRecheck = beforeExpiryRecheck;
         _logger = logger ?? NullRuntimeLogger.Instance;
         _budget = new UdpSetupQueueBudget(setupQueueGlobalByteBudget, _logger);
+        _setupQueuePool = setupQueuePool ?? new NativeBufferPool(maximumFrameSize);
+        _ownsSetupQueuePool = setupQueuePool is null;
+        var receiveBufferSize = ReceiveWindowSize(maximumFrameSize);
+        _receiveWindowPool = receiveWindowPool ?? new NativeBufferPool(receiveBufferSize);
+        _ownsReceiveWindowPool = receiveWindowPool is null;
+        _setupExecutor = setupExecutor ?? new SetupExecutor();
+        _ownsSetupExecutor = setupExecutor is null;
+        _setupHandler = RunSessionSetupAsync;
         _setup = new UdpSessionSetup(
             transportFactory,
             _associations,
             responseSink,
             timeProvider,
             _logger,
-            receiveBufferPool ?? ArrayPool<byte>.Shared,
-            checked(maximumFrameSize + MaximumSocks5UdpHeaderSize + OversizeSentinelSize),
+            _receiveWindowPool,
+            receiveBufferSize,
             RefreshSetupStampsUnderGate,
             AttachSessionUnderGate,
             DequeueForFlush,
@@ -106,6 +125,47 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
     internal long SetupStampsRefreshedCount => _setup.StampsRefreshedCount;
 
     /// <summary>
+    /// The single source of truth for the per-session receive window: maximum Ethernet frame,
+    /// maximum SOCKS5 UDP header, and the one-byte oversize sentinel. Composition sizes the
+    /// shared receive-window pool with this value so the pool and the session window agree.
+    /// </summary>
+    internal static int ReceiveWindowSize(int maximumFrameSize) =>
+        checked(maximumFrameSize + MaximumSocks5UdpHeaderSize + OversizeSentinelSize);
+
+    /// <summary>
+    /// Starts the off-gate setup task for a new flow. Kept out of the send entries because a
+    /// captured-parameter lambda makes the compiler hoist its display class to the method
+    /// entry, charging every warm datagram the setup closure's allocation even when the
+    /// new-flow branch never runs. Routing both entries through this method confines that
+    /// allocation to the cold new-flow path.
+    /// </summary>
+    private bool ScheduleSessionSetup(FlowKey flow, Socks5Server server, long flowGeneration, MacAddress capturedClientMac, UdpSessionSlot slot)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var item = _setupExecutor.RentItem();
+        item.Handler = _setupHandler;
+        item.Completion = completion;
+        item.Kind = SetupWorkKind.UdpNew;
+        item.Flow = flow;
+        item.Server = server;
+        item.FlowGeneration = flowGeneration;
+        item.ClientMac = capturedClientMac;
+        item.UdpSlot = slot;
+        item.CancellationToken = _shutdown.Token;
+        if (!_setupExecutor.TryEnqueue(item))
+        {
+            completion.TrySetCanceled();
+            return false;
+        }
+
+        slot.Completion = completion.Task;
+        return true;
+    }
+
+    private Task RunSessionSetupAsync(SetupWorkItem item)
+        => _setup.CreateSessionAsync(item.Flow, item.Server!, item.FlowGeneration, item.ClientMac, item.CancellationToken, item.UdpSlot!);
+
+    /// <summary>
     /// Hands a datagram to the flow's relay session without ever awaiting session setup network
     /// I/O (R1): the first datagram of a flow starts the SOCKS5 handshake in the background and
     /// is buffered in a bounded drop-oldest setup queue; datagrams on a ready session are sent
@@ -113,7 +173,7 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
     /// when the datagram was accepted (sent or buffered); false means capacity, cooldown, or an
     /// unbufferable datagram rejected it (fail-closed, traced).
     /// </summary>
-    public ValueTask<bool> TrySendAsync(FlowKey flow, Socks5Server server, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken, long packetSequence = 0, long flowGeneration = 0, ReadOnlyMemory<byte> clientMac = default)
+    public ValueTask<bool> TrySendAsync(FlowKey flow, Socks5Server server, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken, long packetSequence = 0, long flowGeneration = 0, MacAddress clientMac = default)
     {
         if (flow.Protocol != TransportProtocol.Udp) throw new ArgumentException("UDP coordinator accepts only UDP flow keys.", nameof(flow));
 
@@ -138,16 +198,18 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
                 }
 
                 slot = new UdpSessionSlot();
-                // The client MAC rides in the pump's native batch slot; copy it before the
-                // background task can outlive the dispatch. The setup task itself runs off the
-                // pump AND off the coordinator gate, so even a synchronously completing factory
-                // never blocks other flows' dispatch. Registration ordering (the slot must be
-                // in _sessions before the session's receive-failure handler can run) is carried
-                // by this gate: the setup pipeline's attach step (which takes this gate via its
-                // delegate) can only be acquired after this critical section (including the Add
-                // below) has released it.
-                var capturedClientMac = clientMac.IsEmpty ? null : clientMac.ToArray();
-                slot.Completion = Task.Run(() => _setup.CreateSessionAsync(flow, server, flowGeneration, capturedClientMac, _shutdown.Token, slot));
+                // The client MAC is an inline value: it is copied by value into the setup task,
+                // which runs off the pump AND off the coordinator gate, so even a synchronously
+                // completing factory never blocks other flows' dispatch. Registration ordering
+                // (the slot must be in _sessions before the session's receive-failure handler can
+                // run) is carried by this gate: the setup pipeline's attach step (which takes this
+                // gate via its delegate) can only be acquired after this critical section
+                // (including the Add below) has released it.
+                if (!ScheduleSessionSetup(flow, server, flowGeneration, clientMac, slot))
+                {
+                    if (_logger.IsEnabled(RuntimeLogLevel.Trace)) UdpProxyLogging.LogTrace(_logger, "udp.session.rejected", flow, new RuntimeLogField("reason", "setupRing"));
+                    return ValueTask.FromResult(false);
+                }
                 _sessions.Add(flow, slot);
             }
 
@@ -158,7 +220,7 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
             }
             else
             {
-                return ValueTask.FromResult(EnqueueSetupDatagram(flow, slot, payload));
+                return ValueTask.FromResult(EnqueueSetupDatagram(flow, slot, payload.Span));
             }
         }
 
@@ -197,7 +259,7 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
     /// arming a setup cooldown — budget exhaustion is backpressure, not a setup failure. Returns
     /// true when the datagram (or a newer one in its place) is retained.
     /// </summary>
-    private bool EnqueueSetupDatagram(FlowKey flow, UdpSessionSlot slot, ReadOnlyMemory<byte> payload)
+    private bool EnqueueSetupDatagram(FlowKey flow, UdpSessionSlot slot, ReadOnlySpan<byte> payload)
     {
         // R4: charge the global budget before the per-flow enqueue. Every charged byte is
         // credited back exactly once at whichever sink dequeues it: the flush below, the
@@ -208,22 +270,38 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
             return false;
         }
 
-        // The captured frame lives in the pump's native batch slot only for the dispatch; the
-        // setup queue copies every datagram so buffered traffic survives the pump moving on.
-        var enqueued = slot.SetupQueue.TryEnqueue(payload, _timeProvider.GetUtcNow());
+        // The captured datagram lives in the pump's native batch slot only for the dispatch, so
+        // it is copied into a pooled udp-datagram lease before the enqueue; the queue owns that
+        // lease once it accepts it, and the caller releases it exactly once on refusal.
+        var lease = _setupQueuePool.Rent();
+        if (payload.Length > lease.Length)
+        {
+            // A datagram larger than the pinned frame cap cannot occur on the capture path;
+            // release the rental and fail the enqueue closed rather than copying past the lease.
+            lease.Dispose();
+            _budget.Credit(payload.Length);
+            _budget.NoteDrop(flow, 1);
+            return false;
+        }
+        payload.CopyTo(lease.Span);
+
+        var now = _timeProvider.GetUtcNow();
+        var enqueued = slot.SetupQueue.TryEnqueue(lease, payload.Length, now);
         var dropped = 0;
-        while (!enqueued && slot.SetupQueue.TryDequeue(out var evicted, out _))
+        while (!enqueued && slot.SetupQueue.TryDequeue(out var evicted, out var evictedLength, out _))
         {
             dropped++;
-            _budget.Credit(evicted.Length);
-            enqueued = slot.SetupQueue.TryEnqueue(payload, _timeProvider.GetUtcNow());
+            _budget.Credit(evictedLength);
+            evicted.Dispose();
+            enqueued = slot.SetupQueue.TryEnqueue(lease, payload.Length, now);
         }
 
         if (!enqueued)
         {
-            // The per-flow bounds refused the datagram outright: release its charge.
+            // The per-flow bounds refused the datagram outright: release its lease and charge.
             dropped++;
             _budget.Credit(payload.Length);
+            lease.Dispose();
         }
         if (dropped > 0) _budget.NoteDrop(flow, dropped);
         return enqueued;
@@ -275,9 +353,10 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
             foreach (var slot in slots)
             {
                 var dropped = 0;
-                while (slot.SetupQueue.TryDequeue(out var drained, out _))
+                while (slot.SetupQueue.TryDequeue(out var drained, out var drainedLength, out _))
                 {
-                    _budget.Credit(drained.Length);
+                    _budget.Credit(drainedLength);
+                    drained.Dispose();
                     dropped++;
                 }
 
@@ -306,6 +385,11 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
         // tasks that start later observe the cancelled shutdown token before acquiring it.
         _setup.DisposeLimiter();
         _shutdown.Dispose();
+        // Every queued lease was drained above and every in-flight flush lease was released by
+        // the awaited setup tasks, so the pool owns nothing outstanding when it is disposed.
+        if (_ownsSetupQueuePool) _setupQueuePool.Dispose();
+        if (_ownsReceiveWindowPool) _receiveWindowPool.Dispose();
+        if (_ownsSetupExecutor) _setupExecutor.Dispose();
     }
 
     /// <summary>
@@ -334,27 +418,28 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
 
     /// <summary>
     /// One flush-dequeue step under the coordinator gate: verifies the slot is still the flow's
-    /// registered owner, dequeues the next buffered datagram (releasing its budget charge exactly
-    /// once), or flips the slot ready when the queue has drained. The setup pipeline's flush loop
-    /// calls this via delegate and performs the TTL check and the send below the gate.
+    /// registered owner, dequeues the next buffered datagram lease (releasing its budget charge
+    /// exactly once; the caller releases the lease), or flips the slot ready when the queue has
+    /// drained. The setup pipeline's flush loop calls this via delegate and performs the TTL check
+    /// and the send below the gate.
     /// </summary>
-    private (UdpSessionSetup.FlushStep Step, ReadOnlyMemory<byte> Pending, DateTimeOffset EnqueuedAt) DequeueForFlush(FlowKey flow, UdpSessionSlot slot)
+    private (UdpSessionSetup.FlushStep Step, NativeLease Lease, int Length, DateTimeOffset EnqueuedAt) DequeueForFlush(FlowKey flow, UdpSessionSlot slot)
     {
         lock (_gate)
         {
             // Another owner (receive failure, expiry, disposal, a replacement setup) took over
             // this slot's teardown and owns the session and the queued datagrams.
-            if (!_sessions.TryGetValue(flow, out var current) || !ReferenceEquals(current, slot)) return (UdpSessionSetup.FlushStep.NotOwner, default, default);
-            if (!slot.SetupQueue.TryDequeue(out var pending, out var enqueuedAt))
+            if (!_sessions.TryGetValue(flow, out var current) || !ReferenceEquals(current, slot)) return (UdpSessionSetup.FlushStep.NotOwner, default, 0, default);
+            if (!slot.SetupQueue.TryDequeue(out var pending, out var length, out var enqueuedAt))
             {
                 slot.Ready = true;
-                return (UdpSessionSetup.FlushStep.QueueEmpty, default, default);
+                return (UdpSessionSetup.FlushStep.QueueEmpty, default, 0, default);
             }
 
             // The datagram left the pending set under the coordinator gate: its budget
             // charge is released here, exactly once, regardless of the sink outcome.
-            _budget.Credit(pending.Length);
-            return (UdpSessionSetup.FlushStep.Dequeued, pending, enqueuedAt);
+            _budget.Credit(length);
+            return (UdpSessionSetup.FlushStep.Dequeued, pending, length, enqueuedAt);
         }
     }
 
@@ -418,9 +503,10 @@ public sealed class UdpProxyCoordinator : IAsyncDisposable
                 session = expected.Session;
                 if (session is not null) _associations.TryRemove(session.Association);
                 var dropped = 0;
-                while (expected.SetupQueue.TryDequeue(out var drained, out _))
+                while (expected.SetupQueue.TryDequeue(out var drained, out var drainedLength, out _))
                 {
-                    _budget.Credit(drained.Length);
+                    _budget.Credit(drainedLength);
+                    drained.Dispose();
                     dropped++;
                 }
                 if (dropped > 0) _budget.NoteDrop(flow, dropped);

@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Net;
 using WinForward.Core;
 using WinForward.Protocols;
@@ -16,6 +15,8 @@ namespace WinForward.Core.Tests;
 /// </summary>
 public sealed class UdpProxySessionTests
 {
+    private static readonly NativeBufferPool ReceiveWindowPool = new(1537);
+
     [Fact]
     public async Task FirstActivityPropagatesToTheAssociationTableImmediately()
     {
@@ -102,12 +103,12 @@ public sealed class UdpProxySessionTests
             association,
             transport ?? new FakeTransport(System.Net.Sockets.AddressFamily.InterNetwork, 40000),
             new FakeResponseSink(),
-            null,
+            MacAddress.Invalid,
             CancellationToken.None,
             time,
             (_, now) => propagationStamps.Add(now),
             NullRuntimeLogger.Instance,
-            ArrayPool<byte>.Shared,
+            ReceiveWindowPool,
             1537);
     }
 }

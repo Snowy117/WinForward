@@ -1,5 +1,6 @@
 using WinForward.Configuration;
 using WinForward.Core;
+using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.TcpRedirect;
 using WinForward.Windows;
@@ -66,5 +67,8 @@ internal sealed class ThrowingRelayFactory : ITcpProxyRelayFactory
 internal sealed class ThrowingRedirectInjector : ITcpRedirectInjector
 {
     public ValueTask InjectAsync(ReadOnlyMemory<byte> rewrittenFrame, bool towardMstcp, nint adapterHandle, CancellationToken cancellationToken) =>
+        throw new InvalidOperationException("injection is not expected on this path");
+
+    public void Inject(NdisPacketBuffer stagedFrame, bool towardMstcp, nint adapterHandle, CancellationToken cancellationToken) =>
         throw new InvalidOperationException("injection is not expected on this path");
 }

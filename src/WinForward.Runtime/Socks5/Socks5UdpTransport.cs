@@ -63,6 +63,16 @@ public interface IUdpProxyTransport : IAsyncDisposable
     /// warm path (uncontended gate, sync kernel send) allocates nothing.
     /// </summary>
     ValueTask SendAsync(Endpoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Span-based send for callers that hold the payload only as a synchronous view (a native
+    /// capture buffer): the warm shape is identical to <see cref="SendAsync"/> — uncontended gate,
+    /// encode into the reusable send buffer, non-blocking kernel send — and consumes the payload
+    /// synchronously before any asynchronous socket operation, so the backing native frame is free
+    /// to recycle once this call returns. Only the contended-gate slow shape cannot keep the span
+    /// across its await and copies it (cold path).
+    /// </summary>
+    ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken);
     ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken);
 }
 
@@ -75,6 +85,7 @@ public sealed class Socks5UdpTransportFactory : IUdpProxyTransportFactory
 {
     private readonly SelfTrafficRegistry _selfTraffic;
     private readonly int _maximumFrameSize;
+    private readonly Socks5AddressCache? _addressCache;
 
     /// <summary>
     /// Creates transports whose send buffer follows the pinned frame cap (6 + 16 + cap) — the
@@ -82,16 +93,17 @@ public sealed class Socks5UdpTransportFactory : IUdpProxyTransportFactory
     /// reinjector's rebuilt frames (cap) already use. Composition passes the native ABI
     /// constant explicitly.
     /// </summary>
-    public Socks5UdpTransportFactory(SelfTrafficRegistry selfTraffic, int maximumFrameSize)
+    public Socks5UdpTransportFactory(SelfTrafficRegistry selfTraffic, int maximumFrameSize, Socks5AddressCache? addressCache = null)
     {
         ArgumentNullException.ThrowIfNull(selfTraffic);
         if (maximumFrameSize <= 0) throw new ArgumentOutOfRangeException(nameof(maximumFrameSize));
         _selfTraffic = selfTraffic;
         _maximumFrameSize = maximumFrameSize;
+        _addressCache = addressCache;
     }
 
     public async ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken) =>
-        await Socks5UdpTransport.CreateAsync(server, _selfTraffic, cancellationToken, null, null, maximumFrameSize: _maximumFrameSize).ConfigureAwait(false);
+        await Socks5UdpTransport.CreateAsync(server, _selfTraffic, cancellationToken, null, null, maximumFrameSize: _maximumFrameSize, addressCache: _addressCache).ConfigureAwait(false);
 }
 
 public sealed class Socks5UdpTransport : IUdpProxyTransport
@@ -158,7 +170,8 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
         Func<CancellationToken, ValueTask<Socks5ControlConnection>>? createControl,
         Func<AddressFamily, Socket>? socketFactory,
         Action<Socket>? disableUdpConnectionReset = null,
-        int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame)
+        int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame,
+        Socks5AddressCache? addressCache = null)
     {
         Socks5ControlConnection? control = null;
         Socket? socket = null;
@@ -172,7 +185,8 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
                     (local, remote) => selfTraffic.Register(new SelfTrafficRegistry.SelfTrafficKey(
                         TransportProtocol.Tcp,
                         Endpoint.From(local.Address, checked((ushort)local.Port)),
-                        Endpoint.From(remote.Address, checked((ushort)remote.Port))))));
+                        Endpoint.From(remote.Address, checked((ushort)remote.Port)))),
+                    addressCache: addressCache));
             control = await controlFactory(cancellationToken).ConfigureAwait(false);
             var relay = await control.UdpAssociateAsync(cancellationToken).ConfigureAwait(false);
             var relayAddressFamily = relay.AddressFamily;
@@ -252,6 +266,47 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
                 // WouldBlock (kernel send queue momentarily full) or any other socket fault:
                 // retry the datagram through the overlapped send, which parks until the socket
                 // accepts it, and keep the gate until the buffer is consumed.
+                return SendOverlappedAsync(written, cancellationToken);
+            }
+
+            _sendGate.Release();
+            return ValueTask.CompletedTask;
+        }
+        catch
+        {
+            _sendGate.Release();
+            throw;
+        }
+    }
+
+    public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken)
+    {
+        // Same non-async warm entry as the memory overload (hot-path convention #3); only the
+        // contended-gate shape differs, because a span over native capture memory must not cross
+        // the gate await — it is copied there and rides the memory slow path.
+        var gateWait = _sendGate.WaitAsync(cancellationToken);
+        if (!gateWait.IsCompletedSuccessfully)
+        {
+            // Documented cold-path exemption (task 09-18 M2): this copy allocates, but only on the
+            // contended-gate branch. The span cannot cross the gate await (it views native capture
+            // memory that recycles once the dispatch returns), so the datagram is materialized and
+            // rides the memory slow path; the warm uncontended shape below stays zero-alloc.
+            return SendAfterGateAsync(gateWait, destination, payload.ToArray(), cancellationToken);
+        }
+
+        try
+        {
+            if (!Socks5UdpCodec.TryEncode(destination.Address, destination.Port, payload, _sendBuffer, out var written))
+            {
+                throw new IOException("A SOCKS5 UDP datagram exceeded the relay send buffer.");
+            }
+
+            try
+            {
+                _ = _socket.SendTo(_sendBuffer.AsSpan(0, written), SocketFlags.None, RelayEndpoint);
+            }
+            catch (SocketException)
+            {
                 return SendOverlappedAsync(written, cancellationToken);
             }
 

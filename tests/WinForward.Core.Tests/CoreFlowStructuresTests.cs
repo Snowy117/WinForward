@@ -50,13 +50,23 @@ public sealed class CoreFlowStructuresTests
     [Fact]
     public void SetupQueueFailsClosedWhenPacketOrByteLimitIsReached()
     {
+        using var pool = new NativeBufferPool(8);
         var queue = new BoundedSetupQueue(maxPackets: 2, maxBytes: 4);
 
-        Assert.True(queue.TryEnqueue(new byte[] { 1, 2 }));
-        Assert.True(queue.TryEnqueue(new byte[] { 3, 4 }));
-        Assert.False(queue.TryEnqueue(new byte[] { 5 }));
+        Assert.True(Enqueue(queue, pool, new byte[] { 1, 2 }));
+        Assert.True(Enqueue(queue, pool, new byte[] { 3, 4 }));
+        Assert.False(Enqueue(queue, pool, new byte[] { 5 }));
         Assert.Equal(2, queue.Count);
         Assert.Equal(4, queue.Bytes);
+    }
+
+    private static bool Enqueue(BoundedSetupQueue queue, NativeBufferPool pool, ReadOnlySpan<byte> payload)
+    {
+        var lease = pool.Rent();
+        payload.CopyTo(lease.Span);
+        if (queue.TryEnqueue(lease, payload.Length, default)) return true;
+        lease.Dispose();
+        return false;
     }
 
     [Fact]

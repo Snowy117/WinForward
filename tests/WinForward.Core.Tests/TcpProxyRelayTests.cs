@@ -7,6 +7,7 @@ using WinForward.Core;
 using WinForward.Runtime;
 using WinForward.Runtime.TcpRedirect;
 using Xunit;
+using static WinForward.Core.Tests.AsyncTestExtensions;
 
 namespace WinForward.Core.Tests;
 
@@ -136,6 +137,40 @@ public sealed class TcpProxyRelayTests
         Assert.False(TcpProxyRelay.IsRearmDue(now, now + TcpProxyRelay.ArmThrottleTicks));
         Assert.True(TcpProxyRelay.IsRearmDue(now, now + TcpProxyRelay.ArmThrottleTicks + 1));
         Assert.True(TcpProxyRelay.IsRearmDue(now, now + 10 * TcpProxyRelay.ArmThrottleTicks));
+    }
+
+    [Fact]
+    public async Task PumpWindowPoolRentsOneLeasePerDirectionAndReturnsBothOnCompletion()
+    {
+        using var pool = new NativeBufferPool(TcpProxyRelayFactory.PumpBufferSize, capacity: 4);
+        var (localPeer, relayLocal) = await CreateSocketPairAsync();
+        var (upstreamPeer, relayUpstream) = await CreateSocketPairAsync();
+        using var local = localPeer;
+        using var upstream = upstreamPeer;
+        using var relayUpstreamStream = new NetworkStream(relayUpstream, ownsSocket: true);
+        await using var relay = new TcpProxyRelay(relayLocal, relayUpstreamStream, new NoopAsyncDisposable(), pumpBufferPool: pool);
+
+        // One lease per pump direction, held for the whole pump lifetime.
+        await WaitForAsync(() => pool.Stats.Outstanding == 2);
+        Assert.Equal(TcpProxyRelayFactory.PumpBufferSize, pool.BufferSize);
+
+        await local.SendAsync(new byte[] { 1, 2, 3 }, SocketFlags.None);
+        local.Shutdown(SocketShutdown.Send);
+        var request = new byte[3];
+        Assert.Equal(3, await upstream.ReceiveAsync(request, SocketFlags.None));
+        Assert.Equal(0, await ReceiveWithTimeoutAsync(upstream));
+
+        await upstream.SendAsync(new byte[] { 4, 5 }, SocketFlags.None);
+        upstream.Shutdown(SocketShutdown.Send);
+        var response = new byte[2];
+        Assert.Equal(2, await local.ReceiveAsync(response, SocketFlags.None));
+        await relay.Completion.WaitAsync(TimeSpan.FromSeconds(2));
+
+        await WaitForAsync(() => pool.Stats.Outstanding == 0);
+        Assert.Equal(2, pool.Stats.Rented);
+        Assert.Equal(2, pool.Stats.Returned);
+        Assert.Equal(2, pool.Stats.InPool);
+        Assert.Equal(0, pool.Stats.DisposedCount);
     }
 
     private static async Task<(Socket Peer, Socket Relay)> CreateSocketPairAsync()

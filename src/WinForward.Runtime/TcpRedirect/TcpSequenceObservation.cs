@@ -1,3 +1,4 @@
+using WinForward.Core;
 using WinForward.Protocols;
 
 namespace WinForward.Runtime.TcpRedirect;
@@ -14,13 +15,17 @@ internal static class TcpSequenceObservation
     /// Together with the server ISN captured by <see cref="RecordServerSynAck"/> this is everything
     /// a relay setup failure needs to abort the client-visible connection with an in-window RST.
     /// </summary>
-    public static void RecordClientSyn(ReadOnlySpan<byte> frame, TcpRedirectAssociation association)
+    public static void RecordClientSyn(ReadOnlySpan<byte> frame, TcpRedirectAssociation association, NativeBufferPool synCopyPool)
     {
         if (!IPTcpUdpPacket.TryParse(frame, out var view) || view.Transport != PacketTransport.Tcp) return;
         var sequenceOffset = 14 + view.IPHeaderLength + 4;
         if (frame.Length < sequenceOffset + 4) return;
         association.ClientInitialSeq = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(frame.Slice(sequenceOffset, 4));
-        association.OriginalSynFrameCopy = frame.Slice(0, Math.Min(frame.Length, 128)).ToArray();
+        var templateLength = Math.Min(frame.Length, 128);
+        var template = synCopyPool.Rent();
+        frame.Slice(0, templateLength).CopyTo(template.Span);
+        association.ReleaseOriginalSynTemplate();
+        association.SetOriginalSynTemplate(template, templateLength);
     }
 
     /// <summary>

@@ -203,7 +203,7 @@ internal sealed class BurstCountingSink(int backgroundFlows, int burstFlows, InF
         return ticks == 0 ? null : ticks;
     }
 
-    public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, byte[]? clientMac, CancellationToken cancellationToken)
+    public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, MacAddress clientMac, CancellationToken cancellationToken)
     {
         if (!DatagramHeader.TryRead(payload.Span, out var sequence, out var flowId))
         {

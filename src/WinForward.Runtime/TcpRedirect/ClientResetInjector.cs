@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Net.Sockets;
 using WinForward.Configuration;
 using WinForward.Core;
+using WinForward.NdisApi;
 using WinForward.Protocols;
 
 namespace WinForward.Runtime.TcpRedirect;
@@ -32,8 +33,9 @@ internal sealed class ClientResetInjector
     private readonly Func<TcpRedirectSession, ValueTask> _tearDownSession;
     private readonly Func<TcpRedirectAssociation, ValueTask> _failAssociation;
     private readonly TcpResetCooldownTable _capacityResets;
+    private readonly NdisPacketBufferPool _bufferPool;
 
-    public ClientResetInjector(ITcpRedirectInjector injector, IRuntimeLogger logger, Func<TcpRedirectSession, ValueTask> tearDownSession, Func<TcpRedirectAssociation, ValueTask> failAssociation, int? capacity = null, IInterceptionHealthSignal? healthSignal = null)
+    public ClientResetInjector(ITcpRedirectInjector injector, IRuntimeLogger logger, Func<TcpRedirectSession, ValueTask> tearDownSession, Func<TcpRedirectAssociation, ValueTask> failAssociation, int? capacity = null, IInterceptionHealthSignal? healthSignal = null, NdisPacketBufferPool? bufferPool = null)
     {
         _injector = injector;
         _logger = logger;
@@ -41,6 +43,7 @@ internal sealed class ClientResetInjector
         _failAssociation = failAssociation;
         _capacityResets = new TcpResetCooldownTable(capacity ?? 16_384);
         _healthSignal = healthSignal ?? InterceptionHealthMonitor.Noop;
+        _bufferPool = bufferPool ?? NdisPacketBufferPool.Shared;
     }
 
     /// <summary>The capacity-reset cooldown index; surfaced so tests can advance the window.</summary>
@@ -51,19 +54,22 @@ internal sealed class ClientResetInjector
 
     /// <summary>The association-level core, usable from teardown paths that hold no session
     /// (e.g. an injection failure on the data path).</summary>
-    public async ValueTask TryInjectClientResetAsync(TcpRedirectAssociation association, CancellationToken cancellationToken)
+    public ValueTask TryInjectClientResetAsync(TcpRedirectAssociation association, CancellationToken cancellationToken)
     {
-        if (association.OriginalSynFrameCopy is not { } synTemplate || association.ClientInitialSeq is not uint clientInitialSeq || association.ServerInitialSeq is not uint serverInitialSeq) return;
+        if (!association.HasOriginalSynTemplate || association.ClientInitialSeq is not uint clientInitialSeq || association.ServerInitialSeq is not uint serverInitialSeq) return ValueTask.CompletedTask;
+        var synTemplate = association.OriginalSynTemplate;
         // The tracked advancement covers data the client already sent, so the reset's ack stays in
         // its window instead of being dropped as out-of-window (RFC 5961) after a slow relay setup.
         var serverSequenceNext = association.ServerNextSeq ?? serverInitialSeq + 1;
         var clientSequenceNext = association.ClientNextSeq ?? clientInitialSeq + 1;
-        var reset = TcpResetBuilder.BuildReset(synTemplate, association.OriginalDestination.Address, association.OriginalDestination.Port,
-            association.OriginalKey.Local.Address, association.OriginalKey.Local.Port, serverSequenceNext, clientSequenceNext);
-        if (reset is null) return;
+        var towardMstcp = association.OriginalKey.Origin != FlowOriginKind.Forwarded;
         try
         {
-            await _injector.InjectAsync(reset, association.OriginalKey.Origin != FlowOriginKind.Forwarded, association.OriginAdapterHandle, cancellationToken).ConfigureAwait(false);
+            using var buffer = _bufferPool.Rent();
+            if (!TcpResetBuilder.TryBuildReset(synTemplate, association.OriginalDestination.Address, association.OriginalDestination.Port,
+                association.OriginalKey.Local.Address, association.OriginalKey.Local.Port, serverSequenceNext, clientSequenceNext, buffer.GetFrameStorage(), out var written)) return ValueTask.CompletedTask;
+            buffer.CompleteFrame(written, towardMstcp ? NdisApiAbi.PacketFlagOnReceive : NdisApiAbi.PacketFlagOnSend, association.OriginAdapterHandle);
+            _injector.Inject(buffer, towardMstcp, association.OriginAdapterHandle, cancellationToken);
             if (_logger.IsEnabled(RuntimeLogLevel.Debug))
             {
                 _logger.Event(RuntimeLogLevel.Debug, "tcp.redirect.clientReset",
@@ -79,6 +85,7 @@ internal sealed class ClientResetInjector
         {
             _logger.Warn($"TCP redirect client reset injection failed ({exception.GetType().Name}).");
         }
+        return ValueTask.CompletedTask;
     }
 
     /// <summary>
@@ -90,15 +97,17 @@ internal sealed class ClientResetInjector
     /// handle), matching the redirect direction matrix. Never throws: a failed best-effort
     /// reset is warned and the Blocked rejection outcome stands unchanged.
     /// </summary>
-    public async ValueTask InjectCapacityRejectedResetAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
+    public ValueTask InjectCapacityRejectedResetAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
         var key = packet.Context.Key;
-        if (!_capacityResets.TryClaim(key, DateTimeOffset.UtcNow, CapacityResetCooldownWindow)) return;
-        var reset = TcpResetBuilder.BuildResetFromSyn(packet.InspectionSpan, key.Remote.Address, key.Remote.Port, key.Local.Address, key.Local.Port);
-        if (reset is null) return;
+        if (!_capacityResets.TryClaim(key, DateTimeOffset.UtcNow, CapacityResetCooldownWindow)) return ValueTask.CompletedTask;
+        var towardMstcp = key.Origin != FlowOriginKind.Forwarded;
         try
         {
-            await _injector.InjectAsync(reset, key.Origin != FlowOriginKind.Forwarded, packet.Metadata.AdapterHandle, cancellationToken).ConfigureAwait(false);
+            using var buffer = _bufferPool.Rent();
+            if (!TcpResetBuilder.TryBuildResetFromSyn(packet.InspectionSpan, key.Remote.Address, key.Remote.Port, key.Local.Address, key.Local.Port, buffer.GetFrameStorage(), out var written)) return ValueTask.CompletedTask;
+            buffer.CompleteFrame(written, towardMstcp ? NdisApiAbi.PacketFlagOnReceive : NdisApiAbi.PacketFlagOnSend, packet.Metadata.AdapterHandle);
+            _injector.Inject(buffer, towardMstcp, packet.Metadata.AdapterHandle, cancellationToken);
             if (_logger.IsEnabled(RuntimeLogLevel.Debug))
             {
                 _logger.Event(RuntimeLogLevel.Debug, "tcp.redirect.capacityReset",
@@ -113,6 +122,7 @@ internal sealed class ClientResetInjector
         {
             _logger.Warn($"TCP redirect capacity reset injection failed ({exception.GetType().Name}).");
         }
+        return ValueTask.CompletedTask;
     }
 
     /// <summary>
@@ -124,7 +134,7 @@ internal sealed class ClientResetInjector
     /// </summary>
     public async ValueTask HandleFragmentTeardownAsync(TcpRedirectAssociation association)
     {
-        if (association.OriginalSynFrameCopy is null || association.ClientInitialSeq is not uint || association.ServerInitialSeq is not uint)
+        if (!association.HasOriginalSynTemplate || association.ClientInitialSeq is not uint || association.ServerInitialSeq is not uint)
         {
             _logger.Warn($"TCP redirect torn down by an IP fragment without observed sequences ({association.OriginalKey.Local} -> {association.OriginalKey.Remote}); no client reset is possible.");
         }

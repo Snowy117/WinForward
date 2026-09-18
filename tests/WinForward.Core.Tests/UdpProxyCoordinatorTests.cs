@@ -170,7 +170,7 @@ public sealed class UdpProxyCoordinatorTests
         var flow = CreateFlow("192.0.2.53");
         var clientMac = new byte[] { 0x02, 0x00, 0x00, 0x00, 0x00, 0x0a };
 
-        Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 1 }, CancellationToken.None, 0, 0, clientMac));
+        Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 1 }, CancellationToken.None, 0, 0, MacAddress.From(clientMac)));
         await WaitForAsync(() => factory.Transports.Count == 1);
         var transport = Assert.Single(factory.Transports);
         await WaitForAsync(() =>
@@ -181,13 +181,13 @@ public sealed class UdpProxyCoordinatorTests
         transport.EnqueueResponse(new Socks5UdpDatagram(IPAddress.Parse("192.0.2.53"), null, 53, new byte[] { 9 }));
         var response = await sink.Responses.Reader.ReadAsync(CancellationToken.None);
 
-        Assert.Equal(clientMac, response.ClientMac);
+        Assert.Equal(MacAddress.From(clientMac), response.ClientMac);
     }
 
     [Fact]
     public async Task ReceiveBufferIsBoundedAndReturnedWhenCoordinatorStops()
     {
-        var pool = new TrackingArrayPool();
+        using var pool = new NativeBufferPool(1537);
         var factory = new FakeTransportFactory();
         var coordinator = new UdpProxyCoordinator(
             factory,
@@ -196,15 +196,17 @@ public sealed class UdpProxyCoordinatorTests
             TimeProvider.System,
             null,
             maximumFrameSize: 1514,
-            receiveBufferPool: pool);
+            receiveWindowPool: pool);
 
         Assert.True(await coordinator.TrySendAsync(CreateFlow("192.0.2.53"), s_server, new byte[] { 1 }, CancellationToken.None));
-        // The receive buffer is rented when the background setup starts the session's receive loop.
-        await WaitForAsync(() => pool.LastMinimumLength == 1537);
+        // The receive window is rented when the background setup starts the session's receive loop.
+        await WaitForAsync(() => pool.Stats.Outstanding == 1);
+        Assert.Equal(1537, pool.BufferSize);
 
         await coordinator.DisposeAsync();
 
-        Assert.Equal(1, pool.ReturnCount);
+        Assert.Equal(1, pool.Stats.Returned);
+        Assert.Equal(0, pool.Stats.Outstanding);
     }
 
     [Theory]

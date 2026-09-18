@@ -1,5 +1,6 @@
 using WinForward.Configuration;
 using WinForward.Core;
+using WinForward.NdisApi;
 
 namespace WinForward.Runtime.TcpRedirect;
 
@@ -58,14 +59,27 @@ public interface ITcpRelay : IAsyncDisposable
 
 /// <summary>
 /// Injects a rewritten TCP frame back into the packet path. <paramref name="towardMstcp"/> selects
-/// the direction: true sends toward the Windows TCP/IP stack (SendToMstcp), false sends toward the
-/// adapter (SendToAdapter). For a SYN redirect the frame is injected toward MSTCP so the stack
+/// the direction: true sends toward the Windows TCP/IP stack (SendToMstcp), false sends toward
+/// the adapter (SendToAdapter). For a SYN redirect the frame is injected toward MSTCP so the stack
 /// delivers it to the local listener; for a reverse packet it is injected toward MSTCP (host flow)
 /// or back to the origin adapter (forwarded flow) per the association's origin.
 /// </summary>
 public interface ITcpRedirectInjector
 {
     ValueTask InjectAsync(ReadOnlyMemory<byte> rewrittenFrame, bool towardMstcp, nint adapterHandle, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Sends a frame the caller already staged into a pooled native buffer (written through
+    /// <c>GetFrameStorage</c>/<c>CompleteFrame</c> — direction flag and adapter handle are part of
+    /// the staging). The per-packet TCP paths (mid-flow rewrite, reverse rewrite) use this shape so
+    /// the staged buffer is both the rewrite scratch and the send buffer: no managed materialization
+    /// and no second copy (A3). The native send completes synchronously and is not cancellable — the
+    /// token rides along only so the seam keeps the caller-cancellation observability contract of
+    /// <see cref="InjectAsync"/> (a fake throws <see cref="OperationCanceledException"/> on it; the
+    /// coordinator propagates that without touching the shared association). The buffer remains the
+    /// caller's property and must be returned by the caller on every path.
+    /// </summary>
+    void Inject(NdisPacketBuffer stagedFrame, bool towardMstcp, nint adapterHandle, CancellationToken cancellationToken);
 }
 
 /// <summary>

@@ -86,14 +86,14 @@ public sealed class UdpAdapterTargetSourceTests
         var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
         var flow = FlowKey.Create(client, server, TransportProtocol.Udp, FlowOriginKind.Forwarded, adapter);
 
-        await sink.InjectAsync(flow, server, new byte[] { 1 }, s_macB, CancellationToken.None);
+        await sink.InjectAsync(flow, server, new byte[] { 1 }, MacAddress.From(s_macB), CancellationToken.None);
         Assert.Equal(1, reinjector.ToAdapterCount);
         Assert.Equal((nint)1234, reinjector.LastAdapterHandle);
 
         // The re-enumerated handle (adapter list rebuilt) is picked up per response through the
         // same sink instance — no reconstruction involved.
         source.Update(null, new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase) { ["veth-1"] = new((nint)5678, s_macB) });
-        await sink.InjectAsync(flow, server, new byte[] { 2 }, s_macB, CancellationToken.None);
+        await sink.InjectAsync(flow, server, new byte[] { 2 }, MacAddress.From(s_macB), CancellationToken.None);
         Assert.Equal(2, reinjector.ToAdapterCount);
         Assert.Equal((nint)5678, reinjector.LastAdapterHandle);
         Assert.Equal(NdisApiAbi.PacketFlagOnSend, reinjector.LastDeviceFlags);
@@ -115,7 +115,7 @@ public sealed class UdpAdapterTargetSourceTests
         var flow = FlowKey.Create(client, server, TransportProtocol.Udp, FlowOriginKind.Forwarded, adapter);
 
         source.Update(new UdpAdapterTarget((nint)7, s_macA), new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase));
-        await sink.InjectAsync(flow, server, new byte[] { 1 }, s_macB, CancellationToken.None);
+        await sink.InjectAsync(flow, server, new byte[] { 1 }, MacAddress.From(s_macB), CancellationToken.None);
 
         Assert.Equal(0, reinjector.ToMstcpCount);
         Assert.Equal(0, reinjector.ToAdapterCount);
@@ -133,8 +133,8 @@ public sealed class UdpAdapterTargetSourceTests
         var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
         var flow = FlowKey.Create(client, server, TransportProtocol.Udp, FlowOriginKind.Host);
 
-        await sink.InjectAsync(flow, server, new byte[] { 1 }, null, CancellationToken.None);
-        await sink.InjectAsync(flow, server, new byte[] { 2 }, null, CancellationToken.None);
+        await sink.InjectAsync(flow, server, new byte[] { 1 }, MacAddress.Invalid, CancellationToken.None);
+        await sink.InjectAsync(flow, server, new byte[] { 2 }, MacAddress.Invalid, CancellationToken.None);
 
         Assert.Equal(0, reinjector.ToMstcpCount);
         Assert.Equal(0, reinjector.ToAdapterCount);
@@ -155,7 +155,7 @@ public sealed class UdpAdapterTargetSourceTests
         var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
         var flow = FlowKey.Create(client, server, TransportProtocol.Udp, FlowOriginKind.Host, adapter);
 
-        await sink.InjectAsync(flow, server, new byte[] { 1 }, null, CancellationToken.None);
+        await sink.InjectAsync(flow, server, new byte[] { 1 }, MacAddress.Invalid, CancellationToken.None);
 
         Assert.Equal(1, reinjector.ToMstcpCount);
         Assert.Equal(0, reinjector.ToAdapterCount);

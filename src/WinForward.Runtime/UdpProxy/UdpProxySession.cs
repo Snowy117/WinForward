@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Net;
 using System.Net.Sockets;
 using WinForward.Configuration;
@@ -31,7 +30,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
     private readonly TimeProvider _timeProvider;
     private readonly Action<UdpAssociation, DateTimeOffset> _activityObserver;
     private readonly IRuntimeLogger _logger;
-    private readonly ArrayPool<byte> _receiveBufferPool;
+    private readonly NativeBufferPool _receiveWindowPool;
     private readonly int _receiveBufferSize;
     private readonly Lock _activityGate = new();
     private readonly Lock _disposeGate = new();
@@ -57,14 +56,19 @@ internal sealed class UdpProxySession : IAsyncDisposable
         UdpAssociation association,
         IUdpProxyTransport transport,
         IUdpResponseSink sink,
-        byte[]? clientMac,
+        MacAddress clientMac,
         CancellationToken shutdown,
         TimeProvider timeProvider,
         Action<UdpAssociation, DateTimeOffset> activityObserver,
         IRuntimeLogger logger,
-        ArrayPool<byte> receiveBufferPool,
+        NativeBufferPool receiveWindowPool,
         int receiveBufferSize)
     {
+        ArgumentNullException.ThrowIfNull(receiveWindowPool);
+        if (receiveWindowPool.BufferSize < receiveBufferSize)
+        {
+            throw new ArgumentException("The receive-window pool supplies buffers smaller than the session receive window.", nameof(receiveWindowPool));
+        }
         _flow = flow;
         _flowGeneration = flowGeneration;
         _association = association;
@@ -75,7 +79,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
         _timeProvider = timeProvider;
         _activityObserver = activityObserver;
         _logger = logger;
-        _receiveBufferPool = receiveBufferPool;
+        _receiveWindowPool = receiveWindowPool;
         _receiveBufferSize = receiveBufferSize;
         _lastActivityTicks = timeProvider.GetUtcNow().UtcTicks;
     }
@@ -90,7 +94,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
     /// (VM-originated) flows use it as the destination MAC of rebuilt responses so the vSwitch
     /// delivers them to the client instead of the host stack.
     /// </summary>
-    public byte[]? ClientMac { get; }
+    public MacAddress ClientMac { get; }
 
     public void Start(Func<UdpProxySession, Task> receiveFailureHandler)
     {
@@ -115,6 +119,56 @@ internal sealed class UdpProxySession : IAsyncDisposable
             // The raw Endpoint flows straight through: the transport encodes it into the SOCKS5
             // header, so the forward warm path allocates nothing for endpoint handling.
             await _transport.SendAsync(destination, payload, cancellationToken).ConfigureAwait(false);
+            TouchActivity();
+        }
+        finally
+        {
+            lock (_activityGate) _activeSends--;
+        }
+    }
+
+    /// <summary>
+    /// Span-based send for callers that hold the payload only as a synchronous view of the capture
+    /// buffer. Identical admission/activity semantics to <see cref="SendAsync"/>; the entry is
+    /// non-async because the payload span must not cross an await — the transport consumes it
+    /// synchronously (SOCKS5 encode into its reusable send buffer) before any asynchronous socket
+    /// operation, and only the send tail continues asynchronously without the span.
+    /// </summary>
+    public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken)
+    {
+        lock (_activityGate)
+        {
+            var failure = Volatile.Read(ref _receiveFailure);
+            if (failure is not null) throw new IOException("SOCKS5 UDP relay session is no longer usable.", failure);
+            if (_expiring) throw new IOException("SOCKS5 UDP relay session is expiring.");
+            _activeSends++;
+        }
+
+        ValueTask send;
+        try
+        {
+            send = _transport.SendSpanAsync(destination, payload, cancellationToken);
+        }
+        catch
+        {
+            lock (_activityGate) _activeSends--;
+            throw;
+        }
+
+        if (send.IsCompletedSuccessfully)
+        {
+            TouchActivity();
+            lock (_activityGate) _activeSends--;
+            return ValueTask.CompletedTask;
+        }
+        return FinishSpanSendAsync(send);
+    }
+
+    private async ValueTask FinishSpanSendAsync(ValueTask send)
+    {
+        try
+        {
+            await send.ConfigureAwait(false);
             TouchActivity();
         }
         finally
@@ -166,7 +220,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
 
     private async Task ReceiveLoopAsync()
     {
-        var buffer = _receiveBufferPool.Rent(_receiveBufferSize);
+        var lease = _receiveWindowPool.Rent();
         try
         {
             while (!_shutdown.IsCancellationRequested)
@@ -174,7 +228,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
                 Socks5UdpReceiveResult receive;
                 try
                 {
-                    receive = await _transport.ReceiveAsync(buffer.AsMemory(0, _receiveBufferSize), _shutdown).ConfigureAwait(false);
+                    receive = await _transport.ReceiveAsync(lease.Memory.Slice(0, _receiveBufferSize), _shutdown).ConfigureAwait(false);
                 }
                 catch (SocketException exception) when (exception.SocketErrorCode == SocketError.ConnectionReset)
                 {
@@ -216,7 +270,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
         }
         finally
         {
-            _receiveBufferPool.Return(buffer);
+            lease.Dispose();
         }
 
         if (Volatile.Read(ref _receiveFailure) is not null)

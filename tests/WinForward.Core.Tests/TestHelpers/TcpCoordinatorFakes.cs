@@ -337,6 +337,13 @@ internal sealed class FakeInjector(int? throwOnCall = null, bool throwIfCanceled
         lock (InjectedFrames) InjectedFrames.Add((rewrittenFrame.ToArray(), towardMstcp, adapterHandle));
         return ValueTask.CompletedTask;
     }
+
+    public void Inject(NdisPacketBuffer stagedFrame, bool towardMstcp, nint adapterHandle, CancellationToken cancellationToken)
+    {
+        if (throwIfCanceled) cancellationToken.ThrowIfCancellationRequested();
+        if (throwOnCall is int call && Interlocked.Increment(ref _calls) == call) throw exception ?? new IOException("injection failed");
+        lock (InjectedFrames) InjectedFrames.Add((stagedFrame.GetFrame().ToArray(), towardMstcp, adapterHandle));
+    }
 }
 
 internal sealed class GatedRelayFactory : ITcpProxyRelayFactory

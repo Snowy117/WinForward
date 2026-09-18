@@ -209,3 +209,76 @@ foreach (var w in words) acc += w; // 65,538 × 65,535 > 2^32 — result ≠ one
 uint acc = 0;
 foreach (var w in words) { acc += w; while (acc > 0xFFFF) acc = (acc & 0xFFFF) + (acc >> 16); }
 ```
+
+## Closure-hoisting and allocation-gate contracts (task 09-18-gc-less-zero-alloc, 2026-09-18)
+
+### 1. Scope / Trigger
+
+Trigger: any change to a warm zero-alloc entry that also contains a cold `Task.Run`/lambda
+branch, and any allocation-gate test that protects a span-vs-memory overload choice.
+
+### 2. Signatures
+
+- `UdpProxyCoordinator.TrySendSpanAsync` / `TrySendAsync` are **non-async** warm entries; the
+  cold new-flow work is delegated to `ScheduleSessionSetup(FlowKey, Socks5Server, long, byte[]?, UdpSessionSlot)`
+  (`UdpProxyCoordinator.Send.cs`), which is the only place a `Task.Run(() => ...)` lambda lives.
+- `UdpProxyCoordinator` is a `partial class` split into `UdpProxyCoordinator.cs` (admission /
+  lifecycle) and `UdpProxyCoordinator.Send.cs` (span/memory send bridges), keeping each file
+  ≤400 effective lines.
+
+### 3. Contracts
+
+- **Closure hoisting is per-call, not per-branch.** Roslyn hoists a captured lambda's closure
+  display class to **method entry** (`IL_0000: newobj '<>c__DisplayClass…'`), so an entry that
+  *contains* a capturing lambda pays its allocation on **every** call even when the warm path
+  returns before the lambda's branch. Measured 184 B/op deterministically on a coordinator whose
+  warm path never entered the new-flow branch. Fix: extract the capturing lambda into a separate
+  cold helper method; both warm entries then contain no lambda and no display class is hoisted.
+  This is a source-level guarantee — do not rely on escape analysis.
+- **Allocation gates must discriminate the exact overload.** A fake transport that increments one
+  shared `_sends` counter for both `SendAsync` (memory) and `SendSpanAsync` (span) cannot detect a
+  regression that reverts the caller to the memory overload — the count and the 0 B measurement
+  both stay green (self-fulfilling gate). Gates must count the overloads separately
+  (`MemorySends`/`SpanSends`) and assert the span overload is the one used
+  (`MemorySends == 0`, `SpanSends == expected`).
+- **Approved cold-path materialization.** `Socks5UdpTransport.SendSpanAsync` copies with
+  `payload.ToArray()` only on the contended-gate branch: the span views native capture memory
+  that recycles once dispatch returns, so it cannot cross the gate `await`. This is a documented
+  cold-path exemption; the warm uncontended shape stays zero-alloc.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Warm entry contains a capturing lambda anywhere in its body | 0 B gate fails by design; extract the lambda to a cold helper |
+| Warm entry returns before the cold branch | still 0 B — no display class is hoisted |
+| Gate reverts caller to memory overload | `MemorySends > 0` / `SpanSends == 0` assertion fails |
+| Span reaches `Socks5UdpTransport` with the send gate uncontended | zero-alloc sync `SendTo` |
+| Span reaches `Socks5UdpTransport` with the gate contended | `payload.ToArray()` cold copy (documented exemption) |
+
+### 5. Tests Required
+
+- `HotPathAllocationGateTests`: `MidFlowRewriteAndInjectAllocatesNoManagedBytes`,
+  `ReverseRewriteAndInjectAllocatesNoManagedBytes`, `EstablishedUdpDatagramPathAllocatesNoManagedBytes`
+  — the UDP gate asserts `MemorySends == 0` and `SpanSends == 3 + count` after the measurement.
+- `NativeBufferPoolTests` / `NdisPacketBufferPoolTests`: balance identity + dispose-drain races
+  (`ReturnsRacingDisposeNeverStrandBuffers`).
+- Baseline must stay behavior-zero (678 tests green on this task).
+
+### 6. Wrong vs Correct
+
+```csharp
+// Wrong: the capturing lambda lives inside the warm entry — Roslyn hoists its display
+// class to method entry, so EVERY call pays ~184 B even when this branch is not taken.
+public ValueTask<bool> TrySendSpanAsync(...)
+{
+    lock (_gate) { if (warm) return ValueTask.FromResult(true); }
+    var completion = Task.Run(() => _setup.CreateSessionAsync(flow, server, gen, mac, token, slot));
+    ...
+}
+
+// Correct: the lambda lives only in a cold helper; the warm entry contains no lambda,
+// so no display class is hoisted and the warm path measures 0 B.
+private void ScheduleSessionSetup(FlowKey flow, Socks5Server server, long flowGeneration, byte[]? capturedClientMac, UdpSessionSlot slot)
+    => slot.Completion = Task.Run(() => _setup.CreateSessionAsync(flow, server, flowGeneration, capturedClientMac, _shutdown.Token, slot));
+```

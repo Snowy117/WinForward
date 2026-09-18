@@ -11,13 +11,25 @@ namespace WinForward.Runtime.TcpRedirect;
 /// </summary>
 internal sealed class PendingSynSetup
 {
-    public required byte[] RetainedFrame { get; set; }
+    /// <summary>
+    /// The retained copy of the SYN frame, owned by this entry until a sink releases it
+    /// (retransmission overwrite, completion, TTL expiry, or the dispose drain).
+    /// <see cref="RetainedLength"/> is the frame byte count the global budget charges; the pool
+    /// buffer is sized to the pinned maximum Ethernet frame, so the two are not the same.
+    /// </summary>
+    public required NativeLease RetainedFrame { get; set; }
+
+    public required int RetainedLength { get; set; }
+
     public required FlowContext Context { get; init; }
     public required PacketCaptureMetadata Metadata { get; init; }
     public long PacketSequence { get; init; }
     public long FlowGeneration { get; init; }
     public DateTimeOffset LastWriteUtc { get; set; }
     public Task SetupTask { get; set; } = Task.CompletedTask;
+
+    /// <summary>Completes when the pooled setup worker finished this entry's pipeline; awaitable by drains.</summary>
+    public TaskCompletionSource SetupCompletionSource { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 }
 
 /// <summary>
@@ -110,23 +122,25 @@ internal sealed class TcpPendingSynSetupIndex
     }
 
     /// <summary>
-    /// Retains the newest copy of a new-flow SYN. An existing pending entry (a retransmission
-    /// inside the setup window) is overwritten in place: the previous copy's budget charge is
-    /// credited and <c>created</c> comes back null — the caller must NOT launch a second setup
-    /// task, because retransmissions share the client ISN and the running task injects the
-    /// equivalent frame. A genuinely new entry charges the global byte budget, installs the
-    /// copy, and returns the entry for the caller to attach its setup task. Returns false when
-    /// the entry cap or the byte budget refuses the retain (fail-closed backpressure, never a
-    /// cooldown).
+    /// Retains the newest copy of a new-flow SYN, taking ownership of <paramref name="frame"/> on
+    /// success. An existing pending entry (a retransmission inside the setup window) is
+    /// overwritten in place: the previous copy is released and its budget charge credited, and
+    /// <c>created</c> comes back null — the caller must NOT launch a second setup task, because
+    /// retransmissions share the client ISN and the running task injects the equivalent frame. A
+    /// genuinely new entry charges the global byte budget, installs the copy, and returns the
+    /// entry for the caller to attach its setup task. Returns false when the entry cap or the
+    /// byte budget refuses the retain (fail-closed backpressure, never a cooldown); the caller
+    /// keeps ownership of <paramref name="frame"/> and must release it.
     /// </summary>
-    public bool TryRetain(FlowKey key, byte[] frameCopy, FlowContext context, PacketCaptureMetadata metadata, long packetSequence, long flowGeneration, DateTimeOffset now, out PendingSynSetup? created)
+    public bool TryRetain(FlowKey key, NativeLease frame, int frameLength, FlowContext context, PacketCaptureMetadata metadata, long packetSequence, long flowGeneration, DateTimeOffset now, out PendingSynSetup? created)
     {
         lock (_gate)
         {
             if (_pending.TryGetValue(key, out var existing))
             {
                 var overwritten = existing.RetainedFrame;
-                if (!TryChargeBytes(frameCopy.Length))
+                var overwrittenLength = existing.RetainedLength;
+                if (!TryChargeBytes(frameLength))
                 {
                     // Keep the older copy: the newer one did not fit the budget either way, and the
                     // entry plus its running setup task stay intact.
@@ -134,14 +148,16 @@ internal sealed class TcpPendingSynSetupIndex
                     return false;
                 }
 
-                existing.RetainedFrame = frameCopy;
+                existing.RetainedFrame = frame;
+                existing.RetainedLength = frameLength;
                 existing.LastWriteUtc = now;
-                CreditBytes(overwritten.Length);
+                CreditBytes(overwrittenLength);
+                overwritten.Dispose();
                 created = null;
                 return true;
             }
 
-            if (_pending.Count >= _capacity || !TryChargeBytes(frameCopy.Length))
+            if (_pending.Count >= _capacity || !TryChargeBytes(frameLength))
             {
                 Interlocked.Increment(ref _capacityRejectionCount);
                 created = null;
@@ -150,7 +166,8 @@ internal sealed class TcpPendingSynSetupIndex
 
             var entry = new PendingSynSetup
             {
-                RetainedFrame = frameCopy,
+                RetainedFrame = frame,
+                RetainedLength = frameLength,
                 Context = context,
                 Metadata = metadata,
                 PacketSequence = packetSequence,
@@ -193,7 +210,8 @@ internal sealed class TcpPendingSynSetupIndex
             if (_pending.TryGetValue(key, out var current) && ReferenceEquals(current, entry))
             {
                 _pending.Remove(key);
-                CreditBytes(entry.RetainedFrame.Length);
+                CreditBytes(entry.RetainedLength);
+                entry.RetainedFrame.Dispose();
             }
 
             if (writeCooldown) WriteCooldownUnderGate(key, now);
@@ -223,7 +241,11 @@ internal sealed class TcpPendingSynSetupIndex
                 {
                     // Removal only: the entry's copy leaves the pending set here, and the completing
                     // task's ReferenceEquals guard makes its later Complete a no-op for the credit.
-                    if (_pending.Remove(key, out var entry)) CreditBytes(entry.RetainedFrame.Length);
+                    if (_pending.Remove(key, out var entry))
+                    {
+                        CreditBytes(entry.RetainedLength);
+                        entry.RetainedFrame.Dispose();
+                    }
                 }
 
                 Interlocked.Add(ref _ttlExpiredCount, expired.Count);
@@ -252,7 +274,11 @@ internal sealed class TcpPendingSynSetupIndex
     {
         lock (_gate)
         {
-            foreach (var entry in _pending.Values) CreditBytes(entry.RetainedFrame.Length);
+            foreach (var entry in _pending.Values)
+            {
+                CreditBytes(entry.RetainedLength);
+                entry.RetainedFrame.Dispose();
+            }
             _pending.Clear();
             _setupCooldowns.Clear();
         }

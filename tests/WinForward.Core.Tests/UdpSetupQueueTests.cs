@@ -286,7 +286,7 @@ public sealed class UdpSetupQueueTests
         // back so the budget recovers once the setup completes.
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new DelayedTransportFactory(gate.Task);
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 16, TimeProvider.System, null, setupQueueGlobalByteBudget: 4096);
+        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 16, TimeProvider.System, null, maximumFrameSize: 4096, setupQueueGlobalByteBudget: 4096);
         var flow = CreateFlow("192.0.2.53");
 
         Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[3000], CancellationToken.None));
@@ -322,16 +322,20 @@ public sealed class UdpSetupQueueTests
         // A gated, then failed, setup makes the charge observable while parked and the credit
         // observable after the failure teardown drains the queue.
         var factory = new GatedTransportFactory();
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 16, TimeProvider.System, null, setupQueueGlobalByteBudget: 4096);
+        using var pool = new NativeBufferPool(4096, capacity: 8);
+        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 16, TimeProvider.System, null, maximumFrameSize: 4096, setupQueueGlobalByteBudget: 4096, setupQueuePool: pool);
         var flow = CreateFlow("192.0.2.53");
 
         Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[3000], CancellationToken.None));
         await factory.CreateStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.Equal(3000, coordinator.PendingSetupBytesForDiagnostics);
+        Assert.Equal(1, pool.Stats.Outstanding);
 
-        // The failure teardown drains the setup queue fail-closed and releases its charge.
+        // The failure teardown drains the setup queue fail-closed and releases its charge and lease.
         factory.Fail(new IOException("SOCKS5 server is unreachable (synthetic)."));
         await WaitForAsync(() => coordinator.PendingSetupBytesForDiagnostics == 0);
+        await WaitForAsync(() => pool.Stats.Outstanding == 0);
+        Assert.Equal(pool.Stats.Rented, pool.Stats.Returned);
     }
 
     [Fact]
@@ -339,17 +343,77 @@ public sealed class UdpSetupQueueTests
     {
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new DelayedTransportFactory(gate.Task);
-        var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 16, TimeProvider.System, null, setupQueueGlobalByteBudget: 4096);
+        using var pool = new NativeBufferPool(4096, capacity: 8);
+        var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 16, TimeProvider.System, null, maximumFrameSize: 4096, setupQueueGlobalByteBudget: 4096, setupQueuePool: pool);
         var flow = CreateFlow("192.0.2.53");
 
         Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[3000], CancellationToken.None));
         Assert.Equal(3000, coordinator.PendingSetupBytesForDiagnostics);
+        Assert.Equal(1, pool.Stats.Outstanding);
 
         await coordinator.DisposeAsync();
         Assert.Equal(0, coordinator.PendingSetupBytesForDiagnostics);
 
-        // The gate never opens: disposal must complete without waiting for the stalled setup.
+        // The gate never opens: disposal must complete without waiting for the stalled setup, and
+        // the drained datagram's lease must be back in the pool.
         gate.TrySetResult();
+        Assert.Equal(0, pool.Stats.Outstanding);
+        Assert.Equal(pool.Stats.Rented, pool.Stats.Returned);
+    }
+
+    [Fact]
+    public async Task SetupQueueLeasesReturnToThePoolAcrossDropOldestFlushAndTtlDrop()
+    {
+        // B4 balance: every queued datagram holds a lease; drop-oldest eviction, the flush TTL
+        // drop, and the flush send must each release their lease exactly once.
+        var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var factory = new DelayedTransportFactory(gate.Task);
+        using var pool = new NativeBufferPool(1514, capacity: 64);
+        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 16, time, null, setupQueuePool: pool);
+        var flow = CreateFlow("192.0.2.53");
+
+        Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 1 }, CancellationToken.None));
+        await WaitForAsync(() => factory.CreateCalls == 1);
+        // 40 datagrams overflow the 32-packet per-flow bound: drop-oldest keeps the freshest.
+        for (var index = 0; index < 40; index++)
+        {
+            Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { (byte)index }, CancellationToken.None));
+        }
+
+        time.Advance(TimeSpan.FromSeconds(6));
+        Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 0xaa }, CancellationToken.None));
+
+        gate.TrySetResult();
+        await WaitForAsync(() => factory.Transports.Count == 1);
+        var transport = Assert.Single(factory.Transports);
+        await WaitForAsync(() =>
+        {
+            lock (transport.Sent) return transport.Sent.Count == 1;
+        });
+        lock (transport.Sent) Assert.Equal((byte)0xaa, Assert.Single(transport.Sent[0].Payload));
+        // The 31 stale datagrams that survived drop-oldest age out at the flush; only the fresh
+        // one is delivered.
+        Assert.Equal(31, coordinator.SetupTtlExpiredCount);
+        await WaitForAsync(() => pool.Stats.Outstanding == 0);
+        Assert.Equal(pool.Stats.Rented, pool.Stats.Returned);
+        Assert.Equal(0, coordinator.PendingSetupBytesForDiagnostics);
+    }
+
+    [Fact]
+    public async Task SetupQueueLeaseIsReleasedWhenTheDatagramExceedsTheFrameCap()
+    {
+        // B4 bounds refusal: a datagram larger than the pinned frame cap cannot be copied into a
+        // pooled lease; it is rejected fail-closed with its lease and budget charge released.
+        using var pool = new NativeBufferPool(64, capacity: 8);
+        await using var coordinator = new UdpProxyCoordinator(new FakeTransportFactory(), new FakeResponseSink(), 16, TimeProvider.System, null, maximumFrameSize: 64, setupQueuePool: pool);
+        var flow = CreateFlow("192.0.2.53");
+
+        Assert.False(await coordinator.TrySendAsync(flow, s_server, new byte[100], CancellationToken.None));
+
+        Assert.Equal(0, coordinator.PendingSetupBytesForDiagnostics);
+        Assert.Equal(0, pool.Stats.Outstanding);
+        Assert.Equal(pool.Stats.Rented, pool.Stats.Returned);
     }
 
     [Fact]
@@ -504,16 +568,18 @@ public sealed class UdpSetupQueueTests
     [Fact]
     public void RefreshEnqueuedStampsReStampsTheSinglePendingEntry()
     {
+        using var pool = new NativeBufferPool(64);
         var queue = new BoundedSetupQueue(4, 1024);
         var enqueuedAt = new DateTimeOffset(2026, 9, 6, 0, 0, 0, TimeSpan.Zero);
         var refreshAt = enqueuedAt + TimeSpan.FromSeconds(10);
-        Assert.True(queue.TryEnqueue(new byte[] { 1 }, enqueuedAt));
+        Enqueue(queue, pool, new byte[] { 1 }, enqueuedAt);
 
         Assert.Equal(1, queue.RefreshEnqueuedStamps(refreshAt));
 
-        Assert.True(queue.TryDequeue(out var frame, out var stamp));
+        Assert.True(queue.TryDequeue(out var lease, out var length, out var stamp));
         Assert.Equal(refreshAt, stamp);
-        Assert.Equal(new byte[] { 1 }, frame.ToArray());
+        Assert.Equal(new byte[] { 1 }, lease.Span[..length].ToArray());
+        lease.Dispose();
         Assert.Equal(0, queue.Count);
         Assert.Equal(0, queue.Bytes);
     }
@@ -523,11 +589,12 @@ public sealed class UdpSetupQueueTests
     {
         // Three entries cross the single-slot fast path into the Queue<>; the refresh must
         // re-stamp all of them while preserving membership, FIFO order, and byte accounting.
+        using var pool = new NativeBufferPool(64);
         var queue = new BoundedSetupQueue(8, 1024);
         var baseStamp = new DateTimeOffset(2026, 9, 6, 0, 0, 0, TimeSpan.Zero);
         for (var index = 0; index < 3; index++)
         {
-            Assert.True(queue.TryEnqueue(new[] { (byte)index }, baseStamp + TimeSpan.FromSeconds(index)));
+            Enqueue(queue, pool, new[] { (byte)index }, baseStamp + TimeSpan.FromSeconds(index));
         }
 
         var refreshAt = baseStamp + TimeSpan.FromMinutes(1);
@@ -537,13 +604,21 @@ public sealed class UdpSetupQueueTests
 
         for (var index = 0; index < 3; index++)
         {
-            Assert.True(queue.TryDequeue(out var frame, out var stamp));
+            Assert.True(queue.TryDequeue(out var lease, out var length, out var stamp));
             Assert.Equal(refreshAt, stamp);
-            Assert.Equal((byte)index, Assert.Single(frame.ToArray()));
+            Assert.Equal((byte)index, Assert.Single(lease.Span[..length].ToArray()));
+            lease.Dispose();
         }
 
         Assert.Equal(0, queue.Count);
         Assert.Equal(0, queue.Bytes);
+    }
+
+    private static void Enqueue(BoundedSetupQueue queue, NativeBufferPool pool, ReadOnlySpan<byte> payload, DateTimeOffset enqueuedAt)
+    {
+        var lease = pool.Rent();
+        payload.CopyTo(lease.Span);
+        Assert.True(queue.TryEnqueue(lease, payload.Length, enqueuedAt));
     }
 
     private static FlowKey CreateFlow(string remoteAddress) =>

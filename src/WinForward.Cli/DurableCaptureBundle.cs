@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using WinForward.Configuration;
+using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.Capture;
@@ -26,9 +27,19 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
     private readonly IdleExpirySweeper _sweeper;
     private readonly UdpProxyCoordinator _udp;
     private readonly TcpProxyCoordinator _tcp;
+    private readonly NativeBufferPool? _synCopyPool;
+    private readonly NativeBufferPool? _relayPool;
+    private readonly NativeBufferPool? _udpDatagramPool;
+    private readonly NativeBufferPool? _udpWindowPool;
+    private readonly SetupExecutor? _setupExecutor;
     private readonly IRuntimeLogger _logger;
     private readonly Lock _gate = new();
     private Task? _disposeTask;
+
+    internal const string SynCopyPoolName = "tcp.synCopy";
+    internal const string RelayPoolName = "tcp.relay";
+    internal const string UdpDatagramPoolName = "udp.setupQueue";
+    internal const string UdpWindowPoolName = "udp.receiveWindow";
     private HashSet<string>? _lastNoMacAdapters;
     private string? _lastZeroMacHostId;
 
@@ -45,7 +56,12 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         IdleExpirySweeper sweeper,
         UdpProxyCoordinator udp,
         TcpProxyCoordinator tcp,
-        IRuntimeLogger logger)
+        IRuntimeLogger logger,
+        NativeBufferPool? synCopyPool = null,
+        NativeBufferPool? relayPool = null,
+        NativeBufferPool? udpDatagramPool = null,
+        NativeBufferPool? udpWindowPool = null,
+        SetupExecutor? setupExecutor = null)
     {
         Dispatcher = dispatcher;
         Executor = executor;
@@ -54,6 +70,11 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         _udp = udp;
         _tcp = tcp;
         _logger = logger;
+        _synCopyPool = synCopyPool;
+        _relayPool = relayPool;
+        _udpDatagramPool = udpDatagramPool;
+        _udpWindowPool = udpWindowPool;
+        _setupExecutor = setupExecutor;
     }
 
     internal FlowDispatcher Dispatcher { get; }
@@ -82,58 +103,197 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         IPacketReinjector reinjector,
         SelfTrafficRegistry selfTraffic,
         IRuntimeLogger logger,
-        IInterceptionHealthSignal? healthSignal = null)
+        IInterceptionHealthSignal? healthSignal = null,
+        RuntimeCounters? counters = null)
     {
+        var runtimeCounters = counters ?? RuntimeCounters.Shared;
         // The tcpFlowCapacity budget is the single source of truth for both the coordinator's
         // session gate and the redirect table's bounded capacity (design §4).
         var redirectTable = new TcpRedirectTable(capacity: configuration.TcpFlowCapacity);
-        var tcpCoordinator = new TcpProxyCoordinator(
+        // One native pool backs retained SYNs and association reset templates (B1/B2); the
+        // coordinator owns it when none is injected, so production passes it and disposes it here.
+        var synCopyPool = new NativeBufferPool(NdisApiAbi.MaximumEthernetFrame);
+        RegisterPool(runtimeCounters, SynCopyPoolName, synCopyPool);
+        // One native pool backs the two per-direction relay pump windows (B11).
+        var relayPool = new NativeBufferPool(TcpProxyRelayFactory.PumpBufferSize);
+        RegisterPool(runtimeCounters, RelayPoolName, relayPool);
+        // One pooled setup executor is shared by both coordinators (B5); the bundle owns it.
+        var setupExecutor = new SetupExecutor(configuration.SetupWorkerCount);
+        TcpProxyCoordinator tcpCoordinator;
+        try
+        {
+            tcpCoordinator = CreateTcpCoordinator(configuration, reinjector, selfTraffic, logger, healthSignal, redirectTable, synCopyPool, relayPool, setupExecutor);
+        }
+        catch
+        {
+            synCopyPool.Dispose();
+            relayPool.Dispose();
+            setupExecutor.Dispose();
+            throw;
+        }
+        try
+        {
+            return await BuildWithUdpAsync(configuration, reinjector, selfTraffic, logger, healthSignal, runtimeCounters, tcpCoordinator, synCopyPool, relayPool, setupExecutor).ConfigureAwait(false);
+        }
+        catch
+        {
+            await tcpCoordinator.DisposeAsync().ConfigureAwait(false);
+            synCopyPool.Dispose();
+            relayPool.Dispose();
+            setupExecutor.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Registers a bundle-owned native pool with the runtime counters and points its accounting
+    /// sink at pre-computed key strings, mirroring <c>Program.WireFramePoolDiagnostics</c>; the
+    /// sink allocates nothing per rent/return and never throws.
+    /// </summary>
+    private static void RegisterPool(RuntimeCounters counters, string poolName, NativeBufferPool pool)
+    {
+        counters.RegisterPool(poolName);
+        var rentKey = RuntimeCounters.PoolRentedKey(poolName);
+        var returnKey = RuntimeCounters.PoolReturnedKey(poolName);
+        pool.AccountingSink = rented => { _ = counters.Increment(rented ? rentKey : returnKey); };
+    }
+
+    private static async ValueTask<DurableCaptureBundle> BuildWithUdpAsync(
+        ValidatedConfiguration configuration,
+        IPacketReinjector reinjector,
+        SelfTrafficRegistry selfTraffic,
+        IRuntimeLogger logger,
+        IInterceptionHealthSignal? healthSignal,
+        RuntimeCounters counters,
+        TcpProxyCoordinator tcpCoordinator,
+        NativeBufferPool synCopyPool,
+        NativeBufferPool relayPool,
+        SetupExecutor setupExecutor)
+    {
+        // Single source of truth for every datagram-path buffer bound: the transport send buffer
+        // (6 + 16 + cap), the coordinator receive windows (cap + 22 + 1), the reinjector's
+        // rebuilt-frame cap, and the native ABI capture size must all agree. Only the ABI constant
+        // should ever change; every component follows it from here.
+        var maximumFrameSize = NdisApiAbi.MaximumEthernetFrame;
+        var udpTargets = new UdpAdapterTargetSource();
+        var addressCache = new Socks5AddressCache();
+        await PrimeSocks5AddressCacheAsync(configuration, addressCache, logger).ConfigureAwait(false);
+        // One native pool backs every queued setup datagram (B4); the coordinator owns it when
+        // none is injected, so production passes it and disposes it here after release.
+        var udpDatagramPool = new NativeBufferPool(maximumFrameSize);
+        RegisterPool(counters, UdpDatagramPoolName, udpDatagramPool);
+        // One native pool backs every session receive window (B11); its size comes from the
+        // coordinator so the pool and the session window can never disagree.
+        var udpWindowPool = new NativeBufferPool(UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize));
+        RegisterPool(counters, UdpWindowPoolName, udpWindowPool);
+        UdpProxyCoordinator udpCoordinator;
+        try
+        {
+            udpCoordinator = CreateUdpCoordinator(reinjector, selfTraffic, logger, healthSignal, udpTargets, maximumFrameSize, udpDatagramPool, udpWindowPool, setupExecutor, addressCache);
+        }
+        catch
+        {
+            udpDatagramPool.Dispose();
+            udpWindowPool.Dispose();
+            throw;
+        }
+        try
+        {
+            return BuildBundle(configuration, reinjector, selfTraffic, logger, healthSignal, udpTargets, udpCoordinator, tcpCoordinator, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, setupExecutor);
+        }
+        catch
+        {
+            await udpCoordinator.DisposeAsync().ConfigureAwait(false);
+            udpDatagramPool.Dispose();
+            udpWindowPool.Dispose();
+            throw;
+        }
+    }
+
+    private static async Task PrimeSocks5AddressCacheAsync(ValidatedConfiguration configuration, Socks5AddressCache cache, IRuntimeLogger logger)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        foreach (var server in configuration.Servers.Values)
+        {
+            try
+            {
+                await cache.ResolveAsync(server.Host, timeout.Token).ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                logger.Warn($"SOCKS5 address pre-resolution failed for '{server.Name}': {exception.GetType().Name}: {exception.Message}");
+            }
+        }
+    }
+
+    private static DurableCaptureBundle BuildBundle(
+        ValidatedConfiguration configuration,
+        IPacketReinjector reinjector,
+        SelfTrafficRegistry selfTraffic,
+        IRuntimeLogger logger,
+        IInterceptionHealthSignal? healthSignal,
+        UdpAdapterTargetSource udpTargets,
+        UdpProxyCoordinator udpCoordinator,
+        TcpProxyCoordinator tcpCoordinator,
+        NativeBufferPool synCopyPool,
+        NativeBufferPool relayPool,
+        NativeBufferPool udpDatagramPool,
+        NativeBufferPool udpWindowPool,
+        SetupExecutor setupExecutor)
+    {
+        var executor = new NdisPacketActionExecutor(reinjector, logger, tcpCoordinator, udpCoordinator, healthSignal: healthSignal);
+        var dispatcher = new FlowDispatcher(
+            configuration, selfTraffic, executor, new WindowsProcessAttributor(),
+            reverseHandler: tcpCoordinator,
+            fragmentHandler: tcpCoordinator.HandleFragmentAsync,
+            logger: logger);
+        var idleExpirySweeper = new IdleExpirySweeper(dispatcher, tcpCoordinator, udpCoordinator, logger: logger);
+        idleExpirySweeper.Start();
+        return new DurableCaptureBundle(dispatcher, executor, udpTargets, idleExpirySweeper, udpCoordinator, tcpCoordinator, logger, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, setupExecutor);
+    }
+
+    private static UdpProxyCoordinator CreateUdpCoordinator(
+        IPacketReinjector reinjector,
+        SelfTrafficRegistry selfTraffic,
+        IRuntimeLogger logger,
+        IInterceptionHealthSignal? healthSignal,
+        UdpAdapterTargetSource udpTargets,
+        int maximumFrameSize,
+        NativeBufferPool udpDatagramPool,
+        NativeBufferPool udpWindowPool,
+        SetupExecutor setupExecutor,
+        Socks5AddressCache addressCache)
+        => new(
+            new Socks5UdpTransportFactory(selfTraffic, maximumFrameSize, addressCache),
+            new UdpResponseReinjector(reinjector, udpTargets, maximumFrameSize: maximumFrameSize, logger: logger, healthSignal: healthSignal),
+            logger: logger,
+            maximumFrameSize: maximumFrameSize,
+            receiveWindowPool: udpWindowPool,
+            setupQueuePool: udpDatagramPool,
+            setupExecutor: setupExecutor);
+
+    private static TcpProxyCoordinator CreateTcpCoordinator(
+        ValidatedConfiguration configuration,
+        IPacketReinjector reinjector,
+        SelfTrafficRegistry selfTraffic,
+        IRuntimeLogger logger,
+        IInterceptionHealthSignal? healthSignal,
+        TcpRedirectTable redirectTable,
+        NativeBufferPool synCopyPool,
+        NativeBufferPool relayPool,
+        SetupExecutor setupExecutor)
+        => new(
             new TcpRedirectListenerFactory(),
-            new TcpProxyRelayFactory(selfTraffic, logger),
+            new TcpProxyRelayFactory(selfTraffic, logger, relayPool),
             new TcpRedirectInjector(reinjector),
             redirectTable,
             selfTraffic,
             new WindowsAdapterLocalAddressProvider(),
             logger,
             capacity: configuration.TcpFlowCapacity,
-            healthSignal: healthSignal);
-        try
-        {
-            // Single source of truth for every datagram-path buffer bound: the transport send
-            // buffer (6 + 16 + cap), the coordinator receive windows (cap + 22 + 1), the
-            // reinjector's rebuilt-frame cap, and the native ABI capture size must all agree.
-            // Only the ABI constant should ever change; every component follows it from here.
-            var maximumFrameSize = NdisApiAbi.MaximumEthernetFrame;
-            var udpTargets = new UdpAdapterTargetSource();
-            var udpCoordinator = new UdpProxyCoordinator(
-                new Socks5UdpTransportFactory(selfTraffic, maximumFrameSize),
-                new UdpResponseReinjector(reinjector, udpTargets, maximumFrameSize: maximumFrameSize, logger: logger, healthSignal: healthSignal),
-                logger: logger,
-                maximumFrameSize: maximumFrameSize);
-            try
-            {
-                var executor = new NdisPacketActionExecutor(reinjector, logger, tcpCoordinator, udpCoordinator, healthSignal: healthSignal);
-                var dispatcher = new FlowDispatcher(
-                    configuration, selfTraffic, executor, new WindowsProcessAttributor(),
-                    reverseHandler: tcpCoordinator,
-                    fragmentHandler: tcpCoordinator.HandleFragmentAsync,
-                    logger: logger);
-                var idleExpirySweeper = new IdleExpirySweeper(dispatcher, tcpCoordinator, udpCoordinator, logger: logger);
-                idleExpirySweeper.Start();
-                return new DurableCaptureBundle(dispatcher, executor, udpTargets, idleExpirySweeper, udpCoordinator, tcpCoordinator, logger);
-            }
-            catch
-            {
-                await udpCoordinator.DisposeAsync().ConfigureAwait(false);
-                throw;
-            }
-        }
-        catch
-        {
-            await tcpCoordinator.DisposeAsync().ConfigureAwait(false);
-            throw;
-        }
-    }
+            healthSignal: healthSignal,
+            synCopyPool: synCopyPool,
+            setupExecutor: setupExecutor);
 
     /// <summary>
     /// The capture runner's scope-installed callback: swaps the UDP reinjection-target snapshot to
@@ -254,7 +414,27 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
             }
             finally
             {
-                await _tcp.DisposeAsync().ConfigureAwait(false);
+                try
+                {
+                    // After the UDP coordinator drained and released every queued setup lease
+                    // and every session receive window.
+                    _udpDatagramPool?.Dispose();
+                    _udpWindowPool?.Dispose();
+                }
+                finally
+                {
+                    try
+                    {
+                        await _tcp.DisposeAsync().ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        // After the coordinator released every lease it held, drain the syn-copy pool.
+                        _synCopyPool?.Dispose();
+                        _relayPool?.Dispose();
+                        _setupExecutor?.Dispose();
+                    }
+                }
             }
         }
     }

@@ -4,16 +4,22 @@ namespace WinForward.Core;
 
 public sealed class FlowTable
 {
-    private readonly Dictionary<FlowKey, FlowState> _states = [];
-    private readonly Dictionary<TransportTuple, FlowState> _transportIndex = [];
+    private readonly Dictionary<FlowKey, FlowState> _states;
+    private readonly Dictionary<TransportTuple, FlowState> _transportIndex;
+    private readonly List<FlowKey> _expiredScratch = [];
+    private readonly FlowState[] _freeStates;
     private readonly Lock _gate = new();
     private readonly int _capacity;
+    private int _freeStateCount;
     private long _nextGeneration;
 
     public FlowTable(int capacity = 65_536)
     {
         if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(capacity));
         _capacity = capacity;
+        _states = new Dictionary<FlowKey, FlowState>(capacity);
+        _transportIndex = new Dictionary<TransportTuple, FlowState>(capacity * 2);
+        _freeStates = new FlowState[capacity];
     }
 
     /// <summary>The bounded capacity the table was constructed with.</summary>
@@ -58,7 +64,9 @@ public sealed class FlowTable
                 return false;
             }
 
-            var created = new FlowState(key, decide(), ++_nextGeneration);
+            var decision = decide();
+            var created = RentState();
+            created.Reset(key, decision, ++_nextGeneration);
             _states.Add(key, created);
             AddToTransportIndex(created);
             state = created;
@@ -79,23 +87,48 @@ public sealed class FlowTable
         lock (_gate)
         {
             // One enumeration collecting expired keys (a snapshot: the removal below must not
-            // mutate the dictionary mid-enumeration), with no LINQ allocation.
-            List<FlowKey>? expired = null;
+            // mutate the dictionary mid-enumeration), into a reused scratch buffer.
+            var expired = _expiredScratch;
+            expired.Clear();
             foreach (var pair in _states)
             {
                 if (now - pair.Value.LastActivityUtc < idleTimeout) continue;
                 if (isHeld is not null && isHeld(pair.Key)) continue;
-                (expired ??= []).Add(pair.Key);
+                expired.Add(pair.Key);
             }
 
-            if (expired is null) return 0;
+            if (expired.Count == 0) return 0;
+            var removed = expired.Count;
             foreach (var key in expired)
             {
-                if (_states.Remove(key, out var state)) RemoveFromTransportIndex(state);
+                if (_states.Remove(key, out var state))
+                {
+                    RemoveFromTransportIndex(state);
+                    ReturnState(state);
+                }
             }
+            expired.Clear();
 
-            return expired.Count;
+            return removed;
         }
+    }
+
+    private FlowState RentState()
+    {
+        if (_freeStateCount > 0)
+        {
+            var recycled = _freeStates[--_freeStateCount];
+            _freeStates[_freeStateCount] = null!;
+            return recycled;
+        }
+
+        return new FlowState();
+    }
+
+    private void ReturnState(FlowState state)
+    {
+        state.Reset(default, default, 0);
+        if (_freeStateCount < _freeStates.Length) _freeStates[_freeStateCount++] = state;
     }
 
     private bool TryResolveLocked(FlowKey key, out FlowState? state)

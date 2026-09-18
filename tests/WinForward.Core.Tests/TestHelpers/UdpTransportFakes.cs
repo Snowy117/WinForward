@@ -65,6 +65,12 @@ internal sealed class FakeTransport : IUdpProxyTransport
         return ValueTask.CompletedTask;
     }
 
+    public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken)
+    {
+        lock (Sent) Sent.Add((destination, payload.ToArray()));
+        return ValueTask.CompletedTask;
+    }
+
     public ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
     {
         // A disposed transport models a closed socket: the pump's pending receive must end
@@ -84,16 +90,16 @@ internal sealed class FakeTransport : IUdpProxyTransport
 /// <summary>Records every injected response so relay-pump tests can assert flow identity and payload.</summary>
 internal sealed class FakeResponseSink : IUdpResponseSink
 {
-    public Channel<(FlowKey Flow, Endpoint Remote, byte[] Payload, byte[]? ClientMac)> Responses { get; } = Channel.CreateUnbounded<(FlowKey, Endpoint, byte[], byte[]?)>();
+    public Channel<(FlowKey Flow, Endpoint Remote, byte[] Payload, MacAddress ClientMac)> Responses { get; } = Channel.CreateUnbounded<(FlowKey, Endpoint, byte[], MacAddress)>();
 
-    public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, byte[]? clientMac, CancellationToken cancellationToken) =>
+    public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, MacAddress clientMac, CancellationToken cancellationToken) =>
         Responses.Writer.WriteAsync((originalFlow, remoteSource, payload.ToArray(), clientMac), cancellationToken);
 }
 
 /// <summary>A sink that accepts every response without recording: for tests that exercise a coordinator but never assert on responses.</summary>
 internal sealed class NoopResponseSink : IUdpResponseSink
 {
-    public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, byte[]? clientMac, CancellationToken cancellationToken) =>
+    public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, MacAddress clientMac, CancellationToken cancellationToken) =>
         ValueTask.CompletedTask;
 }
 
@@ -130,6 +136,9 @@ internal sealed class ImmediateFaultTransport : IUdpProxyTransport
     public bool IsDisposed { get; private set; }
 
     public ValueTask SendAsync(Endpoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken) =>
+        ValueTask.FromException(new IOException("relay receive already failed"));
+
+    public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken) =>
         ValueTask.FromException(new IOException("relay receive already failed"));
 
     public ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken) =>

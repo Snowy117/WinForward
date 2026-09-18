@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Net.Sockets;
 using WinForward.Configuration;
 using WinForward.Runtime.Socks5;
@@ -103,20 +102,6 @@ internal sealed class CollidingAliasTransportFactory : IUdpProxyTransportFactory
         lock (Transports) Transports.Add(transport);
         return ValueTask.FromResult<IUdpProxyTransport>(transport);
     }
-}
-
-internal sealed class TrackingArrayPool : ArrayPool<byte>
-{
-    public int LastMinimumLength { get; private set; }
-    public int ReturnCount { get; private set; }
-
-    public override byte[] Rent(int minimumLength)
-    {
-        LastMinimumLength = minimumLength;
-        return new byte[minimumLength];
-    }
-
-    public override void Return(byte[] array, bool clearArray = false) => ReturnCount++;
 }
 
 internal sealed class MutableTimeProvider(DateTimeOffset initial) : TimeProvider

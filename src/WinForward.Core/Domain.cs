@@ -147,10 +147,31 @@ public sealed class FlowState
         LastActivityUtc = DateTimeOffset.UtcNow;
     }
 
-    public FlowKey Key { get; }
-    public FlowDecision Decision { get; }
-    public long Generation { get; }
+    /// <summary>
+    /// Pool-construction shape: the properties are only meaningful after <see cref="Reset"/>,
+    /// which every pooled claim performs before the state becomes visible in a flow table.
+    /// </summary>
+    internal FlowState()
+    {
+    }
+
+    public FlowKey Key { get; private set; }
+    public FlowDecision Decision { get; private set; }
+    public long Generation { get; private set; }
     public DateTimeOffset LastActivityUtc { get; private set; }
 
     public void Touch(DateTimeOffset now) => LastActivityUtc = now;
+
+    /// <summary>
+    /// Re-initializes a pooled instance in place for a new claim. Overwrites every field —
+    /// including <see cref="LastActivityUtc"/>, which starts a fresh idle window — so a recycled
+    /// state carries no trace of its previous flow.
+    /// </summary>
+    internal void Reset(FlowKey key, FlowDecision decision, long generation)
+    {
+        Key = key;
+        Decision = decision;
+        Generation = generation;
+        LastActivityUtc = DateTimeOffset.UtcNow;
+    }
 }

@@ -181,6 +181,12 @@ internal sealed class BenchmarkUdpTransport(int localPort, BenchmarkUdpTransport
         return ValueTask.CompletedTask;
     }
 
+    public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken)
+    {
+        owner.NoteSend();
+        return ValueTask.CompletedTask;
+    }
+
     public async ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
     {
         await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
@@ -194,5 +200,5 @@ internal sealed class NoopUdpResponseSink : IUdpResponseSink
 {
     public static readonly NoopUdpResponseSink Instance = new();
     private NoopUdpResponseSink() { }
-    public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, byte[]? clientMac, CancellationToken cancellationToken) => ValueTask.CompletedTask;
+    public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, MacAddress clientMac, CancellationToken cancellationToken) => ValueTask.CompletedTask;
 }

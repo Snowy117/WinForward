@@ -30,9 +30,10 @@ internal sealed class TcpRedirectSetup
     private readonly IRuntimeLogger _logger;
     private readonly TcpRedirectSessionStore _store;
     private readonly ClientResetInjector _clientReset;
+    private readonly NativeBufferPool _synCopyPool;
     private long _concurrentLoserCount;
 
-    public TcpRedirectSetup(ITcpRedirectListenerFactory listenerFactory, TcpRedirectTable table, SelfTrafficRegistry selfTraffic, IAdapterLocalAddressProvider localAddresses, ITcpRedirectInjector injector, IRuntimeLogger logger, TcpRedirectSessionStore store, ClientResetInjector clientReset)
+    public TcpRedirectSetup(ITcpRedirectListenerFactory listenerFactory, TcpRedirectTable table, SelfTrafficRegistry selfTraffic, IAdapterLocalAddressProvider localAddresses, ITcpRedirectInjector injector, IRuntimeLogger logger, TcpRedirectSessionStore store, ClientResetInjector clientReset, NativeBufferPool synCopyPool)
     {
         _listenerFactory = listenerFactory;
         _table = table;
@@ -42,6 +43,7 @@ internal sealed class TcpRedirectSetup
         _logger = logger;
         _store = store;
         _clientReset = clientReset;
+        _synCopyPool = synCopyPool;
     }
 
     /// <summary>
@@ -151,7 +153,7 @@ internal sealed class TcpRedirectSetup
             return null;
         }
 
-        TcpSequenceObservation.RecordClientSyn(frame.Span, association);
+        TcpSequenceObservation.RecordClientSyn(frame.Span, association, _synCopyPool);
 
         if (!TcpFrameRewriter.TryRewriteForwardLeg(writableFrame, originalClient, originalServer, association, translatedTuple.Port))
         {

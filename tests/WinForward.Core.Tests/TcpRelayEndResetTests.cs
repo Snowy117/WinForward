@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Runtime.Versioning;
 using WinForward.Configuration;
 using WinForward.Core;
+using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.TcpRedirect;
 using Xunit;
@@ -23,6 +24,7 @@ public sealed class TcpRelayEndResetTests
 {
     private static readonly IPAddress s_clientIpv4 = IPAddress.Parse("192.0.2.10");
     private static readonly IPAddress s_destIpv4 = IPAddress.Parse("192.0.2.53");
+    private static readonly NativeBufferPool s_synCopyPool = new(NdisApiAbi.MaximumEthernetFrame);
 
     [Fact]
     public async Task FaultedRelayEndInjectsInWindowClientResetBeforeTeardown()
@@ -184,7 +186,7 @@ public sealed class TcpRelayEndResetTests
         var key = FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
         var association = new TcpRedirectAssociation(key, key.Remote, new AdapterContext("eth0", "Ethernet", 1), 0x1234, Endpoint.From(IPAddress.Loopback, 40000), null, 1, DateTimeOffset.UtcNow);
 
-        TcpSequenceObservation.RecordClientSyn(BuildIpv4TcpSyn(s_clientIpv4, s_destIpv4, 53000, 443), association);
+        TcpSequenceObservation.RecordClientSyn(BuildIpv4TcpSyn(s_clientIpv4, s_destIpv4, 53000, 443), association, s_synCopyPool);
         var synAck = BuildIpv4TcpSyn(s_destIpv4, s_clientIpv4, 443, 53000);
         synAck[47] = 0x12;
         TcpSequenceObservation.RecordServerSynAck(synAck, association);
@@ -264,6 +266,12 @@ public sealed class TcpRelayEndResetTests
             lock (Frames) Frames.Add((rewrittenFrame.ToArray(), towardMstcp, adapterHandle));
             order.Add("reset");
             return ValueTask.CompletedTask;
+        }
+
+        public void Inject(NdisPacketBuffer stagedFrame, bool towardMstcp, nint adapterHandle, CancellationToken cancellationToken)
+        {
+            lock (Frames) Frames.Add((stagedFrame.GetFrame().ToArray(), towardMstcp, adapterHandle));
+            order.Add("reset");
         }
     }
 

@@ -207,7 +207,7 @@ public sealed class UdpRelayTests
         var flow = FlowKey.Create(client, server, TransportProtocol.Udp, FlowOriginKind.Host);
 
         var payload = new byte[1514 - 41]; // 1 byte over the 1514 cap for an IPv4 frame
-        await sink.InjectAsync(flow, server, payload, null, CancellationToken.None);
+        await sink.InjectAsync(flow, server, payload, MacAddress.Invalid, CancellationToken.None);
 
         Assert.Equal(0, reinjector.ToMstcpCount);
         Assert.Equal(0, reinjector.ToAdapterCount);
@@ -226,7 +226,7 @@ public sealed class UdpRelayTests
         var flow = FlowKey.Create(client, server, TransportProtocol.Udp, FlowOriginKind.Host);
         var payload = new byte[] { 0xca, 0xfe };
 
-        await sink.InjectAsync(flow, server, payload, s_macC, CancellationToken.None);
+        await sink.InjectAsync(flow, server, payload, MacAddress.From(s_macC), CancellationToken.None);
 
         Assert.Equal(1, reinjector.ToMstcpCount);
         Assert.Equal(0, reinjector.ToAdapterCount);
@@ -257,7 +257,7 @@ public sealed class UdpRelayTests
         var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
         var flow = FlowKey.Create(client, server, TransportProtocol.Udp, FlowOriginKind.Host, adapter);
 
-        await sink.InjectAsync(flow, server, new byte[] { 1 }, s_macC, CancellationToken.None);
+        await sink.InjectAsync(flow, server, new byte[] { 1 }, MacAddress.From(s_macC), CancellationToken.None);
 
         Assert.Equal(1, reinjector.ToMstcpCount);
         Assert.Equal(0, reinjector.ToAdapterCount);
@@ -280,8 +280,8 @@ public sealed class UdpRelayTests
         var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
         var flow = FlowKey.Create(client, server, TransportProtocol.Udp, FlowOriginKind.Host, adapter);
 
-        await sink.InjectAsync(flow, server, new byte[] { 1 }, null, CancellationToken.None);
-        await sink.InjectAsync(flow, server, new byte[] { 2 }, null, CancellationToken.None);
+        await sink.InjectAsync(flow, server, new byte[] { 1 }, MacAddress.Invalid, CancellationToken.None);
+        await sink.InjectAsync(flow, server, new byte[] { 2 }, MacAddress.Invalid, CancellationToken.None);
 
         Assert.Equal(2, reinjector.ToMstcpCount);
         Assert.Equal(0, reinjector.ToAdapterCount);
@@ -308,7 +308,7 @@ public sealed class UdpRelayTests
         var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
         var flow = FlowKey.Create(client, server, TransportProtocol.Udp, FlowOriginKind.Forwarded, adapter);
 
-        await sink.InjectAsync(flow, server, new byte[] { 1 }, s_macC, CancellationToken.None);
+        await sink.InjectAsync(flow, server, new byte[] { 1 }, MacAddress.From(s_macC), CancellationToken.None);
 
         // H2: a forwarded flow's response must reach the origin adapter, not the host adapter.
         Assert.Equal(0, reinjector.ToMstcpCount);
@@ -342,7 +342,7 @@ public sealed class UdpRelayTests
         var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
         var flow = FlowKey.Create(client, server, TransportProtocol.Udp, FlowOriginKind.Forwarded, adapter);
 
-        await sink.InjectAsync(flow, server, new byte[] { 1 }, null, CancellationToken.None);
+        await sink.InjectAsync(flow, server, new byte[] { 1 }, MacAddress.Invalid, CancellationToken.None);
 
         // Fail-closed: no response is sent out any adapter (the VM could never receive it), and the
         // missing-origin is surfaced via a log rather than silently dropped (H2).
@@ -374,7 +374,7 @@ public sealed class UdpRelayTests
         var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
         var flow = FlowKey.Create(client, server, TransportProtocol.Udp, FlowOriginKind.Forwarded, adapter);
 
-        await sink.InjectAsync(flow, server, new byte[] { 1 }, clientMac, CancellationToken.None);
+        await sink.InjectAsync(flow, server, new byte[] { 1 }, MacAddress.From(clientMac), CancellationToken.None);
 
         Assert.Equal(0, reinjector.ToMstcpCount);
         Assert.Equal(0, reinjector.ToAdapterCount);
@@ -393,7 +393,7 @@ public sealed class UdpRelayTests
         // frame-builder rejection path inside the sink.
         var flow = new FlowKey(AddressFamilyKind.IPv6, TransportProtocol.Udp, client, server, FlowOriginKind.Host, null, 0);
 
-        await sink.InjectAsync(flow, server, new byte[] { 1 }, null, CancellationToken.None);
+        await sink.InjectAsync(flow, server, new byte[] { 1 }, MacAddress.Invalid, CancellationToken.None);
 
         Assert.Equal(0, reinjector.ToMstcpCount);
         Assert.Equal(0, reinjector.ToAdapterCount);
@@ -415,11 +415,11 @@ public sealed class UdpRelayTests
         var payload = new byte[64];
 
         // Warm up the JIT and the pool so the measured loop sees only steady-state behavior.
-        for (var index = 0; index < 3; index++) await sink.InjectAsync(flow, server, payload, null, CancellationToken.None);
+        for (var index = 0; index < 3; index++) await sink.InjectAsync(flow, server, payload, MacAddress.Invalid, CancellationToken.None);
 
         var before = GC.GetAllocatedBytesForCurrentThread();
         const int count = 16;
-        for (var index = 0; index < count; index++) await sink.InjectAsync(flow, server, payload, null, CancellationToken.None);
+        for (var index = 0; index < count; index++) await sink.InjectAsync(flow, server, payload, MacAddress.Invalid, CancellationToken.None);
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
         Assert.Equal(0, allocated);

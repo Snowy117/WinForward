@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
@@ -10,7 +9,7 @@ using WinForward.Runtime.Socks5;
 namespace WinForward.Runtime.TcpRedirect;
 
 [SupportedOSPlatform("windows")]
-public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic, IRuntimeLogger? logger = null) : ITcpProxyRelayFactory
+public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic, IRuntimeLogger? logger = null, NativeBufferPool? pumpBufferPool = null) : ITcpProxyRelayFactory
 {
     // The redirect leg completes the client's TCP handshake in tens of milliseconds, so the relay's
     // upstream connect budget bounds how long an unreachable/black-holed SOCKS5 server delays the
@@ -19,6 +18,9 @@ public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic, IRunti
     // because a rejected connect fails the attempt immediately.
     internal const int RelayConnectMaxAttempts = 2;
     internal static readonly TimeSpan RelayConnectAttemptTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>The per-direction relay pump window; the bundle-owned relay pool uses this size (B11).</summary>
+    public const int PumpBufferSize = 64 * 1024;
 
     public async ValueTask<ITcpRelay> EstablishAsync(Endpoint originalDestination, ITcpAcceptedConnection acceptedConnection, Socks5Server server, CancellationToken cancellationToken)
     {
@@ -48,7 +50,7 @@ public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic, IRunti
             await control.ConnectDestinationAsync(new IPEndPoint(destinationAddress.ToIPAddress(), originalDestination.Port), cancellationToken).ConfigureAwait(false);
 
             var upstream = control.GetUpstreamStream();
-            return new TcpProxyRelay(concrete.Socket, upstream, control, logger);
+            return new TcpProxyRelay(concrete.Socket, upstream, control, logger, pumpBufferPool);
         }
         catch
         {
@@ -84,7 +86,13 @@ internal interface ITcpRelayEndInfo
 [SupportedOSPlatform("windows")]
 internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
 {
-    private const int PumpBufferSize = 64 * 1024;
+    internal const int PumpBufferSize = TcpProxyRelayFactory.PumpBufferSize;
+
+    /// <summary>
+    /// The pump-window pool used when composition does not inject one (direct constructions in
+    /// tests and benchmarks). Production always injects the bundle-owned, counter-registered pool.
+    /// </summary>
+    private static readonly NativeBufferPool SharedPumpBufferPool = new(PumpBufferSize, capacity: 64);
     // A relay that makes no progress in one direction for this long is considered stalled and the
     // whole relay is reclaimed (M4). Established connections that are merely idle at the packet
     // level (e.g. SSH with keepalives) keep traffic flowing in both directions (data + ACKs), so
@@ -107,8 +115,9 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
     // both pumps verifiably completed.
     private RelayEndKind _endKind = RelayEndKind.Faulted;
     private int _disposed;
+    private readonly NativeBufferPool _pumpBufferPool;
 
-    public TcpProxyRelay(Socket localSocket, Stream upstream, IAsyncDisposable control, IRuntimeLogger? logger = null)
+    public TcpProxyRelay(Socket localSocket, Stream upstream, IAsyncDisposable control, IRuntimeLogger? logger = null, NativeBufferPool? pumpBufferPool = null)
     {
         ArgumentNullException.ThrowIfNull(localSocket);
         ArgumentNullException.ThrowIfNull(upstream);
@@ -116,6 +125,7 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
         _localSocket = localSocket;
         _control = control;
         _logger = logger ?? NullRuntimeLogger.Instance;
+        _pumpBufferPool = pumpBufferPool ?? SharedPumpBufferPool;
         _completion = RunPumpAsync(upstream);
     }
 
@@ -127,8 +137,8 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
     {
         using var localStream = new NetworkStream(_localSocket, ownsSocket: true);
         using var pumpCancellation = new CancellationTokenSource();
-        var localToUpstream = PumpAsync(localStream, upstream, pumpCancellation.Token);
-        var upstreamToLocal = PumpAsync(upstream, localStream, pumpCancellation.Token);
+        var localToUpstream = PumpAsync(localStream, upstream, pumpCancellation.Token, _pumpBufferPool);
+        var upstreamToLocal = PumpAsync(upstream, localStream, pumpCancellation.Token, _pumpBufferPool);
 
         try
         {
@@ -215,13 +225,14 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
     internal static bool IsRearmDue(long lastArmTicks, long nowTicks)
         => lastArmTicks == 0 || nowTicks - lastArmTicks > ArmThrottleTicks;
 
-    private static async Task<PumpResult> PumpAsync(Stream source, Stream destination, CancellationToken cancellationToken)
+    private static async Task<PumpResult> PumpAsync(Stream source, Stream destination, CancellationToken cancellationToken, NativeBufferPool pumpBufferPool)
     {
-        // One pooled 64 KiB buffer per pump direction (X5): directions have independent
-        // lifetimes via half-close, so the rent brackets this whole pump and the pool bounds
+        // One native 64 KiB window per pump direction (X5/B11): directions have independent
+        // lifetimes via half-close, so the lease brackets this whole pump and the pool bounds
         // steady-state memory while an 8 KiB fixed buffer paid ~8x the per-byte
-        // syscall/memcpy cost.
-        var buffer = ArrayPool<byte>.Shared.Rent(PumpBufferSize);
+        // syscall/memcpy cost. The lease's Memory view (allocation-free, backed by the
+        // per-allocation MemoryManager) feeds the async stream APIs.
+        var lease = pumpBufferPool.Rent();
         try
         {
             using var stall = new StallWindow(cancellationToken);
@@ -231,7 +242,7 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
                 try
                 {
                     stall.Arm();
-                    read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), stall.Token).ConfigureAwait(false);
+                    read = await source.ReadAsync(lease.Memory, stall.Token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -248,7 +259,7 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
                 try
                 {
                     stall.Arm();
-                    await destination.WriteAsync(buffer.AsMemory(0, read), stall.Token).ConfigureAwait(false);
+                    await destination.WriteAsync(lease.Memory.Slice(0, read), stall.Token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -262,7 +273,7 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(buffer);
+            lease.Dispose();
         }
     }
 

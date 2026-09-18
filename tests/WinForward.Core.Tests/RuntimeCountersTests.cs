@@ -80,4 +80,90 @@ public sealed class RuntimeCountersTests
         Assert.Equal("attributionMiss", RuntimeCounters.AttributionMiss);
         Assert.Equal("passReinjectFailed", RuntimeCounters.PassReinjectFailed);
     }
+
+    /// <summary>
+    /// The native-pool registry (task 09-18 M0): registered pools record cumulative
+    /// rents/returns under pool.&lt;name&gt;.rented/.returned, occupancy is rented − returned,
+    /// and the heartbeat aggregates occupancy across every registered pool.
+    /// </summary>
+    public sealed class PoolRegistryTests
+    {
+        [Fact]
+        public void PoolCounterKeysFollowTheDocumentedVocabulary()
+        {
+            Assert.Equal("pool.", RuntimeCounters.PoolCounterPrefix);
+            Assert.Equal("pool.frame.rented", RuntimeCounters.PoolRentedKey("frame"));
+            Assert.Equal("pool.frame.returned", RuntimeCounters.PoolReturnedKey("frame"));
+        }
+
+        [Fact]
+        public void RegisterPoolIsIdempotentAndPreCreatesTheCounters()
+        {
+            var counters = new RuntimeCounters();
+
+            counters.RegisterPool("frame");
+            counters.RegisterPool("frame");
+
+            var pool = Assert.Single(counters.GetRegisteredPools());
+            Assert.Equal("frame", pool);
+            // Pre-created counters read zero and appear in snapshots before any activity.
+            Assert.Equal(0, counters.Get(RuntimeCounters.PoolRentedKey("frame")));
+            Assert.Equal(0, counters.Get(RuntimeCounters.PoolReturnedKey("frame")));
+            Assert.Contains(RuntimeCounters.PoolRentedKey("frame"), counters.Snapshot());
+        }
+
+        [Fact]
+        public void RentReturnActivityDrivesOccupancy()
+        {
+            var counters = new RuntimeCounters();
+            counters.RegisterPool("frame");
+
+            counters.RecordPoolRent("frame");
+            counters.RecordPoolRent("frame");
+            counters.RecordPoolRent("frame");
+            Assert.Equal(3, counters.GetPoolOccupancy("frame"));
+
+            counters.RecordPoolReturn("frame");
+            Assert.Equal(2, counters.GetPoolOccupancy("frame"));
+            Assert.Equal(3, counters.Get(RuntimeCounters.PoolRentedKey("frame")));
+            Assert.Equal(1, counters.Get(RuntimeCounters.PoolReturnedKey("frame")));
+        }
+
+        [Fact]
+        public void PoolActivityImpliesRegistration()
+        {
+            var counters = new RuntimeCounters();
+
+            counters.RecordPoolRent("relay");
+
+            Assert.Equal("relay", Assert.Single(counters.GetRegisteredPools()));
+            Assert.Equal(1, counters.GetPoolOccupancy("relay"));
+        }
+
+        [Fact]
+        public void TotalOccupancyAggregatesAcrossPoolsInOrdinalOrder()
+        {
+            var counters = new RuntimeCounters();
+            counters.RegisterPool("udpWindow");
+            counters.RegisterPool("frame");
+            counters.RecordPoolRent("frame");
+            counters.RecordPoolRent("udpWindow");
+            counters.RecordPoolRent("udpWindow");
+            counters.RecordPoolReturn("udpWindow");
+
+            Assert.Equal(["frame", "udpWindow"], counters.GetRegisteredPools());
+            Assert.Equal(2, counters.GetTotalPoolOccupancy());
+        }
+
+        [Fact]
+        public void UnregisteredPoolOccupancyReadsZeroAndBlankNamesAreRejected()
+        {
+            var counters = new RuntimeCounters();
+
+            Assert.Equal(0, counters.GetPoolOccupancy("never-registered"));
+            Assert.Equal(0, counters.GetTotalPoolOccupancy());
+            Assert.Throws<ArgumentException>(() => counters.RegisterPool(" "));
+            Assert.Throws<ArgumentException>(() => counters.RecordPoolRent(""));
+        }
+    }
 }

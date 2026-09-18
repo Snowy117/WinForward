@@ -66,10 +66,39 @@ public sealed class TcpRedirectAssociation
     /// <summary>
     /// The client ISN observed on the original SYN and a bounded copy of that frame, recorded at
     /// redirect setup so a relay setup failure can be surfaced to the client as a protocol-correct
-    /// RST crafted from real sequence numbers instead of a silent hang.
+    /// RST crafted from real sequence numbers instead of a silent hang. The copy is rented from
+    /// the syn-copy pool and released at table removal.
     /// </summary>
     public uint? ClientInitialSeq { get; internal set; }
-    public byte[]? OriginalSynFrameCopy { get; internal set; }
+
+    /// <summary>Whether the bounded original-SYN template is present (a lease is recorded).</summary>
+    public bool HasOriginalSynTemplate => _originalSynTemplate is not null;
+
+    /// <summary>
+    /// A read-only view of the bounded original-SYN template, empty when none was recorded. The
+    /// span is valid until the association is removed from the redirect table.
+    /// </summary>
+    public ReadOnlySpan<byte> OriginalSynTemplate => _originalSynTemplate is { } template ? template.Span[.._originalSynTemplateLength] : default;
+
+    private NativeLease? _originalSynTemplate;
+    private int _originalSynTemplateLength;
+
+    internal void SetOriginalSynTemplate(NativeLease template, int length)
+    {
+        _originalSynTemplate = template;
+        _originalSynTemplateLength = length;
+    }
+
+    /// <summary>
+    /// Releases the recorded template lease. Idempotent: a repeat call is a no-op (the field is
+    /// cleared), so the table-removal and expiry paths can both call it safely.
+    /// </summary>
+    internal void ReleaseOriginalSynTemplate()
+    {
+        _originalSynTemplate?.Dispose();
+        _originalSynTemplate = null;
+        _originalSynTemplateLength = 0;
+    }
 
     /// <summary>The listener-side ISN, observed when the reverse SYN-ACK passed the reverse hook.</summary>
     public uint? ServerInitialSeq { get; internal set; }
@@ -282,6 +311,7 @@ public sealed class TcpRedirectTable
             _byTranslatedListener.Remove(association.TranslatedListenerTuple);
             _byReverse.Remove(new ReverseRedirectTuple(association.ReverseSourceEndpoint, association.ReverseDestinationEndpoint));
             RemoveAddressPairUnderGate(association);
+            association.ReleaseOriginalSynTemplate();
             // X1: released under the same gate; the ReferenceEquals guard above makes idempotent
             // removals a no-op here, so the count never double-decrements.
             Interlocked.Decrement(ref _candidatePorts[association.TranslatedListenerTuple.Port]);
@@ -301,6 +331,7 @@ public sealed class TcpRedirectTable
                 _byTranslatedListener.Remove(association.TranslatedListenerTuple);
                 _byReverse.Remove(new ReverseRedirectTuple(association.ReverseSourceEndpoint, association.ReverseDestinationEndpoint));
                 RemoveAddressPairUnderGate(association);
+                association.ReleaseOriginalSynTemplate();
                 Interlocked.Decrement(ref _candidatePorts[association.TranslatedListenerTuple.Port]);
             }
             return expired.Length;
