@@ -1,0 +1,11 @@
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "R2 all new/modified events must follow IRuntimeLogger structured format, level policy, and privacy rules"}
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "Adapter identity/enumeration vs runtime handle contract; extension of enumeration items (AddressFingerprint) must respect GUID-primary identity and native-call gates"}
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "Relay setup failure/unrelated-peer paths live here; R2.2 field additions and failure-signal wiring must preserve teardown grace semantics"}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "UdpResponseReinjector origin-resolution/fail-closed paths are R1-B signal sources and R2.2 log targets"}
+{"file": ".trellis/spec/backend/traffic-policy-lifecycle.md", "reason": "FlowDispatcher capacity block and attribution-miss logging must not alter fail-closed policy semantics; idle sweep coexists with heartbeat"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "RuntimeCounters must be zero-allocation Interlocked counters; no per-packet allocation on fast path"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Fail-closed semantics for forced refresh trigger paths; throttled warns must not swallow actionable failures"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Code standards and testing requirements for all new units"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Placement of new files (Runtime vs Windows projects, sub-namespaces)"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse RefreshDemandGate/storm-guard/forced semantics instead of new state machines"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Signal crosses Runtime capture ↔ durable bundle ↔ CLI wiring layers"}

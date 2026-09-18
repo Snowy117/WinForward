@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Verify every new event's name/level/fields/throttle against the logging spec"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Verify counters and throttle checks add no per-packet allocation on the fast path"}
+{"file": ".trellis/spec/backend/traffic-policy-lifecycle.md", "reason": "Verify capacity-block/attribution-miss logging did not change policy outcomes"}
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "Verify relay failure logging and signal wiring keep teardown/alias-release semantics"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Full-scope check baseline: forbidden patterns, test coverage"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Check the health-signal data flow end to end (executor/reinjector -> bundle -> runner -> refresh)"}
