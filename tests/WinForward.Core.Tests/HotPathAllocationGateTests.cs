@@ -254,6 +254,66 @@ public sealed class HotPathAllocationGateTests
     }
 
     [Fact]
+    public async Task DispatcherWarmFastPathAllocatesNoManagedBytes()
+    {
+        // AC2: a resolved warm flow riding the non-async DispatchAsync entry must not allocate.
+        // The DispatcherBenchmarks ~160 B/op figure is harness allocation (a fresh lease byte[]
+        // and FlowContext per iteration), so this gate measures DispatchAsync alone over a
+        // pre-built packet. The reverse handler runs the production predicate shape (protocol
+        // gate + a real TcpRedirectTable port array) and declines, keeping the UDP pass warm.
+        var executor = new FakeExecutor();
+        var table = new TcpRedirectTable();
+        var handler = new DecliningReverseHandler(table);
+        var config = new ValidatedConfiguration(
+            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new PolicySnapshot([], FlowAction.Pass));
+        var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor, reverseHandler: handler);
+
+        var key = FlowKey.Create(Endpoint.From(ClientIpv4, 53000), Endpoint.From(DestIpv4, 53), TransportProtocol.Udp, FlowOriginKind.Host);
+        CapturedFlowPacket MakePacket() => new(new PacketLease(new byte[] { 1, 2, 3, 4 }), new FlowContext(key, null, null, key.OriginAdapterId, null, key.Remote.Port));
+
+        // The first dispatch claims the flow (cold, allocates freely); the measured window is warm.
+        await dispatcher.DispatchAsync(MakePacket(), CancellationToken.None);
+        for (var warm = 0; warm < 8; warm++) await dispatcher.DispatchAsync(MakePacket(), CancellationToken.None);
+
+        // A lease completes once, so every measured dispatch needs its own packet; pre-building
+        // them keeps the harness allocation out of the measured window.
+        const int count = 256;
+        var packets = new CapturedFlowPacket[count];
+        for (var index = 0; index < count; index++) packets[index] = MakePacket();
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var index = 0; index < count; index++) await dispatcher.DispatchAsync(packets[index], CancellationToken.None);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(0, allocated);
+        Assert.Equal(1 + 8 + count, executor.PassCount);
+        Assert.Equal(1 + 8 + count, handler.WantsCount);
+    }
+
+    /// <summary>
+    /// The production reverse-handler stand-in for the dispatcher allocation gate: its predicate
+    /// runs the real path (protocol gate + the live <see cref="TcpRedirectTable"/> port array) and
+    /// its handling side answers NotRelevant — an answer a UDP pass flow never reaches.
+    /// </summary>
+    private sealed class DecliningReverseHandler(TcpRedirectTable table) : ITcpReverseHandler
+    {
+        private int _wantsCount;
+
+        public int WantsCount => Volatile.Read(ref _wantsCount);
+
+        public bool WantsPacket(in CapturedFlowPacket packet)
+        {
+            Interlocked.Increment(ref _wantsCount);
+            var flowKey = packet.Context.Key;
+            return flowKey.Protocol == TransportProtocol.Tcp && table.IsReverseCandidatePort(flowKey.Local.Port);
+        }
+
+        public ValueTask<TcpRedirectOutcome> HandleReverseIfApplicableAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
+            => ValueTask.FromResult(TcpRedirectOutcome.NotRelevant);
+    }
+
+    [Fact]
     public void FlowTableClaimAndExpireCycleAllocatesNoManagedBytes()
     {
         // B10: a new-flow claim rents a pooled FlowState (no per-flow allocation) and expiry
