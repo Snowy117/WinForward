@@ -111,3 +111,25 @@ if (logger.IsEnabled(RuntimeLogLevel.Trace))
         new("packet", packet.PacketSequence), new("bytes", packet.Lease.Frame.Length));
 }
 ```
+
+## Runtime Diagnostics Conventions (wired 2026-09-17, task 09-17-adapter-staleness-logging)
+
+> Root cause of the 2026-09-17 outage post-mortem: every decisive failure path was silent (Trace-only or swallowed) while harmless warns flooded. These conventions gate every new failure site.
+
+- **`RuntimeLogThrottle`** (src/WinForward.Runtime/RuntimeLogThrottle.cs): per-event-site key + window throttle. First occurrence always emits; suppressed occurrences cost nothing — checks are **check-first** (`ShouldEmit()` before any `RuntimeLogField` construction). High-frequency sites additionally gate on `IsEnabled`.
+- **`RuntimeCounters`** (src/WinForward.Runtime/RuntimeCounters.cs): observation-only `Interlocked` long counters (zero-alloc after key creation), shared instance + `Snapshot()`. The stable key vocabulary lives as constants (`relaySetupFailed`, `udpOriginUnresolved`, `udpFailClosedDrop`, `flowCapacityBlock`, `attributionMiss`, `passReinjectFailed`, …) and is shared by the health monitor thresholds and heartbeat deltas — never retype a key literal. Counters never influence behavior.
+- **Heartbeat**: `runner.heartbeat` (info, 60 s default, `RuntimeHeartbeat`) aggregates usage (flows/flowCapacity, tcp/udp sessions+capacity, pumps running/degraded), health state (degraded, consecutiveForced, cooldownRemainingSeconds), and per-key deltas since the previous tick (zero deltas omitted, ordinal key order). Observational loop: a faulty usage provider warns and retries next tick, never dies.
+- **Change-gated group warns**: recurring state-shaped warnings (e.g. `udp.targets.noMac`) emit on first occurrence and only when the member SET changes — not on every refresh. Full recovery (all MACs valid) or empty scope resets the memory so the next occurrence re-emits.
+- **Failure-path events carry their reason**: never log a fixed-text failure line again. `tcp.redirect.relaySetupFailed` carries error type + socketError/nativeError + upstream + attempts; `tcp.redirect.unrelatedPeer` carries listener/expected/actual; `udp.reinject.*` carry flow key + map summary. A failure log without its distinguisher is a defect.
+- **Incident triad rule** (acceptance gate for future diagnostics work): for any incident, the log must let an operator read out the three essentials — 失效环节 (which leg failed), 触发信号 (which signal fired), 恢复动作 (what recovery ran). The 2026-09-17 replay against the new events satisfies this; keep it that way.
+
+## Runtime Diagnostics Conventions (wired 2026-09-17, task 09-17-adapter-staleness-logging)
+
+> Root cause of the 2026-09-17 outage post-mortem: every decisive failure path was silent (Trace-only or swallowed) while harmless warns flooded. These conventions gate every new failure site.
+
+- **RuntimeLogThrottle** (src/WinForward.Runtime/RuntimeLogThrottle.cs): per-event-site key + window throttle. First occurrence always emits; suppressed occurrences cost nothing — checks are check-first (ShouldEmit() before any RuntimeLogField construction). High-frequency sites additionally gate on IsEnabled.
+- **RuntimeCounters** (src/WinForward.Runtime/RuntimeCounters.cs): observation-only Interlocked long counters (zero-alloc after key creation), shared instance + Snapshot(). The stable key vocabulary lives as constants (relaySetupFailed, udpOriginUnresolved, udpFailClosedDrop, flowCapacityBlock, attributionMiss, passReinjectFailed) and is shared by the health monitor thresholds and heartbeat deltas — never retype a key literal. Counters never influence behavior.
+- **Heartbeat**: runner.heartbeat (info, 60 s default, RuntimeHeartbeat) aggregates usage (flows/flowCapacity, tcp/udp sessions+capacity, pumps running/degraded), health state (degraded, consecutiveForced, cooldownRemainingSeconds), and per-key deltas since the previous tick (zero deltas omitted, ordinal key order). Observational loop: a faulty usage provider warns and retries next tick, never dies.
+- **Change-gated group warns**: recurring state-shaped warnings (e.g. udp.targets.noMac) emit on first occurrence and only when the member SET changes — not on every refresh. Full recovery (all MACs valid) or empty scope resets the memory so the next occurrence re-emits.
+- **Failure-path events carry their reason**: never log a fixed-text failure line again. tcp.redirect.relaySetupFailed carries error type + socketError/nativeError + upstream + attempts; tcp.redirect.unrelatedPeer carries listener/expected/actual; udp.reinject.* carry flow key + map summary. A failure log without its distinguisher is a defect.
+- **Incident triad rule** (acceptance gate for future diagnostics work): for any incident, the log must let an operator read out the three essentials — which leg failed, which signal fired, what recovery ran. The 2026-09-17 replay against the new events satisfies this; keep it that way.

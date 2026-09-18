@@ -408,3 +408,75 @@ TryRewriteForwardLeg(frame, ...);
 ```
 
 **Related**: task `08-27-fix-datapath-throughput` (prd/design/implement artifacts hold the full audit tables); the parent `08-27-fix-eof-reset-design-flaws` maps the throughput bottleneck to the RST/EOF frequency symptom.
+
+---
+
+## Adapter-view self-healing — address fingerprints, periodic re-enumeration, health-triggered forced refresh (wired 2026-09-17, task 09-17-adapter-staleness-logging)
+
+> Production ground truth 2026-09-17: host link state changed (suspected IPv6 temporary-address rotation) with NO NDISRD bound-list rebuild — the last `adapter.refresh` was 78 minutes before a total proxied-traffic outage that only a process restart cured. The NDISRD change event alone cannot see address changes; the view now self-heals through two independent channels.
+
+### 1. Scope / Trigger
+
+- Trigger: any change to `AdapterEnumerationItem`'s diff inputs, `LayeredCaptureRunner`'s demand producers (NDISRD watcher / periodic timer / health monitor), `InterceptionHealthMonitor`, or the unicast-address query (`UnicastAddressInventory`).
+
+### 2. Contracts
+
+- **AddressFingerprint joins the diff triple**: `AdapterEnumerationItem` carries `AddressFingerprint` (normalized: adapter's unicast addresses sorted, `';'`-joined, invariant lower-case; IPv6 link-local `fe80::/10` EXCLUDED so ND churn never flaps). `AdapterEnumerationDiff.LinkStateEquals` compares handle, MAC, MTU, and the fingerprint — any change rebuilds through the existing refresh pipeline. Default `""` keeps legacy no-op semantics for untouched fakes. Address-query failure is non-fatal (empty fingerprint + one-shot debug `adapter.addressQuery.failed`): a broken query must degrade to the pre-task view, never break capture.
+- **iphlpapi table row alignment is layout-determined (E1-caught, 2026-09-17)**: owner-pid tables (`MIB_TCPTABLE_OWNER_PID` etc.) have 4-byte-aligned rows, so `Table[0]` sits at offset 4; `MIB_UNICASTIPADDRESS_ROW` contains `NET_LUID`/`LARGE_INTEGER` members, so `Table[0]` sits at offset **8** (MS-documented padding). `IPHelperTables.ReadRow<T>(buffer, index, firstRowOffset)` is the single row-read entry — never hardcode `+4` for a new table; derive the offset from the row's largest alignment class and pin it with a poisoned-padding test (`UnicastAddressInventoryTests` writes `0xDeadBeef` into the padding bytes). The pre-E1 bug read unicast rows at +4, parsed garbage, and the tolerance path silently emptied every fingerprint — the root-cause fix would have been a no-op on real hardware while all tests stayed green.
+- **Periodic re-enumeration (R1-A)**: `LayeredCaptureRunner` ctor takes `periodicRefreshInterval` (default 30 s, `TimeSpan.Zero` disables, negative throws). Each tick signals the SAME `RefreshDemandGate` as the NDISRD watcher — non-forced: an unchanged enumeration no-ops (no mode flap), any diff input change rebuilds. Storm guard (1 s) absorbs tick/event races; no new state machine.
+- **Failure-rate forced refresh (R1-B)**: `IInterceptionHealthSignal.ReportFailure(counter)` feeds `InterceptionHealthMonitor` (runner-owned, exposed as `HealthSignal`). Per-counter 30 s sliding window, default thresholds `relaySetupFailed≥3`, `passReinjectFailed≥3`, `udpOriginUnresolved≥8`, `udpFailClosedDrop≥8`; trigger arms the SAME `_forceRebuild` flag the 09-11 startup-fault recovery uses and signals a demand — forced demands bypass the empty-diff no-op (forced refresh is idempotent and harmless when the real cause is an upstream outage). Anti-storm: storm guard → shared 60 s cooldown → 3 consecutive forced triggers degrade to one per 5 min + single error `runner.forcedRefresh.degraded`. `NoteRefreshCompleted()` (called on BOTH successful demand paths — no-op and install; NOT on the empty-scope pause) resets windows/consecutive/degraded but keeps earned cooldown.
+- **Forced-flag double-producer semantics**: startup-fault recovery and the health monitor both write `_forceRebuild`; consumption stays single-point (demand entry reads-and-clears; install clears). Monitor writes the flag immediately before `_demandGate.Signal()` so the gate's lock/TCS provides happens-before visibility. Benign race: an in-flight install may clear a just-armed flag — the next demand degrades to a non-forced no-op recheck; harmless, the refresh already happened.
+- **Signal sources** (null-safe injection, `Noop` default; counting stays with `RuntimeCounters` — ReportFailure never double-counts): `UdpResponseReinjector` (host fallback → `udpOriginUnresolved`; missingOriginAdapter/missingHostTarget drops → `udpFailClosedDrop`; missingClientMac is a different failure class, unreported), `ClientResetInjector.HandleRelaySetupFailureAsync` (`relaySetupFailed`), `NdisPacketActionExecutor` pass-native failures (`passReinjectFailed`).
+
+### 3. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Fingerprint change alone (handle/MAC/MTU equal) | diff `changed` → refresh rebuild |
+| Periodic tick, enumeration unchanged | no-op, pumps/modes untouched |
+| Threshold crossed in 30 s window | `_forceRebuild` armed + demand + warn `runner.forcedRefresh`; forced install logs `forced=true` |
+| Cooldown active | failures still counted; no trigger until expiry |
+| 3 consecutive forced triggers without a completed refresh | error `runner.forcedRefresh.degraded`; 5-min cadence |
+| Any successful demand processing (no-op or install) | `NoteRefreshCompleted` resets windows/streak; cooldown survives |
+| Empty scope (all adapters gone) | pause; no NoteRefreshCompleted (no live generation) |
+| Address query fails | empty fingerprint, one-shot debug; enumeration unaffected |
+
+### 4. Tests Required
+
+`LayeredCaptureRunnerPeriodicRefreshTests` (fingerprint-change rebuild; no-op on unchanged ticks; tick+signal coalesce; zero/negative interval), `LayeredCaptureRunnerHealthSignalTests` (threshold → `forced=true` rebuild + warn fields + streak reset; below-threshold silence), `InterceptionHealthMonitorTests` (windows/cooldown/degrade/reset/no-op), `UnicastAddressInventoryTests` (parse/group/link-local exclusion + poisoned-padding offset lock), `AdapterEnumerationDiffTests` (fingerprint diff cases).
+
+---
+
+## Adapter-view self-healing — address fingerprints, periodic re-enumeration, health-triggered forced refresh (wired 2026-09-17, task 09-17-adapter-staleness-logging)
+
+> Production ground truth 2026-09-17: host link state changed (suspected IPv6 temporary-address rotation) with NO NDISRD bound-list rebuild — the last `adapter.refresh` was 78 minutes before a total proxied-traffic outage that only a process restart cured. The NDISRD change event alone cannot see address changes; the view now self-heals through two independent channels.
+
+### 1. Scope / Trigger
+
+- Trigger: any change to `AdapterEnumerationItem`'s diff inputs, `LayeredCaptureRunner`'s demand producers (NDISRD watcher / periodic timer / health monitor), `InterceptionHealthMonitor`, or the unicast-address query (`UnicastAddressInventory`).
+
+### 2. Contracts
+
+- **AddressFingerprint joins the diff triple**: `AdapterEnumerationItem` carries `AddressFingerprint` (normalized: adapter's unicast addresses sorted, ';'-joined, invariant lower-case; IPv6 link-local fe80::/10 EXCLUDED so ND churn never flaps). `AdapterEnumerationDiff.LinkStateEquals` compares handle, MAC, MTU, and the fingerprint — any change rebuilds through the existing refresh pipeline. Default "" keeps legacy no-op semantics for untouched fakes. Address-query failure is non-fatal (empty fingerprint + one-shot debug `adapter.addressQuery.failed`): a broken query must degrade to the pre-task view, never break capture.
+- **iphlpapi table row alignment is layout-determined (E1-caught, 2026-09-17)**: owner-pid tables (`MIB_TCPTABLE_OWNER_PID` etc.) have 4-byte-aligned rows, so `Table[0]` sits at offset 4; `MIB_UNICASTIPADDRESS_ROW` contains `NET_LUID`/`LARGE_INTEGER` members, so `Table[0]` sits at offset **8** (MS-documented padding). `IPHelperTables.ReadRow<T>(buffer, index, firstRowOffset)` is the single row-read entry — never hardcode +4 for a new table; derive the offset from the row's largest alignment class and pin it with a poisoned-padding test (`UnicastAddressInventoryTests` writes 0xDeadBeef into the padding bytes). The pre-E1 bug read unicast rows at +4, parsed garbage, and the tolerance path silently emptied every fingerprint — the root-cause fix would have been a no-op on real hardware while all tests stayed green.
+- **Periodic re-enumeration (R1-A)**: `LayeredCaptureRunner` ctor takes `periodicRefreshInterval` (default 30 s, TimeSpan.Zero disables, negative throws). Each tick signals the SAME `RefreshDemandGate` as the NDISRD watcher — non-forced: an unchanged enumeration no-ops (no mode flap), any diff input change rebuilds. Storm guard (1 s) absorbs tick/event races; no new state machine.
+- **Failure-rate forced refresh (R1-B)**: `IInterceptionHealthSignal.ReportFailure(counter)` feeds `InterceptionHealthMonitor` (runner-owned, exposed as `HealthSignal`). Per-counter 30 s sliding window, default thresholds relaySetupFailed>=3, passReinjectFailed>=3, udpOriginUnresolved>=8, udpFailClosedDrop>=8; trigger arms the SAME `_forceRebuild` flag the 09-11 startup-fault recovery uses and signals a demand — forced demands bypass the empty-diff no-op (forced refresh is idempotent and harmless when the real cause is an upstream outage). Anti-storm: storm guard -> shared 60 s cooldown -> 3 consecutive forced triggers degrade to one per 5 min + single error `runner.forcedRefresh.degraded`. `NoteRefreshCompleted()` (called on BOTH successful demand paths — no-op and install; NOT on the empty-scope pause) resets windows/consecutive/degraded but keeps earned cooldown.
+- **Forced-flag double-producer semantics**: startup-fault recovery and the health monitor both write `_forceRebuild`; consumption stays single-point (demand entry reads-and-clears; install clears). Monitor writes the flag immediately before `_demandGate.Signal()` so the gate's lock/TCS provides happens-before visibility. Benign race: an in-flight install may clear a just-armed flag — the next demand degrades to a non-forced no-op recheck; harmless, the refresh already happened.
+- **Signal sources** (null-safe injection, Noop default; counting stays with `RuntimeCounters` — ReportFailure never double-counts): `UdpResponseReinjector` (host fallback -> udpOriginUnresolved; missingOriginAdapter/missingHostTarget drops -> udpFailClosedDrop; missingClientMac is a different failure class, unreported), `ClientResetInjector.HandleRelaySetupFailureAsync` (relaySetupFailed), `NdisPacketActionExecutor` pass-native failures (passReinjectFailed).
+
+### 3. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Fingerprint change alone (handle/MAC/MTU equal) | diff changed -> refresh rebuild |
+| Periodic tick, enumeration unchanged | no-op, pumps/modes untouched |
+| Threshold crossed in 30 s window | _forceRebuild armed + demand + warn runner.forcedRefresh; forced install logs forced=true |
+| Cooldown active | failures still counted; no trigger until expiry |
+| 3 consecutive forced triggers without a completed refresh | error runner.forcedRefresh.degraded; 5-min cadence |
+| Any successful demand processing (no-op or install) | NoteRefreshCompleted resets windows/streak; cooldown survives |
+| Empty scope (all adapters gone) | pause; no NoteRefreshCompleted (no live generation) |
+| Address query fails | empty fingerprint, one-shot debug; enumeration unaffected |
+
+### 4. Tests Required
+
+`LayeredCaptureRunnerPeriodicRefreshTests` (fingerprint-change rebuild; no-op on unchanged ticks; tick+signal coalesce; zero/negative interval), `LayeredCaptureRunnerHealthSignalTests` (threshold -> forced=true rebuild + warn fields + streak reset; below-threshold silence), `InterceptionHealthMonitorTests` (windows/cooldown/degrade/reset/no-op), `UnicastAddressInventoryTests` (parse/group/link-local exclusion + poisoned-padding offset lock), `AdapterEnumerationDiffTests` (fingerprint diff cases).
