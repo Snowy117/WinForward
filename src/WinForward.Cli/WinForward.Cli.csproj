@@ -7,7 +7,33 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <PublishSingleFile>true</PublishSingleFile>
+
+    <!-- GC-off posture (task 09-18 M5). The steady-state packet/flow/connection paths allocate
+         nothing on the managed heap, so the GC must never run; these settings make that intent
+         explicit and fence any regression. Workstation + non-concurrent GC is the posture the
+         zero-allocation contract assumes; retaining no VM lets the runtime hand a shrunk startup
+         heap back to the OS. The heap hard limit below turns a runaway allocation regression into
+         a fail-fast (GC-then-OOM) instead of silent, unbounded collecting growth. -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <RetainVMGarbageCollection>false</RetainVMGarbageCollection>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- Hard managed-heap fuse in bytes (not percent, so the ceiling is deterministic). Basis:
+         the gc-soak steady-state harness (mixed TCP+UDP loopback, 128 flows + 8 relays) measures a
+         post-full-GC managed heap of ~12-13 MiB across runs (`managedHeapBytes`). The production
+         daemon's live managed set is larger — capture composition, pre-sized flow tables,
+         per-adapter and per-session state — but remains well inside this ceiling; revisit this value
+         against a real hardware measurement of the daemon under representative connection load
+         before treating it as final. 128 MiB (134217728) is ~10x the measured harness baseline and
+         sits at the top of the design's expected 64-128 MiB order: deliberate headroom so bounded
+         BCL infrastructure allocations (Socket/NetworkStream per connection, slow-path async state
+         machines) stay collectible without ever tripping the fuse, while a genuine per-packet leak
+         (GBs over a soak) still fails fast instead of silently growing. An explicit
+         RuntimeHostConfigurationOption (rather than an MSBuild GC property, which does not exist for
+         this key) guarantees the runtimeconfig.json entry in both JIT and AOT publishes. -->
+    <RuntimeHostConfigurationOption Include="System.GC.HeapHardLimit" Value="134217728" />
+  </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="WinForward.Core.Tests" />
   </ItemGroup>

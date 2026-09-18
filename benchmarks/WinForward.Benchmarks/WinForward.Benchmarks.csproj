@@ -10,6 +10,9 @@
     <PackageReference Include="BenchmarkDotNet" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="WinForward.Core.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../../src/WinForward.Configuration/WinForward.Configuration.csproj" />
     <ProjectReference Include="../../src/WinForward.Core/WinForward.Core.csproj" />
     <ProjectReference Include="../../src/WinForward.NdisApi/WinForward.NdisApi.csproj" />

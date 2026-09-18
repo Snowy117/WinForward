@@ -50,7 +50,13 @@ internal static class SoakRunner
         return new StreamWriter(outputPath, append: false);
     }
 
-    private static IReadOnlyList<(string Name, Func<StabilityContext, SoakOptions, Task> Run)> SelectScenarios(SoakScenario scenario)
+    /// <summary>
+    /// The scenarios a <see cref="SoakScenario"/> selection expands to. <c>gc-soak</c> is
+    /// deliberately excluded from <see cref="SoakScenario.All"/>: it resolves a 30-minute default,
+    /// so folding it into the shared stability sweep would silently drag every existing run to
+    /// that length.
+    /// </summary>
+    internal static IReadOnlyList<(string Name, Func<StabilityContext, SoakOptions, Task> Run)> SelectScenarios(SoakScenario scenario)
     {
         return scenario switch
         {
@@ -60,6 +66,7 @@ internal static class SoakRunner
             SoakScenario.Footprint => new List<(string, Func<StabilityContext, SoakOptions, Task>)> { ("footprint", SessionFootprintScenario.RunAsync) },
             SoakScenario.Baseline => new List<(string, Func<StabilityContext, SoakOptions, Task>)> { ("baseline", UdpRawBaselineScenario.RunAsync) },
             SoakScenario.Burst => new List<(string, Func<StabilityContext, SoakOptions, Task>)> { ("udpBurst", UdpBurstScenario.RunAsync) },
+            SoakScenario.GcSoak => new List<(string, Func<StabilityContext, SoakOptions, Task>)> { ("gcSoak", GcSoakScenario.RunAsync) },
             _ => new List<(string, Func<StabilityContext, SoakOptions, Task>)>
             {
                 ("udp", UdpLossScenario.RunAsync),

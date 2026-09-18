@@ -11,6 +11,7 @@ internal enum SoakScenario
     Footprint,
     Baseline,
     Burst,
+    GcSoak,
 }
 
 internal enum TcpRelayMode
@@ -87,6 +88,14 @@ internal sealed record AbortMix(int Clean, int ClientRst, int RelayCancel, int U
 
 internal sealed record SoakOptions
 {
+    /// <summary>
+    /// Default duration for the long-form <see cref="SoakScenario.GcSoak"/> scenario. Every other
+    /// scenario keeps the shared 60 s default (15 s under <c>--quick</c>); <c>gc-soak</c> is the
+    /// only one that must prove hour-scale steady-state behavior, so it resolves its own default
+    /// when the caller neither passed <c>--duration</c> nor <c>--quick</c>.
+    /// </summary>
+    public const int GcSoakDefaultDurationSeconds = 1_800;
+
     public SoakScenario Scenario { get; init; } = SoakScenario.All;
     public int DurationSeconds { get; init; } = 60;
     public int Pps { get; init; } = 25_000;
@@ -105,55 +114,12 @@ internal sealed record SoakOptions
     public static SoakOptions Parse(string[] args)
     {
         var options = new SoakOptions();
+        // A scenario with its own long default (gc-soak) applies it only when the caller left the
+        // duration unspecified; --duration and --quick both count as pinning it.
+        var durationSpecified = false;
         for (var index = 0; index < args.Length; index++)
         {
-            switch (args[index])
-            {
-                case "--quick":
-                    options = options with { Quick = true, DurationSeconds = 15, Pps = 10_000, TcpConcurrency = 16, Flows = 64 };
-                    break;
-                case "--scenario":
-                    options = options with { Scenario = ParseScenario(Value(args, ref index)) };
-                    break;
-                case "--duration":
-                    options = options with { DurationSeconds = PositiveInt("--duration", Value(args, ref index)) };
-                    break;
-                case "--pps":
-                    options = options with { Pps = PositiveInt("--pps", Value(args, ref index)) };
-                    break;
-                case "--payload-bytes":
-                    options = options with { PayloadBytes = AtLeast("--payload-bytes", Value(args, ref index), 12) };
-                    break;
-                case "--flows":
-                    options = options with { Flows = PositiveInt("--flows", Value(args, ref index)) };
-                    break;
-                case "--tcp-concurrency":
-                    options = options with { TcpConcurrency = PositiveInt("--tcp-concurrency", Value(args, ref index)) };
-                    break;
-                case "--tcp-transfer-bytes":
-                    options = options with { TcpTransferBytes = PositiveInt("--tcp-transfer-bytes", Value(args, ref index)) };
-                    break;
-                case "--tcp-relay-mode":
-                    options = options with { TcpRelayMode = ParseTcpRelayMode(Value(args, ref index)) };
-                    break;
-                case "--abort-mix":
-                    options = options with { AbortMix = AbortMix.Parse(Value(args, ref index)) };
-                    break;
-                case "--seed":
-                    options = options with { Seed = AnyInt("--seed", Value(args, ref index)) };
-                    break;
-                case "--output":
-                    options = options with { OutputPath = Value(args, ref index) };
-                    break;
-                case "--burst-flows":
-                    options = options with { BurstFlows = PositiveInt("--burst-flows", Value(args, ref index)) };
-                    break;
-                case "--dial-delay-ms":
-                    options = options with { DialDelayMs = AtLeast("--dial-delay-ms", Value(args, ref index), 0) };
-                    break;
-                default:
-                    throw new ArgumentException($"Unknown stability argument '{args[index]}'.", nameof(args));
-            }
+            options = ApplyArgument(options, args, ref index, ref durationSpecified);
         }
 
         if (options.AbortMix.Total == 0)
@@ -161,7 +127,51 @@ internal sealed record SoakOptions
             throw new ArgumentException("The abort mix must have at least one non-zero weight.", nameof(args));
         }
 
+        if (options.Scenario == SoakScenario.GcSoak && !durationSpecified)
+        {
+            options = options with { DurationSeconds = GcSoakDefaultDurationSeconds };
+        }
+
         return options;
+    }
+
+    private static SoakOptions ApplyArgument(SoakOptions options, string[] args, ref int index, ref bool durationSpecified)
+    {
+        switch (args[index])
+        {
+            case "--quick":
+                durationSpecified = true;
+                return options with { Quick = true, DurationSeconds = 15, Pps = 10_000, TcpConcurrency = 16, Flows = 64 };
+            case "--scenario":
+                return options with { Scenario = ParseScenario(Value(args, ref index)) };
+            case "--duration":
+                durationSpecified = true;
+                return options with { DurationSeconds = PositiveInt("--duration", Value(args, ref index)) };
+            case "--pps":
+                return options with { Pps = PositiveInt("--pps", Value(args, ref index)) };
+            case "--payload-bytes":
+                return options with { PayloadBytes = AtLeast("--payload-bytes", Value(args, ref index), 12) };
+            case "--flows":
+                return options with { Flows = PositiveInt("--flows", Value(args, ref index)) };
+            case "--tcp-concurrency":
+                return options with { TcpConcurrency = PositiveInt("--tcp-concurrency", Value(args, ref index)) };
+            case "--tcp-transfer-bytes":
+                return options with { TcpTransferBytes = PositiveInt("--tcp-transfer-bytes", Value(args, ref index)) };
+            case "--tcp-relay-mode":
+                return options with { TcpRelayMode = ParseTcpRelayMode(Value(args, ref index)) };
+            case "--abort-mix":
+                return options with { AbortMix = AbortMix.Parse(Value(args, ref index)) };
+            case "--seed":
+                return options with { Seed = AnyInt("--seed", Value(args, ref index)) };
+            case "--output":
+                return options with { OutputPath = Value(args, ref index) };
+            case "--burst-flows":
+                return options with { BurstFlows = PositiveInt("--burst-flows", Value(args, ref index)) };
+            case "--dial-delay-ms":
+                return options with { DialDelayMs = AtLeast("--dial-delay-ms", Value(args, ref index), 0) };
+            default:
+                throw new ArgumentException($"Unknown stability argument '{args[index]}'.", nameof(args));
+        }
     }
 
     private static string Value(string[] args, ref int index)
@@ -184,7 +194,8 @@ internal sealed record SoakOptions
         "footprint" => SoakScenario.Footprint,
         "baseline" => SoakScenario.Baseline,
         "udpburst" => SoakScenario.Burst,
-        _ => throw new ArgumentException($"Unknown scenario '{raw}'; expected all, udp, udpburst, tcp, tcpthroughput, footprint, or baseline.", nameof(raw)),
+        "gc-soak" or "gcsoak" => SoakScenario.GcSoak,
+        _ => throw new ArgumentException($"Unknown scenario '{raw}'; expected all, udp, udpburst, tcp, tcpthroughput, footprint, baseline, or gc-soak.", nameof(raw)),
     };
 
     private static TcpRelayMode ParseTcpRelayMode(string raw) => raw.ToLowerInvariant() switch
