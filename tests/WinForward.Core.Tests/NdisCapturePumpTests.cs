@@ -232,6 +232,104 @@ public sealed class NdisCapturePumpTests
         await dispose;
     }
 
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public async Task DedicatedPumpThreadExitsAndIsBackgroundAfterRun()
+    {
+        // Lifecycle: RunAsync runs the loop on one dedicated background thread. When the loop
+        // exits (here via cancellation) that thread must have terminated — no thread leak across
+        // start/stop, and the background flag means the pump can never keep the process alive.
+        // The gated reader parks the thread so its live state (IsBackground/IsAlive) is readable.
+        var readEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var readReleased = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cts = new CancellationTokenSource();
+        var pump = new NdisCapturePump(new GatedReader(readEntered, readReleased), (nint)0x44, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1) });
+
+        var run = pump.RunAsync(cts.Token).AsTask();
+        await readEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var thread = pump.PumpThread;
+        Assert.NotNull(thread);
+        Assert.True(thread.IsAlive, "the dedicated pump thread should be parked in its first read");
+        Assert.True(thread.IsBackground, "the pump must run on a background thread");
+
+        cts.Cancel();
+        readReleased.SetResult();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+
+        Assert.True(thread.Join(TimeSpan.FromSeconds(5)), "the dedicated pump thread did not exit after the run loop ended");
+        Assert.False(thread.IsAlive);
+
+        await pump.DisposeAsync();
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public async Task DisposeStopsTheLoopNormallyAndReapsTheThread()
+    {
+        // A DisposeAsync stop (without cancellation) is a normal, non-throwing loop exit, and it
+        // also terminates the dedicated thread.
+        var readEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var readReleased = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var pump = new NdisCapturePump(new GatedReader(readEntered, readReleased), (nint)0x45, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1) });
+
+        var run = pump.RunAsync(CancellationToken.None).AsTask();
+        await readEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var dispose = pump.DisposeAsync();
+        readReleased.SetResult();
+
+        await run.WaitAsync(TimeSpan.FromSeconds(5));
+        await dispose.AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(pump.PumpThread!.Join(TimeSpan.FromSeconds(5)), "the dedicated pump thread did not exit after disposal");
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public async Task IdlePollIterationsAllocateNoManagedBytes()
+    {
+        // Allocation gate: an idle poll iteration — the read, the batch-completed callback,
+        // and the zero-allocation Thread.Sleep pacing — must not touch the managed heap. The seam
+        // runs the identical synchronous iteration body production runs on the dedicated thread,
+        // so this gates the real loop body rather than a re-implementation. The pump is disposed
+        // so the constructor's native batch buffers are freed (they have no finalizer).
+        await using var pump = new NdisCapturePump(new ScriptedReader([_ => 0]), (nint)0x46, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.Zero });
+
+        // Warm the JIT outside the measured window.
+        for (var warm = 0; warm < 64; warm++) pump.RunIterationForTests(CancellationToken.None);
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var keepGoing = true;
+        const int iterations = 1_000;
+        for (var index = 0; index < iterations; index++) keepGoing &= pump.RunIterationForTests(CancellationToken.None);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.True(keepGoing);
+        Assert.Equal(0, allocated);
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public async Task SecondRunAsyncThrowsWithoutDisturbingTheFirstRun()
+    {
+        // Run-once guard: a second start must fail fast instead of launching a second loop over the
+        // batch buffers and run-completion signal the first run owns — which would double-read the
+        // shared slots and corrupt the zero-copy slot contract.
+        var readEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var readReleased = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var pump = new NdisCapturePump(new GatedReader(readEntered, readReleased), (nint)0x47, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1) });
+
+        var run = pump.RunAsync(CancellationToken.None).AsTask();
+        await readEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Throws<InvalidOperationException>(() => pump.RunAsync(CancellationToken.None));
+
+        var dispose = pump.DisposeAsync();
+        readReleased.SetResult();
+        await run.WaitAsync(TimeSpan.FromSeconds(5));
+        await dispose.AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
     private static Func<NdisCapturedPacket, CancellationToken, ValueTask> CaptureHandler(List<byte> observed, List<nint> handles) =>
         (packet, _) =>
         {
