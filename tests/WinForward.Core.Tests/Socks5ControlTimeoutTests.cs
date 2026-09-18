@@ -40,10 +40,10 @@ public sealed class Socks5ControlTimeoutTests
         var endpoint = (IPEndPoint)listener.LocalEndpoint;
         var socksServer = new Socks5Server("test", endpoint.Address.ToString(), checked((ushort)endpoint.Port), null, null);
 
-        var connect = Socks5ControlConnection.ConnectAsync(socksServer, CancellationToken.None, perAttemptTimeout: TimeSpan.FromMilliseconds(100)).AsTask();
-        await greetingRead.Task.WaitAsync(CancellationToken.None);
+        var connect = Socks5ControlConnection.ConnectAsync(socksServer, CancellationToken.None, perAttemptTimeout: TimeSpan.FromSeconds(2)).AsTask();
+        await greetingRead.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
-        await Assert.ThrowsAsync<IOException>(async () => await connect);
+        await Assert.ThrowsAsync<IOException>(async () => await connect.WaitAsync(TimeSpan.FromSeconds(30)));
         stopServer.Cancel();
         await IgnoreExpectedCancellationAsync(server);
     }
@@ -61,7 +61,7 @@ public sealed class Socks5ControlTimeoutTests
         using var cancellation = new CancellationTokenSource();
 
         var connect = Socks5ControlConnection.ConnectAsync(socksServer, cancellation.Token, perAttemptTimeout: TimeSpan.FromSeconds(5)).AsTask();
-        await greetingRead.Task.WaitAsync(CancellationToken.None);
+        await greetingRead.Task.WaitAsync(TimeSpan.FromSeconds(30));
         cancellation.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await connect);
@@ -79,12 +79,12 @@ public sealed class Socks5ControlTimeoutTests
         var server = StallAfterUdpAssociateRequestAsync(listener, commandRead, stopServer.Token);
         var endpoint = (IPEndPoint)listener.LocalEndpoint;
         var socksServer = new Socks5Server("test", endpoint.Address.ToString(), checked((ushort)endpoint.Port), null, null);
-        await using var control = await Socks5ControlConnection.ConnectAsync(socksServer, CancellationToken.None, perAttemptTimeout: TimeSpan.FromMilliseconds(200));
+        await using var control = await Socks5ControlConnection.ConnectAsync(socksServer, CancellationToken.None, perAttemptTimeout: TimeSpan.FromSeconds(2));
 
         var associate = control.UdpAssociateAsync(CancellationToken.None).AsTask();
-        await commandRead.Task.WaitAsync(CancellationToken.None);
+        await commandRead.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
-        await Assert.ThrowsAsync<IOException>(async () => await associate);
+        await Assert.ThrowsAsync<IOException>(async () => await associate.WaitAsync(TimeSpan.FromSeconds(30)));
         stopServer.Cancel();
         await IgnoreExpectedCancellationAsync(server);
     }
@@ -156,7 +156,8 @@ public sealed class Socks5ControlTimeoutTests
         await sender.SendToAsync(datagram, SocketFlags.None, new IPEndPoint(IPAddress.Loopback, transport.LocalEndpoint.Port), CancellationToken.None);
 
         var buffer = new byte[65_535];
-        var response = await transport.ReceiveAsync(buffer, CancellationToken.None);
+        using var receiveBudget = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var response = await transport.ReceiveAsync(buffer, receiveBudget.Token);
         Assert.True(response.HasDatagram);
         Assert.Equal((IPAddressValue?)IPAddress.Parse("192.0.2.53"), response.Datagram.DestinationAddress);
         Assert.Equal(53, response.Datagram.DestinationPort);

@@ -209,10 +209,15 @@ public sealed class UdpSetupQueueTests
         await WaitForAsync(() => factory.Transports.Count == cappedFlows + 1);
         await WaitForAsync(() =>
         {
-            return factory.Transports.Any(transport =>
+            // Transports is appended under its own lock by CreateAsync; enumerate under it too,
+            // or a concurrent append fails the enumeration with "collection was modified".
+            lock (factory.Transports)
             {
-                lock (transport.Sent) return transport.Sent.Count == 1 && Assert.Single(transport.Sent[0].Payload) == cappedFlows;
-            });
+                return factory.Transports.Any(transport =>
+                {
+                    lock (transport.Sent) return transport.Sent.Count == 1 && Assert.Single(transport.Sent[0].Payload) == cappedFlows;
+                });
+            }
         });
         Assert.DoesNotContain(logger.Events, item => string.Equals(item.Name, "udp.setup.failed", StringComparison.Ordinal));
         Assert.DoesNotContain(logger.Events, item => string.Equals(item.Name, "udp.setupqueue.dropped", StringComparison.Ordinal));
@@ -245,18 +250,24 @@ public sealed class UdpSetupQueueTests
         await WaitForAsync(() => factory.Transports.Count == flowCount, timeoutMs: 30_000);
         await WaitForAsync(() =>
         {
-            return factory.Transports.Sum(transport =>
+            lock (factory.Transports)
             {
-                lock (transport.Sent) return transport.Sent.Count;
-            }) == flowCount;
+                return factory.Transports.Sum(transport =>
+                {
+                    lock (transport.Sent) return transport.Sent.Count;
+                }) == flowCount;
+            }
         }, timeoutMs: 30_000);
 
         var forwarded = new HashSet<byte>();
-        foreach (var transport in factory.Transports)
+        lock (factory.Transports)
         {
-            lock (transport.Sent)
+            foreach (var transport in factory.Transports)
             {
-                foreach (var sent in transport.Sent) forwarded.Add(Assert.Single(sent.Payload));
+                lock (transport.Sent)
+                {
+                    foreach (var sent in transport.Sent) forwarded.Add(Assert.Single(sent.Payload));
+                }
             }
         }
 
@@ -415,10 +426,18 @@ public sealed class UdpSetupQueueTests
         await factory.QueuedCreateStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         // The occupants' datagrams flush before the clock moves again (their dial was 4 s).
-        await WaitForAsync(() => factory.Transports.Sum(transport =>
+        await WaitForAsync(() =>
         {
-            lock (transport.Sent) return transport.Sent.Count;
-        }) == occupants, timeoutMs: 10_000);
+            // Occupant transports can still be appending while this polls: enumerate under the
+            // factory lock, or the Sum throws "collection was modified" (observed 2026-09-17).
+            lock (factory.Transports)
+            {
+                return factory.Transports.Sum(transport =>
+                {
+                    lock (transport.Sent) return transport.Sent.Count;
+                }) == occupants;
+            }
+        }, timeoutMs: 10_000);
 
         // Flow #9's dial stalls another 2 s: 6 s from enqueue, 2 s from the re-stamp.
         time.Advance(TimeSpan.FromSeconds(2));
@@ -426,18 +445,24 @@ public sealed class UdpSetupQueueTests
 
         await WaitForAsync(() =>
         {
-            return factory.Transports.Sum(transport =>
+            lock (factory.Transports)
             {
-                lock (transport.Sent) return transport.Sent.Count;
-            }) == occupants + 1;
+                return factory.Transports.Sum(transport =>
+                {
+                    lock (transport.Sent) return transport.Sent.Count;
+                }) == occupants + 1;
+            }
         }, timeoutMs: 10_000);
 
         var forwarded = new HashSet<byte>();
-        foreach (var transport in factory.Transports)
+        lock (factory.Transports)
         {
-            lock (transport.Sent)
+            foreach (var transport in factory.Transports)
             {
-                foreach (var sent in transport.Sent) forwarded.Add(Assert.Single(sent.Payload));
+                lock (transport.Sent)
+                {
+                    foreach (var sent in transport.Sent) forwarded.Add(Assert.Single(sent.Payload));
+                }
             }
         }
 

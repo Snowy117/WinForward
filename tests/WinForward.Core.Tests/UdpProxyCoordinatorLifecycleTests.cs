@@ -180,6 +180,10 @@ public sealed class UdpProxyCoordinatorLifecycleTests
 
         Assert.True(await coordinator.TrySendAsync(first, s_server, new byte[] { 1 }, CancellationToken.None));
         await WaitForAsync(() => factory.Transports.Count == 1);
+        // Wait for the flush, not just the transport: the session slot only becomes Ready (and
+        // refreshable by the second send) once the first datagram is forwarded. Advancing the
+        // clock before that expires the not-yet-ready slot by its creation timestamp instead.
+        await WaitForReadyAsync(Assert.Single(factory.Transports), 1);
         time.Advance(TimeSpan.FromMinutes(2));
         Assert.True(await coordinator.TrySendAsync(first, s_server, new byte[] { 2 }, CancellationToken.None));
         Assert.Equal(0, await coordinator.RemoveExpiredAsync(time.GetUtcNow(), TimeSpan.FromMinutes(1)));

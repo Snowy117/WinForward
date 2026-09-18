@@ -3,8 +3,14 @@ namespace WinForward.Core.Tests;
 /// <summary>Async polling and expected-cancellation helpers shared by coordinator tests.</summary>
 internal static class AsyncTestExtensions
 {
-    /// <summary>Polls the condition every 10 ms until it holds or the timeout elapses (then throws).</summary>
-    public static async Task WaitForAsync(Func<bool> condition, int timeoutMs = 2000)
+    /// <summary>
+    /// Polls the condition every 10 ms until it holds or the timeout elapses (then throws). The
+    /// default budget is deliberately generous: under full-suite parallel load the thread pool
+    /// can starve queued continuations (channel reads, timer ticks, Task.Run setups) for
+    /// seconds, and a tight budget turns that into false flakes — a passing condition is still
+    /// observed on its first true poll, so only genuinely failing tests pay the longer budget.
+    /// </summary>
+    public static async Task WaitForAsync(Func<bool> condition, int timeoutMs = 10_000)
     {
         using var cts = new CancellationTokenSource(timeoutMs);
         while (!condition())
