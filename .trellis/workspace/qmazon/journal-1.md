@@ -585,3 +585,11 @@ Diagnosed the frequent 'pass batching degraded' warn: the fixed 8-slot lane tabl
 ### Status
 
 [OK] **Completed**
+
+## 2026-09-18 — 09-17-adapter-staleness-logging（事故诊断 → 自愈 + 日志改进，已归档）
+
+- 起因：2026-09-17 20:02–20:08 断网事故。诊断结论：18:04 的 degraded/refresh 管线按设计工作（无关）；真实根因是主机链路状态在 NDISRD 绑定列表之外变化（嫌疑 IPv6 临时地址轮换），适配器视图从最后一次 refresh 起永久 stale——sing-box 到节点的 v6 出站 SYN 黑洞，只有重启恢复。交叉证据：smoke/sing-box 日志显示其 loopback inbound 正常、WinForward 握手正常、唯独节点 dial i/o timeout 与 WinForward relay setup failed 逐条对齐。
+- 交付：双通道自愈（30s 周期重枚举 + 地址指纹 diff；失败率阈值 forced refresh，三层防风暴）+ 全面诊断日志（6 个静默失败点补 warn、心跳、降噪、README 事件表）。测试 589→649。
+- E1 抓到关键 bug：MIB_UNICASTIPADDRESS_ROW 行起始偏移是 8（NET_LUID 对齐）而非 4——原实现会把根因修复在真机静默失效。已修 + 毒值测试锁定。教训入 spec：iphlpapi 表行偏移由行内最大对齐类决定，新表必须推导并用 poisoned-padding 测试钉住。
+- 下次 Windows 硬件运行时验证一次地址指纹非空。
+- 提交：a6ca464（测试稳定性）/ 6d95301（主实现）/ 325ba53（spec）/ a1d9f31（任务档案）+ 归档自动提交。
