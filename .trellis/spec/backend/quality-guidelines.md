@@ -34,6 +34,8 @@
 - Flow lookup regressions must verify that an observation refreshes `LastActivityUtc` before an idle-expiry boundary; also preserve a non-observing lookup test where applicable.
 - Configuration tests must cover null DTO array entries, merged adjacent/overlapping port ranges, unknown JSON field paths, and paired credential limits at both 255-byte accepted and 256-byte rejected UTF-8 boundaries.
 - Lifecycle tests must assert coordinator disposal precedes mode restoration on normal completion, capture failure, and concurrent stop, using an ordered event seam rather than scheduler timing.
+- Every native buffer rent site ships a balance regression: rent N → return N → dispose → assert the pool reports `InPool == N`, `Rented == Returned`, `Outstanding == 0`; an overflow or exception path that rents must additionally prove the buffer is still returned (the L1 pattern). Add a dispose-race test where returns overlap `Dispose` and prove no buffer is stranded or double-freed. See `hot-path.md` → "Native pool family, pooled flow/setup state, and GC-off posture".
+- Steady-state paths must not materialize managed copies: no `ToArray()`, no `new byte[]`, and no fresh `EndPoint` handed to a socket send overload (serialize the destination once and cache the `SocketAddress`). An allocation gate that uses a fake collaborator cannot see a trap inside the real one — for any path whose real collaborator can allocate, include at least one gate against the real collaborator (loopback) or a dedicated regression test. See `hot-path.md` → "Allocation gates must exercise the real production collaborator".
 
 ## Scenario: Bounded Pooled SOCKS5 UDP Receive Storage
 

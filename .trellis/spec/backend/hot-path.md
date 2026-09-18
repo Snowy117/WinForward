@@ -282,3 +282,134 @@ public ValueTask<bool> TrySendSpanAsync(...)
 private void ScheduleSessionSetup(FlowKey flow, Socks5Server server, long flowGeneration, byte[]? capturedClientMac, UdpSessionSlot slot)
     => slot.Completion = Task.Run(() => _setup.CreateSessionAsync(flow, server, flowGeneration, capturedClientMac, _shutdown.Token, slot));
 ```
+
+## Native pool family, pooled flow/setup state, and GC-off posture (task 09-18, 2026-09-18)
+
+### 1. Scope / Trigger
+
+Trigger: any new native rent site, any change to `NativeBufferPool`/`NativeLease`, `FlowTable`
+pooling, `SetupExecutor`, the native relay/UDP receive windows, the allocation gates, or the CLI
+GC configuration. This is the contract for the full-path zeroing milestone (M1-M5).
+
+### 2. Signatures
+
+- `NativeBufferPool(int byteSize, int capacity = 256, Action<bool>? accountingSink = null)`
+  (`src/WinForward.Core/NativeBufferPool.cs`): `Rent() -> NativeLease`, `Dispose()`, and
+  `Stats` with interlocked `Rented` / `Returned` / `InPool` / `DisposedCount` /
+  `OverflowAllocations` / `Outstanding`. Overflow allocates-and-tracks instead of failing.
+- `NativeLease` (struct): `Span<byte>`, `Memory<byte>` (backed by `NativeMemoryManager :
+  MemoryManager<byte>`, one manager per fresh native allocation, never per rent), and an
+  idempotent `Dispose()`. `MemoryManager.Pin` returns the raw pointer, `Unpin` is a no-op
+  (native memory never moves), so `NetworkStream`/`Socket` async IO can consume `lease.Memory`.
+- `SetupExecutor` (`src/WinForward.Runtime/SetupExecutor.cs`): MPMC `ConcurrentQueue` ring +
+  `SemaphoreSlim` signal + dedicated `Thread` workers (`DefaultWorkerCount = max(2 × CPU, 16)`,
+  `DefaultRingCapacity = 1024`); `StartPendingSetup`/`LaunchSetup` replace per-flow `Task.Run`.
+- `FlowTable(capacity)`: `_states`/`_transportIndex` pre-sized dictionaries plus a
+  `FlowState[]` free list; `FlowState.Reset(FlowKey, FlowDecision, long)` re-initializes in
+  place; `RemoveExpired` returns states.
+- `UdpProxyCoordinator.ReceiveWindowSize(int maximumFrameSize) = frame + 22 + 1` — the single
+  source of truth shared by composition and the receiver.
+- `Socks5UdpTransport` ctor caches `_relaySocketAddress = relayEndpoint.Serialize()`.
+- `RuntimeHeartbeat`: `RuntimeGcSnapshot(Gen0Collections, Gen1Collections, Gen2Collections,
+  AllocatedBytes)`, a startup mark, an injectable snapshot provider, and the
+  `WarnGcCollected` warn-on-new-collection event.
+
+### 3. Contracts
+
+- **Native lease ownership.** Every rent is `using`/`try-finally`; release exactly once per
+  rental. Release is idempotent across copies of a lease (in-band `int` state cell,
+  `StateRented → StateIdle`), and a return racing `Dispose` is freed by exactly one drainer
+  (no stranding, no double free). A release from a *stale* copy after the buffer was re-rented
+  is a **rental-contract violation** (no in-tree violator); never double-release or retain a
+  lease past its owning scope.
+- **`lease.Memory` is valid only until release.** It is the documented bridge for async IO over
+  native memory; do not hold it across a release. The pool's own size-class pools are the relay
+  pump (64 KiB), the UDP receive window (`ReceiveWindowSize`), the SYN copy, and the setup slot.
+- **FlowTable pooling.** `RemoveExpired` returns states under the gate; every successful
+  `TryResolve` calls `Touch` before returning, so a live state cannot be idle-expired. Reuse
+  means a `FlowState` reference held *past* expiry could observe the next flow's fields —
+  callers must read state within the gate-held / `Touch`-refreshed operation (no production path
+  retains a `FlowState` across an await).
+- **SetupExecutor.** Per-item exception containment (`TrySetException`), balanced
+  pending/enqueued/completed/rejected counters, lazy worker start, and `Dispose` joins workers,
+  drains queued items (canceling their completions), and refuses new work. A worker that
+  dequeues after `_disposed` drains that item instead of executing it.
+- **GC posture (CLI).** `WinForward.Cli.csproj` sets `ServerGarbageCollection=false`,
+  `ConcurrentGarbageCollection=false`, `RetainVMGarbageCollection=false`, and the fuse
+  `System.GC.HeapHardLimit` (bytes) via `<RuntimeHostConfigurationOption>` — there is **no**
+  MSBuild GC property for this key, and the explicit item is what guarantees the
+  runtimeconfig.json entry in both JIT and AOT publishes. The fuse value is documented in-csproj
+  with its measurement basis.
+- **`gc-soak` asserted contract.** Steady state = established flows only (no new setup inside the
+  measured window, since per-connection BCL allocations are Out-of-Scope). The scenario asserts
+  the application-level guarantee — UDP forward lanes stay within the leak allowance
+  (`max(64 KiB, sends/512)`, far below any per-datagram leak), pools return `Outstanding`/`
+  OverflowAllocations` to baseline, and the working-set slope/growth stay flat — and *reports*
+  process-wide `gen0/1/2` and allocated bytes. Process-wide "gen counts unchanged" is not
+  assertable on the loopback harness; the heartbeat `gc.collected` alarm is the field signal.
+- **Allocation gates must exercise the real production collaborator.** A gate built on a fake
+  that implements the same interface cannot observe an allocation trap inside the real
+  collaborator. `Socks5UdpTransport` handed a fresh `EndPoint` to `Socket.SendTo`/`SendToAsync`,
+  which serializes it to a `SocketAddress` — **72 B per relay datagram** on the product's main
+  path — while every fake-transport gate stayed green. When a path's real collaborator can
+  allocate, add at least one gate against the real one (loopback) or a dedicated regression test.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Rent N → return N → dispose | `Stats.InPool == N`, `Rented == Returned`, `Outstanding == 0` |
+| Return racing `Dispose` | freed by the drain or the return's post-enqueue recheck, exactly once |
+| Second release of a lease copy | no-op (in-band state already idle) |
+| Release of a stale copy after re-rent | contract violation — would enqueue a buffer another renter holds; do not write such code |
+| Pool at capacity, all in use | overflow allocates and increments `OverflowAllocations`; never fails mid-packet |
+| `NativeLease.Memory` used after release | invalid — memory may be re-rented (documented "valid until release") |
+| Warm entry hands the real relay socket an `EndPoint` | 72 B/datagram (forbidden); use the cached `SocketAddress` |
+| `SetupExecutor.TryEnqueue` after dispose | refuses; item completed/rejected, no `ObjectDisposedException` escapes |
+| Post-dispose worker dequeues an item | drains it (canceled completion + recycled) instead of executing |
+| `FlowState` reused after expiry | caller must not observe it past the gate-held operation |
+| Fuse key misspelled / MSBuild property used | runtimeconfig.json has no `System.GC.HeapHardLimit`; fuse silently absent |
+
+### 5. Good/Base/Bad Cases
+
+- Good: a warm UDP relay datagram is encoded into the transport's buffer and handed to the
+  kernel via the cached `SocketAddress` — 0 B on the calling thread.
+- Base: a native pool at capacity under a burst allocates-and-tracks overflow; the heartbeat
+  surfaces `poolOccupancy` and the soak fails if `OverflowAllocations` moved.
+- Bad: `new byte[6]`/`ToArray()`/`EndPoint` serialization on a steady-state path; holding a
+  lease's `Memory` past release; asserting process-wide zero-GC on a harness that allocates
+  BCL infrastructure.
+
+### 6. Tests Required
+
+- `NativeBufferPoolTests`: rent/return balance, dispose-drain races, idempotent release,
+  `Memory` round-trip, 0 managed bytes on warm re-rent.
+- `NdisPacketBufferPoolTests`: L1 (overflow-throw still returns the buffer) + L2 dispose-drain.
+- `FlowTableClaimAndExpireCycleAllocatesNoManagedBytes` / `FlowTableRecyclesExpiredStatesThroughItsPool`.
+- `SetupExecutorTests`: balance, reject-beyond-capacity, fault-keeps-draining, dispose joins/
+  drains/refuses.
+- `Socks5UdpTransportSendTests.WarmSyncSendAllocatesNoManagedBytes`: real relay socket, warm
+  synchronous `SendAsync` completes on the calling thread with 0 B (the EndPoint-trap regression).
+- `HotPathAllocationGateTests`: per-packet (TCP mid-flow/reverse, UDP, socks5, RST, SYN
+  retention, FlowTable, dispatcher warm path) 0 B gates.
+- `GcSoakScenarioTests`: token parsing/defaults/selection, leak allowance, slope helper.
+
+### 7. Wrong vs Correct
+
+```csharp
+// Wrong: a fresh EndPoint reaches the kernel every datagram — SocketAddress serialization
+// allocates 72 B/op, invisible to any fake-transport gate.
+_socket.SendTo(_sendBuffer.AsSpan(0, written), SocketFlags.None, relayEndpoint);
+
+// Correct: serialize once in the ctor; the send sites stay allocation-free.
+_relaySocketAddress = relayEndpoint.Serialize();
+_socket.SendTo(_sendBuffer.AsSpan(0, written), SocketFlags.None, _relaySocketAddress);
+```
+
+```csharp
+// Wrong: assert process-wide zero-GC on a loopback harness whose BCL async receives and lock
+// infrastructure allocate on park — the gate can never hold and hides nothing useful.
+
+// Correct: assert the application-level guarantee per sending thread (leak-bounded) and report
+// process-wide gen counts as observability; the field alarm is the heartbeat warn event.
+```
