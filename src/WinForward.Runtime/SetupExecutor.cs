@@ -107,6 +107,9 @@ public sealed class SetupExecutor : ISetupExecutor
     public int WorkerCount => _workerCount;
     public int PendingCount => Volatile.Read(ref _pendingCount);
     public int FreeCount => _free.Count;
+
+    /// <summary>True once <see cref="Dispose"/> has begun; new work is refused and workers stop.</summary>
+    internal bool IsDisposed => Volatile.Read(ref _disposed) != 0;
     public long EnqueuedCount => Interlocked.Read(ref _enqueuedCount);
     public long CompletedCount => Interlocked.Read(ref _completedCount);
     public long RejectedCount => Interlocked.Read(ref _rejectedCount);
@@ -139,7 +142,15 @@ public sealed class SetupExecutor : ISetupExecutor
 
         EnsureWorkers();
         _ring.Enqueue(item);
-        _signal.Release();
+        try
+        {
+            _signal.Release();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Shutdown raced the enqueue; the item is fail-closed rather than surfaced to the caller.
+        }
+
         Interlocked.Increment(ref _enqueuedCount);
         return true;
     }
@@ -186,6 +197,11 @@ public sealed class SetupExecutor : ISetupExecutor
             }
 
             if (!_ring.TryDequeue(out var item)) continue;
+            if (IsDisposed)
+            {
+                DrainItem(item);
+                return;
+            }
             Execute(item);
         }
     }
@@ -227,15 +243,22 @@ public sealed class SetupExecutor : ISetupExecutor
             foreach (var thread in workers) thread.Join();
         }
 
-        while (_ring.TryDequeue(out var item))
-        {
-            Interlocked.Decrement(ref _pendingCount);
-            item.Completion?.TrySetCanceled();
-            item.Reset();
-            if (_free.Count < _capacity) _free.Enqueue(item);
-        }
+        while (_ring.TryDequeue(out var item)) DrainItem(item);
 
         _signal.Dispose();
         _shutdown.Dispose();
+    }
+
+    /// <summary>
+    /// Fail-closes one item that never started: cancels its completion, decrements the pending
+    /// count, and recycles the slot. Shared by <see cref="Dispose"/> and a worker that observes
+    /// <see cref="IsDisposed"/> after dequeuing, so both sinks account identically.
+    /// </summary>
+    private void DrainItem(SetupWorkItem item)
+    {
+        Interlocked.Decrement(ref _pendingCount);
+        item.Completion?.TrySetCanceled();
+        item.Reset();
+        if (_free.Count < _capacity) _free.Enqueue(item);
     }
 }

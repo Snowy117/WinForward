@@ -62,6 +62,71 @@ public sealed class SetupExecutorTests
         Assert.Equal(0, executor.PendingCount);
     }
 
+    [Fact]
+    public async Task SetupExecutorFaultsTheItemCompletionAndKeepsDraining()
+    {
+        using var executor = new SetupExecutor(workerCount: 1, ringCapacity: 4);
+
+        var failing = executor.RentItem();
+        var failedCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        failing.Handler = static _ => Task.FromException(new InvalidOperationException("boom"));
+        failing.Completion = failedCompletion;
+        Assert.True(executor.TryEnqueue(failing));
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => failedCompletion.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal("boom", thrown.Message);
+        Assert.Equal(1, executor.CompletedCount);
+        Assert.Equal(0, executor.PendingCount);
+        await WaitForAsync(() => executor.FreeCount == 1);
+
+        // A faulted item never kills the worker: later work still runs and the slot was recycled.
+        var healthy = executor.RentItem();
+        var healthyCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        healthy.Handler = static _ => Task.CompletedTask;
+        healthy.Completion = healthyCompletion;
+        Assert.True(executor.TryEnqueue(healthy));
+        await healthyCompletion.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(2, executor.CompletedCount);
+    }
+
+    [Fact]
+    public async Task SetupExecutorDisposeJoinsWorkersDrainsTheRingAndRefusesNewWork()
+    {
+        // One worker parks on the gate, so the second item provably stays queued until Dispose drains it.
+        var executor = new SetupExecutor(workerCount: 1, ringCapacity: 4);
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var running = executor.RentItem();
+        running.Handler = _ => gate.Task;
+        running.Completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Assert.True(executor.TryEnqueue(running));
+
+        // A second item is queued behind the blocked worker; it must be drained, not left hanging.
+        var queued = executor.RentItem();
+        var queuedCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        queued.Handler = static _ => Task.CompletedTask;
+        queued.Completion = queuedCompletion;
+        Assert.True(executor.TryEnqueue(queued));
+
+        var dispose = Task.Run(executor.Dispose);
+        await WaitForAsync(() => executor.IsDisposed);
+        gate.TrySetResult();
+        await dispose.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.True(queuedCompletion.Task.IsCanceled);
+        Assert.Equal(0, executor.PendingCount);
+
+        // Post-dispose enqueues are refused (and the slot recycled), never thrown.
+        var late = executor.RentItem();
+        late.Handler = static _ => Task.CompletedTask;
+        late.Completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Assert.False(executor.TryEnqueue(late));
+
+        // Dispose is idempotent.
+        executor.Dispose();
+    }
+
     private static async Task RunRoundAsync(SetupExecutor executor, int slotCount)
     {
         var items = new SetupWorkItem[slotCount];

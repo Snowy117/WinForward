@@ -125,7 +125,7 @@ public sealed unsafe class NativeBufferPool : IDisposable
     }
 
     private static bool TryMarkRented(void* pointer) =>
-        Interlocked.CompareExchange(ref *((byte*)pointer - sizeof(int)), StateRented, StateIdle) == StateIdle;
+        Interlocked.CompareExchange(ref *(int*)((byte*)pointer - sizeof(int)), StateRented, StateIdle) == StateIdle;
 
     public void Dispose()
     {

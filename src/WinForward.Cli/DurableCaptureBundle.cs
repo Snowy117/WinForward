@@ -117,12 +117,15 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         // One native pool backs the two per-direction relay pump windows (B11).
         var relayPool = new NativeBufferPool(TcpProxyRelayFactory.PumpBufferSize);
         RegisterPool(runtimeCounters, RelayPoolName, relayPool);
+        // One address cache backs both proxies' SOCKS5 control connections (B9/R3): the configured
+        // endpoint is resolved once here and reused on every TCP relay and UDP session setup.
+        var addressCache = new Socks5AddressCache();
         // One pooled setup executor is shared by both coordinators (B5); the bundle owns it.
         var setupExecutor = new SetupExecutor(configuration.SetupWorkerCount);
         TcpProxyCoordinator tcpCoordinator;
         try
         {
-            tcpCoordinator = CreateTcpCoordinator(configuration, reinjector, selfTraffic, logger, healthSignal, redirectTable, synCopyPool, relayPool, setupExecutor);
+            tcpCoordinator = CreateTcpCoordinator(configuration, reinjector, selfTraffic, logger, healthSignal, redirectTable, synCopyPool, relayPool, setupExecutor, addressCache);
         }
         catch
         {
@@ -133,7 +136,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         }
         try
         {
-            return await BuildWithUdpAsync(configuration, reinjector, selfTraffic, logger, healthSignal, runtimeCounters, tcpCoordinator, synCopyPool, relayPool, setupExecutor).ConfigureAwait(false);
+            return await BuildWithUdpAsync(configuration, reinjector, selfTraffic, logger, healthSignal, runtimeCounters, tcpCoordinator, synCopyPool, relayPool, setupExecutor, addressCache).ConfigureAwait(false);
         }
         catch
         {
@@ -168,7 +171,8 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         TcpProxyCoordinator tcpCoordinator,
         NativeBufferPool synCopyPool,
         NativeBufferPool relayPool,
-        SetupExecutor setupExecutor)
+        SetupExecutor setupExecutor,
+        Socks5AddressCache addressCache)
     {
         // Single source of truth for every datagram-path buffer bound: the transport send buffer
         // (6 + 16 + cap), the coordinator receive windows (cap + 22 + 1), the reinjector's
@@ -176,7 +180,6 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         // should ever change; every component follows it from here.
         var maximumFrameSize = NdisApiAbi.MaximumEthernetFrame;
         var udpTargets = new UdpAdapterTargetSource();
-        var addressCache = new Socks5AddressCache();
         await PrimeSocks5AddressCacheAsync(configuration, addressCache, logger).ConfigureAwait(false);
         // One native pool backs every queued setup datagram (B4); the coordinator owns it when
         // none is injected, so production passes it and disposes it here after release.
@@ -281,10 +284,11 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         TcpRedirectTable redirectTable,
         NativeBufferPool synCopyPool,
         NativeBufferPool relayPool,
-        SetupExecutor setupExecutor)
+        SetupExecutor setupExecutor,
+        Socks5AddressCache addressCache)
         => new(
             new TcpRedirectListenerFactory(),
-            new TcpProxyRelayFactory(selfTraffic, logger, relayPool),
+            new TcpProxyRelayFactory(selfTraffic, logger, relayPool, addressCache),
             new TcpRedirectInjector(reinjector),
             redirectTable,
             selfTraffic,

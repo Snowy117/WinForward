@@ -209,7 +209,10 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         // one bounded managed copy here — the cold setup boundary. The retention itself is
         // alloc-free (the retransmission overwrite never copies); only the first SYN of a flow
         // pays this, and later retransmissions keep reusing the running task's launch-time copy.
-        var frame = lease.Span[..source.Length].ToArray();
+        // Source the copy from the dispatch-valid capture view: TryRetain has transferred the
+        // lease to the index, where a concurrent same-flow retransmission may overwrite and
+        // dispose it before this line runs.
+        var frame = source.ToArray();
         if (!LaunchSetup(key, created, frame, server))
         {
             Interlocked.Increment(ref _capacityRejectionCount);

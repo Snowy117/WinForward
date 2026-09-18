@@ -9,7 +9,7 @@ using WinForward.Runtime.Socks5;
 namespace WinForward.Runtime.TcpRedirect;
 
 [SupportedOSPlatform("windows")]
-public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic, IRuntimeLogger? logger = null, NativeBufferPool? pumpBufferPool = null) : ITcpProxyRelayFactory
+public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic, IRuntimeLogger? logger = null, NativeBufferPool? pumpBufferPool = null, Socks5AddressCache? addressCache = null) : ITcpProxyRelayFactory
 {
     // The redirect leg completes the client's TCP handshake in tens of milliseconds, so the relay's
     // upstream connect budget bounds how long an unreachable/black-holed SOCKS5 server delays the
@@ -43,7 +43,8 @@ public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic, IRunti
                 Endpoint.From(local.Address, checked((ushort)local.Port)),
                 Endpoint.From(remote.Address, checked((ushort)remote.Port)))),
             maxAttempts: RelayConnectMaxAttempts,
-            perAttemptTimeout: RelayConnectAttemptTimeout).ConfigureAwait(false);
+            perAttemptTimeout: RelayConnectAttemptTimeout,
+            addressCache: addressCache).ConfigureAwait(false);
         try
         {
             var destinationAddress = originalDestination.Address;
