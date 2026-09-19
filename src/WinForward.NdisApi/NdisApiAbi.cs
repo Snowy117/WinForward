@@ -8,8 +8,6 @@ namespace WinForward.NdisApi;
 
 public static class NdisApiAbi
 {
-    public const string UpstreamVersion = "v3.6.2";
-    public const string UpstreamCommit = "417b8734e844083a10236387fba705d94a2d6bc9";
     public const int AdapterListSize = 32;
     public const int AdapterNameSize = 256;
     public const int EthernetAddressLength = 6;
@@ -18,7 +16,6 @@ public static class NdisApiAbi
     public const uint PacketFlagOnReceive = 0x00000002;
     public const uint SentTunnel = 0x00000001;
     public const uint ReceiveTunnel = 0x00000002;
-    public const uint LoopbackFilter = 0x00000020;
 
     public static void AssertManagedX64Layout()
     {

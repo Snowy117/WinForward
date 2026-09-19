@@ -42,7 +42,7 @@ public sealed class IdleExpirySweeperFailureTests
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), new FakeExecutor());
         var flow = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
 
-        Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 1 }, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 1 }, default, CancellationToken.None));
         await WaitForAsync(() => transportFactory.Transport is not null);
 
         await using var sweeper = new IdleExpirySweeper(
@@ -88,8 +88,6 @@ public sealed class IdleExpirySweeperFailureTests
 
         public IPEndPoint RelayEndpoint { get; } = new(IPAddress.Loopback, 50000);
         public IPEndPoint LocalEndpoint { get; } = new(IPAddress.Loopback, 40010);
-
-        public ValueTask SendAsync(Endpoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken) => ValueTask.CompletedTask;
 
         public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken) => ValueTask.CompletedTask;
 

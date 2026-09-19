@@ -28,8 +28,6 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
     internal const int MaxPacketsPerSendRequest = (MaxStackMultiRequestBytes - 16) / 8;
 
     private readonly NdisApiSafeHandle _handle;
-    private long _batchedSendFlushCount;
-    private long _batchedSendPacketCount;
     private readonly NdisNativeCallGate _controlGate = new();
     private readonly NdisAdapterGateMap _adapterGates = new();
 
@@ -290,8 +288,6 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
                 throw new Win32Exception(error, $"Unable to inject {chunkCount} NDISAPI packets toward {target} (native error {error}, packets {offset}..{offset + chunkCount - 1} of {count}, adapter 0x{adapterHandle:X}).");
             }
         }
-        Interlocked.Increment(ref _batchedSendFlushCount);
-        Interlocked.Add(ref _batchedSendPacketCount, count);
     }
 
     public void Dispose()
@@ -299,25 +295,6 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
         using var gateLease = _controlGate.Enter();
         _handle.Dispose();
     }
-
-    /// <summary>Telemetry: maximum concurrent native calls observed on the control gate.</summary>
-    internal int ControlGateMaxConcurrentCalls => _controlGate.MaxConcurrentCalls;
-
-    /// <summary>
-    /// Telemetry: successful batched send flushes. Compared with <see cref="BatchedSendPacketCount"/>
-    /// this yields the average reinjection batch size — the syscall-amortization evidence for the
-    /// batched pass path (task 08-30-batched-ioctls).
-    /// </summary>
-    internal long BatchedSendFlushCount => Volatile.Read(ref _batchedSendFlushCount);
-
-    /// <summary>Telemetry: packets delivered through successful batched send flushes.</summary>
-    internal long BatchedSendPacketCount => Volatile.Read(ref _batchedSendPacketCount);
-
-    /// <summary>
-    /// Telemetry snapshot of the maximum concurrent native calls observed per adapter gate,
-    /// keyed by adapter enumeration handle.
-    /// </summary>
-    internal IReadOnlyDictionary<nint, int> GetAdapterGateMaxConcurrentCalls() => _adapterGates.GetMaxConcurrentCalls();
 
     private static unsafe string ReadAscii(byte* source, int offset, int capacity)
     {

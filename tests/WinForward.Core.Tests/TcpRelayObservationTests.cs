@@ -111,7 +111,7 @@ public sealed class TcpRelayObservationTests
         var association = new TcpRedirectAssociation(key, key.Remote, new AdapterContext("eth0", "Ethernet", 1), 0x1234, Endpoint.From(IPAddress.Loopback, 40000), null, 1, DateTimeOffset.UtcNow);
         listener = new FakeListener(association.TranslatedListenerTuple);
         var token = new SelfTrafficRegistry().Register(new SelfTrafficRegistry.SelfTrafficKey(TransportProtocol.Tcp, association.TranslatedListenerTuple, association.TranslatedListenerTuple));
-        return new TcpRedirectSession(association, listener, token, new Socks5Server("primary", "127.0.0.1", 1080, null, null), CancellationToken.None);
+        return new TcpRedirectSession(association, listener, token, new Socks5Server("primary", "127.0.0.1", 1080, null, null), CancellationToken.None, 0);
     }
 
     private static async Task<(Socket Peer, Socket Relay)> CreateSocketPairAsync()

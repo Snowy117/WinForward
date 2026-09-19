@@ -62,7 +62,7 @@ public sealed class Socks5UdpAssociateTests
             FlowOriginKind.Host);
         var payload = new byte[] { 0xde, 0xad, 0xbe, 0xef };
 
-        Assert.True(await coordinator.TrySendAsync(flow, socksServer, payload, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, socksServer, payload, default, CancellationToken.None));
 
         var request = await associateRequest.Task.WaitAsync(CancellationToken.None);
         Assert.Equal(new byte[] { 5, 3, 0, 1, 0, 0, 0, 0, 0, 0 }, request);
@@ -108,12 +108,12 @@ public sealed class Socks5UdpAssociateTests
             serverCancellation.Token);
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), null, null);
         var registry = new SelfTrafficRegistry();
-        var transport = await Socks5UdpTransport.CreateAsync(socksServer, registry, CancellationToken.None);
+        var transport = await Socks5UdpTransport.CreateAsync(socksServer, registry, CancellationToken.None, createControl: null, socketFactory: null);
         var destination = Endpoint.From(IPAddress.Parse("2001:db8::53"), 5353);
         var payload = new byte[] { 1, 2, 3 };
 
         Assert.Equal(AddressFamily.InterNetworkV6, transport.LocalEndpoint.AddressFamily);
-        await transport.SendAsync(destination, payload, CancellationToken.None);
+        await transport.SendSpanAsync(destination, payload, CancellationToken.None);
 
         var request = await associateRequest.Task.WaitAsync(CancellationToken.None);
         Assert.Equal(22, request.Length);
@@ -145,6 +145,7 @@ public sealed class Socks5UdpAssociateTests
         var control = await Socks5ControlConnection.ConnectAsync(
             socksServer,
             CancellationToken.None,
+            resolveAddresses: null,
             onSocketReady: (_, _) => registration,
             socketFactory: family => socket = new TrackingSocket(family, SocketType.Stream, ProtocolType.Tcp));
         await control.DisposeAsync();
@@ -226,7 +227,7 @@ public sealed class Socks5UdpAssociateTests
             CancellationToken.None,
             null,
             family => socket = new TrackingSocket(family));
-        await transport.SendAsync(Endpoint.From(IPAddress.Loopback, 53), new byte[] { 1 }, CancellationToken.None);
+        await transport.SendSpanAsync(Endpoint.From(IPAddress.Loopback, 53), new byte[] { 1 }, CancellationToken.None);
         var packet = await relayPacket.Task.WaitAsync(CancellationToken.None);
         var local = Endpoint.From(packet.Sender.Address, checked((ushort)packet.Sender.Port));
         var relay = Endpoint.From(relayEndpoint.Address, checked((ushort)relayEndpoint.Port));

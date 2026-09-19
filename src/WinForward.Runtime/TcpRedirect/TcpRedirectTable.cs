@@ -231,9 +231,6 @@ public sealed class TcpRedirectTable
         }
     }
 
-    public bool TryResolveByTranslated(Endpoint translatedTuple, DateTimeOffset now, out TcpRedirectAssociation? association) =>
-        TryFind(_byTranslatedListener, translatedTuple, now, out association);
-
     /// <summary>
     /// Resolves a reverse redirect frame by its complete pre-rewrite wire tuple. The tuple shape
     /// follows the association origin: a host flow's listener replies from

@@ -314,10 +314,11 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
             if (_lastClient is null) return;
             var address = _lastDestinationAddress ?? _echoAddress;
             var port = _lastDestinationAddress is not null ? _lastDestinationPort : checked((ushort)_echoDestination.Port);
-            var datagram = Socks5UdpCodec.Encode(address, port, payload.Span);
+            var datagram = new byte[6 + 16 + payload.Length];
+            if (!Socks5UdpCodec.TryEncode(address, port, payload.Span, datagram, out var written)) return;
             try
             {
-                _ = _relay.SendTo(datagram.AsSpan(), SocketFlags.None, _lastClient);
+                _ = _relay.SendTo(datagram.AsSpan(0, written), SocketFlags.None, _lastClient);
                 return;
             }
             catch (SocketException)
@@ -325,7 +326,7 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
                 // WouldBlock: the kernel send queue is momentarily full; use the overlapped send below.
             }
 
-            _ = await _relay.SendToAsync(datagram, SocketFlags.None, _lastClient).ConfigureAwait(false);
+            _ = await _relay.SendToAsync(datagram.AsMemory(0, written), SocketFlags.None, _lastClient).ConfigureAwait(false);
         }
 
         public ValueTask DisposeAsync()

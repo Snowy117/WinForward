@@ -29,21 +29,21 @@ public sealed class UdpRelayTests
         var destination = IPAddress.Parse("192.0.2.10");
         var payload = new byte[] { 0xde, 0xad, 0xbe, 0xef };
 
-        Assert.True(UdpFrameBuilder.TryBuild(source, 53, destination, 53000, payload, s_macA, s_macB, out var frame));
-        Assert.True(IPUdpPacket.TryParse(frame, out var udp));
+        Assert.True(TryBuildUdpFrame(source, 53, destination, 53000, payload, s_macA, s_macB, out var frame));
+        Assert.True(IPUdpPacket.TryParseSpan(frame, out var udp));
 
         Assert.Equal(source, udp.SourceAddress);
         Assert.Equal(destination, udp.DestinationAddress);
         Assert.Equal((ushort)53, udp.SourcePort);
         Assert.Equal((ushort)53000, udp.DestinationPort);
-        Assert.Equal(payload, udp.Payload.ToArray());
+        Assert.Equal(payload, udp.Payload(frame).ToArray());
         Assert.Equal(20, udp.IPHeaderLength);
     }
 
     [Fact]
     public void Ipv4HeaderChecksumValidatesToZero()
     {
-        Assert.True(UdpFrameBuilder.TryBuild(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[] { 1, 2, 3 }, s_macA, s_macB, out var frame));
+        Assert.True(TryBuildUdpFrame(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[] { 1, 2, 3 }, s_macA, s_macB, out var frame));
         Assert.Equal((ushort)0, PacketChecksums.InternetChecksum(frame.AsSpan(14, 20)));
     }
 
@@ -54,7 +54,7 @@ public sealed class UdpRelayTests
         var destination = IPAddress.Parse("192.0.2.10");
         var payload = new byte[] { 0xaa, 0xbb, 0xcc };
 
-        Assert.True(UdpFrameBuilder.TryBuild(source, 53, destination, 53000, payload, s_macA, s_macB, out var frame));
+        Assert.True(TryBuildUdpFrame(source, 53, destination, 53000, payload, s_macA, s_macB, out var frame));
 
         var udpLength = 8 + payload.Length;
         var sum = Sum(source.GetAddressBytes()) + Sum(destination.GetAddressBytes()) + 17u + (ushort)udpLength + Sum(frame.AsSpan(34, udpLength));
@@ -86,7 +86,7 @@ public sealed class UdpRelayTests
         var payloadWord = folded == 0 ? (ushort)0xFFFF : (ushort)(0xFFFF - folded);
         var payload = new[] { (byte)(payloadWord >> 8), (byte)payloadWord };
 
-        Assert.True(UdpFrameBuilder.TryBuild(source, sourcePort, destination, destinationPort, payload, s_macA, s_macB, out var frame));
+        Assert.True(TryBuildUdpFrame(source, sourcePort, destination, destinationPort, payload, s_macA, s_macB, out var frame));
         Assert.Equal((ushort)0xFFFF, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(34 + 6, 2)));
 
         // The transmitted 0xFFFF still validates when the receiver folds the whole datagram.
@@ -101,14 +101,14 @@ public sealed class UdpRelayTests
         var destination = IPAddress.Parse("2001:db8::10");
         var payload = new byte[] { 0x01, 0x02, 0x03, 0x04, 0x05 };
 
-        Assert.True(UdpFrameBuilder.TryBuild(source, 53, destination, 53000, payload, s_macA, s_macB, out var frame));
-        Assert.True(IPUdpPacket.TryParse(frame, out var udp));
+        Assert.True(TryBuildUdpFrame(source, 53, destination, 53000, payload, s_macA, s_macB, out var frame));
+        Assert.True(IPUdpPacket.TryParseSpan(frame, out var udp));
 
         Assert.Equal(source, udp.SourceAddress);
         Assert.Equal(destination, udp.DestinationAddress);
         Assert.Equal((ushort)53, udp.SourcePort);
         Assert.Equal((ushort)53000, udp.DestinationPort);
-        Assert.Equal(payload, udp.Payload.ToArray());
+        Assert.Equal(payload, udp.Payload(frame).ToArray());
         Assert.Equal(40, udp.IPHeaderLength);
 
         var udpLength = 8 + payload.Length;
@@ -119,23 +119,23 @@ public sealed class UdpRelayTests
     [Fact]
     public void RejectsMismatchedAddressFamilies()
     {
-        Assert.False(UdpFrameBuilder.TryBuild(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("2001:db8::10"), 53000, new byte[] { 1 }, s_macA, s_macB, out _));
-        Assert.False(UdpFrameBuilder.TryBuild(IPAddress.Parse("2001:db8::53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[] { 1 }, s_macA, s_macB, out _));
+        Assert.False(TryBuildUdpFrame(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("2001:db8::10"), 53000, new byte[] { 1 }, s_macA, s_macB, out _));
+        Assert.False(TryBuildUdpFrame(IPAddress.Parse("2001:db8::53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[] { 1 }, s_macA, s_macB, out _));
     }
 
     [Fact]
     public void RejectsBadMacLengths()
     {
-        Assert.False(UdpFrameBuilder.TryBuild(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[] { 1 }, new byte[] { 1, 2, 3, 4, 5 }, s_macB, out _));
-        Assert.False(UdpFrameBuilder.TryBuild(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[] { 1 }, s_macA, new byte[] { 1, 2, 3, 4, 5, 6, 7 }, out _));
-        Assert.False(UdpFrameBuilder.TryBuild(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[] { 1 }, ReadOnlySpan<byte>.Empty, s_macB, out _));
+        Assert.False(TryBuildUdpFrame(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[] { 1 }, new byte[] { 1, 2, 3, 4, 5 }, s_macB, out _));
+        Assert.False(TryBuildUdpFrame(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[] { 1 }, s_macA, new byte[] { 1, 2, 3, 4, 5, 6, 7 }, out _));
+        Assert.False(TryBuildUdpFrame(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[] { 1 }, ReadOnlySpan<byte>.Empty, s_macB, out _));
     }
 
     [Fact]
     public void RejectsOversizedFrame()
     {
         var payload = new byte[UdpFrameBuilder.MaximumEthernetFrame];
-        Assert.False(UdpFrameBuilder.TryBuild(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, payload, s_macA, s_macB, out _));
+        Assert.False(TryBuildUdpFrame(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, payload, s_macA, s_macB, out _));
     }
 
     [Theory]
@@ -148,30 +148,8 @@ public sealed class UdpRelayTests
         // exactly and cap - 41 exceeds it. The cap must not be a hard-coded 1514 magic number.
         var fits = cap - 42;
         var overflow = cap - 41;
-        Assert.True(UdpFrameBuilder.TryBuild(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[fits], s_macA, s_macB, out _, cap));
-        Assert.False(UdpFrameBuilder.TryBuild(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[overflow], s_macA, s_macB, out _, cap));
-    }
-
-    [Theory]
-    [InlineData("192.0.2.53", "192.0.2.10")]
-    [InlineData("2001:db8::53", "2001:db8::10")]
-    public void TryBuildIntoMatchesTheAllocatingTryBuildByteForByte(string source, string destination)
-    {
-        // R4: the span-writing overload must produce byte-identical frames so the pooled
-        // reinjection path shares one header/checksum code path with the allocating builder.
-        var payload = new byte[] { 0xde, 0xad, 0xbe, 0xef, 0x01 };
-        var sourceAddress = IPAddress.Parse(source);
-        var destinationAddress = IPAddress.Parse(destination);
-
-        Assert.True(UdpFrameBuilder.TryBuild(sourceAddress, 53, destinationAddress, 53000, payload, s_macA, s_macB, out var frame));
-        var storage = new byte[9014];
-        Assert.True(UdpFrameBuilder.TryBuildInto(
-            WinForward.Core.IPAddressValue.From(sourceAddress), 53,
-            WinForward.Core.IPAddressValue.From(destinationAddress), 53000,
-            payload, s_macA, s_macB, storage, out var frameLength));
-
-        Assert.Equal(frame.Length, frameLength);
-        Assert.True(storage.AsSpan(0, frameLength).SequenceEqual(frame));
+        Assert.True(TryBuildUdpFrame(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[fits], s_macA, s_macB, out _, cap));
+        Assert.False(TryBuildUdpFrame(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[overflow], s_macA, s_macB, out _, cap));
     }
 
     [Fact]
@@ -187,7 +165,7 @@ public sealed class UdpRelayTests
             payload, s_macA, s_macB, storage.AsSpan(0, 40), out var length));
         Assert.Equal(0, length);
 
-        // MAC length rejections shared with the allocating overload.
+        // MAC length rejection.
         Assert.False(UdpFrameBuilder.TryBuildInto(
             WinForward.Core.IPAddressValue.From(IPAddress.Parse("192.0.2.53")), 53,
             WinForward.Core.IPAddressValue.From(IPAddress.Parse("192.0.2.10")), 53000,
@@ -230,12 +208,12 @@ public sealed class UdpRelayTests
 
         Assert.Equal(1, reinjector.ToMstcpCount);
         Assert.Equal(0, reinjector.ToAdapterCount);
-        Assert.True(IPUdpPacket.TryParse(reinjector.LastFrame!, out var udp));
+        Assert.True(IPUdpPacket.TryParseSpan(reinjector.LastFrame!, out var udp));
         Assert.Equal(server.Address, udp.SourceAddress);
         Assert.Equal(server.Port, udp.SourcePort);
         Assert.Equal(client.Address, udp.DestinationAddress);
         Assert.Equal(client.Port, udp.DestinationPort);
-        Assert.Equal(payload, udp.Payload.ToArray());
+        Assert.Equal(payload, udp.Payload(reinjector.LastFrame!).ToArray());
         // Host flows ignore the recorded client MAC: both header slots carry the host adapter MAC.
         Assert.True(reinjector.LastFrame!.AsSpan(0, 6).SequenceEqual(s_macA));
         Assert.True(reinjector.LastFrame!.AsSpan(6, 6).SequenceEqual(s_macA));
@@ -321,7 +299,7 @@ public sealed class UdpRelayTests
         // the host stack and the VM would never receive it (R2).
         Assert.True(reinjector.LastFrame!.AsSpan(0, 6).SequenceEqual(s_macC));
         Assert.True(reinjector.LastFrame!.AsSpan(6, 6).SequenceEqual(s_macB));
-        Assert.True(IPUdpPacket.TryParse(reinjector.LastFrame!, out var udp));
+        Assert.True(IPUdpPacket.TryParseSpan(reinjector.LastFrame!, out var udp));
         Assert.Equal(server.Address, udp.SourceAddress);
         Assert.Equal(client.Address, udp.DestinationAddress);
     }
@@ -435,7 +413,7 @@ public sealed class UdpRelayTests
         var source = IPAddress.Parse("192.0.2.10");
         var destination = IPAddress.Parse("192.0.2.53");
         var payload = new byte[] { 0x12, 0x34, 0x56 };
-        Assert.True(UdpFrameBuilder.TryBuild(source, 53000, destination, 53, payload, s_macA, s_macB, out var frame));
+        Assert.True(TryBuildUdpFrame(source, 53000, destination, 53, payload, s_macA, s_macB, out var frame));
 
         var factory = new FakeTransportFactory();
         var sink = new FakeResponseSink();
@@ -476,4 +454,26 @@ public sealed class UdpRelayTests
     }
 
     private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, null, null);
+
+    private static bool TryBuildUdpFrame(
+        IPAddress sourceAddress,
+        ushort sourcePort,
+        IPAddress destinationAddress,
+        ushort destinationPort,
+        ReadOnlyMemory<byte> payload,
+        ReadOnlySpan<byte> sourceMac,
+        ReadOnlySpan<byte> destinationMac,
+        out byte[] frame,
+        int maximumEthernetFrame = UdpFrameBuilder.DefaultMaximumEthernetFrame)
+    {
+        var buffer = new byte[maximumEthernetFrame];
+        if (!UdpFrameBuilder.TryBuildInto(IPAddressValue.From(sourceAddress), sourcePort, IPAddressValue.From(destinationAddress), destinationPort, payload, sourceMac, destinationMac, buffer, out var written, maximumEthernetFrame))
+        {
+            frame = [];
+            return false;
+        }
+
+        frame = buffer.AsSpan(0, written).ToArray();
+        return true;
+    }
 }

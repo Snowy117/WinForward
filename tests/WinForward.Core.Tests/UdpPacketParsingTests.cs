@@ -13,7 +13,7 @@ public sealed class UdpPacketParsingTests
     {
         var payload = new byte[] { 0x12, 0x34, 0x01, 0x00, 0x00, 0x01 };
         var address = IPAddress.Parse("2001:db8::53");
-        var encoded = Socks5UdpCodec.Encode(address, 53, payload);
+        var encoded = Encode(address, 53, payload);
 
         Assert.True(Socks5UdpCodec.TryDecode(encoded, out var decoded));
         Assert.Equal((IPAddressValue?)address, decoded.DestinationAddress);
@@ -29,7 +29,7 @@ public sealed class UdpPacketParsingTests
         // R2: address-typed datagrams decode straight to IPAddressValue — no framework address
         // on the decode path; IPv4 keeps its four big-endian bytes in the low 32 bits.
         var payload = new byte[] { 0x01 };
-        var encoded = Socks5UdpCodec.Encode(IPAddress.Parse("192.0.2.53"), 53, payload);
+        var encoded = Encode(IPAddress.Parse("192.0.2.53"), 53, payload);
 
         Assert.True(Socks5UdpCodec.TryDecode(encoded, out var decoded));
         Assert.Equal((IPAddressValue?)IPAddress.Parse("192.0.2.53"), decoded.DestinationAddress);
@@ -41,7 +41,7 @@ public sealed class UdpPacketParsingTests
     [Fact]
     public void SocksUdpRejectsFragmentedFrames()
     {
-        var encoded = Socks5UdpCodec.Encode(IPAddress.Parse("192.0.2.53"), 53, [1, 2, 3]);
+        var encoded = Encode(IPAddress.Parse("192.0.2.53"), 53, [1, 2, 3]);
         encoded[2] = 1;
 
         Assert.False(Socks5UdpCodec.TryDecode(encoded, out _));
@@ -50,7 +50,14 @@ public sealed class UdpPacketParsingTests
     [Fact]
     public void SocksUdpDomainRoundTripPreservesPayload()
     {
-        var encoded = Socks5UdpCodec.Encode("dns.example", 53, [0xab, 0xcd]);
+        var domain = "dns.example"u8;
+        var encoded = new byte[4 + 1 + domain.Length + 2 + 2];
+        encoded[3] = 3;
+        encoded[4] = (byte)domain.Length;
+        domain.CopyTo(encoded.AsSpan(5));
+        BinaryPrimitives.WriteUInt16BigEndian(encoded.AsSpan(5 + domain.Length, 2), 53);
+        encoded[7 + domain.Length] = 0xab;
+        encoded[8 + domain.Length] = 0xcd;
 
         Assert.True(Socks5UdpCodec.TryDecode(encoded, out var decoded));
         Assert.Null(decoded.DestinationAddress);
@@ -80,7 +87,7 @@ public sealed class UdpPacketParsingTests
         // M2: the SOCKS5 UDP wire format carries no scope, so TryDecode accepts an explicit scope
         // and reconstructs an IPv6 destination with a non-zero ScopeId.
         var address = IPAddress.Parse("fe80::53");
-        var encoded = Socks5UdpCodec.Encode(address, 53, [1, 2, 3]);
+        var encoded = Encode(address, 53, [1, 2, 3]);
         Assert.True(Socks5UdpCodec.TryDecode(encoded, out var decoded, scopeId: 9));
         Assert.NotNull(decoded.DestinationAddress);
         Assert.Equal((uint)9, decoded.DestinationAddress!.Value.ScopeId);
@@ -104,13 +111,13 @@ public sealed class UdpPacketParsingTests
         frame[43] = 2;
         frame[44] = 3;
 
-        Assert.True(IPUdpPacket.TryParse(frame, out var packet));
+        Assert.True(IPUdpPacket.TryParseSpan(frame, out var packet));
         Assert.Equal((ushort)53000, packet.SourcePort);
-        Assert.Equal(new byte[] { 1, 2, 3 }, packet.Payload.ToArray());
+        Assert.Equal(new byte[] { 1, 2, 3 }, packet.Payload(frame).ToArray());
         frame[44] = 4;
-        Assert.Equal(4, packet.Payload.Span[^1]);
+        Assert.Equal(4, packet.Payload(frame)[^1]);
         frame[20] = 0x20;
-        Assert.False(IPUdpPacket.TryParse(frame, out _));
+        Assert.False(IPUdpPacket.TryParseSpan(frame, out _));
     }
 
     [Fact]
@@ -119,7 +126,7 @@ public sealed class UdpPacketParsingTests
         var frame = CreateIpv4UdpFrame();
 
         Assert.True(PacketChecksums.TryRewriteUdpEndpoints(frame, IPAddress.Parse("198.51.100.1"), 40000, IPAddress.Parse("203.0.113.2"), 5353));
-        Assert.True(IPUdpPacket.TryParse(frame, out var packet));
+        Assert.True(IPUdpPacket.TryParseSpan(frame, out var packet));
         Assert.Equal(IPAddress.Parse("198.51.100.1"), packet.SourceAddress);
         Assert.Equal((ushort)40000, packet.SourcePort);
         Assert.Equal(IPAddress.Parse("203.0.113.2"), packet.DestinationAddress);
@@ -152,12 +159,12 @@ public sealed class UdpPacketParsingTests
     {
         var frame = CreateIpv6UdpFrame();
 
-        Assert.True(IPUdpPacket.TryParse(frame, out var packet));
+        Assert.True(IPUdpPacket.TryParseSpan(frame, out var packet));
         Assert.Equal(IPAddress.Parse("2001:db8::10"), packet.SourceAddress);
         Assert.Equal(IPAddress.Parse("2001:db8::53"), packet.DestinationAddress);
         Assert.Equal((ushort)53000, packet.SourcePort);
         Assert.Equal((ushort)53, packet.DestinationPort);
-        Assert.Equal(new byte[] { 1, 2, 3 }, packet.Payload.ToArray());
+        Assert.Equal(new byte[] { 1, 2, 3 }, packet.Payload(frame).ToArray());
     }
 
     [Fact]
@@ -166,7 +173,7 @@ public sealed class UdpPacketParsingTests
         var frame = CreateIpv6UdpFrame();
 
         Assert.True(PacketChecksums.TryRewriteUdpEndpoints(frame, IPAddress.Parse("2001:db8::99"), 40000, IPAddress.Parse("2001:db8::1"), 5353));
-        Assert.True(IPUdpPacket.TryParse(frame, out var packet));
+        Assert.True(IPUdpPacket.TryParseSpan(frame, out var packet));
         Assert.Equal(IPAddress.Parse("2001:db8::99"), packet.SourceAddress);
         Assert.Equal((ushort)40000, packet.SourcePort);
         Assert.Equal(IPAddress.Parse("2001:db8::1"), packet.DestinationAddress);
@@ -192,7 +199,7 @@ public sealed class UdpPacketParsingTests
         var frame = CreateIpv6UdpFrame();
         frame[20] = 44; // next header = fragment
 
-        Assert.False(IPUdpPacket.TryParse(frame, out _));
+        Assert.False(IPUdpPacket.TryParseSpan(frame, out _));
     }
 
     private static byte[] CreateIpv6UdpFrame()
@@ -233,5 +240,12 @@ public sealed class UdpPacketParsingTests
         frame[43] = 2;
         frame[44] = 3;
         return frame;
+    }
+
+    private static byte[] Encode(IPAddress address, ushort port, ReadOnlySpan<byte> payload)
+    {
+        var encoded = new byte[6 + 16 + payload.Length];
+        Assert.True(Socks5UdpCodec.TryEncode(IPAddressValue.From(address), port, payload, encoded, out var written));
+        return encoded.AsSpan(0, written).ToArray();
     }
 }

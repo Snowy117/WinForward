@@ -72,7 +72,7 @@ public sealed class PacketLease : IDisposable
     /// <summary>True when no producer-owned source remains: the frame is a plain stable memory.</summary>
     public bool IsMaterialized => _source is null;
 
-    public PacketDisposition? Disposition => _disposition;
+    internal PacketDisposition? Disposition => _disposition;
 
     private ReadOnlyMemory<byte> Materialize()
     {

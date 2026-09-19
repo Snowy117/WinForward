@@ -12,16 +12,15 @@ namespace WinForward.Windows;
 public sealed partial class WindowsProcessAttributor : IProcessAttributor
 {
     private const int ErrorInsufficientBuffer = 122;
-    private readonly TimeSpan _retryDelay;
+    private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(2);
     private readonly int _cacheCapacity;
     private readonly Dictionary<ProcessCacheKey, ProcessIdentity> _identityCache = [];
     private readonly Queue<ProcessCacheKey> _cacheOrder = [];
     private readonly Lock _cacheGate = new();
 
-    public WindowsProcessAttributor(TimeSpan? retryDelay = null, int cacheCapacity = 1024)
+    public WindowsProcessAttributor(int cacheCapacity = 1024)
     {
         if (cacheCapacity <= 0) throw new ArgumentOutOfRangeException(nameof(cacheCapacity));
-        _retryDelay = retryDelay ?? TimeSpan.FromMilliseconds(2);
         _cacheCapacity = cacheCapacity;
     }
 
@@ -29,9 +28,9 @@ public sealed partial class WindowsProcessAttributor : IProcessAttributor
     {
         if (!OperatingSystem.IsWindows()) return null;
         var result = FindOwnerSafely(key);
-        if (result is null && _retryDelay > TimeSpan.Zero)
+        if (result is null && RetryDelay > TimeSpan.Zero)
         {
-            await Task.Delay(_retryDelay, cancellationToken).ConfigureAwait(false);
+            await Task.Delay(RetryDelay, cancellationToken).ConfigureAwait(false);
             result = FindOwnerSafely(key);
         }
 

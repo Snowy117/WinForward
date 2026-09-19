@@ -104,35 +104,11 @@ internal sealed class UdpProxySession : IAsyncDisposable
         _receiveLoop = receiveLoop;
     }
 
-    public async ValueTask SendAsync(Endpoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
-    {
-        lock (_activityGate)
-        {
-            var failure = Volatile.Read(ref _receiveFailure);
-            if (failure is not null) throw new IOException("SOCKS5 UDP relay session is no longer usable.", failure);
-            if (_expiring) throw new IOException("SOCKS5 UDP relay session is expiring.");
-            _activeSends++;
-        }
-
-        try
-        {
-            // The raw Endpoint flows straight through: the transport encodes it into the SOCKS5
-            // header, so the forward warm path allocates nothing for endpoint handling.
-            await _transport.SendAsync(destination, payload, cancellationToken).ConfigureAwait(false);
-            TouchActivity();
-        }
-        finally
-        {
-            lock (_activityGate) _activeSends--;
-        }
-    }
-
     /// <summary>
-    /// Span-based send for callers that hold the payload only as a synchronous view of the capture
-    /// buffer. Identical admission/activity semantics to <see cref="SendAsync"/>; the entry is
-    /// non-async because the payload span must not cross an await — the transport consumes it
-    /// synchronously (SOCKS5 encode into its reusable send buffer) before any asynchronous socket
-    /// operation, and only the send tail continues asynchronously without the span.
+    /// Sends one datagram through the shared transport. The entry is non-async because the payload
+    /// span must not cross an await — the transport consumes it synchronously (SOCKS5 encode into
+    /// its reusable send buffer) before any asynchronous socket operation, and only the send tail
+    /// continues asynchronously without the span.
     /// </summary>
     public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken)
     {

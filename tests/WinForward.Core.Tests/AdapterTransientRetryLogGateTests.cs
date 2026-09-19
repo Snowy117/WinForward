@@ -14,12 +14,12 @@ public sealed class AdapterTransientRetryLogGateTests
 {
     private static readonly long FiveSeconds = TimeSpan.FromSeconds(5).Ticks;
 
-    private sealed class ScriptedClock
+    private sealed class ScriptedClock : TimeProvider
     {
         // Any start >= one window keeps the gate's cold-start semantics (first call logs) that
         // the real clock gets from DateTime.UtcNow.Ticks being far from zero.
         private long _ticks = FiveSeconds;
-        public Func<long> Provider => () => _ticks;
+        public override DateTimeOffset GetUtcNow() => new(_ticks, TimeSpan.Zero);
         public void AdvanceTo(long ticks) => _ticks = ticks;
     }
 
@@ -27,7 +27,7 @@ public sealed class AdapterTransientRetryLogGateTests
     {
         var logger = new RecordingRuntimeLogger();
         var clock = new ScriptedClock();
-        return (new AdapterTransientRetryLogGate(logger, clock.Provider), clock, logger);
+        return (new AdapterTransientRetryLogGate(logger, clock), clock, logger);
     }
 
     [Fact]

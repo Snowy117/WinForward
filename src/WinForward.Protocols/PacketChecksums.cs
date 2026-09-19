@@ -20,6 +20,12 @@ public static class PacketChecksums
 
     public static ushort InternetChecksum(ReadOnlySpan<byte> data) => Finish(Sum(data));
 
+    /// <summary>
+    /// Rewrites only the IP addresses, UDP ports, and IPv4/UDP checksums of an Ethernet II
+    /// IPv4/IPv6 UDP frame. There is no production caller: UDP flow translation does not rewrite
+    /// endpoint headers, so this overload is kept as the independent protocol oracle for the UDP
+    /// parse/checksum tests (<c>UdpPacketParsingTests</c>, <c>ProtocolAuditTests</c>).
+    /// </summary>
     public static bool TryRewriteUdpEndpoints(Span<byte> ethernetFrame, IPAddress sourceAddress, ushort sourcePort, IPAddress destinationAddress, ushort destinationPort)
         => TryRewriteUdpEndpoints(ethernetFrame, IPAddressValue.From(sourceAddress), sourcePort, IPAddressValue.From(destinationAddress), destinationPort);
 

@@ -7,7 +7,7 @@ using WinForward.Runtime.UdpProxy;
 namespace WinForward.Runtime;
 
 /// <summary>The new-flow setup pipeline a pooled <see cref="SetupWorkItem"/> carries.</summary>
-public enum SetupWorkKind
+internal enum SetupWorkKind
 {
     /// <summary>TCP redirect setup for a retained SYN (<c>TcpProxyCoordinator.SetupPendingAsync</c>).</summary>
     TcpSyn = 0,
@@ -104,18 +104,17 @@ public sealed class SetupExecutor : ISetupExecutor
         _capacity = ringCapacity;
     }
 
-    public int WorkerCount => _workerCount;
-    public int PendingCount => Volatile.Read(ref _pendingCount);
-    public int FreeCount => _free.Count;
+    internal int PendingCount => Volatile.Read(ref _pendingCount);
+    internal int FreeCount => _free.Count;
 
     /// <summary>True once <see cref="Dispose"/> has begun; new work is refused and workers stop.</summary>
     internal bool IsDisposed => Volatile.Read(ref _disposed) != 0;
-    public long EnqueuedCount => Interlocked.Read(ref _enqueuedCount);
-    public long CompletedCount => Interlocked.Read(ref _completedCount);
-    public long RejectedCount => Interlocked.Read(ref _rejectedCount);
+    internal long EnqueuedCount => Interlocked.Read(ref _enqueuedCount);
+    internal long CompletedCount => Interlocked.Read(ref _completedCount);
+    internal long RejectedCount => Interlocked.Read(ref _rejectedCount);
 
     /// <summary>Rents that missed the free list and allocated fresh (sizing diagnostic; zero at steady state).</summary>
-    public long OverflowAllocations => Interlocked.Read(ref _overflowAllocations);
+    internal long OverflowAllocations => Interlocked.Read(ref _overflowAllocations);
 
     public SetupWorkItem RentItem()
     {

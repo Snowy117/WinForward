@@ -563,7 +563,7 @@ internal static class GcSoakScenario
             {
                 _sequences[index]++;
                 DatagramHeader.Write(_payload, _sequences[index], index);
-                _ = await _coordinator.TrySendAsync(_flows[index], _server, _payload, CancellationToken.None).ConfigureAwait(false);
+                _ = await _coordinator.TrySendSpanAsync(_flows[index], _server, _payload, default, CancellationToken.None).ConfigureAwait(false);
             }
 
             var stopwatch = Stopwatch.StartNew();

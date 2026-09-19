@@ -1,13 +1,13 @@
 using System.Buffers.Binary;
-using System.Net;
 using WinForward.Core;
 
 namespace WinForward.Protocols;
 
 /// <summary>
 /// Builds a complete Ethernet II + IPv4/IPv6 + UDP frame from raw endpoints and payload, including
-/// IPv4 header and UDP checksums. Pure and allocation-bounded: the only allocation is the returned
-/// frame byte[]. Used to reinject SOCKS5 UDP relay responses back toward the original client.
+/// IPv4 header and UDP checksums. Pure and allocation-free: the frame is written directly into a
+/// caller-supplied span (typically a pooled native buffer's frame storage), so response
+/// reinjection costs no managed allocation per datagram.
 /// </summary>
 public static class UdpFrameBuilder
 {
@@ -17,48 +17,16 @@ public static class UdpFrameBuilder
     /// <summary>
     /// The pinned NDISAPI capture-frame ABI (Ethernet II plus max payload) used when no explicit cap
     /// is supplied. A jumbo-enabled (9014) ABI build is configured explicitly through
-    /// <see cref="TryBuild"/>'s <paramref name="maximumEthernetFrame"/> parameter.
+    /// <see cref="TryBuildInto"/>'s <c>maximumEthernetFrame</c> parameter.
     /// </summary>
     public const int MaximumEthernetFrame = DefaultMaximumEthernetFrame;
 
-    public static bool TryBuild(
-        IPAddress sourceAddress,
-        ushort sourcePort,
-        IPAddress destinationAddress,
-        ushort destinationPort,
-        ReadOnlyMemory<byte> payload,
-        ReadOnlySpan<byte> sourceMac,
-        ReadOnlySpan<byte> destinationMac,
-        out byte[] frame,
-        int maximumEthernetFrame = DefaultMaximumEthernetFrame)
-        => TryBuild(IPAddressValue.From(sourceAddress), sourcePort, IPAddressValue.From(destinationAddress), destinationPort, payload, sourceMac, destinationMac, out frame, maximumEthernetFrame);
-
-    public static bool TryBuild(
-        IPAddressValue sourceAddress,
-        ushort sourcePort,
-        IPAddressValue destinationAddress,
-        ushort destinationPort,
-        ReadOnlyMemory<byte> payload,
-        ReadOnlySpan<byte> sourceMac,
-        ReadOnlySpan<byte> destinationMac,
-        out byte[] frame,
-        int maximumEthernetFrame = DefaultMaximumEthernetFrame)
-    {
-        frame = [];
-        if (!TryComputeFrameLength(sourceAddress, destinationAddress, payload, sourceMac, destinationMac, maximumEthernetFrame, out var totalLength)) return false;
-        var result = new byte[totalLength];
-        if (!TryBuildInto(sourceAddress, sourcePort, destinationAddress, destinationPort, payload, sourceMac, destinationMac, result, out _, maximumEthernetFrame)) return false;
-        frame = result;
-        return true;
-    }
-
     /// <summary>
     /// Writes the complete Ethernet II + IPv4/IPv6 + UDP frame directly into
-    /// <paramref name="destination"/> (for example a pooled native buffer's frame storage) so the
-    /// response reinjection path allocates no managed frame per datagram. The allocating
-    /// <see cref="TryBuild"/> delegates here, so both entry points share one header/checksum code
-    /// path. Returns false for the same rejections as <see cref="TryBuild"/> or when the
-    /// destination span is shorter than the computed frame.
+    /// <paramref name="destination"/> (for example a pooled native buffer's frame storage) and
+    /// reports the frame length. Returns false without writing when the inputs are rejected
+    /// (MAC length, address families, wire-length fields, the frame cap) or when the destination
+    /// span is shorter than the computed frame.
     /// </summary>
     public static bool TryBuildInto(
         IPAddressValue sourceAddress,

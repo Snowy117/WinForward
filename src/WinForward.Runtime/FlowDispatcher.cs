@@ -26,10 +26,7 @@ public readonly record struct PacketCaptureMetadata(uint DeviceFlags, nint Adapt
 /// that rewrite or relay must copy through the lease instead of retaining this buffer.
 /// </summary>
 [StructLayout(LayoutKind.Auto)]
-public readonly record struct NativeFrameHandle(NdisPacketBuffer? Buffer)
-{
-    public bool HasBuffer => Buffer is not null;
-}
+public readonly record struct NativeFrameHandle(NdisPacketBuffer? Buffer);
 
 [StructLayout(LayoutKind.Auto)]
 public readonly record struct CapturedFlowPacket(

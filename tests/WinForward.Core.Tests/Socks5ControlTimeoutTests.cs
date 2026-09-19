@@ -147,12 +147,12 @@ public sealed class Socks5ControlTimeoutTests
         var server = ServeAdvertisedAssociateAsync(tcpListener, advertised, serverCancellation.Token);
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), null, null);
         var registry = new SelfTrafficRegistry();
-        var transport = await Socks5UdpTransport.CreateAsync(socksServer, registry, CancellationToken.None);
+        var transport = await Socks5UdpTransport.CreateAsync(socksServer, registry, CancellationToken.None, createControl: null, socketFactory: null);
         Assert.Equal(advertised, transport.RelayEndpoint);
 
         using var sender = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         sender.Bind(new IPEndPoint(IPAddress.Parse("127.0.0.2"), relayEndpoint.Port));
-        var datagram = Socks5UdpCodec.Encode(IPAddress.Parse("192.0.2.53"), 53, new byte[] { 0xab });
+        var datagram = Socks5UdpDatagrams.Encode(IPAddress.Parse("192.0.2.53"), 53, new byte[] { 0xab });
         await sender.SendToAsync(datagram, SocketFlags.None, new IPEndPoint(IPAddress.Loopback, transport.LocalEndpoint.Port), CancellationToken.None);
 
         var buffer = new byte[65_535];

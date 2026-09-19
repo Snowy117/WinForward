@@ -25,7 +25,9 @@ public class ParserBenchmarks
         _payloadLength = FrameBytes - 14 - 20 - 8;
         _frame = BenchmarkShared.CreateIpv4UdpFrame(FrameBytes);
         _destination = IPAddress.Parse("192.0.2.53");
-        _socksFrame = Socks5UdpCodec.Encode(_destination, 53, _frame.AsSpan(_frame.Length - _payloadLength));
+        var socksFrame = new byte[22 + _payloadLength];
+        if (!Socks5UdpCodec.TryEncode(IPAddressValue.From(_destination), 53, _frame.AsSpan(_frame.Length - _payloadLength), socksFrame, out var socksWritten)) throw new InvalidOperationException("SOCKS5 UDP span encoder rejected the benchmark frame.");
+        _socksFrame = socksFrame.AsSpan(0, socksWritten).ToArray();
         _reusable = new byte[22 + 65535];
     }
 
@@ -43,8 +45,8 @@ public class ParserBenchmarks
     public long Ipv4UdpPayload()
     {
         long value = 0;
-        if (!IPUdpPacket.TryParse(_frame, out var packet)) throw new InvalidOperationException("UDP parser rejected the benchmark frame.");
-        value += packet.Payload.Length;
+        if (!IPUdpPacket.TryParseSpan(_frame, out var packet)) throw new InvalidOperationException("UDP parser rejected the benchmark frame.");
+        value += packet.PayloadLength;
         Volatile.Write(ref s_sink, value);
         return value;
     }
@@ -55,16 +57,6 @@ public class ParserBenchmarks
         long value = 0;
         if (!Socks5UdpCodec.TryDecode(_socksFrame, out var datagram)) throw new InvalidOperationException("SOCKS5 UDP decoder rejected the benchmark frame.");
         value += datagram.Payload.Length;
-        Volatile.Write(ref s_sink, value);
-        return value;
-    }
-
-    [Benchmark]
-    public long Socks5UdpEncode()
-    {
-        long value = 0;
-        var payload = _frame.AsSpan(_frame.Length - _payloadLength);
-        value += Socks5UdpCodec.Encode(_destination, 53, payload).Length;
         Volatile.Write(ref s_sink, value);
         return value;
     }

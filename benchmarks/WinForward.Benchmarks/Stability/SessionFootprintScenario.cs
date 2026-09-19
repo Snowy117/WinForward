@@ -52,7 +52,7 @@ internal static class SessionFootprintScenario
             {
                 // A false return is the setup-failure cooldown; the next round re-offers the
                 // flow and WaitUntilCreatedAsync bounds the total populate time.
-                _ = await coordinator.TrySendAsync(flowKey, server, PopulatePayload, CancellationToken.None).ConfigureAwait(false);
+                _ = await coordinator.TrySendSpanAsync(flowKey, server, PopulatePayload, default, CancellationToken.None).ConfigureAwait(false);
             }
 
             await factory.WaitUntilProgressAsync().ConfigureAwait(false);

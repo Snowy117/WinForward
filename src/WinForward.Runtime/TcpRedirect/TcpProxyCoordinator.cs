@@ -53,7 +53,6 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         IRuntimeLogger? logger = null,
         int? capacity = null,
         IInterceptionHealthSignal? healthSignal = null,
-        NdisPacketBufferPool? framePool = null,
         NativeBufferPool? synCopyPool = null,
         ISetupExecutor? setupExecutor = null)
     {
@@ -66,7 +65,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         if (capacity is < 1) throw new ArgumentOutOfRangeException(nameof(capacity), capacity, "Capacity must be positive.");
         _table = table;
         _injector = injector;
-        _framePool = framePool ?? NdisPacketBufferPool.Shared;
+        _framePool = NdisPacketBufferPool.Shared;
         _synCopyPool = synCopyPool ?? new NativeBufferPool(NdisApiAbi.MaximumEthernetFrame);
         _ownsSynCopyPool = synCopyPool is null;
         _setupExecutor = setupExecutor ?? new SetupExecutor();
@@ -80,7 +79,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         _setup = new TcpRedirectSetup(listenerFactory, table, selfTraffic, localAddresses, injector, _logger, _store, _clientReset, _synCopyPool);
     }
 
-    public TcpRedirectTable Table => _table;
+    internal TcpRedirectTable Table => _table;
 
     /// <summary>The number of live redirect sessions (heartbeat diagnostics; gate-consistent).</summary>
     public int SessionCount => _store.SessionCount;
@@ -621,9 +620,6 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
     /// <summary>The pending new-flow SYN setups; internal for tests to observe R8 bounds.</summary>
     internal TcpPendingSynSetupIndex PendingSetups => _pendingSyn;
 
-    /// <summary>The syn-copy native pool backing retained SYNs and association templates (balance tests).</summary>
-    internal NativeBufferPool SynCopyPool => _synCopyPool;
-
     /// <summary>
     /// Awaits every pending background setup launched so far (internal test/diagnostic seam):
     /// the pump-side SYN handler returns <see cref="TcpRedirectOutcome.SetupPending"/> long
@@ -659,7 +655,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
 /// so the accept/reset/relay modules can reference it without a circular dependency on the
 /// coordinator itself; it lives in this file to keep the module's file count lean.
 /// </summary>
-internal sealed class TcpRedirectSession(TcpRedirectAssociation association, ITcpRedirectListener listener, SelfTrafficRegistry.SelfTrafficToken selfTrafficToken, Socks5Server server, CancellationToken shutdown, long flowGeneration = 0)
+internal sealed class TcpRedirectSession(TcpRedirectAssociation association, ITcpRedirectListener listener, SelfTrafficRegistry.SelfTrafficToken selfTrafficToken, Socks5Server server, CancellationToken shutdown, long flowGeneration)
 {
     public TcpRedirectAssociation Association { get; } = association;
     public ITcpRedirectListener Listener { get; } = listener;

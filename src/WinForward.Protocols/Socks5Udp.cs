@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using System.Net;
 using WinForward.Core;
 
 namespace WinForward.Protocols;
@@ -38,45 +37,6 @@ public static class Socks5UdpCodec
         payload.CopyTo(destination.Slice(6 + addressLength));
         written = totalLength;
         return true;
-    }
-
-    /// <summary>Framework-address convenience wrapper over the span-writing encode.</summary>
-    public static bool TryEncode(IPAddress destinationAddress, ushort destinationPort, ReadOnlySpan<byte> payload, Span<byte> destination, out int written)
-        => TryEncode(IPAddressValue.From(destinationAddress), destinationPort, payload, destination, out written);
-
-    /// <summary>Raw-address convenience over the span-writing encode; cold edges (tests, loopback servers).</summary>
-    public static byte[] Encode(IPAddressValue destinationAddress, ushort destinationPort, ReadOnlySpan<byte> payload)
-    {
-        var result = new byte[6 + (destinationAddress.Family == AddressFamilyKind.IPv4 ? 4 : 16) + payload.Length];
-        _ = TryEncode(destinationAddress, destinationPort, payload, result, out _);
-        return result;
-    }
-
-    public static byte[] Encode(IPAddress destinationAddress, ushort destinationPort, ReadOnlySpan<byte> payload)
-    {
-        var addressLength = destinationAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? 4 : 16;
-        var result = new byte[4 + addressLength + 2 + payload.Length];
-        result[0] = 0;
-        result[1] = 0;
-        result[2] = 0;
-        result[3] = destinationAddress.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? (byte)1 : (byte)4;
-        destinationAddress.TryWriteBytes(result.AsSpan(4, addressLength), out _);
-        BinaryPrimitives.WriteUInt16BigEndian(result.AsSpan(4 + addressLength, 2), destinationPort);
-        payload.CopyTo(result.AsSpan(6 + addressLength));
-        return result;
-    }
-
-    public static byte[] Encode(string destinationDomain, ushort destinationPort, ReadOnlySpan<byte> payload)
-    {
-        var domainBytes = System.Text.Encoding.UTF8.GetBytes(destinationDomain);
-        if (domainBytes.Length is 0 or > 255) throw new ArgumentOutOfRangeException(nameof(destinationDomain));
-        var result = new byte[4 + 1 + domainBytes.Length + 2 + payload.Length];
-        result[3] = 3;
-        result[4] = (byte)domainBytes.Length;
-        domainBytes.CopyTo(result.AsSpan(5));
-        BinaryPrimitives.WriteUInt16BigEndian(result.AsSpan(5 + domainBytes.Length, 2), destinationPort);
-        payload.CopyTo(result.AsSpan(7 + domainBytes.Length));
-        return result;
     }
 
     public static bool TryDecode(ReadOnlyMemory<byte> frame, out Socks5UdpDatagram datagram, long scopeId = 0)

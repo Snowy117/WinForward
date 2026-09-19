@@ -4,23 +4,8 @@ using Xunit;
 
 namespace WinForward.Core.Tests;
 
-public sealed class AdapterSelectorTests
+public sealed class WindowsAdapterInventoryTests
 {
-    [Fact]
-    public void SelectorRequiresExactNameAndRejectsAmbiguity()
-    {
-        var adapters = new[]
-        {
-            new WindowsAdapter("id-a", "vEthernet 1", "a", 1, 1),
-            new WindowsAdapter("id-b", "vEthernet 1", "b", 2, 1)
-        };
-
-        Assert.False(AdapterSelector.TryResolve(adapters, null, "vEthernet 1", out _, out var error));
-        Assert.Equal("Adapter selector is ambiguous.", error);
-        Assert.True(AdapterSelector.TryResolve(adapters, "id-a", "vEthernet 1", out var resolved, out _));
-        Assert.Equal("id-a", resolved!.StableId);
-    }
-
     [Fact]
     [SupportedOSPlatform("windows")]
     public void AdapterSnapshotUsesOneGenerationForAllAdapters()

@@ -97,7 +97,7 @@ public sealed class RuntimeCounters
     }
 
     /// <summary>Records one buffer rent for the pool (cumulative counter increment).</summary>
-    public void RecordPoolRent(string poolName)
+    internal void RecordPoolRent(string poolName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(poolName);
         _ = _pools.TryAdd(poolName, 0);
@@ -105,7 +105,7 @@ public sealed class RuntimeCounters
     }
 
     /// <summary>Records one buffer return for the pool (cumulative counter increment).</summary>
-    public void RecordPoolReturn(string poolName)
+    internal void RecordPoolReturn(string poolName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(poolName);
         _ = _pools.TryAdd(poolName, 0);

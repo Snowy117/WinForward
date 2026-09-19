@@ -161,7 +161,7 @@ internal sealed class BenchmarkUdpTransportFactory : IUdpProxyTransportFactory
     private int _nextPort = 10_000;
     private long _sends;
 
-    /// <summary>Total datagrams handed to fake transports' <c>SendAsync</c>; the setup-queue flush increments it once per drained datagram.</summary>
+    /// <summary>Total datagrams handed to fake transports' <c>SendSpanAsync</c>; the setup-queue flush increments it once per drained datagram.</summary>
     public long Sends => Interlocked.Read(ref _sends);
 
     internal void NoteSend() => Interlocked.Increment(ref _sends);
@@ -174,12 +174,6 @@ internal sealed class BenchmarkUdpTransport(int localPort, BenchmarkUdpTransport
 {
     public IPEndPoint RelayEndpoint { get; } = new(IPAddress.Loopback, 50_000);
     public IPEndPoint LocalEndpoint { get; } = new(IPAddress.Loopback, localPort);
-
-    public ValueTask SendAsync(Endpoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
-    {
-        owner.NoteSend();
-        return ValueTask.CompletedTask;
-    }
 
     public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken)
     {

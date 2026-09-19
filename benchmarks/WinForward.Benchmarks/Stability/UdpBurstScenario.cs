@@ -114,7 +114,7 @@ internal static class UdpBurstScenario
         for (var flow = 0; flow < backgroundKeys.Length; flow++)
         {
             DatagramHeader.Write(payload, 1, flow);
-            _ = await coordinator.TrySendAsync(backgroundKeys[flow], socksServer, payload, CancellationToken.None).ConfigureAwait(false);
+            _ = await coordinator.TrySendSpanAsync(backgroundKeys[flow], socksServer, payload, default, CancellationToken.None).ConfigureAwait(false);
         }
 
         // A flow counts as established once its warmup response has returned through the
@@ -169,7 +169,7 @@ internal static class UdpBurstScenario
         {
             issueTimestamps[flow] = Stopwatch.GetTimestamp();
             DatagramHeader.Write(payload, 1, flowIdOffset + flow);
-            if (await coordinator.TrySendAsync(burstKeys[flow], socksServer, payload, CancellationToken.None).ConfigureAwait(false))
+            if (await coordinator.TrySendSpanAsync(burstKeys[flow], socksServer, payload, default, CancellationToken.None).ConfigureAwait(false))
             {
                 accepted++;
             }

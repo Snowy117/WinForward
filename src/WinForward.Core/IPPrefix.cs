@@ -8,17 +8,11 @@ namespace WinForward.Core;
 /// <summary>
 /// A CIDR prefix stored as a raw <see cref="IPAddressValue"/> network plus prefix length, so
 /// policy matching against flow endpoints is a two-operation mask compare with no byte-array
-/// round-trips. The <see cref="IPAddress"/>-based members are cold edges kept for configuration
-/// parsing and tests.
+/// round-trips.
 /// </summary>
 [StructLayout(LayoutKind.Auto)]
 public readonly record struct IPPrefix
 {
-    public IPPrefix(IPAddress network, int prefixLength)
-        : this(IPAddressValue.From(network), prefixLength)
-    {
-    }
-
     public IPPrefix(IPAddressValue network, int prefixLength)
     {
         var maxLength = network.Family == AddressFamilyKind.IPv4 ? 32 : 128;
@@ -56,8 +50,6 @@ public readonly record struct IPPrefix
         var mask = PrefixMask(PrefixLength, Network.Family);
         return (address.Bits & mask) == Network.Bits;
     }
-
-    public bool Contains(IPAddress? address) => address is not null && Contains(IPAddressValue.From(address));
 
     /// <summary>The all-ones mask over the first <paramref name="prefixLength"/> bits, aligned to
     /// the family's width: IPv4 masks live in the low 32 bits (where IPv4 addresses are stored);

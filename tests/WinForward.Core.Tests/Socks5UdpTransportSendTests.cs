@@ -14,7 +14,7 @@ using static WinForward.Core.Tests.Socks5TestServer;
 namespace WinForward.Core.Tests;
 
 /// <summary>
-/// D2 sync-send fast path: the relay socket runs non-blocking and <c>SendAsync</c> is a
+/// D2 sync-send fast path: the relay socket runs non-blocking and <c>SendSpanAsync</c> is a
 /// non-async entry whose warm shape hands the datagram to the kernel inline (no IOCP hop, no
 /// state machine); a loopback echo peer proves the synchronous send is actually delivered.
 /// </summary>
@@ -34,11 +34,11 @@ public sealed class Socks5UdpTransportSendTests
         var associateRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var server = ServeAssociateOnlyAsync(tcpListener, relayEndpoint, associateRead, serverCancellation.Token);
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), null, null);
-        var transport = await Socks5UdpTransport.CreateAsync(socksServer, new SelfTrafficRegistry(), CancellationToken.None);
+        var transport = await Socks5UdpTransport.CreateAsync(socksServer, new SelfTrafficRegistry(), CancellationToken.None, createControl: null, socketFactory: null);
         var payload = new byte[] { 0x51, 0x52, 0x53 };
         var destination = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
 
-        await transport.SendAsync(destination, payload, CancellationToken.None);
+        await transport.SendSpanAsync(destination, payload, CancellationToken.None);
 
         var buffer = new byte[65_535];
         EndPoint sender = new IPEndPoint(IPAddress.Any, 0);
@@ -50,7 +50,7 @@ public sealed class Socks5UdpTransportSendTests
 
         // The echo peer answers from the negotiated relay; the same transport decodes it.
         await relaySocket.SendToAsync(
-            Socks5UdpCodec.Encode(IPAddress.Parse("192.0.2.10"), 53000, payload),
+            Socks5UdpDatagrams.Encode(IPAddress.Parse("192.0.2.10"), 53000, payload),
             SocketFlags.None,
             (EndPoint)transport.LocalEndpoint!,
             CancellationToken.None);
@@ -116,7 +116,7 @@ public sealed class Socks5UdpTransportSendTests
             maximumFrameSize: 9014);
         var payload = new byte[2000];
 
-        await transport.SendAsync(Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), payload, CancellationToken.None);
+        await transport.SendSpanAsync(Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), payload, CancellationToken.None);
 
         var buffer = new byte[65_535];
         EndPoint sender = new IPEndPoint(IPAddress.Any, 0);
@@ -147,11 +147,11 @@ public sealed class Socks5UdpTransportSendTests
         using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var server = ServeAssociateOnlyAsync(tcpListener, relayEndpoint, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), serverCancellation.Token);
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), null, null);
-        var transport = await Socks5UdpTransport.CreateAsync(socksServer, new SelfTrafficRegistry(), CancellationToken.None);
+        var transport = await Socks5UdpTransport.CreateAsync(socksServer, new SelfTrafficRegistry(), CancellationToken.None, createControl: null, socketFactory: null);
         var payload = new byte[2000];
 
         await Assert.ThrowsAsync<IOException>(async () =>
-            await transport.SendAsync(Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), payload, CancellationToken.None));
+            await transport.SendSpanAsync(Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), payload, CancellationToken.None));
 
         await transport.DisposeAsync();
         serverCancellation.Cancel();
@@ -159,11 +159,11 @@ public sealed class Socks5UdpTransportSendTests
     }
 
     [Fact]
-    public void SendAsyncWarmPathRunsNoAsyncStateMachine()
+    public void SendSpanAsyncWarmPathRunsNoAsyncStateMachine()
     {
         var method = typeof(Socks5UdpTransport).GetMethod(
-            nameof(Socks5UdpTransport.SendAsync),
-            [typeof(Endpoint), typeof(ReadOnlyMemory<byte>), typeof(CancellationToken)]);
+            nameof(Socks5UdpTransport.SendSpanAsync),
+            [typeof(Endpoint), typeof(ReadOnlySpan<byte>), typeof(CancellationToken)]);
         Assert.NotNull(method);
         Assert.Null(method.GetCustomAttribute<AsyncStateMachineAttribute>());
     }
@@ -184,14 +184,14 @@ public sealed class Socks5UdpTransportSendTests
         using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var server = ServeAssociateOnlyAsync(tcpListener, relayEndpoint, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), serverCancellation.Token);
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), null, null);
-        var transport = await Socks5UdpTransport.CreateAsync(socksServer, new SelfTrafficRegistry(), CancellationToken.None);
+        var transport = await Socks5UdpTransport.CreateAsync(socksServer, new SelfTrafficRegistry(), CancellationToken.None, createControl: null, socketFactory: null);
         var destination = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
         var payload = new byte[] { 0x51, 0x52, 0x53 };
         try
         {
             for (var warm = 0; warm < 8; warm++)
             {
-                var warmSend = transport.SendAsync(destination, payload, CancellationToken.None);
+                var warmSend = transport.SendSpanAsync(destination, payload, CancellationToken.None);
                 Assert.True(warmSend.IsCompletedSuccessfully);
                 await warmSend;
             }
@@ -200,7 +200,7 @@ public sealed class Socks5UdpTransportSendTests
             const int count = 64;
             for (var index = 0; index < count; index++)
             {
-                var send = transport.SendAsync(destination, payload, CancellationToken.None);
+                var send = transport.SendSpanAsync(destination, payload, CancellationToken.None);
                 Assert.True(send.IsCompletedSuccessfully, "the warm send must complete synchronously on the calling thread");
                 await send;
             }

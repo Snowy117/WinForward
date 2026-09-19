@@ -50,18 +50,31 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
     /// the SYN leaves the host; it returns an optional loop-prevention registration that the
     /// connection owns and disposes with itself. Registering before the SYN closes the race where a
     /// catch-all proxy rule could capture WinForward's own SOCKS5 control traffic (design §10).
-    /// <paramref name="resolveAddresses"/> and <paramref name="socketFactory"/> are injectable seams
-    /// (address-list provider and socket ctor) so the attempt cap/deadline/disposal are testable with
-    /// fakes without real sockets or DNS. Attempts are capped by <paramref name="maxAttempts"/> and
-    /// each attempt is bounded by <paramref name="perAttemptTimeout"/>; a failed attempt waits out of
-    /// the loop to the next candidate, exhausting candidates fails closed (L1).
+    /// Attempts are capped by <paramref name="maxAttempts"/> and each attempt is bounded by
+    /// <paramref name="perAttemptTimeout"/>; a failed attempt waits out of the loop to the next
+    /// candidate, exhausting candidates fails closed (L1).
     /// </summary>
-    public static async ValueTask<Socks5ControlConnection> ConnectAsync(
+    public static ValueTask<Socks5ControlConnection> ConnectAsync(
         Socks5Server server,
         CancellationToken cancellationToken,
         Func<IPEndPoint, IPEndPoint, IDisposable?>? onSocketReady = null,
-        Func<string, CancellationToken, ValueTask<IPAddress[]>>? resolveAddresses = null,
+        int maxAttempts = MaxConnectionAttempts,
+        TimeSpan? perAttemptTimeout = null,
+        Socks5AddressCache? addressCache = null)
+        => ConnectAsync(server, cancellationToken, null, null, onSocketReady, maxAttempts, perAttemptTimeout, addressCache);
+
+    /// <summary>
+    /// The injectable-seam form of <see cref="ConnectAsync(Socks5Server, CancellationToken, Func{IPEndPoint, IPEndPoint, IDisposable?}?, int, TimeSpan?, Socks5AddressCache?)"/>:
+    /// <paramref name="resolveAddresses"/> (the address-list provider) and <paramref name="socketFactory"/>
+    /// (the socket constructor) let tests exercise the attempt cap, deadline, and disposal with
+    /// fakes instead of real DNS and sockets. Production callers use the public overload.
+    /// </summary>
+    internal static async ValueTask<Socks5ControlConnection> ConnectAsync(
+        Socks5Server server,
+        CancellationToken cancellationToken,
+        Func<string, CancellationToken, ValueTask<IPAddress[]>>? resolveAddresses,
         Func<AddressFamily, Socket>? socketFactory = null,
+        Func<IPEndPoint, IPEndPoint, IDisposable?>? onSocketReady = null,
         int maxAttempts = MaxConnectionAttempts,
         TimeSpan? perAttemptTimeout = null,
         Socks5AddressCache? addressCache = null)

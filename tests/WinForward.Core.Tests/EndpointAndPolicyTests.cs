@@ -219,8 +219,9 @@ public sealed class EndpointAndPolicyTests
     [Fact]
     public void IPPrefixRejectsNullInputsWithoutThrowing()
     {
-        Assert.False(IPPrefix.TryParse(null, out var prefix));
-        Assert.False(prefix.Contains(null));
+        Assert.False(IPPrefix.TryParse(null, out _));
+        Assert.False(IPPrefix.TryParse("   ", out _));
+        Assert.False(IPPrefix.TryParse("192.0.2.0/33", out _));
     }
 
     [Fact]

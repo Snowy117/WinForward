@@ -59,7 +59,7 @@ public sealed unsafe class NativeBufferPool : IDisposable
     public Action<bool>? AccountingSink { get; set; }
 
     /// <summary>Point-in-time rent/return accounting for diagnostics and balance tests.</summary>
-    public NativeBufferPoolStats Stats => new(
+    internal NativeBufferPoolStats Stats => new(
         Interlocked.Read(ref _rented),
         Interlocked.Read(ref _returned),
         Interlocked.Read(ref _inPool),
@@ -237,7 +237,7 @@ internal sealed unsafe class NativeMemoryManager : MemoryManager<byte>
 /// still checked out), which is what the pool balance tests assert.
 /// </summary>
 [StructLayout(LayoutKind.Auto)]
-public readonly record struct NativeBufferPoolStats(
+internal readonly record struct NativeBufferPoolStats(
     long Rented,
     long Returned,
     long InPool,

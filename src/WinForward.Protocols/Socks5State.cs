@@ -47,7 +47,7 @@ public static class Socks5Messages
 
     /// <summary>
     /// Writes the RFC 1929 username/password message into <paramref name="destination"/> and
-    /// returns its length. Zero-allocation counterpart of <see cref="UsernamePassword"/>.
+    /// returns its length.
     /// </summary>
     public static int WriteUsernamePassword(string username, string password, Span<byte> destination)
     {
@@ -62,21 +62,14 @@ public static class Socks5Messages
         return length;
     }
 
-    public static byte[] UsernamePassword(string username, string password)
-    {
-        var message = new byte[UsernamePasswordLength(username, password)];
-        WriteUsernamePassword(username, password, message);
-        return message;
-    }
-
     /// <summary>The byte length of the SOCKS5 request for <paramref name="address"/>.</summary>
     public static int RequestLength(IPAddress address) =>
         4 + (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? 4 : 16) + 2;
 
     /// <summary>
     /// Writes a SOCKS5 request (RFC 1928 section 4) into <paramref name="destination"/> and
-    /// returns its length. Zero-allocation counterpart of <see cref="Request"/>; the reserved
-    /// byte is written explicitly because the caller's scratch span is reused.
+    /// returns its length; the reserved byte is written explicitly because the caller's scratch
+    /// span is reused.
     /// </summary>
     public static int WriteRequest(Socks5Command command, IPAddress address, ushort port, Span<byte> destination)
     {
@@ -93,13 +86,6 @@ public static class Socks5Messages
         }
         BinaryPrimitives.WriteUInt16BigEndian(destination.Slice(4 + addressLength, 2), port);
         return length;
-    }
-
-    public static byte[] Request(Socks5Command command, IPAddress address, ushort port)
-    {
-        var result = new byte[RequestLength(address)];
-        WriteRequest(command, address, port, result);
-        return result;
     }
 
     /// <summary>

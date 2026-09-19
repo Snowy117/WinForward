@@ -68,8 +68,24 @@ public sealed class RuntimeHeartbeat : IAsyncDisposable
         RuntimeCounters? counters = null,
         InterceptionHealthMonitor? health = null,
         TimeProvider? timeProvider = null,
-        TimeSpan? interval = null,
-        Func<RuntimeGcSnapshot>? gcSnapshotProvider = null)
+        TimeSpan? interval = null)
+        : this(logger, null, usage, counters, health, timeProvider, interval)
+    {
+    }
+
+    /// <summary>
+    /// The injectable-snapshot form of the public constructor: tests supply a scripted
+    /// <paramref name="gcSnapshotProvider"/> to drive the GC-growth alarm deterministically.
+    /// Production reads the process GC counters through the default provider.
+    /// </summary>
+    internal RuntimeHeartbeat(
+        IRuntimeLogger logger,
+        Func<RuntimeGcSnapshot>? gcSnapshotProvider,
+        Func<RuntimeHeartbeatUsage>? usage = null,
+        RuntimeCounters? counters = null,
+        InterceptionHealthMonitor? health = null,
+        TimeProvider? timeProvider = null,
+        TimeSpan? interval = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
         if (interval is { } value && value <= TimeSpan.Zero)

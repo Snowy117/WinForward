@@ -3,4 +3,9 @@
     <AssemblyName>WinForward.Core</AssemblyName>
     <RootNamespace>WinForward.Core</RootNamespace>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="WinForward.Core.Tests" />
+    <InternalsVisibleTo Include="WinForward.Benchmarks" />
+  </ItemGroup>
 </Project>

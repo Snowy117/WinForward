@@ -7,7 +7,7 @@ public readonly record struct NdisCapturedPacket(NdisPacketBuffer Buffer, nint A
 {
     public uint Flags { get; init; }
 
-    public static NdisCapturedPacket FromCapture(NdisPacketBuffer buffer, nint enumerationAdapterHandle)
+    internal static NdisCapturedPacket FromCapture(NdisPacketBuffer buffer, nint enumerationAdapterHandle)
     {
         ArgumentNullException.ThrowIfNull(buffer);
         return new NdisCapturedPacket(buffer, enumerationAdapterHandle, buffer.DeviceFlags) { Flags = buffer.Flags };

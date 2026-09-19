@@ -61,7 +61,7 @@ public sealed class ProtocolAuditTests
         var udpOriginal = udp.ToArray();
 
         Assert.False(IPTcpUdpPacket.TryParse(tcp, out _));
-        Assert.False(IPUdpPacket.TryParse(udp, out _));
+        Assert.False(IPUdpPacket.TryParseSpan(udp, out _));
         Assert.False(PacketChecksums.TryRewriteTcpEndpoints(tcp, s_ipv4Destination, 1, s_ipv4Source, 2));
         Assert.False(PacketChecksums.TryRewriteUdpEndpoints(udp, s_ipv4Destination, 1, s_ipv4Source, 2));
         Assert.Equal(tcpOriginal, tcp);
@@ -97,11 +97,12 @@ public sealed class ProtocolAuditTests
     public void FrameBuilderRejectsPayloadsBeyondWireLengthFields()
     {
         var payload = new byte[65_528];
+        var storage = new byte[65_600];
 
-        Assert.False(UdpFrameBuilder.TryBuild(s_ipv4Source, 1, s_ipv4Destination, 2, payload, s_sourceMac, s_destinationMac, out var ipv4Frame, 65_570));
-        Assert.Empty(ipv4Frame);
-        Assert.False(UdpFrameBuilder.TryBuild(s_ipv6Source, 1, s_ipv6Destination, 2, payload, s_sourceMac, s_destinationMac, out var ipv6Frame, 65_590));
-        Assert.Empty(ipv6Frame);
+        Assert.False(UdpFrameBuilder.TryBuildInto(WinForward.Core.IPAddressValue.From(s_ipv4Source), 1, WinForward.Core.IPAddressValue.From(s_ipv4Destination), 2, payload, s_sourceMac, s_destinationMac, storage, out var ipv4Length, 65_570));
+        Assert.Equal(0, ipv4Length);
+        Assert.False(UdpFrameBuilder.TryBuildInto(WinForward.Core.IPAddressValue.From(s_ipv6Source), 1, WinForward.Core.IPAddressValue.From(s_ipv6Destination), 2, payload, s_sourceMac, s_destinationMac, storage, out var ipv6Length, 65_590));
+        Assert.Equal(0, ipv6Length);
     }
 
     private static byte[] CreateIpv4TcpFrame()

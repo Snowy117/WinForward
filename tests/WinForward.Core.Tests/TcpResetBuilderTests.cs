@@ -16,7 +16,7 @@ public class TcpResetBuilderTests
     public void BuildResetIpv4ProducesWellFormedResetAck()
     {
         var template = BuildTemplateSyn(0x0800, srcMac: 0x11, dstMac: 0x22);
-        var frame = TcpResetBuilder.BuildReset(template, s_serverV4, 443, s_clientV4, 53000, 1001, 2002);
+        var frame = BuildReset(template, s_serverV4, 443, s_clientV4, 53000, 1001, 2002);
 
         Assert.NotNull(frame);
         Assert.Equal(14 + 20 + 20, frame.Length);
@@ -45,7 +45,7 @@ public class TcpResetBuilderTests
     public void BuildResetIpv6ProducesWellFormedResetAck()
     {
         var template = BuildTemplateSyn(0x86dd, srcMac: 0x33, dstMac: 0x44);
-        var frame = TcpResetBuilder.BuildReset(template, s_serverV6, 443, s_clientV6, 53000, 77, 88);
+        var frame = BuildReset(template, s_serverV6, 443, s_clientV6, 53000, 77, 88);
 
         Assert.NotNull(frame);
         Assert.Equal(14 + 40 + 20, frame.Length);
@@ -70,12 +70,12 @@ public class TcpResetBuilderTests
     [Fact]
     public void BuildResetRejectsUnusableTemplates()
     {
-        Assert.Null(TcpResetBuilder.BuildReset(new byte[10], s_serverV4, 443, s_clientV4, 53000, 1, 1));
+        Assert.Null(BuildReset(new byte[10], s_serverV4, 443, s_clientV4, 53000, 1, 1));
         var arp = BuildTemplateSyn(0x0806, 0x11, 0x22);
-        Assert.Null(TcpResetBuilder.BuildReset(arp, s_serverV4, 443, s_clientV4, 53000, 1, 1));
+        Assert.Null(BuildReset(arp, s_serverV4, 443, s_clientV4, 53000, 1, 1));
         var v4 = BuildTemplateSyn(0x0800, 0x11, 0x22);
-        Assert.Null(TcpResetBuilder.BuildReset(v4, s_serverV6, 443, s_clientV6, 53000, 1, 1));
-        Assert.Null(TcpResetBuilder.BuildReset(v4, s_serverV4, 443, s_clientV6, 53000, 1, 1));
+        Assert.Null(BuildReset(v4, s_serverV6, 443, s_clientV6, 53000, 1, 1));
+        Assert.Null(BuildReset(v4, s_serverV4, 443, s_clientV6, 53000, 1, 1));
     }
 
     [Fact]
@@ -94,7 +94,7 @@ public class TcpResetBuilderTests
         // S4: a capacity-rejected SYN must draw an RST|ACK whose ack = client-ISN + 1 — the
         // value a SYN_SENT stack accepts as acknowledging its SYN — with seq = 0.
         var syn = FrameBuilders.BuildIpv4TcpFrame(s_clientV4, s_serverV4, 53000, 443, FrameBuilders.TcpFlagSyn, sequence: 0x11223344);
-        var frame = TcpResetBuilder.BuildResetFromSyn(syn, WinForward.Core.IPAddressValue.From(s_serverV4), 443, WinForward.Core.IPAddressValue.From(s_clientV4), 53000);
+        var frame = BuildResetFromSyn(syn, WinForward.Core.IPAddressValue.From(s_serverV4), 443, WinForward.Core.IPAddressValue.From(s_clientV4), 53000);
 
         Assert.NotNull(frame);
         Assert.Equal(0x14, frame[47]);
@@ -112,7 +112,7 @@ public class TcpResetBuilderTests
     public void BuildResetFromSynIpv6ReadsClientIsn()
     {
         var syn = FrameBuilders.BuildIpv6TcpFrame(s_clientV6, s_serverV6, 53000, 443, sequence: 0xA0B0C0D0);
-        var frame = TcpResetBuilder.BuildResetFromSyn(syn, WinForward.Core.IPAddressValue.From(s_serverV6), 443, WinForward.Core.IPAddressValue.From(s_clientV6), 53000);
+        var frame = BuildResetFromSyn(syn, WinForward.Core.IPAddressValue.From(s_serverV6), 443, WinForward.Core.IPAddressValue.From(s_clientV6), 53000);
 
         Assert.NotNull(frame);
         var tcp = frame.AsSpan(54, 20);
@@ -126,10 +126,26 @@ public class TcpResetBuilderTests
     public void BuildResetFromSynRejectsUnparseableFrames()
     {
         var udp = FrameBuilders.BuildIpv4UdpFrame(s_clientV4, s_serverV4, 53000, 443);
-        Assert.Null(TcpResetBuilder.BuildResetFromSyn(udp, WinForward.Core.IPAddressValue.From(s_serverV4), 443, WinForward.Core.IPAddressValue.From(s_clientV4), 53000));
-        Assert.Null(TcpResetBuilder.BuildResetFromSyn(new byte[20], WinForward.Core.IPAddressValue.From(s_serverV4), 443, WinForward.Core.IPAddressValue.From(s_clientV4), 53000));
+        Assert.Null(BuildResetFromSyn(udp, WinForward.Core.IPAddressValue.From(s_serverV4), 443, WinForward.Core.IPAddressValue.From(s_clientV4), 53000));
+        Assert.Null(BuildResetFromSyn(new byte[20], WinForward.Core.IPAddressValue.From(s_serverV4), 443, WinForward.Core.IPAddressValue.From(s_clientV4), 53000));
         var arp = BuildTemplateSyn(0x0806, 0x11, 0x22);
-        Assert.Null(TcpResetBuilder.BuildResetFromSyn(arp, WinForward.Core.IPAddressValue.From(s_serverV4), 443, WinForward.Core.IPAddressValue.From(s_clientV4), 53000));
+        Assert.Null(BuildResetFromSyn(arp, WinForward.Core.IPAddressValue.From(s_serverV4), 443, WinForward.Core.IPAddressValue.From(s_clientV4), 53000));
+    }
+
+    private static byte[]? BuildReset(ReadOnlySpan<byte> synFrame, IPAddress server, ushort serverPort, IPAddress client, ushort clientPort, uint serverSequenceNext, uint clientSequenceNext)
+    {
+        Span<byte> frame = stackalloc byte[TcpResetBuilder.MaxResetFrameLength];
+        return TcpResetBuilder.TryBuildReset(synFrame, WinForward.Core.IPAddressValue.From(server), serverPort, WinForward.Core.IPAddressValue.From(client), clientPort, serverSequenceNext, clientSequenceNext, frame, out var written)
+            ? frame[..written].ToArray()
+            : null;
+    }
+
+    private static byte[]? BuildResetFromSyn(ReadOnlySpan<byte> synFrame, WinForward.Core.IPAddressValue server, ushort serverPort, WinForward.Core.IPAddressValue client, ushort clientPort)
+    {
+        Span<byte> frame = stackalloc byte[TcpResetBuilder.MaxResetFrameLength];
+        return TcpResetBuilder.TryBuildResetFromSyn(synFrame, server, serverPort, client, clientPort, frame, out var written)
+            ? frame[..written].ToArray()
+            : null;
     }
 
     private static byte[] BuildTemplateSyn(ushort etherType, byte srcMac, byte dstMac)

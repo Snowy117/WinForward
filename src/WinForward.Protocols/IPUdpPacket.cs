@@ -4,15 +4,12 @@ using WinForward.Core;
 
 namespace WinForward.Protocols;
 
-[StructLayout(LayoutKind.Auto)]
-public readonly record struct UdpPacketView(IPAddressValue SourceAddress, IPAddressValue DestinationAddress, ushort SourcePort, ushort DestinationPort, ReadOnlyMemory<byte> Payload, int IPHeaderLength);
-
 /// <summary>
-/// The synchronous-inspection twin of <see cref="UdpPacketView"/>: identical header fields, but the
-/// UDP payload is an offset/length pair into the parsed frame instead of a
-/// <see cref="ReadOnlyMemory{T}"/> slice, so a consumer holding only a span (a native capture
-/// buffer viewed through <c>CapturedFlowPacket.InspectionSpan</c>) can parse and slice without any
-/// managed backing. Use <see cref="Payload"/> to recover the payload slice from the same span.
+/// A parsed IPv4/IPv6 UDP header whose payload is an offset/length pair into the parsed frame
+/// rather than a <see cref="ReadOnlyMemory{T}"/> slice, so a consumer holding only a span (a
+/// native capture buffer viewed through <c>CapturedFlowPacket.InspectionSpan</c>) can parse and
+/// slice without any managed backing. Use <see cref="Payload"/> to recover the payload slice from
+/// the same span.
 /// </summary>
 [StructLayout(LayoutKind.Auto)]
 public readonly record struct UdpPacketSpanView(IPAddressValue SourceAddress, IPAddressValue DestinationAddress, ushort SourcePort, ushort DestinationPort, int PayloadOffset, int PayloadLength, int IPHeaderLength)
@@ -23,23 +20,10 @@ public readonly record struct UdpPacketSpanView(IPAddressValue SourceAddress, IP
 
 public static class IPUdpPacket
 {
-    public static bool TryParse(ReadOnlyMemory<byte> frame, out UdpPacketView packet)
-    {
-        if (!TryParseSpan(frame.Span, out UdpPacketSpanView view))
-        {
-            packet = default;
-            return false;
-        }
-        packet = new UdpPacketView(view.SourceAddress, view.DestinationAddress, view.SourcePort, view.DestinationPort, frame.Slice(view.PayloadOffset, view.PayloadLength), view.IPHeaderLength);
-        return true;
-    }
-
     /// <summary>
-    /// Span-based parse for synchronous hot-path consumers: identical validation to the memory
-    /// overload, with the payload reported as an offset/length pair into <paramref name="frame"/>.
-    /// Deliberately named apart from <see cref="TryParse(ReadOnlyMemory{byte}, out UdpPacketView)"/>
-    /// so byte[]-backed call sites keep binding to the memory view (a span overload would capture
-    /// them and strand the <c>Payload</c> property consumers on the offset-based twin).
+    /// Span-based parse for synchronous hot-path consumers: the payload is reported as an
+    /// offset/length pair into <paramref name="frame"/>, so parsing and slicing never touch the
+    /// managed heap.
     /// </summary>
     public static bool TryParseSpan(ReadOnlySpan<byte> frame, out UdpPacketSpanView packet)
     {

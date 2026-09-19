@@ -14,20 +14,26 @@ public sealed class Socks5ProtocolTests
     {
         Assert.Equal(new byte[] { 5, 1, 0 }, Socks5Messages.Greeting(credentials: false));
         Assert.Equal(new byte[] { 5, 2, 0, 2 }, Socks5Messages.Greeting(credentials: true));
-        Assert.Equal(new byte[] { 1, 1, (byte)'u', 1, (byte)'p' }, Socks5Messages.UsernamePassword("u", "p"));
+        var credentials = new byte[Socks5Messages.UsernamePasswordLength("u", "p")];
+        _ = Socks5Messages.WriteUsernamePassword("u", "p", credentials);
+        Assert.Equal(new byte[] { 1, 1, (byte)'u', 1, (byte)'p' }, credentials);
     }
 
     [Fact]
     public void Socks5UsernamePasswordAllowsEmptySecret()
     {
         // R4: RFC 1929 permits a zero-length password; the encoded message carries a 0-length field.
-        Assert.Equal(new byte[] { 1, 4, (byte)'u', (byte)'s', (byte)'e', (byte)'r', 0 }, Socks5Messages.UsernamePassword("user", ""));
+        var credentials = new byte[Socks5Messages.UsernamePasswordLength("user", "")];
+        _ = Socks5Messages.WriteUsernamePassword("user", "", credentials);
+        Assert.Equal(new byte[] { 1, 4, (byte)'u', (byte)'s', (byte)'e', (byte)'r', 0 }, credentials);
     }
 
     [Fact]
     public void Socks5RequestsCarryCommandAddressAndPort()
     {
-        var request = Socks5Messages.Request(Socks5Command.UdpAssociate, IPAddress.Parse("192.0.2.53"), 5353);
+        Span<byte> scratch = stackalloc byte[Socks5Messages.RequestLength(IPAddress.Parse("192.0.2.53"))];
+        var length = Socks5Messages.WriteRequest(Socks5Command.UdpAssociate, IPAddress.Parse("192.0.2.53"), 5353, scratch);
+        var request = scratch[..length].ToArray();
 
         Assert.Equal(new byte[] { 5, 3, 0, 1, 192, 0, 2, 53, 0x14, 0xe9 }, request);
     }

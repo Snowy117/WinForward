@@ -25,7 +25,7 @@ public sealed class UdpProxySessionTests
         var session = CreateSession(time, stamps);
         await using (session)
         {
-            await session.SendAsync(session.Flow.Remote, new byte[] { 1 }, CancellationToken.None);
+            await session.SendSpanAsync(session.Flow.Remote, new byte[] { 1 }, CancellationToken.None);
         }
 
         var stamp = Assert.Single(stamps);
@@ -40,14 +40,14 @@ public sealed class UdpProxySessionTests
         var session = CreateSession(time, stamps);
         await using (session)
         {
-            await session.SendAsync(session.Flow.Remote, new byte[] { 1 }, CancellationToken.None);
+            await session.SendSpanAsync(session.Flow.Remote, new byte[] { 1 }, CancellationToken.None);
             Assert.Single(stamps);
 
             // Sends inside the interval keep the session timestamp exact but do not propagate.
             for (var index = 0; index < 5; index++)
             {
                 time.Advance(TimeSpan.FromMilliseconds(10));
-                await session.SendAsync(session.Flow.Remote, new byte[] { 2 }, CancellationToken.None);
+                await session.SendSpanAsync(session.Flow.Remote, new byte[] { 2 }, CancellationToken.None);
             }
 
             Assert.Single(stamps);
@@ -55,7 +55,7 @@ public sealed class UdpProxySessionTests
 
             // Crossing the interval lets exactly the next send propagate.
             time.Advance(TimeSpan.FromMilliseconds(60));
-            await session.SendAsync(session.Flow.Remote, new byte[] { 3 }, CancellationToken.None);
+            await session.SendSpanAsync(session.Flow.Remote, new byte[] { 3 }, CancellationToken.None);
             Assert.Equal(2, stamps.Count);
             Assert.Equal(time.GetUtcNow(), session.LastActivityUtc);
             Assert.Equal(time.GetUtcNow(), stamps[1]);
@@ -63,7 +63,7 @@ public sealed class UdpProxySessionTests
     }
 
     [Fact]
-    public async Task SendAsyncForwardsTheSessionEndpointToTheTransportUnchanged()
+    public async Task SendSpanAsyncForwardsTheSessionEndpointToTheTransportUnchanged()
     {
         // R1: the session hands its Endpoint struct straight through to the transport — no
         // IPEndPoint round-trip on the forward leg — so address, port, and family arrive intact.
@@ -71,7 +71,7 @@ public sealed class UdpProxySessionTests
         var session = CreateSession(new MutableTimeProvider(DateTimeOffset.UnixEpoch), [], transport);
         await using (session)
         {
-            await session.SendAsync(session.Flow.Remote, new byte[] { 1 }, CancellationToken.None);
+            await session.SendSpanAsync(session.Flow.Remote, new byte[] { 1 }, CancellationToken.None);
         }
 
         (Endpoint Destination, byte[] Payload) sent;

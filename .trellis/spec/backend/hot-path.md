@@ -17,7 +17,7 @@ attribution, socket setup, logging, tests) are exempt.
    `Endpoint` stores `IPAddressValue` by value. Since 2026-08-30 (task
    08-30-udp-alloc-jumbo) this extends to the SOCKS5 UDP datagram product type —
    `Socks5UdpDatagram.DestinationAddress` is `IPAddressValue?` and
-   `IUdpProxyTransport.SendAsync` takes an `Endpoint` — no framework addresses
+   `IUdpProxyTransport.SendSpanAsync` takes an `Endpoint` — no framework addresses
    remain on any UDP datagram path.
 2. **IPv4 masks stay inside the low 32 bits.** `IPPrefix.PrefixMask(prefixLength, family)`:
    IPv4 = `0xFFFFFFFF << (32 - len)` (/0→0, /32→0xFFFFFFFF); IPv6 = left-aligned 128-bit.
@@ -219,11 +219,12 @@ branch, and any allocation-gate test that protects a span-vs-memory overload cho
 
 ### 2. Signatures
 
-- `UdpProxyCoordinator.TrySendSpanAsync` / `TrySendAsync` are **non-async** warm entries; the
-  cold new-flow work is delegated to `ScheduleSessionSetup(FlowKey, Socks5Server, long, byte[]?, UdpSessionSlot)`
+- `UdpProxyCoordinator.TrySendSpanAsync` is the **only** (and **non-async**) warm send entry
+  (task 09-19-compat-api-cleanup removed the memory `TrySendAsync`); the cold new-flow work is
+  delegated to `ScheduleSessionSetup(FlowKey, Socks5Server, long, byte[]?, UdpSessionSlot)`
   (`UdpProxyCoordinator.Send.cs`), which is the only place a `Task.Run(() => ...)` lambda lives.
 - `UdpProxyCoordinator` is a `partial class` split into `UdpProxyCoordinator.cs` (admission /
-  lifecycle) and `UdpProxyCoordinator.Send.cs` (span/memory send bridges), keeping each file
+  lifecycle) and `UdpProxyCoordinator.Send.cs` (the span send bridge), keeping each file
   ≤400 effective lines.
 
 ### 3. Contracts
@@ -235,12 +236,15 @@ branch, and any allocation-gate test that protects a span-vs-memory overload cho
   warm path never entered the new-flow branch. Fix: extract the capturing lambda into a separate
   cold helper method; both warm entries then contain no lambda and no display class is hoisted.
   This is a source-level guarantee — do not rely on escape analysis.
-- **Allocation gates must discriminate the exact overload.** A fake transport that increments one
-  shared `_sends` counter for both `SendAsync` (memory) and `SendSpanAsync` (span) cannot detect a
-  regression that reverts the caller to the memory overload — the count and the 0 B measurement
-  both stay green (self-fulfilling gate). Gates must count the overloads separately
-  (`MemorySends`/`SpanSends`) and assert the span overload is the one used
-  (`MemorySends == 0`, `SpanSends == expected`).
+- **Allocation gates must discriminate the exact seam.** History: the interface once carried both
+  a memory `SendAsync` and a span `SendSpanAsync`; a fake that incremented one shared `_sends`
+  counter for both could not detect a regression that reverted the caller to the memory overload
+  (self-fulfilling gate), so the gate counted them separately (`MemorySends`/`SpanSends`). Task
+  09-19-compat-api-cleanup deleted the memory overload and made `IUdpProxyTransport.SendSpanAsync`
+  the only send seam, so the gate now measures the span path directly: it asserts
+  `GC.GetAllocatedBytesForCurrentThread()` delta `== 0` across real dispatches and that the fake's
+  `SpanSends` advanced by exactly the expected count. A future re-materialization on the send path
+  (a new memory overload, `ToArray()`, or `new byte[]`) must make that 0-B assertion fail.
 - **Approved cold-path materialization.** `Socks5UdpTransport.SendSpanAsync` copies with
   `payload.ToArray()` only on the contended-gate branch: the span views native capture memory
   that recycles once dispatch returns, so it cannot cross the gate `await`. This is a documented
@@ -252,7 +256,7 @@ branch, and any allocation-gate test that protects a span-vs-memory overload cho
 |---|---|
 | Warm entry contains a capturing lambda anywhere in its body | 0 B gate fails by design; extract the lambda to a cold helper |
 | Warm entry returns before the cold branch | still 0 B — no display class is hoisted |
-| Gate reverts caller to memory overload | `MemorySends > 0` / `SpanSends == 0` assertion fails |
+| A materializing overload/copy is re-added on the send seam | 0 B gate fails (`SpanSends` count and/or allocation delta) |
 | Span reaches `Socks5UdpTransport` with the send gate uncontended | zero-alloc sync `SendTo` |
 | Span reaches `Socks5UdpTransport` with the gate contended | `payload.ToArray()` cold copy (documented exemption) |
 
@@ -260,7 +264,7 @@ branch, and any allocation-gate test that protects a span-vs-memory overload cho
 
 - `HotPathAllocationGateTests`: `MidFlowRewriteAndInjectAllocatesNoManagedBytes`,
   `ReverseRewriteAndInjectAllocatesNoManagedBytes`, `EstablishedUdpDatagramPathAllocatesNoManagedBytes`
-  — the UDP gate asserts `MemorySends == 0` and `SpanSends == 3 + count` after the measurement.
+  — the UDP gate asserts 0 allocated bytes and that the fake's `SpanSends` advances by exactly the expected count after the measurement (span is the only send seam).
 - `NativeBufferPoolTests` / `NdisPacketBufferPoolTests`: balance identity + dispose-drain races
   (`ReturnsRacingDisposeNeverStrandBuffers`).
 - Baseline must stay behavior-zero (678 tests green on this task).
@@ -396,7 +400,7 @@ GC configuration. This is the contract for the full-path zeroing milestone (M1-M
 - `SetupExecutorTests`: balance, reject-beyond-capacity, fault-keeps-draining, dispose joins/
   drains/refuses.
 - `Socks5UdpTransportSendTests.WarmSyncSendAllocatesNoManagedBytes`: real relay socket, warm
-  synchronous `SendAsync` completes on the calling thread with 0 B (the EndPoint-trap regression).
+  synchronous `SendSpanAsync` completes on the calling thread with 0 B (the EndPoint-trap regression).
 - `HotPathAllocationGateTests`: per-packet (TCP mid-flow/reverse, UDP, socks5, RST, SYN
   retention, FlowTable, dispatcher warm path) 0 B gates.
 - `GcSoakScenarioTests`: token parsing/defaults/selection, leak allowance, slope helper.

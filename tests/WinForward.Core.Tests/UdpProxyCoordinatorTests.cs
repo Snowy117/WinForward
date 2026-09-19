@@ -22,8 +22,8 @@ public sealed class UdpProxyCoordinatorTests
         await using var coordinator = new UdpProxyCoordinator(factory, sink);
         var flow = CreateFlow("192.0.2.53");
 
-        Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 0x12, 0x34 }, CancellationToken.None));
-        Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 0x56, 0x78 }, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 0x12, 0x34 }, default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 0x56, 0x78 }, default, CancellationToken.None));
 
         await WaitForAsync(() => factory.Transports.Count == 1);
         var transport = Assert.Single(factory.Transports);
@@ -49,7 +49,7 @@ public sealed class UdpProxyCoordinatorTests
         const int count = 32;
 
         var sends = Enumerable.Range(0, count)
-            .Select(index => coordinator.TrySendAsync(flow, s_server, new[] { (byte)index }, CancellationToken.None).AsTask())
+            .Select(index => coordinator.TrySendSpanAsync(flow, s_server, new[] { (byte)index }, default, CancellationToken.None).AsTask())
             .ToArray();
         Assert.All(await Task.WhenAll(sends), Assert.True);
 
@@ -79,7 +79,7 @@ public sealed class UdpProxyCoordinatorTests
         var factory = new FakeTransportFactory();
         await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink());
         var sends = new[] { "192.0.2.53", "192.0.2.54" }
-            .Select((address, index) => coordinator.TrySendAsync(CreateFlow(address), s_server, new[] { (byte)index }, CancellationToken.None).AsTask())
+            .Select((address, index) => coordinator.TrySendSpanAsync(CreateFlow(address), s_server, new[] { (byte)index }, default, CancellationToken.None).AsTask())
             .ToArray();
 
         Assert.All(await Task.WhenAll(sends), Assert.True);
@@ -94,7 +94,7 @@ public sealed class UdpProxyCoordinatorTests
         await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink());
         var flow = FlowKey.Create(Endpoint.From(IPAddress.Parse("2001:db8::10"), 53000), Endpoint.From(IPAddress.Parse("2001:db8::53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
 
-        Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 1 }, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 1 }, default, CancellationToken.None));
         await WaitForAsync(() => factory.Transports.Count == 1);
         var transport = Assert.Single(factory.Transports);
         await WaitForAsync(() =>
@@ -116,7 +116,7 @@ public sealed class UdpProxyCoordinatorTests
         await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink());
         var flow = FlowKey.Create(Endpoint.From(IPAddress.Parse("2001:db8::10"), 53000), Endpoint.From(IPAddress.Parse("2001:db8::53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
 
-        Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 1 }, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 1 }, default, CancellationToken.None));
         await WaitForAsync(() => factory.Transports.Count == 1);
         var transport = Assert.Single(factory.Transports);
         Assert.Equal(AddressFamily.InterNetworkV6, transport.LocalEndpoint.AddressFamily);
@@ -129,8 +129,8 @@ public sealed class UdpProxyCoordinatorTests
         var factory = new FakeTransportFactory();
         await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink());
 
-        Assert.True(await coordinator.TrySendAsync(CreateFlow("192.0.2.53"), s_server, new byte[] { 1 }, CancellationToken.None));
-        Assert.True(await coordinator.TrySendAsync(CreateFlow("192.0.2.54"), s_server, new byte[] { 2 }, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(CreateFlow("192.0.2.53"), s_server, new byte[] { 1 }, default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(CreateFlow("192.0.2.54"), s_server, new byte[] { 2 }, default, CancellationToken.None));
 
         await WaitForAsync(() => factory.Transports.Count == 2);
         Assert.Equal(2, factory.Transports.Count);
@@ -143,7 +143,7 @@ public sealed class UdpProxyCoordinatorTests
         var sink = new FakeResponseSink();
         await using var coordinator = new UdpProxyCoordinator(factory, sink);
         var flow = CreateFlow("192.0.2.53");
-        Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 1 }, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 1 }, default, CancellationToken.None));
         await WaitForAsync(() => factory.Transports.Count == 1);
         var transport = Assert.Single(factory.Transports);
         await WaitForAsync(() =>
@@ -170,7 +170,7 @@ public sealed class UdpProxyCoordinatorTests
         var flow = CreateFlow("192.0.2.53");
         var clientMac = new byte[] { 0x02, 0x00, 0x00, 0x00, 0x00, 0x0a };
 
-        Assert.True(await coordinator.TrySendAsync(flow, s_server, new byte[] { 1 }, CancellationToken.None, 0, 0, MacAddress.From(clientMac)));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 1 }, MacAddress.From(clientMac), CancellationToken.None, 0, 0));
         await WaitForAsync(() => factory.Transports.Count == 1);
         var transport = Assert.Single(factory.Transports);
         await WaitForAsync(() =>
@@ -198,7 +198,7 @@ public sealed class UdpProxyCoordinatorTests
             maximumFrameSize: 1514,
             receiveWindowPool: pool);
 
-        Assert.True(await coordinator.TrySendAsync(CreateFlow("192.0.2.53"), s_server, new byte[] { 1 }, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(CreateFlow("192.0.2.53"), s_server, new byte[] { 1 }, default, CancellationToken.None));
         // The receive window is rented when the background setup starts the session's receive loop.
         await WaitForAsync(() => pool.Stats.Outstanding == 1);
         Assert.Equal(1537, pool.BufferSize);

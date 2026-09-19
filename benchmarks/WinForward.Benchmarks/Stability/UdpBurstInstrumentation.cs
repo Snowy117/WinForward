@@ -142,7 +142,7 @@ internal sealed class BackgroundSender(
                     var sendTicks = Stopwatch.GetTimestamp();
                     DatagramHeader.Write(_payload, _sequences[flow], flow);
                     tracker.Stamp(flow, _sequences[flow], (BackgroundWindow)window, sendTicks);
-                    if (await coordinator.TrySendAsync(flows[flow], socksServer, _payload, cancellation).ConfigureAwait(false))
+                    if (await coordinator.TrySendSpanAsync(flows[flow], socksServer, _payload, default, cancellation).ConfigureAwait(false))
                     {
                         _sentPerWindow[window]++;
                         _sendLatencies[window].Add(StabilityShared.TicksToMilliseconds(Stopwatch.GetTimestamp() - sendTicks));

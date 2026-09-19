@@ -59,12 +59,6 @@ internal sealed class FakeTransport : IUdpProxyTransport
     /// <summary>Queues a per-datagram anomaly the real transport would surface as a skip result.</summary>
     public void EnqueueSkip(Socks5UdpReceiveSkipReason reason) => Received.Writer.TryWrite(Socks5UdpReceiveResult.Skipped(reason));
 
-    public ValueTask SendAsync(Endpoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
-    {
-        lock (Sent) Sent.Add((destination, payload.ToArray()));
-        return ValueTask.CompletedTask;
-    }
-
     public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken)
     {
         lock (Sent) Sent.Add((destination, payload.ToArray()));
@@ -134,9 +128,6 @@ internal sealed class ImmediateFaultTransport : IUdpProxyTransport
     public IPEndPoint RelayEndpoint { get; }
     public IPEndPoint LocalEndpoint { get; }
     public bool IsDisposed { get; private set; }
-
-    public ValueTask SendAsync(Endpoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken) =>
-        ValueTask.FromException(new IOException("relay receive already failed"));
 
     public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken) =>
         ValueTask.FromException(new IOException("relay receive already failed"));

@@ -90,7 +90,9 @@ public sealed class HotPathAllocationGateTests
         var executor = new NdisPacketActionExecutor(reinjector, udpProxy: coordinator);
 
         var payload = new byte[64];
-        Assert.True(UdpFrameBuilder.TryBuild(ClientIpv4, 53000, DestIpv4, 53, payload, [0x02, 0x00, 0x00, 0x00, 0x00, 0x01], [0x02, 0x00, 0x00, 0x00, 0x00, 0x02], out var frame));
+        var frameBuffer = new byte[UdpFrameBuilder.DefaultMaximumEthernetFrame];
+        Assert.True(UdpFrameBuilder.TryBuildInto(IPAddressValue.From(ClientIpv4), 53000, IPAddressValue.From(DestIpv4), 53, payload, [0x02, 0x00, 0x00, 0x00, 0x00, 0x01], [0x02, 0x00, 0x00, 0x00, 0x00, 0x02], frameBuffer, out var frameLength));
+        var frame = frameBuffer.AsSpan(0, frameLength).ToArray();
         var flow = FlowKey.Create(Endpoint.From(ClientIpv4, 53000), Endpoint.From(DestIpv4, 53), TransportProtocol.Udp, FlowOriginKind.Host);
         var packet = new CapturedFlowPacket(new PacketLease(frame), new FlowContext(flow, null, null, null, null, 53), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
 
@@ -101,7 +103,6 @@ public sealed class HotPathAllocationGateTests
         await WaitForAsync(() => factory.Transport!.Sends >= 1);
         for (var warm = 0; warm < 3; warm++) await executor.ProxyAsync(packet, Server, CancellationToken.None);
 
-        var memorySendsBeforeMeasure = factory.Transport!.MemorySends;
         var spanSendsBeforeMeasure = factory.Transport!.SpanSends;
         var before = GC.GetAllocatedBytesForCurrentThread();
         const int count = 64;
@@ -109,14 +110,11 @@ public sealed class HotPathAllocationGateTests
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
         Assert.Equal(0, allocated);
-        // A4/B4 mutation gate: the measured window must ride the span overload exclusively, and
-        // the cold setup flush is a span send too (the queue holds native leases, not managed
-        // buffers). Reverting HandleUdpProxyAsync to TrySendAsync — which stays at 0 B via the
-        // lease's cached materialization — moves every measured send onto MemorySends and fails
-        // these counters.
-        Assert.Equal(0, factory.Transport!.MemorySends - memorySendsBeforeMeasure);
+        // A4/B4 mutation gate: the measured window must ride the span overload, and the cold
+        // setup flush is a span send too (the queue holds native leases, not managed buffers).
+        // The memory send overload no longer exists; the gate pins the span counter so a
+        // regression that stops sending (or sends a managed copy) fails here.
         Assert.Equal(count, factory.Transport!.SpanSends - spanSendsBeforeMeasure);
-        Assert.Equal(0, factory.Transport!.MemorySends);
         Assert.Equal(4 + count, factory.Transport!.SpanSends);
         Assert.Equal(4 + count, factory.Transport!.Sends);
         // The original datagram is consumed by the relay forward; it is never reinjected.
@@ -140,12 +138,12 @@ public sealed class HotPathAllocationGateTests
 
         // The first datagram starts the cold setup; 40 more materialize the Queue<> and reach the
         // 32-packet drop-oldest steady state.
-        Assert.True(await coordinator.TrySendAsync(flow, Server, payload, CancellationToken.None));
-        for (var warm = 0; warm < 40; warm++) Assert.True(await coordinator.TrySendAsync(flow, Server, payload, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, Server, payload, default, CancellationToken.None));
+        for (var warm = 0; warm < 40; warm++) Assert.True(await coordinator.TrySendSpanAsync(flow, Server, payload, default, CancellationToken.None));
 
         var before = GC.GetAllocatedBytesForCurrentThread();
         const int count = 128;
-        for (var index = 0; index < count; index++) Assert.True(await coordinator.TrySendAsync(flow, Server, payload, CancellationToken.None));
+        for (var index = 0; index < count; index++) Assert.True(await coordinator.TrySendSpanAsync(flow, Server, payload, default, CancellationToken.None));
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
         Assert.Equal(0, allocated);
@@ -420,23 +418,14 @@ public sealed class HotPathAllocationGateTests
     private sealed class CountingTransport : IUdpProxyTransport
     {
         private readonly TaskCompletionSource<Socks5UdpReceiveResult> _parkedReceive = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private long _memorySends;
         private long _spanSends;
 
         public IPEndPoint RelayEndpoint { get; } = new(IPAddress.Loopback, 50000);
         public IPEndPoint LocalEndpoint { get; } = new(IPAddress.Loopback, 40000);
 
-        public long Sends => Interlocked.Read(ref _memorySends) + Interlocked.Read(ref _spanSends);
-
-        public long MemorySends => Interlocked.Read(ref _memorySends);
+        public long Sends => Interlocked.Read(ref _spanSends);
 
         public long SpanSends => Interlocked.Read(ref _spanSends);
-
-        public ValueTask SendAsync(Endpoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
-        {
-            Interlocked.Increment(ref _memorySends);
-            return ValueTask.CompletedTask;
-        }
 
         public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken)
         {

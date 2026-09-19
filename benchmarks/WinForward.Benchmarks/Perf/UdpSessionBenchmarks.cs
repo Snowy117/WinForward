@@ -58,7 +58,7 @@ public class UdpSessionBenchmarks
         var forwardedBaseline = _server.RelayForwarded;
         for (var index = 0; index < Sessions; index++)
         {
-            if (!await coordinator.TrySendAsync(BenchmarkShared.CreateFlowKey(index), _socks, Payload, CancellationToken.None).ConfigureAwait(false))
+            if (!await coordinator.TrySendSpanAsync(BenchmarkShared.CreateFlowKey(index), _socks, Payload, default, CancellationToken.None).ConfigureAwait(false))
             {
                 throw new InvalidOperationException("Unable to populate the UDP session benchmark.");
             }
@@ -82,7 +82,7 @@ public class UdpSessionBenchmarks
         var sendsBaseline = factory.Sends;
         for (var index = 0; index < Sessions; index++)
         {
-            if (!await coordinator.TrySendAsync(BenchmarkShared.CreateFlowKey(index), _socks, Payload, CancellationToken.None).ConfigureAwait(false))
+            if (!await coordinator.TrySendSpanAsync(BenchmarkShared.CreateFlowKey(index), _socks, Payload, default, CancellationToken.None).ConfigureAwait(false))
             {
                 throw new InvalidOperationException("Unable to populate the UDP session benchmark.");
             }

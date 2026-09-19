@@ -46,10 +46,10 @@ public readonly record struct Socks5UdpReceiveResult(Socks5UdpDatagram Datagram,
     public bool HasDatagram => SkipReason == Socks5UdpReceiveSkipReason.None;
 
     /// <summary>Wraps a successfully decoded relay datagram.</summary>
-    public static Socks5UdpReceiveResult Received(Socks5UdpDatagram datagram) => new(datagram, Socks5UdpReceiveSkipReason.None);
+    internal static Socks5UdpReceiveResult Received(Socks5UdpDatagram datagram) => new(datagram, Socks5UdpReceiveSkipReason.None);
 
     /// <summary>Marks one per-datagram anomaly; the caller must skip the datagram and keep receiving.</summary>
-    public static Socks5UdpReceiveResult Skipped(Socks5UdpReceiveSkipReason reason) => new(default, reason);
+    internal static Socks5UdpReceiveResult Skipped(Socks5UdpReceiveSkipReason reason) => new(default, reason);
 }
 
 public interface IUdpProxyTransport : IAsyncDisposable
@@ -58,18 +58,11 @@ public interface IUdpProxyTransport : IAsyncDisposable
     IPEndPoint LocalEndpoint { get; }
 
     /// <summary>
-    /// Encodes one datagram with <paramref name="destination"/> as the SOCKS5 UDP header target and
-    /// sends it to the negotiated relay endpoint. The destination is a raw struct so the forward
-    /// warm path (uncontended gate, sync kernel send) allocates nothing.
-    /// </summary>
-    ValueTask SendAsync(Endpoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Span-based send for callers that hold the payload only as a synchronous view (a native
-    /// capture buffer): the warm shape is identical to <see cref="SendAsync"/> — uncontended gate,
-    /// encode into the reusable send buffer, non-blocking kernel send — and consumes the payload
-    /// synchronously before any asynchronous socket operation, so the backing native frame is free
-    /// to recycle once this call returns. Only the contended-gate slow shape cannot keep the span
+    /// Sends one datagram: the destination is encoded as the SOCKS5 UDP header target and the
+    /// datagram is sent to the negotiated relay endpoint. The payload is consumed synchronously
+    /// (encode into the reusable send buffer, then a non-blocking kernel send) before any
+    /// asynchronous socket operation, so a native capture buffer whose span backs it is free to
+    /// recycle once this call returns. Only the contended-gate slow shape cannot keep the span
     /// across its await and copies it (cold path).
     /// </summary>
     ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken);
@@ -162,9 +155,6 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
     public IPEndPoint RelayEndpoint { get; }
     public IPEndPoint LocalEndpoint => (IPEndPoint)_socket.LocalEndPoint!;
 
-    public static async ValueTask<Socks5UdpTransport> CreateAsync(Socks5Server server, SelfTrafficRegistry selfTraffic, CancellationToken cancellationToken)
-        => await CreateAsync(server, selfTraffic, cancellationToken, null, null).ConfigureAwait(false);
-
     internal static async ValueTask<Socks5UdpTransport> CreateAsync(
         Socks5Server server,
         SelfTrafficRegistry selfTraffic,
@@ -234,58 +224,11 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
         }
     }
 
-    public ValueTask SendAsync(Endpoint destination, ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
-    {
-        // Serialize the encode + send pair (R5): the shared send buffer must never observe
-        // interleaved writers when one flow is dispatched from two pumps. This is a
-        // non-async entry (hot-path convention #3): the warm shape — uncontended gate
-        // (WaitAsync completes synchronously), encode into the reusable buffer, non-blocking
-        // send the kernel accepts inline — runs without a state machine or any allocation,
-        // removing the per-datagram IOCP hop; every other shape falls back to async slow
-        // paths that honor the cancellation token.
-        var gateWait = _sendGate.WaitAsync(cancellationToken);
-        if (!gateWait.IsCompletedSuccessfully)
-        {
-            return SendAfterGateAsync(gateWait, destination, payload, cancellationToken);
-        }
-
-        try
-        {
-            // The header buffer covers the worst SOCKS5 UDP overhead (6 + 16-byte IPv6) plus the
-            // cap-derived payload bound; the encode writes into it and the socket send reads only
-            // the written slice, so a datagram send allocates nothing.
-            if (!Socks5UdpCodec.TryEncode(destination.Address, destination.Port, payload.Span, _sendBuffer, out var written))
-            {
-                throw new IOException("A SOCKS5 UDP datagram exceeded the relay send buffer.");
-            }
-
-            try
-            {
-                _ = _socket.SendTo(_sendBuffer.AsSpan(0, written), SocketFlags.None, _relaySocketAddress);
-            }
-            catch (SocketException)
-            {
-                // WouldBlock (kernel send queue momentarily full) or any other socket fault:
-                // retry the datagram through the overlapped send, which parks until the socket
-                // accepts it, and keep the gate until the buffer is consumed.
-                return SendOverlappedAsync(written, cancellationToken);
-            }
-
-            _sendGate.Release();
-            return ValueTask.CompletedTask;
-        }
-        catch
-        {
-            _sendGate.Release();
-            throw;
-        }
-    }
-
     public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken)
     {
-        // Same non-async warm entry as the memory overload (hot-path convention #3); only the
-        // contended-gate shape differs, because a span over native capture memory must not cross
-        // the gate await — it is copied there and rides the memory slow path.
+        // Non-async warm entry (hot-path convention #3); only the contended-gate shape differs,
+        // because a span over native capture memory must not cross the gate await — it is copied
+        // there and rides the async slow path.
         var gateWait = _sendGate.WaitAsync(cancellationToken);
         if (!gateWait.IsCompletedSuccessfully)
         {

@@ -12,11 +12,10 @@ public sealed partial class UdpProxyCoordinator
 {
     /// <summary>
     /// Span-based entry for the capture path (A4): the executor holds the datagram payload only as
-    /// a synchronous view of the native capture buffer. Admission semantics mirror
-    /// <see cref="TrySendAsync"/> exactly; the ready-session warm shape consumes the span
-    /// synchronously (SOCKS5 encode into the transport's reusable buffer) so nothing materializes,
-    /// while the setup-window path copies the datagram into the bounded setup queue exactly like
-    /// the memory overload (the queue owns its native leases).
+    /// a synchronous view of the native capture buffer. The ready-session warm shape consumes the
+    /// span synchronously (SOCKS5 encode into the transport's reusable buffer) so nothing
+    /// materializes, while the setup-window path copies the datagram into the bounded setup queue
+    /// (the queue owns its native leases).
     /// </summary>
     internal ValueTask<bool> TrySendSpanAsync(FlowKey flow, Socks5Server server, ReadOnlySpan<byte> payload, MacAddress clientMac, CancellationToken cancellationToken, long packetSequence = 0, long flowGeneration = 0)
     {
@@ -74,12 +73,11 @@ public sealed partial class UdpProxyCoordinator
     }
 
     /// <summary>
-    /// The ready-session bridge for the span entry: a non-async method (the payload span must not
-    /// cross an await) that starts the send and either completes it inline — the warm shape the
-    /// transport finishes synchronously — or hands only the send tail to the async continuation.
-    /// Failure semantics mirror <see cref="SendOnReadySessionAsync"/>: caller cancellation
-    /// propagates untouched, any other send failure removes the slot first and then rethrows the
-    /// original exception.
+    /// The ready-session send bridge: a non-async method (the payload span must not cross an
+    /// await) that starts the send and either completes it inline — the warm shape the transport
+    /// finishes synchronously — or hands only the send tail to the async continuation. Caller
+    /// cancellation propagates untouched; any other send failure removes the slot first and then
+    /// rethrows the original exception.
     /// </summary>
     private ValueTask<bool> SendOnReadySessionSpanAsync(FlowKey flow, UdpSessionSlot slot, UdpProxySession session, ReadOnlySpan<byte> payload, CancellationToken cancellationToken, long packetSequence)
     {

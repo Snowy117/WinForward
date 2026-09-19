@@ -34,7 +34,7 @@ public sealed class BoundedSetupQueue
     }
 
     public int Count => (_hasPending ? 1 : 0) + (_items?.Count ?? 0);
-    public int Bytes => _bytes;
+    internal int Bytes => _bytes;
 
     /// <summary>
     /// Takes ownership of <paramref name="lease"/> (the caller copied the datagram's

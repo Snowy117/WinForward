@@ -1,6 +1,4 @@
 using System.Buffers.Binary;
-using System.Net;
-using System.Net.Sockets;
 using WinForward.Core;
 
 namespace WinForward.Protocols;
@@ -26,47 +24,13 @@ public static class TcpResetBuilder
     public const int MaxResetFrameLength = EthernetHeaderLength + Ipv6HeaderLength + TcpHeaderLength;
 
     /// <summary>
-    /// Builds the reset frame from framework addresses; convenience wrapper for callers on cold
-    /// paths (relay failure handling, tests).
-    /// </summary>
-    public static byte[]? BuildReset(
-        ReadOnlySpan<byte> originalSynFrame,
-        IPAddress serverAddress,
-        ushort serverPort,
-        IPAddress clientAddress,
-        ushort clientPort,
-        uint serverSequenceNext,
-        uint clientSequenceNext)
-        => BuildReset(originalSynFrame, IPAddressValue.From(serverAddress), serverPort, IPAddressValue.From(clientAddress), clientPort, serverSequenceNext, clientSequenceNext);
-
-    /// <summary>
-    /// Builds the reset frame from fixed-size address values; the allocating convenience form.
+    /// Writes the reset frame into <paramref name="destination"/> (at least
+    /// <see cref="MaxResetFrameLength"/> bytes) and reports the exact frame length.
     /// <paramref name="serverSequenceNext"/> must be the sequence the client expects next from
     /// the server (its in-window value, typically server-ISN + 1) and <paramref name="clientSequenceNext"/>
-    /// the acknowledged client sequence (client-ISN + 1). Returns null when the template is not a
-    /// usable Ethernet IPv4/IPv6 frame or the address families do not match it.
-    /// </summary>
-    public static byte[]? BuildReset(
-        ReadOnlySpan<byte> originalSynFrame,
-        IPAddressValue serverAddress,
-        ushort serverPort,
-        IPAddressValue clientAddress,
-        ushort clientPort,
-        uint serverSequenceNext,
-        uint clientSequenceNext)
-    {
-        Span<byte> frame = stackalloc byte[MaxResetFrameLength];
-        return TryBuildReset(originalSynFrame, serverAddress, serverPort, clientAddress, clientPort, serverSequenceNext, clientSequenceNext, frame, out var written)
-            ? frame[..written].ToArray()
-            : null;
-    }
-
-    /// <summary>
-    /// The span-writing hot-path form of <see cref="BuildReset(ReadOnlySpan{byte}, IPAddressValue, ushort, IPAddressValue, ushort, uint, uint)"/>:
-    /// writes the frame into <paramref name="destination"/> (at least
-    /// <see cref="MaxResetFrameLength"/> bytes) and reports the exact frame length. Returns false
-    /// without writing when the template is not a usable Ethernet IPv4/IPv6 frame, the address
-    /// families do not match it, or <paramref name="destination"/> is too small.
+    /// the acknowledged client sequence (client-ISN + 1). Returns false without writing when the
+    /// template is not a usable Ethernet IPv4/IPv6 frame, the address families do not match it,
+    /// or <paramref name="destination"/> is too small.
     /// </summary>
     public static bool TryBuildReset(
         ReadOnlySpan<byte> originalSynFrame,
@@ -107,25 +71,8 @@ public static class TcpResetBuilder
     /// <c>seq = 0</c>, <c>ack = client-ISN + 1</c>, flags RST|ACK. A client in SYN_SENT accepts
     /// this reset — its ACK acknowledges the client's SYN — and fails the connect immediately
     /// with ECONNREFUSED instead of retransmitting for the full OS timeout. The client ISN is
-    /// read from <paramref name="synFrame"/> itself; returns null when the frame is not a
-    /// parseable IPv4/IPv6 TCP segment or the address families do not match it.
-    /// </summary>
-    public static byte[]? BuildResetFromSyn(
-        ReadOnlySpan<byte> synFrame,
-        IPAddressValue serverAddress,
-        ushort serverPort,
-        IPAddressValue clientAddress,
-        ushort clientPort)
-    {
-        Span<byte> frame = stackalloc byte[MaxResetFrameLength];
-        return TryBuildResetFromSyn(synFrame, serverAddress, serverPort, clientAddress, clientPort, frame, out var written)
-            ? frame[..written].ToArray()
-            : null;
-    }
-
-    /// <summary>
-    /// The span-writing hot-path form of <see cref="BuildResetFromSyn"/>: writes the abort frame
-    /// into <paramref name="destination"/> (at least <see cref="MaxResetFrameLength"/> bytes) and
+    /// read from <paramref name="synFrame"/> itself; writes the abort frame into
+    /// <paramref name="destination"/> (at least <see cref="MaxResetFrameLength"/> bytes) and
     /// reports the exact frame length. Returns false without writing when the frame is not a
     /// parseable IPv4/IPv6 TCP segment, the address families do not match it, or
     /// <paramref name="destination"/> is too small.
