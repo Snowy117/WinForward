@@ -10,7 +10,9 @@ namespace WinForward.Runtime;
 /// One pooled unit of new-flow setup work: rented from an <see cref="ISetupExecutor"/>, populated by
 /// a coordinator's cold new-flow branch, enqueued, and recycled by the worker that ran it. Reuse is
 /// safe because <see cref="Reset"/> clears every payload reference before the slot returns to the
-/// free list.
+/// free list. The TCP-only and UDP-only payloads live in the pre-allocated <see cref="Tcp"/> and
+/// <see cref="Udp"/> planes, so each flow family's fields are disjoint and the item's shared fields
+/// stay protocol-neutral.
 /// </summary>
 public sealed class SetupWorkItem
 {
@@ -25,12 +27,11 @@ public sealed class SetupWorkItem
     internal Socks5Server? Server;
     internal CancellationToken CancellationToken;
 
-    internal PendingSynSetup? TcpEntry;
-    internal byte[]? TcpFrame;
+    /// <summary>The TCP-only setup payload plane, allocated once with the item.</summary>
+    internal readonly TcpSetupWork Tcp = new();
 
-    internal long FlowGeneration;
-    internal MacAddress ClientMac;
-    internal UdpProxyCoordinator.UdpSessionSlot? UdpSlot;
+    /// <summary>The UDP-only setup payload plane, allocated once with the item.</summary>
+    internal readonly UdpSetupWork Udp = new();
 
     internal void Reset()
     {
@@ -39,11 +40,44 @@ public sealed class SetupWorkItem
         Flow = default;
         Server = null;
         CancellationToken = default;
-        TcpEntry = null;
-        TcpFrame = null;
+        Tcp.Reset();
+        Udp.Reset();
+    }
+}
+
+/// <summary>
+/// The TCP-only setup payload plane of a <see cref="SetupWorkItem"/>: the pending-SYN entry and its
+/// retained frame copy. Pre-allocated once with the item so the rent/recycle path stays
+/// allocation-free.
+/// </summary>
+internal sealed class TcpSetupWork
+{
+    internal PendingSynSetup? Entry;
+    internal byte[]? Frame;
+
+    internal void Reset()
+    {
+        Entry = null;
+        Frame = null;
+    }
+}
+
+/// <summary>
+/// The UDP-only setup payload plane of a <see cref="SetupWorkItem"/>: the flow generation, the
+/// client MAC, and the session slot. Pre-allocated once with the item so the rent/recycle path
+/// stays allocation-free.
+/// </summary>
+internal sealed class UdpSetupWork
+{
+    internal long FlowGeneration;
+    internal MacAddress ClientMac;
+    internal UdpProxyCoordinator.UdpSessionSlot? Slot;
+
+    internal void Reset()
+    {
         FlowGeneration = 0;
         ClientMac = default;
-        UdpSlot = null;
+        Slot = null;
     }
 }
 

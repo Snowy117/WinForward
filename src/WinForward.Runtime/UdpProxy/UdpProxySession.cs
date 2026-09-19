@@ -58,7 +58,6 @@ internal sealed class UdpProxySession : IAsyncDisposable
     private Task? _receiveLoop;
     private Task? _disposeTask;
     private Exception? _receiveFailure;
-    private Func<UdpProxySession, Task>? _receiveFailureHandler;
     private long _lastActivityTicks;
     private long _lastActivityPropagationTicks;
     private long _lastSkipSummaryTicks;
@@ -110,9 +109,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
     public void Start(Func<UdpProxySession, Task> receiveFailureHandler)
     {
         ArgumentNullException.ThrowIfNull(receiveFailureHandler);
-        _receiveFailureHandler = receiveFailureHandler;
-        var receiveLoop = ReceiveLoopAsync();
-        _receiveLoop = receiveLoop;
+        _receiveLoop = ReceiveLoopAsync(receiveFailureHandler);
     }
 
     /// <summary>
@@ -205,7 +202,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
         }
     }
 
-    private async Task ReceiveLoopAsync()
+    private async Task ReceiveLoopAsync(Func<UdpProxySession, Task> receiveFailureHandler)
     {
         var lease = _receiveWindowPool.Rent();
         try
@@ -264,7 +261,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
         {
             // Fire-and-forget on purpose: the handler tears this session down, and awaiting it
             // here would make session disposal (which awaits this loop) re-enter itself.
-            _ = _receiveFailureHandler!(this);
+            _ = receiveFailureHandler(this);
         }
     }
 

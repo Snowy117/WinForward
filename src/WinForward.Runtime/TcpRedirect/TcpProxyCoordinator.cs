@@ -226,8 +226,8 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         item.Completion = entry.SetupCompletionSource;
         item.Flow = key;
         item.Server = server;
-        item.TcpEntry = entry;
-        item.TcpFrame = frame;
+        item.Tcp.Entry = entry;
+        item.Tcp.Frame = frame;
         if (!_setupExecutor.TryEnqueue(item))
         {
             entry.SetupCompletionSource.TrySetCanceled();
@@ -251,8 +251,8 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
     private async Task SetupPendingAsync(SetupWorkItem item)
     {
         var key = item.Flow;
-        var entry = item.TcpEntry!;
-        var frame = item.TcpFrame!;
+        var entry = item.Tcp.Entry!;
+        var frame = item.Tcp.Frame!;
         var server = item.Server!;
         var writeCooldown = false;
         try
@@ -635,33 +635,4 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         if (_ownsSynCopyPool) _synCopyPool.Dispose();
         if (_ownsSetupExecutor) _setupExecutor.Dispose();
     }
-}
-
-/// <summary>
-/// The per-flow redirect state: the association (redirect table entry), the local listener, the
-/// self-traffic token, the SOCKS5 server, a linked lifetime cancellation token, and the optional
-/// relay/accept-loop tasks. A top-level internal type (not nested on <see cref="TcpProxyCoordinator"/>)
-/// so the accept/reset/relay modules can reference it without a circular dependency on the
-/// coordinator itself; it lives in this file to keep the module's file count lean.
-/// </summary>
-internal sealed class TcpRedirectSession(TcpRedirectAssociation association, ITcpRedirectListener listener, SelfTrafficRegistry.SelfTrafficToken selfTrafficToken, Socks5Server server, CancellationToken shutdown, long flowGeneration)
-{
-    public TcpRedirectAssociation Association { get; } = association;
-    public ITcpRedirectListener Listener { get; } = listener;
-    public SelfTrafficRegistry.SelfTrafficToken SelfTrafficToken { get; } = selfTrafficToken;
-    public Socks5Server Server { get; } = server;
-    public long FlowGeneration { get; } = flowGeneration;
-    private CancellationTokenSource Lifetime { get; } = CancellationTokenSource.CreateLinkedTokenSource(shutdown);
-    private int _retired;
-    public ITcpRelay? Relay { get; set; }
-    public Task? AcceptLoop { get; set; }
-    public CancellationToken Token => Lifetime.Token;
-    public bool IsRetired => Volatile.Read(ref _retired) != 0;
-
-    public void Retire()
-    {
-        if (Interlocked.Exchange(ref _retired, 1) == 0) Lifetime.Cancel();
-    }
-
-    public void DisposeLifetime() => Lifetime.Dispose();
 }

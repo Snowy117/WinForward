@@ -120,9 +120,9 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
         item.Completion = completion;
         item.Flow = flow;
         item.Server = server;
-        item.FlowGeneration = flowGeneration;
-        item.ClientMac = capturedClientMac;
-        item.UdpSlot = slot;
+        item.Udp.FlowGeneration = flowGeneration;
+        item.Udp.ClientMac = capturedClientMac;
+        item.Udp.Slot = slot;
         item.CancellationToken = _shutdown.Token;
         if (!_setupExecutor.TryEnqueue(item))
         {
@@ -135,7 +135,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     }
 
     private Task RunSessionSetupAsync(SetupWorkItem item)
-        => _setup.CreateSessionAsync(item.Flow, item.Server!, item.FlowGeneration, item.ClientMac, item.CancellationToken, item.UdpSlot!);
+        => _setup.CreateSessionAsync(item.Flow, item.Server!, item.Udp.FlowGeneration, item.Udp.ClientMac, item.CancellationToken, item.Udp.Slot!);
 
     /// <summary>
     /// Buffers one datagram while the flow's session is setting up or flushing. The queue is
