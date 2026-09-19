@@ -7,6 +7,7 @@ using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
 using Xunit;
 using static WinForward.Core.Tests.AsyncTestExtensions;
+using static WinForward.Core.Tests.FlowBuilders;
 
 namespace WinForward.Core.Tests;
 
@@ -213,6 +214,4 @@ public sealed class UdpProxyCoordinatorTests
         Assert.Equal(expected, Socks5UdpTransport.IsPossiblyTruncated(receivedBytes, bufferLength));
     }
 
-    private static FlowKey CreateFlow(string remoteAddress) =>
-        FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse(remoteAddress), 53), TransportProtocol.Udp, FlowOriginKind.Host);
 }

@@ -5,6 +5,7 @@ using WinForward.Protocols;
 using WinForward.Runtime.UdpProxy;
 using Xunit;
 using static WinForward.Core.Tests.AsyncTestExtensions;
+using static WinForward.Core.Tests.FlowBuilders;
 
 namespace WinForward.Core.Tests;
 
@@ -302,9 +303,6 @@ public sealed class UdpProxyCoordinatorLifecycleTests
         Assert.Equal(0, await sweep);
         Assert.False(Assert.Single(factory.Transports).IsDisposed);
     }
-
-    private static FlowKey CreateFlow(string remoteAddress) =>
-        FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse(remoteAddress), 53), TransportProtocol.Udp, FlowOriginKind.Host);
 
     private static async Task<bool> WaitUntilTrueAsync(Func<Task<bool>> condition)
     {

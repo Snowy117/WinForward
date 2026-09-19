@@ -9,6 +9,7 @@ using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
 using Xunit;
 using static WinForward.Core.Tests.AsyncTestExtensions;
+using static WinForward.Core.Tests.FlowBuilders;
 
 namespace WinForward.Core.Tests;
 
@@ -264,9 +265,6 @@ public sealed class UdpReceiveResilienceTests
 
         static Socks5UdpDatagram Datagram(byte payload) => new(IPAddress.Parse("192.0.2.53"), null, 53, new[] { payload });
     }
-
-    private static FlowKey CreateFlow(string remoteAddress) =>
-        FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse(remoteAddress), 53), TransportProtocol.Udp, FlowOriginKind.Host);
 
     /// <summary>Yields one predetermined transport regardless of how many sessions ask for a relay.</summary>
     private sealed class SingleTransportFactory(IUdpProxyTransport transport) : IUdpProxyTransportFactory
