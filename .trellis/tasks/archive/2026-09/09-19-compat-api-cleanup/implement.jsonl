@@ -1,0 +1,10 @@
+{"file": ".trellis/tasks/09-19-compat-api-cleanup/prd.md", "reason": "Requirements R1-R6, acceptance criteria AC1-AC6, in-scope vs follow-up split, decisions D1-D3"}
+{"file": ".trellis/tasks/09-19-compat-api-cleanup/design.md", "reason": "Classification rules, exact deletion set with file:line, public+internal-overload pattern, visibility narrowing, B9 span-only design, rollback plan"}
+{"file": ".trellis/tasks/09-19-compat-api-cleanup/research/compat-inventory.md", "reason": "Per-candidate caller evidence and disposition; the authoritative source for what is dead vs test/bench-only vs legitimate KEEP"}
+{"file": ".trellis/tasks/09-19-compat-api-cleanup/research/design-health.md", "reason": "Design-health findings, [cleanup] items 1-6 in scope and [follow-up] items 7-18 to record; defines the legitimate internal seams not to churn"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Zero-warning bar, forbidden patterns, test-deletion rules for the cleanup"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Allocation-gate and native-pool contracts that must remain green and must not gain public test-only surface"}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "UDP transport interface semantics for the B9 span-only send-seam change"}
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "TcpProxyCoordinator ctor/Table and TcpResetBuilder/TcpRedirectTable removals"}
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "NdisApiDriver/NdisApiAbi removals and native-call gate accessors"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Visibility narrowing must not change fail-closed semantics"}

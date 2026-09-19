@@ -1,0 +1,8 @@
+{"file": ".trellis/tasks/09-19-compat-api-cleanup/prd.md", "reason": "AC1-AC6 are the check contract: in-scope removals applied, build zero-warning, suite green, KEEP decisions documented, allocation gates intact"}
+{"file": ".trellis/tasks/09-19-compat-api-cleanup/design.md", "reason": "Verify each implementer change matches the classification rule and seam strategy; detect scope drift into follow-up refactors"}
+{"file": ".trellis/tasks/09-19-compat-api-cleanup/research/compat-inventory.md", "reason": "Caller-map baseline: every removed symbol must actually have zero production callers; every rewritten test must move to the production seam"}
+{"file": ".trellis/tasks/09-19-compat-api-cleanup/research/design-health.md", "reason": "Legitimate internal seams (do not churn) and the [follow-up] list that must not be silently implemented"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Allocation gates must not weaken; native-pool interface must not gain test-only public surface"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Zero-warning, forbidden patterns, test deletion policy"}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "B9 span-only transport seam must preserve relay semantics and skip classification"}
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "TCP coordinator ctor/visibility changes must not alter redirect behaviour"}
