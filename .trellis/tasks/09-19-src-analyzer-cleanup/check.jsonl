@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Check agent verifies fixes match analyzer/suppression posture, behavior-zero discipline, and test-baseline gate 724"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Verify hot-path allocation discipline was preserved across all fixes (collection expressions, MA0076 ToString changes, CA1859)"}
+{"file": ".trellis/tasks/09-19-src-analyzer-cleanup/research/analyzer-inventory.md", "reason": "Rule inventory; the check agent uses it to confirm every rule in the baseline report is either fixed or has a documented suppression"}
+{"file": ".trellis/tasks/09-19-src-analyzer-cleanup/research/naming-inventory.md", "reason": "Naming convention table and per-bucket sites; verify renames/comments comply with the user-decreed convention"}

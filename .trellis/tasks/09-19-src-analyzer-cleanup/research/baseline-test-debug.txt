@@ -1,0 +1,24 @@
+Test run for /home/paff/Projects/WinForward/tests/WinForward.Core.Tests/bin/Debug/net10.0/WinForward.Core.Tests.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.
+[xUnit.net 00:00:02.52]     WinForward.Core.Tests.HotPathAllocationGateTests.EstablishedUdpDatagramPathAllocatesNoManagedBytes [FAIL]
+  Failed WinForward.Core.Tests.HotPathAllocationGateTests.EstablishedUdpDatagramPathAllocatesNoManagedBytes [529 ms]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: 0
+Actual:   48128
+  Stack Trace:
+     at WinForward.Core.Tests.HotPathAllocationGateTests.EstablishedUdpDatagramPathAllocatesNoManagedBytes() in /home/paff/Projects/WinForward/tests/WinForward.Core.Tests/HotPathAllocationGateTests.cs:line 112
+   at WinForward.Core.Tests.HotPathAllocationGateTests.EstablishedUdpDatagramPathAllocatesNoManagedBytes() in /home/paff/Projects/WinForward/tests/WinForward.Core.Tests/HotPathAllocationGateTests.cs:line 122
+--- End of stack trace from previous location ---
+[xUnit.net 00:00:03.25]     WinForward.Core.Tests.HotPathAllocationGateTests.SynRetentionWithWarmSynCopyPoolAllocatesNoManagedBytes [FAIL]
+  Failed WinForward.Core.Tests.HotPathAllocationGateTests.SynRetentionWithWarmSynCopyPoolAllocatesNoManagedBytes [355 ms]
+  Error Message:
+   Assert.Equal() Failure: Values differ
+Expected: 0
+Actual:   29184
+  Stack Trace:
+     at WinForward.Core.Tests.HotPathAllocationGateTests.SynRetentionWithWarmSynCopyPoolAllocatesNoManagedBytes() in /home/paff/Projects/WinForward/tests/WinForward.Core.Tests/HotPathAllocationGateTests.cs:line 240
+   at WinForward.Core.Tests.HotPathAllocationGateTests.SynRetentionWithWarmSynCopyPoolAllocatesNoManagedBytes() in /home/paff/Projects/WinForward/tests/WinForward.Core.Tests/HotPathAllocationGateTests.cs:line 251
+--- End of stack trace from previous location ---
+
+Failed!  - Failed:     2, Passed:   723, Skipped:     0, Total:   725, Duration: 6 s - WinForward.Core.Tests.dll (net10.0)

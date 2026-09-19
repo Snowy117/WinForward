@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Analyzer/suppression posture (localized documented #pragma only), behavior-zero refactor discipline, test baseline 724, build with TreatWarningsAsErrors"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Zero-allocation packet pipeline rules; any auto-fix or judgment fix touching Protocols/Runtime hot paths must not change allocation behavior"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Exception shape conventions; CA1512/CA2208/CA2250/CA1068 decisions touch throw sites and argument validation"}
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "NDISAPI interop contract; MA0189 InlineArray decisions touch ABI structs in WinForward.NdisApi"}
+{"file": ".trellis/tasks/09-19-src-analyzer-cleanup/research/analyzer-inventory.md", "reason": "Full rule inventory with per-scope counts and sample sites, generated from the authoritative format report"}
+{"file": ".trellis/tasks/09-19-src-analyzer-cleanup/research/naming-inventory.md", "reason": "IDE1006 site inventory grouped by variant with the user-decreed naming convention (s_/t_ prefixes retained) and per-bucket disposition"}
