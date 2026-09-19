@@ -87,22 +87,14 @@ public readonly record struct FlowKey(
         return new(local.AddressFamily, protocol, local, remote, origin, adapter?.StableId, adapter?.Generation ?? 0);
     }
 
-    /// <summary>Flat mix over the endpoint addresses and ports: one pass, no per-field chaining,
-    /// tuned for dictionary keys probed on every packet. Deliberately omits the origin fields that
-    /// <see cref="Equals(FlowKey)"/> compares: keys differing only in origin kind or origin adapter
-    /// are the same logical flow seen from another orientation and must share a hash bucket — the
-    /// same field set TransportTuple hashes for its orientation-agnostic index. An origin-aware
-    /// equality over this transport-only hash can collide but never diverge, so the asymmetry is
-    /// hash-consistent.</summary>
-    public override int GetHashCode() => HashCode.Combine(
-        (ulong)Local.Address.Bits,
-        (ulong)(Local.Address.Bits >> 64),
-        (ulong)Remote.Address.Bits,
-        (ulong)(Remote.Address.Bits >> 64),
-        Local.Port,
-        Remote.Port,
-        (byte)AddressFamily,
-        (byte)Protocol);
+    /// <summary>Flat mix over the endpoint addresses and ports via <see cref="FlowHash"/>: one pass,
+    /// no per-field chaining, tuned for dictionary keys probed on every packet. Deliberately omits
+    /// the origin fields that <see cref="Equals(FlowKey)"/> compares: keys differing only in origin
+    /// kind or origin adapter are the same logical flow seen from another orientation and must share
+    /// a hash bucket — the same field set backs the flow table's orientation-agnostic transport
+    /// index, whose key delegates to the same expression. An origin-aware equality over this
+    /// transport-only hash can collide but never diverge, so the asymmetry is hash-consistent.</summary>
+    public override int GetHashCode() => FlowHash.Combine(AddressFamily, Protocol, Local, Remote);
 
     /// <summary>Cheapest discriminators first; addresses last because they are the widest fields.</summary>
     public bool Equals(FlowKey other) =>
@@ -121,6 +113,26 @@ public readonly record struct FlowKey(
         string.Equals(OriginAdapterId, other.OriginAdapterId, StringComparison.Ordinal);
 
     public FlowKey Reverse() => this with { Local = Remote, Remote = Local };
+}
+
+/// <summary>
+/// The one hash expression shared by <see cref="FlowKey"/> (origin-aware equality) and the flow
+/// table's orientation-agnostic <c>TransportTuple</c> index key. Both GetHashCode implementations
+/// delegate here so the transport-only hash set cannot drift; hashing only the transport fields lets
+/// origin variants and either endpoint orientation land in shared buckets — collisions are fine,
+/// divergence is not.
+/// </summary>
+internal static class FlowHash
+{
+    internal static int Combine(AddressFamilyKind addressFamily, TransportProtocol protocol, Endpoint local, Endpoint remote) => HashCode.Combine(
+        (ulong)local.Address.Bits,
+        (ulong)(local.Address.Bits >> 64),
+        (ulong)remote.Address.Bits,
+        (ulong)(remote.Address.Bits >> 64),
+        local.Port,
+        remote.Port,
+        (byte)addressFamily,
+        (byte)protocol);
 }
 
 public readonly record struct FlowDecision(FlowAction Action, int? RuleIndex, string? ProxyServerName)

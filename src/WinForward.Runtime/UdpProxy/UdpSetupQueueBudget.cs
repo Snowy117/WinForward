@@ -26,15 +26,17 @@ internal sealed class UdpSetupQueueBudget
 
     private readonly long _byteBudget;
     private readonly IRuntimeLogger _logger;
+    private readonly TimeProvider _timeProvider;
     private long _pendingBytes;
     private long _rejectionCount;
     private long _droppedTotal;
     private long _lastDropLogTicks;
 
-    public UdpSetupQueueBudget(long byteBudget, IRuntimeLogger logger)
+    public UdpSetupQueueBudget(long byteBudget, IRuntimeLogger logger, TimeProvider timeProvider)
     {
         _byteBudget = byteBudget;
         _logger = logger;
+        _timeProvider = timeProvider;
     }
 
     /// <summary>The aggregate setup-queue bytes currently charged; for tests and diagnostics.</summary>
@@ -72,7 +74,7 @@ internal sealed class UdpSetupQueueBudget
         if (dropped <= 0) return;
         Interlocked.Add(ref _droppedTotal, dropped);
         if (_logger.IsEnabled(RuntimeLogLevel.Trace)) UdpProxyLogging.LogTrace(_logger, "udp.setupqueue.dropped", flow, new RuntimeLogField("dropped", dropped));
-        var now = DateTime.UtcNow.Ticks;
+        var now = _timeProvider.GetUtcNow().UtcTicks;
         var last = Interlocked.Read(ref _lastDropLogTicks);
         if (now - last >= DropLogInterval.Ticks && Interlocked.CompareExchange(ref _lastDropLogTicks, now, last) == last)
         {

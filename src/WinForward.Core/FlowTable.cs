@@ -10,13 +10,19 @@ public sealed class FlowTable
     private readonly FlowState[] _freeStates;
     private readonly Lock _gate = new();
     private readonly int _capacity;
+    private readonly TimeProvider _timeProvider;
     private int _freeStateCount;
     private long _nextGeneration;
 
-    public FlowTable(int capacity = 65_536)
+    /// <summary>
+    /// Creates a flow table. A null <paramref name="timeProvider"/> uses <see cref="TimeProvider.System"/>
+    /// (production behavior); tests inject a controllable clock to assert refresh and expiry boundaries exactly.
+    /// </summary>
+    public FlowTable(int capacity = 65_536, TimeProvider? timeProvider = null)
     {
         if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(capacity));
         _capacity = capacity;
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _states = new Dictionary<FlowKey, FlowState>(capacity);
         _transportIndex = new Dictionary<TransportTuple, FlowState>(capacity * 2);
         _freeStates = new FlowState[capacity];
@@ -135,7 +141,7 @@ public sealed class FlowTable
     {
         if (_states.TryGetValue(key, out state) || _transportIndex.TryGetValue(TransportTuple.From(key), out state))
         {
-            state.Touch(DateTimeOffset.UtcNow);
+            state.Touch(_timeProvider.GetUtcNow());
             return true;
         }
 
@@ -167,19 +173,11 @@ public sealed class FlowTable
         public static TransportTuple From(FlowKey key) => new(key.AddressFamily, key.Protocol, key.Local, key.Remote);
         public TransportTuple Reverse() => this with { Local = Remote, Remote = Local };
 
-        // Mirrors FlowKey.GetHashCode's field set on purpose: FlowKey hashes exactly these
-        // transport fields while also comparing origin, and TransportTuple is the
-        // orientation-agnostic index key. Two equivalence relations over one endpoint shape —
-        // parallel by design, not a dedup candidate.
-        public override int GetHashCode() => HashCode.Combine(
-            (ulong)Local.Address.Bits,
-            (ulong)(Local.Address.Bits >> 64),
-            (ulong)Remote.Address.Bits,
-            (ulong)(Remote.Address.Bits >> 64),
-            Local.Port,
-            Remote.Port,
-            (byte)AddressFamily,
-            (byte)Protocol);
+        // Transport-only hash set shared with FlowKey via FlowHash.Combine. FlowKey compares
+        // origin-aware yet must hash transport-only so origin variants land in the same bucket as
+        // the flows they alias; this orientation-agnostic index key needs the same buckets for the
+        // reverse tuple. Both delegate to the one expression, so the two hash sets cannot drift.
+        public override int GetHashCode() => FlowHash.Combine(AddressFamily, Protocol, Local, Remote);
 
         public bool Equals(TransportTuple other) =>
             Protocol == other.Protocol &&

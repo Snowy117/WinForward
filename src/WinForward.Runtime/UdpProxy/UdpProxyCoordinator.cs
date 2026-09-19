@@ -76,7 +76,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable
         _timeProvider = timeProvider;
         _beforeExpiryRecheck = beforeExpiryRecheck;
         _logger = logger ?? NullRuntimeLogger.Instance;
-        _budget = new UdpSetupQueueBudget(setupQueueGlobalByteBudget, _logger);
+        _budget = new UdpSetupQueueBudget(setupQueueGlobalByteBudget, _logger, _timeProvider);
         _setupQueuePool = setupQueuePool ?? new NativeBufferPool(maximumFrameSize);
         _ownsSetupQueuePool = setupQueuePool is null;
         var receiveBufferSize = ReceiveWindowSize(maximumFrameSize);

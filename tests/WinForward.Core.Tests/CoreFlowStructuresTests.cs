@@ -99,6 +99,26 @@ public sealed class CoreFlowStructuresTests
     }
 
     [Fact]
+    public void FlowTableLookupRefreshesActivityFromInjectedClock()
+    {
+        var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
+        var table = new FlowTable(timeProvider: time);
+        var key = FlowKey.Create(Endpoint.From(IPAddress.Loopback, 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
+        var claimed = table.TryClaimResolved(key, () => FlowDecision.Fallback(FlowAction.Pass), out var state)
+            ? state!
+            : throw new InvalidOperationException("Flow table claim failed.");
+        claimed.Touch(time.GetUtcNow() - TimeSpan.FromMinutes(2));
+
+        time.Advance(TimeSpan.FromMinutes(30));
+
+        Assert.True(table.TryResolve(key, out var resolved));
+        Assert.Same(claimed, resolved);
+        Assert.Equal(time.GetUtcNow(), claimed.LastActivityUtc);
+        Assert.Equal(0, table.RemoveExpired(time.GetUtcNow() + TimeSpan.FromMinutes(1) - TimeSpan.FromTicks(1), TimeSpan.FromMinutes(1)));
+        Assert.Equal(1, table.RemoveExpired(time.GetUtcNow() + TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1)));
+    }
+
+    [Fact]
     public void FlowTableRemoveExpiredHonorsHoldPredicateWithoutTouchingActivity()
     {
         var table = new FlowTable();
