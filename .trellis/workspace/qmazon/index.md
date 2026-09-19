@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 25
-- **Last Active**: 2026-09-19
+- **Total Sessions**: 26
+- **Last Active**: 2026-09-20
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~680 | Active |
+| `journal-1.md` | ~707 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 26 | 2026-09-20 | Analyzer diagnostics cleanup: 1369 → 0 (dotnet format --severity info) | `fe21bd3`, `a6c15e0`, `b8484a1`, `1fafb33`, `aa7261d`, `d185cf1` | `master` |
 | 25 | 2026-09-19 | Design-deepening refactors (R1-R12) + TCP clock seam follow-up | `d434d00`, `804c790`, `7a8df52`, `ac7b957`, `a634ae7`, `53ddcb4`, `cb70b0d`, `cfad0d6`, `3a9ccfc`, `a4322d3`, `31191ad`, `18d2243`, `10e5798`, `d9ca244`, `e6215ba` | `master` |
 | 24 | 2026-09-19 | Compat API cleanup + design-health review | `2ea413d` | `master` |
 | 23 | 2026-09-19 | GC-less zero-allocation hot paths (M0-M5) | `c75f30e`, `97f0e01`, `c2ac421`, `fef03fc`, `cf1a570`, `b51965b`, `a0e8024`, `8c6cfe0` | `master` |

@@ -678,3 +678,30 @@ Executed 09-19-design-deepening-refactors end-to-end via dispatched trellis-impl
 ### Status
 
 [OK] **Completed**
+
+
+## Session 26: Analyzer diagnostics cleanup: 1369 → 0 (dotnet format --severity info)
+<!-- trellis-session: v=2 fp=8703ef5cfb7a0402 -->
+
+**Date**: 2026-09-20
+**Task**: Analyzer diagnostics cleanup: 1369 → 0 (dotnet format --severity info)
+**Branch**: `master`
+
+### Summary
+
+Executed 09-19-src-analyzer-cleanup via dispatched trellis-implement/check sub-agents: cleared all 1369 info-level dotnet format diagnostics (src 426 / tests 762 / benchmarks 181) to exit 0. Whitespace pass; 36 mechanical rules (820 diagnostics: MA0003 named arguments, collection expressions, trailing commas, u8 literals, ...); per-site judgment fixes (MA0076 → 79 string.Create(InvariantCulture) wraps, CA1512 ThrowIf*, IDE0290 primary ctors, MA0042/RCS1261 async disposal, CA1859 concrete types, CA1068 token reorders, IDE0059, ...); 105 identifier renames under the user-decided naming convention (internal≡private via s_/_ prefixes, ThreadStatic t_ marked by a localized pragma because naming rules cannot match attributes, public/protected fields incl. perf-motivated public fields stay PascalCase, local consts camelCase). An independent audit agent empirically re-enabled every suppression (37 editorconfig entries → 17 fired; 38 pragma sites → all load-bearing), then deleted 8 stale entries, rewrote 9 comment blocks inherited from another project with repo-accurate facts, and rescoped IDE0130/MA0041 to their evidence paths per the user's glob rule. Final check agent verified semantic equivalence across all batches (single finding: CA1419 rationale rewrite). Gates standardized on Release: build 0 warnings, 725/725 tests (baseline corrected 724→725; Debug deterministically fails the two zero-allocation gates), verify exit 0. AGENTS.md pre-commit gate + GitHub Actions 'Analyzer Gate' workflow (PR/push master) added; naming/suppression conventions written into spec quality-guidelines.md.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fe21bd3` | chore(analysis): rework naming rules and suppression scope |
+| `a6c15e0` | chore(quality): zero dotnet format --severity info diagnostics (1369 -> 0) |
+| `b8484a1` | docs(spec): record field-naming convention and suppression-scope policy |
+| `1fafb33` | docs(agents): require the analyzer-diagnostic gate before commits |
+| `aa7261d` | ci: gate master pushes and PRs on the analyzer diagnostics |
+| `d185cf1` | chore(task): record 09-19-src-analyzer-cleanup artifacts |
+
+### Status
+
+[OK] **Completed**
