@@ -7,8 +7,6 @@ permission:
   write: allow
   edit: allow
   bash: allow
-  glob: allow
-  grep: allow
   mcp__exa__*: allow
 ---
 # Implement Agent
