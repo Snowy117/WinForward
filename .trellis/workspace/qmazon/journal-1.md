@@ -642,3 +642,39 @@ Audited and removed compatibility APIs that existed only to avoid test rewrites:
 ### Status
 
 [OK] **Completed**
+
+
+## Session 25: Design-deepening refactors (R1-R12) + TCP clock seam follow-up
+<!-- trellis-session: v=2 fp=4b12f89e96096b6b -->
+
+**Date**: 2026-09-19
+**Task**: Design-deepening refactors (R1-R12) + TCP clock seam follow-up
+**Branch**: `master`
+
+### Summary
+
+Executed 09-19-design-deepening-refactors end-to-end via dispatched trellis-implement sub-agents: six behavior-neutral milestones (RentItem(handler) factory + dead SetupWorkKind removal; FlowTable/UdpSetupQueueBudget clock injection + shared FlowHash; UdpProxyOptions/IUdpSessionSlotHost seam/UdpProxySessionContext/UdpProxyDiagnostics; TcpRedirectOptions/TcpRedirectDiagnostics with 66 mechanical test-site rewrites; NdisPumpDiagnostics + internal test-seam options members with NdisApi Benchmarks IVT; DurableCaptureBundle composers 350->287 effective lines), then closed the review follow-ups in 09-19-tcp-clock-followup: TCP-family clock seam closed over 15 raw UtcNow reads (TcpRedirectOptions.TimeProvider threaded through coordinator/store/setup/reset + IdleExpirySweeper) proven by a load-bearing HoldsFlow grace-boundary regression; TcpRedirectSession moved to its own file; UdpProxySession receive-failure handler threaded as a loop parameter (no more null-forgiving); SetupWorkItem payload planes partitioned into pre-allocated TcpSetupWork/UdpSetupWork; UdpSetupQueueTests split 512->272/146/113 with byte-identical facts and the shared CreateFlow helper consolidated from five copies into TestHelpers/FlowBuilders. Gates at every milestone: zero-warning Release build, full suite 721 baseline -> 725 (4 additive regressions, zero assertion changes), allocation gates and gc-soak clean (gen2=0, zero pool deltas); spec updated for the options/clock/diagnostics conventions.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d434d00` | chore(task): plan design-deepening refactors (09-19-design-deepening-refactors) |
+| `804c790` | refactor(setup): require handler at rent time, drop dead work kind |
+| `7a8df52` | refactor(core): inject clocks into FlowTable and UdpSetupQueueBudget; share FlowHash |
+| `ac7b957` | refactor(udp): options record, slot-host seam, session context, diagnostics snapshot |
+| `a634ae7` | refactor(tcp): options record and diagnostics snapshot |
+| `53ddcb4` | refactor(ndis): pump diagnostics snapshot, internal test-seam options members |
+| `cb70b0d` | refactor(cli): extract coordinator composers from durable capture bundle |
+| `cfad0d6` | docs(spec): record deep-module conventions from design-deepening refactors |
+| `3a9ccfc` | chore(task): close out design-deepening refactors verification |
+| `a4322d3` | refactor(tcp): close the clock seam across the TCP family |
+| `31191ad` | refactor(runtime): move TcpRedirectSession out, tighten receive handler, split setup payload planes |
+| `18d2243` | test(udp): split UdpSetupQueueTests into theme files under the 400-line budget |
+| `10e5798` | test(udp): consolidate the four duplicate CreateFlow copies onto FlowBuilders |
+| `d9ca244` | docs(spec): extend the clock-seam convention to the TCP family |
+| `e6215ba` | chore(task): record 09-19-tcp-clock-followup planning artifacts |
+
+### Status
+
+[OK] **Completed**
