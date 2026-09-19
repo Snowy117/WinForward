@@ -298,11 +298,14 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
             redirectTable,
             selfTraffic,
             new WindowsAdapterLocalAddressProvider(),
-            logger,
-            capacity: configuration.TcpFlowCapacity,
-            healthSignal: healthSignal,
-            synCopyPool: synCopyPool,
-            setupExecutor: setupExecutor);
+            new TcpRedirectOptions
+            {
+                Logger = logger,
+                Capacity = configuration.TcpFlowCapacity,
+                HealthSignal = healthSignal,
+                SynCopyPool = synCopyPool,
+                SetupExecutor = setupExecutor
+            });
 
     /// <summary>
     /// The capture runner's scope-installed callback: swaps the UDP reinjection-target snapshot to

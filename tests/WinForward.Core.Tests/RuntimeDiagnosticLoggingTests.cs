@@ -37,7 +37,7 @@ public sealed class RuntimeDiagnosticLoggingTests
             new TcpRedirectTable(),
             new SelfTrafficRegistry(),
             new FakeLocalAddressProvider(),
-            logger);
+            new TcpRedirectOptions { Logger = logger });
         var syn = MakeSynPacket(s_client, s_destination, 53000, 443);
         await HandleSynSettledAsync(coordinator, syn, s_server);
         var listener = Assert.Single(listenerFactory.Listeners);
@@ -66,7 +66,7 @@ public sealed class RuntimeDiagnosticLoggingTests
             new TcpRedirectTable(),
             new SelfTrafficRegistry(),
             new FakeLocalAddressProvider(),
-            logger);
+            new TcpRedirectOptions { Logger = logger });
         var syn = MakeSynPacket(s_client, s_destination, 53000, 443);
         await HandleSynSettledAsync(coordinator, syn, s_server);
         var listener = Assert.Single(listenerFactory.Listeners);

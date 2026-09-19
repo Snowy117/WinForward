@@ -220,7 +220,7 @@ public sealed class HotPathAllocationGateTests
         var injector = new CountingInjector();
         var listenerFactory = new GatedListenerFactory();
         using var synCopyPool = new NativeBufferPool(NdisApiAbi.MaximumEthernetFrame, capacity: 8);
-        var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, new TcpRedirectTable(), new SelfTrafficRegistry(), new FakeLocalAddressProvider(), synCopyPool: synCopyPool);
+        var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, new TcpRedirectTable(), new SelfTrafficRegistry(), new FakeLocalAddressProvider(), new TcpRedirectOptions { SynCopyPool = synCopyPool });
         try
         {
             var syn = MakeSynPacket(ClientIpv4, DestIpv4, 53000, 443);
@@ -238,7 +238,7 @@ public sealed class HotPathAllocationGateTests
             var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
             Assert.Equal(0, allocated);
-            Assert.Equal(1, coordinator.PendingSetups.ActiveCount);
+            Assert.Equal(1, coordinator.Diagnostics.PendingSetupActiveCount);
             Assert.Equal(1, synCopyPool.Stats.Outstanding);
         }
         finally

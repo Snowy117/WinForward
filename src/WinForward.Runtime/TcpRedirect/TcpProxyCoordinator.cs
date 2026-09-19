@@ -50,11 +50,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         TcpRedirectTable table,
         SelfTrafficRegistry selfTraffic,
         IAdapterLocalAddressProvider localAddresses,
-        IRuntimeLogger? logger = null,
-        int? capacity = null,
-        IInterceptionHealthSignal? healthSignal = null,
-        NativeBufferPool? synCopyPool = null,
-        ISetupExecutor? setupExecutor = null)
+        TcpRedirectOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(listenerFactory);
         ArgumentNullException.ThrowIfNull(relayFactory);
@@ -62,19 +58,21 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         ArgumentNullException.ThrowIfNull(table);
         ArgumentNullException.ThrowIfNull(selfTraffic);
         ArgumentNullException.ThrowIfNull(localAddresses);
-        if (capacity is < 1) throw new ArgumentOutOfRangeException(nameof(capacity), capacity, "Capacity must be positive.");
+        options ??= new TcpRedirectOptions();
+        var capacity = options.Capacity ?? 16_384;
+        if (capacity < 1) throw new ArgumentOutOfRangeException(nameof(options), capacity, "Capacity must be positive.");
         _table = table;
         _injector = injector;
         _framePool = NdisPacketBufferPool.Shared;
-        _synCopyPool = synCopyPool ?? new NativeBufferPool(NdisApiAbi.MaximumEthernetFrame);
-        _ownsSynCopyPool = synCopyPool is null;
-        _setupExecutor = setupExecutor ?? new SetupExecutor();
-        _ownsSetupExecutor = setupExecutor is null;
+        _synCopyPool = options.SynCopyPool ?? new NativeBufferPool(NdisApiAbi.MaximumEthernetFrame);
+        _ownsSynCopyPool = options.SynCopyPool is null;
+        _setupExecutor = options.SetupExecutor ?? new SetupExecutor();
+        _ownsSetupExecutor = options.SetupExecutor is null;
         _setupHandler = SetupPendingAsync;
-        _logger = logger ?? NullRuntimeLogger.Instance;
-        _capacity = capacity ?? 16_384;
+        _logger = options.Logger ?? NullRuntimeLogger.Instance;
+        _capacity = capacity;
         _store = new TcpRedirectSessionStore(table, _logger, _capacity);
-        _clientReset = new ClientResetInjector(injector, _logger, _store.TearDownSessionAsync, _store.FailAssociationAsync, _capacity, healthSignal);
+        _clientReset = new ClientResetInjector(injector, _logger, _store.TearDownSessionAsync, _store.FailAssociationAsync, _capacity, options.HealthSignal);
         _acceptor = new TcpRedirectAcceptor(relayFactory, _logger, _clientReset, _store.TryAttachRelay, _store.TearDownSessionAsync);
         _setup = new TcpRedirectSetup(listenerFactory, table, selfTraffic, localAddresses, injector, _logger, _store, _clientReset, _synCopyPool);
     }
@@ -88,19 +86,13 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
     public int Capacity => _capacity;
 
     /// <summary>
-    /// The number of concurrent SYN callers that arrived after another caller had already claimed
-    /// the flow, detected a translated-tuple mismatch, released their redundant listener, and
-    /// fallen back to re-inject. A non-zero value after a concurrent burst proves the redirect-table
-    /// exactly-once path was exercised under genuine concurrency.
+    /// The coordinator's observable counters as one snapshot: the concurrent-loser total from the
+    /// redirect-table exactly-once path (a non-zero value after a concurrent burst proves that path
+    /// was exercised under genuine concurrency), the capacity-gate rejection total (explicit budget
+    /// management, not setup failure), and the pending-SYN-setup counts (live entries, charged
+    /// bytes, retention-TTL expiries, setup-failure cooldowns); for tests and diagnostics.
     /// </summary>
-    internal long ConcurrentLoserCount => _setup.ConcurrentLoserCount;
-
-    /// <summary>
-    /// The total number of SYN arrivals rejected by the capacity gate since construction. Unlike
-    /// error-type failures this counts explicit budget management: the flow was blocked because the
-    /// concurrent proxied-flow budget was exhausted, not because setup failed.
-    /// </summary>
-    internal long CapacityRejectionCount => Interlocked.Read(ref _capacityRejectionCount);
+    internal TcpRedirectDiagnostics Diagnostics => new(_setup.ConcurrentLoserCount, Interlocked.Read(ref _capacityRejectionCount), _pendingSyn.ActiveCount, _pendingSyn.ChargedBytes, _pendingSyn.TtlExpiredCount, _pendingSyn.CooldownCount);
 
     /// <summary>
     /// Emits an info-level summary of capacity-gate rejections, but only when the count advanced
@@ -614,9 +606,6 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
 
     /// <summary>The TIME_WAIT-grace tombstone index; internal for tests to advance the grace window.</summary>
     internal TcpRedirectTombstoneTable Tombstones => _store.Tombstones;
-
-    /// <summary>The pending new-flow SYN setups; internal for tests to observe R8 bounds.</summary>
-    internal TcpPendingSynSetupIndex PendingSetups => _pendingSyn;
 
     /// <summary>
     /// Awaits every pending background setup launched so far (internal test/diagnostic seam):

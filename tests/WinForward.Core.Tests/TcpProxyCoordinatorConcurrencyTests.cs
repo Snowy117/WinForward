@@ -124,7 +124,7 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
         await coordinator.DrainPendingSetupsAsync();
         Assert.Single(listenerFactory.Listeners, listener => !listener.IsDisposed);
         Assert.Equal(1, table.Count);
-        Assert.Equal(0, coordinator.CapacityRejectionCount);
+        Assert.Equal(0, coordinator.Diagnostics.CapacityRejectionCount);
     }
 
     [Fact]
@@ -159,7 +159,7 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
         Assert.Single(listenerFactory.Listeners);
         Assert.Single(injector.InjectedFrames);
         Assert.Equal(1, table.Count);
-        Assert.Equal(0, coordinator.ConcurrentLoserCount);
+        Assert.Equal(0, coordinator.Diagnostics.ConcurrentLoserCount);
     }
 
     [Fact]

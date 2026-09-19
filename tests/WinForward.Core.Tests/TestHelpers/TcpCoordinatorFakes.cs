@@ -97,7 +97,7 @@ internal static class TcpCoordinatorFakes
         var logger = new RecordingRuntimeLogger();
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable();
-        var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider(), logger);
+        var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider(), new TcpRedirectOptions { Logger = logger });
 
         var server = new Socks5Server("primary", "127.0.0.1", 1080, null, null);
         var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase) { [server.Name] = server };

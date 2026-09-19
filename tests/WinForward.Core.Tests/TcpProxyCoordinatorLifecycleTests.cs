@@ -33,7 +33,7 @@ public sealed class TcpProxyCoordinatorLifecycleTests
         await coordinator.DrainPendingSetupsAsync();
         Assert.Empty(injector.InjectedFrames);
         Assert.Equal(0, table.Count);
-        Assert.Equal(1, coordinator.PendingSetups.CooldownCount);
+        Assert.Equal(1, coordinator.Diagnostics.PendingSetupCooldownCount);
         Assert.Equal(TcpRedirectOutcome.Dropped, await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None));
     }
 

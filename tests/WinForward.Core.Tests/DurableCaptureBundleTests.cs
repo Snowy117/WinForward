@@ -47,7 +47,7 @@ public sealed class DurableCaptureBundleTests
             new TcpRedirectTable(),
             new SelfTrafficRegistry(),
             new FakeLocalAddressProvider(),
-            logger);
+            new TcpRedirectOptions { Logger = logger });
         return new DurableCaptureBundle(dispatcher, executor, udpTargets, sweeper, udp, tcp, logger);
     }
 

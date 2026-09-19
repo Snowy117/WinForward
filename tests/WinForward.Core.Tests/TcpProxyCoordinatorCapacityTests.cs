@@ -25,7 +25,7 @@ public sealed class TcpProxyCoordinatorCapacityTests
         var injector = new FakeInjector();
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable(capacity: 1);
-        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider(), capacity: 1);
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider(), new TcpRedirectOptions { Capacity = 1 });
 
         var first = await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None);
         await coordinator.DrainPendingSetupsAsync();
@@ -48,12 +48,12 @@ public sealed class TcpProxyCoordinatorCapacityTests
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable(capacity: 1);
         var logger = new RecordingRuntimeLogger();
-        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider(), logger, capacity: 1);
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider(), new TcpRedirectOptions { Logger = logger, Capacity = 1 });
 
         await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
         Assert.Equal(TcpRedirectOutcome.Blocked, await coordinator.HandleSynAsync(MakeSynPacket(IPAddress.Parse("192.0.2.11"), IPAddress.Parse("192.0.2.99"), 53001, 80), s_server, CancellationToken.None));
 
-        Assert.Equal(1, coordinator.CapacityRejectionCount);
+        Assert.Equal(1, coordinator.Diagnostics.CapacityRejectionCount);
         var rejection = Assert.Single(logger.Events, item => string.Equals(item.Name, "tcp.redirect.rejected", StringComparison.Ordinal));
         Assert.Contains(rejection.Fields, field => string.Equals(field.Key, "reason", StringComparison.Ordinal) && field.Value is "capacity");
 
@@ -78,7 +78,7 @@ public sealed class TcpProxyCoordinatorCapacityTests
         await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), new FakeInjector(), table, new SelfTrafficRegistry(), new FakeLocalAddressProvider());
 
         await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
-        Assert.Equal(0, coordinator.CapacityRejectionCount);
+        Assert.Equal(0, coordinator.Diagnostics.CapacityRejectionCount);
     }
 
     [Fact]
@@ -93,7 +93,7 @@ public sealed class TcpProxyCoordinatorCapacityTests
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable();
         var logger = new RecordingRuntimeLogger();
-        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider(), logger);
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider(), new TcpRedirectOptions { Logger = logger });
 
         var syn = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
         await HandleSynSettledAsync(coordinator, syn, s_server);
@@ -135,7 +135,7 @@ public sealed class TcpProxyCoordinatorCapacityTests
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable();
         var logger = new RecordingRuntimeLogger();
-        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider(), logger);
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider(), new TcpRedirectOptions { Logger = logger });
 
         Assert.Equal(TcpRedirectOutcome.SetupPending, await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None));
         await coordinator.DrainPendingSetupsAsync();
@@ -293,7 +293,7 @@ public sealed class TcpProxyCoordinatorCapacityTests
         var logger = new RecordingRuntimeLogger();
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable();
-        await using var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider(), logger);
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider(), new TcpRedirectOptions { Logger = logger });
 
         var syn = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
         await HandleSynSettledAsync(coordinator, syn, s_server);
@@ -393,7 +393,7 @@ public sealed class TcpProxyCoordinatorCapacityTests
         var selfTraffic = new SelfTrafficRegistry();
         var logger = new RecordingRuntimeLogger();
         var table = new TcpRedirectTable(capacity: 1);
-        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider(), logger, capacity: 1);
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider(), new TcpRedirectOptions { Logger = logger, Capacity = 1 });
 
         await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
         var rejectedTuple = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.11"), 53001), Endpoint.From(IPAddress.Parse("192.0.2.99"), 80), TransportProtocol.Tcp, FlowOriginKind.Host);
@@ -422,7 +422,7 @@ public sealed class TcpProxyCoordinatorCapacityTests
         Assert.Equal(0x14, injector.InjectedFrames[2].Frame[47]);
 
         // The rejection accounting is unchanged.
-        Assert.Equal(3, coordinator.CapacityRejectionCount);
+        Assert.Equal(3, coordinator.Diagnostics.CapacityRejectionCount);
         Assert.Contains(logger.Events, e => string.Equals(e.Name, "tcp.redirect.rejected", StringComparison.Ordinal)
             && e.Fields.Any(field => string.Equals(field.Key, "reason", StringComparison.Ordinal) && field.Value is "capacity"));
     }
@@ -437,7 +437,7 @@ public sealed class TcpProxyCoordinatorCapacityTests
         var injector = new FakeInjector();
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable(capacity: 1);
-        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider(), capacity: 1);
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider(), new TcpRedirectOptions { Capacity = 1 });
         await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
 
         var hostSyn = MakeSynPacket(IPAddress.Parse("192.0.2.11"), IPAddress.Parse("192.0.2.99"), 53001, 80);
@@ -463,7 +463,7 @@ public sealed class TcpProxyCoordinatorCapacityTests
         var selfTraffic = new SelfTrafficRegistry();
         var logger = new RecordingRuntimeLogger();
         var table = new TcpRedirectTable(capacity: 1);
-        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider(), logger, capacity: 1);
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider(), new TcpRedirectOptions { Logger = logger, Capacity = 1 });
 
         await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
         Assert.Equal(TcpRedirectOutcome.Blocked, await coordinator.HandleSynAsync(MakeSynPacket(IPAddress.Parse("192.0.2.11"), IPAddress.Parse("192.0.2.99"), 53001, 80), s_server, CancellationToken.None));

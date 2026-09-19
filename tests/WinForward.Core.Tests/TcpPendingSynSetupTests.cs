@@ -247,7 +247,7 @@ public sealed class TcpPendingSynSetupTests
         var listenerFactory = new CancellableGatedListenerFactory();
         var logger = new RecordingRuntimeLogger();
         var table = new TcpRedirectTable();
-        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), new FakeInjector(), table, new SelfTrafficRegistry(), new FakeLocalAddressProvider(), logger);
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), new FakeInjector(), table, new SelfTrafficRegistry(), new FakeLocalAddressProvider(), new TcpRedirectOptions { Logger = logger });
 
         // Every launched setup parks inside the gated factory, so entries accumulate to the cap.
         for (var port = 53000; port < 53000 + 1024; port++)
@@ -261,10 +261,10 @@ public sealed class TcpPendingSynSetupTests
         Assert.Equal(TcpRedirectOutcome.Blocked, rejected);
         Assert.Contains(logger.Events, e => string.Equals(e.Name, "tcp.setup.pending.dropped", StringComparison.Ordinal)
             && e.Fields.Any(field => string.Equals(field.Key, "reason", StringComparison.Ordinal) && field.Value is "pendingBudget"));
-        Assert.Equal(TcpPendingSynSetupIndex.DefaultCapacity, coordinator.PendingSetups.ActiveCount);
+        Assert.Equal(TcpPendingSynSetupIndex.DefaultCapacity, coordinator.Diagnostics.PendingSetupActiveCount);
         await coordinator.DisposeAsync();
-        Assert.Equal(0, coordinator.PendingSetups.ActiveCount);
-        Assert.Equal(0, coordinator.PendingSetups.ChargedBytes);
+        Assert.Equal(0, coordinator.Diagnostics.PendingSetupActiveCount);
+        Assert.Equal(0, coordinator.Diagnostics.PendingSetupChargedBytes);
     }
 
     [Fact]
@@ -283,7 +283,7 @@ public sealed class TcpPendingSynSetupTests
         // The background setup reached the factory only after the dispatch returned; the gate is
         // still closed, proving nothing on the dispatch path waited for the allocation.
         await listenerFactory.CreateStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        Assert.Equal(1, coordinator.PendingSetups.ActiveCount);
+        Assert.Equal(1, coordinator.Diagnostics.PendingSetupActiveCount);
 
         listenerFactory.Release();
         await coordinator.DrainPendingSetupsAsync();
@@ -303,14 +303,14 @@ public sealed class TcpPendingSynSetupTests
 
         await coordinator.HandleSynAsync(MakeSynPacket(s_client, s_destination, 53000, 443), s_server, CancellationToken.None);
         await listenerFactory.CreateStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        var chargedAtPark = coordinator.PendingSetups.ChargedBytes;
+        var chargedAtPark = coordinator.Diagnostics.PendingSetupChargedBytes;
         Assert.True(chargedAtPark > 0);
 
         await coordinator.RemoveExpiredAsync(DateTimeOffset.UtcNow.AddSeconds(6), TimeSpan.FromMinutes(1));
 
-        Assert.Equal(0, coordinator.PendingSetups.ActiveCount);
-        Assert.Equal(0, coordinator.PendingSetups.ChargedBytes);
-        Assert.Equal(1, coordinator.PendingSetups.TtlExpiredCount);
+        Assert.Equal(0, coordinator.Diagnostics.PendingSetupActiveCount);
+        Assert.Equal(0, coordinator.Diagnostics.PendingSetupChargedBytes);
+        Assert.Equal(1, coordinator.Diagnostics.PendingSetupTtlExpiredCount);
 
         listenerFactory.Release();
         await coordinator.DrainPendingSetupsAsync();
@@ -318,7 +318,7 @@ public sealed class TcpPendingSynSetupTests
         // and one association registered, despite the entry having been reclaimed mid-flight.
         Assert.Single(table.Snapshot());
         await coordinator.DisposeAsync();
-        Assert.Equal(0, coordinator.PendingSetups.ChargedBytes);
-        Assert.Equal(0, coordinator.PendingSetups.CooldownCount);
+        Assert.Equal(0, coordinator.Diagnostics.PendingSetupChargedBytes);
+        Assert.Equal(0, coordinator.Diagnostics.PendingSetupCooldownCount);
     }
 }
