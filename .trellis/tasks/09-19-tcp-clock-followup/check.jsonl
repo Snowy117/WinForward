@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify zero-warning build, full-suite baseline (724 + F1 test), unchanged assertion semantics, and that the options/clock conventions are followed."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Verify F2's moved file is the main type of its new file, F5's split files are each ≤400 effective lines, and any shared test helper placement follows the TestHelpers rules."}
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "Verify F1 preserved tombstone/cooldown/TTL semantics byte-for-byte under the default system clock and that the new boundary test asserts the intended grace window."}

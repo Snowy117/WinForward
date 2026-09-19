@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Behavior-zero discipline, test baseline gate (724), options-record + injected-clock conventions, single-gate/lock-order contracts F1/F4 must preserve, and the assertion-semantics rule for F5's test moves."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "File-per-main-type and ≤400 effective line rules for F2 (TcpRedirectSession own file) and F5 (test split), plus TestHelpers extraction rules."}
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "Tombstone TIME_WAIT grace, setup cooldown, pending-SYN TTL, and session-store contracts that F1's clock injection must preserve exactly."}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Zero-allocation posture for F4's SetupWorkItem payload partition (allocation happens at item creation only, never per rent) and F3's receive-loop change."}
