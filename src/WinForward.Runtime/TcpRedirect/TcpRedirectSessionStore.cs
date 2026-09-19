@@ -30,6 +30,7 @@ internal sealed class TcpRedirectSessionStore
     private readonly TcpRedirectTable _table;
     private readonly TcpRedirectTombstoneTable _tombstones;
     private readonly IRuntimeLogger _logger;
+    private readonly TimeProvider _timeProvider;
     private readonly Dictionary<FlowKey, TcpRedirectSession> _sessions = [];
     private readonly Lock _gate = new();
     private readonly CancellationTokenSource _shutdown = new();
@@ -45,10 +46,11 @@ internal sealed class TcpRedirectSessionStore
     /// </summary>
     private static readonly TimeSpan TombstoneGracePeriod = TimeSpan.FromSeconds(60);
 
-    public TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLogger logger, int capacity)
+    public TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLogger logger, int capacity, TimeProvider timeProvider)
     {
         _table = table;
         _logger = logger;
+        _timeProvider = timeProvider;
         _tombstones = new TcpRedirectTombstoneTable(capacity);
     }
 
@@ -326,7 +328,7 @@ internal sealed class TcpRedirectSessionStore
     /// </summary>
     private void RemoveAssociationFromTable(TcpRedirectAssociation association)
     {
-        _table.TryRemove(association, removed => _tombstones.TryAdd(removed.OriginalKey, removed.ReverseSourceEndpoint, removed.ReverseDestinationEndpoint, DateTimeOffset.UtcNow + TombstoneGracePeriod));
+        _table.TryRemove(association, removed => _tombstones.TryAdd(removed.OriginalKey, removed.ReverseSourceEndpoint, removed.ReverseDestinationEndpoint, _timeProvider.GetUtcNow() + TombstoneGracePeriod));
     }
 
     private static TaskCompletionSource CompletedSource()

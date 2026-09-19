@@ -31,9 +31,10 @@ internal sealed class TcpRedirectSetup
     private readonly TcpRedirectSessionStore _store;
     private readonly ClientResetInjector _clientReset;
     private readonly NativeBufferPool _synCopyPool;
+    private readonly TimeProvider _timeProvider;
     private long _concurrentLoserCount;
 
-    public TcpRedirectSetup(ITcpRedirectListenerFactory listenerFactory, TcpRedirectTable table, SelfTrafficRegistry selfTraffic, IAdapterLocalAddressProvider localAddresses, ITcpRedirectInjector injector, IRuntimeLogger logger, TcpRedirectSessionStore store, ClientResetInjector clientReset, NativeBufferPool synCopyPool)
+    public TcpRedirectSetup(ITcpRedirectListenerFactory listenerFactory, TcpRedirectTable table, SelfTrafficRegistry selfTraffic, IAdapterLocalAddressProvider localAddresses, ITcpRedirectInjector injector, IRuntimeLogger logger, TcpRedirectSessionStore store, ClientResetInjector clientReset, NativeBufferPool synCopyPool, TimeProvider timeProvider)
     {
         _listenerFactory = listenerFactory;
         _table = table;
@@ -44,6 +45,7 @@ internal sealed class TcpRedirectSetup
         _store = store;
         _clientReset = clientReset;
         _synCopyPool = synCopyPool;
+        _timeProvider = timeProvider;
     }
 
     /// <summary>
@@ -87,7 +89,7 @@ internal sealed class TcpRedirectSetup
             return null;
         }
 
-        if (!_table.TryClaim(key, originalDestination, originAdapter, packet.Metadata.AdapterHandle, translatedTuple, forwardLocalAddress, DateTimeOffset.UtcNow, out var association) || association is null)
+        if (!_table.TryClaim(key, originalDestination, originAdapter, packet.Metadata.AdapterHandle, translatedTuple, forwardLocalAddress, _timeProvider.GetUtcNow(), out var association) || association is null)
         {
             await listener.DisposeAsync().ConfigureAwait(false);
             TcpRedirectLogging.LogTrace(_logger, "tcp.redirect.rejected", packet, null, "claim");

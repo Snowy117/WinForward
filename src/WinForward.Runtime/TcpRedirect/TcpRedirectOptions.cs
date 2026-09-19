@@ -16,6 +16,9 @@ public sealed record TcpRedirectOptions
     /// <summary>The concurrent proxied-flow budget; null keeps the historical default (16,384).</summary>
     public int? Capacity { get; init; }
 
+    /// <summary>The clock driving tombstone grace, setup cooldowns, capacity-reset cooldowns, and pending-SYN TTLs (injectable for fake-time tests).</summary>
+    public TimeProvider TimeProvider { get; init; } = TimeProvider.System;
+
     /// <summary>Optional sink for client-visible failure health signals; null reports to the shared no-op.</summary>
     public IInterceptionHealthSignal? HealthSignal { get; init; }
 

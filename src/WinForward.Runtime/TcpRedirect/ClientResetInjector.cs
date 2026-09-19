@@ -34,8 +34,9 @@ internal sealed class ClientResetInjector
     private readonly Func<TcpRedirectAssociation, ValueTask> _failAssociation;
     private readonly TcpResetCooldownTable _capacityResets;
     private readonly NdisPacketBufferPool _bufferPool;
+    private readonly TimeProvider _timeProvider;
 
-    public ClientResetInjector(ITcpRedirectInjector injector, IRuntimeLogger logger, Func<TcpRedirectSession, ValueTask> tearDownSession, Func<TcpRedirectAssociation, ValueTask> failAssociation, int? capacity = null, IInterceptionHealthSignal? healthSignal = null, NdisPacketBufferPool? bufferPool = null)
+    public ClientResetInjector(ITcpRedirectInjector injector, IRuntimeLogger logger, Func<TcpRedirectSession, ValueTask> tearDownSession, Func<TcpRedirectAssociation, ValueTask> failAssociation, int? capacity = null, IInterceptionHealthSignal? healthSignal = null, NdisPacketBufferPool? bufferPool = null, TimeProvider? timeProvider = null)
     {
         _injector = injector;
         _logger = logger;
@@ -44,6 +45,7 @@ internal sealed class ClientResetInjector
         _capacityResets = new TcpResetCooldownTable(capacity ?? 16_384);
         _healthSignal = healthSignal ?? InterceptionHealthMonitor.Noop;
         _bufferPool = bufferPool ?? NdisPacketBufferPool.Shared;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <summary>The capacity-reset cooldown index; surfaced so tests can advance the window.</summary>
@@ -100,7 +102,7 @@ internal sealed class ClientResetInjector
     public ValueTask InjectCapacityRejectedResetAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
         var key = packet.Context.Key;
-        if (!_capacityResets.TryClaim(key, DateTimeOffset.UtcNow, CapacityResetCooldownWindow)) return ValueTask.CompletedTask;
+        if (!_capacityResets.TryClaim(key, _timeProvider.GetUtcNow(), CapacityResetCooldownWindow)) return ValueTask.CompletedTask;
         var towardMstcp = key.Origin != FlowOriginKind.Forwarded;
         try
         {

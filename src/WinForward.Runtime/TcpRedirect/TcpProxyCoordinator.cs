@@ -35,6 +35,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
     private readonly Func<SetupWorkItem, Task> _setupHandler;
     private readonly IRuntimeLogger _logger;
     private readonly int _capacity;
+    private readonly TimeProvider _timeProvider;
     private readonly TcpRedirectSessionStore _store;
     private readonly TcpRedirectSetup _setup;
     private readonly ClientResetInjector _clientReset;
@@ -71,10 +72,11 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         _setupHandler = SetupPendingAsync;
         _logger = options.Logger ?? NullRuntimeLogger.Instance;
         _capacity = capacity;
-        _store = new TcpRedirectSessionStore(table, _logger, _capacity);
-        _clientReset = new ClientResetInjector(injector, _logger, _store.TearDownSessionAsync, _store.FailAssociationAsync, _capacity, options.HealthSignal);
+        _timeProvider = options.TimeProvider;
+        _store = new TcpRedirectSessionStore(table, _logger, _capacity, _timeProvider);
+        _clientReset = new ClientResetInjector(injector, _logger, _store.TearDownSessionAsync, _store.FailAssociationAsync, _capacity, healthSignal: options.HealthSignal, timeProvider: _timeProvider);
         _acceptor = new TcpRedirectAcceptor(relayFactory, _logger, _clientReset, _store.TryAttachRelay, _store.TearDownSessionAsync);
-        _setup = new TcpRedirectSetup(listenerFactory, table, selfTraffic, localAddresses, injector, _logger, _store, _clientReset, _synCopyPool);
+        _setup = new TcpRedirectSetup(listenerFactory, table, selfTraffic, localAddresses, injector, _logger, _store, _clientReset, _synCopyPool, _timeProvider);
     }
 
     internal TcpRedirectTable Table => _table;
@@ -126,7 +128,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
 
         // A flow already claimed by a prior SYN reuses its decision: touch the association and
         // re-inject the rewritten SYN toward the listener. Policy is evaluated exactly once.
-        if (_table.TryResolveByOriginal(key, DateTimeOffset.UtcNow, out var existing) && existing is not null)
+        if (_table.TryResolveByOriginal(key, _timeProvider.GetUtcNow(), out var existing) && existing is not null)
         {
             TcpRedirectLogging.LogTrace(_logger, "tcp.redirect.reused", packet, existing);
             return await ReinjectExistingFlowDataAsync(packet, existing, cancellationToken).ConfigureAwait(false);
@@ -137,13 +139,13 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         // connection — re-arming setup would honor the dead flow (or leak the straggler
         // toward the real server via the NotRelevant fallback), so it is consumed like every
         // other straggler. The next connection claims a new source port and a new key.
-        if (_store.Tombstones.TryHit(key, DateTimeOffset.UtcNow)) return TcpRedirectOutcome.Dropped;
+        if (_store.Tombstones.TryHit(key, _timeProvider.GetUtcNow())) return TcpRedirectOutcome.Dropped;
 
         // Setup-failure cooldown (R8): a redirect setup for this flow genuinely failed within
         // the last second — the failure path already logged and released its resources, and a
         // retransmitted SYN inside the window is consumed so a dead setup path is not re-armed
         // at the client's retransmission rate.
-        if (_pendingSyn.IsInSetupCooldown(key, DateTimeOffset.UtcNow))
+        if (_pendingSyn.IsInSetupCooldown(key, _timeProvider.GetUtcNow()))
         {
             TcpRedirectLogging.LogTrace(_logger, "tcp.setup.cooldown", packet, null, "cooldown");
             return TcpRedirectOutcome.Dropped;
@@ -181,7 +183,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         var source = packet.InspectionSpan;
         var lease = _synCopyPool.Rent();
         source.CopyTo(lease.Span);
-        if (!_pendingSyn.TryRetain(key, lease, source.Length, packet.Context, packet.Metadata, packet.PacketSequence, packet.FlowGeneration, DateTimeOffset.UtcNow, out var created))
+        if (!_pendingSyn.TryRetain(key, lease, source.Length, packet.Context, packet.Metadata, packet.PacketSequence, packet.FlowGeneration, _timeProvider.GetUtcNow(), out var created))
         {
             // The index refused the retain and kept ownership of nothing new: release the rental.
             // Bounded pending index (entry cap or global byte budget) is explicit backpressure,
@@ -229,7 +231,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         if (!_setupExecutor.TryEnqueue(item))
         {
             entry.SetupCompletionSource.TrySetCanceled();
-            _pendingSyn.Complete(key, entry, writeCooldown: false, DateTimeOffset.UtcNow);
+            _pendingSyn.Complete(key, entry, writeCooldown: false, _timeProvider.GetUtcNow());
             _logger.Warn("TCP setup executor ring is full; blocking the redirect flow.");
             return false;
         }
@@ -261,7 +263,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         {
             // Disposal began between the pump-side retain and this task's start: the setup was
             // never observed, and shutdown unwinds without a cooldown.
-            _pendingSyn.Complete(key, entry, writeCooldown: false, DateTimeOffset.UtcNow);
+            _pendingSyn.Complete(key, entry, writeCooldown: false, _timeProvider.GetUtcNow());
             return;
         }
 
@@ -303,7 +305,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
             _store.ExitSetup();
         }
 
-        _pendingSyn.Complete(key, entry, writeCooldown, DateTimeOffset.UtcNow);
+        _pendingSyn.Complete(key, entry, writeCooldown, _timeProvider.GetUtcNow());
     }
 
     private ValueTask<TcpRedirectOutcome> ReinjectExistingFlowDataAsync(CapturedFlowPacket packet, TcpRedirectAssociation association, CancellationToken cancellationToken)
@@ -389,7 +391,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         // dispatcher already gates the reverse handler to TCP (H1), but a non-TCP packet must never
         // be routed into reverse handling regardless of call context.
         if (key.Protocol != TransportProtocol.Tcp) return ValueTask.FromResult(TcpRedirectOutcome.NotRelevant);
-        if (!_table.TryResolveByReverse(key.Local, key.Remote, DateTimeOffset.UtcNow, out var association) || association is null) return ValueTask.FromResult(TcpRedirectOutcome.NotRelevant);
+        if (!_table.TryResolveByReverse(key.Local, key.Remote, _timeProvider.GetUtcNow(), out var association) || association is null) return ValueTask.FromResult(TcpRedirectOutcome.NotRelevant);
 
         var original = association.OriginalKey;
         // Host-originated flows terminate on this host (reverse to MSTCP); forwarded flows (client
@@ -498,7 +500,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
             // TIME_WAIT grace: the reverse leg of a redirect torn down within the grace window still
             // resolves here, so listener-side stragglers of the finished handshake are consumed
             // instead of falling through to flow/policy handling as a fresh flow.
-            return _store.Tombstones.TryHit(key.Local, key.Remote, DateTimeOffset.UtcNow)
+            return _store.Tombstones.TryHit(key.Local, key.Remote, _timeProvider.GetUtcNow())
                 ? TcpRedirectOutcome.Dropped
                 : TcpRedirectOutcome.NotRelevant;
         }
@@ -519,7 +521,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
 
         var key = packet.Context.Key;
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
         // A2: the SYN bit-test reads the synchronous frame view (the native capture buffer while
         // the lease is unmaterialized) — a pure span read that never forces a pooled managed copy.
         var syn = TcpFrameRewriter.IsTcpSyn(packet.InspectionSpan);
@@ -570,7 +572,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
 
         if (!IPFragment.TryReadAddressPair(packet.InspectionSpan, out var source, out var destination)) return TcpRedirectOutcome.NotRelevant;
-        if (!_table.TryResolveByAddressPair(source, destination, DateTimeOffset.UtcNow, out var association) || association is null) return TcpRedirectOutcome.NotRelevant;
+        if (!_table.TryResolveByAddressPair(source, destination, _timeProvider.GetUtcNow(), out var association) || association is null) return TcpRedirectOutcome.NotRelevant;
 
         TcpRedirectLogging.LogTrace(_logger, "tcp.redirect.fragment", packet, association, "fragment");
         await _clientReset.HandleFragmentTeardownAsync(association).ConfigureAwait(false);
@@ -602,7 +604,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
     /// generation, so the hold naturally lapses.
     /// </summary>
     internal bool HoldsFlow(FlowKey key)
-        => _store.Holds(key) || _store.Tombstones.TryHit(key, DateTimeOffset.UtcNow);
+        => _store.Holds(key) || _store.Tombstones.TryHit(key, _timeProvider.GetUtcNow());
 
     /// <summary>The TIME_WAIT-grace tombstone index; internal for tests to advance the grace window.</summary>
     internal TcpRedirectTombstoneTable Tombstones => _store.Tombstones;

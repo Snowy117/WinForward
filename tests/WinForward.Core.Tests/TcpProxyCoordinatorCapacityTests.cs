@@ -357,6 +357,26 @@ public sealed class TcpProxyCoordinatorCapacityTests
     }
 
     [Fact]
+    public async Task HoldsFlowGraceBoundaryFollowsInjectedClock()
+    {
+        // F1: HoldsFlow's grace probe consumes the injected clock, so the tombstone boundary is
+        // deterministic — proving it end-to-end previously required 60 s of real time.
+        var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
+        var listenerFactory = new FakeListenerFactory();
+        var table = new TcpRedirectTable();
+        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), new FakeInjector(), table, new SelfTrafficRegistry(), new FakeLocalAddressProvider(), new TcpRedirectOptions { TimeProvider = time });
+
+        // TryHit is `now < ExpiryUtc`, so a deadline one grace period after the fake now is inside
+        // the window; advancing past the deadline (tombstone untouched) closes it.
+        var key = MakeHostFlowKey();
+        coordinator.Tombstones.TryAdd(key, Endpoint.From(s_clientIpv4, 40000), Endpoint.From(s_destIpv4, 443), time.GetUtcNow() + TimeSpan.FromSeconds(60));
+        Assert.True(coordinator.HoldsFlow(key));
+
+        time.Advance(TimeSpan.FromSeconds(61));
+        Assert.False(coordinator.HoldsFlow(key));
+    }
+
+    [Fact]
     public async Task HeldFlowExpiresAtOriginalIdlePointAfterGraceLapses()
     {
         // The wired sweep sequence (tcp first, then flows with the hold predicate): a torn-down

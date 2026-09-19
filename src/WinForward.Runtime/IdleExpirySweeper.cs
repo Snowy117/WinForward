@@ -24,6 +24,7 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
     private readonly TimeSpan _relayIdleTimeout;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly IRuntimeLogger _logger;
+    private readonly TimeProvider _timeProvider;
     private long _lastSweepFailureLogTicks;
     private Task? _loop;
 
@@ -35,7 +36,8 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
         TimeSpan? flowIdleTimeout = null,
         TimeSpan? redirectIdleTimeout = null,
         TimeSpan? relayIdleTimeout = null,
-        IRuntimeLogger? logger = null)
+        IRuntimeLogger? logger = null,
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
         _dispatcher = dispatcher;
@@ -46,6 +48,7 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
         _redirectIdleTimeout = redirectIdleTimeout ?? TimeSpan.FromMinutes(5);
         _relayIdleTimeout = relayIdleTimeout ?? TimeSpan.FromMinutes(2);
         _logger = logger ?? NullRuntimeLogger.Instance;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public void Start()
@@ -61,7 +64,7 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
         {
             while (await timer.WaitForNextTickAsync(_shutdown.Token))
             {
-                var now = DateTimeOffset.UtcNow;
+                var now = _timeProvider.GetUtcNow();
                 try
                 {
                     // TCP sweeps before flows: expiring a half-open session here releases its hold
@@ -102,7 +105,7 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
 
     private void LogSweepFailureRateLimited(Exception exception)
     {
-        var now = DateTime.UtcNow.Ticks;
+        var now = _timeProvider.GetUtcNow().UtcTicks;
         var last = Interlocked.Read(ref _lastSweepFailureLogTicks);
         if (now - last < SweepFailureLogInterval.Ticks) return;
         if (Interlocked.CompareExchange(ref _lastSweepFailureLogTicks, now, last) != last) return;
