@@ -593,3 +593,31 @@ Diagnosed the frequent 'pass batching degraded' warn: the fixed 8-slot lane tabl
 - E1 抓到关键 bug：MIB_UNICASTIPADDRESS_ROW 行起始偏移是 8（NET_LUID 对齐）而非 4——原实现会把根因修复在真机静默失效。已修 + 毒值测试锁定。教训入 spec：iphlpapi 表行偏移由行内最大对齐类决定，新表必须推导并用 poisoned-padding 测试钉住。
 - 下次 Windows 硬件运行时验证一次地址指纹非空。
 - 提交：a6ca464（测试稳定性）/ 6d95301（主实现）/ 325ba53（spec）/ a1d9f31（任务档案）+ 归档自动提交。
+
+
+## Session 23: GC-less zero-allocation hot paths (M0-M5)
+
+**Date**: 2026-09-19
+**Task**: GC-less zero-allocation hot paths (M0-M5)
+**Branch**: `master`
+
+### Summary
+
+Completed M0-M5 of the GC-less zero-allocation task: native buffer pool family (syn/udp/relay/window) with MemoryManager bridge, pooled FlowState/setup executor, NdisCapturePump dedicated-thread sync loop, workstation GC + 128 MiB HeapHardLimit fuse, and the gc-soak stability scenario. M3 review fixed a SYN-lease UAF, a missing TCP DNS cache, and a setup shutdown race; M4 fixed a test-only native leak. M5 review found a vacuous soak assertion and a real 72 B/datagram SocketAddress allocation in Socks5UdpTransport. The first 30-min soak failed on an over-strict pool Outstanding-equality gate (a relay return, not a leak); corrected to an overflow-growth window gate plus a bounded post-teardown drain check. Final 30-min gc-soak passed (exit 0): flat working set, 272 B per-thread over 45.06M sends, pools balanced. 724/724 tests, 0 warnings.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c75f30e` | (see git log) |
+| `97f0e01` | (see git log) |
+| `c2ac421` | (see git log) |
+| `fef03fc` | (see git log) |
+| `cf1a570` | (see git log) |
+| `b51965b` | (see git log) |
+| `a0e8024` | (see git log) |
+| `8c6cfe0` | (see git log) |
+
+### Status
+
+[OK] **Completed**

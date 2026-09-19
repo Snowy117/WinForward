@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 22
-- **Last Active**: 2026-09-12
+- **Total Sessions**: 23
+- **Last Active**: 2026-09-19
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~587 | Active |
+| `journal-1.md` | ~623 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 23 | 2026-09-19 | GC-less zero-allocation hot paths (M0-M5) | `c75f30e`, `97f0e01`, `c2ac421`, `fef03fc`, `cf1a570`, `b51965b`, `a0e8024`, `8c6cfe0` | `master` |
 | 22 | 2026-09-12 | Scope-sized pass-lane table | `f1d1c1b` | `master` |
 | 21 | 2026-09-12 | Recover generation startup from stale adapter handles (native 87) | `975aede` | `master` |
 | 20 | 2026-09-08 | Fix adapter.degraded nativeError=87 storm via in-process layered refresh | `398376e` | `master` |
