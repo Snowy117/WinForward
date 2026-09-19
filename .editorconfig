@@ -62,55 +62,64 @@ dotnet_style_explicit_tuple_names = true:suggestion
 # Whitespace options
 dotnet_style_allow_multiple_blank_lines_experimental = false
 
-# Non-private static fields are PascalCase
+# 字段命名约定（2026-09-19 用户裁定，按"声明"的可访问性匹配）：
+# - public/protected（可能公开暴露，含 protected internal）→ PascalCase 无前缀；公开字段因性能允许保留，
+#   命名同为 PascalCase（internal 类型上的 public 字段亦然，属预期）。
+# - internal 与 private 同级：static → s_camelCase（[ThreadStatic] 的 t_ 前缀是本仓特例，
+#   在 PacketRuntime 声明处用局部 pragma 标注）；实例字段 → _camelCase。
+# - private/internal const → PascalCase；局部 const → camelCase（由 locals_and_parameters 规则负责）。
+#
+# Non-private static fields are PascalCase（non-private 现仅指 public/protected 系；internal 归 s_ 规则）
 dotnet_naming_rule.non_private_static_fields_should_be_pascal_case.severity = suggestion
 dotnet_naming_rule.non_private_static_fields_should_be_pascal_case.symbols = non_private_static_fields
 dotnet_naming_rule.non_private_static_fields_should_be_pascal_case.style = non_private_static_field_style
 
 dotnet_naming_symbols.non_private_static_fields.applicable_kinds = field
-dotnet_naming_symbols.non_private_static_fields.applicable_accessibilities = public, protected, internal, protected_internal, private_protected
+dotnet_naming_symbols.non_private_static_fields.applicable_accessibilities = public, protected, protected_internal
 dotnet_naming_symbols.non_private_static_fields.required_modifiers = static
 
 dotnet_naming_style.non_private_static_field_style.capitalization = pascal_case
 
-# Non-private readonly fields are PascalCase
+# Non-private readonly fields are PascalCase（同上：仅 public/protected 系）
 dotnet_naming_rule.non_private_readonly_fields_should_be_pascal_case.severity = suggestion
 dotnet_naming_rule.non_private_readonly_fields_should_be_pascal_case.symbols = non_private_readonly_fields
 dotnet_naming_rule.non_private_readonly_fields_should_be_pascal_case.style = non_private_readonly_field_style
 
 dotnet_naming_symbols.non_private_readonly_fields.applicable_kinds = field
-dotnet_naming_symbols.non_private_readonly_fields.applicable_accessibilities = public, protected, internal, protected_internal, private_protected
+dotnet_naming_symbols.non_private_readonly_fields.applicable_accessibilities = public, protected, protected_internal
 dotnet_naming_symbols.non_private_readonly_fields.required_modifiers = readonly
 
 dotnet_naming_style.non_private_readonly_field_style.capitalization = pascal_case
 
-# Constants are PascalCase
+# Constants are PascalCase（private/internal const；局部 const 交给 locals 规则 → camelCase）
 dotnet_naming_rule.constants_should_be_pascal_case.severity = suggestion
 dotnet_naming_rule.constants_should_be_pascal_case.symbols = constants
 dotnet_naming_rule.constants_should_be_pascal_case.style = constant_style
 
-dotnet_naming_symbols.constants.applicable_kinds = field, local
+dotnet_naming_symbols.constants.applicable_kinds = field
 dotnet_naming_symbols.constants.required_modifiers = const
 
 dotnet_naming_style.constant_style.capitalization = pascal_case
 
-# Static fields are camelCase and start with s_
+# Static fields are camelCase and start with s_（internal 与 private 同级）
 dotnet_naming_rule.static_fields_should_be_camel_case.severity = suggestion
 dotnet_naming_rule.static_fields_should_be_camel_case.symbols = static_fields
 dotnet_naming_rule.static_fields_should_be_camel_case.style = static_field_style
 
 dotnet_naming_symbols.static_fields.applicable_kinds = field
+dotnet_naming_symbols.static_fields.applicable_accessibilities = internal, private_protected, private
 dotnet_naming_symbols.static_fields.required_modifiers = static
 
 dotnet_naming_style.static_field_style.capitalization = camel_case
 dotnet_naming_style.static_field_style.required_prefix = s_
 
-# Instance fields are camelCase and start with _
+# Instance fields are camelCase and start with _（同上：internal/private 系）
 dotnet_naming_rule.instance_fields_should_be_camel_case.severity = suggestion
 dotnet_naming_rule.instance_fields_should_be_camel_case.symbols = instance_fields
 dotnet_naming_rule.instance_fields_should_be_camel_case.style = instance_field_style
 
 dotnet_naming_symbols.instance_fields.applicable_kinds = field
+dotnet_naming_symbols.instance_fields.applicable_accessibilities = internal, private_protected, private
 
 dotnet_naming_style.instance_field_style.capitalization = camel_case
 dotnet_naming_style.instance_field_style.required_prefix = _
@@ -149,82 +158,102 @@ dotnet_public_api_analyzer.require_api_files = true
 # Workaround for https://github.com/dotnet/roslyn/issues/70570
 dotnet_diagnostic.IDE0055.severity = warning
 
-# https://github.com/dotnet/roslyn-analyzers/issues/7436 - False positives from valid GetDeclaredSymbol calls
-dotnet_diagnostic.RS1039.severity = none
+# 2026-09-19 独立抑制审计（结论见 .trellis/tasks/09-19-src-analyzer-cleanup/research/suppression-audit.md）：
+# 实证复核本文件全部 severity = none 条目与源码 pragma（“启用实验”命中数见审计文档）。规则级抑制仅保留
+# 有实证命中或面向本仓真实使用模式的条目；注释均按本仓库事实改写。审计移除的条目（0 命中且理由所指
+# 模式在本仓不存在，或原理由系其它仓库的继承文本）：
+# - RS1039：仅针对 Roslyn 分析器/源生成器开发代码（SemanticModel.GetDeclaredSymbol），本仓无此类工程；
+# - CA1822 / RCS1197 / MA0038：0 命中；原“fixer 误修 extension 块/InterpolatedStringHandlerArgument”
+#   理由在本仓不可复现（全仓 0 处 extension 块与 0 处该特性），且均为 info 级；
+# - MA0009：本仓零 Regex 使用，无触发载体；
+# - MA0056 / MA0015 / S4456（tests 段）：测试树零 virtual/abstract 成员、零参数异常抛出、零迭代器。
+# 若未来引入上述模式并在门禁中触发诊断，按 spec 以局部 pragma + 理由（或按需重建规则级条目）处理。
+# 2026-09-19 复审补记（用户指示——抑制必须按证据路径 glob 限定，不得以“当前无命中”为由全局豁免）：
+# MA0041 与 IDE0130 已由全局条目改为路径限定（tests/ 与 tests/WinForward.Core.Tests/TestHelpers/），
+# src 重回对应规则的正常管辖。
 
-# CA1822 / RCS1146 / RCS1197 / MA0038（成员可标记为 static）：dotnet format 的 fixer 在 C# 14 extension 块
-# （receiver 参数语义）和 InterpolatedStringHandlerArgument("") 约定签名（绑 this）两类场景下
-# 错误地把实例方法改为 static，导致编译失败（CS8944 / CS9293 / CS0176）。
-# MA0038 是 Meziantou 分析器对应的同一规则，fixer 同样会触发误修；一并降级。
-dotnet_diagnostic.CA1822.severity = none
+# RCS1146（Use conditional access）：本仓 8 处命中集中在 Policy.IsMatch 等 `x is not null && !x....`
+# 守卫链（src 7 / tests 1）。刻意保留显式 null 守卫写法（守卫链短路语义最直观，`?.`/`is false`
+# 变体可读性更低且需逐点重写），故降级该条规则。注：原注释将其误标为“成员可标记为 static”，
+# 与 CA1822/RCS1197/MA0038 同块——两者规则无关，2026-09-19 审计拆分改写。
 dotnet_diagnostic.RCS1146.severity = none
-dotnet_diagnostic.RCS1197.severity = none
-dotnet_diagnostic.MA0038.severity = none
 
-# IDE0130（namespace 与文件夹不匹配）：dotnet format 的 fixer 试图改 MSBuild 的 document properties
-# （<RootNamespace> 等），触发 System.NotSupportedException: Changing document properties is not supported，
-# 直接让 format 全量崩溃。本项目刻意的多 namespace/文件夹布局（contracts 聚合、跨命名空间 partial 类）
-# 无法靠 fixer 调整 MSBuild 属性解决，故暂时降级。
-# TODO: 评估能否通过显式配置 csharp_style_namespace_options 或重新组织文件夹结构以恢复该规则。
-dotnet_diagnostic.IDE0130.severity = none
-
-# 第三方分析器仓库级抑制：以下规则都与本项目架构/技术栈根本不兼容，无法靠改代码消除。
+# 第三方分析器规则级抑制（2026-09-19 审计逐条实证；命中数与样本见 research/suppression-audit.md）：
 #
-# MA0048（文件名必须匹配类型名）：本项目刻意采用"一文件多类型"组织模式——
-# contracts/records 聚合文件（如 AccessControlContracts.cs 含 UserId/AccessResource/AccessGrant 等十余类型）、
-# EF 实体/配置聚合文件、JsonStreamEvent 聚合文件等。强制拆分文件会破坏既有架构，属根本不兼容。
+# MA0048（File name must match type name，默认 warning）：实测 205 处命中 / 64 文件——本仓刻意的
+# “一文件多类型”组织模式：src 的聚合契约/记录文件（Domain.cs、ConfigurationModels.cs、
+# NdisApiAbi.cs、TcpRedirectInterfaces.cs 等）、benchmarks/BenchmarkShared.cs、
+# tests/TestHelpers/TcpCoordinatorFakes.cs 等。强制拆分会破坏既有组织，属根本不兼容。
+# （原注举例 AccessControlContracts.cs/EF 实体/JsonStreamEvent 均为其它仓库文本，已改。）
 dotnet_diagnostic.MA0048.severity = none
 #
-# MA0004（async 调用缺 ConfigureAwait(false)）：本项目全部运行在 ASP.NET Core / 服务端 host，
-# 无 SynchronizationContext，ConfigureAwait(false) 在现代 .NET 中无意义（与旧 .NET Framework 库代码相反）。
+# MA0004（Use Task.ConfigureAwait，默认 warning）：实测 99 处命中（tests 78 / benchmarks 17 / src 4）。
+# 本仓是自托管控制台/服务主机（WinForward.Cli 为 Exe；无 WPF/WinForms/ASP.NET Core 引用），
+# 无线程亲和 SynchronizationContext，ConfigureAwait(false) 不改变行为；仓库在链路深处自行使用
+# （src 231 处），不采用 MA0004 的全面强制。（原注“运行在 ASP.NET Core host”失实，审计改写。）
 dotnet_diagnostic.MA0004.severity = none
 #
-# VSTHRD003（避免 await/return 外部任务）：与 MA0004 同理——服务端无 SynchronizationContext，
-# 不存在 await 外部任务导致的死锁风险。此外 quality-guidelines 强制的并发测试"释放屏障"模式
-# （TaskCompletionSource + await start.Task）必然 await 外部 TCS 任务，属刻意设计。
+# VSTHRD003（Avoid awaiting foreign Tasks，默认 warning）：实测 39 处命中（tests 25 / src 10 /
+# benchmarks 4）。本仓无 JoinableTaskFactory / VS 宿主，被 await 的任务均为同进程内自建
+# （pump/monitor/TCS）；并发测试的“释放屏障”（TaskCompletionSource + await start.Task）是
+# quality-guidelines 明确要求的刻意设计。VSTHRD003 所防的跨上下文死锁场景在本仓不存在。
+# （原注的“服务端 host”说法失实，审计改写。）
 dotnet_diagnostic.VSTHRD003.severity = none
 #
-# MA0026 / S1135（TODO 注释必须处理）：TODO 注释是本项目有意的 issue 追踪工作流，
-# 用于标注待办（如需先加数据库列才能实现的 RemoveUserAsync），不是 bug。强制处理会破坏该工作流。
+# MA0026 / S1135（TODO 注释，默认 warning）：审计实测全仓 0 条 TODO、0 命中。保留该降级以支持
+# “TODO 作为有意待办追踪”的工作流声明（配置作者既定意图；旧注用于举例的 RemoveUserAsync/数据库
+# 系其它仓库文本，已删除）。若团队确认不使用 TODO 工作流，可后续移除此二条。
 dotnet_diagnostic.MA0026.severity = none
 dotnet_diagnostic.S1135.severity = none
 
-# 测试树 tests/**：测试 fixture / fake / 场景与下列规则系统冲突——反射驱动的未用构造/属性
-# （S1144/S3459/S3237）、断言经异常或副作用的用例（S2699）、测试替身的重载/同名参数（S927/S4136/S4144）、
-# 长场景方法（MA0051）、测试构造的无参名 ArgumentException（MA0015）、测试配置类（MA0056/MA0009/S6966）、
-# fixture/fake 的迭代器桩不拆分校验（S4456），以及测试中合法的同步阻塞用法（VSTHRD002/103/200）。
-# 仅限实测触发的规则。
-# 注意：VSTHRD002/103/200 仅在此 tests 区域抑制，src/ 仍受保护以防真正的同步阻塞 bug。
+# 测试树 tests/**：测试 fixture / fake / 场景与下列规则系统冲突（2026-09-19 审计逐条实证；命中数与
+# 样本见 research/suppression-audit.md）。与旧注释不同，此处不再声称“仅限实测触发的规则”——部分条目
+# 当前 0 命中，但其监控的构造（fixture 属性/重载/同步 I/O/阻塞调用）在测试树中被广泛使用，按 design §5
+# 作为对未来测试代码的防护保留：
+# - fixture/fake 为镜像真实接口保留、套件未读取的成员（S1144 实测 1 处真阳性：
+#   TcpPendingSynSetupTests.CancellableGatedListenerFactory.Listeners 未被读取）；
+# - 断言经异常或副作用的用例（S2699 实测 3 处，如“不抛即通过”的幂等性用例）；
+# - 测试替身的重载/同名参数（S927 实测 4 处，如 lambda 参数 `_` 与接口声明名不一致）；
+# - 重载分组/未赋值成员/setter 未用 value（S4136/S3459/S3237，0 命中；fixture 常见形态）；
+# - 同步 API 替代 async（S6966，0 命中；测试树大量使用同步 socket/stream 调用）；
+# - 场景级长方法（MA0051 实测 2 处）；同步阻塞用法（VSTHRD002 实测 4 处、VSTHRD103 0 命中；
+#   测试以阻塞探测时序属刻意；src/ 不在抑制范围，仍受保护）；方法名缺 Async 后缀（VSTHRD200 实测 2 处，
+#   局部函数 Resolver 返回 ValueTask 属名称即语义的测试脚手架）。
+# 审计移除：MA0056（测试树零 virtual/abstract 成员）、MA0009（零 Regex 使用）、
+# MA0015（零参数异常抛出；src 的刻意 member-path paramName 由局部 pragma 覆盖）、
+# S4456（零迭代器方法）。
 [tests/**.cs]
 dotnet_diagnostic.S1144.severity = none
-dotnet_diagnostic.MA0056.severity = none
 dotnet_diagnostic.MA0051.severity = none
 dotnet_diagnostic.S927.severity = none
-dotnet_diagnostic.MA0009.severity = none
-dotnet_diagnostic.MA0015.severity = none
-dotnet_diagnostic.S6966.severity = none
 dotnet_diagnostic.S4144.severity = none
 dotnet_diagnostic.S4136.severity = none
 dotnet_diagnostic.S3459.severity = none
 dotnet_diagnostic.S3237.severity = none
 dotnet_diagnostic.S2699.severity = none
-dotnet_diagnostic.S4456.severity = none
 dotnet_diagnostic.VSTHRD002.severity = none
 dotnet_diagnostic.VSTHRD103.severity = none
 dotnet_diagnostic.VSTHRD200.severity = none
-# MA0040（方法支持取消但未传 CancellationToken）：测试用例多数只断言单一行为，刻意不串取消令牌；
-# 在 src/ 仍受保护，避免生产代码遗漏 token。
+dotnet_diagnostic.S6966.severity = none
+# MA0040（方法支持取消但未传 CancellationToken，info）：实测 30 处、全部在 tests——测试用例多数只
+# 断言单一行为，刻意不串取消令牌；src/ 与 benchmarks 不在抑制范围（bench 站点已按规则修复）。
 dotnet_diagnostic.MA0040.severity = none
-# MA0182（internal 类型从未被引用）：测试 fixture 经常通过反射 / assembly 扫描被消费
-# （GameSettingsContract.Discover(assembly)、UserConfigurableSettingsContract 等），
-# 编译期分析器看不到反射引用而误报。
+# MA0182（Avoid unused internal types，info）：tests 实测 1 处真阳性——TcpCoordinatorFakes.BarrierListenerFactory
+# 是文档完备但当前无引用的 fixture 辅助类型；测试 fixture 允许保留未接线辅助类型（info 级、不影响构建）。
+# 旧注的 GameSettingsContract.Discover/UserConfigurableSettingsContract 系其它仓库文本，已删除。
 dotnet_diagnostic.MA0182.severity = none
+# MA0041（Make property static，已被作者弃用、继任者即 CA1822）：命中全部为测试 fixture 中读取
+# primary 构造器参数的属性（加 static 必然 CS9105/CS9113，B4 实测——弃用规则的误报）。
+# 按“抑制只覆盖证据所在路径”原则仅限 tests/（2026-09-19 复审）：src 出现同类命中时按局部 pragma 处置。
+dotnet_diagnostic.MA0041.severity = none
 
-# These xUnit analyzers were disabled temporarily to let us move to the
-# new xUnit and get past several component governance issues. The
-# following issue tracks enabling them
-#
-# https://github.com/dotnet/roslyn/issues/75093
+# xUnit 分析器（2026-09-19 审计改写；原“迁移新 xUnit / 组件治理 / roslyn#75093”注释系其它仓库文本）：
+# xUnit1030（测试方法不应调用 ConfigureAwait(false)，默认 warning）实测 94 处、xUnit1031（测试方法
+# 不应使用阻塞式任务操作，默认 warning）实测 2 处——本仓测试与生产代码统一使用 ConfigureAwait(false)
+# 惯例，时序探测以阻塞/TaskCompletionSource 门控实现（725 测试全绿，未观察到并行度问题）；
+# 修复=删除 94 处调用，属行为可见的批量变更、收益为零。其余五条当前 0 命中，但 Assert.Same /
+# Assert.True / Assert.Empty / 理论数据 null / 集合断言在测试树中广泛使用，保留作为断言退化防护
+# （xUnit2023 为 info 级）。
 dotnet_diagnostic.xUnit1012.severity = none
 dotnet_diagnostic.xUnit1030.severity = none
 dotnet_diagnostic.xUnit1031.severity = none
@@ -232,6 +261,14 @@ dotnet_diagnostic.xUnit2005.severity = none
 dotnet_diagnostic.xUnit2020.severity = none
 dotnet_diagnostic.xUnit2023.severity = none
 dotnet_diagnostic.xUnit2029.severity = none
+
+# IDE0130（namespace 与文件夹不匹配）：测试辅助类型刻意使用父命名空间（WinForward.Core.Tests），
+# 避免每个测试文件追加 using——改为子命名空间需改 19 个辅助文件 + 全部消费方，属净 churn。
+# 按“抑制只覆盖证据所在路径”原则仅限 TestHelpers 目录（2026-09-19 复审）：src 与其它 tests 目录
+# 不受影响，未来若出现不匹配诊断即正常上报。原“fixer 改 MSBuild document properties 致 format 崩溃”
+# 说法系其它仓库继承文本，本仓未复现（审计删除）。
+[tests/WinForward.Core.Tests/TestHelpers/**.cs]
+dotnet_diagnostic.IDE0130.severity = none
 
 # CSharp code style settings:
 [*.cs]
