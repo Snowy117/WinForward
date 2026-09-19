@@ -1,5 +1,6 @@
 #pragma warning disable CA1416 // The pump and processor are Windows-attributed; the benchmark drives their managed-only pipeline through a fake reader, so it runs on any OS.
 using System.Buffers.Binary;
+using System.Globalization;
 using BenchmarkDotNet.Attributes;
 using WinForward.Configuration;
 using WinForward.Core;
@@ -52,7 +53,7 @@ public class CapturePumpBenchmarks
         }
 
         Volatile.Write(ref s_sink, executor.PassCount);
-        if (executor.PassCount != PacketsPerRound) throw new InvalidOperationException($"The capture pump benchmark processed {executor.PassCount} of {PacketsPerRound} packets.");
+        if (executor.PassCount != PacketsPerRound) throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture, $"The capture pump benchmark processed {executor.PassCount} of {PacketsPerRound} packets."));
     }
 
     /// <summary>
@@ -80,7 +81,7 @@ public class CapturePumpBenchmarks
             var count = (int)Math.Min(remaining, (long)buffers.Length);
             for (var index = 0; index < count; index++)
             {
-                var sourcePort = (ushort)(1_024 + _sequence % distinctFlows);
+                var sourcePort = (ushort)(1_024 + (_sequence % distinctFlows));
                 BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(34, 2), sourcePort);
                 buffers[index].SetFrame(frame, deviceFlags, adapterHandle);
                 _sequence++;

@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
@@ -29,7 +30,7 @@ namespace WinForward.Runtime.Capture;
 public sealed class NdisPacketActionExecutor : IPacketActionExecutor
 {
     /// <summary>Shared rate-limit window for this executor's recoverable-fault warnings.</summary>
-    private static readonly TimeSpan RateLimitedWarnInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan s_rateLimitedWarnInterval = TimeSpan.FromSeconds(5);
 
     // One lane per (adapter handle, direction). The table starts at a pre-install capacity (the
     // window before the first scope install, when the adapter count is still unknown) and is
@@ -48,7 +49,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     private readonly IInterceptionHealthSignal _healthSignal;
     private readonly NdisPacketBufferPool _bufferPool;
     private readonly Lock _pendingLaneLock = new();
-    private readonly RuntimeLogThrottle _passFailedWarn = new(RateLimitedWarnInterval);
+    private readonly RuntimeLogThrottle _passFailedWarn = new(s_rateLimitedWarnInterval);
     private PendingPassLane?[] _pendingLanes = new PendingPassLane?[PreInstallLaneCapacity];
     private long _lastProxyUnavailableLogTicks;
     private long _lastUdpFailureLogTicks;
@@ -181,7 +182,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     /// <summary>
     /// Sends every pass frame accumulated for one adapter, one batched reinjector call per
     /// direction lane in lane-creation order, preserving append (capture) order within each lane.
-    /// Rented pooled buffers are returned exactly once in a <c>finally</c>, so a failed batch
+    /// Rented pooled buffers are returned exactly once in a <see langword="finally"/>, so a failed batch
     /// still releases them; in-place capture buffers are never returned (the pump owns them).
     /// Called by the pump's batch-completed callback once per iteration and once on loop exit.
     /// </summary>
@@ -273,7 +274,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
                 if (stale > 0)
                 {
                     if (ShouldWarn(ref _lastLaneRetireLogTicks))
-                        _logger.Warn($"A pass lane retired for adapter 0x{lane.AdapterHandle:X} still held {stale} frame(s); the frames are dropped and their rented buffers returned because the iteration-end flush contract was breached.");
+                        _logger.Warn(string.Create(CultureInfo.InvariantCulture, $"A pass lane retired for adapter 0x{lane.AdapterHandle:X} still held {stale} frame(s); the frames are dropped and their rented buffers returned because the iteration-end flush contract was breached."));
                     ReleaseLaneBuffers(lane, stale);
                 }
             }
@@ -537,6 +538,6 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     {
         var now = DateTime.UtcNow.Ticks;
         var last = Interlocked.Read(ref lastLogTicks);
-        return now - last >= RateLimitedWarnInterval.Ticks && Interlocked.CompareExchange(ref lastLogTicks, now, last) == last;
+        return now - last >= s_rateLimitedWarnInterval.Ticks && Interlocked.CompareExchange(ref lastLogTicks, now, last) == last;
     }
 }

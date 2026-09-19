@@ -24,7 +24,7 @@ public sealed class CoreFlowStructuresTests
         Assert.True(table.TryClaimResolved(FlowKey.Create(local, dns1, TransportProtocol.Udp, FlowOriginKind.Host), () =>
         {
             decisionCount++;
-            return new FlowDecision(FlowAction.Block, 1, null);
+            return new FlowDecision(FlowAction.Block, 1, ProxyServerName: null);
         }, out var second));
         Assert.True(table.TryClaimResolved(FlowKey.Create(local, dns2, TransportProtocol.Udp, FlowOriginKind.Host), () =>
         {
@@ -53,9 +53,9 @@ public sealed class CoreFlowStructuresTests
         using var pool = new NativeBufferPool(8);
         var queue = new BoundedSetupQueue(maxPackets: 2, maxBytes: 4);
 
-        Assert.True(Enqueue(queue, pool, new byte[] { 1, 2 }));
-        Assert.True(Enqueue(queue, pool, new byte[] { 3, 4 }));
-        Assert.False(Enqueue(queue, pool, new byte[] { 5 }));
+        Assert.True(Enqueue(queue, pool, [1, 2]));
+        Assert.True(Enqueue(queue, pool, [3, 4]));
+        Assert.False(Enqueue(queue, pool, [5]));
         Assert.Equal(2, queue.Count);
         Assert.Equal(4, queue.Bytes);
     }

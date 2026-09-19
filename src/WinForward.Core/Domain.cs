@@ -6,26 +6,26 @@ namespace WinForward.Core;
 public enum TransportProtocol
 {
     Tcp,
-    Udp
+    Udp,
 }
 
 public enum AddressFamilyKind
 {
     IPv4,
-    IPv6
+    IPv6,
 }
 
 public enum FlowOriginKind
 {
     Host,
-    Forwarded
+    Forwarded,
 }
 
 public enum FlowAction
 {
     Proxy,
     Pass,
-    Block
+    Block,
 }
 
 [StructLayout(LayoutKind.Auto)]
@@ -137,7 +137,7 @@ internal static class FlowHash
 
 public readonly record struct FlowDecision(FlowAction Action, int? RuleIndex, string? ProxyServerName)
 {
-    public static FlowDecision Fallback(FlowAction action) => new(action, null, null);
+    public static FlowDecision Fallback(FlowAction action) => new(action, RuleIndex: null, ProxyServerName: null);
 }
 
 [StructLayout(LayoutKind.Auto)]

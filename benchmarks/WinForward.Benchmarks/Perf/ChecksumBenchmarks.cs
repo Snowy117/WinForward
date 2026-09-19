@@ -1,6 +1,6 @@
 using System.Buffers.Binary;
-using System.Runtime.Intrinsics;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 using BenchmarkDotNet.Attributes;
 using WinForward.Protocols;
 
@@ -25,7 +25,7 @@ public class ChecksumBenchmarks
     public void Setup()
     {
         _data = new byte[FrameBytes];
-        for (var index = 0; index < _data.Length; index++) _data[index] = unchecked((byte)(index * 31 + 7));
+        for (var index = 0; index < _data.Length; index++) _data[index] = unchecked((byte)((index * 31) + 7));
     }
 
     [Benchmark(Baseline = true)]
@@ -45,7 +45,7 @@ public class ChecksumBenchmarks
 
 internal static class VectorizedCandidate
 {
-    private static readonly Vector256<byte> SwapAdjacentBytes = Vector256.Create(
+    private static readonly Vector256<byte> s_swapAdjacentBytes = Vector256.Create(
         (byte)1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12, 15, 14,
         17, 16, 19, 18, 21, 20, 23, 22, 25, 24, 27, 26, 29, 28, 31, 30);
 
@@ -56,11 +56,11 @@ internal static class VectorizedCandidate
         if (Vector256.IsHardwareAccelerated && data.Length >= 64)
         {
             var accumulator = Vector256<uint>.Zero;
-            ref byte start = ref MemoryMarshal.GetReference(data);
+            ref var start = ref MemoryMarshal.GetReference(data);
             for (; index + Vector256<byte>.Count <= data.Length; index += Vector256<byte>.Count)
             {
                 var block = Vector256.LoadUnsafe(ref start, (nuint)index);
-                var swapped = Vector256.Shuffle(block, SwapAdjacentBytes);
+                var swapped = Vector256.Shuffle(block, s_swapAdjacentBytes);
                 var (lo, hi) = Vector256.Widen(swapped.AsUInt16());
                 accumulator += lo + hi;
             }

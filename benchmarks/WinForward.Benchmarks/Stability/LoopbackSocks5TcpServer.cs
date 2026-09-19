@@ -32,7 +32,7 @@ internal sealed class LoopbackSocks5TcpServer : IAsyncDisposable
         _listener = new TcpListener(IPAddress.Loopback, 0);
         _listener.Start(1024);
         Endpoint = (IPEndPoint)_listener.LocalEndpoint!;
-        _acceptLoop = Task.Run(() => AcceptLoopAsync(_shutdown.Token));
+        _acceptLoop = Task.Run(() => AcceptLoopAsync(_shutdown.Token), _shutdown.Token);
     }
 
     public IPEndPoint Endpoint { get; }
@@ -99,23 +99,16 @@ internal sealed class LoopbackSocks5TcpServer : IAsyncDisposable
         }
     }
 
-    private sealed class Connection : IAsyncDisposable
+    private sealed class Connection(Socket socket, LoopbackSocks5TcpServer owner, CancellationToken shutdown) : IAsyncDisposable
     {
-        private static readonly byte[] NoAuthMethodReply = [5, 0];
-        private static readonly byte[] ConnectSuccessReply = [5, 0, 0, 1, 0, 0, 0, 0, 0, 0];
-        private static readonly byte[] RequestFailureReply = [5, 1, 0, 1, 0, 0, 0, 0, 0, 0];
+        private static readonly byte[] s_noAuthMethodReply = [5, 0];
+        private static readonly byte[] s_connectSuccessReply = [5, 0, 0, 1, 0, 0, 0, 0, 0, 0];
+        private static readonly byte[] s_requestFailureReply = [5, 1, 0, 1, 0, 0, 0, 0, 0, 0];
 
-        private readonly Socket _socket;
-        private readonly LoopbackSocks5TcpServer _owner;
-        private readonly CancellationToken _shutdown;
+        private readonly Socket _socket = socket;
+        private readonly LoopbackSocks5TcpServer _owner = owner;
+        private readonly CancellationToken _shutdown = shutdown;
         private int _disposed;
-
-        public Connection(Socket socket, LoopbackSocks5TcpServer owner, CancellationToken shutdown)
-        {
-            _socket = socket;
-            _owner = owner;
-            _shutdown = shutdown;
-        }
 
         public async Task RunAsync()
         {
@@ -136,7 +129,7 @@ internal sealed class LoopbackSocks5TcpServer : IAsyncDisposable
 
         private async Task HandleControlAsync()
         {
-            using var stream = new NetworkStream(_socket, ownsSocket: true);
+            await using var stream = new NetworkStream(_socket, ownsSocket: true);
             var greeting = new byte[2];
             await stream.ReadExactlyAsync(greeting, _shutdown).ConfigureAwait(false);
             if (greeting[0] != 5 || greeting[1] == 0) return;
@@ -144,7 +137,7 @@ internal sealed class LoopbackSocks5TcpServer : IAsyncDisposable
             await stream.ReadExactlyAsync(methods, _shutdown).ConfigureAwait(false);
             // Always select NO AUTHENTICATION: the production client accepts method 0 without
             // further negotiation even when it offered username/password as an alternative.
-            await stream.WriteAsync(NoAuthMethodReply, _shutdown).ConfigureAwait(false);
+            await stream.WriteAsync(s_noAuthMethodReply, _shutdown).ConfigureAwait(false);
 
             var request = new byte[4];
             await stream.ReadExactlyAsync(request, _shutdown).ConfigureAwait(false);
@@ -165,7 +158,7 @@ internal sealed class LoopbackSocks5TcpServer : IAsyncDisposable
 
             if (addressLength < 0)
             {
-                await stream.WriteAsync(RequestFailureReply, _shutdown).ConfigureAwait(false);
+                await stream.WriteAsync(s_requestFailureReply, _shutdown).ConfigureAwait(false);
                 return;
             }
 
@@ -173,14 +166,14 @@ internal sealed class LoopbackSocks5TcpServer : IAsyncDisposable
             await stream.ReadExactlyAsync(remainder, _shutdown).ConfigureAwait(false);
             if (request[1] == (byte)Socks5Command.Connect)
             {
-                await stream.WriteAsync(ConnectSuccessReply, _shutdown).ConfigureAwait(false);
+                await stream.WriteAsync(s_connectSuccessReply, _shutdown).ConfigureAwait(false);
                 Interlocked.Increment(ref _owner._connectReplies);
                 await EchoLoopAsync(stream).ConfigureAwait(false);
             }
             else
             {
                 Interlocked.Increment(ref _owner._rejectedCommands);
-                await stream.WriteAsync(RequestFailureReply, _shutdown).ConfigureAwait(false);
+                await stream.WriteAsync(s_requestFailureReply, _shutdown).ConfigureAwait(false);
             }
         }
 

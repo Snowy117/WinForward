@@ -64,7 +64,7 @@ public sealed class NdisCapturePumpTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pump.RunAsync(cts.Token).AsTask());
 
-        Assert.Equal(new byte[] { 0x20, 0x21 }, observed);
+        Assert.Equal(" !"u8.ToArray(), observed);
         Assert.Equal(2, reader.Calls);
     }
 
@@ -177,7 +177,7 @@ public sealed class NdisCapturePumpTests
                 },
             ]);
 
-        await using var pump = new NdisCapturePump(reader, (nint)0x99, (packet, _) =>
+        await using var pump = new NdisCapturePump(reader, (nint)0x99, (_, _) =>
         {
             if (!handlerStarted.TrySetResult()) return ValueTask.CompletedTask;
             return new ValueTask(handlerReleased.Task);
@@ -253,7 +253,7 @@ public sealed class NdisCapturePumpTests
         Assert.True(thread.IsAlive, "the dedicated pump thread should be parked in its first read");
         Assert.True(thread.IsBackground, "the pump must run on a background thread");
 
-        cts.Cancel();
+        await cts.CancelAsync();
         readReleased.SetResult();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
 
@@ -322,7 +322,9 @@ public sealed class NdisCapturePumpTests
         var run = pump.RunAsync(CancellationToken.None).AsTask();
         await readEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
+#pragma warning disable CA2012 // The run-once guard throws synchronously before any ValueTask is produced; the Action-bound lambda pins exactly that synchronous exception and nothing consumes a result.
         Assert.Throws<InvalidOperationException>(() => pump.RunAsync(CancellationToken.None));
+#pragma warning restore CA2012
 
         var dispose = pump.DisposeAsync();
         readReleased.SetResult();

@@ -173,7 +173,7 @@ internal static class Socks5TestServer
         {
             1 => 4,
             4 => 16,
-            _ => throw new IOException($"Unexpected SOCKS5 address type {prefix[3]} in test server.")
+            _ => throw new IOException($"Unexpected SOCKS5 address type {prefix[3]} in test server."),
         };
         var request = new byte[4 + addressLength + 2];
         prefix.CopyTo(request, 0);

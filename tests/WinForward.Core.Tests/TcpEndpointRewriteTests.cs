@@ -246,7 +246,7 @@ public sealed class TcpEndpointRewriteTests
 
     private static bool ValidateIpv6TcpChecksum(byte[] frame)
     {
-        var tcpOffset = 54;
+        const int tcpOffset = 54;
         var tcpLength = frame.Length - tcpOffset;
         var sum = Sum(frame.AsSpan(22, 16)) + Sum(frame.AsSpan(38, 16)) + 6u + (uint)tcpLength + Sum(frame.AsSpan(tcpOffset, tcpLength));
         return Finish(sum) == 0;
@@ -254,7 +254,7 @@ public sealed class TcpEndpointRewriteTests
 
     private static bool ValidateIpv6TcpChecksumWithHopByHop(byte[] frame)
     {
-        var tcpOffset = 62;
+        const int tcpOffset = 62;
         var tcpLength = frame.Length - tcpOffset;
         var sum = Sum(frame.AsSpan(22, 16)) + Sum(frame.AsSpan(38, 16)) + 6u + (uint)tcpLength + Sum(frame.AsSpan(tcpOffset, tcpLength));
         return Finish(sum) == 0;

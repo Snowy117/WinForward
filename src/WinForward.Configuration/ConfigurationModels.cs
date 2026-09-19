@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -192,7 +193,7 @@ public static class ConfigurationLoader
             servers,
             new PolicySnapshot(rules, fallback.Value),
             logLevel,
-            rules.Any(static rule => rule.Matcher.Processes?.Any(IsPathSelector) == true),
+            rules.Exists(static rule => rule.Matcher.Processes?.Any(IsPathSelector) == true),
             tcpFlowCapacity,
             setupWorkerCount)
         {
@@ -271,7 +272,7 @@ public static class ConfigurationLoader
 
     private static void ValidateServer(Socks5ServerDto? dto, int index, Dictionary<string, Socks5Server> servers, List<ConfigDiagnostic> errors)
     {
-        var path = $"socks5Servers[{index}]";
+        var path = string.Create(CultureInfo.InvariantCulture, $"socks5Servers[{index}]");
         if (dto is null)
         {
             errors.Add(new(path, "Server entry must be an object."));
@@ -295,9 +296,9 @@ public static class ConfigurationLoader
         }
     }
 
-    private static PolicyRule? ParseRule(RuleDto? dto, int index, IReadOnlyDictionary<string, Socks5Server> servers, List<ConfigDiagnostic> errors)
+    private static PolicyRule? ParseRule(RuleDto? dto, int index, Dictionary<string, Socks5Server> servers, List<ConfigDiagnostic> errors)
     {
-        var path = $"rules[{index}]";
+        var path = string.Create(CultureInfo.InvariantCulture, $"rules[{index}]");
         if (dto is null)
         {
             errors.Add(new(path, "Rule entry must be an object."));
@@ -325,7 +326,7 @@ public static class ConfigurationLoader
         var families = ParseSet(dto.AddressFamily, ParseFamily, $"{path}.addressFamily", errors);
         var networks = ParseNetworks(dto.RemoteCidr, $"{path}.remoteCidr", errors);
         var ports = ParsePorts(dto.RemotePort, $"{path}.remotePort", errors);
-        if (errors.Any(error => error.Path.Equals(path, StringComparison.Ordinal) || error.Path.StartsWith(path + ".", StringComparison.Ordinal))) return null;
+        if (errors.Exists(error => error.Path.Equals(path, StringComparison.Ordinal) || error.Path.StartsWith(path + ".", StringComparison.Ordinal))) return null;
 
         return new PolicyRule(new RuleMatcher(
             NormalizeSet(dto.Process), NormalizeSet(dto.AdapterId), NormalizeSet(dto.AdapterName), protocols, families, networks, ports),
@@ -340,7 +341,7 @@ public static class ConfigurationLoader
             "proxy" when allowProxy => FlowAction.Proxy,
             "pass" => FlowAction.Pass,
             "block" => FlowAction.Block,
-            _ => (FlowAction?)null
+            _ => (FlowAction?)null,
         };
         if (action is null)
         {
@@ -366,13 +367,13 @@ public static class ConfigurationLoader
 
         for (var index = 0; index < values.Length; index++)
         {
-            if (string.IsNullOrWhiteSpace(values[index])) errors.Add(new($"{path}[{index}]", "Value must not be empty."));
+            if (string.IsNullOrWhiteSpace(values[index])) errors.Add(new(string.Create(CultureInfo.InvariantCulture, $"{path}[{index}]"), "Value must not be empty."));
         }
     }
 
-    private static IReadOnlySet<string>? NormalizeSet(string?[]? values) => values is null ? null : values.Select(static value => value!.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    private static HashSet<string>? NormalizeSet(string?[]? values) => values?.Select(static value => value!.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-    private static IReadOnlyList<IPPrefix>? ParseNetworks(string?[]? values, string path, List<ConfigDiagnostic> errors)
+    private static List<IPPrefix>? ParseNetworks(string?[]? values, string path, List<ConfigDiagnostic> errors)
     {
         if (values is null) return null;
         var result = new List<IPPrefix>();
@@ -380,7 +381,7 @@ public static class ConfigurationLoader
         {
             var value = values[index];
             if (string.IsNullOrWhiteSpace(value)) continue;
-            if (!IPPrefix.TryParse(value, out var prefix)) errors.Add(new($"{path}[{index}]", $"Invalid CIDR '{value}'.")); else result.Add(prefix);
+            if (!IPPrefix.TryParse(value, out var prefix)) errors.Add(new(string.Create(CultureInfo.InvariantCulture, $"{path}[{index}]"), $"Invalid CIDR '{value}'.")); else result.Add(prefix);
         }
         return result;
     }
@@ -394,12 +395,12 @@ public static class ConfigurationLoader
             var value = values[index];
             if (string.IsNullOrWhiteSpace(value)) continue;
             var parsed = parser(value);
-            if (parsed is null) errors.Add(new($"{path}[{index}]", $"Unsupported value '{value}'.")); else result.Add(parsed.Value);
+            if (parsed is null) errors.Add(new(string.Create(CultureInfo.InvariantCulture, $"{path}[{index}]"), $"Unsupported value '{value}'.")); else result.Add(parsed.Value);
         }
         return result;
     }
 
-    private static IReadOnlyList<(ushort Start, ushort End)>? ParsePorts(string?[]? values, string path, List<ConfigDiagnostic> errors)
+    private static List<(ushort Start, ushort End)>? ParsePorts(string?[]? values, string path, List<ConfigDiagnostic> errors)
     {
         if (values is null) return null;
         var result = new List<(ushort Start, ushort End)>();
@@ -410,14 +411,14 @@ public static class ConfigurationLoader
             var parts = value.Split('-', StringSplitOptions.TrimEntries);
             if (parts.Length is < 1 or > 2 || !ushort.TryParse(parts[0], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var start) || start == 0)
             {
-                errors.Add(new($"{path}[{index}]", $"Invalid port or range '{value}'."));
+                errors.Add(new(string.Create(CultureInfo.InvariantCulture, $"{path}[{index}]"), $"Invalid port or range '{value}'."));
                 continue;
             }
 
             var end = start;
             if (parts.Length == 2 && (!ushort.TryParse(parts[1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out end) || end == 0 || end < start))
             {
-                errors.Add(new($"{path}[{index}]", $"Invalid port or range '{value}'."));
+                errors.Add(new(string.Create(CultureInfo.InvariantCulture, $"{path}[{index}]"), $"Invalid port or range '{value}'."));
                 continue;
             }
 
@@ -436,14 +437,14 @@ public static class ConfigurationLoader
                 continue;
             }
 
-            var previous = merged[^1];
-            if ((uint)range.Start > (uint)previous.End + 1U)
+            var (start, end) = merged[^1];
+            if ((uint)range.Start > (uint)end + 1U)
             {
                 merged.Add(range);
                 continue;
             }
 
-            if (range.End > previous.End) merged[^1] = (previous.Start, range.End);
+            if (range.End > end) merged[^1] = (start, range.End);
         }
 
         return merged;

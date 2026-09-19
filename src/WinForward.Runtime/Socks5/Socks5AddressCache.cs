@@ -13,7 +13,7 @@ public sealed class Socks5AddressCache
 {
     public const int DefaultCapacity = 64;
 
-    private static readonly Func<string, CancellationToken, ValueTask<IPAddress[]>> DefaultResolver =
+    private static readonly Func<string, CancellationToken, ValueTask<IPAddress[]>> s_defaultResolver =
         static (host, token) => new ValueTask<IPAddress[]>(Dns.GetHostAddressesAsync(host, token));
 
     private readonly Dictionary<string, IPAddressValue> _addresses = new(StringComparer.OrdinalIgnoreCase);
@@ -23,8 +23,8 @@ public sealed class Socks5AddressCache
 
     public Socks5AddressCache(Func<string, CancellationToken, ValueTask<IPAddress[]>>? resolver = null, int capacity = DefaultCapacity)
     {
-        if (capacity < 1) throw new ArgumentOutOfRangeException(nameof(capacity));
-        _resolver = resolver ?? DefaultResolver;
+        ArgumentOutOfRangeException.ThrowIfLessThan(capacity, 1);
+        _resolver = resolver ?? s_defaultResolver;
         _capacity = capacity;
     }
 
@@ -51,7 +51,7 @@ public sealed class Socks5AddressCache
     /// <summary>Returns the cached address when present, otherwise resolves (cold) and stores it.</summary>
     public async ValueTask<IPAddress[]> ResolveAsync(string host, CancellationToken cancellationToken)
     {
-        if (TryGet(host, out var cached)) return new[] { cached.ToIPAddress() };
+        if (TryGet(host, out var cached)) return [cached.ToIPAddress()];
         var addresses = await _resolver(host, cancellationToken).ConfigureAwait(false);
         if (addresses.Length > 0) Set(host, IPAddressValue.From(addresses[0]));
         return addresses;

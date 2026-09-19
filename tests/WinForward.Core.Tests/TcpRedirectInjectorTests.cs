@@ -56,13 +56,13 @@ public sealed class TcpRedirectInjectorTests
         public void SendToAdapter(nint adapterHandle, NdisPacketBuffer buffer)
         {
             ToAdapterCount++;
-            record(adapterHandle, buffer);
+            Record(adapterHandle, buffer);
         }
 
         public void SendToMstcp(nint adapterHandle, NdisPacketBuffer buffer)
         {
             ToMstcpCount++;
-            record(adapterHandle, buffer);
+            Record(adapterHandle, buffer);
         }
 
         /// <summary>
@@ -79,7 +79,7 @@ public sealed class TcpRedirectInjectorTests
             for (var index = 0; index < count; index++) SendToMstcp(adapterHandle, buffers[index]);
         }
 
-        private void record(nint adapterHandle, NdisPacketBuffer buffer)
+        private void Record(nint adapterHandle, NdisPacketBuffer buffer)
         {
             Handle = adapterHandle;
             DeviceFlags = buffer.DeviceFlags;

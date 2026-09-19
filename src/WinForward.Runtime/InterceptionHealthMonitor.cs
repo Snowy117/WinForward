@@ -29,14 +29,18 @@ public interface IInterceptionHealthSignal
 /// Window counts saturate at the threshold — the trigger decision needs "at least threshold
 /// within the window", while <see cref="RuntimeCounters"/> keeps the true aggregates.
 /// </summary>
-public sealed class InterceptionHealthMonitor : IInterceptionHealthSignal
+public sealed class InterceptionHealthMonitor(
+    IRuntimeLogger? logger = null,
+    Action<string>? onTrigger = null,
+    TimeProvider? timeProvider = null,
+    IReadOnlyDictionary<string, int>? thresholds = null) : IInterceptionHealthSignal
 {
     /// <summary>The shared no-op every injection point defaults to, so no call site needs a null guard.</summary>
     public static IInterceptionHealthSignal Noop { get; } = new NoopSignal();
 
-    internal static readonly TimeSpan DefaultWindow = TimeSpan.FromSeconds(30);
-    internal static readonly TimeSpan DefaultTriggerCooldown = TimeSpan.FromSeconds(60);
-    internal static readonly TimeSpan DegradedTriggerSpacing = TimeSpan.FromMinutes(5);
+    internal static readonly TimeSpan s_defaultWindow = TimeSpan.FromSeconds(30);
+    internal static readonly TimeSpan s_defaultTriggerCooldown = TimeSpan.FromSeconds(60);
+    internal static readonly TimeSpan s_degradedTriggerSpacing = TimeSpan.FromMinutes(5);
     internal const int DegradedAfterConsecutiveTriggers = 3;
 
     /// <summary>Default per-counter trigger thresholds, keyed by <see cref="RuntimeCounters"/> constants.</summary>
@@ -50,25 +54,13 @@ public sealed class InterceptionHealthMonitor : IInterceptionHealthSignal
 
     private readonly Lock _gate = new();
     private readonly Dictionary<string, CounterWindow> _windows = new(StringComparer.Ordinal);
-    private readonly IReadOnlyDictionary<string, int> _thresholds;
-    private readonly IRuntimeLogger _logger;
-    private readonly TimeProvider _time;
-    private Action<string>? _onTrigger;
+    private readonly IReadOnlyDictionary<string, int> _thresholds = thresholds ?? DefaultThresholds;
+    private readonly IRuntimeLogger _logger = logger ?? NullRuntimeLogger.Instance;
+    private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+    private Action<string>? _onTrigger = onTrigger;
     private DateTimeOffset _nextTriggerUtc;
     private bool _degraded;
     private int _consecutiveForced;
-
-    public InterceptionHealthMonitor(
-        IRuntimeLogger? logger = null,
-        Action<string>? onTrigger = null,
-        TimeProvider? timeProvider = null,
-        IReadOnlyDictionary<string, int>? thresholds = null)
-    {
-        _logger = logger ?? NullRuntimeLogger.Instance;
-        _onTrigger = onTrigger;
-        _time = timeProvider ?? TimeProvider.System;
-        _thresholds = thresholds ?? DefaultThresholds;
-    }
 
     /// <summary>Consecutive triggers fired since the last <see cref="NoteRefreshCompleted"/> (diagnostics/heartbeat).</summary>
     public int ConsecutiveForcedTriggers
@@ -127,16 +119,16 @@ public sealed class InterceptionHealthMonitor : IInterceptionHealthSignal
 
     public void ReportFailure(string counter)
     {
-        string? fired = null;
-        Action<string>? handler = null;
+        string? fired;
+        Action<string>? handler;
         var degradedNow = false;
-        var consecutive = 0;
+        int consecutive;
         lock (_gate)
         {
             if (!_thresholds.TryGetValue(counter, out var threshold)) return;
             var now = _time.GetUtcNow();
             var window = GetOrAddWindow(counter, threshold);
-            window.Record(now.Ticks, DefaultWindow.Ticks);
+            window.Record(now.Ticks, s_defaultWindow.Ticks);
             if (now < _nextTriggerUtc || window.Count < threshold) return;
             _consecutiveForced++;
             consecutive = _consecutiveForced;
@@ -145,7 +137,7 @@ public sealed class InterceptionHealthMonitor : IInterceptionHealthSignal
                 _degraded = true;
                 degradedNow = true;
             }
-            _nextTriggerUtc = now + (_degraded ? DegradedTriggerSpacing : DefaultTriggerCooldown);
+            _nextTriggerUtc = now + (_degraded ? s_degradedTriggerSpacing : s_defaultTriggerCooldown);
             fired = counter;
             handler = _onTrigger;
         }
@@ -176,7 +168,7 @@ public sealed class InterceptionHealthMonitor : IInterceptionHealthSignal
         if (!_logger.IsEnabled(RuntimeLogLevel.Error)) return;
         _logger.Event(RuntimeLogLevel.Error, "runner.forcedRefresh.degraded",
             new("consecutive", consecutive),
-            new("spacingSeconds", (long)DegradedTriggerSpacing.TotalSeconds));
+            new("spacingSeconds", (long)s_degradedTriggerSpacing.TotalSeconds));
     }
 
     private CounterWindow GetOrAddWindow(string counter, int threshold)

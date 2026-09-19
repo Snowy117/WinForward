@@ -27,8 +27,8 @@ public sealed class BoundedSetupQueue
 
     public BoundedSetupQueue(int maxPackets, int maxBytes)
     {
-        if (maxPackets <= 0) throw new ArgumentOutOfRangeException(nameof(maxPackets));
-        if (maxBytes <= 0) throw new ArgumentOutOfRangeException(nameof(maxBytes));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxPackets);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxBytes);
         _maxPackets = maxPackets;
         _maxBytes = maxBytes;
     }

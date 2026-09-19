@@ -1,3 +1,4 @@
+using System.Globalization;
 using WinForward.Core;
 using WinForward.Windows;
 
@@ -49,7 +50,7 @@ public static class CaptureAdapterScopeResolver
             foreach (var adapter in adapters) scopeSet.Add(adapter);
         }
 
-        scope = scopeSet.OrderBy(adapter => adapter.StableId, StringComparer.OrdinalIgnoreCase).ToArray();
+        scope = [.. scopeSet.OrderBy(adapter => adapter.StableId, StringComparer.OrdinalIgnoreCase)];
         errors = [];
         return true;
     }
@@ -92,7 +93,7 @@ public static class CaptureAdapterScopeResolver
         }
 
         warnings = warningList;
-        return scopeSet.OrderBy(adapter => adapter.StableId, StringComparer.OrdinalIgnoreCase).ToArray();
+        return [.. scopeSet.OrderBy(adapter => adapter.StableId, StringComparer.OrdinalIgnoreCase)];
     }
 
     private static void ResolveRuleScope(IReadOnlyList<WindowsAdapter> adapters, Core.RuleMatcher matcher, int ruleIndex, HashSet<WindowsAdapter> scope, List<string> diagnostics, bool fatal)
@@ -122,7 +123,7 @@ public static class CaptureAdapterScopeResolver
             var byName = nameMatches.Select(adapter => adapter.StableId).ToHashSet(StringComparer.OrdinalIgnoreCase);
             if (!byId.SetEquals(byName))
             {
-                diagnostics.Add($"rules[{ruleIndex}]: adapterId and adapterName resolve to different adapters; both fields must select the same adapter.");
+                diagnostics.Add(string.Create(CultureInfo.InvariantCulture, $"rules[{ruleIndex}]: adapterId and adapterName resolve to different adapters; both fields must select the same adapter."));
                 if (!fatal) ruleContributesNothing = true;
             }
         }
@@ -149,13 +150,13 @@ public static class CaptureAdapterScopeResolver
             var found = adapters.Where(adapter => string.Equals(valueOf(adapter), selector, StringComparison.OrdinalIgnoreCase)).ToArray();
             if (found.Length == 0)
             {
-                diagnostics.Add($"rules[{ruleIndex}]: configured adapter selector '{selector}' matches no current adapter.");
+                diagnostics.Add(string.Create(CultureInfo.InvariantCulture, $"rules[{ruleIndex}]: configured adapter selector '{selector}' matches no current adapter."));
                 if (!fatal) ruleContributesNothing = true;
             }
             else if (found.Length > 1)
             {
                 var conflicts = string.Join(", ", found.Select(adapter => adapter.StableId + " (" + adapter.FriendlyName + ")"));
-                diagnostics.Add($"rules[{ruleIndex}]: configured adapter selector '{selector}' is ambiguous; matching adapters: {conflicts}.");
+                diagnostics.Add(string.Create(CultureInfo.InvariantCulture, $"rules[{ruleIndex}]: configured adapter selector '{selector}' is ambiguous; matching adapters: {conflicts}."));
             }
             else
             {

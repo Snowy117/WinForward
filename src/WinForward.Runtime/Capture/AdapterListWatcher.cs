@@ -49,8 +49,8 @@ public sealed class NdisAdapterListWatcher : IAdapterListChangeSource
     /// <summary>Driver-free seam over the wait-any/cancel/dispose semantics (unit tests).</summary>
     internal NdisAdapterListWatcher()
     {
-        _signalEvent = new EventWaitHandle(false, EventResetMode.AutoReset);
-        _cancelEvent = new EventWaitHandle(false, EventResetMode.ManualReset);
+        _signalEvent = new EventWaitHandle(initialState: false, EventResetMode.AutoReset);
+        _cancelEvent = new EventWaitHandle(initialState: false, EventResetMode.ManualReset);
     }
 
     /// <summary>

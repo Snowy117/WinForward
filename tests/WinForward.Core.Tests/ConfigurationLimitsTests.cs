@@ -1,3 +1,4 @@
+using System.Globalization;
 using WinForward.Configuration;
 using Xunit;
 
@@ -45,14 +46,14 @@ public sealed class ConfigurationLimitsTests
     [InlineData(4096)]
     public void ConfigurationAcceptsTcpFlowCapacityAtOrBelowDefaultWithoutWarning(int value)
     {
-        var json = $$"""
+        var json = string.Create(CultureInfo.InvariantCulture, $$"""
         {
           "socks5Servers": [],
           "rules": [],
           "fallbackAction": "pass",
           "tcpFlowCapacity": {{value}}
         }
-        """;
+        """);
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
         Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
@@ -65,14 +66,14 @@ public sealed class ConfigurationLimitsTests
     [InlineData(8192)]
     public void ConfigurationWarnsAboveDefaultTcpFlowCapacityWithoutBlocking(int value)
     {
-        var json = $$"""
+        var json = string.Create(CultureInfo.InvariantCulture, $$"""
         {
           "socks5Servers": [],
           "rules": [],
           "fallbackAction": "pass",
           "tcpFlowCapacity": {{value}}
         }
-        """;
+        """);
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
         Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
@@ -88,14 +89,14 @@ public sealed class ConfigurationLimitsTests
     [InlineData(8193)]
     public void ConfigurationRejectsTcpFlowCapacityOutsideSupportedRange(int value)
     {
-        var json = $$"""
+        var json = string.Create(CultureInfo.InvariantCulture, $$"""
         {
           "socks5Servers": [],
           "rules": [],
           "fallbackAction": "pass",
           "tcpFlowCapacity": {{value}}
         }
-        """;
+        """);
 
         ConfigurationAssert.Invalid(json, "tcpFlowCapacity");
     }

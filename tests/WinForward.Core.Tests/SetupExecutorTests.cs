@@ -41,11 +41,11 @@ public sealed class SetupExecutorTests
         using var executor = new SetupExecutor(workerCount: 1, ringCapacity: 1);
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var blocker = executor.RentItem(_ => gate.Task);
-        blocker.Completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        blocker._completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Assert.True(executor.TryEnqueue(blocker));
 
         var rejected = executor.RentItem(static _ => Task.CompletedTask);
-        rejected.Completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        rejected._completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Assert.False(executor.TryEnqueue(rejected));
         Assert.Equal(1, executor.RejectedCount);
         Assert.Equal(1, executor.PendingCount);
@@ -56,7 +56,7 @@ public sealed class SetupExecutorTests
         Assert.Equal(overflowBefore, executor.OverflowAllocations);
 
         gate.TrySetResult();
-        blocker.Completion.TrySetResult();
+        blocker._completion.TrySetResult();
         await WaitForAsync(() => executor.FreeCount > 0);
         Assert.Equal(0, executor.PendingCount);
     }
@@ -68,7 +68,7 @@ public sealed class SetupExecutorTests
 
         var failing = executor.RentItem(static _ => Task.FromException(new InvalidOperationException("boom")));
         var failedCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        failing.Completion = failedCompletion;
+        failing._completion = failedCompletion;
         Assert.True(executor.TryEnqueue(failing));
 
         var thrown = await Assert.ThrowsAsync<InvalidOperationException>(
@@ -81,7 +81,7 @@ public sealed class SetupExecutorTests
         // A faulted item never kills the worker: later work still runs and the slot was recycled.
         var healthy = executor.RentItem(static _ => Task.CompletedTask);
         var healthyCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        healthy.Completion = healthyCompletion;
+        healthy._completion = healthyCompletion;
         Assert.True(executor.TryEnqueue(healthy));
         await healthyCompletion.Task.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Equal(2, executor.CompletedCount);
@@ -95,13 +95,13 @@ public sealed class SetupExecutorTests
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var running = executor.RentItem(_ => gate.Task);
-        running.Completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        running._completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Assert.True(executor.TryEnqueue(running));
 
         // A second item is queued behind the blocked worker; it must be drained, not left hanging.
         var queued = executor.RentItem(static _ => Task.CompletedTask);
         var queuedCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        queued.Completion = queuedCompletion;
+        queued._completion = queuedCompletion;
         Assert.True(executor.TryEnqueue(queued));
 
         var dispose = Task.Run(executor.Dispose);
@@ -114,7 +114,7 @@ public sealed class SetupExecutorTests
 
         // Post-dispose enqueues are refused (and the slot recycled), never thrown.
         var late = executor.RentItem(static _ => Task.CompletedTask);
-        late.Completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        late._completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Assert.False(executor.TryEnqueue(late));
 
         // Dispose is idempotent.
@@ -144,7 +144,7 @@ public sealed class SetupExecutorTests
         for (var index = 0; index < slotCount; index++)
         {
             var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            items[index].Completion = completion;
+            items[index]._completion = completion;
             completions[index] = completion.Task;
             Assert.True(executor.TryEnqueue(items[index]));
         }

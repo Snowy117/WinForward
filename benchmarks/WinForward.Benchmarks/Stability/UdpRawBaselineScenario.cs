@@ -16,9 +16,9 @@ namespace WinForward.Benchmarks.Stability;
 /// </summary>
 internal static class UdpRawBaselineScenario
 {
-    private static readonly TimeSpan DrainTime = TimeSpan.FromSeconds(2);
-    private static readonly TimeSpan WarmupTimeout = TimeSpan.FromSeconds(10);
-    private static readonly TimeSpan WarmupPollInterval = TimeSpan.FromMilliseconds(50);
+    private static readonly TimeSpan s_drainTime = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan s_warmupTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan s_warmupPollInterval = TimeSpan.FromMilliseconds(50);
     private const int TickMilliseconds = 10;
 
     public static async Task RunAsync(StabilityContext context, SoakOptions options)
@@ -43,7 +43,7 @@ internal static class UdpRawBaselineScenario
             foreach (var client in clients) client.BeginWindow(markers);
 
             stats = await RunWindowAsync(clients, forwarders, sequences, payload, options).ConfigureAwait(false);
-            await Task.Delay(DrainTime).ConfigureAwait(false);
+            await Task.Delay(s_drainTime).ConfigureAwait(false);
         }
         finally
         {
@@ -61,7 +61,7 @@ internal static class UdpRawBaselineScenario
         var responsesInjected = 0L;
         foreach (var client in clients) responsesInjected += client.Received;
 
-        var lossRate = stats.SentDatagrams == 0 ? 0.0 : Math.Clamp(1.0 - echo.Received / (double)stats.SentDatagrams, 0.0, 1.0);
+        var lossRate = stats.SentDatagrams == 0 ? 0.0 : Math.Clamp(1.0 - (echo.Received / (double)stats.SentDatagrams), 0.0, 1.0);
         var achievedPps = stats.ElapsedSeconds > 0.0 ? stats.SentDatagrams / stats.ElapsedSeconds : 0.0;
         context.WriteResult(
             "udp.rawBaseline",
@@ -89,9 +89,9 @@ internal static class UdpRawBaselineScenario
         }
 
         var stopwatch = Stopwatch.StartNew();
-        while (echo.ObservedFlowCount < clients.Count && stopwatch.Elapsed < WarmupTimeout)
+        while (echo.ObservedFlowCount < clients.Count && stopwatch.Elapsed < s_warmupTimeout)
         {
-            await Task.Delay(WarmupPollInterval).ConfigureAwait(false);
+            await Task.Delay(s_warmupPollInterval).ConfigureAwait(false);
         }
     }
 
@@ -159,8 +159,10 @@ internal static class UdpRawBaselineScenario
         public Forwarder(IPEndPoint echoDestination)
         {
             _echoDestination = echoDestination;
-            _socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-            _socket.ReceiveBufferSize = 4 << 20;
+            _socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)
+            {
+                ReceiveBufferSize = 4 << 20,
+            };
             _socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
             Endpoint = (IPEndPoint)_socket.LocalEndPoint!;
             _loop = Task.Run(ReceiveLoopAsync);
@@ -239,8 +241,10 @@ internal static class UdpRawBaselineScenario
 
         public ClientReceiver()
         {
-            _socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-            _socket.ReceiveBufferSize = 512 << 10;
+            _socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)
+            {
+                ReceiveBufferSize = 512 << 10,
+            };
             _socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
             _loop = Task.Run(ReceiveLoopAsync);
         }

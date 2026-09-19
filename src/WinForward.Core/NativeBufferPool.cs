@@ -25,8 +25,6 @@ public sealed unsafe class NativeBufferPool : IDisposable
     private const int StateRented = 1;
 
     private readonly ConcurrentQueue<NativeLease> _buffers = new();
-    private readonly int _capacity;
-    private readonly int _bufferSize;
     private int _disposedState;
     private long _rented;
     private long _returned;
@@ -36,24 +34,24 @@ public sealed unsafe class NativeBufferPool : IDisposable
 
     public NativeBufferPool(int bufferSize, int capacity = DefaultCapacity)
     {
-        if (bufferSize <= 0) throw new ArgumentOutOfRangeException(nameof(bufferSize));
-        if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(capacity));
-        _bufferSize = bufferSize;
-        _capacity = capacity;
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(bufferSize);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capacity);
+        BufferSize = bufferSize;
+        Capacity = capacity;
     }
 
-    public int Capacity => _capacity;
+    public int Capacity { get; }
 
     /// <summary>The payload bytes every buffer of this pool provides; the rental-state word is additional.</summary>
-    public int BufferSize => _bufferSize;
+    public int BufferSize { get; }
 
     public int Count => _buffers.Count;
 
     /// <summary>
     /// Optional per-rent/return accounting sink for process-wide diagnostics (the RuntimeCounters
-    /// pool registry): invoked once per successful rent (<c>true</c>) and once per completed
-    /// return (<c>false</c>). Composition sets it once at startup, before any consumer can rent;
-    /// it stays <c>null</c> when unwired. Diagnostics only — the sink must not throw and never
+    /// pool registry): invoked once per successful rent (<see langword="true"/>) and once per completed
+    /// return (<see langword="false"/>). Composition sets it once at startup, before any consumer can rent;
+    /// it stays <see langword="null"/> when unwired. Diagnostics only — the sink must not throw and never
     /// influences pool behavior.
     /// </summary>
     public Action<bool>? AccountingSink { get; set; }
@@ -87,14 +85,14 @@ public sealed unsafe class NativeBufferPool : IDisposable
         }
         // No reusable buffer was available: allocate fresh and account the overflow so a sizing
         // error is visible in diagnostics instead of silently churning native allocations.
-        var allocation = (byte*)NativeMemory.AllocZeroed((nuint)sizeof(int) + (nuint)_bufferSize);
+        var allocation = (byte*)NativeMemory.AllocZeroed((nuint)sizeof(int) + (nuint)BufferSize);
         if (allocation is null) throw new InvalidOperationException("Unable to allocate a native buffer.");
         var pointer = allocation + sizeof(int);
         Volatile.Write(ref *(int*)allocation, StateRented);
         Interlocked.Increment(ref _overflowAllocations);
         Interlocked.Increment(ref _rented);
         AccountingSink?.Invoke(true);
-        return new NativeLease(this, pointer, _bufferSize, new NativeMemoryManager(pointer, _bufferSize));
+        return new NativeLease(this, pointer, BufferSize, new NativeMemoryManager(pointer, BufferSize));
     }
 
     /// <summary>
@@ -113,7 +111,7 @@ public sealed unsafe class NativeBufferPool : IDisposable
         if (Interlocked.CompareExchange(ref *(int*)allocation, StateIdle, StateRented) != StateRented) return;
         Interlocked.Increment(ref _returned);
         AccountingSink?.Invoke(false);
-        if (Volatile.Read(ref _disposedState) != 0 || Volatile.Read(ref _inPool) >= _capacity)
+        if (Volatile.Read(ref _disposedState) != 0 || Volatile.Read(ref _inPool) >= Capacity)
         {
             NativeMemory.Free(allocation);
             Interlocked.Increment(ref _disposedCount);
@@ -164,22 +162,21 @@ public readonly unsafe struct NativeLease : IDisposable
 {
     internal readonly NativeBufferPool? _pool;
     internal readonly void* _pointer;
-    private readonly int _length;
     private readonly NativeMemoryManager? _manager;
 
     internal NativeLease(NativeBufferPool pool, void* pointer, int length, NativeMemoryManager manager)
     {
         _pool = pool;
         _pointer = pointer;
-        _length = length;
+        Length = length;
         _manager = manager;
     }
 
     /// <summary>The payload bytes this lease provides (excludes the in-band rental-state word).</summary>
-    public int Length => _length;
+    public int Length { get; }
 
     /// <summary>A writable view of the buffer; valid until the lease is released.</summary>
-    public Span<byte> Span => new(_pointer, _length);
+    public Span<byte> Span => new(_pointer, Length);
 
     /// <summary>
     /// A <see cref="Memory{T}"/> view for asynchronous APIs (<c>ReadAsync</c>, <c>WriteAsync</c>,
@@ -187,7 +184,7 @@ public readonly unsafe struct NativeLease : IDisposable
     /// per-allocation <see cref="NativeMemoryManager"/> carried on this lease, so obtaining it is
     /// allocation-free; valid until the lease is released. A default lease yields an empty memory.
     /// </summary>
-    public Memory<byte> Memory => _manager is null ? default : _manager.Memory;
+    public Memory<byte> Memory => _manager?.Memory ?? default;
 
     public void Dispose() => _pool?.Release(this);
 }
@@ -200,16 +197,10 @@ public readonly unsafe struct NativeLease : IDisposable
 /// nothing. The native storage never moves, so <see cref="Pin"/> hands out the raw pointer and
 /// <see cref="Unpin"/> is a no-op.
 /// </summary>
-internal sealed unsafe class NativeMemoryManager : MemoryManager<byte>
+internal sealed unsafe class NativeMemoryManager(void* pointer, int length) : MemoryManager<byte>
 {
-    private readonly void* _pointer;
-    private readonly int _length;
-
-    public NativeMemoryManager(void* pointer, int length)
-    {
-        _pointer = pointer;
-        _length = length;
-    }
+    private readonly void* _pointer = pointer;
+    private readonly int _length = length;
 
     public override Span<byte> GetSpan() => new(_pointer, _length);
 

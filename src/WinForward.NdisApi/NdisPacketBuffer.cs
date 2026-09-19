@@ -7,7 +7,7 @@ namespace WinForward.NdisApi;
 /// A managed wrapper over one native <see cref="IntermediateBuffer"/>. Buffers created with the
 /// public constructor are privately owned: <see cref="Dispose"/> frees the native memory. Buffers
 /// rented from <see cref="NdisPacketBufferPool"/> keep pool ownership: <see cref="Dispose"/>
-/// returns them to the pool instead of freeing, so <c>using</c>-style callers need no changes
+/// returns them to the pool instead of freeing, so <see langword="using"/>-style callers need no changes
 /// when switching from per-injection allocation to pooling. A pooled buffer's Dispose contract is
 /// rental-window-scoped: disposing again while the buffer sits idle in the pool is a no-op, but
 /// once the pool has re-rented the buffer a stale Dispose flips it back to idle and returns it

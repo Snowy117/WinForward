@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Net;
 using WinForward.Configuration;
 using WinForward.Core;
@@ -12,7 +13,7 @@ namespace WinForward.Core.Tests;
 
 public sealed class TcpProxyCoordinatorLifecycleTests
 {
-    private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, null, null);
+    private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, Username: null, Password: null);
     private static readonly IPAddress s_clientIpv4 = IPAddress.Parse("192.0.2.10");
     private static readonly IPAddress s_destIpv4 = IPAddress.Parse("192.0.2.53");
 
@@ -85,9 +86,8 @@ public sealed class TcpProxyCoordinatorLifecycleTests
 
         // Frame 3 is the crafted RST: original server -> client, in-window seq, RST|ACK.
         Assert.Equal(3, injector.InjectedFrames.Count);
-        var reset = injector.InjectedFrames[2];
-        Assert.True(reset.TowardMstcp);
-        var frame = reset.Frame;
+        var (frame, towardMstcp, _) = injector.InjectedFrames[2];
+        Assert.True(towardMstcp);
         Assert.Equal(s_destIpv4, new IPAddress(frame.AsSpan(26, 4).ToArray()));
         Assert.Equal(443u, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(34, 2)));
         Assert.Equal(s_clientIpv4, new IPAddress(frame.AsSpan(30, 4).ToArray()));
@@ -121,10 +121,9 @@ public sealed class TcpProxyCoordinatorLifecycleTests
         await WaitForAsync(() => table.Count == 0);
 
         Assert.Equal(3, injector.InjectedFrames.Count);
-        var reset = injector.InjectedFrames[2];
-        Assert.False(reset.TowardMstcp);
-        Assert.Equal((nint)0x1234, reset.AdapterHandle);
-        var frame = reset.Frame;
+        var (frame, towardMstcp, adapterHandle) = injector.InjectedFrames[2];
+        Assert.False(towardMstcp);
+        Assert.Equal((nint)0x1234, adapterHandle);
         Assert.Equal(s_destIpv4, new IPAddress(frame.AsSpan(26, 4).ToArray()));
         Assert.Equal(client, new IPAddress(frame.AsSpan(30, 4).ToArray()));
         Assert.Equal(0x14, frame[47]);
@@ -165,9 +164,8 @@ public sealed class TcpProxyCoordinatorLifecycleTests
 
         // Frame 5 is the crafted RST: server next seq (SYN-ACK only) = 2, client next seq = 8.
         Assert.Equal(5, injector.InjectedFrames.Count);
-        var reset = injector.InjectedFrames[4];
-        Assert.True(reset.TowardMstcp);
-        var frame = reset.Frame;
+        var (frame, towardMstcp, _) = injector.InjectedFrames[4];
+        Assert.True(towardMstcp);
         Assert.Equal(2u, BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(38, 4)));
         Assert.Equal(8u, BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(42, 4)));
         Assert.Equal(0x14, frame[47]);
@@ -193,12 +191,12 @@ public sealed class TcpProxyCoordinatorLifecycleTests
         var synAck = MakeReversePacketClassifierOrientation(s_clientIpv4, listenerTuple.Port, s_destIpv4, 53000, mutateFrame: f => f[47] = 0x12);
         Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleReverseAsync(synAck, CancellationToken.None));
         var serverData = MakeReversePacketClassifierOrientation(s_clientIpv4, listenerTuple.Port, s_destIpv4, 53000,
-            payload: [1, 2, 3, 4, 5, 6, 7, 8],
             mutateFrame: f =>
             {
                 f[47] = TcpFlagAck;
                 BinaryPrimitives.WriteUInt32BigEndian(f.AsSpan(38, 4), 2);
-            });
+            },
+            payload: [1, 2, 3, 4, 5, 6, 7, 8]);
         Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleReverseAsync(serverData, CancellationToken.None));
 
         var listener = Assert.Single(listenerFactory.Listeners);
@@ -245,7 +243,7 @@ public sealed class TcpProxyCoordinatorLifecycleTests
 
         await HandleSynSettledAsync(coordinator, syn, s_server);
         using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
+        await cancellation.CancelAsync();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => coordinator.HandleSynAsync(syn, s_server, cancellation.Token).AsTask());
 
@@ -266,7 +264,7 @@ public sealed class TcpProxyCoordinatorLifecycleTests
         using var cancellation = new CancellationTokenSource();
 
         await HandleSynSettledAsync(coordinator, syn, s_server, cancellation.Token);
-        cancellation.Cancel();
+        await cancellation.CancelAsync();
 
         var listener = Assert.Single(listenerFactory.Listeners);
         await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(Endpoint.From(s_destIpv4, 53000)), CancellationToken.None);
@@ -395,8 +393,8 @@ public sealed class TcpProxyCoordinatorLifecycleTests
         // between transient failures, this window yields a few calls, and the elapsed time proves
         // real back-pressure was applied rather than a tight busy-loop.
         var elapsed = await MeasureWindowAsync(() => throwingListener.AcceptCount >= 3, TimeSpan.FromMilliseconds(300));
-        Assert.True(throwingListener.AcceptCount < 25, $"accept calls over the window should be bounded, saw {throwingListener.AcceptCount}");
-        Assert.True(elapsed >= TimeSpan.FromMilliseconds(50), $"the retry should have observed back-off back-pressure, saw {elapsed.TotalMilliseconds:F0}ms");
+        Assert.True(throwingListener.AcceptCount < 25, string.Create(CultureInfo.InvariantCulture, $"accept calls over the window should be bounded, saw {throwingListener.AcceptCount}"));
+        Assert.True(elapsed >= TimeSpan.FromMilliseconds(50), string.Create(CultureInfo.InvariantCulture, $"the retry should have observed back-off back-pressure, saw {elapsed.TotalMilliseconds:F0}ms"));
 
         // Dispose must terminate the throwing accept loop promptly (cancel + listener dispose).
         await coordinator.DisposeAsync();

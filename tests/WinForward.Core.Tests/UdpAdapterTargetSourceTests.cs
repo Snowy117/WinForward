@@ -54,7 +54,7 @@ public sealed class UdpAdapterTargetSourceTests
         Assert.Null(source.Host);
         Assert.Null(source.Resolve("veth-1"));
 
-        source.Update(null, new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase));
+        source.Update(host: null, new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase));
         Assert.Null(source.Host);
     }
 
@@ -92,7 +92,7 @@ public sealed class UdpAdapterTargetSourceTests
 
         // The re-enumerated handle (adapter list rebuilt) is picked up per response through the
         // same sink instance — no reconstruction involved.
-        source.Update(null, new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase) { ["veth-1"] = new((nint)5678, s_macB) });
+        source.Update(host: null, new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase) { ["veth-1"] = new((nint)5678, s_macB) });
         await sink.InjectAsync(flow, server, new byte[] { 2 }, MacAddress.From(s_macB), CancellationToken.None);
         Assert.Equal(2, reinjector.ToAdapterCount);
         Assert.Equal((nint)5678, reinjector.LastAdapterHandle);
@@ -149,7 +149,7 @@ public sealed class UdpAdapterTargetSourceTests
         var originHandle = (nint)1234;
         var sink = new UdpResponseReinjector(
             reinjector,
-            new UdpAdapterTargetSource(null, new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase) { ["wlan-1"] = new(originHandle, s_macB) }));
+            new UdpAdapterTargetSource(host: null, new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase) { ["wlan-1"] = new(originHandle, s_macB) }));
         var adapter = new AdapterContext("wlan-1", "Wi-Fi", 3);
         var client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000);
         var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);

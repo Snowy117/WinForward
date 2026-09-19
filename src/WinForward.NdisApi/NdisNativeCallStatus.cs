@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 
 namespace WinForward.NdisApi;
 
@@ -10,13 +11,13 @@ internal static class NdisNativeCallStatus
     {
         if (HasValidNativeHandle(rawHandle) && isDriverLoaded) return;
         var state = HasValidNativeHandle(rawHandle) ? "The NDISAPI wrapper opened, but the NDISRD driver is unavailable" : "Unable to open the WinpkFilter NDISRD driver";
-        throw new Win32Exception(nativeError, $"{state} (native error {nativeError}, 0x{nativeError:X8}).");
+        throw new Win32Exception(nativeError, string.Create(CultureInfo.InvariantCulture, $"{state} (native error {nativeError}, 0x{nativeError:X8})."));
     }
 
     internal static bool HasQueuedPackets(int nativeResult, int nativeError, uint queuedPacketCount, nint adapterHandle)
     {
         if (nativeResult != 0) return queuedPacketCount != 0;
-        throw new Win32Exception(nativeError, $"Unable to inspect the NDISAPI packet queue (native error {nativeError}, adapter 0x{adapterHandle:X}).");
+        throw new Win32Exception(nativeError, string.Create(CultureInfo.InvariantCulture, $"Unable to inspect the NDISAPI packet queue (native error {nativeError}, adapter 0x{adapterHandle:X})."));
     }
 
     internal static int InterpretBatchReadResult(uint queuedPacketCount, int requestedCount, int nativeResult, int nativeError, uint packetsSuccess, nint adapterHandle)
@@ -24,7 +25,7 @@ internal static class NdisNativeCallStatus
         if (queuedPacketCount == 0) return 0;
         if (nativeResult == 0)
         {
-            throw new Win32Exception(nativeError, $"Unable to read NDISAPI packets from a non-empty queue (native error {nativeError}, queued {queuedPacketCount}, requested {requestedCount}, adapter 0x{adapterHandle:X}).");
+            throw new Win32Exception(nativeError, string.Create(CultureInfo.InvariantCulture, $"Unable to read NDISAPI packets from a non-empty queue (native error {nativeError}, queued {queuedPacketCount}, requested {requestedCount}, adapter 0x{adapterHandle:X})."));
         }
         // The driver fills dwPacketsSuccess with the actual count; clamp defensively so a
         // misbehaving driver can never make the pump read past the prepared buffers.

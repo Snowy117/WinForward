@@ -19,7 +19,7 @@ internal sealed class RecordingRuntimeLogger : IRuntimeLogger
     {
         get
         {
-            lock (_gate) return _events.ToArray();
+            lock (_gate) return [.. _events];
         }
     }
 
@@ -27,7 +27,7 @@ internal sealed class RecordingRuntimeLogger : IRuntimeLogger
     {
         get
         {
-            lock (_gate) return _lines.ToArray();
+            lock (_gate) return [.. _lines];
         }
     }
 

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Runtime.Socks5;
@@ -8,9 +9,9 @@ namespace WinForward.Benchmarks.Stability;
 
 internal static class SessionFootprintScenario
 {
-    private static readonly byte[] PopulatePayload = [1];
-    private static readonly TimeSpan SetupTimeout = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan SettleDelay = TimeSpan.FromMilliseconds(100);
+    private static readonly byte[] s_populatePayload = [1];
+    private static readonly TimeSpan s_setupTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan s_settleDelay = TimeSpan.FromMilliseconds(100);
 
     public static async Task RunAsync(StabilityContext context, SoakOptions _)
     {
@@ -24,14 +25,14 @@ internal static class SessionFootprintScenario
     {
         var factory = new CountingTransportFactory(new BenchmarkUdpTransportFactory());
         var coordinator = new UdpProxyCoordinator(factory, NoopUdpResponseSink.Instance, new UdpProxyOptions { Capacity = sessions });
-        var server = new Socks5Server("benchmark", "127.0.0.1", 1080, null, null);
+        var server = new Socks5Server("benchmark", "127.0.0.1", 1080, Username: null, Password: null);
         using var process = Process.GetCurrentProcess();
         var workingSetBefore = process.WorkingSet64;
         var gen0Before = GC.CollectionCount(0);
         var allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
         await PopulateAsync(coordinator, factory, server, sessions).ConfigureAwait(false);
         await factory.WaitUntilCreatedAsync(sessions).ConfigureAwait(false);
-        await Task.Delay(SettleDelay).ConfigureAwait(false);
+        await Task.Delay(s_settleDelay).ConfigureAwait(false);
         var workingSetDeltaBytes = process.WorkingSet64 - workingSetBefore;
         var gen0Collections = GC.CollectionCount(0) - gen0Before;
         var allocatedBytes = GC.GetTotalAllocatedBytes(precise: true) - allocatedBefore;
@@ -52,7 +53,7 @@ internal static class SessionFootprintScenario
             {
                 // A false return is the setup-failure cooldown; the next round re-offers the
                 // flow and WaitUntilCreatedAsync bounds the total populate time.
-                _ = await coordinator.TrySendSpanAsync(flowKey, server, PopulatePayload, default, CancellationToken.None).ConfigureAwait(false);
+                _ = await coordinator.TrySendSpanAsync(flowKey, server, s_populatePayload, default, CancellationToken.None).ConfigureAwait(false);
             }
 
             await factory.WaitUntilProgressAsync().ConfigureAwait(false);
@@ -74,7 +75,7 @@ internal static class SessionFootprintScenario
 
         public async Task WaitUntilCreatedAsync(int expected)
         {
-            using var timeout = new CancellationTokenSource(SetupTimeout);
+            using var timeout = new CancellationTokenSource(s_setupTimeout);
             while (Volatile.Read(ref _created) < expected)
             {
                 try
@@ -83,7 +84,7 @@ internal static class SessionFootprintScenario
                 }
                 catch (OperationCanceledException)
                 {
-                    throw new InvalidOperationException($"Only {Volatile.Read(ref _created)} of {expected} UDP sessions were created within the setup timeout.");
+                    throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture, $"Only {Volatile.Read(ref _created)} of {expected} UDP sessions were created within the setup timeout."));
                 }
             }
         }

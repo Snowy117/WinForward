@@ -126,9 +126,9 @@ public sealed class UdpRelayTests
     [Fact]
     public void RejectsBadMacLengths()
     {
-        Assert.False(TryBuildUdpFrame(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[] { 1 }, new byte[] { 1, 2, 3, 4, 5 }, s_macB, out _));
-        Assert.False(TryBuildUdpFrame(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[] { 1 }, s_macA, new byte[] { 1, 2, 3, 4, 5, 6, 7 }, out _));
-        Assert.False(TryBuildUdpFrame(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[] { 1 }, ReadOnlySpan<byte>.Empty, s_macB, out _));
+        Assert.False(TryBuildUdpFrame(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[] { 1 }, [1, 2, 3, 4, 5], s_macB, out _));
+        Assert.False(TryBuildUdpFrame(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[] { 1 }, s_macA, [1, 2, 3, 4, 5, 6, 7], out _));
+        Assert.False(TryBuildUdpFrame(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[] { 1 }, [], s_macB, out _));
     }
 
     [Fact]
@@ -169,7 +169,7 @@ public sealed class UdpRelayTests
         Assert.False(UdpFrameBuilder.TryBuildInto(
             WinForward.Core.IPAddressValue.From(IPAddress.Parse("192.0.2.53")), 53,
             WinForward.Core.IPAddressValue.From(IPAddress.Parse("192.0.2.10")), 53000,
-            payload, new byte[] { 1, 2, 3, 4, 5 }, s_macB, storage, out _));
+            payload, [1, 2, 3, 4, 5], s_macB, storage, out _));
     }
 
     [Fact]
@@ -227,7 +227,7 @@ public sealed class UdpRelayTests
         var originHandle = (nint)1234;
         var adapters = new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase)
         {
-            ["wlan-1"] = new(originHandle, s_macB)
+            ["wlan-1"] = new(originHandle, s_macB),
         };
         var sink = new UdpResponseReinjector(reinjector, new UdpAdapterTargetSource(new UdpAdapterTarget((nint)7, s_macA), adapters));
         var adapter = new AdapterContext("WLAN-1", "Wi-Fi", 3);
@@ -266,8 +266,8 @@ public sealed class UdpRelayTests
         Assert.Equal(fallbackHandle, reinjector.LastAdapterHandle);
         Assert.True(reinjector.LastFrame!.AsSpan(0, 6).SequenceEqual(s_macA));
         Assert.True(reinjector.LastFrame!.AsSpan(6, 6).SequenceEqual(s_macA));
-        var unresolved = Assert.Single(logger.Events, e => e.Level == RuntimeLogLevel.Warn && string.Equals(e.Name, "udp.reinject.unresolved", StringComparison.Ordinal));
-        Assert.Contains(unresolved.Fields, field => string.Equals(field.Key, "mapAdapters", StringComparison.Ordinal));
+        var (_, _, fields) = Assert.Single(logger.Events, e => e.Level == RuntimeLogLevel.Warn && string.Equals(e.Name, "udp.reinject.unresolved", StringComparison.Ordinal));
+        Assert.Contains(fields, field => string.Equals(field.Key, "mapAdapters", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -278,7 +278,7 @@ public sealed class UdpRelayTests
         var originHandle = (nint)1234;
         var adapters = new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase)
         {
-            ["veth-1"] = new(originHandle, s_macB)
+            ["veth-1"] = new(originHandle, s_macB),
         };
         var sink = new UdpResponseReinjector(reinjector, new UdpAdapterTargetSource(new UdpAdapterTarget((nint)7, s_macA), adapters));
         var adapter = new AdapterContext("veth-1", "vEthernet 1", 3);
@@ -326,8 +326,8 @@ public sealed class UdpRelayTests
         // missing-origin is surfaced via a log rather than silently dropped (H2).
         Assert.Equal(0, reinjector.ToMstcpCount);
         Assert.Equal(0, reinjector.ToAdapterCount);
-        var drop = Assert.Single(logger.Events, e => e.Level == RuntimeLogLevel.Warn && string.Equals(e.Name, "udp.reinject.drop", StringComparison.Ordinal));
-        Assert.Contains(drop.Fields, field => string.Equals(field.Key, "originKind", StringComparison.Ordinal) && Equals(field.Value, FlowOriginKind.Forwarded));
+        var (_, _, fields) = Assert.Single(logger.Events, e => e.Level == RuntimeLogLevel.Warn && string.Equals(e.Name, "udp.reinject.drop", StringComparison.Ordinal));
+        Assert.Contains(fields, field => string.Equals(field.Key, "originKind", StringComparison.Ordinal) && Equals(field.Value, FlowOriginKind.Forwarded));
     }
 
     [Theory]
@@ -343,7 +343,7 @@ public sealed class UdpRelayTests
         var originHandle = (nint)1234;
         var adapters = new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase)
         {
-            ["veth-1"] = new(originHandle, s_macB)
+            ["veth-1"] = new(originHandle, s_macB),
         };
         var logger = new RecordingRuntimeLogger();
         var sink = new UdpResponseReinjector(reinjector, new UdpAdapterTargetSource(new UdpAdapterTarget((nint)7, s_macA), adapters), logger: logger);
@@ -369,7 +369,7 @@ public sealed class UdpRelayTests
         var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53); // family mismatch with the flow
         // FlowKey.Create rejects mismatched families, so the key is built directly to reach the
         // frame-builder rejection path inside the sink.
-        var flow = new FlowKey(AddressFamilyKind.IPv6, TransportProtocol.Udp, client, server, FlowOriginKind.Host, null, 0);
+        var flow = new FlowKey(AddressFamilyKind.IPv6, TransportProtocol.Udp, client, server, FlowOriginKind.Host, OriginAdapterId: null, 0);
 
         await sink.InjectAsync(flow, server, new byte[] { 1 }, MacAddress.Invalid, CancellationToken.None);
 
@@ -421,7 +421,7 @@ public sealed class UdpRelayTests
         var reinjector = new FakeReinjector();
         var executor = new NdisPacketActionExecutor(reinjector, udpProxy: coordinator);
         var flow = FlowKey.Create(Endpoint.From(source, 53000), Endpoint.From(destination, 53), TransportProtocol.Udp, FlowOriginKind.Host);
-        var packet = new CapturedFlowPacket(new PacketLease(frame), new FlowContext(flow, null, null, null, null, 53), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
+        var packet = new CapturedFlowPacket(new PacketLease(frame), new FlowContext(flow, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, 53), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
 
         await executor.ProxyAsync(packet, s_server, CancellationToken.None);
 
@@ -446,14 +446,14 @@ public sealed class UdpRelayTests
         await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink());
         var executor = new NdisPacketActionExecutor(new FakeReinjector(), udpProxy: coordinator);
         var flow = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
-        var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 0xff, 0xff, 0xff }), new FlowContext(flow, null, null, null, null, 53), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
+        var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 0xff, 0xff, 0xff }), new FlowContext(flow, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, 53), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
 
         await executor.ProxyAsync(packet, s_server, CancellationToken.None);
 
         Assert.Empty(factory.Transports);
     }
 
-    private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, null, null);
+    private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, Username: null, Password: null);
 
     private static bool TryBuildUdpFrame(
         IPAddress sourceAddress,

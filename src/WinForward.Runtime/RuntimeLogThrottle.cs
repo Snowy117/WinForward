@@ -15,6 +15,9 @@ public sealed class RuntimeLogThrottle
     private readonly long _windowTicks;
     private long _lastEmitTicks;
 
+    /// <summary>
+    /// Creates a throttle whose window is the minimum wall-clock interval between two emissions.
+    /// </summary>
     /// <param name="window">The minimum wall-clock interval between two emissions; must be positive.</param>
     public RuntimeLogThrottle(TimeSpan window)
     {

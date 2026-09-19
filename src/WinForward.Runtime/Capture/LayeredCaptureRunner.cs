@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.ComponentModel;
+using System.Globalization;
 using System.Runtime.ExceptionServices;
 using WinForward.Configuration;
 using WinForward.Core;
@@ -30,10 +31,10 @@ namespace WinForward.Runtime.Capture;
 /// </summary>
 public sealed class LayeredCaptureRunner
 {
-    internal static readonly TimeSpan DefaultMinimumRefreshInterval = TimeSpan.FromSeconds(1);
+    internal static readonly TimeSpan s_defaultMinimumRefreshInterval = TimeSpan.FromSeconds(1);
 
     /// <summary>The periodic link-state re-check interval (task 09-17 R1-A); <see cref="TimeSpan.Zero"/> disables it.</summary>
-    internal static readonly TimeSpan DefaultPeriodicRefreshInterval = TimeSpan.FromSeconds(30);
+    internal static readonly TimeSpan s_defaultPeriodicRefreshInterval = TimeSpan.FromSeconds(30);
 
     /// <summary>ERROR_INVALID_PARAMETER: every cached handle went stale because the driver rebuilt its bound-adapter list.</summary>
     internal const int AdapterListRebuiltNativeError = 87;
@@ -99,8 +100,8 @@ public sealed class LayeredCaptureRunner
         _logger = logger;
         _disposeDurableAsync = disposeDurableAsync;
         _onScopeInstalled = onScopeInstalled;
-        _minimumRefreshInterval = minimumRefreshInterval ?? DefaultMinimumRefreshInterval;
-        _periodicRefreshInterval = periodicRefreshInterval ?? DefaultPeriodicRefreshInterval;
+        _minimumRefreshInterval = minimumRefreshInterval ?? s_defaultMinimumRefreshInterval;
+        _periodicRefreshInterval = periodicRefreshInterval ?? s_defaultPeriodicRefreshInterval;
         _time = timeProvider ?? TimeProvider.System;
         _healthMonitor = interceptionHealthMonitor ?? new InterceptionHealthMonitor(logger, timeProvider: timeProvider);
         _healthMonitor.AttachTrigger(OnForcedRefreshTriggered);
@@ -141,13 +142,13 @@ public sealed class LayeredCaptureRunner
     {
         if (Interlocked.Exchange(ref _started, 1) != 0) throw new InvalidOperationException("The capture runner has already been started.");
         using var monitorCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        using var cancelRegistration = cancellationToken.Register(
+        await using var cancelRegistration = cancellationToken.Register(
             static state => ((RefreshDemandGate)state!).Signal(), _demandGate);
         var monitor = Task.Factory.StartNew(
             () => MonitorAsync(monitorCancellation.Token),
             CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
         var periodicTick = _periodicRefreshInterval > TimeSpan.Zero
-            ? Task.Run(() => PeriodicRefreshTickAsync(monitorCancellation.Token))
+            ? Task.Run(() => PeriodicRefreshTickAsync(monitorCancellation.Token), monitorCancellation.Token)
             : null;
         try
         {
@@ -303,7 +304,7 @@ public sealed class LayeredCaptureRunner
         {
             fields.Add(new RuntimeLogField(pair.Key, pair.Value));
         }
-        _logger.Event(RuntimeLogLevel.Warn, "runner.forcedRefresh", fields.ToArray());
+        _logger.Event(RuntimeLogLevel.Warn, "runner.forcedRefresh", [.. fields]);
     }
 
     /// <summary>
@@ -410,14 +411,14 @@ public sealed class LayeredCaptureRunner
         {
             _logger.Event(RuntimeLogLevel.Error, "generation.startup-fault",
                 new RuntimeLogField("nativeError", fault.NativeErrorCode),
-                new RuntimeLogField("attempt", $"{_startupFaultStreak + 1}/{MaxConsecutiveStartupRecoveries}"));
+                new RuntimeLogField("attempt", string.Create(CultureInfo.InvariantCulture, $"{_startupFaultStreak + 1}/{MaxConsecutiveStartupRecoveries}")));
             return false;
         }
         _startupFaultStreak++;
         _forceRebuild = true;
         _logger.Event(RuntimeLogLevel.Warn, "generation.startup-fault",
             new RuntimeLogField("nativeError", fault.NativeErrorCode),
-            new RuntimeLogField("attempt", $"{_startupFaultStreak}/{MaxConsecutiveStartupRecoveries}"));
+            new RuntimeLogField("attempt", string.Create(CultureInfo.InvariantCulture, $"{_startupFaultStreak}/{MaxConsecutiveStartupRecoveries}")));
         return true;
     }
 
@@ -465,16 +466,9 @@ public sealed class LayeredCaptureRunner
         {
             await _disposeDurableAsync(CancellationToken.None).ConfigureAwait(false);
         }
-        catch (Exception exception)
+        catch (Exception exception) when (stopFault is not null)
         {
-            if (stopFault is not null)
-            {
-                _logger.Error($"Durable-layer disposal failed during shutdown: {exception.Message}");
-            }
-            else
-            {
-                throw;
-            }
+            _logger.Error($"Durable-layer disposal failed during shutdown: {exception.Message}");
         }
         if (stopFault is not null) ExceptionDispatchInfo.Capture(stopFault).Throw();
     }
@@ -496,14 +490,14 @@ public sealed class LayeredCaptureRunner
         AddScopeList(fields, "changed", diff.Changed);
         var degradedText = DescribeDegradedPresence(degraded, fresh);
         if (degradedText is not null) fields.Add(new("degraded", degradedText));
-        _logger.Event(RuntimeLogLevel.Info, "adapter.refresh", fields.ToArray());
+        _logger.Event(RuntimeLogLevel.Info, "adapter.refresh", [.. fields]);
     }
 
     /// <summary>One <c>stableId=present</c> token per degraded adapter, resolved against the fresh enumeration.</summary>
     private static string? DescribeDegradedPresence(IReadOnlyList<string> degraded, IReadOnlyList<AdapterEnumerationItem> fresh)
     {
         if (degraded.Count == 0) return null;
-        return string.Join(",", degraded.Select(stableId =>
+        return string.Join(',', degraded.Select(stableId =>
             $"{stableId}={(fresh.Any(item => string.Equals(item.StableId, stableId, StringComparison.OrdinalIgnoreCase)) ? "true" : "false")}"));
     }
 
@@ -514,9 +508,9 @@ public sealed class LayeredCaptureRunner
     }
 
     private static IReadOnlyList<WindowsAdapter> AdaptersOf(IReadOnlyList<AdapterEnumerationItem> items) =>
-        items.Select(item => item.Adapter).ToArray();
+        [.. items.Select(item => item.Adapter)];
 
-    private static IReadOnlyList<AdapterEnumerationItem> ScopeItemsOf(IReadOnlyList<AdapterEnumerationItem> enumeration, IReadOnlyList<WindowsAdapter> scope)
+    private static List<AdapterEnumerationItem> ScopeItemsOf(IReadOnlyList<AdapterEnumerationItem> enumeration, IReadOnlyList<WindowsAdapter> scope)
     {
         var byHandle = new Dictionary<nint, AdapterEnumerationItem>();
         foreach (var item in enumeration) byHandle[item.Adapter.RuntimeHandle] = item;
@@ -532,7 +526,7 @@ public sealed class LayeredCaptureRunner
     private enum RefreshDemandOutcome
     {
         Continue,
-        Exit
+        Exit,
     }
 
     /// <summary>

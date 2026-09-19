@@ -125,7 +125,9 @@ public sealed class NdisApiAbiTests
         {
             using var gateLease = gate.Enter();
             firstEntered.SetResult();
+#pragma warning disable MA0042 // The lease wraps a Monitor (thread-affine): awaiting would resume on another thread and Monitor.Exit in the lease would throw SynchronizationLockException. The deliberate synchronous block keeps the gate held on this thread while the test proves serialization.
             releaseFirst.Task.GetAwaiter().GetResult();
+#pragma warning restore MA0042
         });
         await firstEntered.Task;
 

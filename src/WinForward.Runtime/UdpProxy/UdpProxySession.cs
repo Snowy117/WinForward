@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using WinForward.Configuration;
@@ -21,17 +22,17 @@ internal sealed record UdpProxySessionContext(
     IUdpProxyTransport Transport,
     IUdpResponseSink Sink,
     MacAddress ClientMac,
-    CancellationToken Shutdown,
     TimeProvider TimeProvider,
     Action<UdpAssociation, DateTimeOffset> ActivityObserver,
     IRuntimeLogger Logger,
     NativeBufferPool ReceiveWindowPool,
-    int ReceiveBufferSize);
+    int ReceiveBufferSize,
+    CancellationToken Shutdown);
 
 internal sealed class UdpProxySession : IAsyncDisposable
 {
     /// <summary>Interval between per-session rate-limited summaries (skipped datagrams, injection failures).</summary>
-    private static readonly TimeSpan RateLimitedLogInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan s_rateLimitedLogInterval = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Minimum interval between activity propagations to the association table. The table
@@ -40,11 +41,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
     /// the touch drops to one Interlocked exchange. <see cref="LastActivityUtc"/> stays exact
     /// per operation, so idle-expiry semantics are unaffected.
     /// </summary>
-    private static readonly TimeSpan ActivityPropagationInterval = TimeSpan.FromMilliseconds(100);
-
-    private readonly FlowKey _flow;
-    private readonly long _flowGeneration;
-    private readonly UdpAssociation _association;
+    private static readonly TimeSpan s_activityPropagationInterval = TimeSpan.FromMilliseconds(100);
     private readonly IUdpProxyTransport _transport;
     private readonly IUdpResponseSink _sink;
     private readonly CancellationToken _shutdown;
@@ -72,16 +69,16 @@ internal sealed class UdpProxySession : IAsyncDisposable
 
     public UdpProxySession(UdpProxySessionContext context)
     {
-#pragma warning disable MA0015, S3928 // The paramName deliberately names the null member (the context parameter itself is never null); both analyzers only accept declared parameter names, which would point diagnosis at a phantom "context".
+#pragma warning disable MA0015, S3928, CA2208 // The paramName deliberately names the null member (the context parameter itself is never null); these analyzers only accept declared parameter names, which would point diagnosis at a phantom "context".
         ArgumentNullException.ThrowIfNull(context.ReceiveWindowPool);
         if (context.ReceiveWindowPool.BufferSize < context.ReceiveBufferSize)
         {
             throw new ArgumentException("The receive-window pool supplies buffers smaller than the session receive window.", nameof(context.ReceiveWindowPool));
         }
-#pragma warning restore MA0015, S3928
-        _flow = context.Flow;
-        _flowGeneration = context.FlowGeneration;
-        _association = context.Association;
+#pragma warning restore MA0015, S3928, CA2208
+        Flow = context.Flow;
+        FlowGeneration = context.FlowGeneration;
+        Association = context.Association;
         _transport = context.Transport;
         _sink = context.Sink;
         ClientMac = context.ClientMac;
@@ -94,9 +91,9 @@ internal sealed class UdpProxySession : IAsyncDisposable
         _lastActivityTicks = context.TimeProvider.GetUtcNow().UtcTicks;
     }
 
-    public FlowKey Flow => _flow;
-    public long FlowGeneration => _flowGeneration;
-    public UdpAssociation Association => _association;
+    public FlowKey Flow { get; }
+    public long FlowGeneration { get; }
+    public UdpAssociation Association { get; }
     public DateTimeOffset LastActivityUtc => new(Interlocked.Read(ref _lastActivityTicks), TimeSpan.Zero);
 
     /// <summary>
@@ -212,7 +209,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
                 Socks5UdpReceiveResult receive;
                 try
                 {
-                    receive = await _transport.ReceiveAsync(lease.Memory.Slice(0, _receiveBufferSize), _shutdown).ConfigureAwait(false);
+                    receive = await _transport.ReceiveAsync(lease.Memory[.._receiveBufferSize], _shutdown).ConfigureAwait(false);
                 }
                 catch (SocketException exception) when (exception.SocketErrorCode == SocketError.ConnectionReset)
                 {
@@ -270,7 +267,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
     {
         try
         {
-            await _sink.InjectAsync(_flow, source, response.Payload, ClientMac, _shutdown).ConfigureAwait(false);
+            await _sink.InjectAsync(Flow, source, response.Payload, ClientMac, _shutdown).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
         {
@@ -285,9 +282,9 @@ internal sealed class UdpProxySession : IAsyncDisposable
         if (_logger.IsEnabled(RuntimeLogLevel.Trace))
         {
             _logger.Event(RuntimeLogLevel.Trace, "udp.packet.received",
-                new("flow", _flowGeneration == 0 ? null : _flowGeneration),
-                new("udpAssociation", _association.Generation), new("source", source),
-                new("destination", _flow.Local), new("bytes", response.Payload.Length));
+                new("flow", FlowGeneration == 0 ? null : FlowGeneration),
+                new("udpAssociation", Association.Generation), new("source", source),
+                new("destination", Flow.Local), new("bytes", response.Payload.Length));
         }
     }
 
@@ -325,7 +322,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
     {
         var now = _timeProvider.GetUtcNow().UtcTicks;
         var last = Interlocked.Read(ref _lastSkipSummaryTicks);
-        if (now - last < RateLimitedLogInterval.Ticks) return;
+        if (now - last < s_rateLimitedLogInterval.Ticks) return;
         if (Interlocked.CompareExchange(ref _lastSkipSummaryTicks, now, last) != last) return;
         var unexpected = Interlocked.Exchange(ref _skippedUnexpectedSource, 0);
         var oversized = Interlocked.Exchange(ref _skippedOversized, 0);
@@ -333,14 +330,14 @@ internal sealed class UdpProxySession : IAsyncDisposable
         var connectionReset = Interlocked.Exchange(ref _skippedConnectionReset, 0);
         var domainDestination = Interlocked.Exchange(ref _skippedDomainDestination, 0);
         if (unexpected + oversized + malformed + connectionReset + domainDestination == 0) return;
-        _logger.Debug($"SOCKS5 UDP relay skipped datagrams in the last window: unexpectedSource={unexpected} oversized={oversized} malformed={malformed} connectionReset={connectionReset} domainDestination={domainDestination}.");
+        _logger.Debug(string.Create(CultureInfo.InvariantCulture, $"SOCKS5 UDP relay skipped datagrams in the last window: unexpectedSource={unexpected} oversized={oversized} malformed={malformed} connectionReset={connectionReset} domainDestination={domainDestination}."));
     }
 
     private void LogInjectionFailureRateLimited(Exception exception)
     {
         var now = _timeProvider.GetUtcNow().UtcTicks;
         var last = Interlocked.Read(ref _lastInjectionFailureLogTicks);
-        if (now - last < RateLimitedLogInterval.Ticks) return;
+        if (now - last < s_rateLimitedLogInterval.Ticks) return;
         if (Interlocked.CompareExchange(ref _lastInjectionFailureLogTicks, now, last) != last) return;
         _logger.Warn($"UDP response reinjection failed; the response was skipped: {exception.GetType().Name}: {exception.Message}");
     }
@@ -359,8 +356,8 @@ internal sealed class UdpProxySession : IAsyncDisposable
         // quieter-than-interval gap — is delivered immediately.
         var nowTicks = now.UtcTicks;
         var lastPropagation = Interlocked.Read(ref _lastActivityPropagationTicks);
-        if (nowTicks - lastPropagation < ActivityPropagationInterval.Ticks) return;
+        if (nowTicks - lastPropagation < s_activityPropagationInterval.Ticks) return;
         if (Interlocked.CompareExchange(ref _lastActivityPropagationTicks, nowTicks, lastPropagation) != lastPropagation) return;
-        _activityObserver(_association, now);
+        _activityObserver(Association, now);
     }
 }

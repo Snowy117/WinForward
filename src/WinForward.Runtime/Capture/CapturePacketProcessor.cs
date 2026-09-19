@@ -22,7 +22,6 @@ public sealed class CapturePacketProcessor
 {
     private readonly FlowDispatcher _dispatcher;
     private readonly IRuntimeLogger _logger;
-    private readonly Action<nint>? _onBatchCompleted;
     private long _nextPacketSequence;
 
     public CapturePacketProcessor(FlowDispatcher dispatcher, IRuntimeLogger? logger = null, Action<nint>? onBatchCompleted = null)
@@ -30,7 +29,7 @@ public sealed class CapturePacketProcessor
         ArgumentNullException.ThrowIfNull(dispatcher);
         _dispatcher = dispatcher;
         _logger = logger ?? NullRuntimeLogger.Instance;
-        _onBatchCompleted = onBatchCompleted;
+        OnBatchCompleted = onBatchCompleted;
     }
 
     /// <summary>
@@ -39,7 +38,7 @@ public sealed class CapturePacketProcessor
     /// runtime composition wires it to the executor's pending-pass flush so accumulated pass
     /// reinjections leave as batched IOCTLs; this holder keeps the executor out of the pump layer.
     /// </summary>
-    public Action<nint>? OnBatchCompleted => _onBatchCompleted;
+    public Action<nint>? OnBatchCompleted { get; }
 
     public async ValueTask ProcessAsync(NdisCapturedPacket packet, WindowsAdapter adapter, CancellationToken cancellationToken)
     {

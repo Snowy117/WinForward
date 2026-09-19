@@ -19,13 +19,13 @@ namespace WinForward.Benchmarks.Stability;
 /// </summary>
 internal static class UdpBurstScenario
 {
-    private static readonly TimeSpan ControlWindow = TimeSpan.FromSeconds(5);
-    private static readonly TimeSpan PostWindow = TimeSpan.FromSeconds(5);
-    private static readonly TimeSpan DrainTime = TimeSpan.FromSeconds(2);
-    private static readonly TimeSpan WarmupTimeout = TimeSpan.FromSeconds(10);
-    private static readonly TimeSpan WarmupPollInterval = TimeSpan.FromMilliseconds(50);
-    private static readonly TimeSpan BurstPollInterval = TimeSpan.FromMilliseconds(20);
-    private static readonly TimeSpan MinimumBurstWindow = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan s_controlWindow = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan s_postWindow = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan s_drainTime = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan s_warmupTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan s_warmupPollInterval = TimeSpan.FromMilliseconds(50);
+    private static readonly TimeSpan s_burstPollInterval = TimeSpan.FromMilliseconds(20);
+    private static readonly TimeSpan s_minimumBurstWindow = TimeSpan.FromSeconds(30);
     private const int SetupLimiterWidth = 8;
 
     /// <summary>
@@ -54,12 +54,12 @@ internal static class UdpBurstScenario
             new UdpProxyOptions
             {
                 Capacity = backgroundFlows + burstFlows,
-                Logger = productEvents is not null ? productEvents : NullRuntimeLogger.Instance
+                Logger = (IRuntimeLogger?)productEvents ?? NullRuntimeLogger.Instance,
             });
         PhaseOutcome outcome;
         try
         {
-            var socksServer = new Socks5Server("soak", "127.0.0.1", checked((ushort)server.ControlEndpoint.Port), null, null);
+            var socksServer = new Socks5Server("soak", "127.0.0.1", checked((ushort)server.ControlEndpoint.Port), Username: null, Password: null);
             var backgroundKeys = CreateFlowKeys(0, backgroundFlows);
             var burstKeys = CreateFlowKeys(backgroundFlows, burstFlows);
             outcome = await RunPhasesAsync(coordinator, socksServer, backgroundKeys, burstKeys, sink, tracker, options, burstTimeout)
@@ -92,7 +92,7 @@ internal static class UdpBurstScenario
     /// </summary>
     private static TimeSpan ComputeBurstTimeout(int burstFlows, TimeSpan associateDelay) =>
         TimeSpan.FromMilliseconds(Math.Max(
-            MinimumBurstWindow.TotalMilliseconds,
+            s_minimumBurstWindow.TotalMilliseconds,
             Math.Ceiling(burstFlows / (double)SetupLimiterWidth) * associateDelay.TotalMilliseconds * 3));
 
     private static FlowKey[] CreateFlowKeys(int flowIdOffset, int count)
@@ -123,9 +123,9 @@ internal static class UdpBurstScenario
         // A flow counts as established once its warmup response has returned through the
         // sink, so no warmup echo can straddle the attribution boundary below.
         var warmupWatch = Stopwatch.StartNew();
-        while (sink.WarmupResponses < backgroundKeys.Length && warmupWatch.Elapsed < WarmupTimeout)
+        while (sink.WarmupResponses < backgroundKeys.Length && warmupWatch.Elapsed < s_warmupTimeout)
         {
-            await Task.Delay(WarmupPollInterval).ConfigureAwait(false);
+            await Task.Delay(s_warmupPollInterval).ConfigureAwait(false);
         }
 
         tracker.BeginAttribution();
@@ -133,19 +133,19 @@ internal static class UdpBurstScenario
         windowTicks[0] = Stopwatch.GetTimestamp();
         using var senderCancellation = new CancellationTokenSource();
         var sender = new BackgroundSender(coordinator, socksServer, backgroundKeys, options.PayloadBytes, options.Pps, tracker);
-        var senderTask = Task.Run(() => sender.RunLoopAsync(senderCancellation.Token));
+        var senderTask = Task.Run(() => sender.RunLoopAsync(senderCancellation.Token), senderCancellation.Token);
 
-        await Task.Delay(ControlWindow).ConfigureAwait(false);
+        await Task.Delay(s_controlWindow, senderCancellation.Token).ConfigureAwait(false);
         windowTicks[1] = Stopwatch.GetTimestamp();
         sender.EnterWindow(BackgroundWindow.Burst);
         var burst = await FireBurstAsync(coordinator, socksServer, burstKeys, backgroundKeys.Length, options.PayloadBytes, burstTimeout, sink).ConfigureAwait(false);
         windowTicks[2] = Stopwatch.GetTimestamp();
         sender.EnterWindow(BackgroundWindow.Post);
-        await Task.Delay(PostWindow).ConfigureAwait(false);
+        await Task.Delay(s_postWindow, senderCancellation.Token).ConfigureAwait(false);
         windowTicks[3] = Stopwatch.GetTimestamp();
         await senderCancellation.CancelAsync().ConfigureAwait(false);
         await senderTask.ConfigureAwait(false);
-        await Task.Delay(DrainTime).ConfigureAwait(false);
+        await Task.Delay(s_drainTime, CancellationToken.None).ConfigureAwait(false);
         return new PhaseOutcome(burst, sender, windowTicks);
     }
 
@@ -186,7 +186,7 @@ internal static class UdpBurstScenario
         var stopwatch = Stopwatch.StartNew();
         while (sink.BurstFirstResponses < accepted && stopwatch.Elapsed < timeout)
         {
-            await Task.Delay(BurstPollInterval).ConfigureAwait(false);
+            await Task.Delay(s_burstPollInterval).ConfigureAwait(false);
         }
 
         var latencies = new List<double>(burstKeys.Length);
@@ -199,7 +199,7 @@ internal static class UdpBurstScenario
         }
 
         var firstResponses = (long)latencies.Count;
-        var lossRate = accepted == 0 ? 0.0 : Math.Clamp(1.0 - firstResponses / (double)accepted, 0.0, 1.0);
+        var lossRate = accepted == 0 ? 0.0 : Math.Clamp(1.0 - (firstResponses / (double)accepted), 0.0, 1.0);
         return new BurstResult(
             accepted,
             rejected,
@@ -239,7 +239,7 @@ internal static class UdpBurstScenario
     {
         sent,
         injected,
-        lossRate = sent == 0 ? 0.0 : Math.Clamp(1.0 - injected / (double)sent, 0.0, 1.0),
+        lossRate = sent == 0 ? 0.0 : Math.Clamp(1.0 - (injected / (double)sent), 0.0, 1.0),
         sendP95Ms = StabilityShared.Percentile(sendLatencies, 95),
         sendMaxMs = sendLatencies.Count == 0 ? 0.0 : sendLatencies.Max(),
         achievedPps = windowSeconds > 0.0 ? sent / windowSeconds : 0.0,

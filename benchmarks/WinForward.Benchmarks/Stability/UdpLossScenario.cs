@@ -16,9 +16,9 @@ namespace WinForward.Benchmarks.Stability;
 /// </summary>
 internal static class UdpLossScenario
 {
-    private static readonly TimeSpan DrainTime = TimeSpan.FromSeconds(2);
-    private static readonly TimeSpan WarmupTimeout = TimeSpan.FromSeconds(10);
-    private static readonly TimeSpan WarmupPollInterval = TimeSpan.FromMilliseconds(50);
+    private static readonly TimeSpan s_drainTime = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan s_warmupTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan s_warmupPollInterval = TimeSpan.FromMilliseconds(50);
     private const int TickMilliseconds = 10;
 
     /// <summary>
@@ -39,12 +39,12 @@ internal static class UdpLossScenario
         var coordinator = new UdpProxyCoordinator(new Socks5UdpTransportFactory(new SelfTrafficRegistry(), UdpFrameBuilder.DefaultMaximumEthernetFrame), sink, new UdpProxyOptions
         {
             Capacity = options.Flows,
-            Logger = productEvents is not null ? productEvents : NullRuntimeLogger.Instance
+            Logger = (IRuntimeLogger?)productEvents ?? NullRuntimeLogger.Instance,
         });
         SenderStats stats;
         try
         {
-            var socksServer = new Socks5Server("soak", "127.0.0.1", checked((ushort)server.ControlEndpoint.Port), null, null);
+            var socksServer = new Socks5Server("soak", "127.0.0.1", checked((ushort)server.ControlEndpoint.Port), Username: null, Password: null);
             var flows = new FlowKey[options.Flows];
             for (var index = 0; index < flows.Length; index++) flows[index] = BenchmarkShared.CreateFlowKey(index);
             var sequences = new long[flows.Length];
@@ -54,14 +54,14 @@ internal static class UdpLossScenario
             receiver.BeginWindow(markers);
             sink.BeginWindow(markers);
             stats = await RunWindowAsync(coordinator, socksServer, flows, sequences, payload, options).ConfigureAwait(false);
-            await Task.Delay(DrainTime).ConfigureAwait(false);
+            await Task.Delay(s_drainTime).ConfigureAwait(false);
         }
         finally
         {
             await coordinator.DisposeAsync().ConfigureAwait(false);
         }
 
-        var lossRate = stats.SentDatagrams == 0 ? 0.0 : Math.Clamp(1.0 - receiver.Received / (double)stats.SentDatagrams, 0.0, 1.0);
+        var lossRate = stats.SentDatagrams == 0 ? 0.0 : Math.Clamp(1.0 - (receiver.Received / (double)stats.SentDatagrams), 0.0, 1.0);
         var achievedPps = stats.ElapsedSeconds > 0.0 ? stats.SentDatagrams / stats.ElapsedSeconds : 0.0;
         context.WriteResult(
             "udp.lossRate",
@@ -98,9 +98,9 @@ internal static class UdpLossScenario
         }
 
         var stopwatch = Stopwatch.StartNew();
-        while (receiver.ObservedFlowCount < flows.Length && stopwatch.Elapsed < WarmupTimeout)
+        while (receiver.ObservedFlowCount < flows.Length && stopwatch.Elapsed < s_warmupTimeout)
         {
-            await Task.Delay(WarmupPollInterval).ConfigureAwait(false);
+            await Task.Delay(s_warmupPollInterval).ConfigureAwait(false);
         }
     }
 

@@ -9,7 +9,6 @@ public sealed class FlowTable
     private readonly List<FlowKey> _expiredScratch = [];
     private readonly FlowState[] _freeStates;
     private readonly Lock _gate = new();
-    private readonly int _capacity;
     private readonly TimeProvider _timeProvider;
     private int _freeStateCount;
     private long _nextGeneration;
@@ -20,8 +19,8 @@ public sealed class FlowTable
     /// </summary>
     public FlowTable(int capacity = 65_536, TimeProvider? timeProvider = null)
     {
-        if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(capacity));
-        _capacity = capacity;
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capacity);
+        Capacity = capacity;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _states = new Dictionary<FlowKey, FlowState>(capacity);
         _transportIndex = new Dictionary<TransportTuple, FlowState>(capacity * 2);
@@ -29,7 +28,7 @@ public sealed class FlowTable
     }
 
     /// <summary>The bounded capacity the table was constructed with.</summary>
-    public int Capacity => _capacity;
+    public int Capacity { get; }
 
     /// <summary>The number of tracked flows (a gate-consistent snapshot; diagnostics only).</summary>
     public int Count
@@ -64,7 +63,7 @@ public sealed class FlowTable
         lock (_gate)
         {
             if (TryResolveLocked(key, out state)) return state is not null;
-            if (_states.Count >= _capacity)
+            if (_states.Count >= Capacity)
             {
                 state = null;
                 return false;

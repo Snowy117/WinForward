@@ -27,7 +27,7 @@ internal static class StabilityShared
     internal static double TicksToSeconds(long deltaTicks) => deltaTicks / (double)Stopwatch.Frequency;
 
     /// <summary>Product trace/debug event names surfaced in the result row; absent names count as zero.</summary>
-    private static readonly string[] ProductEventNames =
+    private static readonly string[] s_productEventNames =
     [
         "udp.setupqueue.dropped",
         "udp.session.rejected",
@@ -41,8 +41,8 @@ internal static class StabilityShared
 
     internal static Dictionary<string, long> BuildProductEvents(CountingRuntimeLogger logger)
     {
-        var snapshot = new Dictionary<string, long>(ProductEventNames.Length, StringComparer.Ordinal);
-        foreach (var name in ProductEventNames)
+        var snapshot = new Dictionary<string, long>(s_productEventNames.Length, StringComparer.Ordinal);
+        foreach (var name in s_productEventNames)
         {
             snapshot[name] = logger.Events.TryGetValue(name, out var count) ? count : 0;
         }

@@ -55,9 +55,7 @@ public sealed class DurableCaptureBundleTests
 
     /// <summary>The structured <c>udp.targets.noMac</c> warns recorded so far, both kinds included.</summary>
     private static List<RuntimeLogField[]> NoMacEvents(RecordingRuntimeLogger logger) =>
-        logger.Events.Where(entry => string.Equals(entry.Name, "udp.targets.noMac", StringComparison.Ordinal))
-            .Select(entry => entry.Fields)
-            .ToList();
+        [.. logger.Events.Where(entry => string.Equals(entry.Name, "udp.targets.noMac", StringComparison.Ordinal)).Select(entry => entry.Fields)];
 
     private static object? Field(RuntimeLogField[] fields, string key) =>
         fields.FirstOrDefault(field => string.Equals(field.Key, key, StringComparison.Ordinal)).Value;

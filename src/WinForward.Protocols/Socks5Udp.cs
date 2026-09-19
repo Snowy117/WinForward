@@ -34,7 +34,7 @@ public static class Socks5UdpCodec
         destination[3] = isIpv4 ? (byte)1 : (byte)4;
         _ = destinationAddress.TryWrite(destination.Slice(4, addressLength), out _);
         BinaryPrimitives.WriteUInt16BigEndian(destination.Slice(4 + addressLength, 2), destinationPort);
-        payload.CopyTo(destination.Slice(6 + addressLength));
+        payload.CopyTo(destination[(6 + addressLength)..]);
         written = totalLength;
         return true;
     }

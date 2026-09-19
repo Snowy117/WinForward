@@ -58,23 +58,16 @@ internal sealed class TcpRedirectListener(Socket socket, Endpoint translatedTupl
 }
 
 [SupportedOSPlatform("windows")]
-internal sealed class TcpAcceptedConnection : ITcpAcceptedConnection
+internal sealed class TcpAcceptedConnection(Socket socket, Endpoint remoteEndPoint) : ITcpAcceptedConnection
 {
-    private readonly Socket _socket;
 
-    public TcpAcceptedConnection(Socket socket, Endpoint remoteEndPoint)
-    {
-        _socket = socket;
-        RemoteEndPoint = remoteEndPoint;
-    }
+    public Endpoint RemoteEndPoint { get; } = remoteEndPoint;
 
-    public Endpoint RemoteEndPoint { get; }
-
-    internal Socket Socket => _socket;
+    internal Socket Socket { get; } = socket;
 
     public ValueTask DisposeAsync()
     {
-        _socket.Dispose();
+        Socket.Dispose();
         return ValueTask.CompletedTask;
     }
 }

@@ -1,3 +1,4 @@
+using System.Globalization;
 using WinForward.Runtime.Capture;
 using WinForward.Windows;
 
@@ -36,18 +37,12 @@ internal sealed class FakeAdapterEnumerationProvider(IReadOnlyList<AdapterEnumer
 /// the real runtime's start sequence; a <see cref="FaultAtStartupWith"/> exception escapes
 /// before that latch — the pre-pump startup signature (task 09-11).
 /// </summary>
-internal sealed class FakeCaptureGeneration : ICaptureGeneration
+internal sealed class FakeCaptureGeneration(int index, IReadOnlyList<AdapterEnumerationItem> scope) : ICaptureGeneration
 {
     private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public FakeCaptureGeneration(int index, IReadOnlyList<AdapterEnumerationItem> scope)
-    {
-        Index = index;
-        Scope = scope;
-    }
-
-    public int Index { get; }
-    public IReadOnlyList<AdapterEnumerationItem> Scope { get; }
+    public int Index { get; } = index;
+    public IReadOnlyList<AdapterEnumerationItem> Scope { get; } = scope;
     public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public int DisposeCount { get; private set; }
     public bool CancelObserved { get; private set; }
@@ -70,7 +65,7 @@ internal sealed class FakeCaptureGeneration : ICaptureGeneration
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
-        using var registration = cancellationToken.Register(() => CancelObserved = true);
+        await using var registration = cancellationToken.Register(() => CancelObserved = true);
         if (FaultAtStartupWith is { } startupFault)
         {
             if (StartupFaultRelease is { } release) await release.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -114,7 +109,7 @@ internal sealed class FakeCaptureGenerationFactory : ICaptureGenerationFactory
     {
         get
         {
-            lock (_gate) return _generations.ToArray();
+            lock (_gate) return [.. _generations];
         }
     }
 
@@ -139,14 +134,14 @@ internal static class CaptureRunnerFakes
 
     /// <summary>A policy whose process rule constrains nothing, so capture scope widens to every adapter.</summary>
     public static WinForward.Core.PolicySnapshot UnconstrainedPolicy() => new(
-        [new WinForward.Core.PolicyRule(new WinForward.Core.RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "browser.exe" }), new WinForward.Core.FlowDecision(FlowAction.Block, 0, null))],
+        [new WinForward.Core.PolicyRule(new WinForward.Core.RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "browser.exe" }), new WinForward.Core.FlowDecision(FlowAction.Block, 0, ProxyServerName: null))],
         FlowAction.Pass);
 
     /// <summary>A policy with one adapter-constrained rule per selector, so scope follows the selectors.</summary>
     public static WinForward.Core.PolicySnapshot AdapterConstrainedPolicy(params string[] stableIds) => new(
-        stableIds.Select((id, index) => new WinForward.Core.PolicyRule(
+        [.. stableIds.Select((id, index) => new WinForward.Core.PolicyRule(
             new WinForward.Core.RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { id }),
-            new WinForward.Core.FlowDecision(FlowAction.Pass, index, null))).ToArray(),
+            new WinForward.Core.FlowDecision(FlowAction.Pass, index, ProxyServerName: null)))],
         FlowAction.Pass);
 }
 
@@ -166,8 +161,8 @@ internal sealed class CaptureRunnerHarness : IAsyncDisposable
         Enumeration = new FakeAdapterEnumerationProvider(initialAdapters);
         Generations.OnCreated = generation =>
         {
-            generation.OnDisposed = () => AddEvent($"generation-{generation.Index}-disposed");
-            AddEvent($"generation-{generation.Index}-created");
+            generation.OnDisposed = () => AddEvent(string.Create(CultureInfo.InvariantCulture, $"generation-{generation.Index}-disposed"));
+            AddEvent(string.Create(CultureInfo.InvariantCulture, $"generation-{generation.Index}-created"));
         };
         Runner = new LayeredCaptureRunner(
             Enumeration,
@@ -208,12 +203,12 @@ internal sealed class CaptureRunnerHarness : IAsyncDisposable
     {
         get
         {
-            lock (_eventGate) return _events.ToArray();
+            lock (_eventGate) return [.. _events];
         }
     }
 
     public IReadOnlyList<IReadOnlyList<WinForward.Runtime.RuntimeLogField>> RefreshEvents =>
-        Logger.Events.Where(entry => string.Equals(entry.Name, "adapter.refresh", StringComparison.Ordinal)).Select(entry => (IReadOnlyList<WinForward.Runtime.RuntimeLogField>)entry.Fields).ToList();
+        [.. Logger.Events.Where(entry => string.Equals(entry.Name, "adapter.refresh", StringComparison.Ordinal)).Select(entry => (IReadOnlyList<WinForward.Runtime.RuntimeLogField>)entry.Fields)];
 
     public static string? FieldValue(IReadOnlyList<WinForward.Runtime.RuntimeLogField> fields, string key) =>
         fields.FirstOrDefault(field => string.Equals(field.Key, key, StringComparison.Ordinal)).Value?.ToString();
@@ -233,7 +228,7 @@ internal sealed class CaptureRunnerHarness : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        Cancel.Cancel();
+        await Cancel.CancelAsync();
         try
         {
             await RunTask.ConfigureAwait(false);

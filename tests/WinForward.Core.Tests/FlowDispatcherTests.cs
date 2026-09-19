@@ -38,7 +38,7 @@ public sealed class FlowDispatcherTests
         // whose local AND remote ports equal an active TCP proxy-listener port value must be
         // evaluated by normal flow/policy (here proxied) and never routed into the reverse handler,
         // whose numeric-port matching could otherwise drop it.
-        var server = new Socks5Server("primary", "127.0.0.1", 1080, null, null);
+        var server = new Socks5Server("primary", "127.0.0.1", 1080, Username: null, Password: null);
         var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase) { [server.Name] = server };
         const ushort collidingPort = 40001;
         var rules = new[] { new PolicyRule(new RuleMatcher(RemotePorts: [(collidingPort, collidingPort)]), new FlowDecision(FlowAction.Proxy, 0, server.Name)) };
@@ -146,14 +146,14 @@ public sealed class FlowDispatcherTests
 
     private static ValidatedConfiguration CreateConfig()
     {
-        var server = new Socks5Server("primary", "127.0.0.1", 1080, null, null);
+        var server = new Socks5Server("primary", "127.0.0.1", 1080, Username: null, Password: null);
         var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase) { [server.Name] = server };
         var rules = new[] { new PolicyRule(new RuleMatcher(RemotePorts: [(53, 53)]), new FlowDecision(FlowAction.Proxy, 0, server.Name)) };
         return new ValidatedConfiguration(servers, new PolicySnapshot(rules, FlowAction.Block));
     }
 
     private static FlowKey CreateKey(TransportProtocol protocol = TransportProtocol.Udp) => FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), protocol, FlowOriginKind.Host);
-    private static FlowContext Context(FlowKey key) => new(key, "dns.exe", null, null, null, key.Remote.Port);
+    private static FlowContext Context(FlowKey key) => new(key, "dns.exe", ProcessPath: null, AdapterId: null, AdapterName: null, key.Remote.Port);
 
     /// <summary>
     /// A reverse handler whose <see cref="WantsPacket"/> always diverts — the pre-X1 dispatcher

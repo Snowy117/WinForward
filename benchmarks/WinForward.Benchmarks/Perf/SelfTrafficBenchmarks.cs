@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using BenchmarkDotNet.Attributes;
 using WinForward.Core;
@@ -24,10 +25,10 @@ public class SelfTrafficBenchmarks
         _tokens = new List<IDisposable>(Cardinality);
         for (var index = 0; index < Cardinality; index++)
         {
-            var remote = Endpoint.From(IPAddress.Parse($"198.19.{index / 256 % 256}.{index % 256}"), checked((ushort)(10_000 + index % 50_000)));
+            var remote = Endpoint.From(IPAddress.Parse(string.Create(CultureInfo.InvariantCulture, $"198.19.{index / 256 % 256}.{index % 256}")), checked((ushort)(10_000 + (index % 50_000))));
             _tokens.Add(_registry.Register(new SelfTrafficRegistry.SelfTrafficKey(
                 TransportProtocol.Udp,
-                Endpoint.From(IPAddress.Any, checked((ushort)(1_024 + index % 50_000))),
+                Endpoint.From(IPAddress.Any, checked((ushort)(1_024 + (index % 50_000)))),
                 remote)));
         }
 
@@ -37,7 +38,7 @@ public class SelfTrafficBenchmarks
                 Endpoint.From(IPAddress.Parse("203.0.113.10"), 53),
                 TransportProtocol.Udp,
                 FlowOriginKind.Host),
-            null, null, null, null, 53);
+            ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, 53);
     }
 
     [GlobalCleanup]

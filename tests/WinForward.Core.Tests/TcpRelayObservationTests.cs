@@ -87,7 +87,7 @@ public sealed class TcpRelayObservationTests
         var (upstreamPeer, relayUpstream) = await CreateSocketPairAsync();
         using var local = localPeer;
         using var upstream = upstreamPeer;
-        using var upstreamStream = new NetworkStream(relayUpstream, ownsSocket: true);
+        await using var upstreamStream = new NetworkStream(relayUpstream, ownsSocket: true);
         var logger = new RecordingRuntimeLogger();
         var relay = new TcpProxyRelay(relayLocal, upstreamStream, new NoopDisposable(), logger);
 
@@ -108,10 +108,10 @@ public sealed class TcpRelayObservationTests
         var client = IPAddress.Parse("192.0.2.10");
         var destination = IPAddress.Parse("192.0.2.53");
         var key = FlowKey.Create(Endpoint.From(client, 53000), Endpoint.From(destination, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
-        var association = new TcpRedirectAssociation(key, key.Remote, new AdapterContext("eth0", "Ethernet", 1), 0x1234, Endpoint.From(IPAddress.Loopback, 40000), null, 1, DateTimeOffset.UtcNow);
+        var association = new TcpRedirectAssociation(key, key.Remote, new AdapterContext("eth0", "Ethernet", 1), 0x1234, Endpoint.From(IPAddress.Loopback, 40000), forwardLocalAddress: null, 1, DateTimeOffset.UtcNow);
         listener = new FakeListener(association.TranslatedListenerTuple);
         var token = new SelfTrafficRegistry().Register(new SelfTrafficRegistry.SelfTrafficKey(TransportProtocol.Tcp, association.TranslatedListenerTuple, association.TranslatedListenerTuple));
-        return new TcpRedirectSession(association, listener, token, new Socks5Server("primary", "127.0.0.1", 1080, null, null), CancellationToken.None, 0);
+        return new TcpRedirectSession(association, listener, token, new Socks5Server("primary", "127.0.0.1", 1080, Username: null, Password: null), 0, CancellationToken.None);
     }
 
     private static async Task<(Socket Peer, Socket Relay)> CreateSocketPairAsync()

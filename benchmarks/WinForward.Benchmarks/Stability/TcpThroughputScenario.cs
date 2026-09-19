@@ -23,14 +23,14 @@ namespace WinForward.Benchmarks.Stability;
 /// </summary>
 internal static class TcpThroughputScenario
 {
-    private static readonly TimeSpan RelaySettleTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan s_relaySettleTimeout = TimeSpan.FromSeconds(30);
     private const int ChunkBytes = 65_536;
     private const int MaximumErrorSamples = 8;
 
     public static async Task RunAsync(StabilityContext context, SoakOptions options)
     {
         await using var server = options.TcpRelayMode == TcpRelayMode.Socks5 ? new LoopbackSocks5TcpServer() : null;
-        var socksServer = server is null ? null : new Socks5Server("throughput", "127.0.0.1", checked((ushort)server.Endpoint.Port), null, null);
+        var socksServer = server is null ? null : new Socks5Server("throughput", "127.0.0.1", checked((ushort)server.Endpoint.Port), Username: null, Password: null);
         var factory = new TcpProxyRelayFactory(new SelfTrafficRegistry());
         var counters = new ThroughputCounters();
         var clock = Stopwatch.StartNew();
@@ -94,7 +94,7 @@ internal static class TcpThroughputScenario
             await sender.ConfigureAwait(false);
             try
             {
-                await relay.Completion.WaitAsync(RelaySettleTimeout).ConfigureAwait(false);
+                await relay.Completion.WaitAsync(s_relaySettleTimeout).ConfigureAwait(false);
             }
             catch (Exception exception) when (exception is TimeoutException or SocketException or ObjectDisposedException or IOException)
             {
@@ -103,12 +103,12 @@ internal static class TcpThroughputScenario
             }
 
             stopwatch.Stop();
-            counters.Record(received == options.TcpTransferBytes, received, stopwatch.Elapsed.TotalMilliseconds, handshakeMicroseconds, null);
+            counters.Record(received == options.TcpTransferBytes, received, stopwatch.Elapsed.TotalMilliseconds, handshakeMicroseconds, sample: null);
         }
         catch (Exception exception) when (exception is SocketException or ObjectDisposedException or IOException)
         {
             stopwatch.Stop();
-            counters.Record(false, 0, stopwatch.Elapsed.TotalMilliseconds, 0, $"{exception.GetType().Name}: {exception.Message}");
+            counters.Record(completed: false, 0, stopwatch.Elapsed.TotalMilliseconds, 0, $"{exception.GetType().Name}: {exception.Message}");
         }
         finally
         {
@@ -125,11 +125,11 @@ internal static class TcpThroughputScenario
     /// </summary>
     private static async Task<(ITcpRelay Relay, Socket EchoPeer)> CreateBareRelayAsync(Socket relayLocal, ThroughputCounters counters)
     {
-        var upstreamPair = await CreateSocketPairAsync().ConfigureAwait(false);
-        var upstreamStream = new NetworkStream(upstreamPair.Relay, ownsSocket: true);
+        var (peerSocket, relaySocket) = await CreateSocketPairAsync().ConfigureAwait(false);
+        var upstreamStream = new NetworkStream(relaySocket, ownsSocket: true);
         var relay = new TcpProxyRelay(relayLocal, upstreamStream, new UpstreamOwner(upstreamStream));
-        _ = Task.Run(() => EchoAsync(upstreamPair.Peer, counters));
-        return (relay, upstreamPair.Peer);
+        _ = Task.Run(() => EchoAsync(peerSocket, counters));
+        return (relay, peerSocket);
     }
 
     private static async Task<ITcpRelay> EstablishSocks5RelayAsync(TcpProxyRelayFactory factory, Socks5Server socksServer, Socket relayLocal)
@@ -176,8 +176,7 @@ internal static class TcpThroughputScenario
     {
         public ValueTask DisposeAsync()
         {
-            upstream.Dispose();
-            return ValueTask.CompletedTask;
+            return upstream.DisposeAsync();
         }
     }
 

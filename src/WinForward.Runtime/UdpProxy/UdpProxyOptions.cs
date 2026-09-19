@@ -9,7 +9,7 @@ namespace WinForward.Runtime.UdpProxy;
 /// named record, with defaults matching the coordinator's historical behavior. A pool or the
 /// setup executor that is not injected is created by the coordinator and then owned (and
 /// disposed) by it; an injected instance is never disposed by the coordinator. The two
-/// <c>internal</c> members are test seams (reached through <c>InternalsVisibleTo</c>) and are
+/// <see langword="internal"/> members are test seams (reached through <c>InternalsVisibleTo</c>) and are
 /// never set by production composition.
 /// </summary>
 public sealed record UdpProxyOptions

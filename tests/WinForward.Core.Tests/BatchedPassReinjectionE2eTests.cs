@@ -89,7 +89,7 @@ public sealed class BatchedPassReinjectionE2eTests
             var lease = new PacketLease(packet.Buffer);
             var packet2 = new CapturedFlowPacket(
                 lease,
-                new FlowContext(FlowKeyFor(packet), null, null, null, null, 443),
+                new FlowContext(FlowKeyFor(packet), ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, 443),
                 new PacketCaptureMetadata(packet.DeviceFlags, packet.AdapterHandle, packet.Flags),
                 NativeFrame: new NativeFrameHandle(packet.Buffer));
             return executor.PassAsync(packet2, CancellationToken.None);

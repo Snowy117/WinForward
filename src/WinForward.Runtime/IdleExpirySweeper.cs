@@ -13,7 +13,7 @@ namespace WinForward.Runtime;
 /// </summary>
 public sealed class IdleExpirySweeper : IAsyncDisposable
 {
-    private static readonly TimeSpan SweepFailureLogInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan s_sweepFailureLogInterval = TimeSpan.FromSeconds(5);
 
     private readonly FlowDispatcher _dispatcher;
     private readonly TcpProxyCoordinator? _tcp;
@@ -107,7 +107,7 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
     {
         var now = _timeProvider.GetUtcNow().UtcTicks;
         var last = Interlocked.Read(ref _lastSweepFailureLogTicks);
-        if (now - last < SweepFailureLogInterval.Ticks) return;
+        if (now - last < s_sweepFailureLogInterval.Ticks) return;
         if (Interlocked.CompareExchange(ref _lastSweepFailureLogTicks, now, last) != last) return;
         _logger.Warn($"Idle-expiry sweep failed and will retry on the next tick: {exception.GetType().Name}: {exception.Message}");
     }

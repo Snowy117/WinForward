@@ -32,7 +32,7 @@ public sealed class Socks5UdpConnresetTests
         using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var associateRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var server = ServeAssociateOnlyAsync(tcpListener, relayEndpoint, associateRead, serverCancellation.Token);
-        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), null, null);
+        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
         TrackingSocket? socket = null;
         var disableCalls = new List<Socket>();
         bool? boundAtDisableCall = null;
@@ -41,7 +41,7 @@ public sealed class Socks5UdpConnresetTests
             socksServer,
             new SelfTrafficRegistry(),
             CancellationToken.None,
-            null,
+            createControl: null,
             family => socket = new TrackingSocket(family),
             disableUdpConnectionReset: candidate =>
             {
@@ -55,7 +55,7 @@ public sealed class Socks5UdpConnresetTests
         Assert.NotNull(transport.LocalEndpoint);
 
         await transport.DisposeAsync();
-        serverCancellation.Cancel();
+        await serverCancellation.CancelAsync();
         await IgnoreExpectedCancellationAsync(server);
     }
 

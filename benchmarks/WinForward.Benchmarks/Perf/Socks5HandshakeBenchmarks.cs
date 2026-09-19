@@ -29,7 +29,7 @@ public class Socks5HandshakeBenchmarks
     public void Setup()
     {
         _server = new LoopbackSocks5TcpServer();
-        _socks = new Socks5Server("benchmark", "127.0.0.1", checked((ushort)_server.Endpoint.Port), null, null);
+        _socks = new Socks5Server("benchmark", "127.0.0.1", checked((ushort)_server.Endpoint.Port), Username: null, Password: null);
         _destination = new IPEndPoint(IPAddress.Parse("192.0.2.80"), 443);
     }
 
@@ -46,7 +46,7 @@ public class Socks5HandshakeBenchmarks
             _socks,
             CancellationToken.None,
             maxAttempts: TcpProxyRelayFactory.RelayConnectMaxAttempts,
-            perAttemptTimeout: TcpProxyRelayFactory.RelayConnectAttemptTimeout).ConfigureAwait(false);
+            perAttemptTimeout: TcpProxyRelayFactory.s_relayConnectAttemptTimeout).ConfigureAwait(false);
         await control.ConnectDestinationAsync(_destination, CancellationToken.None).ConfigureAwait(false);
         Volatile.Write(ref s_sink, _server.ConnectReplies);
     }

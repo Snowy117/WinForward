@@ -25,12 +25,11 @@ internal sealed record RetiredSession(TcpRedirectSession Session, ITcpRelay? Rel
 /// sections are synchronous and non-blocking, so nesting them under the store gate is safe.
 /// The coordinator and setup pipeline reach the session set only through this module's methods.
 /// </summary>
-internal sealed class TcpRedirectSessionStore
+internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLogger logger, int capacity, TimeProvider timeProvider)
 {
-    private readonly TcpRedirectTable _table;
-    private readonly TcpRedirectTombstoneTable _tombstones;
-    private readonly IRuntimeLogger _logger;
-    private readonly TimeProvider _timeProvider;
+    private readonly TcpRedirectTable _table = table;
+    private readonly IRuntimeLogger _logger = logger;
+    private readonly TimeProvider _timeProvider = timeProvider;
     private readonly Dictionary<FlowKey, TcpRedirectSession> _sessions = [];
     private readonly Lock _gate = new();
     private readonly CancellationTokenSource _shutdown = new();
@@ -44,22 +43,14 @@ internal sealed class TcpRedirectSessionStore
     /// the handshake tail (the client's final ACK) and common FIN retransmissions (RTO backoff
     /// typically stays under 10s) without parking entries for a full 240s TIME_WAIT.
     /// </summary>
-    private static readonly TimeSpan TombstoneGracePeriod = TimeSpan.FromSeconds(60);
-
-    public TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLogger logger, int capacity, TimeProvider timeProvider)
-    {
-        _table = table;
-        _logger = logger;
-        _timeProvider = timeProvider;
-        _tombstones = new TcpRedirectTombstoneTable(capacity);
-    }
+    private static readonly TimeSpan s_tombstoneGracePeriod = TimeSpan.FromSeconds(60);
 
     public bool IsDisposed => Volatile.Read(ref _disposed);
 
     public CancellationToken ShutdownToken => _shutdown.Token;
 
     /// <summary>The TIME_WAIT-grace tombstone index; surfaced for the coordinator's routing lookups.</summary>
-    public TcpRedirectTombstoneTable Tombstones => _tombstones;
+    public TcpRedirectTombstoneTable Tombstones { get; } = new TcpRedirectTombstoneTable(capacity);
 
     /// <summary>The live session count, read under the gate (used by the coordinator's capacity check).</summary>
     public int SessionCount
@@ -134,10 +125,9 @@ internal sealed class TcpRedirectSessionStore
         RetiredSession[] expired;
         lock (_gate)
         {
-            expired = _sessions.Values
+            expired = [.. _sessions.Values
                 .Where(session => session.Association.Phase == RelayPhase.Redirecting && now - session.Association.LastActivityUtc >= idleTimeout)
-                .Select(RetireSessionUnderGate)
-                .ToArray();
+                .Select(RetireSessionUnderGate)];
         }
 
         foreach (var retired in expired)
@@ -149,7 +139,7 @@ internal sealed class TcpRedirectSessionStore
         // reclaimed here, after which same-tuple packets fall back to the pre-tombstone behavior.
         // Tombstones are not included in the return value — it counts expired redirect sessions,
         // keeping the sweeper's runtime.expired accounting unchanged.
-        _tombstones.RemoveExpired(now);
+        Tombstones.RemoveExpired(now);
         return expired.Length;
     }
 
@@ -198,7 +188,7 @@ internal sealed class TcpRedirectSessionStore
         RetiredSession[] sessions;
         lock (_gate)
         {
-            sessions = _sessions.Values.Select(RetireSessionUnderGate).ToArray();
+            sessions = [.. _sessions.Values.Select(RetireSessionUnderGate)];
         }
 
         foreach (var retired in sessions)
@@ -328,7 +318,7 @@ internal sealed class TcpRedirectSessionStore
     /// </summary>
     private void RemoveAssociationFromTable(TcpRedirectAssociation association)
     {
-        _table.TryRemove(association, removed => _tombstones.TryAdd(removed.OriginalKey, removed.ReverseSourceEndpoint, removed.ReverseDestinationEndpoint, _timeProvider.GetUtcNow() + TombstoneGracePeriod));
+        _table.TryRemove(association, removed => Tombstones.TryAdd(removed.OriginalKey, removed.ReverseSourceEndpoint, removed.ReverseDestinationEndpoint, _timeProvider.GetUtcNow() + s_tombstoneGracePeriod));
     }
 
     private static TaskCompletionSource CompletedSource()

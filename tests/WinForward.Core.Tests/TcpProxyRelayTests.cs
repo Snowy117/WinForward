@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.Versioning;
@@ -22,7 +23,7 @@ public sealed class TcpProxyRelayTests
         // binds to these constants, which cap the worst case at DNS + 2 x 10s instead of the
         // 4 x 30s per-attempt defaults (worst case ~150s).
         Assert.Equal(2, TcpProxyRelayFactory.RelayConnectMaxAttempts);
-        Assert.Equal(TimeSpan.FromSeconds(10), TcpProxyRelayFactory.RelayConnectAttemptTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(10), TcpProxyRelayFactory.s_relayConnectAttemptTimeout);
     }
 
     [Fact]
@@ -39,15 +40,15 @@ public sealed class TcpProxyRelayTests
         using var local = localPeer;
         var accepted = new TcpAcceptedConnection(relayLocal, Endpoint.From(IPAddress.Loopback, 40000));
         var factory = new TcpProxyRelayFactory(new SelfTrafficRegistry());
-        var server = new Socks5Server("refused", "127.0.0.1", checked((ushort)port), null, null);
+        var server = new Socks5Server("refused", "127.0.0.1", checked((ushort)port), Username: null, Password: null);
 
         var started = Stopwatch.StartNew();
         await Assert.ThrowsAsync<IOException>(() =>
             factory.EstablishAsync(Endpoint.From(IPAddress.Parse("192.0.2.9"), 80), accepted, server, CancellationToken.None).AsTask());
         started.Stop();
 
-        Assert.True(started.Elapsed < TcpProxyRelayFactory.RelayConnectAttemptTimeout,
-            $"a refused connect must fail fast, took {started.Elapsed.TotalMilliseconds:F0}ms");
+        Assert.True(started.Elapsed < TcpProxyRelayFactory.s_relayConnectAttemptTimeout,
+            string.Create(CultureInfo.InvariantCulture, $"a refused connect must fail fast, took {started.Elapsed.TotalMilliseconds:F0}ms"));
         local.Dispose();
         relayLocal.Dispose();
     }
@@ -59,7 +60,7 @@ public sealed class TcpProxyRelayTests
         var (upstreamPeer, relayUpstream) = await CreateSocketPairAsync();
         using var local = localPeer;
         using var upstream = upstreamPeer;
-        using var relayUpstreamStream = new NetworkStream(relayUpstream, ownsSocket: true);
+        await using var relayUpstreamStream = new NetworkStream(relayUpstream, ownsSocket: true);
         await using var relay = new TcpProxyRelay(relayLocal, relayUpstreamStream, new NoopAsyncDisposable());
 
         await local.SendAsync(new byte[] { 1, 2, 3 }, SocketFlags.None);
@@ -103,7 +104,7 @@ public sealed class TcpProxyRelayTests
         var (upstreamPeer, relayUpstream) = await CreateSocketPairAsync();
         using var local = localPeer;
         using var upstream = upstreamPeer;
-        using var relayUpstreamStream = new NetworkStream(relayUpstream, ownsSocket: true);
+        await using var relayUpstreamStream = new NetworkStream(relayUpstream, ownsSocket: true);
         await using var relay = new TcpProxyRelay(relayLocal, new FaultAfterWritesStream(relayUpstreamStream, allowedWrites: 1), new NoopAsyncDisposable());
 
         await local.SendAsync(new byte[] { 1, 2, 3 }, SocketFlags.None);
@@ -120,7 +121,7 @@ public sealed class TcpProxyRelayTests
     [Fact]
     public void StallRearmThrottleIsOneSecond()
     {
-        Assert.Equal(Stopwatch.Frequency, TcpProxyRelay.ArmThrottleTicks);
+        Assert.Equal(Stopwatch.Frequency, TcpProxyRelay.s_armThrottleTicks);
     }
 
     [Fact]
@@ -130,13 +131,13 @@ public sealed class TcpProxyRelayTests
         // skipped (the previous arm's 30-minute window still covers the operations), and an
         // arm past the interval goes through.
         var now = Stopwatch.GetTimestamp();
-        var halfSecond = TcpProxyRelay.ArmThrottleTicks / 2;
+        var halfSecond = TcpProxyRelay.s_armThrottleTicks / 2;
 
         Assert.True(TcpProxyRelay.IsRearmDue(0, now));
         Assert.False(TcpProxyRelay.IsRearmDue(now, now + halfSecond));
-        Assert.False(TcpProxyRelay.IsRearmDue(now, now + TcpProxyRelay.ArmThrottleTicks));
-        Assert.True(TcpProxyRelay.IsRearmDue(now, now + TcpProxyRelay.ArmThrottleTicks + 1));
-        Assert.True(TcpProxyRelay.IsRearmDue(now, now + 10 * TcpProxyRelay.ArmThrottleTicks));
+        Assert.False(TcpProxyRelay.IsRearmDue(now, now + TcpProxyRelay.s_armThrottleTicks));
+        Assert.True(TcpProxyRelay.IsRearmDue(now, now + TcpProxyRelay.s_armThrottleTicks + 1));
+        Assert.True(TcpProxyRelay.IsRearmDue(now, now + (10 * TcpProxyRelay.s_armThrottleTicks)));
     }
 
     [Fact]
@@ -147,7 +148,7 @@ public sealed class TcpProxyRelayTests
         var (upstreamPeer, relayUpstream) = await CreateSocketPairAsync();
         using var local = localPeer;
         using var upstream = upstreamPeer;
-        using var relayUpstreamStream = new NetworkStream(relayUpstream, ownsSocket: true);
+        await using var relayUpstreamStream = new NetworkStream(relayUpstream, ownsSocket: true);
         await using var relay = new TcpProxyRelay(relayLocal, relayUpstreamStream, new NoopAsyncDisposable(), pumpBufferPool: pool);
 
         // One lease per pump direction, held for the whole pump lifetime.

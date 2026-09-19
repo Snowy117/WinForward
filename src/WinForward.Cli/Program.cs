@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.Versioning;
 using System.Text.Json;
 using WinForward.Configuration;
@@ -153,7 +154,9 @@ internal static class Program
     }
 
     [SupportedOSPlatform("windows")]
+#pragma warning disable CA1859 // The private composition chain deliberately types its logger as IRuntimeLogger (the composition seam); narrowing this entry helper cascades through RunCaptureLoopAsync / generation-factory / bundle factories for immeasurable devirtualization gain on cold startup and failure-logging paths.
     private static async Task<int> RunInterceptionAsync(ValidatedConfiguration configuration, IRuntimeLogger logger)
+#pragma warning restore CA1859
     {
         using var driver = NdisApiDriver.Open();
         // Startup pre-flight for the exit-code surface (exit 1 selector errors, exit 3 empty
@@ -248,15 +251,12 @@ internal static class Program
     /// </summary>
     private static void WireFramePoolDiagnostics()
     {
-        const string FramePoolName = "ndis.frame";
+        const string framePoolName = "ndis.frame";
         var counters = RuntimeCounters.Shared;
-        counters.RegisterPool(FramePoolName);
-        var rentKey = RuntimeCounters.PoolRentedKey(FramePoolName);
-        var returnKey = RuntimeCounters.PoolReturnedKey(FramePoolName);
-        NdisPacketBufferPool.Shared.AccountingSink = rented =>
-        {
-            _ = counters.Increment(rented ? rentKey : returnKey);
-        };
+        counters.RegisterPool(framePoolName);
+        var rentKey = RuntimeCounters.PoolRentedKey(framePoolName);
+        var returnKey = RuntimeCounters.PoolReturnedKey(framePoolName);
+        NdisPacketBufferPool.Shared.AccountingSink = rented => counters.Increment(rented ? rentKey : returnKey);
     }
 
     /// <summary>
@@ -349,9 +349,7 @@ internal static class Program
     [SupportedOSPlatform("windows")]
     private static IReadOnlyList<WindowsAdapter> EnumerateAdapters(NdisApiDriver driver)
     {
-        var inventory = new WindowsAdapterInventory(() => driver.GetAdapters()
-            .Select(adapter => (adapter.InternalName, adapter.RuntimeHandle, adapter.MacAddress, adapter.Mtu))
-            .ToArray());
+        var inventory = new WindowsAdapterInventory(() => [.. driver.GetAdapters().Select(adapter => (adapter.InternalName, adapter.RuntimeHandle, adapter.MacAddress, adapter.Mtu))]);
         return inventory.GetCurrentAdapters();
     }
 
@@ -367,7 +365,7 @@ internal static class Program
         try
         {
             if (!TryLoadConfig(path, out var configuration)) return 1;
-            Console.WriteLine($"Configuration is valid. tcpFlowCapacity: {configuration!.TcpFlowCapacity}");
+            Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"Configuration is valid. tcpFlowCapacity: {configuration!.TcpFlowCapacity}"));
             foreach (var warning in configuration.Warnings)
             {
                 Console.Error.WriteLine($"warning {warning}");

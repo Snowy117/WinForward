@@ -117,16 +117,16 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     {
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var item = _setupExecutor.RentItem(_setupHandler);
-        item.Completion = completion;
-        item.Flow = flow;
-        item.Server = server;
-        item.Udp.FlowGeneration = flowGeneration;
-        item.Udp.ClientMac = capturedClientMac;
-        item.Udp.Slot = slot;
-        item.CancellationToken = _shutdown.Token;
+        item._completion = completion;
+        item._flow = flow;
+        item._server = server;
+        item._udp._flowGeneration = flowGeneration;
+        item._udp._clientMac = capturedClientMac;
+        item._udp._slot = slot;
+        item._cancellationToken = _shutdown.Token;
         if (!_setupExecutor.TryEnqueue(item))
         {
-            completion.TrySetCanceled();
+            completion.TrySetCanceled(item._cancellationToken);
             return false;
         }
 
@@ -135,7 +135,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     }
 
     private Task RunSessionSetupAsync(SetupWorkItem item)
-        => _setup.CreateSessionAsync(item.Flow, item.Server!, item.Udp.FlowGeneration, item.Udp.ClientMac, item.CancellationToken, item.Udp.Slot!);
+        => _setup.CreateSessionAsync(item._flow, item._server!, item._udp._flowGeneration, item._udp._clientMac, item._udp._slot!, item._cancellationToken);
 
     /// <summary>
     /// Buffers one datagram while the flow's session is setting up or flushing. The queue is
@@ -230,7 +230,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
         UdpSessionSlot[] slots;
         lock (_gate)
         {
-            slots = _sessions.Values.ToArray();
+            slots = [.. _sessions.Values];
             _sessions.Clear();
             _cooldowns.Clear();
             // The cleared slots are unreachable for every other drain path (a setup task's
@@ -341,10 +341,9 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
         lock (_gate)
         {
             _cooldowns.PruneExpired(now);
-            idle = _sessions.Values
+            idle = [.. _sessions.Values
                 .Where(slot => slot.Session is { } session && now - session.LastActivityUtc >= idleTimeout)
-                .Select(slot => (slot, slot.Session!))
-                .ToArray();
+                .Select(slot => (slot, slot.Session!))];
         }
 
         if (idle.Length > 0 && _beforeExpiryRecheck is not null) await _beforeExpiryRecheck().ConfigureAwait(false);
@@ -358,7 +357,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
                 session.CancelExpiry();
                 continue;
             }
-            UdpProxyLogging.LogDebug(_logger, "udp.session.expired", session.Flow, session.FlowGeneration, session.Association, null);
+            UdpProxyLogging.LogDebug(_logger, "udp.session.expired", session.Flow, session.FlowGeneration, session.Association, serverName: null);
             removed++;
         }
 
@@ -416,7 +415,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
         }
         if (slot is null) return;
         if (!await _slotHost.RemoveSlotAsync(session.Flow, slot, armCooldown: false).ConfigureAwait(false)) return;
-        UdpProxyLogging.LogDebug(_logger, "udp.session.closed", session.Flow, session.FlowGeneration, session.Association, null);
+        UdpProxyLogging.LogDebug(_logger, "udp.session.closed", session.Flow, session.FlowGeneration, session.Association, serverName: null);
     }
 
     /// <summary>

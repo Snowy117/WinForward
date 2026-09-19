@@ -337,7 +337,7 @@ public sealed class TcpRedirectTable
 
     public TcpRedirectAssociation[] Snapshot()
     {
-        lock (_gate) return _byOriginal.Values.ToArray();
+        lock (_gate) return [.. _byOriginal.Values];
     }
 
     private void RemoveAddressPairUnderGate(TcpRedirectAssociation association)

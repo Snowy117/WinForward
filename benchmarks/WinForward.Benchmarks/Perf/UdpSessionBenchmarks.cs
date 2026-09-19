@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using BenchmarkDotNet.Attributes;
@@ -22,8 +23,8 @@ namespace WinForward.Benchmarks.Perf;
 [MemoryDiagnoser]
 public class UdpSessionBenchmarks
 {
-    private static readonly TimeSpan ReadinessTimeout = TimeSpan.FromSeconds(60);
-    private static readonly byte[] Payload = [1];
+    private static readonly TimeSpan s_readinessTimeout = TimeSpan.FromSeconds(60);
+    private static readonly byte[] s_payload = [1];
 
     [Params(1, 100, 1000)]
     public int Sessions { get; set; }
@@ -41,7 +42,7 @@ public class UdpSessionBenchmarks
         _echoDiscard = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         _echoDiscard.Bind(new IPEndPoint(IPAddress.Loopback, 0));
         _server = new LoopbackSocks5UdpServer((IPEndPoint)_echoDiscard.LocalEndPoint!);
-        _socks = new Socks5Server("benchmark", "127.0.0.1", checked((ushort)_server.ControlEndpoint.Port), null, null);
+        _socks = new Socks5Server("benchmark", "127.0.0.1", checked((ushort)_server.ControlEndpoint.Port), Username: null, Password: null);
     }
 
     [GlobalCleanup]
@@ -58,7 +59,7 @@ public class UdpSessionBenchmarks
         var forwardedBaseline = _server.RelayForwarded;
         for (var index = 0; index < Sessions; index++)
         {
-            if (!await coordinator.TrySendSpanAsync(BenchmarkShared.CreateFlowKey(index), _socks, Payload, default, CancellationToken.None).ConfigureAwait(false))
+            if (!await coordinator.TrySendSpanAsync(BenchmarkShared.CreateFlowKey(index), _socks, s_payload, default, CancellationToken.None).ConfigureAwait(false))
             {
                 throw new InvalidOperationException("Unable to populate the UDP session benchmark.");
             }
@@ -82,7 +83,7 @@ public class UdpSessionBenchmarks
         var sendsBaseline = factory.Sends;
         for (var index = 0; index < Sessions; index++)
         {
-            if (!await coordinator.TrySendSpanAsync(BenchmarkShared.CreateFlowKey(index), _socks, Payload, default, CancellationToken.None).ConfigureAwait(false))
+            if (!await coordinator.TrySendSpanAsync(BenchmarkShared.CreateFlowKey(index), _socks, s_payload, default, CancellationToken.None).ConfigureAwait(false))
             {
                 throw new InvalidOperationException("Unable to populate the UDP session benchmark.");
             }
@@ -91,9 +92,9 @@ public class UdpSessionBenchmarks
         var stopwatch = Stopwatch.StartNew();
         while (factory.Sends < sendsBaseline + Sessions)
         {
-            if (stopwatch.Elapsed > ReadinessTimeout)
+            if (stopwatch.Elapsed > s_readinessTimeout)
             {
-                throw new InvalidOperationException($"UDP session setup did not settle within {ReadinessTimeout.TotalSeconds:0}s ({factory.Sends - sendsBaseline}/{Sessions} flushed).");
+                throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture, $"UDP session setup did not settle within {s_readinessTimeout.TotalSeconds:0}s ({factory.Sends - sendsBaseline}/{Sessions} flushed)."));
             }
 
             await Task.Delay(1).ConfigureAwait(false);
@@ -112,9 +113,9 @@ public class UdpSessionBenchmarks
         var spins = 0;
         while (_server.RelayForwarded < targetForwarded)
         {
-            if (stopwatch.Elapsed > ReadinessTimeout)
+            if (stopwatch.Elapsed > s_readinessTimeout)
             {
-                throw new InvalidOperationException($"UDP session setup did not settle within {ReadinessTimeout.TotalSeconds:0}s ({_server.RelayForwarded - (targetForwarded - Sessions)}/{Sessions} forwarded).");
+                throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture, $"UDP session setup did not settle within {s_readinessTimeout.TotalSeconds:0}s ({_server.RelayForwarded - (targetForwarded - Sessions)}/{Sessions} forwarded)."));
             }
 
             if (spins < 200_000)

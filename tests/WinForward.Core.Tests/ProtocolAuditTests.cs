@@ -78,7 +78,7 @@ public sealed class ProtocolAuditTests
         Assert.Equal(Socks5ReplyKind.Invalid, Socks5Messages.TryParseReply(nonZeroReserved, out _, out _, out _));
         Assert.Equal(Socks5ReplyKind.Invalid, Socks5Messages.TryParseReply(unknownAddressType, out _, out _, out _));
         Assert.Equal(Socks5ReplyKind.Invalid, Socks5Messages.TryParseReply(unknownReplyStatus, out _, out _, out _));
-        Assert.False(Socks5Messages.TryParseReplyPrefix(new byte[] { 5, 0 }, out _));
+        Assert.False(Socks5Messages.TryParseReplyPrefix([5, 0], out _));
         Assert.False(Socks5Messages.TryParseReplyPrefix(nonZeroReserved, out _));
         Assert.False(Socks5Messages.TryParseReplyPrefix(unknownReplyStatus, out _));
         Assert.False(Socks5Messages.TryGetReplyLength(unknownAddressType, out _));

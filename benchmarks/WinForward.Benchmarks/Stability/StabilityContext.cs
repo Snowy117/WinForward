@@ -6,7 +6,7 @@ namespace WinForward.Benchmarks.Stability;
 
 internal sealed class StabilityContext : IDisposable
 {
-    private static readonly JsonSerializerOptions Serialization = new()
+    private static readonly JsonSerializerOptions s_serialization = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         // Opt-off diagnostics (e.g. UdpLossScenario's productEvents) omit their field
@@ -32,13 +32,13 @@ internal sealed class StabilityContext : IDisposable
             Architecture = RuntimeInformation.ProcessArchitecture.ToString(),
             Options = options,
         };
-        Write(JsonSerializer.Serialize(metadata, Serialization));
+        Write(JsonSerializer.Serialize(metadata, s_serialization));
     }
 
     public void WriteResult(string scenario, object parameters, object metrics)
     {
         var record = new { Type = "result", Scenario = scenario, Parameters = parameters, Metrics = metrics };
-        Write(JsonSerializer.Serialize(record, Serialization));
+        Write(JsonSerializer.Serialize(record, s_serialization));
     }
 
     private void Write(string json)

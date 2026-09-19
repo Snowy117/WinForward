@@ -21,8 +21,8 @@ public sealed partial class UdpProxyCoordinator
     {
         if (flow.Protocol != TransportProtocol.Udp) throw new ArgumentException("UDP coordinator accepts only UDP flow keys.", nameof(flow));
 
-        UdpSessionSlot? readySlot = null;
-        UdpProxySession? readySession = null;
+        UdpSessionSlot? readySlot;
+        UdpProxySession? readySession;
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -68,7 +68,7 @@ public sealed partial class UdpProxyCoordinator
             }
         }
 
-        var result = SendOnReadySessionSpanAsync(flow, readySlot!, readySession!, payload, cancellationToken, packetSequence);
+        var result = SendOnReadySessionSpanAsync(flow, readySlot!, readySession!, payload, packetSequence, cancellationToken);
         return result;
     }
 
@@ -79,7 +79,7 @@ public sealed partial class UdpProxyCoordinator
     /// cancellation propagates untouched; any other send failure removes the slot first and then
     /// rethrows the original exception.
     /// </summary>
-    private ValueTask<bool> SendOnReadySessionSpanAsync(FlowKey flow, UdpSessionSlot slot, UdpProxySession session, ReadOnlySpan<byte> payload, CancellationToken cancellationToken, long packetSequence)
+    private ValueTask<bool> SendOnReadySessionSpanAsync(FlowKey flow, UdpSessionSlot slot, UdpProxySession session, ReadOnlySpan<byte> payload, long packetSequence, CancellationToken cancellationToken)
     {
         ValueTask send;
         try

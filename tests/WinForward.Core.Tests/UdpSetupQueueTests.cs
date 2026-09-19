@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Runtime.Socks5;
@@ -20,7 +21,7 @@ namespace WinForward.Core.Tests;
 /// </summary>
 public sealed class UdpSetupQueueTests
 {
-    private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, null, null);
+    private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, Username: null, Password: null);
 
     [Fact]
     public async Task FirstDatagramDoesNotAwaitAStalledSetupAndDatagramsRelayInFifoOrder()
@@ -34,8 +35,8 @@ public sealed class UdpSetupQueueTests
         var flow = CreateFlow("192.0.2.53");
 
         var stopwatch = Stopwatch.StartNew();
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 1 }, default, CancellationToken.None));
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 2 }, default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [2], default, CancellationToken.None));
         stopwatch.Stop();
         Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(3), $"TrySendSpanAsync awaited the setup ({stopwatch.Elapsed}).");
 
@@ -68,7 +69,7 @@ public sealed class UdpSetupQueueTests
         const int retained = 32;
         for (var index = 0; index < count; index++)
         {
-            Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new[] { (byte)index }, default, CancellationToken.None));
+            Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [(byte)index], default, CancellationToken.None));
         }
 
         gate.TrySetResult();
@@ -103,11 +104,11 @@ public sealed class UdpSetupQueueTests
         await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink());
         var flow = CreateFlow("192.0.2.53");
 
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 1 }, default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
         gate.TrySetResult();
         for (var index = 2; index <= 4; index++)
         {
-            Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new[] { (byte)index }, default, CancellationToken.None));
+            Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [(byte)index], default, CancellationToken.None));
         }
 
         await WaitForAsync(() => factory.Transports.Count == 1);
@@ -141,10 +142,10 @@ public sealed class UdpSetupQueueTests
         await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, TimeProvider = time });
         var flow = CreateFlow("192.0.2.53");
 
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 1 }, default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
         await WaitForAsync(() => factory.CreateCalls == 1);
         time.Advance(TimeSpan.FromSeconds(6));
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 2 }, default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [2], default, CancellationToken.None));
 
         gate.TrySetResult();
         await WaitForAsync(() => factory.Transports.Count == 1);
@@ -179,24 +180,24 @@ public sealed class UdpSetupQueueTests
         const int occupants = 8;
         var factory = new StagedGateTransportFactory(occupantGate, occupants);
         await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = occupants + 8, TimeProvider = time });
-        var flows = Enumerable.Range(0, occupants + 1).Select(index => CreateFlow($"192.0.2.{index + 1}")).ToArray();
+        var flows = Enumerable.Range(0, occupants + 1).Select(index => CreateFlow(string.Create(CultureInfo.InvariantCulture, $"192.0.2.{index + 1}"))).ToArray();
 
         for (var index = 0; index < occupants; index++)
         {
-            Assert.True(await coordinator.TrySendSpanAsync(flows[index], s_server, new[] { (byte)index }, default, CancellationToken.None));
+            Assert.True(await coordinator.TrySendSpanAsync(flows[index], s_server, [(byte)index], default, CancellationToken.None));
         }
 
         // The occupants hold every limiter slot; flow #9's datagram is accepted (buffered)
         // while its setup queues on the limiter.
         await WaitForAsync(() => factory.CreateCalls == occupants);
-        Assert.True(await coordinator.TrySendSpanAsync(flows[occupants], s_server, new[] { (byte)occupants }, default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flows[occupants], s_server, [(byte)occupants], default, CancellationToken.None));
 
         // 4 s of limiter queue-wait for flow #9 (and 4 s of dial for the occupants, under the
         // TTL). Releasing the occupants lets flow #9's dial start: its queue is re-stamped at
         // that boundary, observable once its CreateAsync is entered.
         time.Advance(TimeSpan.FromSeconds(4));
         occupantGate.TrySetResult();
-        await factory.QueuedCreateStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await factory.QueuedCreateStarted.Task.WaitAsync(TimeSpan.FromSeconds(10), TimeProvider.System, CancellationToken.None);
 
         // The occupants' datagrams flush before the clock moves again (their dial was 4 s).
         await WaitForAsync(() =>
@@ -234,7 +235,7 @@ public sealed class UdpSetupQueueTests
             {
                 lock (transport.Sent)
                 {
-                    foreach (var sent in transport.Sent) forwarded.Add(Assert.Single(sent.Payload));
+                    foreach (var (_, payload) in transport.Sent) forwarded.Add(Assert.Single(payload));
                 }
             }
         }
@@ -253,13 +254,13 @@ public sealed class UdpSetupQueueTests
         var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink());
         var flow = CreateFlow("192.0.2.53");
 
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 1 }, default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
         await coordinator.DisposeAsync();
 
         // The gate never opens: disposal must complete without waiting for the stalled setup.
         gate.TrySetResult();
         await Assert.ThrowsAsync<ObjectDisposedException>(async () =>
-            await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 2 }, default, CancellationToken.None));
+            await coordinator.TrySendSpanAsync(flow, s_server, [2], default, CancellationToken.None));
         Assert.Empty(factory.Transports);
     }
 
@@ -281,7 +282,7 @@ public sealed class UdpSetupQueueTests
         var queue = new BoundedSetupQueue(4, 1024);
         var enqueuedAt = new DateTimeOffset(2026, 9, 6, 0, 0, 0, TimeSpan.Zero);
         var refreshAt = enqueuedAt + TimeSpan.FromSeconds(10);
-        Enqueue(queue, pool, new byte[] { 1 }, enqueuedAt);
+        Enqueue(queue, pool, [1], enqueuedAt);
 
         Assert.Equal(1, queue.RefreshEnqueuedStamps(refreshAt));
 
@@ -303,7 +304,7 @@ public sealed class UdpSetupQueueTests
         var baseStamp = new DateTimeOffset(2026, 9, 6, 0, 0, 0, TimeSpan.Zero);
         for (var index = 0; index < 3; index++)
         {
-            Enqueue(queue, pool, new[] { (byte)index }, baseStamp + TimeSpan.FromSeconds(index));
+            Enqueue(queue, pool, [(byte)index], baseStamp + TimeSpan.FromSeconds(index));
         }
 
         var refreshAt = baseStamp + TimeSpan.FromMinutes(1);

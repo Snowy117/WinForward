@@ -16,7 +16,15 @@ namespace WinForward.Runtime.UdpProxy;
 /// redirect setup/acceptor pair. Owns the 2026-09-06 dial-start re-stamp fix (limiter queue-wait
 /// is not client staleness) as one cohesive unit.
 /// </summary>
-internal sealed class UdpSessionSetup
+internal sealed class UdpSessionSetup(
+    IUdpProxyTransportFactory transportFactory,
+    UdpAssociationTable associations,
+    IUdpResponseSink responseSink,
+    TimeProvider timeProvider,
+    IRuntimeLogger logger,
+    NativeBufferPool receiveWindowPool,
+    int receiveBufferSize,
+    IUdpSessionSlotHost host)
 {
     private const int MaximumConcurrentSetups = 8;
 
@@ -27,39 +35,19 @@ internal sealed class UdpSessionSetup
     /// already been retransmitted or abandoned by the application, so the flush delivers only
     /// fresh state.
     /// </summary>
-    private static readonly TimeSpan SetupQueueDatagramTtl = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan s_setupQueueDatagramTtl = TimeSpan.FromSeconds(5);
 
-    private readonly IUdpProxyTransportFactory _transportFactory;
-    private readonly UdpAssociationTable _associations;
-    private readonly IUdpResponseSink _responseSink;
-    private readonly TimeProvider _timeProvider;
-    private readonly IRuntimeLogger _logger;
-    private readonly NativeBufferPool _receiveWindowPool;
-    private readonly int _receiveBufferSize;
-    private readonly IUdpSessionSlotHost _host;
+    private readonly IUdpProxyTransportFactory _transportFactory = transportFactory;
+    private readonly UdpAssociationTable _associations = associations;
+    private readonly IUdpResponseSink _responseSink = responseSink;
+    private readonly TimeProvider _timeProvider = timeProvider;
+    private readonly IRuntimeLogger _logger = logger;
+    private readonly NativeBufferPool _receiveWindowPool = receiveWindowPool;
+    private readonly int _receiveBufferSize = receiveBufferSize;
+    private readonly IUdpSessionSlotHost _host = host;
     private readonly SemaphoreSlim _setupLimiter = new(MaximumConcurrentSetups, MaximumConcurrentSetups);
     private long _ttlExpiredCount;
     private long _stampsRefreshedCount;
-
-    public UdpSessionSetup(
-        IUdpProxyTransportFactory transportFactory,
-        UdpAssociationTable associations,
-        IUdpResponseSink responseSink,
-        TimeProvider timeProvider,
-        IRuntimeLogger logger,
-        NativeBufferPool receiveWindowPool,
-        int receiveBufferSize,
-        IUdpSessionSlotHost host)
-    {
-        _transportFactory = transportFactory;
-        _associations = associations;
-        _responseSink = responseSink;
-        _timeProvider = timeProvider;
-        _logger = logger;
-        _receiveWindowPool = receiveWindowPool;
-        _receiveBufferSize = receiveBufferSize;
-        _host = host;
-    }
 
     /// <summary>The total buffered datagrams dropped at flush for exceeding the setup TTL; for tests and diagnostics.</summary>
     internal long TtlExpiredCount => Interlocked.Read(ref _ttlExpiredCount);
@@ -80,7 +68,7 @@ internal sealed class UdpSessionSetup
         QueueEmpty,
     }
 
-    internal async Task CreateSessionAsync(FlowKey flow, Socks5Server server, long flowGeneration, MacAddress clientMac, CancellationToken cancellationToken, UdpProxyCoordinator.UdpSessionSlot slot)
+    internal async Task CreateSessionAsync(FlowKey flow, Socks5Server server, long flowGeneration, MacAddress clientMac, UdpProxyCoordinator.UdpSessionSlot slot, CancellationToken cancellationToken)
     {
         // Patient admission: a flash crowd of new flows must queue behind the 8-wide setup
         // gate rather than fail into the setup cooldown, because a failed setup's teardown
@@ -115,7 +103,7 @@ internal sealed class UdpSessionSetup
                 throw new IOException("UDP flow association was already owned by another session; blocking the flow.");
             }
 
-            var session = new UdpProxySession(new UdpProxySessionContext(flow, flowGeneration, association, transport, _responseSink, clientMac, cancellationToken, _timeProvider, OnSessionActivity, _logger, _receiveWindowPool, _receiveBufferSize));
+            var session = new UdpProxySession(new UdpProxySessionContext(flow, flowGeneration, association, transport, _responseSink, clientMac, _timeProvider, OnSessionActivity, _logger, _receiveWindowPool, _receiveBufferSize, cancellationToken));
             transport = null;
             _host.AttachSession(slot, session);
             session.Start(_host.RemoveReceiveFailedSessionAsync);
@@ -169,13 +157,13 @@ internal sealed class UdpSessionSetup
     {
         while (true)
         {
-            var step = _host.DequeueForFlush(flow, slot);
-            if (step.Step != FlushStep.Dequeued) return;
+            var (step, lease, length, enqueuedAt) = _host.DequeueForFlush(flow, slot);
+            if (step != FlushStep.Dequeued) return;
 
-            if (_timeProvider.GetUtcNow() - step.EnqueuedAt > SetupQueueDatagramTtl)
+            if (_timeProvider.GetUtcNow() - enqueuedAt > s_setupQueueDatagramTtl)
             {
                 Interlocked.Increment(ref _ttlExpiredCount);
-                step.Lease.Dispose();
+                lease.Dispose();
                 continue;
             }
 
@@ -183,11 +171,11 @@ internal sealed class UdpSessionSetup
             // await; the lease is released exactly once on every exit below.
             try
             {
-                await session.SendSpanAsync(flow.Remote, step.Lease.Span[..step.Length], cancellationToken).ConfigureAwait(false);
+                await session.SendSpanAsync(flow.Remote, lease.Span[..length], cancellationToken).ConfigureAwait(false);
             }
             finally
             {
-                step.Lease.Dispose();
+                lease.Dispose();
             }
         }
     }

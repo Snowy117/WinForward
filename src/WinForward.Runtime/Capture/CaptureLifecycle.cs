@@ -9,7 +9,7 @@ public enum CaptureRuntimeState
     ModesApplied,
     Running,
     Stopping,
-    Closed
+    Closed,
 }
 
 public readonly record struct AdapterModeSnapshot(string AdapterId, uint Flags);
@@ -182,7 +182,7 @@ public sealed class TransactionalCaptureRuntime : IAsyncDisposable
         // Ctrl+C lands right after a degradation). A snapshot makes the iteration stable; entries
         // removed mid-restore are simply gone, and a double restore is idempotent.
         AdapterModeSnapshot[] applied;
-        lock (_gate) applied = _applied.ToArray();
+        lock (_gate) applied = [.. _applied];
         foreach (var adapter in applied.AsEnumerable().Reverse())
         {
             try { await _modes.RestoreAsync(adapter, CancellationToken.None).ConfigureAwait(false); }

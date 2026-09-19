@@ -139,7 +139,7 @@ public sealed class UdpPacketParsingTests
     {
         var frame = CreateIpv4UdpFrame();
         Assert.True(PacketChecksums.TryRewriteUdpEndpoints(frame, IPAddress.Parse("198.51.100.1"), 40000, IPAddress.Parse("203.0.113.2"), 5353));
-        var udpOffset = 14 + 20;
+        const int udpOffset = 14 + 20;
         var udpLength = BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(udpOffset + 4, 2));
         var checksum = BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(udpOffset + 6, 2));
         BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(udpOffset + 6, 2), 0);
@@ -179,7 +179,7 @@ public sealed class UdpPacketParsingTests
         Assert.Equal(IPAddress.Parse("2001:db8::1"), packet.DestinationAddress);
         Assert.Equal((ushort)5353, packet.DestinationPort);
 
-        var udpOffset = 14 + 40;
+        const int udpOffset = 14 + 40;
         var udpLength = BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(udpOffset + 4, 2));
         var checksum = BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(udpOffset + 6, 2));
         BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(udpOffset + 6, 2), 0);

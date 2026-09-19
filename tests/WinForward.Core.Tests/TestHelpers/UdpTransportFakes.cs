@@ -13,17 +13,12 @@ namespace WinForward.Core.Tests;
 /// In-memory fakes for the SOCKS5 UDP relay transport seam: a factory emitting distinct bound
 /// sockets, a channel-backed transport, a recording response sink, and an always-faulting pair.
 /// </summary>
-internal sealed class FakeTransportFactory : IUdpProxyTransportFactory
+internal sealed class FakeTransportFactory(AddressFamily addressFamily = AddressFamily.InterNetwork) : IUdpProxyTransportFactory
 {
-    private readonly AddressFamily _addressFamily;
+    private readonly AddressFamily _addressFamily = addressFamily;
     public List<FakeTransport> Transports { get; } = [];
     private int _nextLocalPort = 40000;
     private int _createCalls;
-
-    public FakeTransportFactory(AddressFamily addressFamily = AddressFamily.InterNetwork)
-    {
-        _addressFamily = addressFamily;
-    }
 
     public int CreateCalls => Volatile.Read(ref _createCalls);
 

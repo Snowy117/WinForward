@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 
@@ -64,7 +65,7 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
             if (NdisApiNative.GetTcpipBoundAdaptersInfo(_handle, &native) == 0)
             {
                 var nativeError = Marshal.GetLastWin32Error();
-                throw new Win32Exception(nativeError, $"Unable to enumerate NDISAPI adapters (native error {nativeError}, 0x{nativeError:X8}).");
+                throw new Win32Exception(nativeError, string.Create(CultureInfo.InvariantCulture, $"Unable to enumerate NDISAPI adapters (native error {nativeError}, 0x{nativeError:X8})."));
             }
         }
 
@@ -74,7 +75,7 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
         {
             var name = ReadAscii(native.AdapterNames, index * NdisApiAbi.AdapterNameSize, NdisApiAbi.AdapterNameSize);
             var mac = new byte[NdisApiAbi.EthernetAddressLength];
-            for (var octet = 0; octet < mac.Length; octet++) mac[octet] = native.CurrentAddresses[index * mac.Length + octet];
+            for (var octet = 0; octet < mac.Length; octet++) mac[octet] = native.CurrentAddresses[(index * mac.Length) + octet];
             adapters.Add(new NdisAdapter((nint)native.AdapterHandles[index], name, native.AdapterMediums[index], mac, native.Mtus[index]));
         }
         return adapters;
@@ -103,7 +104,7 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
         {
             var nativeError = Marshal.GetLastWin32Error();
             var operation = win32Event == nint.Zero ? "release" : "register";
-            throw new Win32Exception(nativeError, $"Unable to {operation} the NDISAPI adapter-list-change event (native error {nativeError}, 0x{nativeError:X8}).");
+            throw new Win32Exception(nativeError, string.Create(CultureInfo.InvariantCulture, $"Unable to {operation} the NDISAPI adapter-list-change event (native error {nativeError}, 0x{nativeError:X8})."));
         }
     }
 
@@ -115,7 +116,7 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
             if (NdisApiNative.GetAdapterMode(_handle, &mode) == 0)
             {
                 var nativeError = Marshal.GetLastWin32Error();
-                throw new Win32Exception(nativeError, $"Unable to read NDISAPI adapter mode (native error {nativeError}, 0x{nativeError:X8}).");
+                throw new Win32Exception(nativeError, string.Create(CultureInfo.InvariantCulture, $"Unable to read NDISAPI adapter mode (native error {nativeError}, 0x{nativeError:X8})."));
             }
         }
         return mode.Flags;
@@ -128,7 +129,7 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
         if (NdisApiNative.SetAdapterMode(_handle, &mode) == 0)
         {
             var nativeError = Marshal.GetLastWin32Error();
-            throw new Win32Exception(nativeError, $"Unable to set NDISAPI adapter mode (native error {nativeError}, 0x{nativeError:X8}).");
+            throw new Win32Exception(nativeError, string.Create(CultureInfo.InvariantCulture, $"Unable to set NDISAPI adapter mode (native error {nativeError}, 0x{nativeError:X8})."));
         }
     }
 
@@ -145,9 +146,9 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
 
         uint queuedPacketCount = 0;
         uint packetsSuccess = 0;
-        int requestedCount = 0;
-        int readResult = 0;
-        int readError = 0;
+        var requestedCount = 0;
+        var readResult = 0;
+        var readError = 0;
 
         var adapterGate = _adapterGates.Get(adapterHandle);
         using (var gateLease = adapterGate.Enter())
@@ -207,14 +208,13 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
         var slots = (NdisrdEthernetPacket*)&request->FirstBuffer;
         for (var index = 0; index < count; index++)
         {
-            var buffer = buffers[offset + index];
-            if (buffer is null) throw new ArgumentNullException(nameof(buffers));
+            var buffer = buffers[offset + index] ?? throw new ArgumentNullException(nameof(buffers));
             slots[index] = new NdisrdEthernetPacket { Buffer = buffer.Pointer };
         }
     }
 
     private static unsafe nuint MultiRequestByteCount(int count) =>
-        (nuint)sizeof(EthernetMultiRequest) + (nuint)(count - 1) * (nuint)sizeof(NdisrdEthernetPacket);
+        (nuint)sizeof(EthernetMultiRequest) + ((nuint)(count - 1) * (nuint)sizeof(NdisrdEthernetPacket));
 
     public unsafe void SendPacketToMstcp(nint adapterHandle, NdisPacketBuffer buffer)
     {
@@ -225,7 +225,7 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
         if (NdisApiNative.SendPacketToMstcp(_handle, &request) == 0)
         {
             var error = Marshal.GetLastWin32Error();
-            throw new Win32Exception(error, $"Unable to inject an NDISAPI packet toward MSTCP (native error {error}, length {buffer.Length}, device flags 0x{buffer.DeviceFlags:X}, NDIS flags 0x{buffer.Flags:X}, adapter 0x{adapterHandle:X}).");
+            throw new Win32Exception(error, string.Create(CultureInfo.InvariantCulture, $"Unable to inject an NDISAPI packet toward MSTCP (native error {error}, length {buffer.Length}, device flags 0x{buffer.DeviceFlags:X}, NDIS flags 0x{buffer.Flags:X}, adapter 0x{adapterHandle:X})."));
         }
     }
 
@@ -238,7 +238,7 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
         if (NdisApiNative.SendPacketToAdapter(_handle, &request) == 0)
         {
             var error = Marshal.GetLastWin32Error();
-            throw new Win32Exception(error, $"Unable to inject an NDISAPI packet toward the adapter (native error {error}, length {buffer.Length}, device flags 0x{buffer.DeviceFlags:X}, NDIS flags 0x{buffer.Flags:X}, adapter 0x{adapterHandle:X}).");
+            throw new Win32Exception(error, string.Create(CultureInfo.InvariantCulture, $"Unable to inject an NDISAPI packet toward the adapter (native error {error}, length {buffer.Length}, device flags 0x{buffer.DeviceFlags:X}, NDIS flags 0x{buffer.Flags:X}, adapter 0x{adapterHandle:X})."));
         }
     }
 
@@ -285,7 +285,7 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
             {
                 var error = Marshal.GetLastWin32Error();
                 var target = toMstcp ? "MSTCP" : "the adapter";
-                throw new Win32Exception(error, $"Unable to inject {chunkCount} NDISAPI packets toward {target} (native error {error}, packets {offset}..{offset + chunkCount - 1} of {count}, adapter 0x{adapterHandle:X}).");
+                throw new Win32Exception(error, string.Create(CultureInfo.InvariantCulture, $"Unable to inject {chunkCount} NDISAPI packets toward {target} (native error {error}, packets {offset}..{offset + chunkCount - 1} of {count}, adapter 0x{adapterHandle:X})."));
             }
         }
     }

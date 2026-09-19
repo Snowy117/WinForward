@@ -19,7 +19,6 @@ public sealed class NdisPacketBufferPool : IDisposable
     public const int DefaultCapacity = 256;
 
     private readonly ConcurrentQueue<NdisPacketBuffer> _buffers = new();
-    private readonly int _capacity;
     private int _disposedState;
     private long _rented;
     private long _returned;
@@ -29,8 +28,8 @@ public sealed class NdisPacketBufferPool : IDisposable
 
     public NdisPacketBufferPool(int capacity = DefaultCapacity)
     {
-        if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(capacity));
-        _capacity = capacity;
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capacity);
+        Capacity = capacity;
     }
 
     /// <summary>The process-wide pool used by the injection paths when none is injected.</summary>
@@ -38,15 +37,15 @@ public sealed class NdisPacketBufferPool : IDisposable
 
     /// <summary>
     /// Optional per-rent/return accounting sink for process-wide diagnostics (the RuntimeCounters
-    /// pool registry): invoked once per successful rent (<c>true</c>) and once per completed
-    /// return (<c>false</c>). Composition sets it once at startup, before any capture pump can
-    /// rent; it stays <c>null</c> when unwired. Diagnostics only — the sink must not throw (the
+    /// pool registry): invoked once per successful rent (<see langword="true"/>) and once per completed
+    /// return (<see langword="false"/>). Composition sets it once at startup, before any capture pump can
+    /// rent; it stays <see langword="null"/> when unwired. Diagnostics only — the sink must not throw (the
     /// production sink, interlocked counter increments over constant keys, cannot) and never
     /// influences pool behavior.
     /// </summary>
     public Action<bool>? AccountingSink { get; set; }
 
-    public int Capacity => _capacity;
+    public int Capacity { get; }
     public int Count => _buffers.Count;
 
     /// <summary>Point-in-time rent/return accounting for diagnostics and balance tests.</summary>
@@ -132,7 +131,7 @@ public sealed class NdisPacketBufferPool : IDisposable
     {
         Interlocked.Increment(ref _returned);
         AccountingSink?.Invoke(false);
-        if (Volatile.Read(ref _disposedState) != 0 || Volatile.Read(ref _inPool) >= _capacity)
+        if (Volatile.Read(ref _disposedState) != 0 || Volatile.Read(ref _inPool) >= Capacity)
         {
             ReleaseBuffer(buffer);
             return;

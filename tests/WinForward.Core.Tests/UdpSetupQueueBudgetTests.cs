@@ -15,7 +15,7 @@ namespace WinForward.Core.Tests;
 /// </summary>
 public sealed class UdpSetupQueueBudgetTests
 {
-    private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, null, null);
+    private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, Username: null, Password: null);
 
     [Fact]
     public async Task GlobalSetupBudgetRejectsBeyondTheAggregateAndCreditsBackOnFlush()
@@ -30,7 +30,7 @@ public sealed class UdpSetupQueueBudgetTests
         var flow = CreateFlow("192.0.2.53");
 
         Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[3000], default, CancellationToken.None));
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 1 }, default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
         Assert.Equal(3001, coordinator.Diagnostics.PendingSetupBytes);
 
         // 3001 + 2000 crosses the 4096-byte aggregate: the new datagram is rejected and counted.
@@ -53,7 +53,7 @@ public sealed class UdpSetupQueueBudgetTests
 
         // The flush credited both charges back: admission recovers for a brand-new flow.
         Assert.Equal(0, coordinator.Diagnostics.PendingSetupBytes);
-        Assert.True(await coordinator.TrySendSpanAsync(CreateFlow("192.0.2.54"), s_server, new byte[] { 9 }, default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(CreateFlow("192.0.2.54"), s_server, "\t"u8, default, CancellationToken.None));
     }
 
     [Fact]
@@ -113,16 +113,16 @@ public sealed class UdpSetupQueueBudgetTests
         await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, TimeProvider = time, SetupQueuePool = pool });
         var flow = CreateFlow("192.0.2.53");
 
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 1 }, default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
         await WaitForAsync(() => factory.CreateCalls == 1);
         // 40 datagrams overflow the 32-packet per-flow bound: drop-oldest keeps the freshest.
         for (var index = 0; index < 40; index++)
         {
-            Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { (byte)index }, default, CancellationToken.None));
+            Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [(byte)index], default, CancellationToken.None));
         }
 
         time.Advance(TimeSpan.FromSeconds(6));
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 0xaa }, default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [0xaa], default, CancellationToken.None));
 
         gate.TrySetResult();
         await WaitForAsync(() => factory.Transports.Count == 1);

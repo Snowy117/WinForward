@@ -139,13 +139,13 @@ public sealed class AdapterLocalAddressProviderCacheTests
     private static IReadOnlyList<IPAdapterUnicastInfo> Subnet100() =>
         [new IPAdapterUnicastInfo(AdapterGuid,
         [
-            new IPAdapterUnicastAddress(IPAddress.Parse("192.168.100.1"), IPAddress.Parse("255.255.255.0"))
+            new IPAdapterUnicastAddress(IPAddress.Parse("192.168.100.1"), IPAddress.Parse("255.255.255.0")),
         ])];
 
     private static IReadOnlyList<IPAdapterUnicastInfo> Subnet10() =>
         [new IPAdapterUnicastInfo(AdapterGuid,
         [
-            new IPAdapterUnicastAddress(IPAddress.Parse("10.0.0.1"), IPAddress.Parse("255.0.0.0"))
+            new IPAdapterUnicastAddress(IPAddress.Parse("10.0.0.1"), IPAddress.Parse("255.0.0.0")),
         ])];
 
     /// <summary>

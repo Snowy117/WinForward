@@ -59,7 +59,7 @@ internal sealed class TcpPendingSynSetupIndex
     /// A normal setup (bind + claim + inject) completes in well under a second; an entry still
     /// pending after this window belongs to a stuck bind and is reclaimed by the idle sweep.
     /// </summary>
-    private static readonly TimeSpan RetentionTtl = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan s_retentionTtl = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// The per-flow cooldown after a genuine setup failure (bind throws, claim fails, injection
@@ -67,7 +67,7 @@ internal sealed class TcpPendingSynSetupIndex
     /// a dead setup path is not re-armed at retransmission rate. Mirrors the UDP setup-failure
     /// tombstone (<c>udp.setup.cooldown</c>).
     /// </summary>
-    private static readonly TimeSpan SetupFailureCooldown = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan s_setupFailureCooldown = TimeSpan.FromSeconds(1);
 
     private readonly Lock _gate = new();
     private readonly Dictionary<FlowKey, PendingSynSetup> _pending = [];
@@ -232,7 +232,7 @@ internal sealed class TcpPendingSynSetupIndex
         {
             foreach (var pair in _pending)
             {
-                if (now - pair.Value.LastWriteUtc > RetentionTtl) (expired ??= []).Add(pair.Key);
+                if (now - pair.Value.LastWriteUtc > s_retentionTtl) (expired ??= []).Add(pair.Key);
             }
 
             if (expired is not null)
@@ -294,7 +294,7 @@ internal sealed class TcpPendingSynSetupIndex
         Task[] tasks;
         lock (_gate)
         {
-            tasks = _setupTasks.Where(task => !task.IsCompleted).ToArray();
+            tasks = [.. _setupTasks.Where(task => !task.IsCompleted)];
             _setupTasks.Clear();
         }
 
@@ -308,7 +308,7 @@ internal sealed class TcpPendingSynSetupIndex
         // oldest-deadline entry is evicted instead (the timestamp doubles as the age order —
         // the same cold-path tradeoff as the UDP coordinator's cooldown table).
         if (_setupCooldowns.Count >= _capacity && !_setupCooldowns.ContainsKey(key)) EvictOldestCooldownUnderGate();
-        _setupCooldowns[key] = now + SetupFailureCooldown;
+        _setupCooldowns[key] = now + s_setupFailureCooldown;
     }
 
     private void EvictOldestCooldownUnderGate()

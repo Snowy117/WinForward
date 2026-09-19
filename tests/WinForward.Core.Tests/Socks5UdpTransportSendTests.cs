@@ -33,9 +33,9 @@ public sealed class Socks5UdpTransportSendTests
         using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var associateRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var server = ServeAssociateOnlyAsync(tcpListener, relayEndpoint, associateRead, serverCancellation.Token);
-        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), null, null);
+        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
         var transport = await Socks5UdpTransport.CreateAsync(socksServer, new SelfTrafficRegistry(), CancellationToken.None, createControl: null, socketFactory: null);
-        var payload = new byte[] { 0x51, 0x52, 0x53 };
+        var payload = "QRS"u8.ToArray();
         var destination = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
 
         await transport.SendSpanAsync(destination, payload, CancellationToken.None);
@@ -59,7 +59,7 @@ public sealed class Socks5UdpTransportSendTests
         Assert.Equal(payload, echo.Datagram.Payload.ToArray());
 
         await transport.DisposeAsync();
-        serverCancellation.Cancel();
+        await serverCancellation.CancelAsync();
         await IgnoreExpectedCancellationAsync(server);
     }
 
@@ -75,19 +75,19 @@ public sealed class Socks5UdpTransportSendTests
         var controlEndpoint = (IPEndPoint)tcpListener.LocalEndpoint;
         using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var server = ServeAssociateOnlyAsync(tcpListener, relayEndpoint, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), serverCancellation.Token);
-        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), null, null);
+        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
         TrackingSocket? socket = null;
         var transport = await Socks5UdpTransport.CreateAsync(
             socksServer,
             new SelfTrafficRegistry(),
             CancellationToken.None,
-            null,
+            createControl: null,
             family => socket = new TrackingSocket(family));
 
         Assert.False(socket!.Blocking);
 
         await transport.DisposeAsync();
-        serverCancellation.Cancel();
+        await serverCancellation.CancelAsync();
         await IgnoreExpectedCancellationAsync(server);
     }
 
@@ -106,13 +106,13 @@ public sealed class Socks5UdpTransportSendTests
         var controlEndpoint = (IPEndPoint)tcpListener.LocalEndpoint;
         using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var server = ServeAssociateOnlyAsync(tcpListener, relayEndpoint, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), serverCancellation.Token);
-        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), null, null);
+        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
         var transport = await Socks5UdpTransport.CreateAsync(
             socksServer,
             new SelfTrafficRegistry(),
             CancellationToken.None,
-            null,
-            null,
+            createControl: null,
+            socketFactory: null,
             maximumFrameSize: 9014);
         var payload = new byte[2000];
 
@@ -127,7 +127,7 @@ public sealed class Socks5UdpTransportSendTests
         Assert.Equal((IPAddressValue?)IPAddress.Parse("192.0.2.53"), datagram.DestinationAddress);
 
         await transport.DisposeAsync();
-        serverCancellation.Cancel();
+        await serverCancellation.CancelAsync();
         await IgnoreExpectedCancellationAsync(server);
     }
 
@@ -146,7 +146,7 @@ public sealed class Socks5UdpTransportSendTests
         var controlEndpoint = (IPEndPoint)tcpListener.LocalEndpoint;
         using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var server = ServeAssociateOnlyAsync(tcpListener, relayEndpoint, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), serverCancellation.Token);
-        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), null, null);
+        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
         var transport = await Socks5UdpTransport.CreateAsync(socksServer, new SelfTrafficRegistry(), CancellationToken.None, createControl: null, socketFactory: null);
         var payload = new byte[2000];
 
@@ -154,7 +154,7 @@ public sealed class Socks5UdpTransportSendTests
             await transport.SendSpanAsync(Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), payload, CancellationToken.None));
 
         await transport.DisposeAsync();
-        serverCancellation.Cancel();
+        await serverCancellation.CancelAsync();
         await IgnoreExpectedCancellationAsync(server);
     }
 
@@ -183,10 +183,10 @@ public sealed class Socks5UdpTransportSendTests
         var controlEndpoint = (IPEndPoint)tcpListener.LocalEndpoint;
         using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var server = ServeAssociateOnlyAsync(tcpListener, relayEndpoint, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), serverCancellation.Token);
-        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), null, null);
+        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
         var transport = await Socks5UdpTransport.CreateAsync(socksServer, new SelfTrafficRegistry(), CancellationToken.None, createControl: null, socketFactory: null);
         var destination = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
-        var payload = new byte[] { 0x51, 0x52, 0x53 };
+        var payload = "QRS"u8.ToArray();
         try
         {
             for (var warm = 0; warm < 8; warm++)
@@ -211,7 +211,7 @@ public sealed class Socks5UdpTransportSendTests
         finally
         {
             await transport.DisposeAsync();
-            serverCancellation.Cancel();
+            await serverCancellation.CancelAsync();
             await IgnoreExpectedCancellationAsync(server);
         }
     }

@@ -74,7 +74,7 @@ internal sealed class BlockingCapture : IPacketCaptureLoop
     public async ValueTask RunAsync(CancellationToken cancellationToken)
     {
         Started.TrySetResult();
-        using var registration = cancellationToken.Register(() => CancellationObserved.TrySetResult());
+        await using var registration = cancellationToken.Register(() => CancellationObserved.TrySetResult());
         await _complete.Task;
     }
 

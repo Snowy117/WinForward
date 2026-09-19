@@ -8,9 +8,8 @@ namespace WinForward.Core.Tests;
 /// disposal failure. Defaults to a UDP datagram socket; TCP control connections pass explicit
 /// socket/protocol types.
 /// </summary>
-internal sealed class TrackingSocket : Socket
+internal sealed class TrackingSocket(AddressFamily addressFamily, SocketType socketType = SocketType.Dgram, ProtocolType protocolType = ProtocolType.Udp) : Socket(addressFamily, socketType, protocolType)
 {
-    public TrackingSocket(AddressFamily addressFamily, SocketType socketType = SocketType.Dgram, ProtocolType protocolType = ProtocolType.Udp) : base(addressFamily, socketType, protocolType) { }
     public bool IsDisposedValue { get; private set; }
     public Action? OnDisposing { get; set; }
     public Exception? DisposeException { get; set; }

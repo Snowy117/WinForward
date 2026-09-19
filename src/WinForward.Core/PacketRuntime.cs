@@ -6,7 +6,7 @@ public enum PacketDisposition
 {
     Pass,
     Block,
-    ProxyConsumed
+    ProxyConsumed,
 }
 
 /// <summary>
@@ -25,7 +25,9 @@ public interface IFrameSource
 public sealed class PacketLease : IDisposable
 {
     [ThreadStatic]
+#pragma warning disable IDE1006 // The t_ prefix is the team convention for [ThreadStatic] fields (2026-09-19): the editorconfig naming rules cannot match attributes, so the s_ rule for internal/private static fields would otherwise claim this field and rename it away from its thread-local marker.
     private static PacketLease? t_recycleCache;
+#pragma warning restore IDE1006
 
     private IFrameSource? _source;
     private ReadOnlyMemory<byte> _frame;
@@ -97,8 +99,7 @@ public sealed class PacketLease : IDisposable
         var lease = t_recycleCache;
         if (lease is null)
         {
-            lease = new PacketLease(source) { _fromRecyclePool = true };
-            return lease;
+            return new PacketLease(source) { _fromRecyclePool = true };
         }
 
         t_recycleCache = null;
@@ -133,7 +134,7 @@ public sealed class PacketLease : IDisposable
 
     private static void RecycleToCache(PacketLease lease)
     {
-        if (t_recycleCache is null) t_recycleCache = lease;
+        t_recycleCache ??= lease;
     }
 
     public bool TryComplete(PacketDisposition disposition)

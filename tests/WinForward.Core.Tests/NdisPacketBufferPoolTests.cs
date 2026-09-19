@@ -5,6 +5,8 @@ namespace WinForward.Core.Tests;
 
 public sealed class NdisPacketBufferPoolTests
 {
+    private static readonly bool[] s_expectedRentalEvents = [true, false, true, false];
+
     [Fact]
     public void RentDisposeRoundtripReusesTheSameBuffer()
     {
@@ -63,7 +65,7 @@ public sealed class NdisPacketBufferPoolTests
         using var pool = new NdisPacketBufferPool(capacity: 4);
         var rented = new System.Collections.Concurrent.ConcurrentBag<NdisPacketBuffer>();
 
-        await Parallel.ForAsync(0, 64, async (_, cancellationToken) =>
+        await Parallel.ForAsync(0, 64, async (_, _) =>
         {
             var buffer = pool.Rent();
             rented.Add(buffer);
@@ -106,7 +108,7 @@ public sealed class NdisPacketBufferPoolTests
         // Disposal trims idle buffers but does not disable the pool: a later rent allocates fresh.
         using var buffer = pool.Rent();
         buffer.SetFrame([9], NdisApiAbi.PacketFlagOnReceive, (nint)1);
-        Assert.Equal(new byte[] { 9 }, buffer.GetFrame().ToArray());
+        Assert.Equal("\t"u8.ToArray(), buffer.GetFrame().ToArray());
     }
 
     [Fact]
@@ -236,6 +238,6 @@ public sealed class NdisPacketBufferPoolTests
 
         // One sink event per hand-out and one per completed return, in order — a reused hand-out
         // counts exactly like a fresh one (the sink observes rental events, not allocations).
-        Assert.Equal(new[] { true, false, true, false }, observed);
+        Assert.Equal(s_expectedRentalEvents, observed);
     }
 }

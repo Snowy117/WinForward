@@ -16,7 +16,7 @@ namespace WinForward.Runtime.UdpProxy;
 internal sealed class UdpSetupCooldownTable
 {
     /// <summary>How long a failed flow stays rejected before its next datagram retries setup.</summary>
-    private static readonly TimeSpan SetupFailureCooldown = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan s_setupFailureCooldown = TimeSpan.FromSeconds(1);
 
     private readonly Dictionary<FlowKey, DateTimeOffset> _retryAtByFlow = [];
     private readonly Lock _gate = new();
@@ -54,7 +54,7 @@ internal sealed class UdpSetupCooldownTable
             // turn a failing-server storm into an immediate-retry storm. Refreshing an existing
             // key never grows the count.
             if (_retryAtByFlow.Count >= _capacity && !_retryAtByFlow.ContainsKey(flow)) EvictOldestUnderGate();
-            _retryAtByFlow[flow] = failedAt + SetupFailureCooldown;
+            _retryAtByFlow[flow] = failedAt + s_setupFailureCooldown;
         }
     }
 

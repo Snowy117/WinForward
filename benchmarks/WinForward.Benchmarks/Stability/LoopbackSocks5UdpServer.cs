@@ -40,7 +40,7 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
         _controlListener = new TcpListener(IPAddress.Loopback, 0);
         _controlListener.Start(1024);
         ControlEndpoint = (IPEndPoint)_controlListener.LocalEndpoint!;
-        _acceptLoop = Task.Run(() => AcceptLoopAsync(_shutdown.Token));
+        _acceptLoop = Task.Run(() => AcceptLoopAsync(_shutdown.Token), _shutdown.Token);
     }
 
     public IPEndPoint ControlEndpoint { get; }
@@ -115,8 +115,8 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
 
     private sealed class RelayConnection : IAsyncDisposable
     {
-        private static readonly byte[] NoAuthMethodReply = [5, 0];
-        private static readonly byte[] RequestFailureReply = [5, 1, 0, 1, 0, 0, 0, 0, 0, 0];
+        private static readonly byte[] s_noAuthMethodReply = [5, 0];
+        private static readonly byte[] s_requestFailureReply = [5, 1, 0, 1, 0, 0, 0, 0, 0, 0];
 
         private readonly Socket _control;
         private readonly Socket _relay;
@@ -136,9 +136,11 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
             _echoDestination = echoDestination;
             _echoAddress = IPAddressValue.From(echoDestination.Address);
             _shutdown = shutdown;
-            _relay = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-            _relay.ReceiveBufferSize = 4 << 20;
-            _relay.Blocking = false;
+            _relay = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)
+            {
+                ReceiveBufferSize = 4 << 20,
+                Blocking = false,
+            };
             _relay.Bind(new IPEndPoint(IPAddress.Loopback, 0));
         }
 
@@ -164,13 +166,13 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
 
         private async Task HandleControlAsync()
         {
-            using var stream = new NetworkStream(_control, ownsSocket: true);
+            await using var stream = new NetworkStream(_control, ownsSocket: true);
             var greeting = new byte[2];
             await stream.ReadExactlyAsync(greeting, _shutdown).ConfigureAwait(false);
             if (greeting[0] != 5 || greeting[1] == 0) return;
             var methods = new byte[greeting[1]];
             await stream.ReadExactlyAsync(methods, _shutdown).ConfigureAwait(false);
-            await stream.WriteAsync(NoAuthMethodReply, _shutdown).ConfigureAwait(false);
+            await stream.WriteAsync(s_noAuthMethodReply, _shutdown).ConfigureAwait(false);
 
             var request = new byte[4];
             await stream.ReadExactlyAsync(request, _shutdown).ConfigureAwait(false);
@@ -191,7 +193,7 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
 
             if (addressLength < 0)
             {
-                await stream.WriteAsync(RequestFailureReply, _shutdown).ConfigureAwait(false);
+                await stream.WriteAsync(s_requestFailureReply, _shutdown).ConfigureAwait(false);
                 return;
             }
 
@@ -203,7 +205,7 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
             }
             else
             {
-                await stream.WriteAsync(RequestFailureReply, _shutdown).ConfigureAwait(false);
+                await stream.WriteAsync(s_requestFailureReply, _shutdown).ConfigureAwait(false);
             }
 
             var scratch = new byte[4096];
@@ -306,7 +308,7 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
                 // WouldBlock: the kernel send queue is momentarily full; use the overlapped send below.
             }
 
-            _ = await _relay.SendToAsync(request.Payload, SocketFlags.None, _echoDestination).ConfigureAwait(false);
+            _ = await _relay.SendToAsync(request.Payload, SocketFlags.None, _echoDestination, _shutdown).ConfigureAwait(false);
         }
 
         private async Task SendReplyAsync(ReadOnlyMemory<byte> payload)
@@ -326,7 +328,7 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
                 // WouldBlock: the kernel send queue is momentarily full; use the overlapped send below.
             }
 
-            _ = await _relay.SendToAsync(datagram.AsMemory(0, written), SocketFlags.None, _lastClient).ConfigureAwait(false);
+            _ = await _relay.SendToAsync(datagram.AsMemory(0, written), SocketFlags.None, _lastClient, _shutdown).ConfigureAwait(false);
         }
 
         public ValueTask DisposeAsync()

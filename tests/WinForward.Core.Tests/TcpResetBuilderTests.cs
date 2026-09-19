@@ -58,7 +58,7 @@ public class TcpResetBuilderTests
         Assert.Equal(s_serverV6, new IPAddress(frame.AsSpan(22, 16).ToArray()));
         Assert.Equal(s_clientV6, new IPAddress(frame.AsSpan(38, 16).ToArray()));
         var tcp = frame.AsSpan(54, 20);
-        Assert.Equal(443, BinaryPrimitives.ReadUInt16BigEndian(tcp.Slice(0, 2)));
+        Assert.Equal(443, BinaryPrimitives.ReadUInt16BigEndian(tcp[..2]));
         Assert.Equal(53000, BinaryPrimitives.ReadUInt16BigEndian(tcp.Slice(2, 2)));
         Assert.Equal(77u, BinaryPrimitives.ReadUInt32BigEndian(tcp.Slice(4, 4)));
         Assert.Equal(88u, BinaryPrimitives.ReadUInt32BigEndian(tcp.Slice(8, 4)));

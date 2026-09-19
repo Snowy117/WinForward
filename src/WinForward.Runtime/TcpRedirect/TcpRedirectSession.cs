@@ -9,7 +9,7 @@ namespace WinForward.Runtime.TcpRedirect;
 /// so the accept/reset/relay modules can reference it without a circular dependency on the
 /// coordinator itself.
 /// </summary>
-internal sealed class TcpRedirectSession(TcpRedirectAssociation association, ITcpRedirectListener listener, SelfTrafficRegistry.SelfTrafficToken selfTrafficToken, Socks5Server server, CancellationToken shutdown, long flowGeneration)
+internal sealed class TcpRedirectSession(TcpRedirectAssociation association, ITcpRedirectListener listener, SelfTrafficRegistry.SelfTrafficToken selfTrafficToken, Socks5Server server, long flowGeneration, CancellationToken shutdown)
 {
     public TcpRedirectAssociation Association { get; } = association;
     public ITcpRedirectListener Listener { get; } = listener;

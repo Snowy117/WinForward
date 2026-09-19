@@ -1,3 +1,4 @@
+using System.Globalization;
 using WinForward.Configuration;
 using WinForward.Core;
 
@@ -12,7 +13,7 @@ namespace WinForward.Runtime.UdpProxy;
 /// slot-state transitions stays exactly the coordinator's. Also owns the setup-drop bookkeeping:
 /// the per-drop trace, the running total, and a rate-limited debug summary.
 /// </summary>
-internal sealed class UdpSetupQueueBudget
+internal sealed class UdpSetupQueueBudget(long byteBudget, IRuntimeLogger logger, TimeProvider timeProvider)
 {
     /// <summary>
     /// The default cross-flow bound on aggregate setup-queue memory (~250 full 32 KiB queues;
@@ -22,22 +23,15 @@ internal sealed class UdpSetupQueueBudget
     internal const long SetupQueueGlobalByteBudget = 8 * 1024 * 1024;
 
     /// <summary>Interval between rate-limited drop-summary debug logs.</summary>
-    private static readonly TimeSpan DropLogInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan s_dropLogInterval = TimeSpan.FromSeconds(5);
 
-    private readonly long _byteBudget;
-    private readonly IRuntimeLogger _logger;
-    private readonly TimeProvider _timeProvider;
+    private readonly long _byteBudget = byteBudget;
+    private readonly IRuntimeLogger _logger = logger;
+    private readonly TimeProvider _timeProvider = timeProvider;
     private long _pendingBytes;
     private long _rejectionCount;
     private long _droppedTotal;
     private long _lastDropLogTicks;
-
-    public UdpSetupQueueBudget(long byteBudget, IRuntimeLogger logger, TimeProvider timeProvider)
-    {
-        _byteBudget = byteBudget;
-        _logger = logger;
-        _timeProvider = timeProvider;
-    }
 
     /// <summary>The aggregate setup-queue bytes currently charged; for tests and diagnostics.</summary>
     internal long PendingBytes => Interlocked.Read(ref _pendingBytes);
@@ -76,9 +70,9 @@ internal sealed class UdpSetupQueueBudget
         if (_logger.IsEnabled(RuntimeLogLevel.Trace)) UdpProxyLogging.LogTrace(_logger, "udp.setupqueue.dropped", flow, new RuntimeLogField("dropped", dropped));
         var now = _timeProvider.GetUtcNow().UtcTicks;
         var last = Interlocked.Read(ref _lastDropLogTicks);
-        if (now - last >= DropLogInterval.Ticks && Interlocked.CompareExchange(ref _lastDropLogTicks, now, last) == last)
+        if (now - last >= s_dropLogInterval.Ticks && Interlocked.CompareExchange(ref _lastDropLogTicks, now, last) == last)
         {
-            _logger.Debug($"UDP session setup queues dropped {Interlocked.Read(ref _droppedTotal)} datagram(s) total (drop-oldest).");
+            _logger.Debug(string.Create(CultureInfo.InvariantCulture, $"UDP session setup queues dropped {Interlocked.Read(ref _droppedTotal)} datagram(s) total (drop-oldest)."));
         }
     }
 

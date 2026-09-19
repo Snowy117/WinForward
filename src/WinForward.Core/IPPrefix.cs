@@ -29,7 +29,7 @@ public readonly record struct IPPrefix
         prefix = default;
         if (string.IsNullOrWhiteSpace(value)) return false;
 
-        var separator = value.IndexOf('/');
+        var separator = value.IndexOf('/', StringComparison.Ordinal);
         if (separator <= 0 || separator == value.Length - 1 ||
             !IPAddress.TryParse(value[..separator].Trim(), out var address) ||
             !int.TryParse(value[(separator + 1)..].Trim(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var length) ||

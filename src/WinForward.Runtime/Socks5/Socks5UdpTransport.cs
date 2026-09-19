@@ -89,14 +89,14 @@ public sealed class Socks5UdpTransportFactory : IUdpProxyTransportFactory
     public Socks5UdpTransportFactory(SelfTrafficRegistry selfTraffic, int maximumFrameSize, Socks5AddressCache? addressCache = null)
     {
         ArgumentNullException.ThrowIfNull(selfTraffic);
-        if (maximumFrameSize <= 0) throw new ArgumentOutOfRangeException(nameof(maximumFrameSize));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumFrameSize);
         _selfTraffic = selfTraffic;
         _maximumFrameSize = maximumFrameSize;
         _addressCache = addressCache;
     }
 
     public async ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken) =>
-        await Socks5UdpTransport.CreateAsync(server, _selfTraffic, cancellationToken, null, null, maximumFrameSize: _maximumFrameSize, addressCache: _addressCache).ConfigureAwait(false);
+        await Socks5UdpTransport.CreateAsync(server, _selfTraffic, cancellationToken, createControl: null, socketFactory: null, maximumFrameSize: _maximumFrameSize, addressCache: _addressCache).ConfigureAwait(false);
 }
 
 public sealed class Socks5UdpTransport : IUdpProxyTransport
@@ -117,10 +117,10 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
     private const int SIOUdpConnreset = unchecked((int)0x9800000C);
 
     /// <summary>A 4-byte Win32 BOOL FALSE, the SIO_UDP_CONNRESET input value.</summary>
-    private static readonly byte[] DisableValue = { 0, 0, 0, 0 };
+    private static readonly byte[] s_disableValue = [0, 0, 0, 0];
 
     /// <summary>Cached default for <c>disableUdpConnectionReset</c> so session setup never converts the method group per call.</summary>
-    private static readonly Action<Socket> DisableUdpConnectionResetAction = DisableUdpConnectionReset;
+    private static readonly Action<Socket> s_disableUdpConnectionResetAction = DisableUdpConnectionReset;
 
     private readonly Socket _socket;
     private readonly Socks5ControlConnection _control;
@@ -132,7 +132,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
 
     private Socks5UdpTransport(Socket socket, Socks5ControlConnection control, IPEndPoint relayEndpoint, SelfTrafficRegistry.SelfTrafficToken? selfTrafficToken, int maximumFrameSize)
     {
-        if (maximumFrameSize <= 0) throw new ArgumentOutOfRangeException(nameof(maximumFrameSize));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumFrameSize);
         _socket = socket;
         _control = control;
         RelayEndpoint = relayEndpoint;
@@ -155,6 +155,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
     public IPEndPoint RelayEndpoint { get; }
     public IPEndPoint LocalEndpoint => (IPEndPoint)_socket.LocalEndPoint!;
 
+#pragma warning disable CA1068 // Deliberate shape: the token follows the identifying arguments and precedes the test-only seam factories, so the production call site (createControl: null, socketFactory: null) keeps the token in the readable position; reordering would bury it between null arguments for a style-only gain.
     internal static async ValueTask<Socks5UdpTransport> CreateAsync(
         Socks5Server server,
         SelfTrafficRegistry selfTraffic,
@@ -164,6 +165,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
         Action<Socket>? disableUdpConnectionReset = null,
         int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame,
         Socks5AddressCache? addressCache = null)
+#pragma warning restore CA1068
     {
         Socks5ControlConnection? control = null;
         Socket? socket = null;
@@ -186,7 +188,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
             socket.ReceiveBufferSize = RelaySocketReceiveBufferSize;
             // Applied before bind per the IOCTL's contract (S2): an ICMP-driven reset must never
             // reach the receive loop. Injectable so tests can assert the call without a Windows socket.
-            (disableUdpConnectionReset ?? DisableUdpConnectionResetAction)(socket);
+            (disableUdpConnectionReset ?? s_disableUdpConnectionResetAction)(socket);
             socket.Bind(new IPEndPoint(relayAddressFamily == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any, 0));
             // Non-blocking mode keeps the send warm path synchronous: the kernel either takes
             // the datagram inline or reports WouldBlock, which falls back to the overlapped
@@ -224,7 +226,9 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
         }
     }
 
+#pragma warning disable RCS1229 // Deliberate non-async warm entry (hot-path.md #3): the steady-state send path must not pay an async state machine; a synchronous failure before the returned ValueTask is part of the warm contract and handled by the dispatcher.
     public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken)
+#pragma warning restore RCS1229
     {
         // Non-async warm entry (hot-path convention #3); only the contended-gate shape differs,
         // because a span over native capture memory must not cross the gate await — it is copied
@@ -355,7 +359,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
     internal static void DisableUdpConnectionReset(Socket socket)
     {
         if (!OperatingSystem.IsWindows()) return;
-        socket.IOControl(SIOUdpConnreset, DisableValue, null);
+        socket.IOControl(SIOUdpConnreset, s_disableValue, optionOutValue: null);
     }
 
     /// <summary>

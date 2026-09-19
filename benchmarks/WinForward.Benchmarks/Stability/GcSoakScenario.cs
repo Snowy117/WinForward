@@ -1,6 +1,7 @@
 #pragma warning disable CA1416 // TcpProxyRelayFactory/TcpProxyRelay carry SupportedOSPlatform(windows) but are platform-neutral managed code; only their production wiring is Windows-specific.
 
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
@@ -37,10 +38,10 @@ namespace WinForward.Benchmarks.Stability;
 /// </summary>
 internal static class GcSoakScenario
 {
-    private static readonly TimeSpan WarmupDuration = TimeSpan.FromSeconds(2);
-    private static readonly TimeSpan SettleDuration = TimeSpan.FromMilliseconds(250);
-    private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(15);
-    private static readonly TimeSpan SetupTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan s_warmupDuration = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan s_settleDuration = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan s_stopTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan s_setupTimeout = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// Least-squares working-set slope above which the growth is a leak rather than loopback-buffer
@@ -73,8 +74,8 @@ internal static class GcSoakScenario
 
     public static async Task RunAsync(StabilityContext context, SoakOptions options)
     {
-        var maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame;
-        var relayPool = new NativeBufferPool(TcpProxyRelayFactory.PumpBufferSize, capacity: Math.Max(64, MaximumTcpRelays * 2 + 8));
+        const int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame;
+        var relayPool = new NativeBufferPool(TcpProxyRelayFactory.PumpBufferSize, capacity: Math.Max(64, (MaximumTcpRelays * 2) + 8));
         var udpWindowPool = new NativeBufferPool(UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize), capacity: Math.Max(64, options.Flows + 8));
         var udpSetupPool = new NativeBufferPool(maximumFrameSize, capacity: Math.Max(64, options.Flows + 8));
         try
@@ -113,10 +114,10 @@ internal static class GcSoakScenario
                 Capacity = Math.Max(options.Flows, 1),
                 MaximumFrameSize = maximumFrameSize,
                 ReceiveWindowPool = udpWindowPool,
-                SetupQueuePool = udpSetupPool
+                SetupQueuePool = udpSetupPool,
             });
-        var udpProxyServer = new Socks5Server("gc-soak", "127.0.0.1", checked((ushort)udpServer.ControlEndpoint.Port), null, null);
-        var tcpProxyServer = new Socks5Server("gc-soak", "127.0.0.1", checked((ushort)tcpServer.Endpoint.Port), null, null);
+        var udpProxyServer = new Socks5Server("gc-soak", "127.0.0.1", checked((ushort)udpServer.ControlEndpoint.Port), Username: null, Password: null);
+        var tcpProxyServer = new Socks5Server("gc-soak", "127.0.0.1", checked((ushort)tcpServer.Endpoint.Port), Username: null, Password: null);
         var tcpFlood = new TcpFlood(
             new TcpProxyRelayFactory(new SelfTrafficRegistry(), pumpBufferPool: relayPool),
             tcpProxyServer,
@@ -163,7 +164,7 @@ internal static class GcSoakScenario
         NativeBufferPool udpSetupPool,
         Action markWarm)
     {
-        await Task.Delay(WarmupDuration).ConfigureAwait(false);
+        await Task.Delay(s_warmupDuration).ConfigureAwait(false);
         CollectAll();
         markWarm();
         var baselineGc = ReadGc();
@@ -175,7 +176,7 @@ internal static class GcSoakScenario
         var windowGc = ReadGc();
         var windowPools = Snapshot(relayPool, udpWindowPool, udpSetupPool);
         sampler.Stop();
-        await Task.Delay(SettleDuration).ConfigureAwait(false);
+        await Task.Delay(s_settleDuration).ConfigureAwait(false);
         return new GcSoakMeasurement(baselineGc, windowGc, baselinePools, windowPools, sampler.Timestamps, sampler.WorkingSet, sampler.SampleCount, managedHeapBytes);
     }
 
@@ -195,7 +196,7 @@ internal static class GcSoakScenario
             workingSetSamples = samples,
             managedHeapBytes = measurement.ManagedHeapBytes,
             tcpRelays = tcpFlood.RelayCount,
-            tcpBytesEchoed = tcpBytesEchoed,
+            tcpBytesEchoed,
             udpSends = udpFlood.SendCount,
             udpDrainReceivedBytes = drain.Received,
             udpResponsesInjected = sink.ResponsesInjected,
@@ -233,7 +234,7 @@ internal static class GcSoakScenario
         if (udpFlood.ThreadAllocatedBytes > allowedSenderBytes)
         {
             throw new InvalidOperationException(
-                $"gc-soak application allocation exceeds the leak ceiling: the UDP forward lanes allocated {udpFlood.ThreadAllocatedBytes} managed bytes (allowed {allowedSenderBytes}) over {udpFlood.SendCount} sends.");
+                string.Create(CultureInfo.InvariantCulture, $"gc-soak application allocation exceeds the leak ceiling: the UDP forward lanes allocated {udpFlood.ThreadAllocatedBytes} managed bytes (allowed {allowedSenderBytes}) over {udpFlood.SendCount} sends."));
         }
 
         AssertNoOverflowGrowth(measurement);
@@ -248,14 +249,14 @@ internal static class GcSoakScenario
         if (slope > WorkingSetSlopeLimitBytesPerSecond)
         {
             throw new InvalidOperationException(
-                $"gc-soak working set grew at {slope:F0} B/s (limit {WorkingSetSlopeLimitBytesPerSecond:F0} B/s) over {samples} samples.");
+                string.Create(CultureInfo.InvariantCulture, $"gc-soak working set grew at {slope:F0} B/s (limit {WorkingSetSlopeLimitBytesPerSecond:F0} B/s) over {samples} samples."));
         }
 
         var growth = measurement.WorkingSet[samples - 1] - measurement.WorkingSet[0];
         if (growth > WorkingSetGrowthLimitBytes)
         {
             throw new InvalidOperationException(
-                $"gc-soak working set grew {growth} bytes across the window (limit {WorkingSetGrowthLimitBytes}).");
+                string.Create(CultureInfo.InvariantCulture, $"gc-soak working set grew {growth} bytes across the window (limit {WorkingSetGrowthLimitBytes})."));
         }
     }
 
@@ -273,7 +274,7 @@ internal static class GcSoakScenario
         if (OverflowGrew(measurement.BaselinePools, measurement.WindowPools))
         {
             throw new InvalidOperationException(
-                $"gc-soak native pools allocated fresh overflow buffers during the window: baseline {measurement.BaselinePools}, window-end {measurement.WindowPools}, overflow delta {TotalOverflow(measurement.WindowPools) - TotalOverflow(measurement.BaselinePools)}.");
+                string.Create(CultureInfo.InvariantCulture, $"gc-soak native pools allocated fresh overflow buffers during the window: baseline {measurement.BaselinePools}, window-end {measurement.WindowPools}, overflow delta {TotalOverflow(measurement.WindowPools) - TotalOverflow(measurement.BaselinePools)}."));
         }
     }
 
@@ -289,7 +290,7 @@ internal static class GcSoakScenario
         // can return just after RunCoreAsync returns. Wait — bounded — for the pools to drain
         // rather than trusting a fixed delay, which flakes when the thread pool is contended. A
         // genuine leak never drains, so the timeout still fails.
-        var deadline = Stopwatch.GetTimestamp() + (long)(StopTimeout.TotalSeconds * Stopwatch.Frequency);
+        var deadline = Stopwatch.GetTimestamp() + (long)(s_stopTimeout.TotalSeconds * Stopwatch.Frequency);
         while (!PoolsDrained(relay.Stats, window.Stats, setup.Stats) && Stopwatch.GetTimestamp() < deadline)
         {
             await Task.Delay(10).ConfigureAwait(false);
@@ -308,7 +309,7 @@ internal static class GcSoakScenario
         if (stats.Outstanding != 0)
         {
             throw new InvalidOperationException(
-                $"gc-soak leaked {stats.Outstanding} native {poolName} lease(s) after teardown: {stats}.");
+                string.Create(CultureInfo.InvariantCulture, $"gc-soak leaked {stats.Outstanding} native {poolName} lease(s) after teardown: {stats}."));
         }
 
         if (stats.OverflowAllocations != stats.DisposedCount + stats.InPool + stats.Outstanding)
@@ -448,7 +449,7 @@ internal static class GcSoakScenario
             Endpoint = (IPEndPoint)_socket.LocalEndPoint!;
             for (var index = 0; index < _threads.Length; index++)
             {
-                var thread = new Thread(DrainLoop) { IsBackground = true, Name = $"gc-soak-drain-{index}" };
+                var thread = new Thread(DrainLoop) { IsBackground = true, Name = string.Create(CultureInfo.InvariantCulture, $"gc-soak-drain-{index}") };
                 _threads[index] = thread;
                 thread.Start();
             }
@@ -484,7 +485,7 @@ internal static class GcSoakScenario
         {
             _stop = true;
             _socket.Dispose();
-            foreach (var thread in _threads) thread.Join(StopTimeout);
+            foreach (var thread in _threads) thread.Join(s_stopTimeout);
             return ValueTask.CompletedTask;
         }
     }
@@ -570,14 +571,14 @@ internal static class GcSoakScenario
             }
 
             var stopwatch = Stopwatch.StartNew();
-            while (_coordinator.SessionCount < _flows.Length && stopwatch.Elapsed < SetupTimeout)
+            while (_coordinator.SessionCount < _flows.Length && stopwatch.Elapsed < s_setupTimeout)
             {
                 await Task.Delay(10).ConfigureAwait(false);
             }
 
             if (_coordinator.SessionCount < _flows.Length)
             {
-                throw new InvalidOperationException($"Only {_coordinator.SessionCount} of {_flows.Length} UDP flows established within the setup timeout.");
+                throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture, $"Only {_coordinator.SessionCount} of {_flows.Length} UDP flows established within the setup timeout."));
             }
 
             // SessionCount only proves the slots exist; each session still has to finish its SOCKS5
@@ -585,14 +586,14 @@ internal static class GcSoakScenario
             // before then: datagrams sent while a slot is not ready take the setup-window path,
             // whose queue-node allocations would be charged to the measured sender threads and
             // masquerade as a warm-path regression.
-            while (_serverMetrics.RelayForwarded < _flows.Length && stopwatch.Elapsed < SetupTimeout)
+            while (_serverMetrics.RelayForwarded < _flows.Length && stopwatch.Elapsed < s_setupTimeout)
             {
                 await Task.Delay(10).ConfigureAwait(false);
             }
 
             if (_serverMetrics.RelayForwarded < _flows.Length)
             {
-                throw new InvalidOperationException($"Only {_serverMetrics.RelayForwarded} of {_flows.Length} UDP flows relayed their first datagram within the setup timeout.");
+                throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture, $"Only {_serverMetrics.RelayForwarded} of {_flows.Length} UDP flows relayed their first datagram within the setup timeout."));
             }
         }
 
@@ -601,7 +602,7 @@ internal static class GcSoakScenario
             for (var index = 0; index < _threads.Length; index++)
             {
                 var lane = index;
-                var thread = new Thread(() => SendLoop(lane)) { IsBackground = true, Name = $"gc-soak-udp-{lane}" };
+                var thread = new Thread(() => SendLoop(lane)) { IsBackground = true, Name = string.Create(CultureInfo.InvariantCulture, $"gc-soak-udp-{lane}") };
                 _threads[index] = thread;
                 thread.Start();
             }
@@ -675,15 +676,14 @@ internal static class GcSoakScenario
         {
             _sequences[flowIndex]++;
             DatagramHeader.Write(_payload, _sequences[flowIndex], flowIndex);
+            // Dedicated load thread: deliberate synchronous consumption; blocking on the rare async
+            // send tail cannot deadlock and the completed shape allocates nothing. The ValueTask is
+            // consumed exactly once, immediately.
+#pragma warning disable S5034, VSTHRD002, CA2012
             var pending = _coordinator.TrySendSpanAsync(_flows[flowIndex], _server, _payload.AsSpan(), default, CancellationToken.None);
             Interlocked.Increment(ref _sends);
-            // Dedicated load thread: deliberate synchronous consumption; blocking on the rare async
-            // send tail cannot deadlock and the completed shape allocates nothing.
-#pragma warning disable S5034
-#pragma warning disable VSTHRD002
             _ = pending.GetAwaiter().GetResult();
-#pragma warning restore VSTHRD002
-#pragma warning restore S5034
+#pragma warning restore S5034, VSTHRD002, CA2012
         }
 
         public void Stop()
@@ -691,34 +691,25 @@ internal static class GcSoakScenario
             _stop = true;
             foreach (var thread in _threads)
             {
-                thread?.Join(StopTimeout);
+                thread?.Join(s_stopTimeout);
             }
 
             if (_error is not null) throw new InvalidOperationException("The gc-soak UDP flood failed.", _error);
         }
     }
 
-    private sealed class TcpFlood : IAsyncDisposable
+    private sealed class TcpFlood(TcpProxyRelayFactory factory, Socks5Server server, int relayCount) : IAsyncDisposable
     {
         private const int ChunkBytes = 64 * 1024;
         private const int ClientReceiveBufferBytes = 4 * 1024 * 1024;
-        private static readonly Endpoint Destination = Endpoint.From(IPAddress.Parse("192.0.2.80"), 443);
+        private static readonly Endpoint s_destination = Endpoint.From(IPAddress.Parse("192.0.2.80"), 443);
 
-        private readonly TcpProxyRelayFactory _factory;
-        private readonly Socks5Server _server;
-        private readonly int _relayCount;
-        private readonly RelaySlot?[] _slots;
+        private readonly TcpProxyRelayFactory _factory = factory;
+        private readonly Socks5Server _server = server;
+        private readonly RelaySlot?[] _slots = new RelaySlot?[relayCount];
         private volatile bool _stop;
 
-        public TcpFlood(TcpProxyRelayFactory factory, Socks5Server server, int relayCount)
-        {
-            _factory = factory;
-            _server = server;
-            _relayCount = relayCount;
-            _slots = new RelaySlot?[relayCount];
-        }
-
-        public int RelayCount => _relayCount;
+        public int RelayCount { get; } = relayCount;
 
         public async Task EstablishAsync()
         {
@@ -729,7 +720,7 @@ internal static class GcSoakScenario
                 {
                     var peer = (IPEndPoint)relayLocal.RemoteEndPoint!;
                     var accepted = new TcpAcceptedConnection(relayLocal, Endpoint.From(peer.Address, checked((ushort)peer.Port)));
-                    var relay = await _factory.EstablishAsync(Destination, accepted, _server, CancellationToken.None).ConfigureAwait(false);
+                    var relay = await _factory.EstablishAsync(s_destination, accepted, _server, CancellationToken.None).ConfigureAwait(false);
                     _slots[index] = new RelaySlot(client, relay);
                 }
                 catch
@@ -746,8 +737,8 @@ internal static class GcSoakScenario
             for (var index = 0; index < _slots.Length; index++)
             {
                 var client = _slots[index]!.Client;
-                _slots[index]!.Sender = StartThread($"gc-soak-tcp-send-{index}", () => SenderLoop(client));
-                _slots[index]!.Receiver = StartThread($"gc-soak-tcp-recv-{index}", () => ReceiverLoop(client));
+                _slots[index]!.Sender = StartThread(string.Create(CultureInfo.InvariantCulture, $"gc-soak-tcp-send-{index}"), () => SenderLoop(client));
+                _slots[index]!.Receiver = StartThread(string.Create(CultureInfo.InvariantCulture, $"gc-soak-tcp-recv-{index}"), () => ReceiverLoop(client));
             }
         }
 
@@ -829,8 +820,8 @@ internal static class GcSoakScenario
 
             foreach (var slot in _slots)
             {
-                slot?.Sender?.Join(StopTimeout);
-                slot?.Receiver?.Join(StopTimeout);
+                slot?.Sender?.Join(s_stopTimeout);
+                slot?.Receiver?.Join(s_stopTimeout);
             }
         }
 
@@ -855,22 +846,20 @@ internal static class GcSoakScenario
     {
         private readonly Process _process = Process.GetCurrentProcess();
         private readonly Thread _thread;
-        private readonly long[] _timestamps;
-        private readonly long[] _workingSet;
         private volatile bool _stop;
         private int _sampleCount;
 
         public WorkingSetSampler(int durationSeconds)
         {
             var capacity = durationSeconds + 8;
-            _timestamps = new long[capacity];
-            _workingSet = new long[capacity];
+            Timestamps = new long[capacity];
+            WorkingSet = new long[capacity];
             _thread = new Thread(SampleLoop) { IsBackground = true, Name = "gc-soak-sampler" };
         }
 
-        public long[] Timestamps => _timestamps;
+        public long[] Timestamps { get; }
 
-        public long[] WorkingSet => _workingSet;
+        public long[] WorkingSet { get; }
 
         public int SampleCount => Volatile.Read(ref _sampleCount);
 
@@ -879,7 +868,7 @@ internal static class GcSoakScenario
         public void Stop()
         {
             _stop = true;
-            _thread.Join(StopTimeout);
+            _thread.Join(s_stopTimeout);
         }
 
         private void SampleLoop()
@@ -888,10 +877,10 @@ internal static class GcSoakScenario
             while (!_stop)
             {
                 var index = _sampleCount;
-                if (index < _timestamps.Length)
+                if (index < Timestamps.Length)
                 {
-                    _timestamps[index] = stopwatch.ElapsedTicks;
-                    _workingSet[index] = _process.WorkingSet64;
+                    Timestamps[index] = stopwatch.ElapsedTicks;
+                    WorkingSet[index] = _process.WorkingSet64;
                     Volatile.Write(ref _sampleCount, index + 1);
                 }
 

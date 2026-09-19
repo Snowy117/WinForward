@@ -9,8 +9,8 @@ namespace WinForward.Benchmarks.Stability;
 
 internal static class TcpEofScenario
 {
-    private static readonly TimeSpan RelaySettleTimeout = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan ReceiverTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan s_relaySettleTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan s_receiverTimeout = TimeSpan.FromSeconds(10);
     private const int ChunkBytes = 65_536;
     private const int MaximumErrorSamples = 8;
 
@@ -52,19 +52,19 @@ internal static class TcpEofScenario
         TcpProxyRelay? relay = null;
         try
         {
-            var localPair = await CreateSocketPairAsync().ConfigureAwait(false);
-            localPeer = localPair.Peer;
-            var upstreamPair = await CreateSocketPairAsync().ConfigureAwait(false);
-            upstreamPeer = upstreamPair.Peer;
-            upstreamStream = new NetworkStream(upstreamPair.Relay, ownsSocket: true);
-            relay = new TcpProxyRelay(localPair.Relay, upstreamStream, new UpstreamOwner(upstreamStream));
+            var (peer, pairRelay) = await CreateSocketPairAsync().ConfigureAwait(false);
+            localPeer = peer;
+            var (upstreamSocket, upstreamRelaySocket) = await CreateSocketPairAsync().ConfigureAwait(false);
+            upstreamPeer = upstreamSocket;
+            upstreamStream = new NetworkStream(upstreamRelaySocket, ownsSocket: true);
+            relay = new TcpProxyRelay(pairRelay, upstreamStream, new UpstreamOwner(upstreamStream));
 
             var receiver = Task.Run(() => ReceiveAsync(upstreamPeer, options.TcpTransferBytes));
             var sender = Task.Run(() => SendAsync(localPeer, options.TcpTransferBytes, kind, fraction, relay, upstreamPeer));
             await sender.ConfigureAwait(false);
             try
             {
-                await relay.Completion.WaitAsync(RelaySettleTimeout).ConfigureAwait(false);
+                await relay.Completion.WaitAsync(s_relaySettleTimeout).ConfigureAwait(false);
             }
             catch (Exception exception) when (exception is TimeoutException or SocketException or ObjectDisposedException or IOException)
             {
@@ -73,14 +73,14 @@ internal static class TcpEofScenario
             }
 
             await relay.DisposeAsync().ConfigureAwait(false);
-            var completed = await Task.WhenAny(receiver, Task.Delay(ReceiverTimeout)).ConfigureAwait(false);
+            var completed = await Task.WhenAny(receiver, Task.Delay(s_receiverTimeout)).ConfigureAwait(false);
             if (completed != receiver)
             {
                 upstreamPeer.Dispose();
             }
 
-            var outcome = await receiver.ConfigureAwait(false);
-            counters.Record(outcome.Outcome, outcome.Received, stopwatch.Elapsed.TotalMilliseconds, null);
+            var (received, outcome) = await receiver.ConfigureAwait(false);
+            counters.Record(outcome, received, stopwatch.Elapsed.TotalMilliseconds, sample: null);
         }
         catch (Exception exception) when (exception is SocketException or ObjectDisposedException or IOException)
         {
@@ -147,7 +147,7 @@ internal static class TcpEofScenario
         switch (kind)
         {
             case AbortKind.ClientRst:
-                localPeer.LingerState = new LingerOption(true, 0);
+                localPeer.LingerState = new LingerOption(enable: true, 0);
                 localPeer.Close();
                 break;
             case AbortKind.RelayCancel:
@@ -223,8 +223,7 @@ internal static class TcpEofScenario
     {
         public ValueTask DisposeAsync()
         {
-            upstream.Dispose();
-            return ValueTask.CompletedTask;
+            return upstream.DisposeAsync();
         }
     }
 

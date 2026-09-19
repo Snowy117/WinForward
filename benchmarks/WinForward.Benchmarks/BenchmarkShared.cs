@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Net;
 using WinForward.Configuration;
 using WinForward.Core;
@@ -59,20 +60,20 @@ internal static class BenchmarkShared
     public static byte[] CreateIpv4TcpFrame(int frameSize, bool bareSyn)
     {
         var frame = CreateIpv4TcpFrame(frameSize);
-        const int IpTotalLengthOffset = 16;
-        const int TcpFlagsOffset = 47;
+        const int ipTotalLengthOffset = 16;
+        const int tcpFlagsOffset = 47;
         if (bareSyn)
         {
-            BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(IpTotalLengthOffset, 2), 40);
-            frame[TcpFlagsOffset] = 0x02;
+            BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(ipTotalLengthOffset, 2), 40);
+            frame[tcpFlagsOffset] = 0x02;
         }
         else
         {
-            frame[TcpFlagsOffset] = 0x10;
+            frame[tcpFlagsOffset] = 0x10;
         }
 
         var headerLength = (frame[14] & 0x0f) * 4;
-        var totalLength = BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(IpTotalLengthOffset, 2));
+        var totalLength = BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(ipTotalLengthOffset, 2));
         var tcpOffset = 14 + headerLength;
         var tcpLength = totalLength - headerLength;
         BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(24, 2), PacketChecksums.InternetChecksum(frame.AsSpan(14, headerLength)));
@@ -102,9 +103,9 @@ internal static class BenchmarkShared
     {
         var first = index / 65_536;
         var second = index % 65_536;
-        var local = Endpoint.From(IPAddress.Parse($"10.{first % 256}.{second / 256}.{second % 256}"), checked((ushort)(1_024 + index % 50_000)));
-        var remote = Endpoint.From(IPAddress.Parse($"172.{16 + first % 16}.{second / 256}.{second % 256}"), checked((ushort)(1 + index % 65_535)));
-        return FlowKey.Create(local, remote, TransportProtocol.Udp, FlowOriginKind.Host, new AdapterContext($"adapter-{index % 4}", null, index % 4));
+        var local = Endpoint.From(IPAddress.Parse(string.Create(CultureInfo.InvariantCulture, $"10.{first % 256}.{second / 256}.{second % 256}")), checked((ushort)(1_024 + (index % 50_000))));
+        var remote = Endpoint.From(IPAddress.Parse(string.Create(CultureInfo.InvariantCulture, $"172.{16 + (first % 16)}.{second / 256}.{second % 256}")), checked((ushort)(1 + (index % 65_535))));
+        return FlowKey.Create(local, remote, TransportProtocol.Udp, FlowOriginKind.Host, new AdapterContext(string.Create(CultureInfo.InvariantCulture, $"adapter-{index % 4}"), Name: null, index % 4));
     }
 
     /// <summary>A TCP flow key with a controllable local (source) port, for the reverse-prefilter
@@ -113,10 +114,10 @@ internal static class BenchmarkShared
     {
         var local = Endpoint.From(IPAddress.Parse("10.0.0.1"), localPort);
         var remote = Endpoint.From(IPAddress.Parse("172.16.0.1"), 443);
-        return FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Host, new AdapterContext("adapter-0", null, 0));
+        return FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Host, new AdapterContext("adapter-0", Name: null, 0));
     }
 
-    public static FlowContext CreateContext(FlowKey key) => new(key, null, null, key.OriginAdapterId, null, key.Remote.Port);
+    public static FlowContext CreateContext(FlowKey key) => new(key, ProcessName: null, ProcessPath: null, key.OriginAdapterId, AdapterName: null, key.Remote.Port);
 }
 
 internal sealed class NeverOwnedGuard : ISelfTrafficGuard

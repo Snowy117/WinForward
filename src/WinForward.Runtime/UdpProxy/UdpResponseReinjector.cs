@@ -32,12 +32,12 @@ public interface IUdpResponseSink
 [SupportedOSPlatform("windows")]
 public sealed class UdpResponseReinjector : IUdpResponseSink
 {
-    private static readonly TimeSpan MissingOriginLogInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan s_missingOriginLogInterval = TimeSpan.FromSeconds(5);
 
     /// <summary>Throttle window for the structured reinjection diagnostics: these failures can
     /// repeat at query rate, and the drop shape is an aggregate staleness signal, so one line per
     /// window plus the counter suffices.</summary>
-    private static readonly TimeSpan StructuredReinjectLogInterval = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan s_structuredReinjectLogInterval = TimeSpan.FromSeconds(30);
 
     private readonly IPacketReinjector _reinjector;
     private readonly IUdpAdapterTargetSource _adapterTargets;
@@ -45,8 +45,8 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
     private readonly int _maximumFrameSize;
     private readonly IRuntimeLogger _logger;
     private readonly IInterceptionHealthSignal _healthSignal;
-    private readonly RuntimeLogThrottle _originUnresolvedWarn = new(StructuredReinjectLogInterval);
-    private readonly RuntimeLogThrottle _failClosedDropWarn = new(StructuredReinjectLogInterval);
+    private readonly RuntimeLogThrottle _originUnresolvedWarn = new(s_structuredReinjectLogInterval);
+    private readonly RuntimeLogThrottle _failClosedDropWarn = new(s_structuredReinjectLogInterval);
     private long _lastMissingClientMacLogTicks;
     private long _lastFrameBuildFailureLogTicks;
 
@@ -71,7 +71,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
     {
         ArgumentNullException.ThrowIfNull(reinjector);
         ArgumentNullException.ThrowIfNull(adapterTargets);
-        if (maximumFrameSize <= 0) throw new ArgumentOutOfRangeException(nameof(maximumFrameSize));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumFrameSize);
         _reinjector = reinjector;
         _adapterTargets = adapterTargets;
         _maximumFrameSize = maximumFrameSize;
@@ -220,7 +220,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
     {
         var now = DateTime.UtcNow.Ticks;
         var last = Interlocked.Read(ref _lastFrameBuildFailureLogTicks);
-        if (now - last >= MissingOriginLogInterval.Ticks && Interlocked.CompareExchange(ref _lastFrameBuildFailureLogTicks, now, last) == last)
+        if (now - last >= s_missingOriginLogInterval.Ticks && Interlocked.CompareExchange(ref _lastFrameBuildFailureLogTicks, now, last) == last)
         {
             _logger.Warn("UDP response frame build failed; dropping the response (fail-closed).");
         }
@@ -235,7 +235,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
     {
         var now = DateTime.UtcNow.Ticks;
         var last = Interlocked.Read(ref _lastMissingClientMacLogTicks);
-        if (now - last >= MissingOriginLogInterval.Ticks && Interlocked.CompareExchange(ref _lastMissingClientMacLogTicks, now, last) == last)
+        if (now - last >= s_missingOriginLogInterval.Ticks && Interlocked.CompareExchange(ref _lastMissingClientMacLogTicks, now, last) == last)
         {
             _logger.Warn("Forwarded UDP response dropped fail-closed: the flow's client MAC was not recorded.");
         }
@@ -250,7 +250,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
             new("source", originalFlow.Local),
             new("destination", originalFlow.Remote),
             new("originAdapter", originalFlow.OriginAdapterId),
-            new("mapAdapters", string.Join(",", _adapterTargets.AdapterIds)),
+            new("mapAdapters", string.Join(',', _adapterTargets.AdapterIds)),
             new("fallback", "host"));
     }
 

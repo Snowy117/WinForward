@@ -70,8 +70,8 @@ internal static class TcpFrameRewriter
         var tcpFlagsOffset = 14 + view.IPHeaderLength + 13;
         if (frame.Length <= tcpFlagsOffset) return false;
         var flags = frame[tcpFlagsOffset];
-        const byte Syn = 0x02;
-        const byte Ack = 0x10;
-        return (flags & Syn) != 0 && (flags & Ack) == 0;
+        const byte syn = 0x02;
+        const byte ack = 0x10;
+        return (flags & syn) != 0 && (flags & ack) == 0;
     }
 }

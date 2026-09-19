@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Runtime.Versioning;
 
 namespace WinForward.NdisApi;
@@ -31,7 +32,7 @@ public interface INdisPacketReader
 /// <summary>
 /// The optional knobs of the <see cref="NdisCapturePump"/> constructor as one record of named
 /// init properties, so call sites set only the knobs they need. Every member defaults to null,
-/// which selects the pump's built-in default for that knob. The two <c>internal</c> members are
+/// which selects the pump's built-in default for that knob. The two <see langword="internal"/> members are
 /// test and benchmark seams (reached through <c>InternalsVisibleTo</c>) and are never set by
 /// production.
 /// </summary>
@@ -104,8 +105,8 @@ public sealed class NdisCapturePump : IAsyncDisposable
     /// </summary>
     internal const int TransientRetryMaxAttempts = 5;
 
-    private static readonly TimeSpan DefaultTransientRetryBaseDelay = TimeSpan.FromMilliseconds(100);
-    private static readonly TimeSpan TransientRetryDelayCap = TimeSpan.FromMilliseconds(1600);
+    private static readonly TimeSpan s_defaultTransientRetryBaseDelay = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan s_transientRetryDelayCap = TimeSpan.FromMilliseconds(1600);
 
     private readonly INdisPacketReader _driver;
     private readonly nint _adapterHandle;
@@ -146,7 +147,7 @@ public sealed class NdisCapturePump : IAsyncDisposable
         _onBatchCompleted = options?.OnBatchCompleted;
         _onTransientRetry = options?.OnTransientRetry;
         _onDegraded = options?.OnDegraded;
-        _transientRetryBaseDelay = options?.TransientRetryBaseDelay ?? DefaultTransientRetryBaseDelay;
+        _transientRetryBaseDelay = options?.TransientRetryBaseDelay ?? s_defaultTransientRetryBaseDelay;
     }
 
     /// <summary>
@@ -167,10 +168,10 @@ public sealed class NdisCapturePump : IAsyncDisposable
         // The closure (thread + outcome source) is a one-time startup allocation; the loop body
         // that follows on the dedicated thread is allocation-free in steady state.
         var outcome = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var thread = new Thread(() => RunLoop(cancellationToken, outcome))
+        var thread = new Thread(() => RunLoop(outcome, cancellationToken))
         {
             IsBackground = true,
-            Name = $"WinForward.CapturePump.{_adapterHandle:X}",
+            Name = string.Create(CultureInfo.InvariantCulture, $"WinForward.CapturePump.{_adapterHandle:X}"),
         };
         Volatile.Write(ref _pumpThread, thread);
         thread.Start();
@@ -195,7 +196,7 @@ public sealed class NdisCapturePump : IAsyncDisposable
     /// process down on an unhandled thread exception — and <see cref="_runCompletion"/> must always
     /// be signaled so a parked <see cref="DisposeAsync"/> cannot hang.
     /// </summary>
-    private void RunLoop(CancellationToken cancellationToken, TaskCompletionSource outcome)
+    private void RunLoop(TaskCompletionSource outcome, CancellationToken cancellationToken)
     {
         Exception? failure = null;
         var canceled = false;
@@ -401,7 +402,7 @@ public sealed class NdisCapturePump : IAsyncDisposable
     private TimeSpan TransientRetryDelay(int attempt)
     {
         var delay = TimeSpan.FromTicks(_transientRetryBaseDelay.Ticks << Math.Min(attempt - 1, 20));
-        return delay > TransientRetryDelayCap ? TransientRetryDelayCap : delay;
+        return delay > s_transientRetryDelayCap ? s_transientRetryDelayCap : delay;
     }
 
     /// <summary>

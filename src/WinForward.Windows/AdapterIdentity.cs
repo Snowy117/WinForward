@@ -29,7 +29,7 @@ public sealed class WindowsAdapterInventory
         _ipAdapters = ipAdapters ?? GetWindowsIpAdapters;
     }
 
-    private static IReadOnlyList<IPAdapterInfo> GetWindowsIpAdapters()
+    private static List<IPAdapterInfo> GetWindowsIpAdapters()
     {
         var result = new List<IPAdapterInfo>();
         foreach (var network in NetworkInterface.GetAllNetworkInterfaces())

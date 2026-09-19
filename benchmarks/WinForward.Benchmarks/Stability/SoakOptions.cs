@@ -51,7 +51,7 @@ internal sealed record AbortMix(int Clean, int ClientRst, int RelayCancel, int U
         var upstreamTruncate = 0;
         foreach (var entry in raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            var separator = entry.IndexOf('=');
+            var separator = entry.IndexOf('=', StringComparison.Ordinal);
             if (separator <= 0)
             {
                 throw new ArgumentException($"Invalid abort-mix entry '{entry}'; expected 'name=weight'.", nameof(raw));
@@ -209,7 +209,7 @@ internal sealed record SoakOptions
         int.TryParse(raw, CultureInfo.InvariantCulture, out var value) && value > 0 ? value : throw new ArgumentException($"{name} must be a positive integer.", nameof(raw));
 
     private static int AtLeast(string name, string raw, int minimum) =>
-        int.TryParse(raw, CultureInfo.InvariantCulture, out var value) && value >= minimum ? value : throw new ArgumentException($"{name} must be an integer >= {minimum}.", nameof(raw));
+        int.TryParse(raw, CultureInfo.InvariantCulture, out var value) && value >= minimum ? value : throw new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"{name} must be an integer >= {minimum}."), nameof(raw));
 
     private static int AnyInt(string name, string raw) =>
         int.TryParse(raw, CultureInfo.InvariantCulture, out var value) ? value : throw new ArgumentException($"{name} must be an integer.", nameof(raw));

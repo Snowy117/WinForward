@@ -135,13 +135,13 @@ public static class TcpResetBuilder
         // Mirror the recorded client SYN with the addresses swapped: the reset travels back toward
         // the side the SYN arrived from.
         synTemplate.Slice(6, 6).CopyTo(frame);
-        synTemplate.Slice(0, 6).CopyTo(frame.Slice(6, 6));
+        synTemplate[..6].CopyTo(frame.Slice(6, 6));
         BinaryPrimitives.WriteUInt16BigEndian(frame.Slice(12, 2), etherType);
     }
 
     private static void WriteTcpHeader(Span<byte> tcp, ushort serverPort, ushort clientPort, uint serverSequenceNext, uint clientSequenceNext)
     {
-        BinaryPrimitives.WriteUInt16BigEndian(tcp.Slice(0, 2), serverPort);
+        BinaryPrimitives.WriteUInt16BigEndian(tcp[..2], serverPort);
         BinaryPrimitives.WriteUInt16BigEndian(tcp.Slice(2, 2), clientPort);
         BinaryPrimitives.WriteUInt32BigEndian(tcp.Slice(4, 4), serverSequenceNext);
         BinaryPrimitives.WriteUInt32BigEndian(tcp.Slice(8, 4), clientSequenceNext);

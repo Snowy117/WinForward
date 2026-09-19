@@ -48,8 +48,8 @@ internal static class DatagramHeader
 /// header, tracks per-flow reordering and duplicates with a 64-entry sequence ring, and echoes
 /// each datagram back to its source. Received/OutOfOrder/Duplicates count only datagrams inside
 /// the steady-state window (sequence above the per-flow marker published via
-    /// <see cref="BeginWindow"/>); warmup and teardown-tail datagrams still feed the sequence ring
-    /// but never touch the metrics. Buffer sizing is 16 MiB.
+/// <see cref="BeginWindow"/>); warmup and teardown-tail datagrams still feed the sequence ring
+/// but never touch the metrics. Buffer sizing is 16 MiB.
 /// </summary>
 internal sealed class EchoReceiver : IAsyncDisposable
 {
@@ -57,7 +57,7 @@ internal sealed class EchoReceiver : IAsyncDisposable
 
     private readonly Socket _socket;
     private readonly Task[] _loops;
-    private readonly Dictionary<int, FlowState> _flows = new();
+    private readonly Dictionary<int, FlowState> _flows = [];
     private readonly Lock _trackingGate = new();
     private readonly bool[] _observed;
     private volatile long[]? _windowMarkers;
@@ -66,9 +66,11 @@ internal sealed class EchoReceiver : IAsyncDisposable
     public EchoReceiver(int flowCount)
     {
         _observed = new bool[flowCount];
-        _socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-        _socket.ReceiveBufferSize = 16 << 20;
-        _socket.Blocking = false;
+        _socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)
+        {
+            ReceiveBufferSize = 16 << 20,
+            Blocking = false,
+        };
         _socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
         Endpoint = (IPEndPoint)_socket.LocalEndPoint!;
         _loops = new Task[ReceiveLoopCount];

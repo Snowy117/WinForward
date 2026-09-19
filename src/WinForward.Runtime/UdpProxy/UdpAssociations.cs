@@ -32,8 +32,8 @@ public sealed class UdpAssociationTable
 
     public UdpAssociationTable(int capacity = 16_384, int initialCapacity = 0)
     {
-        if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(capacity));
-        if (initialCapacity < 0) throw new ArgumentOutOfRangeException(nameof(initialCapacity));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capacity);
+        ArgumentOutOfRangeException.ThrowIfNegative(initialCapacity);
         _capacity = capacity;
         if (initialCapacity > 0)
         {

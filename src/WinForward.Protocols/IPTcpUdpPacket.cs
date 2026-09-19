@@ -7,7 +7,7 @@ namespace WinForward.Protocols;
 public enum PacketTransport : byte
 {
     Tcp,
-    Udp
+    Udp,
 }
 
 /// <summary>
@@ -52,7 +52,7 @@ public static class IPTcpUdpPacket
         {
             EtherTypeIpv4 => TryParseIpv4(frame, out view),
             EtherTypeIpv6 => TryParseIpv6(frame, out view),
-            _ => false
+            _ => false,
         };
     }
 

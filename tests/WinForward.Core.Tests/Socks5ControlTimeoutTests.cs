@@ -17,7 +17,7 @@ public sealed class Socks5ControlTimeoutTests
     public async Task ServerAddressResolutionTimeoutDoesNotDependOnResolverCancellation()
     {
         var unresolved = new TaskCompletionSource<IPAddress[]>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var socksServer = new Socks5Server("test", "resolver.invalid", 1080, null, null);
+        var socksServer = new Socks5Server("test", "resolver.invalid", 1080, Username: null, Password: null);
 
         await Assert.ThrowsAsync<IOException>(async () =>
         {
@@ -38,13 +38,13 @@ public sealed class Socks5ControlTimeoutTests
         var greetingRead = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var server = StallAfterGreetingAsync(listener, greetingRead, stopServer.Token);
         var endpoint = (IPEndPoint)listener.LocalEndpoint;
-        var socksServer = new Socks5Server("test", endpoint.Address.ToString(), checked((ushort)endpoint.Port), null, null);
+        var socksServer = new Socks5Server("test", endpoint.Address.ToString(), checked((ushort)endpoint.Port), Username: null, Password: null);
 
         var connect = Socks5ControlConnection.ConnectAsync(socksServer, CancellationToken.None, perAttemptTimeout: TimeSpan.FromSeconds(2)).AsTask();
         await greetingRead.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
         await Assert.ThrowsAsync<IOException>(async () => await connect.WaitAsync(TimeSpan.FromSeconds(30)));
-        stopServer.Cancel();
+        await stopServer.CancelAsync();
         await IgnoreExpectedCancellationAsync(server);
     }
 
@@ -57,15 +57,15 @@ public sealed class Socks5ControlTimeoutTests
         var greetingRead = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var server = StallAfterGreetingAsync(listener, greetingRead, stopServer.Token);
         var endpoint = (IPEndPoint)listener.LocalEndpoint;
-        var socksServer = new Socks5Server("test", endpoint.Address.ToString(), checked((ushort)endpoint.Port), null, null);
+        var socksServer = new Socks5Server("test", endpoint.Address.ToString(), checked((ushort)endpoint.Port), Username: null, Password: null);
         using var cancellation = new CancellationTokenSource();
 
         var connect = Socks5ControlConnection.ConnectAsync(socksServer, cancellation.Token, perAttemptTimeout: TimeSpan.FromSeconds(5)).AsTask();
         await greetingRead.Task.WaitAsync(TimeSpan.FromSeconds(30));
-        cancellation.Cancel();
+        await cancellation.CancelAsync();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await connect);
-        stopServer.Cancel();
+        await stopServer.CancelAsync();
         await IgnoreExpectedCancellationAsync(server);
     }
 
@@ -78,14 +78,14 @@ public sealed class Socks5ControlTimeoutTests
         var commandRead = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var server = StallAfterUdpAssociateRequestAsync(listener, commandRead, stopServer.Token);
         var endpoint = (IPEndPoint)listener.LocalEndpoint;
-        var socksServer = new Socks5Server("test", endpoint.Address.ToString(), checked((ushort)endpoint.Port), null, null);
+        var socksServer = new Socks5Server("test", endpoint.Address.ToString(), checked((ushort)endpoint.Port), Username: null, Password: null);
         await using var control = await Socks5ControlConnection.ConnectAsync(socksServer, CancellationToken.None, perAttemptTimeout: TimeSpan.FromSeconds(2));
 
         var associate = control.UdpAssociateAsync(CancellationToken.None).AsTask();
         await commandRead.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
         await Assert.ThrowsAsync<IOException>(async () => await associate.WaitAsync(TimeSpan.FromSeconds(30)));
-        stopServer.Cancel();
+        await stopServer.CancelAsync();
         await IgnoreExpectedCancellationAsync(server);
     }
 
@@ -99,7 +99,7 @@ public sealed class Socks5ControlTimeoutTests
         listener.Start();
         var server = AcceptGreetingAsync(listener, CancellationToken.None);
         var endpoint = (IPEndPoint)listener.LocalEndpoint;
-        var socksServer = new Socks5Server("test", endpoint.Address.ToString(), checked((ushort)endpoint.Port), null, null);
+        var socksServer = new Socks5Server("test", endpoint.Address.ToString(), checked((ushort)endpoint.Port), Username: null, Password: null);
 
         await using var control = await Socks5ControlConnection.ConnectAsync(socksServer, CancellationToken.None);
         var stream = Assert.IsType<NetworkStream>(control.GetUpstreamStream());
@@ -120,7 +120,7 @@ public sealed class Socks5ControlTimeoutTests
         listener.Start();
         var server = AcceptGreetingAsync(listener, CancellationToken.None);
         var endpoint = (IPEndPoint)listener.LocalEndpoint;
-        var socksServer = new Socks5Server("test", endpoint.Address.ToString(), checked((ushort)endpoint.Port), null, null);
+        var socksServer = new Socks5Server("test", endpoint.Address.ToString(), checked((ushort)endpoint.Port), Username: null, Password: null);
 
         await using var control = await Socks5ControlConnection.ConnectAsync(socksServer, CancellationToken.None);
         var stream = Assert.IsType<NetworkStream>(control.GetUpstreamStream());
@@ -145,14 +145,14 @@ public sealed class Socks5ControlTimeoutTests
         var controlEndpoint = (IPEndPoint)tcpListener.LocalEndpoint;
         using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var server = ServeAdvertisedAssociateAsync(tcpListener, advertised, serverCancellation.Token);
-        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), null, null);
+        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
         var registry = new SelfTrafficRegistry();
         var transport = await Socks5UdpTransport.CreateAsync(socksServer, registry, CancellationToken.None, createControl: null, socketFactory: null);
         Assert.Equal(advertised, transport.RelayEndpoint);
 
         using var sender = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         sender.Bind(new IPEndPoint(IPAddress.Parse("127.0.0.2"), relayEndpoint.Port));
-        var datagram = Socks5UdpDatagrams.Encode(IPAddress.Parse("192.0.2.53"), 53, new byte[] { 0xab });
+        var datagram = Socks5UdpDatagrams.Encode(IPAddress.Parse("192.0.2.53"), 53, [0xab]);
         await sender.SendToAsync(datagram, SocketFlags.None, new IPEndPoint(IPAddress.Loopback, transport.LocalEndpoint.Port), CancellationToken.None);
 
         var buffer = new byte[65_535];

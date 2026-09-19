@@ -23,11 +23,9 @@ public interface IPacketReinjector
 /// The production reinjector that drives the NDISAPI driver. The driver stays owned by the caller.
 /// </summary>
 [SupportedOSPlatform("windows")]
-public sealed class NdisPacketReinjector : IPacketReinjector
+public sealed class NdisPacketReinjector(NdisApiDriver driver) : IPacketReinjector
 {
-    private readonly NdisApiDriver _driver;
-
-    public NdisPacketReinjector(NdisApiDriver driver) => _driver = driver ?? throw new ArgumentNullException(nameof(driver));
+    private readonly NdisApiDriver _driver = driver ?? throw new ArgumentNullException(nameof(driver));
 
     public void SendToAdapter(nint adapterHandle, NdisPacketBuffer buffer) => _driver.SendPacketToAdapter(adapterHandle, buffer);
 

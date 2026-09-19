@@ -1,4 +1,5 @@
 #pragma warning disable CA1416 // TcpProxyRelay is platform-neutral; only its production factory is Windows-specific.
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using BenchmarkDotNet.Attributes;
@@ -25,7 +26,7 @@ public class TcpRelayBenchmarks
         var (upstreamPeer, relayUpstream) = await CreateSocketPairAsync().ConfigureAwait(false);
         using (localPeer)
         using (upstreamPeer)
-        using (var relayUpstreamStream = new NetworkStream(relayUpstream, ownsSocket: true))
+        await using (var relayUpstreamStream = new NetworkStream(relayUpstream, ownsSocket: true))
         await using (var relay = new TcpProxyRelay(relayLocal, relayUpstreamStream, NoopAsyncDisposable.Instance))
         {
             var sendBuffer = new byte[ChunkBytes];
@@ -52,7 +53,7 @@ public class TcpRelayBenchmarks
             upstreamPeer.Shutdown(SocketShutdown.Send);
             await relay.Completion.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
             Volatile.Write(ref s_sink, received);
-            if (received != transferBytes) throw new InvalidOperationException($"Relay copied {received} of {transferBytes} bytes.");
+            if (received != transferBytes) throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture, $"Relay copied {received} of {transferBytes} bytes."));
         }
     }
 

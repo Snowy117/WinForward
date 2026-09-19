@@ -34,7 +34,7 @@ public static class IPUdpPacket
         {
             0x0800 => TryParseIpv4(frame, out packet),
             0x86dd => TryParseIpv6(frame, out packet),
-            _ => false
+            _ => false,
         };
     }
 

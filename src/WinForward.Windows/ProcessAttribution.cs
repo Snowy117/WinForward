@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -12,7 +13,7 @@ namespace WinForward.Windows;
 public sealed partial class WindowsProcessAttributor : IProcessAttributor
 {
     private const int ErrorInsufficientBuffer = 122;
-    private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(2);
+    private static readonly TimeSpan s_retryDelay = TimeSpan.FromMilliseconds(2);
     private readonly int _cacheCapacity;
     private readonly Dictionary<ProcessCacheKey, ProcessIdentity> _identityCache = [];
     private readonly Queue<ProcessCacheKey> _cacheOrder = [];
@@ -20,7 +21,7 @@ public sealed partial class WindowsProcessAttributor : IProcessAttributor
 
     public WindowsProcessAttributor(int cacheCapacity = 1024)
     {
-        if (cacheCapacity <= 0) throw new ArgumentOutOfRangeException(nameof(cacheCapacity));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(cacheCapacity);
         _cacheCapacity = cacheCapacity;
     }
 
@@ -28,9 +29,9 @@ public sealed partial class WindowsProcessAttributor : IProcessAttributor
     {
         if (!OperatingSystem.IsWindows()) return null;
         var result = FindOwnerSafely(key);
-        if (result is null && RetryDelay > TimeSpan.Zero)
+        if (result is null && s_retryDelay > TimeSpan.Zero)
         {
-            await Task.Delay(RetryDelay, cancellationToken).ConfigureAwait(false);
+            await Task.Delay(s_retryDelay, cancellationToken).ConfigureAwait(false);
             result = FindOwnerSafely(key);
         }
 
@@ -43,7 +44,7 @@ public sealed partial class WindowsProcessAttributor : IProcessAttributor
         {
             TransportProtocol.Udp => IPHelperTables.FindUdpOwner(key.Local),
             TransportProtocol.Tcp => IPHelperTables.FindTcpOwner(key.Local, key.Remote),
-            _ => null
+            _ => null,
         };
     }
 
@@ -75,7 +76,7 @@ public sealed partial class WindowsProcessAttributor : IProcessAttributor
             var identity = new ProcessIdentity(processId, creationTime, name, path);
             lock (_cacheGate)
             {
-                if (_identityCache.ContainsKey(cacheKey)) return _identityCache[cacheKey];
+                if (_identityCache.TryGetValue(cacheKey, out var value)) return value;
                 while (_identityCache.Count >= _cacheCapacity && _cacheOrder.TryDequeue(out var evicted)) _identityCache.Remove(evicted);
                 _identityCache[cacheKey] = identity;
                 _cacheOrder.Enqueue(cacheKey);
@@ -111,7 +112,7 @@ public sealed partial class WindowsProcessAttributor : IProcessAttributor
         using var processHandle = SafeProcessHandle.Open(processId);
         if (processHandle.IsInvalid) return null;
 
-        const int MaximumPathLength = 32_768;
+        const int maximumPathLength = 32_768;
         var capacity = 260;
         while (true)
         {
@@ -130,8 +131,8 @@ public sealed partial class WindowsProcessAttributor : IProcessAttributor
                 return new string(buffer, 0, pathLength);
             }
 
-            if (Marshal.GetLastWin32Error() != ErrorInsufficientBuffer || capacity >= MaximumPathLength) return null;
-            capacity = Math.Min(capacity * 2, MaximumPathLength);
+            if (Marshal.GetLastWin32Error() != ErrorInsufficientBuffer || capacity >= maximumPathLength) return null;
+            capacity = Math.Min(capacity * 2, maximumPathLength);
         }
     }
 
@@ -146,7 +147,7 @@ public sealed partial class WindowsProcessAttributor : IProcessAttributor
         public static SafeProcessHandle Open(uint processId)
         {
             var result = new SafeProcessHandle();
-            result.SetHandle(Native.OpenProcess(ProcessQueryLimitedInformation, false, processId));
+            result.SetHandle(Native.OpenProcess(ProcessQueryLimitedInformation, inheritHandle: false, processId));
             return result;
         }
 
@@ -190,7 +191,7 @@ internal static partial class IPHelperTables
         return matches.Length == 1 ? matches[0] : null;
     }
 
-    private static unsafe IReadOnlyList<UdpOwner> ReadUdp4()
+    private static unsafe UdpOwner[] ReadUdp4()
     {
         var buffer = ReadTable(AfInet, IPHelperAbi.UdpTableOwnerPid, out var rowCount, out var bytesWritten);
         try
@@ -207,7 +208,7 @@ internal static partial class IPHelperTables
         finally { Marshal.FreeHGlobal(buffer); }
     }
 
-    private static unsafe IReadOnlyList<UdpOwner> ReadUdp6()
+    private static unsafe UdpOwner[] ReadUdp6()
     {
         var buffer = ReadTable(AfInet6, IPHelperAbi.UdpTableOwnerPid, out var rowCount, out var bytesWritten);
         try
@@ -224,7 +225,7 @@ internal static partial class IPHelperTables
         finally { Marshal.FreeHGlobal(buffer); }
     }
 
-    private static unsafe IReadOnlyList<TcpOwner> ReadTcp4()
+    private static unsafe TcpOwner[] ReadTcp4()
     {
         var buffer = ReadTable(AfInet, TcpTableOwnerPidAll, out var rowCount, out var bytesWritten);
         try
@@ -241,7 +242,7 @@ internal static partial class IPHelperTables
         finally { Marshal.FreeHGlobal(buffer); }
     }
 
-    private static unsafe IReadOnlyList<TcpOwner> ReadTcp6()
+    private static unsafe TcpOwner[] ReadTcp6()
     {
         var buffer = ReadTable(AfInet6, TcpTableOwnerPidAll, out var rowCount, out var bytesWritten);
         try
@@ -262,13 +263,13 @@ internal static partial class IPHelperTables
     {
         uint size = 0;
         var result = tableClass == IPHelperAbi.UdpTableOwnerPid
-            ? Native.GetExtendedUdpTable(nint.Zero, ref size, false, addressFamily, tableClass, 0)
-            : Native.GetExtendedTcpTable(nint.Zero, ref size, false, addressFamily, tableClass, 0);
+            ? Native.GetExtendedUdpTable(nint.Zero, ref size, order: false, addressFamily, tableClass, 0)
+            : Native.GetExtendedTcpTable(nint.Zero, ref size, order: false, addressFamily, tableClass, 0);
         if (result != ErrorInsufficientBuffer || size < 4) throw new Win32Exception(result);
         var buffer = Marshal.AllocHGlobal(checked((int)size));
         result = tableClass == IPHelperAbi.UdpTableOwnerPid
-            ? Native.GetExtendedUdpTable(buffer, ref size, false, addressFamily, tableClass, 0)
-            : Native.GetExtendedTcpTable(buffer, ref size, false, addressFamily, tableClass, 0);
+            ? Native.GetExtendedUdpTable(buffer, ref size, order: false, addressFamily, tableClass, 0)
+            : Native.GetExtendedTcpTable(buffer, ref size, order: false, addressFamily, tableClass, 0);
         if (result != 0)
         {
             Marshal.FreeHGlobal(buffer);
@@ -291,8 +292,8 @@ internal static partial class IPHelperTables
     /// </summary>
     internal static void ValidateRowCount(int rowCount, uint bytesWritten, int rowSize, string tableName)
     {
-        if (rowCount < 0 || 4 + (long)rowCount * rowSize > bytesWritten)
-            throw new InvalidOperationException($"The {tableName} announced {rowCount} rows of {rowSize} bytes each but wrote only {bytesWritten} bytes; refusing to read rows beyond the table payload.");
+        if (rowCount < 0 || 4 + ((long)rowCount * rowSize) > bytesWritten)
+            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture, $"The {tableName} announced {rowCount} rows of {rowSize} bytes each but wrote only {bytesWritten} bytes; refusing to read rows beyond the table payload."));
     }
 
     /// <summary>
@@ -304,7 +305,7 @@ internal static partial class IPHelperTables
     /// must assume padding between <c>NumEntries</c> and the first row).
     /// </summary>
     internal static unsafe T ReadRow<T>(nint buffer, int index, int firstRowOffset = 4) where T : unmanaged =>
-        Unsafe.ReadUnaligned<T>((void*)(buffer + firstRowOffset + index * sizeof(T)));
+        Unsafe.ReadUnaligned<T>((void*)(buffer + firstRowOffset + (index * sizeof(T))));
 
     private readonly record struct UdpOwner(IPAddress Address, ushort Port, uint ProcessId);
     [StructLayout(LayoutKind.Auto)] private readonly record struct TcpOwner(Endpoint Local, Endpoint Remote, uint ProcessId);

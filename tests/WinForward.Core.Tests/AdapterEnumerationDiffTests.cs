@@ -36,8 +36,8 @@ public sealed class AdapterEnumerationDiffTests
         var diff = AdapterEnumerationDiff.Diff(current, next);
 
         Assert.False(diff.IsEmpty);
-        Assert.Equal(["id-b"], diff.Added.Select(item => item.StableId).ToArray());
-        Assert.Equal(["id-a"], diff.Removed.Select(item => item.StableId).ToArray());
+        Assert.Equal(["id-b"], [.. diff.Added.Select(item => item.StableId)]);
+        Assert.Equal(["id-a"], [.. diff.Removed.Select(item => item.StableId)]);
         Assert.Empty(diff.Changed);
     }
 
@@ -49,7 +49,7 @@ public sealed class AdapterEnumerationDiffTests
 
         var diff = AdapterEnumerationDiff.Diff(current, next);
 
-        Assert.Equal(["id-a"], diff.Changed.Select(item => item.StableId).ToArray());
+        Assert.Equal(["id-a"], [.. diff.Changed.Select(item => item.StableId)]);
         Assert.Empty(diff.Added);
         Assert.Empty(diff.Removed);
     }
@@ -62,7 +62,7 @@ public sealed class AdapterEnumerationDiffTests
 
         var diff = AdapterEnumerationDiff.Diff(current, next);
 
-        Assert.Equal(["id-a"], diff.Changed.Select(item => item.StableId).ToArray());
+        Assert.Equal(["id-a"], [.. diff.Changed.Select(item => item.StableId)]);
     }
 
     [Fact]
@@ -73,7 +73,7 @@ public sealed class AdapterEnumerationDiffTests
 
         var diff = AdapterEnumerationDiff.Diff(current, next);
 
-        Assert.Equal(["id-a"], diff.Changed.Select(item => item.StableId).ToArray());
+        Assert.Equal(["id-a"], [.. diff.Changed.Select(item => item.StableId)]);
     }
 
     [Fact]
@@ -86,7 +86,7 @@ public sealed class AdapterEnumerationDiffTests
 
         var diff = AdapterEnumerationDiff.Diff(current, next);
 
-        Assert.Equal(["id-a"], diff.Changed.Select(item => item.StableId).ToArray());
+        Assert.Equal(["id-a"], [.. diff.Changed.Select(item => item.StableId)]);
         Assert.Empty(diff.Added);
         Assert.Empty(diff.Removed);
     }

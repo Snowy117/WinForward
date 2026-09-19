@@ -54,12 +54,12 @@ public sealed class FlowDispatcherExecutorTests
     [Fact]
     public async Task DispatcherSeparatesForwardedAdaptersFromHostCatchAllPolicy()
     {
-        var server = new Socks5Server("primary", "127.0.0.1", 1080, null, null);
+        var server = new Socks5Server("primary", "127.0.0.1", 1080, Username: null, Password: null);
         var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase) { [server.Name] = server };
         var config = new ValidatedConfiguration(servers, new PolicySnapshot(
         [
             new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Proxy, 0, server.Name)),
-            new(new RuleMatcher(), new FlowDecision(FlowAction.Proxy, 1, server.Name))
+            new(new RuleMatcher(), new FlowDecision(FlowAction.Proxy, 1, server.Name)),
         ], FlowAction.Block));
         var executor = new FakeExecutor();
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor);
@@ -128,7 +128,7 @@ public sealed class FlowDispatcherExecutorTests
     public async Task DispatcherFallsBackWhenHostAttributionIsUnknown()
     {
         var config = CreateConfig(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "dns.exe" }), FlowAction.Pass, ruleAction: FlowAction.Block);
-        var attributor = new FakeAttributor(null);
+        var attributor = new FakeAttributor(name: null);
         var executor = new FakeExecutor();
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor, attributor);
         var key = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
@@ -149,8 +149,8 @@ public sealed class FlowDispatcherExecutorTests
             new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot(
             [
-                new(new RuleMatcher(), new FlowDecision(FlowAction.Block, 0, null)),
-                new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Proxy, 1, "proxy"))
+                new(new RuleMatcher(), new FlowDecision(FlowAction.Block, 0, ProxyServerName: null)),
+                new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Proxy, 1, "proxy")),
             ], FlowAction.Block));
         var executor = new FakeExecutor();
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor);
@@ -175,9 +175,9 @@ public sealed class FlowDispatcherExecutorTests
             new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot(
             [
-                new(new RuleMatcher(Protocols: new HashSet<TransportProtocol> { TransportProtocol.Tcp }), new FlowDecision(FlowAction.Block, 0, null)),
+                new(new RuleMatcher(Protocols: new HashSet<TransportProtocol> { TransportProtocol.Tcp }), new FlowDecision(FlowAction.Block, 0, ProxyServerName: null)),
                 new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Proxy, 1, "proxy")),
-                new(new RuleMatcher(), new FlowDecision(FlowAction.Block, 2, null))
+                new(new RuleMatcher(), new FlowDecision(FlowAction.Block, 2, ProxyServerName: null)),
             ], FlowAction.Block));
         var executor = new FakeExecutor();
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor);
@@ -401,7 +401,7 @@ public sealed class FlowDispatcherExecutorTests
         var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), FlowContext(FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 1), Endpoint.From(IPAddress.Parse("192.0.2.53"), 2), TransportProtocol.Tcp, FlowOriginKind.Host)), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
 
         await executor.BlockAsync(packet, CancellationToken.None);
-        await executor.ProxyAsync(packet, new Socks5Server("p", "127.0.0.1", 1080, null, null), CancellationToken.None);
+        await executor.ProxyAsync(packet, new Socks5Server("p", "127.0.0.1", 1080, Username: null, Password: null), CancellationToken.None);
         executor.FlushPendingPasses((nint)7);
 
         Assert.Equal(0, reinjector.ToAdapterCount);
@@ -421,7 +421,7 @@ public sealed class FlowDispatcherExecutorTests
         var key = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 443), TransportProtocol.Tcp, FlowOriginKind.Host);
         var packet = new CapturedFlowPacket(new PacketLease(FrameBuilders.CreateIpv4TcpFrame()), FlowContext(key), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
 
-        await executor.ProxyAsync(packet, new Socks5Server("p", "127.0.0.1", 1080, null, null), CancellationToken.None);
+        await executor.ProxyAsync(packet, new Socks5Server("p", "127.0.0.1", 1080, Username: null, Password: null), CancellationToken.None);
         executor.FlushPendingPasses((nint)7);
 
         Assert.Equal(0, reinjector.ToAdapterCount);
@@ -435,12 +435,12 @@ public sealed class FlowDispatcherExecutorTests
     private static ValidatedConfiguration CreateConfig(RuleMatcher matcher, FlowAction fallback, FlowAction ruleAction = FlowAction.Pass, string? server = null)
     {
         var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase);
-        if (server is not null) servers[server] = new Socks5Server(server, "127.0.0.1", 1080, null, null);
+        if (server is not null) servers[server] = new Socks5Server(server, "127.0.0.1", 1080, Username: null, Password: null);
         var rules = new[] { new PolicyRule(matcher, new FlowDecision(ruleAction, 0, server)) };
         return new ValidatedConfiguration(servers, new PolicySnapshot(rules, fallback));
     }
 
-    private static FlowContext FlowContext(FlowKey key) => new(key, null, null, null, null, key.Remote.Port);
+    private static FlowContext FlowContext(FlowKey key) => new(key, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, key.Remote.Port);
 
     private static CapturedFlowPacket FlowPacket(ushort localPort, FlowOriginKind origin, string adapterId, string adapterName)
     {
@@ -451,7 +451,7 @@ public sealed class FlowDispatcherExecutorTests
             TransportProtocol.Tcp,
             origin,
             adapter);
-        var context = new FlowContext(key, null, null, adapterId, adapterName, key.Remote.Port);
+        var context = new FlowContext(key, ProcessName: null, ProcessPath: null, adapterId, adapterName, key.Remote.Port);
         return new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), context);
     }
 }

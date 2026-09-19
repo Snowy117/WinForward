@@ -25,6 +25,8 @@ public sealed class TcpRelayEndResetTests
     private static readonly IPAddress s_clientIpv4 = IPAddress.Parse("192.0.2.10");
     private static readonly IPAddress s_destIpv4 = IPAddress.Parse("192.0.2.53");
     private static readonly NativeBufferPool s_synCopyPool = new(NdisApiAbi.MaximumEthernetFrame);
+    private static readonly string[] s_resetThenTeardownOrder = ["reset", "teardown"];
+    private static readonly string[] s_teardownOnlyOrder = ["teardown"];
 
     [Fact]
     public async Task FaultedRelayEndInjectsInWindowClientResetBeforeTeardown()
@@ -38,7 +40,7 @@ public sealed class TcpRelayEndResetTests
         await WaitForAsync(() => order.Count == 2);
 
         AssertResetFromTrackers(injector);
-        Assert.Equal(new[] { "reset", "teardown" }, order);
+        Assert.Equal(s_resetThenTeardownOrder, order);
         session.Retire();
         await acceptLoop;
     }
@@ -55,7 +57,7 @@ public sealed class TcpRelayEndResetTests
         await WaitForAsync(() => order.Count == 2);
 
         AssertResetFromTrackers(injector);
-        Assert.Equal(new[] { "reset", "teardown" }, order);
+        Assert.Equal(s_resetThenTeardownOrder, order);
         session.Retire();
         await acceptLoop;
     }
@@ -72,7 +74,7 @@ public sealed class TcpRelayEndResetTests
         await WaitForAsync(() => order.Count == 1);
 
         Assert.Empty(injector.Frames);
-        Assert.Equal(new[] { "teardown" }, order);
+        Assert.Equal(s_teardownOnlyOrder, order);
         session.Retire();
         await acceptLoop;
     }
@@ -89,7 +91,7 @@ public sealed class TcpRelayEndResetTests
         await WaitForAsync(() => order.Count == 1);
 
         Assert.Empty(injector.Frames);
-        Assert.Equal(new[] { "teardown" }, order);
+        Assert.Equal(s_teardownOnlyOrder, order);
         session.Retire();
         await acceptLoop;
     }
@@ -102,7 +104,7 @@ public sealed class TcpRelayEndResetTests
         var (upstreamPeer, relayUpstream) = await CreateSocketPairAsync();
         using var local = localPeer;
         using var upstream = upstreamPeer;
-        using var upstreamStream = new NetworkStream(relayUpstream, ownsSocket: true);
+        await using var upstreamStream = new NetworkStream(relayUpstream, ownsSocket: true);
         await using var relay = new TcpProxyRelay(relayLocal, upstreamStream, new NoopDisposable());
 
         local.Shutdown(SocketShutdown.Send);
@@ -145,9 +147,8 @@ public sealed class TcpRelayEndResetTests
     /// </summary>
     private static void AssertResetFromTrackers(OrderingInjector injector)
     {
-        var reset = Assert.Single(injector.Frames);
-        Assert.True(reset.TowardMstcp);
-        var frame = reset.Frame;
+        var (frame, towardMstcp, _) = Assert.Single(injector.Frames);
+        Assert.True(towardMstcp);
         Assert.Equal(s_destIpv4, new IPAddress(frame.AsSpan(26, 4).ToArray()));
         Assert.Equal(443u, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(34, 2)));
         Assert.Equal(s_clientIpv4, new IPAddress(frame.AsSpan(30, 4).ToArray()));
@@ -184,7 +185,7 @@ public sealed class TcpRelayEndResetTests
     private static TcpRedirectSession CreateSessionWithObservedSequences(out FakeListener listener)
     {
         var key = FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
-        var association = new TcpRedirectAssociation(key, key.Remote, new AdapterContext("eth0", "Ethernet", 1), 0x1234, Endpoint.From(IPAddress.Loopback, 40000), null, 1, DateTimeOffset.UtcNow);
+        var association = new TcpRedirectAssociation(key, key.Remote, new AdapterContext("eth0", "Ethernet", 1), 0x1234, Endpoint.From(IPAddress.Loopback, 40000), forwardLocalAddress: null, 1, DateTimeOffset.UtcNow);
 
         TcpSequenceObservation.RecordClientSyn(BuildIpv4TcpSyn(s_clientIpv4, s_destIpv4, 53000, 443), association, s_synCopyPool);
         var synAck = BuildIpv4TcpSyn(s_destIpv4, s_clientIpv4, 443, 53000);
@@ -202,7 +203,7 @@ public sealed class TcpRelayEndResetTests
 
         listener = new FakeListener(association.TranslatedListenerTuple);
         var token = new SelfTrafficRegistry().Register(new SelfTrafficRegistry.SelfTrafficKey(TransportProtocol.Tcp, association.TranslatedListenerTuple, association.TranslatedListenerTuple));
-        return new TcpRedirectSession(association, listener, token, new Socks5Server("primary", "127.0.0.1", 1080, null, null), CancellationToken.None, 0);
+        return new TcpRedirectSession(association, listener, token, new Socks5Server("primary", "127.0.0.1", 1080, Username: null, Password: null), 0, CancellationToken.None);
     }
 
     private static async Task<(Socket Peer, Socket Relay)> CreateSocketPairAsync()

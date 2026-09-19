@@ -116,11 +116,11 @@ public sealed class Socks5ProtocolTests
         // L1: each candidate address is one attempt; a socket-creation failure is a failed attempt.
         // The global attempt cap stops the sequential loop, and exhausting candidates fails closed
         // (an exception surfaces as blocked) rather than hanging the capture path.
-        var server = new Socks5Server("test", "host.invalid", 1080, null, null);
+        var server = new Socks5Server("test", "host.invalid", 1080, Username: null, Password: null);
         var answers = new[]
         {
             IPAddress.Parse("192.0.2.1"), IPAddress.Parse("192.0.2.2"),
-            IPAddress.Parse("192.0.2.3"), IPAddress.Parse("192.0.2.4")
+            IPAddress.Parse("192.0.2.3"), IPAddress.Parse("192.0.2.4"),
         };
         var socketCreations = 0;
 
@@ -145,11 +145,11 @@ public sealed class Socks5ProtocolTests
         // created before advancing to the next candidate. A leaked socket would hold the local
         // ephemeral endpoint and a file descriptor. The attempt cap is also honored: only the
         // capped number of sockets are created, never the full address list.
-        var server = new Socks5Server("test", "host.invalid", 1080, null, null);
+        var server = new Socks5Server("test", "host.invalid", 1080, Username: null, Password: null);
         var candidates = new[]
         {
             IPAddress.Parse("127.0.0.1"), IPAddress.Parse("127.0.0.1"),
-            IPAddress.Parse("127.0.0.1"), IPAddress.Parse("127.0.0.1")
+            IPAddress.Parse("127.0.0.1"), IPAddress.Parse("127.0.0.1"),
         };
         var tracked = new List<TrackingSocket>();
 

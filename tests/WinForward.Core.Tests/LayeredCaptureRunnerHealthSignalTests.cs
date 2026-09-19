@@ -41,11 +41,11 @@ public sealed class LayeredCaptureRunnerHealthSignalTests
         Assert.Equal([101], harness.Generation(1).Scope.Select(item => item.Adapter.RuntimeHandle).ToArray());
         Assert.Equal(1, harness.Generation(0).DisposeCount);
         Assert.Equal(0, harness.DurableDisposeCount);
-        var forced = Assert.Single(harness.Logger.Events, entry =>
+        var (level, _, fields) = Assert.Single(harness.Logger.Events, entry =>
             string.Equals(entry.Name, "runner.forcedRefresh", StringComparison.Ordinal));
-        Assert.Equal(RuntimeLogLevel.Warn, forced.Level);
-        Assert.Equal(RuntimeCounters.RelaySetupFailed, CaptureRunnerHarness.FieldValue(forced.Fields, "reason"));
-        Assert.Equal("1", CaptureRunnerHarness.FieldValue(forced.Fields, "consecutive"));
+        Assert.Equal(RuntimeLogLevel.Warn, level);
+        Assert.Equal(RuntimeCounters.RelaySetupFailed, CaptureRunnerHarness.FieldValue(fields, "reason"));
+        Assert.Equal("1", CaptureRunnerHarness.FieldValue(fields, "consecutive"));
 
         // The forced install completed, so the demand-processing success hook already reset
         // the monitor's consecutive streak.

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
@@ -41,7 +42,7 @@ public sealed class LayeredCaptureRunnerRefreshTests
 
         for (var generation = 1; generation <= 4; generation++)
         {
-            var firstHandle = (nint)(1001 + generation * 2);
+            var firstHandle = (nint)(1001 + (generation * 2));
             capture.Enumeration.SetAdapters(
                 CaptureRunnerFakes.AdapterItem("id-a", firstHandle),
                 CaptureRunnerFakes.AdapterItem("id-b", firstHandle + 1));
@@ -53,7 +54,7 @@ public sealed class LayeredCaptureRunnerRefreshTests
         // Traffic on the final generation's fresh handles still batches: batched reinjector
         // calls observed, zero immediate sends, zero overflow. Without retirement, ten distinct
         // handle keys would have exhausted the eight-lane table generations ago.
-        var finalA = (nint)(1001 + 4 * 2);
+        var finalA = (nint)(1001 + (4 * 2));
         var finalB = finalA + 1;
         await executor.PassAsync(PassPacket(finalA, isOnSend: true), CancellationToken.None);
         await executor.PassAsync(PassPacket(finalA, isOnSend: true), CancellationToken.None);
@@ -75,8 +76,8 @@ public sealed class LayeredCaptureRunnerRefreshTests
         var expected = new List<string>();
         for (var generation = 0; generation < 5; generation++)
         {
-            if (generation > 0) expected.Add($"generation-{generation - 1}-disposed");
-            expected.Add($"generation-{generation}-created");
+            if (generation > 0) expected.Add(string.Create(CultureInfo.InvariantCulture, $"generation-{generation - 1}-disposed"));
+            expected.Add(string.Create(CultureInfo.InvariantCulture, $"generation-{generation}-created"));
             expected.Add("scope-installed(2)");
             expected.Add("retire-lanes");
         }
@@ -108,7 +109,7 @@ public sealed class LayeredCaptureRunnerRefreshTests
             Assert.Equal([202], harness.InstalledScopes[1].Select(item => item.Adapter.RuntimeHandle).ToArray());
         }
 
-        harness.Cancel.Cancel();
+        await harness.Cancel.CancelAsync();
         await harness.RunTask.ConfigureAwait(false);
         Assert.Equal(1, harness.DurableDisposeCount);
     }
@@ -127,7 +128,7 @@ public sealed class LayeredCaptureRunnerRefreshTests
         await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 2).ConfigureAwait(false);
         await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
 
-        Assert.Equal(["id-a"], harness.Generation(1).Scope.Select(item => item.StableId).ToArray());
+        Assert.Equal(["id-a"], [.. harness.Generation(1).Scope.Select(item => item.StableId)]);
         Assert.Contains(harness.Logger.Lines, line => line.Level == RuntimeLogLevel.Warn && line.Message.Contains("id-b", StringComparison.Ordinal));
         Assert.Contains("id-b", CaptureRunnerHarness.FieldValue(harness.RefreshEvents[^1], "removed"), StringComparison.Ordinal);
         Assert.Equal(0, harness.DurableDisposeCount);
@@ -146,7 +147,7 @@ public sealed class LayeredCaptureRunnerRefreshTests
         await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 2).ConfigureAwait(false);
         await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
 
-        Assert.Equal(["id-a", "id-new"], harness.Generation(1).Scope.Select(item => item.StableId).ToArray());
+        Assert.Equal(["id-a", "id-new"], [.. harness.Generation(1).Scope.Select(item => item.StableId)]);
         Assert.Contains("id-new", CaptureRunnerHarness.FieldValue(harness.RefreshEvents[^1], "added"), StringComparison.Ordinal);
         Assert.False(harness.RunTask.IsCompleted);
     }
@@ -289,7 +290,7 @@ public sealed class LayeredCaptureRunnerRefreshTests
         Assert.Equal(
             [RuntimeLogLevel.Warn, RuntimeLogLevel.Warn, RuntimeLogLevel.Warn, RuntimeLogLevel.Error],
             faultEvents.Select(entry => entry.Level).ToArray());
-        Assert.Equal("1/3,2/3,3/3,4/3", string.Join(",",
+        Assert.Equal("1/3,2/3,3/3,4/3", string.Join(',',
             faultEvents.Select(entry => CaptureRunnerHarness.FieldValue(entry.Fields, "attempt"))));
         Assert.All(faultEvents, entry => Assert.Equal("87", CaptureRunnerHarness.FieldValue(entry.Fields, "nativeError")));
     }
@@ -390,7 +391,7 @@ public sealed class LayeredCaptureRunnerRefreshTests
 
         Assert.False(harness.RunTask.IsCompleted);
         Assert.Equal(0, harness.DurableDisposeCount);
-        Assert.Equal("1/3,1/3", string.Join(",",
+        Assert.Equal("1/3,1/3", string.Join(',',
             harness.Logger.Events
                 .Where(entry => string.Equals(entry.Name, "generation.startup-fault", StringComparison.Ordinal))
                 .Select(entry => CaptureRunnerHarness.FieldValue(entry.Fields, "attempt"))));
@@ -399,7 +400,7 @@ public sealed class LayeredCaptureRunnerRefreshTests
     /// <summary>A materialized pass packet for one (adapter handle, direction) — the shape a pump hands the executor after a rewrite consumer materialized the lease.</summary>
     private static CapturedFlowPacket PassPacket(nint adapterHandle, bool isOnSend)
     {
-        var lease = new PacketLease(new byte[] { 0x2A });
+        var lease = new PacketLease("*"u8.ToArray());
         _ = lease.Frame.Length; // materialize, as a rewriting consumer would
         var key = FlowKey.Create(
             Endpoint.From(IPAddressValue.IPv4Any, 1),
@@ -408,7 +409,7 @@ public sealed class LayeredCaptureRunnerRefreshTests
             FlowOriginKind.Host);
         return new CapturedFlowPacket(
             lease,
-            new FlowContext(key, null, null, null, null, key.Remote.Port),
+            new FlowContext(key, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, key.Remote.Port),
             new PacketCaptureMetadata(isOnSend ? NdisApiAbi.PacketFlagOnSend : NdisApiAbi.PacketFlagOnReceive, adapterHandle));
     }
 }

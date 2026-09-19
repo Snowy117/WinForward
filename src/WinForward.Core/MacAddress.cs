@@ -16,19 +16,18 @@ public readonly struct MacAddress : IEquatable<MacAddress>
     public const int Length = 6;
 
     private readonly ulong _bits;
-    private readonly bool _isValid;
 
     private MacAddress(ulong bits, bool isValid)
     {
         _bits = bits;
-        _isValid = isValid;
+        IsValid = isValid;
     }
 
     /// <summary>An unrecorded/absent MAC; the forwarding path drops fail-closed on this value.</summary>
     public static MacAddress Invalid => default;
 
     /// <summary>True when six bytes were recorded; false for <see cref="Invalid"/>.</summary>
-    public bool IsValid => _isValid;
+    public bool IsValid { get; }
 
     /// <summary>Reads the six network-order bytes, or returns <see cref="Invalid"/> when the span is not exactly six bytes.</summary>
     public static MacAddress From(ReadOnlySpan<byte> source) => TryFrom(source, out var mac) ? mac : Invalid;
@@ -52,15 +51,15 @@ public readonly struct MacAddress : IEquatable<MacAddress>
     public void CopyTo(Span<byte> destination)
     {
         if (destination.Length < Length) throw new ArgumentOutOfRangeException(nameof(destination), destination.Length, "The destination must hold at least six bytes.");
-        if (!_isValid) throw new InvalidOperationException("The MAC address was not recorded.");
+        if (!IsValid) throw new InvalidOperationException("The MAC address was not recorded.");
         for (var index = 0; index < Length; index++) destination[index] = (byte)(_bits >> (8 * (Length - 1 - index)));
     }
 
-    public bool Equals(MacAddress other) => _isValid == other._isValid && (!_isValid || _bits == other._bits);
+    public bool Equals(MacAddress other) => IsValid == other.IsValid && (!IsValid || _bits == other._bits);
 
     public override bool Equals(object? obj) => obj is MacAddress other && Equals(other);
 
-    public override int GetHashCode() => HashCode.Combine(_bits, _isValid);
+    public override int GetHashCode() => HashCode.Combine(_bits, IsValid);
 
     public static bool operator ==(MacAddress left, MacAddress right) => left.Equals(right);
 

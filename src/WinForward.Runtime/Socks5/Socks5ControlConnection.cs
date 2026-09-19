@@ -13,7 +13,7 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
     // Each candidate address is one attempt; exhausted candidates fail closed (exception -> blocked)
     // without changing policy.
     private const int MaxConnectionAttempts = 4;
-    private static readonly TimeSpan ConnectAttemptTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan s_connectAttemptTimeout = TimeSpan.FromSeconds(30);
 
     // One reusable handshake scratch buffer per connection must hold the largest frame the
     // connection writes or reads. An RFC 1929 username/password message (3-byte header + up to
@@ -23,7 +23,7 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
     private const int HandshakeScratchLength = 3 + 255 + 255;
 
     // Default DNS seam, cached so the null-argument path allocates no delegate per connect.
-    private static readonly Func<string, CancellationToken, ValueTask<IPAddress[]>> DefaultAddressResolver =
+    private static readonly Func<string, CancellationToken, ValueTask<IPAddress[]>> s_defaultAddressResolver =
         static (host, token) => new ValueTask<IPAddress[]>(Dns.GetHostAddressesAsync(host, token));
 
     private readonly Socket _socket;
@@ -34,7 +34,7 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
     private readonly Socks5AddressCache? _addressCache;
     private readonly byte[] _handshakeScratch = new byte[HandshakeScratchLength];
 
-    private Socks5ControlConnection(Socket socket, IDisposable? loopPrevention, CancellationTokenSource attemptCancellation, CancellationToken connectCancellation, Socks5AddressCache? addressCache)
+    private Socks5ControlConnection(Socket socket, IDisposable? loopPrevention, CancellationTokenSource attemptCancellation, Socks5AddressCache? addressCache, CancellationToken connectCancellation)
     {
         _socket = socket;
         _stream = new NetworkStream(socket, ownsSocket: true);
@@ -61,7 +61,7 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
         int maxAttempts = MaxConnectionAttempts,
         TimeSpan? perAttemptTimeout = null,
         Socks5AddressCache? addressCache = null)
-        => ConnectAsync(server, cancellationToken, null, null, onSocketReady, maxAttempts, perAttemptTimeout, addressCache);
+        => ConnectAsync(server, cancellationToken, resolveAddresses: null, socketFactory: null, onSocketReady, maxAttempts, perAttemptTimeout, addressCache);
 
     /// <summary>
     /// The injectable-seam form of <see cref="ConnectAsync(Socks5Server, CancellationToken, Func{IPEndPoint, IPEndPoint, IDisposable?}?, int, TimeSpan?, Socks5AddressCache?)"/>:
@@ -69,6 +69,7 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
     /// (the socket constructor) let tests exercise the attempt cap, deadline, and disposal with
     /// fakes instead of real DNS and sockets. Production callers use the public overload.
     /// </summary>
+#pragma warning disable CA1068 // Deliberate shape: this injectable-seam overload mirrors the public ConnectAsync overload (CancellationToken immediately after the required server argument); the required resolveAddresses seam function cannot follow the token after the optional parameters, and reordering just this overload would diverge the documented pair for a style-only gain.
     internal static async ValueTask<Socks5ControlConnection> ConnectAsync(
         Socks5Server server,
         CancellationToken cancellationToken,
@@ -78,12 +79,13 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
         int maxAttempts = MaxConnectionAttempts,
         TimeSpan? perAttemptTimeout = null,
         Socks5AddressCache? addressCache = null)
+#pragma warning restore CA1068
     {
         ArgumentNullException.ThrowIfNull(server);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxAttempts);
 
         var socketCtor = socketFactory ?? (family => new Socket(family, SocketType.Stream, ProtocolType.Tcp));
-        var timeout = perAttemptTimeout ?? ConnectAttemptTimeout;
+        var timeout = perAttemptTimeout ?? s_connectAttemptTimeout;
         if (timeout <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(perAttemptTimeout));
         var timeoutMs = (int)Math.Clamp(timeout.TotalMilliseconds, 1, int.MaxValue);
 
@@ -92,12 +94,12 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
         {
             // Steady state: the configured endpoint was resolved at startup (or on a prior
             // failure), so no DNS call happens on the connection-setup path.
-            addresses = new[] { cached.ToIPAddress() };
+            addresses = [cached.ToIPAddress()];
         }
         else
         {
-            var addressProvider = resolveAddresses ?? DefaultAddressResolver;
-            addresses = await ResolveAddressesAsync(addressProvider, server.Host, cancellationToken, timeout).ConfigureAwait(false);
+            var addressProvider = resolveAddresses ?? s_defaultAddressResolver;
+            addresses = await ResolveAddressesAsync(addressProvider, server.Host, timeout, cancellationToken).ConfigureAwait(false);
             if (addressCache is not null && addresses.Length > 0) addressCache.Set(server.Host, IPAddressValue.From(addresses[0]));
         }
         if (addresses.Length == 0) throw new SocketException((int)SocketError.HostNotFound);
@@ -110,7 +112,7 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
             attempts++;
 
             var outcome = await ConnectOnceAsync(
-                server, address, socketCtor, onSocketReady, cancellationToken, timeout, timeoutMs, addressCache).ConfigureAwait(false);
+                server, address, socketCtor, onSocketReady, timeout, timeoutMs, addressCache, cancellationToken).ConfigureAwait(false);
             if (outcome.Connection is not null) return outcome.Connection;
 
             // A socket-creation failure or a per-attempt timeout records a representative error so
@@ -140,12 +142,12 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
         IPAddress address,
         Func<AddressFamily, Socket> socketCtor,
         Func<IPEndPoint, IPEndPoint, IDisposable?>? onSocketReady,
-        CancellationToken cancellationToken,
         TimeSpan timeout,
         int timeoutMs,
-        Socks5AddressCache? addressCache)
+        Socks5AddressCache? addressCache,
+        CancellationToken cancellationToken)
     {
-        Socket? socket = null;
+        Socket? socket;
         IDisposable? registration = null;
         Socks5ControlConnection? connection = null;
         CancellationTokenSource? attemptCancellation = null;
@@ -173,7 +175,7 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
             // writes 40-200 ms (X4), so TCP_NODELAY goes on as soon as the connect succeeds.
             socket.NoDelay = true;
 
-            connection = new Socks5ControlConnection(socket, registration, attemptCancellation, cancellationToken, addressCache);
+            connection = new Socks5ControlConnection(socket, registration, attemptCancellation, addressCache, cancellationToken);
             socket = null;
             registration = null;
             attemptCancellation = null;
@@ -288,8 +290,8 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
 
     private void ThrowForAttemptCancellation(CancellationToken operationCancellation)
     {
-        if (operationCancellation.IsCancellationRequested) throw new OperationCanceledException(operationCancellation);
-        if (_connectCancellation.IsCancellationRequested) throw new OperationCanceledException(_connectCancellation);
+        operationCancellation.ThrowIfCancellationRequested();
+        _connectCancellation.ThrowIfCancellationRequested();
         if (_attemptCancellation.IsCancellationRequested) throw new IOException("SOCKS5 control connection attempt timed out.");
     }
 
@@ -332,13 +334,13 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
             throw new IOException("SOCKS5 command returned a malformed reply.");
         }
 
-        IPAddress address = addressType switch
+        var address = addressType switch
         {
             1 => new IPAddress(_handshakeScratch.AsSpan(4, 4)),
             4 => new IPAddress(_handshakeScratch.AsSpan(4, 16)),
             // RFC 1928 domain names are ASCII; non-ASCII bytes decode as '?' rather than throwing (R5).
             3 => await ResolveDomainAsync(System.Text.Encoding.ASCII.GetString(_handshakeScratch.AsSpan(5, _handshakeScratch[4])), cancellationToken).ConfigureAwait(false),
-            _ => throw new IOException("SOCKS5 server returned an unsupported address type.")
+            _ => throw new IOException("SOCKS5 server returned an unsupported address type."),
         };
 
         // M1: only a UDP ASSOCIATE reply may substitute an unspecified wildcard with the control
@@ -358,7 +360,7 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
         return addresses[0];
     }
 
-    private static async ValueTask<IPAddress[]> ResolveAddressesAsync(Func<string, CancellationToken, ValueTask<IPAddress[]>> addressProvider, string host, CancellationToken cancellationToken, TimeSpan timeout)
+    private static async ValueTask<IPAddress[]> ResolveAddressesAsync(Func<string, CancellationToken, ValueTask<IPAddress[]>> addressProvider, string host, TimeSpan timeout, CancellationToken cancellationToken)
     {
         using var resolutionCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         resolutionCancellation.CancelAfter(timeout);

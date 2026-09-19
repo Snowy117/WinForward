@@ -14,8 +14,8 @@ public sealed class AdapterListWatcherTests
     [SupportedOSPlatform("windows")]
     public void PresetSignalIsConsumedWithoutBlocking()
     {
-        using var signal = new EventWaitHandle(false, EventResetMode.AutoReset);
-        using var cancel = new EventWaitHandle(false, EventResetMode.ManualReset);
+        using var signal = new EventWaitHandle(initialState: false, EventResetMode.AutoReset);
+        using var cancel = new EventWaitHandle(initialState: false, EventResetMode.ManualReset);
         signal.Set();
 
         Assert.True(NdisAdapterListWatcher.WaitForSignal(signal, cancel));
@@ -25,8 +25,8 @@ public sealed class AdapterListWatcherTests
     [SupportedOSPlatform("windows")]
     public async Task SignalResolvesAParkedWaitAsListChanged()
     {
-        using var signal = new EventWaitHandle(false, EventResetMode.AutoReset);
-        using var cancel = new EventWaitHandle(false, EventResetMode.ManualReset);
+        using var signal = new EventWaitHandle(initialState: false, EventResetMode.AutoReset);
+        using var cancel = new EventWaitHandle(initialState: false, EventResetMode.ManualReset);
         var waiter = Task.Run(() => NdisAdapterListWatcher.WaitForSignal(signal, cancel));
 
         await Task.Delay(ParkMs);
@@ -49,7 +49,7 @@ public sealed class AdapterListWatcherTests
         await Task.Delay(ParkMs);
         Assert.False(waiter.IsCompleted);
 
-        cts.Cancel();
+        await cts.CancelAsync();
         Assert.False(await waiter);
     }
 
@@ -122,21 +122,23 @@ public sealed class AdapterListWatcherTests
     }
 
     [Fact]
-    public void FakeTriggerWakesExactlyOneParkedWaiter()
+    public async Task FakeTriggerWakesExactlyOneParkedWaiter()
     {
         using var source = new FakeAdapterListChangeSource();
         var first = Task.Run(() => source.WaitOne(CancellationToken.None));
         var second = Task.Run(() => source.WaitOne(CancellationToken.None));
-        Assert.False(first.Wait(ParkMs));
-        Assert.False(second.Wait(ParkMs));
+        await Task.Delay(ParkMs);
+        Assert.False(first.IsCompleted);
+        Assert.False(second.IsCompleted);
 
         source.Trigger();
 
-        Assert.True(first.Wait(TimeSpan.FromSeconds(5)) || second.Wait(TimeSpan.FromSeconds(5)));
+        await Task.WhenAny(first, second).WaitAsync(TimeSpan.FromSeconds(5));
         var resolved = first.IsCompleted ? first : second;
         var parked = first.IsCompleted ? second : first;
-        Assert.True(resolved.Result);
-        Assert.False(parked.Wait(ParkMs));
+        Assert.True(await resolved);
+        await Task.Delay(ParkMs);
+        Assert.False(parked.IsCompleted);
     }
 
     [Fact]
@@ -172,7 +174,7 @@ public sealed class AdapterListWatcherTests
         await Task.Delay(ParkMs);
         Assert.False(waiter.IsCompleted);
 
-        cts.Cancel();
+        await cts.CancelAsync();
 
         Assert.False(await waiter);
     }

@@ -30,7 +30,7 @@ public sealed class TcpFragmentHandlingTests
     private static readonly IPAddress s_clientIpv6 = IPAddress.Parse("2001:db8::10");
     private static readonly IPAddress s_destIpv6 = IPAddress.Parse("2001:db8::53");
     private static readonly IPAddress s_forwardLocal = IPAddress.Parse("192.0.2.1");
-    private static readonly Socks5Server s_server = new("primary", "127.0.0.1", 1080, null, null);
+    private static readonly Socks5Server s_server = new("primary", "127.0.0.1", 1080, Username: null, Password: null);
 
     [Fact]
     public async Task HostFragmentIsConsumedWithClientResetTraceAndTombstone()
@@ -47,10 +47,10 @@ public sealed class TcpFragmentHandlingTests
         Assert.Equal(0, harness.Reinjector.SendToMstcpCount);
 
         // The teardown injected one client-visible RST|ACK (seq/ack = 2: ISN+1 on both legs).
-        var reset = Assert.Single(harness.Injector.InjectedFrames, frame => frame.Frame[47] == 0x14);
-        Assert.True(reset.TowardMstcp);
-        Assert.Equal(2u, BinaryPrimitives.ReadUInt32BigEndian(reset.Frame.AsSpan(38, 4)));
-        Assert.Equal(2u, BinaryPrimitives.ReadUInt32BigEndian(reset.Frame.AsSpan(42, 4)));
+        var (frame, towardMstcp, _) = Assert.Single(harness.Injector.InjectedFrames, frame => frame.Frame[47] == 0x14);
+        Assert.True(towardMstcp);
+        Assert.Equal(2u, BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(38, 4)));
+        Assert.Equal(2u, BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(42, 4)));
 
         AssertFragmentTeardownCompleted(harness);
     }
@@ -80,9 +80,9 @@ public sealed class TcpFragmentHandlingTests
 
         Assert.Equal(PacketDisposition.ProxyConsumed, fragment.Lease.Disposition);
         Assert.Equal(0, harness.Reinjector.SendToMstcpCount);
-        var reset = Assert.Single(harness.Injector.InjectedFrames, frame => frame.Frame[47] == 0x14);
-        Assert.False(reset.TowardMstcp);
-        Assert.Equal((nint)0x1234, reset.AdapterHandle);
+        var (_, towardMstcp, adapterHandle) = Assert.Single(harness.Injector.InjectedFrames, frame => frame.Frame[47] == 0x14);
+        Assert.False(towardMstcp);
+        Assert.Equal((nint)0x1234, adapterHandle);
         AssertFragmentTeardownCompleted(harness);
     }
 
@@ -113,8 +113,8 @@ public sealed class TcpFragmentHandlingTests
 
         Assert.Equal(PacketDisposition.ProxyConsumed, fragment.Lease.Disposition);
         Assert.Equal(0, harness.Reinjector.SendToAdapterCount);
-        var reset = Assert.Single(harness.Injector.InjectedFrames, frame => frame.Frame.Length == 14 + 40 + 20);
-        Assert.Equal(0x14, reset.Frame[67]);
+        var (frame, _, _) = Assert.Single(harness.Injector.InjectedFrames, frame => frame.Frame.Length == 14 + 40 + 20);
+        Assert.Equal(0x14, frame[67]);
         AssertFragmentTeardownCompleted(harness);
     }
 
@@ -311,7 +311,7 @@ public sealed class TcpFragmentHandlingTests
             var reverseDestination = forwarded ? s_clientIpv4 : Destination;
             // The option-less TCP flags byte sits 7 bytes from the frame end for both families
             // (IPv4: 47, IPv6: 67), so the SYN|ACK mutation is family-agnostic.
-            var synAck = MakeReversePacketClassifierOrientation(reverseSource, listenerPort, reverseDestination, 53000, mutateFrame: f => f[f.Length - 7] = 0x12);
+            var synAck = MakeReversePacketClassifierOrientation(reverseSource, listenerPort, reverseDestination, 53000, mutateFrame: f => f[^7] = 0x12);
             await Dispatcher.DispatchAsync(synAck, CancellationToken.None);
             injector.InjectedFrames.Clear();
         }

@@ -236,7 +236,9 @@ public sealed class NdisPacketActionExecutorBatchingTests
             null!,
             FlowContext(FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 1), Endpoint.From(IPAddress.Parse("192.0.2.53"), 2), TransportProtocol.Tcp, FlowOriginKind.Host)));
 
+#pragma warning disable CA2012 // The lease guard throws synchronously before any ValueTask is produced; the Action-bound lambda pins exactly that synchronous exception and nothing consumes a result.
         var exception = Assert.Throws<ArgumentNullException>(() => executor.PassAsync(packet, CancellationToken.None));
+#pragma warning restore CA2012
 
         Assert.Equal("packet.Lease", exception.ParamName);
     }
@@ -261,7 +263,7 @@ public sealed class NdisPacketActionExecutorBatchingTests
         await executor.PassAsync(MaterializedPass([0x42], (nint)5, isOnSend: true), CancellationToken.None);
         Assert.Equal(1L, executor.ImmediateSendLaneOverflowCount);
         Assert.Equal(1, reinjector.ToAdapterCount + reinjector.ToMstcpCount);
-        Assert.Equal(new byte[] { 0x42 }, reinjector.LastFrame);
+        Assert.Equal("B"u8.ToArray(), reinjector.LastFrame);
 
         // A second overflow inside the rate-limit window still counts and still sends exactly
         // once, but the warn fires at most once per window.
@@ -317,7 +319,7 @@ public sealed class NdisPacketActionExecutorBatchingTests
         // Empty scope = interception paused: the rebuild installs a zero-capacity table (no
         // lane can accumulate while no pump runs), so a stray pass cannot batch — it degrades
         // to the immediate single send, still going out exactly once.
-        executor.RetireLanesExcept(ReadOnlySpan<nint>.Empty);
+        executor.RetireLanesExcept([]);
 
         await executor.PassAsync(MaterializedPass([0x62], (nint)11, isOnSend: true), CancellationToken.None);
         await executor.PassAsync(MaterializedPass([0x63], (nint)11, isOnSend: false), CancellationToken.None);
@@ -404,7 +406,7 @@ public sealed class NdisPacketActionExecutorBatchingTests
         Assert.Empty(reinjector.BatchCalls);
         Assert.Equal(1, pool.Count);
         Assert.Equal(0, executor.PendingPassCount);
-        Assert.Equal(new byte[] { 0x70 }, inPlace.GetFrame().ToArray());
+        Assert.Equal("p"u8.ToArray(), inPlace.GetFrame().ToArray());
         Assert.Contains(logger.Lines, line => line.Level == RuntimeLogLevel.Warn && line.Message.Contains("pass lane retired", StringComparison.Ordinal));
 
         // A repeated retire finds no lane and must not double-return anything.
@@ -432,7 +434,7 @@ public sealed class NdisPacketActionExecutorBatchingTests
             new PacketCaptureMetadata(isOnSend ? NdisApiAbi.PacketFlagOnSend : NdisApiAbi.PacketFlagOnReceive, adapterHandle));
     }
 
-    private static FlowContext FlowContext(FlowKey key) => new(key, null, null, null, null, key.Remote.Port);
+    private static FlowContext FlowContext(FlowKey key) => new(key, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, key.Remote.Port);
 
     private sealed class ThrowingBatchReinjector : IPacketReinjector
     {

@@ -25,8 +25,6 @@ namespace WinForward.Cli;
 internal sealed class DurableCaptureBundle : IAsyncDisposable
 {
     private readonly IdleExpirySweeper _sweeper;
-    private readonly UdpProxyCoordinator _udp;
-    private readonly TcpProxyCoordinator _tcp;
     private readonly NativeBufferPool? _synCopyPool;
     private readonly NativeBufferPool? _relayPool;
     private readonly NativeBufferPool? _udpDatagramPool;
@@ -67,8 +65,8 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         Executor = executor;
         UdpTargets = udpTargets;
         _sweeper = sweeper;
-        _udp = udp;
-        _tcp = tcp;
+        Udp = udp;
+        Tcp = tcp;
         _logger = logger;
         _synCopyPool = synCopyPool;
         _relayPool = relayPool;
@@ -85,10 +83,10 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
     internal UdpAdapterTargetSource UdpTargets { get; }
 
     /// <summary>The durable TCP redirect coordinator (heartbeat usage source).</summary>
-    internal TcpProxyCoordinator Tcp => _tcp;
+    internal TcpProxyCoordinator Tcp { get; }
 
     /// <summary>The durable UDP session coordinator (heartbeat usage source).</summary>
-    internal UdpProxyCoordinator Udp => _udp;
+    internal UdpProxyCoordinator Udp { get; }
 
     /// <summary>
     /// Builds the durable layer for a run. Nothing in the bundle references a specific adapter
@@ -160,7 +158,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         counters.RegisterPool(poolName);
         var rentKey = RuntimeCounters.PoolRentedKey(poolName);
         var returnKey = RuntimeCounters.PoolReturnedKey(poolName);
-        pool.AccountingSink = rented => { _ = counters.Increment(rented ? rentKey : returnKey); };
+        pool.AccountingSink = rented => counters.Increment(rented ? rentKey : returnKey);
     }
 
     private static async ValueTask<DurableCaptureBundle> BuildWithUdpAsync(
@@ -180,7 +178,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         // (6 + 16 + cap), the coordinator receive windows (cap + 22 + 1), the reinjector's
         // rebuilt-frame cap, and the native ABI capture size must all agree. Only the ABI constant
         // should ever change; every component follows it from here.
-        var maximumFrameSize = NdisApiAbi.MaximumEthernetFrame;
+        const int maximumFrameSize = NdisApiAbi.MaximumEthernetFrame;
         var udpTargets = new UdpAdapterTargetSource();
         await UdpProxyComposer.PrimeSocks5AddressCacheAsync(configuration, addressCache, logger).ConfigureAwait(false);
         // One native pool backs every queued setup datagram (B4); the coordinator owns it when
@@ -257,7 +255,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
     {
         if (scope.Count == 0)
         {
-            UdpTargets.Update(null, new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase));
+            UdpTargets.Update(host: null, new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase));
             _lastNoMacAdapters = null;
             _lastZeroMacHostId = null;
             return;
@@ -356,7 +354,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         {
             try
             {
-                await _udp.DisposeAsync().ConfigureAwait(false);
+                await Udp.DisposeAsync().ConfigureAwait(false);
             }
             finally
             {
@@ -371,7 +369,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
                 {
                     try
                     {
-                        await _tcp.DisposeAsync().ConfigureAwait(false);
+                        await Tcp.DisposeAsync().ConfigureAwait(false);
                     }
                     finally
                     {

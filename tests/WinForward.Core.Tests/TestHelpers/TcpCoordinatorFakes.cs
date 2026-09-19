@@ -20,8 +20,8 @@ namespace WinForward.Core.Tests;
 /// </summary>
 internal static class TcpCoordinatorFakes
 {
-    private static readonly IPAddress ClientIpv4 = IPAddress.Parse("192.0.2.10");
-    private static readonly IPAddress DestIpv4 = IPAddress.Parse("192.0.2.53");
+    private static readonly IPAddress s_clientIpv4 = IPAddress.Parse("192.0.2.10");
+    private static readonly IPAddress s_destIpv4 = IPAddress.Parse("192.0.2.53");
 
     internal static CapturedFlowPacket MakeSynPacket(IPAddress client, IPAddress destination, ushort clientPort, ushort destinationPort, byte[]? payload = null)
     {
@@ -31,7 +31,7 @@ internal static class TcpCoordinatorFakes
         var local = Endpoint.From(client, clientPort);
         var remote = Endpoint.From(destination, destinationPort);
         var key = FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Host);
-        var context = new FlowContext(key, "app.exe", null, null, "eth0", destinationPort);
+        var context = new FlowContext(key, "app.exe", ProcessPath: null, AdapterId: null, "eth0", destinationPort);
         var lease = new PacketLease(frame);
         return new CapturedFlowPacket(lease, context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 0x1234));
     }
@@ -46,7 +46,7 @@ internal static class TcpCoordinatorFakes
         var remote = Endpoint.From(destination, destinationPort);
         var adapter = new AdapterContext("veth-1", "vEthernet 1", 7);
         var key = FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Forwarded, adapter);
-        var context = new FlowContext(key, null, null, "veth-1", "vEthernet 1", destinationPort);
+        var context = new FlowContext(key, ProcessName: null, ProcessPath: null, "veth-1", "vEthernet 1", destinationPort);
         var lease = new PacketLease(frame);
         return new CapturedFlowPacket(lease, context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, 0x1234));
     }
@@ -60,7 +60,7 @@ internal static class TcpCoordinatorFakes
         var local = Endpoint.From(source, sourcePort);
         var remote = Endpoint.From(destination, destinationPort);
         var key = FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Host);
-        var context = new FlowContext(key, "app.exe", null, null, "eth0", destinationPort);
+        var context = new FlowContext(key, "app.exe", ProcessPath: null, AdapterId: null, "eth0", destinationPort);
         var lease = new PacketLease(frame);
         return new CapturedFlowPacket(lease, context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, adapterHandle));
     }
@@ -83,11 +83,11 @@ internal static class TcpCoordinatorFakes
         var local = Endpoint.From(client, clientPort);
         var remote = Endpoint.From(destination, destinationPort);
         var key = FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Host);
-        var context = new FlowContext(key, "app.exe", null, null, "eth0", destinationPort);
+        var context = new FlowContext(key, "app.exe", ProcessPath: null, AdapterId: null, "eth0", destinationPort);
         return new CapturedFlowPacket(new PacketLease(frame), context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 0x1234));
     }
 
-    internal static FlowKey MakeHostFlowKey() => FlowKey.Create(Endpoint.From(ClientIpv4, 53000), Endpoint.From(DestIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
+    internal static FlowKey MakeHostFlowKey() => FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
 
     internal static DispatcherHarness CreateDispatcherHarness()
     {
@@ -99,7 +99,7 @@ internal static class TcpCoordinatorFakes
         var table = new TcpRedirectTable();
         var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider(), new TcpRedirectOptions { Logger = logger });
 
-        var server = new Socks5Server("primary", "127.0.0.1", 1080, null, null);
+        var server = new Socks5Server("primary", "127.0.0.1", 1080, Username: null, Password: null);
         var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase) { [server.Name] = server };
         var rules = new[] { new PolicyRule(new RuleMatcher(), new FlowDecision(FlowAction.Proxy, 0, server.Name)) };
         var config = new ValidatedConfiguration(servers, new PolicySnapshot(rules, FlowAction.Block));
@@ -114,12 +114,12 @@ internal static class TcpCoordinatorFakes
 
     internal static async Task EstablishRelayingSessionAsync(DispatcherHarness harness)
     {
-        await harness.Dispatcher.DispatchAsync(MakeSynPacket(ClientIpv4, DestIpv4, 53000, 443), CancellationToken.None);
+        await harness.Dispatcher.DispatchAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), CancellationToken.None);
         // R8: the SYN dispatch returns SetupPending; the listener exists only after the
         // background setup settles, so drain before touching the factory's recordings.
         await harness.Coordinator.DrainPendingSetupsAsync();
         var listener = Assert.Single(harness.ListenerFactory.Listeners);
-        await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(Endpoint.From(DestIpv4, 53000)), CancellationToken.None);
+        await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(Endpoint.From(s_destIpv4, 53000)), CancellationToken.None);
         await WaitForAsync(() => harness.RelayFactory.Relay is not null);
     }
 
@@ -151,17 +151,11 @@ internal sealed record DispatcherHarness(
     FlowDispatcher Dispatcher,
     RecordingRuntimeLogger Logger);
 
-internal sealed class FakeListenerFactory : ITcpRedirectListenerFactory
+internal sealed class FakeListenerFactory(Endpoint? fixedTuple = null, bool throwOnCreate = false) : ITcpRedirectListenerFactory
 {
-    private readonly Endpoint? _fixedTuple;
-    private readonly bool _throwOnCreate;
+    private readonly Endpoint? _fixedTuple = fixedTuple;
+    private readonly bool _throwOnCreate = throwOnCreate;
     private int _nextPort = 40000;
-
-    public FakeListenerFactory(Endpoint? fixedTuple = null, bool throwOnCreate = false)
-    {
-        _fixedTuple = fixedTuple;
-        _throwOnCreate = throwOnCreate;
-    }
 
     public List<FakeListener> Listeners { get; } = [];
     public List<AddressFamilyKind> RequestedFamilies { get; } = [];

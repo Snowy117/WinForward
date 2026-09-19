@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Runtime.InteropServices;
 
@@ -44,13 +45,13 @@ public static class IPHelperAbi
     private static void AssertSize<T>(int expected) where T : struct
     {
         var actual = Marshal.SizeOf<T>();
-        if (actual != expected) throw new TypeLoadException($"IP Helper ABI mismatch for {typeof(T).Name}: expected {expected}, actual {actual}.");
+        if (actual != expected) throw new TypeLoadException(string.Create(CultureInfo.InvariantCulture, $"IP Helper ABI mismatch for {typeof(T).Name}: expected {expected}, actual {actual}."));
     }
 
     private static void AssertOffset<T>(string field, int expected)
     {
         var actual = Marshal.OffsetOf<T>(field).ToInt32();
-        if (actual != expected) throw new TypeLoadException($"IP Helper ABI mismatch for {typeof(T).Name}.{field}: expected {expected}, actual {actual}.");
+        if (actual != expected) throw new TypeLoadException(string.Create(CultureInfo.InvariantCulture, $"IP Helper ABI mismatch for {typeof(T).Name}.{field}: expected {expected}, actual {actual}."));
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -64,7 +65,9 @@ public static class IPHelperAbi
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe struct MibUdp6RowOwnerPid
     {
+#pragma warning disable MA0189 // Fixed buffers mirror the iphlpapi MIB_UDP6ROW_OWNER_PID declaration; size/offsets pinned by AssertManagedLayout. InlineArray would add generated buffer types on top of the native declaration mirror for no runtime gain.
         public fixed byte LocalAddress[16];
+#pragma warning restore MA0189
         public uint ScopeId;
         public uint LocalPort;
         public uint ProcessId;
@@ -84,10 +87,14 @@ public static class IPHelperAbi
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe struct MibTcp6RowOwnerPid
     {
+#pragma warning disable MA0189 // Fixed buffers mirror the iphlpapi MIB_TCP6ROW_OWNER_PID declaration (size 56, RemoteAddress@24 pinned by AssertManagedLayout); InlineArray would add generated buffer types on top of the native declaration mirror for no runtime gain.
         public fixed byte LocalAddress[16];
+#pragma warning restore MA0189
         public uint LocalScopeId;
         public uint LocalPort;
+#pragma warning disable MA0189 // Same native-declaration mirror as LocalAddress above (MIB_TCP6ROW_OWNER_PID.RemoteAddress).
         public fixed byte RemoteAddress[16];
+#pragma warning restore MA0189
         public uint RemoteScopeId;
         public uint RemotePort;
         public uint State;
@@ -102,7 +109,9 @@ public static class IPHelperAbi
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe struct MibUnicastIpAddressRow
     {
+#pragma warning disable MA0189 // The fixed buffer mirrors SOCKADDR_INET inside the netioapi.h MIB_UNICASTIPADDRESS_ROW declaration (size 80, InterfaceLuid@32 pinned by AssertManagedLayout and the poisoned-padding stride test). The parser reads it through pointer arithmetic (family/scope offsets), which InlineArray would force through fixed/span rewrites for no runtime gain.
         public fixed byte Address[SockaddrInetSize];
+#pragma warning restore MA0189
         public ulong InterfaceLuid;
         public uint InterfaceIndex;
         public uint PrefixOrigin;

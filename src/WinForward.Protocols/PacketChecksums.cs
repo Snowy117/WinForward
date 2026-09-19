@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using System.Net;
-using System.Runtime.Intrinsics;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 using WinForward.Core;
 
 namespace WinForward.Protocols;
@@ -14,7 +14,7 @@ public static class PacketChecksums
     // the scalar fold-while-adding (both compute the same mod-65535 class, and only an
     // all-zero span yields the exact-zero representative). Hosts without hardware vectors
     // keep the fold-while-adding scalar loop below.
-    private static readonly Vector256<byte> SwapAdjacentBytes = Vector256.Create(
+    private static readonly Vector256<byte> s_swapAdjacentBytes = Vector256.Create(
         (byte)1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12, 15, 14,
         17, 16, 19, 18, 21, 20, 23, 22, 25, 24, 27, 26, 29, 28, 31, 30);
 
@@ -37,7 +37,7 @@ public static class PacketChecksums
         {
             0x0800 => TryRewriteIpv4(ethernetFrame, sourceAddress, sourcePort, destinationAddress, destinationPort),
             0x86dd => TryRewriteIpv6(ethernetFrame, sourceAddress, sourcePort, destinationAddress, destinationPort),
-            _ => false
+            _ => false,
         };
     }
 
@@ -52,7 +52,7 @@ public static class PacketChecksums
         {
             0x0800 => TryRewriteIpv4Tcp(ethernetFrame, sourceAddress, sourcePort, destinationAddress, destinationPort),
             0x86dd => TryRewriteIpv6Tcp(ethernetFrame, sourceAddress, sourcePort, destinationAddress, destinationPort),
-            _ => false
+            _ => false,
         };
     }
 
@@ -166,7 +166,7 @@ public static class PacketChecksums
         WritePorts(frame, tcpOffset, sourcePort, destinationPort);
 
         // IPv6 has no header checksum: the addresses feed only the TCP pseudo-header.
-        uint tcpDelta = WordDelta(oldSourcePort, sourcePort) + WordDelta(oldDestinationPort, destinationPort);
+        var tcpDelta = WordDelta(oldSourcePort, sourcePort) + WordDelta(oldDestinationPort, destinationPort);
         var wordIndex = 0;
         for (var offset = ipOffset + 8; offset < ipOffset + 40; offset += 2)
         {
@@ -187,7 +187,7 @@ public static class PacketChecksums
         {
             0x0800 => RewriteIpv4TcpFull(ethernetFrame, sourceAddress, sourcePort, destinationAddress, destinationPort),
             0x86dd => RewriteIpv6TcpFull(ethernetFrame, sourceAddress, sourcePort, destinationAddress, destinationPort),
-            _ => false
+            _ => false,
         };
     }
 
@@ -263,7 +263,7 @@ public static class PacketChecksums
     {
         frame[tcpOffset + 16] = 0;
         frame[tcpOffset + 17] = 0;
-        uint sum = Sum(source) + Sum(destination) + 6u;
+        var sum = Sum(source) + Sum(destination) + 6u;
         sum += isIpv6 ? (uint)tcpLength : (ushort)tcpLength;
         sum += Sum(frame.Slice(tcpOffset, tcpLength));
         // TCP has no UDP-style optional-zero-checksum: the folded value is stored verbatim,
@@ -281,7 +281,7 @@ public static class PacketChecksums
     {
         frame[udpOffset + 6] = 0;
         frame[udpOffset + 7] = 0;
-        uint sum = Sum(source) + Sum(destination) + 17u;
+        var sum = Sum(source) + Sum(destination) + 17u;
         sum += isIpv6 ? (uint)udpLength : (ushort)udpLength;
         sum += Sum(frame.Slice(udpOffset, udpLength));
         var checksum = Finish(sum);
@@ -297,20 +297,20 @@ public static class PacketChecksums
         // one's-complement-neutral (2^32 ≡ 1 mod 65 535). Generic checksum consumers exceed
         // the 64 KiB IP maximum, hence the periodic fold; the scalar fallback folds per word
         // for the same reason on hosts without hardware vectors.
-        const int FoldBlockInterval = 4_096;
+        const int foldBlockInterval = 4_096;
         uint sum = 0;
         var index = 0;
         if (Vector256.IsHardwareAccelerated && data.Length >= Vector256<byte>.Count)
         {
             var accumulator = Vector256<uint>.Zero;
-            ref byte start = ref MemoryMarshal.GetReference(data);
+            ref var start = ref MemoryMarshal.GetReference(data);
             for (var blocks = 0; index + Vector256<byte>.Count <= data.Length; index += Vector256<byte>.Count)
             {
                 var block = Vector256.LoadUnsafe(ref start, (nuint)index);
-                var swapped = Vector256.Shuffle(block, SwapAdjacentBytes);
+                var swapped = Vector256.Shuffle(block, s_swapAdjacentBytes);
                 var (lo, hi) = Vector256.Widen(swapped.AsUInt16());
                 accumulator += lo + hi;
-                if (++blocks == FoldBlockInterval)
+                if (++blocks == foldBlockInterval)
                 {
                     sum += Vector256.Sum(accumulator);
                     while (sum >> 16 != 0) sum = (sum & 0xffff) + (sum >> 16);

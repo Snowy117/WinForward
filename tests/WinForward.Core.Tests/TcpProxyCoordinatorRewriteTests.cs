@@ -13,7 +13,7 @@ namespace WinForward.Core.Tests;
 
 public sealed class TcpProxyCoordinatorRewriteTests
 {
-    private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, null, null);
+    private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, Username: null, Password: null);
     private static readonly IPAddress s_clientIpv4 = IPAddress.Parse("192.0.2.10");
     private static readonly IPAddress s_destIpv4 = IPAddress.Parse("192.0.2.53");
     private static readonly IPAddress s_clientIpv6 = IPAddress.Parse("2001:db8::10");
@@ -26,7 +26,7 @@ public sealed class TcpProxyCoordinatorRewriteTests
         var now = DateTimeOffset.UtcNow;
         var key = FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
         var adapter = new AdapterContext("eth0", "Ethernet", 1);
-        Assert.True(table.TryClaim(key, key.Remote, adapter, (nint)0x1234, Endpoint.From(IPAddress.Loopback, 42000), null, now, out var claimed));
+        Assert.True(table.TryClaim(key, key.Remote, adapter, (nint)0x1234, Endpoint.From(IPAddress.Loopback, 42000), forwardLocalAddress: null, now, out var claimed));
         Assert.NotNull(claimed);
 
         Assert.False(table.TryResolveByReverse(Endpoint.From(s_clientIpv4, 42000), Endpoint.From(IPAddress.Parse("192.0.2.99"), 53000), now.AddMinutes(1), out _));
@@ -138,10 +138,9 @@ public sealed class TcpProxyCoordinatorRewriteTests
         await HandleSynSettledAsync(coordinator, syn, s_server);
 
         Assert.Equal(1, localAddresses.Calls);
-        var injected = Assert.Single(injector.InjectedFrames);
-        Assert.True(injected.TowardMstcp);
-        Assert.Equal((nint)0x1234, injected.AdapterHandle);
-        var frame = injected.Frame;
+        var (frame, towardMstcp, adapterHandle) = Assert.Single(injector.InjectedFrames);
+        Assert.True(towardMstcp);
+        Assert.Equal((nint)0x1234, adapterHandle);
         var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
         Assert.Equal(client, new IPAddress(frame.AsSpan(26, 4).ToArray()));
         Assert.Equal(53000u, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(34, 2)));
@@ -212,10 +211,9 @@ public sealed class TcpProxyCoordinatorRewriteTests
         var reverse = MakeReversePacketClassifierOrientation(forwardLocal, listenerTuple.Port, client, 53000, (nint)0x5678, f => { f[0] = 0xCC; f[6] = 0xDD; });
         Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleReverseAsync(reverse, CancellationToken.None));
 
-        var injected = Assert.Single(injector.InjectedFrames);
-        Assert.False(injected.TowardMstcp);
-        Assert.Equal((nint)0x1234, injected.AdapterHandle);
-        var frame = injected.Frame;
+        var (frame, towardMstcp, adapterHandle) = Assert.Single(injector.InjectedFrames);
+        Assert.False(towardMstcp);
+        Assert.Equal((nint)0x1234, adapterHandle);
         Assert.Equal(s_destIpv4, new IPAddress(frame.AsSpan(26, 4).ToArray()));
         Assert.Equal(443u, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(34, 2)));
         Assert.Equal(client, new IPAddress(frame.AsSpan(30, 4).ToArray()));
@@ -270,8 +268,8 @@ public sealed class TcpProxyCoordinatorRewriteTests
         var reverse = MakeReversePacketClassifierOrientation(s_clientIpv4, listenerTuple.Port, s_destIpv4, 53000);
         Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleReverseAsync(reverse, CancellationToken.None));
 
-        var injected = Assert.Single(injector.InjectedFrames);
-        Assert.True(injected.TowardMstcp);
+        var (_, towardMstcp, _) = Assert.Single(injector.InjectedFrames);
+        Assert.True(towardMstcp);
     }
 
     [Fact]
@@ -291,7 +289,7 @@ public sealed class TcpProxyCoordinatorRewriteTests
         var local = Endpoint.From(s_clientIpv4, listenerPort);
         var remote = Endpoint.From(s_destIpv4, listenerPort);
         var udpKey = FlowKey.Create(local, remote, TransportProtocol.Udp, FlowOriginKind.Host);
-        var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), new FlowContext(udpKey, "dns.exe", null, null, "eth0", listenerPort));
+        var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), new FlowContext(udpKey, "dns.exe", ProcessPath: null, AdapterId: null, "eth0", listenerPort));
 
         var outcome = await coordinator.HandleReverseIfApplicableAsync(packet, CancellationToken.None);
 

@@ -81,7 +81,7 @@ public sealed class RuntimeCounters
     /// activity is never missing from the aggregate occupancy.
     /// </summary>
     public IReadOnlyList<string> GetRegisteredPools() =>
-        _pools.Keys.OrderBy(static name => name, StringComparer.Ordinal).ToArray();
+        [.. _pools.Keys.Order(StringComparer.Ordinal)];
 
     /// <summary>
     /// Registers a native buffer pool under <paramref name="poolName"/> (idempotent) and pre-creates

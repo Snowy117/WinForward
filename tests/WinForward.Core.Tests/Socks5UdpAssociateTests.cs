@@ -21,7 +21,7 @@ public sealed class Socks5UdpAssociateTests
         await Assert.ThrowsAsync<IOException>(async () =>
         {
             await Socks5UdpTransport.CreateAsync(
-                new Socks5Server("test", "127.0.0.1", 1080, null, null),
+                new Socks5Server("test", "127.0.0.1", 1080, Username: null, Password: null),
                 new SelfTrafficRegistry(),
                 CancellationToken.None,
                 _ => ValueTask.FromException<Socks5ControlConnection>(new IOException("control setup failed")),
@@ -51,7 +51,7 @@ public sealed class Socks5UdpAssociateTests
             associateRequest,
             relayPacket,
             serverCancellation.Token);
-        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), null, null);
+        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
         var registry = new SelfTrafficRegistry();
         var coordinator = new UdpProxyCoordinator(new Socks5UdpTransportFactory(registry, UdpFrameBuilder.DefaultMaximumEthernetFrame), new NoopResponseSink());
         var destination = Endpoint.From(IPAddress.Parse("2001:db8::53"), 5353);
@@ -78,11 +78,11 @@ public sealed class Socks5UdpAssociateTests
         var local = Endpoint.From(packet.Sender.Address, checked((ushort)packet.Sender.Port));
         var relay = Endpoint.From(relayEndpoint.Address, checked((ushort)relayEndpoint.Port));
         var relayFlow = FlowKey.Create(local, relay, TransportProtocol.Udp, FlowOriginKind.Host);
-        Assert.True(registry.IsOwned(new FlowContext(relayFlow, null, null, null, null, relay.Port)));
+        Assert.True(registry.IsOwned(new FlowContext(relayFlow, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, relay.Port)));
 
         await coordinator.DisposeAsync();
 
-        Assert.False(registry.IsOwned(new FlowContext(relayFlow, null, null, null, null, relay.Port)));
+        Assert.False(registry.IsOwned(new FlowContext(relayFlow, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, relay.Port)));
         await server;
     }
 
@@ -106,7 +106,7 @@ public sealed class Socks5UdpAssociateTests
             associateRequest,
             relayPacket,
             serverCancellation.Token);
-        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), null, null);
+        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
         var registry = new SelfTrafficRegistry();
         var transport = await Socks5UdpTransport.CreateAsync(socksServer, registry, CancellationToken.None, createControl: null, socketFactory: null);
         var destination = Endpoint.From(IPAddress.Parse("2001:db8::53"), 5353);
@@ -138,7 +138,7 @@ public sealed class Socks5UdpAssociateTests
         listener.Start();
         var server = AcceptGreetingAsync(listener, CancellationToken.None);
         var endpoint = (IPEndPoint)listener.LocalEndpoint;
-        var socksServer = new Socks5Server("test", endpoint.Address.ToString(), checked((ushort)endpoint.Port), null, null);
+        var socksServer = new Socks5Server("test", endpoint.Address.ToString(), checked((ushort)endpoint.Port), Username: null, Password: null);
         TrackingSocket? socket = null;
         var registration = new OrderingRegistration(() => socket is not null && socket.IsDisposedValue);
 
@@ -146,8 +146,8 @@ public sealed class Socks5UdpAssociateTests
             socksServer,
             CancellationToken.None,
             resolveAddresses: null,
-            onSocketReady: (_, _) => registration,
-            socketFactory: family => socket = new TrackingSocket(family, SocketType.Stream, ProtocolType.Tcp));
+            socketFactory: family => socket = new TrackingSocket(family, SocketType.Stream, ProtocolType.Tcp),
+            onSocketReady: (_, _) => registration);
         await control.DisposeAsync();
 
         Assert.True(registration.DisposedAfterSocket);
@@ -172,30 +172,30 @@ public sealed class Socks5UdpAssociateTests
             new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously),
             new TaskCompletionSource<RelayPacket>(TaskCreationOptions.RunContinuationsAsynchronously),
             serverCancellation.Token);
-        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), null, null);
+        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
         var registry = new SelfTrafficRegistry();
         TrackingSocket? socket = null;
         var transport = await Socks5UdpTransport.CreateAsync(
             socksServer,
             registry,
             CancellationToken.None,
-            null,
+            createControl: null,
             family => socket = new TrackingSocket(family));
         var local = Endpoint.From(transport.LocalEndpoint.Address, checked((ushort)transport.LocalEndpoint.Port));
         var relay = Endpoint.From(transport.RelayEndpoint.Address, checked((ushort)transport.RelayEndpoint.Port));
         var context = new FlowContext(
             FlowKey.Create(local, relay, TransportProtocol.Udp, FlowOriginKind.Host),
-            null,
-            null,
-            null,
-            null,
+            ProcessName: null,
+            ProcessPath: null,
+            AdapterId: null,
+            AdapterName: null,
             relay.Port);
         socket!.OnDisposing = () => Assert.True(registry.IsOwned(context));
 
         await transport.DisposeAsync();
 
         Assert.False(registry.IsOwned(context));
-        serverCancellation.Cancel();
+        await serverCancellation.CancelAsync();
         await IgnoreExpectedCancellationAsync(server);
     }
 
@@ -218,25 +218,25 @@ public sealed class Socks5UdpAssociateTests
             new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously),
             relayPacket,
             serverCancellation.Token);
-        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), null, null);
+        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
         var registry = new SelfTrafficRegistry();
         TrackingSocket? socket = null;
         var transport = await Socks5UdpTransport.CreateAsync(
             socksServer,
             registry,
             CancellationToken.None,
-            null,
+            createControl: null,
             family => socket = new TrackingSocket(family));
-        await transport.SendSpanAsync(Endpoint.From(IPAddress.Loopback, 53), new byte[] { 1 }, CancellationToken.None);
+        await transport.SendSpanAsync(Endpoint.From(IPAddress.Loopback, 53), [1], CancellationToken.None);
         var packet = await relayPacket.Task.WaitAsync(CancellationToken.None);
         var local = Endpoint.From(packet.Sender.Address, checked((ushort)packet.Sender.Port));
         var relay = Endpoint.From(relayEndpoint.Address, checked((ushort)relayEndpoint.Port));
         var context = new FlowContext(
             FlowKey.Create(local, relay, TransportProtocol.Udp, FlowOriginKind.Host),
-            null,
-            null,
-            null,
-            null,
+            ProcessName: null,
+            ProcessPath: null,
+            AdapterId: null,
+            AdapterName: null,
             relay.Port);
         socket!.DisposeException = new IOException("synthetic socket disposal failure");
 

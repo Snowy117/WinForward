@@ -17,7 +17,7 @@ public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic, IRunti
     // defaults (worst case ~150s). Refused/unreachable failures still surface in sub-second time
     // because a rejected connect fails the attempt immediately.
     internal const int RelayConnectMaxAttempts = 2;
-    internal static readonly TimeSpan RelayConnectAttemptTimeout = TimeSpan.FromSeconds(10);
+    internal static readonly TimeSpan s_relayConnectAttemptTimeout = TimeSpan.FromSeconds(10);
 
     /// <summary>The per-direction relay pump window; the bundle-owned relay pool uses this size (B11).</summary>
     public const int PumpBufferSize = 64 * 1024;
@@ -43,7 +43,7 @@ public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic, IRunti
                 Endpoint.From(local.Address, checked((ushort)local.Port)),
                 Endpoint.From(remote.Address, checked((ushort)remote.Port)))),
             maxAttempts: RelayConnectMaxAttempts,
-            perAttemptTimeout: RelayConnectAttemptTimeout,
+            perAttemptTimeout: s_relayConnectAttemptTimeout,
             addressCache: addressCache).ConfigureAwait(false);
         try
         {
@@ -93,23 +93,22 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
     /// The pump-window pool used when composition does not inject one (direct constructions in
     /// tests and benchmarks). Production always injects the bundle-owned, counter-registered pool.
     /// </summary>
-    private static readonly NativeBufferPool SharedPumpBufferPool = new(PumpBufferSize, capacity: 64);
+    private static readonly NativeBufferPool s_sharedPumpBufferPool = new(PumpBufferSize, capacity: 64);
     // A relay that makes no progress in one direction for this long is considered stalled and the
     // whole relay is reclaimed (M4). Established connections that are merely idle at the packet
     // level (e.g. SSH with keepalives) keep traffic flowing in both directions (data + ACKs), so
     // this generous stall window only fires for a genuinely dead peer and cannot be held forever
     // by <see cref="TcpProxyRelay"/>. Teardown is otherwise tied to the relay ending, not to a
     // per-flow wall-clock idle timeout.
-    internal static readonly TimeSpan StallTimeout = TimeSpan.FromMinutes(30);
+    internal static readonly TimeSpan s_stallTimeout = TimeSpan.FromMinutes(30);
     // One re-arm per second is enough for a 30-minute window (X8a): the window drifts by at most
     // one second, while skipping the per-chunk TryReset + CancelAfter timer-queue updates saves
     // ~100-200 ns per operation at 10 Gbps single-flow chunk rates.
-    internal static readonly long ArmThrottleTicks = Stopwatch.Frequency;
+    internal static readonly long s_armThrottleTicks = Stopwatch.Frequency;
 
     private readonly Socket _localSocket;
     private readonly IAsyncDisposable _control;
     private readonly IRuntimeLogger _logger;
-    private readonly Task _completion;
     // Defaults to the fail-visible kind: a relay whose pumps never started (a construction-time
     // throw before the run body) completes faulted without ever classifying itself, and that end
     // must still surface as a client reset. CleanEnded is only ever assigned explicitly, after
@@ -126,20 +125,20 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
         _localSocket = localSocket;
         _control = control;
         _logger = logger ?? NullRuntimeLogger.Instance;
-        _pumpBufferPool = pumpBufferPool ?? SharedPumpBufferPool;
-        _completion = RunPumpAsync(upstream);
+        _pumpBufferPool = pumpBufferPool ?? s_sharedPumpBufferPool;
+        Completion = RunPumpAsync(upstream);
     }
 
-    public Task Completion => _completion;
+    public Task Completion { get; }
 
     public RelayEndKind EndKind => _endKind;
 
     private async Task RunPumpAsync(Stream upstream)
     {
-        using var localStream = new NetworkStream(_localSocket, ownsSocket: true);
+        await using var localStream = new NetworkStream(_localSocket, ownsSocket: true);
         using var pumpCancellation = new CancellationTokenSource();
-        var localToUpstream = PumpAsync(localStream, upstream, pumpCancellation.Token, _pumpBufferPool);
-        var upstreamToLocal = PumpAsync(upstream, localStream, pumpCancellation.Token, _pumpBufferPool);
+        var localToUpstream = PumpAsync(localStream, upstream, _pumpBufferPool, pumpCancellation.Token);
+        var upstreamToLocal = PumpAsync(upstream, localStream, _pumpBufferPool, pumpCancellation.Token);
 
         try
         {
@@ -183,17 +182,11 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
     // still cancel an in-flight operation immediately; the source is recreated only when a
     // previous stall timer raced with operation completion (TryReset returns false). Re-arms are
     // throttled to one per second (X8a); the window is never disarmed between operations.
-    private sealed class StallWindow : IDisposable
+    private sealed class StallWindow(CancellationToken lifetime) : IDisposable
     {
-        private readonly CancellationToken _lifetime;
-        private CancellationTokenSource _source;
+        private readonly CancellationToken _lifetime = lifetime;
+        private CancellationTokenSource _source = CreateArmed(lifetime);
         private long _lastArmTicks;
-
-        public StallWindow(CancellationToken lifetime)
-        {
-            _lifetime = lifetime;
-            _source = CreateArmed(lifetime);
-        }
 
         public CancellationToken Token => _source.Token;
 
@@ -204,7 +197,7 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
             _lastArmTicks = now;
             if (_source.TryReset())
             {
-                _source.CancelAfter(StallTimeout);
+                _source.CancelAfter(s_stallTimeout);
                 return;
             }
             _source.Dispose();
@@ -216,7 +209,7 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
         private static CancellationTokenSource CreateArmed(CancellationToken lifetime)
         {
             var source = CancellationTokenSource.CreateLinkedTokenSource(lifetime);
-            source.CancelAfter(StallTimeout);
+            source.CancelAfter(s_stallTimeout);
             return source;
         }
     }
@@ -224,9 +217,9 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
     // The first arm is unconditional; a later arm within one second of the last is skipped
     // because the window from the previous arm still covers the operations.
     internal static bool IsRearmDue(long lastArmTicks, long nowTicks)
-        => lastArmTicks == 0 || nowTicks - lastArmTicks > ArmThrottleTicks;
+        => lastArmTicks == 0 || nowTicks - lastArmTicks > s_armThrottleTicks;
 
-    private static async Task<PumpResult> PumpAsync(Stream source, Stream destination, CancellationToken cancellationToken, NativeBufferPool pumpBufferPool)
+    private static async Task<PumpResult> PumpAsync(Stream source, Stream destination, NativeBufferPool pumpBufferPool, CancellationToken cancellationToken)
     {
         // One native 64 KiB window per pump direction (X5/B11): directions have independent
         // lifetimes via half-close, so the lease brackets this whole pump and the pool bounds
@@ -260,7 +253,7 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
                 try
                 {
                     stall.Arm();
-                    await destination.WriteAsync(lease.Memory.Slice(0, read), stall.Token).ConfigureAwait(false);
+                    await destination.WriteAsync(lease.Memory[..read], stall.Token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {

@@ -50,6 +50,6 @@ internal static class TcpRedirectComposer
                 Capacity = configuration.TcpFlowCapacity,
                 HealthSignal = healthSignal,
                 SynCopyPool = composition.SynCopyPool,
-                SetupExecutor = composition.SetupExecutor
+                SetupExecutor = composition.SetupExecutor,
             });
 }

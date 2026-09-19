@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using WinForward.Configuration;
 using WinForward.Core;
@@ -17,7 +18,7 @@ namespace WinForward.Core.Tests;
 /// </summary>
 public sealed class IdleExpirySweeperFailureTests
 {
-    private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, null, null);
+    private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, Username: null, Password: null);
 
     [Fact]
     public async Task SweepFailureLogsRateLimitedWarnAndKeepsSweeping()
@@ -36,7 +37,7 @@ public sealed class IdleExpirySweeperFailureTests
                     Interlocked.Increment(ref sweepFailures);
                     return ValueTask.FromException(new IOException("synthetic sweep failure"));
                 },
-                Logger = logger
+                Logger = logger,
             });
         var config = new ValidatedConfiguration(
             new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
@@ -44,7 +45,7 @@ public sealed class IdleExpirySweeperFailureTests
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), new FakeExecutor());
         var flow = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
 
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 1 }, default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
         await WaitForAsync(() => transportFactory.Transport is not null);
 
         await using var sweeper = new IdleExpirySweeper(
@@ -63,10 +64,10 @@ public sealed class IdleExpirySweeperFailureTests
         await WaitForAsync(() => Volatile.Read(ref sweepFailures) >= 4);
         await Task.Delay(250);
 
-        var warn = Assert.Single(logger.Lines, line => line.Level == RuntimeLogLevel.Warn && line.Message.Contains("Idle-expiry sweep failed", StringComparison.Ordinal));
-        Assert.Contains("IOException", warn.Message, StringComparison.Ordinal);
-        Assert.Contains("synthetic sweep failure", warn.Message, StringComparison.Ordinal);
-        Assert.True(Volatile.Read(ref sweepFailures) >= 5, $"The sweeper must keep sweeping across failures (observed {Volatile.Read(ref sweepFailures)} failing ticks).");
+        var (_, message) = Assert.Single(logger.Lines, line => line.Level == RuntimeLogLevel.Warn && line.Message.Contains("Idle-expiry sweep failed", StringComparison.Ordinal));
+        Assert.Contains("IOException", message, StringComparison.Ordinal);
+        Assert.Contains("synthetic sweep failure", message, StringComparison.Ordinal);
+        Assert.True(Volatile.Read(ref sweepFailures) >= 5, string.Create(CultureInfo.InvariantCulture, $"The sweeper must keep sweeping across failures (observed {Volatile.Read(ref sweepFailures)} failing ticks)."));
 
         await coordinator.DisposeAsync();
     }

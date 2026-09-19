@@ -29,7 +29,7 @@ public sealed class MultiAdapterCaptureLoop : IPacketCaptureLoop
         ArgumentNullException.ThrowIfNull(processor);
         _onAdapterDegraded = onAdapterDegraded;
         var onBatchCompleted = processor.OnBatchCompleted;
-        _pumps = adapters
+        _pumps = [.. adapters
             .Select(adapter => new NdisCapturePump(
                 driver,
                 adapter.RuntimeHandle,
@@ -40,8 +40,7 @@ public sealed class MultiAdapterCaptureLoop : IPacketCaptureLoop
                     OnBatchCompleted = onBatchCompleted is null ? null : () => onBatchCompleted(adapter.RuntimeHandle),
                     OnTransientRetry = onAdapterTransientRetry is null ? null : (nativeError, attempt) => onAdapterTransientRetry(adapter, nativeError, attempt),
                     OnDegraded = nativeError => OnPumpDegraded(adapter, nativeError),
-                }))
-            .ToArray();
+                }))];
     }
 
     /// <summary>How many adapter pumps exited through the degraded path (telemetry, R7).</summary>

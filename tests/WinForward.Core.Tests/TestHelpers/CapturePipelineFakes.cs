@@ -23,15 +23,15 @@ internal sealed class FakeGuard : ISelfTrafficGuard
     public bool IsOwned(FlowContext context) => Owned;
 }
 
-internal sealed class FakeAttributor : IProcessAttributor
+internal sealed class FakeAttributor(string? name) : IProcessAttributor
 {
-    private readonly string? _name;
+    private readonly string? _name = name;
     public int Calls { get; private set; }
-    public FakeAttributor(string? name) => _name = name;
+
     public ValueTask<ProcessIdentity?> FindAsync(FlowKey key, CancellationToken cancellationToken)
     {
         Calls++;
-        return ValueTask.FromResult<ProcessIdentity?>(_name is null ? null : new ProcessIdentity(123, DateTime.UtcNow, _name, null));
+        return ValueTask.FromResult<ProcessIdentity?>(_name is null ? null : new ProcessIdentity(123, DateTime.UtcNow, _name, FullPath: null));
     }
 }
 

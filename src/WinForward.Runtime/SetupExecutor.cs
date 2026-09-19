@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Runtime.TcpRedirect;
@@ -10,8 +11,8 @@ namespace WinForward.Runtime;
 /// One pooled unit of new-flow setup work: rented from an <see cref="ISetupExecutor"/>, populated by
 /// a coordinator's cold new-flow branch, enqueued, and recycled by the worker that ran it. Reuse is
 /// safe because <see cref="Reset"/> clears every payload reference before the slot returns to the
-/// free list. The TCP-only and UDP-only payloads live in the pre-allocated <see cref="Tcp"/> and
-/// <see cref="Udp"/> planes, so each flow family's fields are disjoint and the item's shared fields
+/// free list. The TCP-only and UDP-only payloads live in the pre-allocated <see cref="_tcp"/> and
+/// <see cref="_udp"/> planes, so each flow family's fields are disjoint and the item's shared fields
 /// stay protocol-neutral.
 /// </summary>
 public sealed class SetupWorkItem
@@ -20,28 +21,28 @@ public sealed class SetupWorkItem
     /// The item's setup pipeline, installed by <see cref="ISetupExecutor.RentItem"/> at rent time
     /// and never null while the item is in flight. A rented item therefore always has a pipeline.
     /// </summary>
-    internal Func<SetupWorkItem, Task> Handler = null!;
+    internal Func<SetupWorkItem, Task> _handler = null!;
 
-    internal TaskCompletionSource? Completion;
-    internal FlowKey Flow;
-    internal Socks5Server? Server;
-    internal CancellationToken CancellationToken;
+    internal TaskCompletionSource? _completion;
+    internal FlowKey _flow;
+    internal Socks5Server? _server;
+    internal CancellationToken _cancellationToken;
 
     /// <summary>The TCP-only setup payload plane, allocated once with the item.</summary>
-    internal readonly TcpSetupWork Tcp = new();
+    internal readonly TcpSetupWork _tcp = new();
 
     /// <summary>The UDP-only setup payload plane, allocated once with the item.</summary>
-    internal readonly UdpSetupWork Udp = new();
+    internal readonly UdpSetupWork _udp = new();
 
     internal void Reset()
     {
-        Handler = null!;
-        Completion = null;
-        Flow = default;
-        Server = null;
-        CancellationToken = default;
-        Tcp.Reset();
-        Udp.Reset();
+        _handler = null!;
+        _completion = null;
+        _flow = default;
+        _server = null;
+        _cancellationToken = default;
+        _tcp.Reset();
+        _udp.Reset();
     }
 }
 
@@ -52,13 +53,13 @@ public sealed class SetupWorkItem
 /// </summary>
 internal sealed class TcpSetupWork
 {
-    internal PendingSynSetup? Entry;
-    internal byte[]? Frame;
+    internal PendingSynSetup? _entry;
+    internal byte[]? _frame;
 
     internal void Reset()
     {
-        Entry = null;
-        Frame = null;
+        _entry = null;
+        _frame = null;
     }
 }
 
@@ -69,15 +70,15 @@ internal sealed class TcpSetupWork
 /// </summary>
 internal sealed class UdpSetupWork
 {
-    internal long FlowGeneration;
-    internal MacAddress ClientMac;
-    internal UdpProxyCoordinator.UdpSessionSlot? Slot;
+    internal long _flowGeneration;
+    internal MacAddress _clientMac;
+    internal UdpProxyCoordinator.UdpSessionSlot? _slot;
 
     internal void Reset()
     {
-        FlowGeneration = 0;
-        ClientMac = default;
-        Slot = null;
+        _flowGeneration = 0;
+        _clientMac = default;
+        _slot = null;
     }
 }
 
@@ -149,7 +150,7 @@ public sealed class SetupExecutor : ISetupExecutor
     public SetupExecutor(int? workerCount = null, int ringCapacity = DefaultRingCapacity)
     {
         if (workerCount is < 0) throw new ArgumentOutOfRangeException(nameof(workerCount));
-        if (ringCapacity <= 0) throw new ArgumentOutOfRangeException(nameof(ringCapacity));
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(ringCapacity);
         _workerCount = workerCount ?? DefaultWorkerCount;
         _capacity = ringCapacity;
     }
@@ -171,12 +172,12 @@ public sealed class SetupExecutor : ISetupExecutor
         ArgumentNullException.ThrowIfNull(handler);
         if (_free.TryDequeue(out var item))
         {
-            item.Handler = handler;
+            item._handler = handler;
             return item;
         }
 
         Interlocked.Increment(ref _overflowAllocations);
-        return new SetupWorkItem { Handler = handler };
+        return new SetupWorkItem { _handler = handler };
     }
 
     public bool TryEnqueue(SetupWorkItem item)
@@ -228,7 +229,7 @@ public sealed class SetupExecutor : ISetupExecutor
                 var thread = new Thread(WorkerLoop)
                 {
                     IsBackground = true,
-                    Name = $"wf-setup-{index}",
+                    Name = string.Create(CultureInfo.InvariantCulture, $"wf-setup-{index}"),
                 };
                 workers[index] = thread;
                 thread.Start();
@@ -268,17 +269,17 @@ public sealed class SetupExecutor : ISetupExecutor
             // The dedicated worker thread intentionally blocks until the asynchronous setup pipeline
             // completes: that is the whole point of the executor (no thread-pool thread is parked).
 #pragma warning disable VSTHRD002
-            item.Handler(item).GetAwaiter().GetResult();
+            item._handler(item).GetAwaiter().GetResult();
 #pragma warning restore VSTHRD002
-            item.Completion?.TrySetResult();
+            item._completion?.TrySetResult();
         }
         catch (OperationCanceledException exception)
         {
-            item.Completion?.TrySetCanceled(exception.CancellationToken);
+            item._completion?.TrySetCanceled(exception.CancellationToken);
         }
         catch (Exception exception)
         {
-            item.Completion?.TrySetException(exception);
+            item._completion?.TrySetException(exception);
         }
         finally
         {
@@ -312,7 +313,7 @@ public sealed class SetupExecutor : ISetupExecutor
     private void DrainItem(SetupWorkItem item)
     {
         Interlocked.Decrement(ref _pendingCount);
-        item.Completion?.TrySetCanceled();
+        item._completion?.TrySetCanceled(item._cancellationToken);
         item.Reset();
         if (_free.Count < _capacity) _free.Enqueue(item);
     }

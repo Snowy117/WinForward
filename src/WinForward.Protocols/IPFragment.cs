@@ -35,7 +35,7 @@ public static class IPFragment
         {
             EtherTypeIpv4 => IsIpv4Fragment(frame),
             EtherTypeIpv6 => IsIpv6Fragment(frame),
-            _ => false
+            _ => false,
         };
     }
 

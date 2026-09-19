@@ -46,7 +46,7 @@ public interface IAdapterEnumerationProvider
 [SupportedOSPlatform("windows")]
 public sealed class NdisAdapterEnumerationProvider : IAdapterEnumerationProvider
 {
-    private static readonly IReadOnlyDictionary<string, string> EmptyFingerprints = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    private static readonly IReadOnlyDictionary<string, string> s_emptyFingerprints = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
     private readonly NdisApiDriver _driver;
     private readonly IRuntimeLogger? _logger;
@@ -62,9 +62,7 @@ public sealed class NdisAdapterEnumerationProvider : IAdapterEnumerationProvider
     public IReadOnlyList<AdapterEnumerationItem> Enumerate()
     {
         var ndisAdapters = _driver.GetAdapters();
-        var inventory = new WindowsAdapterInventory(() => ndisAdapters
-            .Select(adapter => (adapter.InternalName, adapter.RuntimeHandle, adapter.MacAddress, adapter.Mtu))
-            .ToArray());
+        var inventory = new WindowsAdapterInventory(() => [.. ndisAdapters.Select(adapter => (adapter.InternalName, adapter.RuntimeHandle, adapter.MacAddress, adapter.Mtu))]);
         var adapters = inventory.GetCurrentAdapters();
         var linkStateByHandle = ndisAdapters.ToDictionary(adapter => adapter.RuntimeHandle);
         var fingerprints = ReadAddressFingerprintsTolerantly();
@@ -99,7 +97,7 @@ public sealed class NdisAdapterEnumerationProvider : IAdapterEnumerationProvider
                 logger.Event(RuntimeLogLevel.Debug, "adapter.addressQuery.failed",
                     new RuntimeLogField("error", exception.Message));
             }
-            return EmptyFingerprints;
+            return s_emptyFingerprints;
         }
     }
 }

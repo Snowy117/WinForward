@@ -62,8 +62,8 @@ public sealed class GcSoakScenarioTests
     public void GcSoakSelectionExpandsToTheGcSoakScenario()
     {
         var scenarios = SoakRunner.SelectScenarios(SoakScenario.GcSoak);
-        var entry = Assert.Single(scenarios);
-        Assert.Equal("gcSoak", entry.Name);
+        var (name, _) = Assert.Single(scenarios);
+        Assert.Equal("gcSoak", name);
     }
 
     [Fact]

@@ -101,10 +101,10 @@ public sealed class InterceptionHealthMonitorTests
         }
 
         Assert.True(harness.Monitor.IsDegraded);
-        var degraded = Assert.Single(harness.Logger.Events,
+        var (level, _, fields) = Assert.Single(harness.Logger.Events,
             entry => string.Equals(entry.Name, "runner.forcedRefresh.degraded", StringComparison.Ordinal));
-        Assert.Equal(RuntimeLogLevel.Error, degraded.Level);
-        Assert.Equal("3", CaptureRunnerHarness.FieldValue(degraded.Fields, "consecutive"));
+        Assert.Equal(RuntimeLogLevel.Error, level);
+        Assert.Equal("3", CaptureRunnerHarness.FieldValue(fields, "consecutive"));
 
         // Degraded spacing replaces the 60 s cooldown: a fresh cluster one minute later stays
         // silent, the same cluster past the 5-minute mark triggers again — with no second error.

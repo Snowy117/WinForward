@@ -18,38 +18,25 @@ namespace WinForward.Runtime.TcpRedirect;
 /// down right after. Degrades to plain teardown when either initial sequence number was never
 /// observed.
 /// </summary>
-internal sealed class ClientResetInjector
+internal sealed class ClientResetInjector(ITcpRedirectInjector injector, IRuntimeLogger logger, Func<TcpRedirectSession, ValueTask> tearDownSession, Func<TcpRedirectAssociation, ValueTask> failAssociation, int? capacity = null, IInterceptionHealthSignal? healthSignal = null, NdisPacketBufferPool? bufferPool = null, TimeProvider? timeProvider = null)
 {
     /// <summary>
     /// The per-tuple cooldown window for capacity-rejection resets: at most one RST|ACK per
     /// 4-tuple per second (the UDP setup-cooldown precedent) bounds reflection amplification
     /// from spoofed sources while still failing well-behaved clients fast.
     /// </summary>
-    internal static readonly TimeSpan CapacityResetCooldownWindow = TimeSpan.FromSeconds(1);
+    internal static readonly TimeSpan s_capacityResetCooldownWindow = TimeSpan.FromSeconds(1);
 
-    private readonly ITcpRedirectInjector _injector;
-    private readonly IRuntimeLogger _logger;
-    private readonly IInterceptionHealthSignal _healthSignal;
-    private readonly Func<TcpRedirectSession, ValueTask> _tearDownSession;
-    private readonly Func<TcpRedirectAssociation, ValueTask> _failAssociation;
-    private readonly TcpResetCooldownTable _capacityResets;
-    private readonly NdisPacketBufferPool _bufferPool;
-    private readonly TimeProvider _timeProvider;
-
-    public ClientResetInjector(ITcpRedirectInjector injector, IRuntimeLogger logger, Func<TcpRedirectSession, ValueTask> tearDownSession, Func<TcpRedirectAssociation, ValueTask> failAssociation, int? capacity = null, IInterceptionHealthSignal? healthSignal = null, NdisPacketBufferPool? bufferPool = null, TimeProvider? timeProvider = null)
-    {
-        _injector = injector;
-        _logger = logger;
-        _tearDownSession = tearDownSession;
-        _failAssociation = failAssociation;
-        _capacityResets = new TcpResetCooldownTable(capacity ?? 16_384);
-        _healthSignal = healthSignal ?? InterceptionHealthMonitor.Noop;
-        _bufferPool = bufferPool ?? NdisPacketBufferPool.Shared;
-        _timeProvider = timeProvider ?? TimeProvider.System;
-    }
+    private readonly ITcpRedirectInjector _injector = injector;
+    private readonly IRuntimeLogger _logger = logger;
+    private readonly IInterceptionHealthSignal _healthSignal = healthSignal ?? InterceptionHealthMonitor.Noop;
+    private readonly Func<TcpRedirectSession, ValueTask> _tearDownSession = tearDownSession;
+    private readonly Func<TcpRedirectAssociation, ValueTask> _failAssociation = failAssociation;
+    private readonly NdisPacketBufferPool _bufferPool = bufferPool ?? NdisPacketBufferPool.Shared;
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     /// <summary>The capacity-reset cooldown index; surfaced so tests can advance the window.</summary>
-    internal TcpResetCooldownTable CapacityResets => _capacityResets;
+    internal TcpResetCooldownTable CapacityResets { get; } = new TcpResetCooldownTable(capacity ?? 16_384);
 
     public ValueTask TryInjectClientResetAsync(TcpRedirectSession session)
         => TryInjectClientResetAsync(session.Association, session.Token);
@@ -69,7 +56,11 @@ internal sealed class ClientResetInjector
         {
             using var buffer = _bufferPool.Rent();
             if (!TcpResetBuilder.TryBuildReset(synTemplate, association.OriginalDestination.Address, association.OriginalDestination.Port,
-                association.OriginalKey.Local.Address, association.OriginalKey.Local.Port, serverSequenceNext, clientSequenceNext, buffer.GetFrameStorage(), out var written)) return ValueTask.CompletedTask;
+                association.OriginalKey.Local.Address, association.OriginalKey.Local.Port, serverSequenceNext, clientSequenceNext, buffer.GetFrameStorage(), out var written))
+            {
+                return ValueTask.CompletedTask;
+            }
+
             buffer.CompleteFrame(written, towardMstcp ? NdisApiAbi.PacketFlagOnReceive : NdisApiAbi.PacketFlagOnSend, association.OriginAdapterHandle);
             _injector.Inject(buffer, towardMstcp, association.OriginAdapterHandle, cancellationToken);
             if (_logger.IsEnabled(RuntimeLogLevel.Debug))
@@ -102,7 +93,7 @@ internal sealed class ClientResetInjector
     public ValueTask InjectCapacityRejectedResetAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
         var key = packet.Context.Key;
-        if (!_capacityResets.TryClaim(key, _timeProvider.GetUtcNow(), CapacityResetCooldownWindow)) return ValueTask.CompletedTask;
+        if (!CapacityResets.TryClaim(key, _timeProvider.GetUtcNow(), s_capacityResetCooldownWindow)) return ValueTask.CompletedTask;
         var towardMstcp = key.Origin != FlowOriginKind.Forwarded;
         try
         {
@@ -163,13 +154,13 @@ internal sealed class ClientResetInjector
             // the socket error name only exists on SocketException. An IPv6-literal host gets the
             // bracket convention the log formatter applies to Endpoint values.
 #pragma warning disable CA1416 // Reading the const inlines a literal from the windows-gated relay factory; the value (the dial budget this event reports) is inert on every platform.
-            var connectAttempts = TcpProxyRelayFactory.RelayConnectMaxAttempts;
+            const int connectAttempts = TcpProxyRelayFactory.RelayConnectMaxAttempts;
 #pragma warning restore CA1416
             _logger.Event(RuntimeLogLevel.Warn, "tcp.redirect.relaySetupFailed",
                 new("error", exception.GetType().Name),
                 new("socketError", (exception as SocketException)?.SocketErrorCode),
                 new("nativeError", (exception as Win32Exception)?.NativeErrorCode),
-                new("upstream", session.Server.Host.Contains(':')
+                new("upstream", session.Server.Host.Contains(':', StringComparison.Ordinal)
                     ? $"[{session.Server.Host}]:{session.Server.Port.ToString(CultureInfo.InvariantCulture)}"
                     : $"{session.Server.Host}:{session.Server.Port.ToString(CultureInfo.InvariantCulture)}"),
                 new("proxy", session.Server.Name),

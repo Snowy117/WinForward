@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
@@ -56,13 +57,13 @@ public static class NdisApiAbi
     private static void AssertSize<T>(int expected) where T : unmanaged
     {
         var actual = Unsafe.SizeOf<T>();
-        if (actual != expected) throw new TypeLoadException($"NDISAPI ABI mismatch for {typeof(T).Name}: expected {expected}, actual {actual}.");
+        if (actual != expected) throw new TypeLoadException(string.Create(CultureInfo.InvariantCulture, $"NDISAPI ABI mismatch for {typeof(T).Name}: expected {expected}, actual {actual}."));
     }
 
     private static void AssertOffset<T>(string field, int expected)
     {
         var actual = Marshal.OffsetOf<T>(field).ToInt32();
-        if (actual != expected) throw new TypeLoadException($"NDISAPI ABI mismatch for {typeof(T).Name}.{field}: expected {expected}, actual {actual}.");
+        if (actual != expected) throw new TypeLoadException(string.Create(CultureInfo.InvariantCulture, $"NDISAPI ABI mismatch for {typeof(T).Name}.{field}: expected {expected}, actual {actual}."));
     }
 }
 
@@ -70,11 +71,13 @@ public static class NdisApiAbi
 public unsafe struct TcpAdapterList
 {
     public uint AdapterCount;
+#pragma warning disable MA0189 // These fixed buffers mirror the ndisapi.h TCP_ADAPTER_LIST declaration byte-for-byte (size and every offset pinned by AssertManagedX64Layout); InlineArray would replace the native declaration mirror with generated buffer types for no runtime gain.
     public fixed byte AdapterNames[NdisApiAbi.AdapterListSize * NdisApiAbi.AdapterNameSize];
     public fixed long AdapterHandles[NdisApiAbi.AdapterListSize];
     public fixed uint AdapterMediums[NdisApiAbi.AdapterListSize];
     public fixed byte CurrentAddresses[NdisApiAbi.AdapterListSize * NdisApiAbi.EthernetAddressLength];
     public fixed ushort Mtus[NdisApiAbi.AdapterListSize];
+#pragma warning restore MA0189
 }
 
 [StructLayout(LayoutKind.Explicit, Pack = 1, Size = 1566)]
@@ -87,8 +90,10 @@ public unsafe struct IntermediateBuffer
     [FieldOffset(24)] public uint Flags;
     [FieldOffset(28)] public uint Ieee8021q;
     [FieldOffset(32)] public uint FilterId;
+#pragma warning disable MA0189 // Fixed buffers mirror the ndisapi.h INTERMEDIATE_BUFFER declaration (size 1566 and the Reserved/Buffer offsets pinned by AssertManagedX64Layout); callers build spans from the fixed pointers, which InlineArray would force through MemoryMarshal rewrites for no runtime gain.
     [FieldOffset(36)] public fixed uint Reserved[4];
     [FieldOffset(52)] public fixed byte Buffer[NdisApiAbi.MaximumEthernetFrame];
+#pragma warning restore MA0189
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -129,7 +134,9 @@ public struct AdapterMode
 
 public sealed class NdisApiSafeHandle : SafeHandleZeroOrMinusOneIsInvalid
 {
+#pragma warning disable CA1419 // The handle is produced only by the driver's Open path via FromRawHandle; a public constructor would let callers construct an un-opened handle. No interop import returns this type (the handle-typed imports take it as an input parameter, which needs no public constructor), so the marshalling scenario CA1419 guards against is absent here.
     private NdisApiSafeHandle() : base(ownsHandle: true) { }
+#pragma warning restore CA1419
 
     internal static NdisApiSafeHandle FromRawHandle(nint handle)
     {

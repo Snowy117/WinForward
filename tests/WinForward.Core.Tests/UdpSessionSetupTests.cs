@@ -19,7 +19,7 @@ namespace WinForward.Core.Tests;
 public sealed class UdpSessionSetupTests
 {
     private const int ReceiveBufferSize = 1537;
-    private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, null, null);
+    private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, Username: null, Password: null);
 
     [Fact]
     public async Task FlushDropsTtlExpiredDatagramThroughTheSlotHostSeam()
@@ -34,7 +34,7 @@ public sealed class UdpSessionSetupTests
         var setup = new UdpSessionSetup(factory, new UdpAssociationTable(), new FakeResponseSink(), time, NullRuntimeLogger.Instance, receiveWindowPool, ReceiveBufferSize, host);
         var slot = new UdpProxyCoordinator.UdpSessionSlot();
 
-        await setup.CreateSessionAsync(flow, s_server, flowGeneration: 1, MacAddress.Invalid, shutdown.Token, slot);
+        await setup.CreateSessionAsync(flow, s_server, flowGeneration: 1, MacAddress.Invalid, slot, shutdown.Token);
 
         // The first dequeue step delivered an over-TTL entry: it was dropped without a send, its
         // lease returned to the pool, and the flush then stopped at the not-owner step.
@@ -48,7 +48,7 @@ public sealed class UdpSessionSetupTests
         // The fake host observed the constructed session through the opaque slot handle.
         var session = Assert.IsType<UdpProxySession>(host.AttachedSession);
         Assert.Same(session, slot.Session);
-        shutdown.Cancel();
+        await shutdown.CancelAsync();
         await session.DisposeAsync();
         setup.DisposeLimiter();
     }

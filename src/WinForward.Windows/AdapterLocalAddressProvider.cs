@@ -45,7 +45,7 @@ public sealed class WindowsAdapterLocalAddressProvider : IAdapterLocalAddressPro
     /// exists to remove per-SYN enumeration, and a forwarded-flow address that goes stale between
     /// events is corrected by the next rebuild within this window.
     /// </summary>
-    private static readonly TimeSpan SnapshotSafetyTimeToLive = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan s_snapshotSafetyTimeToLive = TimeSpan.FromSeconds(30);
 
     private readonly Func<IReadOnlyList<IPAdapterUnicastInfo>> _adapters;
     private readonly TimeProvider _timeProvider;
@@ -78,7 +78,7 @@ public sealed class WindowsAdapterLocalAddressProvider : IAdapterLocalAddressPro
     private static void SubscribeNetworkAddressChanged(Action callback) =>
         NetworkChange.NetworkAddressChanged += (_, _) => callback();
 
-    private static IReadOnlyList<IPAdapterUnicastInfo> GetWindowsAdapterAddresses()
+    private static List<IPAdapterUnicastInfo> GetWindowsAdapterAddresses()
     {
         var result = new List<IPAdapterUnicastInfo>();
         foreach (var network in NetworkInterface.GetAllNetworkInterfaces())
@@ -165,7 +165,7 @@ public sealed class WindowsAdapterLocalAddressProvider : IAdapterLocalAddressPro
     }
 
     private bool IsFresh(AddressSnapshot snapshot)
-        => !snapshot.Invalidated && _timeProvider.GetUtcNow() - snapshot.CapturedAtUtc < SnapshotSafetyTimeToLive;
+        => !snapshot.Invalidated && _timeProvider.GetUtcNow() - snapshot.CapturedAtUtc < s_snapshotSafetyTimeToLive;
 
     private void InvalidateSnapshot()
     {

@@ -5,6 +5,8 @@ namespace WinForward.Core.Tests;
 
 public sealed class NativeBufferPoolTests
 {
+    private static readonly bool[] s_expectedRentalEvents = [true, false, true, false];
+
     [Fact]
     public void RentDisposeRoundtripReusesTheSameBuffer()
     {
@@ -89,7 +91,7 @@ public sealed class NativeBufferPoolTests
         using var pool = new NativeBufferPool(bufferSize: 32, capacity: 4);
         var rented = new System.Collections.Concurrent.ConcurrentBag<byte>();
 
-        await Parallel.ForAsync(0, 64, async (index, cancellationToken) =>
+        await Parallel.ForAsync(0, 64, async (index, _) =>
         {
             var lease = pool.Rent();
             lease.Span[0] = (byte)index;
@@ -279,6 +281,6 @@ public sealed class NativeBufferPoolTests
 
         // One sink event per hand-out and one per completed return, in order — a reused hand-out
         // counts exactly like a fresh one, and the idempotent second release produces none.
-        Assert.Equal(new[] { true, false, true, false }, observed);
+        Assert.Equal(s_expectedRentalEvents, observed);
     }
 }

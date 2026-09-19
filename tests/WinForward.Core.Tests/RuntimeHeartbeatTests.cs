@@ -19,9 +19,7 @@ public sealed class RuntimeHeartbeatTests
         new(flows, 1000, tcp, 4096, udp, 16_384, pumpsRunning, pumpsDegraded);
 
     private static List<(RuntimeLogLevel Level, RuntimeLogField[] Fields)> Heartbeats(RecordingRuntimeLogger logger) =>
-        logger.Events.Where(entry => string.Equals(entry.Name, "runner.heartbeat", StringComparison.Ordinal))
-            .Select(entry => (entry.Level, entry.Fields))
-            .ToList();
+        [.. logger.Events.Where(entry => string.Equals(entry.Name, "runner.heartbeat", StringComparison.Ordinal)).Select(entry => (entry.Level, entry.Fields))];
 
     private static object? Field(RuntimeLogField[] fields, string key) =>
         fields.FirstOrDefault(field => string.Equals(field.Key, key, StringComparison.Ordinal)).Value;
@@ -41,9 +39,8 @@ public sealed class RuntimeHeartbeatTests
 
         await AsyncTestExtensions.WaitForAsync(() => Heartbeats(logger).Count >= 1).ConfigureAwait(false);
 
-        var beat = Heartbeats(logger)[0];
-        Assert.Equal(RuntimeLogLevel.Info, beat.Level);
-        var fields = beat.Fields;
+        var (level, fields) = Heartbeats(logger)[0];
+        Assert.Equal(RuntimeLogLevel.Info, level);
         Assert.True((long)Field(fields, "uptimeSeconds")! >= 0);
         Assert.Equal(12, Field(fields, "flows"));
         Assert.Equal(1000, Field(fields, "flowCapacity"));
@@ -122,7 +119,7 @@ public sealed class RuntimeHeartbeatTests
         var logger = new RecordingRuntimeLogger();
         var gc = new MutableGcSnapshotSource();
         await using var heartbeat = new RuntimeHeartbeat(
-            logger, counters: new RuntimeCounters(), interval: s_tick, gcSnapshotProvider: gc.Read);
+            logger, gcSnapshotProvider: gc.Read, counters: new RuntimeCounters(), interval: s_tick);
         heartbeat.Start();
 
         await AsyncTestExtensions.WaitForAsync(() => Heartbeats(logger).Count >= 1).ConfigureAwait(false);
@@ -209,7 +206,7 @@ public sealed class RuntimeHeartbeatTests
         var logger = new RecordingRuntimeLogger();
         var gc = new MutableGcSnapshotSource { Current = new(Gen0Collections: 10, Gen1Collections: 2, Gen2Collections: 1, AllocatedBytes: 1_000_000) };
         await using var heartbeat = new RuntimeHeartbeat(
-            logger, counters: new RuntimeCounters(), interval: s_tick, gcSnapshotProvider: gc.Read);
+            logger, gcSnapshotProvider: gc.Read, counters: new RuntimeCounters(), interval: s_tick);
         heartbeat.Start();
         gc.Current = new(Gen0Collections: 12, Gen1Collections: 2, Gen2Collections: 1, AllocatedBytes: 1_500_000);
 
@@ -221,12 +218,12 @@ public sealed class RuntimeHeartbeatTests
         Assert.Null(Field(fields, "gcGen1"));
         Assert.Null(Field(fields, "gcGen2"));
         Assert.Equal(500_000L, Field(fields, "gcAllocatedBytes"));
-        var warn = logger.Events.Single(entry => string.Equals(entry.Name, "gc.collected", StringComparison.Ordinal));
-        Assert.Equal(RuntimeLogLevel.Warn, warn.Level);
-        Assert.Equal(2, Field(warn.Fields, "gen0"));
-        Assert.Null(Field(warn.Fields, "gen1"));
-        Assert.Null(Field(warn.Fields, "gen2"));
-        Assert.Equal(2, Field(warn.Fields, "sinceStart"));
+        var (level, _, gcFields) = logger.Events.Single(entry => string.Equals(entry.Name, "gc.collected", StringComparison.Ordinal));
+        Assert.Equal(RuntimeLogLevel.Warn, level);
+        Assert.Equal(2, Field(gcFields, "gen0"));
+        Assert.Null(Field(gcFields, "gen1"));
+        Assert.Null(Field(gcFields, "gen2"));
+        Assert.Equal(2, Field(gcFields, "sinceStart"));
     }
 
     [Fact]
@@ -235,7 +232,7 @@ public sealed class RuntimeHeartbeatTests
         var logger = new RecordingRuntimeLogger();
         var gc = new MutableGcSnapshotSource { Current = new(Gen0Collections: 5, Gen1Collections: 0, Gen2Collections: 0, AllocatedBytes: 0) };
         await using var heartbeat = new RuntimeHeartbeat(
-            logger, counters: new RuntimeCounters(), interval: s_tick, gcSnapshotProvider: gc.Read);
+            logger, gcSnapshotProvider: gc.Read, counters: new RuntimeCounters(), interval: s_tick);
         heartbeat.Start();
 
         await AsyncTestExtensions.WaitForAsync(() => Heartbeats(logger).Count >= 1).ConfigureAwait(false);
@@ -264,9 +261,9 @@ public sealed class RuntimeHeartbeatTests
         Assert.Null(Field(beats[0].Fields, "gcCollections"));
         Assert.Equal(2, Field(beats[warnedIndex].Fields, "gcCollections"));
         Assert.Equal(2, Field(beats[warnedIndex + 1].Fields, "gcCollections"));
-        var warn = logger.Events.Single(entry => string.Equals(entry.Name, "gc.collected", StringComparison.Ordinal));
-        Assert.Equal(2, Field(warn.Fields, "gen0"));
-        Assert.Equal(2, Field(warn.Fields, "sinceStart"));
+        var (_, _, fields) = logger.Events.Single(entry => string.Equals(entry.Name, "gc.collected", StringComparison.Ordinal));
+        Assert.Equal(2, Field(fields, "gen0"));
+        Assert.Equal(2, Field(fields, "sinceStart"));
     }
 
     [Fact]
@@ -280,7 +277,7 @@ public sealed class RuntimeHeartbeatTests
         counters.RecordPoolRent("frame");
         var gc = new MutableGcSnapshotSource();
         await using var heartbeat = new RuntimeHeartbeat(
-            logger, counters: counters, interval: s_tick, gcSnapshotProvider: gc.Read);
+            logger, gcSnapshotProvider: gc.Read, counters: counters, interval: s_tick);
         heartbeat.Start();
 
         await AsyncTestExtensions.WaitForAsync(() => Heartbeats(logger).Count >= 1).ConfigureAwait(false);

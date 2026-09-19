@@ -20,7 +20,7 @@ namespace WinForward.Core.Tests;
 /// </summary>
 public sealed class NdisPacketActionExecutorLoggingTests
 {
-    private static readonly Socks5Server s_server = new("p", "127.0.0.1", 1080, null, null);
+    private static readonly Socks5Server s_server = new("p", "127.0.0.1", 1080, Username: null, Password: null);
     private static readonly IPAddress s_client = IPAddress.Parse("192.0.2.10");
     private static readonly IPAddress s_destination = IPAddress.Parse("192.0.2.53");
 
@@ -32,8 +32,8 @@ public sealed class NdisPacketActionExecutorLoggingTests
 
         await executor.ProxyAsync(TcpPacket(), s_server, CancellationToken.None);
 
-        var warn = Assert.Single(logger.Lines, line => line.Level == RuntimeLogLevel.Warn);
-        Assert.Contains("not initialized in this build", warn.Message, StringComparison.Ordinal);
+        var (_, message) = Assert.Single(logger.Lines, line => line.Level == RuntimeLogLevel.Warn);
+        Assert.Contains("not initialized in this build", message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -62,8 +62,8 @@ public sealed class NdisPacketActionExecutorLoggingTests
         BinaryPrimitives.WriteUInt16BigEndian(segment.Array.AsSpan(segment.Offset + 12, 2), 0x0806);
         await executor.ProxyAsync(malformed, s_server, CancellationToken.None);
 
-        var warn = Assert.Single(logger.Lines, line => line.Level == RuntimeLogLevel.Warn && line.Message.Contains("reason=redirect", StringComparison.Ordinal));
-        Assert.DoesNotContain("not initialized", warn.Message, StringComparison.Ordinal);
+        var (_, message) = Assert.Single(logger.Lines, line => line.Level == RuntimeLogLevel.Warn && line.Message.Contains("reason=redirect", StringComparison.Ordinal));
+        Assert.DoesNotContain("not initialized", message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -116,5 +116,5 @@ public sealed class NdisPacketActionExecutorLoggingTests
             FlowContext(FlowKey.Create(Endpoint.From(s_client, 53000), Endpoint.From(s_destination, 53), TransportProtocol.Udp, FlowOriginKind.Host)),
             new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
 
-    private static FlowContext FlowContext(FlowKey key) => new(key, null, null, null, null, key.Remote.Port);
+    private static FlowContext FlowContext(FlowKey key) => new(key, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, key.Remote.Port);
 }

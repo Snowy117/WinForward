@@ -6,7 +6,7 @@ namespace WinForward.Protocols;
 public enum Socks5Command : byte
 {
     Connect = 1,
-    UdpAssociate = 3
+    UdpAssociate = 3,
 }
 
 /// <summary>
@@ -58,7 +58,7 @@ public static class Socks5Messages
         destination[1] = (byte)userLength;
         System.Text.Encoding.UTF8.GetBytes(username.AsSpan(), destination.Slice(2, userLength));
         destination[2 + userLength] = (byte)(length - 3 - userLength);
-        System.Text.Encoding.UTF8.GetBytes(password.AsSpan(), destination.Slice(3 + userLength));
+        System.Text.Encoding.UTF8.GetBytes(password.AsSpan(), destination[(3 + userLength)..]);
         return length;
     }
 
@@ -176,7 +176,7 @@ public static class Socks5Messages
         6 => "TTL expired",
         7 => "command not supported",
         8 => "address type not supported",
-        _ => $"unknown status {status}"
+        _ => $"unknown status {status}",
     };
 
     /// <summary>
@@ -203,7 +203,7 @@ public static class Socks5Messages
             1 => 10,
             3 => 7 + prefix[4],
             4 => 22,
-            _ => 0
+            _ => 0,
         };
         return length > 0;
     }

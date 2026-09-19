@@ -17,13 +17,13 @@ namespace WinForward.Core.Tests;
 /// </summary>
 public sealed class TcpPendingSynSetupTests
 {
-    private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, null, null);
+    private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, Username: null, Password: null);
     private static readonly IPAddress s_client = IPAddress.Parse("192.0.2.10");
     private static readonly IPAddress s_destination = IPAddress.Parse("192.0.2.53");
 
     private static FlowKey Key(ushort port) => FlowKey.Create(Endpoint.From(s_client, port), Endpoint.From(s_destination, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
 
-    private static FlowContext Context(FlowKey key) => new(key, null, null, null, null, key.Remote.Port);
+    private static FlowContext Context(FlowKey key) => new(key, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, key.Remote.Port);
 
     /// <summary>
     /// A factory whose allocations park until released OR the token fires — unlike the shared
@@ -279,7 +279,7 @@ public sealed class TcpPendingSynSetupTests
         var dispatch = coordinator.HandleSynAsync(MakeSynPacket(s_client, s_destination, 53000, 443), s_server, CancellationToken.None).AsTask();
         await dispatch.WaitAsync(TimeSpan.FromSeconds(2));
 
-        Assert.Equal(TcpRedirectOutcome.SetupPending, dispatch.Result);
+        Assert.Equal(TcpRedirectOutcome.SetupPending, await dispatch);
         // The background setup reached the factory only after the dispatch returned; the gate is
         // still closed, proving nothing on the dispatch path waited for the allocation.
         await listenerFactory.CreateStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));

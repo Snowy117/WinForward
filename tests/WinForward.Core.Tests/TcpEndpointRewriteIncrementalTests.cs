@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Net;
 using WinForward.Core;
 using WinForward.Protocols;
@@ -36,8 +37,8 @@ public sealed class TcpEndpointRewriteIncrementalTests
             var (incremental, full) = RewriteBothWays(frame, RandomIpv4(random), RandomIpv4(random), RandomPort(random), RandomPort(random));
 
             Assert.Equal(full, incremental);
-            Assert.True(ValidateIpv4HeaderChecksum(incremental), $"header checksum invalid at iteration {iteration}");
-            Assert.True(ValidateIpv4TcpChecksum(incremental), $"tcp checksum invalid at iteration {iteration}");
+            Assert.True(ValidateIpv4HeaderChecksum(incremental), string.Create(CultureInfo.InvariantCulture, $"header checksum invalid at iteration {iteration}"));
+            Assert.True(ValidateIpv4TcpChecksum(incremental), string.Create(CultureInfo.InvariantCulture, $"tcp checksum invalid at iteration {iteration}"));
         }
     }
 
@@ -55,7 +56,7 @@ public sealed class TcpEndpointRewriteIncrementalTests
             var (incremental, full) = RewriteBothWays(frame, RandomIpv6(random), RandomIpv6(random), RandomPort(random), RandomPort(random));
 
             Assert.Equal(full, incremental);
-            Assert.True(ValidateIpv6TcpChecksum(incremental), $"tcp checksum invalid at iteration {iteration}");
+            Assert.True(ValidateIpv6TcpChecksum(incremental), string.Create(CultureInfo.InvariantCulture, $"tcp checksum invalid at iteration {iteration}"));
         }
     }
 

@@ -156,7 +156,7 @@ public sealed class NdisCaptureResilienceTests
 
         var run = pump.RunAsync(cts.Token).AsTask();
         await Task.Delay(50, CancellationToken.None);
-        cts.Cancel();
+        await cts.CancelAsync();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
         Assert.False(pump.Diagnostics.IsDegraded);

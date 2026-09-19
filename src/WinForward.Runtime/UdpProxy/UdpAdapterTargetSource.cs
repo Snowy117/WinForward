@@ -45,16 +45,11 @@ public interface IUdpAdapterTargetSource
 /// <see cref="Update"/> copy the supplied map into the snapshot so later caller-side mutation
 /// can never leak into a live view; reads allocate nothing.
 /// </summary>
-public sealed class UdpAdapterTargetSource : IUdpAdapterTargetSource
+public sealed class UdpAdapterTargetSource(UdpAdapterTarget? host = null, IReadOnlyDictionary<string, UdpAdapterTarget>? byStableId = null) : IUdpAdapterTargetSource
 {
     private sealed record Snapshot(UdpAdapterTarget? Host, IReadOnlyDictionary<string, UdpAdapterTarget> ByStableId, IReadOnlyList<string> SortedAdapterIds);
 
-    private Snapshot _snapshot;
-
-    public UdpAdapterTargetSource(UdpAdapterTarget? host = null, IReadOnlyDictionary<string, UdpAdapterTarget>? byStableId = null)
-    {
-        _snapshot = CreateSnapshot(host, CopyMap(byStableId));
-    }
+    private Snapshot _snapshot = CreateSnapshot(host, CopyMap(byStableId));
 
     public UdpAdapterTarget? Host => Volatile.Read(ref _snapshot).Host;
 
@@ -80,7 +75,7 @@ public sealed class UdpAdapterTargetSource : IUdpAdapterTargetSource
         return new Snapshot(host, byStableId, sortedIds);
     }
 
-    private static IReadOnlyDictionary<string, UdpAdapterTarget> CopyMap(IReadOnlyDictionary<string, UdpAdapterTarget>? byStableId) =>
+    private static Dictionary<string, UdpAdapterTarget> CopyMap(IReadOnlyDictionary<string, UdpAdapterTarget>? byStableId) =>
         byStableId is null
             ? new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, UdpAdapterTarget>(byStableId, StringComparer.OrdinalIgnoreCase);

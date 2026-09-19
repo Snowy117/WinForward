@@ -1,5 +1,5 @@
-using BenchmarkDotNet.Attributes;
 using System.Net;
+using BenchmarkDotNet.Attributes;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Runtime;
@@ -53,7 +53,7 @@ public class DispatcherBenchmarks
         var proxyConfiguration = new ValidatedConfiguration(
             new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase)
             {
-                ["benchmark"] = new Socks5Server("benchmark", "127.0.0.1", 1080, null, null),
+                ["benchmark"] = new Socks5Server("benchmark", "127.0.0.1", 1080, Username: null, Password: null),
             },
             new PolicySnapshot(
                 [new PolicyRule(new RuleMatcher(), new FlowDecision(FlowAction.Proxy, 0, "benchmark"))],
@@ -162,7 +162,7 @@ public class DispatcherBenchmarks
     private static void AssertClaim(TcpRedirectTable table, FlowKey originalKey, ushort listenerPort)
     {
         var translated = Endpoint.From(IPAddress.Loopback, listenerPort);
-        if (!table.TryClaim(originalKey, originalKey.Remote, originalKey.OriginAdapterId is { } adapterId ? new AdapterContext(adapterId, null, 0) : new AdapterContext("adapter-0", null, 0), 0x1234, translated, null, DateTimeOffset.UtcNow, out _))
+        if (!table.TryClaim(originalKey, originalKey.Remote, originalKey.OriginAdapterId is { } adapterId ? new AdapterContext(adapterId, Name: null, 0) : new AdapterContext("adapter-0", Name: null, 0), 0x1234, translated, forwardLocalAddress: null, DateTimeOffset.UtcNow, out _))
             throw new InvalidOperationException("The candidate-port claim must succeed for the diverted control.");
     }
 }

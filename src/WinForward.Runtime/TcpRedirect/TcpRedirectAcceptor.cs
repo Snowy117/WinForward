@@ -9,25 +9,16 @@ namespace WinForward.Runtime.TcpRedirect;
 /// from retransmitted SYNs are drained and closed instead of starting a second relay. Transient
 /// accept errors are retried with a bounded delay so a failing loop never spins flat-out.
 /// </summary>
-internal sealed class TcpRedirectAcceptor
+internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IRuntimeLogger logger, ClientResetInjector clientReset, Func<TcpRedirectSession, ITcpRelay, bool> tryAttachRelay, Func<TcpRedirectSession, ValueTask> tearDownSession)
 {
-    private readonly ITcpProxyRelayFactory _relayFactory;
-    private readonly IRuntimeLogger _logger;
-    private readonly ClientResetInjector _clientReset;
-    private readonly Func<TcpRedirectSession, ITcpRelay, bool> _tryAttachRelay;
-    private readonly Func<TcpRedirectSession, ValueTask> _tearDownSession;
+    private readonly ITcpProxyRelayFactory _relayFactory = relayFactory;
+    private readonly IRuntimeLogger _logger = logger;
+    private readonly ClientResetInjector _clientReset = clientReset;
+    private readonly Func<TcpRedirectSession, ITcpRelay, bool> _tryAttachRelay = tryAttachRelay;
+    private readonly Func<TcpRedirectSession, ValueTask> _tearDownSession = tearDownSession;
 
     /// <summary>A short bounded back-off between retries of a transient accept error (L3).</summary>
-    private static readonly TimeSpan BoundedAcceptRetryDelay = TimeSpan.FromMilliseconds(100);
-
-    public TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IRuntimeLogger logger, ClientResetInjector clientReset, Func<TcpRedirectSession, ITcpRelay, bool> tryAttachRelay, Func<TcpRedirectSession, ValueTask> tearDownSession)
-    {
-        _relayFactory = relayFactory;
-        _logger = logger;
-        _clientReset = clientReset;
-        _tryAttachRelay = tryAttachRelay;
-        _tearDownSession = tearDownSession;
-    }
+    private static readonly TimeSpan s_boundedAcceptRetryDelay = TimeSpan.FromMilliseconds(100);
 
     public async Task RunAcceptLoopAsync(TcpRedirectSession session)
     {
@@ -149,7 +140,7 @@ internal sealed class TcpRedirectAcceptor
     {
         try
         {
-            await Task.Delay(BoundedAcceptRetryDelay, token).ConfigureAwait(false);
+            await Task.Delay(s_boundedAcceptRetryDelay, token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {

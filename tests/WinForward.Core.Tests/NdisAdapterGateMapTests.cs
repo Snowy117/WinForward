@@ -1,3 +1,4 @@
+using System.Globalization;
 using WinForward.NdisApi;
 using Xunit;
 
@@ -28,27 +29,27 @@ public sealed class NdisAdapterGateMapTests
     [Fact]
     public async Task MapCreationIsThreadSafeUnderStress()
     {
-        const int HandleCount = 16;
-        const int ResolvesPerHandle = 64;
+        const int handleCount = 16;
+        const int resolvesPerHandle = 64;
         var map = new NdisAdapterGateMap();
-        var resolved = new NdisNativeCallGate[HandleCount * ResolvesPerHandle];
+        var resolved = new NdisNativeCallGate[handleCount * resolvesPerHandle];
 
         var resolves = Enumerable.Range(0, resolved.Length)
-            .Select(slot => Task.Run(() => resolved[slot] = map.Get((nint)(slot % HandleCount + 1))))
+            .Select(slot => Task.Run(() => resolved[slot] = map.Get((nint)((slot % handleCount) + 1))))
             .ToArray();
         await Task.WhenAll(resolves);
 
-        for (var handle = 0; handle < HandleCount; handle++)
+        for (var handle = 0; handle < handleCount; handle++)
         {
             var canonical = resolved[handle];
-            for (var resolve = 1; resolve < ResolvesPerHandle; resolve++)
+            for (var resolve = 1; resolve < resolvesPerHandle; resolve++)
             {
-                var slot = handle + resolve * HandleCount;
-                Assert.True(ReferenceEquals(canonical, resolved[slot]), $"adapter {handle + 1} resolve #{resolve} returned a different gate instance");
+                var slot = handle + (resolve * handleCount);
+                Assert.True(ReferenceEquals(canonical, resolved[slot]), string.Create(CultureInfo.InvariantCulture, $"adapter {handle + 1} resolve #{resolve} returned a different gate instance"));
             }
         }
 
-        Assert.Equal(HandleCount, map.GetMaxConcurrentCalls().Count);
+        Assert.Equal(handleCount, map.GetMaxConcurrentCalls().Count);
     }
 
     [Fact]
@@ -62,7 +63,9 @@ public sealed class NdisAdapterGateMapTests
         {
             using var gateLease = map.Get((nint)0xA).Enter();
             firstEntered.SetResult();
+#pragma warning disable MA0042 // The lease wraps a Monitor (thread-affine): awaiting would resume on another thread and Monitor.Exit in the lease would throw SynchronizationLockException. The deliberate synchronous block keeps the gate held on this thread while the test proves serialization.
             releaseFirst.Task.GetAwaiter().GetResult();
+#pragma warning restore MA0042
         });
         await firstEntered.Task;
 
@@ -100,7 +103,9 @@ public sealed class NdisAdapterGateMapTests
         {
             using var gateLease = map.Get((nint)1).Enter();
             firstEntered.SetResult();
+#pragma warning disable MA0042 // The lease wraps a Monitor (thread-affine): awaiting would resume on another thread and Monitor.Exit in the lease would throw SynchronizationLockException. The deliberate synchronous block keeps the gate held on this thread while the test proves serialization.
             releaseFirst.Task.GetAwaiter().GetResult();
+#pragma warning restore MA0042
         });
         await firstEntered.Task;
 

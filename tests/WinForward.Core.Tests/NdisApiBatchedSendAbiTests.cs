@@ -18,7 +18,7 @@ public sealed class NdisApiBatchedSendAbiTests
     {
         // 16 header bytes + one 8-byte pointer slot per packet must fit the 1KB budget the
         // driver stackallocs for a whole chunk.
-        var worstChunkBytes = 16 + 8 * NdisApiDriver.MaxPacketsPerSendRequest;
+        const int worstChunkBytes = 16 + (8 * NdisApiDriver.MaxPacketsPerSendRequest);
         Assert.InRange(NdisApiDriver.MaxPacketsPerSendRequest, 1, 126);
         Assert.True(worstChunkBytes <= 1024, $"A full send chunk spans {worstChunkBytes} bytes and overflows the 1KB stack budget.");
     }
@@ -32,7 +32,7 @@ public sealed class NdisApiBatchedSendAbiTests
         using var third = new NdisPacketBuffer();
         var buffers = new[] { first, second, third };
 
-        var requestBytes = stackalloc byte[16 + 8 * buffers.Length];
+        var requestBytes = stackalloc byte[16 + (8 * buffers.Length)];
         NdisApiDriver.BuildMultiRequest(requestBytes, (nint)0x55, buffers, buffers.Length, offset: 0);
 
         var request = (EthernetMultiRequest*)requestBytes;
@@ -56,7 +56,7 @@ public sealed class NdisApiBatchedSendAbiTests
         using var third = new NdisPacketBuffer();
         var buffers = new[] { first, second, third };
 
-        var requestBytes = stackalloc byte[16 + 8 * 2];
+        var requestBytes = stackalloc byte[16 + (8 * 2)];
         NdisApiDriver.BuildMultiRequest(requestBytes, (nint)0x66, buffers, count: 2, offset: 1);
 
         var request = (EthernetMultiRequest*)requestBytes;
@@ -73,7 +73,7 @@ public sealed class NdisApiBatchedSendAbiTests
     {
         using var buffer = new NdisPacketBuffer();
         var buffers = new NdisPacketBuffer?[] { buffer, null };
-        var requestBytes = stackalloc byte[16 + 8 * 2];
+        var requestBytes = stackalloc byte[16 + (8 * 2)];
 
         Assert.Throws<ArgumentNullException>(() =>
             NdisApiDriver.BuildMultiRequest(requestBytes, (nint)1, buffers!, count: 2, offset: 0));

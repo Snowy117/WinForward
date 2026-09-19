@@ -11,7 +11,7 @@ namespace WinForward.Core.Tests;
 
 public sealed class TcpProxyCoordinatorConcurrencyTests
 {
-    private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, null, null);
+    private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, Username: null, Password: null);
     private static readonly IPAddress s_clientIpv4 = IPAddress.Parse("192.0.2.10");
     private static readonly IPAddress s_destIpv4 = IPAddress.Parse("192.0.2.53");
     private static readonly IPAddress s_clientIpv6 = IPAddress.Parse("2001:db8::10");
@@ -49,8 +49,8 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
         var secondKey = FlowKey.Create(Endpoint.From(s_clientIpv6, 53001), Endpoint.From(s_destIpv6, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
         var adapter = new AdapterContext("eth0", "Ethernet", 1);
 
-        Assert.True(table.TryClaim(firstKey, firstKey.Remote, adapter, (nint)0x1234, Endpoint.From(IPAddress.Loopback, 42000), null, now, out var first));
-        Assert.True(table.TryClaim(secondKey, secondKey.Remote, adapter, (nint)0x1234, Endpoint.From(IPAddress.IPv6Loopback, 42000), null, now, out var second));
+        Assert.True(table.TryClaim(firstKey, firstKey.Remote, adapter, (nint)0x1234, Endpoint.From(IPAddress.Loopback, 42000), forwardLocalAddress: null, now, out var first));
+        Assert.True(table.TryClaim(secondKey, secondKey.Remote, adapter, (nint)0x1234, Endpoint.From(IPAddress.IPv6Loopback, 42000), forwardLocalAddress: null, now, out var second));
         Assert.NotNull(first);
         Assert.NotNull(second);
         Assert.Equal(2, table.Count);
@@ -94,7 +94,7 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
 
         var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
         var key = FlowKey.Create(listenerTuple, listenerTuple, TransportProtocol.Tcp, FlowOriginKind.Host);
-        var context = new FlowContext(key, null, null, null, null, listenerTuple.Port);
+        var context = new FlowContext(key, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, listenerTuple.Port);
 
         Assert.True(selfTraffic.IsOwned(context));
     }
@@ -179,7 +179,7 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
         var key = FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
         var adapter = new AdapterContext("eth0", "Ethernet", 1);
         var now = DateTimeOffset.UtcNow;
-        Assert.True(table.TryClaim(key, key.Remote, adapter, (nint)0x1234, Endpoint.From(IPAddress.Loopback, 42000), null, now, out _));
+        Assert.True(table.TryClaim(key, key.Remote, adapter, (nint)0x1234, Endpoint.From(IPAddress.Loopback, 42000), forwardLocalAddress: null, now, out _));
 
         var outcome = await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None);
 
@@ -187,8 +187,8 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
         Assert.Equal(1, table.Count);
         Assert.Empty(listenerFactory.Listeners);
         // The re-inject rewrote the SYN toward the pre-claimed association's listener tuple.
-        var injected = Assert.Single(injector.InjectedFrames);
-        Assert.Equal(42000, injected.Frame[14 + 20 + 2] << 8 | injected.Frame[14 + 20 + 3]);
+        var (frame, _, _) = Assert.Single(injector.InjectedFrames);
+        Assert.Equal(42000, frame[14 + 20 + 2] << 8 | frame[14 + 20 + 3]);
     }
 
     [Fact]
@@ -308,7 +308,7 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
 
         var observedLocal = Endpoint.From(IPAddress.Parse("192.168.77.2"), 40000);
         var key = FlowKey.Create(observedLocal, remote, TransportProtocol.Udp, FlowOriginKind.Host);
-        var context = new FlowContext(key, null, null, null, null, remote.Port);
+        var context = new FlowContext(key, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, remote.Port);
         Assert.True(registry.IsOwned(context));
 
         token.Dispose();
@@ -330,17 +330,17 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
 
         var observedLocal = Endpoint.From(IPAddress.Parse("192.168.77.1"), 40000);
         var observedKey = FlowKey.Create(observedLocal, proxy, TransportProtocol.Tcp, FlowOriginKind.Host);
-        var observed = new FlowContext(observedKey, null, null, null, null, proxy.Port);
+        var observed = new FlowContext(observedKey, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, proxy.Port);
         Assert.True(registry.IsOwned(observed));
 
         // The proxy's response (reverse direction) is owned too.
-        var reverse = new FlowContext(observedKey.Reverse(), null, null, null, null, proxy.Port);
+        var reverse = new FlowContext(observedKey.Reverse(), ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, proxy.Port);
         Assert.True(registry.IsOwned(reverse));
 
         // An unrelated application sharing the proxy endpoint but using its own source port is not
         // exempted: loop prevention is exact to WinForward-owned sockets, never a broad exemption.
         var otherLocal = Endpoint.From(IPAddress.Parse("192.168.77.1"), 41001);
-        var other = new FlowContext(FlowKey.Create(otherLocal, proxy, TransportProtocol.Tcp, FlowOriginKind.Host), null, null, null, null, proxy.Port);
+        var other = new FlowContext(FlowKey.Create(otherLocal, proxy, TransportProtocol.Tcp, FlowOriginKind.Host), ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, proxy.Port);
         Assert.False(registry.IsOwned(other));
     }
 }

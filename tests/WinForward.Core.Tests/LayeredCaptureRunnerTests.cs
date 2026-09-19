@@ -40,7 +40,7 @@ public sealed class LayeredCaptureRunnerTests
         harness.Start();
         await harness.WaitForGenerationStartedAsync(0).ConfigureAwait(false);
 
-        harness.Cancel.Cancel();
+        await harness.Cancel.CancelAsync();
         await harness.RunTask.ConfigureAwait(false);
 
         Assert.Equal(1, harness.Generation(0).DisposeCount);
@@ -133,7 +133,7 @@ public sealed class LayeredCaptureRunnerTests
         Assert.Contains("id-b", CaptureRunnerHarness.FieldValue(refresh, "removed"), StringComparison.Ordinal);
         Assert.Equal("id-b=false", CaptureRunnerHarness.FieldValue(refresh, "degraded"));
         await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
-        Assert.Equal(["id-a"], harness.Generation(1).Scope.Select(item => item.StableId).ToArray());
+        Assert.Equal(["id-a"], [.. harness.Generation(1).Scope.Select(item => item.StableId)]);
         Assert.Equal(0, harness.DurableDisposeCount);
         Assert.False(harness.RunTask.IsCompleted);
     }
@@ -165,17 +165,17 @@ public sealed class LayeredCaptureRunnerTests
         await using var harness = new CaptureRunnerHarness([CaptureRunnerFakes.AdapterItem("id-a", 101)], CaptureRunnerFakes.UnconstrainedPolicy());
 
         // Before the run starts there is no generation, so the heartbeat source reports none.
-        Assert.Equal(default(CapturePumpState), harness.Runner.PumpState);
+        Assert.Equal(default, harness.Runner.PumpState);
         harness.Start();
         await harness.WaitForGenerationStartedAsync(0).ConfigureAwait(false);
 
         harness.Generation(0).Pumps = new CapturePumpState(3, 1);
         Assert.Equal(new CapturePumpState(3, 1), harness.Runner.PumpState);
 
-        harness.Cancel.Cancel();
+        await harness.Cancel.CancelAsync();
         await harness.RunTask.ConfigureAwait(false);
 
         // The teardown releases the generation, so the snapshot falls back to "no pumps".
-        Assert.Equal(default(CapturePumpState), harness.Runner.PumpState);
+        Assert.Equal(default, harness.Runner.PumpState);
     }
 }

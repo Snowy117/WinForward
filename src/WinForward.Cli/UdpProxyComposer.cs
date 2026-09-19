@@ -62,6 +62,6 @@ internal static class UdpProxyComposer
                 MaximumFrameSize = composition.MaximumFrameSize,
                 ReceiveWindowPool = composition.ReceiveWindowPool,
                 SetupQueuePool = composition.SetupQueuePool,
-                SetupExecutor = composition.SetupExecutor
+                SetupExecutor = composition.SetupExecutor,
             });
 }

@@ -23,7 +23,7 @@ internal static class TcpSequenceObservation
         association.ClientInitialSeq = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(frame.Slice(sequenceOffset, 4));
         var templateLength = Math.Min(frame.Length, 128);
         var template = synCopyPool.Rent();
-        frame.Slice(0, templateLength).CopyTo(template.Span);
+        frame[..templateLength].CopyTo(template.Span);
         association.ReleaseOriginalSynTemplate();
         association.SetOriginalSynTemplate(template, templateLength);
     }
@@ -62,10 +62,10 @@ internal static class TcpSequenceObservation
         var sequence = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(frame.Slice(tcpOffset + 4, 4));
         var flags = frame[tcpOffset + 13];
         var advance = (uint)(transportLength - view.TransportHeaderLength);
-        const byte Syn = 0x02;
-        const byte Fin = 0x01;
-        if ((flags & Syn) != 0) advance++;
-        if ((flags & Fin) != 0) advance++;
+        const byte syn = 0x02;
+        const byte fin = 0x01;
+        if ((flags & syn) != 0) advance++;
+        if ((flags & fin) != 0) advance++;
         sequenceNext = sequence + advance;
         return true;
     }

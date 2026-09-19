@@ -34,19 +34,13 @@ public sealed class NullRuntimeLogger : IRuntimeLogger
     public void Event(RuntimeLogLevel level, string eventName, params RuntimeLogField[] fields) { }
 }
 
-public sealed class ConsoleRuntimeLogger : IRuntimeLogger
+public sealed class ConsoleRuntimeLogger(RuntimeLogLevel threshold = RuntimeLogLevel.Info, TextWriter? writer = null) : IRuntimeLogger
 {
     private const string TimestampFormat = "yyyy-MM-dd HH:mm:ss.fff";
 
-    private readonly RuntimeLogLevel _threshold;
-    private readonly TextWriter _writer;
+    private readonly RuntimeLogLevel _threshold = threshold;
+    private readonly TextWriter _writer = writer ?? Console.Error;
     private readonly Lock _gate = new();
-
-    public ConsoleRuntimeLogger(RuntimeLogLevel threshold = RuntimeLogLevel.Info, TextWriter? writer = null)
-    {
-        _threshold = threshold;
-        _writer = writer ?? Console.Error;
-    }
 
     public bool IsEnabled(RuntimeLogLevel level) => level <= _threshold;
 
@@ -99,12 +93,12 @@ public sealed class ConsoleRuntimeLogger : IRuntimeLogger
         {
             Endpoint endpoint => FormatEndpoint(endpoint),
             IPEndPoint endpoint => endpoint.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6
-                ? $"[{endpoint.Address}]:{endpoint.Port.ToString(CultureInfo.InvariantCulture)}"
-                : $"{endpoint.Address}:{endpoint.Port.ToString(CultureInfo.InvariantCulture)}",
+                ? string.Create(CultureInfo.InvariantCulture, $"[{endpoint.Address}]:{endpoint.Port.ToString(CultureInfo.InvariantCulture)}")
+                : string.Create(CultureInfo.InvariantCulture, $"{endpoint.Address}:{endpoint.Port.ToString(CultureInfo.InvariantCulture)}"),
             DateTimeOffset timestamp => timestamp.ToString("O", CultureInfo.InvariantCulture),
             DateTime timestamp => timestamp.ToString("O", CultureInfo.InvariantCulture),
             Enum enumValue => enumValue.ToString().ToLowerInvariant(),
-            IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture) ?? string.Empty,
+            IFormattable formattable => formattable.ToString(format: null, CultureInfo.InvariantCulture) ?? string.Empty,
             _ => value.ToString() ?? string.Empty,
         };
         return NeedsQuoting(text) ? Quote(text) : text;

@@ -14,14 +14,14 @@ public sealed class IPHelperTablesBoundsTests
     [Fact]
     public void ExactRowFitPasses()
     {
-        IPHelperTables.ValidateRowCount(rowCount: 2, bytesWritten: 4 + 2 * 8, rowSize: 8, tableName: "IPv4 TCP owner table");
+        IPHelperTables.ValidateRowCount(rowCount: 2, bytesWritten: 4 + (2 * 8), rowSize: 8, tableName: "IPv4 TCP owner table");
     }
 
     [Fact]
     public void OverflowByOneRowThrowsNamingTheTable()
     {
         var exception = Assert.Throws<InvalidOperationException>(() =>
-            IPHelperTables.ValidateRowCount(rowCount: 3, bytesWritten: 4 + 2 * 8, rowSize: 8, tableName: "IPv4 TCP owner table"));
+            IPHelperTables.ValidateRowCount(rowCount: 3, bytesWritten: 4 + (2 * 8), rowSize: 8, tableName: "IPv4 TCP owner table"));
 
         Assert.Contains("IPv4 TCP owner table", exception.Message, StringComparison.Ordinal);
     }
@@ -30,7 +30,7 @@ public sealed class IPHelperTablesBoundsTests
     public void OverflowByOneByteThrows()
     {
         Assert.Throws<InvalidOperationException>(() =>
-            IPHelperTables.ValidateRowCount(rowCount: 2, bytesWritten: 4 + 2 * 8 - 1, rowSize: 8, tableName: "IPv6 UDP owner table"));
+            IPHelperTables.ValidateRowCount(rowCount: 2, bytesWritten: 4 + (2 * 8) - 1, rowSize: 8, tableName: "IPv6 UDP owner table"));
     }
 
     [Fact]

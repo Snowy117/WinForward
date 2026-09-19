@@ -102,7 +102,7 @@ internal sealed class BackgroundSender(
     // in-flight (flow, sequence) keys globally unique across the whole scenario.
     private readonly long[] _sequences = CreateSequencesAfterWarmup(flows.Length);
     private readonly byte[] _payload = new byte[payloadBytes];
-    private readonly List<double>[] _sendLatencies = [new(), new(), new()];
+    private readonly List<double>[] _sendLatencies = [[], [], []];
     private readonly long[] _sentPerWindow = new long[3];
     private volatile int _currentWindow = (int)BackgroundWindow.Control;
 

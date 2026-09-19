@@ -14,7 +14,7 @@ namespace WinForward.Core.Tests;
 
 public sealed class TcpProxyCoordinatorCapacityTests
 {
-    private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, null, null);
+    private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, Username: null, Password: null);
     private static readonly IPAddress s_clientIpv4 = IPAddress.Parse("192.0.2.10");
     private static readonly IPAddress s_destIpv4 = IPAddress.Parse("192.0.2.53");
 
@@ -54,15 +54,15 @@ public sealed class TcpProxyCoordinatorCapacityTests
         Assert.Equal(TcpRedirectOutcome.Blocked, await coordinator.HandleSynAsync(MakeSynPacket(IPAddress.Parse("192.0.2.11"), IPAddress.Parse("192.0.2.99"), 53001, 80), s_server, CancellationToken.None));
 
         Assert.Equal(1, coordinator.Diagnostics.CapacityRejectionCount);
-        var rejection = Assert.Single(logger.Events, item => string.Equals(item.Name, "tcp.redirect.rejected", StringComparison.Ordinal));
-        Assert.Contains(rejection.Fields, field => string.Equals(field.Key, "reason", StringComparison.Ordinal) && field.Value is "capacity");
+        var (_, _, fields) = Assert.Single(logger.Events, item => string.Equals(item.Name, "tcp.redirect.rejected", StringComparison.Ordinal));
+        Assert.Contains(fields, field => string.Equals(field.Key, "reason", StringComparison.Ordinal) && field.Value is "capacity");
 
         coordinator.LogCapacitySummary();
-        var summary = Assert.Single(logger.Events, item => string.Equals(item.Name, "tcp.redirect.capacity", StringComparison.Ordinal));
-        Assert.Equal(RuntimeLogLevel.Info, summary.Level);
-        Assert.Contains(summary.Fields, field => string.Equals(field.Key, "budget", StringComparison.Ordinal) && field.Value is 1);
-        Assert.Contains(summary.Fields, field => string.Equals(field.Key, "rejectedTotal", StringComparison.Ordinal) && field.Value is 1L);
-        Assert.Contains(summary.Fields, field => string.Equals(field.Key, "rejectedSinceLastSummary", StringComparison.Ordinal) && field.Value is 1L);
+        var (summaryLevel, _, summaryFields) = Assert.Single(logger.Events, item => string.Equals(item.Name, "tcp.redirect.capacity", StringComparison.Ordinal));
+        Assert.Equal(RuntimeLogLevel.Info, summaryLevel);
+        Assert.Contains(summaryFields, field => string.Equals(field.Key, "budget", StringComparison.Ordinal) && field.Value is 1);
+        Assert.Contains(summaryFields, field => string.Equals(field.Key, "rejectedTotal", StringComparison.Ordinal) && field.Value is 1L);
+        Assert.Contains(summaryFields, field => string.Equals(field.Key, "rejectedSinceLastSummary", StringComparison.Ordinal) && field.Value is 1L);
 
         // The summary repeats only when further rejections arrived.
         var eventsAfterSummary = logger.Events.Count;
@@ -102,14 +102,14 @@ public sealed class TcpProxyCoordinatorCapacityTests
         var synAck = MakeReversePacketClassifierOrientation(s_clientIpv4, listenerTuple.Port, s_destIpv4, 53000, mutateFrame: f => f[47] = 0x12);
         Assert.Equal(TcpRedirectOutcome.Blocked, await coordinator.HandleReverseAsync(synAck, CancellationToken.None));
 
-        var failure = Assert.Single(logger.Events, item => string.Equals(item.Name, "tcp.redirect.failed", StringComparison.Ordinal));
-        Assert.Equal(RuntimeLogLevel.Warn, failure.Level);
-        Assert.Contains(failure.Fields, field => string.Equals(field.Key, "reason", StringComparison.Ordinal) && field.Value is "injectionFailure");
-        Assert.Contains(failure.Fields, field => string.Equals(field.Key, "nativeError", StringComparison.Ordinal) && field.Value is 87);
-        Assert.Contains(failure.Fields, field => string.Equals(field.Key, "error", StringComparison.Ordinal) && field.Value is "Win32Exception");
-        Assert.Contains(failure.Fields, field => string.Equals(field.Key, "adapterHandle", StringComparison.Ordinal) && field.Value is 0x1234L);
-        Assert.Contains(failure.Fields, field => string.Equals(field.Key, "source", StringComparison.Ordinal) && field.Value is Endpoint source && source.Equals(Endpoint.From(s_clientIpv4, 53000)));
-        Assert.Contains(failure.Fields, field => string.Equals(field.Key, "destination", StringComparison.Ordinal) && field.Value is Endpoint destination && destination.Equals(Endpoint.From(s_destIpv4, 443)));
+        var (level, _, fields) = Assert.Single(logger.Events, item => string.Equals(item.Name, "tcp.redirect.failed", StringComparison.Ordinal));
+        Assert.Equal(RuntimeLogLevel.Warn, level);
+        Assert.Contains(fields, field => string.Equals(field.Key, "reason", StringComparison.Ordinal) && field.Value is "injectionFailure");
+        Assert.Contains(fields, field => string.Equals(field.Key, "nativeError", StringComparison.Ordinal) && field.Value is 87);
+        Assert.Contains(fields, field => string.Equals(field.Key, "error", StringComparison.Ordinal) && field.Value is "Win32Exception");
+        Assert.Contains(fields, field => string.Equals(field.Key, "adapterHandle", StringComparison.Ordinal) && field.Value is 0x1234L);
+        Assert.Contains(fields, field => string.Equals(field.Key, "source", StringComparison.Ordinal) && field.Value is Endpoint source && source.Equals(Endpoint.From(s_clientIpv4, 53000)));
+        Assert.Contains(fields, field => string.Equals(field.Key, "destination", StringComparison.Ordinal) && field.Value is Endpoint destination && destination.Equals(Endpoint.From(s_destIpv4, 443)));
 
         // The sequence recorders ran before the failed injection, so the best-effort reset was
         // still crafted: injected frames are exactly the SYN and the RST.
@@ -140,11 +140,11 @@ public sealed class TcpProxyCoordinatorCapacityTests
         Assert.Equal(TcpRedirectOutcome.SetupPending, await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None));
         await coordinator.DrainPendingSetupsAsync();
 
-        var failure = Assert.Single(logger.Events, item => string.Equals(item.Name, "tcp.redirect.failed", StringComparison.Ordinal));
-        Assert.Equal(RuntimeLogLevel.Warn, failure.Level);
-        Assert.Contains(failure.Fields, field => string.Equals(field.Key, "reason", StringComparison.Ordinal) && field.Value is "injectionFailure");
-        Assert.Contains(failure.Fields, field => string.Equals(field.Key, "nativeError", StringComparison.Ordinal) && field.Value is 87);
-        Assert.Contains(failure.Fields, field => string.Equals(field.Key, "adapterHandle", StringComparison.Ordinal) && field.Value is 0x1234L);
+        var (level, _, fields) = Assert.Single(logger.Events, item => string.Equals(item.Name, "tcp.redirect.failed", StringComparison.Ordinal));
+        Assert.Equal(RuntimeLogLevel.Warn, level);
+        Assert.Contains(fields, field => string.Equals(field.Key, "reason", StringComparison.Ordinal) && field.Value is "injectionFailure");
+        Assert.Contains(fields, field => string.Equals(field.Key, "nativeError", StringComparison.Ordinal) && field.Value is 87);
+        Assert.Contains(fields, field => string.Equals(field.Key, "adapterHandle", StringComparison.Ordinal) && field.Value is 0x1234L);
 
         Assert.Empty(injector.InjectedFrames);
         Assert.Equal(0, table.Count);
@@ -423,11 +423,11 @@ public sealed class TcpProxyCoordinatorCapacityTests
 
         // Frame 1 is the first flow's rewritten SYN; frame 2 is the capacity RST.
         Assert.Equal(2, injector.InjectedFrames.Count);
-        var reset = injector.InjectedFrames[1];
-        Assert.True(reset.TowardMstcp);
-        Assert.Equal(0x14, reset.Frame[47]);
-        Assert.Equal(0u, System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(reset.Frame.AsSpan(38, 4)));
-        Assert.Equal(0x11223345u, System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(reset.Frame.AsSpan(42, 4)));
+        var (frame, towardMstcp, _) = injector.InjectedFrames[1];
+        Assert.True(towardMstcp);
+        Assert.Equal(0x14, frame[47]);
+        Assert.Equal(0u, System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(38, 4)));
+        Assert.Equal(0x11223345u, System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(42, 4)));
         Assert.Contains(logger.Events, e => string.Equals(e.Name, "tcp.redirect.capacityReset", StringComparison.Ordinal));
 
         // A retransmitted SYN inside the cooldown window is still consumed (Blocked) and draws no
@@ -462,17 +462,17 @@ public sealed class TcpProxyCoordinatorCapacityTests
 
         var hostSyn = MakeSynPacket(IPAddress.Parse("192.0.2.11"), IPAddress.Parse("192.0.2.99"), 53001, 80);
         Assert.Equal(TcpRedirectOutcome.Blocked, await coordinator.HandleSynAsync(hostSyn, s_server, CancellationToken.None));
-        var hostReset = injector.InjectedFrames[1];
-        Assert.True(hostReset.TowardMstcp);
-        Assert.Equal((nint)0x1234, hostReset.AdapterHandle);
+        var (_, towardMstcp, adapterHandle) = injector.InjectedFrames[1];
+        Assert.True(towardMstcp);
+        Assert.Equal((nint)0x1234, adapterHandle);
 
         injector.InjectedFrames.Clear();
         var forwardedSyn = MakeForwardedSynPacket(IPAddress.Parse("192.0.2.12"), IPAddress.Parse("192.0.2.99"), 53002, 80);
         Assert.Equal(TcpRedirectOutcome.Blocked, await coordinator.HandleSynAsync(forwardedSyn, s_server, CancellationToken.None));
-        var forwardedReset = injector.InjectedFrames[0];
-        Assert.False(forwardedReset.TowardMstcp);
-        Assert.Equal((nint)0x1234, forwardedReset.AdapterHandle);
-        Assert.Equal(0x14, forwardedReset.Frame[47]);
+        var (forwardedFrame, forwardedTowardMstcp, forwardedAdapterHandle) = injector.InjectedFrames[0];
+        Assert.False(forwardedTowardMstcp);
+        Assert.Equal((nint)0x1234, forwardedAdapterHandle);
+        Assert.Equal(0x14, forwardedFrame[47]);
     }
 
     [Fact]
@@ -499,7 +499,7 @@ public sealed class TcpProxyCoordinatorCapacityTests
     {
         var frame = FrameBuilders.BuildIpv4TcpFrame(client, destination, clientPort, destinationPort, FrameBuilders.TcpFlagSyn, sequence: sequence);
         var key = FlowKey.Create(Endpoint.From(client, clientPort), Endpoint.From(destination, destinationPort), TransportProtocol.Tcp, FlowOriginKind.Host);
-        var context = new FlowContext(key, "app.exe", null, null, "eth0", destinationPort);
+        var context = new FlowContext(key, "app.exe", ProcessPath: null, AdapterId: null, "eth0", destinationPort);
         return new CapturedFlowPacket(new PacketLease(frame), context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 0x1234));
     }
 }

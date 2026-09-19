@@ -69,7 +69,7 @@ public sealed class RuntimeHeartbeat : IAsyncDisposable
         InterceptionHealthMonitor? health = null,
         TimeProvider? timeProvider = null,
         TimeSpan? interval = null)
-        : this(logger, null, usage, counters, health, timeProvider, interval)
+        : this(logger, gcSnapshotProvider: null, usage, counters, health, timeProvider, interval)
     {
     }
 
@@ -173,7 +173,7 @@ public sealed class RuntimeHeartbeat : IAsyncDisposable
                 var delta = pair.Value - (_lastCounters.TryGetValue(pair.Key, out var previous) ? previous : 0);
                 if (delta != 0) fields.Add(new RuntimeLogField(pair.Key, delta));
             }
-            _logger.Event(RuntimeLogLevel.Info, "runner.heartbeat", fields.ToArray());
+            _logger.Event(RuntimeLogLevel.Info, "runner.heartbeat", [.. fields]);
         }
         if (intervalGen0 > 0 || intervalGen1 > 0 || intervalGen2 > 0)
         {
@@ -241,7 +241,7 @@ public sealed class RuntimeHeartbeat : IAsyncDisposable
             + (gc.Gen1Collections - _gcStartupMark.Gen1Collections)
             + (gc.Gen2Collections - _gcStartupMark.Gen2Collections);
         fields.Add(new("sinceStart", sinceStart));
-        _logger.Event(RuntimeLogLevel.Warn, "gc.collected", fields.ToArray());
+        _logger.Event(RuntimeLogLevel.Warn, "gc.collected", [.. fields]);
     }
 
     private static void AddPositive(List<RuntimeLogField> fields, string key, int value)

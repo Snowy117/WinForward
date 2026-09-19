@@ -10,6 +10,7 @@ namespace WinForward.Runtime;
 /// adapters race. The clock is a <see cref="TimeProvider"/> so the window semantics stay testable
 /// without real time.
 /// </summary>
+#pragma warning disable MA0182 // Consumed by WinForward.Cli through InternalsVisibleTo (Program.cs wires it into the pump's retry logging) and by AdapterTransientRetryLogGateTests; the analyzer only sees usages inside this assembly and cannot see IVT consumers.
 internal sealed class AdapterTransientRetryLogGate(IRuntimeLogger logger, TimeProvider? timeProvider = null)
 {
     private static readonly long s_windowTicks = TimeSpan.FromSeconds(5).Ticks;
@@ -29,3 +30,4 @@ internal sealed class AdapterTransientRetryLogGate(IRuntimeLogger logger, TimePr
             new RuntimeLogField("attempt", attempt));
     }
 }
+#pragma warning restore MA0182

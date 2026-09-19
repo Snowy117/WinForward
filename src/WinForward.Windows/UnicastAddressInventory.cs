@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Net;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
@@ -101,7 +102,7 @@ public static partial class UnicastAddressInventory
     internal static void ValidateEntryCount(int rowCount)
     {
         if (rowCount is < 0 or > MaxUnicastAddressRows)
-            throw new InvalidOperationException($"The unicast address table announced {rowCount} rows; refusing to read a count that cannot belong to a real host table.");
+            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture, $"The unicast address table announced {rowCount} rows; refusing to read a count that cannot belong to a real host table."));
     }
 
     /// <summary>
@@ -170,7 +171,7 @@ public static partial class UnicastAddressInventory
                     *(uint*)(row.Address + IPHelperAbi.Ipv6ScopeIdOffset)));
         }
 
-        throw new InvalidOperationException($"The unicast address table row {index} carries unsupported address family {family}.");
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture, $"The unicast address table row {index} carries unsupported address family {family}."));
     }
 
     private static partial class Native

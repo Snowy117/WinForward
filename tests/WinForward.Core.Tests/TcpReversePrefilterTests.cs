@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using WinForward.Configuration;
 using WinForward.Core;
@@ -74,10 +75,10 @@ public sealed class TcpReversePrefilterTests
         await Task.WhenAll(Enumerable.Range(0, claims).Select(index => Task.Run(() =>
         {
             var original = FlowKey.Create(
-                Endpoint.From(IPAddress.Parse($"192.0.2.{10 + index / 250}"), checked((ushort)(49_000 + index))),
+                Endpoint.From(IPAddress.Parse(string.Create(CultureInfo.InvariantCulture, $"192.0.2.{10 + (index / 250)}")), checked((ushort)(49_000 + index))),
                 Endpoint.From(s_destination, 443),
                 TransportProtocol.Tcp, FlowOriginKind.Host);
-            Assert.True(TryClaimListener(table, original, IPAddress.Parse($"198.51.100.{1 + index % 250}"), 40000));
+            Assert.True(TryClaimListener(table, original, IPAddress.Parse(string.Create(CultureInfo.InvariantCulture, $"198.51.100.{1 + (index % 250)}")), 40000));
             associations[index] = table.TryResolveByOriginal(original, DateTimeOffset.UtcNow, out var found) ? found : null;
         })));
 
@@ -222,14 +223,14 @@ public sealed class TcpReversePrefilterTests
 
     private static FlowKey MakeUdpKey(ushort localPort) => FlowKey.Create(Endpoint.From(s_client, localPort), Endpoint.From(s_destination, 53), TransportProtocol.Udp, FlowOriginKind.Host);
 
-    private static FlowContext MakeContext(FlowKey key) => new(key, null, null, key.OriginAdapterId, null, key.Remote.Port);
+    private static FlowContext MakeContext(FlowKey key) => new(key, ProcessName: null, ProcessPath: null, key.OriginAdapterId, AdapterName: null, key.Remote.Port);
 
     private static CapturedFlowPacket MakePacket(FlowKey key) => new(new PacketLease(new byte[] { 1 }), MakeContext(key));
 
     private static bool TryClaimListener(TcpRedirectTable table, FlowKey originalKey, IPAddress listenerAddress, ushort listenerPort)
     {
         var translated = Endpoint.From(listenerAddress, listenerPort);
-        return table.TryClaim(originalKey, originalKey.Remote, new AdapterContext("eth0", "eth0", 1), 0x1234, translated, null, DateTimeOffset.UtcNow, out _);
+        return table.TryClaim(originalKey, originalKey.Remote, new AdapterContext("eth0", "eth0", 1), 0x1234, translated, forwardLocalAddress: null, DateTimeOffset.UtcNow, out _);
     }
 
     private sealed class CountingExecutor : IPacketActionExecutor

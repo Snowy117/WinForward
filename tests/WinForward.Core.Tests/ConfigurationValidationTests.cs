@@ -444,6 +444,6 @@ public sealed class ConfigurationValidationTests
         Assert.NotNull(dto);
         Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
         Assert.NotNull(configuration);
-        Assert.Equal(new[] { ((ushort)80, (ushort)250), ((ushort)443, (ushort)443) }, configuration!.Policy.Rules[0].Matcher.RemotePorts);
+        Assert.Equal([((ushort)80, (ushort)250), ((ushort)443, (ushort)443)], configuration!.Policy.Rules[0].Matcher.RemotePorts);
     }
 }

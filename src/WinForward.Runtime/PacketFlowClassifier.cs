@@ -24,7 +24,7 @@ public static class PacketFlowClassifier
         var remote = Endpoint.From(view.DestinationAddress, view.DestinationPort);
         var origin = isOnSend ? FlowOriginKind.Host : FlowOriginKind.Forwarded;
         var key = FlowKey.Create(local, remote, protocol, origin, adapterContext);
-        return new FlowContext(key, null, null, adapter.StableId, adapter.FriendlyName, remote.Port);
+        return new FlowContext(key, ProcessName: null, ProcessPath: null, adapter.StableId, adapter.FriendlyName, remote.Port);
     }
 
     /// <summary>
@@ -37,6 +37,6 @@ public static class PacketFlowClassifier
         var adapterContext = new AdapterContext(adapter.StableId, adapter.FriendlyName, adapter.Generation);
         var origin = isOnSend ? FlowOriginKind.Host : FlowOriginKind.Forwarded;
         var key = FlowKey.Create(Endpoint.From(IPAddressValue.IPv4Any, 0), Endpoint.From(IPAddressValue.IPv4Any, 0), TransportProtocol.Udp, origin, adapterContext);
-        return new FlowContext(key, null, null, adapter.StableId, adapter.FriendlyName, 0);
+        return new FlowContext(key, ProcessName: null, ProcessPath: null, adapter.StableId, adapter.FriendlyName, 0);
     }
 }
