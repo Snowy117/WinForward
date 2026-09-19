@@ -79,7 +79,7 @@ benchmarks/                    # 基准宿主（BenchmarkDotNet 性能基准 + �
 - 产品代码文件 = 主类型名 PascalCase；xunit 测试文件 = 测试类名 + `Tests` 后缀，按主题命名（`TcpProxyCoordinatorLifecycleTests`、`ConfigurationValidationTests`）。
 - 测试 fake/helper 组织：
   - 仅单文件使用 → 留在该文件内（private nested 或文件私有均可）。
-  - **≥ 2 个文件重复 → 提取到 `tests/WinForward.Core.Tests/TestHelpers/`**，按类别分组文件（`ChecksumMath`、`FrameBuilders`、`UdpTransportFakes`、`PacketReinjectorFakes`、`TcpCoordinatorFakes`、`Socks5TestServer`…）。
+  - **≥ 2 个文件重复 → 提取到 `tests/WinForward.Core.Tests/TestHelpers/`**，按类别分组文件（`ChecksumMath`、`FrameBuilders`、`FlowBuilders`、`UdpTransportFakes`、`PacketReinjectorFakes`、`TcpCoordinatorFakes`、`Socks5TestServer`…）。
   - TestHelpers 使用测试项目根 namespace（`WinForward.Core.Tests`，不加 `.TestHelpers` 后缀）；fake 从 private nested 提升为 internal（`InternalsVisibleTo` 已配置）。
   - 合并重复 fake 时取行为超集（先例：`FakeReinjector` 同时记录 `DeviceFlags` 与 `Flags` 两个 flag 平面；`TrackingSocket` 支持可选 SocketType/ProtocolType）。
 
