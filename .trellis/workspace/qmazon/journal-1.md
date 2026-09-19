@@ -621,3 +621,24 @@ Completed M0-M5 of the GC-less zero-allocation task: native buffer pool family (
 ### Status
 
 [OK] **Completed**
+
+
+## Session 24: Compat API cleanup + design-health review
+
+**Date**: 2026-09-19
+**Task**: Compat API cleanup + design-health review
+**Branch**: `master`
+
+### Summary
+
+Audited and removed compatibility APIs that existed only to avoid test rewrites: dead members (NdisApiDriver telemetry, SynCopyPool, NdisApiAbi upstream constants, orphan resolvers), test/benchmark-only convenience wrappers (rewritten to the production span seams), test-only optional parameters (moved to internal overloads; framePool/retryDelay/flowGeneration defaults removed), and benchmark-only diagnostics (narrowed to internal with Core InternalsVisibleTo). Made IUdpProxyTransport.SendSpanAsync the only UDP send seam by deleting the unused memory chain (~98 call sites rewritten; no tests deleted). A design-health deep-module review was produced and its larger refactors routed to follow-up task 09-19-design-deepening-refactors. A check pass caught that the AdapterSelectorTests deletion had taken 10 live WindowsAdapterInventory facts with it; they were restored, keeping the net test decrease at the permitted 3 (deleted-unit tests only). Final: 721/721 tests, 0 warnings, grep gates clean, gc-soak smoke green. Commits 2ea413d, ee6fdd8, a170719.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2ea413d` | (see git log) |
+
+### Status
+
+[OK] **Completed**
