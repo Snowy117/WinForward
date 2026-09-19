@@ -75,7 +75,7 @@ ctor sites.
 public sealed record TcpRedirectOptions
 {
     public IRuntimeLogger? Logger { get; init; }
-    public int Capacity { get; init; } = 16_384;
+    public int? Capacity { get; init; }          // null → 16_384, mirroring the historical nullable param
     public IInterceptionHealthSignal? HealthSignal { get; init; }
     public NativeBufferPool? SynCopyPool { get; init; }
     public ISetupExecutor? SetupExecutor { get; init; }
@@ -166,16 +166,20 @@ construction vocabulary a name and lets R4's fake host read naturally).
 
 ## R6 — Diagnostics snapshot records
 
-**Design**:
+**Design** (refined 2026-09-19 at M4 dispatch after surveying real usage):
 - `TcpRedirectDiagnostics` (new file under TcpRedirect/): `ConcurrentLoserCount`,
-  `CapacityRejectionCount`, `PendingSetupCount`, `TombstoneCount`, `CapacityResetCooldownCount`,
-  `IReadOnlySet<FlowKey> HeldFlows` + convenience `bool HoldsFlow(in FlowKey)`.
+  `CapacityRejectionCount`, `PendingSetupActiveCount`, `PendingSetupChargedBytes`,
+  `PendingSetupTtlExpiredCount`, `PendingSetupCooldownCount`.
   Coordinator exposes `internal TcpRedirectDiagnostics Diagnostics { get; }` (computed snapshot;
   building it takes the gates briefly as today's individual accessors do).
-  Removed individual members: `ConcurrentLoserCount`, `CapacityRejectionCount`, `HoldsFlow`,
-  `Tombstones`, `PendingSetups` (count only — the drain method stays), `CapacityResetCooldowns`.
-  Kept unchanged: `Table`, `PendingSetups` control surfaces, `DrainPendingSetupsAsync`,
-  `LogCapacitySummary`, `TrySendSpanAsync`.
+  Removed individual members: `ConcurrentLoserCount`, `CapacityRejectionCount`, `PendingSetups`
+  (the index accessor; its four read counters move into the snapshot).
+  Kept unchanged, with rationale: `HoldsFlow` (production hold predicate — `IdleExpirySweeper`
+  consumes it as a method group, and tests pass it to `RemoveExpiredFlows`), `Tombstones` and
+  `CapacityResetCooldowns` (test control surfaces that mutate those tables to advance windows),
+  plus `Table`, `DrainPendingSetupsAsync`, `LogCapacitySummary`, `TrySendSpanAsync`.
+  The snapshot carries read-only observability only; surfaces with production consumers or
+  mutation duties stay direct.
 - `UdpProxyDiagnostics` (new file under UdpProxy/): `SetupCooldownCount`,
   `PendingSetupBytes`, `SetupBudgetRejectionCount`, `SetupTtlExpiredCount`,
   `SetupStampsRefreshedCount`. Coordinator exposes `internal UdpProxyDiagnostics Diagnostics { get; }`;
@@ -191,12 +195,14 @@ construction vocabulary a name and lets R4's fake host read naturally).
 `TransientRetryBaseDelay`) are set only by tests + CapturePumpBenchmarks. Four internal telemetry
 accessors on the pump.
 
-**Design**:
-- `internal sealed record NdisPumpDiagnostics(bool IsDegraded, long LastDegradedNativeErrorCode,
+**Design** (refined 2026-09-19 at M5 dispatch — actual field types and call-site form):
+- `internal sealed record NdisPumpDiagnostics(bool IsDegraded, int LastDegradedNativeErrorCode,
   long TransientReadRetryCount, long TransientReadIncidentCount);` pump exposes
   `internal NdisPumpDiagnostics Diagnostics { get; }`. Remove the four accessors.
-- `BatchCapacity`/`TransientRetryBaseDelay` → `internal init` members on the public options record
-  (tests + benchmarks have IVT). Production never sets them — same as today.
+- `BatchCapacity`/`TransientRetryBaseDelay`: the options record was already being constructed with
+  object-initializer syntax at every call site, so it becomes a non-positional record with init
+  properties and these two members declared `internal init` (tests + benchmarks have IVT).
+  Production never sets them — same as today.
 - `PumpThread` / `RunIterationForTests` stay (control seams; RunIterationForTests is documented as a
   deterministic single-iteration entry). No doc changes.
 
@@ -247,14 +253,19 @@ wiring: CreateAsync creates table/pools/cache/executor, BuildWithUdpAsync create
 BuildBundle/CreateUdpCoordinator/CreateTcpCoordinator wire coordinators, UpdateUdpTargets builds
 the adapter map, DisposeCoreAsync owns ordered teardown.
 
-**Design**:
-- New `src/WinForward.Cli/TcpRedirectComposer.cs` + `UdpProxyComposer.cs` (internal static).
-- Composition records: `TcpRedirectComposition(TcpRedirectTable Table, IReadOnlySet<IPAddressSet>? …)`
-  / `UdpProxyComposition(...)` transferring already-created pools + executor (P3) — the bundle
-  keeps creation and rollback; composers only wire coordinator options.
-- Shared pool helper `BundlePools` for the pool-name constants (L39-42) + `RegisterPool` (L156-162)
-  so both the bundle and composers name pools identically.
+**Design** (refined 2026-09-19 at M6 dispatch — bundle measured at 350 effective lines, already
+under budget; the extraction targets locality, not line count):
+- New `src/WinForward.Cli/TcpRedirectComposer.cs` + `UdpProxyComposer.cs` (internal static; types
+  `[SupportedOSPlatform("windows")]` where platform-annotated collaborators require it).
+- Composition records co-located in each composer file (record + static class operating on it is
+  an allowed tight cluster): `TcpRedirectComposition(RedirectTable, SynCopyPool, RelayPool,
+  SetupExecutor, AddressCache)` / `UdpProxyComposition(Targets, MaximumFrameSize, SetupQueuePool,
+  ReceiveWindowPool, SetupExecutor, AddressCache)` — transferring already-created pools + executor
+  (P3). The bundle keeps creation, registration, rollback, and disposal; composers only wire
+  coordinator options from the record.
 - `PrimeSocks5AddressCacheAsync` moves to UdpProxyComposer.
+- No `BundlePools` helper: pool creation/registration stays in the bundle (composers never name a
+  pool), so a shared naming helper would have a single consumer.
 - **Unchanged in bundle**: `CreateAsync` orchestration + rollback try/catch, `BuildBundle` assembly,
   `UpdateUdpTargets`, `OnScopeInstalled`, `DisposeCoreAsync` ordering verbatim, `ReloadAsync` path.
 - If the bundle still exceeds 400 effective lines after extraction, split a child task (documented;
