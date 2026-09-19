@@ -1,1 +1,6 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Check gate: zero-warning build, full test count == M0 baseline, no assertion-semantics changes in test moves, behavior-zero discipline, UdpProxyCoordinator signature spec line consistency after R3."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Check R4's new interface file placement, R6's diagnostics files, R11's composer files, and every touched file's ≤400 effective line budget."}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Verify allocation gates + gc-soak contracts unchanged and no steady-state path gained an allocation through the ctor/options rewrites."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify fail-closed paths and ordered resource release are untouched by R1's required-handler factory and the coordinator ctor rewrites."}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "Verify R3/R4/R5/R6-UDP preserve UDP setup/cooldown/expiry/teardown contracts and the bounded receive-storage scenario exactly."}
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "Verify R2/R6-TCP/R10 preserve TCP claim-once, tombstone, pending-SYN TTL/cooldown, and concurrent-loser-counter assertability."}
