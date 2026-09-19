@@ -59,7 +59,7 @@ public sealed class UdpSetupQueueTests
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new DelayedTransportFactory(gate.Task);
         var logger = new RecordingRuntimeLogger();
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), logger: logger);
+        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Logger = logger });
         var flow = CreateFlow("192.0.2.53");
 
         // 40 datagrams against a 32-packet queue: the eight oldest are dropped, the newest 32
@@ -90,7 +90,7 @@ public sealed class UdpSetupQueueTests
 
         // The drop-oldest evictions and the flush deliveries each credited their charge: the
         // aggregate returns to zero once the queue is fully drained.
-        Assert.Equal(0, coordinator.PendingSetupBytesForDiagnostics);
+        Assert.Equal(0, coordinator.Diagnostics.PendingSetupBytes);
     }
 
     [Fact]
@@ -131,7 +131,7 @@ public sealed class UdpSetupQueueTests
         var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
         var factory = new FailingTransportFactory();
         var logger = new RecordingRuntimeLogger();
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 16, time, null, logger);
+        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, TimeProvider = time, Logger = logger });
         var flow = CreateFlow("192.0.2.53");
 
         // Accepted (buffered); the failure itself surfaces through the background setup task.
@@ -156,7 +156,7 @@ public sealed class UdpSetupQueueTests
         // bound while every recent flow keeps its cooldown (eviction, never refusal).
         var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
         var factory = new FailingTransportFactory();
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 4, time, null);
+        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 4, TimeProvider = time });
         const int flowCount = 5;
         var flows = Enumerable.Range(0, flowCount).Select(index => CreateFlow($"192.0.2.{index + 1}")).ToArray();
 
@@ -170,7 +170,7 @@ public sealed class UdpSetupQueueTests
         }
 
         // Bounded at capacity: the first flow's cooldown entry (the oldest deadline) was evicted.
-        Assert.Equal(4, coordinator.SetupCooldownCountForDiagnostics);
+        Assert.Equal(4, coordinator.Diagnostics.SetupCooldownCount);
 
         // Every surviving cooldown entry still cools down its flow at the frozen clock...
         for (var index = 1; index < flowCount; index++)
@@ -181,7 +181,7 @@ public sealed class UdpSetupQueueTests
         // ...while the evicted flow retries immediately instead of being cooldown-rejected.
         Assert.True(await coordinator.TrySendSpanAsync(flows[0], s_server, new byte[] { 3 }, default, CancellationToken.None));
         await WaitForAsync(() => factory.CreateCalls == flowCount + 1);
-        Assert.Equal(4, coordinator.SetupCooldownCountForDiagnostics);
+        Assert.Equal(4, coordinator.Diagnostics.SetupCooldownCount);
     }
 
     [Fact]
@@ -192,7 +192,7 @@ public sealed class UdpSetupQueueTests
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new DelayedTransportFactory(gate.Task);
         var logger = new RecordingRuntimeLogger();
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 16, TimeProvider.System, null, logger);
+        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, Logger = logger });
         const int cappedFlows = 8;
         var flows = Enumerable.Range(0, cappedFlows + 1).Select(index => CreateFlow($"192.0.2.{index + 1}")).ToArray();
 
@@ -236,7 +236,7 @@ public sealed class UdpSetupQueueTests
         var barrier = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new BarrierTransportFactory(barrier, concurrentSetupCap);
         var logger = new RecordingRuntimeLogger();
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), flowCount, TimeProvider.System, null, logger);
+        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = flowCount, Logger = logger });
         var flows = Enumerable.Range(0, flowCount).Select(index => CreateFlow($"198.51.100.{index + 1}")).ToArray();
 
         var sends = Enumerable.Range(0, flowCount)
@@ -286,17 +286,17 @@ public sealed class UdpSetupQueueTests
         // back so the budget recovers once the setup completes.
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new DelayedTransportFactory(gate.Task);
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 16, TimeProvider.System, null, maximumFrameSize: 4096, setupQueueGlobalByteBudget: 4096);
+        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, MaximumFrameSize = 4096, SetupQueueGlobalByteBudget = 4096 });
         var flow = CreateFlow("192.0.2.53");
 
         Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[3000], default, CancellationToken.None));
         Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 1 }, default, CancellationToken.None));
-        Assert.Equal(3001, coordinator.PendingSetupBytesForDiagnostics);
+        Assert.Equal(3001, coordinator.Diagnostics.PendingSetupBytes);
 
         // 3001 + 2000 crosses the 4096-byte aggregate: the new datagram is rejected and counted.
         Assert.False(await coordinator.TrySendSpanAsync(flow, s_server, new byte[2000], default, CancellationToken.None));
-        Assert.Equal(1, coordinator.SetupBudgetRejectionCount);
-        Assert.Equal(3001, coordinator.PendingSetupBytesForDiagnostics);
+        Assert.Equal(1, coordinator.Diagnostics.SetupBudgetRejectionCount);
+        Assert.Equal(3001, coordinator.Diagnostics.PendingSetupBytes);
 
         gate.TrySetResult();
         await WaitForAsync(() => factory.Transports.Count == 1);
@@ -312,7 +312,7 @@ public sealed class UdpSetupQueueTests
         }
 
         // The flush credited both charges back: admission recovers for a brand-new flow.
-        Assert.Equal(0, coordinator.PendingSetupBytesForDiagnostics);
+        Assert.Equal(0, coordinator.Diagnostics.PendingSetupBytes);
         Assert.True(await coordinator.TrySendSpanAsync(CreateFlow("192.0.2.54"), s_server, new byte[] { 9 }, default, CancellationToken.None));
     }
 
@@ -323,17 +323,17 @@ public sealed class UdpSetupQueueTests
         // observable after the failure teardown drains the queue.
         var factory = new GatedTransportFactory();
         using var pool = new NativeBufferPool(4096, capacity: 8);
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 16, TimeProvider.System, null, maximumFrameSize: 4096, setupQueueGlobalByteBudget: 4096, setupQueuePool: pool);
+        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, MaximumFrameSize = 4096, SetupQueueGlobalByteBudget = 4096, SetupQueuePool = pool });
         var flow = CreateFlow("192.0.2.53");
 
         Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[3000], default, CancellationToken.None));
         await factory.CreateStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        Assert.Equal(3000, coordinator.PendingSetupBytesForDiagnostics);
+        Assert.Equal(3000, coordinator.Diagnostics.PendingSetupBytes);
         Assert.Equal(1, pool.Stats.Outstanding);
 
         // The failure teardown drains the setup queue fail-closed and releases its charge and lease.
         factory.Fail(new IOException("SOCKS5 server is unreachable (synthetic)."));
-        await WaitForAsync(() => coordinator.PendingSetupBytesForDiagnostics == 0);
+        await WaitForAsync(() => coordinator.Diagnostics.PendingSetupBytes == 0);
         await WaitForAsync(() => pool.Stats.Outstanding == 0);
         Assert.Equal(pool.Stats.Rented, pool.Stats.Returned);
     }
@@ -344,15 +344,15 @@ public sealed class UdpSetupQueueTests
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new DelayedTransportFactory(gate.Task);
         using var pool = new NativeBufferPool(4096, capacity: 8);
-        var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 16, TimeProvider.System, null, maximumFrameSize: 4096, setupQueueGlobalByteBudget: 4096, setupQueuePool: pool);
+        var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, MaximumFrameSize = 4096, SetupQueueGlobalByteBudget = 4096, SetupQueuePool = pool });
         var flow = CreateFlow("192.0.2.53");
 
         Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[3000], default, CancellationToken.None));
-        Assert.Equal(3000, coordinator.PendingSetupBytesForDiagnostics);
+        Assert.Equal(3000, coordinator.Diagnostics.PendingSetupBytes);
         Assert.Equal(1, pool.Stats.Outstanding);
 
         await coordinator.DisposeAsync();
-        Assert.Equal(0, coordinator.PendingSetupBytesForDiagnostics);
+        Assert.Equal(0, coordinator.Diagnostics.PendingSetupBytes);
 
         // The gate never opens: disposal must complete without waiting for the stalled setup, and
         // the drained datagram's lease must be back in the pool.
@@ -370,7 +370,7 @@ public sealed class UdpSetupQueueTests
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new DelayedTransportFactory(gate.Task);
         using var pool = new NativeBufferPool(1514, capacity: 64);
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 16, time, null, setupQueuePool: pool);
+        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, TimeProvider = time, SetupQueuePool = pool });
         var flow = CreateFlow("192.0.2.53");
 
         Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 1 }, default, CancellationToken.None));
@@ -394,10 +394,10 @@ public sealed class UdpSetupQueueTests
         lock (transport.Sent) Assert.Equal((byte)0xaa, Assert.Single(transport.Sent[0].Payload));
         // The 31 stale datagrams that survived drop-oldest age out at the flush; only the fresh
         // one is delivered.
-        Assert.Equal(31, coordinator.SetupTtlExpiredCount);
+        Assert.Equal(31, coordinator.Diagnostics.SetupTtlExpiredCount);
         await WaitForAsync(() => pool.Stats.Outstanding == 0);
         Assert.Equal(pool.Stats.Rented, pool.Stats.Returned);
-        Assert.Equal(0, coordinator.PendingSetupBytesForDiagnostics);
+        Assert.Equal(0, coordinator.Diagnostics.PendingSetupBytes);
     }
 
     [Fact]
@@ -406,12 +406,12 @@ public sealed class UdpSetupQueueTests
         // B4 bounds refusal: a datagram larger than the pinned frame cap cannot be copied into a
         // pooled lease; it is rejected fail-closed with its lease and budget charge released.
         using var pool = new NativeBufferPool(64, capacity: 8);
-        await using var coordinator = new UdpProxyCoordinator(new FakeTransportFactory(), new FakeResponseSink(), 16, TimeProvider.System, null, maximumFrameSize: 64, setupQueuePool: pool);
+        await using var coordinator = new UdpProxyCoordinator(new FakeTransportFactory(), new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, MaximumFrameSize = 64, SetupQueuePool = pool });
         var flow = CreateFlow("192.0.2.53");
 
         Assert.False(await coordinator.TrySendSpanAsync(flow, s_server, new byte[100], default, CancellationToken.None));
 
-        Assert.Equal(0, coordinator.PendingSetupBytesForDiagnostics);
+        Assert.Equal(0, coordinator.Diagnostics.PendingSetupBytes);
         Assert.Equal(0, pool.Stats.Outstanding);
         Assert.Equal(pool.Stats.Rented, pool.Stats.Returned);
     }
@@ -429,7 +429,7 @@ public sealed class UdpSetupQueueTests
         var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new DelayedTransportFactory(gate.Task);
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 16, time, null);
+        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, TimeProvider = time });
         var flow = CreateFlow("192.0.2.53");
 
         Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 1 }, default, CancellationToken.None));
@@ -449,9 +449,9 @@ public sealed class UdpSetupQueueTests
             Assert.Equal((byte)2, Assert.Single(transport.Sent[0].Payload));
         }
 
-        Assert.Equal(1, coordinator.SetupTtlExpiredCount);
-        Assert.True(coordinator.SetupStampsRefreshedCount >= 1);
-        Assert.Equal(0, coordinator.PendingSetupBytesForDiagnostics);
+        Assert.Equal(1, coordinator.Diagnostics.SetupTtlExpiredCount);
+        Assert.True(coordinator.Diagnostics.SetupStampsRefreshedCount >= 1);
+        Assert.Equal(0, coordinator.Diagnostics.PendingSetupBytes);
     }
 
     [Fact]
@@ -469,7 +469,7 @@ public sealed class UdpSetupQueueTests
         var occupantGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         const int occupants = 8;
         var factory = new StagedGateTransportFactory(occupantGate, occupants);
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), occupants + 8, time, null);
+        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = occupants + 8, TimeProvider = time });
         var flows = Enumerable.Range(0, occupants + 1).Select(index => CreateFlow($"192.0.2.{index + 1}")).ToArray();
 
         for (var index = 0; index < occupants; index++)
@@ -531,9 +531,9 @@ public sealed class UdpSetupQueueTests
         }
 
         Assert.Equal(occupants + 1, forwarded.Count);
-        Assert.Equal(0, coordinator.SetupTtlExpiredCount);
-        Assert.True(coordinator.SetupStampsRefreshedCount >= 1);
-        Assert.Equal(0, coordinator.PendingSetupBytesForDiagnostics);
+        Assert.Equal(0, coordinator.Diagnostics.SetupTtlExpiredCount);
+        Assert.True(coordinator.Diagnostics.SetupStampsRefreshedCount >= 1);
+        Assert.Equal(0, coordinator.Diagnostics.PendingSetupBytes);
     }
 
     [Fact]

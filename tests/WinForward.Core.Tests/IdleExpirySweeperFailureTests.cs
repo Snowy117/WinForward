@@ -28,14 +28,16 @@ public sealed class IdleExpirySweeperFailureTests
         var coordinator = new UdpProxyCoordinator(
             transportFactory,
             new NoopResponseSink(),
-            capacity: 16,
-            TimeProvider.System,
-            beforeExpiryRecheck: () =>
+            new UdpProxyOptions
             {
-                Interlocked.Increment(ref sweepFailures);
-                return ValueTask.FromException(new IOException("synthetic sweep failure"));
-            },
-            logger: logger);
+                Capacity = 16,
+                BeforeExpiryRecheck = () =>
+                {
+                    Interlocked.Increment(ref sweepFailures);
+                    return ValueTask.FromException(new IOException("synthetic sweep failure"));
+                },
+                Logger = logger
+            });
         var config = new ValidatedConfiguration(
             new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Pass));

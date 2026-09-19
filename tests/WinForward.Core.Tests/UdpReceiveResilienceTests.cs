@@ -29,7 +29,7 @@ public sealed class UdpReceiveResilienceTests
         var factory = new FakeTransportFactory();
         var sink = new FakeResponseSink();
         var logger = new RecordingRuntimeLogger();
-        await using var coordinator = new UdpProxyCoordinator(factory, sink, logger: logger);
+        await using var coordinator = new UdpProxyCoordinator(factory, sink, new UdpProxyOptions { Logger = logger });
         var flow = CreateFlow("192.0.2.53");
 
         Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 0 }, default, CancellationToken.None));
@@ -200,7 +200,7 @@ public sealed class UdpReceiveResilienceTests
         var factory = new SingleTransportFactory(transport);
         var sink = new FakeResponseSink();
         var logger = new RecordingRuntimeLogger();
-        await using var coordinator = new UdpProxyCoordinator(factory, sink, logger: logger);
+        await using var coordinator = new UdpProxyCoordinator(factory, sink, new UdpProxyOptions { Logger = logger });
         var flow = CreateFlow("192.0.2.53");
 
         Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 1 }, default, CancellationToken.None));
@@ -234,7 +234,7 @@ public sealed class UdpReceiveResilienceTests
         var factory = new FakeTransportFactory();
         var sink = new FakeResponseSink();
         var logger = new RecordingRuntimeLogger();
-        await using var coordinator = new UdpProxyCoordinator(factory, sink, logger: logger);
+        await using var coordinator = new UdpProxyCoordinator(factory, sink, new UdpProxyOptions { Logger = logger });
         var flow = CreateFlow("192.0.2.53");
 
         Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 1 }, default, CancellationToken.None));

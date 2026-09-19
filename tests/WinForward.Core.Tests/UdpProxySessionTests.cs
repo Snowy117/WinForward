@@ -97,7 +97,7 @@ public sealed class UdpProxySessionTests
                 FlowOriginKind.Host)),
             1,
             time.GetUtcNow());
-        return new UdpProxySession(
+        return new UdpProxySession(new UdpProxySessionContext(
             flow,
             1,
             association,
@@ -109,6 +109,6 @@ public sealed class UdpProxySessionTests
             (_, now) => propagationStamps.Add(now),
             NullRuntimeLogger.Instance,
             ReceiveWindowPool,
-            1537);
+            1537));
     }
 }

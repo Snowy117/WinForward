@@ -118,7 +118,7 @@ public sealed partial class UdpProxyCoordinator
         }
         catch (Exception exception)
         {
-            await RemoveSlotAsync(flow, slot, writeCooldown: false).ConfigureAwait(false);
+            await _slotHost.RemoveSlotAsync(flow, slot, armCooldown: false).ConfigureAwait(false);
             ExceptionDispatchInfo.Capture(exception).Throw();
             return false;
         }
@@ -129,7 +129,7 @@ public sealed partial class UdpProxyCoordinator
 
     private async ValueTask<bool> RemoveSlotSpanAsync(FlowKey flow, UdpSessionSlot slot, Exception exception)
     {
-        await RemoveSlotAsync(flow, slot, writeCooldown: false).ConfigureAwait(false);
+        await _slotHost.RemoveSlotAsync(flow, slot, armCooldown: false).ConfigureAwait(false);
         ExceptionDispatchInfo.Capture(exception).Throw();
         return false;
     }

@@ -271,11 +271,14 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         => new(
             new Socks5UdpTransportFactory(selfTraffic, maximumFrameSize, addressCache),
             new UdpResponseReinjector(reinjector, udpTargets, maximumFrameSize: maximumFrameSize, logger: logger, healthSignal: healthSignal),
-            logger: logger,
-            maximumFrameSize: maximumFrameSize,
-            receiveWindowPool: udpWindowPool,
-            setupQueuePool: udpDatagramPool,
-            setupExecutor: setupExecutor);
+            new UdpProxyOptions
+            {
+                Logger = logger,
+                MaximumFrameSize = maximumFrameSize,
+                ReceiveWindowPool = udpWindowPool,
+                SetupQueuePool = udpDatagramPool,
+                SetupExecutor = setupExecutor
+            });
 
     private static TcpProxyCoordinator CreateTcpCoordinator(
         ValidatedConfiguration configuration,

@@ -132,7 +132,7 @@ public sealed class HotPathAllocationGateTests
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new StalledTransportFactory(gate.Task);
         using var pool = new NativeBufferPool(64, capacity: 64);
-        await using var coordinator = new UdpProxyCoordinator(factory, new NoopResponseSink(), setupQueuePool: pool, maximumFrameSize: 64);
+        await using var coordinator = new UdpProxyCoordinator(factory, new NoopResponseSink(), new UdpProxyOptions { MaximumFrameSize = 64, SetupQueuePool = pool });
         var flow = FlowKey.Create(Endpoint.From(ClientIpv4, 53000), Endpoint.From(DestIpv4, 53), TransportProtocol.Udp, FlowOriginKind.Host);
         var payload = new byte[32];
 
@@ -147,7 +147,7 @@ public sealed class HotPathAllocationGateTests
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
         Assert.Equal(0, allocated);
-        Assert.Equal(0, coordinator.SetupBudgetRejectionCount);
+        Assert.Equal(0, coordinator.Diagnostics.SetupBudgetRejectionCount);
         Assert.True(pool.Stats.Rented > 0);
         gate.TrySetResult();
     }

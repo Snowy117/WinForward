@@ -192,11 +192,7 @@ public sealed class UdpProxyCoordinatorTests
         var coordinator = new UdpProxyCoordinator(
             factory,
             new FakeResponseSink(),
-            1,
-            TimeProvider.System,
-            null,
-            maximumFrameSize: 1514,
-            receiveWindowPool: pool);
+            new UdpProxyOptions { Capacity = 1, MaximumFrameSize = 1514, ReceiveWindowPool = pool });
 
         Assert.True(await coordinator.TrySendSpanAsync(CreateFlow("192.0.2.53"), s_server, new byte[] { 1 }, default, CancellationToken.None));
         // The receive window is rented when the background setup starts the session's receive loop.

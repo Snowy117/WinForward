@@ -23,7 +23,7 @@ internal static class SessionFootprintScenario
     private static async Task RunOneAsync(StabilityContext context, int sessions)
     {
         var factory = new CountingTransportFactory(new BenchmarkUdpTransportFactory());
-        var coordinator = new UdpProxyCoordinator(factory, NoopUdpResponseSink.Instance, sessions);
+        var coordinator = new UdpProxyCoordinator(factory, NoopUdpResponseSink.Instance, new UdpProxyOptions { Capacity = sessions });
         var server = new Socks5Server("benchmark", "127.0.0.1", 1080, null, null);
         using var process = Process.GetCurrentProcess();
         var workingSetBefore = process.WorkingSet64;

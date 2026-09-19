@@ -7,6 +7,27 @@ using WinForward.Runtime.Socks5;
 
 namespace WinForward.Runtime.UdpProxy;
 
+/// <summary>
+/// The construction context of one UDP relay session: the flow identity, the claimed relay
+/// association, the transport/sink collaborators, the recorded client MAC, and the activity
+/// plumbing the session reports through. Grouping them gives the setup pipeline (and the tests
+/// that construct sessions directly) one named construction vocabulary; the positional order
+/// mirrors the former constructor parameters.
+/// </summary>
+internal sealed record UdpProxySessionContext(
+    FlowKey Flow,
+    long FlowGeneration,
+    UdpAssociation Association,
+    IUdpProxyTransport Transport,
+    IUdpResponseSink Sink,
+    MacAddress ClientMac,
+    CancellationToken Shutdown,
+    TimeProvider TimeProvider,
+    Action<UdpAssociation, DateTimeOffset> ActivityObserver,
+    IRuntimeLogger Logger,
+    NativeBufferPool ReceiveWindowPool,
+    int ReceiveBufferSize);
+
 internal sealed class UdpProxySession : IAsyncDisposable
 {
     /// <summary>Interval between per-session rate-limited summaries (skipped datagrams, injection failures).</summary>
@@ -50,38 +71,28 @@ internal sealed class UdpProxySession : IAsyncDisposable
     private bool _expiring;
     private int _activeSends;
 
-    public UdpProxySession(
-        FlowKey flow,
-        long flowGeneration,
-        UdpAssociation association,
-        IUdpProxyTransport transport,
-        IUdpResponseSink sink,
-        MacAddress clientMac,
-        CancellationToken shutdown,
-        TimeProvider timeProvider,
-        Action<UdpAssociation, DateTimeOffset> activityObserver,
-        IRuntimeLogger logger,
-        NativeBufferPool receiveWindowPool,
-        int receiveBufferSize)
+    public UdpProxySession(UdpProxySessionContext context)
     {
-        ArgumentNullException.ThrowIfNull(receiveWindowPool);
-        if (receiveWindowPool.BufferSize < receiveBufferSize)
+#pragma warning disable MA0015, S3928 // The paramName deliberately names the null member (the context parameter itself is never null); both analyzers only accept declared parameter names, which would point diagnosis at a phantom "context".
+        ArgumentNullException.ThrowIfNull(context.ReceiveWindowPool);
+        if (context.ReceiveWindowPool.BufferSize < context.ReceiveBufferSize)
         {
-            throw new ArgumentException("The receive-window pool supplies buffers smaller than the session receive window.", nameof(receiveWindowPool));
+            throw new ArgumentException("The receive-window pool supplies buffers smaller than the session receive window.", nameof(context.ReceiveWindowPool));
         }
-        _flow = flow;
-        _flowGeneration = flowGeneration;
-        _association = association;
-        _transport = transport;
-        _sink = sink;
-        ClientMac = clientMac;
-        _shutdown = shutdown;
-        _timeProvider = timeProvider;
-        _activityObserver = activityObserver;
-        _logger = logger;
-        _receiveWindowPool = receiveWindowPool;
-        _receiveBufferSize = receiveBufferSize;
-        _lastActivityTicks = timeProvider.GetUtcNow().UtcTicks;
+#pragma warning restore MA0015, S3928
+        _flow = context.Flow;
+        _flowGeneration = context.FlowGeneration;
+        _association = context.Association;
+        _transport = context.Transport;
+        _sink = context.Sink;
+        ClientMac = context.ClientMac;
+        _shutdown = context.Shutdown;
+        _timeProvider = context.TimeProvider;
+        _activityObserver = context.ActivityObserver;
+        _logger = context.Logger;
+        _receiveWindowPool = context.ReceiveWindowPool;
+        _receiveBufferSize = context.ReceiveBufferSize;
+        _lastActivityTicks = context.TimeProvider.GetUtcNow().UtcTicks;
     }
 
     public FlowKey Flow => _flow;
@@ -162,7 +173,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
         }
     }
 
-    public bool TryBeginExpiry(DateTimeOffset now, TimeSpan idleTimeout)
+    internal bool TryBeginExpiry(DateTimeOffset now, TimeSpan idleTimeout)
     {
         lock (_activityGate)
         {
@@ -172,7 +183,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
         }
     }
 
-    public void CancelExpiry()
+    internal void CancelExpiry()
     {
         lock (_activityGate) _expiring = false;
     }

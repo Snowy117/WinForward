@@ -54,7 +54,7 @@ public class UdpSessionBenchmarks
     [Benchmark]
     public async Task PopulateSessionsAsync()
     {
-        await using var coordinator = new UdpProxyCoordinator(new Socks5UdpTransportFactory(new SelfTrafficRegistry(), UdpFrameBuilder.DefaultMaximumEthernetFrame), NoopUdpResponseSink.Instance, Sessions);
+        await using var coordinator = new UdpProxyCoordinator(new Socks5UdpTransportFactory(new SelfTrafficRegistry(), UdpFrameBuilder.DefaultMaximumEthernetFrame), NoopUdpResponseSink.Instance, new UdpProxyOptions { Capacity = Sessions });
         var forwardedBaseline = _server.RelayForwarded;
         for (var index = 0; index < Sessions; index++)
         {
@@ -78,7 +78,7 @@ public class UdpSessionBenchmarks
     public async Task PopulateSessionsNoopTransportAsync()
     {
         var factory = new BenchmarkUdpTransportFactory();
-        await using var coordinator = new UdpProxyCoordinator(factory, NoopUdpResponseSink.Instance, Sessions);
+        await using var coordinator = new UdpProxyCoordinator(factory, NoopUdpResponseSink.Instance, new UdpProxyOptions { Capacity = Sessions });
         var sendsBaseline = factory.Sends;
         for (var index = 0; index < Sessions; index++)
         {

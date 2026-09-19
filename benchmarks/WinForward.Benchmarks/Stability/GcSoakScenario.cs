@@ -108,10 +108,13 @@ internal static class GcSoakScenario
         var coordinator = new UdpProxyCoordinator(
             new Socks5UdpTransportFactory(new SelfTrafficRegistry(), maximumFrameSize),
             udpSink,
-            capacity: Math.Max(options.Flows, 1),
-            maximumFrameSize: maximumFrameSize,
-            receiveWindowPool: udpWindowPool,
-            setupQueuePool: udpSetupPool);
+            new UdpProxyOptions
+            {
+                Capacity = Math.Max(options.Flows, 1),
+                MaximumFrameSize = maximumFrameSize,
+                ReceiveWindowPool = udpWindowPool,
+                SetupQueuePool = udpSetupPool
+            });
         var udpProxyServer = new Socks5Server("gc-soak", "127.0.0.1", checked((ushort)udpServer.ControlEndpoint.Port), null, null);
         var tcpProxyServer = new Socks5Server("gc-soak", "127.0.0.1", checked((ushort)tcpServer.Endpoint.Port), null, null);
         var tcpFlood = new TcpFlood(

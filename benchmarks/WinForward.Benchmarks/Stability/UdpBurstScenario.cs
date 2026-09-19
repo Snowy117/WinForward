@@ -51,8 +51,11 @@ internal static class UdpBurstScenario
         var coordinator = new UdpProxyCoordinator(
             new Socks5UdpTransportFactory(new SelfTrafficRegistry(), UdpFrameBuilder.DefaultMaximumEthernetFrame),
             sink,
-            backgroundFlows + burstFlows,
-            logger: productEvents is not null ? productEvents : NullRuntimeLogger.Instance);
+            new UdpProxyOptions
+            {
+                Capacity = backgroundFlows + burstFlows,
+                Logger = productEvents is not null ? productEvents : NullRuntimeLogger.Instance
+            });
         PhaseOutcome outcome;
         try
         {

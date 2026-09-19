@@ -62,7 +62,7 @@ public sealed class UdpProxyCoordinatorLifecycleTests
     public async Task FailedSetupReleasesSlotAndCapacityForOtherFlows()
     {
         var factory = new GatedTransportFactory();
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 1, TimeProvider.System, null);
+        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 1 });
         var first = CreateFlow("192.0.2.53");
         var second = CreateFlow("192.0.2.54");
 
@@ -82,7 +82,7 @@ public sealed class UdpProxyCoordinatorLifecycleTests
     public async Task ReceiveFaultDisposesAndRemovesSessionWithoutAnotherSend()
     {
         var factory = new FakeTransportFactory();
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 1, TimeProvider.System, null);
+        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 1 });
         var flow = CreateFlow("192.0.2.53");
 
         Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 1 }, default, CancellationToken.None));
@@ -105,10 +105,7 @@ public sealed class UdpProxyCoordinatorLifecycleTests
         await using var coordinator = new UdpProxyCoordinator(
             factory,
             new FakeResponseSink(),
-            1,
-            TimeProvider.System,
-            null,
-            receiveWindowPool: pool);
+            new UdpProxyOptions { Capacity = 1, ReceiveWindowPool = pool });
         var flow = CreateFlow("192.0.2.53");
 
         // The datagram is accepted and buffered; the receive fault surfaces through the
@@ -153,7 +150,7 @@ public sealed class UdpProxyCoordinatorLifecycleTests
     {
         var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
         var factory = new FakeTransportFactory();
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 1, time, null);
+        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 1, TimeProvider = time });
         var flow = CreateFlow("192.0.2.53");
 
         Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[] { 1 }, default, CancellationToken.None));
@@ -175,7 +172,7 @@ public sealed class UdpProxyCoordinatorLifecycleTests
     {
         var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
         var factory = new CollidingAliasTransportFactory();
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), 2, time, null);
+        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 2, TimeProvider = time });
         var first = CreateFlow("192.0.2.53");
         var second = CreateFlow("192.0.2.54");
 
@@ -236,12 +233,15 @@ public sealed class UdpProxyCoordinatorLifecycleTests
         await using var coordinator = new UdpProxyCoordinator(
             factory,
             new FakeResponseSink(),
-            1,
-            time,
-            () =>
+            new UdpProxyOptions
             {
-                snapshotTaken!.TrySetResult(true);
-                return new ValueTask(resumeSweep!.Task);
+                Capacity = 1,
+                TimeProvider = time,
+                BeforeExpiryRecheck = () =>
+                {
+                    snapshotTaken!.TrySetResult(true);
+                    return new ValueTask(resumeSweep!.Task);
+                }
             });
         var flow = CreateFlow("192.0.2.53");
 
@@ -273,12 +273,15 @@ public sealed class UdpProxyCoordinatorLifecycleTests
         await using var coordinator = new UdpProxyCoordinator(
             factory,
             sink,
-            1,
-            time,
-            () =>
+            new UdpProxyOptions
             {
-                snapshotTaken!.TrySetResult(true);
-                return new ValueTask(resumeSweep!.Task);
+                Capacity = 1,
+                TimeProvider = time,
+                BeforeExpiryRecheck = () =>
+                {
+                    snapshotTaken!.TrySetResult(true);
+                    return new ValueTask(resumeSweep!.Task);
+                }
             });
         var flow = CreateFlow("192.0.2.53");
 

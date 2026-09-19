@@ -17,6 +17,12 @@ public readonly record struct UdpAdapterTarget(nint Handle, byte[] Mac);
 /// lock-free dictionary probes; a refresh swaps one immutable snapshot so a response never
 /// observes a half-updated map.
 /// </summary>
+/// <remarks>
+/// A composition-only seam: <see cref="UdpAdapterTargetSource"/> is the single production
+/// implementation, and no substituting fake exists — the real source is directly exercisable
+/// (the relay tests build it and drive responses through it), so a fake would not exercise any
+/// scenario the production implementation does not already cover.
+/// </remarks>
 public interface IUdpAdapterTargetSource
 {
     /// <summary>The fallback target for host flows without a resolvable origin adapter; null when the scope is empty.</summary>

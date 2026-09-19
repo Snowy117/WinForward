@@ -1,11 +1,10 @@
 using WinForward.Configuration;
 using WinForward.Core;
-using WinForward.Protocols;
 using WinForward.Runtime.Socks5;
 
 namespace WinForward.Runtime.UdpProxy;
 
-public sealed partial class UdpProxyCoordinator : IAsyncDisposable
+public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionSlotHost
 {
     private const int MaximumSocks5UdpHeaderSize = 22;
     private const int OversizeSentinelSize = 1;
@@ -17,6 +16,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable
     private readonly UdpSetupCooldownTable _cooldowns;
     private readonly UdpSetupQueueBudget _budget;
     private readonly UdpSessionSetup _setup;
+    private readonly IUdpSessionSlotHost _slotHost;
     private readonly NativeBufferPool _setupQueuePool;
     private readonly bool _ownsSetupQueuePool;
     private readonly NativeBufferPool _receiveWindowPool;
@@ -39,52 +39,37 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable
     public UdpProxyCoordinator(
         IUdpProxyTransportFactory transportFactory,
         IUdpResponseSink responseSink,
-        int capacity = 16_384,
-        IRuntimeLogger? logger = null,
-        int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame,
-        NativeBufferPool? receiveWindowPool = null,
-        NativeBufferPool? setupQueuePool = null,
-        ISetupExecutor? setupExecutor = null)
-        : this(transportFactory, responseSink, capacity, TimeProvider.System, null, logger, maximumFrameSize, receiveWindowPool: receiveWindowPool, setupQueuePool: setupQueuePool, setupExecutor: setupExecutor)
-    {
-    }
-
-    internal UdpProxyCoordinator(
-        IUdpProxyTransportFactory transportFactory,
-        IUdpResponseSink responseSink,
-        int capacity,
-        TimeProvider timeProvider,
-        Func<ValueTask>? beforeExpiryRecheck,
-        IRuntimeLogger? logger = null,
-        int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame,
-        NativeBufferPool? receiveWindowPool = null,
-        long setupQueueGlobalByteBudget = UdpSetupQueueBudget.SetupQueueGlobalByteBudget,
-        NativeBufferPool? setupQueuePool = null,
-        ISetupExecutor? setupExecutor = null)
+        UdpProxyOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(transportFactory);
         ArgumentNullException.ThrowIfNull(responseSink);
-        ArgumentNullException.ThrowIfNull(timeProvider);
-        if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(capacity));
-        if (maximumFrameSize <= 0) throw new ArgumentOutOfRangeException(nameof(maximumFrameSize));
-        if (setupQueueGlobalByteBudget <= 0) throw new ArgumentOutOfRangeException(nameof(setupQueueGlobalByteBudget));
+        options ??= new UdpProxyOptions();
+        var capacity = options.Capacity;
+        var timeProvider = options.TimeProvider;
+        var maximumFrameSize = options.MaximumFrameSize;
+        var setupQueueGlobalByteBudget = options.SetupQueueGlobalByteBudget ?? UdpSetupQueueBudget.SetupQueueGlobalByteBudget;
+        if (timeProvider is null) throw new ArgumentNullException(nameof(options), "The TimeProvider option must not be null.");
+        if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(options), capacity, "Capacity must be positive.");
+        if (maximumFrameSize <= 0) throw new ArgumentOutOfRangeException(nameof(options), maximumFrameSize, "Maximum frame size must be positive.");
+        if (setupQueueGlobalByteBudget <= 0) throw new ArgumentOutOfRangeException(nameof(options), setupQueueGlobalByteBudget, "Setup queue global byte budget must be positive.");
         var preSeed = Math.Min(capacity, MaximumPreSeedCapacity);
         _associations = new UdpAssociationTable(capacity, preSeed);
         _sessions = new Dictionary<FlowKey, UdpSessionSlot>(preSeed);
         _cooldowns = new UdpSetupCooldownTable(capacity);
         _capacity = capacity;
         _timeProvider = timeProvider;
-        _beforeExpiryRecheck = beforeExpiryRecheck;
-        _logger = logger ?? NullRuntimeLogger.Instance;
+        _beforeExpiryRecheck = options.BeforeExpiryRecheck;
+        _logger = options.Logger ?? NullRuntimeLogger.Instance;
         _budget = new UdpSetupQueueBudget(setupQueueGlobalByteBudget, _logger, _timeProvider);
-        _setupQueuePool = setupQueuePool ?? new NativeBufferPool(maximumFrameSize);
-        _ownsSetupQueuePool = setupQueuePool is null;
+        _setupQueuePool = options.SetupQueuePool ?? new NativeBufferPool(maximumFrameSize);
+        _ownsSetupQueuePool = options.SetupQueuePool is null;
         var receiveBufferSize = ReceiveWindowSize(maximumFrameSize);
-        _receiveWindowPool = receiveWindowPool ?? new NativeBufferPool(receiveBufferSize);
-        _ownsReceiveWindowPool = receiveWindowPool is null;
-        _setupExecutor = setupExecutor ?? new SetupExecutor();
-        _ownsSetupExecutor = setupExecutor is null;
+        _receiveWindowPool = options.ReceiveWindowPool ?? new NativeBufferPool(receiveBufferSize);
+        _ownsReceiveWindowPool = options.ReceiveWindowPool is null;
+        _setupExecutor = options.SetupExecutor ?? new SetupExecutor();
+        _ownsSetupExecutor = options.SetupExecutor is null;
         _setupHandler = RunSessionSetupAsync;
+        _slotHost = this;
         _setup = new UdpSessionSetup(
             transportFactory,
             _associations,
@@ -93,15 +78,8 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable
             _logger,
             _receiveWindowPool,
             receiveBufferSize,
-            RefreshSetupStampsUnderGate,
-            AttachSessionUnderGate,
-            DequeueForFlush,
-            RemoveSlotAsync,
-            RemoveReceiveFailedSessionAsync);
+            _slotHost);
     }
-
-    /// <summary>The live setup-failure cooldown count (bounded by <c>capacity</c>); for tests and diagnostics.</summary>
-    internal int SetupCooldownCountForDiagnostics => _cooldowns.Count;
 
     /// <summary>The number of live UDP sessions (heartbeat diagnostics; gate-consistent).</summary>
     public int SessionCount
@@ -112,17 +90,13 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable
     /// <summary>The session budget this coordinator was constructed with (heartbeat diagnostics).</summary>
     public int Capacity => _capacity;
 
-    /// <summary>The aggregate setup-queue bytes currently charged against the global budget; for tests and diagnostics.</summary>
-    internal long PendingSetupBytesForDiagnostics => _budget.PendingBytes;
-
-    /// <summary>The total datagrams rejected because the global setup byte budget was exhausted; for tests and diagnostics.</summary>
-    internal long SetupBudgetRejectionCount => _budget.RejectionCount;
-
-    /// <summary>The total buffered datagrams dropped at flush for exceeding the setup TTL; for tests and diagnostics.</summary>
-    internal long SetupTtlExpiredCount => _setup.TtlExpiredCount;
-
-    /// <summary>The total queue entries re-stamped at setup dial start (limiter queue-wait does not age a datagram); for tests and diagnostics.</summary>
-    internal long SetupStampsRefreshedCount => _setup.StampsRefreshedCount;
+    /// <summary>
+    /// The coordinator's observable counters as one snapshot: the live setup-failure cooldown
+    /// count (bounded by <c>capacity</c>), the aggregate setup-queue bytes charged against the
+    /// global budget, and the setup-queue rejection / flush-TTL / dial-start re-stamp totals;
+    /// for tests and diagnostics.
+    /// </summary>
+    internal UdpProxyDiagnostics Diagnostics => new(_cooldowns.Count, _budget.PendingBytes, _budget.RejectionCount, _setup.TtlExpiredCount, _setup.StampsRefreshedCount);
 
     /// <summary>
     /// The single source of truth for the per-session receive window: maximum Ethernet frame,
@@ -305,10 +279,10 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable
     }
 
     /// <summary>
-    /// Attaches a constructed session to its slot under the coordinator gate; the delegate the
-    /// setup pipeline calls at the point where the session becomes visible to dispatch.
+    /// Attaches a constructed session to its slot under the coordinator gate; the setup pipeline
+    /// calls this at the point where the session becomes visible to dispatch.
     /// </summary>
-    private void AttachSessionUnderGate(UdpSessionSlot slot, UdpProxySession session)
+    void IUdpSessionSlotHost.AttachSession(UdpSessionSlot slot, UdpProxySession session)
     {
         lock (_gate) slot.Session = session;
     }
@@ -318,7 +292,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable
     /// while this slot is still the flow's registered owner. The pipeline counts the refreshed
     /// entries on its side.
     /// </summary>
-    private int RefreshSetupStampsUnderGate(FlowKey flow, UdpSessionSlot slot)
+    int IUdpSessionSlotHost.RefreshSetupStamps(FlowKey flow, UdpSessionSlot slot)
     {
         lock (_gate)
         {
@@ -332,10 +306,10 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable
     /// One flush-dequeue step under the coordinator gate: verifies the slot is still the flow's
     /// registered owner, dequeues the next buffered datagram lease (releasing its budget charge
     /// exactly once; the caller releases the lease), or flips the slot ready when the queue has
-    /// drained. The setup pipeline's flush loop calls this via delegate and performs the TTL check
-    /// and the send below the gate.
+    /// drained. The setup pipeline's flush loop calls this through the seam and performs the TTL
+    /// check and the send below the gate.
     /// </summary>
-    private (UdpSessionSetup.FlushStep Step, NativeLease Lease, int Length, DateTimeOffset EnqueuedAt) DequeueForFlush(FlowKey flow, UdpSessionSlot slot)
+    (UdpSessionSetup.FlushStep Step, NativeLease Lease, int Length, DateTimeOffset EnqueuedAt) IUdpSessionSlotHost.DequeueForFlush(FlowKey flow, UdpSessionSlot slot)
     {
         lock (_gate)
         {
@@ -379,7 +353,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable
         foreach (var (slot, session) in idle)
         {
             if (!session.TryBeginExpiry(now, idleTimeout)) continue;
-            if (!await RemoveSlotAsync(session.Flow, slot, writeCooldown: false).ConfigureAwait(false))
+            if (!await _slotHost.RemoveSlotAsync(session.Flow, slot, armCooldown: false).ConfigureAwait(false))
             {
                 session.CancelExpiry();
                 continue;
@@ -394,35 +368,35 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable
     /// <summary>
     /// Shared owns-slot removal protocol for every teardown path: under the gate, the slot mapped
     /// to <paramref name="flow"/> is removed only when it is still the exact slot instance
-    /// <paramref name="expected"/> (a newer generation may have replaced it); the resolved
+    /// <paramref name="slot"/> (a newer generation may have replaced it); the resolved
     /// session's association is released and any datagrams still queued for setup are dropped
-    /// fail-closed in the same critical section. When <paramref name="writeCooldown"/> is set
+    /// fail-closed in the same critical section. When <paramref name="armCooldown"/> is set
     /// and the coordinator is not shutting down, a setup-failure cooldown is armed so
     /// the next datagram does not immediately hammer a dead SOCKS5 server. Session disposal runs
     /// outside the gate. Returns true when this caller owned the removal; per-call-site logging
     /// and expiry bookkeeping stay with callers.
     /// </summary>
-    private async Task<bool> RemoveSlotAsync(FlowKey flow, UdpSessionSlot expected, bool writeCooldown)
+    async Task<bool> IUdpSessionSlotHost.RemoveSlotAsync(FlowKey flow, UdpSessionSlot slot, bool armCooldown)
     {
         UdpProxySession? session = null;
         var owned = false;
         lock (_gate)
         {
-            if (_sessions.TryGetValue(flow, out var current) && ReferenceEquals(current, expected))
+            if (_sessions.TryGetValue(flow, out var current) && ReferenceEquals(current, slot))
             {
                 _sessions.Remove(flow);
                 owned = true;
-                session = expected.Session;
+                session = slot.Session;
                 if (session is not null) _associations.TryRemove(session.Association);
                 var dropped = 0;
-                while (expected.SetupQueue.TryDequeue(out var drained, out var drainedLength, out _))
+                while (slot.SetupQueue.TryDequeue(out var drained, out var drainedLength, out _))
                 {
                     _budget.Credit(drainedLength);
                     drained.Dispose();
                     dropped++;
                 }
                 if (dropped > 0) _budget.NoteDrop(flow, dropped);
-                if (writeCooldown && !_shutdown.IsCancellationRequested)
+                if (armCooldown && !_shutdown.IsCancellationRequested)
                 {
                     _cooldowns.Write(flow, _timeProvider.GetUtcNow());
                 }
@@ -433,7 +407,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable
         return owned;
     }
 
-    private async Task RemoveReceiveFailedSessionAsync(UdpProxySession session)
+    async Task IUdpSessionSlotHost.RemoveReceiveFailedSessionAsync(UdpProxySession session)
     {
         UdpSessionSlot? slot = null;
         lock (_gate)
@@ -441,7 +415,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable
             if (_sessions.TryGetValue(session.Flow, out var current) && ReferenceEquals(current.Session, session)) slot = current;
         }
         if (slot is null) return;
-        if (!await RemoveSlotAsync(session.Flow, slot, writeCooldown: false).ConfigureAwait(false)) return;
+        if (!await _slotHost.RemoveSlotAsync(session.Flow, slot, armCooldown: false).ConfigureAwait(false)) return;
         UdpProxyLogging.LogDebug(_logger, "udp.session.closed", session.Flow, session.FlowGeneration, session.Association, null);
     }
 

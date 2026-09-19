@@ -9,11 +9,12 @@ namespace WinForward.Runtime.UdpProxy;
 /// The SOCKS5 dial/claim/construct/flush pipeline behind every UDP flow's first datagram: the
 /// 8-wide setup limiter (patient admission), the dial-start queue re-stamp, the association
 /// claim, session construction, and the FIFO flush of datagrams buffered while setup was in
-/// flight. Runs entirely off the coordinator gate — coordinator slot state is touched only via
-/// ctor-injected delegates (attach, re-stamp, flush dequeue, slot removal), each of which takes
-/// the coordinator gate internally, so the gate stays the single arbiter of slot state. The
-/// analog of the TCP redirect setup/acceptor pair. Owns the 2026-09-06 dial-start re-stamp fix
-/// (limiter queue-wait is not client staleness) as one cohesive unit.
+/// flight. Runs entirely off the coordinator gate — coordinator slot state is touched only
+/// through the single ctor-injected <see cref="IUdpSessionSlotHost"/> seam (attach, re-stamp,
+/// flush dequeue, slot removal, receive-failure removal), whose members each take the coordinator
+/// gate internally, so the gate stays the single arbiter of slot state. The analog of the TCP
+/// redirect setup/acceptor pair. Owns the 2026-09-06 dial-start re-stamp fix (limiter queue-wait
+/// is not client staleness) as one cohesive unit.
 /// </summary>
 internal sealed class UdpSessionSetup
 {
@@ -35,11 +36,7 @@ internal sealed class UdpSessionSetup
     private readonly IRuntimeLogger _logger;
     private readonly NativeBufferPool _receiveWindowPool;
     private readonly int _receiveBufferSize;
-    private readonly Func<FlowKey, UdpProxyCoordinator.UdpSessionSlot, int> _refreshSetupStamps;
-    private readonly Action<UdpProxyCoordinator.UdpSessionSlot, UdpProxySession> _attachSession;
-    private readonly Func<FlowKey, UdpProxyCoordinator.UdpSessionSlot, (FlushStep Step, NativeLease Lease, int Length, DateTimeOffset EnqueuedAt)> _dequeueForFlush;
-    private readonly Func<FlowKey, UdpProxyCoordinator.UdpSessionSlot, bool, Task> _removeSlot;
-    private readonly Func<UdpProxySession, Task> _removeReceiveFailedSession;
+    private readonly IUdpSessionSlotHost _host;
     private readonly SemaphoreSlim _setupLimiter = new(MaximumConcurrentSetups, MaximumConcurrentSetups);
     private long _ttlExpiredCount;
     private long _stampsRefreshedCount;
@@ -52,11 +49,7 @@ internal sealed class UdpSessionSetup
         IRuntimeLogger logger,
         NativeBufferPool receiveWindowPool,
         int receiveBufferSize,
-        Func<FlowKey, UdpProxyCoordinator.UdpSessionSlot, int> refreshSetupStamps,
-        Action<UdpProxyCoordinator.UdpSessionSlot, UdpProxySession> attachSession,
-        Func<FlowKey, UdpProxyCoordinator.UdpSessionSlot, (FlushStep Step, NativeLease Lease, int Length, DateTimeOffset EnqueuedAt)> dequeueForFlush,
-        Func<FlowKey, UdpProxyCoordinator.UdpSessionSlot, bool, Task> removeSlot,
-        Func<UdpProxySession, Task> removeReceiveFailedSession)
+        IUdpSessionSlotHost host)
     {
         _transportFactory = transportFactory;
         _associations = associations;
@@ -65,11 +58,7 @@ internal sealed class UdpSessionSetup
         _logger = logger;
         _receiveWindowPool = receiveWindowPool;
         _receiveBufferSize = receiveBufferSize;
-        _refreshSetupStamps = refreshSetupStamps;
-        _attachSession = attachSession;
-        _dequeueForFlush = dequeueForFlush;
-        _removeSlot = removeSlot;
-        _removeReceiveFailedSession = removeReceiveFailedSession;
+        _host = host;
     }
 
     /// <summary>The total buffered datagrams dropped at flush for exceeding the setup TTL; for tests and diagnostics.</summary>
@@ -126,10 +115,10 @@ internal sealed class UdpSessionSetup
                 throw new IOException("UDP flow association was already owned by another session; blocking the flow.");
             }
 
-            var session = new UdpProxySession(flow, flowGeneration, association, transport, _responseSink, clientMac, cancellationToken, _timeProvider, OnSessionActivity, _logger, _receiveWindowPool, _receiveBufferSize);
+            var session = new UdpProxySession(new UdpProxySessionContext(flow, flowGeneration, association, transport, _responseSink, clientMac, cancellationToken, _timeProvider, OnSessionActivity, _logger, _receiveWindowPool, _receiveBufferSize));
             transport = null;
-            _attachSession(slot, session);
-            session.Start(_removeReceiveFailedSession);
+            _host.AttachSession(slot, session);
+            session.Start(_host.RemoveReceiveFailedSessionAsync);
             UdpProxyLogging.LogDebug(_logger, "udp.session.created", flow, flowGeneration, association, server.Name);
             await FlushSetupQueueAsync(flow, slot, session, cancellationToken).ConfigureAwait(false);
         }
@@ -142,7 +131,7 @@ internal sealed class UdpSessionSetup
             // setup cooldown, and the slot removal ride this frame at no extra cost.
             // Shutdown cancellation keeps the no-cooldown semantics the observer had.
             UdpProxyLogging.LogSetupFailure(_logger, flow, exception);
-            await _removeSlot(flow, slot, exception is not OperationCanceledException).ConfigureAwait(false);
+            await _host.RemoveSlotAsync(flow, slot, armCooldown: exception is not OperationCanceledException).ConfigureAwait(false);
         }
         finally
         {
@@ -159,7 +148,7 @@ internal sealed class UdpSessionSetup
     /// </summary>
     private void RefreshSetupStampsAtDialStart(FlowKey flow, UdpProxyCoordinator.UdpSessionSlot slot)
     {
-        var refreshed = _refreshSetupStamps(flow, slot);
+        var refreshed = _host.RefreshSetupStamps(flow, slot);
         Interlocked.Add(ref _stampsRefreshedCount, refreshed);
     }
 
@@ -180,7 +169,7 @@ internal sealed class UdpSessionSetup
     {
         while (true)
         {
-            var step = _dequeueForFlush(flow, slot);
+            var step = _host.DequeueForFlush(flow, slot);
             if (step.Step != FlushStep.Dequeued) return;
 
             if (_timeProvider.GetUtcNow() - step.EnqueuedAt > SetupQueueDatagramTtl)
