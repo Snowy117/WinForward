@@ -120,8 +120,10 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         // One address cache backs both proxies' SOCKS5 control connections (B9/R3): the configured
         // endpoint is resolved once here and reused on every TCP relay and UDP session setup.
         var addressCache = new Socks5AddressCache();
-        // One pooled setup executor is shared by both coordinators (B5); the bundle owns it.
-        var setupExecutor = new SetupExecutor(configuration.SetupWorkerCount);
+        // One pooled setup executor is shared by both coordinators (B5); the bundle owns it. The
+        // configuration layer keeps 0 = auto (absent); the sentinel is translated here so the
+        // executor's worker count has exactly one meaning (null = platform default).
+        var setupExecutor = new SetupExecutor(configuration.SetupWorkerCount == 0 ? null : configuration.SetupWorkerCount);
         TcpProxyCoordinator tcpCoordinator;
         try
         {

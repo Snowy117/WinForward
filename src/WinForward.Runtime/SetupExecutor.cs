@@ -6,16 +6,6 @@ using WinForward.Runtime.UdpProxy;
 
 namespace WinForward.Runtime;
 
-/// <summary>The new-flow setup pipeline a pooled <see cref="SetupWorkItem"/> carries.</summary>
-internal enum SetupWorkKind
-{
-    /// <summary>TCP redirect setup for a retained SYN (<c>TcpProxyCoordinator.SetupPendingAsync</c>).</summary>
-    TcpSyn = 0,
-
-    /// <summary>UDP relay session setup for a flow's first datagram (<c>UdpSessionSetup.CreateSessionAsync</c>).</summary>
-    UdpNew = 1,
-}
-
 /// <summary>
 /// One pooled unit of new-flow setup work: rented from an <see cref="ISetupExecutor"/>, populated by
 /// a coordinator's cold new-flow branch, enqueued, and recycled by the worker that ran it. Reuse is
@@ -24,9 +14,13 @@ internal enum SetupWorkKind
 /// </summary>
 public sealed class SetupWorkItem
 {
-    internal Func<SetupWorkItem, Task>? Handler;
+    /// <summary>
+    /// The item's setup pipeline, installed by <see cref="ISetupExecutor.RentItem"/> at rent time
+    /// and never null while the item is in flight. A rented item therefore always has a pipeline.
+    /// </summary>
+    internal Func<SetupWorkItem, Task> Handler = null!;
+
     internal TaskCompletionSource? Completion;
-    internal SetupWorkKind Kind;
     internal FlowKey Flow;
     internal Socks5Server? Server;
     internal CancellationToken CancellationToken;
@@ -40,9 +34,8 @@ public sealed class SetupWorkItem
 
     internal void Reset()
     {
-        Handler = null;
+        Handler = null!;
         Completion = null;
-        Kind = default;
         Flow = default;
         Server = null;
         CancellationToken = default;
@@ -55,9 +48,22 @@ public sealed class SetupWorkItem
 }
 
 /// <summary>The seam coordinators use to hand new-flow setup off the pump thread.</summary>
+/// <remarks>
+/// This seam exists for composition and test infrastructure: the production adapter is
+/// <see cref="SetupExecutor"/>, and callers may inject their own to change the enqueue policy.
+/// No substituting fake ships with it, because none would exercise a scenario beyond what the
+/// real executor's own tests already cover (pool balance, capacity rejection, worker survival
+/// after a fault, and the dispose drain) — tests assert the ring semantics against the real
+/// executor instead.
+/// </remarks>
 public interface ISetupExecutor : IDisposable
 {
-    SetupWorkItem RentItem();
+    /// <summary>
+    /// Rents one pooled item whose pipeline is <paramref name="handler"/>, invoked by an executor
+    /// worker until its task completes. The handler is required: it is the item's only pipeline,
+    /// and a handler-less item is unrepresentable by construction.
+    /// </summary>
+    SetupWorkItem RentItem(Func<SetupWorkItem, Task> handler);
 
     /// <summary>Enqueues one populated item; false when the bounded ring is full (fail-closed).</summary>
     bool TryEnqueue(SetupWorkItem item);
@@ -72,7 +78,13 @@ public interface ISetupExecutor : IDisposable
 /// </summary>
 public sealed class SetupExecutor : ISetupExecutor
 {
-    /// <summary>Bound on queued setup items; matches the TCP pending-SYN index cap and the UDP session budget.</summary>
+    /// <summary>
+    /// Bound on queued setup items. It must not be smaller than the TCP pending-SYN index cap
+    /// (<see cref="TcpRedirect.TcpPendingSynSetupIndex.DefaultCapacity"/>): that index can retain
+    /// a full cap of pending SYNs at once and every one of them enqueues here, so a smaller ring
+    /// could reject setups under load. The load-bearing relation is this ordering inequality, not
+    /// an equality — a larger ring is always safe.
+    /// </summary>
     public const int DefaultRingCapacity = 1_024;
 
     /// <summary>
@@ -96,11 +108,15 @@ public sealed class SetupExecutor : ISetupExecutor
     private long _rejectedCount;
     private long _overflowAllocations;
 
-    public SetupExecutor(int workerCount = 0, int ringCapacity = DefaultRingCapacity)
+    /// <summary>
+    /// Creates the executor. <paramref name="workerCount"/> null selects
+    /// <see cref="DefaultWorkerCount"/>; <paramref name="ringCapacity"/> bounds the queued items.
+    /// </summary>
+    public SetupExecutor(int? workerCount = null, int ringCapacity = DefaultRingCapacity)
     {
-        if (workerCount < 0) throw new ArgumentOutOfRangeException(nameof(workerCount));
+        if (workerCount is < 0) throw new ArgumentOutOfRangeException(nameof(workerCount));
         if (ringCapacity <= 0) throw new ArgumentOutOfRangeException(nameof(ringCapacity));
-        _workerCount = workerCount == 0 ? DefaultWorkerCount : workerCount;
+        _workerCount = workerCount ?? DefaultWorkerCount;
         _capacity = ringCapacity;
     }
 
@@ -116,11 +132,17 @@ public sealed class SetupExecutor : ISetupExecutor
     /// <summary>Rents that missed the free list and allocated fresh (sizing diagnostic; zero at steady state).</summary>
     internal long OverflowAllocations => Interlocked.Read(ref _overflowAllocations);
 
-    public SetupWorkItem RentItem()
+    public SetupWorkItem RentItem(Func<SetupWorkItem, Task> handler)
     {
-        if (_free.TryDequeue(out var item)) return item;
+        ArgumentNullException.ThrowIfNull(handler);
+        if (_free.TryDequeue(out var item))
+        {
+            item.Handler = handler;
+            return item;
+        }
+
         Interlocked.Increment(ref _overflowAllocations);
-        return new SetupWorkItem();
+        return new SetupWorkItem { Handler = handler };
     }
 
     public bool TryEnqueue(SetupWorkItem item)
@@ -212,7 +234,7 @@ public sealed class SetupExecutor : ISetupExecutor
             // The dedicated worker thread intentionally blocks until the asynchronous setup pipeline
             // completes: that is the whole point of the executor (no thread-pool thread is parked).
 #pragma warning disable VSTHRD002
-            item.Handler!(item).GetAwaiter().GetResult();
+            item.Handler(item).GetAwaiter().GetResult();
 #pragma warning restore VSTHRD002
             item.Completion?.TrySetResult();
         }

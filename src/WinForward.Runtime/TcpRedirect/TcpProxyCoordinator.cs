@@ -228,10 +228,8 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
     /// </summary>
     private bool LaunchSetup(FlowKey key, PendingSynSetup entry, byte[] frame, Socks5Server server)
     {
-        var item = _setupExecutor.RentItem();
-        item.Handler = _setupHandler;
+        var item = _setupExecutor.RentItem(_setupHandler);
         item.Completion = entry.SetupCompletionSource;
-        item.Kind = SetupWorkKind.TcpSyn;
         item.Flow = key;
         item.Server = server;
         item.TcpEntry = entry;

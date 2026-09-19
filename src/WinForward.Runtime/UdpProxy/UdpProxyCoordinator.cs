@@ -142,10 +142,8 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable
     private bool ScheduleSessionSetup(FlowKey flow, Socks5Server server, long flowGeneration, MacAddress capturedClientMac, UdpSessionSlot slot)
     {
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var item = _setupExecutor.RentItem();
-        item.Handler = _setupHandler;
+        var item = _setupExecutor.RentItem(_setupHandler);
         item.Completion = completion;
-        item.Kind = SetupWorkKind.UdpNew;
         item.Flow = flow;
         item.Server = server;
         item.FlowGeneration = flowGeneration;
