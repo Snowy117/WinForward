@@ -100,6 +100,30 @@ public sealed class GcSoakScenarioTests
     }
 
     [Fact]
+    public void OverflowGrewToleratesOutstandingDriftButCatchesFreshNativeAllocation()
+    {
+        // The exact shape of the failed 30-minute run: identical overflow, relay outstanding drifted
+        // 16 -> 14 because relays finished and returned their leases. A return is not a leak, so the
+        // window gate must pass.
+        var baseline = new GcSoakScenario.PoolSnapshot(
+            RelayOutstanding: 16, RelayOverflow: 16,
+            WindowOutstanding: 128, WindowOverflow: 128,
+            SetupOutstanding: 0, SetupOverflow: 128);
+        var churned = new GcSoakScenario.PoolSnapshot(
+            RelayOutstanding: 14, RelayOverflow: 16,
+            WindowOutstanding: 128, WindowOverflow: 128,
+            SetupOutstanding: 0, SetupOverflow: 128);
+
+        Assert.False(GcSoakScenario.OverflowGrew(baseline, churned));
+        Assert.False(GcSoakScenario.OverflowGrew(baseline, baseline));
+
+        // A fresh native allocation beyond recycled buffers is the regression signal — in any pool.
+        Assert.True(GcSoakScenario.OverflowGrew(baseline, churned with { RelayOverflow = 17 }));
+        Assert.True(GcSoakScenario.OverflowGrew(baseline, churned with { WindowOverflow = 129 }));
+        Assert.True(GcSoakScenario.OverflowGrew(baseline, churned with { SetupOverflow = 129 }));
+    }
+
+    [Fact]
     public void WorkingSetSlopeIsZeroForAFlatSeries()
     {
         long[] timestamps = [0, 100, 200, 300];

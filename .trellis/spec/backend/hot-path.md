@@ -343,10 +343,14 @@ GC configuration. This is the contract for the full-path zeroing milestone (M1-M
 - **`gc-soak` asserted contract.** Steady state = established flows only (no new setup inside the
   measured window, since per-connection BCL allocations are Out-of-Scope). The scenario asserts
   the application-level guarantee — UDP forward lanes stay within the leak allowance
-  (`max(64 KiB, sends/512)`, far below any per-datagram leak), pools return `Outstanding`/`
-  OverflowAllocations` to baseline, and the working-set slope/growth stay flat — and *reports*
-  process-wide `gen0/1/2` and allocated bytes. Process-wide "gen counts unchanged" is not
-  assertable on the loopback harness; the heartbeat `gc.collected` alarm is the field signal.
+  (`max(64 KiB, sends/512)`, far below any per-datagram leak), pools perform **no fresh overflow
+  allocation** during the window (summed `OverflowAllocations` unchanged), the working-set
+  slope/growth stay flat — and, **after teardown**, every pool drains to `Outstanding == 0` with
+  the conservation identity `OverflowAllocations == DisposedCount + InPool + Outstanding` — and
+  *reports* process-wide `gen0/1/2` and allocated bytes. Cumulative `Outstanding` is deliberately
+  **not** asserted inside the window: established relays legitimately finish and return their
+  leases mid-soak (a return is not a leak). Process-wide "gen counts unchanged" is not assertable
+  on the loopback harness; the heartbeat `gc.collected` alarm is the field signal.
 - **Allocation gates must exercise the real production collaborator.** A gate built on a fake
   that implements the same interface cannot observe an allocation trap inside the real
   collaborator. `Socks5UdpTransport` handed a fresh `EndPoint` to `Socket.SendTo`/`SendToAsync`,
@@ -365,6 +369,9 @@ GC configuration. This is the contract for the full-path zeroing milestone (M1-M
 | Pool at capacity, all in use | overflow allocates and increments `OverflowAllocations`; never fails mid-packet |
 | `NativeLease.Memory` used after release | invalid — memory may be re-rented (documented "valid until release") |
 | Warm entry hands the real relay socket an `EndPoint` | 72 B/datagram (forbidden); use the cached `SocketAddress` |
+| Established relay finishes mid-window and returns its leases | `Outstanding` legitimately drops — do not assert in-window `Outstanding` equality; gate on overflow growth |
+| Any lease still held after full teardown | post-teardown `Outstanding != 0` fails the soak (bounded drain wait, not a fixed sleep) |
+| A pool overflows during the window | summed `OverflowAllocations` grows — soak fails |
 | `SetupExecutor.TryEnqueue` after dispose | refuses; item completed/rejected, no `ObjectDisposedException` escapes |
 | Post-dispose worker dequeues an item | drains it (canceled completion + recycled) instead of executing |
 | `FlowState` reused after expiry | caller must not observe it past the gate-held operation |
@@ -412,4 +419,14 @@ _socket.SendTo(_sendBuffer.AsSpan(0, written), SocketFlags.None, _relaySocketAdd
 
 // Correct: assert the application-level guarantee per sending thread (leak-bounded) and report
 // process-wide gen counts as observability; the field alarm is the heartbeat warn event.
+```
+
+```csharp
+// Wrong: assert full pool-state equality (including cumulative Outstanding) across the window —
+// established TCP relays finish and return their leases mid-soak, so Outstanding legitimately
+// drifts (a return, not a leak) and a 30-min run fails on correct behavior.
+
+// Correct: gate the window on fresh overflow growth only, then — after the relays/coordinator are
+// torn down — wait (bounded) for every pool to drain to Outstanding == 0 and assert the
+// conservation identity OverflowAllocations == DisposedCount + InPool + Outstanding.
 ```

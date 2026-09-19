@@ -20,7 +20,8 @@ namespace WinForward.Benchmarks.Stability;
 /// established shape for the measured window: TCP relays flood in both directions and UDP
 /// datagrams ride the forward relay path. The window asserts the application-level guarantee
 /// exactly — the UDP forward lanes allocate zero managed bytes while pushing the established
-/// flows — plus a flat working set and native-pool occupancy/overflow back at the baseline.
+/// flows — plus a flat working set, no native-pool overflow growth across the window, and every
+/// pooled lease returned (outstanding zero) once the load has been torn down.
 /// <para>
 /// Process-wide gen0/gen1/gen2 counts and <see cref="GC.GetTotalAllocatedBytes"/> are reported,
 /// not asserted, and this is deliberate: the loopback fake servers drive their receive loops with
@@ -79,6 +80,10 @@ internal static class GcSoakScenario
         try
         {
             await RunCoreAsync(context, options, maximumFrameSize, relayPool, udpWindowPool, udpSetupPool).ConfigureAwait(false);
+            // RunCoreAsync's finally has disposed the TCP flood and the UDP coordinator, so every
+            // relay pump and session has stopped. Assert the pools are fully drained while they are
+            // still alive: Dispose frees whatever remains queued, which would mask a stranded lease.
+            await AssertNoLeakedLeasesAsync(relayPool, udpWindowPool, udpSetupPool).ConfigureAwait(false);
         }
         finally
         {
@@ -228,11 +233,7 @@ internal static class GcSoakScenario
                 $"gc-soak application allocation exceeds the leak ceiling: the UDP forward lanes allocated {udpFlood.ThreadAllocatedBytes} managed bytes (allowed {allowedSenderBytes}) over {udpFlood.SendCount} sends.");
         }
 
-        if (measurement.WindowPools != measurement.BaselinePools)
-        {
-            throw new InvalidOperationException(
-                $"gc-soak native-pool state drifted: baseline {measurement.BaselinePools}, window-end {measurement.WindowPools}.");
-        }
+        AssertNoOverflowGrowth(measurement);
 
         var samples = measurement.SampleCount;
         if (samples < 1)
@@ -252,6 +253,65 @@ internal static class GcSoakScenario
         {
             throw new InvalidOperationException(
                 $"gc-soak working set grew {growth} bytes across the window (limit {WorkingSetGrowthLimitBytes}).");
+        }
+    }
+
+    /// <summary>
+    /// Overflow is the only unbounded native-allocation signal across the measured window.
+    /// Cumulative rent/return/outstanding counters legitimately move under long-run relay churn:
+    /// TCP relays finish or fall silent and hand their relay-pool leases back, so relay outstanding
+    /// drifts down (16 -> 14 over the 30-minute run that motivated this check). That is a return,
+    /// not a leak, and outstanding is therefore deliberately not compared here; the leak signal is
+    /// the post-teardown <see cref="AssertNoLeakedLeasesAsync"/>. Only fresh <c>NativeMemory</c>
+    /// allocations beyond recycled buffers (overflow growth) indicate a sizing regression.
+    /// </summary>
+    private static void AssertNoOverflowGrowth(GcSoakMeasurement measurement)
+    {
+        if (OverflowGrew(measurement.BaselinePools, measurement.WindowPools))
+        {
+            throw new InvalidOperationException(
+                $"gc-soak native pools allocated fresh overflow buffers during the window: baseline {measurement.BaselinePools}, window-end {measurement.WindowPools}, overflow delta {TotalOverflow(measurement.WindowPools) - TotalOverflow(measurement.BaselinePools)}.");
+        }
+    }
+
+    /// <summary>
+    /// The true lease-leak signal, evaluated after <see cref="RunCoreAsync"/> has torn the load
+    /// down: every rented buffer must be back, and the allocation-conservation identity
+    /// (<c>overflow == disposed + inPool + outstanding</c>) must hold for each pool.
+    /// </summary>
+    private static async Task AssertNoLeakedLeasesAsync(NativeBufferPool relay, NativeBufferPool window, NativeBufferPool setup)
+    {
+        // Relay disposal deliberately does not await the pump tasks: TcpProxyRelay.DisposeAsync
+        // faults the sockets and lets the pumps unwind asynchronously, so a final relay-pool lease
+        // can return just after RunCoreAsync returns. Wait — bounded — for the pools to drain
+        // rather than trusting a fixed delay, which flakes when the thread pool is contended. A
+        // genuine leak never drains, so the timeout still fails.
+        var deadline = Stopwatch.GetTimestamp() + (long)(StopTimeout.TotalSeconds * Stopwatch.Frequency);
+        while (!PoolsDrained(relay.Stats, window.Stats, setup.Stats) && Stopwatch.GetTimestamp() < deadline)
+        {
+            await Task.Delay(10).ConfigureAwait(false);
+        }
+
+        AssertPoolDrained("relay", relay.Stats);
+        AssertPoolDrained("udpWindow", window.Stats);
+        AssertPoolDrained("udpSetup", setup.Stats);
+    }
+
+    private static bool PoolsDrained(NativeBufferPoolStats relay, NativeBufferPoolStats window, NativeBufferPoolStats setup)
+        => relay.Outstanding == 0 && window.Outstanding == 0 && setup.Outstanding == 0;
+
+    private static void AssertPoolDrained(string poolName, NativeBufferPoolStats stats)
+    {
+        if (stats.Outstanding != 0)
+        {
+            throw new InvalidOperationException(
+                $"gc-soak leaked {stats.Outstanding} native {poolName} lease(s) after teardown: {stats}.");
+        }
+
+        if (stats.OverflowAllocations != stats.DisposedCount + stats.InPool + stats.Outstanding)
+        {
+            throw new InvalidOperationException(
+                $"gc-soak {poolName} pool accounting is inconsistent after teardown: {stats} (overflow must equal disposed + inPool + outstanding).");
         }
     }
 
@@ -321,8 +381,17 @@ internal static class GcSoakScenario
     private static long TotalOverflow(PoolSnapshot snapshot) =>
         snapshot.RelayOverflow + snapshot.WindowOverflow + snapshot.SetupOverflow;
 
+    /// <summary>
+    /// True when any of the three native pools performed a fresh allocation beyond its recycled
+    /// buffers between the two snapshots. Cumulative rent/return/outstanding counters move under
+    /// long-run relay churn and are deliberately not compared; only overflow growth signals a
+    /// native-buffer sizing or lease-leak regression while load is still running.
+    /// </summary>
+    internal static bool OverflowGrew(PoolSnapshot baseline, PoolSnapshot window) =>
+        TotalOverflow(window) != TotalOverflow(baseline);
+
     [StructLayout(LayoutKind.Auto)]
-    private readonly record struct PoolSnapshot(
+    internal readonly record struct PoolSnapshot(
         long RelayOutstanding,
         long RelayOverflow,
         long WindowOutstanding,
