@@ -127,7 +127,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         TcpProxyCoordinator tcpCoordinator;
         try
         {
-            tcpCoordinator = CreateTcpCoordinator(configuration, reinjector, selfTraffic, logger, healthSignal, redirectTable, synCopyPool, relayPool, setupExecutor, addressCache);
+            tcpCoordinator = TcpRedirectComposer.Create(configuration, reinjector, selfTraffic, logger, healthSignal, new TcpRedirectComposition(redirectTable, synCopyPool, relayPool, setupExecutor, addressCache));
         }
         catch
         {
@@ -182,7 +182,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         // should ever change; every component follows it from here.
         var maximumFrameSize = NdisApiAbi.MaximumEthernetFrame;
         var udpTargets = new UdpAdapterTargetSource();
-        await PrimeSocks5AddressCacheAsync(configuration, addressCache, logger).ConfigureAwait(false);
+        await UdpProxyComposer.PrimeSocks5AddressCacheAsync(configuration, addressCache, logger).ConfigureAwait(false);
         // One native pool backs every queued setup datagram (B4); the coordinator owns it when
         // none is injected, so production passes it and disposes it here after release.
         var udpDatagramPool = new NativeBufferPool(maximumFrameSize);
@@ -194,7 +194,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         UdpProxyCoordinator udpCoordinator;
         try
         {
-            udpCoordinator = CreateUdpCoordinator(reinjector, selfTraffic, logger, healthSignal, udpTargets, maximumFrameSize, udpDatagramPool, udpWindowPool, setupExecutor, addressCache);
+            udpCoordinator = UdpProxyComposer.Create(reinjector, selfTraffic, logger, healthSignal, new UdpProxyComposition(udpTargets, maximumFrameSize, udpDatagramPool, udpWindowPool, setupExecutor, addressCache));
         }
         catch
         {
@@ -212,22 +212,6 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
             udpDatagramPool.Dispose();
             udpWindowPool.Dispose();
             throw;
-        }
-    }
-
-    private static async Task PrimeSocks5AddressCacheAsync(ValidatedConfiguration configuration, Socks5AddressCache cache, IRuntimeLogger logger)
-    {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        foreach (var server in configuration.Servers.Values)
-        {
-            try
-            {
-                await cache.ResolveAsync(server.Host, timeout.Token).ConfigureAwait(false);
-            }
-            catch (Exception exception)
-            {
-                logger.Warn($"SOCKS5 address pre-resolution failed for '{server.Name}': {exception.GetType().Name}: {exception.Message}");
-            }
         }
     }
 
@@ -256,56 +240,6 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         idleExpirySweeper.Start();
         return new DurableCaptureBundle(dispatcher, executor, udpTargets, idleExpirySweeper, udpCoordinator, tcpCoordinator, logger, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, setupExecutor);
     }
-
-    private static UdpProxyCoordinator CreateUdpCoordinator(
-        IPacketReinjector reinjector,
-        SelfTrafficRegistry selfTraffic,
-        IRuntimeLogger logger,
-        IInterceptionHealthSignal? healthSignal,
-        UdpAdapterTargetSource udpTargets,
-        int maximumFrameSize,
-        NativeBufferPool udpDatagramPool,
-        NativeBufferPool udpWindowPool,
-        SetupExecutor setupExecutor,
-        Socks5AddressCache addressCache)
-        => new(
-            new Socks5UdpTransportFactory(selfTraffic, maximumFrameSize, addressCache),
-            new UdpResponseReinjector(reinjector, udpTargets, maximumFrameSize: maximumFrameSize, logger: logger, healthSignal: healthSignal),
-            new UdpProxyOptions
-            {
-                Logger = logger,
-                MaximumFrameSize = maximumFrameSize,
-                ReceiveWindowPool = udpWindowPool,
-                SetupQueuePool = udpDatagramPool,
-                SetupExecutor = setupExecutor
-            });
-
-    private static TcpProxyCoordinator CreateTcpCoordinator(
-        ValidatedConfiguration configuration,
-        IPacketReinjector reinjector,
-        SelfTrafficRegistry selfTraffic,
-        IRuntimeLogger logger,
-        IInterceptionHealthSignal? healthSignal,
-        TcpRedirectTable redirectTable,
-        NativeBufferPool synCopyPool,
-        NativeBufferPool relayPool,
-        SetupExecutor setupExecutor,
-        Socks5AddressCache addressCache)
-        => new(
-            new TcpRedirectListenerFactory(),
-            new TcpProxyRelayFactory(selfTraffic, logger, relayPool, addressCache),
-            new TcpRedirectInjector(reinjector),
-            redirectTable,
-            selfTraffic,
-            new WindowsAdapterLocalAddressProvider(),
-            new TcpRedirectOptions
-            {
-                Logger = logger,
-                Capacity = configuration.TcpFlowCapacity,
-                HealthSignal = healthSignal,
-                SynCopyPool = synCopyPool,
-                SetupExecutor = setupExecutor
-            });
 
     /// <summary>
     /// The capture runner's scope-installed callback: swaps the UDP reinjection-target snapshot to
