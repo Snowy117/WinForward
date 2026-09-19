@@ -29,17 +29,32 @@ public interface INdisPacketReader
 }
 
 /// <summary>
-/// The optional knobs of the <see cref="NdisCapturePump"/> constructor, collapsed into one
-/// record (six former optional positional parameters) so call sites name only the knobs they
-/// set. Every member defaults to null, which selects the pump's built-in default for that knob.
+/// The optional knobs of the <see cref="NdisCapturePump"/> constructor as one record of named
+/// init properties, so call sites set only the knobs they need. Every member defaults to null,
+/// which selects the pump's built-in default for that knob. The two <c>internal</c> members are
+/// test and benchmark seams (reached through <c>InternalsVisibleTo</c>) and are never set by
+/// production.
 /// </summary>
-public sealed record NdisCapturePumpOptions(
-    TimeSpan? PollDelay = null,
-    int? BatchCapacity = null,
-    Action? OnBatchCompleted = null,
-    Action<int, int>? OnTransientRetry = null,
-    Action<int>? OnDegraded = null,
-    TimeSpan? TransientRetryBaseDelay = null);
+public sealed record NdisCapturePumpOptions
+{
+    /// <summary>Idle pacing between empty-queue polls; null keeps the pump's 1 ms default.</summary>
+    public TimeSpan? PollDelay { get; init; }
+
+    /// <summary>Runs after every iteration's slot loop (and once on run exit); null disables.</summary>
+    public Action? OnBatchCompleted { get; init; }
+
+    /// <summary>Observes each transient-read retry with (nativeError, attempt); null disables.</summary>
+    public Action<int, int>? OnTransientRetry { get; init; }
+
+    /// <summary>Runs once when the pump exits through the degraded path; null disables.</summary>
+    public Action<int>? OnDegraded { get; init; }
+
+    /// <summary>Test/benchmark seam: overrides the batch-buffer count; null keeps the production default (32).</summary>
+    internal int? BatchCapacity { get; init; }
+
+    /// <summary>Test/benchmark seam: overrides the retry backoff base; null keeps the production default (100 ms).</summary>
+    internal TimeSpan? TransientRetryBaseDelay { get; init; }
+}
 
 /// <summary>
 /// Pumps captured packets until cancelled or stopped. The loop runs on ONE dedicated
@@ -365,17 +380,16 @@ public sealed class NdisCapturePump : IAsyncDisposable
         if (cancellationToken.WaitHandle.WaitOne(delay)) cancellationToken.ThrowIfCancellationRequested();
     }
 
-    /// <summary>Total transient read retries attempted since construction (telemetry, R7).</summary>
-    internal long TransientReadRetryCount => Interlocked.Read(ref _transientReadRetryCount);
-
-    /// <summary>Distinct transient-failure incidents (a healthy read separates incidents; telemetry, R7).</summary>
-    internal long TransientReadIncidentCount => Interlocked.Read(ref _transientReadIncidentCount);
-
-    /// <summary>Whether this pump exited through the degraded path (telemetry, R7).</summary>
-    internal bool IsDegraded => Volatile.Read(ref _degraded) != 0;
-
-    /// <summary>The native error of the degraded exit; 0 while the pump has not degraded.</summary>
-    internal int LastDegradedNativeErrorCode => Volatile.Read(ref _lastDegradedNativeError);
+    /// <summary>
+    /// One read-only telemetry snapshot of this pump's transient-retry counters and degraded
+    /// state (see <see cref="NdisPumpDiagnostics"/>; R7). The control/test seams
+    /// (<see cref="PumpThread"/> and <c>RunIterationForTests</c>) stay on the pump itself.
+    /// </summary>
+    internal NdisPumpDiagnostics Diagnostics => new(
+        Volatile.Read(ref _degraded) != 0,
+        Volatile.Read(ref _lastDegradedNativeError),
+        Interlocked.Read(ref _transientReadRetryCount),
+        Interlocked.Read(ref _transientReadIncidentCount));
 
     private void Degrade(int nativeError)
     {

@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
 [assembly: InternalsVisibleTo("WinForward.Core.Tests")]
+[assembly: InternalsVisibleTo("WinForward.Benchmarks")]
 
 namespace WinForward.NdisApi;
 

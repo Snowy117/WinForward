@@ -55,9 +55,9 @@ public sealed class NdisCaptureResilienceTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pump.RunAsync(cts.Token).AsTask());
 
         Assert.Equal(new byte[] { 0x10 }, observed);
-        Assert.Equal(1, pump.TransientReadRetryCount);
-        Assert.Equal(1, pump.TransientReadIncidentCount);
-        Assert.False(pump.IsDegraded);
+        Assert.Equal(1, pump.Diagnostics.TransientReadRetryCount);
+        Assert.Equal(1, pump.Diagnostics.TransientReadIncidentCount);
+        Assert.False(pump.Diagnostics.IsDegraded);
     }
 
     [Fact]
@@ -81,8 +81,8 @@ public sealed class NdisCaptureResilienceTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pump.RunAsync(cts.Token).AsTask());
 
-        Assert.Equal(2, pump.TransientReadRetryCount);
-        Assert.Equal(2, pump.TransientReadIncidentCount);
+        Assert.Equal(2, pump.Diagnostics.TransientReadRetryCount);
+        Assert.Equal(2, pump.Diagnostics.TransientReadIncidentCount);
     }
 
     [Fact]
@@ -100,9 +100,9 @@ public sealed class NdisCaptureResilienceTests
 
         // Five retries then the degraded exit: the callback fires exactly once with the native
         // error, the run returns normally, and the pump observes its own degraded state.
-        Assert.Equal(5, pump.TransientReadRetryCount);
-        Assert.True(pump.IsDegraded);
-        Assert.Equal(ErrorNotReady, pump.LastDegradedNativeErrorCode);
+        Assert.Equal(5, pump.Diagnostics.TransientReadRetryCount);
+        Assert.True(pump.Diagnostics.IsDegraded);
+        Assert.Equal(ErrorNotReady, pump.Diagnostics.LastDegradedNativeErrorCode);
         Assert.Equal([ErrorNotReady], degradedErrors);
         Assert.Empty(observed);
     }
@@ -118,8 +118,8 @@ public sealed class NdisCaptureResilienceTests
 
         await pump.RunAsync(cts.Token);
 
-        Assert.True(pump.IsDegraded);
-        Assert.Equal(0, pump.TransientReadRetryCount);
+        Assert.True(pump.Diagnostics.IsDegraded);
+        Assert.Equal(0, pump.Diagnostics.TransientReadRetryCount);
         Assert.Equal([87], degradedErrors);
     }
 
@@ -159,7 +159,7 @@ public sealed class NdisCaptureResilienceTests
         cts.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
-        Assert.False(pump.IsDegraded);
+        Assert.False(pump.Diagnostics.IsDegraded);
         await pump.DisposeAsync();
     }
 
