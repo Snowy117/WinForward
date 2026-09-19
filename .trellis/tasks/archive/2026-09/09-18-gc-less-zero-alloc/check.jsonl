@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/09-18-gc-less-zero-alloc/prd.md", "reason": "Acceptance criteria AC1-AC6 are the check contract: allocation gates, soak zero-collection, leak regressions, explicit GC posture"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "MemoryDiagnoser allocation/GC-count gates are the benchmark acceptance rule (hot-path.md §9)"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Zero-warning build, 589-test baseline, forbidden patterns to verify against"}
+{"file": ".trellis/tasks/09-18-gc-less-zero-alloc/design.md", "reason": "Verify implementation matches design: try/finally on every rent site, dispose-drain pools, bounded threads, fallback documented where used"}

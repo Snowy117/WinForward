@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Codified zero-allocation contracts for the packet pipeline: 160B dispatcher gate, native lease lifetime, relay 0B/op — all changes must comply"}
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "Native-call gates, batched capture ABI, buffer pooling conventions for NdisApi layer touched by M2/M4"}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "SOCKS5 UDP relay wiring and response reinjection semantics for A4/B4/B11 changes"}
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "Local redirect transform, DNAT shape, teardown grace — constraints for A2/A3/B1/B2/B8 changes"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Forbidden patterns, testing requirements, 589-test baseline, zero-warning bar for new tests"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Fail-closed semantics and bounded exemptions govern L1/L2 leak-fix exception paths"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "IRuntimeLogger structured logging rules for new heartbeat GC/pool fields (M0/M5)"}
+{"file": ".trellis/tasks/09-18-gc-less-zero-alloc/prd.md", "reason": "Requirements, allocation enemy inventory (A/B/L anchors), user decisions D1/D2, acceptance criteria"}
+{"file": ".trellis/tasks/09-18-gc-less-zero-alloc/design.md", "reason": "NativeBufferPool family design, pump threading model, per-flow pooling, GC posture, risks and fallbacks"}
