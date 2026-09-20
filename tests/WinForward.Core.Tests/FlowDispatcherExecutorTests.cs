@@ -413,7 +413,7 @@ public sealed class FlowDispatcherExecutorTests
     public async Task ExecutorPassesTcpPacketWhenCoordinatorReportsNotRelevant()
     {
         var reinjector = new FakeReinjector();
-        await using var coordinator = new TcpProxyCoordinator(
+        await using var coordinator = TcpCoordinatorFakes.CreateCoordinator(
             new ThrowingRedirectListenerFactory(), new ThrowingRelayFactory(), new ThrowingRedirectInjector(),
             new TcpRedirectTable(), new SelfTrafficRegistry(), new FakeLocalAddressProvider());
         var executor = new NdisPacketActionExecutor(reinjector, tcpProxy: coordinator);

@@ -21,9 +21,9 @@ internal interface IUdpSessionSlotHost
     /// <summary>One flush-dequeue step: verifies slot ownership, dequeues the next buffered datagram (releasing its budget charge exactly once; the caller releases the lease), or flips the slot ready when the queue drains.</summary>
     (UdpSessionSetup.FlushStep Step, NativeLease Lease, int Length, DateTimeOffset EnqueuedAt) DequeueForFlush(FlowKey flow, UdpProxyCoordinator.UdpSessionSlot slot);
 
-    /// <summary>Removes the flow's slot when it is still the exact <paramref name="slot"/> instance, releasing the session and draining queued datagrams fail-closed; returns true when this caller owned the removal.</summary>
-    Task<bool> RemoveSlotAsync(FlowKey flow, UdpProxyCoordinator.UdpSessionSlot slot, bool armCooldown);
+    /// <summary>Removes the flow's slot when it is still the exact <paramref name="slot"/> instance, releasing the session and draining queued datagrams fail-closed; returns true when this caller owned the removal. Only <see cref="UdpTeardownReason.SetupFailure"/> arms the setup cooldown.</summary>
+    Task<bool> RemoveSlotAsync(FlowKey flow, UdpProxyCoordinator.UdpSessionSlot slot, UdpTeardownReason reason);
 
-    /// <summary>The receive-failure teardown: removes the session's slot (no cooldown) so the flow can set up anew.</summary>
+    /// <summary>The receive-failure teardown: removes the session's slot (reason <see cref="UdpTeardownReason.Fault"/>, no cooldown) so the flow can set up anew.</summary>
     Task RemoveReceiveFailedSessionAsync(UdpProxySession session);
 }

@@ -17,33 +17,44 @@ internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IR
 
     public async Task RunAcceptLoopAsync(TcpRedirectSession session)
     {
-        var token = session.Token;
-        while (!token.IsCancellationRequested)
+        try
         {
-            ITcpAcceptedConnection accepted;
-            try
+            var token = session.Token;
+            while (!token.IsCancellationRequested)
             {
-                accepted = await session.Listener.AcceptAsync(token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (token.IsCancellationRequested)
-            {
-                return;
-            }
-            catch (ObjectDisposedException)
-            {
-                // The listener was disposed during shutdown.
-                return;
-            }
-            catch (Exception acceptEx)
-            {
-                // L3: a transient accept error is retried after a bounded delay, never a tight
-                // busy-loop. Cancellation and a disposed listener already break out above.
-                logger.Warn($"TCP redirect accept failed ({acceptEx.GetType().Name}); retrying after a bounded delay.");
-                await BoundedRetryDelayAsync(token).ConfigureAwait(false);
-                continue;
-            }
+                ITcpAcceptedConnection accepted;
+                try
+                {
+                    accepted = await session.Listener.AcceptAsync(token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch (ObjectDisposedException)
+                {
+                    // The listener was disposed during shutdown.
+                    return;
+                }
+                catch (Exception acceptEx)
+                {
+                    // L3: a transient accept error is retried after a bounded delay, never a tight
+                    // busy-loop. Cancellation and a disposed listener already break out above.
+                    logger.Warn($"TCP redirect accept failed ({acceptEx.GetType().Name}); retrying after a bounded delay.");
+                    await BoundedRetryDelayAsync(token).ConfigureAwait(false);
+                    continue;
+                }
 
-            if (!await TryEstablishRelayAsync(session, accepted).ConfigureAwait(false)) return;
+                if (!await TryEstablishRelayAsync(session, accepted).ConfigureAwait(false)) return;
+            }
+        }
+        finally
+        {
+            // This loop is the only reader of session.Token (directly and through
+            // ClientResetInjector's session overload), so it owns the lifetime CTS disposal: the
+            // store defers DisposeLifetime until the loop ends and a retire can never pull the
+            // CTS out from under a concurrent Token read (R1).
+            session.DisposeLifetime();
         }
     }
 
@@ -55,6 +66,7 @@ internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IR
     private async Task<bool> TryEstablishRelayAsync(TcpRedirectSession session, ITcpAcceptedConnection accepted)
     {
         var token = session.Token;
+        ITcpRelay? unattachedRelay;
         try
         {
             if (accepted.RemoteEndPoint != session.Association.AcceptedPeerEndpoint)
@@ -72,18 +84,20 @@ internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IR
             var relay = await relayFactory.EstablishAsync(session.Association.OriginalDestination, accepted, session.Server, token).ConfigureAwait(false);
             if (!tryAttachRelay(session, relay))
             {
-                // The relay is discarded without an owner that would await its completion;
-                // observe it now so a later fault never surfaces as an unobserved task
-                // exception (S3).
-                TcpRelayFaultObserver.Observe(relay, logger);
-                await relay.DisposeAsync().ConfigureAwait(false);
-                await accepted.DisposeAsync().ConfigureAwait(false);
+                unattachedRelay = relay;
+            }
+            else
+            {
+                TcpRedirectLogging.LogDebug(logger, "tcp.relay.started", session, "established");
+                // Both terminal drains own the session's remaining lifetime: the relay-completion
+                // observer runs the teardown, the redundant-accept drain spans until that teardown
+                // disposes the listener. Awaiting both (no discarded tasks) makes session.AcceptLoop
+                // the store's true quiescence wait (R1/R2).
+                var relayCompletion = ObserveRelayCompletionAsync(session, relay, token);
+                await DrainRedundantConnectionsAsync(session, token).ConfigureAwait(false);
+                await relayCompletion.ConfigureAwait(false);
                 return false;
             }
-            TcpRedirectLogging.LogDebug(logger, "tcp.relay.started", session, "established");
-            _ = ObserveRelayCompletionAsync(session, relay, token);
-            await DrainRedundantConnectionsAsync(session, token).ConfigureAwait(false);
-            return false;
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
@@ -94,6 +108,44 @@ internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IR
         {
             await clientReset.HandleRelaySetupFailureAsync(session, accepted, exception).ConfigureAwait(false);
             return false;
+        }
+
+        // The session could no longer own a relay (it was retired, or the store is disposing, in
+        // the accept-to-attach window), so the relay and the accepted connection have no owner and
+        // the redirect must not be left half-open. This runs outside the setup try: a disposal
+        // fault here is not a relay setup failure, and routing it through the reset/fail handler
+        // would inject against an already retired session (R7).
+        // The relay is discarded without an owner that would await its completion; observe it now
+        // so a later fault never surfaces as an unobserved task exception (S3).
+        TcpRelayFaultObserver.Observe(unattachedRelay, logger);
+        await DiscardUnattachedRelayAsync(unattachedRelay, accepted).ConfigureAwait(false);
+        await tearDownSession(session).ConfigureAwait(false);
+        return false;
+    }
+
+    /// <summary>
+    /// Best-effort disposal of a relay that could not be attached and of its accepted connection.
+    /// Both disposals are contained so a fault here can never escape into the caller's
+    /// setup-failure handling against a retired session.
+    /// </summary>
+    private async ValueTask DiscardUnattachedRelayAsync(ITcpRelay relay, ITcpAcceptedConnection accepted)
+    {
+        try
+        {
+            await relay.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            logger.Warn($"TCP redirect relay disposal after a failed attach failed ({exception.GetType().Name}).");
+        }
+
+        try
+        {
+            await accepted.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            logger.Warn($"TCP redirect accepted-connection disposal after a failed attach failed ({exception.GetType().Name}).");
         }
     }
 
@@ -145,14 +197,14 @@ internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IR
 
     private async Task ObserveRelayCompletionAsync(TcpRedirectSession session, ITcpRelay relay, CancellationToken token)
     {
-        // Fire-and-forget (S5): nothing awaits this task, so a throw here would surface as an
-        // unobserved task exception. The end handling itself is best-effort and must never block
-        // the teardown that follows.
+        // Best-effort end handling: neither an unobserved task exception nor an error in the
+        // teardown that follows may escape. The token bounds the wait so a relay whose completion
+        // never settles cannot hold the accept loop open past its own cancellation.
         try
         {
             try
             {
-                await relay.Completion.ConfigureAwait(false);
+                await relay.Completion.WaitAsync(token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
             {

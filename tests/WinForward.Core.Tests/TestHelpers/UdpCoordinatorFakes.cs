@@ -1,8 +1,32 @@
 using System.Net.Sockets;
 using WinForward.Configuration;
+using WinForward.Runtime;
 using WinForward.Runtime.Socks5;
+using WinForward.Runtime.UdpProxy;
 
 namespace WinForward.Core.Tests;
+
+/// <summary>
+/// Builds a UDP coordinator whose borrowed pools and setup executor default to the process-wide
+/// <see cref="TestPools"/> instances; tests that assert pool accounting pass their own.
+/// </summary>
+internal static class UdpCoordinatorFakes
+{
+    internal static UdpProxyCoordinator CreateCoordinator(
+        IUdpProxyTransportFactory transportFactory,
+        IUdpResponseSink responseSink,
+        UdpProxyOptions? options = null,
+        NativeBufferPool? setupQueuePool = null,
+        NativeBufferPool? receiveWindowPool = null,
+        ISetupExecutor? setupExecutor = null)
+        => new(
+            transportFactory,
+            responseSink,
+            setupQueuePool ?? TestPools.UdpSetupQueuePool,
+            receiveWindowPool ?? TestPools.UdpReceiveWindowPool,
+            setupExecutor ?? TestPools.SetupExecutor,
+            options);
+}
 
 /// <summary>
 /// Coordinator-lifecycle fakes: a factory whose first CreateAsync blocks until failed

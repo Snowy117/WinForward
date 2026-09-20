@@ -12,8 +12,8 @@ namespace WinForward.Cli;
 /// The bundle-created collaborators the durable UDP coordinator is wired from (P3): the
 /// refreshable reinjection-target snapshot, the pinned frame cap, the shared native pools and
 /// setup executor, and the shared SOCKS5 address cache. Creation, registration, rollback, and
-/// disposal stay in <see cref="DurableCaptureBundle"/>; the coordinator owns the pools exactly
-/// as it always has.
+/// disposal stay in <see cref="DurableCaptureBundle"/>; the coordinator borrows the pools and
+/// the executor and never disposes them.
 /// </summary>
 internal sealed record UdpProxyComposition(
     UdpAdapterTargetSource Targets,
@@ -56,12 +56,12 @@ internal static class UdpProxyComposer
         => new(
             new Socks5UdpTransportFactory(selfTraffic, composition.MaximumFrameSize, composition.AddressCache),
             new UdpResponseReinjector(reinjector, composition.Targets, maximumFrameSize: composition.MaximumFrameSize, logger: logger, healthSignal: healthSignal),
+            composition.SetupQueuePool,
+            composition.ReceiveWindowPool,
+            composition.SetupExecutor,
             new UdpProxyOptions
             {
                 Logger = logger,
                 MaximumFrameSize = composition.MaximumFrameSize,
-                ReceiveWindowPool = composition.ReceiveWindowPool,
-                SetupQueuePool = composition.SetupQueuePool,
-                SetupExecutor = composition.SetupExecutor,
             });
 }

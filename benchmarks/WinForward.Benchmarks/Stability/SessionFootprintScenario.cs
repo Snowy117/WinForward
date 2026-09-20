@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Globalization;
 using WinForward.Configuration;
 using WinForward.Core;
+using WinForward.Protocols;
+using WinForward.Runtime;
 using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
 
@@ -24,7 +26,11 @@ internal static class SessionFootprintScenario
     private static async Task RunOneAsync(StabilityContext context, int sessions)
     {
         var factory = new CountingTransportFactory(new BenchmarkUdpTransportFactory());
-        var coordinator = new UdpProxyCoordinator(factory, NoopUdpResponseSink.Instance, new UdpProxyOptions { Capacity = sessions });
+        const int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame;
+        using var setupQueuePool = new NativeBufferPool(maximumFrameSize);
+        using var receiveWindowPool = new NativeBufferPool(UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize));
+        using var setupExecutor = new SetupExecutor();
+        var coordinator = new UdpProxyCoordinator(factory, NoopUdpResponseSink.Instance, setupQueuePool, receiveWindowPool, setupExecutor, new UdpProxyOptions { Capacity = sessions });
         var server = new Socks5Server("benchmark", "127.0.0.1", 1080, Username: null, Password: null);
         using var process = Process.GetCurrentProcess();
         var workingSetBefore = process.WorkingSet64;

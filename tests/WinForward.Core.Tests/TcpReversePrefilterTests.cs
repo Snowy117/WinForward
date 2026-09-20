@@ -94,7 +94,7 @@ public sealed class TcpReversePrefilterTests
     {
         var table = new TcpRedirectTable();
         var listenerFactory = new FakeListenerFactory();
-        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new CompletableRelayFactory(), new FakeInjector(), table, new SelfTrafficRegistry(), new FakeLocalAddressProvider());
+        await using var coordinator = CreateCoordinator(listenerFactory, new CompletableRelayFactory(), new FakeInjector(), table, new SelfTrafficRegistry(), new FakeLocalAddressProvider());
         Assert.True(TryClaimListener(table, MakeOriginalKey(53000), IPAddress.Loopback, 40000));
 
         // Stage (b): TCP with a claimed source port diverts; any other shape stays warm. The UDP

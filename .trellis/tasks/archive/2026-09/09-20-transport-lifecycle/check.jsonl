@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verification gate: format (exit 0, empty), zero-warning Release build, green Release tests, and a zero-Issue jb inspectcode report; the check must confirm no global suppressions were added."}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Confirm the SendSpanAsync signature change adds no allocation and the per-packet dispatch path is unchanged; re-run the allocation gates."}
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "Verify the store/accept-loop/relay teardown semantics and tombstone behavior match the documented TCP contracts after §1.1-§1.4 and §4."}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "Verify the per-session lifetime, teardown reason, and drop policy match the documented UDP session contracts after §1.5-§2."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Confirm fail-closed behavior and exactly-once resource release across the new teardown paths."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Spec index to confirm every touched layer has a matching spec section and no contract was left undocumented."}

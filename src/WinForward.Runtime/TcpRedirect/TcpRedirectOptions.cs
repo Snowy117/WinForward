@@ -1,12 +1,10 @@
-using WinForward.Core;
-
 namespace WinForward.Runtime.TcpRedirect;
 
 /// <summary>
-/// Construction options for <see cref="TcpProxyCoordinator"/>: every optional dependency in one
-/// named record, with defaults matching the coordinator's historical behavior. A pool or the
-/// setup executor that is not injected is created by the coordinator and then owned (and
-/// disposed) by it; an injected instance is never disposed by the coordinator.
+/// Construction options for <see cref="TcpProxyCoordinator"/>: the optional dependencies in one
+/// named record, with defaults matching the coordinator's historical behavior. The shared native
+/// pool and setup executor are required constructor parameters owned by composition; the
+/// coordinator only borrows them and never disposes them.
 /// </summary>
 public sealed record TcpRedirectOptions
 {
@@ -21,10 +19,4 @@ public sealed record TcpRedirectOptions
 
     /// <summary>Optional sink for client-visible failure health signals; null reports to the shared no-op.</summary>
     public IInterceptionHealthSignal? HealthSignal { get; init; }
-
-    /// <summary>Shared pool backing the retained SYN copies; created if absent.</summary>
-    public NativeBufferPool? SynCopyPool { get; init; }
-
-    /// <summary>Shared setup executor; created if absent.</summary>
-    public ISetupExecutor? SetupExecutor { get; init; }
 }

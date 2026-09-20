@@ -299,14 +299,34 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
         Stalled,
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0) return ValueTask.CompletedTask;
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         // The dispose path discards the relay without ever awaiting its completion — and the
         // disposal itself faults an in-flight pump read — so the fault observer must be hooked
         // before the sockets go away (S3).
         TcpRelayFaultObserver.Observe(this, _logger);
         _localSocket.Dispose();
-        return _control.DisposeAsync();
+        try
+        {
+            await _control.DisposeAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            // Owning the pump boundary (R1): closing the local socket and the control stream
+            // terminates both pumps, so awaiting Completion makes DisposeAsync a real quiescence
+            // point — once it returns, no pump task is running. The fault the disposal manufactures
+            // is already observed by TcpRelayFaultObserver, so the await swallows it here.
+            try
+            {
+                await Completion.ConfigureAwait(false);
+            }
+#pragma warning disable RCS1075 // The disposal-manufactured pump fault is observed by TcpRelayFaultObserver.
+            catch (Exception)
+            {
+                // Disposal-manufactured pump fault; observed by TcpRelayFaultObserver.
+            }
+#pragma warning restore RCS1075
+        }
     }
 }

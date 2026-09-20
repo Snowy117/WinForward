@@ -263,7 +263,7 @@ public sealed class TcpFragmentHandlingTests
                 ? new FakeLocalAddressProvider(s_forwardLocal)
                 : new FakeLocalAddressProvider();
             var logger = new RecordingRuntimeLogger();
-            var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, localAddresses, new TcpRedirectOptions { Logger = logger });
+            var coordinator = CreateCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, localAddresses, new TcpRedirectOptions { Logger = logger });
             var reinjector = new CountingReinjector();
             var executor = new NdisPacketActionExecutor(reinjector, logger, tcpProxy: coordinator);
             // Forwarded flows only evaluate adapter-qualified rules, so each shape needs its own

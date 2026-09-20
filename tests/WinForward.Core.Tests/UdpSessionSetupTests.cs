@@ -50,6 +50,50 @@ public sealed class UdpSessionSetupTests
         setup.DisposeLimiter();
     }
 
+    [Fact]
+    public async Task SetupFailureReportsTheSetupFailureTeardownReason()
+    {
+        var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
+        var flow = CreateFlow("192.0.2.53");
+        var factory = new FailingTransportFactory();
+        using var receiveWindowPool = new NativeBufferPool(ReceiveBufferSize, capacity: 4);
+        using var setupQueuePool = new NativeBufferPool(64, capacity: 4);
+        var host = new TtlExpiredDequeueHost(setupQueuePool, time.GetUtcNow());
+        using var shutdown = new CancellationTokenSource();
+        var setup = new UdpSessionSetup(factory, new UdpAssociationTable(), new FakeResponseSink(), time, NullRuntimeLogger.Instance, receiveWindowPool, ReceiveBufferSize, host);
+        var slot = new UdpProxyCoordinator.UdpSessionSlot();
+
+        await setup.CreateSessionAsync(flow, s_server, flowGeneration: 1, MacAddress.Invalid, slot, shutdown.Token);
+
+        // A genuine dial failure is what arms the setup cooldown, so its teardown reason is the
+        // only one that must arm it.
+        Assert.Equal(UdpTeardownReason.SetupFailure, host.RemovedReason);
+        setup.DisposeLimiter();
+    }
+
+    [Fact]
+    public async Task CancelledSetupReportsTheShutdownTeardownReason()
+    {
+        var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
+        var flow = CreateFlow("192.0.2.53");
+        var factory = new GatedTransportFactory();
+        using var receiveWindowPool = new NativeBufferPool(ReceiveBufferSize, capacity: 4);
+        using var setupQueuePool = new NativeBufferPool(64, capacity: 4);
+        var host = new TtlExpiredDequeueHost(setupQueuePool, time.GetUtcNow());
+        using var shutdown = new CancellationTokenSource();
+        var setup = new UdpSessionSetup(factory, new UdpAssociationTable(), new FakeResponseSink(), time, NullRuntimeLogger.Instance, receiveWindowPool, ReceiveBufferSize, host);
+        var slot = new UdpProxyCoordinator.UdpSessionSlot();
+
+        var pending = setup.CreateSessionAsync(flow, s_server, flowGeneration: 1, MacAddress.Invalid, slot, shutdown.Token);
+        await factory.CreateStarted.Task;
+        factory.Fail(new OperationCanceledException("setup cancelled (synthetic)."));
+        await pending;
+
+        // A cancelled dial must not arm the cooldown; only a genuine setup failure may.
+        Assert.Equal(UdpTeardownReason.Shutdown, host.RemovedReason);
+        setup.DisposeLimiter();
+    }
+
     /// <summary>
     /// A slot host whose first flush-dequeue step hands back an entry older than the setup TTL
     /// (rented from the setup queue pool), then reports not-owner so the flush stops — exactly
@@ -61,6 +105,7 @@ public sealed class UdpSessionSetupTests
 
         public int DequeueCalls;
         public UdpProxySession? AttachedSession;
+        public UdpTeardownReason? RemovedReason;
 
         public void AttachSession(UdpProxyCoordinator.UdpSessionSlot slot, UdpProxySession session)
         {
@@ -80,7 +125,11 @@ public sealed class UdpSessionSetupTests
             return (UdpSessionSetup.FlushStep.Dequeued, lease, 1, enqueuedAt);
         }
 
-        public Task<bool> RemoveSlotAsync(FlowKey flow, UdpProxyCoordinator.UdpSessionSlot slot, bool armCooldown) => Task.FromResult(true);
+        public Task<bool> RemoveSlotAsync(FlowKey flow, UdpProxyCoordinator.UdpSessionSlot slot, UdpTeardownReason reason)
+        {
+            RemovedReason = reason;
+            return Task.FromResult(true);
+        }
 
         public Task RemoveReceiveFailedSessionAsync(UdpProxySession session) => Task.CompletedTask;
     }

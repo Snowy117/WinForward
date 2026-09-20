@@ -53,9 +53,16 @@ internal static class UdpBurstScenario
         // switch's enabled state, flipped by editing the constant for a loss-localization session.
         var productEvents = CaptureProductEvents ? new CountingRuntimeLogger() : null;
         // ReSharper restore HeuristicUnreachableCode, CSharpWarnings::CS0162
+        const int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame;
+        using var setupQueuePool = new NativeBufferPool(maximumFrameSize);
+        using var receiveWindowPool = new NativeBufferPool(UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize));
+        using var setupExecutor = new SetupExecutor();
         var coordinator = new UdpProxyCoordinator(
-            new Socks5UdpTransportFactory(new SelfTrafficRegistry(), UdpFrameBuilder.DefaultMaximumEthernetFrame),
+            new Socks5UdpTransportFactory(new SelfTrafficRegistry(), maximumFrameSize),
             sink,
+            setupQueuePool,
+            receiveWindowPool,
+            setupExecutor,
             new UdpProxyOptions
             {
                 Capacity = backgroundFlows + burstFlows,

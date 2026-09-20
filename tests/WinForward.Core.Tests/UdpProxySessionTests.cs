@@ -79,6 +79,59 @@ public sealed class UdpProxySessionTests
         Assert.Equal((ushort)53, sent.Destination.Port);
     }
 
+    [Fact]
+    public async Task IdleExpiryEndsTheReceiveLoopWithoutRecordingAFailure()
+    {
+        // R3: the receive loop reads through the session lifetime token, so an admitted idle
+        // expiry cancels it as normal teardown — no receive failure is recorded and the
+        // coordinator's failure handler stays untouched.
+        var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
+        var failureHandlerCalls = 0;
+        var session = CreateSession(time, [], new FakeTransport(System.Net.Sockets.AddressFamily.InterNetwork, 40000));
+        await using (session)
+        {
+            session.Start(_ =>
+            {
+                Interlocked.Increment(ref failureHandlerCalls);
+                return Task.CompletedTask;
+            });
+
+            Assert.True(session.TryBeginExpiry(time.GetUtcNow(), TimeSpan.Zero));
+            Assert.Equal(UdpSessionState.Expiring, session.State);
+            // The expiry-admitted session refuses the send instead of throwing at the dispatcher.
+            Assert.False(await session.SendSpanAsync(session.Flow.Remote, [1], CancellationToken.None));
+
+            await session.DisposeAsync();
+        }
+
+        Assert.Equal(UdpSessionState.Disposed, session.State);
+        Assert.Equal(0, failureHandlerCalls);
+    }
+
+    [Fact]
+    public async Task GenuineReceiveFaultRecordsFaultedAndFiresTheFailureHandler()
+    {
+        var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
+        var transport = new FakeTransport(System.Net.Sockets.AddressFamily.InterNetwork, 40000);
+        var handled = new TaskCompletionSource<UdpProxySession>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var session = CreateSession(time, [], transport);
+        await using (session)
+        {
+            session.Start(faulted =>
+            {
+                handled.TrySetResult(faulted);
+                return Task.CompletedTask;
+            });
+
+            transport.Received.Writer.TryComplete(new IOException("relay read failed"));
+
+            Assert.Same(session, await handled.Task.WaitAsync(TimeSpan.FromSeconds(2), TimeProvider.System));
+            Assert.Equal(UdpSessionState.Faulted, session.State);
+            // A faulted session refuses further sends so the caller can fail the datagram closed.
+            Assert.False(await session.SendSpanAsync(session.Flow.Remote, [1], CancellationToken.None));
+        }
+    }
+
     private static UdpProxySession CreateSession(TimeProvider time, List<DateTimeOffset> propagationStamps, FakeTransport? transport = null)
     {
         var flow = FlowKey.Create(

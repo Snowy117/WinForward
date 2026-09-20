@@ -117,6 +117,7 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
         RetiredSession[] expired;
         lock (_gate)
         {
+            if (_disposed) return 0;
             expired = [.. _sessions.Values
                 .Where(session => session.Association.Phase == RelayPhase.Redirecting && now - session.Association.LastActivityUtc >= idleTimeout)
                 .Select(RetireSessionUnderGate)];
@@ -187,10 +188,15 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
         {
             await ReleaseRetiredAsync(retired).ConfigureAwait(false);
             var session = retired.Session;
-            if (session.AcceptLoop is null) continue;
-            try { await session.AcceptLoop.ConfigureAwait(false); }
-            catch (OperationCanceledException) when (_shutdown.IsCancellationRequested) { /* cancellation is the expected shutdown path */ }
-            catch (ObjectDisposedException) { /* the listener was already disposed during shutdown */ }
+            if (session.AcceptLoop is not null)
+            {
+                try { await session.AcceptLoop.ConfigureAwait(false); }
+                catch (OperationCanceledException) when (_shutdown.IsCancellationRequested) { /* cancellation is the expected shutdown path */ }
+                catch (ObjectDisposedException) { /* the listener was already disposed during shutdown */ }
+            }
+            // The accept loop owns the lifetime CTS disposal (R1); a session whose loop was never
+            // launched has no other owner, so it is released here after the quiescence wait.
+            session.DisposeLifetime();
         }
 
         _shutdown.Dispose();
@@ -201,6 +207,7 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
         RetiredSession? retired;
         lock (_gate)
         {
+            if (_disposed) return ValueTask.CompletedTask;
             retired = TryRetireSessionUnderGate(session);
         }
         return retired is not null ? ReleaseRetiredAsync(retired) : ValueTask.CompletedTask;
@@ -246,7 +253,10 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
             try { await retired.Relay.DisposeAsync().ConfigureAwait(false); }
             catch (Exception exception) { logger.Warn($"TCP redirect relay disposal failed ({exception.GetType().Name})."); }
         }
-        session.DisposeLifetime();
+        // The lifetime CTS is disposed by the accept loop once it ends (it is the only reader of
+        // session.Token), so a retire can never pull the CTS out from under a concurrent Token
+        // read (R1). A session whose loop was never launched is disposed here.
+        if (session.AcceptLoop is null) session.DisposeLifetime();
     }
 
     public bool TryAttachRelay(TcpRedirectSession session, ITcpRelay relay)
@@ -263,7 +273,11 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
     public async ValueTask FailAssociationAsync(TcpRedirectAssociation association)
     {
         TcpRedirectSession? session;
-        lock (_gate) _sessions.TryGetValue(association.OriginalKey, out session);
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _sessions.TryGetValue(association.OriginalKey, out session);
+        }
         if (session is not null) await TearDownSessionAsync(session).ConfigureAwait(false);
         else RemoveAssociationFromTable(association);
     }

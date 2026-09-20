@@ -76,12 +76,13 @@ public sealed partial class UdpProxyCoordinator
     /// The ready-session send bridge: a non-async method (the payload span must not cross an
     /// await) that starts the send and either completes it inline — the warm shape the transport
     /// finishes synchronously — or hands only the send tail to the async continuation. Caller
-    /// cancellation propagates untouched; any other send failure removes the slot first and then
-    /// rethrows the original exception.
+    /// cancellation propagates untouched; a genuine transport failure removes the slot first and
+    /// then rethrows the original exception, while a session that refuses the datagram because it
+    /// is expiring or faulted is a counted drop that leaves the slot to its state owner.
     /// </summary>
     private ValueTask<bool> SendOnReadySessionSpanAsync(FlowKey flow, UdpSessionSlot slot, UdpProxySession session, ReadOnlySpan<byte> payload, long packetSequence, CancellationToken cancellationToken)
     {
-        ValueTask send;
+        ValueTask<bool> send;
         try
         {
             send = session.SendSpanAsync(flow.Remote, payload, cancellationToken);
@@ -99,17 +100,25 @@ public sealed partial class UdpProxyCoordinator
 
         if (send.IsCompletedSuccessfully)
         {
+            // Steady-state path: the session completed inline, so consuming its result here is a
+            // plain allocation-free read (the same guarded-inline shape as NdisCapture's handler
+            // result, which suppresses the sibling VSTHRD002); the await path is the tail below.
+#pragma warning disable VSTHRD103, MA0042 // The ValueTask is already complete (checked above), so reading it cannot block; MA0042's await guidance does not apply to the guarded-inline fast path.
+            var sent = send.GetAwaiter().GetResult();
+#pragma warning restore VSTHRD103, MA0042
+            if (!sent) return ValueTask.FromResult(DropSessionUnavailable(flow));
             LogSpanDatagramSent(flow, session, packetSequence, payload.Length);
             return ValueTask.FromResult(true);
         }
         return SendSpanTailAsync(send, flow, slot, session, packetSequence, payload.Length, cancellationToken);
     }
 
-    private async ValueTask<bool> SendSpanTailAsync(ValueTask send, FlowKey flow, UdpSessionSlot slot, UdpProxySession session, long packetSequence, int payloadLength, CancellationToken cancellationToken)
+    private async ValueTask<bool> SendSpanTailAsync(ValueTask<bool> send, FlowKey flow, UdpSessionSlot slot, UdpProxySession session, long packetSequence, int payloadLength, CancellationToken cancellationToken)
     {
+        bool sent;
         try
         {
-            await send.ConfigureAwait(false);
+            sent = await send.ConfigureAwait(false);
         }
         catch (OperationCanceledException exception) when (cancellationToken.IsCancellationRequested && !_shutdown.IsCancellationRequested)
         {
@@ -118,18 +127,32 @@ public sealed partial class UdpProxyCoordinator
         }
         catch (Exception exception)
         {
-            await _slotHost.RemoveSlotAsync(flow, slot, armCooldown: false).ConfigureAwait(false);
+            await _slotHost.RemoveSlotAsync(flow, slot, UdpTeardownReason.Fault).ConfigureAwait(false);
             ExceptionDispatchInfo.Capture(exception).Throw();
             return false;
         }
 
+        if (!sent) return DropSessionUnavailable(flow);
         LogSpanDatagramSent(flow, session, packetSequence, payloadLength);
         return true;
     }
 
+    /// <summary>
+    /// Records a datagram the session refused because it is expiring or faulted. The slot is
+    /// deliberately left in place — the sweeper owns an expiring session's removal and the
+    /// failure handler a faulted one's — so this is a counted, rate-limited drop rather than a
+    /// transport failure.
+    /// </summary>
+    private bool DropSessionUnavailable(FlowKey flow)
+    {
+        RuntimeCounters.Shared.Increment(RuntimeCounters.UdpFailClosedDrop);
+        if (_sessionUnavailableDropLog.ShouldEmit()) UdpProxyLogging.LogSessionUnavailableDrop(_logger, flow);
+        return false;
+    }
+
     private async ValueTask<bool> RemoveSlotSpanAsync(FlowKey flow, UdpSessionSlot slot, Exception exception)
     {
-        await _slotHost.RemoveSlotAsync(flow, slot, armCooldown: false).ConfigureAwait(false);
+        await _slotHost.RemoveSlotAsync(flow, slot, UdpTeardownReason.Fault).ConfigureAwait(false);
         ExceptionDispatchInfo.Capture(exception).Throw();
         return false;
     }

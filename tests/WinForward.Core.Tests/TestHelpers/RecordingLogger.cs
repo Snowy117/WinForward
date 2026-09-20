@@ -7,9 +7,11 @@ namespace WinForward.Core.Tests;
 /// Captures every structured event and plain-text line with its level; <see cref="WarnCount"/>
 /// derives from the recorded lines so sink tests can assert the rate-limited warning fired.
 /// Recording is lock-guarded and <see cref="Lines"/>/<see cref="Events"/> return snapshots, so a
-/// test may enumerate while a background capture/proxy thread is still logging.
+/// test may enumerate while a background capture/proxy thread is still logging. The optional
+/// <c>isEnabled</c> predicate lets a test model a threshold (the production default disables
+/// debug), while recording itself stays unconditional.
 /// </summary>
-internal sealed class RecordingRuntimeLogger : IRuntimeLogger
+internal sealed class RecordingRuntimeLogger(Func<RuntimeLogLevel, bool>? isEnabled = null) : IRuntimeLogger
 {
     private readonly Lock _gate = new();
     private readonly List<(RuntimeLogLevel Level, string Name, RuntimeLogField[] Fields)> _events = [];
@@ -33,7 +35,7 @@ internal sealed class RecordingRuntimeLogger : IRuntimeLogger
 
     public int WarnCount => Lines.Count(line => line.Level == RuntimeLogLevel.Warn);
 
-    public bool IsEnabled(RuntimeLogLevel level) => true;
+    public bool IsEnabled(RuntimeLogLevel level) => isEnabled?.Invoke(level) ?? true;
 
     public void Trace(string message) => Add(RuntimeLogLevel.Trace, message);
 

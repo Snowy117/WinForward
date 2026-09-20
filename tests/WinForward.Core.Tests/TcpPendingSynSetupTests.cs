@@ -47,6 +47,33 @@ public sealed class TcpPendingSynSetupTests
         public void Release() => _release.TrySetResult();
     }
 
+    /// <summary>
+    /// Captures the launched setup item instead of running it, so a test can inspect the item the
+    /// coordinator handed to the pool and then prove the parked work is cancelled by shutdown.
+    /// </summary>
+    private sealed class RecordingSetupExecutor : ISetupExecutor
+    {
+        private readonly TaskCompletionSource<SetupWorkItem> _enqueued = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<SetupWorkItem> Enqueued => _enqueued.Task;
+
+        public SetupWorkItem RentItem(Func<SetupWorkItem, Task> handler)
+        {
+            ArgumentNullException.ThrowIfNull(handler);
+            return new SetupWorkItem { _handler = handler };
+        }
+
+        public bool TryEnqueue(SetupWorkItem item)
+        {
+            _enqueued.TrySetResult(item);
+            return true;
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
     private static bool TryRetain(TcpPendingSynSetupIndex index, NativeBufferPool pool, FlowKey key, int byteCount, DateTimeOffset now, out PendingSynSetup? created)
     {
         var lease = pool.Rent();
@@ -242,7 +269,8 @@ public sealed class TcpPendingSynSetupTests
         var listenerFactory = new CancellableGatedListenerFactory();
         var logger = new RecordingRuntimeLogger();
         var table = new TcpRedirectTable();
-        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), new FakeInjector(), table, new SelfTrafficRegistry(), new FakeLocalAddressProvider(), new TcpRedirectOptions { Logger = logger });
+        using var setupExecutor = new SetupExecutor();
+        await using var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), new FakeInjector(), table, new SelfTrafficRegistry(), new FakeLocalAddressProvider(), new TcpRedirectOptions { Logger = logger }, setupExecutor: setupExecutor);
 
         // Every launched setup parks inside the gated factory, so entries accumulate to the cap.
         for (var port = 53000; port < 53000 + 1024; port++)
@@ -264,13 +292,31 @@ public sealed class TcpPendingSynSetupTests
     }
 
     [Fact]
+    public async Task LaunchedSetupItemCarriesTheShutdownTokenSoParkedSetupsUnwindOnDispose()
+    {
+        var listenerFactory = new GatedListenerFactory();
+        using var setupExecutor = new RecordingSetupExecutor();
+        var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), new FakeInjector(), new TcpRedirectTable(), new SelfTrafficRegistry(), new FakeLocalAddressProvider(), setupExecutor: setupExecutor);
+
+        var outcome = await coordinator.HandleSynAsync(MakeSynPacket(s_client, s_destination, 53000, 443), s_server, CancellationToken.None);
+
+        Assert.Equal(TcpRedirectOutcome.SetupPending, outcome);
+        var item = await setupExecutor.Enqueued.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.False(item._cancellationToken.IsCancellationRequested);
+
+        await coordinator.DisposeAsync();
+
+        Assert.True(item._cancellationToken.IsCancellationRequested);
+    }
+
+    [Fact]
     public async Task SynDispatchDoesNotWaitForListenerAllocation()
     {
         // R8's core contract: the pump-side SYN dispatch completes while the listener factory is
         // still parked — the historical inline setup would have blocked on the bind forever.
         var listenerFactory = new GatedListenerFactory();
         var table = new TcpRedirectTable();
-        var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), new FakeInjector(), table, new SelfTrafficRegistry(), new FakeLocalAddressProvider());
+        var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), new FakeInjector(), table, new SelfTrafficRegistry(), new FakeLocalAddressProvider());
 
         var dispatch = coordinator.HandleSynAsync(MakeSynPacket(s_client, s_destination, 53000, 443), s_server, CancellationToken.None).AsTask();
         await dispatch.WaitAsync(TimeSpan.FromSeconds(2));
@@ -295,7 +341,7 @@ public sealed class TcpPendingSynSetupTests
         // its launch-time copy, and dispose afterwards leaves zero charge and no cooldown.
         var listenerFactory = new CancellableGatedListenerFactory();
         var table = new TcpRedirectTable();
-        var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), new FakeInjector(), table, new SelfTrafficRegistry(), new FakeLocalAddressProvider());
+        var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), new FakeInjector(), table, new SelfTrafficRegistry(), new FakeLocalAddressProvider());
 
         await coordinator.HandleSynAsync(MakeSynPacket(s_client, s_destination, 53000, 443), s_server, CancellationToken.None);
         await listenerFactory.CreateStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
@@ -314,6 +360,48 @@ public sealed class TcpPendingSynSetupTests
         // and one association registered, despite the entry having been reclaimed mid-flight.
         Assert.Single(table.Snapshot());
         await coordinator.DisposeAsync();
+        Assert.Equal(0, coordinator.Diagnostics.PendingSetupChargedBytes);
+        Assert.Equal(0, coordinator.Diagnostics.PendingSetupCooldownCount);
+    }
+
+    [Fact]
+    public async Task DisposeClearsTheCooldownAnEarlierFailureArmed()
+    {
+        // D3: a genuine setup failure arms the cooldown while the index is live, and disposal's
+        // index teardown clears it — the removed entry can never re-arm a cooldown afterwards.
+        var table = new TcpRedirectTable();
+        var coordinator = CreateCoordinator(new FakeListenerFactory(throwOnCreate: true), new FakeRelayFactory(), new FakeInjector(), table, new SelfTrafficRegistry(), new FakeLocalAddressProvider());
+
+        await coordinator.HandleSynAsync(MakeSynPacket(s_client, s_destination, 53000, 443), s_server, CancellationToken.None);
+        await coordinator.DrainPendingSetupsAsync();
+
+        Assert.Equal(0, coordinator.Diagnostics.PendingSetupActiveCount);
+        Assert.Equal(1, coordinator.Diagnostics.PendingSetupCooldownCount);
+
+        await coordinator.DisposeAsync();
+
+        Assert.Equal(0, coordinator.Diagnostics.PendingSetupCooldownCount);
+        Assert.Equal(0, coordinator.Diagnostics.PendingSetupChargedBytes);
+    }
+
+    [Fact]
+    public async Task DisposeRacingAnInFlightSetupLeavesNoCooldownOrCharge()
+    {
+        // D3: a setup still parked in the listener factory when disposal begins completes its entry
+        // removal (with a shutdown-cancelled cooldown decision) before ExitSetup unblocks the
+        // drain, so the post-drain RemoveAll is never raced by a late write.
+        var listenerFactory = new GatedListenerFactory();
+        var table = new TcpRedirectTable();
+        var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), new FakeInjector(), table, new SelfTrafficRegistry(), new FakeLocalAddressProvider());
+
+        await coordinator.HandleSynAsync(MakeSynPacket(s_client, s_destination, 53000, 443), s_server, CancellationToken.None);
+        await listenerFactory.CreateStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        var dispose = coordinator.DisposeAsync().AsTask();
+        listenerFactory.Release();
+        await dispose;
+
+        Assert.Equal(0, coordinator.Diagnostics.PendingSetupActiveCount);
         Assert.Equal(0, coordinator.Diagnostics.PendingSetupChargedBytes);
         Assert.Equal(0, coordinator.Diagnostics.PendingSetupCooldownCount);
     }

@@ -6,6 +6,7 @@ using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.Capture;
 using WinForward.Runtime.TcpRedirect;
+using WinForward.Windows;
 using Xunit;
 using static WinForward.Core.Tests.AsyncTestExtensions;
 using static WinForward.Core.Tests.FrameBuilders;
@@ -87,6 +88,52 @@ internal static class TcpCoordinatorFakes
 
     internal static FlowKey MakeHostFlowKey() => FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
 
+    /// <summary>
+    /// Builds a coordinator whose borrowed syn-copy pool and setup executor default to the
+    /// process-wide <see cref="TestPools"/> instances; tests that assert pool accounting pass
+    /// their own through <paramref name="synCopyPool"/> or <paramref name="setupExecutor"/>.
+    /// </summary>
+    internal static TcpProxyCoordinator CreateCoordinator(
+        ITcpRedirectListenerFactory listenerFactory,
+        ITcpProxyRelayFactory relayFactory,
+        ITcpRedirectInjector injector,
+        TcpRedirectTable table,
+        SelfTrafficRegistry selfTraffic,
+        IAdapterLocalAddressProvider localAddresses,
+        TcpRedirectOptions? options = null,
+        NativeBufferPool? synCopyPool = null,
+        ISetupExecutor? setupExecutor = null)
+        => new(
+            listenerFactory,
+            relayFactory,
+            injector,
+            table,
+            selfTraffic,
+            localAddresses,
+            synCopyPool ?? TestPools.SynCopyPool,
+            setupExecutor ?? TestPools.SetupExecutor,
+            options);
+
+    /// <summary>
+    /// Builds a host-shape redirect association for the standard client/destination pair against
+    /// <paramref name="translatedListenerTuple"/>; the tests that exercise session and store
+    /// lifetime use it without a coordinator.
+    /// </summary>
+    internal static TcpRedirectAssociation CreateHostAssociation(Endpoint translatedListenerTuple)
+        => CreateHostAssociation(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), translatedListenerTuple);
+
+    private static TcpRedirectAssociation CreateHostAssociation(Endpoint local, Endpoint remote, Endpoint translatedListenerTuple)
+    {
+        var key = FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Host);
+        return new TcpRedirectAssociation(key, key.Remote, 0x1234, translatedListenerTuple, forwardLocalAddress: null, 1, DateTimeOffset.UtcNow);
+    }
+
+    internal static TcpRedirectSession CreateSession(TcpRedirectAssociation association, ITcpRedirectListener listener, CancellationToken shutdown = default)
+    {
+        var token = new SelfTrafficRegistry().Register(new SelfTrafficRegistry.SelfTrafficKey(TransportProtocol.Tcp, association.TranslatedListenerTuple, association.TranslatedListenerTuple));
+        return new TcpRedirectSession(association, listener, token, new Socks5Server("primary", "127.0.0.1", 1080, Username: null, Password: null), 0, shutdown);
+    }
+
     internal static DispatcherHarness CreateDispatcherHarness()
     {
         var listenerFactory = new FakeListenerFactory();
@@ -95,7 +142,7 @@ internal static class TcpCoordinatorFakes
         var logger = new RecordingRuntimeLogger();
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable();
-        var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider(), new TcpRedirectOptions { Logger = logger });
+        var coordinator = CreateCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider(), new TcpRedirectOptions { Logger = logger });
 
         var server = new Socks5Server("primary", "127.0.0.1", 1080, Username: null, Password: null);
         var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase) { [server.Name] = server };

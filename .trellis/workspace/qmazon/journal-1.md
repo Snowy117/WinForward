@@ -733,3 +733,25 @@ Introduced the jb inspectcode gate (pin 2026.1.3) and drove the baseline report 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 28: Transport lifecycle hardening: ownership, quiescence, session state
+<!-- trellis-session: v=2 fp=ba1fdaa64c4120af -->
+
+**Date**: 2026-09-20
+**Task**: Transport lifecycle hardening: ownership, quiescence, session state
+**Branch**: `feat/transport-lifecycle`
+
+### Summary
+
+Planned and implemented 09-20-transport-lifecycle across Phases A-E. Ownership consolidated into DurableCaptureBundle (coordinators take pools + shared SetupExecutor as required ctor deps, never dispose them); TCP quiescence made explicit (relay DisposeAsync awaits Completion, acceptor owns terminal observation + session lifetime, store defers lifetime CTS disposal, attach failure tears the session down, RegisterSession releases on partial failure, setup cooldown written inside the inflight section); UDP got a per-session lifetime CTS, UdpSessionState/UdpTeardownReason enums, and SendSpanAsync returning bool with a counted rate-limited fail-closed drop instead of throwing. Gates: format clean, Release build 0 warnings, 744/744 tests, jb inspectcode 0 issues. Specs updated: tcp-local-redirect, udp-relay, error-handling, quality-guidelines. Deferred follow-up (not tasked): structured concurrency (TaskScope) + lifetime analyzers.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4a2007e` | feat(runtime): explicit transport quiescence boundary and session state |
+
+### Status
+
+[OK] **Completed**

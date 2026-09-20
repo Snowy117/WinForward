@@ -6,7 +6,6 @@ using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.Capture;
 using WinForward.Runtime.TcpRedirect;
-using WinForward.Runtime.UdpProxy;
 using Xunit;
 using static WinForward.Core.Tests.TcpCoordinatorFakes;
 
@@ -39,7 +38,7 @@ public sealed class NdisPacketActionExecutorLoggingTests
     public async Task CoordinatorBlockedWarnCarriesRedirectReasonInsteadOfUninitializedText()
     {
         var logger = new RecordingRuntimeLogger();
-        await using var coordinator = new TcpProxyCoordinator(
+        await using var coordinator = CreateCoordinator(
             new FakeListenerFactory(),
             new FakeRelayFactory(),
             new FakeInjector(),
@@ -70,7 +69,7 @@ public sealed class NdisPacketActionExecutorLoggingTests
     {
         var logger = new RecordingRuntimeLogger();
         var factory = new FakeTransportFactory();
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink());
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink());
         var executor = new NdisPacketActionExecutor(new FakeReinjector(), logger, udpProxy: coordinator);
 
         // A TCP frame on a UDP-decided flow cannot be parsed as a UDP datagram.
@@ -89,7 +88,7 @@ public sealed class NdisPacketActionExecutorLoggingTests
     public async Task UdpHandlingFailureWarnIsRateLimitedPerWindow()
     {
         var logger = new RecordingRuntimeLogger();
-        var coordinator = new UdpProxyCoordinator(new FakeTransportFactory(), new FakeResponseSink());
+        var coordinator = UdpCoordinatorFakes.CreateCoordinator(new FakeTransportFactory(), new FakeResponseSink());
         await coordinator.DisposeAsync();
         var executor = new NdisPacketActionExecutor(new FakeReinjector(), logger, udpProxy: coordinator);
 

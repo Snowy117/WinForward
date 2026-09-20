@@ -31,7 +31,7 @@ public sealed class HotPathAllocationGateTests
     {
         var injector = new CountingInjector();
         var listenerFactory = new FakeListenerFactory();
-        var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, new TcpRedirectTable(), new SelfTrafficRegistry(), new FakeLocalAddressProvider());
+        var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, new TcpRedirectTable(), new SelfTrafficRegistry(), new FakeLocalAddressProvider());
         await using (coordinator)
         {
             await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
@@ -58,7 +58,7 @@ public sealed class HotPathAllocationGateTests
     {
         var injector = new CountingInjector();
         var listenerFactory = new FakeListenerFactory();
-        var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, new TcpRedirectTable(), new SelfTrafficRegistry(), new FakeLocalAddressProvider());
+        var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, new TcpRedirectTable(), new SelfTrafficRegistry(), new FakeLocalAddressProvider());
         await using (coordinator)
         {
             await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
@@ -84,7 +84,7 @@ public sealed class HotPathAllocationGateTests
     public async Task EstablishedUdpDatagramPathAllocatesNoManagedBytes()
     {
         var factory = new CountingTransportFactory();
-        await using var coordinator = new UdpProxyCoordinator(factory, new NoopResponseSink());
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new NoopResponseSink());
         var reinjector = new FakeReinjector();
         var executor = new NdisPacketActionExecutor(reinjector, udpProxy: coordinator);
 
@@ -131,7 +131,7 @@ public sealed class HotPathAllocationGateTests
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new StalledTransportFactory(gate.Task);
         using var pool = new NativeBufferPool(64, capacity: 64);
-        await using var coordinator = new UdpProxyCoordinator(factory, new NoopResponseSink(), new UdpProxyOptions { MaximumFrameSize = 64, SetupQueuePool = pool });
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new NoopResponseSink(), new UdpProxyOptions { MaximumFrameSize = 64 }, setupQueuePool: pool);
         var flow = FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 53), TransportProtocol.Udp, FlowOriginKind.Host);
         var payload = new byte[32];
 
@@ -219,7 +219,7 @@ public sealed class HotPathAllocationGateTests
         var injector = new CountingInjector();
         var listenerFactory = new GatedListenerFactory();
         using var synCopyPool = new NativeBufferPool(NdisApiAbi.MaximumEthernetFrame, capacity: 8);
-        var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, new TcpRedirectTable(), new SelfTrafficRegistry(), new FakeLocalAddressProvider(), new TcpRedirectOptions { SynCopyPool = synCopyPool });
+        var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, new TcpRedirectTable(), new SelfTrafficRegistry(), new FakeLocalAddressProvider(), synCopyPool: synCopyPool);
         try
         {
             var syn = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);

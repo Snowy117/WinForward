@@ -110,7 +110,7 @@ internal sealed class UdpSessionSetup(
             // setup cooldown, and the slot removal ride this frame at no extra cost.
             // Shutdown cancellation keeps the no-cooldown semantics the observer had.
             UdpProxyLogging.LogSetupFailure(logger, flow, exception);
-            await host.RemoveSlotAsync(flow, slot, armCooldown: exception is not OperationCanceledException).ConfigureAwait(false);
+            await host.RemoveSlotAsync(flow, slot, exception is OperationCanceledException ? UdpTeardownReason.Shutdown : UdpTeardownReason.SetupFailure).ConfigureAwait(false);
         }
         finally
         {
@@ -162,7 +162,12 @@ internal sealed class UdpSessionSetup(
             // await; the lease is released exactly once on every exit below.
             try
             {
-                await session.SendSpanAsync(flow.Remote, lease.Span[..length], cancellationToken).ConfigureAwait(false);
+                if (!await session.SendSpanAsync(flow.Remote, lease.Span[..length], cancellationToken).ConfigureAwait(false))
+                {
+                    // The session is expiring or faulted: it (not the setup) owns the remaining
+                    // queued datagrams' fate, so the flush stops without touching the slot.
+                    return;
+                }
             }
             finally
             {
