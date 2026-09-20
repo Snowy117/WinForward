@@ -9,7 +9,7 @@ namespace WinForward.Runtime.TcpRedirect;
 
 /// <summary>
 /// Coordinates the transparent TCP redirect data path described in design §8 behind abstraction seams,
-/// mirroring <see cref="UdpProxyCoordinator"/>. For each proxy-selected TCP flow it: allocates a local
+/// mirroring <see cref="UdpProxy.UdpProxyCoordinator"/>. For each proxy-selected TCP flow it: allocates a local
 /// listener, claims the flow exactly once in the redirect table, rewrites the SYN destination toward
 /// the listener, registers the listener tuple in the loop-prevention registry, injects the rewritten
 /// frame, and runs a background accept-and-relay loop. A proxy-selected flow is never silently passed:
@@ -114,6 +114,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
 
     public async ValueTask<TcpRedirectOutcome> HandleSynAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
     {
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease; CapturedFlowPacketGuards.ThrowLeaseRequired reports the null member (quality-guidelines.md).
         if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
         ArgumentNullException.ThrowIfNull(server);
         ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
@@ -234,7 +235,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
             return false;
         }
 
-        _pendingSyn.AttachSetup(entry, entry.SetupCompletionSource.Task);
+        _pendingSyn.AttachSetup(entry.SetupCompletionSource.Task);
         return true;
     }
 
@@ -385,6 +386,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
     public ValueTask<TcpRedirectOutcome> HandleReverseAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
 #pragma warning restore RCS1229
     {
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease; CapturedFlowPacketGuards.ThrowLeaseRequired reports the null member (quality-guidelines.md).
         if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
         ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
 
@@ -491,6 +493,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
     /// </summary>
     public async ValueTask<TcpRedirectOutcome> HandleReverseIfApplicableAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease; CapturedFlowPacketGuards.ThrowLeaseRequired reports the null member (quality-guidelines.md).
         if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
         ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
 
@@ -520,6 +523,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
     /// </summary>
     public ValueTask<TcpRedirectOutcome> HandlePacketAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
     {
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease; CapturedFlowPacketGuards.ThrowLeaseRequired reports the null member (quality-guidelines.md).
         if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
         ArgumentNullException.ThrowIfNull(server);
         ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
@@ -557,6 +561,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         // instead of returning NotRelevant, whose executor fallback would reinject toward the real
         // server — which never saw the proxied connection and answers the unknown tuple with a
         // bounced RST.
+        // ReSharper disable once ConvertIfStatementToReturnStatement // Tombstones.TryHit is a side-effecting probe; the ternary would exceed the line budget and bury the "already-finished handshake straggler" early exit (B1 disposition).
         if (_store.Tombstones.TryHit(key, now)) return ValueTask.FromResult(TcpRedirectOutcome.Dropped);
 
         return ValueTask.FromResult(TcpRedirectOutcome.NotRelevant);
@@ -573,9 +578,11 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
 #pragma warning disable IDE0060, RCS1163 // The cancellationToken parameter is fixed by the dispatcher's fragment-handler delegate; the teardown path takes no caller token (it runs on the store's shutdown token) and a client-visible RST teardown must complete even under caller cancellation.
     public async ValueTask<TcpRedirectOutcome> HandleFragmentAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease; CapturedFlowPacketGuards.ThrowLeaseRequired reports the null member (quality-guidelines.md).
         if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
         ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
 
+        // ReSharper disable once DuplicatedSequentialIfBodies // Two stages (fragment parse, association resolve) share the NotRelevant exit; merging would fold two out-parameter bindings into one negated 3-clause guard and hide which "not ours" case fired.
         if (!IPFragment.TryReadAddressPair(packet.InspectionSpan, out var source, out var destination)) return TcpRedirectOutcome.NotRelevant;
         if (!Table.TryResolveByAddressPair(source, destination, _timeProvider.GetUtcNow(), out var association) || association is null) return TcpRedirectOutcome.NotRelevant;
 

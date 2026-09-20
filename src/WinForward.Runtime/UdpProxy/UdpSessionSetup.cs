@@ -1,6 +1,5 @@
 using WinForward.Configuration;
 using WinForward.Core;
-using WinForward.Protocols;
 using WinForward.Runtime.Socks5;
 
 namespace WinForward.Runtime.UdpProxy;
@@ -37,14 +36,6 @@ internal sealed class UdpSessionSetup(
     /// </summary>
     private static readonly TimeSpan s_setupQueueDatagramTtl = TimeSpan.FromSeconds(5);
 
-    private readonly IUdpProxyTransportFactory _transportFactory = transportFactory;
-    private readonly UdpAssociationTable _associations = associations;
-    private readonly IUdpResponseSink _responseSink = responseSink;
-    private readonly TimeProvider _timeProvider = timeProvider;
-    private readonly IRuntimeLogger _logger = logger;
-    private readonly NativeBufferPool _receiveWindowPool = receiveWindowPool;
-    private readonly int _receiveBufferSize = receiveBufferSize;
-    private readonly IUdpSessionSlotHost _host = host;
     private readonly SemaphoreSlim _setupLimiter = new(MaximumConcurrentSetups, MaximumConcurrentSetups);
     private long _ttlExpiredCount;
     private long _stampsRefreshedCount;
@@ -87,13 +78,13 @@ internal sealed class UdpSessionSetup(
             // Dial start: the datagram waited on the setup limiter, not on the network, so its
             // queue is re-stamped before the dial and the TTL below measures dial age.
             RefreshSetupStampsAtDialStart(flow, slot);
-            transport = await _transportFactory.CreateAsync(server, cancellationToken).ConfigureAwait(false);
+            transport = await transportFactory.CreateAsync(server, cancellationToken).ConfigureAwait(false);
             var relayAlias = new RelayAlias(FlowKey.Create(
                 Endpoint.From(transport.LocalEndpoint.Address, checked((ushort)transport.LocalEndpoint.Port)),
                 Endpoint.From(transport.RelayEndpoint.Address, checked((ushort)transport.RelayEndpoint.Port)),
                 TransportProtocol.Udp,
                 flow.Origin));
-            if (!_associations.TryClaim(flow, relayAlias, _timeProvider.GetUtcNow(), out association, out associationCreated) || association is null)
+            if (!associations.TryClaim(flow, relayAlias, timeProvider.GetUtcNow(), out association, out associationCreated) || association is null)
             {
                 throw new IOException("UDP relay alias collision with another flow; blocking the flow.");
             }
@@ -103,23 +94,23 @@ internal sealed class UdpSessionSetup(
                 throw new IOException("UDP flow association was already owned by another session; blocking the flow.");
             }
 
-            var session = new UdpProxySession(new UdpProxySessionContext(flow, flowGeneration, association, transport, _responseSink, clientMac, _timeProvider, OnSessionActivity, _logger, _receiveWindowPool, _receiveBufferSize, cancellationToken));
+            var session = new UdpProxySession(new UdpProxySessionContext(flow, flowGeneration, association, transport, responseSink, clientMac, timeProvider, OnSessionActivity, logger, receiveWindowPool, receiveBufferSize, cancellationToken));
             transport = null;
-            _host.AttachSession(slot, session);
-            session.Start(_host.RemoveReceiveFailedSessionAsync);
-            UdpProxyLogging.LogDebug(_logger, "udp.session.created", flow, flowGeneration, association, server.Name);
+            host.AttachSession(slot, session);
+            session.Start(host.RemoveReceiveFailedSessionAsync);
+            UdpProxyLogging.LogDebug(logger, "udp.session.created", flow, flowGeneration, association, server.Name);
             await FlushSetupQueueAsync(flow, slot, session, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception)
         {
-            if (associationCreated && association is not null) _associations.TryRemove(association);
+            if (associationCreated && association is not null) associations.TryRemove(association);
             if (transport is not null) await transport.DisposeAsync().ConfigureAwait(false);
             // Handle the failure here instead of rethrowing through a second observer task:
             // the setup state machine is already boxed at its first await, so the log, the
             // setup cooldown, and the slot removal ride this frame at no extra cost.
             // Shutdown cancellation keeps the no-cooldown semantics the observer had.
-            UdpProxyLogging.LogSetupFailure(_logger, flow, exception);
-            await _host.RemoveSlotAsync(flow, slot, armCooldown: exception is not OperationCanceledException).ConfigureAwait(false);
+            UdpProxyLogging.LogSetupFailure(logger, flow, exception);
+            await host.RemoveSlotAsync(flow, slot, armCooldown: exception is not OperationCanceledException).ConfigureAwait(false);
         }
         finally
         {
@@ -136,7 +127,7 @@ internal sealed class UdpSessionSetup(
     /// </summary>
     private void RefreshSetupStampsAtDialStart(FlowKey flow, UdpProxyCoordinator.UdpSessionSlot slot)
     {
-        var refreshed = _host.RefreshSetupStamps(flow, slot);
+        var refreshed = host.RefreshSetupStamps(flow, slot);
         Interlocked.Add(ref _stampsRefreshedCount, refreshed);
     }
 
@@ -157,10 +148,10 @@ internal sealed class UdpSessionSetup(
     {
         while (true)
         {
-            var (step, lease, length, enqueuedAt) = _host.DequeueForFlush(flow, slot);
+            var (step, lease, length, enqueuedAt) = host.DequeueForFlush(flow, slot);
             if (step != FlushStep.Dequeued) return;
 
-            if (_timeProvider.GetUtcNow() - enqueuedAt > s_setupQueueDatagramTtl)
+            if (timeProvider.GetUtcNow() - enqueuedAt > s_setupQueueDatagramTtl)
             {
                 Interlocked.Increment(ref _ttlExpiredCount);
                 lease.Dispose();
@@ -187,5 +178,5 @@ internal sealed class UdpSessionSetup(
     /// </summary>
     internal void DisposeLimiter() => _setupLimiter.Dispose();
 
-    private void OnSessionActivity(UdpAssociation association, DateTimeOffset now) => _associations.TryTouch(association, now);
+    private void OnSessionActivity(UdpAssociation association, DateTimeOffset now) => associations.TryTouch(association, now);
 }

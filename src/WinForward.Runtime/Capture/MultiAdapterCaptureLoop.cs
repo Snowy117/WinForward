@@ -103,11 +103,11 @@ public sealed class MultiAdapterCaptureLoop : IPacketCaptureLoop
     private void OnPumpDegraded(WindowsAdapter adapter, int nativeError)
     {
         Interlocked.Increment(ref _degradedAdapterCount);
-        if (_onAdapterDegraded is not { } callback) return;
+        if (_onAdapterDegraded is null) return;
         // Fire-and-forget with observation: the degraded pump has already exited its loop, so the
         // callback cannot delay it; a faulting callback must not surface as an unobserved task
         // exception (the wiring performs its own logging and best-effort mode restore).
-        _ = ForwardDegradationAsync(callback, adapter, nativeError);
+        _ = ForwardDegradationAsync(_onAdapterDegraded, adapter, nativeError);
     }
 
     private static async Task ForwardDegradationAsync(Func<WindowsAdapter, int, ValueTask> callback, WindowsAdapter adapter, int nativeError)

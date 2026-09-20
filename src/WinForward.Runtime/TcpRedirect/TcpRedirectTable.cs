@@ -18,11 +18,10 @@ public enum RelayPhase
 
 public sealed class TcpRedirectAssociation
 {
-    internal TcpRedirectAssociation(FlowKey originalKey, Endpoint originalDestination, AdapterContext originAdapter, nint originAdapterHandle, Endpoint translatedListenerTuple, IPAddressValue? forwardLocalAddress, long generation, DateTimeOffset now)
+    internal TcpRedirectAssociation(FlowKey originalKey, Endpoint originalDestination, nint originAdapterHandle, Endpoint translatedListenerTuple, IPAddressValue? forwardLocalAddress, long generation, DateTimeOffset now)
     {
         OriginalKey = originalKey;
         OriginalDestination = originalDestination;
-        OriginAdapter = originAdapter;
         OriginAdapterHandle = originAdapterHandle;
         TranslatedListenerTuple = translatedListenerTuple;
         ForwardLocalAddress = forwardLocalAddress;
@@ -48,7 +47,6 @@ public sealed class TcpRedirectAssociation
 
     public FlowKey OriginalKey { get; }
     public Endpoint OriginalDestination { get; }
-    public AdapterContext OriginAdapter { get; }
     public nint OriginAdapterHandle { get; }
     public Endpoint TranslatedListenerTuple { get; }
     /// <summary>
@@ -128,7 +126,7 @@ public sealed class TcpRedirectAssociation
     {
         lock (_sequenceGate)
         {
-            if (_clientNextSeq is not uint current || IsSequenceAhead(sequenceNext, current)) _clientNextSeq = sequenceNext;
+            if (_clientNextSeq is not { } current || IsSequenceAhead(sequenceNext, current)) _clientNextSeq = sequenceNext;
         }
     }
 
@@ -137,7 +135,7 @@ public sealed class TcpRedirectAssociation
     {
         lock (_sequenceGate)
         {
-            if (_serverNextSeq is not uint current || IsSequenceAhead(sequenceNext, current)) _serverNextSeq = sequenceNext;
+            if (_serverNextSeq is not { } current || IsSequenceAhead(sequenceNext, current)) _serverNextSeq = sequenceNext;
         }
     }
 
@@ -149,7 +147,7 @@ public sealed class TcpRedirectAssociation
 }
 
 /// <summary>
-/// The exactly-once ownership table for TCP redirect flows, mirroring <see cref="UdpAssociationTable"/>.
+/// The exactly-once ownership table for TCP redirect flows, mirroring <see cref="UdpProxy.UdpAssociationTable"/>.
 /// An original flow key is claimed once; a translated listener tuple may belong to only one original
 /// flow, so reverse packets route deterministically. Capacity is bounded; a full table fails closed.
 /// Thread-safe via a single gate lock, matching the reference UDP table.
@@ -191,7 +189,7 @@ public sealed class TcpRedirectTable
     /// <paramref name="forwardLocalAddress"/> is the adapter-local redirect destination address for
     /// forwarded flows (DNAT shape); null selects the host IP-swap shape.
     /// </summary>
-    public bool TryClaim(FlowKey originalKey, Endpoint originalDestination, AdapterContext originAdapter, nint originAdapterHandle, Endpoint translatedTuple, IPAddressValue? forwardLocalAddress, DateTimeOffset now, out TcpRedirectAssociation? association)
+    public bool TryClaim(FlowKey originalKey, Endpoint originalDestination, nint originAdapterHandle, Endpoint translatedTuple, IPAddressValue? forwardLocalAddress, DateTimeOffset now, out TcpRedirectAssociation? association)
     {
         lock (_gate)
         {
@@ -202,7 +200,8 @@ public sealed class TcpRedirectTable
                 return true;
             }
 
-            var created = new TcpRedirectAssociation(originalKey, originalDestination, originAdapter, originAdapterHandle, translatedTuple, forwardLocalAddress, ++_nextGeneration, now);
+            var created = new TcpRedirectAssociation(originalKey, originalDestination, originAdapterHandle, translatedTuple, forwardLocalAddress, ++_nextGeneration, now);
+            // ReSharper disable once DuplicatedSequentialIfBodies // Fail-closed claim gate: the doc contract names two distinct rejection reasons (tuple already owned by another key / table full); merging them into one 3-clause condition would collapse that distinction on the claim path.
             if (_byTranslatedListener.ContainsKey(translatedTuple) || _byReverse.ContainsKey(new ReverseRedirectTuple(created.ReverseSourceEndpoint, created.ReverseDestinationEndpoint)))
             {
                 association = null;

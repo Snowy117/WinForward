@@ -24,10 +24,7 @@ public readonly record struct PacketView(
     ushort SourcePort,
     ushort DestinationPort,
     int IPHeaderLength,
-    int TransportHeaderLength)
-{
-    public ushort RemotePort => DestinationPort;
-}
+    int TransportHeaderLength);
 
 public static class IPTcpUdpPacket
 {
@@ -59,47 +56,45 @@ public static class IPTcpUdpPacket
     private static bool TryParseIpv4(ReadOnlySpan<byte> frame, out PacketView view)
     {
         view = default;
-        const int ipOffset = EthernetHeaderLength;
-        var versionAndHeader = frame[ipOffset];
+        var versionAndHeader = frame[EthernetHeaderLength];
         var headerLength = (versionAndHeader & 0x0f) * 4;
-        if (versionAndHeader >> 4 != 4 || headerLength < 20 || frame.Length < ipOffset + headerLength) return false;
-        var protocol = frame[ipOffset + 9];
+        if (versionAndHeader >> 4 != 4 || headerLength < 20 || frame.Length < EthernetHeaderLength + headerLength) return false;
+        var protocol = frame[EthernetHeaderLength + 9];
         if (protocol is not ProtocolTcp and not ProtocolUdp) return false;
-        var totalLength = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(ipOffset + 2, 2));
-        if (totalLength < headerLength + 8 || frame.Length < ipOffset + totalLength) return false;
-        var fragment = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(ipOffset + 6, 2));
+        var totalLength = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(EthernetHeaderLength + 2, 2));
+        if (totalLength < headerLength + 8 || frame.Length < EthernetHeaderLength + totalLength) return false;
+        var fragment = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(EthernetHeaderLength + 6, 2));
         if ((fragment & 0xbfff) != 0) return false;
 
-        var source = IPAddressValue.FromIPv4(frame.Slice(ipOffset + 12, 4));
-        var destination = IPAddressValue.FromIPv4(frame.Slice(ipOffset + 16, 4));
-        return TryParseTransport(frame, ipOffset + headerLength, totalLength - headerLength, protocol, source, destination, headerLength, out view);
+        var source = IPAddressValue.FromIPv4(frame.Slice(EthernetHeaderLength + 12, 4));
+        var destination = IPAddressValue.FromIPv4(frame.Slice(EthernetHeaderLength + 16, 4));
+        return TryParseTransport(frame, EthernetHeaderLength + headerLength, totalLength - headerLength, protocol, source, destination, headerLength, out view);
     }
 
     private static bool TryParseIpv6(ReadOnlySpan<byte> frame, out PacketView view)
     {
         view = default;
-        const int ipOffset = EthernetHeaderLength;
-        if (frame.Length < ipOffset + 40 || frame[ipOffset] >> 4 != 6) return false;
-        var payloadLength = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(ipOffset + 4, 2));
-        if (frame.Length < ipOffset + 40 + payloadLength) return false;
+        if (frame.Length < EthernetHeaderLength + 40 || frame[EthernetHeaderLength] >> 4 != 6) return false;
+        var payloadLength = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(EthernetHeaderLength + 4, 2));
+        if (frame.Length < EthernetHeaderLength + 40 + payloadLength) return false;
 
-        var nextHeader = frame[ipOffset + 6];
-        var transportOffset = ipOffset + 40;
+        var nextHeader = frame[EthernetHeaderLength + 6];
+        var transportOffset = EthernetHeaderLength + 40;
         var extensionBytes = 0;
         while (nextHeader is 0 or 43 or 44 or 60)
         {
             if (nextHeader == 44 || frame.Length < transportOffset + 2) return false;
             var extensionLength = (frame[transportOffset + 1] + 1) * 8;
-            if (extensionBytes + extensionLength > 256 || transportOffset + extensionLength > ipOffset + 40 + payloadLength) return false;
+            if (extensionBytes + extensionLength > 256 || transportOffset + extensionLength > EthernetHeaderLength + 40 + payloadLength) return false;
             nextHeader = frame[transportOffset];
             transportOffset += extensionLength;
             extensionBytes += extensionLength;
         }
         if (nextHeader is not ProtocolTcp and not ProtocolUdp) return false;
 
-        var source = IPAddressValue.FromIPv6(frame.Slice(ipOffset + 8, 16));
-        var destination = IPAddressValue.FromIPv6(frame.Slice(ipOffset + 24, 16));
-        return TryParseTransport(frame, transportOffset, ipOffset + 40 + payloadLength - transportOffset, nextHeader, source, destination, transportOffset - ipOffset, out view);
+        var source = IPAddressValue.FromIPv6(frame.Slice(EthernetHeaderLength + 8, 16));
+        var destination = IPAddressValue.FromIPv6(frame.Slice(EthernetHeaderLength + 24, 16));
+        return TryParseTransport(frame, transportOffset, EthernetHeaderLength + 40 + payloadLength - transportOffset, nextHeader, source, destination, transportOffset - EthernetHeaderLength, out view);
     }
 
     private static bool TryParseTransport(

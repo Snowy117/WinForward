@@ -51,11 +51,11 @@ public sealed class RuntimeCounters
         return Interlocked.Increment(ref counter.Value);
     }
 
-    /// <summary>Atomically adds <paramref name="value"/> to <paramref name="key"/> and returns the new value.</summary>
-    public long Add(string key, long value)
+    /// <summary>Atomically adds <paramref name="value"/> to <paramref name="key"/>.</summary>
+    public void Add(string key, long value)
     {
         var counter = GetOrAddCounter(key);
-        return Interlocked.Add(ref counter.Value, value);
+        _ = Interlocked.Add(ref counter.Value, value);
     }
 
     /// <summary>The current value of <paramref name="key"/>, or 0 when the key was never touched.</summary>

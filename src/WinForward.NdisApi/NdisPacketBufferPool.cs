@@ -16,8 +16,7 @@ namespace WinForward.NdisApi;
 /// </summary>
 public sealed class NdisPacketBufferPool : IDisposable
 {
-    public const int DefaultCapacity = 256;
-
+    private const int DefaultCapacity = 256;
     private readonly ConcurrentQueue<NdisPacketBuffer> _buffers = new();
     private int _disposedState;
     private long _rented;
@@ -45,7 +44,7 @@ public sealed class NdisPacketBufferPool : IDisposable
     /// </summary>
     public Action<bool>? AccountingSink { get; set; }
 
-    public int Capacity { get; }
+    private int Capacity { get; }
     public int Count => _buffers.Count;
 
     /// <summary>Point-in-time rent/return accounting for diagnostics and balance tests.</summary>

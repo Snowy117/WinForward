@@ -68,8 +68,9 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         _healthSignal = healthSignal ?? InterceptionHealthMonitor.Noop;
     }
 
-    public ValueTask PassAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
+    public ValueTask PassAsync(CapturedFlowPacket packet)
     {
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease; CapturedFlowPacketGuards.ThrowLeaseRequired reports the null member (quality-guidelines.md).
         if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
         var metadata = packet.Metadata;
         if (packet.NativeFrame.Buffer is { } captureBuffer && !packet.Lease.IsMaterialized)
@@ -271,12 +272,10 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
                 }
                 var stale = lane.Count;
                 lane.Count = 0;
-                if (stale > 0)
-                {
-                    if (ShouldWarn(ref _lastLaneRetireLogTicks))
-                        _logger.Warn(string.Create(CultureInfo.InvariantCulture, $"A pass lane retired for adapter 0x{lane.AdapterHandle:X} still held {stale} frame(s); the frames are dropped and their rented buffers returned because the iteration-end flush contract was breached."));
-                    ReleaseLaneBuffers(lane, stale);
-                }
+                if (stale == 0) continue;
+                if (ShouldWarn(ref _lastLaneRetireLogTicks))
+                    _logger.Warn(string.Create(CultureInfo.InvariantCulture, $"A pass lane retired for adapter 0x{lane.AdapterHandle:X} still held {stale} frame(s); the frames are dropped and their rented buffers returned because the iteration-end flush contract was breached."));
+                ReleaseLaneBuffers(lane, stale);
             }
             Volatile.Write(ref _pendingLanes, next);
         }
@@ -347,7 +346,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         public int Count;
     }
 
-    public ValueTask BlockAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
+    public ValueTask BlockAsync(CapturedFlowPacket packet)
     {
         // Consumed: the lease is already completed by the dispatcher; no reinjection occurs.
         if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("packet.dropped", packet, new RuntimeLogField("reason", "policy"));
@@ -356,9 +355,9 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
 
     public async ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
     {
-        if (_udpProxy is { } udpProxy && packet.Context.Key.Protocol == TransportProtocol.Udp)
+        if (_udpProxy is not null && packet.Context.Key.Protocol == TransportProtocol.Udp)
         {
-            await HandleUdpProxyAsync(udpProxy, packet, server, cancellationToken).ConfigureAwait(false);
+            await HandleUdpProxyAsync(_udpProxy, packet, server, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -372,6 +371,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         {
             var outcome = await _tcpProxy.HandlePacketAsync(packet, server, cancellationToken).ConfigureAwait(false);
             if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("tcp.packet.handled", packet, new RuntimeLogField("outcome", outcome));
+            // ReSharper disable once ConvertIfStatementToSwitchStatement // Per-outcome commentary and awaits: the if/else-if chain keeps each outcome's rationale attached; a switch would also pull in the enum-coverage inspections (default handling) for a hot-path packet handler.
             if (outcome == TcpRedirectOutcome.Dropped)
             {
                 // TIME_WAIT-grace tombstone hit: a straggler of a redirect torn down moments ago
@@ -397,7 +397,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
                 // (typically a connection established before capture started, so its SYN was never
                 // observed). It cannot join a relay retroactively; pass it so the pre-existing
                 // connection stays alive instead of hanging until timeout.
-                await PassAsync(packet, cancellationToken).ConfigureAwait(false);
+                await PassAsync(packet).ConfigureAwait(false);
             }
             else if (outcome == TcpRedirectOutcome.Blocked)
             {

@@ -11,6 +11,7 @@ public readonly record struct RuntimeLogField(string Key, object? Value);
 public interface IRuntimeLogger
 {
     bool IsEnabled(RuntimeLogLevel level) => level <= RuntimeLogLevel.Info;
+    // ReSharper disable once UnusedMemberInSuper.Global // Level-parity logger contract: the `trace` log level is user-configurable (ConfigurationModels) and ConsoleRuntimeLogger.Trace is threshold-filtered, covered by RuntimeLoggingTests through the concrete type. Removing the member from the interface would only strand NullRuntimeLogger.Trace/RecordingLogger.Trace as new unused members.
     void Trace(string message) { }
     void Debug(string message) { }
     void Info(string message);
@@ -38,11 +39,10 @@ public sealed class ConsoleRuntimeLogger(RuntimeLogLevel threshold = RuntimeLogL
 {
     private const string TimestampFormat = "yyyy-MM-dd HH:mm:ss.fff";
 
-    private readonly RuntimeLogLevel _threshold = threshold;
     private readonly TextWriter _writer = writer ?? Console.Error;
     private readonly Lock _gate = new();
 
-    public bool IsEnabled(RuntimeLogLevel level) => level <= _threshold;
+    public bool IsEnabled(RuntimeLogLevel level) => level <= threshold;
 
     public void Trace(string message) => Write(RuntimeLogLevel.Trace, message);
     public void Debug(string message) => Write(RuntimeLogLevel.Debug, message);
@@ -98,7 +98,7 @@ public sealed class ConsoleRuntimeLogger(RuntimeLogLevel threshold = RuntimeLogL
             DateTimeOffset timestamp => timestamp.ToString("O", CultureInfo.InvariantCulture),
             DateTime timestamp => timestamp.ToString("O", CultureInfo.InvariantCulture),
             Enum enumValue => enumValue.ToString().ToLowerInvariant(),
-            IFormattable formattable => formattable.ToString(format: null, CultureInfo.InvariantCulture) ?? string.Empty,
+            IFormattable formattable => formattable.ToString(format: null, CultureInfo.InvariantCulture),
             _ => value.ToString() ?? string.Empty,
         };
         return NeedsQuoting(text) ? Quote(text) : text;
@@ -119,7 +119,7 @@ public sealed class ConsoleRuntimeLogger(RuntimeLogLevel threshold = RuntimeLogL
         {
             _ = character switch
             {
-                '\\' => builder.Append("\\\\"),
+                '\\' => builder.Append(@"\\"),
                 '"' => builder.Append("\\\""),
                 '\r' => builder.Append("\\r"),
                 '\n' => builder.Append("\\n"),

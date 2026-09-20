@@ -46,6 +46,7 @@ public static class TcpResetBuilder
         written = 0;
         if (originalSynFrame.Length < EthernetHeaderLength) return false;
         var etherType = BinaryPrimitives.ReadUInt16BigEndian(originalSynFrame.Slice(12, 2));
+        // ReSharper disable once ConvertIfStatementToSwitchStatement // Each arm guards on the etherType AND both address families; `switch` + `when` clauses would bury those guards in a hot-path frame builder.
         if (etherType == 0x0800 && serverAddress.Family == AddressFamilyKind.IPv4 && clientAddress.Family == AddressFamilyKind.IPv4)
         {
             const int required = EthernetHeaderLength + Ipv4HeaderLength + TcpHeaderLength;

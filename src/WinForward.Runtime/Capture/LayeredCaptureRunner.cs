@@ -31,21 +31,17 @@ namespace WinForward.Runtime.Capture;
 /// </summary>
 public sealed class LayeredCaptureRunner
 {
-    internal static readonly TimeSpan s_defaultMinimumRefreshInterval = TimeSpan.FromSeconds(1);
-
+    private static readonly TimeSpan s_defaultMinimumRefreshInterval = TimeSpan.FromSeconds(1);
     /// <summary>The periodic link-state re-check interval (task 09-17 R1-A); <see cref="TimeSpan.Zero"/> disables it.</summary>
-    internal static readonly TimeSpan s_defaultPeriodicRefreshInterval = TimeSpan.FromSeconds(30);
-
+    private static readonly TimeSpan s_defaultPeriodicRefreshInterval = TimeSpan.FromSeconds(30);
     /// <summary>ERROR_INVALID_PARAMETER: every cached handle went stale because the driver rebuilt its bound-adapter list.</summary>
-    internal const int AdapterListRebuiltNativeError = 87;
-
+    private const int AdapterListRebuiltNativeError = 87;
     /// <summary>
     /// Consecutive recoverable startup faults beyond this count rethrow the original fault
     /// fail-closed: a settling adapter-list churn recovers within two or three rebuilds, so a
     /// longer streak is a genuine defect, not a race (task 09-11 R3).
     /// </summary>
-    internal const int MaxConsecutiveStartupRecoveries = 3;
-
+    private const int MaxConsecutiveStartupRecoveries = 3;
     private readonly IAdapterEnumerationProvider _enumerationProvider;
     private readonly ICaptureGenerationFactory _generationFactory;
     private readonly IAdapterListChangeSource _changeSource;
@@ -144,9 +140,11 @@ public sealed class LayeredCaptureRunner
         using var monitorCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         await using var cancelRegistration = cancellationToken.Register(
             static state => ((RefreshDemandGate)state!).Signal(), _demandGate);
+        // ReSharper disable once AccessToDisposedClosure // TeardownAsync joins this monitor task (await monitor) before RunAsync's using scope disposes monitorCancellation, so the closure never reads a disposed token source.
         var monitor = Task.Factory.StartNew(
             () => MonitorAsync(monitorCancellation.Token),
             CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
+        // ReSharper disable once AccessToDisposedClosure // TeardownAsync joins this periodic-tick task (await periodicTick) before the using scope disposes monitorCancellation, the same join-before-dispose contract as the monitor task above.
         var periodicTick = _periodicRefreshInterval > TimeSpan.Zero
             ? Task.Run(() => PeriodicRefreshTickAsync(monitorCancellation.Token), monitorCancellation.Token)
             : null;
@@ -216,16 +214,13 @@ public sealed class LayeredCaptureRunner
         }
     }
 
-    private async Task MonitorAsync(CancellationToken cancellationToken)
+    private Task MonitorAsync(CancellationToken cancellationToken)
     {
         try
         {
-            while (true)
-            {
-                // Blocking wait: this loop owns its dedicated (LongRunning) thread by design.
-                if (!_changeSource.WaitOne(cancellationToken)) return;
-                _demandGate.Signal();
-            }
+            // Blocking wait: this loop owns its dedicated (LongRunning) thread by design. A false
+            // return (the change source was disposed/unblocked) ends the monitor loop.
+            while (_changeSource.WaitOne(cancellationToken)) _demandGate.Signal();
         }
         catch (OperationCanceledException)
         {
@@ -235,6 +230,8 @@ public sealed class LayeredCaptureRunner
         {
             // The change source was disposed concurrently with shutdown; no signal can follow.
         }
+
+        return Task.CompletedTask;
     }
 
     private async Task<RefreshDemandOutcome> ProcessRefreshDemandAsync(CancellationToken cancellationToken)
@@ -350,9 +347,9 @@ public sealed class LayeredCaptureRunner
         _runTask = null;
         Exception? fault = null;
         await CancelBestEffortAsync(_refreshCancellation).ConfigureAwait(false);
-        if (runTask is { } task)
+        if (runTask is not null)
         {
-            try { await task.ConfigureAwait(false); }
+            try { await runTask.ConfigureAwait(false); }
             catch (OperationCanceledException)
             {
                 // The refresh token fired; the generation stopped gracefully.
@@ -461,7 +458,7 @@ public sealed class LayeredCaptureRunner
         catch (Exception exception) { stopFault = exception; }
         await CancelBestEffortAsync(monitorCancellation).ConfigureAwait(false);
         await monitor.ConfigureAwait(false);
-        if (periodicTick is { } tick) await tick.ConfigureAwait(false);
+        if (periodicTick is not null) await periodicTick.ConfigureAwait(false);
         try
         {
             await _disposeDurableAsync(CancellationToken.None).ConfigureAwait(false);

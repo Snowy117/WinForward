@@ -54,7 +54,7 @@ public sealed class NdisAdapterListWatcher : IAdapterListChangeSource
     }
 
     /// <summary>
-    /// Parks the caller in one blocking <see cref="WaitHandle.WaitAny"/> (never spins) until the
+    /// Parks the caller in one blocking <c>WaitHandle.WaitAny</c> (never spins) until the
     /// driver signals the adapter event (true) or the wait is cancelled (false) by the token
     /// firing or by <see cref="Dispose"/>. After disposal this returns false immediately.
     /// </summary>
@@ -78,11 +78,11 @@ public sealed class NdisAdapterListWatcher : IAdapterListChangeSource
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         _cancelEvent.Set();
-        if (_driver is { } driver)
+        if (_driver is not null)
         {
             try
             {
-                driver.SetAdapterListChangeEvent(nint.Zero);
+                _driver.SetAdapterListChangeEvent(nint.Zero);
             }
             catch (Exception exception)
             {

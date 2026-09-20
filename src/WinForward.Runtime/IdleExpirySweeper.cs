@@ -79,9 +79,9 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
                     var udpCount = _udp is null ? 0 : await _udp.RemoveExpiredAsync(now, _relayIdleTimeout).ConfigureAwait(false);
                     // Rides the existing sweep tick so the capacity summary needs no dedicated timer.
                     _tcp?.LogCapacitySummary();
-                    if (_logger.IsEnabled(WinForward.Configuration.RuntimeLogLevel.Debug) && (flowCount != 0 || tcpCount != 0 || udpCount != 0))
+                    if (_logger.IsEnabled(Configuration.RuntimeLogLevel.Debug) && (flowCount != 0 || tcpCount != 0 || udpCount != 0))
                     {
-                        _logger.Event(WinForward.Configuration.RuntimeLogLevel.Debug, "runtime.expired",
+                        _logger.Event(Configuration.RuntimeLogLevel.Debug, "runtime.expired",
                             new("flows", flowCount), new("tcpRedirects", tcpCount), new("udpSessions", udpCount));
                     }
                 }

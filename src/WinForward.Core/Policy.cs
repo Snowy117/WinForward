@@ -20,8 +20,7 @@ public sealed record RuleMatcher(
         if (Protocols is not null && !Protocols.Contains(context.Key.Protocol)) return false;
         if (AddressFamilies is not null && !AddressFamilies.Contains(context.Key.AddressFamily)) return false;
         if (RemoteNetworks is not null && !RemoteNetworks.Any(network => network.Contains(context.Key.Remote))) return false;
-        if (RemotePorts is not null && !RemotePorts.Any(range => context.RemotePort >= range.Start && context.RemotePort <= range.End)) return false;
-        return true;
+        return RemotePorts is null || RemotePorts.Any(range => context.RemotePort >= range.Start && context.RemotePort <= range.End);
     }
 }
 
@@ -37,7 +36,7 @@ public sealed class PolicySnapshot
     }
 
     public IReadOnlyList<PolicyRule> Rules { get; }
-    public FlowAction FallbackAction { get; }
+    private FlowAction FallbackAction { get; }
     public bool RequiresProcessAttribution { get; }
 
     public FlowDecision Evaluate(FlowContext context)

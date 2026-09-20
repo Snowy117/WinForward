@@ -35,7 +35,7 @@ public sealed partial class UdpProxyCoordinator
 
             if (!_sessions.TryGetValue(flow, out var slot))
             {
-                if (_sessions.Count >= _capacity)
+                if (_sessions.Count >= Capacity)
                 {
                     if (_logger.IsEnabled(RuntimeLogLevel.Trace)) UdpProxyLogging.LogTrace(_logger, "udp.session.rejected", flow, new RuntimeLogField("reason", "capacity"));
                     return ValueTask.FromResult(false);
@@ -68,7 +68,7 @@ public sealed partial class UdpProxyCoordinator
             }
         }
 
-        var result = SendOnReadySessionSpanAsync(flow, readySlot!, readySession!, payload, packetSequence, cancellationToken);
+        var result = SendOnReadySessionSpanAsync(flow, readySlot, readySession, payload, packetSequence, cancellationToken);
         return result;
     }
 

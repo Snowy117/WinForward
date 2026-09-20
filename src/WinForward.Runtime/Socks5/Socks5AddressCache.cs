@@ -11,8 +11,7 @@ namespace WinForward.Runtime.Socks5;
 /// </summary>
 public sealed class Socks5AddressCache
 {
-    public const int DefaultCapacity = 64;
-
+    private const int DefaultCapacity = 64;
     private static readonly Func<string, CancellationToken, ValueTask<IPAddress[]>> s_defaultResolver =
         static (host, token) => new ValueTask<IPAddress[]>(Dns.GetHostAddressesAsync(host, token));
 

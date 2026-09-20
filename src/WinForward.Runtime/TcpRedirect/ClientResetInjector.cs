@@ -25,27 +25,21 @@ internal sealed class ClientResetInjector(ITcpRedirectInjector injector, IRuntim
     /// 4-tuple per second (the UDP setup-cooldown precedent) bounds reflection amplification
     /// from spoofed sources while still failing well-behaved clients fast.
     /// </summary>
-    internal static readonly TimeSpan s_capacityResetCooldownWindow = TimeSpan.FromSeconds(1);
-
-    private readonly ITcpRedirectInjector _injector = injector;
-    private readonly IRuntimeLogger _logger = logger;
+    private static readonly TimeSpan s_capacityResetCooldownWindow = TimeSpan.FromSeconds(1);
     private readonly IInterceptionHealthSignal _healthSignal = healthSignal ?? InterceptionHealthMonitor.Noop;
-    private readonly Func<TcpRedirectSession, ValueTask> _tearDownSession = tearDownSession;
-    private readonly Func<TcpRedirectAssociation, ValueTask> _failAssociation = failAssociation;
     private readonly NdisPacketBufferPool _bufferPool = bufferPool ?? NdisPacketBufferPool.Shared;
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     /// <summary>The capacity-reset cooldown index; surfaced so tests can advance the window.</summary>
-    internal TcpResetCooldownTable CapacityResets { get; } = new TcpResetCooldownTable(capacity ?? 16_384);
+    internal TcpResetCooldownTable CapacityResets { get; } = new(capacity ?? 16_384);
 
-    public ValueTask TryInjectClientResetAsync(TcpRedirectSession session)
-        => TryInjectClientResetAsync(session.Association, session.Token);
+    private ValueTask TryInjectClientResetAsync(TcpRedirectSession session) => TryInjectClientResetAsync(session.Association, session.Token);
 
     /// <summary>The association-level core, usable from teardown paths that hold no session
     /// (e.g. an injection failure on the data path).</summary>
     public ValueTask TryInjectClientResetAsync(TcpRedirectAssociation association, CancellationToken cancellationToken)
     {
-        if (!association.HasOriginalSynTemplate || association.ClientInitialSeq is not uint clientInitialSeq || association.ServerInitialSeq is not uint serverInitialSeq) return ValueTask.CompletedTask;
+        if (!association.HasOriginalSynTemplate || association.ClientInitialSeq is not { } clientInitialSeq || association.ServerInitialSeq is not { } serverInitialSeq) return ValueTask.CompletedTask;
         var synTemplate = association.OriginalSynTemplate;
         // The tracked advancement covers data the client already sent, so the reset's ack stays in
         // its window instead of being dropped as out-of-window (RFC 5961) after a slow relay setup.
@@ -62,10 +56,10 @@ internal sealed class ClientResetInjector(ITcpRedirectInjector injector, IRuntim
             }
 
             buffer.CompleteFrame(written, towardMstcp ? NdisApiAbi.PacketFlagOnReceive : NdisApiAbi.PacketFlagOnSend, association.OriginAdapterHandle);
-            _injector.Inject(buffer, towardMstcp, association.OriginAdapterHandle, cancellationToken);
-            if (_logger.IsEnabled(RuntimeLogLevel.Debug))
+            injector.Inject(buffer, towardMstcp, association.OriginAdapterHandle, cancellationToken);
+            if (logger.IsEnabled(RuntimeLogLevel.Debug))
             {
-                _logger.Event(RuntimeLogLevel.Debug, "tcp.redirect.clientReset",
+                logger.Event(RuntimeLogLevel.Debug, "tcp.redirect.clientReset",
                     new("tcpAssociation", association.Generation), new("source", association.OriginalKey.Local),
                     new("destination", association.OriginalKey.Remote), new("outcome", "injected"));
             }
@@ -76,7 +70,7 @@ internal sealed class ClientResetInjector(ITcpRedirectInjector injector, IRuntim
         }
         catch (Exception exception)
         {
-            _logger.Warn($"TCP redirect client reset injection failed ({exception.GetType().Name}).");
+            logger.Warn($"TCP redirect client reset injection failed ({exception.GetType().Name}).");
         }
         return ValueTask.CompletedTask;
     }
@@ -100,10 +94,10 @@ internal sealed class ClientResetInjector(ITcpRedirectInjector injector, IRuntim
             using var buffer = _bufferPool.Rent();
             if (!TcpResetBuilder.TryBuildResetFromSyn(packet.InspectionSpan, key.Remote.Address, key.Remote.Port, key.Local.Address, key.Local.Port, buffer.GetFrameStorage(), out var written)) return ValueTask.CompletedTask;
             buffer.CompleteFrame(written, towardMstcp ? NdisApiAbi.PacketFlagOnReceive : NdisApiAbi.PacketFlagOnSend, packet.Metadata.AdapterHandle);
-            _injector.Inject(buffer, towardMstcp, packet.Metadata.AdapterHandle, cancellationToken);
-            if (_logger.IsEnabled(RuntimeLogLevel.Debug))
+            injector.Inject(buffer, towardMstcp, packet.Metadata.AdapterHandle, cancellationToken);
+            if (logger.IsEnabled(RuntimeLogLevel.Debug))
             {
-                _logger.Event(RuntimeLogLevel.Debug, "tcp.redirect.capacityReset",
+                logger.Event(RuntimeLogLevel.Debug, "tcp.redirect.capacityReset",
                     new("source", key.Local), new("destination", key.Remote), new("outcome", "injected"));
             }
         }
@@ -113,7 +107,7 @@ internal sealed class ClientResetInjector(ITcpRedirectInjector injector, IRuntim
         }
         catch (Exception exception)
         {
-            _logger.Warn($"TCP redirect capacity reset injection failed ({exception.GetType().Name}).");
+            logger.Warn($"TCP redirect capacity reset injection failed ({exception.GetType().Name}).");
         }
         return ValueTask.CompletedTask;
     }
@@ -127,12 +121,12 @@ internal sealed class ClientResetInjector(ITcpRedirectInjector injector, IRuntim
     /// </summary>
     public async ValueTask HandleFragmentTeardownAsync(TcpRedirectAssociation association)
     {
-        if (!association.HasOriginalSynTemplate || association.ClientInitialSeq is not uint || association.ServerInitialSeq is not uint)
+        if (!association.HasOriginalSynTemplate || association.ClientInitialSeq is null || association.ServerInitialSeq is null)
         {
-            _logger.Warn($"TCP redirect torn down by an IP fragment without observed sequences ({association.OriginalKey.Local} -> {association.OriginalKey.Remote}); no client reset is possible.");
+            logger.Warn($"TCP redirect torn down by an IP fragment without observed sequences ({association.OriginalKey.Local} -> {association.OriginalKey.Remote}); no client reset is possible.");
         }
         await TryInjectClientResetAsync(association, CancellationToken.None).ConfigureAwait(false);
-        await _failAssociation(association).ConfigureAwait(false);
+        await failAssociation(association).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -147,7 +141,7 @@ internal sealed class ClientResetInjector(ITcpRedirectInjector injector, IRuntim
     {
         RuntimeCounters.Shared.Increment(RuntimeCounters.RelaySetupFailed);
         _healthSignal.ReportFailure(RuntimeCounters.RelaySetupFailed);
-        if (_logger.IsEnabled(RuntimeLogLevel.Warn))
+        if (logger.IsEnabled(RuntimeLogLevel.Warn))
         {
             var association = session.Association;
             // SocketException derives from Win32Exception, so the Win32 probe covers both shapes;
@@ -156,7 +150,7 @@ internal sealed class ClientResetInjector(ITcpRedirectInjector injector, IRuntim
 #pragma warning disable CA1416 // Reading the const inlines a literal from the windows-gated relay factory; the value (the dial budget this event reports) is inert on every platform.
             const int connectAttempts = TcpProxyRelayFactory.RelayConnectMaxAttempts;
 #pragma warning restore CA1416
-            _logger.Event(RuntimeLogLevel.Warn, "tcp.redirect.relaySetupFailed",
+            logger.Event(RuntimeLogLevel.Warn, "tcp.redirect.relaySetupFailed",
                 new("error", exception.GetType().Name),
                 new("socketError", (exception as SocketException)?.SocketErrorCode),
                 new("nativeError", (exception as Win32Exception)?.NativeErrorCode),
@@ -170,7 +164,7 @@ internal sealed class ClientResetInjector(ITcpRedirectInjector injector, IRuntim
         }
         await accepted.DisposeAsync().ConfigureAwait(false);
         await TryInjectClientResetAsync(session).ConfigureAwait(false);
-        await _tearDownSession(session).ConfigureAwait(false);
+        await tearDownSession(session).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -183,9 +177,9 @@ internal sealed class ClientResetInjector(ITcpRedirectInjector injector, IRuntim
     /// </summary>
     public async ValueTask HandleInjectionFailureAsync(TcpRedirectAssociation association, nint adapterHandle, bool towardMstcp, Exception exception)
     {
-        if (_logger.IsEnabled(RuntimeLogLevel.Warn))
+        if (logger.IsEnabled(RuntimeLogLevel.Warn))
         {
-            _logger.Event(RuntimeLogLevel.Warn, "tcp.redirect.failed",
+            logger.Event(RuntimeLogLevel.Warn, "tcp.redirect.failed",
                 new("reason", "injectionFailure"),
                 new("nativeError", (exception as Win32Exception)?.NativeErrorCode),
                 new("error", exception.GetType().Name),
@@ -195,6 +189,6 @@ internal sealed class ClientResetInjector(ITcpRedirectInjector injector, IRuntim
                 new("destination", association.OriginalKey.Remote));
         }
         await TryInjectClientResetAsync(association, CancellationToken.None).ConfigureAwait(false);
-        await _failAssociation(association).ConfigureAwait(false);
+        await failAssociation(association).ConfigureAwait(false);
     }
 }

@@ -1,4 +1,3 @@
-using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
 

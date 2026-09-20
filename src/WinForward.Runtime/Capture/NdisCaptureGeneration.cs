@@ -99,6 +99,7 @@ public sealed class NdisCaptureGenerationFactory : ICaptureGenerationFactory
         ArgumentNullException.ThrowIfNull(scope);
         var adapters = scope.Select(item => item.Adapter).ToArray();
         TransactionalCaptureRuntime? runtime = null;
+        // ReSharper disable once AccessToModifiedClosure // runtime is assigned on the statement after this construction and the callback fires only from a running pump, which cannot exist before the runtime created below starts this loop.
         var loop = new MultiAdapterCaptureLoop(_driver, adapters, _processor, _pollDelay,
             onAdapterDegraded: (adapter, nativeError) => HandleDegradedAsync(runtime!, adapter, nativeError),
             onAdapterTransientRetry: _onAdapterTransientRetry);
@@ -113,9 +114,9 @@ public sealed class NdisCaptureGenerationFactory : ICaptureGenerationFactory
             new RuntimeLogField("name", adapter.FriendlyName),
             new RuntimeLogField("nativeError", nativeError));
         await runtime.MarkAdapterDegradedAsync(adapter.StableId).ConfigureAwait(false);
-        if (_onAdapterDegraded is { } notify)
+        if (_onAdapterDegraded is not null)
         {
-            await notify(adapter, nativeError).ConfigureAwait(false);
+            await _onAdapterDegraded(adapter, nativeError).ConfigureAwait(false);
         }
     }
 }
@@ -140,7 +141,7 @@ internal sealed class RuntimeCaptureGeneration : ICaptureGeneration
 
     public bool ReachedPumpRun => _runtime.ReachedPumpRun;
 
-    public CapturePumpState Pumps => _pumps is { } pumps ? pumps() : default;
+    public CapturePumpState Pumps => _pumps?.Invoke() ?? default;
 
     public ValueTask DisposeAsync() => _runtime.DisposeAsync();
 }

@@ -44,7 +44,7 @@ public readonly record struct CapturedFlowPacket(
     /// non-null <see cref="Lease"/> (every dispatch entry rejects a leaseless packet first); the
     /// span must be consumed synchronously and must not escape the dispatch section.
     /// </summary>
-    internal ReadOnlySpan<byte> InspectionSpan => NativeFrame.Buffer is { } buffer ? buffer.GetFrame() : Lease!.Frame.Span;
+    internal ReadOnlySpan<byte> InspectionSpan => NativeFrame.Buffer is { } buffer ? buffer.GetFrame() : Lease.Frame.Span;
 }
 
 /// <summary>
@@ -58,6 +58,7 @@ internal static class CapturedFlowPacketGuards
     [DoesNotReturn]
 #pragma warning disable MA0015, S3928 // The paramName deliberately names the null member (the packet struct is never itself null); both analyzers only accept declared parameter names, which would point diagnosis at a phantom "packet".
     public static void ThrowLeaseRequired() =>
+        // ReSharper disable once NotResolvedInText // Deliberate member-path paramName: the centralized guard route (MA0015/S3928/CA2208 are scoped-suppressed for the same reason) names the null member, which ReSharper cannot resolve as a symbol.
         throw new ArgumentNullException("packet.Lease", "The captured packet requires a lease.");
 #pragma warning restore MA0015, S3928
 }
@@ -69,8 +70,8 @@ public interface ISelfTrafficGuard
 
 public interface IPacketActionExecutor
 {
-    ValueTask PassAsync(CapturedFlowPacket packet, CancellationToken cancellationToken);
-    ValueTask BlockAsync(CapturedFlowPacket packet, CancellationToken cancellationToken);
+    ValueTask PassAsync(CapturedFlowPacket packet);
+    ValueTask BlockAsync(CapturedFlowPacket packet);
     ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken);
 }
 
@@ -146,13 +147,15 @@ public sealed class FlowDispatcher
     /// </summary>
     public ValueTask DispatchAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease; CapturedFlowPacketGuards.ThrowLeaseRequired reports the null member (quality-guidelines.md).
         if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
 
         if (_logger.IsEnabled(RuntimeLogLevel.Trace)) return DispatchSlowAsync(packet, cancellationToken);
         // X1: only packets the reverse handler itself claims can be reverse candidates divert;
         // a miss falls through here, and when the flow table also misses, the slow path still
         // runs the full handler — so tombstone stragglers keep their grace-drop behavior.
-        if (_reverseHandler is { } handler && handler.WantsPacket(packet)) return DispatchSlowAsync(packet, cancellationToken);
+        if (_reverseHandler is not null && _reverseHandler.WantsPacket(packet)) return DispatchSlowAsync(packet, cancellationToken);
+        // ReSharper disable once DuplicatedSequentialIfBodies // Warm-path bypass enumeration: the trace-only bypass (above) and each lane below (X1 reverse claim, self-traffic ownership, unresolved flow) is a distinct documented reason; merging couples unrelated predicates into one >150-char guard.
         if (_selfTraffic.IsOwned(packet.Context)) return DispatchSlowAsync(packet, cancellationToken);
         if (!_flows.TryResolve(packet.Context.Key, out var existing) || existing is null) return DispatchSlowAsync(packet, cancellationToken);
 
@@ -167,6 +170,7 @@ public sealed class FlowDispatcher
             if (decision.ProxyServerName is null || !_servers.TryGetValue(decision.ProxyServerName, out var server)) return DispatchSlowAsync(packet, cancellationToken);
             if (packet.Context.Key.Protocol == TransportProtocol.Udp && IsReverseOf(existing.Key, packet.Context.Key)) return DispatchSlowAsync(packet, cancellationToken);
             packet = packet with { FlowGeneration = existing.Generation };
+            // ReSharper disable once ConvertIfStatementToReturnStatement // The condition completes the lease (side effect + state transition); folding it into a conditional expression hides the "already consumed" early exit (B1 disposition).
             if (!packet.Lease.TryComplete(PacketDisposition.ProxyConsumed)) return ValueTask.CompletedTask;
             return _executor.ProxyAsync(packet, server, cancellationToken);
         }
@@ -175,12 +179,13 @@ public sealed class FlowDispatcher
         var disposition = decision.Action == FlowAction.Pass ? PacketDisposition.Pass : PacketDisposition.Block;
         if (!packet.Lease.TryComplete(disposition)) return ValueTask.CompletedTask;
         return decision.Action == FlowAction.Pass
-            ? _executor.PassAsync(packet, cancellationToken)
-            : _executor.BlockAsync(packet, cancellationToken);
+            ? _executor.PassAsync(packet)
+            : _executor.BlockAsync(packet);
     }
 
     private async ValueTask DispatchSlowAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease; CapturedFlowPacketGuards.ThrowLeaseRequired reports the null member (quality-guidelines.md).
         if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
         if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.classified", packet, new RuntimeLogField("kind", "flow"));
         if (await TryHandleSelfTrafficAsync(packet, cancellationToken).ConfigureAwait(false)) return;
@@ -316,6 +321,7 @@ public sealed class FlowDispatcher
     /// </summary>
     public async ValueTask DispatchNonFlowAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease; CapturedFlowPacketGuards.ThrowLeaseRequired reports the null member (quality-guidelines.md).
         if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
         if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.classified", packet, new RuntimeLogField("kind", "nonFlow"));
         if (_selfTraffic.IsOwned(packet.Context))
@@ -383,14 +389,22 @@ public sealed class FlowDispatcher
         switch (action)
         {
             case PacketAction.Pass:
-                await _executor.PassAsync(packet, cancellationToken).ConfigureAwait(false);
+                await _executor.PassAsync(packet).ConfigureAwait(false);
                 break;
             case PacketAction.Block:
-                await _executor.BlockAsync(packet, cancellationToken).ConfigureAwait(false);
+                await _executor.BlockAsync(packet).ConfigureAwait(false);
                 break;
             case PacketAction.Proxy when server is not null:
                 await _executor.ProxyAsync(packet, server, cancellationToken).ConfigureAwait(false);
                 break;
+            case PacketAction.None:
+                // The caller completed the lease with its own disposition and there is no executor
+                // action for it (reverse/fragment handled paths pass None); nothing to dispatch.
+                break;
+            default:
+                // PacketAction is a closed private enum: a value outside its members means a caller
+                // asked for an action the dispatcher cannot complete — fail loudly, not silently.
+                throw new InvalidOperationException($"Unhandled packet action '{action}'.");
         }
         if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.completed", packet, new RuntimeLogField("disposition", disposition));
     }

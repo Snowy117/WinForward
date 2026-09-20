@@ -93,18 +93,17 @@ public sealed class FlowTable
         {
             // One enumeration collecting expired keys (a snapshot: the removal below must not
             // mutate the dictionary mid-enumeration), into a reused scratch buffer.
-            var expired = _expiredScratch;
-            expired.Clear();
+            _expiredScratch.Clear();
             foreach (var pair in _states)
             {
                 if (now - pair.Value.LastActivityUtc < idleTimeout) continue;
                 if (isHeld is not null && isHeld(pair.Key)) continue;
-                expired.Add(pair.Key);
+                _expiredScratch.Add(pair.Key);
             }
 
-            if (expired.Count == 0) return 0;
-            var removed = expired.Count;
-            foreach (var key in expired)
+            if (_expiredScratch.Count == 0) return 0;
+            var removed = _expiredScratch.Count;
+            foreach (var key in _expiredScratch)
             {
                 if (_states.Remove(key, out var state))
                 {
@@ -112,7 +111,7 @@ public sealed class FlowTable
                     ReturnState(state);
                 }
             }
-            expired.Clear();
+            _expiredScratch.Clear();
 
             return removed;
         }

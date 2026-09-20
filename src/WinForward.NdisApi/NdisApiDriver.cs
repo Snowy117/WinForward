@@ -60,7 +60,7 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
     public unsafe IReadOnlyList<NdisAdapter> GetAdapters()
     {
         TcpAdapterList native = default;
-        using (var gateLease = _controlGate.Enter())
+        using (_controlGate.Enter())
         {
             if (NdisApiNative.GetTcpipBoundAdaptersInfo(_handle, &native) == 0)
             {
@@ -76,7 +76,7 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
             var name = ReadAscii(native.AdapterNames, index * NdisApiAbi.AdapterNameSize, NdisApiAbi.AdapterNameSize);
             var mac = new byte[NdisApiAbi.EthernetAddressLength];
             for (var octet = 0; octet < mac.Length; octet++) mac[octet] = native.CurrentAddresses[(index * mac.Length) + octet];
-            adapters.Add(new NdisAdapter((nint)native.AdapterHandles[index], name, native.AdapterMediums[index], mac, native.Mtus[index]));
+            adapters.Add(new NdisAdapter((nint)native.AdapterHandles[index], name, mac, native.Mtus[index]));
         }
         return adapters;
     }
@@ -111,7 +111,7 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
     public unsafe uint GetAdapterMode(nint adapterHandle)
     {
         var mode = new AdapterMode { AdapterHandle = adapterHandle };
-        using (var gateLease = _controlGate.Enter())
+        using (_controlGate.Enter())
         {
             if (NdisApiNative.GetAdapterMode(_handle, &mode) == 0)
             {
@@ -151,7 +151,7 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
         var readError = 0;
 
         var adapterGate = _adapterGates.Get(adapterHandle);
-        using (var gateLease = adapterGate.Enter())
+        using (adapterGate.Enter())
         {
             var queueResult = NdisApiNative.GetAdapterPacketQueueSize(_handle, adapterHandle, &queuedPacketCount);
             var queueError = queueResult == 0 ? Marshal.GetLastWin32Error() : 0;
@@ -251,7 +251,7 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
     /// wiresock/ndisapi@417b8734 ndisapi.cpp + local DLL disassembly) — so a failed batch throws
     /// with the same fail-closed semantics as a failed single send.
     /// </summary>
-    public unsafe void SendPacketsToMstcp(nint adapterHandle, NdisPacketBuffer[] buffers, int count) =>
+    public void SendPacketsToMstcp(nint adapterHandle, NdisPacketBuffer[] buffers, int count) =>
         SendPacketsBatch(adapterHandle, buffers, count, toMstcp: true);
 
     /// <summary>
@@ -259,7 +259,7 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
     /// in one batched request. See <see cref="SendPacketsToMstcp(nint, NdisPacketBuffer[], int)"/>
     /// for the chunking, gate-lease, and all-or-nothing failure contract.
     /// </summary>
-    public unsafe void SendPacketsToAdapter(nint adapterHandle, NdisPacketBuffer[] buffers, int count) =>
+    public void SendPacketsToAdapter(nint adapterHandle, NdisPacketBuffer[] buffers, int count) =>
         SendPacketsBatch(adapterHandle, buffers, count, toMstcp: false);
 
     private unsafe void SendPacketsBatch(nint adapterHandle, NdisPacketBuffer[] buffers, int count, bool toMstcp)

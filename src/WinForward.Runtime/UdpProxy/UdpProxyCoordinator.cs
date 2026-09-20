@@ -26,7 +26,6 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     private readonly Func<SetupWorkItem, Task> _setupHandler;
     private readonly Lock _gate = new();
     private readonly CancellationTokenSource _shutdown = new();
-    private readonly int _capacity;
     private readonly TimeProvider _timeProvider;
     private readonly Func<ValueTask>? _beforeExpiryRecheck;
     private readonly IRuntimeLogger _logger;
@@ -56,7 +55,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
         _associations = new UdpAssociationTable(capacity, preSeed);
         _sessions = new Dictionary<FlowKey, UdpSessionSlot>(preSeed);
         _cooldowns = new UdpSetupCooldownTable(capacity);
-        _capacity = capacity;
+        Capacity = capacity;
         _timeProvider = timeProvider;
         _beforeExpiryRecheck = options.BeforeExpiryRecheck;
         _logger = options.Logger ?? NullRuntimeLogger.Instance;
@@ -88,7 +87,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     }
 
     /// <summary>The session budget this coordinator was constructed with (heartbeat diagnostics).</summary>
-    public int Capacity => _capacity;
+    public int Capacity { get; }
 
     /// <summary>
     /// The coordinator's observable counters as one snapshot: the live setup-failure cooldown

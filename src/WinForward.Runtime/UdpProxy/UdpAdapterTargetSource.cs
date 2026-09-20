@@ -41,7 +41,7 @@ public interface IUdpAdapterTargetSource
 /// <summary>
 /// Thread-safe mutable <see cref="IUdpAdapterTargetSource"/>: a single immutable snapshot record
 /// (host fallback + stable-ID map, ordinal-ignore-case) swapped wholesale via
-/// <see cref="Volatile.Write"/> by the capture refresh runner. The constructor and
+/// <c>Volatile.Write</c> by the capture refresh runner. The constructor and
 /// <see cref="Update"/> copy the supplied map into the snapshot so later caller-side mutation
 /// can never leak into a live view; reads allocate nothing.
 /// </summary>

@@ -38,6 +38,7 @@ public sealed unsafe class NdisPacketBuffer : IFrameSource, IDisposable
     private static IntermediateBuffer* Allocate()
     {
         var pointer = (IntermediateBuffer*)NativeMemory.AllocZeroed((nuint)sizeof(IntermediateBuffer));
+        // ReSharper disable once ConvertIfStatementToReturnStatement // Guard-clause + throw reads failure-first; the suggested `cond ? throw ... : value` form has no precedent in this repo (B1 disposition).
         if (pointer is null) throw new InvalidOperationException("Unable to allocate an NDISAPI packet buffer.");
         return pointer;
     }
@@ -75,6 +76,7 @@ public sealed unsafe class NdisPacketBuffer : IFrameSource, IDisposable
     public Span<byte> GetFrame()
     {
         ObjectDisposedException.ThrowIf(_buffer is null, this);
+        // ReSharper disable once ConvertIfStatementToReturnStatement // Guard-clause + throw reads failure-first; the suggested `cond ? throw ... : value` form has no precedent in this repo (B1 disposition).
         if (_buffer->Length > NdisApiAbi.MaximumEthernetFrame) throw new InvalidDataException("NDISAPI returned a frame larger than the pinned ABI.");
         return new Span<byte>(_buffer->Buffer, checked((int)_buffer->Length));
     }
@@ -82,7 +84,7 @@ public sealed unsafe class NdisPacketBuffer : IFrameSource, IDisposable
     /// <summary>
     /// Returns the buffer's full native frame storage for an in-place frame build: a caller
     /// writes the frame bytes into the span and then stamps the buffer with
-    /// <see cref="CompleteFrame"/>, avoiding the copy that <see cref="SetFrame"/> performs. Unlike
+    /// <see cref="CompleteFrame"/>, avoiding the copy that <c>SetFrame</c> performs. Unlike
     /// <see cref="GetFrame"/> the span is not bounded by the current length.
     /// </summary>
     public Span<byte> GetFrameStorage()
@@ -107,8 +109,6 @@ public sealed unsafe class NdisPacketBuffer : IFrameSource, IDisposable
         _buffer->Length = (uint)frameLength;
         _buffer->Flags = 0;
     }
-
-    int IFrameSource.FrameLength => Length;
 
     ReadOnlySpan<byte> IFrameSource.GetFrameSpan() => GetFrame();
 

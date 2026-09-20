@@ -6,8 +6,7 @@ namespace WinForward.NdisApi;
 
 public readonly record struct NdisCapturedPacket(NdisPacketBuffer Buffer, nint AdapterHandle, uint DeviceFlags)
 {
-    public uint Flags { get; init; }
-
+    public uint Flags { get; private init; }
     internal static NdisCapturedPacket FromCapture(NdisPacketBuffer buffer, nint enumerationAdapterHandle)
     {
         ArgumentNullException.ThrowIfNull(buffer);
@@ -103,8 +102,7 @@ public sealed class NdisCapturePump : IAsyncDisposable
     /// interception degrades (R7). With the doubling base delay capped per attempt, the worst-case
     /// incident window is ~3.1 s.
     /// </summary>
-    internal const int TransientRetryMaxAttempts = 5;
-
+    private const int TransientRetryMaxAttempts = 5;
     private static readonly TimeSpan s_defaultTransientRetryBaseDelay = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan s_transientRetryDelayCap = TimeSpan.FromMilliseconds(1600);
 
@@ -427,6 +425,6 @@ public sealed class NdisCapturePump : IAsyncDisposable
     private void ReleaseBatchBuffers()
     {
         if (Interlocked.Exchange(ref _buffersReleased, 1) != 0) return;
-        foreach (var buffer in _batchBuffers) buffer?.Dispose();
+        foreach (var buffer in _batchBuffers) buffer.Dispose();
     }
 }

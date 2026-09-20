@@ -4,7 +4,7 @@ namespace WinForward.Runtime;
 
 /// <summary>
 /// Reports one interception-path failure observation (reinject/forward failures the capture
-/// runner may treat as an adapter-view staleness signal). <paramref name="counter"/> is a
+/// runner may treat as an adapter-view staleness signal). <c>counter</c> is a
 /// <see cref="RuntimeCounters"/> key constant; the receiving monitor owns thresholding,
 /// cooldown, and forced-refresh pacing. Reporting is observational: it must never change packet
 /// disposition, and call sites keep their existing fail-closed behavior unchanged.
@@ -38,13 +38,13 @@ public sealed class InterceptionHealthMonitor(
     /// <summary>The shared no-op every injection point defaults to, so no call site needs a null guard.</summary>
     public static IInterceptionHealthSignal Noop { get; } = new NoopSignal();
 
-    internal static readonly TimeSpan s_defaultWindow = TimeSpan.FromSeconds(30);
-    internal static readonly TimeSpan s_defaultTriggerCooldown = TimeSpan.FromSeconds(60);
-    internal static readonly TimeSpan s_degradedTriggerSpacing = TimeSpan.FromMinutes(5);
-    internal const int DegradedAfterConsecutiveTriggers = 3;
+    private static readonly TimeSpan s_defaultWindow = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan s_defaultTriggerCooldown = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan s_degradedTriggerSpacing = TimeSpan.FromMinutes(5);
+    private const int DegradedAfterConsecutiveTriggers = 3;
 
     /// <summary>Default per-counter trigger thresholds, keyed by <see cref="RuntimeCounters"/> constants.</summary>
-    public static IReadOnlyDictionary<string, int> DefaultThresholds { get; } = new Dictionary<string, int>(StringComparer.Ordinal)
+    private static IReadOnlyDictionary<string, int> DefaultThresholds { get; } = new Dictionary<string, int>(StringComparer.Ordinal)
     {
         [RuntimeCounters.RelaySetupFailed] = 3,
         [RuntimeCounters.PassReinjectFailed] = 3,
@@ -119,7 +119,7 @@ public sealed class InterceptionHealthMonitor(
 
     public void ReportFailure(string counter)
     {
-        string? fired;
+        string fired;
         Action<string>? handler;
         var degradedNow = false;
         int consecutive;
@@ -144,7 +144,7 @@ public sealed class InterceptionHealthMonitor(
         // Outside the gate: the transition to degraded happened exactly once under it, and the
         // handler may itself consult the snapshot state.
         if (degradedNow) LogDegraded(consecutive);
-        if (fired is not null) handler?.Invoke(fired);
+        handler?.Invoke(fired);
     }
 
     /// <summary>
@@ -191,26 +191,24 @@ public sealed class InterceptionHealthMonitor(
     {
         private readonly long[] _ticks = new long[capacity];
         private int _head;
-        private int _count;
-
-        public int Count => _count;
+        public int Count { get; private set; }
 
         public void Record(long nowTicks, long windowTicks)
         {
-            while (_count > 0 && nowTicks - _ticks[_head] >= windowTicks)
+            while (Count > 0 && nowTicks - _ticks[_head] >= windowTicks)
             {
                 _head = (_head + 1) % _ticks.Length;
-                _count--;
+                Count--;
             }
-            _ticks[(_head + _count) % _ticks.Length] = nowTicks;
-            if (_count < _ticks.Length) _count++;
+            _ticks[(_head + Count) % _ticks.Length] = nowTicks;
+            if (Count < _ticks.Length) Count++;
             else _head = (_head + 1) % _ticks.Length;
         }
 
         public void Clear()
         {
             _head = 0;
-            _count = 0;
+            Count = 0;
         }
     }
 

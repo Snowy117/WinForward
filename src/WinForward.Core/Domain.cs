@@ -31,6 +31,7 @@ public enum FlowAction
 [StructLayout(LayoutKind.Auto)]
 public readonly struct Endpoint : IEquatable<Endpoint>
 {
+    // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local // Caller-facing boundary contract: ProcessAttribution decodes raw Win32 rows and must state the family; the parameter exists to fail closed on a family/address mismatch, not to feed the value (the family is derived from the address afterwards).
     public Endpoint(AddressFamilyKind addressFamily, IPAddress address, ushort port)
         : this(IPAddressValue.From(address), port)
     {
@@ -70,7 +71,7 @@ public readonly struct Endpoint : IEquatable<Endpoint>
         : $"{Address}:{Port}";
 }
 
-public readonly record struct AdapterContext(string? StableId, string? Name, long Generation);
+public readonly record struct AdapterContext(string? StableId, long Generation);
 
 public readonly record struct FlowKey(
     AddressFamilyKind AddressFamily,
@@ -83,6 +84,7 @@ public readonly record struct FlowKey(
 {
     public static FlowKey Create(Endpoint local, Endpoint remote, TransportProtocol protocol, FlowOriginKind origin, AdapterContext? adapter = null)
     {
+        // ReSharper disable once ConvertIfStatementToReturnStatement // Guard-clause + throw reads failure-first; the suggested `cond ? throw ... : value` form has no precedent in this repo (B1 disposition).
         if (local.AddressFamily != remote.AddressFamily) throw new ArgumentException("Flow endpoints must use the same address family.", nameof(remote));
         return new(local.AddressFamily, protocol, local, remote, origin, adapter?.StableId, adapter?.Generation ?? 0);
     }
@@ -151,14 +153,6 @@ public readonly record struct FlowContext(
 
 public sealed class FlowState
 {
-    public FlowState(FlowKey key, FlowDecision decision, long generation)
-    {
-        Key = key;
-        Decision = decision;
-        Generation = generation;
-        LastActivityUtc = DateTimeOffset.UtcNow;
-    }
-
     /// <summary>
     /// Pool-construction shape: the properties are only meaningful after <see cref="Reset"/>,
     /// which every pooled claim performs before the state becomes visible in a flow table.

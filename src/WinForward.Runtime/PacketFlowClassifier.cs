@@ -18,7 +18,7 @@ public static class PacketFlowClassifier
     /// </summary>
     public static FlowContext ClassifyFlow(PacketView view, WindowsAdapter adapter, bool isOnSend)
     {
-        var adapterContext = new AdapterContext(adapter.StableId, adapter.FriendlyName, adapter.Generation);
+        var adapterContext = new AdapterContext(adapter.StableId, adapter.Generation);
         var protocol = view.Transport == PacketTransport.Tcp ? TransportProtocol.Tcp : TransportProtocol.Udp;
         var local = Endpoint.From(view.SourceAddress, view.SourcePort);
         var remote = Endpoint.From(view.DestinationAddress, view.DestinationPort);
@@ -34,7 +34,7 @@ public static class PacketFlowClassifier
     /// </summary>
     public static FlowContext ClassifyNonFlow(WindowsAdapter adapter, bool isOnSend)
     {
-        var adapterContext = new AdapterContext(adapter.StableId, adapter.FriendlyName, adapter.Generation);
+        var adapterContext = new AdapterContext(adapter.StableId, adapter.Generation);
         var origin = isOnSend ? FlowOriginKind.Host : FlowOriginKind.Forwarded;
         var key = FlowKey.Create(Endpoint.From(IPAddressValue.IPv4Any, 0), Endpoint.From(IPAddressValue.IPv4Any, 0), TransportProtocol.Udp, origin, adapterContext);
         return new FlowContext(key, ProcessName: null, ProcessPath: null, adapter.StableId, adapter.FriendlyName, 0);

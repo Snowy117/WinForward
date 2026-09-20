@@ -46,8 +46,7 @@ public readonly record struct RuntimeGcSnapshot(
 public sealed class RuntimeHeartbeat : IAsyncDisposable
 {
     /// <summary>The default heartbeat interval; <see cref="TimeSpan.Zero"/>-like values are rejected (use disposal to stop).</summary>
-    public static readonly TimeSpan DefaultInterval = TimeSpan.FromSeconds(60);
-
+    private static readonly TimeSpan s_defaultInterval = TimeSpan.FromSeconds(60);
     private readonly IRuntimeLogger _logger;
     private readonly Func<RuntimeHeartbeatUsage>? _usage;
     private readonly RuntimeCounters _counters;
@@ -96,7 +95,7 @@ public sealed class RuntimeHeartbeat : IAsyncDisposable
         _usage = usage;
         _counters = counters ?? RuntimeCounters.Shared;
         _health = health;
-        _interval = interval ?? DefaultInterval;
+        _interval = interval ?? s_defaultInterval;
         _time = timeProvider ?? TimeProvider.System;
         _gcSnapshotProvider = gcSnapshotProvider;
     }
@@ -147,7 +146,7 @@ public sealed class RuntimeHeartbeat : IAsyncDisposable
         if (_logger.IsEnabled(RuntimeLogLevel.Info))
         {
             var now = _time.GetUtcNow();
-            var usage = _usage is { } usageProvider ? usageProvider() : default;
+            var usage = _usage?.Invoke() ?? default;
             var fields = new List<RuntimeLogField>(12 + current.Count)
             {
                 new("uptimeSeconds", (long)(now - _startedUtc).TotalSeconds),
@@ -160,17 +159,17 @@ public sealed class RuntimeHeartbeat : IAsyncDisposable
             AddPositive(fields, "udpCapacity", usage.UdpCapacity);
             AddPositive(fields, "pumpsRunning", usage.PumpsRunning);
             AddPositive(fields, "pumpsDegraded", usage.PumpsDegraded);
-            if (_health is { } health)
+            if (_health is not null)
             {
-                if (health.IsDegraded) fields.Add(new("degraded", "true"));
-                AddPositive(fields, "consecutiveForced", health.ConsecutiveForcedTriggers);
-                var cooldown = health.CooldownRemaining;
+                if (_health.IsDegraded) fields.Add(new("degraded", "true"));
+                AddPositive(fields, "consecutiveForced", _health.ConsecutiveForcedTriggers);
+                var cooldown = _health.CooldownRemaining;
                 if (cooldown > TimeSpan.Zero) fields.Add(new("cooldownSeconds", (long)cooldown.TotalSeconds));
             }
             AddGcAndPoolFields(fields, gc);
             foreach (var pair in current.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
             {
-                var delta = pair.Value - (_lastCounters.TryGetValue(pair.Key, out var previous) ? previous : 0);
+                var delta = pair.Value - _lastCounters.GetValueOrDefault(pair.Key);
                 if (delta != 0) fields.Add(new RuntimeLogField(pair.Key, delta));
             }
             _logger.Event(RuntimeLogLevel.Info, "runner.heartbeat", [.. fields]);
@@ -216,9 +215,8 @@ public sealed class RuntimeHeartbeat : IAsyncDisposable
     /// Reads the current GC sample: the injected source when tests provide one, otherwise the
     /// real process-wide GC counters (<c>precise: false</c> keeps the read cheap for the cold path).
     /// </summary>
-    private RuntimeGcSnapshot ReadGcSnapshot() => _gcSnapshotProvider is { } provider
-        ? provider()
-        : new RuntimeGcSnapshot(
+    private RuntimeGcSnapshot ReadGcSnapshot() => _gcSnapshotProvider?.Invoke()
+        ?? new RuntimeGcSnapshot(
             GC.CollectionCount(0),
             GC.CollectionCount(1),
             GC.CollectionCount(2),

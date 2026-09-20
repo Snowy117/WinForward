@@ -34,10 +34,10 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
     private readonly Lock _gate = new();
     private Task? _disposeTask;
 
-    internal const string SynCopyPoolName = "tcp.synCopy";
-    internal const string RelayPoolName = "tcp.relay";
-    internal const string UdpDatagramPoolName = "udp.setupQueue";
-    internal const string UdpWindowPoolName = "udp.receiveWindow";
+    private const string SynCopyPoolName = "tcp.synCopy";
+    private const string RelayPoolName = "tcp.relay";
+    private const string UdpDatagramPoolName = "udp.setupQueue";
+    private const string UdpWindowPoolName = "udp.receiveWindow";
     private HashSet<string>? _lastNoMacAdapters;
     private string? _lastZeroMacHostId;
 

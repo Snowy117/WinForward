@@ -87,8 +87,7 @@ internal interface ITcpRelayEndInfo
 [SupportedOSPlatform("windows")]
 internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
 {
-    internal const int PumpBufferSize = TcpProxyRelayFactory.PumpBufferSize;
-
+    private const int PumpBufferSize = TcpProxyRelayFactory.PumpBufferSize;
     /// <summary>
     /// The pump-window pool used when composition does not inject one (direct constructions in
     /// tests and benchmarks). Production always injects the bundle-owned, counter-registered pool.
@@ -100,8 +99,7 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
     // this generous stall window only fires for a genuinely dead peer and cannot be held forever
     // by <see cref="TcpProxyRelay"/>. Teardown is otherwise tied to the relay ending, not to a
     // per-flow wall-clock idle timeout.
-    internal static readonly TimeSpan s_stallTimeout = TimeSpan.FromMinutes(30);
-    // One re-arm per second is enough for a 30-minute window (X8a): the window drifts by at most
+    private static readonly TimeSpan s_stallTimeout = TimeSpan.FromMinutes(30);    // One re-arm per second is enough for a 30-minute window (X8a): the window drifts by at most
     // one second, while skipping the per-chunk TryReset + CancelAfter timer-queue updates saves
     // ~100-200 ns per operation at 10 Gbps single-flow chunk rates.
     internal static readonly long s_armThrottleTicks = Stopwatch.Frequency;
@@ -113,7 +111,6 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
     // throw before the run body) completes faulted without ever classifying itself, and that end
     // must still surface as a client reset. CleanEnded is only ever assigned explicitly, after
     // both pumps verifiably completed.
-    private RelayEndKind _endKind = RelayEndKind.Faulted;
     private int _disposed;
     private readonly NativeBufferPool _pumpBufferPool;
 
@@ -131,7 +128,7 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
 
     public Task Completion { get; }
 
-    public RelayEndKind EndKind => _endKind;
+    public RelayEndKind EndKind { get; private set; } = RelayEndKind.Faulted;
 
     private async Task RunPumpAsync(Stream upstream)
     {
@@ -148,7 +145,7 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
             {
                 await pumpCancellation.CancelAsync().ConfigureAwait(false);
                 ObservePump(first == localToUpstream ? upstreamToLocal : localToUpstream);
-                _endKind = RelayEndKind.Stalled;
+                EndKind = RelayEndKind.Stalled;
                 return;
             }
 
@@ -159,18 +156,18 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
             if (results[0] == PumpResult.Stalled || results[1] == PumpResult.Stalled)
             {
                 await pumpCancellation.CancelAsync().ConfigureAwait(false);
-                _endKind = RelayEndKind.Stalled;
+                EndKind = RelayEndKind.Stalled;
             }
             else
             {
-                _endKind = RelayEndKind.CleanEnded;
+                EndKind = RelayEndKind.CleanEnded;
             }
         }
         catch
         {
             await pumpCancellation.CancelAsync().ConfigureAwait(false);
             ObservePump(localToUpstream.IsCompleted ? upstreamToLocal : localToUpstream);
-            _endKind = RelayEndKind.Faulted;
+            EndKind = RelayEndKind.Faulted;
             throw;
         }
     }
@@ -184,7 +181,6 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
     // throttled to one per second (X8a); the window is never disarmed between operations.
     private sealed class StallWindow(CancellationToken lifetime) : IDisposable
     {
-        private readonly CancellationToken _lifetime = lifetime;
         private CancellationTokenSource _source = CreateArmed(lifetime);
         private long _lastArmTicks;
 
@@ -201,7 +197,7 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
                 return;
             }
             _source.Dispose();
-            _source = CreateArmed(_lifetime);
+            _source = CreateArmed(lifetime);
         }
 
         public void Dispose() => _source.Dispose();

@@ -40,7 +40,7 @@ public sealed class SetupWorkItem
         _completion = null;
         _flow = default;
         _server = null;
-        _cancellationToken = default;
+        _cancellationToken = CancellationToken.None;
         _tcp.Reset();
         _udp.Reset();
     }
@@ -126,7 +126,7 @@ public sealed class SetupExecutor : ISetupExecutor
     /// 2x the logical processor count, floored at 16 so the 8-wide UDP setup limiter (plus the
     /// queued-flow dial-start probe) stays drainable on small hosts.
     /// </summary>
-    public static readonly int DefaultWorkerCount = Math.Max(2 * Environment.ProcessorCount, 16);
+    private static readonly int s_defaultWorkerCount = Math.Max(2 * Environment.ProcessorCount, 16);
 
     private readonly ConcurrentQueue<SetupWorkItem> _ring = new();
     private readonly ConcurrentQueue<SetupWorkItem> _free = new();
@@ -145,13 +145,13 @@ public sealed class SetupExecutor : ISetupExecutor
 
     /// <summary>
     /// Creates the executor. <paramref name="workerCount"/> null selects
-    /// <see cref="DefaultWorkerCount"/>; <paramref name="ringCapacity"/> bounds the queued items.
+    /// <see cref="s_defaultWorkerCount"/>; <paramref name="ringCapacity"/> bounds the queued items.
     /// </summary>
     public SetupExecutor(int? workerCount = null, int ringCapacity = DefaultRingCapacity)
     {
         if (workerCount is < 0) throw new ArgumentOutOfRangeException(nameof(workerCount));
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(ringCapacity);
-        _workerCount = workerCount ?? DefaultWorkerCount;
+        _workerCount = workerCount ?? s_defaultWorkerCount;
         _capacity = ringCapacity;
     }
 

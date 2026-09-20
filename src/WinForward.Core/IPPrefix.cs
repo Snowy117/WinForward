@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
@@ -13,7 +12,7 @@ namespace WinForward.Core;
 [StructLayout(LayoutKind.Auto)]
 public readonly record struct IPPrefix
 {
-    public IPPrefix(IPAddressValue network, int prefixLength)
+    private IPPrefix(IPAddressValue network, int prefixLength)
     {
         var maxLength = network.Family == AddressFamilyKind.IPv4 ? 32 : 128;
         if (prefixLength < 0 || prefixLength > maxLength) throw new ArgumentOutOfRangeException(nameof(prefixLength));
@@ -22,8 +21,7 @@ public readonly record struct IPPrefix
     }
 
     public IPAddressValue Network { get; }
-    public int PrefixLength { get; }
-
+    private int PrefixLength { get; }
     public static bool TryParse(string? value, out IPPrefix prefix)
     {
         prefix = default;
@@ -69,6 +67,6 @@ public readonly record struct IPPrefix
     private static IPAddressValue Normalize(IPAddressValue address, int prefixLength)
     {
         var mask = PrefixMask(prefixLength, address.Family);
-        return new IPAddressValue(address.Bits & mask, address.Family, 0);
+        return new IPAddressValue(address.Bits & mask, address.Family);
     }
 }

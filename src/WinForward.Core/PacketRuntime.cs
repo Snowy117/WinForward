@@ -17,8 +17,6 @@ public enum PacketDisposition
 /// </summary>
 public interface IFrameSource
 {
-    int FrameLength { get; }
-
     ReadOnlySpan<byte> GetFrameSpan();
 }
 
@@ -33,7 +31,6 @@ public sealed class PacketLease : IDisposable
     private ReadOnlyMemory<byte> _frame;
     private byte[]? _rented;
     private readonly Action<ReadOnlyMemory<byte>>? _onCompleted;
-    private PacketDisposition? _disposition;
     private int _completed;
     private bool _fromRecyclePool;
 
@@ -74,7 +71,7 @@ public sealed class PacketLease : IDisposable
     /// <summary>True when no producer-owned source remains: the frame is a plain stable memory.</summary>
     public bool IsMaterialized => _source is null;
 
-    internal PacketDisposition? Disposition => _disposition;
+    internal PacketDisposition? Disposition { get; private set; }
 
     private ReadOnlyMemory<byte> Materialize()
     {
@@ -106,7 +103,7 @@ public sealed class PacketLease : IDisposable
         lease._source = source;
         lease._frame = default;
         lease._rented = null;
-        lease._disposition = null;
+        lease.Disposition = null;
         lease._completed = 0;
         return lease;
     }
@@ -127,7 +124,7 @@ public sealed class PacketLease : IDisposable
         if (!_fromRecyclePool) return;
         _source = null;
         _frame = default;
-        _disposition = null;
+        Disposition = null;
         _completed = 0;
         RecycleToCache(this);
     }
@@ -140,7 +137,7 @@ public sealed class PacketLease : IDisposable
     public bool TryComplete(PacketDisposition disposition)
     {
         if (Interlocked.Exchange(ref _completed, 1) != 0) return false;
-        _disposition = disposition;
+        Disposition = disposition;
         // The callback constructor only ever wraps stable memory (_source stays null there), so
         // invoking the callback on the stored frame can never materialize a pooled copy. The
         // Frame property is deliberately unreachable here: completion must not be the path that

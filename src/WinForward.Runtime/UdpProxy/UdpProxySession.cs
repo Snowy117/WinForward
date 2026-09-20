@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Net;
 using System.Net.Sockets;
 using WinForward.Configuration;
 using WinForward.Core;
@@ -101,8 +100,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
     /// (VM-originated) flows use it as the destination MAC of rebuilt responses so the vSwitch
     /// delivers them to the client instead of the host stack.
     /// </summary>
-    public MacAddress ClientMac { get; }
-
+    private MacAddress ClientMac { get; }
     public void Start(Func<UdpProxySession, Task> receiveFailureHandler)
     {
         ArgumentNullException.ThrowIfNull(receiveFailureHandler);
@@ -194,7 +192,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
             }
             catch (ObjectDisposedException)
             {
-                return;
+                // Disposal already tore the receive loop down; nothing left to observe here.
             }
         }
     }

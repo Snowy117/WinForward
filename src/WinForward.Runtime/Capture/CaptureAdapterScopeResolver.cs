@@ -96,7 +96,7 @@ public static class CaptureAdapterScopeResolver
         return [.. scopeSet.OrderBy(adapter => adapter.StableId, StringComparer.OrdinalIgnoreCase)];
     }
 
-    private static void ResolveRuleScope(IReadOnlyList<WindowsAdapter> adapters, Core.RuleMatcher matcher, int ruleIndex, HashSet<WindowsAdapter> scope, List<string> diagnostics, bool fatal)
+    private static void ResolveRuleScope(IReadOnlyList<WindowsAdapter> adapters, RuleMatcher matcher, int ruleIndex, HashSet<WindowsAdapter> scope, List<string> diagnostics, bool fatal)
     {
         var idMatches = new List<WindowsAdapter>();
         var nameMatches = new List<WindowsAdapter>();
@@ -148,6 +148,7 @@ public static class CaptureAdapterScopeResolver
         foreach (var selector in selectors)
         {
             var found = adapters.Where(adapter => string.Equals(valueOf(adapter), selector, StringComparison.OrdinalIgnoreCase)).ToArray();
+            // ReSharper disable once ConvertIfStatementToSwitchStatement // Zero, one, and several matches are discriminated here — the if-else chain states that intent directly, while a length-based switch would obscure it.
             if (found.Length == 0)
             {
                 diagnostics.Add(string.Create(CultureInfo.InvariantCulture, $"rules[{ruleIndex}]: configured adapter selector '{selector}' matches no current adapter."));

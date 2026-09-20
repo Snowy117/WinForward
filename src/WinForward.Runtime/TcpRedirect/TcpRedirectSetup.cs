@@ -1,4 +1,3 @@
-using System.Net;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Windows;
@@ -22,16 +21,6 @@ internal sealed record RedirectSetup(TcpRedirectAssociation Association, TcpRedi
 /// </summary>
 internal sealed class TcpRedirectSetup(ITcpRedirectListenerFactory listenerFactory, TcpRedirectTable table, SelfTrafficRegistry selfTraffic, IAdapterLocalAddressProvider localAddresses, ITcpRedirectInjector injector, IRuntimeLogger logger, TcpRedirectSessionStore store, ClientResetInjector clientReset, NativeBufferPool synCopyPool, TimeProvider timeProvider)
 {
-    private readonly ITcpRedirectListenerFactory _listenerFactory = listenerFactory;
-    private readonly TcpRedirectTable _table = table;
-    private readonly SelfTrafficRegistry _selfTraffic = selfTraffic;
-    private readonly IAdapterLocalAddressProvider _localAddresses = localAddresses;
-    private readonly ITcpRedirectInjector _injector = injector;
-    private readonly IRuntimeLogger _logger = logger;
-    private readonly TcpRedirectSessionStore _store = store;
-    private readonly ClientResetInjector _clientReset = clientReset;
-    private readonly NativeBufferPool _synCopyPool = synCopyPool;
-    private readonly TimeProvider _timeProvider = timeProvider;
     private long _concurrentLoserCount;
 
     /// <summary>
@@ -49,7 +38,7 @@ internal sealed class TcpRedirectSetup(ITcpRedirectListenerFactory listenerFacto
         ITcpRedirectListener listener;
         try
         {
-            listener = await _listenerFactory.CreateAsync(key.AddressFamily, cancellationToken).ConfigureAwait(false);
+            listener = await listenerFactory.CreateAsync(key.AddressFamily, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -57,29 +46,28 @@ internal sealed class TcpRedirectSetup(ITcpRedirectListenerFactory listenerFacto
         }
         catch
         {
-            TcpRedirectLogging.LogTrace(_logger, "tcp.redirect.rejected", packet, association: null, "listenerAllocation");
-            _logger.Warn("TCP redirect failed: listener allocation failed, blocking the flow.");
+            TcpRedirectLogging.LogTrace(logger, "tcp.redirect.rejected", packet, association: null, "listenerAllocation");
+            logger.Warn("TCP redirect failed: listener allocation failed, blocking the flow.");
             return null;
         }
 
         var translatedTuple = listener.TranslatedTuple;
-        var originAdapter = new AdapterContext(key.OriginAdapterId, packet.Context.AdapterName, key.OriginAdapterGeneration);
         var originalDestination = key.Remote;
 
         var forwardLocalAddress = ResolveForwardLocalAddress(key);
         if (key.Origin == FlowOriginKind.Forwarded && forwardLocalAddress is null)
         {
             await listener.DisposeAsync().ConfigureAwait(false);
-            TcpRedirectLogging.LogTrace(_logger, "tcp.redirect.rejected", packet, association: null, "localAddress");
-            _logger.Warn("TCP redirect failed: no local address available on the origin adapter, blocking the flow.");
+            TcpRedirectLogging.LogTrace(logger, "tcp.redirect.rejected", packet, association: null, "localAddress");
+            logger.Warn("TCP redirect failed: no local address available on the origin adapter, blocking the flow.");
             return null;
         }
 
-        if (!_table.TryClaim(key, originalDestination, originAdapter, packet.Metadata.AdapterHandle, translatedTuple, forwardLocalAddress, _timeProvider.GetUtcNow(), out var association) || association is null)
+        if (!table.TryClaim(key, originalDestination, packet.Metadata.AdapterHandle, translatedTuple, forwardLocalAddress, timeProvider.GetUtcNow(), out var association) || association is null)
         {
             await listener.DisposeAsync().ConfigureAwait(false);
-            TcpRedirectLogging.LogTrace(_logger, "tcp.redirect.rejected", packet, association: null, "claim");
-            _logger.Warn("TCP redirect failed: redirect-table capacity reached or translated-tuple collision, blocking the flow.");
+            TcpRedirectLogging.LogTrace(logger, "tcp.redirect.rejected", packet, association: null, "claim");
+            logger.Warn("TCP redirect failed: redirect-table capacity reached or translated-tuple collision, blocking the flow.");
             return null;
         }
 
@@ -112,9 +100,8 @@ internal sealed class TcpRedirectSetup(ITcpRedirectListenerFactory listenerFacto
         if (key.OriginAdapterId is not { } originAdapterId) return null;
         // Hot-path contract 1: this cold edge performs the flow's only From(IPAddress)
         // conversion; the per-packet rewrite reads the stored raw address instead.
-        var address = _localAddresses.SelectLocalAddress(originAdapterId, key.AddressFamily, key.Local.Address.ToIPAddress());
-        if (address is not { } raw) return null;
-        return IPAddressValue.From(raw);
+        var address = localAddresses.SelectLocalAddress(originAdapterId, key.AddressFamily, key.Local.Address.ToIPAddress());
+        return address is not null ? IPAddressValue.From(address) : (IPAddressValue?)null;
     }
 
     private async ValueTask<RedirectSetup?> CompleteNewRedirectAsync(CapturedFlowPacket packet, ITcpRedirectListener listener, TcpRedirectAssociation association, Endpoint translatedTuple, Socks5Server server, CancellationToken cancellationToken)
@@ -122,32 +109,30 @@ internal sealed class TcpRedirectSetup(ITcpRedirectListenerFactory listenerFacto
         var session = RegisterSession(listener, association, translatedTuple, server, packet.FlowGeneration);
         if (session is null)
         {
-            await _store.ReleaseAssociationAsync(listener, association, selfTrafficToken: null).ConfigureAwait(false);
+            await store.ReleaseAssociationAsync(listener, association, selfTrafficToken: null).ConfigureAwait(false);
             return null;
         }
 
-        var key = packet.Context.Key;
         // The rewrite below mutates the lease's pooled frame in place, so the original-SYN
         // template must be recorded first; afterwards the frame only holds the rewritten form.
         var frame = packet.Lease.Frame;
-        var originalClient = key.Local;
-        var originalServer = key.Remote;
+        var (_, _, originalClient, originalServer, _, _, _) = packet.Context.Key;
 
         if (!TcpFrameRewriter.TryGetWritableFrame(frame, out var writableFrame))
         {
-            await _store.TearDownSessionAsync(session).ConfigureAwait(false);
-            TcpRedirectLogging.LogTrace(_logger, "tcp.redirect.rejected", packet, association, "rewrite");
-            _logger.Warn("TCP redirect failed: the captured frame is not writable in place, blocking the flow.");
+            await store.TearDownSessionAsync(session).ConfigureAwait(false);
+            TcpRedirectLogging.LogTrace(logger, "tcp.redirect.rejected", packet, association, "rewrite");
+            logger.Warn("TCP redirect failed: the captured frame is not writable in place, blocking the flow.");
             return null;
         }
 
-        TcpSequenceObservation.RecordClientSyn(frame.Span, association, _synCopyPool);
+        TcpSequenceObservation.RecordClientSyn(frame.Span, association, synCopyPool);
 
         if (!TcpFrameRewriter.TryRewriteForwardLeg(writableFrame, originalClient, originalServer, association, translatedTuple.Port))
         {
-            await _store.TearDownSessionAsync(session).ConfigureAwait(false);
-            TcpRedirectLogging.LogTrace(_logger, "tcp.redirect.rejected", packet, association, "rewrite");
-            _logger.Warn("TCP redirect failed: SYN endpoint rewrite failed, blocking the flow.");
+            await store.TearDownSessionAsync(session).ConfigureAwait(false);
+            TcpRedirectLogging.LogTrace(logger, "tcp.redirect.rejected", packet, association, "rewrite");
+            logger.Warn("TCP redirect failed: SYN endpoint rewrite failed, blocking the flow.");
             return null;
         }
 
@@ -157,20 +142,20 @@ internal sealed class TcpRedirectSetup(ITcpRedirectListenerFactory listenerFacto
         // stays as writer-intent belt-and-suspenders for an exact listener tuple.
         try
         {
-            await _injector.InjectAsync(frame, towardMstcp: true, packet.Metadata.AdapterHandle, cancellationToken).ConfigureAwait(false);
-            TcpRedirectLogging.LogTrace(_logger, "tcp.redirect.injected", packet, association);
+            await injector.InjectAsync(frame, towardMstcp: true, packet.Metadata.AdapterHandle, cancellationToken).ConfigureAwait(false);
+            TcpRedirectLogging.LogTrace(logger, "tcp.redirect.injected", packet, association);
         }
         catch (OperationCanceledException)
         {
-            await _store.TearDownSessionAsync(session).ConfigureAwait(false);
+            await store.TearDownSessionAsync(session).ConfigureAwait(false);
             throw;
         }
         catch (Exception exception)
         {
             // The single observable exit for injection failures; the reset leg is inert for a
             // first SYN (no server ISN yet) and the fail path tears the session down.
-            await _clientReset.HandleInjectionFailureAsync(association, packet.Metadata.AdapterHandle, towardMstcp: true, exception).ConfigureAwait(false);
-            TcpRedirectLogging.LogTrace(_logger, "tcp.redirect.rejected", packet, association, "injection");
+            await clientReset.HandleInjectionFailureAsync(association, packet.Metadata.AdapterHandle, towardMstcp: true, exception).ConfigureAwait(false);
+            TcpRedirectLogging.LogTrace(logger, "tcp.redirect.rejected", packet, association, "injection");
             return null;
         }
 
@@ -179,8 +164,8 @@ internal sealed class TcpRedirectSetup(ITcpRedirectListenerFactory listenerFacto
 
     private TcpRedirectSession? RegisterSession(ITcpRedirectListener listener, TcpRedirectAssociation association, Endpoint translatedTuple, Socks5Server server, long flowGeneration)
     {
-        var selfTrafficToken = _selfTraffic.Register(new SelfTrafficRegistry.SelfTrafficKey(TransportProtocol.Tcp, translatedTuple, translatedTuple));
-        var session = new TcpRedirectSession(association, listener, selfTrafficToken, server, flowGeneration, _store.ShutdownToken);
-        return _store.TryRegister(session);
+        var selfTrafficToken = selfTraffic.Register(new SelfTrafficRegistry.SelfTrafficKey(TransportProtocol.Tcp, translatedTuple, translatedTuple));
+        var session = new TcpRedirectSession(association, listener, selfTrafficToken, server, flowGeneration, store.ShutdownToken);
+        return store.TryRegister(session);
     }
 }

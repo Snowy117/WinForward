@@ -25,7 +25,7 @@ public sealed class NdisAdapterModeController : IAdapterModeController
         _byStableId = adapters.ToDictionary(adapter => adapter.StableId, StringComparer.OrdinalIgnoreCase);
     }
 
-    public ValueTask<IReadOnlyList<AdapterModeSnapshot>> SnapshotAsync(CancellationToken cancellationToken)
+    public ValueTask<IReadOnlyList<AdapterModeSnapshot>> SnapshotAsync()
     {
         var snapshots = new List<AdapterModeSnapshot>(_byStableId.Count);
         foreach (var adapter in _byStableId.Values)
@@ -35,14 +35,14 @@ public sealed class NdisAdapterModeController : IAdapterModeController
         return ValueTask.FromResult<IReadOnlyList<AdapterModeSnapshot>>(snapshots);
     }
 
-    public ValueTask ApplyCaptureModeAsync(AdapterModeSnapshot adapter, CancellationToken cancellationToken)
+    public ValueTask ApplyCaptureModeAsync(AdapterModeSnapshot adapter)
     {
         var windowsAdapter = _byStableId[adapter.AdapterId];
         _driver.SetAdapterMode(windowsAdapter.RuntimeHandle, adapter.Flags | NdisApiAbi.SentTunnel | NdisApiAbi.ReceiveTunnel);
         return ValueTask.CompletedTask;
     }
 
-    public ValueTask RestoreAsync(AdapterModeSnapshot adapter, CancellationToken cancellationToken)
+    public ValueTask RestoreAsync(AdapterModeSnapshot adapter)
     {
         var windowsAdapter = _byStableId[adapter.AdapterId];
         _driver.SetAdapterMode(windowsAdapter.RuntimeHandle, adapter.Flags);

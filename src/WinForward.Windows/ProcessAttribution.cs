@@ -73,7 +73,7 @@ public sealed partial class WindowsProcessAttributor : IProcessAttributor
             var name = process.ProcessName;
             var path = TryGetFullProcessImagePath(processId);
 
-            var identity = new ProcessIdentity(processId, creationTime, name, path);
+            var identity = new ProcessIdentity(name, path);
             lock (_cacheGate)
             {
                 if (_identityCache.TryGetValue(cacheKey, out var value)) return value;
@@ -180,7 +180,11 @@ internal static partial class IPHelperTables
     {
         var owners = local.AddressFamily == AddressFamilyKind.IPv4 ? ReadUdp4() : ReadUdp6();
         var wildcard = local.AddressFamily == AddressFamilyKind.IPv4 ? IPAddress.Any : IPAddress.IPv6Any;
-        var matches = owners.Where(row => row.Port == local.Port && (row.Address.Equals(wildcard) || row.Address.Equals(local.Address))).Select(row => row.ProcessId).Distinct().ToArray();
+        // The row address is a framework IPAddress while Endpoint carries IPAddressValue: the
+        // comparison must convert the row (IPAddress.Equals against a boxed IPAddressValue is
+        // always false, which would silently drop every exact-address match).
+        var localAddress = local.Address;
+        var matches = owners.Where(row => row.Port == local.Port && (row.Address.Equals(wildcard) || IPAddressValue.From(row.Address).Equals(localAddress))).Select(row => row.ProcessId).Distinct().ToArray();
         return matches.Length == 1 ? matches[0] : null;
     }
 

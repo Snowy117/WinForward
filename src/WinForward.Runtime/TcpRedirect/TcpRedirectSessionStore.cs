@@ -27,9 +27,6 @@ internal sealed record RetiredSession(TcpRedirectSession Session, ITcpRelay? Rel
 /// </summary>
 internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLogger logger, int capacity, TimeProvider timeProvider)
 {
-    private readonly TcpRedirectTable _table = table;
-    private readonly IRuntimeLogger _logger = logger;
-    private readonly TimeProvider _timeProvider = timeProvider;
     private readonly Dictionary<FlowKey, TcpRedirectSession> _sessions = [];
     private readonly Lock _gate = new();
     private readonly CancellationTokenSource _shutdown = new();
@@ -50,7 +47,7 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
     public CancellationToken ShutdownToken => _shutdown.Token;
 
     /// <summary>The TIME_WAIT-grace tombstone index; surfaced for the coordinator's routing lookups.</summary>
-    public TcpRedirectTombstoneTable Tombstones { get; } = new TcpRedirectTombstoneTable(capacity);
+    public TcpRedirectTombstoneTable Tombstones { get; } = new(capacity);
 
     /// <summary>The live session count, read under the gate (used by the coordinator's capacity check).</summary>
     public int SessionCount
@@ -110,13 +107,8 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
     /// <summary>
     /// Retires and releases every half-open session still <see cref="RelayPhase.Redirecting"/> with
     /// no activity for the idle timeout, then reclaims elapsed tombstones. A relaying session is
-    /// deliberately not expired here (M4); its teardown is tied to relay completion.
-    /// </summary>
-    public ValueTask<int> RemoveExpiredAsync(DateTimeOffset now, TimeSpan idleTimeout) => RemoveExpiredAsync(now, idleTimeout, prunePending: null);
-
-    /// <summary>
-    /// Same sweep with an optional pending-SYN prune hook (R8): the coordinator's retained-SYN
-    /// TTL and setup-cooldown expiry ride this existing sweep tick (no dedicated timer), running
+    /// deliberately not expired here (M4); its teardown is tied to relay completion. The optional
+    /// pending-SYN prune hook (R8) rides this existing sweep tick (no dedicated timer), running
     /// inside the same sweep phase as the store's own expiry so their clocks agree.
     /// </summary>
     public async ValueTask<int> RemoveExpiredAsync(DateTimeOffset now, TimeSpan idleTimeout, Action? prunePending)
@@ -195,12 +187,10 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
         {
             await ReleaseRetiredAsync(retired).ConfigureAwait(false);
             var session = retired.Session;
-            if (session.AcceptLoop is not null)
-            {
-                try { await session.AcceptLoop.ConfigureAwait(false); }
-                catch (OperationCanceledException) when (_shutdown.IsCancellationRequested) { /* cancellation is the expected shutdown path */ }
-                catch (ObjectDisposedException) { /* the listener was already disposed during shutdown */ }
-            }
+            if (session.AcceptLoop is null) continue;
+            try { await session.AcceptLoop.ConfigureAwait(false); }
+            catch (OperationCanceledException) when (_shutdown.IsCancellationRequested) { /* cancellation is the expected shutdown path */ }
+            catch (ObjectDisposedException) { /* the listener was already disposed during shutdown */ }
         }
 
         _shutdown.Dispose();
@@ -240,7 +230,7 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
     private async ValueTask ReleaseRetiredAsync(RetiredSession retired)
     {
         var session = retired.Session;
-        TcpRedirectLogging.LogDebug(_logger, "tcp.redirect.closed", session, "closed");
+        TcpRedirectLogging.LogDebug(logger, "tcp.redirect.closed", session, "closed");
         try
         {
             // The retire critical section already removed the table alias and armed the
@@ -249,12 +239,12 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
         }
         catch (Exception exception)
         {
-            _logger.Warn($"TCP redirect listener disposal failed ({exception.GetType().Name}).");
+            logger.Warn($"TCP redirect listener disposal failed ({exception.GetType().Name}).");
         }
         if (retired.Relay is not null)
         {
             try { await retired.Relay.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception exception) { _logger.Warn($"TCP redirect relay disposal failed ({exception.GetType().Name})."); }
+            catch (Exception exception) { logger.Warn($"TCP redirect relay disposal failed ({exception.GetType().Name})."); }
         }
         session.DisposeLifetime();
     }
@@ -294,9 +284,9 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
     {
         try
         {
-            try { await listener.DisposeAsync().ConfigureAwait(false); }
-            catch (ObjectDisposedException) { /* the listener may already be disposed during teardown */ }
+            await listener.DisposeAsync().ConfigureAwait(false);
         }
+        catch (ObjectDisposedException) { /* the listener may already be disposed during teardown */ }
         finally
         {
             selfTrafficToken?.Dispose();
@@ -318,7 +308,7 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
     /// </summary>
     private void RemoveAssociationFromTable(TcpRedirectAssociation association)
     {
-        _table.TryRemove(association, removed => Tombstones.TryAdd(removed.OriginalKey, removed.ReverseSourceEndpoint, removed.ReverseDestinationEndpoint, _timeProvider.GetUtcNow() + s_tombstoneGracePeriod));
+        table.TryRemove(association, removed => Tombstones.TryAdd(removed.OriginalKey, removed.ReverseSourceEndpoint, removed.ReverseDestinationEndpoint, timeProvider.GetUtcNow() + s_tombstoneGracePeriod));
     }
 
     private static TaskCompletionSource CompletedSource()

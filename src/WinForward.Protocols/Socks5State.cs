@@ -29,10 +29,8 @@ public static class Socks5Messages
     /// The process-lifetime constant greeting frames: <c>[5,1,0]</c> (no authentication offered)
     /// and <c>[5,2,0,2]</c> (username/password). Built once; callers never copy or mutate them.
     /// </summary>
-    public static ReadOnlyMemory<byte> GreetingNoCredentials { get; } = new byte[] { 5, 1, 0 };
-
-    public static ReadOnlyMemory<byte> GreetingWithCredentials { get; } = new byte[] { 5, 2, 0, 2 };
-
+    private static ReadOnlyMemory<byte> GreetingNoCredentials { get; } = new byte[] { 5, 1, 0 };
+    private static ReadOnlyMemory<byte> GreetingWithCredentials { get; } = new byte[] { 5, 2, 0, 2 };
     public static ReadOnlyMemory<byte> Greeting(bool credentials) => credentials ? GreetingWithCredentials : GreetingNoCredentials;
 
     /// <summary>The byte length of the RFC 1929 username/password message for a credential pair.</summary>
@@ -118,6 +116,7 @@ public static class Socks5Messages
             addressLength = reply[4];
             portOffset = 5 + addressLength;
         }
+        // ReSharper disable once DuplicatedSequentialIfBodies // Distinct parse stages sharing the Invalid exit: ATYP-3 zero-length address (malformed) vs missing port bytes (truncated); keeping them separate preserves the parser's step-by-step validation order.
         if (addressType is 3 && addressLength == 0) return Socks5ReplyKind.Invalid;
         if (reply.Length < portOffset + 2) return Socks5ReplyKind.Invalid;
         port = BinaryPrimitives.ReadUInt16BigEndian(reply.Slice(portOffset, 2));

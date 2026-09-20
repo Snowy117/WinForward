@@ -2,7 +2,7 @@ using WinForward.Core;
 
 namespace WinForward.Runtime.UdpProxy;
 
-public readonly record struct RelayAlias(FlowKey LocalRelayToRemoteRelay) : IEquatable<RelayAlias>;
+public readonly record struct RelayAlias(FlowKey LocalRelayToRemoteRelay);
 
 public sealed class UdpAssociation
 {

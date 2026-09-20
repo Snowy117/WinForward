@@ -26,7 +26,6 @@ internal sealed class PendingSynSetup
     public long PacketSequence { get; init; }
     public long FlowGeneration { get; init; }
     public DateTimeOffset LastWriteUtc { get; set; }
-    public Task SetupTask { get; set; } = Task.CompletedTask;
 
     /// <summary>Completes when the pooled setup worker finished this entry's pipeline; awaitable by drains.</summary>
     public TaskCompletionSource SetupCompletionSource { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -52,8 +51,7 @@ internal sealed class TcpPendingSynSetupIndex
     /// entry cap binds first under standard MTUs; the byte budget exists for symmetry with the
     /// UDP bounded-setup-memory pattern and future-proofing against jumbo capture frames.
     /// </summary>
-    internal const long DefaultGlobalByteBudget = 1024 * 1024;
-
+    private const long DefaultGlobalByteBudget = 1024 * 1024;
     /// <summary>
     /// How long a retained SYN stays deliverable while its background setup has not completed.
     /// A normal setup (bind + claim + inject) completes in well under a second; an entry still
@@ -181,14 +179,13 @@ internal sealed class TcpPendingSynSetupIndex
     }
 
     /// <summary>
-    /// Attaches the background setup task to a freshly created entry so a drain (dispose, tests)
-    /// can await it. Only valid for entries returned by <see cref="TryRetain"/> as created.
+    /// Registers the background setup task of a freshly retained entry so a drain (dispose, tests)
+    /// can await it. Only called for entries returned by <see cref="TryRetain"/> as created.
     /// </summary>
-    public void AttachSetup(PendingSynSetup entry, Task setupTask)
+    public void AttachSetup(Task setupTask)
     {
         lock (_gate)
         {
-            entry.SetupTask = setupTask;
             // Completed task references are pruned on the next attach, so the list stays bounded
             // by the concurrently in-flight setups instead of total setups.
             _setupTasks.RemoveAll(static task => task.IsCompleted);

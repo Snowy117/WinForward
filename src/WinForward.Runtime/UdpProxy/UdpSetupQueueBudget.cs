@@ -25,9 +25,6 @@ internal sealed class UdpSetupQueueBudget(long byteBudget, IRuntimeLogger logger
     /// <summary>Interval between rate-limited drop-summary debug logs.</summary>
     private static readonly TimeSpan s_dropLogInterval = TimeSpan.FromSeconds(5);
 
-    private readonly long _byteBudget = byteBudget;
-    private readonly IRuntimeLogger _logger = logger;
-    private readonly TimeProvider _timeProvider = timeProvider;
     private long _pendingBytes;
     private long _rejectionCount;
     private long _droppedTotal;
@@ -46,7 +43,7 @@ internal sealed class UdpSetupQueueBudget(long byteBudget, IRuntimeLogger logger
     /// </summary>
     internal bool TryCharge(int length)
     {
-        if (Interlocked.Add(ref _pendingBytes, length) > _byteBudget)
+        if (Interlocked.Add(ref _pendingBytes, length) > byteBudget)
         {
             Interlocked.Add(ref _pendingBytes, -length);
             Interlocked.Increment(ref _rejectionCount);
@@ -67,12 +64,12 @@ internal sealed class UdpSetupQueueBudget(long byteBudget, IRuntimeLogger logger
     {
         if (dropped <= 0) return;
         Interlocked.Add(ref _droppedTotal, dropped);
-        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) UdpProxyLogging.LogTrace(_logger, "udp.setupqueue.dropped", flow, new RuntimeLogField("dropped", dropped));
-        var now = _timeProvider.GetUtcNow().UtcTicks;
+        if (logger.IsEnabled(RuntimeLogLevel.Trace)) UdpProxyLogging.LogTrace(logger, "udp.setupqueue.dropped", flow, new RuntimeLogField("dropped", dropped));
+        var now = timeProvider.GetUtcNow().UtcTicks;
         var last = Interlocked.Read(ref _lastDropLogTicks);
         if (now - last >= s_dropLogInterval.Ticks && Interlocked.CompareExchange(ref _lastDropLogTicks, now, last) == last)
         {
-            _logger.Debug(string.Create(CultureInfo.InvariantCulture, $"UDP session setup queues dropped {Interlocked.Read(ref _droppedTotal)} datagram(s) total (drop-oldest)."));
+            logger.Debug(string.Create(CultureInfo.InvariantCulture, $"UDP session setup queues dropped {Interlocked.Read(ref _droppedTotal)} datagram(s) total (drop-oldest)."));
         }
     }
 

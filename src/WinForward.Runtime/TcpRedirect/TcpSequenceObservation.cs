@@ -49,7 +49,7 @@ internal static class TcpSequenceObservation
     /// payload. Returns false for non-TCP or unparseable frames, which simply leaves the trackers
     /// untouched (the reset then degrades to the ISN-based values).
     /// </summary>
-    public static bool TryReadTcpSequenceAdvance(ReadOnlySpan<byte> frame, out uint sequenceNext)
+    private static bool TryReadTcpSequenceAdvance(ReadOnlySpan<byte> frame, out uint sequenceNext)
     {
         sequenceNext = 0;
         if (!IPTcpUdpPacket.TryParse(frame, out var view) || view.Transport != PacketTransport.Tcp) return false;

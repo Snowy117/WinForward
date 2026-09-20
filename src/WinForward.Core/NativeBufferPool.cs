@@ -7,7 +7,7 @@ namespace WinForward.Core;
 /// <summary>
 /// A bounded pool of fixed-size native buffers for steady-state application paths that must not
 /// allocate on the managed heap (relay pump windows, UDP receive windows, retained SYN copies).
-/// Buffers are raw <see cref="NativeMemory.AllocZeroed"/> storage; each allocation carries a
+/// Buffers are raw <c>NativeMemory.AllocZeroed</c> storage; each allocation carries a
 /// one-word rental-state cell immediately before the payload so the lightweight
 /// <see cref="NativeLease"/> handle stays a struct with idempotent release across copies.
 /// Semantics mirror the M1-hardened <c>NdisPacketBufferPool</c>: a <see cref="ConcurrentQueue{T}"/>
@@ -19,8 +19,7 @@ namespace WinForward.Core;
 /// </summary>
 public sealed unsafe class NativeBufferPool : IDisposable
 {
-    public const int DefaultCapacity = 256;
-
+    private const int DefaultCapacity = 256;
     private const int StateIdle = 2;
     private const int StateRented = 1;
 
@@ -40,8 +39,7 @@ public sealed unsafe class NativeBufferPool : IDisposable
         Capacity = capacity;
     }
 
-    public int Capacity { get; }
-
+    private int Capacity { get; }
     /// <summary>The payload bytes every buffer of this pool provides; the rental-state word is additional.</summary>
     public int BufferSize { get; }
 
@@ -85,7 +83,7 @@ public sealed unsafe class NativeBufferPool : IDisposable
         }
         // No reusable buffer was available: allocate fresh and account the overflow so a sizing
         // error is visible in diagnostics instead of silently churning native allocations.
-        var allocation = (byte*)NativeMemory.AllocZeroed((nuint)sizeof(int) + (nuint)BufferSize);
+        var allocation = (byte*)NativeMemory.AllocZeroed(sizeof(int) + (nuint)BufferSize);
         if (allocation is null) throw new InvalidOperationException("Unable to allocate a native buffer.");
         var pointer = allocation + sizeof(int);
         Volatile.Write(ref *(int*)allocation, StateRented);
@@ -199,16 +197,14 @@ public readonly unsafe struct NativeLease : IDisposable
 /// </summary>
 internal sealed unsafe class NativeMemoryManager(void* pointer, int length) : MemoryManager<byte>
 {
-    private readonly void* _pointer = pointer;
-    private readonly int _length = length;
 
-    public override Span<byte> GetSpan() => new(_pointer, _length);
+    public override Span<byte> GetSpan() => new(pointer, length);
 
     public override MemoryHandle Pin(int elementIndex = 0)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(elementIndex);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(elementIndex, _length);
-        return new MemoryHandle((byte*)_pointer + elementIndex, pinnable: this);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(elementIndex, length);
+        return new MemoryHandle((byte*)pointer + elementIndex, pinnable: this);
     }
 
     public override void Unpin()

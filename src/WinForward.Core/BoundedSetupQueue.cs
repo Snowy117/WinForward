@@ -23,7 +23,6 @@ public sealed class BoundedSetupQueue
     private bool _hasPending;
     private readonly int _maxPackets;
     private readonly int _maxBytes;
-    private int _bytes;
 
     public BoundedSetupQueue(int maxPackets, int maxBytes)
     {
@@ -34,7 +33,7 @@ public sealed class BoundedSetupQueue
     }
 
     public int Count => (_hasPending ? 1 : 0) + (_items?.Count ?? 0);
-    internal int Bytes => _bytes;
+    internal int Bytes { get; private set; }
 
     /// <summary>
     /// Takes ownership of <paramref name="lease"/> (the caller copied the datagram's
@@ -45,7 +44,7 @@ public sealed class BoundedSetupQueue
     public bool TryEnqueue(NativeLease lease, int length, DateTimeOffset enqueuedAt)
     {
         if (length < 0 || length > lease.Length) return false;
-        if (length > _maxBytes || Count >= _maxPackets || _bytes > _maxBytes - length) return false;
+        if (length > _maxBytes || Count >= _maxPackets || Bytes > _maxBytes - length) return false;
         var entry = new Entry(lease, length, enqueuedAt);
         if (_items is null)
         {
@@ -53,7 +52,7 @@ public sealed class BoundedSetupQueue
             {
                 _pending = entry;
                 _hasPending = true;
-                _bytes += length;
+                Bytes += length;
                 return true;
             }
 
@@ -63,7 +62,7 @@ public sealed class BoundedSetupQueue
         }
 
         _items.Enqueue(entry);
-        _bytes += length;
+        Bytes += length;
         return true;
     }
 
@@ -100,7 +99,7 @@ public sealed class BoundedSetupQueue
         lease = entry.Lease;
         length = entry.Length;
         enqueuedAt = entry.EnqueuedAt;
-        _bytes -= entry.Length;
+        Bytes -= entry.Length;
         return true;
     }
 

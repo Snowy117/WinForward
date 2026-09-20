@@ -117,7 +117,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
     private const int SIOUdpConnreset = unchecked((int)0x9800000C);
 
     /// <summary>A 4-byte Win32 BOOL FALSE, the SIO_UDP_CONNRESET input value.</summary>
-    private static readonly byte[] s_disableValue = [0, 0, 0, 0];
+    private static readonly byte[] s_disableValue = new byte[4];
 
     /// <summary>Cached default for <c>disableUdpConnectionReset</c> so session setup never converts the method group per call.</summary>
     private static readonly Action<Socket> s_disableUdpConnectionResetAction = DisableUdpConnectionReset;
@@ -327,6 +327,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
         // M2: the SOCKS5 UDP wire format carries no interface scope, so propagate the relay
         // endpoint's IPv6 scope into reconstruction to keep a link-local decoded address routable.
         var scopeId = RelayEndpoint.Address.AddressFamily == AddressFamily.InterNetworkV6 ? RelayEndpoint.Address.ScopeId : 0;
+        // ReSharper disable once ConvertIfStatementToReturnStatement // TryDecode decodes into an out parameter (side effect + binding); the early exit on malformed input must stay a separate step (B1 disposition).
         if (!Socks5UdpCodec.TryDecode(buffer[..result.ReceivedBytes], out var datagram, scopeId)) return Socks5UdpReceiveResult.Skipped(Socks5UdpReceiveSkipReason.Malformed);
         return Socks5UdpReceiveResult.Received(datagram);
     }
@@ -356,7 +357,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
     /// (S2). Windows-only at runtime: the Linux test host rejects vendor IOCTLs, and tests assert
     /// the call through the injectable seam instead of executing it.
     /// </summary>
-    internal static void DisableUdpConnectionReset(Socket socket)
+    private static void DisableUdpConnectionReset(Socket socket)
     {
         if (!OperatingSystem.IsWindows()) return;
         socket.IOControl(SIOUdpConnreset, s_disableValue, optionOutValue: null);

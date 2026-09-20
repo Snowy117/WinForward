@@ -1,4 +1,3 @@
-using WinForward.Core;
 
 namespace WinForward.Runtime.Capture;
 
@@ -16,9 +15,9 @@ public readonly record struct AdapterModeSnapshot(string AdapterId, uint Flags);
 
 public interface IAdapterModeController : IAsyncDisposable
 {
-    ValueTask<IReadOnlyList<AdapterModeSnapshot>> SnapshotAsync(CancellationToken cancellationToken);
-    ValueTask ApplyCaptureModeAsync(AdapterModeSnapshot adapter, CancellationToken cancellationToken);
-    ValueTask RestoreAsync(AdapterModeSnapshot adapter, CancellationToken cancellationToken);
+    ValueTask<IReadOnlyList<AdapterModeSnapshot>> SnapshotAsync();
+    ValueTask ApplyCaptureModeAsync(AdapterModeSnapshot adapter);
+    ValueTask RestoreAsync(AdapterModeSnapshot adapter);
 }
 
 public interface IPacketCaptureLoop : IAsyncDisposable
@@ -88,10 +87,10 @@ public sealed class TransactionalCaptureRuntime : IAsyncDisposable
         var runtimeCancellation = linkedCancellation.Token;
         try
         {
-            var snapshots = await _modes.SnapshotAsync(runtimeCancellation).ConfigureAwait(false);
+            var snapshots = await _modes.SnapshotAsync().ConfigureAwait(false);
             foreach (var adapter in snapshots)
             {
-                await _modes.ApplyCaptureModeAsync(adapter, runtimeCancellation).ConfigureAwait(false);
+                await _modes.ApplyCaptureModeAsync(adapter).ConfigureAwait(false);
                 _applied.Add(adapter);
             }
             SetActiveState(CaptureRuntimeState.ModesApplied);
@@ -125,7 +124,7 @@ public sealed class TransactionalCaptureRuntime : IAsyncDisposable
         if (runTask is not null)
         {
             try { await runTask.ConfigureAwait(false); }
-            catch (OperationCanceledException) { return; }
+            catch (OperationCanceledException) { /* Expected stop completion: observed and swallowed; the following return skips cleanup. */ }
             return;
         }
 
@@ -166,7 +165,7 @@ public sealed class TransactionalCaptureRuntime : IAsyncDisposable
     {
         try
         {
-            await _modes.RestoreAsync(snapshot, CancellationToken.None).ConfigureAwait(false);
+            await _modes.RestoreAsync(snapshot).ConfigureAwait(false);
         }
         catch (Exception exception)
         {
@@ -185,7 +184,7 @@ public sealed class TransactionalCaptureRuntime : IAsyncDisposable
         lock (_gate) applied = [.. _applied];
         foreach (var adapter in applied.AsEnumerable().Reverse())
         {
-            try { await _modes.RestoreAsync(adapter, CancellationToken.None).ConfigureAwait(false); }
+            try { await _modes.RestoreAsync(adapter).ConfigureAwait(false); }
 #pragma warning disable RCS1075 // Rollback must continue restoring the remaining adapters.
             catch (Exception)
             {

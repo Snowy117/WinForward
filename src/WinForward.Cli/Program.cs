@@ -214,6 +214,7 @@ internal static class Program
                     configuration, driver, bundle, logger, healthMonitor, watcher,
                     (adapter, nativeError) =>
                     {
+                        // ReSharper disable once AccessToModifiedClosure // One-shot wiring: runnerRef is assigned before RunAsync starts, and the callback can fire only from a generation created inside RunAsync, so every read already sees the assigned runner.
                         runnerRef!.SignalDegraded(adapter, nativeError);
                         return ValueTask.CompletedTask;
                     });
@@ -319,6 +320,7 @@ internal static class Program
         void OnCancel(object? sender, ConsoleCancelEventArgs eventArgs)
         {
             eventArgs.Cancel = true;
+            // ReSharper disable once AccessToDisposedClosure // OnCancel is reachable only through the Console.CancelKeyPress subscription, which the finally below removes before this method's using scope disposes shutdown; Cancel() can never observe a disposed source on that path.
             shutdown.Cancel();
         }
 

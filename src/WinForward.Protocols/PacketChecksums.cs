@@ -26,10 +26,9 @@ public static class PacketChecksums
     /// endpoint headers, so this overload is kept as the independent protocol oracle for the UDP
     /// parse/checksum tests (<c>UdpPacketParsingTests</c>, <c>ProtocolAuditTests</c>).
     /// </summary>
-    public static bool TryRewriteUdpEndpoints(Span<byte> ethernetFrame, IPAddress sourceAddress, ushort sourcePort, IPAddress destinationAddress, ushort destinationPort)
-        => TryRewriteUdpEndpoints(ethernetFrame, IPAddressValue.From(sourceAddress), sourcePort, IPAddressValue.From(destinationAddress), destinationPort);
+    public static bool TryRewriteUdpEndpoints(Span<byte> ethernetFrame, IPAddress sourceAddress, ushort sourcePort, IPAddress destinationAddress, ushort destinationPort) => TryRewriteUdpEndpoints(ethernetFrame, IPAddressValue.From(sourceAddress), sourcePort, IPAddressValue.From(destinationAddress), destinationPort);
 
-    public static bool TryRewriteUdpEndpoints(Span<byte> ethernetFrame, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
+    private static bool TryRewriteUdpEndpoints(Span<byte> ethernetFrame, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
     {
         if (ethernetFrame.Length < 14) return false;
         var etherType = BinaryPrimitives.ReadUInt16BigEndian(ethernetFrame.Slice(12, 2));

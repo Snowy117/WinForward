@@ -30,7 +30,7 @@ public static partial class UnicastAddressInventory
     /// </summary>
     internal const int MaxUnicastAddressRows = 4096;
 
-    internal const ushort AfUnspec = 0;
+    private const ushort AfUnspec = 0;
     internal const ushort AfInet = 2;
     internal const ushort AfInet6 = 23;
 
@@ -61,7 +61,7 @@ public static partial class UnicastAddressInventory
             : string.Empty;
     }
 
-    internal static unsafe IReadOnlyList<UnicastAddressObservation> ReadRows()
+    private static unsafe IReadOnlyList<UnicastAddressObservation> ReadRows()
     {
         nint table;
         var result = Native.GetUnicastIpAddressTable(AfUnspec, &table);
@@ -77,7 +77,7 @@ public static partial class UnicastAddressInventory
     }
 
     /// <summary>Parses a MIB_UNICASTIPADDRESS_TABLE-shaped buffer: 4-byte entry count, then rows.</summary>
-    internal static unsafe IReadOnlyList<UnicastAddressObservation> ParseRows(nint tableBuffer)
+    internal static IReadOnlyList<UnicastAddressObservation> ParseRows(nint tableBuffer)
     {
         if (tableBuffer == nint.Zero) throw new ArgumentNullException(nameof(tableBuffer));
         var rowCount = Marshal.ReadInt32(tableBuffer);
@@ -139,8 +139,7 @@ public static partial class UnicastAddressInventory
         return fingerprints;
     }
 
-    internal static string BuildFingerprint(IEnumerable<IPAddress> addresses) =>
-        string.Join(';', addresses
+    private static string BuildFingerprint(IEnumerable<IPAddress> addresses) => string.Join(';', addresses
             .Select(address => address.ToString().ToLowerInvariant())
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal));
@@ -149,12 +148,12 @@ public static partial class UnicastAddressInventory
     /// Converts an interface LUID to the interface GUID (the NetCfgInstanceId the adapter
     /// identity contract correlates on); null when the system refuses the LUID.
     /// </summary>
-    internal static Guid? ResolveInterfaceGuid(ulong interfaceLuid) =>
-        Native.ConvertInterfaceLuidToGuid(in interfaceLuid, out var interfaceGuid) == 0 ? interfaceGuid : null;
+    private static Guid? ResolveInterfaceGuid(ulong interfaceLuid) => Native.ConvertInterfaceLuidToGuid(in interfaceLuid, out var interfaceGuid) == 0 ? interfaceGuid : null;
 
     private static unsafe UnicastAddressObservation ReadObservation(IPHelperAbi.MibUnicastIpAddressRow row, int index)
     {
         var family = *(ushort*)row.Address;
+        // ReSharper disable once ConvertIfStatementToSwitchStatement // Row-parse if/throw cascade — switch-expression arms would force the multi-line address constructions into over-long single lines and hide the fallback throw.
         if (family == AfInet)
         {
             return new UnicastAddressObservation(

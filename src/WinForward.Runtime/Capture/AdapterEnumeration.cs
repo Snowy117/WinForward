@@ -92,9 +92,9 @@ public sealed class NdisAdapterEnumerationProvider : IAdapterEnumerationProvider
         }
         catch (Exception exception) when (exception is Win32Exception or InvalidOperationException or ArgumentException)
         {
-            if (Interlocked.Exchange(ref _addressQueryFailureLogged, 1) == 0 && _logger is { } logger)
+            if (Interlocked.Exchange(ref _addressQueryFailureLogged, 1) == 0 && _logger is not null)
             {
-                logger.Event(RuntimeLogLevel.Debug, "adapter.addressQuery.failed",
+                _logger.Event(RuntimeLogLevel.Debug, "adapter.addressQuery.failed",
                     new RuntimeLogField("error", exception.Message));
             }
             return s_emptyFingerprints;

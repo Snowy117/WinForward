@@ -163,6 +163,7 @@ internal static partial class NdisApiNative
 
     private static nint ResolveLibrary(string libraryName, System.Reflection.Assembly assembly, DllImportSearchPath? searchPath)
     {
+        // ReSharper disable once ConvertIfStatementToReturnStatement // Foreign-library probe: the early "not our library" return keeps the load path out of a 150+ char ternary (B1 disposition).
         if (!string.Equals(libraryName, LibraryName, StringComparison.OrdinalIgnoreCase)) return nint.Zero;
         return NativeLibrary.Load(GetApplicationLocalLibraryPath(AppContext.BaseDirectory));
     }
@@ -171,6 +172,7 @@ internal static partial class NdisApiNative
     {
         ArgumentException.ThrowIfNullOrEmpty(applicationBaseDirectory);
         var path = Path.Combine(applicationBaseDirectory, LibraryName);
+        // ReSharper disable once ConvertIfStatementToReturnStatement // Guard-clause + throw reads failure-first; the suggested `cond ? throw ... : value` form has no precedent in this repo (B1 disposition).
         if (!File.Exists(path)) throw new DllNotFoundException($"WinForward requires {LibraryName} beside the executable: {path}");
         return path;
     }
@@ -186,10 +188,6 @@ internal static partial class NdisApiNative
     [LibraryImport(LibraryName, EntryPoint = "CloseFilterDriver", SetLastError = true)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
     internal static partial void CloseFilterDriver(nint handle);
-
-    [LibraryImport(LibraryName, EntryPoint = "GetDriverVersion", SetLastError = true)]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
-    internal static partial uint GetDriverVersion(NdisApiSafeHandle handle);
 
     [LibraryImport(LibraryName, EntryPoint = "GetTcpipBoundAdaptersInfo", SetLastError = true)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
@@ -210,10 +208,6 @@ internal static partial class NdisApiNative
     [LibraryImport(LibraryName, EntryPoint = "GetAdapterPacketQueueSize", SetLastError = true)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
     internal static unsafe partial int GetAdapterPacketQueueSize(NdisApiSafeHandle handle, nint adapterHandle, uint* packetCount);
-
-    [LibraryImport(LibraryName, EntryPoint = "ReadPacket", SetLastError = true)]
-    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
-    internal static unsafe partial int ReadPacket(NdisApiSafeHandle handle, EthernetRequest* request);
 
     [LibraryImport(LibraryName, EntryPoint = "ReadPackets", SetLastError = true)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]

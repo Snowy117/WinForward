@@ -58,7 +58,7 @@ public interface ITcpRelay : IAsyncDisposable
 }
 
 /// <summary>
-/// Injects a rewritten TCP frame back into the packet path. <paramref name="towardMstcp"/> selects
+/// Injects a rewritten TCP frame back into the packet path. <c>towardMstcp</c> selects
 /// the direction: true sends toward the Windows TCP/IP stack (SendToMstcp), false sends toward
 /// the adapter (SendToAdapter). For a SYN redirect the frame is injected toward MSTCP so the stack
 /// delivers it to the local listener; for a reverse packet it is injected toward MSTCP (host flow)

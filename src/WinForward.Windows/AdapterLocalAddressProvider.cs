@@ -8,7 +8,7 @@ namespace WinForward.Windows;
 
 /// <summary>
 /// A hardware-independent projection of one network interface's unicast addresses, mirroring the
-/// <see cref="IPAdapterInfo"/> projection in <see cref="AdapterIdentity.cs"/>. The mask is captured
+/// <see cref="IPAdapterInfo"/> projection in <c>AdapterIdentity.cs</c>. The mask is captured
 /// only for IPv4 addresses; IPv6 subnet preference uses /64 prefix equality instead.
 /// </summary>
 public readonly record struct IPAdapterUnicastInfo(string Id, IReadOnlyList<IPAdapterUnicastAddress> Addresses);
@@ -115,10 +115,9 @@ public sealed class WindowsAdapterLocalAddressProvider : IAdapterLocalAddressPro
         var adapters = snapshot.Adapters;
         for (var adapterIndex = 0; adapterIndex < adapters.Count; adapterIndex++)
         {
-            var adapter = adapters[adapterIndex];
-            if (!MatchesAdapter(adapter.Id, adapterId)) continue;
+            var (id, addresses) = adapters[adapterIndex];
+            if (!MatchesAdapter(id, adapterId)) continue;
             IPAddress? fallback = null;
-            var addresses = adapter.Addresses;
             for (var addressIndex = 0; addressIndex < addresses.Count; addressIndex++)
             {
                 var candidate = addresses[addressIndex];

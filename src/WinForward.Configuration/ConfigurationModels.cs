@@ -101,19 +101,15 @@ public static class ConfigurationLoader
     public const int DefaultTcpFlowCapacity = 4_096;
 
     /// <summary>The smallest accepted tcpFlowCapacity; a zero or negative budget would block every flow.</summary>
-    public const int MinimumTcpFlowCapacity = 1;
-
+    private const int MinimumTcpFlowCapacity = 1;
     /// <summary>The largest accepted tcpFlowCapacity; above this the budget offers no port-pool protection at all.</summary>
-    public const int MaximumTcpFlowCapacity = 8_192;
-
+    private const int MaximumTcpFlowCapacity = 8_192;
     /// <summary>Values above the default warn during validation because they shrink the reserved ephemeral-port headroom.</summary>
-    public const int TcpFlowCapacityWarningThreshold = 4_096;
-
+    private const int TcpFlowCapacityWarningThreshold = 4_096;
     /// <summary>The smallest accepted setupWorkerCount; at least one worker must exist to drain new-flow setup.</summary>
-    public const int MinimumSetupWorkerCount = 1;
-
+    private const int MinimumSetupWorkerCount = 1;
     /// <summary>The largest accepted setupWorkerCount; beyond this the dedicated threads outweigh any setup throughput gain.</summary>
-    public const int MaximumSetupWorkerCount = 256;
+    private const int MaximumSetupWorkerCount = 256;
 
     public static bool TryParse(string json, out WinForwardConfigDto? dto, out IReadOnlyList<ConfigDiagnostic> diagnostics)
     {
@@ -241,6 +237,7 @@ public static class ConfigurationLoader
     private static int ParseTcpFlowCapacity(WinForwardConfigDto dto, List<ConfigDiagnostic> errors, List<ConfigDiagnostic> warnings)
     {
         if (dto.TcpFlowCapacity is not { } value) return DefaultTcpFlowCapacity;
+        // ReSharper disable once ConvertIfStatementToSwitchStatement // Range-pattern precondition — a switch over the same value with a relational pattern adds ceremony and hides the fail-closed order (report the error, return the default) that pairs with the threshold warning below.
         if (value is < MinimumTcpFlowCapacity or > MaximumTcpFlowCapacity)
         {
             errors.Add(new("tcpFlowCapacity", $"TCP flow capacity must be in {MinimumTcpFlowCapacity}..{MaximumTcpFlowCapacity}."));
@@ -409,14 +406,14 @@ public static class ConfigurationLoader
             var value = values[index];
             if (string.IsNullOrWhiteSpace(value)) continue;
             var parts = value.Split('-', StringSplitOptions.TrimEntries);
-            if (parts.Length is < 1 or > 2 || !ushort.TryParse(parts[0], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var start) || start == 0)
+            if (parts.Length is < 1 or > 2 || !ushort.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var start) || start == 0)
             {
                 errors.Add(new(string.Create(CultureInfo.InvariantCulture, $"{path}[{index}]"), $"Invalid port or range '{value}'."));
                 continue;
             }
 
             var end = start;
-            if (parts.Length == 2 && (!ushort.TryParse(parts[1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out end) || end == 0 || end < start))
+            if (parts.Length == 2 && (!ushort.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out end) || end == 0 || end < start))
             {
                 errors.Add(new(string.Create(CultureInfo.InvariantCulture, $"{path}[{index}]"), $"Invalid port or range '{value}'."));
                 continue;
@@ -438,7 +435,7 @@ public static class ConfigurationLoader
             }
 
             var (start, end) = merged[^1];
-            if ((uint)range.Start > (uint)end + 1U)
+            if (range.Start > end + 1U)
             {
                 merged.Add(range);
                 continue;
