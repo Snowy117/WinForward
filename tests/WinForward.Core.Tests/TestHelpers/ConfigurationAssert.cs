@@ -13,7 +13,7 @@ internal static class ConfigurationAssert
     {
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
         Assert.NotNull(dto);
-        Assert.False(ConfigurationLoader.TryValidate(dto!, out _, out var diagnostics));
+        Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
         foreach (var path in expectedPaths) Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, path, StringComparison.Ordinal));
     }
 }

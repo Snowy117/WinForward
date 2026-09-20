@@ -14,7 +14,7 @@ public sealed class NdisPacketBufferPoolTests
         NdisPacketBuffer first;
         using (first = pool.Rent())
         {
-            first.SetFrame([1, 2, 3], NdisApiAbi.PacketFlagOnSend, (nint)7);
+            first.SetFrame([1, 2, 3], NdisApiAbi.PacketFlagOnSend, 7);
             Assert.Equal(3, first.Length);
         }
         Assert.Equal(1, pool.Count);
@@ -25,7 +25,7 @@ public sealed class NdisPacketBufferPoolTests
 
         // A reused buffer presents only its newest frame; the previous contents are not observable
         // through the wrapper until overwritten.
-        second.SetFrame([4], NdisApiAbi.PacketFlagOnReceive, (nint)8);
+        second.SetFrame([4], NdisApiAbi.PacketFlagOnReceive, 8);
         Assert.Equal(new byte[] { 4 }, second.GetFrame().ToArray());
     }
 
@@ -69,7 +69,7 @@ public sealed class NdisPacketBufferPoolTests
         {
             var buffer = pool.Rent();
             rented.Add(buffer);
-            buffer.SetFrame([1, 2, 3], NdisApiAbi.PacketFlagOnSend, (nint)7);
+            buffer.SetFrame([1, 2, 3], NdisApiAbi.PacketFlagOnSend, 7);
             await Task.Yield();
         });
 
@@ -107,7 +107,7 @@ public sealed class NdisPacketBufferPoolTests
 
         // Disposal trims idle buffers but does not disable the pool: a later rent allocates fresh.
         using var buffer = pool.Rent();
-        buffer.SetFrame([9], NdisApiAbi.PacketFlagOnReceive, (nint)1);
+        buffer.SetFrame([9], NdisApiAbi.PacketFlagOnReceive, 1);
         Assert.Equal("\t"u8.ToArray(), buffer.GetFrame().ToArray());
     }
 
@@ -124,8 +124,9 @@ public sealed class NdisPacketBufferPoolTests
     public void PrivateBuffersKeepFreeOnDisposeSemantics()
     {
         using var buffer = new NdisPacketBuffer();
-        buffer.SetFrame([1, 2, 3], NdisApiAbi.PacketFlagOnSend, (nint)7);
+        buffer.SetFrame([1, 2, 3], NdisApiAbi.PacketFlagOnSend, 7);
 
+        // ReSharper disable once DisposeOnUsingVariable // The explicit Dispose establishes the state the test asserts: a privately constructed buffer is freed (not pooled) and refuses further use; the using declaration only backstops assertion-failure paths.
         buffer.Dispose();
 
         // A privately constructed buffer is freed, not pooled: the wrapper refuses further use.
@@ -140,7 +141,7 @@ public sealed class NdisPacketBufferPoolTests
         for (var index = 0; index < buffers.Length; index++)
         {
             buffers[index] = pool.Rent();
-            buffers[index].SetFrame([(byte)index], NdisApiAbi.PacketFlagOnSend, (nint)1);
+            buffers[index].SetFrame([(byte)index], NdisApiAbi.PacketFlagOnSend, 1);
         }
 
         // Everything is checked out: the pool started empty, so every rent allocated fresh.
@@ -178,7 +179,7 @@ public sealed class NdisPacketBufferPoolTests
         for (var round = 0; round < 4; round++)
         {
             var buffer = pool.Rent();
-            buffer.SetFrame([(byte)round], NdisApiAbi.PacketFlagOnSend, (nint)1);
+            buffer.SetFrame([(byte)round], NdisApiAbi.PacketFlagOnSend, 1);
             pool.Return(buffer);
         }
 
@@ -229,7 +230,7 @@ public sealed class NdisPacketBufferPoolTests
         using var pool = new NdisPacketBufferPool();
         Assert.Null(pool.AccountingSink);
         var observed = new List<bool>();
-        pool.AccountingSink = rented => observed.Add(rented);
+        pool.AccountingSink = observed.Add;
 
         var buffer = pool.Rent();
         pool.Return(buffer);

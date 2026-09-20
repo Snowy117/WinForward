@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
 using Xunit;
@@ -190,7 +189,7 @@ public sealed class UdpSetupQueueTests
         // The occupants hold every limiter slot; flow #9's datagram is accepted (buffered)
         // while its setup queues on the limiter.
         await WaitForAsync(() => factory.CreateCalls == occupants);
-        Assert.True(await coordinator.TrySendSpanAsync(flows[occupants], s_server, [(byte)occupants], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flows[occupants], s_server, [occupants], default, CancellationToken.None));
 
         // 4 s of limiter queue-wait for flow #9 (and 4 s of dial for the occupants, under the
         // TTL). Releasing the occupants lets flow #9's dial start: its queue is re-stamped at

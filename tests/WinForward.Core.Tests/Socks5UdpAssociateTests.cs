@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.Protocols;
 using WinForward.Runtime;
 using WinForward.Runtime.Socks5;
@@ -71,7 +70,7 @@ public sealed class Socks5UdpAssociateTests
         Assert.Equal(AddressFamily.InterNetwork, packet.Sender.AddressFamily);
         Assert.Equal(4, packet.Datagram[3]);
         Assert.True(Socks5UdpCodec.TryDecode(packet.Datagram, out var decoded));
-        Assert.Equal((IPAddressValue?)destination.Address, decoded.DestinationAddress);
+        Assert.Equal(destination.Address, decoded.DestinationAddress);
         Assert.Equal(destination.Port, decoded.DestinationPort);
         Assert.Equal(payload, decoded.Payload.ToArray());
 
@@ -123,7 +122,7 @@ public sealed class Socks5UdpAssociateTests
         var packet = await relayPacket.Task.WaitAsync(CancellationToken.None);
         Assert.Equal(AddressFamily.InterNetworkV6, packet.Sender.AddressFamily);
         Assert.True(Socks5UdpCodec.TryDecode(packet.Datagram, out var decoded));
-        Assert.Equal((IPAddressValue?)destination.Address, decoded.DestinationAddress);
+        Assert.Equal(destination.Address, decoded.DestinationAddress);
         Assert.Equal(destination.Port, decoded.DestinationPort);
         Assert.Equal(payload, decoded.Payload.ToArray());
 
@@ -250,10 +249,9 @@ public sealed class Socks5UdpAssociateTests
 
     private sealed class OrderingRegistration(Func<bool> socketIsDisposed) : IDisposable
     {
-        private readonly Func<bool> _socketIsDisposed = socketIsDisposed;
 
         public bool DisposedAfterSocket { get; private set; }
 
-        public void Dispose() => DisposedAfterSocket = _socketIsDisposed();
+        public void Dispose() => DisposedAfterSocket = socketIsDisposed();
     }
 }

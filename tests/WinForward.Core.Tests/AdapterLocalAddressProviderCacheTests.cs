@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Runtime.Versioning;
-using WinForward.Core;
 using WinForward.Windows;
 using Xunit;
 
@@ -127,6 +126,7 @@ public sealed class AdapterLocalAddressProviderCacheTests
 
         var workers = Enumerable.Range(0, 4).Select(index => Task.Run(() =>
         {
+            // ReSharper disable once AccessToDisposedClosure // Every worker is joined by the Task.WhenAll below before the using scope disposes the barrier; this SignalAndWait runs inside the test body's own await.
             barrier.SignalAndWait();
             results[index] = provider.SelectLocalAddress(AdapterGuid, AddressFamilyKind.IPv4, IPAddress.Parse("192.168.100.6"));
         })).ToArray();
@@ -137,13 +137,13 @@ public sealed class AdapterLocalAddressProviderCacheTests
     }
 
     private static IReadOnlyList<IPAdapterUnicastInfo> Subnet100() =>
-        [new IPAdapterUnicastInfo(AdapterGuid,
+        [new(AdapterGuid,
         [
             new IPAdapterUnicastAddress(IPAddress.Parse("192.168.100.1"), IPAddress.Parse("255.255.255.0")),
         ])];
 
     private static IReadOnlyList<IPAdapterUnicastInfo> Subnet10() =>
-        [new IPAdapterUnicastInfo(AdapterGuid,
+        [new(AdapterGuid,
         [
             new IPAdapterUnicastAddress(IPAddress.Parse("10.0.0.1"), IPAddress.Parse("255.0.0.0")),
         ])];
@@ -166,8 +166,7 @@ public sealed class AdapterLocalAddressProviderCacheTests
         public CountingEnumeration Enumeration { get; }
         public MutableTimeProvider Time { get; }
         public ManualAddressChange Change { get; }
-        public WindowsAdapterLocalAddressProvider Provider { get; }
-
+        private WindowsAdapterLocalAddressProvider Provider { get; }
         public IPAddress? Select(
             string adapterId = AdapterGuid,
             AddressFamilyKind family = AddressFamilyKind.IPv4,

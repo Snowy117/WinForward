@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Net;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.Runtime;
 using Xunit;
 
@@ -106,7 +105,7 @@ public sealed class RuntimeLoggingTests
             Endpoint.From(IPAddress.Parse("198.51.100.20"), 443),
             TransportProtocol.Tcp,
             FlowOriginKind.Host);
-        var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), new FlowContext(key, "browser.exe", "C:\\Users\\test\\browser.exe", "adapter-id", "Ethernet", 443), PacketSequence: 17);
+        var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), new FlowContext(key, "browser.exe", @"C:\Users\test\browser.exe", "adapter-id", "Ethernet", 443), PacketSequence: 17);
 
         await dispatcher.DispatchAsync(packet, CancellationToken.None);
 
@@ -117,7 +116,7 @@ public sealed class RuntimeLoggingTests
         Assert.Contains("flow.created flow=1", output, StringComparison.Ordinal);
         Assert.Contains("packet.completed packet=17 flow=1 disposition=pass", output, StringComparison.Ordinal);
         Assert.Contains("process=browser.exe", output, StringComparison.Ordinal);
-        Assert.DoesNotContain("C:\\Users\\test", output, StringComparison.Ordinal);
+        Assert.DoesNotContain(@"C:\Users\test", output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -132,18 +131,18 @@ public sealed class RuntimeLoggingTests
             IncludeProcessPathInLogs: true);
         var dispatcher = new FlowDispatcher(configuration, new FakeGuard(), new RecordingExecutor(), logger: logger);
         var key = FlowKey.Create(Endpoint.From(IPAddress.Loopback, 50000), Endpoint.From(IPAddress.Parse("198.51.100.20"), 443), TransportProtocol.Tcp, FlowOriginKind.Host);
-        var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), new FlowContext(key, "browser.exe", "C:\\Apps\\browser.exe", AdapterId: null, AdapterName: null, 443));
+        var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), new FlowContext(key, "browser.exe", @"C:\Apps\browser.exe", AdapterId: null, AdapterName: null, 443));
 
         await dispatcher.DispatchAsync(packet, CancellationToken.None);
 
-        Assert.Contains("processPath=C:\\Apps\\browser.exe", writer.ToString(), StringComparison.Ordinal);
+        Assert.Contains(@"processPath=C:\Apps\browser.exe", writer.ToString(), StringComparison.Ordinal);
     }
 
     private sealed class RecordingExecutor : IPacketActionExecutor
     {
         public CapturedFlowPacket? LastPacket { get; private set; }
-        public ValueTask PassAsync(CapturedFlowPacket packet, CancellationToken cancellationToken) { LastPacket = packet; return ValueTask.CompletedTask; }
-        public ValueTask BlockAsync(CapturedFlowPacket packet, CancellationToken cancellationToken) { LastPacket = packet; return ValueTask.CompletedTask; }
+        public ValueTask PassAsync(CapturedFlowPacket packet) { LastPacket = packet; return ValueTask.CompletedTask; }
+        public ValueTask BlockAsync(CapturedFlowPacket packet) { LastPacket = packet; return ValueTask.CompletedTask; }
         public ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken) { LastPacket = packet; return ValueTask.CompletedTask; }
     }
 }

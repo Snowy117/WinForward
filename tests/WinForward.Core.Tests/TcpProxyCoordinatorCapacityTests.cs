@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.Net;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.Capture;
@@ -464,14 +463,14 @@ public sealed class TcpProxyCoordinatorCapacityTests
         Assert.Equal(TcpRedirectOutcome.Blocked, await coordinator.HandleSynAsync(hostSyn, s_server, CancellationToken.None));
         var (_, towardMstcp, adapterHandle) = injector.InjectedFrames[1];
         Assert.True(towardMstcp);
-        Assert.Equal((nint)0x1234, adapterHandle);
+        Assert.Equal(0x1234, adapterHandle);
 
         injector.InjectedFrames.Clear();
         var forwardedSyn = MakeForwardedSynPacket(IPAddress.Parse("192.0.2.12"), IPAddress.Parse("192.0.2.99"), 53002, 80);
         Assert.Equal(TcpRedirectOutcome.Blocked, await coordinator.HandleSynAsync(forwardedSyn, s_server, CancellationToken.None));
         var (forwardedFrame, forwardedTowardMstcp, forwardedAdapterHandle) = injector.InjectedFrames[0];
         Assert.False(forwardedTowardMstcp);
-        Assert.Equal((nint)0x1234, forwardedAdapterHandle);
+        Assert.Equal(0x1234, forwardedAdapterHandle);
         Assert.Equal(0x14, forwardedFrame[47]);
     }
 
@@ -479,7 +478,7 @@ public sealed class TcpProxyCoordinatorCapacityTests
     public async Task CapacityResetInjectionFailureWarnsWithoutChangingOutcome()
     {
         var listenerFactory = new FakeListenerFactory();
-        var injector = new FakeInjector(throwOnCall: 2, exception: new System.ComponentModel.Win32Exception(87));
+        var injector = new FakeInjector(throwOnCall: 2, exception: new Win32Exception(87));
         var selfTraffic = new SelfTrafficRegistry();
         var logger = new RecordingRuntimeLogger();
         var table = new TcpRedirectTable(capacity: 1);

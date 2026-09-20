@@ -1,16 +1,11 @@
 using System.ComponentModel;
-using System.Net;
 using System.Runtime.Versioning;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.Capture;
-using WinForward.Runtime.TcpRedirect;
 using WinForward.Windows;
 using Xunit;
-using static WinForward.Core.Tests.AsyncTestExtensions;
-using static WinForward.Core.Tests.TcpCoordinatorFakes;
 
 namespace WinForward.Core.Tests;
 
@@ -45,12 +40,13 @@ public sealed class NdisCaptureResilienceTests
                 },
                 _ =>
                 {
+                    // ReSharper disable once AccessToDisposedClosure // This scripted-reader cancel step ends the run on its third read; the pump run is awaited before the using scope disposes cts.
                     cts.Cancel();
                     return 0;
                 },
             ]);
 
-        await using var pump = new NdisCapturePump(reader, (nint)0x55, CaptureHandler(observed), new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), TransientRetryBaseDelay = TimeSpan.FromMilliseconds(1) });
+        await using var pump = new NdisCapturePump(reader, 0x55, CaptureHandler(observed), new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), TransientRetryBaseDelay = TimeSpan.FromMilliseconds(1) });
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pump.RunAsync(cts.Token).AsTask());
 
@@ -72,12 +68,13 @@ public sealed class NdisCaptureResilienceTests
                 _ => throw Transient(),
                 _ =>
                 {
+                    // ReSharper disable once AccessToDisposedClosure // This scripted-reader cancel step ends the run on its fourth read; the pump run is awaited before the using scope disposes cts.
                     cts.Cancel();
                     return 0;
                 },
             ]);
 
-        await using var pump = new NdisCapturePump(reader, (nint)0x55, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), TransientRetryBaseDelay = TimeSpan.FromMilliseconds(1) });
+        await using var pump = new NdisCapturePump(reader, 0x55, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), TransientRetryBaseDelay = TimeSpan.FromMilliseconds(1) });
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pump.RunAsync(cts.Token).AsTask());
 
@@ -93,7 +90,7 @@ public sealed class NdisCaptureResilienceTests
         using var cts = new CancellationTokenSource();
         var reader = new ScriptedReader([], throwAlways: Transient());
 
-        var pump = new NdisCapturePump(reader, (nint)0x55, CaptureHandler(observed), new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), OnDegraded = degradedErrors.Add, TransientRetryBaseDelay = TimeSpan.FromMilliseconds(1) });
+        var pump = new NdisCapturePump(reader, 0x55, CaptureHandler(observed), new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), OnDegraded = degradedErrors.Add, TransientRetryBaseDelay = TimeSpan.FromMilliseconds(1) });
 
         await pump.RunAsync(cts.Token);
         await pump.DisposeAsync();
@@ -114,7 +111,7 @@ public sealed class NdisCaptureResilienceTests
         using var cts = new CancellationTokenSource();
         var reader = new ScriptedReader([], throwAlways: Permanent());
 
-        var pump = new NdisCapturePump(reader, (nint)0x55, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), OnDegraded = degradedErrors.Add });
+        var pump = new NdisCapturePump(reader, 0x55, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), OnDegraded = degradedErrors.Add });
 
         await pump.RunAsync(cts.Token);
 
@@ -134,12 +131,13 @@ public sealed class NdisCaptureResilienceTests
                 _ => throw Transient(170),
                 _ =>
                 {
+                    // ReSharper disable once AccessToDisposedClosure // This scripted-reader cancel step ends the run on its second read; the pump run is awaited before the using scope disposes cts.
                     cts.Cancel();
                     return 0;
                 },
             ]);
 
-        await using var pump = new NdisCapturePump(reader, (nint)0x55, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), OnTransientRetry = (error, attempt) => attempts.Add((error, attempt)), TransientRetryBaseDelay = TimeSpan.FromMilliseconds(1) });
+        await using var pump = new NdisCapturePump(reader, 0x55, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), OnTransientRetry = (error, attempt) => attempts.Add((error, attempt)), TransientRetryBaseDelay = TimeSpan.FromMilliseconds(1) });
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pump.RunAsync(cts.Token).AsTask());
 
@@ -152,7 +150,7 @@ public sealed class NdisCaptureResilienceTests
         using var cts = new CancellationTokenSource();
         var reader = new ScriptedReader([], throwAlways: Transient());
 
-        var pump = new NdisCapturePump(reader, (nint)0x55, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), TransientRetryBaseDelay = TimeSpan.FromSeconds(30) });
+        var pump = new NdisCapturePump(reader, 0x55, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), TransientRetryBaseDelay = TimeSpan.FromSeconds(30) });
 
         var run = pump.RunAsync(cts.Token).AsTask();
         await Task.Delay(50, CancellationToken.None);
@@ -171,7 +169,7 @@ public sealed class NdisCaptureResilienceTests
         };
 
     private static void Fill(NdisPacketBuffer buffer, byte marker) =>
-        buffer.SetFrame([marker, 0xAA, 0xBB], NdisApiAbi.PacketFlagOnReceive, (nint)0x55, flags: 0x40);
+        buffer.SetFrame([marker, 0xAA, 0xBB], NdisApiAbi.PacketFlagOnReceive, 0x55, flags: 0x40);
 }
 
 /// <summary>
@@ -189,12 +187,12 @@ public sealed class CaptureDegradationPlumbingTests
     public async Task DegradedPumpKeepsSiblingsRunningAndForwardsCallback()
     {
         var degradedSignalled = new TaskCompletionSource<(string AdapterId, int NativeError)>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var adapters = new[] { Adapter("a", (nint)0x10), Adapter("b", (nint)0x11) };
+        var adapters = new[] { Adapter("a", 0x10), Adapter("b", 0x11) };
         using var cts = new CancellationTokenSource();
         var readers = new Dictionary<nint, INdisPacketReader>
         {
-            [(nint)0x10] = new PermanentFailureReader(87),
-            [(nint)0x11] = new CancellingReader(cts, readsBeforeCancel: 3),
+            [0x10] = new PermanentFailureReader(87),
+            [0x11] = new CancellingReader(cts, readsBeforeCancel: 3),
         };
         var dispatcher = new FlowDispatcher(CreatePassConfiguration(), new FakeGuard(), new NoopExecutor());
         var processor = new CapturePacketProcessor(dispatcher);
@@ -248,6 +246,7 @@ public sealed class CaptureDegradationPlumbingTests
         var modes = new FakeModes([new("a", 7), new("b", 9)]);
         var capture = new BlockingCapture();
         await using var runtime = new TransactionalCaptureRuntime(modes, capture);
+        // ReSharper disable once AccessToDisposedClosure // start is awaited while the runtime is alive; the await using scope disposes the runtime only after the test's own Complete/Stop sequence.
         var start = Task.Run(async () => await runtime.StartAsync(CancellationToken.None));
         await capture.Started.Task;
 
@@ -270,6 +269,7 @@ public sealed class CaptureDegradationPlumbingTests
         var modes = new FailingRestoreModes();
         var capture = new BlockingCapture();
         await using var runtime = new TransactionalCaptureRuntime(modes, capture);
+        // ReSharper disable once AccessToDisposedClosure // As in the previous test: start is awaited while the runtime is alive, and the await using disposal follows the test's own Complete/Stop sequence.
         var start = Task.Run(async () => await runtime.StartAsync(CancellationToken.None));
         await capture.Started.Task;
 
@@ -294,8 +294,8 @@ public sealed class CaptureDegradationPlumbingTests
 
     private sealed class NoopExecutor : IPacketActionExecutor
     {
-        public ValueTask PassAsync(CapturedFlowPacket packet, CancellationToken cancellationToken) => ValueTask.CompletedTask;
-        public ValueTask BlockAsync(CapturedFlowPacket packet, CancellationToken cancellationToken) => ValueTask.CompletedTask;
+        public ValueTask PassAsync(CapturedFlowPacket packet) => ValueTask.CompletedTask;
+        public ValueTask BlockAsync(CapturedFlowPacket packet) => ValueTask.CompletedTask;
         public ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken) => ValueTask.CompletedTask;
     }
 
@@ -303,9 +303,9 @@ public sealed class CaptureDegradationPlumbingTests
     {
         public int RestoreAttempts { get; private set; }
 
-        public ValueTask<IReadOnlyList<AdapterModeSnapshot>> SnapshotAsync(CancellationToken cancellationToken) => ValueTask.FromResult<IReadOnlyList<AdapterModeSnapshot>>([new("a", 7)]);
-        public ValueTask ApplyCaptureModeAsync(AdapterModeSnapshot adapter, CancellationToken cancellationToken) => ValueTask.CompletedTask;
-        public ValueTask RestoreAsync(AdapterModeSnapshot adapter, CancellationToken cancellationToken) { RestoreAttempts++; throw new InvalidOperationException("restore failed"); }
+        public ValueTask<IReadOnlyList<AdapterModeSnapshot>> SnapshotAsync() => ValueTask.FromResult<IReadOnlyList<AdapterModeSnapshot>>([new("a", 7)]);
+        public ValueTask ApplyCaptureModeAsync(AdapterModeSnapshot adapter) => ValueTask.CompletedTask;
+        public ValueTask RestoreAsync(AdapterModeSnapshot adapter) { RestoreAttempts++; throw new InvalidOperationException("restore failed"); }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

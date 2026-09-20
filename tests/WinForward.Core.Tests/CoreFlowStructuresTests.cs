@@ -1,5 +1,4 @@
 using System.Net;
-using WinForward.Core;
 using WinForward.Runtime.UdpProxy;
 using Xunit;
 
@@ -149,7 +148,7 @@ public sealed class CoreFlowStructuresTests
             Endpoint.From(IPAddress.Parse("198.51.100.53"), 53),
             TransportProtocol.Udp,
             FlowOriginKind.Host,
-            new AdapterContext("host", "host", 1));
+            new AdapterContext("host", 1));
         var claimed = table.TryClaimResolved(key, () => FlowDecision.Fallback(FlowAction.Pass), out var state)
             ? state!
             : throw new InvalidOperationException("Flow table claim failed.");

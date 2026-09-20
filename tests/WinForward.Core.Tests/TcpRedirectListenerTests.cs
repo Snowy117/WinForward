@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.Versioning;
-using WinForward.Core;
 using WinForward.Runtime.TcpRedirect;
 using Xunit;
 
@@ -18,7 +17,7 @@ public sealed class TcpRedirectListenerTests
         var factory = new TcpRedirectListenerFactory();
         await using var listener = await factory.CreateAsync(AddressFamilyKind.IPv4, CancellationToken.None);
         using var client = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-        await client.ConnectAsync(IPAddress.Loopback, (int)listener.TranslatedTuple.Port);
+        await client.ConnectAsync(IPAddress.Loopback, listener.TranslatedTuple.Port);
 
         var accepted = await listener.AcceptAsync(CancellationToken.None);
 

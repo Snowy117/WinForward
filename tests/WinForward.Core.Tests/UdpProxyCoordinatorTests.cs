@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.Protocols;
 using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
@@ -172,7 +171,7 @@ public sealed class UdpProxyCoordinatorTests
         var flow = CreateFlow("192.0.2.53");
         var clientMac = new byte[] { 0x02, 0x00, 0x00, 0x00, 0x00, 0x0a };
 
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], MacAddress.From(clientMac), CancellationToken.None, 0, 0));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], MacAddress.From(clientMac), CancellationToken.None));
         await WaitForAsync(() => factory.Transports.Count == 1);
         var transport = Assert.Single(factory.Transports);
         await WaitForAsync(() =>

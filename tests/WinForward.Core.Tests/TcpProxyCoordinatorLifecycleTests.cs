@@ -2,7 +2,6 @@ using System.Buffers.Binary;
 using System.Globalization;
 using System.Net;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.Runtime;
 using WinForward.Runtime.TcpRedirect;
 using Xunit;
@@ -123,7 +122,7 @@ public sealed class TcpProxyCoordinatorLifecycleTests
         Assert.Equal(3, injector.InjectedFrames.Count);
         var (frame, towardMstcp, adapterHandle) = injector.InjectedFrames[2];
         Assert.False(towardMstcp);
-        Assert.Equal((nint)0x1234, adapterHandle);
+        Assert.Equal(0x1234, adapterHandle);
         Assert.Equal(s_destIpv4, new IPAddress(frame.AsSpan(26, 4).ToArray()));
         Assert.Equal(client, new IPAddress(frame.AsSpan(30, 4).ToArray()));
         Assert.Equal(0x14, frame[47]);
@@ -397,6 +396,7 @@ public sealed class TcpProxyCoordinatorLifecycleTests
         Assert.True(elapsed >= TimeSpan.FromMilliseconds(50), string.Create(CultureInfo.InvariantCulture, $"the retry should have observed back-off back-pressure, saw {elapsed.TotalMilliseconds:F0}ms"));
 
         // Dispose must terminate the throwing accept loop promptly (cancel + listener dispose).
+        // ReSharper disable once DisposeOnUsingVariable // The explicit DisposeAsync is the scenario under test: if it hung behind the persistently-throwing accept loop the test would time out; the await using disposal only backstops failure paths.
         await coordinator.DisposeAsync();
     }
 

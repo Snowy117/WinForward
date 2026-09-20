@@ -1,6 +1,5 @@
 using System.Net;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.Runtime;
 using WinForward.Runtime.TcpRedirect;
 using Xunit;
@@ -47,10 +46,9 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
         var now = DateTimeOffset.UtcNow;
         var firstKey = FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
         var secondKey = FlowKey.Create(Endpoint.From(s_clientIpv6, 53001), Endpoint.From(s_destIpv6, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
-        var adapter = new AdapterContext("eth0", "Ethernet", 1);
 
-        Assert.True(table.TryClaim(firstKey, firstKey.Remote, adapter, (nint)0x1234, Endpoint.From(IPAddress.Loopback, 42000), forwardLocalAddress: null, now, out var first));
-        Assert.True(table.TryClaim(secondKey, secondKey.Remote, adapter, (nint)0x1234, Endpoint.From(IPAddress.IPv6Loopback, 42000), forwardLocalAddress: null, now, out var second));
+        Assert.True(table.TryClaim(firstKey, firstKey.Remote, 0x1234, Endpoint.From(IPAddress.Loopback, 42000), forwardLocalAddress: null, now, out var first));
+        Assert.True(table.TryClaim(secondKey, secondKey.Remote, 0x1234, Endpoint.From(IPAddress.IPv6Loopback, 42000), forwardLocalAddress: null, now, out var second));
         Assert.NotNull(first);
         Assert.NotNull(second);
         Assert.Equal(2, table.Count);
@@ -177,9 +175,8 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
         var table = new TcpRedirectTable();
         await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
         var key = FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
-        var adapter = new AdapterContext("eth0", "Ethernet", 1);
         var now = DateTimeOffset.UtcNow;
-        Assert.True(table.TryClaim(key, key.Remote, adapter, (nint)0x1234, Endpoint.From(IPAddress.Loopback, 42000), forwardLocalAddress: null, now, out _));
+        Assert.True(table.TryClaim(key, key.Remote, 0x1234, Endpoint.From(IPAddress.Loopback, 42000), forwardLocalAddress: null, now, out _));
 
         var outcome = await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None);
 
@@ -296,7 +293,7 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
     }
 
     [Fact]
-    public async Task SelfTrafficRegistryMatchesWildcardBoundSocketByPort()
+    public void SelfTrafficRegistryMatchesWildcardBoundSocketByPort()
     {
         // The UDP relay transport binds 0.0.0.0 but emits packets whose source IP is chosen by
         // routing (e.g. 192.168.77.2). The registry must treat a 0.0.0.0:port registration as

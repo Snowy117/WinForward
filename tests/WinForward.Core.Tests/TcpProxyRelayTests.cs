@@ -4,7 +4,6 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.Versioning;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.Runtime;
 using WinForward.Runtime.TcpRedirect;
 using Xunit;
@@ -33,7 +32,7 @@ public sealed class TcpProxyRelayTests
         // tightened connect budget must not slow down the typical failure path.
         var refused = new TcpListener(IPAddress.Loopback, 0);
         refused.Start();
-        var port = ((IPEndPoint)refused.LocalEndpoint!).Port;
+        var port = ((IPEndPoint)refused.LocalEndpoint).Port;
         refused.Stop();
 
         var (localPeer, relayLocal) = await CreateSocketPairAsync();
@@ -49,7 +48,6 @@ public sealed class TcpProxyRelayTests
 
         Assert.True(started.Elapsed < TcpProxyRelayFactory.s_relayConnectAttemptTimeout,
             string.Create(CultureInfo.InvariantCulture, $"a refused connect must fail fast, took {started.Elapsed.TotalMilliseconds:F0}ms"));
-        local.Dispose();
         relayLocal.Dispose();
     }
 
@@ -181,7 +179,7 @@ public sealed class TcpProxyRelayTests
         try
         {
             var peer = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            await peer.ConnectAsync((IPEndPoint)listener.LocalEndpoint!);
+            await peer.ConnectAsync((IPEndPoint)listener.LocalEndpoint);
             var relay = await listener.AcceptSocketAsync();
             return (peer, relay);
         }

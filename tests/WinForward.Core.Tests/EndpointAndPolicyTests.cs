@@ -1,5 +1,4 @@
 using System.Net;
-using WinForward.Core;
 using Xunit;
 
 namespace WinForward.Core.Tests;
@@ -48,7 +47,7 @@ public sealed class EndpointAndPolicyTests
             Endpoint.From(IPAddress.Parse("192.0.2.53"), 443),
             TransportProtocol.Tcp,
             FlowOriginKind.Forwarded,
-            new AdapterContext("id-b", "vEthernet B", 1));
+            new AdapterContext("id-b", 1));
         var context = new FlowContext(key, ProcessName: null, ProcessPath: null, "id-b", "vEthernet B", 443);
         var policy = new PolicySnapshot(
         [
@@ -72,7 +71,7 @@ public sealed class EndpointAndPolicyTests
             Endpoint.From(IPAddress.Parse("192.0.2.53"), 443),
             TransportProtocol.Udp,
             FlowOriginKind.Forwarded,
-            new AdapterContext("id-a", "vEthernet A", 1));
+            new AdapterContext("id-a", 1));
         var context = new FlowContext(key, ProcessName: null, ProcessPath: null, "id-a", "vEthernet A", 443);
         var policy = new PolicySnapshot(
         [

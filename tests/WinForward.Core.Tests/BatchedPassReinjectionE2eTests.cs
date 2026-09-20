@@ -1,6 +1,5 @@
 using System.Runtime.Versioning;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.Capture;
@@ -34,9 +33,9 @@ public sealed class BatchedPassReinjectionE2eTests
             new PolicySnapshot([], FlowAction.Pass));
         var dispatcher = new FlowDispatcher(configuration, new FakeGuard(), executor);
         var processor = new CapturePacketProcessor(dispatcher, onBatchCompleted: executor.FlushPendingPasses);
-        var adapter = new WindowsAdapter("id-a", "Ethernet", "internal-a", (nint)0x55, 1);
+        var adapter = new WindowsAdapter("id-a", "Ethernet", "internal-a", 0x55, 1);
         using var cts = new CancellationTokenSource();
-        var reader = new FiniteMixedPassReader(Batches * BatchCapacity, cts, (nint)0x55);
+        var reader = new FiniteMixedPassReader(Batches * BatchCapacity, cts, 0x55);
 
         await using var pump = new NdisCapturePump(
             reader,
@@ -70,7 +69,7 @@ public sealed class BatchedPassReinjectionE2eTests
         Assert.Equal(Batches * BatchCapacity / 2, mstcpMarkers.Length);
         Assert.True(IsStrictlyIncreasing(adapterMarkers), "Adapter-direction frames left in a non-capture order.");
         Assert.True(IsStrictlyIncreasing(mstcpMarkers), "MSTCP-direction frames left in a non-capture order.");
-        Assert.All(reinjector.BatchCalls, call => Assert.Equal((nint)0x55, call.AdapterHandle));
+        Assert.All(reinjector.BatchCalls, call => Assert.Equal(0x55, call.AdapterHandle));
     }
 
     [Fact]
@@ -81,9 +80,9 @@ public sealed class BatchedPassReinjectionE2eTests
         var reinjector = new FakeReinjector();
         var executor = new NdisPacketActionExecutor(reinjector);
         using var cts = new CancellationTokenSource();
-        var reader = new ScriptedFaultingReader((nint)0x66);
+        var reader = new ScriptedFaultingReader(0x66);
 
-        await using var pump = new NdisCapturePump(reader, (nint)0x66, (packet, _) =>
+        await using var pump = new NdisCapturePump(reader, 0x66, (packet, _) =>
         {
             if (packet.Buffer.GetFrame()[^1] == 0xFF) throw new InvalidOperationException("handler fault");
             var lease = new PacketLease(packet.Buffer);
@@ -92,8 +91,8 @@ public sealed class BatchedPassReinjectionE2eTests
                 new FlowContext(FlowKeyFor(packet), ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, 443),
                 new PacketCaptureMetadata(packet.DeviceFlags, packet.AdapterHandle, packet.Flags),
                 NativeFrame: new NativeFrameHandle(packet.Buffer));
-            return executor.PassAsync(packet2, CancellationToken.None);
-        }, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), OnBatchCompleted = () => executor.FlushPendingPasses((nint)0x66) });
+            return executor.PassAsync(packet2);
+        }, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), OnBatchCompleted = () => executor.FlushPendingPasses(0x66) });
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => RunPumpAsync(pump, cts).AsTask());
 

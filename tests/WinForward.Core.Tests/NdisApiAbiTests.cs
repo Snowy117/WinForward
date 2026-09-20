@@ -22,7 +22,7 @@ public sealed class NdisApiAbiTests
     [Fact]
     public void OpenValidationRejectsOpaqueUnloadedDriverObject()
     {
-        var exception = Assert.Throws<Win32Exception>(() => NdisNativeCallStatus.ThrowIfOpenFailed((nint)1, isDriverLoaded: false, nativeError: 5));
+        var exception = Assert.Throws<Win32Exception>(() => NdisNativeCallStatus.ThrowIfOpenFailed(1, isDriverLoaded: false, nativeError: 5));
 
         Assert.Equal(5, exception.NativeErrorCode);
         Assert.Contains("wrapper opened", exception.Message, StringComparison.Ordinal);
@@ -41,16 +41,16 @@ public sealed class NdisApiAbiTests
     [Fact]
     public void OpenValidationAcceptsLoadedDriverObject()
     {
-        NdisNativeCallStatus.ThrowIfOpenFailed((nint)1, isDriverLoaded: true, nativeError: 0);
+        NdisNativeCallStatus.ThrowIfOpenFailed(1, isDriverLoaded: true, nativeError: 0);
     }
 
     [Fact]
     public void QueueStatusSeparatesIdlePollingFromNativeFailures()
     {
-        Assert.False(NdisNativeCallStatus.HasQueuedPackets(1, nativeError: 0, queuedPacketCount: 0, (nint)2));
-        Assert.True(NdisNativeCallStatus.HasQueuedPackets(1, nativeError: 0, queuedPacketCount: 1, (nint)2));
+        Assert.False(NdisNativeCallStatus.HasQueuedPackets(1, nativeError: 0, queuedPacketCount: 0, 2));
+        Assert.True(NdisNativeCallStatus.HasQueuedPackets(1, nativeError: 0, queuedPacketCount: 1, 2));
 
-        var exception = Assert.Throws<Win32Exception>(() => NdisNativeCallStatus.HasQueuedPackets(0, nativeError: 87, queuedPacketCount: 0, (nint)2));
+        var exception = Assert.Throws<Win32Exception>(() => NdisNativeCallStatus.HasQueuedPackets(0, nativeError: 87, queuedPacketCount: 0, 2));
         Assert.Equal(87, exception.NativeErrorCode);
         Assert.Contains("adapter 0x2", exception.Message, StringComparison.Ordinal);
     }
@@ -59,9 +59,9 @@ public sealed class NdisApiAbiTests
     public void BatchReadResultSeparatesEmptyQueueFromNativeFailures()
     {
         // An empty queue never reaches the batched read; the result is 0 without touching native error state.
-        Assert.Equal(0, NdisNativeCallStatus.InterpretBatchReadResult(queuedPacketCount: 0, requestedCount: 0, nativeResult: 0, nativeError: 87, packetsSuccess: 0, (nint)2));
+        Assert.Equal(0, NdisNativeCallStatus.InterpretBatchReadResult(queuedPacketCount: 0, requestedCount: 0, nativeResult: 0, nativeError: 87, packetsSuccess: 0, 2));
 
-        var exception = Assert.Throws<Win32Exception>(() => NdisNativeCallStatus.InterpretBatchReadResult(queuedPacketCount: 5, requestedCount: 4, nativeResult: 0, nativeError: 87, packetsSuccess: 0, (nint)2));
+        var exception = Assert.Throws<Win32Exception>(() => NdisNativeCallStatus.InterpretBatchReadResult(queuedPacketCount: 5, requestedCount: 4, nativeResult: 0, nativeError: 87, packetsSuccess: 0, 2));
         Assert.Equal(87, exception.NativeErrorCode);
         Assert.Contains("non-empty queue", exception.Message, StringComparison.Ordinal);
         Assert.Contains("requested 4", exception.Message, StringComparison.Ordinal);
@@ -70,23 +70,23 @@ public sealed class NdisApiAbiTests
     [Fact]
     public void BatchReadResultReturnsDriverCountClampedToRequest()
     {
-        Assert.Equal(4, NdisNativeCallStatus.InterpretBatchReadResult(queuedPacketCount: 10, requestedCount: 4, nativeResult: 1, nativeError: 0, packetsSuccess: 4, (nint)2));
+        Assert.Equal(4, NdisNativeCallStatus.InterpretBatchReadResult(queuedPacketCount: 10, requestedCount: 4, nativeResult: 1, nativeError: 0, packetsSuccess: 4, 2));
         // A partial read (fewer packets than requested) reports the actual count.
-        Assert.Equal(2, NdisNativeCallStatus.InterpretBatchReadResult(queuedPacketCount: 10, requestedCount: 4, nativeResult: 1, nativeError: 0, packetsSuccess: 2, (nint)2));
+        Assert.Equal(2, NdisNativeCallStatus.InterpretBatchReadResult(queuedPacketCount: 10, requestedCount: 4, nativeResult: 1, nativeError: 0, packetsSuccess: 2, 2));
         // A driver over-reporting dwPacketsSuccess can never push the pump past the prepared buffers.
-        Assert.Equal(4, NdisNativeCallStatus.InterpretBatchReadResult(queuedPacketCount: 10, requestedCount: 4, nativeResult: 1, nativeError: 0, packetsSuccess: 99, (nint)2));
+        Assert.Equal(4, NdisNativeCallStatus.InterpretBatchReadResult(queuedPacketCount: 10, requestedCount: 4, nativeResult: 1, nativeError: 0, packetsSuccess: 99, 2));
     }
 
     [Fact]
     public void PacketBufferPreservesExplicitNdisFlagsAndClearsThemForNewFrames()
     {
         using var buffer = new NdisPacketBuffer();
-        buffer.SetFrame([1, 2, 3], NdisApiAbi.PacketFlagOnSend, (nint)7, flags: 0x2000_0001);
+        buffer.SetFrame([1, 2, 3], NdisApiAbi.PacketFlagOnSend, 7, flags: 0x2000_0001);
 
         Assert.Equal(0x2000_0001u, buffer.Flags);
         Assert.Equal(new byte[] { 1, 2, 3 }, buffer.GetFrame().ToArray());
 
-        buffer.SetFrame([4], NdisApiAbi.PacketFlagOnReceive, (nint)8);
+        buffer.SetFrame([4], NdisApiAbi.PacketFlagOnReceive, 8);
         Assert.Equal(0u, buffer.Flags);
     }
 
@@ -94,10 +94,10 @@ public sealed class NdisApiAbiTests
     public void CapturedPacketUsesEnumerationHandleAndCarriesNativePacketFlags()
     {
         using var buffer = new NdisPacketBuffer();
-        buffer.SetFrame([1], NdisApiAbi.PacketFlagOnSend, (nint)0x1234, flags: 0x40);
-        var packet = NdisCapturedPacket.FromCapture(buffer, (nint)0x5678);
+        buffer.SetFrame([1], NdisApiAbi.PacketFlagOnSend, 0x1234, flags: 0x40);
+        var packet = NdisCapturedPacket.FromCapture(buffer, 0x5678);
 
-        Assert.Equal((nint)0x5678, packet.AdapterHandle);
+        Assert.Equal(0x5678, packet.AdapterHandle);
         Assert.NotEqual(buffer.CapturedAdapterHandle, packet.AdapterHandle);
         Assert.Equal(buffer.DeviceFlags, packet.DeviceFlags);
         Assert.Equal(0x40u, packet.Flags);

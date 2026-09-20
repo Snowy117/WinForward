@@ -3,7 +3,6 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.Versioning;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.TcpRedirect;
@@ -185,7 +184,7 @@ public sealed class TcpRelayEndResetTests
     private static TcpRedirectSession CreateSessionWithObservedSequences(out FakeListener listener)
     {
         var key = FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
-        var association = new TcpRedirectAssociation(key, key.Remote, new AdapterContext("eth0", "Ethernet", 1), 0x1234, Endpoint.From(IPAddress.Loopback, 40000), forwardLocalAddress: null, 1, DateTimeOffset.UtcNow);
+        var association = new TcpRedirectAssociation(key, key.Remote, 0x1234, Endpoint.From(IPAddress.Loopback, 40000), forwardLocalAddress: null, 1, DateTimeOffset.UtcNow);
 
         TcpSequenceObservation.RecordClientSyn(BuildIpv4TcpSyn(s_clientIpv4, s_destIpv4, 53000, 443), association, s_synCopyPool);
         var synAck = BuildIpv4TcpSyn(s_destIpv4, s_clientIpv4, 443, 53000);
@@ -213,7 +212,7 @@ public sealed class TcpRelayEndResetTests
         try
         {
             var peer = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            await peer.ConnectAsync((IPEndPoint)server.LocalEndpoint!);
+            await peer.ConnectAsync((IPEndPoint)server.LocalEndpoint);
             var relaySide = await server.AcceptSocketAsync();
             return (peer, relaySide);
         }
@@ -239,7 +238,7 @@ public sealed class TcpRelayEndResetTests
         private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public Task Completion => _completion.Task;
-        public RelayEndKind EndKind { get; set; }
+        public RelayEndKind EndKind { get; init; }
 
         public void Complete() => _completion.TrySetResult();
         public void Fault(Exception exception) => _completion.TrySetException(exception);

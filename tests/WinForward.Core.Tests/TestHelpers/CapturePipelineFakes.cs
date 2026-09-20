@@ -1,5 +1,4 @@
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.TcpRedirect;
@@ -25,13 +24,12 @@ internal sealed class FakeGuard : ISelfTrafficGuard
 
 internal sealed class FakeAttributor(string? name) : IProcessAttributor
 {
-    private readonly string? _name = name;
     public int Calls { get; private set; }
 
     public ValueTask<ProcessIdentity?> FindAsync(FlowKey key, CancellationToken cancellationToken)
     {
         Calls++;
-        return ValueTask.FromResult<ProcessIdentity?>(_name is null ? null : new ProcessIdentity(123, DateTime.UtcNow, _name, FullPath: null));
+        return ValueTask.FromResult<ProcessIdentity?>(name is null ? null : new ProcessIdentity(name, FullPath: null));
     }
 }
 
@@ -40,15 +38,15 @@ internal sealed class FakeExecutor : IPacketActionExecutor
     public int PassCount { get; private set; }
     public int BlockCount { get; private set; }
     public int ProxyCount { get; private set; }
-    public ValueTask PassAsync(CapturedFlowPacket packet, CancellationToken cancellationToken) { PassCount++; return ValueTask.CompletedTask; }
-    public ValueTask BlockAsync(CapturedFlowPacket packet, CancellationToken cancellationToken) { BlockCount++; return ValueTask.CompletedTask; }
+    public ValueTask PassAsync(CapturedFlowPacket packet) { PassCount++; return ValueTask.CompletedTask; }
+    public ValueTask BlockAsync(CapturedFlowPacket packet) { BlockCount++; return ValueTask.CompletedTask; }
     public ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken) { ProxyCount++; return ValueTask.CompletedTask; }
 }
 
 internal sealed class ThrowingPassExecutor : IPacketActionExecutor
 {
-    public ValueTask PassAsync(CapturedFlowPacket packet, CancellationToken cancellationToken) => throw new InvalidOperationException("injection failed");
-    public ValueTask BlockAsync(CapturedFlowPacket packet, CancellationToken cancellationToken) => ValueTask.CompletedTask;
+    public ValueTask PassAsync(CapturedFlowPacket packet) => throw new InvalidOperationException("injection failed");
+    public ValueTask BlockAsync(CapturedFlowPacket packet) => ValueTask.CompletedTask;
     public ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken) => ValueTask.CompletedTask;
 }
 

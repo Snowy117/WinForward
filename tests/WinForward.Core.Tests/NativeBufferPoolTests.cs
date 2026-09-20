@@ -1,4 +1,3 @@
-using WinForward.Core;
 using Xunit;
 
 namespace WinForward.Core.Tests;
@@ -125,6 +124,7 @@ public sealed class NativeBufferPoolTests
     {
         using var pool = new NativeBufferPool(bufferSize: 16);
         var lease = pool.Rent();
+        // ReSharper disable once InlineTemporaryVariable // `copy` IS the asserted scenario object: the test locks "a lease copy releases the same rental window idempotently"; inlining would degrade it to two disposes of one variable and silently drop the regression coverage (B1 disposition).
         var copy = lease;
 
         copy.Dispose();
@@ -270,11 +270,12 @@ public sealed class NativeBufferPoolTests
         using var pool = new NativeBufferPool(bufferSize: 16);
         Assert.Null(pool.AccountingSink);
         var observed = new List<bool>();
-        pool.AccountingSink = rented => observed.Add(rented);
+        pool.AccountingSink = observed.Add;
 
         var lease = pool.Rent();
         lease.Dispose();
         var reused = pool.Rent();
+        // ReSharper disable once InlineTemporaryVariable // `stale` IS the asserted scenario object: the test locks "a stale copy's release is a no-op after the live handle returned the buffer"; inlining would drop that coverage (B1 disposition).
         var stale = reused;
         reused.Dispose();
         stale.Dispose();

@@ -1,5 +1,4 @@
 using System.Net;
-using WinForward.Core;
 using WinForward.Windows;
 
 namespace WinForward.Core.Tests;

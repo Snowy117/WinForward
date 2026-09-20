@@ -1,7 +1,6 @@
 using System.Buffers.Binary;
 using System.Net;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.Capture;
@@ -82,7 +81,7 @@ public sealed class TcpFragmentHandlingTests
         Assert.Equal(0, harness.Reinjector.SendToMstcpCount);
         var (_, towardMstcp, adapterHandle) = Assert.Single(harness.Injector.InjectedFrames, frame => frame.Frame[47] == 0x14);
         Assert.False(towardMstcp);
-        Assert.Equal((nint)0x1234, adapterHandle);
+        Assert.Equal(0x1234, adapterHandle);
         AssertFragmentTeardownCompleted(harness);
     }
 
@@ -127,7 +126,7 @@ public sealed class TcpFragmentHandlingTests
 
         var fragment = MakeNonFlowPacket(BuildIpv4Fragment(s_clientIpv4, s_destIpv4, 53000, 443), isOnSend: true);
         await harness.Dispatcher.DispatchNonFlowAsync(fragment, CancellationToken.None);
-        harness.Executor.FlushPendingPasses((nint)0x1234);
+        harness.Executor.FlushPendingPasses(0x1234);
 
         Assert.Equal(PacketDisposition.Pass, fragment.Lease.Disposition);
         Assert.Equal(0, harness.Reinjector.SendToAdapterCount);
@@ -156,6 +155,7 @@ public sealed class TcpFragmentHandlingTests
     {
         // The trace names the fragment reason; the association is gone (single tombstone write
         // point), the relay and listener are released, and the flow key hits the grace tombstone.
+        // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local // False positive: the lambda parameter is the xUnit assertion predicate's input (it inspects the recorded event name and fields), not a guard — ReSharper models assertion predicates as precondition checks.
         Assert.Contains(harness.Logger.Events, e => string.Equals(e.Name, "tcp.redirect.fragment", StringComparison.Ordinal)
             && e.Fields.Any(field => string.Equals(field.Key, "reason", StringComparison.Ordinal) && field.Value is "fragment"));
         Assert.Equal(0, harness.Table.Count);
@@ -174,7 +174,7 @@ public sealed class TcpFragmentHandlingTests
         return frame;
     }
 
-    internal static byte[] BuildIpv4NonFirstFragment(IPAddress source, IPAddress destination)
+    private static byte[] BuildIpv4NonFirstFragment(IPAddress source, IPAddress destination)
     {
         // A payload-only continuation fragment: 20-byte IPv4 header + 8 payload bytes, fragment
         // offset 1 (MF clear) — no transport header at all.
@@ -200,7 +200,7 @@ public sealed class TcpFragmentHandlingTests
         frame[12] = 0x86;
         frame[13] = 0xdd;
         frame[14] = 0x60;
-        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(18, 2), (ushort)(8 + tcpLength));
+        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(18, 2), 8 + tcpLength);
         frame[20] = 44;
         source.TryWriteBytes(frame.AsSpan(22, 16), out _);
         destination.TryWriteBytes(frame.AsSpan(38, 16), out _);
@@ -214,7 +214,7 @@ public sealed class TcpFragmentHandlingTests
         return frame;
     }
 
-    internal static CapturedFlowPacket MakeNonFlowPacket(byte[] frame, bool isOnSend, string adapterId = "eth0")
+    private static CapturedFlowPacket MakeNonFlowPacket(byte[] frame, bool isOnSend, string adapterId = "eth0")
     {
         var adapter = new WindowsAdapter(adapterId, string.Equals(adapterId, "veth-1", StringComparison.Ordinal) ? "vEthernet 1" : "Ethernet", adapterId, 0x1234, 1);
         var context = PacketFlowClassifier.ClassifyNonFlow(adapter, isOnSend);
@@ -277,7 +277,7 @@ public sealed class TcpFragmentHandlingTests
             var dispatcher = new FlowDispatcher(config, selfTraffic, executor, reverseHandler: coordinator, fragmentHandler: coordinator.HandleFragmentAsync);
             // The tombstone is keyed by the association's original key, which carries the
             // forwarded origin and its adapter context.
-            var adapter = new AdapterContext("veth-1", "vEthernet 1", 7);
+            var adapter = new AdapterContext("veth-1", 7);
             var key = forwarded
                 ? FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Forwarded, adapter)
                 : FlowKey.Create(Endpoint.From(client, 53000), Endpoint.From(destination, 443), TransportProtocol.Tcp, FlowOriginKind.Host);

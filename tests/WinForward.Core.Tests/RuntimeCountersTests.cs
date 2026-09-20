@@ -62,6 +62,7 @@ public sealed class RuntimeCountersTests
 
         await Task.WhenAll(Enumerable.Range(0, tasks).Select(_ => Task.Run(() =>
         {
+            // ReSharper disable once AccessToDisposedClosure // Every worker is joined by the Task.WhenAll below before the using scope disposes the barrier; this SignalAndWait runs inside the awaited test body.
             barrier.SignalAndWait();
             for (var i = 0; i < incrementsPerTask; i++) counters.Increment("hot");
         })));

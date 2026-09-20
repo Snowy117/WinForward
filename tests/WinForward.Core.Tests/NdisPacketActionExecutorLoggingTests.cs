@@ -2,7 +2,6 @@ using System.Buffers.Binary;
 using System.Net;
 using System.Runtime.InteropServices;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.Capture;

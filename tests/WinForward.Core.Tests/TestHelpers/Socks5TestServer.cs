@@ -165,7 +165,7 @@ internal static class Socks5TestServer
         }
     }
 
-    internal static async Task<byte[]> ReadSocksRequestAsync(Stream stream, CancellationToken cancellationToken)
+    private static async Task<byte[]> ReadSocksRequestAsync(Stream stream, CancellationToken cancellationToken)
     {
         var prefix = new byte[4];
         await stream.ReadExactlyAsync(prefix, cancellationToken).ConfigureAwait(false);

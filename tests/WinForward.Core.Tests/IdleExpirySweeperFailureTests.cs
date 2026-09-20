@@ -1,8 +1,6 @@
 using System.Globalization;
 using System.Net;
 using WinForward.Configuration;
-using WinForward.Core;
-using WinForward.Protocols;
 using WinForward.Runtime;
 using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
@@ -34,6 +32,7 @@ public sealed class IdleExpirySweeperFailureTests
                 Capacity = 16,
                 BeforeExpiryRecheck = () =>
                 {
+                    // ReSharper disable once AccessToModifiedClosure // sweepFailures is only ever touched through Interlocked/Volatile from the sweeper and the test thread, so the modification the inspection guards against is the checked access itself.
                     Interlocked.Increment(ref sweepFailures);
                     return ValueTask.FromException(new IOException("synthetic sweep failure"));
                 },

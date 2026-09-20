@@ -1,6 +1,5 @@
 using WinForward.Configuration;
 using WinForward.Runtime;
-using WinForward.Runtime.Capture;
 using Xunit;
 
 namespace WinForward.Core.Tests;
@@ -31,6 +30,7 @@ public sealed class LayeredCaptureRunnerHealthSignalTests
         signal.ReportFailure(RuntimeCounters.RelaySetupFailed);
         signal.ReportFailure(RuntimeCounters.RelaySetupFailed);
 
+        // ReSharper disable once AccessToDisposedClosure // WaitForAsync polls Generations.Generations.Count (Count == 2) on this test's own thread; the harness is disposed only after the poll returns and its run is drained.
         await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 2, timeoutMs: 5000).ConfigureAwait(false);
         await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
 

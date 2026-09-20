@@ -1,9 +1,7 @@
-using System;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading.Channels;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.Capture;
@@ -44,7 +42,7 @@ internal static class TcpCoordinatorFakes
         mutateFrame?.Invoke(frame);
         var local = Endpoint.From(client, clientPort);
         var remote = Endpoint.From(destination, destinationPort);
-        var adapter = new AdapterContext("veth-1", "vEthernet 1", 7);
+        var adapter = new AdapterContext("veth-1", 7);
         var key = FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Forwarded, adapter);
         var context = new FlowContext(key, ProcessName: null, ProcessPath: null, "veth-1", "vEthernet 1", destinationPort);
         var lease = new PacketLease(frame);
@@ -151,10 +149,9 @@ internal sealed record DispatcherHarness(
     FlowDispatcher Dispatcher,
     RecordingRuntimeLogger Logger);
 
+// ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local // Deliberate failure-injection seam: the flag makes listener creation throw so the coordinator's listener-allocation failure path is exercised deterministically.
 internal sealed class FakeListenerFactory(Endpoint? fixedTuple = null, bool throwOnCreate = false) : ITcpRedirectListenerFactory
 {
-    private readonly Endpoint? _fixedTuple = fixedTuple;
-    private readonly bool _throwOnCreate = throwOnCreate;
     private int _nextPort = 40000;
 
     public List<FakeListener> Listeners { get; } = [];
@@ -162,39 +159,13 @@ internal sealed class FakeListenerFactory(Endpoint? fixedTuple = null, bool thro
 
     public ValueTask<ITcpRedirectListener> CreateAsync(AddressFamilyKind addressFamily, CancellationToken cancellationToken)
     {
-        if (_throwOnCreate) throw new IOException("listener allocation failed");
+        if (throwOnCreate) throw new IOException("listener allocation failed");
         RequestedFamilies.Add(addressFamily);
         var loopback = addressFamily == AddressFamilyKind.IPv4 ? IPAddress.Loopback : IPAddress.IPv6Loopback;
-        var tuple = _fixedTuple ?? Endpoint.From(loopback, checked((ushort)Interlocked.Increment(ref _nextPort)));
+        var tuple = fixedTuple ?? Endpoint.From(loopback, checked((ushort)Interlocked.Increment(ref _nextPort)));
         var listener = new FakeListener(tuple);
         lock (Listeners) Listeners.Add(listener);
         return ValueTask.FromResult<ITcpRedirectListener>(listener);
-    }
-}
-
-internal sealed class BarrierListenerFactory(int participantCount) : ITcpRedirectListenerFactory
-{
-    /* Gates CreateAsync so the first participantCount-1 callers block until the last one
-     * arrives; all are then released together. This guarantees every caller passed the
-     * coordinator's pre-claim TryResolveByOriginal fast path (empty table) before any
-     * TryClaim runs, deterministically forcing the redirect-table exactly-once race a
-     * synchronous fake masks. */
-    private readonly TaskCompletionSource _gate = new();
-    private int _arrived;
-    private int _nextPort = 40000;
-
-    public List<FakeListener> Listeners { get; } = [];
-
-    public async ValueTask<ITcpRedirectListener> CreateAsync(AddressFamilyKind addressFamily, CancellationToken cancellationToken)
-    {
-        // The last caller to arrive opens the gate; the rest were already awaiting it.
-        if (Interlocked.Increment(ref _arrived) == participantCount) _gate.TrySetResult();
-        await using var registration = cancellationToken.Register(() => _gate.TrySetCanceled(cancellationToken));
-        await _gate.Task.ConfigureAwait(false);
-        var loopback = addressFamily == AddressFamilyKind.IPv4 ? IPAddress.Loopback : IPAddress.IPv6Loopback;
-        var listener = new FakeListener(Endpoint.From(loopback, checked((ushort)Interlocked.Increment(ref _nextPort))));
-        lock (Listeners) Listeners.Add(listener);
-        return listener;
     }
 }
 
@@ -208,7 +179,6 @@ internal sealed class ThrowingListener : ITcpRedirectListener
     private int _acceptCount;
     public Endpoint TranslatedTuple => Endpoint.From(IPAddress.Loopback, 40000);
     public int AcceptCount => Volatile.Read(ref _acceptCount);
-    public bool IsDisposed { get; private set; }
 
     public ValueTask<ITcpAcceptedConnection> AcceptAsync(CancellationToken cancellationToken)
     {
@@ -217,11 +187,7 @@ internal sealed class ThrowingListener : ITcpRedirectListener
         throw new IOException("transient accept error");
     }
 
-    public ValueTask DisposeAsync()
-    {
-        IsDisposed = true;
-        return ValueTask.CompletedTask;
-    }
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
 
 internal sealed class FakeListener(Endpoint translatedTuple) : ITcpRedirectListener
@@ -296,6 +262,7 @@ internal sealed class FakeAcceptedConnection(Endpoint remoteEndPoint) : ITcpAcce
     }
 }
 
+// ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local // Deliberate failure-injection seam: the flag makes relay establishment throw so the coordinator's relay-setup failure path is exercised deterministically.
 internal sealed class FakeRelayFactory(bool throwOnEstablish = false) : ITcpProxyRelayFactory
 {
     public List<Endpoint> EstablishedDestinations { get; } = [];
@@ -327,7 +294,7 @@ internal sealed class FakeInjector(int? throwOnCall = null, bool throwIfCanceled
     public ValueTask InjectAsync(ReadOnlyMemory<byte> rewrittenFrame, bool towardMstcp, nint adapterHandle, CancellationToken cancellationToken)
     {
         if (throwIfCanceled) cancellationToken.ThrowIfCancellationRequested();
-        if (throwOnCall is int call && Interlocked.Increment(ref _calls) == call) throw exception ?? new IOException("injection failed");
+        if (throwOnCall is { } call && Interlocked.Increment(ref _calls) == call) throw exception ?? new IOException("injection failed");
         lock (InjectedFrames) InjectedFrames.Add((rewrittenFrame.ToArray(), towardMstcp, adapterHandle));
         return ValueTask.CompletedTask;
     }
@@ -335,7 +302,7 @@ internal sealed class FakeInjector(int? throwOnCall = null, bool throwIfCanceled
     public void Inject(NdisPacketBuffer stagedFrame, bool towardMstcp, nint adapterHandle, CancellationToken cancellationToken)
     {
         if (throwIfCanceled) cancellationToken.ThrowIfCancellationRequested();
-        if (throwOnCall is int call && Interlocked.Increment(ref _calls) == call) throw exception ?? new IOException("injection failed");
+        if (throwOnCall is { } call && Interlocked.Increment(ref _calls) == call) throw exception ?? new IOException("injection failed");
         lock (InjectedFrames) InjectedFrames.Add((stagedFrame.GetFrame().ToArray(), towardMstcp, adapterHandle));
     }
 }
@@ -365,7 +332,14 @@ internal sealed class GatedListenerFactory : ITcpRedirectListenerFactory
     private readonly List<FakeListener> _listeners = [];
 
     public TaskCompletionSource CreateStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    public IReadOnlyList<FakeListener> Listeners => _listeners;
+
+    public IReadOnlyList<FakeListener> Listeners
+    {
+        get
+        {
+            lock (_listeners) return [.. _listeners];
+        }
+    }
 
     public async ValueTask<ITcpRedirectListener> CreateAsync(AddressFamilyKind addressFamily, CancellationToken cancellationToken)
     {

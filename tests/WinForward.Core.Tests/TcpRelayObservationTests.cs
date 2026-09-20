@@ -2,11 +2,9 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.Versioning;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.Runtime;
 using WinForward.Runtime.TcpRedirect;
 using Xunit;
-using static WinForward.Core.Tests.TcpCoordinatorFakes;
 
 namespace WinForward.Core.Tests;
 
@@ -108,7 +106,7 @@ public sealed class TcpRelayObservationTests
         var client = IPAddress.Parse("192.0.2.10");
         var destination = IPAddress.Parse("192.0.2.53");
         var key = FlowKey.Create(Endpoint.From(client, 53000), Endpoint.From(destination, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
-        var association = new TcpRedirectAssociation(key, key.Remote, new AdapterContext("eth0", "Ethernet", 1), 0x1234, Endpoint.From(IPAddress.Loopback, 40000), forwardLocalAddress: null, 1, DateTimeOffset.UtcNow);
+        var association = new TcpRedirectAssociation(key, key.Remote, 0x1234, Endpoint.From(IPAddress.Loopback, 40000), forwardLocalAddress: null, 1, DateTimeOffset.UtcNow);
         listener = new FakeListener(association.TranslatedListenerTuple);
         var token = new SelfTrafficRegistry().Register(new SelfTrafficRegistry.SelfTrafficKey(TransportProtocol.Tcp, association.TranslatedListenerTuple, association.TranslatedListenerTuple));
         return new TcpRedirectSession(association, listener, token, new Socks5Server("primary", "127.0.0.1", 1080, Username: null, Password: null), 0, CancellationToken.None);
@@ -121,7 +119,7 @@ public sealed class TcpRelayObservationTests
         try
         {
             var peer = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            await peer.ConnectAsync((IPEndPoint)server.LocalEndpoint!);
+            await peer.ConnectAsync((IPEndPoint)server.LocalEndpoint);
             var relaySide = await server.AcceptSocketAsync();
             return (peer, relaySide);
         }

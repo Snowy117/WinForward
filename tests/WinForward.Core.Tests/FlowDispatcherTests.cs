@@ -1,6 +1,5 @@
 using System.Net;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.Runtime;
 using WinForward.Runtime.TcpRedirect;
 using Xunit;
@@ -128,8 +127,10 @@ public sealed class FlowDispatcherTests
         Assert.True(registry.IsOwned(context));
 
         using var second = registry.Register(selfKey);
+        // ReSharper disable once DisposeOnUsingVariable // The explicit dispose sequence is the scenario: the registry must stay owned after releasing one of two leases for the same key, and release only after the second dispose; the using declarations backstop assertion-failure paths.
         first.Dispose();
         Assert.True(registry.IsOwned(context));
+        // ReSharper disable once DisposeOnUsingVariable // Same two-lease scenario: the observable owned->released transition happens exactly at this dispose, before the using scope exits.
         second.Dispose();
         Assert.False(registry.IsOwned(context));
     }
@@ -161,12 +162,11 @@ public sealed class FlowDispatcherTests
     /// </summary>
     private sealed class RecordingReverseHandler(Func<TcpRedirectOutcome>? outcome = null) : ITcpReverseHandler
     {
-        private int _calls;
-        public int HandleCount => _calls;
+        public int HandleCount { get; private set; }
         public bool WantsPacket(in CapturedFlowPacket packet) => true;
         public ValueTask<TcpRedirectOutcome> HandleReverseIfApplicableAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
         {
-            var calls = ++_calls;
+            var calls = ++HandleCount;
             return ValueTask.FromResult(outcome?.Invoke() ?? (calls == 1 ? TcpRedirectOutcome.NotRelevant : TcpRedirectOutcome.Injected));
         }
     }

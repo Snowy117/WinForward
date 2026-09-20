@@ -1,6 +1,5 @@
 using System.Net;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Protocols;
 using WinForward.Runtime;
@@ -268,7 +267,6 @@ public sealed class HotPathAllocationGateTests
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor, reverseHandler: handler);
 
         var key = FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 53), TransportProtocol.Udp, FlowOriginKind.Host);
-        CapturedFlowPacket MakePacket() => new(new PacketLease(new byte[] { 1, 2, 3, 4 }), new FlowContext(key, ProcessName: null, ProcessPath: null, key.OriginAdapterId, AdapterName: null, key.Remote.Port));
 
         // The first dispatch claims the flow (cold, allocates freely); the measured window is warm.
         await dispatcher.DispatchAsync(MakePacket(), CancellationToken.None);
@@ -287,6 +285,10 @@ public sealed class HotPathAllocationGateTests
         Assert.Equal(0, allocated);
         Assert.Equal(1 + 8 + count, executor.PassCount);
         Assert.Equal(1 + 8 + count, handler.WantsCount);
+
+        return;
+
+        CapturedFlowPacket MakePacket() => new(new PacketLease(new byte[] { 1, 2, 3, 4 }), new FlowContext(key, ProcessName: null, ProcessPath: null, key.OriginAdapterId, AdapterName: null, key.Remote.Port));
     }
 
     /// <summary>
@@ -333,7 +335,6 @@ public sealed class HotPathAllocationGateTests
 
         // One delegate instance shared by both loops: a per-call-site lambda would allocate its
         // cached delegate on its own first invocation, inside the measured window.
-        static FlowDecision Decide() => new(FlowAction.Pass, 0, ProxyServerName: null);
 
         for (var warm = 0; warm < capacity; warm++)
         {
@@ -354,6 +355,10 @@ public sealed class HotPathAllocationGateTests
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
         Assert.Equal(0, allocated);
+
+        return;
+
+        static FlowDecision Decide() => new(FlowAction.Pass, 0, ProxyServerName: null);
     }
 
     [Fact]

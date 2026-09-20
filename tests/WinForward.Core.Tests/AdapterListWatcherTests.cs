@@ -27,7 +27,9 @@ public sealed class AdapterListWatcherTests
     {
         using var signal = new EventWaitHandle(initialState: false, EventResetMode.AutoReset);
         using var cancel = new EventWaitHandle(initialState: false, EventResetMode.ManualReset);
+        // ReSharper disable AccessToDisposedClosure // Both handles are consumed by the waiter task, which this test awaits (Assert.True(await waiter)) before the using scope disposes them.
         var waiter = Task.Run(() => NdisAdapterListWatcher.WaitForSignal(signal, cancel));
+        // ReSharper restore AccessToDisposedClosure
 
         await Task.Delay(ParkMs);
         Assert.False(waiter.IsCompleted);
@@ -44,7 +46,9 @@ public sealed class AdapterListWatcherTests
     {
         using var watcher = new NdisAdapterListWatcher();
         using var cts = new CancellationTokenSource();
+        // ReSharper disable AccessToDisposedClosure // The waiter is awaited (Assert.False(await waiter)) after cts cancellation, still inside the scope; watcher and cts are disposed only afterwards.
         var waiter = Task.Run(() => watcher.WaitOne(cts.Token));
+        // ReSharper restore AccessToDisposedClosure
 
         await Task.Delay(ParkMs);
         Assert.False(waiter.IsCompleted);
@@ -69,6 +73,7 @@ public sealed class AdapterListWatcherTests
     public async Task DisposeUnblocksAParkedWaitOne()
     {
         var watcher = new NdisAdapterListWatcher();
+        // ReSharper disable once AccessToDisposedClosure // Deliberate pattern under test: Dispose is the unblock mechanism for the parked WaitOne that the test awaits right after, so the overlap is the assertion target.
         var waiter = Task.Run(() => watcher.WaitOne(CancellationToken.None));
 
         await Task.Delay(ParkMs);
@@ -106,6 +111,7 @@ public sealed class AdapterListWatcherTests
         source.Trigger();
 
         Assert.True(source.WaitOne(CancellationToken.None));
+        // ReSharper disable once AccessToDisposedClosure // The detached waiter is meant to stay parked past the 100 ms window; the source's Dispose (using scope) then releases it false, the helper's documented cancel-on-dispose contract.
         Assert.False(Task.Run(() => source.WaitOne(CancellationToken.None)).Wait(ParkMs));
     }
 
@@ -118,6 +124,7 @@ public sealed class AdapterListWatcherTests
         source.Trigger();
 
         Assert.True(source.WaitOne(CancellationToken.None));
+        // ReSharper disable once AccessToDisposedClosure // Same detached-waiter shape as the trigger test above: the abandoned waiter is released false by the using scope's Dispose.
         Assert.False(Task.Run(() => source.WaitOne(CancellationToken.None)).Wait(ParkMs));
     }
 
@@ -125,7 +132,9 @@ public sealed class AdapterListWatcherTests
     public async Task FakeTriggerWakesExactlyOneParkedWaiter()
     {
         using var source = new FakeAdapterListChangeSource();
+        // ReSharper disable once AccessToDisposedClosure // Both parked waiters outlive the assertions by design; the woken one is awaited true and the parked one is released false by the using scope's Dispose.
         var first = Task.Run(() => source.WaitOne(CancellationToken.None));
+        // ReSharper disable once AccessToDisposedClosure // Second parked waiter: the test asserts exactly one is woken by Trigger, and the remaining one is released false by the using scope's Dispose.
         var second = Task.Run(() => source.WaitOne(CancellationToken.None));
         await Task.Delay(ParkMs);
         Assert.False(first.IsCompleted);
@@ -145,6 +154,7 @@ public sealed class AdapterListWatcherTests
     public async Task FakeCancelReleasesParkedWaitersAndFutureWaitsReturnFalse()
     {
         using var source = new FakeAdapterListChangeSource();
+        // ReSharper disable once AccessToDisposedClosure // The waiter is resolved by the explicit Cancel below and awaited before the using scope disposes the source.
         var waiter = Task.Run(() => source.WaitOne(CancellationToken.None));
         await Task.Delay(ParkMs);
         Assert.False(waiter.IsCompleted);
@@ -170,7 +180,9 @@ public sealed class AdapterListWatcherTests
     {
         using var source = new FakeAdapterListChangeSource();
         using var cts = new CancellationTokenSource();
+        // ReSharper disable AccessToDisposedClosure // cts cancels the wait and the waiter is awaited before the using scope disposes either object.
         var waiter = Task.Run(() => source.WaitOne(cts.Token));
+        // ReSharper restore AccessToDisposedClosure
         await Task.Delay(ParkMs);
         Assert.False(waiter.IsCompleted);
 

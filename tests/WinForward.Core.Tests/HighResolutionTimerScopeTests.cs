@@ -16,6 +16,7 @@ public sealed class HighResolutionTimerScopeTests
         Assert.True(scope.IsEnabled);
         Assert.Equal([1u], fake.BeginPeriods);
 
+        // ReSharper disable once DisposeOnUsingVariable // The explicit Dispose is the act under test: the fake timer's recorded End period is asserted right after it; the using declaration only backstops assertion-failure paths.
         scope.Dispose();
 
         Assert.Equal([1u], fake.EndPeriods);
@@ -30,6 +31,7 @@ public sealed class HighResolutionTimerScopeTests
 
         Assert.False(scope.IsEnabled);
 
+        // ReSharper disable once DisposeOnUsingVariable // The explicit Dispose is the act under test: End must not fire for a failed Begin, asserted right after it; the using declaration only backstops failure paths.
         scope.Dispose();
 
         Assert.Empty(fake.EndPeriods);
@@ -57,6 +59,7 @@ public sealed class HighResolutionTimerScopeTests
 
         Assert.False(scope.IsEnabled);
 
+        // ReSharper disable once DisposeOnUsingVariable // The explicit Dispose is the act under test: End must not fire for a throwing Begin, asserted right after it; the using declaration only backstops failure paths.
         scope.Dispose();
 
         Assert.Empty(fake.EndPeriods);
@@ -71,6 +74,7 @@ public sealed class HighResolutionTimerScopeTests
         public uint Begin(uint period)
         {
             BeginPeriods.Add(period);
+            // ReSharper disable once ConvertIfStatementToReturnStatement // Failure-injection seam: the throw is the injected behavior and must read as a standalone guard (B1 disposition).
             if (ThrowOnBegin) throw new DllNotFoundException("simulated winmm failure");
             return BeginResult;
         }

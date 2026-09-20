@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Net;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.Runtime;
 using WinForward.Runtime.TcpRedirect;
 using Xunit;
@@ -230,15 +229,15 @@ public sealed class TcpReversePrefilterTests
     private static bool TryClaimListener(TcpRedirectTable table, FlowKey originalKey, IPAddress listenerAddress, ushort listenerPort)
     {
         var translated = Endpoint.From(listenerAddress, listenerPort);
-        return table.TryClaim(originalKey, originalKey.Remote, new AdapterContext("eth0", "eth0", 1), 0x1234, translated, forwardLocalAddress: null, DateTimeOffset.UtcNow, out _);
+        return table.TryClaim(originalKey, originalKey.Remote, 0x1234, translated, forwardLocalAddress: null, DateTimeOffset.UtcNow, out _);
     }
 
     private sealed class CountingExecutor : IPacketActionExecutor
     {
         public int PassCount { get; private set; }
         public int BlockCount { get; private set; }
-        public ValueTask PassAsync(CapturedFlowPacket packet, CancellationToken cancellationToken) { PassCount++; return ValueTask.CompletedTask; }
-        public ValueTask BlockAsync(CapturedFlowPacket packet, CancellationToken cancellationToken) { BlockCount++; return ValueTask.CompletedTask; }
+        public ValueTask PassAsync(CapturedFlowPacket packet) { PassCount++; return ValueTask.CompletedTask; }
+        public ValueTask BlockAsync(CapturedFlowPacket packet) { BlockCount++; return ValueTask.CompletedTask; }
         public ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken) => ValueTask.CompletedTask;
     }
 

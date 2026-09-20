@@ -1,5 +1,4 @@
 using System.Net;
-using WinForward.Core;
 using WinForward.Protocols;
 
 namespace WinForward.Core.Tests;
@@ -13,6 +12,7 @@ internal static class Socks5UdpDatagrams
     public static byte[] Encode(IPAddress destinationAddress, ushort destinationPort, ReadOnlySpan<byte> payload)
     {
         var datagram = new byte[6 + 16 + payload.Length];
+        // ReSharper disable once ConvertIfStatementToReturnStatement // TryEncode fills the buffer through out params (side effect); the guard keeps the "buffer too small" failure legible (B1 disposition).
         if (!Socks5UdpCodec.TryEncode(IPAddressValue.From(destinationAddress), destinationPort, payload, datagram, out var written))
         {
             throw new InvalidOperationException("The SOCKS5 UDP encode buffer was too small.");

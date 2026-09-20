@@ -61,7 +61,7 @@ internal sealed class DelayedTransportFactory(Task gate, TimeSpan? minimumDelay 
         // able to interrupt the pending setup, so the wait honors the cancellation token.
         await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         if (minimumDelay is { } delay) await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
-        var transport = new FakeTransport(System.Net.Sockets.AddressFamily.InterNetwork, Interlocked.Increment(ref _nextLocalPort));
+        var transport = new FakeTransport(AddressFamily.InterNetwork, Interlocked.Increment(ref _nextLocalPort));
         lock (Transports) Transports.Add(transport);
         return transport;
     }

@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.Net;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.Capture;
@@ -144,7 +143,7 @@ public sealed class RuntimeDiagnosticLoggingTests
         var logger = new RecordingRuntimeLogger();
         var executor = new NdisPacketActionExecutor(new ThrowingBatchReinjector(), logger);
 
-        await executor.PassAsync(PassPacket(), CancellationToken.None);
+        await executor.PassAsync(PassPacket());
         Assert.Throws<Win32Exception>(() => executor.FlushPendingPasses(7));
 
         var (level, _, fields) = Assert.Single(logger.Events, e => string.Equals(e.Name, "reinject.pass-failed", StringComparison.Ordinal));
@@ -155,7 +154,7 @@ public sealed class RuntimeDiagnosticLoggingTests
         Assert.Null(fields.Single(f => string.Equals(f.Key, "source", StringComparison.Ordinal)).Value);
 
         // A second failing flush inside the throttle window still propagates but stays silent.
-        await executor.PassAsync(PassPacket(), CancellationToken.None);
+        await executor.PassAsync(PassPacket());
         Assert.Throws<Win32Exception>(() => executor.FlushPendingPasses(7));
         Assert.Single(logger.Events, e => string.Equals(e.Name, "reinject.pass-failed", StringComparison.Ordinal));
     }
@@ -169,7 +168,7 @@ public sealed class RuntimeDiagnosticLoggingTests
         // immediate single-send backstop that carries the flow key and adapter stable ID.
         executor.RetireLanesExcept([]);
 
-        await Assert.ThrowsAsync<Win32Exception>(() => executor.PassAsync(PassPacket(), CancellationToken.None).AsTask());
+        await Assert.ThrowsAsync<Win32Exception>(() => executor.PassAsync(PassPacket()).AsTask());
 
         var (level, _, fields) = Assert.Single(logger.Events, e => string.Equals(e.Name, "reinject.pass-failed", StringComparison.Ordinal));
         Assert.Equal(RuntimeLogLevel.Warn, level);
@@ -194,6 +193,7 @@ public sealed class RuntimeDiagnosticLoggingTests
     private static FlowContext FlowContext(FlowKey key) => new(key, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, key.Remote.Port);
 
     /// <summary>Fails every batched flush (and optionally every single send) with a native error.</summary>
+    // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local // Deliberate failure-injection seam: the flag selects whether single sends fail in addition to batched flushes, so both native-failure paths are exercised deterministically.
     private sealed class ThrowingBatchReinjector(bool singleSendsToo = false) : IPacketReinjector
     {
         public void SendToAdapter(nint adapterHandle, NdisPacketBuffer buffer)

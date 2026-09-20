@@ -45,7 +45,6 @@ internal sealed class FakeCaptureGeneration(int index, IReadOnlyList<AdapterEnum
     public IReadOnlyList<AdapterEnumerationItem> Scope { get; } = scope;
     public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public int DisposeCount { get; private set; }
-    public bool CancelObserved { get; private set; }
     public bool ReachedPumpRun { get; private set; }
 
     /// <summary>Scriptable pump telemetry for the runner's heartbeat snapshot accessor; default reports none.</summary>
@@ -65,7 +64,6 @@ internal sealed class FakeCaptureGeneration(int index, IReadOnlyList<AdapterEnum
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
-        await using var registration = cancellationToken.Register(() => CancelObserved = true);
         if (FaultAtStartupWith is { } startupFault)
         {
             if (StartupFaultRelease is { } release) await release.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -79,7 +77,7 @@ internal sealed class FakeCaptureGeneration(int index, IReadOnlyList<AdapterEnum
         }
         catch (OperationCanceledException)
         {
-            CancelObserved = true;
+            // A cancelled run completes normally, like the real runtime's shutdown path.
         }
     }
 
@@ -133,15 +131,15 @@ internal static class CaptureRunnerFakes
         new(new WindowsAdapter(stableId, stableId, stableId, handle, 0), [firstMacOctet, 2, 3, 4, 5, 6], mtu, addressFingerprint);
 
     /// <summary>A policy whose process rule constrains nothing, so capture scope widens to every adapter.</summary>
-    public static WinForward.Core.PolicySnapshot UnconstrainedPolicy() => new(
-        [new WinForward.Core.PolicyRule(new WinForward.Core.RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "browser.exe" }), new WinForward.Core.FlowDecision(FlowAction.Block, 0, ProxyServerName: null))],
+    public static PolicySnapshot UnconstrainedPolicy() => new(
+        [new PolicyRule(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "browser.exe" }), new FlowDecision(FlowAction.Block, 0, ProxyServerName: null))],
         FlowAction.Pass);
 
     /// <summary>A policy with one adapter-constrained rule per selector, so scope follows the selectors.</summary>
-    public static WinForward.Core.PolicySnapshot AdapterConstrainedPolicy(params string[] stableIds) => new(
-        [.. stableIds.Select((id, index) => new WinForward.Core.PolicyRule(
-            new WinForward.Core.RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { id }),
-            new WinForward.Core.FlowDecision(FlowAction.Pass, index, ProxyServerName: null)))],
+    public static PolicySnapshot AdapterConstrainedPolicy(params string[] stableIds) => new(
+        [.. stableIds.Select((id, index) => new PolicyRule(
+            new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { id }),
+            new FlowDecision(FlowAction.Pass, index, ProxyServerName: null)))],
         FlowAction.Pass);
 }
 
@@ -156,7 +154,7 @@ internal sealed class CaptureRunnerHarness : IAsyncDisposable
     private readonly List<string> _events = [];
     private int _durableDisposeCount;
 
-    public CaptureRunnerHarness(IReadOnlyList<AdapterEnumerationItem> initialAdapters, WinForward.Core.PolicySnapshot policy, TimeSpan? minimumRefreshInterval = null, Action<IReadOnlyList<AdapterEnumerationItem>>? onScopeInstalled = null, TimeSpan? periodicRefreshInterval = null)
+    public CaptureRunnerHarness(IReadOnlyList<AdapterEnumerationItem> initialAdapters, PolicySnapshot policy, TimeSpan? minimumRefreshInterval = null, Action<IReadOnlyList<AdapterEnumerationItem>>? onScopeInstalled = null, TimeSpan? periodicRefreshInterval = null)
     {
         Enumeration = new FakeAdapterEnumerationProvider(initialAdapters);
         Generations.OnCreated = generation =>
@@ -207,10 +205,10 @@ internal sealed class CaptureRunnerHarness : IAsyncDisposable
         }
     }
 
-    public IReadOnlyList<IReadOnlyList<WinForward.Runtime.RuntimeLogField>> RefreshEvents =>
-        [.. Logger.Events.Where(entry => string.Equals(entry.Name, "adapter.refresh", StringComparison.Ordinal)).Select(entry => (IReadOnlyList<WinForward.Runtime.RuntimeLogField>)entry.Fields)];
+    public IReadOnlyList<IReadOnlyList<Runtime.RuntimeLogField>> RefreshEvents =>
+        [.. Logger.Events.Where(entry => string.Equals(entry.Name, "adapter.refresh", StringComparison.Ordinal)).Select(entry => entry.Fields)];
 
-    public static string? FieldValue(IReadOnlyList<WinForward.Runtime.RuntimeLogField> fields, string key) =>
+    public static string? FieldValue(IReadOnlyList<Runtime.RuntimeLogField> fields, string key) =>
         fields.FirstOrDefault(field => string.Equals(field.Key, key, StringComparison.Ordinal)).Value?.ToString();
 
     public void Start() => RunTask = Runner.RunAsync(Cancel.Token);

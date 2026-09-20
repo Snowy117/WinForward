@@ -19,6 +19,7 @@ public sealed class LayeredCaptureRunnerPeriodicRefreshTests
         // rotated; the watcher alone would never notice, the fingerprint diff must.
         harness.Enumeration.SetAdapters(CaptureRunnerFakes.AdapterItem("id-a", 101, addressFingerprint: "192.168.77.2;240c:c001:202::9"));
         harness.ChangeSource.Trigger();
+        // ReSharper disable once AccessToDisposedClosure // Polled by this WaitForAsync inside the test scope; the harness is disposed only after the awaited call returns, with its run already drained.
         await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 2, timeoutMs: 5000).ConfigureAwait(false);
         await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
 
@@ -40,6 +41,7 @@ public sealed class LayeredCaptureRunnerPeriodicRefreshTests
         harness.Start();
         await harness.WaitForGenerationStartedAsync(0).ConfigureAwait(false);
 
+        // ReSharper disable once AccessToDisposedClosure // Polled by this WaitForAsync inside the test scope; the harness is disposed only after the awaited call returns, with its run already drained.
         await AsyncTestExtensions.WaitForAsync(() => harness.RefreshEvents.Count >= 3, timeoutMs: 5000).ConfigureAwait(false);
         await Task.Delay(120).ConfigureAwait(false);
 
@@ -64,15 +66,18 @@ public sealed class LayeredCaptureRunnerPeriodicRefreshTests
         await harness.WaitForGenerationStartedAsync(0).ConfigureAwait(false);
 
         harness.Enumeration.SetAdapters(CaptureRunnerFakes.AdapterItem("id-a", 101, addressFingerprint: "240c:c001:202::9"));
+        // ReSharper disable once AccessToDisposedClosure // Polled by this WaitForAsync inside the test scope; the harness is disposed only after the awaited call returns, with its run already drained.
         await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 2, timeoutMs: 5000).ConfigureAwait(false);
         await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
 
         // Ticks that landed inside the storm window and afterwards coalesce into no-op
         // re-checks against the now-identical enumeration — never into further rebuilds.
+        // ReSharper disable AccessToDisposedClosure // The predicate is polled by this WaitForAsync inside the test scope; the harness is disposed only after the awaited call returns, with its run already drained.
         await AsyncTestExtensions.WaitForAsync(
             () => harness.RefreshEvents.Count >= 2 && harness.RefreshEvents.Skip(1).Any(
                 fields => string.Equals(CaptureRunnerHarness.FieldValue(fields, "noop"), "true", StringComparison.Ordinal)),
             timeoutMs: 5000).ConfigureAwait(false);
+        // ReSharper restore AccessToDisposedClosure
         await Task.Delay(400).ConfigureAwait(false);
 
         Assert.Equal(2, harness.Generations.Generations.Count);

@@ -1,8 +1,6 @@
-using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.Protocols;
 using WinForward.Runtime;
 using WinForward.Runtime.Socks5;
@@ -66,6 +64,8 @@ public sealed class UdpReceiveResilienceTests
         Assert.False(transport.IsDisposed);
         Assert.Contains(logger.Lines, line => line.Level == RuntimeLogLevel.Debug && line.Message.Contains("skipped", StringComparison.Ordinal));
 
+        return;
+
         static Socks5UdpDatagram Datagram(byte payload) => new(IPAddress.Parse("192.0.2.53"), DestinationDomain: null, 53, new[] { payload });
     }
 
@@ -96,6 +96,8 @@ public sealed class UdpReceiveResilienceTests
             lock (transport.Sent) return transport.Sent.Count == 2;
         });
         Assert.False(transport.IsDisposed);
+
+        return;
 
         static Socks5UdpDatagram Datagram(byte payload) => new(IPAddress.Parse("192.0.2.53"), DestinationDomain: null, 53, new[] { payload });
     }
@@ -224,6 +226,8 @@ public sealed class UdpReceiveResilienceTests
         Assert.False(transport.IsDisposed);
         Assert.Contains(logger.Lines, line => line.Level == RuntimeLogLevel.Debug && line.Message.Contains("connectionReset=1", StringComparison.Ordinal));
 
+        return;
+
         static Socks5UdpDatagram Datagram(byte payload) => new(IPAddress.Parse("192.0.2.53"), DestinationDomain: null, 53, new[] { payload });
     }
 
@@ -262,6 +266,8 @@ public sealed class UdpReceiveResilienceTests
             lock (transport.Sent) return transport.Sent.Count == 2;
         });
         Assert.False(transport.IsDisposed);
+
+        return;
 
         static Socks5UdpDatagram Datagram(byte payload) => new(IPAddress.Parse("192.0.2.53"), DestinationDomain: null, 53, new[] { payload });
     }

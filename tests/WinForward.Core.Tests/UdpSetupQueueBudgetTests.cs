@@ -1,5 +1,4 @@
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.Runtime.UdpProxy;
 using Xunit;
 using static WinForward.Core.Tests.AsyncTestExtensions;

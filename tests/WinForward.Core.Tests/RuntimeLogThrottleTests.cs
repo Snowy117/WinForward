@@ -45,6 +45,7 @@ public sealed class RuntimeLogThrottleTests
 
         var tasks = Enumerable.Range(0, callers).Select(index => Task.Run(() =>
         {
+            // ReSharper disable once AccessToDisposedClosure // All callers are joined by Task.WhenAll below before the using scope disposes the barrier.
             barrier.SignalAndWait();
             results[index] = throttle.ShouldEmit();
         })).ToArray();

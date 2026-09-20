@@ -2,7 +2,6 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading.Channels;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.Protocols;
 using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
@@ -15,7 +14,6 @@ namespace WinForward.Core.Tests;
 /// </summary>
 internal sealed class FakeTransportFactory(AddressFamily addressFamily = AddressFamily.InterNetwork) : IUdpProxyTransportFactory
 {
-    private readonly AddressFamily _addressFamily = addressFamily;
     public List<FakeTransport> Transports { get; } = [];
     private int _nextLocalPort = 40000;
     private int _createCalls;
@@ -27,7 +25,7 @@ internal sealed class FakeTransportFactory(AddressFamily addressFamily = Address
         // Each transport models a distinct bound UDP socket, so its local port is unique; the
         // relay alias collision guard in UdpProxyCoordinator must not reject distinct flows.
         Interlocked.Increment(ref _createCalls);
-        var transport = new FakeTransport(_addressFamily, Interlocked.Increment(ref _nextLocalPort));
+        var transport = new FakeTransport(addressFamily, Interlocked.Increment(ref _nextLocalPort));
         lock (Transports) Transports.Add(transport);
         return ValueTask.FromResult<IUdpProxyTransport>(transport);
     }

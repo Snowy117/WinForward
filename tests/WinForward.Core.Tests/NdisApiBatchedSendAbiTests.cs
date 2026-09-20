@@ -33,11 +33,11 @@ public sealed class NdisApiBatchedSendAbiTests
         var buffers = new[] { first, second, third };
 
         var requestBytes = stackalloc byte[16 + (8 * buffers.Length)];
-        NdisApiDriver.BuildMultiRequest(requestBytes, (nint)0x55, buffers, buffers.Length, offset: 0);
+        NdisApiDriver.BuildMultiRequest(requestBytes, 0x55, buffers, buffers.Length, offset: 0);
 
         var request = (EthernetMultiRequest*)requestBytes;
         var slots = (NdisrdEthernetPacket*)&request->FirstBuffer;
-        Assert.Equal((nint)0x55, request->AdapterHandle);
+        Assert.Equal(0x55, request->AdapterHandle);
         Assert.Equal(3u, request->PacketsNumber);
         Assert.Equal(0u, request->PacketsSuccess);
         Assert.Equal(first.Pointer, slots[0].Buffer);
@@ -57,11 +57,11 @@ public sealed class NdisApiBatchedSendAbiTests
         var buffers = new[] { first, second, third };
 
         var requestBytes = stackalloc byte[16 + (8 * 2)];
-        NdisApiDriver.BuildMultiRequest(requestBytes, (nint)0x66, buffers, count: 2, offset: 1);
+        NdisApiDriver.BuildMultiRequest(requestBytes, 0x66, buffers, count: 2, offset: 1);
 
         var request = (EthernetMultiRequest*)requestBytes;
         var slots = (NdisrdEthernetPacket*)&request->FirstBuffer;
-        Assert.Equal((nint)0x66, request->AdapterHandle);
+        Assert.Equal(0x66, request->AdapterHandle);
         Assert.Equal(2u, request->PacketsNumber);
         Assert.Equal(second.Pointer, slots[0].Buffer);
         Assert.Equal(third.Pointer, slots[1].Buffer);
@@ -72,10 +72,10 @@ public sealed class NdisApiBatchedSendAbiTests
     public unsafe void BuildMultiRequestRejectsNullEntriesInsideTheRange()
     {
         using var buffer = new NdisPacketBuffer();
-        var buffers = new NdisPacketBuffer?[] { buffer, null };
+        NdisPacketBuffer?[] buffers = [buffer, null];
         var requestBytes = stackalloc byte[16 + (8 * 2)];
 
         Assert.Throws<ArgumentNullException>(() =>
-            NdisApiDriver.BuildMultiRequest(requestBytes, (nint)1, buffers!, count: 2, offset: 0));
+            NdisApiDriver.BuildMultiRequest(requestBytes, 1, buffers!, count: 2, offset: 0));
     }
 }

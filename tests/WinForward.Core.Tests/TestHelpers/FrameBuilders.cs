@@ -12,8 +12,7 @@ namespace WinForward.Core.Tests;
 internal static class FrameBuilders
 {
     public const byte TcpFlagSyn = 0x02;
-    public const byte TcpFlagPshAck = 0x18;
-
+    private const byte TcpFlagPshAck = 0x18;
     public static byte[] BuildIpv4TcpSyn(IPAddress source, IPAddress destination, ushort sourcePort, ushort destinationPort, byte[]? payload = null) =>
         BuildIpv4TcpFrame(source, destination, sourcePort, destinationPort, TcpFlagSyn, payload: payload);
 
@@ -111,7 +110,7 @@ internal static class FrameBuilders
         frame[12] = 0x86;
         frame[13] = 0xdd;
         frame[14] = 0x60;
-        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(18, 2), (ushort)ipv6PayloadLength);
+        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(18, 2), ipv6PayloadLength);
         frame[20] = 0;
         source.TryWriteBytes(frame.AsSpan(22, 16), out _);
         destination.TryWriteBytes(frame.AsSpan(38, 16), out _);
@@ -156,7 +155,7 @@ internal static class FrameBuilders
     }
 
     /// <summary>IPv6 UDP datagram; the UDP checksum stays zero (parse-only tests do not validate it).</summary>
-    public static byte[] BuildIpv6UdpFrame(IPAddress source, IPAddress destination, ushort sourcePort, ushort destinationPort, byte[]? payload = null)
+    private static byte[] BuildIpv6UdpFrame(IPAddress source, IPAddress destination, ushort sourcePort, ushort destinationPort, byte[]? payload = null)
     {
         payload ??= [];
         var udpLength = 8 + payload.Length;

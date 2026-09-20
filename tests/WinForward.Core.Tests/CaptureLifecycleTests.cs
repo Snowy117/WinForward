@@ -54,8 +54,10 @@ public sealed class CaptureLifecycleTests
         var capture = new BlockingCapture();
         await using var runtime = new TransactionalCaptureRuntime(modes, capture);
 
+        // ReSharper disable once AccessToDisposedClosure // start is one of the two tasks joined by Task.WhenAll below, still inside the runtime's await using scope; the capture gate keeps the run pending until then.
         var start = Task.Run(async () => await runtime.StartAsync(CancellationToken.None));
         await capture.Started.Task;
+        // ReSharper disable once AccessToDisposedClosure // stop is joined by Task.WhenAll(start, stop) before the runtime is disposed.
         var stop = Task.Run(async () => await runtime.StopAsync());
 
         await capture.CancellationObserved.Task;
@@ -75,6 +77,7 @@ public sealed class CaptureLifecycleTests
         var capture = new CompletingCapture();
         await using var runtime = new TransactionalCaptureRuntime(modes, capture);
 
+        // ReSharper disable once DisposeOnUsingVariable // The explicit DisposeAsync is the act under test: the Closed state and the captured teardown are asserted immediately after it, before the using scope exits; the await using disposal only backstops assertion-failure paths.
         await runtime.DisposeAsync();
 
         Assert.Equal(CaptureRuntimeState.Closed, runtime.State);
@@ -88,9 +91,11 @@ public sealed class CaptureLifecycleTests
         var capture = new BlockingDisposeCapture();
         await using var runtime = new TransactionalCaptureRuntime(modes, capture);
 
+        // ReSharper disable once AccessToDisposedClosure // firstStop is joined by Task.WhenAll(firstStop, secondStop) before the runtime is disposed; the DisposeStarted gate makes the overlap intentional.
         var firstStop = Task.Run(async () => await runtime.StopAsync());
         await capture.DisposeStarted.Task;
 
+        // ReSharper disable once AccessToDisposedClosure // secondStop is joined by the same Task.WhenAll, so no stop touches the runtime after the await using disposal.
         var secondStop = Task.Run(async () => await runtime.StopAsync());
         Assert.False(secondStop.IsCompleted);
 
@@ -130,6 +135,7 @@ public sealed class CaptureLifecycleTests
         var capture = new BlockingCapture();
         await using var runtime = new TransactionalCaptureRuntime(modes, capture);
 
+        // ReSharper disable once AccessToDisposedClosure // start is awaited (await start) after capture.Complete() releases the loop, still inside the await using scope.
         var start = Task.Run(async () => await runtime.StartAsync(CancellationToken.None));
         await capture.Started.Task;
         capture.Complete();

@@ -1,6 +1,5 @@
 using System.Net;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.Protocols;
 using WinForward.Runtime.UdpProxy;
 using Xunit;
@@ -113,7 +112,7 @@ public sealed class UdpProxyCoordinatorLifecycleTests
         // background setup task's failure path instead of the dispatcher's await.
         Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
 
-        await WaitForAsync(() => factory.FaultedTransports.Count == 1 && factory.FaultedTransports[0].IsDisposed);
+        await WaitForAsync(() => factory.FaultedTransports is [{ IsDisposed: true }]);
         Assert.Equal(1, pool.Stats.Returned);
         Assert.Equal(0, pool.Stats.Outstanding);
         Assert.True(await WaitUntilTrueAsync(() => coordinator.TrySendSpanAsync(CreateFlow("192.0.2.54"), s_server, [2], default, CancellationToken.None).AsTask()));
@@ -240,7 +239,9 @@ public sealed class UdpProxyCoordinatorLifecycleTests
                 TimeProvider = time,
                 BeforeExpiryRecheck = () =>
                 {
+                    // ReSharper disable once AccessToModifiedClosure // Two-phase test wiring: this completion source is assigned after construction, and the recheck seam only runs from RemoveExpiredAsync, which the test calls after that assignment.
                     snapshotTaken!.TrySetResult(true);
+                    // ReSharper disable once AccessToModifiedClosure // resumeSweep is assigned before the first sweep and gates the seam's returned task; the test completes it only after observing snapshotTaken.
                     return new ValueTask(resumeSweep!.Task);
                 },
             });
@@ -280,7 +281,9 @@ public sealed class UdpProxyCoordinatorLifecycleTests
                 TimeProvider = time,
                 BeforeExpiryRecheck = () =>
                 {
+                    // ReSharper disable once AccessToModifiedClosure // Same two-phase wiring as the send test above: the assignment happens before RemoveExpiredAsync, the only path that runs the recheck seam.
                     snapshotTaken!.TrySetResult(true);
+                    // ReSharper disable once AccessToModifiedClosure // resumeSweep gates the seam's awaited task and is completed after the test observes snapshotTaken, before the sweep can proceed.
                     return new ValueTask(resumeSweep!.Task);
                 },
             });

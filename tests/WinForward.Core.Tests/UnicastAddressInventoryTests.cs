@@ -15,7 +15,7 @@ namespace WinForward.Core.Tests;
 public sealed class UnicastAddressInventoryTests
 {
     [Fact]
-    public unsafe void ParseRowsReadsIpv4AndIpv6RowsWithLuidAndScope()
+    public void ParseRowsReadsIpv4AndIpv6RowsWithLuidAndScope()
     {
         var buffer = BuildTable(
             (UnicastAddressInventory.AfInet, ToBytes(IPAddress.Parse("192.168.77.2")), 0u, 11uL),
@@ -38,7 +38,7 @@ public sealed class UnicastAddressInventoryTests
     }
 
     [Fact]
-    public unsafe void ParseRowsRejectsAnUnknownAddressFamily()
+    public void ParseRowsRejectsAnUnknownAddressFamily()
     {
         var buffer = BuildTable((999, ToBytes(IPAddress.Parse("192.168.77.2")), 0u, 11uL));
         try
@@ -52,7 +52,7 @@ public sealed class UnicastAddressInventoryTests
     }
 
     [Fact]
-    public unsafe void ParseRowsRejectsACountThatCannotBelongToARealHostTable()
+    public void ParseRowsRejectsACountThatCannotBelongToARealHostTable()
     {
         var buffer = Marshal.AllocHGlobal(4);
         try

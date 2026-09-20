@@ -24,17 +24,18 @@ public sealed class NdisCapturePumpTests
                 },
                 _ =>
                 {
+                    // ReSharper disable once AccessToDisposedClosure // This scripted-reader cancel step ends the pump's second read; the run is awaited (Assert.ThrowsAnyAsync) before the using scope disposes cts.
                     cts.Cancel();
                     return 0;
                 },
             ]);
 
-        await using var pump = new NdisCapturePump(reader, (nint)0x55, CaptureHandler(observed, handles), new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1) });
+        await using var pump = new NdisCapturePump(reader, 0x55, CaptureHandler(observed, handles), new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1) });
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pump.RunAsync(cts.Token).AsTask());
 
         Assert.Equal(new byte[] { 0x10, 0x11, 0x12 }, observed);
-        Assert.All(handles, handle => Assert.Equal((nint)0x55, handle));
+        Assert.All(handles, handle => Assert.Equal(0x55, handle));
     }
 
     [Fact]
@@ -55,12 +56,13 @@ public sealed class NdisCapturePumpTests
                 },
                 _ =>
                 {
+                    // ReSharper disable once AccessToDisposedClosure // This scripted-reader cancel step ends the pump's second read; the run is awaited before the using scope disposes cts.
                     cts.Cancel();
                     return 0;
                 },
             ]);
 
-        await using var pump = new NdisCapturePump(reader, (nint)0x66, CaptureHandler(observed, handles), new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), BatchCapacity = 8 });
+        await using var pump = new NdisCapturePump(reader, 0x66, CaptureHandler(observed, handles), new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), BatchCapacity = 8 });
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pump.RunAsync(cts.Token).AsTask());
 
@@ -81,12 +83,13 @@ public sealed class NdisCapturePumpTests
                 _ => 0,
                 _ =>
                 {
+                    // ReSharper disable once AccessToDisposedClosure // The cancel fires on the third (empty) poll from inside the pump loop, and the run is awaited before the using scope disposes cts.
                     cts.Cancel();
                     return 0;
                 },
             ]);
 
-        await using var pump = new NdisCapturePump(reader, (nint)0x77, CaptureHandler(observed, handles), new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1) });
+        await using var pump = new NdisCapturePump(reader, 0x77, CaptureHandler(observed, handles), new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1) });
 
         // Two empty polls go through the poll-delay branch; the cancelled third poll surfaces as
         // the pump's normal cancellation propagation, not a failure.
@@ -111,12 +114,13 @@ public sealed class NdisCapturePumpTests
                 },
                 _ =>
                 {
+                    // ReSharper disable once AccessToDisposedClosure // This scripted-reader cancel step ends the pump's second read; the run is awaited before the using scope disposes cts.
                     cts.Cancel();
                     return 0;
                 },
             ]);
 
-        var pump = new NdisCapturePump(reader, (nint)0x88, (packet, _) => { buffers.Add(packet.Buffer); return ValueTask.CompletedTask; }, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1) });
+        var pump = new NdisCapturePump(reader, 0x88, (packet, _) => { buffers.Add(packet.Buffer); return ValueTask.CompletedTask; }, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1) });
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pump.RunAsync(cts.Token).AsTask());
         await pump.DisposeAsync();
@@ -133,15 +137,15 @@ public sealed class NdisCapturePumpTests
     [SupportedOSPlatform("windows")]
     public void PumpRejectsNonPositiveBatchCapacity(int batchCapacity)
     {
-        Assert.Throws<ArgumentOutOfRangeException>(() => new NdisCapturePump(new ScriptedReader([_ => 0]), (nint)1, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), BatchCapacity = batchCapacity }));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new NdisCapturePump(new ScriptedReader([_ => 0]), 1, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), BatchCapacity = batchCapacity }));
     }
 
     [Fact]
     [SupportedOSPlatform("windows")]
     public void PumpRejectsNullDriverAndHandler()
     {
-        Assert.Throws<ArgumentNullException>(() => new NdisCapturePump(null!, (nint)1, static (_, _) => ValueTask.CompletedTask));
-        Assert.Throws<ArgumentNullException>(() => new NdisCapturePump(new ScriptedReader([_ => 0]), (nint)1, null!));
+        Assert.Throws<ArgumentNullException>(() => new NdisCapturePump(null!, 1, static (_, _) => ValueTask.CompletedTask));
+        Assert.Throws<ArgumentNullException>(() => new NdisCapturePump(new ScriptedReader([_ => 0]), 1, null!));
     }
 
     [Fact]
@@ -172,13 +176,15 @@ public sealed class NdisCapturePumpTests
                 },
                 _ =>
                 {
+                    // ReSharper disable once AccessToDisposedClosure // The cancel fires on the third read, after the slot-reuse gate opened; the run is awaited before the using scope disposes cts.
                     cts.Cancel();
                     return 0;
                 },
             ]);
 
-        await using var pump = new NdisCapturePump(reader, (nint)0x99, (_, _) =>
+        await using var pump = new NdisCapturePump(reader, 0x99, (_, _) =>
         {
+            // ReSharper disable once ConvertIfStatementToReturnStatement // TrySetResult is the gate signal itself (side effect); the ternary would hide the pump-handshake early exit (B1 disposition).
             if (!handlerStarted.TrySetResult()) return ValueTask.CompletedTask;
             return new ValueTask(handlerReleased.Task);
         }, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1) });
@@ -204,10 +210,11 @@ public sealed class NdisCapturePumpTests
         var readReleased = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var reader = new GatedReader(readEntered, readReleased);
 
-        var pump = new NdisCapturePump(reader, (nint)0xBB, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1) });
+        var pump = new NdisCapturePump(reader, 0xBB, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1) });
 
         // Task.Run: the run's synchronous prefix blocks inside the gated read, so it cannot
         // start on the test thread.
+        // ReSharper disable once AccessToDisposedClosure // The token is read when this Task.Run work starts, and the run plus its dispose handshake are awaited below before the using scope disposes cts.
         var runTask = Task.Run(() => pump.RunAsync(cts.Token));
         await readEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
@@ -224,7 +231,7 @@ public sealed class NdisCapturePumpTests
     [SupportedOSPlatform("windows")]
     public async Task DisposeBeforeAnyRunCompletesSynchronously()
     {
-        var pump = new NdisCapturePump(new ScriptedReader([_ => 0]), (nint)1, static (_, _) => ValueTask.CompletedTask);
+        var pump = new NdisCapturePump(new ScriptedReader([_ => 0]), 1, static (_, _) => ValueTask.CompletedTask);
 
         var dispose = pump.DisposeAsync();
 
@@ -243,7 +250,7 @@ public sealed class NdisCapturePumpTests
         var readEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var readReleased = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var cts = new CancellationTokenSource();
-        var pump = new NdisCapturePump(new GatedReader(readEntered, readReleased), (nint)0x44, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1) });
+        var pump = new NdisCapturePump(new GatedReader(readEntered, readReleased), 0x44, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1) });
 
         var run = pump.RunAsync(cts.Token).AsTask();
         await readEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -271,7 +278,7 @@ public sealed class NdisCapturePumpTests
         // also terminates the dedicated thread.
         var readEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var readReleased = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var pump = new NdisCapturePump(new GatedReader(readEntered, readReleased), (nint)0x45, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1) });
+        var pump = new NdisCapturePump(new GatedReader(readEntered, readReleased), 0x45, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1) });
 
         var run = pump.RunAsync(CancellationToken.None).AsTask();
         await readEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -293,7 +300,7 @@ public sealed class NdisCapturePumpTests
         // runs the identical synchronous iteration body production runs on the dedicated thread,
         // so this gates the real loop body rather than a re-implementation. The pump is disposed
         // so the constructor's native batch buffers are freed (they have no finalizer).
-        await using var pump = new NdisCapturePump(new ScriptedReader([_ => 0]), (nint)0x46, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.Zero });
+        await using var pump = new NdisCapturePump(new ScriptedReader([_ => 0]), 0x46, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.Zero });
 
         // Warm the JIT outside the measured window.
         for (var warm = 0; warm < 64; warm++) pump.RunIterationForTests(CancellationToken.None);
@@ -317,7 +324,7 @@ public sealed class NdisCapturePumpTests
         // shared slots and corrupt the zero-copy slot contract.
         var readEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var readReleased = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var pump = new NdisCapturePump(new GatedReader(readEntered, readReleased), (nint)0x47, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1) });
+        await using var pump = new NdisCapturePump(new GatedReader(readEntered, readReleased), 0x47, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1) });
 
         var run = pump.RunAsync(CancellationToken.None).AsTask();
         await readEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -326,6 +333,7 @@ public sealed class NdisCapturePumpTests
         Assert.Throws<InvalidOperationException>(() => pump.RunAsync(CancellationToken.None));
 #pragma warning restore CA2012
 
+        // ReSharper disable once DisposeOnUsingVariable // DisposeAsync is deliberately started while the loop is parked in the gated read, then the read is released so disposal overlaps the live loop; awaiting the dispose task proves prompt teardown. The await using disposal at scope exit is an idempotent backstop.
         var dispose = pump.DisposeAsync();
         readReleased.SetResult();
         await run.WaitAsync(TimeSpan.FromSeconds(5));
@@ -341,7 +349,7 @@ public sealed class NdisCapturePumpTests
         };
 
     private static void Fill(NdisPacketBuffer buffer, byte marker) =>
-        buffer.SetFrame([marker, 0xAA, 0xBB], NdisApiAbi.PacketFlagOnReceive, (nint)0x99, flags: 0x40);
+        buffer.SetFrame([marker, 0xAA, 0xBB], NdisApiAbi.PacketFlagOnReceive, 0x99, flags: 0x40);
 
     /// <summary>
     /// A reader that parks every read until the test releases it, making "the run loop is in

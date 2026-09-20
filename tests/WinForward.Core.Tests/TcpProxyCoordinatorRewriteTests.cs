@@ -2,7 +2,6 @@ using System.Buffers.Binary;
 using System.Net;
 using System.Runtime.InteropServices;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.Runtime;
 using WinForward.Runtime.TcpRedirect;
 using Xunit;
@@ -25,12 +24,11 @@ public sealed class TcpProxyCoordinatorRewriteTests
         var table = new TcpRedirectTable();
         var now = DateTimeOffset.UtcNow;
         var key = FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
-        var adapter = new AdapterContext("eth0", "Ethernet", 1);
-        Assert.True(table.TryClaim(key, key.Remote, adapter, (nint)0x1234, Endpoint.From(IPAddress.Loopback, 42000), forwardLocalAddress: null, now, out var claimed));
+        Assert.True(table.TryClaim(key, key.Remote, 0x1234, Endpoint.From(IPAddress.Loopback, 42000), forwardLocalAddress: null, now, out var claimed));
         Assert.NotNull(claimed);
 
         Assert.False(table.TryResolveByReverse(Endpoint.From(s_clientIpv4, 42000), Endpoint.From(IPAddress.Parse("192.0.2.99"), 53000), now.AddMinutes(1), out _));
-        Assert.Equal(now, claimed!.LastActivityUtc);
+        Assert.Equal(now, claimed.LastActivityUtc);
     }
 
     [Fact]
@@ -140,7 +138,7 @@ public sealed class TcpProxyCoordinatorRewriteTests
         Assert.Equal(1, localAddresses.Calls);
         var (frame, towardMstcp, adapterHandle) = Assert.Single(injector.InjectedFrames);
         Assert.True(towardMstcp);
-        Assert.Equal((nint)0x1234, adapterHandle);
+        Assert.Equal(0x1234, adapterHandle);
         var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
         Assert.Equal(client, new IPAddress(frame.AsSpan(26, 4).ToArray()));
         Assert.Equal(53000u, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(34, 2)));
@@ -208,12 +206,12 @@ public sealed class TcpProxyCoordinatorRewriteTests
 
         injector.InjectedFrames.Clear();
         var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
-        var reverse = MakeReversePacketClassifierOrientation(forwardLocal, listenerTuple.Port, client, 53000, (nint)0x5678, f => { f[0] = 0xCC; f[6] = 0xDD; });
+        var reverse = MakeReversePacketClassifierOrientation(forwardLocal, listenerTuple.Port, client, 53000, 0x5678, f => { f[0] = 0xCC; f[6] = 0xDD; });
         Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleReverseAsync(reverse, CancellationToken.None));
 
         var (frame, towardMstcp, adapterHandle) = Assert.Single(injector.InjectedFrames);
         Assert.False(towardMstcp);
-        Assert.Equal((nint)0x1234, adapterHandle);
+        Assert.Equal(0x1234, adapterHandle);
         Assert.Equal(s_destIpv4, new IPAddress(frame.AsSpan(26, 4).ToArray()));
         Assert.Equal(443u, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(34, 2)));
         Assert.Equal(client, new IPAddress(frame.AsSpan(30, 4).ToArray()));

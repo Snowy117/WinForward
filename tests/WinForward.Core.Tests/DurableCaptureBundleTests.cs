@@ -1,7 +1,6 @@
 using System.Runtime.Versioning;
 using WinForward.Cli;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.Runtime;
 using WinForward.Runtime.Capture;
 using WinForward.Runtime.TcpRedirect;
@@ -66,16 +65,16 @@ public sealed class DurableCaptureBundleTests
         var logger = new RecordingRuntimeLogger();
         await using var bundle = CreateBundle(logger);
 
-        bundle.UpdateUdpTargets([Item("a", (nint)0x10, s_macA), Item("b", (nint)0x11, s_macB)]);
+        bundle.UpdateUdpTargets([Item("a", 0x10, s_macA), Item("b", 0x11, s_macB)]);
 
         var host = bundle.UdpTargets.Host;
-        Assert.Equal((nint)0x10, host!.Value.Handle);
+        Assert.Equal(0x10, host!.Value.Handle);
         Assert.Equal(s_macA, MacOf(host));
         var a = bundle.UdpTargets.Resolve("a");
         var b = bundle.UdpTargets.Resolve("b");
-        Assert.Equal((nint)0x10, a!.Value.Handle);
+        Assert.Equal(0x10, a!.Value.Handle);
         Assert.Equal(s_macA, MacOf(a));
-        Assert.Equal((nint)0x11, b!.Value.Handle);
+        Assert.Equal(0x11, b!.Value.Handle);
         Assert.Equal(s_macB, MacOf(b));
         Assert.Null(bundle.UdpTargets.Resolve("missing"));
         Assert.Empty(logger.Lines);
@@ -88,7 +87,7 @@ public sealed class DurableCaptureBundleTests
         var logger = new RecordingRuntimeLogger();
         await using var bundle = CreateBundle(logger);
 
-        bundle.UpdateUdpTargets([Item("a", (nint)0x10, s_macA), Item("b", (nint)0x11, s_zeroMac)]);
+        bundle.UpdateUdpTargets([Item("a", 0x10, s_macA), Item("b", 0x11, s_zeroMac)]);
 
         // The zero-MAC adapter fails closed: it has no resolvable target, and the group warn names it.
         Assert.Null(bundle.UdpTargets.Resolve("b"));
@@ -105,10 +104,10 @@ public sealed class DurableCaptureBundleTests
         var logger = new RecordingRuntimeLogger();
         await using var bundle = CreateBundle(logger);
 
-        bundle.UpdateUdpTargets([Item("a", (nint)0x10, s_zeroMac), Item("b", (nint)0x11, s_macB)]);
+        bundle.UpdateUdpTargets([Item("a", 0x10, s_zeroMac), Item("b", 0x11, s_macB)]);
 
         var host = bundle.UdpTargets.Host;
-        Assert.Equal((nint)0x10, host!.Value.Handle);
+        Assert.Equal(0x10, host!.Value.Handle);
         Assert.Equal(s_zeroMac, MacOf(host));
         Assert.Null(bundle.UdpTargets.Resolve("a"));
         Assert.NotNull(bundle.UdpTargets.Resolve("b"));
@@ -125,7 +124,7 @@ public sealed class DurableCaptureBundleTests
     {
         var logger = new RecordingRuntimeLogger();
         await using var bundle = CreateBundle(logger);
-        bundle.UpdateUdpTargets([Item("a", (nint)0x10, s_macA)]);
+        bundle.UpdateUdpTargets([Item("a", 0x10, s_macA)]);
 
         bundle.UpdateUdpTargets([]);
 
@@ -138,14 +137,14 @@ public sealed class DurableCaptureBundleTests
     {
         var logger = new RecordingRuntimeLogger();
         await using var bundle = CreateBundle(logger);
-        bundle.UpdateUdpTargets([Item("a", (nint)0x10, s_macA)]);
+        bundle.UpdateUdpTargets([Item("a", 0x10, s_macA)]);
 
-        bundle.UpdateUdpTargets([Item("c", (nint)0x12, s_macB)]);
+        bundle.UpdateUdpTargets([Item("c", 0x12, s_macB)]);
 
         // The stale adapter no longer resolves; the fresh one does, and the fallback follows.
         Assert.Null(bundle.UdpTargets.Resolve("a"));
         Assert.NotNull(bundle.UdpTargets.Resolve("c"));
-        Assert.Equal((nint)0x12, bundle.UdpTargets.Host!.Value.Handle);
+        Assert.Equal(0x12, bundle.UdpTargets.Host!.Value.Handle);
     }
 
     [Fact]
@@ -153,7 +152,7 @@ public sealed class DurableCaptureBundleTests
     {
         var logger = new RecordingRuntimeLogger();
         await using var bundle = CreateBundle(logger);
-        var scope = new[] { Item("a", (nint)0x10, s_macA), Item("b", (nint)0x11, s_zeroMac) };
+        var scope = new[] { Item("a", 0x10, s_macA), Item("b", 0x11, s_zeroMac) };
 
         bundle.UpdateUdpTargets(scope);
         bundle.UpdateUdpTargets(scope);
@@ -168,8 +167,8 @@ public sealed class DurableCaptureBundleTests
         var logger = new RecordingRuntimeLogger();
         await using var bundle = CreateBundle(logger);
 
-        bundle.UpdateUdpTargets([Item("a", (nint)0x10, s_macA), Item("b", (nint)0x11, s_zeroMac)]);
-        bundle.UpdateUdpTargets([Item("a", (nint)0x10, s_macA), Item("b", (nint)0x11, s_zeroMac), Item("c", (nint)0x12, s_zeroMac)]);
+        bundle.UpdateUdpTargets([Item("a", 0x10, s_macA), Item("b", 0x11, s_zeroMac)]);
+        bundle.UpdateUdpTargets([Item("a", 0x10, s_macA), Item("b", 0x11, s_zeroMac), Item("c", 0x12, s_zeroMac)]);
 
         var groupWarns = NoMacEvents(logger).Where(fields => Equals(Field(fields, "kind"), "adapters")).ToArray();
         Assert.Equal(2, groupWarns.Length);
@@ -185,9 +184,9 @@ public sealed class DurableCaptureBundleTests
         var logger = new RecordingRuntimeLogger();
         await using var bundle = CreateBundle(logger);
 
-        bundle.UpdateUdpTargets([Item("a", (nint)0x10, s_macA), Item("b", (nint)0x11, s_zeroMac)]);
-        bundle.UpdateUdpTargets([Item("a", (nint)0x10, s_macA), Item("b", (nint)0x11, s_macB)]);
-        bundle.UpdateUdpTargets([Item("a", (nint)0x10, s_macA), Item("b", (nint)0x11, s_zeroMac)]);
+        bundle.UpdateUdpTargets([Item("a", 0x10, s_macA), Item("b", 0x11, s_zeroMac)]);
+        bundle.UpdateUdpTargets([Item("a", 0x10, s_macA), Item("b", 0x11, s_macB)]);
+        bundle.UpdateUdpTargets([Item("a", 0x10, s_macA), Item("b", 0x11, s_zeroMac)]);
 
         var groupWarns = NoMacEvents(logger).Where(fields => Equals(Field(fields, "kind"), "adapters")).ToArray();
         Assert.Equal(2, groupWarns.Length);
@@ -199,9 +198,9 @@ public sealed class DurableCaptureBundleTests
         var logger = new RecordingRuntimeLogger();
         await using var bundle = CreateBundle(logger);
 
-        bundle.UpdateUdpTargets([Item("b", (nint)0x11, s_zeroMac)]);
+        bundle.UpdateUdpTargets([Item("b", 0x11, s_zeroMac)]);
         bundle.UpdateUdpTargets([]);
-        bundle.UpdateUdpTargets([Item("b", (nint)0x11, s_zeroMac)]);
+        bundle.UpdateUdpTargets([Item("b", 0x11, s_zeroMac)]);
 
         Assert.Equal(2, NoMacEvents(logger).Count(fields => Equals(Field(fields, "kind"), "adapters")));
     }
@@ -212,11 +211,11 @@ public sealed class DurableCaptureBundleTests
         var logger = new RecordingRuntimeLogger();
         await using var bundle = CreateBundle(logger);
 
-        bundle.UpdateUdpTargets([Item("a", (nint)0x10, s_zeroMac), Item("b", (nint)0x11, s_macB)]);
-        bundle.UpdateUdpTargets([Item("a", (nint)0x10, s_zeroMac), Item("b", (nint)0x11, s_macB)]);
-        bundle.UpdateUdpTargets([Item("c", (nint)0x12, s_zeroMac), Item("b", (nint)0x11, s_macB)]);
-        bundle.UpdateUdpTargets([Item("a", (nint)0x10, s_macA), Item("b", (nint)0x11, s_zeroMac)]);
-        bundle.UpdateUdpTargets([Item("a", (nint)0x10, s_zeroMac), Item("b", (nint)0x11, s_macB)]);
+        bundle.UpdateUdpTargets([Item("a", 0x10, s_zeroMac), Item("b", 0x11, s_macB)]);
+        bundle.UpdateUdpTargets([Item("a", 0x10, s_zeroMac), Item("b", 0x11, s_macB)]);
+        bundle.UpdateUdpTargets([Item("c", 0x12, s_zeroMac), Item("b", 0x11, s_macB)]);
+        bundle.UpdateUdpTargets([Item("a", 0x10, s_macA), Item("b", 0x11, s_zeroMac)]);
+        bundle.UpdateUdpTargets([Item("a", 0x10, s_zeroMac), Item("b", 0x11, s_macB)]);
 
         var hostWarns = NoMacEvents(logger).Where(fields => Equals(Field(fields, "kind"), "hostFallback")).ToArray();
         // First occurrence on 'a', the host change to 'c', and the return to a zero-MAC host

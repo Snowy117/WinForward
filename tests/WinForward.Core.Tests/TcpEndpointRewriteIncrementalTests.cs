@@ -1,7 +1,6 @@
 using System.Buffers.Binary;
 using System.Globalization;
 using System.Net;
-using WinForward.Core;
 using WinForward.Protocols;
 using Xunit;
 using static WinForward.Core.Tests.ChecksumMath;

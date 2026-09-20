@@ -10,8 +10,9 @@ public sealed class NdisAdapterGateMapTests
     public void SameHandleResolvesToSameGateInstance()
     {
         var map = new NdisAdapterGateMap();
+        var gate = map.Get(1);
 
-        Assert.True(ReferenceEquals(map.Get((nint)1), map.Get((nint)1)));
+        Assert.Same(gate, map.Get(1));
     }
 
     [Fact]
@@ -19,8 +20,8 @@ public sealed class NdisAdapterGateMapTests
     {
         var map = new NdisAdapterGateMap();
 
-        var first = map.Get((nint)1);
-        var second = map.Get((nint)2);
+        var first = map.Get(1);
+        var second = map.Get(2);
 
         Assert.False(ReferenceEquals(first, second));
         Assert.Equal(2, map.GetMaxConcurrentCalls().Count);
@@ -35,7 +36,7 @@ public sealed class NdisAdapterGateMapTests
         var resolved = new NdisNativeCallGate[handleCount * resolvesPerHandle];
 
         var resolves = Enumerable.Range(0, resolved.Length)
-            .Select(slot => Task.Run(() => resolved[slot] = map.Get((nint)((slot % handleCount) + 1))))
+            .Select(slot => Task.Run(() => resolved[slot] = map.Get((slot % handleCount) + 1)))
             .ToArray();
         await Task.WhenAll(resolves);
 
@@ -61,7 +62,7 @@ public sealed class NdisAdapterGateMapTests
 
         var firstOnAdapterA = Task.Run(() =>
         {
-            using var gateLease = map.Get((nint)0xA).Enter();
+            using var gateLease = map.Get(0xA).Enter();
             firstEntered.SetResult();
 #pragma warning disable MA0042 // The lease wraps a Monitor (thread-affine): awaiting would resume on another thread and Monitor.Exit in the lease would throw SynchronizationLockException. The deliberate synchronous block keeps the gate held on this thread while the test proves serialization.
             releaseFirst.Task.GetAwaiter().GetResult();
@@ -74,7 +75,7 @@ public sealed class NdisAdapterGateMapTests
         var secondEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var secondOnAdapterB = Task.Run(() =>
         {
-            using var gateLease = map.Get((nint)0xB).Enter();
+            using var gateLease = map.Get(0xB).Enter();
             secondEntered.SetResult();
         });
         await secondEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -83,7 +84,7 @@ public sealed class NdisAdapterGateMapTests
         var sameHandleContended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var secondOnAdapterA = Task.Run(() =>
         {
-            using var gateLease = map.Get((nint)0xA).Enter();
+            using var gateLease = map.Get(0xA).Enter();
             sameHandleContended.SetResult();
         });
         await Assert.ThrowsAsync<TimeoutException>(() => sameHandleContended.Task.WaitAsync(TimeSpan.FromMilliseconds(200)));
@@ -101,7 +102,7 @@ public sealed class NdisAdapterGateMapTests
 
         var holder = Task.Run(() =>
         {
-            using var gateLease = map.Get((nint)1).Enter();
+            using var gateLease = map.Get(1).Enter();
             firstEntered.SetResult();
 #pragma warning disable MA0042 // The lease wraps a Monitor (thread-affine): awaiting would resume on another thread and Monitor.Exit in the lease would throw SynchronizationLockException. The deliberate synchronous block keeps the gate held on this thread while the test proves serialization.
             releaseFirst.Task.GetAwaiter().GetResult();
@@ -113,7 +114,7 @@ public sealed class NdisAdapterGateMapTests
         // the map lock guards the lookup only, never the gate entry itself.
         var lookups = Task.Run(() =>
         {
-            for (var index = 0; index < 100_000; index++) map.Get((nint)(1 + (index & 3)));
+            for (var index = 0; index < 100_000; index++) map.Get(1 + (index & 3));
         });
         await lookups.WaitAsync(TimeSpan.FromSeconds(5));
 

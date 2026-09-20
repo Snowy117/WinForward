@@ -107,7 +107,7 @@ public sealed class Socks5ProtocolTests
         var linkLocal = new IPAddress(IPAddress.Parse("fe80::1").GetAddressBytes(), 0);
         var scopeSource = new IPAddress(IPAddress.Parse("fe80::10").GetAddressBytes(), 7);
         var normalized = Socks5Messages.NormalizeBndAddress(linkLocal, scopeSource, Socks5Command.UdpAssociate);
-        Assert.Equal((long)7, normalized.ScopeId);
+        Assert.Equal(7, normalized.ScopeId);
     }
 
     [Fact]

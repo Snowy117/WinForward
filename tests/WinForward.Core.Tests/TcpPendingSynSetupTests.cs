@@ -1,6 +1,5 @@
 using System.Net;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.TcpRedirect;
@@ -34,19 +33,15 @@ public sealed class TcpPendingSynSetupTests
     private sealed class CancellableGatedListenerFactory : ITcpRedirectListenerFactory
     {
         private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private readonly List<FakeListener> _listeners = [];
 
         public TaskCompletionSource CreateStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public IReadOnlyList<FakeListener> Listeners => _listeners;
 
         public async ValueTask<ITcpRedirectListener> CreateAsync(AddressFamilyKind addressFamily, CancellationToken cancellationToken)
         {
             CreateStarted.TrySetResult();
             await _release.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
             var address = addressFamily == AddressFamilyKind.IPv4 ? IPAddress.Loopback : IPAddress.IPv6Loopback;
-            var listener = new FakeListener(Endpoint.From(address, 42000));
-            lock (_listeners) _listeners.Add(listener);
-            return listener;
+            return new FakeListener(Endpoint.From(address, 42000));
         }
 
         public void Release() => _release.TrySetResult();
@@ -222,7 +217,7 @@ public sealed class TcpPendingSynSetupTests
             var pool = new NativeBufferPool(2048, capacity: 8);
             var index = new TcpPendingSynSetupIndex(capacity: 32);
             var now = DateTimeOffset.UtcNow;
-            var keys = Enumerable.Range(0, 16).Select(index => Key(checked((ushort)(53000 + index)))).ToArray();
+            var keys = Enumerable.Range(0, 16).Select(offset => Key(checked((ushort)(53000 + offset)))).ToArray();
             var entries = new PendingSynSetup?[keys.Length];
             for (var i = 0; i < keys.Length; i++) Assert.True(TryRetain(index, pool, keys[i], 64, now, out entries[i]));
 
@@ -262,6 +257,7 @@ public sealed class TcpPendingSynSetupTests
         Assert.Contains(logger.Events, e => string.Equals(e.Name, "tcp.setup.pending.dropped", StringComparison.Ordinal)
             && e.Fields.Any(field => string.Equals(field.Key, "reason", StringComparison.Ordinal) && field.Value is "pendingBudget"));
         Assert.Equal(TcpPendingSynSetupIndex.DefaultCapacity, coordinator.Diagnostics.PendingSetupActiveCount);
+        // ReSharper disable once DisposeOnUsingVariable // The explicit DisposeAsync is the act under test: teardown must release every pending setup (active count and charged bytes drop to zero, asserted right after it); the await using disposal only backstops assertion-failure paths.
         await coordinator.DisposeAsync();
         Assert.Equal(0, coordinator.Diagnostics.PendingSetupActiveCount);
         Assert.Equal(0, coordinator.Diagnostics.PendingSetupChargedBytes);

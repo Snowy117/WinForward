@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.Globalization;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.Capture;
@@ -26,7 +25,7 @@ public sealed class LayeredCaptureRunnerRefreshTests
         var executor = new NdisPacketActionExecutor(reinjector);
         CaptureRunnerHarness? harness = null;
         await using var capture = new CaptureRunnerHarness(
-            [CaptureRunnerFakes.AdapterItem("id-a", (nint)1001), CaptureRunnerFakes.AdapterItem("id-b", (nint)1002)],
+            [CaptureRunnerFakes.AdapterItem("id-a", 1001), CaptureRunnerFakes.AdapterItem("id-b", 1002)],
             CaptureRunnerFakes.UnconstrainedPolicy(),
             minimumRefreshInterval: TimeSpan.FromMilliseconds(50),
             onScopeInstalled: scope =>
@@ -34,6 +33,7 @@ public sealed class LayeredCaptureRunnerRefreshTests
                 var handles = new nint[scope.Count];
                 for (var index = 0; index < scope.Count; index++) handles[index] = scope[index].Adapter.RuntimeHandle;
                 executor.RetireLanesExcept(handles);
+                // ReSharper disable once AccessToModifiedClosure // Two-phase alias: harness is assigned right after the construction completes, and this scope-installed callback runs only once Start() installs a generation.
                 harness!.AddEvent("retire-lanes");
             });
         harness = capture;
@@ -47,6 +47,8 @@ public sealed class LayeredCaptureRunnerRefreshTests
                 CaptureRunnerFakes.AdapterItem("id-a", firstHandle),
                 CaptureRunnerFakes.AdapterItem("id-b", firstHandle + 1));
             capture.ChangeSource.Trigger();
+            // ReSharper disable once AccessToModifiedClosure // The for-loop variable is incremented only after this awaited poll returns, so the predicate reads the current iteration's value.
+            // ReSharper disable once AccessToDisposedClosure // WaitForAsync polls the live capture inside the test scope; capture's run is drained by its await using disposal only after this await returns.
             await AsyncTestExtensions.WaitForAsync(() => capture.Generations.Generations.Count == generation + 1).ConfigureAwait(false);
             await capture.WaitForGenerationStartedAsync(generation).ConfigureAwait(false);
         }
@@ -54,12 +56,12 @@ public sealed class LayeredCaptureRunnerRefreshTests
         // Traffic on the final generation's fresh handles still batches: batched reinjector
         // calls observed, zero immediate sends, zero overflow. Without retirement, ten distinct
         // handle keys would have exhausted the eight-lane table generations ago.
-        var finalA = (nint)(1001 + (4 * 2));
-        var finalB = finalA + 1;
-        await executor.PassAsync(PassPacket(finalA, isOnSend: true), CancellationToken.None);
-        await executor.PassAsync(PassPacket(finalA, isOnSend: true), CancellationToken.None);
-        await executor.PassAsync(PassPacket(finalB, isOnSend: false), CancellationToken.None);
-        await executor.PassAsync(PassPacket(finalB, isOnSend: false), CancellationToken.None);
+        const nint finalA = 1001 + (4 * 2);
+        const nint finalB = finalA + 1;
+        await executor.PassAsync(PassPacket(finalA, isOnSend: true));
+        await executor.PassAsync(PassPacket(finalA, isOnSend: true));
+        await executor.PassAsync(PassPacket(finalB, isOnSend: false));
+        await executor.PassAsync(PassPacket(finalB, isOnSend: false));
         executor.FlushPendingPasses(finalA);
         executor.FlushPendingPasses(finalB);
 
@@ -93,6 +95,7 @@ public sealed class LayeredCaptureRunnerRefreshTests
 
         harness.Enumeration.SetAdapters(CaptureRunnerFakes.AdapterItem("id-a", 202));
         harness.ChangeSource.Trigger();
+        // ReSharper disable once AccessToDisposedClosure // WaitForAsync polls Generations.Generations.Count (Count == 2) on this test's own thread; the await using scope disposes the harness only after the poll returns, with its run drained.
         await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 2).ConfigureAwait(false);
         await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
 
@@ -125,6 +128,7 @@ public sealed class LayeredCaptureRunnerRefreshTests
 
         harness.Enumeration.SetAdapters(CaptureRunnerFakes.AdapterItem("id-a", 101));
         harness.ChangeSource.Trigger();
+        // ReSharper disable once AccessToDisposedClosure // WaitForAsync polls Generations.Generations.Count (Count == 2) on this test's own thread; the await using scope disposes the harness only after the poll returns, with its run drained.
         await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 2).ConfigureAwait(false);
         await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
 
@@ -144,6 +148,7 @@ public sealed class LayeredCaptureRunnerRefreshTests
 
         harness.Enumeration.SetAdapters(CaptureRunnerFakes.AdapterItem("id-a", 101), CaptureRunnerFakes.AdapterItem("id-new", 303));
         harness.ChangeSource.Trigger();
+        // ReSharper disable once AccessToDisposedClosure // WaitForAsync polls Generations.Generations.Count (Count == 2) on this test's own thread; the await using scope disposes the harness only after the poll returns, with its run drained.
         await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 2).ConfigureAwait(false);
         await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
 
@@ -166,6 +171,7 @@ public sealed class LayeredCaptureRunnerRefreshTests
         harness.ChangeSource.Trigger();
         harness.ChangeSource.Trigger();
         harness.ChangeSource.Trigger();
+        // ReSharper disable once AccessToDisposedClosure // WaitForAsync polls Generations.Generations.Count (Count == 2) on this test's own thread; the await using scope disposes the harness only after the poll returns, with its run drained.
         await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 2).ConfigureAwait(false);
         await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
         await Task.Delay(400).ConfigureAwait(false);
@@ -185,9 +191,11 @@ public sealed class LayeredCaptureRunnerRefreshTests
 
         harness.Enumeration.SetAdapters();
         harness.ChangeSource.Trigger();
+        // ReSharper disable once AccessToDisposedClosure // The poll reads harness.Generation(0).DisposeCount while the harness is live; disposal follows after the poll returns and the run is drained.
         await AsyncTestExtensions.WaitForAsync(() => harness.Generation(0).DisposeCount == 1).ConfigureAwait(false);
         // The paused warn is logged after the generation disposal, so poll for it instead of
         // racing the runner's remaining refresh-pipeline writes.
+        // ReSharper disable once AccessToDisposedClosure // The poll inspects harness.Logger.Lines on this test's own thread; the harness is disposed only after the awaited poll returns, with its run drained.
         await AsyncTestExtensions.WaitForAsync(
             () => harness.Logger.Lines.Any(line => line.Message.Contains("paused", StringComparison.Ordinal))).ConfigureAwait(false);
         Assert.Contains(harness.Logger.Lines, line => line.Message.Contains("paused", StringComparison.Ordinal));
@@ -198,6 +206,7 @@ public sealed class LayeredCaptureRunnerRefreshTests
 
         harness.Enumeration.SetAdapters(CaptureRunnerFakes.AdapterItem("id-a", 909));
         harness.ChangeSource.Trigger();
+        // ReSharper disable once AccessToDisposedClosure // WaitForAsync polls Generations.Generations.Count (Count == 2) on this test's own thread; the await using scope disposes the harness only after the poll returns, with its run drained.
         await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 2).ConfigureAwait(false);
         await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
         Assert.Equal([909], harness.Generation(1).Scope.Select(item => item.Adapter.RuntimeHandle).ToArray());
@@ -219,11 +228,13 @@ public sealed class LayeredCaptureRunnerRefreshTests
             generation.StartupFaultRelease = release;
         };
         harness.Start();
+        // ReSharper disable once AccessToDisposedClosure // Polls the first generation's install (Generations.Generations.Count == 1) while the harness is live; disposal follows after the poll returns and the run is drained.
         await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 1).ConfigureAwait(false);
 
         harness.Enumeration.SetAdapters(CaptureRunnerFakes.AdapterItem("id-a", 202));
         release.TrySetResult();
 
+        // ReSharper disable once AccessToDisposedClosure // WaitForAsync polls Generations.Generations.Count (Count == 2) on this test's own thread; the await using scope disposes the harness only after the poll returns, with its run drained.
         await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 2).ConfigureAwait(false);
         await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
 
@@ -251,6 +262,7 @@ public sealed class LayeredCaptureRunnerRefreshTests
         };
         harness.Start();
 
+        // ReSharper disable once AccessToDisposedClosure // WaitForAsync polls Generations.Generations.Count (Count == 2) on this test's own thread; the await using scope disposes the harness only after the poll returns, with its run drained.
         await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 2).ConfigureAwait(false);
         await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
 
@@ -347,12 +359,14 @@ public sealed class LayeredCaptureRunnerRefreshTests
             generation.StartupFaultRelease = release;
         };
         harness.Start();
+        // ReSharper disable once AccessToDisposedClosure // Polls the first generation's install (Generations.Generations.Count == 1) while the harness is live; disposal follows after the poll returns and the run is drained.
         await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 1).ConfigureAwait(false);
 
         harness.Enumeration.SetAdapters(CaptureRunnerFakes.AdapterItem("id-a", 202));
         harness.Runner.SignalDegraded(new WindowsAdapter("id-a", "id-a", "id-a", 101, 0), 87);
         release.TrySetResult();
 
+        // ReSharper disable once AccessToDisposedClosure // WaitForAsync polls Generations.Generations.Count (Count == 2) on this test's own thread; the await using scope disposes the harness only after the poll returns, with its run drained.
         await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 2).ConfigureAwait(false);
         await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
 
@@ -380,12 +394,15 @@ public sealed class LayeredCaptureRunnerRefreshTests
             if (generation.Index is 0 or 2) generation.FaultAtStartupWith = new Win32Exception(87, "stale adapter handle");
         };
         harness.Start();
+        // ReSharper disable once AccessToDisposedClosure // WaitForAsync polls Generations.Generations.Count (Count == 2) on this test's own thread; the await using scope disposes the harness only after the poll returns, with its run drained.
         await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 2).ConfigureAwait(false);
         await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
 
         harness.Enumeration.SetAdapters(CaptureRunnerFakes.AdapterItem("id-a", 202));
         harness.ChangeSource.Trigger();
+        // ReSharper disable once AccessToDisposedClosure // Chained poll for the third generation (Generations.Generations.Count == 3) while the harness is live; disposal follows after the awaited poll returns and the run is drained.
         await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 3).ConfigureAwait(false);
+        // ReSharper disable once AccessToDisposedClosure // Chained poll for the fourth generation (Generations.Generations.Count == 4) while the harness is live; disposal follows after the awaited poll returns and the run is drained.
         await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 4).ConfigureAwait(false);
         await harness.WaitForGenerationStartedAsync(3).ConfigureAwait(false);
 

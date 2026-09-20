@@ -11,14 +11,13 @@ namespace WinForward.Core.Tests;
 /// </summary>
 internal sealed class ScriptedReader(Func<NdisPacketBuffer[], int>[] reads, Win32Exception? throwAlways = null) : INdisPacketReader
 {
-    private int _calls;
 
-    public int Calls => _calls;
+    public int Calls { get; private set; }
 
     public int TryReadPackets(nint adapterHandle, NdisPacketBuffer[] buffers)
     {
         if (throwAlways is not null) throw throwAlways;
-        var index = Math.Min(_calls++, reads.Length - 1);
+        var index = Math.Min(Calls++, reads.Length - 1);
         return reads[index](buffers);
     }
 }

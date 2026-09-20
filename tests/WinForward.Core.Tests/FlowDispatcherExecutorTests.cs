@@ -1,7 +1,6 @@
 using System.Net;
 using System.Runtime.Versioning;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.Capture;
@@ -292,13 +291,13 @@ public sealed class FlowDispatcherExecutorTests
         var adapter = new WindowsAdapter("id-a", "Ethernet", "internal-a", 7, 1);
         using var buffer = new NdisPacketBuffer();
         var frame = FrameBuilders.CreateIpv4TcpFrame();
-        buffer.SetFrame(frame, NdisApiAbi.PacketFlagOnSend, (nint)7);
+        buffer.SetFrame(frame, NdisApiAbi.PacketFlagOnSend, 7);
 
         await new CapturePacketProcessor(dispatcher).ProcessAsync(
-            NdisCapturedPacket.FromCapture(buffer, (nint)7),
+            NdisCapturedPacket.FromCapture(buffer, 7),
             adapter,
             CancellationToken.None);
-        executor.FlushPendingPasses((nint)7);
+        executor.FlushPendingPasses(7);
 
         // The pass reinjects the capture buffer itself: exact frame bytes, and no materialized
         // managed copy was ever needed.
@@ -317,16 +316,16 @@ public sealed class FlowDispatcherExecutorTests
         var executor = new NdisPacketActionExecutor(reinjector);
         using var buffer = new NdisPacketBuffer();
         var frame = FrameBuilders.CreateIpv4UdpFrame();
-        buffer.SetFrame(frame, NdisApiAbi.PacketFlagOnReceive, (nint)9, flags: 0x21);
+        buffer.SetFrame(frame, NdisApiAbi.PacketFlagOnReceive, 9, flags: 0x21);
         var lease = new PacketLease(buffer);
         var packet = new CapturedFlowPacket(lease, FlowContext(FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 1), Endpoint.From(IPAddress.Parse("192.0.2.53"), 2), TransportProtocol.Udp, FlowOriginKind.Host)), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, 9, 0x21), NativeFrame: new NativeFrameHandle(buffer));
 
-        await executor.PassAsync(packet, CancellationToken.None);
-        executor.FlushPendingPasses((nint)9);
+        await executor.PassAsync(packet);
+        executor.FlushPendingPasses(9);
 
         Assert.Same(buffer, reinjector.LastBuffer);
         Assert.Equal(1, reinjector.BatchToMstcpCount);
-        Assert.Equal((nint)9, reinjector.LastAdapterHandle);
+        Assert.Equal(9, reinjector.LastAdapterHandle);
         Assert.False(lease.IsMaterialized, "The in-place pass must not materialize a managed copy.");
     }
 
@@ -338,13 +337,13 @@ public sealed class FlowDispatcherExecutorTests
         var executor = new NdisPacketActionExecutor(reinjector);
         using var buffer = new NdisPacketBuffer();
         var frame = FrameBuilders.CreateIpv4UdpFrame();
-        buffer.SetFrame(frame, NdisApiAbi.PacketFlagOnReceive, (nint)9);
+        buffer.SetFrame(frame, NdisApiAbi.PacketFlagOnReceive, 9);
         var lease = new PacketLease(buffer);
         _ = lease.Frame.Length; // Materialize before the pass, as a proxy/rewrite consumer would.
         var packet = new CapturedFlowPacket(lease, FlowContext(FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 1), Endpoint.From(IPAddress.Parse("192.0.2.53"), 2), TransportProtocol.Udp, FlowOriginKind.Host)), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, 9), NativeFrame: new NativeFrameHandle(buffer));
 
-        await executor.PassAsync(packet, CancellationToken.None);
-        executor.FlushPendingPasses((nint)9);
+        await executor.PassAsync(packet);
+        executor.FlushPendingPasses(9);
 
         Assert.NotSame(buffer, reinjector.LastBuffer);
         Assert.Equal(frame, reinjector.LastFrame);
@@ -358,18 +357,18 @@ public sealed class FlowDispatcherExecutorTests
         var executor = new NdisPacketActionExecutor(reinjector);
 
         var send = new CapturedFlowPacket(new PacketLease(new byte[] { 1, 2, 3 }), FlowContext(FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 1), Endpoint.From(IPAddress.Parse("192.0.2.53"), 2), TransportProtocol.Tcp, FlowOriginKind.Host)), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
-        await executor.PassAsync(send, CancellationToken.None);
-        executor.FlushPendingPasses((nint)7);
+        await executor.PassAsync(send);
+        executor.FlushPendingPasses(7);
         Assert.Equal(1, reinjector.BatchToAdapterCount);
         Assert.Equal(0, reinjector.BatchToMstcpCount);
-        Assert.Equal((nint)7, reinjector.LastAdapterHandle);
+        Assert.Equal(7, reinjector.LastAdapterHandle);
         Assert.Equal(new byte[] { 1, 2, 3 }, reinjector.LastFrame!);
 
         var receive = new CapturedFlowPacket(new PacketLease(new byte[] { 4, 5 }), FlowContext(FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.53"), 2), Endpoint.From(IPAddress.Parse("192.0.2.10"), 1), TransportProtocol.Tcp, FlowOriginKind.Forwarded)), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, 8));
-        await executor.PassAsync(receive, CancellationToken.None);
-        executor.FlushPendingPasses((nint)8);
+        await executor.PassAsync(receive);
+        executor.FlushPendingPasses(8);
         Assert.Equal(1, reinjector.BatchToMstcpCount);
-        Assert.Equal((nint)8, reinjector.LastAdapterHandle);
+        Assert.Equal(8, reinjector.LastAdapterHandle);
     }
 
     [Fact]
@@ -381,13 +380,13 @@ public sealed class FlowDispatcherExecutorTests
         var dispatcher = new FlowDispatcher(CreateConfig(new RuleMatcher(), FlowAction.Pass), new FakeGuard(), executor);
         var adapter = new WindowsAdapter("id-a", "Ethernet", "internal-a", 7, 1);
         using var buffer = new NdisPacketBuffer();
-        buffer.SetFrame(FrameBuilders.CreateIpv4TcpFrame(), NdisApiAbi.PacketFlagOnSend, (nint)7, flags: 0x4000_0021);
+        buffer.SetFrame(FrameBuilders.CreateIpv4TcpFrame(), NdisApiAbi.PacketFlagOnSend, 7, flags: 0x4000_0021);
 
         await new CapturePacketProcessor(dispatcher).ProcessAsync(
-            NdisCapturedPacket.FromCapture(buffer, (nint)7),
+            NdisCapturedPacket.FromCapture(buffer, 7),
             adapter,
             CancellationToken.None);
-        executor.FlushPendingPasses((nint)7);
+        executor.FlushPendingPasses(7);
 
         Assert.Equal(1, reinjector.BatchToAdapterCount);
         Assert.Equal(0x4000_0021u, reinjector.LastFlags);
@@ -400,9 +399,9 @@ public sealed class FlowDispatcherExecutorTests
         var executor = new NdisPacketActionExecutor(reinjector);
         var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), FlowContext(FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 1), Endpoint.From(IPAddress.Parse("192.0.2.53"), 2), TransportProtocol.Tcp, FlowOriginKind.Host)), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
 
-        await executor.BlockAsync(packet, CancellationToken.None);
+        await executor.BlockAsync(packet);
         await executor.ProxyAsync(packet, new Socks5Server("p", "127.0.0.1", 1080, Username: null, Password: null), CancellationToken.None);
-        executor.FlushPendingPasses((nint)7);
+        executor.FlushPendingPasses(7);
 
         Assert.Equal(0, reinjector.ToAdapterCount);
         Assert.Equal(0, reinjector.ToMstcpCount);
@@ -422,12 +421,12 @@ public sealed class FlowDispatcherExecutorTests
         var packet = new CapturedFlowPacket(new PacketLease(FrameBuilders.CreateIpv4TcpFrame()), FlowContext(key), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
 
         await executor.ProxyAsync(packet, new Socks5Server("p", "127.0.0.1", 1080, Username: null, Password: null), CancellationToken.None);
-        executor.FlushPendingPasses((nint)7);
+        executor.FlushPendingPasses(7);
 
         Assert.Equal(0, reinjector.ToAdapterCount);
         Assert.Equal(1, reinjector.BatchToAdapterCount);
         Assert.Equal(0, reinjector.BatchToMstcpCount);
-        Assert.Equal((nint)7, reinjector.LastAdapterHandle);
+        Assert.Equal(7, reinjector.LastAdapterHandle);
     }
 
     // ---- Helpers ----
@@ -444,7 +443,7 @@ public sealed class FlowDispatcherExecutorTests
 
     private static CapturedFlowPacket FlowPacket(ushort localPort, FlowOriginKind origin, string adapterId, string adapterName)
     {
-        var adapter = new AdapterContext(adapterId, adapterName, 1);
+        var adapter = new AdapterContext(adapterId, 1);
         var key = FlowKey.Create(
             Endpoint.From(IPAddress.Parse("192.0.2.10"), localPort),
             Endpoint.From(IPAddress.Parse("192.0.2.53"), 443),

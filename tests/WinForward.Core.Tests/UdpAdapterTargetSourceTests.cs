@@ -1,7 +1,6 @@
 using System.Net;
 using System.Runtime.Versioning;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Runtime.UdpProxy;
 using Xunit;
@@ -19,31 +18,31 @@ public sealed class UdpAdapterTargetSourceTests
     public void ResolveReadsTheLatestSnapshotAfterUpdateWithoutReconstruction()
     {
         var source = new UdpAdapterTargetSource(
-            new UdpAdapterTarget((nint)7, s_macA),
-            new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase) { ["veth-1"] = new((nint)1234, s_macB) });
+            new UdpAdapterTarget(7, s_macA),
+            new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase) { ["veth-1"] = new(1234, s_macB) });
 
-        Assert.Equal((nint)1234, source.Resolve("veth-1")!.Value.Handle);
-        Assert.Equal((nint)1234, source.Resolve("VETH-1")!.Value.Handle);
+        Assert.Equal(1234, source.Resolve("veth-1")!.Value.Handle);
+        Assert.Equal(1234, source.Resolve("VETH-1")!.Value.Handle);
         Assert.Null(source.Resolve("missing"));
 
         source.Update(
-            new UdpAdapterTarget((nint)9, s_macA),
-            new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase) { ["veth-1"] = new((nint)5678, s_macB) });
+            new UdpAdapterTarget(9, s_macA),
+            new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase) { ["veth-1"] = new(5678, s_macB) });
 
-        Assert.Equal((nint)9, source.Host!.Value.Handle);
-        Assert.Equal((nint)5678, source.Resolve("veth-1")!.Value.Handle);
+        Assert.Equal(9, source.Host!.Value.Handle);
+        Assert.Equal(5678, source.Resolve("veth-1")!.Value.Handle);
     }
 
     [Fact]
     public void SnapshotIsFrozenAgainstLaterCallerSideMapMutation()
     {
-        var map = new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase) { ["veth-1"] = new((nint)1234, s_macB) };
-        var source = new UdpAdapterTargetSource(new UdpAdapterTarget((nint)7, s_macA), map);
+        var map = new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase) { ["veth-1"] = new(1234, s_macB) };
+        var source = new UdpAdapterTargetSource(new UdpAdapterTarget(7, s_macA), map);
 
-        map["veth-1"] = new((nint)9999, s_macB);
+        map["veth-1"] = new(9999, s_macB);
         map.Clear();
 
-        Assert.Equal((nint)1234, source.Resolve("veth-1")!.Value.Handle);
+        Assert.Equal(1234, source.Resolve("veth-1")!.Value.Handle);
     }
 
     [Fact]
@@ -64,7 +63,7 @@ public sealed class UdpAdapterTargetSourceTests
     [InlineData(7)]
     public void ConstructorAndUpdateRejectMalformedHostMac(int macLength)
     {
-        var malformed = new UdpAdapterTarget((nint)7, new byte[macLength]);
+        var malformed = new UdpAdapterTarget(7, new byte[macLength]);
         Assert.Throws<ArgumentOutOfRangeException>(() => new UdpAdapterTargetSource(malformed));
         var source = new UdpAdapterTargetSource();
         Assert.Throws<ArgumentOutOfRangeException>(() => source.Update(malformed, new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase)));
@@ -78,24 +77,24 @@ public sealed class UdpAdapterTargetSourceTests
     {
         var reinjector = new FakeReinjector();
         var source = new UdpAdapterTargetSource(
-            new UdpAdapterTarget((nint)7, s_macA),
-            new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase) { ["veth-1"] = new((nint)1234, s_macB) });
+            new UdpAdapterTarget(7, s_macA),
+            new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase) { ["veth-1"] = new(1234, s_macB) });
         var sink = new UdpResponseReinjector(reinjector, source);
-        var adapter = new AdapterContext("veth-1", "vEthernet 1", 3);
+        var adapter = new AdapterContext("veth-1", 3);
         var client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000);
         var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
         var flow = FlowKey.Create(client, server, TransportProtocol.Udp, FlowOriginKind.Forwarded, adapter);
 
         await sink.InjectAsync(flow, server, new byte[] { 1 }, MacAddress.From(s_macB), CancellationToken.None);
         Assert.Equal(1, reinjector.ToAdapterCount);
-        Assert.Equal((nint)1234, reinjector.LastAdapterHandle);
+        Assert.Equal(1234, reinjector.LastAdapterHandle);
 
         // The re-enumerated handle (adapter list rebuilt) is picked up per response through the
         // same sink instance — no reconstruction involved.
-        source.Update(host: null, new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase) { ["veth-1"] = new((nint)5678, s_macB) });
+        source.Update(host: null, new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase) { ["veth-1"] = new(5678, s_macB) });
         await sink.InjectAsync(flow, server, new byte[] { 2 }, MacAddress.From(s_macB), CancellationToken.None);
         Assert.Equal(2, reinjector.ToAdapterCount);
-        Assert.Equal((nint)5678, reinjector.LastAdapterHandle);
+        Assert.Equal(5678, reinjector.LastAdapterHandle);
         Assert.Equal(NdisApiAbi.PacketFlagOnSend, reinjector.LastDeviceFlags);
     }
 
@@ -106,15 +105,15 @@ public sealed class UdpAdapterTargetSourceTests
         var reinjector = new FakeReinjector();
         var logger = new RecordingRuntimeLogger();
         var source = new UdpAdapterTargetSource(
-            new UdpAdapterTarget((nint)7, s_macA),
-            new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase) { ["veth-1"] = new((nint)1234, s_macB) });
+            new UdpAdapterTarget(7, s_macA),
+            new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase) { ["veth-1"] = new(1234, s_macB) });
         var sink = new UdpResponseReinjector(reinjector, source, logger: logger);
-        var adapter = new AdapterContext("veth-1", "vEthernet 1", 3);
+        var adapter = new AdapterContext("veth-1", 3);
         var client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000);
         var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
         var flow = FlowKey.Create(client, server, TransportProtocol.Udp, FlowOriginKind.Forwarded, adapter);
 
-        source.Update(new UdpAdapterTarget((nint)7, s_macA), new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase));
+        source.Update(new UdpAdapterTarget(7, s_macA), new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase));
         await sink.InjectAsync(flow, server, new byte[] { 1 }, MacAddress.From(s_macB), CancellationToken.None);
 
         Assert.Equal(0, reinjector.ToMstcpCount);
@@ -146,11 +145,11 @@ public sealed class UdpAdapterTargetSourceTests
     public async Task HostFlowWithResolvedOriginInjectsEvenWithoutHostTarget()
     {
         var reinjector = new FakeReinjector();
-        var originHandle = (nint)1234;
+        const nint originHandle = 1234;
         var sink = new UdpResponseReinjector(
             reinjector,
             new UdpAdapterTargetSource(host: null, new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase) { ["wlan-1"] = new(originHandle, s_macB) }));
-        var adapter = new AdapterContext("wlan-1", "Wi-Fi", 3);
+        var adapter = new AdapterContext("wlan-1", 3);
         var client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000);
         var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
         var flow = FlowKey.Create(client, server, TransportProtocol.Udp, FlowOriginKind.Host, adapter);

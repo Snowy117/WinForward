@@ -99,9 +99,9 @@ public sealed class ProtocolAuditTests
         var payload = new byte[65_528];
         var storage = new byte[65_600];
 
-        Assert.False(UdpFrameBuilder.TryBuildInto(WinForward.Core.IPAddressValue.From(s_ipv4Source), 1, WinForward.Core.IPAddressValue.From(s_ipv4Destination), 2, payload, s_sourceMac, s_destinationMac, storage, out var ipv4Length, 65_570));
+        Assert.False(UdpFrameBuilder.TryBuildInto(IPAddressValue.From(s_ipv4Source), 1, IPAddressValue.From(s_ipv4Destination), 2, payload, s_sourceMac, s_destinationMac, storage, out var ipv4Length, 65_570));
         Assert.Equal(0, ipv4Length);
-        Assert.False(UdpFrameBuilder.TryBuildInto(WinForward.Core.IPAddressValue.From(s_ipv6Source), 1, WinForward.Core.IPAddressValue.From(s_ipv6Destination), 2, payload, s_sourceMac, s_destinationMac, storage, out var ipv6Length, 65_590));
+        Assert.False(UdpFrameBuilder.TryBuildInto(IPAddressValue.From(s_ipv6Source), 1, IPAddressValue.From(s_ipv6Destination), 2, payload, s_sourceMac, s_destinationMac, storage, out var ipv6Length, 65_590));
         Assert.Equal(0, ipv6Length);
     }
 

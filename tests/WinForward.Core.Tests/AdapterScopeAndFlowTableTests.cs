@@ -1,5 +1,4 @@
 using System.Net;
-using WinForward.Core;
 using WinForward.Runtime.Capture;
 using WinForward.Windows;
 using Xunit;
@@ -152,8 +151,8 @@ public sealed class AdapterScopeAndFlowTableTests
     public void FlowTableReusesDecisionAcrossAdapterBoundaries()
     {
         var table = new FlowTable();
-        var onAdapterA = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 443), TransportProtocol.Tcp, FlowOriginKind.Host, new AdapterContext("a", "Ethernet", 1));
-        var onAdapterB = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.53"), 443), Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), TransportProtocol.Tcp, FlowOriginKind.Forwarded, new AdapterContext("b", "vEthernet", 2));
+        var onAdapterA = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 443), TransportProtocol.Tcp, FlowOriginKind.Host, new AdapterContext("a", 1));
+        var onAdapterB = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.53"), 443), Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), TransportProtocol.Tcp, FlowOriginKind.Forwarded, new AdapterContext("b", 2));
 
         Assert.True(table.TryClaimResolved(onAdapterA, () => new FlowDecision(FlowAction.Block, 0, ProxyServerName: null), out var claimed));
         Assert.True(table.TryResolve(onAdapterB, out var resolved));

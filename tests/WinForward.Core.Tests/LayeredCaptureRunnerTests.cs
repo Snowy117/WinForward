@@ -1,5 +1,4 @@
 using WinForward.Configuration;
-using WinForward.Runtime;
 using WinForward.Runtime.Capture;
 using WinForward.Windows;
 using Xunit;
@@ -99,6 +98,7 @@ public sealed class LayeredCaptureRunnerTests
         var enumerationCountAtStart = harness.Enumeration.EnumerationCount;
 
         harness.Runner.SignalDegraded(new WindowsAdapter("id-a", "id-a", "id-a", 101, 0), 87);
+        // ReSharper disable once AccessToDisposedClosure // WaitForAsync polls harness.RefreshEvents on this test's own thread; the await using scope disposes the harness only after the poll returns, with its run drained.
         await AsyncTestExtensions.WaitForAsync(() => harness.RefreshEvents.Count > 0).ConfigureAwait(false);
 
         var refresh = harness.RefreshEvents[^1];
@@ -126,6 +126,7 @@ public sealed class LayeredCaptureRunnerTests
 
         harness.Enumeration.SetAdapters(CaptureRunnerFakes.AdapterItem("id-a", 101));
         harness.Runner.SignalDegraded(new WindowsAdapter("id-b", "id-b", "id-b", 202, 0), 87);
+        // ReSharper disable once AccessToDisposedClosure // WaitForAsync polls Generations.Generations.Count (Count == 2) on this test's own thread; the await using scope disposes the harness only after the poll returns, with its run drained.
         await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 2).ConfigureAwait(false);
 
         var refresh = harness.RefreshEvents[^1];
@@ -146,6 +147,7 @@ public sealed class LayeredCaptureRunnerTests
         await harness.WaitForGenerationStartedAsync(0).ConfigureAwait(false);
 
         harness.ChangeSource.Trigger();
+        // ReSharper disable once AccessToDisposedClosure // WaitForAsync polls harness.RefreshEvents.Count > 0 on this test's own thread; the await using scope disposes the harness only after the poll returns, with its run drained.
         await AsyncTestExtensions.WaitForAsync(() => harness.RefreshEvents.Count > 0).ConfigureAwait(false);
 
         var refresh = harness.RefreshEvents[^1];

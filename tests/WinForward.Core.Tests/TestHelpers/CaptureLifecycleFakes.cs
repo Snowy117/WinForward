@@ -14,25 +14,30 @@ namespace WinForward.Core.Tests;
 /// and restored adapters in order, and optionally fails the snapshot itself or the Nth apply
 /// (0-based) so startup rollback paths can be exercised deterministically.
 /// </summary>
+// ReSharper disable ParameterOnlyUsedForPreconditionCheck.Local
+// Deliberate failure-injection seams (one issue per flag): failOnSnapshot makes the snapshot itself
+// fail and failOnApply fails the Nth apply, so startup rollback paths are exercised deterministically.
 internal sealed class FakeModes(IReadOnlyList<AdapterModeSnapshot> snapshots, int failOnApply = -1, bool failOnSnapshot = false) : IAdapterModeController
+// ReSharper restore ParameterOnlyUsedForPreconditionCheck.Local
 {
     public List<string> Applied { get; } = [];
     public List<string> Restored { get; } = [];
 
-    public ValueTask<IReadOnlyList<AdapterModeSnapshot>> SnapshotAsync(CancellationToken cancellationToken)
+    public ValueTask<IReadOnlyList<AdapterModeSnapshot>> SnapshotAsync()
     {
+        // ReSharper disable once ConvertIfStatementToReturnStatement // Failure-injection seam: the throw is the injected behavior and must read as a standalone guard (B1 disposition).
         if (failOnSnapshot) throw new InvalidOperationException("mode snapshot failed");
         return ValueTask.FromResult(snapshots);
     }
 
-    public ValueTask ApplyCaptureModeAsync(AdapterModeSnapshot adapter, CancellationToken cancellationToken)
+    public ValueTask ApplyCaptureModeAsync(AdapterModeSnapshot adapter)
     {
         if (Applied.Count == failOnApply) throw new InvalidOperationException("mode apply failed");
         Applied.Add(adapter.AdapterId);
         return ValueTask.CompletedTask;
     }
 
-    public ValueTask RestoreAsync(AdapterModeSnapshot adapter, CancellationToken cancellationToken)
+    public ValueTask RestoreAsync(AdapterModeSnapshot adapter)
     {
         Restored.Add(adapter.AdapterId);
         return ValueTask.CompletedTask;

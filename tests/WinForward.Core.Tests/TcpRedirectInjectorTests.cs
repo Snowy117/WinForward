@@ -24,7 +24,7 @@ public sealed class TcpRedirectInjectorTests
         Assert.Equal(1, reinjector.ToMstcpCount);
         Assert.Equal(0, reinjector.ToAdapterCount);
         Assert.Equal(NdisApiAbi.PacketFlagOnReceive, reinjector.DeviceFlags);
-        Assert.Equal((nint)7, reinjector.Handle);
+        Assert.Equal(7, reinjector.Handle);
     }
 
     [Fact]
@@ -43,7 +43,7 @@ public sealed class TcpRedirectInjectorTests
         Assert.Equal(0, reinjector.ToMstcpCount);
         Assert.Equal(1, reinjector.ToAdapterCount);
         Assert.Equal(NdisApiAbi.PacketFlagOnSend, reinjector.DeviceFlags);
-        Assert.Equal((nint)7, reinjector.Handle);
+        Assert.Equal(7, reinjector.Handle);
     }
 
     private sealed class RecordingRedirectReinjector : IPacketReinjector

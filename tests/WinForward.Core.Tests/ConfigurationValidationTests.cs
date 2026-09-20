@@ -18,7 +18,7 @@ public sealed class ConfigurationValidationTests
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
         Assert.NotNull(dto);
-        Assert.False(ConfigurationLoader.TryValidate(dto!, out _, out var diagnostics));
+        Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
         Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "rules[0].remotePort", StringComparison.Ordinal));
         Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "rules[0].proxyServer", StringComparison.Ordinal));
     }
@@ -36,7 +36,7 @@ public sealed class ConfigurationValidationTests
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
         Assert.NotNull(dto);
-        Assert.False(ConfigurationLoader.TryValidate(dto!, out _, out var diagnostics));
+        Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
         Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "rules[0].process[0]", StringComparison.Ordinal));
     }
 
@@ -145,7 +145,7 @@ public sealed class ConfigurationValidationTests
 
     [Theory]
     [InlineData("browser.exe", false)]
-    [InlineData("C:\\\\Apps\\\\browser.exe", true)]
+    [InlineData(@"C:\\Apps\\browser.exe", true)]
     public void ConfigurationComputesProcessPathDisclosureNeed(string selector, bool expected)
     {
         var json = $$"""
@@ -266,7 +266,7 @@ public sealed class ConfigurationValidationTests
 
         Assert.True(ConfigurationLoader.TryParse(maximumJson, out var maximumDto, out _));
         Assert.NotNull(maximumDto);
-        Assert.True(ConfigurationLoader.TryValidate(maximumDto!, out _, out var maximumDiagnostics), string.Join("; ", maximumDiagnostics));
+        Assert.True(ConfigurationLoader.TryValidate(maximumDto, out _, out var maximumDiagnostics), string.Join("; ", maximumDiagnostics));
 
         var password = new string('\u00e9', 128);
         var json = $$"""
@@ -279,7 +279,7 @@ public sealed class ConfigurationValidationTests
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
         Assert.NotNull(dto);
-        Assert.False(ConfigurationLoader.TryValidate(dto!, out _, out var diagnostics));
+        Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
         var diagnostic = Assert.Single(diagnostics);
         Assert.Equal("socks5Servers[0].password", diagnostic.Path);
         Assert.DoesNotContain(password, diagnostic.ToString(), StringComparison.Ordinal);
@@ -311,12 +311,10 @@ public sealed class ConfigurationValidationTests
 
         ConfigurationAssert.Invalid(json, "fallbackAction");
 
-        const string missingSections = """
-        {}
-        """;
+        const string missingSections = "{}";
         Assert.True(ConfigurationLoader.TryParse(missingSections, out var dto, out _));
         Assert.NotNull(dto);
-        Assert.False(ConfigurationLoader.TryValidate(dto!, out _, out var diagnostics));
+        Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
         Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "socks5Servers", StringComparison.Ordinal));
         Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "rules", StringComparison.Ordinal));
         Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "fallbackAction", StringComparison.Ordinal));
@@ -342,7 +340,7 @@ public sealed class ConfigurationValidationTests
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
         Assert.NotNull(dto);
-        Assert.False(ConfigurationLoader.TryValidate(dto!, out _, out var diagnostics));
+        Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
         Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, $"rules[0].{field}[0]", StringComparison.Ordinal));
     }
 
@@ -361,7 +359,7 @@ public sealed class ConfigurationValidationTests
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
         Assert.NotNull(dto);
-        Assert.False(ConfigurationLoader.TryValidate(dto!, out _, out var diagnostics));
+        Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
         Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, $"{section}[0]", StringComparison.Ordinal));
     }
 
@@ -374,7 +372,7 @@ public sealed class ConfigurationValidationTests
     {
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
         Assert.NotNull(dto);
-        Assert.False(ConfigurationLoader.TryValidate(dto!, out _, out var diagnostics));
+        Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
         var diagnostic = Assert.Single(diagnostics);
         Assert.Equal(expectedPath, diagnostic.Path);
         return diagnostic;
@@ -423,7 +421,7 @@ public sealed class ConfigurationValidationTests
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
         Assert.NotNull(dto);
-        Assert.False(ConfigurationLoader.TryValidate(dto!, out _, out var diagnostics));
+        Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
         Assert.Equal(2, diagnostics.Count);
         Assert.Equal(new ConfigDiagnostic("rules[0].remotePort[0]", "Invalid port or range '0'."), diagnostics[0]);
         Assert.Equal(new ConfigDiagnostic("rules[0].remotePort[2]", "Invalid port or range '500-100'."), diagnostics[1]);
@@ -442,8 +440,8 @@ public sealed class ConfigurationValidationTests
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
         Assert.NotNull(dto);
-        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.True(ConfigurationLoader.TryValidate(dto, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
         Assert.NotNull(configuration);
-        Assert.Equal([((ushort)80, (ushort)250), ((ushort)443, (ushort)443)], configuration!.Policy.Rules[0].Matcher.RemotePorts);
+        Assert.Equal([(80, 250), (443, 443)], configuration.Policy.Rules[0].Matcher.RemotePorts);
     }
 }

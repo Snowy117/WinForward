@@ -3,7 +3,6 @@ using System.Net.Sockets;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using WinForward.Configuration;
-using WinForward.Core;
 using WinForward.Protocols;
 using WinForward.Runtime;
 using WinForward.Runtime.Socks5;
@@ -44,7 +43,7 @@ public sealed class Socks5UdpTransportSendTests
         EndPoint sender = new IPEndPoint(IPAddress.Any, 0);
         var received = await relaySocket.ReceiveFromAsync(buffer, SocketFlags.None, sender, CancellationToken.None);
         Assert.True(Socks5UdpCodec.TryDecode(buffer.AsMemory(0, received.ReceivedBytes), out var datagram));
-        Assert.Equal((IPAddressValue?)destination.Address, datagram.DestinationAddress);
+        Assert.Equal(destination.Address, datagram.DestinationAddress);
         Assert.Equal(destination.Port, datagram.DestinationPort);
         Assert.Equal(payload, datagram.Payload.ToArray());
 
@@ -52,7 +51,7 @@ public sealed class Socks5UdpTransportSendTests
         await relaySocket.SendToAsync(
             Socks5UdpDatagrams.Encode(IPAddress.Parse("192.0.2.10"), 53000, payload),
             SocketFlags.None,
-            (EndPoint)transport.LocalEndpoint!,
+            transport.LocalEndpoint,
             CancellationToken.None);
         var echo = await transport.ReceiveAsync(buffer, CancellationToken.None);
         Assert.True(echo.HasDatagram);
