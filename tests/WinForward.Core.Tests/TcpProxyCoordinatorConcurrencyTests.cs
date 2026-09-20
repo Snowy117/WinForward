@@ -23,7 +23,7 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
         var injector = new FakeInjector();
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable();
-        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
+        await using var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
         var packet = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
 
         var first = await coordinator.HandleSynAsync(packet, s_server, CancellationToken.None);
@@ -62,7 +62,7 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
         var injector = new FakeInjector();
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable();
-        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
+        await using var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
 
         var first = await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None);
         await coordinator.DrainPendingSetupsAsync();
@@ -86,7 +86,7 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
         var injector = new FakeInjector();
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable();
-        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
+        await using var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
 
         await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
 
@@ -104,7 +104,7 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
         var injector = new FakeInjector();
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable();
-        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
+        await using var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
         var packet = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
         const int count = 32;
 
@@ -138,7 +138,7 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
         var injector = new FakeInjector();
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable();
-        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
+        await using var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
         var packet = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
         const int count = 8;
 
@@ -173,7 +173,7 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
         var injector = new FakeInjector();
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable();
-        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
+        await using var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
         var key = FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
         var now = DateTimeOffset.UtcNow;
         Assert.True(table.TryClaim(key, key.Remote, 0x1234, Endpoint.From(IPAddress.Loopback, 42000), forwardLocalAddress: null, now, out _));
@@ -195,7 +195,7 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
         var injector = new FakeInjector();
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable();
-        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
+        await using var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
 
         await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
         Assert.Equal(1, table.Count);
@@ -216,7 +216,7 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
         var injector = new FakeInjector();
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable();
-        await using var coordinator = new TcpProxyCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
+        await using var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
 
         // Session 1 remains Redirecting (no accepted connection ever relayed).
         await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
@@ -242,7 +242,7 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
         var injector = new FakeInjector();
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable();
-        await using var coordinator = new TcpProxyCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider());
+        await using var coordinator = CreateCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider());
 
         await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
         var listener = Assert.Single(listenerFactory.Listeners);

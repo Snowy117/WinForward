@@ -172,6 +172,29 @@ public sealed class TcpProxyRelayTests
         Assert.Equal(0, pool.Stats.DisposedCount);
     }
 
+    [Fact]
+    public async Task DisposeLeavesCompletionCompletedAndReturnsPumpBuffers()
+    {
+        // R1: the relay owns its pump lifetimes. DisposeAsync must not return while a pump is
+        // still running: it awaits the completion, so the disposal-manufactured fault is observed
+        // and swallowed rather than surfacing as an unobserved task exception, and both pooled
+        // direction buffers are already back by the time it returns.
+        using var pool = new NativeBufferPool(TcpProxyRelayFactory.PumpBufferSize, capacity: 4);
+        var (localPeer, relayLocal) = await CreateSocketPairAsync();
+        using var local = localPeer;
+        await using var relay = new TcpProxyRelay(relayLocal, new FaultingStream(), new NoopAsyncDisposable(), pumpBufferPool: pool);
+
+        await WaitForAsync(() => pool.Stats.Outstanding == 2);
+        await local.SendAsync(new byte[] { 1 }, SocketFlags.None);
+
+        // ReSharper disable once DisposeOnUsingVariable // The test awaits this DisposeAsync to assert the post-disposal state; the await using stays as the dispose-on-failure safety net and the repeat disposal is an idempotent no-op.
+        await relay.DisposeAsync();
+
+        Assert.True(relay.Completion.IsCompleted);
+        await WaitForAsync(() => pool.Stats.Outstanding == 0);
+        Assert.Equal(0, pool.Stats.DisposedCount);
+    }
+
     private static async Task<(Socket Peer, Socket Relay)> CreateSocketPairAsync()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);

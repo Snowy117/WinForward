@@ -109,7 +109,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         // session gate and the redirect table's bounded capacity (design §4).
         var redirectTable = new TcpRedirectTable(capacity: configuration.TcpFlowCapacity);
         // One native pool backs retained SYNs and association reset templates (B1/B2); the
-        // coordinator owns it when none is injected, so production passes it and disposes it here.
+        // bundle owns it and the coordinator borrows it, so it is disposed here after teardown.
         var synCopyPool = new NativeBufferPool(NdisApiAbi.MaximumEthernetFrame);
         RegisterPool(runtimeCounters, SynCopyPoolName, synCopyPool);
         // One native pool backs the two per-direction relay pump windows (B11).
@@ -181,8 +181,8 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         const int maximumFrameSize = NdisApiAbi.MaximumEthernetFrame;
         var udpTargets = new UdpAdapterTargetSource();
         await UdpProxyComposer.PrimeSocks5AddressCacheAsync(configuration, addressCache, logger).ConfigureAwait(false);
-        // One native pool backs every queued setup datagram (B4); the coordinator owns it when
-        // none is injected, so production passes it and disposes it here after release.
+        // One native pool backs every queued setup datagram (B4); the bundle owns it and the
+        // coordinator borrows it, so it is disposed here after release.
         var udpDatagramPool = new NativeBufferPool(maximumFrameSize);
         RegisterPool(counters, UdpDatagramPoolName, udpDatagramPool);
         // One native pool backs every session receive window (B11); its size comes from the

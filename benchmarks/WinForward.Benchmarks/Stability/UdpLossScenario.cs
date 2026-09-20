@@ -41,11 +41,8 @@ internal static class UdpLossScenario
         // switch's enabled state, flipped by editing the constant for a loss-localization session.
         var productEvents = CaptureProductEvents ? new CountingRuntimeLogger() : null;
         // ReSharper restore HeuristicUnreachableCode, CSharpWarnings::CS0162
-        var coordinator = new UdpProxyCoordinator(new Socks5UdpTransportFactory(new SelfTrafficRegistry(), UdpFrameBuilder.DefaultMaximumEthernetFrame), sink, new UdpProxyOptions
-        {
-            Capacity = options.Flows,
-            Logger = (IRuntimeLogger?)productEvents ?? NullRuntimeLogger.Instance,
-        });
+        using var scope = new CoordinatorScope(sink, options.Flows, (IRuntimeLogger?)productEvents ?? NullRuntimeLogger.Instance);
+        var coordinator = scope.Coordinator;
         SenderStats stats;
         try
         {
@@ -157,6 +154,41 @@ internal static class UdpLossScenario
     }
 
     private sealed record SenderStats(long SentDatagrams, long SendLoopOverflows, double ElapsedSeconds);
+
+    /// <summary>
+    /// Owns the borrowed native pools and setup executor a coordinator requires (Phase A / R6) and
+    /// disposes them after the coordinator, since a coordinator never disposes its collaborators.
+    /// </summary>
+    private sealed class CoordinatorScope : IDisposable
+    {
+        private readonly NativeBufferPool _setupQueuePool;
+        private readonly NativeBufferPool _receiveWindowPool;
+        private readonly SetupExecutor _setupExecutor;
+
+        public CoordinatorScope(IUdpResponseSink sink, int capacity, IRuntimeLogger logger)
+        {
+            const int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame;
+            _setupQueuePool = new NativeBufferPool(maximumFrameSize);
+            _receiveWindowPool = new NativeBufferPool(UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize));
+            _setupExecutor = new SetupExecutor();
+            Coordinator = new UdpProxyCoordinator(
+                new Socks5UdpTransportFactory(new SelfTrafficRegistry(), maximumFrameSize),
+                sink,
+                _setupQueuePool,
+                _receiveWindowPool,
+                _setupExecutor,
+                new UdpProxyOptions { Capacity = capacity, Logger = logger });
+        }
+
+        public UdpProxyCoordinator Coordinator { get; }
+
+        public void Dispose()
+        {
+            _setupExecutor.Dispose();
+            _receiveWindowPool.Dispose();
+            _setupQueuePool.Dispose();
+        }
+    }
 
     private sealed class CountingUdpResponseSink : IUdpResponseSink
     {

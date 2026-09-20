@@ -18,6 +18,7 @@ internal sealed class TcpRedirectSession(TcpRedirectAssociation association, ITc
     public long FlowGeneration { get; } = flowGeneration;
     private CancellationTokenSource Lifetime { get; } = CancellationTokenSource.CreateLinkedTokenSource(shutdown);
     private int _retired;
+    private int _lifetimeDisposed;
     public ITcpRelay? Relay { get; set; }
     public Task? AcceptLoop { get; set; }
     public CancellationToken Token => Lifetime.Token;
@@ -25,8 +26,20 @@ internal sealed class TcpRedirectSession(TcpRedirectAssociation association, ITc
 
     public void Retire()
     {
-        if (Interlocked.Exchange(ref _retired, 1) == 0) Lifetime.Cancel();
+        if (Interlocked.Exchange(ref _retired, 1) != 0 || Volatile.Read(ref _lifetimeDisposed) != 0) return;
+        try
+        {
+            Lifetime.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The linked shutdown cancellation ended the accept loop, which owns the lifetime CTS
+            // disposal, before this retire ran — the token is already cancelled either way.
+        }
     }
 
-    public void DisposeLifetime() => Lifetime.Dispose();
+    public void DisposeLifetime()
+    {
+        if (Interlocked.Exchange(ref _lifetimeDisposed, 1) == 0) Lifetime.Dispose();
+    }
 }

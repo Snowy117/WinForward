@@ -25,7 +25,7 @@ public sealed class UdpSetupQueueBudgetTests
         // back so the budget recovers once the setup completes.
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new DelayedTransportFactory(gate.Task);
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, MaximumFrameSize = 4096, SetupQueueGlobalByteBudget = 4096 });
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, MaximumFrameSize = 4096, SetupQueueGlobalByteBudget = 4096 });
         var flow = CreateFlow("192.0.2.53");
 
         Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[3000], default, CancellationToken.None));
@@ -62,7 +62,7 @@ public sealed class UdpSetupQueueBudgetTests
         // observable after the failure teardown drains the queue.
         var factory = new GatedTransportFactory();
         using var pool = new NativeBufferPool(4096, capacity: 8);
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, MaximumFrameSize = 4096, SetupQueueGlobalByteBudget = 4096, SetupQueuePool = pool });
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, MaximumFrameSize = 4096, SetupQueueGlobalByteBudget = 4096 }, setupQueuePool: pool);
         var flow = CreateFlow("192.0.2.53");
 
         Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[3000], default, CancellationToken.None));
@@ -83,7 +83,7 @@ public sealed class UdpSetupQueueBudgetTests
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new DelayedTransportFactory(gate.Task);
         using var pool = new NativeBufferPool(4096, capacity: 8);
-        var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, MaximumFrameSize = 4096, SetupQueueGlobalByteBudget = 4096, SetupQueuePool = pool });
+        var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, MaximumFrameSize = 4096, SetupQueueGlobalByteBudget = 4096 }, setupQueuePool: pool);
         var flow = CreateFlow("192.0.2.53");
 
         Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[3000], default, CancellationToken.None));
@@ -109,7 +109,7 @@ public sealed class UdpSetupQueueBudgetTests
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new DelayedTransportFactory(gate.Task);
         using var pool = new NativeBufferPool(1514, capacity: 64);
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, TimeProvider = time, SetupQueuePool = pool });
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, TimeProvider = time }, setupQueuePool: pool);
         var flow = CreateFlow("192.0.2.53");
 
         Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
@@ -145,7 +145,7 @@ public sealed class UdpSetupQueueBudgetTests
         // B4 bounds refusal: a datagram larger than the pinned frame cap cannot be copied into a
         // pooled lease; it is rejected fail-closed with its lease and budget charge released.
         using var pool = new NativeBufferPool(64, capacity: 8);
-        await using var coordinator = new UdpProxyCoordinator(new FakeTransportFactory(), new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, MaximumFrameSize = 64, SetupQueuePool = pool });
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(new FakeTransportFactory(), new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, MaximumFrameSize = 64 }, setupQueuePool: pool);
         var flow = CreateFlow("192.0.2.53");
 
         Assert.False(await coordinator.TrySendSpanAsync(flow, s_server, new byte[100], default, CancellationToken.None));

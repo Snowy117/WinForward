@@ -103,15 +103,17 @@ internal static class GcSoakScenario
         await using var udpServer = new LoopbackSocks5UdpServer(drain.Endpoint);
         await using var tcpServer = new LoopbackSocks5TcpServer();
         var udpSink = new CountingUdpResponseSink();
+        using var setupExecutor = new SetupExecutor();
         var coordinator = new UdpProxyCoordinator(
             new Socks5UdpTransportFactory(new SelfTrafficRegistry(), maximumFrameSize),
             udpSink,
+            udpSetupPool,
+            udpWindowPool,
+            setupExecutor,
             new UdpProxyOptions
             {
                 Capacity = Math.Max(options.Flows, 1),
                 MaximumFrameSize = maximumFrameSize,
-                ReceiveWindowPool = udpWindowPool,
-                SetupQueuePool = udpSetupPool,
             });
         var udpProxyServer = new Socks5Server("gc-soak", "127.0.0.1", checked((ushort)udpServer.ControlEndpoint.Port), Username: null, Password: null);
         var tcpProxyServer = new Socks5Server("gc-soak", "127.0.0.1", checked((ushort)tcpServer.Endpoint.Port), Username: null, Password: null);

@@ -116,3 +116,17 @@ finally
 }
 ```
 
+
+---
+
+## Composition Ownership And Dispose Quiescence (wired 2026-09-20, task 09-20-transport-lifecycle)
+
+- `DurableCaptureBundle` (Cli) creates and disposes the native buffer pools and the **single
+  shared** `SetupExecutor`; TCP and UDP coordinators take them as **required non-null
+  constructor dependencies** and never dispose injected collaborators.
+- `DisposeAsync` on a coordinator/pump quiesces only its own background work (awaits the tasks
+  it started) and disposes only internally-constructed state. There is no global task registry;
+  the quiescence boundary is an ownership-await tree.
+- Ownership is expressed in the constructor signature, not in `_ownsX` flags or create-if-null
+  branches — a coordinator that cannot run without a pool must fail construction, not
+  fabricate one.

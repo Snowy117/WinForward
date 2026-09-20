@@ -300,3 +300,98 @@ coordinator/reinjector already honor — on a jumbo-capable ABI every payload
 ### 6. Migration note
 
 xUnit `Assert.Equal` generic inference does not apply the `IPAddress` → `IPAddressValue` implicit conversion; migrated assertions cast explicitly (`(IPAddressValue?)expected`). `Assert.Equal(IPAddress, IPAddressValue)` still compiles elsewhere (e.g. `UdpPacketView` assertions) through inference participation — do not mistake those sites for unmigrated ones.
+
+---
+
+## UDP session lifetime, teardown reason, and fail-closed send drop (wired 2026-09-20, task 09-20-transport-lifecycle)
+
+### 1. Scope / Trigger
+
+- Trigger: any change to `UdpProxySession`'s receive loop / activity guard / disposal, the
+  coordinator's slot removal and setup cooldown, or the ready-path send result.
+
+### 2. Signatures
+
+- `UdpSessionState { SettingUp, Active, Expiring, Faulted, Disposed }` and
+  `UdpTeardownReason { SetupFailure, Expiry, Fault, Shutdown }`
+  (`UdpProxy/UdpSessionState.cs`, `UdpProxy/UdpTeardownReason.cs`).
+- `UdpProxySession.SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken)`
+  -> `ValueTask<bool>` (`true` = sent; `false` = not sent because the session is expiring or
+  has failed).
+- `UdpProxySession.State` — computed under the session `_activityGate`.
+- `UdpProxyCoordinator.RemoveSlotAsync(slot, UdpTeardownReason)`; the cooldown is armed only
+  for `SetupFailure`.
+
+### 3. Contracts
+
+- **Per-session lifetime token**: `UdpProxySession` owns
+  `_lifetime = CancellationTokenSource.CreateLinkedTokenSource(context.Shutdown)` (mirroring
+  `TcpRedirectSession.Lifetime`). The receive loop and every `InjectAsync` route through
+  `_lifetime.Token`; catch guards `when (_lifetime.IsCancellationRequested)` treat
+  cancellation as **normal teardown** (idle expiry OR shutdown). `_receiveFailure` is written
+  only by the generic catch, so **idle expiry no longer manufactures a `_receiveFailure`** and
+  the fire-and-forget failure handler no longer fires on expiry.
+- **Expiry cancels outside the activity lock**: `TryBeginExpiry` cancels `_lifetime` *outside*
+  `_activityGate` (the lock is non-reentrant; a cancellation callback must not self-deadlock).
+- **Send reports sent/not-sent instead of throwing**: the `_expiring` / `_receiveFailure`
+  preconditions return `false`; no `IOException` reaches the dispatcher for those. The
+  coordinator counts a rate-limited fail-closed drop (`RuntimeCounters.UdpFailClosedDrop`,
+  `udp.send.dropped reason=sessionUnavailable`, 5 s throttle) and does **not** remove the slot
+  (Expiry -> the sweeper owns removal; Fault -> the failure handler owns removal). A genuine
+  transport exception keeps the existing remove-slot + rethrow path.
+- **Teardown reason is data**: every slot removal passes a `UdpTeardownReason`; only
+  `SetupFailure` arms the 1 s setup cooldown. Teardown logging carries the reason.
+- **Owned drain for the residual handler**: the coordinator tracks in-flight receive-failure
+  teardowns and awaits them in its `DisposeCoreAsync` (`DrainInFlightTeardownsAsync`); the
+  receive loop still does **not** await the handler (re-entrancy hazard).
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Idle-expiry admitted | `_lifetime` cancelled; loop exits as normal teardown; no `_receiveFailure`, no failure handler |
+| Coordinator shutdown cancels the loop | normal teardown (no `_receiveFailure`) |
+| Genuine socket fault | `_receiveFailure` set, `State == Faulted`, failure handler fires once |
+| Send against an expiring/faulted session | `false`; counted rate-limited drop; slot NOT removed by the sender |
+| Send transport throws | existing remove-slot + rethrow |
+| Slot removed for `SetupFailure` | setup cooldown armed |
+| Slot removed for `Expiry`/`Fault`/`Shutdown` | no cooldown |
+| Coordinator `DisposeAsync` with an in-flight failure teardown | drained before dispose completes |
+| Session teardown after `_lifetime` disposal | lifetime disposed exactly once |
+
+### 5. Good/Base/Bad Cases
+
+- Good: an idle session expires cleanly — the receive loop observes cancellation, the handler
+  never fires, and a datagram racing the expiry is dropped without an exception.
+- Base: a real socket fault sets `Faulted`, fires the handler once, and the coordinator drains
+  that teardown on dispose.
+- Bad: throwing `IOException` from `SendSpanAsync` for the expiry precondition; cancelling
+  `_lifetime` while holding `_activityGate`; arming the cooldown for `Expiry`.
+
+### 6. Tests Required
+
+- `UdpProxySessionTests` — idle expiry records no failure / ends the loop / refuses the send;
+  a genuine fault sets `Faulted` + fires the handler once.
+- `UdpProxyCoordinatorTests.SessionStateReportsSettingUpWhileDialingThenActiveWhenReady`.
+- `UdpSessionSetupTests` — setup failure maps to `SetupFailure`, a cancelled dial to
+  `Shutdown` (fake host records `RemovedReason`).
+- Existing ready-path, skip-class, connreset, budget-credit, and dispose-drain suites stay
+  green; `HotPathAllocationGateTests.EstablishedUdpDatagramPathAllocatesNoManagedBytes`
+  unchanged.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```csharp
+// Precondition failure as an exception: internal state leaks out as a packet-path throw,
+// and the sender would tear the slot down even though the sweeper owns expiry.
+lock (_activityGate) { if (_expiring) throw new IOException("session is expiring"); }
+```
+
+#### Correct
+
+```csharp
+// Report sent/not-sent; the coordinator counts a fail-closed drop and leaves the slot alone.
+lock (_activityGate) { if (_expiring || Volatile.Read(ref _receiveFailure) is not null) return false; }
+```

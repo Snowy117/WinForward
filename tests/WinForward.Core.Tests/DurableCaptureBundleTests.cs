@@ -38,8 +38,8 @@ public sealed class DurableCaptureBundleTests
         var executor = new NdisPacketActionExecutor(new FakeReinjector());
         var udpTargets = new UdpAdapterTargetSource();
         var sweeper = new IdleExpirySweeper(dispatcher, tcp: null, udp: null, logger: logger);
-        var udp = new UdpProxyCoordinator(new FakeTransportFactory(), new FakeResponseSink());
-        var tcp = new TcpProxyCoordinator(
+        var udp = UdpCoordinatorFakes.CreateCoordinator(new FakeTransportFactory(), new FakeResponseSink());
+        var tcp = TcpCoordinatorFakes.CreateCoordinator(
             new FakeListenerFactory(),
             new FakeRelayFactory(),
             new FakeInjector(),

@@ -24,7 +24,7 @@ public sealed class UdpProxyCoordinatorLifecycleTests
     public async Task RemoveExpiredDisposesIdleSessionAndReleasesAssociation()
     {
         var factory = new FakeTransportFactory();
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink());
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink());
         var flow = CreateFlow("192.0.2.53");
         Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
         await WaitForAsync(() => factory.Transports.Count == 1);
@@ -46,7 +46,7 @@ public sealed class UdpProxyCoordinatorLifecycleTests
     public async Task RemoveExpiredKeepsActiveSession()
     {
         var factory = new FakeTransportFactory();
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink());
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink());
         var flow = CreateFlow("192.0.2.53");
         Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
         await WaitForAsync(() => factory.Transports.Count == 1);
@@ -62,7 +62,7 @@ public sealed class UdpProxyCoordinatorLifecycleTests
     public async Task FailedSetupReleasesSlotAndCapacityForOtherFlows()
     {
         var factory = new GatedTransportFactory();
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 1 });
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 1 });
         var first = CreateFlow("192.0.2.53");
         var second = CreateFlow("192.0.2.54");
 
@@ -82,7 +82,7 @@ public sealed class UdpProxyCoordinatorLifecycleTests
     public async Task ReceiveFaultDisposesAndRemovesSessionWithoutAnotherSend()
     {
         var factory = new FakeTransportFactory();
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 1 });
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 1 });
         var flow = CreateFlow("192.0.2.53");
 
         Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
@@ -102,10 +102,11 @@ public sealed class UdpProxyCoordinatorLifecycleTests
     {
         var factory = new ImmediateFaultTransportFactory();
         using var pool = new NativeBufferPool(1537);
-        await using var coordinator = new UdpProxyCoordinator(
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(
             factory,
             new FakeResponseSink(),
-            new UdpProxyOptions { Capacity = 1, ReceiveWindowPool = pool });
+            new UdpProxyOptions { Capacity = 1 },
+            receiveWindowPool: pool);
         var flow = CreateFlow("192.0.2.53");
 
         // The datagram is accepted and buffered; the receive fault surfaces through the
@@ -122,7 +123,7 @@ public sealed class UdpProxyCoordinatorLifecycleTests
     public async Task CoordinatorDisposalPreservesSetupCancellation()
     {
         var factory = new CancellationAwareTransportFactory();
-        var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink());
+        var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink());
         Assert.True(await coordinator.TrySendSpanAsync(CreateFlow("192.0.2.53"), s_server, [1], default, CancellationToken.None));
         await factory.CreateStarted.Task.WaitAsync(CancellationToken.None);
 
@@ -134,7 +135,7 @@ public sealed class UdpProxyCoordinatorLifecycleTests
     public async Task ConcurrentDisposalIsSingleFlightAndRejectsNewSends()
     {
         var factory = new FakeTransportFactory();
-        var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink());
+        var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink());
 
         var firstDispose = DisposeCoordinatorAsync(coordinator);
         var secondDispose = DisposeCoordinatorAsync(coordinator);
@@ -150,7 +151,7 @@ public sealed class UdpProxyCoordinatorLifecycleTests
     {
         var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
         var factory = new FakeTransportFactory();
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 1, TimeProvider = time });
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 1, TimeProvider = time });
         var flow = CreateFlow("192.0.2.53");
 
         Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
@@ -172,7 +173,7 @@ public sealed class UdpProxyCoordinatorLifecycleTests
     {
         var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
         var factory = new CollidingAliasTransportFactory();
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 2, TimeProvider = time });
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 2, TimeProvider = time });
         var first = CreateFlow("192.0.2.53");
         var second = CreateFlow("192.0.2.54");
 
@@ -230,7 +231,7 @@ public sealed class UdpProxyCoordinatorLifecycleTests
         var factory = new FakeTransportFactory();
         TaskCompletionSource<bool>? snapshotTaken = null;
         TaskCompletionSource<bool>? resumeSweep = null;
-        await using var coordinator = new UdpProxyCoordinator(
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(
             factory,
             new FakeResponseSink(),
             new UdpProxyOptions
@@ -272,7 +273,7 @@ public sealed class UdpProxyCoordinatorLifecycleTests
         var sink = new FakeResponseSink();
         TaskCompletionSource<bool>? snapshotTaken = null;
         TaskCompletionSource<bool>? resumeSweep = null;
-        await using var coordinator = new UdpProxyCoordinator(
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(
             factory,
             sink,
             new UdpProxyOptions

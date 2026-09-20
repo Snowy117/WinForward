@@ -39,4 +39,18 @@ internal static class UdpProxyLogging
             new("destination", flow.Remote),
             new("reason", exception.GetType().Name));
     }
+
+    /// <summary>
+    /// The ready-session send was refused because the session is expiring or faulted. The caller
+    /// counts the drop and owns the rate limit; this side only formats.
+    /// </summary>
+    public static void LogSessionUnavailableDrop(IRuntimeLogger logger, FlowKey flow)
+    {
+        if (!logger.IsEnabled(RuntimeLogLevel.Debug)) return;
+        logger.Event(RuntimeLogLevel.Debug, "udp.send.dropped",
+            new("protocol", flow.Protocol),
+            new("source", flow.Local),
+            new("destination", flow.Remote),
+            new("reason", "sessionUnavailable"));
+    }
 }

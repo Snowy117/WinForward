@@ -25,7 +25,7 @@ public sealed class UdpSetupCooldownTests
         var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
         var factory = new FailingTransportFactory();
         var logger = new RecordingRuntimeLogger();
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, TimeProvider = time, Logger = logger });
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, TimeProvider = time, Logger = logger });
         var flow = CreateFlow("192.0.2.53");
 
         // Accepted (buffered); the failure itself surfaces through the background setup task.
@@ -50,7 +50,7 @@ public sealed class UdpSetupCooldownTests
         // bound while every recent flow keeps its cooldown (eviction, never refusal).
         var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
         var factory = new FailingTransportFactory();
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 4, TimeProvider = time });
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 4, TimeProvider = time });
         const int flowCount = 5;
         var flows = Enumerable.Range(0, flowCount).Select(index => CreateFlow(string.Create(CultureInfo.InvariantCulture, $"192.0.2.{index + 1}"))).ToArray();
 
@@ -86,7 +86,7 @@ public sealed class UdpSetupCooldownTests
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new DelayedTransportFactory(gate.Task);
         var logger = new RecordingRuntimeLogger();
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, Logger = logger });
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, Logger = logger });
         const int cappedFlows = 8;
         var flows = Enumerable.Range(0, cappedFlows + 1).Select(index => CreateFlow(string.Create(CultureInfo.InvariantCulture, $"192.0.2.{index + 1}"))).ToArray();
 
@@ -130,7 +130,7 @@ public sealed class UdpSetupCooldownTests
         var barrier = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new BarrierTransportFactory(barrier, concurrentSetupCap);
         var logger = new RecordingRuntimeLogger();
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = flowCount, Logger = logger });
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = flowCount, Logger = logger });
         var flows = Enumerable.Range(0, flowCount).Select(index => CreateFlow(string.Create(CultureInfo.InvariantCulture, $"198.51.100.{index + 1}"))).ToArray();
 
         var sends = Enumerable.Range(0, flowCount)

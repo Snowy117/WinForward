@@ -4,7 +4,6 @@ using WinForward.Configuration;
 using WinForward.Protocols;
 using WinForward.Runtime;
 using WinForward.Runtime.Socks5;
-using WinForward.Runtime.UdpProxy;
 using Xunit;
 using static WinForward.Core.Tests.AsyncTestExtensions;
 using static WinForward.Core.Tests.Socks5TestServer;
@@ -52,7 +51,7 @@ public sealed class Socks5UdpAssociateTests
             serverCancellation.Token);
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
         var registry = new SelfTrafficRegistry();
-        var coordinator = new UdpProxyCoordinator(new Socks5UdpTransportFactory(registry, UdpFrameBuilder.DefaultMaximumEthernetFrame), new NoopResponseSink());
+        var coordinator = UdpCoordinatorFakes.CreateCoordinator(new Socks5UdpTransportFactory(registry, UdpFrameBuilder.DefaultMaximumEthernetFrame), new NoopResponseSink());
         var destination = Endpoint.From(IPAddress.Parse("2001:db8::53"), 5353);
         var flow = FlowKey.Create(
             Endpoint.From(IPAddress.Parse("2001:db8::10"), 53000),

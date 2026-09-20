@@ -28,9 +28,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
     private readonly ITcpRedirectInjector _injector;
     private readonly NdisPacketBufferPool _framePool;
     private readonly NativeBufferPool _synCopyPool;
-    private readonly bool _ownsSynCopyPool;
     private readonly ISetupExecutor _setupExecutor;
-    private readonly bool _ownsSetupExecutor;
     private readonly Func<SetupWorkItem, Task> _setupHandler;
     private readonly IRuntimeLogger _logger;
     private readonly TimeProvider _timeProvider;
@@ -39,6 +37,8 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
     private readonly ClientResetInjector _clientReset;
     private readonly TcpRedirectAcceptor _acceptor;
     private readonly TcpPendingSynSetupIndex _pendingSyn = new();
+    private readonly Lock _disposeGate = new();
+    private Task? _disposeTask;
     private long _capacityRejectionCount;
     private long _reportedCapacityRejectionCount;
 
@@ -49,6 +49,8 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         TcpRedirectTable table,
         SelfTrafficRegistry selfTraffic,
         IAdapterLocalAddressProvider localAddresses,
+        NativeBufferPool synCopyPool,
+        ISetupExecutor setupExecutor,
         TcpRedirectOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(listenerFactory);
@@ -57,16 +59,16 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         ArgumentNullException.ThrowIfNull(table);
         ArgumentNullException.ThrowIfNull(selfTraffic);
         ArgumentNullException.ThrowIfNull(localAddresses);
+        ArgumentNullException.ThrowIfNull(synCopyPool);
+        ArgumentNullException.ThrowIfNull(setupExecutor);
         options ??= new TcpRedirectOptions();
         var capacity = options.Capacity ?? 16_384;
         if (capacity < 1) throw new ArgumentOutOfRangeException(nameof(options), capacity, "Capacity must be positive.");
         Table = table;
         _injector = injector;
         _framePool = NdisPacketBufferPool.Shared;
-        _synCopyPool = options.SynCopyPool ?? new NativeBufferPool(NdisApiAbi.MaximumEthernetFrame);
-        _ownsSynCopyPool = options.SynCopyPool is null;
-        _setupExecutor = options.SetupExecutor ?? new SetupExecutor();
-        _ownsSetupExecutor = options.SetupExecutor is null;
+        _synCopyPool = synCopyPool;
+        _setupExecutor = setupExecutor;
         _setupHandler = SetupPendingAsync;
         _logger = options.Logger ?? NullRuntimeLogger.Instance;
         Capacity = capacity;
@@ -227,6 +229,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         item._server = server;
         item._tcp._entry = entry;
         item._tcp._frame = frame;
+        item._cancellationToken = _store.ShutdownToken;
         if (!_setupExecutor.TryEnqueue(item))
         {
             entry.SetupCompletionSource.TrySetCanceled(item._cancellationToken);
@@ -253,7 +256,6 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         var entry = item._tcp._entry!;
         var frame = item._tcp._frame!;
         var server = item._server!;
-        var writeCooldown = false;
         try
         {
             _store.EnterSetup();
@@ -268,43 +270,60 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
 
         try
         {
+            var writeCooldown = await RunSetupPipelineAsync(entry, frame, server).ConfigureAwait(false);
+            // The entry removal and its cooldown write must complete before ExitSetup unblocks
+            // the store's dispose drain: the coordinator's post-drain RemoveAll clears the index,
+            // so a write racing the drain would otherwise re-arm a cooldown on a disposed index
+            // (D3).
+            _pendingSyn.Complete(key, entry, writeCooldown, _timeProvider.GetUtcNow());
+        }
+        finally
+        {
+            _store.ExitSetup();
+        }
+    }
+
+    /// <summary>
+    /// The setup body of <see cref="SetupPendingAsync"/>; returns whether a genuine failure (not
+    /// shutdown cancellation) should arm the per-flow setup cooldown.
+    /// </summary>
+    private async ValueTask<bool> RunSetupPipelineAsync(PendingSynSetup entry, byte[] frame, Socks5Server server)
+    {
+        try
+        {
             var packet = new CapturedFlowPacket(new PacketLease(frame), entry.Context, entry.Metadata, entry.PacketSequence, entry.FlowGeneration);
             var setup = await _setup.SetupNewRedirectAsync(packet, server, _store.ShutdownToken).ConfigureAwait(false);
             if (setup is null)
             {
                 // Fail-closed null return: the pipeline already logged, released its listener
                 // and alias, and wrote the grace tombstone where one applies.
-                writeCooldown = !_store.ShutdownToken.IsCancellationRequested;
+                return !_store.ShutdownToken.IsCancellationRequested;
             }
-            else if (setup.Session is null)
+
+            if (setup.Session is null)
             {
                 // A concurrent caller claimed this flow first; the redundant listener was already
                 // released. Re-inject the retained copy against the existing association without
                 // creating a new session.
                 await ReinjectExistingFlowDataAsync(packet, setup.Association, _store.ShutdownToken).ConfigureAwait(false);
+                return false;
             }
-            else
-            {
-                setup.Session.AcceptLoop = _acceptor.RunAcceptLoopAsync(setup.Session);
-                TcpRedirectLogging.LogDebug(_logger, "tcp.redirect.created", setup.Session, "created");
-            }
+
+            setup.Session.AcceptLoop = _acceptor.RunAcceptLoopAsync(setup.Session);
+            TcpRedirectLogging.LogDebug(_logger, "tcp.redirect.created", setup.Session, "created");
+            return false;
         }
         catch (OperationCanceledException)
         {
             // Shutdown cancellation: the store's teardown released whatever the pipeline had
             // acquired; no cooldown (mirrors the UDP setup contract).
+            return false;
         }
         catch (Exception exception)
         {
             _logger.Warn($"TCP redirect setup failed: {exception.GetType().Name}: {exception.Message}");
-            writeCooldown = !_store.ShutdownToken.IsCancellationRequested;
+            return !_store.ShutdownToken.IsCancellationRequested;
         }
-        finally
-        {
-            _store.ExitSetup();
-        }
-
-        _pendingSyn.Complete(key, entry, writeCooldown, _timeProvider.GetUtcNow());
     }
 
 #pragma warning disable RCS1229 // Deliberate non-async warm entry (hot-path.md #3): the per-packet path must not pay an async state machine; synchronous failures before the returned ValueTask are part of the warm contract (cold tails live in async helpers).
@@ -634,18 +653,23 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
     internal TcpResetCooldownTable CapacityResetCooldowns => _clientReset.CapacityResets;
 
     public ValueTask DisposeAsync()
-        => DisposeAsyncCore();
+    {
+        lock (_disposeGate)
+        {
+            _disposeTask ??= DisposeCoreAsync();
+            return new ValueTask(_disposeTask);
+        }
+    }
 
-    private async ValueTask DisposeAsyncCore()
+    private async Task DisposeCoreAsync()
     {
         // The store's dispose drains every started background setup (R8 moved EnterSetup into
         // the task, so the inflight counter covers them); the pending drain afterwards closes the
         // window between a task's final ExitSetup and its entry removal, crediting every
         // retained copy exactly once and dropping cooldowns so a disposed coordinator leaves no
-        // per-flow state behind.
+        // per-flow state behind. Injected collaborators (the syn-copy pool, the setup executor)
+        // are borrowed, not owned: composition disposes them after the coordinator's drain.
         await _store.DisposeAsync().ConfigureAwait(false);
         _pendingSyn.RemoveAll();
-        if (_ownsSynCopyPool) _synCopyPool.Dispose();
-        if (_ownsSetupExecutor) _setupExecutor.Dispose();
     }
 }

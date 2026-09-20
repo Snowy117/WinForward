@@ -13,7 +13,7 @@ namespace WinForward.Cli;
 /// The bundle-created collaborators the durable TCP coordinator is wired from (P3): the redirect
 /// table, the shared native pools and setup executor, and the shared SOCKS5 address cache.
 /// Creation, registration, rollback, and disposal stay in <see cref="DurableCaptureBundle"/>;
-/// the coordinator owns the pools exactly as it always has.
+/// the coordinator borrows the pools and the executor and never disposes them.
 /// </summary>
 internal sealed record TcpRedirectComposition(
     TcpRedirectTable RedirectTable,
@@ -44,12 +44,12 @@ internal static class TcpRedirectComposer
             composition.RedirectTable,
             selfTraffic,
             new WindowsAdapterLocalAddressProvider(),
+            composition.SynCopyPool,
+            composition.SetupExecutor,
             new TcpRedirectOptions
             {
                 Logger = logger,
                 Capacity = configuration.TcpFlowCapacity,
                 HealthSignal = healthSignal,
-                SynCopyPool = composition.SynCopyPool,
-                SetupExecutor = composition.SetupExecutor,
             });
 }

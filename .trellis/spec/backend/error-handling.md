@@ -26,3 +26,12 @@
 - Keying UDP state by PID, DNS transaction ID, or only the local port mixes independent datagrams.
 - Returning an existing association solely because its relay alias matches can cross-wire two original flows.
 
+
+- **A UDP ready-path send against an expiring or faulted session is a counted, rate-limited
+  fail-closed drop, not an exception** (task 09-20-transport-lifecycle, 2026-09-20):
+  `UdpProxySession.SendSpanAsync` returns `ValueTask<bool>`; `false` is counted
+  (`RuntimeCounters.UdpFailClosedDrop`) with a 5 s-throttled `udp.send.dropped
+  reason=sessionUnavailable`, and the sender never removes the slot (idle expiry is the
+  sweeper's, a fault is the failure handler's). Teardown reasons (`SetupFailure`, `Expiry`,
+  `Fault`, `Shutdown`) are explicit data; only a genuine setup failure arms the 1 s setup
+  cooldown.

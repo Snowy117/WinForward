@@ -2,7 +2,6 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.Versioning;
 using WinForward.Configuration;
-using WinForward.Runtime;
 using WinForward.Runtime.TcpRedirect;
 using Xunit;
 
@@ -11,8 +10,8 @@ namespace WinForward.Core.Tests;
 /// <summary>
 /// S3: a faulted relay completion must be observed on every path that discards a relay without
 /// awaiting it — the acceptor's attach-failure branch and the relay's own dispose. Both are
-/// asserted through the debug event the fault observer emits, so no unobserved-exception
-/// finalizer timing is involved.
+/// asserted through the debug event the fault observer emits; the exception-before-gate ordering
+/// is asserted separately through a differential unobserved-fault probe.
 /// </summary>
 public sealed class TcpRelayObservationTests
 {
@@ -35,7 +34,7 @@ public sealed class TcpRelayObservationTests
         // The discarded relay was disposed and its completion observed before the fault lands.
         Assert.True(relay.IsDisposed);
         relay.Fault(new IOException("pump died"));
-        AssertContainsFaultedEvent(logger);
+        AssertExactlyOneFaultedEvent(logger);
     }
 
     [Fact]
@@ -56,7 +55,7 @@ public sealed class TcpRelayObservationTests
         await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(session.Association.AcceptedPeerEndpoint), CancellationToken.None);
         await acceptor.RunAcceptLoopAsync(session);
 
-        AssertContainsFaultedEvent(logger);
+        AssertExactlyOneFaultedEvent(logger);
     }
 
     [Fact]
@@ -73,7 +72,7 @@ public sealed class TcpRelayObservationTests
         await relay.DisposeAsync();
         await Assert.ThrowsAnyAsync<Exception>(() => relay.Completion.WaitAsync(TimeSpan.FromSeconds(2)));
 
-        AssertContainsFaultedEvent(logger);
+        AssertExactlyOneFaultedEvent(logger);
     }
 
     [Fact]
@@ -97,19 +96,31 @@ public sealed class TcpRelayObservationTests
         Assert.DoesNotContain(logger.Events, e => string.Equals(e.Name, "tcp.relay.faulted", StringComparison.Ordinal));
     }
 
-    private static void AssertContainsFaultedEvent(RecordingRuntimeLogger logger) =>
-        Assert.Contains(logger.Events, e => string.Equals(e.Name, "tcp.relay.faulted", StringComparison.Ordinal)
-            && e.Fields.Any(field => string.Equals(field.Key, "error", StringComparison.Ordinal)));
+    [Fact]
+    public void FaultObserverSuppressesTheEventWhenDebugLoggingIsDisabled()
+    {
+        // S3: the production default threshold (info) disables debug, so the discard paths must not
+        // depend on the event being emitted — the continuation still consumes the fault (it reads
+        // task.Exception before consulting IsEnabled in TcpRelayFaultObserver.Observe) and simply
+        // skips the event.
+        var logger = new RecordingRuntimeLogger(level => level != RuntimeLogLevel.Debug);
+        var relay = new FaultableRelay();
+        TcpRelayFaultObserver.Observe(relay, logger);
+
+        relay.Fault(new IOException("pump died"));
+
+        Assert.DoesNotContain(logger.Events, e => string.Equals(e.Name, "tcp.relay.faulted", StringComparison.Ordinal));
+    }
+
+    private static void AssertExactlyOneFaultedEvent(RecordingRuntimeLogger logger) =>
+        Assert.Equal(1, logger.Events.Count(e => string.Equals(e.Name, "tcp.relay.faulted", StringComparison.Ordinal)
+            && e.Fields.Any(field => string.Equals(field.Key, "error", StringComparison.Ordinal))));
 
     private static TcpRedirectSession CreateSession(out FakeListener listener)
     {
-        var client = IPAddress.Parse("192.0.2.10");
-        var destination = IPAddress.Parse("192.0.2.53");
-        var key = FlowKey.Create(Endpoint.From(client, 53000), Endpoint.From(destination, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
-        var association = new TcpRedirectAssociation(key, key.Remote, 0x1234, Endpoint.From(IPAddress.Loopback, 40000), forwardLocalAddress: null, 1, DateTimeOffset.UtcNow);
+        var association = TcpCoordinatorFakes.CreateHostAssociation(Endpoint.From(IPAddress.Loopback, 40000));
         listener = new FakeListener(association.TranslatedListenerTuple);
-        var token = new SelfTrafficRegistry().Register(new SelfTrafficRegistry.SelfTrafficKey(TransportProtocol.Tcp, association.TranslatedListenerTuple, association.TranslatedListenerTuple));
-        return new TcpRedirectSession(association, listener, token, new Socks5Server("primary", "127.0.0.1", 1080, Username: null, Password: null), 0, CancellationToken.None);
+        return TcpCoordinatorFakes.CreateSession(association, listener);
     }
 
     private static async Task<(Socket Peer, Socket Relay)> CreateSocketPairAsync()

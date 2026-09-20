@@ -30,7 +30,7 @@ public sealed class UdpSetupQueueTests
         // (5 s): a setup stalled beyond it legitimately drops its buffered datagrams by contract.
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new DelayedTransportFactory(gate.Task, TimeSpan.FromSeconds(2));
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink());
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink());
         var flow = CreateFlow("192.0.2.53");
 
         var stopwatch = Stopwatch.StartNew();
@@ -59,7 +59,7 @@ public sealed class UdpSetupQueueTests
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new DelayedTransportFactory(gate.Task);
         var logger = new RecordingRuntimeLogger();
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Logger = logger });
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Logger = logger });
         var flow = CreateFlow("192.0.2.53");
 
         // 40 datagrams against a 32-packet queue: the eight oldest are dropped, the newest 32
@@ -100,7 +100,7 @@ public sealed class UdpSetupQueueTests
         // slot's ready transition and the queue-empty check share one critical section.
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new DelayedTransportFactory(gate.Task);
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink());
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink());
         var flow = CreateFlow("192.0.2.53");
 
         Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
@@ -138,7 +138,7 @@ public sealed class UdpSetupQueueTests
         var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new DelayedTransportFactory(gate.Task);
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, TimeProvider = time });
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, TimeProvider = time });
         var flow = CreateFlow("192.0.2.53");
 
         Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
@@ -178,7 +178,7 @@ public sealed class UdpSetupQueueTests
         var occupantGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         const int occupants = 8;
         var factory = new StagedGateTransportFactory(occupantGate, occupants);
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = occupants + 8, TimeProvider = time });
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = occupants + 8, TimeProvider = time });
         var flows = Enumerable.Range(0, occupants + 1).Select(index => CreateFlow(string.Create(CultureInfo.InvariantCulture, $"192.0.2.{index + 1}"))).ToArray();
 
         for (var index = 0; index < occupants; index++)
@@ -250,7 +250,7 @@ public sealed class UdpSetupQueueTests
     {
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new DelayedTransportFactory(gate.Task);
-        var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink());
+        var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink());
         var flow = CreateFlow("192.0.2.53");
 
         Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));

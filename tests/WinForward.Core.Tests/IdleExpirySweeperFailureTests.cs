@@ -24,7 +24,7 @@ public sealed class IdleExpirySweeperFailureTests
         var logger = new RecordingRuntimeLogger();
         var transportFactory = new ParkedTransportFactory();
         var sweepFailures = 0;
-        var coordinator = new UdpProxyCoordinator(
+        var coordinator = UdpCoordinatorFakes.CreateCoordinator(
             transportFactory,
             new NoopResponseSink(),
             new UdpProxyOptions

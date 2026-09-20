@@ -416,7 +416,7 @@ public sealed class UdpRelayTests
 
         var factory = new FakeTransportFactory();
         var sink = new FakeResponseSink();
-        await using var coordinator = new UdpProxyCoordinator(factory, sink);
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, sink);
         var reinjector = new FakeReinjector();
         var executor = new NdisPacketActionExecutor(reinjector, udpProxy: coordinator);
         var flow = FlowKey.Create(Endpoint.From(source, 53000), Endpoint.From(destination, 53), TransportProtocol.Udp, FlowOriginKind.Host);
@@ -442,7 +442,7 @@ public sealed class UdpRelayTests
     public async Task ExecutorFailsClosedWhenUdpFrameCannotBeParsed()
     {
         var factory = new FakeTransportFactory();
-        await using var coordinator = new UdpProxyCoordinator(factory, new FakeResponseSink());
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink());
         var executor = new NdisPacketActionExecutor(new FakeReinjector(), udpProxy: coordinator);
         var flow = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
         var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 0xff, 0xff, 0xff }), new FlowContext(flow, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, 53), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));

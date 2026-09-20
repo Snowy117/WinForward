@@ -106,7 +106,7 @@ internal sealed class TcpRedirectSetup(ITcpRedirectListenerFactory listenerFacto
 
     private async ValueTask<RedirectSetup?> CompleteNewRedirectAsync(CapturedFlowPacket packet, ITcpRedirectListener listener, TcpRedirectAssociation association, Endpoint translatedTuple, Socks5Server server, CancellationToken cancellationToken)
     {
-        var session = RegisterSession(listener, association, translatedTuple, server, packet.FlowGeneration);
+        var session = await RegisterSessionAsync(listener, association, translatedTuple, server, packet.FlowGeneration).ConfigureAwait(false);
         if (session is null)
         {
             await store.ReleaseAssociationAsync(listener, association, selfTrafficToken: null).ConfigureAwait(false);
@@ -162,10 +162,27 @@ internal sealed class TcpRedirectSetup(ITcpRedirectListenerFactory listenerFacto
         return new RedirectSetup(association, session);
     }
 
-    private TcpRedirectSession? RegisterSession(ITcpRedirectListener listener, TcpRedirectAssociation association, Endpoint translatedTuple, Socks5Server server, long flowGeneration)
+    /// <summary>
+    /// Registers the session's self-traffic token and constructs the session. A failure between
+    /// the claim and a registered session (a hard fault while registering, or while linking the
+    /// shutdown token) would otherwise leak the claimed listener/alias and the token, so every
+    /// fault releases them exactly once through the store and surfaces unchanged. The
+    /// already-disposed-store shape is not a fault: <see cref="TcpRedirectSessionStore.TryRegister"/>
+    /// returns null and owns its own release.
+    /// </summary>
+    private async ValueTask<TcpRedirectSession?> RegisterSessionAsync(ITcpRedirectListener listener, TcpRedirectAssociation association, Endpoint translatedTuple, Socks5Server server, long flowGeneration)
     {
-        var selfTrafficToken = selfTraffic.Register(new SelfTrafficRegistry.SelfTrafficKey(TransportProtocol.Tcp, translatedTuple, translatedTuple));
-        var session = new TcpRedirectSession(association, listener, selfTrafficToken, server, flowGeneration, store.ShutdownToken);
-        return store.TryRegister(session);
+        SelfTrafficRegistry.SelfTrafficToken? selfTrafficToken = null;
+        try
+        {
+            selfTrafficToken = selfTraffic.Register(new SelfTrafficRegistry.SelfTrafficKey(TransportProtocol.Tcp, translatedTuple, translatedTuple));
+            var session = new TcpRedirectSession(association, listener, selfTrafficToken, server, flowGeneration, store.ShutdownToken);
+            return store.TryRegister(session);
+        }
+        catch
+        {
+            await store.ReleaseAssociationAsync(listener, association, selfTrafficToken).ConfigureAwait(false);
+            throw;
+        }
     }
 }

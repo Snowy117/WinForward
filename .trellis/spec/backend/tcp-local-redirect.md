@@ -195,3 +195,114 @@ if (Tombstones.TryHit(reverseSource, reverseDestination, now) ||
     Tombstones.TryHit(key, now))
     return TcpRedirectOutcome.Dropped;
 ```
+
+---
+
+## Relay/redirect quiescence, attach-failure teardown, and setup-fault release (wired 2026-09-20, task 09-20-transport-lifecycle)
+
+### 1. Scope / Trigger
+
+- Trigger: any change to TCP relay/acceptor teardown, `TcpRedirectSessionStore` lifetime
+  disposal, the acceptor's attach-failure branch, `TcpRedirectSetup.RegisterSession`, or
+  `TcpProxyCoordinator`'s background SYN-setup tail.
+
+### 2. Signatures
+
+- `TcpProxyRelay.DisposeAsync()` — after disposing the local socket and the control
+  connection, it `await`s `Completion` inside a contained catch. Returning from it means no
+  pump task is running and `Completion` is completed; the fault the disposal itself
+  manufactures is observed and swallowed.
+- `TcpRedirectAcceptor.RunAcceptLoopAsync(...)` — awaits both terminal steps
+  (`ObserveRelayCompletionAsync` then `DrainRedundantConnectionsAsync`); no `_ =` discards.
+  The loop owns `session.DisposeLifetime()`, so `session.AcceptLoop` spans the whole session
+  lifetime and the store's `await session.AcceptLoop` is a true quiescence wait.
+- `TcpRedirectSessionStore.DisposeCoreAsync()` — awaits each `session.AcceptLoop` before
+  disposing that session's lifetime CTS (`TcpRedirectSession.DisposeLifetime()`, exactly once,
+  tolerant of an already-disposed lifetime).
+- `TcpRedirectSetup.RegisterSessionAsync(...)` -> `ValueTask<TcpRedirectSession?>`.
+- `TcpRelayFaultObserver.Observe(relay, logger)` — exactly one registration per discard path.
+
+### 3. Contracts
+
+- **Ownership-await quiescence**: dispose returns only after the tasks it owns have finished.
+  `TcpProxyRelay.DisposeAsync` -> `Completion`; the acceptor's accept loop -> its terminal
+  observation + redundant-accept drain; the store's dispose -> every session `AcceptLoop`.
+  No global task registry is used.
+- **Lifetime CTS is disposed after its last reader**. `Retire()` cancels the session lifetime;
+  the CTS *dispose* is deferred until after `await session.AcceptLoop`, so the accept loop and
+  the client-reset path that reads `session.Token` can never touch a disposed
+  `CancellationTokenSource`. An `IsDisposed` gate makes late teardown entries
+  (`TearDownSessionAsync`, `FailAssociationAsync`, `RemoveExpiredAsync`, `TryRegister`) no-ops.
+- **Fault observer is per discard path, not deduplicated globally**. The two call sites —
+  `TcpProxyRelay.DisposeAsync` and the acceptor's attach-failure branch — are **distinct
+  discard paths** (the acceptor may discard an arbitrary `ITcpRelay` whose `DisposeAsync` need
+  not observe). Exactly one registration per path; never two on one path (`ContinueWith`-based
+  registration is not idempotent). Preserve the .NET gotcha: read `task.Exception` before any
+  `IsEnabled` gate.
+- **Attach failure leaves no half-open session**: when `tryAttachRelay` returns false the
+  accepted connection is closed and the relay discarded **outside** the setup `try`, then the
+  session is torn down. A throw from that disposal must never fall into
+  `HandleRelaySetupFailureAsync` (which would inject a client reset against a retired session).
+- **RegisterSession releases on partial failure**: a construction fault after the
+  listener/alias was claimed releases it via `store.ReleaseAssociationAsync` exactly once
+  (the success path releases nothing).
+- **Setup cooldown is written inside the store inflight section**: the pending-index entry
+  removal and its setup-failure cooldown write complete before `ExitSetup()` unblocks the
+  store's dispose drain, so a post-drain `RemoveAll` can never run in between.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| `TcpProxyRelay.DisposeAsync` returns | `Completion` completed, no pump running, disposal fault observed |
+| Acceptor reaches end of accept loop | terminal observation + redundant-accept drain awaited (not discarded) |
+| Store dispose while a session is mid-teardown | `AcceptLoop` awaited before the lifetime CTS is disposed |
+| Late teardown entry after store dispose | no-op via `IsDisposed` gate |
+| `tryAttachRelay` returns false | relay discarded + accepted closed + session torn down; store session count 0 |
+| Disposal throw on the attach-failure path | contained (warn); never re-enters `HandleRelaySetupFailureAsync` |
+| Construction fault inside `RegisterSessionAsync` | claimed listener/alias/self-traffic token released exactly once, exception surfaces |
+| Genuine setup failure completes | cooldown written before `ExitSetup()`; a store dispose racing it leaves no cooldown/charge |
+
+### 5. Good/Base/Bad Cases
+
+- Good: disposing a relay against a loopback socket returns with `Completion` completed and
+  both pump buffers returned.
+- Base: a store dispose racing an in-flight setup drains it and leaves zero active/charged
+  setups and no cooldown.
+- Bad: discarding `ObserveRelayCompletionAsync` with `_ =`; disposing the lifetime CTS before
+  `AcceptLoop` finishes; deduplicating the two distinct fault-observer registrations into one
+  call site; writing the setup cooldown after `ExitSetup()`.
+
+### 6. Tests Required
+
+- `TcpProxyRelayTests.DisposeLeavesCompletionCompletedAndReturnsPumpBuffers`.
+- `TcpRelayObservationTests` — exactly one `tcp.relay.faulted` per discard path (all three),
+  plus the debug-gate suppression case.
+- `TcpRedirectAcceptorTests.UnattachableRelayIsDiscardedAndTheSessionIsTornDown`.
+- `TcpRedirectSetupTests.RegistrationFaultReleasesTheClaimedListenerAliasAndToken`.
+- `TcpRedirectSessionTests` / `TcpRedirectSessionStoreTests` — deferred lifetime dispose
+  (no `ObjectDisposedException`), idempotence, post-dispose teardown re-entry.
+- `TcpPendingSynSetupTests.DisposeClearsTheCooldownAnEarlierFailureArmed`,
+  `DisposeRacingAnInFlightSetupLeavesNoCooldownOrCharge`, and
+  `LaunchedSetupItemCarriesTheShutdownTokenSoParkedSetupsUnwindOnDispose`.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```csharp
+// Fire-and-forget end handling: the store's "await AcceptLoop" is not a quiescence wait,
+// and the lifetime CTS may be disposed while the loop still reads session.Token.
+_ = ObserveRelayCompletionAsync(session);
+await DrainRedundantConnectionsAsync();
+DisposeLifetime();
+```
+
+#### Correct
+
+```csharp
+// The accept loop owns its terminal steps and the lifetime; the store's dispose awaits
+// session.AcceptLoop before disposing the CTS.
+await ObserveRelayCompletionAsync(session);
+await DrainRedundantConnectionsAsync();
+```

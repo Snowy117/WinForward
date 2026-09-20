@@ -29,7 +29,7 @@ public sealed class RuntimeDiagnosticLoggingTests
     {
         var logger = new RecordingRuntimeLogger();
         var listenerFactory = new FakeListenerFactory();
-        await using var coordinator = new TcpProxyCoordinator(
+        await using var coordinator = CreateCoordinator(
             listenerFactory,
             new FakeRelayFactory(throwOnEstablish: true),
             new FakeInjector(),
@@ -58,7 +58,7 @@ public sealed class RuntimeDiagnosticLoggingTests
     {
         var logger = new RecordingRuntimeLogger();
         var listenerFactory = new FakeListenerFactory();
-        await using var coordinator = new TcpProxyCoordinator(
+        await using var coordinator = CreateCoordinator(
             listenerFactory,
             new FakeRelayFactory(),
             new FakeInjector(),

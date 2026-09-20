@@ -18,11 +18,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     private readonly UdpSessionSetup _setup;
     private readonly IUdpSessionSlotHost _slotHost;
     private readonly NativeBufferPool _setupQueuePool;
-    private readonly bool _ownsSetupQueuePool;
-    private readonly NativeBufferPool _receiveWindowPool;
-    private readonly bool _ownsReceiveWindowPool;
     private readonly ISetupExecutor _setupExecutor;
-    private readonly bool _ownsSetupExecutor;
     private readonly Func<SetupWorkItem, Task> _setupHandler;
     private readonly Lock _gate = new();
     private readonly CancellationTokenSource _shutdown = new();
@@ -32,16 +28,33 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     private Task? _disposeTask;
     private bool _disposed;
 
+    /// <summary>
+    /// Receive-failure teardowns the sessions started without awaiting (awaiting them in the
+    /// receive loop would re-enter session disposal). Guarded by <see cref="_gate"/>; drained by
+    /// <see cref="DisposeCoreAsync"/> so the coordinator, not the faulting session, owns their
+    /// completion.
+    /// </summary>
+    private readonly List<Task> _inFlightTeardowns = [];
+
+    /// <summary>Rate limit for the deprecated-session send drop diagnostic (one line per window).</summary>
+    private readonly RuntimeLogThrottle _sessionUnavailableDropLog = new(TimeSpan.FromSeconds(5));
+
     /// <summary>Upper bound on eagerly seeded dictionary capacity; growth beyond it stays lazy.</summary>
     private const int MaximumPreSeedCapacity = 1_024;
 
     public UdpProxyCoordinator(
         IUdpProxyTransportFactory transportFactory,
         IUdpResponseSink responseSink,
+        NativeBufferPool setupQueuePool,
+        NativeBufferPool receiveWindowPool,
+        ISetupExecutor setupExecutor,
         UdpProxyOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(transportFactory);
         ArgumentNullException.ThrowIfNull(responseSink);
+        ArgumentNullException.ThrowIfNull(setupQueuePool);
+        ArgumentNullException.ThrowIfNull(receiveWindowPool);
+        ArgumentNullException.ThrowIfNull(setupExecutor);
         options ??= new UdpProxyOptions();
         var capacity = options.Capacity;
         var timeProvider = options.TimeProvider;
@@ -60,13 +73,9 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
         _beforeExpiryRecheck = options.BeforeExpiryRecheck;
         _logger = options.Logger ?? NullRuntimeLogger.Instance;
         _budget = new UdpSetupQueueBudget(setupQueueGlobalByteBudget, _logger, _timeProvider);
-        _setupQueuePool = options.SetupQueuePool ?? new NativeBufferPool(maximumFrameSize);
-        _ownsSetupQueuePool = options.SetupQueuePool is null;
+        _setupQueuePool = setupQueuePool;
+        _setupExecutor = setupExecutor;
         var receiveBufferSize = ReceiveWindowSize(maximumFrameSize);
-        _receiveWindowPool = options.ReceiveWindowPool ?? new NativeBufferPool(receiveBufferSize);
-        _ownsReceiveWindowPool = options.ReceiveWindowPool is null;
-        _setupExecutor = options.SetupExecutor ?? new SetupExecutor();
-        _ownsSetupExecutor = options.SetupExecutor is null;
         _setupHandler = RunSessionSetupAsync;
         _slotHost = this;
         _setup = new UdpSessionSetup(
@@ -75,7 +84,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
             responseSink,
             timeProvider,
             _logger,
-            _receiveWindowPool,
+            receiveWindowPool,
             receiveBufferSize,
             _slotHost);
     }
@@ -88,6 +97,20 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
 
     /// <summary>The session budget this coordinator was constructed with (heartbeat diagnostics).</summary>
     public int Capacity { get; }
+
+    /// <summary>
+    /// One flow's lifecycle state (see <see cref="UdpSessionState"/>): the slot-level
+    /// <see cref="UdpSessionState.SettingUp"/> while the flow has a slot without an attached
+    /// session (the relay is dialing), otherwise the attached session's own state. A flow with no
+    /// slot at all also reports <see cref="UdpSessionState.SettingUp"/>: its next datagram starts a
+    /// fresh setup.
+    /// </summary>
+    internal UdpSessionState SessionState(FlowKey flow)
+    {
+        UdpProxySession? session;
+        lock (_gate) session = _sessions.TryGetValue(flow, out var slot) ? slot.Session : null;
+        return session?.State ?? UdpSessionState.SettingUp;
+    }
 
     /// <summary>
     /// The coordinator's observable counters as one snapshot: the live setup-failure cooldown
@@ -266,15 +289,43 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
             if (slot.Session is { } session) await session.DisposeAsync().ConfigureAwait(false);
         }
 
+        await DrainInFlightTeardownsAsync().ConfigureAwait(false);
+
         // Every started setup task was awaited above and released the limiter in its finally;
         // tasks that start later observe the cancelled shutdown token before acquiring it.
         _setup.DisposeLimiter();
         _shutdown.Dispose();
         // Every queued lease was drained above and every in-flight flush lease was released by
-        // the awaited setup tasks, so the pool owns nothing outstanding when it is disposed.
-        if (_ownsSetupQueuePool) _setupQueuePool.Dispose();
-        if (_ownsReceiveWindowPool) _receiveWindowPool.Dispose();
-        if (_ownsSetupExecutor) _setupExecutor.Dispose();
+        // the awaited setup tasks. The rented pools and the setup executor are borrowed from
+        // composition, which owns and disposes them after this coordinator's drain.
+    }
+
+    /// <summary>
+    /// Awaits the receive-failure teardowns the sessions started fire-and-forget. Disposing every
+    /// session in <see cref="DisposeCoreAsync"/> also drained each receive loop, so every handler
+    /// that will ever run has registered before this snapshot is taken.
+    /// </summary>
+    private async Task DrainInFlightTeardownsAsync()
+    {
+        Task[] inFlightTeardowns;
+        lock (_gate)
+        {
+            inFlightTeardowns = [.. _inFlightTeardowns];
+            _inFlightTeardowns.Clear();
+        }
+        foreach (var teardown in inFlightTeardowns)
+        {
+            try
+            {
+                await teardown.ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                // The teardown's own removal path already handles its failure; disposal still
+                // finishes (the fault surfaces through the session's recorded receive failure).
+                _logger.Warn($"UDP receive-failure teardown faulted during coordinator disposal: {exception.GetType().Name}: {exception.Message}");
+            }
+        }
     }
 
     /// <summary>
@@ -351,7 +402,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
         foreach (var (slot, session) in idle)
         {
             if (!session.TryBeginExpiry(now, idleTimeout)) continue;
-            if (!await _slotHost.RemoveSlotAsync(session.Flow, slot, armCooldown: false).ConfigureAwait(false))
+            if (!await _slotHost.RemoveSlotAsync(session.Flow, slot, UdpTeardownReason.Expiry).ConfigureAwait(false))
             {
                 session.CancelExpiry();
                 continue;
@@ -368,13 +419,14 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     /// to <paramref name="flow"/> is removed only when it is still the exact slot instance
     /// <paramref name="slot"/> (a newer generation may have replaced it); the resolved
     /// session's association is released and any datagrams still queued for setup are dropped
-    /// fail-closed in the same critical section. When <paramref name="armCooldown"/> is set
-    /// and the coordinator is not shutting down, a setup-failure cooldown is armed so
-    /// the next datagram does not immediately hammer a dead SOCKS5 server. Session disposal runs
-    /// outside the gate. Returns true when this caller owned the removal; per-call-site logging
-    /// and expiry bookkeeping stay with callers.
+    /// fail-closed in the same critical section. Only
+    /// <see cref="UdpTeardownReason.SetupFailure"/> arms the setup-failure cooldown (and never
+    /// during shutdown), so the next datagram does not immediately hammer a dead SOCKS5 server
+    /// while an expiry, a transient fault, or a cancellation leaves the flow free to set up
+    /// again. Session disposal runs outside the gate. Returns true when this caller owned the
+    /// removal; per-call-site logging and expiry bookkeeping stay with callers.
     /// </summary>
-    async Task<bool> IUdpSessionSlotHost.RemoveSlotAsync(FlowKey flow, UdpSessionSlot slot, bool armCooldown)
+    async Task<bool> IUdpSessionSlotHost.RemoveSlotAsync(FlowKey flow, UdpSessionSlot slot, UdpTeardownReason reason)
     {
         UdpProxySession? session = null;
         var owned = false;
@@ -394,7 +446,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
                     dropped++;
                 }
                 if (dropped > 0) _budget.NoteDrop(flow, dropped);
-                if (armCooldown && !_shutdown.IsCancellationRequested)
+                if (reason == UdpTeardownReason.SetupFailure && !_shutdown.IsCancellationRequested)
                 {
                     _cooldowns.Write(flow, _timeProvider.GetUtcNow());
                 }
@@ -405,7 +457,20 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
         return owned;
     }
 
-    async Task IUdpSessionSlotHost.RemoveReceiveFailedSessionAsync(UdpProxySession session)
+    Task IUdpSessionSlotHost.RemoveReceiveFailedSessionAsync(UdpProxySession session)
+    {
+        var teardown = RemoveReceiveFailedSessionCoreAsync(session);
+        lock (_gate)
+        {
+            // Prune finished entries so the set stays proportional to genuinely in-flight
+            // teardowns; the fault path is cold, so the scan costs nothing on the hot path.
+            _inFlightTeardowns.RemoveAll(static teardownTask => teardownTask.IsCompleted);
+            _inFlightTeardowns.Add(teardown);
+        }
+        return teardown;
+    }
+
+    private async Task RemoveReceiveFailedSessionCoreAsync(UdpProxySession session)
     {
         UdpSessionSlot? slot = null;
         lock (_gate)
@@ -413,7 +478,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
             if (_sessions.TryGetValue(session.Flow, out var current) && ReferenceEquals(current.Session, session)) slot = current;
         }
         if (slot is null) return;
-        if (!await _slotHost.RemoveSlotAsync(session.Flow, slot, armCooldown: false).ConfigureAwait(false)) return;
+        if (!await _slotHost.RemoveSlotAsync(session.Flow, slot, UdpTeardownReason.Fault).ConfigureAwait(false)) return;
         UdpProxyLogging.LogDebug(_logger, "udp.session.closed", session.Flow, session.FlowGeneration, session.Association, serverName: null);
     }
 
