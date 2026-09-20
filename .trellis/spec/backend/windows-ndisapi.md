@@ -147,7 +147,7 @@ if (TryExtractGuid(adapter.InternalName, out var guid))
   09-11) — phase latch set under the runtime gate immediately before the capture loop run
   starts; read after the generation task completes it is race-free by await ordering. This is
   the classification input that keeps NDIS error-code knowledge out of the runtime itself.
-- `LayeredCaptureRunner.MaxConsecutiveStartupRecoveries = 3` (internal const, task 09-11) —
+- `LayeredCaptureRunner.MaxConsecutiveStartupRecoveries = 3` (const since the 2026-09-20 jb cleanup narrowed it from `internal`; task 09-11) —
   consecutive recoverable startup faults beyond this count rethrow the original fault
   fail-closed (genuine-defect guard; a settling adapter-list churn recovers within two or three
   rebuilds because every retry re-enumerates).

@@ -306,7 +306,7 @@ GC configuration. This is the contract for the full-path zeroing milestone (M1-M
   idempotent `Dispose()`. `MemoryManager.Pin` returns the raw pointer, `Unpin` is a no-op
   (native memory never moves), so `NetworkStream`/`Socket` async IO can consume `lease.Memory`.
 - `SetupExecutor` (`src/WinForward.Runtime/SetupExecutor.cs`): MPMC `ConcurrentQueue` ring +
-  `SemaphoreSlim` signal + dedicated `Thread` workers (`DefaultWorkerCount = max(2 × CPU, 16)`,
+  `SemaphoreSlim` signal + dedicated `Thread` workers (`s_defaultWorkerCount = max(2 × CPU, 16)`,
   `DefaultRingCapacity = 1024`); `StartPendingSetup`/`LaunchSetup` replace per-flow `Task.Run`.
 - `FlowTable(capacity)`: `_states`/`_transportIndex` pre-sized dictionaries plus a
   `FlowState[]` free list; `FlowState.Reset(FlowKey, FlowDecision, long)` re-initializes in

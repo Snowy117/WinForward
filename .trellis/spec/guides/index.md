@@ -51,6 +51,14 @@ These guides help you **ask the right questions before coding**.
 
 → Read [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md)
 
+### When Auditing Analyzer Suppressions
+
+- [ ] A suppressed rule may still be live → neutralize the directive in an isolated worktree and rerun the gate; for jb, delete the whole directive line (blanking or commenting it out can hide the finding)
+- [ ] A rule-level `severity = none` landed → the matching site pragmas are now redundant; remove them
+- [ ] You are about to suppress instead of fix → state a repo-verifiable reason and scope `.editorconfig` globs to exactly the paths the evidence covers
+
+→ Read [Quality Guidelines](../backend/quality-guidelines.md)
+
 ### When Verifying AI Cross-Review Results
 
 - [ ] Reviewer claims "user input can be malicious" → Check the actual data source (internal manifest? user config? external API?)
