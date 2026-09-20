@@ -163,7 +163,7 @@ dotnet_diagnostic.IDE0055.severity = warning
 # 有实证命中或面向本仓真实使用模式的条目；注释均按本仓库事实改写。审计移除的条目（0 命中且理由所指
 # 模式在本仓不存在，或原理由系其它仓库的继承文本）：
 # - RS1039：仅针对 Roslyn 分析器/源生成器开发代码（SemanticModel.GetDeclaredSymbol），本仓无此类工程；
-# - CA1822 / RCS1197 / MA0038：0 命中；原“fixer 误修 extension 块/InterpolatedStringHandlerArgument”
+# - CA1822 / RCS1197：0 命中；原“fixer 误修 extension 块/InterpolatedStringHandlerArgument”
 #   理由在本仓不可复现（全仓 0 处 extension 块与 0 处该特性），且均为 info 级；
 # - MA0009：本仓零 Regex 使用，无触发载体；
 # - MA0056 / MA0015 / S4456（tests 段）：测试树零 virtual/abstract 成员、零参数异常抛出、零迭代器。
@@ -171,6 +171,14 @@ dotnet_diagnostic.IDE0055.severity = warning
 # 2026-09-19 复审补记（用户指示——抑制必须按证据路径 glob 限定，不得以“当前无命中”为由全局豁免）：
 # MA0041 与 IDE0130 已由全局条目改为路径限定（tests/ 与 tests/WinForward.Core.Tests/TestHelpers/），
 # src 重回对应规则的正常管辖。
+
+# MA0038（Make method static，已被作者弃用、继任者即 CA1822）：2026-09-20 用户裁定直接规则级关闭。
+# 理由：弃用规则启用无收益——本仓已因 dotnet format fixer 在 C# 14 extension 块 /
+# InterpolatedStringHandlerArgument 约定签名下误修而停用 CA1822 族；MA0038 作为该族的弃用旧版，
+# 一旦同类模式重现会带来相同的 fixer 误修风险。当前 0 命中（2026-09-19 实证），关闭不影响门禁；
+# 2026-09-20 随后清理了代码内 6 处功能重复的站点 pragma（连同理由注释），规则级关闭为唯一抑制边界；
+# 与 MA0041 的“弃用规则族一致处置”叙事对齐。
+dotnet_diagnostic.MA0038.severity = none
 
 # RCS1146（Use conditional access）：本仓 8 处命中集中在 Policy.IsMatch 等 `x is not null && !x....`
 # 守卫链（src 7 / tests 1）。刻意保留显式 null 守卫写法（守卫链短路语义最直观，`?.`/`is false`
@@ -357,3 +365,62 @@ resharper_arrange_trailing_comma_in_singleline_lists_highlighting = none
 
 # IDE0060: Remove unused parameter
 dotnet_diagnostic.IDE0060.severity = warning
+
+# =====================================================================
+# jb inspectcode 抑制（2026-09-20 引入，任务 09-20-jb-inspectcode-cleanup；逐条实证见该任务
+# research/disposition-log.md 与 suppression-inventory.md）
+# =====================================================================
+
+# ArrangeRedundantParentheses：与强制门禁 RCS1123 在**同一 token** 上直接对立——实测 37 个
+# 命中站点中 32 个正是上个任务 RCS1123 强制补齐的清晰括号（如 `4 + (2 * 8)`、
+# `TryGetValue(...) ? previous : 0`）。dotnet format 门禁为准，jb 侧规则级降级。
+resharper_arrange_redundant_parentheses_highlighting = none
+
+# ArrangeObjectCreationWhenTypeNotEvident：jb 偏好"类型不明显时显式写类型"，与代码库 de facto
+# 的目标类型 new(...) 风格相悖（256 处命中，遍布 src/tests/bench）；显式化属纯风格 churn。
+resharper_arrange_object_creation_when_type_not_evident_highlighting = none
+
+# InconsistentNaming：jb 对 .editorconfig dotnet_naming_* 的读取语义与 Roslyn 不同——缩写驼峰化
+# （IPAddressValue→IpAddressValue，违反 BCL 惯例）、把 field-only 的 constants 规则误用于局部
+# const、与 [ThreadStatic] t_ 约定冲突；37 处命中全部为工具差异、无真实问题。命名由更严格的
+# IDE1006 门禁覆盖（dotnet format --verify-no-changes 保持 exit 0）。
+resharper_inconsistent_naming_highlighting = none
+
+# NotAccessedPositionalProperty：record 的位置属性承载**合成的相等性/哈希**（及序列化契约）语义，
+# 直接读取可能为零但作用关键（SelfTrafficRegistry.WildcardKey、TcpRedirectTable.ReverseRedirectKey、
+# ProcessCacheKey 等均为相等性键）；jb 的分析未建模这部分。16 处命中均为 record 键/数据形状。
+resharper_not_accessed_positional_property_global_highlighting = none
+resharper_not_accessed_positional_property_local_highlighting = none
+
+# LINQ 转换家族（性能优先红线，hot-path.md）：显式循环不转 LINQ——LINQ 引入委托分配与迭代器
+# 状态机；19 处命中集中在 soak/burst 场景与测试辅助。规则级拒绝。
+resharper_loop_can_be_converted_to_query_highlighting = none
+resharper_foreach_can_be_partly_converted_to_query_highlighting = none
+resharper_foreach_can_be_partly_converted_to_query_using_another_get_enumerator_highlighting = none
+resharper_foreach_can_be_converted_to_query_using_another_get_enumerator_highlighting = none
+resharper_for_can_be_converted_to_foreach_highlighting = none
+
+# InvertIf（用户红线：逐站点评估，2026-09-20 B4a）：50 处命中仅 **4 处采纳**（StabilityContext.Write
+# 尾部空值测试→早退；SoakRunner 平台门反转后消除重复调用；NdisPacketActionExecutor.RetireLanesExcept 与
+# TcpRedirectSessionStore.DisposeCoreAsync 的循环尾守卫→continue，去嵌套 try/catch），**46 处拒绝（92%）**：
+# 与 interop guard+throw 读序（NdisApiDriver×5、NdisCapture 的 retry/degrade）、条件含副作用
+# （TryRemove/TryMarkRented/Interlocked.Add/++blocks 掩码计数——取反后执行序读序被破坏）、需取反复合条件
+# （TcpResetBuilder 三合一 &&、ProcessAttribution `is null && retry`、ConfigurationModels 范围模式）、
+# 反转导致尾部 return 重复（BoundedSetupQueue/ProcessSelectors）、快路径正向优先约定
+# （IsCompletedSuccessfully 族）以及同方法/同链未命中守卫的一致性（Program.cs 平台门链、RuntimeHeartbeat
+# 与未命中兄弟守卫）。仓库偏好**显式嵌套与守卫读序**：jb 的"扁平淡化"在这些站点不足以补偿条件取反与
+# 执行序损失（性能红线：hot-path 内不改结构，NdisCapture/PacketChecksums 亦按此拒绝）→ 规则级降级。
+# 采纳/拒绝归属逐站点见 disposition-log「B4a / InvertIf」表。
+resharper_invert_if_highlighting = none
+
+# 测试树：与既有 MA0040/tests 段裁定一致——测试用例多数只断言单一行为，刻意不串取消令牌。
+[tests/**.cs]
+resharper_method_supports_cancellation_highlighting = none
+
+# 测试辅助类型刻意使用父命名空间（与 IDE0130 同路径同裁定，见上文 [tests/.../TestHelpers] 段）。
+[tests/WinForward.Core.Tests/TestHelpers/**.cs]
+resharper_check_namespace_highlighting = none
+
+# BenchmarkDotNet [Params] 属性由 BDN 经**反射**注入 setter，静态分析不可见——jb 误判 setter 未用。
+[benchmarks/WinForward.Benchmarks/Perf/**.cs]
+resharper_unused_auto_property_accessor_global_highlighting = none
