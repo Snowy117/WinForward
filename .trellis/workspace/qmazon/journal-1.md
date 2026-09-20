@@ -705,3 +705,31 @@ Executed 09-19-src-analyzer-cleanup via dispatched trellis-implement/check sub-a
 ### Status
 
 [OK] **Completed**
+
+
+## Session 27: Adopt the JetBrains inspectcode gate and zero its report
+<!-- trellis-session: v=2 fp=5f01db11835fdf8d -->
+
+**Date**: 2026-09-20
+**Task**: Adopt the JetBrains inspectcode gate and zero its report
+**Branch**: `master`
+
+### Summary
+
+Introduced the jb inspectcode gate (pin 2026.1.3) and drove the baseline report 1317 findings -> 0: mechanical fixes, dead-code removal, closure/disposal correctness, nullable family, control-flow style, and primary-ctor parameterization. Audited every suppression in an isolated worktree (rule-level keys 16 -> 14 NECESSARY + 2 POLICY; pragmas 128 -> 126 NECESSARY + 2 STALE deleted); noted that jb verdicts can be comment-sensitive, so neutralize directives by deleting the whole line. Closed MA0038 at rule level and removed its now-redundant site pragmas. Added the AGENTS.md pre-commit gate, renamed format-gate.yml to analyzer-gate.yml with a jb job, and recorded the method in quality-guidelines.md. Gates green: Release build 0-warning, tests 725/725, dotnet format exit 0, jb 0 Issue.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7b199df` | chore(analysis): clear jb inspectcode findings in src |
+| `25db2f5` | test(analysis): clear jb inspectcode findings in tests |
+| `1d612ea` | chore(analysis): clear jb inspectcode findings in benchmarks |
+| `baec0a2` | chore(analysis): rework rule-level suppressions for the jb gate |
+| `b19a779` | docs(agents): require the jb inspectcode gate before commits |
+| `40df6e5` | docs(spec): record the jb gate and suppression-audit method |
+| `fb083cb` | ci: extend the analyzer gate to jb inspectcode |
+
+### Status
+
+[OK] **Completed**
