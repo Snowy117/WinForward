@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Check agent verifies the jb work keeps the dotnet format gate at exit 0, Release build/test gates green, and suppression scoping/reasoning policy intact"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Verify no performance-red-line violations were accepted from jb suggestions (no LINQ conversions in hot paths, no allocation regressions)"}
+{"file": ".trellis/tasks/09-20-jb-inspectcode-cleanup/research/jb-inventory.md", "reason": "Rule inventory; confirm every rule in the baseline is fixed or has a documented suppression"}

@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Analyzer/suppression posture, glob-scope rule, Release gates, test baseline 725 — the jb work must not regress the dotnet format zero-diagnostic state or the gates"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Zero-allocation pipeline rules; the performance red line for jb suggestions touching hot paths (LINQ conversions, casts, primary-ctor captures)"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Exception/nullable conventions; nullable-family jb inspections (RedundantSuppressNullableWarningExpression, ConditionIs*NullableAPI*) decisions touch these patterns"}
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "ABI interop contracts; RedundantUnsafeContext/RedundantCast and unused-member decisions touch NdisApi/Windows ABI structs"}
+{"file": ".trellis/tasks/09-20-jb-inspectcode-cleanup/research/jb-inventory.md", "reason": "Full jb inspection inventory with per-project counts, severities and sample sites (generated from the authoritative XML report)"}
+{"file": ".trellis/tasks/09-20-jb-inspectcode-cleanup/research/jb-inspectcode-report.xml", "reason": "Authoritative XML report; authoritative list of every issue to resolve"}

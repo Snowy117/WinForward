@@ -1,0 +1,15 @@
+  WinForward.Core -> /home/paff/Projects/WinForward/src/WinForward.Core/bin/Release/net10.0/WinForward.Core.dll
+  WinForward.Protocols -> /home/paff/Projects/WinForward/src/WinForward.Protocols/bin/Release/net10.0/WinForward.Protocols.dll
+  WinForward.Configuration -> /home/paff/Projects/WinForward/src/WinForward.Configuration/bin/Release/net10.0/WinForward.Configuration.dll
+  WinForward.Windows -> /home/paff/Projects/WinForward/src/WinForward.Windows/bin/Release/net10.0/WinForward.Windows.dll
+  WinForward.NdisApi -> /home/paff/Projects/WinForward/src/WinForward.NdisApi/bin/Release/net10.0/WinForward.NdisApi.dll
+  WinForward.Runtime -> /home/paff/Projects/WinForward/src/WinForward.Runtime/bin/Release/net10.0/WinForward.Runtime.dll
+  WinForward.Cli -> /home/paff/Projects/WinForward/src/WinForward.Cli/bin/Release/net10.0/win-x64/WinForward.dll
+  WinForward.Benchmarks -> /home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks.dll
+  WinForward.Core.Tests -> /home/paff/Projects/WinForward/tests/WinForward.Core.Tests/bin/Release/net10.0/WinForward.Core.Tests.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:21.02
