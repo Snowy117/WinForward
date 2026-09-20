@@ -29,7 +29,7 @@ public class NdisBufferBenchmarks
     {
         long value = 0;
         using var buffer = new NdisPacketBuffer();
-        buffer.SetFrame(_frame, NdisApiAbi.PacketFlagOnSend, (nint)1);
+        buffer.SetFrame(_frame, NdisApiAbi.PacketFlagOnSend, 1);
         value += buffer.Length;
         Volatile.Write(ref s_sink, value);
         return value;
@@ -39,7 +39,7 @@ public class NdisBufferBenchmarks
     public long ReuseSet()
     {
         long value = 0;
-        _buffer.SetFrame(_frame, NdisApiAbi.PacketFlagOnSend, (nint)1);
+        _buffer.SetFrame(_frame, NdisApiAbi.PacketFlagOnSend, 1);
         value += _buffer.Length;
         Volatile.Write(ref s_sink, value);
         return value;

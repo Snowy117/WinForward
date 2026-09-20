@@ -22,7 +22,6 @@ internal sealed class LoopbackSocks5TcpServer : IAsyncDisposable
     private readonly CancellationTokenSource _shutdown = new();
     private readonly Task _acceptLoop;
     private long _connectReplies;
-    private long _rejectedCommands;
     private long _bytesEchoed;
     private int _connectionCount;
     private int _disposed;
@@ -31,7 +30,7 @@ internal sealed class LoopbackSocks5TcpServer : IAsyncDisposable
     {
         _listener = new TcpListener(IPAddress.Loopback, 0);
         _listener.Start(1024);
-        Endpoint = (IPEndPoint)_listener.LocalEndpoint!;
+        Endpoint = (IPEndPoint)_listener.LocalEndpoint;
         _acceptLoop = Task.Run(() => AcceptLoopAsync(_shutdown.Token), _shutdown.Token);
     }
 
@@ -39,9 +38,6 @@ internal sealed class LoopbackSocks5TcpServer : IAsyncDisposable
 
     /// <summary>Raw total (includes warmup) of successful CONNECT replies sent to clients.</summary>
     public long ConnectReplies => Interlocked.Read(ref _connectReplies);
-
-    /// <summary>Raw total of SOCKS requests that were not CONNECT (rejected with a failure reply).</summary>
-    public long RejectedCommands => Interlocked.Read(ref _rejectedCommands);
 
     /// <summary>Raw total of post-reply payload bytes received (and echoed back) across connections.</summary>
     public long BytesEchoed => Interlocked.Read(ref _bytesEchoed);
@@ -105,9 +101,6 @@ internal sealed class LoopbackSocks5TcpServer : IAsyncDisposable
         private static readonly byte[] s_connectSuccessReply = [5, 0, 0, 1, 0, 0, 0, 0, 0, 0];
         private static readonly byte[] s_requestFailureReply = [5, 1, 0, 1, 0, 0, 0, 0, 0, 0];
 
-        private readonly Socket _socket = socket;
-        private readonly LoopbackSocks5TcpServer _owner = owner;
-        private readonly CancellationToken _shutdown = shutdown;
         private int _disposed;
 
         public async Task RunAsync()
@@ -129,18 +122,18 @@ internal sealed class LoopbackSocks5TcpServer : IAsyncDisposable
 
         private async Task HandleControlAsync()
         {
-            await using var stream = new NetworkStream(_socket, ownsSocket: true);
+            await using var stream = new NetworkStream(socket, ownsSocket: true);
             var greeting = new byte[2];
-            await stream.ReadExactlyAsync(greeting, _shutdown).ConfigureAwait(false);
+            await stream.ReadExactlyAsync(greeting, shutdown).ConfigureAwait(false);
             if (greeting[0] != 5 || greeting[1] == 0) return;
             var methods = new byte[greeting[1]];
-            await stream.ReadExactlyAsync(methods, _shutdown).ConfigureAwait(false);
+            await stream.ReadExactlyAsync(methods, shutdown).ConfigureAwait(false);
             // Always select NO AUTHENTICATION: the production client accepts method 0 without
             // further negotiation even when it offered username/password as an alternative.
-            await stream.WriteAsync(s_noAuthMethodReply, _shutdown).ConfigureAwait(false);
+            await stream.WriteAsync(s_noAuthMethodReply, shutdown).ConfigureAwait(false);
 
             var request = new byte[4];
-            await stream.ReadExactlyAsync(request, _shutdown).ConfigureAwait(false);
+            await stream.ReadExactlyAsync(request, shutdown).ConfigureAwait(false);
             if (request[0] != 5) return;
             var addressLength = request[3] switch
             {
@@ -152,47 +145,46 @@ internal sealed class LoopbackSocks5TcpServer : IAsyncDisposable
             if (addressLength == -1)
             {
                 var domainLength = new byte[1];
-                await stream.ReadExactlyAsync(domainLength, _shutdown).ConfigureAwait(false);
+                await stream.ReadExactlyAsync(domainLength, shutdown).ConfigureAwait(false);
                 addressLength = domainLength[0];
             }
 
             if (addressLength < 0)
             {
-                await stream.WriteAsync(s_requestFailureReply, _shutdown).ConfigureAwait(false);
+                await stream.WriteAsync(s_requestFailureReply, shutdown).ConfigureAwait(false);
                 return;
             }
 
             var remainder = new byte[addressLength + 2];
-            await stream.ReadExactlyAsync(remainder, _shutdown).ConfigureAwait(false);
+            await stream.ReadExactlyAsync(remainder, shutdown).ConfigureAwait(false);
             if (request[1] == (byte)Socks5Command.Connect)
             {
-                await stream.WriteAsync(s_connectSuccessReply, _shutdown).ConfigureAwait(false);
-                Interlocked.Increment(ref _owner._connectReplies);
+                await stream.WriteAsync(s_connectSuccessReply, shutdown).ConfigureAwait(false);
+                Interlocked.Increment(ref owner._connectReplies);
                 await EchoLoopAsync(stream).ConfigureAwait(false);
             }
             else
             {
-                Interlocked.Increment(ref _owner._rejectedCommands);
-                await stream.WriteAsync(s_requestFailureReply, _shutdown).ConfigureAwait(false);
+                await stream.WriteAsync(s_requestFailureReply, shutdown).ConfigureAwait(false);
             }
         }
 
         private async Task EchoLoopAsync(NetworkStream stream)
         {
             var buffer = new byte[65_536];
-            while (!_shutdown.IsCancellationRequested)
+            while (!shutdown.IsCancellationRequested)
             {
-                var count = await stream.ReadAsync(buffer, _shutdown).ConfigureAwait(false);
+                var count = await stream.ReadAsync(buffer, shutdown).ConfigureAwait(false);
                 if (count == 0) return;
-                Interlocked.Add(ref _owner._bytesEchoed, count);
-                await stream.WriteAsync(buffer.AsMemory(0, count), _shutdown).ConfigureAwait(false);
+                Interlocked.Add(ref owner._bytesEchoed, count);
+                await stream.WriteAsync(buffer.AsMemory(0, count), shutdown).ConfigureAwait(false);
             }
         }
 
         public ValueTask DisposeAsync()
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0) return ValueTask.CompletedTask;
-            _socket.Dispose();
+            socket.Dispose();
             return ValueTask.CompletedTask;
         }
     }

@@ -196,7 +196,7 @@ internal static class UdpRawBaselineScenario
                     break;
                 }
 
-                var sender = (IPEndPoint)result.RemoteEndPoint!;
+                var sender = (IPEndPoint)result.RemoteEndPoint;
                 var payload = buffer.AsMemory(0, result.ReceivedBytes);
                 try
                 {

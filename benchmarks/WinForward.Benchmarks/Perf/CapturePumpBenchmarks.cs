@@ -7,7 +7,6 @@ using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.Capture;
-using WinForward.Runtime.Socks5;
 using WinForward.Windows;
 
 namespace WinForward.Benchmarks.Perf;
@@ -36,7 +35,7 @@ public class CapturePumpBenchmarks
         var logger = new ThresholdOnlyLogger(RuntimeLogLevel.Info);
         var dispatcher = new FlowDispatcher(passConfiguration, new NeverOwnedGuard(), executor, logger: logger);
         var processor = new CapturePacketProcessor(dispatcher, logger);
-        var adapter = new WindowsAdapter("bench-adapter", "Benchmark Adapter", @"\DEVICE\{00000000-B3NCH-4ARK-0000-000000000000}", (nint)0x55, 1);
+        var adapter = new WindowsAdapter("bench-adapter", "Benchmark Adapter", @"\DEVICE\{00000000-B3NCH-4ARK-0000-000000000000}", 0x55, 1);
         var frame = BenchmarkShared.CreateIpv4TcpFrame(FrameBytes);
 
         using var completion = new CancellationTokenSource();
@@ -78,7 +77,7 @@ public class CapturePumpBenchmarks
                 return 0;
             }
 
-            var count = (int)Math.Min(remaining, (long)buffers.Length);
+            var count = (int)Math.Min(remaining, buffers.Length);
             for (var index = 0; index < count; index++)
             {
                 var sourcePort = (ushort)(1_024 + (_sequence % distinctFlows));

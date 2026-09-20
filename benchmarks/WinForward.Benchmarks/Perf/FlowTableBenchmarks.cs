@@ -33,7 +33,7 @@ public class FlowTableMissBenchmarks
             Endpoint.From(IPAddress.Parse("203.0.113.254"), 65535),
             TransportProtocol.Udp,
             FlowOriginKind.Forwarded,
-            new AdapterContext("missing", "missing", 99));
+            new AdapterContext("missing", 99));
     }
 
     [Benchmark]

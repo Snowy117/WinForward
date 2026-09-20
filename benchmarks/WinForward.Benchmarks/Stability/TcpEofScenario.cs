@@ -59,8 +59,11 @@ internal static class TcpEofScenario
             upstreamStream = new NetworkStream(upstreamRelaySocket, ownsSocket: true);
             relay = new TcpProxyRelay(pairRelay, upstreamStream, new UpstreamOwner(upstreamStream));
 
+            // ReSharper disable once AccessToDisposedClosure // The receive leg is awaited below before the finally disposes either peer; the timeout path disposes upstreamPeer on purpose so the parked receive resolves, which ReceiveAsync classifies as an ObjectDisposedException outcome by design.
             var receiver = Task.Run(() => ReceiveAsync(upstreamPeer, options.TcpTransferBytes));
+            // ReSharper disable AccessToDisposedClosure // The send leg is awaited below before any dispose; its adversarial abort kinds deliberately kill the client leg mid-send, which SendAsync classifies as an expected SocketException/ObjectDisposedException outcome.
             var sender = Task.Run(() => SendAsync(localPeer, options.TcpTransferBytes, kind, fraction, relay, upstreamPeer));
+            // ReSharper restore AccessToDisposedClosure
             await sender.ConfigureAwait(false);
             try
             {
@@ -146,6 +149,9 @@ internal static class TcpEofScenario
     {
         switch (kind)
         {
+            case AbortKind.Clean:
+                // A clean transfer fires no abort event; only the completed transfer is observable.
+                break;
             case AbortKind.ClientRst:
                 localPeer.LingerState = new LingerOption(enable: true, 0);
                 localPeer.Close();
@@ -159,6 +165,10 @@ internal static class TcpEofScenario
                 // receiver blocked until the forced-teardown timeout mislabels the transfer.
                 upstreamPeer.Shutdown(SocketShutdown.Both);
                 break;
+            default:
+                // Every AbortKind member is handled above; a new member must be wired explicitly
+                // instead of silently firing no abort event.
+                throw new InvalidOperationException($"Unhandled abort kind: {kind}.");
         }
     }
 
@@ -210,7 +220,7 @@ internal static class TcpEofScenario
         try
         {
             var peer = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            await peer.ConnectAsync((IPEndPoint)listener.LocalEndpoint!).ConfigureAwait(false);
+            await peer.ConnectAsync((IPEndPoint)listener.LocalEndpoint).ConfigureAwait(false);
             return (peer, await listener.AcceptSocketAsync().ConfigureAwait(false));
         }
         finally
@@ -253,6 +263,7 @@ internal static class TcpEofScenario
             {
                 _transfers++;
                 _totalMilliseconds += milliseconds;
+                // ReSharper disable once SwitchStatementHandlesSomeKnownEnumValuesWithDefault // TransferOutcome.Other is the enum's catch-all member and is deliberately counted through the shared default body together with any future member value; an explicit `case Other:` stacked on the default body is rejected by SonarAnalyzer S3458 (empty case clause).
                 switch (outcome)
                 {
                     case TransferOutcome.Completed:

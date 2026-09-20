@@ -47,7 +47,12 @@ internal static class UdpBurstScenario
         await using var server = new LoopbackSocks5UdpServer(receiver.Endpoint, associateDelay);
         var tracker = new InFlightTracker(Math.Max(1024, options.Pps * 12));
         var sink = new BurstCountingSink(backgroundFlows, burstFlows, tracker);
+        // ReSharper disable HeuristicUnreachableCode, CSharpWarnings::CS0162
+        // The documented opt-in census switch above is a compile-time constant so a default run
+        // compiles the diagnostic logger out entirely; the false branch "unreachable" code is the
+        // switch's enabled state, flipped by editing the constant for a loss-localization session.
         var productEvents = CaptureProductEvents ? new CountingRuntimeLogger() : null;
+        // ReSharper restore HeuristicUnreachableCode, CSharpWarnings::CS0162
         var coordinator = new UdpProxyCoordinator(
             new Socks5UdpTransportFactory(new SelfTrafficRegistry(), UdpFrameBuilder.DefaultMaximumEthernetFrame),
             sink,
@@ -133,6 +138,7 @@ internal static class UdpBurstScenario
         windowTicks[0] = Stopwatch.GetTimestamp();
         using var senderCancellation = new CancellationTokenSource();
         var sender = new BackgroundSender(coordinator, socksServer, backgroundKeys, options.PayloadBytes, options.Pps, tracker);
+        // ReSharper disable once AccessToDisposedClosure // The sender loop is cancelled and awaited (CancelAsync + await senderTask) inside the using scope, so the token source is disposed only after the loop has returned.
         var senderTask = Task.Run(() => sender.RunLoopAsync(senderCancellation.Token), senderCancellation.Token);
 
         await Task.Delay(s_controlWindow, senderCancellation.Token).ConfigureAwait(false);
@@ -192,7 +198,7 @@ internal static class UdpBurstScenario
         var latencies = new List<double>(burstKeys.Length);
         for (var flow = 0; flow < burstKeys.Length; flow++)
         {
-            if (sink.TryGetBurstFirstResponseTicks(flow) is long responseTicks)
+            if (sink.TryGetBurstFirstResponseTicks(flow) is { } responseTicks)
             {
                 latencies.Add(StabilityShared.TicksToMilliseconds(responseTicks - issueTimestamps[flow]));
             }

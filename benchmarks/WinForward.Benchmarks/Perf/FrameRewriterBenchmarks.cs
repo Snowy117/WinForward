@@ -38,12 +38,11 @@ public class FrameRewriterBenchmarks
         _client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53_000);
         _server = Endpoint.From(IPAddress.Parse("192.0.2.80"), 443);
         var hostKey = BenchmarkShared.CreateFlowKey(0);
-        var forwardedKey = FlowKey.Create(_client, _server, TransportProtocol.Tcp, FlowOriginKind.Forwarded, new AdapterContext("adapter-0", Name: null, 0));
+        var forwardedKey = FlowKey.Create(_client, _server, TransportProtocol.Tcp, FlowOriginKind.Forwarded, new AdapterContext("adapter-0", 0));
         var translated = Endpoint.From(IPAddress.Parse("192.168.77.2"), ListenerPort);
-        var originAdapter = new AdapterContext("adapter-0", Name: null, 0);
         var now = DateTimeOffset.UnixEpoch;
-        _hostAssociation = new TcpRedirectAssociation(hostKey, _server, originAdapter, 0, translated, forwardLocalAddress: null, 1, now);
-        _forwardedAssociation = new TcpRedirectAssociation(forwardedKey, _server, originAdapter, 0, translated, IPAddressValue.From(IPAddress.Parse("192.168.77.1")), 2, now);
+        _hostAssociation = new TcpRedirectAssociation(hostKey, _server, 0, translated, forwardLocalAddress: null, 1, now);
+        _forwardedAssociation = new TcpRedirectAssociation(forwardedKey, _server, 0, translated, IPAddressValue.From(IPAddress.Parse("192.168.77.1")), 2, now);
     }
 
     [Benchmark]

@@ -12,8 +12,7 @@ namespace WinForward.Benchmarks.Stability;
 /// </summary>
 internal static class DatagramHeader
 {
-    public const int Size = 12;
-
+    private const int Size = 12;
     public static void Write(byte[] payload, long sequence, int flow)
     {
         BinaryPrimitives.WriteUInt64BigEndian(payload.AsSpan(0, 8), (ulong)sequence);
@@ -137,7 +136,7 @@ internal sealed class EchoReceiver : IAsyncDisposable
             // WouldBlock (kernel send queue full) falls back to the overlapped send.
             try
             {
-                _ = _socket.SendTo(payload.Span, SocketFlags.None, result.RemoteEndPoint!);
+                _ = _socket.SendTo(payload.Span, SocketFlags.None, result.RemoteEndPoint);
                 continue;
             }
             catch (SocketException)
@@ -151,7 +150,7 @@ internal sealed class EchoReceiver : IAsyncDisposable
 
             try
             {
-                _ = await _socket.SendToAsync(payload, SocketFlags.None, result.RemoteEndPoint!).ConfigureAwait(false);
+                _ = await _socket.SendToAsync(payload, SocketFlags.None, result.RemoteEndPoint).ConfigureAwait(false);
             }
             catch (SocketException)
             {

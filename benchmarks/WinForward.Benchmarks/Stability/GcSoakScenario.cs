@@ -48,15 +48,13 @@ internal static class GcSoakScenario
     /// or scheduling noise. A truly zero-allocation steady state stays flat; 64 KiB/s is a sustained
     /// 3.75 MiB/min rise, far outside any bounded transient.
     /// </summary>
-    internal const double WorkingSetSlopeLimitBytesPerSecond = 64 * 1024;
-
+    private const double WorkingSetSlopeLimitBytesPerSecond = 64 * 1024;
     /// <summary>
     /// Absolute working-set growth allowance across the measured window. Pairs with the slope limit
     /// so a short run cannot pass on a noisy slope estimate alone: 32 MiB is well above loopback
     /// socket buffer churn and far below any real leak over the default (or longer) duration.
     /// </summary>
-    internal const long WorkingSetGrowthLimitBytes = 32L * 1024 * 1024;
-
+    private const long WorkingSetGrowthLimitBytes = 32L * 1024 * 1024;
     /// <summary>
     /// The UDP forward lanes must not allocate per datagram. The runtime's own lock infrastructure
     /// can allocate a few hundred bytes under contention (PRD Out-of-Scope BCL infrastructure), so
@@ -67,8 +65,7 @@ internal static class GcSoakScenario
     internal const long SenderAllocationNoiseCeilingBytes = 64 * 1024;
 
     /// <summary>See <see cref="SenderAllocationNoiseCeilingBytes"/>: allowed bytes scale as <c>SendCount / divisor</c>.</summary>
-    internal const long SenderAllocationBytesPerSendDivisor = 512;
-
+    private const long SenderAllocationBytesPerSendDivisor = 512;
     /// <summary>CPU-bound loopback flood relays; more relays add heat, not GC signal.</summary>
     private const int MaximumTcpRelays = 8;
 
@@ -206,6 +203,7 @@ internal static class GcSoakScenario
         };
     }
 
+    // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local // Deliberate vacuity contract: the parameter feeds the guard that fails the soak when the TCP relay leg echoed no payload, so a zero-allocation report can never be produced by a scenario that never exercised the TCP leg.
     private static void AssertOk(GcSoakMeasurement measurement, UdpFlood udpFlood, long tcpBytesEchoed)
     {
         // Without this the zero-allocation gate could pass on a scenario that never pushed a
@@ -691,7 +689,7 @@ internal static class GcSoakScenario
             _stop = true;
             foreach (var thread in _threads)
             {
-                thread?.Join(s_stopTimeout);
+                thread.Join(s_stopTimeout);
             }
 
             if (_error is not null) throw new InvalidOperationException("The gc-soak UDP flood failed.", _error);
@@ -704,8 +702,6 @@ internal static class GcSoakScenario
         private const int ClientReceiveBufferBytes = 4 * 1024 * 1024;
         private static readonly Endpoint s_destination = Endpoint.From(IPAddress.Parse("192.0.2.80"), 443);
 
-        private readonly TcpProxyRelayFactory _factory = factory;
-        private readonly Socks5Server _server = server;
         private readonly RelaySlot?[] _slots = new RelaySlot?[relayCount];
         private volatile bool _stop;
 
@@ -720,7 +716,7 @@ internal static class GcSoakScenario
                 {
                     var peer = (IPEndPoint)relayLocal.RemoteEndPoint!;
                     var accepted = new TcpAcceptedConnection(relayLocal, Endpoint.From(peer.Address, checked((ushort)peer.Port)));
-                    var relay = await _factory.EstablishAsync(s_destination, accepted, _server, CancellationToken.None).ConfigureAwait(false);
+                    var relay = await factory.EstablishAsync(s_destination, accepted, server, CancellationToken.None).ConfigureAwait(false);
                     _slots[index] = new RelaySlot(client, relay);
                 }
                 catch
@@ -796,7 +792,7 @@ internal static class GcSoakScenario
             var client = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp) { ReceiveBufferSize = ClientReceiveBufferBytes };
             try
             {
-                await client.ConnectAsync((IPEndPoint)listener.LocalEndpoint!).ConfigureAwait(false);
+                await client.ConnectAsync((IPEndPoint)listener.LocalEndpoint).ConfigureAwait(false);
                 var relay = await listener.AcceptSocketAsync().ConfigureAwait(false);
                 relay.ReceiveBufferSize = ClientReceiveBufferBytes;
                 return (client, relay);

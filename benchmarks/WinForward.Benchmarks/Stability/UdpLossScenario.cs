@@ -35,7 +35,12 @@ internal static class UdpLossScenario
         await using var receiver = new EchoReceiver(options.Flows);
         await using var server = new LoopbackSocks5UdpServer(receiver.Endpoint);
         var sink = new CountingUdpResponseSink();
+        // ReSharper disable HeuristicUnreachableCode, CSharpWarnings::CS0162
+        // The documented opt-in census switch above is a compile-time constant so a default run
+        // compiles the diagnostic logger out entirely; the false branch "unreachable" code is the
+        // switch's enabled state, flipped by editing the constant for a loss-localization session.
         var productEvents = CaptureProductEvents ? new CountingRuntimeLogger() : null;
+        // ReSharper restore HeuristicUnreachableCode, CSharpWarnings::CS0162
         var coordinator = new UdpProxyCoordinator(new Socks5UdpTransportFactory(new SelfTrafficRegistry(), UdpFrameBuilder.DefaultMaximumEthernetFrame), sink, new UdpProxyOptions
         {
             Capacity = options.Flows,

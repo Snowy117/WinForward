@@ -64,7 +64,7 @@ public class TcpRelayBenchmarks
         try
         {
             var peer = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            await peer.ConnectAsync((IPEndPoint)listener.LocalEndpoint!).ConfigureAwait(false);
+            await peer.ConnectAsync((IPEndPoint)listener.LocalEndpoint).ConfigureAwait(false);
             return (peer, await listener.AcceptSocketAsync().ConfigureAwait(false));
         }
         finally

@@ -44,7 +44,7 @@ internal static class StabilityShared
         var snapshot = new Dictionary<string, long>(s_productEventNames.Length, StringComparer.Ordinal);
         foreach (var name in s_productEventNames)
         {
-            snapshot[name] = logger.Events.TryGetValue(name, out var count) ? count : 0;
+            snapshot[name] = logger.Events.GetValueOrDefault(name);
         }
 
         return snapshot;

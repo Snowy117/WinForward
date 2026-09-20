@@ -6,16 +6,13 @@ internal static class SoakRunner
 {
     public static async Task<int> RunAsync(SoakOptions options)
     {
-        if (OperatingSystem.IsWindows())
-        {
-            // 10 ms pacing ticks need the 1 ms system timer; the ~15.6 ms default starves them.
-            using var timer = new HighResolutionTimerScope();
-            if (!timer.IsEnabled)
-            {
-                await Console.Error.WriteLineAsync("Failed to raise the Windows timer resolution to 1 ms; pacing-sensitive stability numbers are degraded.").ConfigureAwait(false);
-            }
+        if (!OperatingSystem.IsWindows()) return await RunScenariosAsync(options).ConfigureAwait(false);
 
-            return await RunScenariosAsync(options).ConfigureAwait(false);
+        // 10 ms pacing ticks need the 1 ms system timer; the ~15.6 ms default starves them.
+        using var timer = new HighResolutionTimerScope();
+        if (!timer.IsEnabled)
+        {
+            await Console.Error.WriteLineAsync("Failed to raise the Windows timer resolution to 1 ms; pacing-sensitive stability numbers are degraded.").ConfigureAwait(false);
         }
 
         return await RunScenariosAsync(options).ConfigureAwait(false);

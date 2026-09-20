@@ -44,11 +44,9 @@ internal sealed class StabilityContext : IDisposable
     private void Write(string json)
     {
         Console.Out.WriteLine(json);
-        if (_fileOutput is not null)
-        {
-            _fileOutput.WriteLine(json);
-            _fileOutput.Flush();
-        }
+        if (_fileOutput is null) return;
+        _fileOutput.WriteLine(json);
+        _fileOutput.Flush();
     }
 
     public void Dispose()

@@ -39,8 +39,7 @@ internal sealed record AbortMix(int Clean, int ClientRst, int RelayCancel, int U
         var roll = random.Next(Total);
         if (roll < Clean) return AbortKind.Clean;
         if (roll < Clean + ClientRst) return AbortKind.ClientRst;
-        if (roll < Clean + ClientRst + RelayCancel) return AbortKind.RelayCancel;
-        return AbortKind.UpstreamTruncate;
+        return roll < Clean + ClientRst + RelayCancel ? AbortKind.RelayCancel : AbortKind.UpstreamTruncate;
     }
 
     public static AbortMix Parse(string raw)
@@ -96,20 +95,20 @@ internal sealed record SoakOptions
     /// </summary>
     public const int GcSoakDefaultDurationSeconds = 1_800;
 
-    public SoakScenario Scenario { get; init; } = SoakScenario.All;
-    public int DurationSeconds { get; init; } = 60;
-    public int Pps { get; init; } = 25_000;
-    public int PayloadBytes { get; init; } = 512;
-    public int Flows { get; init; } = 256;
-    public int TcpConcurrency { get; init; } = 64;
-    public int TcpTransferBytes { get; init; } = 1_048_576;
-    public TcpRelayMode TcpRelayMode { get; init; } = TcpRelayMode.Socks5;
-    public AbortMix AbortMix { get; init; } = AbortMix.Default;
-    public int Seed { get; init; } = 42;
-    public string? OutputPath { get; init; }
-    public bool Quick { get; init; }
-    public int BurstFlows { get; init; } = 48;
-    public int DialDelayMs { get; init; }
+    public SoakScenario Scenario { get; private init; } = SoakScenario.All;
+    public int DurationSeconds { get; private init; } = 60;
+    public int Pps { get; private init; } = 25_000;
+    public int PayloadBytes { get; private init; } = 512;
+    public int Flows { get; private init; } = 256;
+    public int TcpConcurrency { get; private init; } = 64;
+    public int TcpTransferBytes { get; private init; } = 1_048_576;
+    public TcpRelayMode TcpRelayMode { get; private init; } = TcpRelayMode.Socks5;
+    public AbortMix AbortMix { get; private init; } = AbortMix.Default;
+    public int Seed { get; private init; } = 42;
+    public string? OutputPath { get; private init; }
+    public bool Quick { get; private init; }
+    public int BurstFlows { get; private init; } = 48;
+    public int DialDelayMs { get; private init; }
 
     public static SoakOptions Parse(string[] args)
     {

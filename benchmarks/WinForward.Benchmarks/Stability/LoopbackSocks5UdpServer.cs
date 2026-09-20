@@ -39,7 +39,7 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
         _associateDelay = associateDelay;
         _controlListener = new TcpListener(IPAddress.Loopback, 0);
         _controlListener.Start(1024);
-        ControlEndpoint = (IPEndPoint)_controlListener.LocalEndpoint!;
+        ControlEndpoint = (IPEndPoint)_controlListener.LocalEndpoint;
         _acceptLoop = Task.Run(() => AcceptLoopAsync(_shutdown.Token), _shutdown.Token);
     }
 
@@ -144,8 +144,7 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
             _relay.Bind(new IPEndPoint(IPAddress.Loopback, 0));
         }
 
-        public IPEndPoint RelayEndpoint => (IPEndPoint)_relay.LocalEndPoint!;
-
+        private IPEndPoint RelayEndpoint => (IPEndPoint)_relay.LocalEndPoint!;
         public async Task RunAsync()
         {
             _ = RelayLoopAsync();
@@ -256,7 +255,7 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
                     break;
                 }
 
-                var sender = (IPEndPoint)result.RemoteEndPoint!;
+                var sender = (IPEndPoint)result.RemoteEndPoint;
                 var payload = buffer.AsMemory(0, result.ReceivedBytes);
                 try
                 {

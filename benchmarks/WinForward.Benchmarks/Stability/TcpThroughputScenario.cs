@@ -89,6 +89,7 @@ internal static class TcpThroughputScenario
 
             var handshakeMicroseconds = handshakeStopwatch.Elapsed.TotalMilliseconds * 1000;
 
+            // ReSharper disable once AccessToDisposedClosure // sender is awaited below before the finally disposes client, and the relay teardown that may kill the client leg early is classified by SendAsync as an expected outcome.
             var sender = Task.Run(() => SendAsync(client, options.TcpTransferBytes));
             var received = await ReceiveAsync(client, options.TcpTransferBytes).ConfigureAwait(false);
             await sender.ConfigureAwait(false);
@@ -215,7 +216,7 @@ internal static class TcpThroughputScenario
         try
         {
             var peer = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            await peer.ConnectAsync((IPEndPoint)listener.LocalEndpoint!).ConfigureAwait(false);
+            await peer.ConnectAsync((IPEndPoint)listener.LocalEndpoint).ConfigureAwait(false);
             return (peer, await listener.AcceptSocketAsync().ConfigureAwait(false));
         }
         finally

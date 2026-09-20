@@ -3,7 +3,6 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using WinForward.Configuration;
 using WinForward.Core;
-using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
 
 namespace WinForward.Benchmarks.Stability;
@@ -16,9 +15,9 @@ internal enum BackgroundWindow
     Post = 2,
 }
 
-/// <summary>A per-datagram in-flight stamp: the window it was sent in and the send timestamp.</summary>
+/// <summary>A per-datagram in-flight stamp: the measurement window it was sent in.</summary>
 [StructLayout(LayoutKind.Auto)]
-internal readonly record struct InFlightStamp(byte Window, long SendTicks);
+internal readonly record struct InFlightStamp(byte Window);
 
 /// <summary>Everything the three measurement windows produced, plus the sender holding their counters.</summary>
 internal sealed record PhaseOutcome(BurstResult Burst, BackgroundSender Sender, long[] WindowTicks);
@@ -41,7 +40,6 @@ internal sealed record BurstResult(
 internal sealed class InFlightTracker(int capacity)
 {
     private readonly ConcurrentDictionary<long, InFlightStamp> _stamps = new();
-    private readonly int _capacity = capacity;
     private long _count;
     private volatile bool _active;
 
@@ -50,16 +48,16 @@ internal sealed class InFlightTracker(int capacity)
 
     public bool AttributionActive => _active;
 
-    public void Stamp(int flowId, long sequence, BackgroundWindow window, long sendTicks)
+    public void Stamp(int flowId, long sequence, BackgroundWindow window)
     {
         if (!_active) return;
-        if (Interlocked.Increment(ref _count) > _capacity)
+        if (Interlocked.Increment(ref _count) > capacity)
         {
             Interlocked.Decrement(ref _count);
             return;
         }
 
-        _stamps[Key(flowId, sequence)] = new InFlightStamp((byte)window, sendTicks);
+        _stamps[Key(flowId, sequence)] = new InFlightStamp((byte)window);
     }
 
     public void Remove(int flowId, long sequence)
@@ -141,7 +139,7 @@ internal sealed class BackgroundSender(
                     var window = _currentWindow;
                     var sendTicks = Stopwatch.GetTimestamp();
                     DatagramHeader.Write(_payload, _sequences[flow], flow);
-                    tracker.Stamp(flow, _sequences[flow], (BackgroundWindow)window, sendTicks);
+                    tracker.Stamp(flow, _sequences[flow], (BackgroundWindow)window);
                     if (await coordinator.TrySendSpanAsync(flows[flow], socksServer, _payload, default, cancellation).ConfigureAwait(false))
                     {
                         _sentPerWindow[window]++;

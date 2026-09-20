@@ -14,7 +14,7 @@ internal static class BenchmarkShared
 {
     public static byte[] CreateIpv4UdpFrame(int frameSize)
     {
-        if (frameSize < 64 || frameSize > UdpFrameBuilder.MaximumEthernetFrame) throw new ArgumentOutOfRangeException(nameof(frameSize));
+        if (frameSize is < 64 or > UdpFrameBuilder.MaximumEthernetFrame) throw new ArgumentOutOfRangeException(nameof(frameSize));
         var frame = new byte[frameSize];
         BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(12, 2), 0x0800);
         frame[14] = 0x45;
@@ -32,7 +32,7 @@ internal static class BenchmarkShared
 
     public static byte[] CreateIpv4TcpFrame(int frameSize)
     {
-        if (frameSize < 64 || frameSize > UdpFrameBuilder.MaximumEthernetFrame) throw new ArgumentOutOfRangeException(nameof(frameSize));
+        if (frameSize is < 64 or > UdpFrameBuilder.MaximumEthernetFrame) throw new ArgumentOutOfRangeException(nameof(frameSize));
         var frame = new byte[frameSize];
         BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(12, 2), 0x0800);
         frame[14] = 0x45;
@@ -105,7 +105,7 @@ internal static class BenchmarkShared
         var second = index % 65_536;
         var local = Endpoint.From(IPAddress.Parse(string.Create(CultureInfo.InvariantCulture, $"10.{first % 256}.{second / 256}.{second % 256}")), checked((ushort)(1_024 + (index % 50_000))));
         var remote = Endpoint.From(IPAddress.Parse(string.Create(CultureInfo.InvariantCulture, $"172.{16 + (first % 16)}.{second / 256}.{second % 256}")), checked((ushort)(1 + (index % 65_535))));
-        return FlowKey.Create(local, remote, TransportProtocol.Udp, FlowOriginKind.Host, new AdapterContext(string.Create(CultureInfo.InvariantCulture, $"adapter-{index % 4}"), Name: null, index % 4));
+        return FlowKey.Create(local, remote, TransportProtocol.Udp, FlowOriginKind.Host, new AdapterContext(string.Create(CultureInfo.InvariantCulture, $"adapter-{index % 4}"), index % 4));
     }
 
     /// <summary>A TCP flow key with a controllable local (source) port, for the reverse-prefilter
@@ -114,7 +114,7 @@ internal static class BenchmarkShared
     {
         var local = Endpoint.From(IPAddress.Parse("10.0.0.1"), localPort);
         var remote = Endpoint.From(IPAddress.Parse("172.16.0.1"), 443);
-        return FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Host, new AdapterContext("adapter-0", Name: null, 0));
+        return FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Host, new AdapterContext("adapter-0", 0));
     }
 
     public static FlowContext CreateContext(FlowKey key) => new(key, ProcessName: null, ProcessPath: null, key.OriginAdapterId, AdapterName: null, key.Remote.Port);
@@ -129,12 +129,12 @@ internal sealed class CountingExecutor : IPacketActionExecutor
 {
     public long PassCount { get; private set; }
     public long ProxyCount { get; private set; }
-    public ValueTask PassAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
+    public ValueTask PassAsync(CapturedFlowPacket packet)
     {
         PassCount++;
         return ValueTask.CompletedTask;
     }
-    public ValueTask BlockAsync(CapturedFlowPacket packet, CancellationToken cancellationToken) => ValueTask.CompletedTask;
+    public ValueTask BlockAsync(CapturedFlowPacket packet) => ValueTask.CompletedTask;
     public ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
     {
         ProxyCount++;
