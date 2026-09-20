@@ -25,3 +25,43 @@ jobs:
 
       - name: Verify analyzer diagnostics
         run: dotnet format WinForward.slnx --severity info --verify-no-changes --no-restore
+
+  jb-inspectcode:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install JetBrains ReSharper Global Tools
+        run: dotnet tool install --global JetBrains.ReSharper.GlobalTools --version 2026.1.3
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Inspect code
+        run: jb inspectcode -f=Xml -e=HINT -o="$env:RUNNER_TEMP\jb-report.xml" WinForward.slnx
+
+      - name: Assert zero issues
+        shell: pwsh
+        run: |
+          [xml]$report = Get-Content "$env:RUNNER_TEMP\jb-report.xml"
+          $issues = $report.SelectNodes('//Issues/Project/Issue').Count
+          if ($issues -ne 0) {
+            Write-Error "jb inspectcode reported $issues issue(s); see the uploaded report artifact."
+            exit 1
+          }
+          Write-Host "jb inspectcode: 0 issues"
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jb-inspectcode-report
+          path: ${{ runner.temp }}\jb-report.xml
