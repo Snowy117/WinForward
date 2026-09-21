@@ -822,3 +822,26 @@ Migrated the TCP/UDP lifecycle cluster to QuiescenceScope: TcpRedirectSessionSto
 ### Status
 
 [OK] **Completed**
+
+
+## Session 32: Complete the structured-concurrency program: C4 migrates the remaining lifecycle owners
+<!-- trellis-session: v=2 fp=ef21a9b20ef58275 -->
+
+**Date**: 2026-09-21
+**Task**: Complete the structured-concurrency program: C4 migrates the remaining lifecycle owners
+**Branch**: `feat/transport-lifecycle`
+
+### Summary
+
+C4 (09-20-lifecycle-migration-rest) migrated the last lifecycle owners to QuiescenceScope and emptied the C2 analyzer allowlist, completing the parent program 09-20-structured-concurrency. Migrated: LayeredCaptureRunner (the run scope owns the CTS; the blocking monitor became a dedicated Thread joined through the scope's lease, so DrainAsync IS the join; the periodic tick a Run child; refresh workers extracted so the file dropped 417 -> 388 effective lines, back under the cap), MultiAdapterCaptureLoop (own scope; the degradation forward a Run child drained by DisposeAsync, pumps disposed first), TransactionalCaptureRuntime (scope-owned CTS drained at the end of the existing single-flight cleanup; the caller-awaited run task deliberately not registered as a scope child), IdleExpirySweeper + RuntimeHeartbeat (scope-owned CTS + a Run loop child; a second DisposeAsync now joins instead of throwing ObjectDisposedException), Socks5ControlConnection (own scope; both RunWithinAttemptAsync overloads admit with a lease so the per-attempt deadline cannot be disposed under a reader; the deadline CTS itself stays, released after the drain), Socks5UdpTransport (no scope: a zero-allocation Interlocked disposal guard, the datagram path unchanged). NdisCapturePump deliberately unchanged - the primitive is Runtime-internal and the dependency direction is Runtime -> NdisApi. 13 new regression tests, each probe-verified non-vacuous; Core 786 + Analyzers 18; format, Release build (0 warnings), tests and jb inspectcode (0 issues) all clean. The parent's integration review passed all six cross-child criteria and fixed two documentation defects: D7 in async-lifetime.md overclaimed (three lifetime handles stay outside the primitive by design - SetupExecutor's worker-joining synchronous IDisposable, NdisCapturePump which owns no CTS, and the CLI's process-root CTS), and two comments still named the deleted EnterSetup/ExitSetup methods. Work commits a3c0783 (C4) and ccb0def (integration-review fixes).
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a3c0783` | feat(runtime): migrate the remaining lifecycle owners to QuiescenceScope |
+| `ccb0def` | docs(runtime): reconcile the lifetime contract after the program |
+
+### Status
+
+[OK] **Completed**
