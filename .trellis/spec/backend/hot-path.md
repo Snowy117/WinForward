@@ -245,6 +245,21 @@ branch, and any allocation-gate test that protects a span-vs-memory overload cho
   `GC.GetAllocatedBytesForCurrentThread()` delta `== 0` across real dispatches and that the fake's
   `SpanSends` advanced by exactly the expected count. A future re-materialization on the send path
   (a new memory overload, `ToArray()`, or `new byte[]`) must make that 0-B assertion fail.
+- **An allocation gate must evaluate on one thread.** `GC.GetAllocatedBytesForCurrentThread()` is a
+  *per-thread* counter, so a gate whose measured window spans `await`s is only valid while the
+  continuation resumes on the same thread. Observed 2026-09-21 (task 09-20-quiescence-scope) on
+  `EstablishedUdpDatagramPathAllocatesNoManagedBytes`
+  (`tests/WinForward.Core.Tests/HotPathAllocationGateTests.cs:106-111`), which measures 64
+  dispatches across 64 `await`s: run alone it failed 4/4 (`Expected: 0, Actual: 600`), the whole
+  `HotPathAllocationGateTests` class run alone left 1 of 10 failing, and only the full suite was
+  green — with a cold pool the continuation migrates to another pool thread and the before/after
+  readings land on different threads. The dangerous direction is the reverse: a migrated
+  continuation reports the *other* thread's delta, so a small genuine regression can measure as 0
+  in the run whose shape happens to migrate. Fix the window, not the threshold — install a
+  single-threaded `SynchronizationContext` (or scheduler) for the measured region so every
+  continuation resumes on the measuring thread, or keep the window synchronous — and always pair
+  the byte assertion with a thread-independent call counter (`SpanSends`, `Sends`), which catches a
+  regression regardless of thread migration.
 - **Approved cold-path materialization.** `Socks5UdpTransport.SendSpanAsync` copies with
   `payload.ToArray()` only on the contended-gate branch: the span views native capture memory
   that recycles once dispatch returns, so it cannot cross the gate `await`. This is a documented
@@ -257,6 +272,7 @@ branch, and any allocation-gate test that protects a span-vs-memory overload cho
 | Warm entry contains a capturing lambda anywhere in its body | 0 B gate fails by design; extract the lambda to a cold helper |
 | Warm entry returns before the cold branch | still 0 B — no display class is hoisted |
 | A materializing overload/copy is re-added on the send seam | 0 B gate fails (`SpanSends` count and/or allocation delta) |
+| A gate's measured window spans `await`s that may resume on another thread | per-thread delta is invalid — the gate can fail spuriously *or* mask a small regression; make the window thread-stable or assert a bound plus the call counter |
 | Span reaches `Socks5UdpTransport` with the send gate uncontended | zero-alloc sync `SendTo` |
 | Span reaches `Socks5UdpTransport` with the gate contended | `payload.ToArray()` cold copy (documented exemption) |
 
@@ -267,6 +283,10 @@ branch, and any allocation-gate test that protects a span-vs-memory overload cho
   — the UDP gate asserts 0 allocated bytes and that the fake's `SpanSends` advances by exactly the expected count after the measurement (span is the only send seam).
 - `NativeBufferPoolTests` / `NdisPacketBufferPoolTests`: balance identity + dispose-drain races
   (`ReturnsRacingDisposeNeverStrandBuffers`).
+- Every allocation gate must be verifiable in isolation, not only inside the full suite: run it with
+  `dotnet test WinForward.slnx -c Release --filter "FullyQualifiedName~<GateName>"`. A gate that only
+  passes when the pool is warm is a weak gate — fix it before trusting it to protect a path you are
+  about to change (see "An allocation gate must evaluate on one thread").
 - Baseline must stay behavior-zero (678 tests green on this task).
 
 ### 6. Wrong vs Correct
@@ -285,6 +305,27 @@ public ValueTask<bool> TrySendSpanAsync(...)
 // so no display class is hoisted and the warm path measures 0 B.
 private void ScheduleSessionSetup(FlowKey flow, Socks5Server server, long flowGeneration, byte[]? capturedClientMac, UdpSessionSlot slot)
     => slot.Completion = Task.Run(() => _setup.CreateSessionAsync(flow, server, flowGeneration, capturedClientMac, _shutdown.Token, slot));
+```
+
+```csharp
+// Wrong: the measured window spans awaits, so a continuation may resume on a pool thread —
+// `before` and `after` are then read on different threads and the delta is meaningless.
+// The same code measured 600 B in isolation and 0 B inside the full suite (2026-09-21).
+var before = GC.GetAllocatedBytesForCurrentThread();
+for (var index = 0; index < count; index++)
+    await executor.ProxyAsync(packet, server, cancellationToken);
+Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+
+// Correct: run the whole window on one thread (single-threaded SynchronizationContext), so every
+// continuation resumes on the measuring thread; keep the thread-independent counter as backstop.
+await OnSingleThreadedContextAsync(async () =>
+{
+    var before = GC.GetAllocatedBytesForCurrentThread();
+    for (var index = 0; index < count; index++)
+        await executor.ProxyAsync(packet, server, cancellationToken);
+    Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+});
+Assert.Equal(count, factory.Transport!.SpanSends - spanSendsBeforeMeasure);
 ```
 
 ## Native pool family, pooled flow/setup state, and GC-off posture (task 09-18, 2026-09-18)

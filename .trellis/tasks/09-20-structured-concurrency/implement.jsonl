@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Zero-allocation packet-pipeline contract: constrains the primitive's Enter/Exit to be allocation-free and forbids any new steady-state packet-path allocation."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Suppression policy and the pre-commit quality gate: governs the C2 allowlist and the format/build/test/jb gates every child must pass."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Where the WinForward.Analyzers project, the analyzer test project, and the quiescence primitive belong."}
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "TCP relay/session lifecycle contracts the C3 migration must preserve."}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "UDP session lifecycle contracts (setup queue, expiry, teardown reason) the C3 migration must preserve."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Fail-closed proxy semantics and the transport-lifecycle drop policy the migration must not change."}
+{"file": ".trellis/tasks/09-20-structured-concurrency/design.md", "reason": "The shared architecture (primitive surface, enforcement rules, per-owner migration mapping) every child implements against."}

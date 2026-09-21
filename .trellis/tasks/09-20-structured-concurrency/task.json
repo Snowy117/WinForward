@@ -1,0 +1,31 @@
+{
+  "id": "structured-concurrency",
+  "name": "structured-concurrency",
+  "title": "Structured concurrency: quiescence scope and lifetime enforcement",
+  "description": "Parent task: formalize async lifetime safety via one audited quiescence-scope primitive (counted in-flight work + seal + join + owned CTS + first-fault), build-time enforcement banning the fire-and-forget escape syntaxes (_ = awaitable, ContinueWith, Task.Run outside allowlist) with one auditable escape hatch (QuiescenceScope.Run, tracked + fault-recorded), and migration of the async-lifecycle owners. Direct follow-up to archived 09-20-transport-lifecycle.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "qmazon",
+  "assignee": "qmazon",
+  "createdAt": "2026-09-20",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "09-20-quiescence-scope",
+    "09-20-lifetime-analyzers",
+    "09-20-lifecycle-migration-cluster",
+    "09-20-lifecycle-migration-rest"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

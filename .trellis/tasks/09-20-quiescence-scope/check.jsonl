@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/09-20-quiescence-scope/prd.md", "reason": "Acceptance criteria to verify against."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Code standards, forbidden patterns, and the suppression policy for quality verification."}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Zero-allocation acceptance for the new gate."}
+{"file": "benchmarks/README.md", "reason": "Benchmark methodology used to validate the gate-choice report."}
