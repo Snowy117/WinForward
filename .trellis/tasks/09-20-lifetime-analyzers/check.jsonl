@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/09-20-lifetime-analyzers/prd.md", "reason": "C2 acceptance criteria: load-bearing allowlist, scope confinement, src/** byte-identical"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify each exemption is narrowly scoped and carries a concrete documented reason"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Verify the new projects match layout, naming and line-cap conventions"}
+{"file": ".editorconfig", "reason": "Verify the allowlist is exactly the six temporary entries plus the one permanent exemption"}

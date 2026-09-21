@@ -10,6 +10,10 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/WinForward.Core.Tests/WinForward.Core.Tests.csproj" />
+    <Project Path="tests/WinForward.Analyzers.Tests/WinForward.Analyzers.Tests.csproj" />
+  </Folder>
+  <Folder Name="/analyzers/">
+    <Project Path="analyzers/WinForward.Analyzers/WinForward.Analyzers.csproj" />
   </Folder>
   <Folder Name="/benchmarks/">
     <Project Path="benchmarks/WinForward.Benchmarks/WinForward.Benchmarks.csproj" />

@@ -186,14 +186,18 @@ pins — central package management is in use and none exist today. Analyzer tes
 | Id | Rule | Notes |
 |----|------|-------|
 | `WF0001` | Do not discard an **unawaited** awaitable (`_ = <awaitable>`) | The escape that defeats VSTHRD110. Fix: `await`, or `scope.Run(...)`. |
-| `WF0002` | Do not use `Task.ContinueWith` | Eliminated structurally (§4.4) — needs no allowlist entry. |
-| `WF0003` | Do not `Task.Run` / `Task.Factory.StartNew` outside the primitive | Allowlisted to the primitive/analyzer projects. |
+| `WF0002` | Do not use `Task.ContinueWith` | Both sites are deleted structurally (§4.4); allowlisted per-file only until C3 lands. |
+| `WF0003` | Do not `Task.Run` / `Task.Factory.StartNew` | Allowlisted for `LayeredCaptureRunner.cs:144,149` until C4 migrates it. `QuiescenceScope` uses neither, so the primitive needs no entry. |
+| `WF0004` | Do not write a bare unawaited awaitable **expression statement** | `CS4014` covers this only inside `async` methods; allowlisted nowhere. |
 
-`WF0004` was **dropped**: a bare unawaited awaitable statement is exactly compiler warning `CS4014`,
-already fatal under this repo's `TreatWarningsAsErrors=true`, and `WF0001` covers the `_ =` loophole
-that defeats it. Rules key on **awaitable types** (`Task`, `Task<T>`, `ValueTask`, `ValueTask<T>`,
-custom awaitables). Analyzer tests must prove the rule does **not** fire on the benign shapes that
-exist in `src/` today:
+`WF0004` was initially **dropped**, on the assumption that a bare unawaited awaitable statement is
+exactly compiler warning `CS4014`, already fatal under this repo's `TreatWarningsAsErrors=true`.
+Measured 2026-09-21 with a scratch net10.0 probe: `async Task M() { WorkAsync(); }` produces
+`CS4014`, but `void M() { WorkAsync(); }` produces **no diagnostic at all** — so a bare
+`FooAsync();` in a synchronous method is silently unobserved. The rule was therefore restored;
+`WF0001` still covers the explicit `_ =` form, which `CS4014` never sees either way. Rules key on
+**awaitable types** (`Task`, `Task<T>`, `ValueTask`, `ValueTask<T>`, custom awaitables). Analyzer
+tests must prove the rules do **not** fire on the benign shapes that exist in `src/` today:
 
 - `_ = await FooAsync(...)` — awaited, only the result is discarded (`Socks5ControlConnection.cs:227`);
 - `_ = task.Exception` — `AggregateException`, not awaitable (`TcpProxyRelay.cs:290`);
@@ -201,6 +205,13 @@ exist in `src/` today:
 - `_ = TryWrite(...)` / `_ = TryAdd(...)` — `bool` (`IPAddressValue.cs:103`, `Socks5Udp.cs:35`,
   `RuntimeCounters.cs:95-96`);
 - `_ = character switch { ... }` — non-awaitable (`RuntimeLogging.cs:120`).
+
+One exemption is **permanent** and is not part of the shrink list: `WF0001` on
+`src/WinForward.Runtime/QuiescenceScope.cs`. The primitive starts its own children with
+`_ = RunChildAsync(...)` and detaches its drain with `_ = DrainCoreAsync(...)`; the child is already
+admitted by `TryEnter`, its lease is released by `RunChildAsync`, and its fault is recorded there, so
+neither discard is an unobserved fire-and-forget. It lands as a glob-scoped `.editorconfig` entry
+with that written reason — the analogue of a primitive's own implementation carve-out.
 
 Rules are scoped to `src/**` by the 3.1 wiring, so `tests/**` and `benchmarks/**` are not flagged.
 

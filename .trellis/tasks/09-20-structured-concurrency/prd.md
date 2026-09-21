@@ -160,9 +160,14 @@ reason-documented allowlist that C3/C4 shrink to zero.
 
 ### Enforcement decisions (confirmed 2026-09-20, user: "可以")
 
-- **E1 — three rules, not four.** `WF0001` unawaited awaitable discard (must not fire on
-  `_ = await X`), `WF0002` `.ContinueWith`, `WF0003` `Task.Run`/`Task.Factory.StartNew`. `WF0004` is
-  dropped: it duplicates `CS4014`, already fatal under `TreatWarningsAsErrors`.
+- **E1 — four rules** (revised 2026-09-21; originally three). `WF0001` unawaited awaitable discard
+  (must not fire on `_ = await X`), `WF0002` `.ContinueWith`, `WF0003`
+  `Task.Run`/`Task.Factory.StartNew`, `WF0004` a bare unawaited awaitable **expression statement**
+  (fires whether or not the enclosing method is `async`). `WF0004` was originally dropped on the
+  assumption that `CS4014` covered that shape; measured 2026-09-21 on net10.0, `CS4014` fires
+  **only** inside `async` methods, so a bare `FooAsync();` in a synchronous method is silently
+  unobserved. Closing the fire-and-forget class at build time requires the rule. See `design.md`
+  §3.2.
 - **E2 — one door:** `bool QuiescenceScope.Run(Func<CancellationToken, Task> body, string reason)` —
   tracked (drained), fault-recorded, seal-respecting, reason-required. The `Detach` method and
   `[Detach]` attribute forms are dropped. See `design.md` §3.3.

@@ -1,0 +1,15 @@
+<Project>
+  <!-- MSBuild stops searching at the nearest Directory.Build.props, so the repo-root one must be
+       imported explicitly; without this every project under src/ would lose net10.0,
+       TreatWarningsAsErrors, AnalysisLevel and the shared analyzer package set. -->
+  <Import Project="$(MSBuildThisFileDirectory)../Directory.Build.props" />
+
+  <ItemGroup>
+    <!-- The WF0001–WF0004 lifetime rules apply to src/** exactly. The analyzer project lives outside
+         src/, so it cannot reference itself. -->
+    <ProjectReference Include="$(MSBuildThisFileDirectory)../analyzers/WinForward.Analyzers/WinForward.Analyzers.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false"
+                      PrivateAssets="all" />
+  </ItemGroup>
+</Project>

@@ -194,12 +194,53 @@ one it created after handing a copy to the child.
 
 | Id | Rule | Fix | Status |
 |----|------|-----|--------|
-| `WF0001` | Do not discard an unawaited awaitable (`_ = <awaitable>`) | `await` it inline, or register it with `scope.Run(...)` | stub — filled by `09-20-lifetime-analyzers` (C2) |
-| `WF0002` | Do not use `Task.ContinueWith` | observe faults intrinsically in the child body (D9) | stub — C2 |
-| `WF0003` | Do not `Task.Run` / `Task.Factory.StartNew` outside the primitive | use `scope.Run(...)`, or a dedicated worker joined by its owner | stub — C2 |
+| `WF0001` | Do not discard an unawaited awaitable (`_ = <awaitable>`) | `await` it inline, or register it with `scope.Run(...)` | implemented — `UnawaitedAwaitableDiscardAnalyzer` |
+| `WF0002` | Do not use `Task.ContinueWith` | observe faults intrinsically in the child body (D9) | implemented — `ContinueWithAnalyzer` |
+| `WF0003` | Do not `Task.Run` / `Task.Factory.StartNew` outside the primitive | use `scope.Run(...)`, or a dedicated worker joined by its owner | implemented — `TaskRunAnalyzer` |
+| `WF0004` | Do not write a bare unawaited awaitable expression statement | `await` it, or register it with `scope.Run(...)` | implemented — `BareAwaitableExpressionAnalyzer` |
 
 Rules key on **awaitable types** (`Task`, `Task<T>`, `ValueTask`, `ValueTask<T>`, custom awaitables) so
 the benign discards in `src/**` (`_ = await FooAsync(...)`, `_ = task.Exception`, `_ = TryWrite(...)`,
-numeric `_ = Interlocked.Add(...)`) are not flagged. Rules are scoped to `src/**`. The primitive's own
-`Run` child start is part of this mechanism and is covered by C2's rollout (see the parent program
-design).
+numeric `_ = Interlocked.Add(...)`) are not flagged. Rules are scoped to `src/**`.
+
+`WF0004` exists because `CS4014` fires **only inside `async` methods**: `async Task M() { WorkAsync(); }`
+is reported, but `void M() { WorkAsync(); }` compiles in silence and the call is never observed.
+`WF0001` covers the explicit `_ = <awaitable>` form, which `CS4014` does not see either way.
+
+### Implementation and current allowlist state (C2, 2026-09-21)
+
+The rules live in `analyzers/WinForward.Analyzers/` (a `netstandard2.0` project with
+`EnforceExtendedAnalyzerRules`), are wired into `src/**` and nothing else by `src/Directory.Build.props`
+(a `ProjectReference` with `OutputItemType="Analyzer"` and `ReferenceOutputAssembly="false"`), and are
+declared `dotnet_diagnostic.WF000n.severity = error` in `.editorconfig`. Each `DiagnosticDescriptor`
+is already `DiagnosticSeverity.Error` in category `WinForward.Lifetime`, so a rule stays fatal even
+where warning treatment is relaxed. Two implementation details are load-bearing and easy to get wrong:
+
+- receivers are matched through `OriginalDefinition`, because a `ContinueWith`/`Run` overload declared
+  on `Task<TResult>` has `Task<TResult>` (not `Task`) as its `ContainingType` — keying on `Task` alone
+  silently misses every generic-task receiver;
+- `WF0004` excludes any `IAssignmentOperation` (not only `ISimpleAssignmentOperation`) and any
+  `IAwaitOperation`, so `_x ??= FooAsync();` and `await Task.WhenAny(a, b);` are not flagged.
+
+Temporary per-file allowlist entries (each carries its evidence and reason in `.editorconfig`; the
+program is not complete while any of them remains):
+
+| File | Rules | Removed by |
+|------|-------|-----------|
+| `src/WinForward.Runtime/TcpRedirect/TcpProxyRelay.cs` | `WF0001` `WF0002` (`:289`) | C3 |
+| `src/WinForward.Runtime/TcpRedirect/TcpRelayFaultObserver.cs` | `WF0001` `WF0002` (`:27`) | C3 (file deleted) |
+| `src/WinForward.Runtime/TcpRedirect/TcpRedirectSessionStore.cs` | `WF0001` (`:157`) | C3 |
+| `src/WinForward.Runtime/UdpProxy/UdpProxySession.cs` | `WF0001` (`:312`) | C3 |
+| `src/WinForward.Runtime/Capture/MultiAdapterCaptureLoop.cs` | `WF0001` (`:110`) | C4 |
+| `src/WinForward.Runtime/Capture/LayeredCaptureRunner.cs` | `WF0003` (`:144`, `:149`) | C4 |
+
+The single permanent exemption is `WF0001` for the primitive itself (`QuiescenceScope.cs`), below.
+
+### The primitive's permanent exemption
+
+`WF0001` is exempted **permanently** for `src/WinForward.Runtime/QuiescenceScope.cs`. The primitive
+starts its own children with `_ = RunChildAsync(...)` and detaches its drain with
+`_ = DrainCoreAsync(...)`; the child is already admitted by `TryEnter`, its lease is released by
+`RunChildAsync`, and its fault is recorded there — so neither discard is an unobserved
+fire-and-forget. This is the analogue of a primitive's own implementation carve-out, and it is
+separate from the temporary legacy-site allowlist, which must shrink to zero.
