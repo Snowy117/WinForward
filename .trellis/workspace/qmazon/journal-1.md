@@ -800,3 +800,25 @@ Delivered C2 of the structured-concurrency program: analyzers/WinForward.Analyze
 ### Status
 
 [OK] **Completed**
+
+
+## Session 31: Quiescence scope migration: TCP/UDP cluster (C3)
+<!-- trellis-session: v=2 fp=e091961c35405e6d -->
+
+**Date**: 2026-09-21
+**Task**: Quiescence scope migration: TCP/UDP cluster (C3)
+**Branch**: `feat/transport-lifecycle`
+
+### Summary
+
+Migrated the TCP/UDP lifecycle cluster to QuiescenceScope: TcpRedirectSessionStore/TcpRedirectSession (root + nested scope, TryEnterSetup), TcpProxyRelay (lease-taking pumps, intrinsic fault observation, observer file deleted, bounded drain), UdpProxySession (single failure cause scope.Fault, synchronous Action signal, lease-based send admission), UdpProxyCoordinator (scope.Run teardown, _inFlightTeardowns removed, defined seal point). Hardened the UDP allocation gate before touching the path it guards and corrected its recorded root cause (not-yet-ready window, not thread migration). Recorded D11 (owner teardown keeps its own one-shot claim; IsSealed-then-DrainAsync is TOCTOU). Gates: format exit 0, Release build 0 warnings, Core.Tests 773 + Analyzers.Tests 18, UDP allocation gate green in isolation, jb inspectcode zero issues. Allowlist shrunk to the two C4 Capture entries plus the primitive exemption.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a0e2b35` | feat(runtime): migrate the TCP/UDP lifecycle cluster to QuiescenceScope |
+
+### Status
+
+[OK] **Completed**

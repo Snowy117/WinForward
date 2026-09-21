@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 30
+- **Total Sessions**: 31
 - **Last Active**: 2026-09-21
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~802 | Active |
+| `journal-1.md` | ~824 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 31 | 2026-09-21 | Quiescence scope migration: TCP/UDP cluster (C3) | `a0e2b35` | `feat/transport-lifecycle` |
 | 30 | 2026-09-21 | Lifetime enforcement analyzers: four WF rules wired into src/** behind a proven allowlist (C2) | `2bfed0a`, `db52a93` | `feat/transport-lifecycle` |
 | 29 | 2026-09-21 | Quiescence scope primitive: measured gate choice and a fragile allocation gate found (C1) | `a167a24` | `feat/transport-lifecycle` |
 | 28 | 2026-09-20 | Transport lifecycle hardening: ownership, quiescence, session state | `4a2007e` | `feat/transport-lifecycle` |
