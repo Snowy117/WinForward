@@ -28,7 +28,8 @@
     "08-30-driver-resilience",
     "09-06-udp-burst-establishment",
     "09-06-udp-burst-ttl-attribution",
-    "09-06-local-mux-transport"
+    "09-06-local-mux-transport",
+    "09-20-transport-lifecycle"
   ],
   "parent": null,
   "relatedFiles": [],
