@@ -755,3 +755,25 @@ Planned and implemented 09-20-transport-lifecycle across Phases A-E. Ownership c
 ### Status
 
 [OK] **Completed**
+
+
+## Session 29: Quiescence scope primitive: measured gate choice and a fragile allocation gate found (C1)
+<!-- trellis-session: v=2 fp=5703a70be5b7df0a -->
+
+**Date**: 2026-09-21
+**Task**: Quiescence scope primitive: measured gate choice and a fragile allocation gate found (C1)
+**Branch**: `feat/transport-lifecycle`
+
+### Summary
+
+Planned and delivered C1 (09-20-quiescence-scope) of the structured-concurrency program, after grilling the design tree in rounds and creating the parent 09-20-structured-concurrency plus four children (quiescence-scope, lifetime-analyzers, lifecycle-migration-cluster, lifecycle-migration-rest). C1 ships QuiescenceScope + WorkLease: a packed-word CAS gate (bit 0 = sealed, rest = pending) chosen by measurement over the lock variant (18.60 ns vs 49.50 ns per enter/exit pair, both 0 B/op, outside the dev-box noise band); Enter/Exit allocate 0 bytes and the drain cell is created once at seal, never on a 0->1 transition. An independent trellis-check pass found 7 issues; the fix pass made DrainAsync identity-stable single-flight (the sealing caller previously got a different Task than later callers) with the drain cell allocated exactly once, added fault call-site attribution (RecordFault(exception, site) + FaultSite, fed by Run's name), corrected the spec's benchmark numbers, and asserted the D3/P6 no-sibling-cancellation property. While verifying, found that HotPathAllocationGateTests.EstablishedUdpDatagramPathAllocatesNoManagedBytes is not a flake but a thread-migration measurement artifact: its window spans 64 awaits while reading GC.GetAllocatedBytesForCurrentThread(), so it fails 4/4 in isolation (600 B observed) and is green only inside the full suite -- and in the dangerous direction a migrated continuation can mask a small real regression. The gate file is unmodified (pre-existing), so the contract 'an allocation gate must evaluate on one thread' was recorded in hot-path.md and the hardening was scheduled as a hard prerequisite of C3, which changes the span-send path it guards. Gates: format exit 0 empty, Release build 0 warnings, 763/763 tests, jb inspectcode 0 issues. Specs: new async-lifetime.md (glossary, I1/I2, primitive contract, Run admission rules, WF-rule stub) plus its index row; hot-path.md gate contract.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a167a24` | feat(runtime): counted quiescence scope primitive |
+
+### Status
+
+[OK] **Completed**
