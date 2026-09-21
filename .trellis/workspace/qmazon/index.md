@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 29
+- **Total Sessions**: 30
 - **Last Active**: 2026-09-21
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~779 | Active |
+| `journal-1.md` | ~802 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 30 | 2026-09-21 | Lifetime enforcement analyzers: four WF rules wired into src/** behind a proven allowlist (C2) | `2bfed0a`, `db52a93` | `feat/transport-lifecycle` |
 | 29 | 2026-09-21 | Quiescence scope primitive: measured gate choice and a fragile allocation gate found (C1) | `a167a24` | `feat/transport-lifecycle` |
 | 28 | 2026-09-20 | Transport lifecycle hardening: ownership, quiescence, session state | `4a2007e` | `feat/transport-lifecycle` |
 | 27 | 2026-09-20 | Adopt the JetBrains inspectcode gate and zero its report | `7b199df`, `25db2f5`, `1d612ea`, `baec0a2`, `b19a779`, `40df6e5`, `fb083cb` | `master` |

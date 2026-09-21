@@ -777,3 +777,26 @@ Planned and delivered C1 (09-20-quiescence-scope) of the structured-concurrency 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 30: Lifetime enforcement analyzers: four WF rules wired into src/** behind a proven allowlist (C2)
+<!-- trellis-session: v=2 fp=21ccd5410e3e41d3 -->
+
+**Date**: 2026-09-21
+**Task**: Lifetime enforcement analyzers: four WF rules wired into src/** behind a proven allowlist (C2)
+**Branch**: `feat/transport-lifecycle`
+
+### Summary
+
+Delivered C2 of the structured-concurrency program: analyzers/WinForward.Analyzers (netstandard2.0, Roslyn 4.14.0 pinned against SDK 10.0.401) with four build-breaking rules - WF0001 (discard of an unawaited awaitable), WF0002 (Task/Task<T>.ContinueWith), WF0003 (Task.Run / Task.Factory.StartNew), WF0004 (bare unawaited awaitable expression statement). WF0004 was restored after measuring that CS4014 fires only inside async methods: 'void M() { FooAsync(); }' is silent, so the synchronous-method hole needed its own rule. Rules key on awaitable types (well-known task types by OriginalDefinition plus a structural GetAwaiter/IsCompleted/OnCompleted/GetResult check) so custom awaitables are covered. A real design error was found by probing: Task<TResult> declares its own ContinueWith overloads, so matching only Task missed TcpProxyRelay.cs:289 - the very site its allowlist entry exists for; both original definitions are now matched. Wiring is deliberately narrow: a new src/Directory.Build.props re-imports the repo-root props and references the analyzer as OutputItemType=Analyzer, so src/** is governed while tests/** and benchmarks/** are not (pinned by tests). .editorconfig declares the severities as error rather than relying on TreatWarningsAsErrors and carries six temporary per-file exemptions (each with evidence and its C3/C4 remover) plus one permanent exemption for QuiescenceScope's tracked children. src/** product code is byte-identical - the rules landed with the allowlist, not with migration. Independent check: stripping every exemption reproduces exactly the 11 expected diagnostics line-for-line (no over-broad glob hides a site); per-rule adversarial breaks fail the expected tests (1 failure for WF0002, 7 for WF0001/0003/0004); deleting one exemption per rule id turns the build red at that site; a violating line under tests/ and benchmarks/ builds green; the analyzer project is inside the dotnet format gate. Gates: format exit 0 empty, Release build 0 warnings, 781 tests (763 Core + 18 Analyzers, exact), jb inspectcode zero issues. Spec: async-lifetime.md WF table completed plus the allowlist state. Two non-blocking AwaitableClassifier edges (over-fires on a non-System.Action parameterless OnCompleted delegate, under-fires on inherited awaiter members) recorded in the task notes rather than speculatively patched. Also committed the previously-missed bookkeeping that records 09-20-transport-lifecycle under its parent 08-30-proxy-perf-stability. Next: C3 migrates the TCP/UDP cluster and starts deleting these exemptions, with the allocation-gate hardening as its hard prerequisite.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2bfed0a` | feat(analyzers): build-time rules for the fire-and-forget escape syntaxes |
+| `db52a93` | chore(trellis): record 09-20-transport-lifecycle under 08-30-proxy-perf-stability |
+
+### Status
+
+[OK] **Completed**
