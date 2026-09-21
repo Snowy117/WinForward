@@ -5,21 +5,22 @@ using Xunit;
 namespace WinForward.Core.Tests;
 
 /// <summary>
-/// R1: the accept loop owns the lifetime CTS disposal — its finally runs when the linked shutdown
+/// R1: the accept loop owns the lifetime drain — its finally runs when the linked shutdown
 /// cancellation ends the loop first, so a retire that arrives afterwards must tolerate an already
-/// disposed source. Retire and DisposeLifetime must also be idempotent in either order.
+/// drained (and released) source. Retire and the lifetime drain must also be idempotent in either
+/// order.
 /// </summary>
 public sealed class TcpRedirectSessionTests
 {
     [Fact]
-    public void RetireAfterTheLinkedShutdownAlreadyEndedTheLoopDoesNotThrow()
+    public async Task RetireAfterTheLinkedShutdownAlreadyEndedTheLoopDoesNotThrow()
     {
         using var shutdown = new CancellationTokenSource();
         var session = CreateSession(shutdown.Token);
         var lifetime = session.Token;
 
-        shutdown.Cancel();
-        session.DisposeLifetime();
+        await shutdown.CancelAsync();
+        await session.DisposeLifetimeAsync();
         session.Retire();
 
         Assert.True(session.IsRetired);
@@ -27,7 +28,7 @@ public sealed class TcpRedirectSessionTests
     }
 
     [Fact]
-    public void RetireCancelsTheLifetimeAndDisposeLifetimeIsIdempotent()
+    public async Task RetireCancelsTheLifetimeAndTheDrainIsIdempotent()
     {
         var session = CreateSession(CancellationToken.None);
         var lifetime = session.Token;
@@ -38,21 +39,24 @@ public sealed class TcpRedirectSessionTests
         Assert.True(session.IsRetired);
         Assert.True(lifetime.IsCancellationRequested);
 
-        session.DisposeLifetime();
-        session.DisposeLifetime();
+        await session.DisposeLifetimeAsync();
+        await session.DisposeLifetimeAsync();
     }
 
     [Fact]
-    public void RetireAfterDisposeLifetimeLeavesTheDisposedSourceUntouched()
+    public async Task LateRetireAfterTheDrainedLifetimeWasReleasedIsHarmless()
     {
         using var shutdown = new CancellationTokenSource();
         var session = CreateSession(shutdown.Token);
         var lifetime = session.Token;
 
-        session.DisposeLifetime();
+        // The drain cancels the owned token and then releases the CTS, so the token stays
+        // cancelled-readable and a retire that arrives afterwards must not touch the source again.
+        await session.DisposeLifetimeAsync();
         session.Retire();
 
-        Assert.False(lifetime.IsCancellationRequested);
+        Assert.True(lifetime.IsCancellationRequested);
+        Assert.True(session.IsRetired);
     }
 
     private static TcpRedirectSession CreateSession(CancellationToken shutdown)

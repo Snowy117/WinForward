@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/09-20-lifecycle-migration-cluster/prd.md", "reason": "This child's requirements and acceptance criteria"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "The commit gate, suppression policy, and test-count expectations"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Must verify the hardened gate really is thread-stable in isolation"}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "Must verify the migrated owners honour the primitive's contract"}

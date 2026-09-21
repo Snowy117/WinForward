@@ -100,22 +100,69 @@ public sealed class HotPathAllocationGateTests
         await executor.ProxyAsync(packet, s_server, CancellationToken.None);
         await WaitForAsync(() => factory.Transport is not null);
         await WaitForAsync(() => factory.Transport!.Sends >= 1);
-        for (var warm = 0; warm < 3; warm++) await executor.ProxyAsync(packet, s_server, CancellationToken.None);
 
+        // Wait until the session admits datagrams directly instead of buffering them for the setup
+        // flush: before that point a dispatched datagram lands in the bounded (drop-oldest) setup
+        // queue and is sent later by the background pipeline, so the flush's own sends leak into
+        // the measured window and break the span-send count it pins. Readiness is one-way, so
+        // proving it once here makes the windows below deterministic.
+        var admittedDirectly = false;
+        for (var attempt = 0; attempt < 1024 && !admittedDirectly; attempt++)
+        {
+            var sendsBeforeProbe = factory.Transport!.SpanSends;
+            var probe = coordinator.TrySendSpanAsync(flow, s_server, payload, default, CancellationToken.None);
+            admittedDirectly = await probe
+                && factory.Transport!.SpanSends == sendsBeforeProbe + 1
+                && coordinator.Diagnostics.PendingSetupBytes == 0;
+
+            if (!admittedDirectly) await Task.Yield();
+        }
+
+        Assert.True(admittedDirectly, "the UDP session never began admitting datagrams directly");
+
+        // Runtime warm-up transient: the first ~30-60 calls after the session becomes ready
+        // allocate on the measuring thread, and the amount moves with DOTNET_TieredCompilation /
+        // DOTNET_TieredPGO, so it is JIT warm-up rather than product allocation. The measured
+        // window is opened only once a probe batch is allocation-stable — a genuine per-packet
+        // allocation never stabilizes and therefore fails the bounded loop below.
+        const int count = 64;
+        const int maximumStabilizationBatches = 8;
+        var stabilized = false;
+        for (var batch = 0; batch < maximumStabilizationBatches && !stabilized; batch++)
+        {
+            var probeThreadId = Environment.CurrentManagedThreadId;
+            var probeBefore = GC.GetAllocatedBytesForCurrentThread();
+            for (var index = 0; index < count; index++) await executor.ProxyAsync(packet, s_server, CancellationToken.None);
+            stabilized = Environment.CurrentManagedThreadId == probeThreadId
+                && GC.GetAllocatedBytesForCurrentThread() == probeBefore;
+        }
+        Assert.True(stabilized, "the UDP warm path never became allocation-stable");
+
+        // The measured window drives the synchronously-completing fast path the send bridge
+        // guarantees (the positive-check shape), so no continuation can migrate and the
+        // per-thread reading is valid; the thread is asserted unchanged to keep that property
+        // honest. The exact zero is kept — the stabilization above removes runtime warm-up, not
+        // the path's own allocation contract.
+        var measuredThreadId = Environment.CurrentManagedThreadId;
         var spanSendsBeforeMeasure = factory.Transport!.SpanSends;
         var before = GC.GetAllocatedBytesForCurrentThread();
-        const int count = 64;
-        for (var index = 0; index < count; index++) await executor.ProxyAsync(packet, s_server, CancellationToken.None);
+        for (var index = 0; index < count; index++)
+        {
+            var pending = executor.ProxyAsync(packet, s_server, CancellationToken.None);
+            Assert.True(pending.IsCompletedSuccessfully, "the allocation gate relies on the synchronous fast path");
+            await pending;
+        }
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
+        Assert.Equal(measuredThreadId, Environment.CurrentManagedThreadId);
         Assert.Equal(0, allocated);
         // A4/B4 mutation gate: the measured window must ride the span overload, and the cold
         // setup flush is a span send too (the queue holds native leases, not managed buffers).
         // The memory send overload no longer exists; the gate pins the span counter so a
         // regression that stops sending (or sends a managed copy) fails here.
+        Assert.True(spanSendsBeforeMeasure >= 1);
+        Assert.Equal(factory.Transport!.SpanSends, factory.Transport!.Sends);
         Assert.Equal(count, factory.Transport!.SpanSends - spanSendsBeforeMeasure);
-        Assert.Equal(4 + count, factory.Transport!.SpanSends);
-        Assert.Equal(4 + count, factory.Transport!.Sends);
         // The original datagram is consumed by the relay forward; it is never reinjected.
         Assert.Equal(0, reinjector.ToMstcpCount);
         Assert.Equal(0, reinjector.ToAdapterCount);

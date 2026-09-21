@@ -256,11 +256,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         var entry = item._tcp._entry!;
         var frame = item._tcp._frame!;
         var server = item._server!;
-        try
-        {
-            _store.EnterSetup();
-        }
-        catch (ObjectDisposedException)
+        if (!_store.TryEnterSetup(out var lease))
         {
             // Disposal began between the pump-side retain and this task's start: the setup was
             // never observed, and shutdown unwinds without a cooldown.
@@ -271,15 +267,15 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         try
         {
             var writeCooldown = await RunSetupPipelineAsync(entry, frame, server).ConfigureAwait(false);
-            // The entry removal and its cooldown write must complete before ExitSetup unblocks
-            // the store's dispose drain: the coordinator's post-drain RemoveAll clears the index,
-            // so a write racing the drain would otherwise re-arm a cooldown on a disposed index
-            // (D3).
+            // The entry removal and its cooldown write must complete before the lease release
+            // unblocks the store's dispose drain: the coordinator's post-drain RemoveAll clears
+            // the index, so a write racing the drain would otherwise re-arm a cooldown on a
+            // disposed index (D3).
             _pendingSyn.Complete(key, entry, writeCooldown, _timeProvider.GetUtcNow());
         }
         finally
         {
-            _store.ExitSetup();
+            lease.Dispose();
         }
     }
 

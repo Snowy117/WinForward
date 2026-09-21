@@ -1,5 +1,7 @@
 using System.Net;
+using System.Reflection;
 using WinForward.Runtime;
+using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
 using Xunit;
 
@@ -90,11 +92,7 @@ public sealed class UdpProxySessionTests
         var session = CreateSession(time, [], new FakeTransport(System.Net.Sockets.AddressFamily.InterNetwork, 40000));
         await using (session)
         {
-            session.Start(_ =>
-            {
-                Interlocked.Increment(ref failureHandlerCalls);
-                return Task.CompletedTask;
-            });
+            session.Start(_ => Interlocked.Increment(ref failureHandlerCalls));
 
             Assert.True(session.TryBeginExpiry(time.GetUtcNow(), TimeSpan.Zero));
             Assert.Equal(UdpSessionState.Expiring, session.State);
@@ -117,11 +115,7 @@ public sealed class UdpProxySessionTests
         var session = CreateSession(time, [], transport);
         await using (session)
         {
-            session.Start(faulted =>
-            {
-                handled.TrySetResult(faulted);
-                return Task.CompletedTask;
-            });
+            session.Start(faulted => handled.TrySetResult(faulted));
 
             transport.Received.Writer.TryComplete(new IOException("relay read failed"));
 
@@ -132,7 +126,46 @@ public sealed class UdpProxySessionTests
         }
     }
 
-    private static UdpProxySession CreateSession(TimeProvider time, List<DateTimeOffset> propagationStamps, FakeTransport? transport = null)
+    [Fact]
+    public async Task DisposeAsyncWaitsForAnOutstandingSendLease()
+    {
+        // Per-owner quiescence (F1): the send admission holds a scope lease for the whole transport
+        // await, so disposal must not return while the send is still in flight. The gate keeps the
+        // send outstanding; the pending dispose is the discriminator (a send that did not hold a
+        // lease would let disposal complete immediately).
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var transport = new FakeTransport(System.Net.Sockets.AddressFamily.InterNetwork, 40000) { SendGate = gate };
+        var session = CreateSession(new MutableTimeProvider(DateTimeOffset.UnixEpoch), [], transport);
+
+        var send = SendAsync(session, 1);
+        Assert.False(send.IsCompleted);
+
+        var dispose = DisposeSessionAsync(session);
+        await Task.Delay(50);
+        Assert.False(dispose.IsCompleted);
+
+        gate.SetResult();
+        Assert.True(await send.WaitAsync(TimeSpan.FromSeconds(5)));
+        await dispose.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(UdpSessionState.Disposed, session.State);
+    }
+
+    private static async Task<bool> SendAsync(UdpProxySession session, byte value) =>
+        await session.SendSpanAsync(session.Flow.Remote, [value], CancellationToken.None).ConfigureAwait(false);
+
+    private static async Task DisposeSessionAsync(UdpProxySession session) =>
+        await session.DisposeAsync().ConfigureAwait(false);
+
+    [Fact]
+    public void FaultedSessionStateHasNoParallelReceiveFailureField()
+    {
+        // D-C3-5: the session's single failure representation is the scope's Fault. A reintroduced
+        // _receiveFailure field would be a second source of truth that can disagree with State and
+        // the send admission (both read scope.Fault under _activityGate).
+        Assert.Null(typeof(UdpProxySession).GetField("_receiveFailure", BindingFlags.Instance | BindingFlags.NonPublic));
+    }
+
+    private static UdpProxySession CreateSession(TimeProvider time, List<DateTimeOffset> propagationStamps, IUdpProxyTransport? transport = null)
     {
         var flow = FlowKey.Create(
             Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000),

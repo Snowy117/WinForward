@@ -51,7 +51,10 @@ internal sealed class QuiescenceScope : IAsyncDisposable
     public bool IsIdle { get; }                      // pending == 0
 
     public Exception? Fault { get; }                 // first recorded fault (D3)
-    public void RecordFault(Exception exception);
+    public string? FaultSite { get; }                // the site that recorded it
+    public void RecordFault(Exception exception, string? site = null);
+
+    public bool IsSealed { get; }                    // seal-only admission predicate (D10)
 
     public void Cancel();
     public Task DrainAsync();                        // seal + cancel + join; single-flight
@@ -72,8 +75,11 @@ fault, so owners stop hand-rolling a `_runTask` field. It must not become the co
 path uses `TryEnter` + `WorkLease`.
 
 `WorkLease` is a **plain `struct`, not a `ref struct`**: it must survive across `await` (e.g. the
-future `UdpProxySession.FinishSpanSendAsync`), which C# forbids for `ref struct`s. It is idempotent,
-so a double-dispose is harmless.
+future `UdpProxySession.FinishSpanSendAsync`), which C# forbids for `ref struct`s. It is idempotent
+**per copy** — `Dispose()` nulls that copy's own scope field, so a double-dispose of the *same* copy is
+harmless, while disposing two different copies of one lease releases the scope twice. A lease is
+therefore a single local (`using var`), never stored in a field, boxed as `IDisposable`, or copied into
+a helper that disposes it.
 
 ### 2.2 Semantics (decided)
 
@@ -108,6 +114,10 @@ so a double-dispose is harmless.
   `ContinueWith(OnlyOnFaulted)` observer is a *patch* for a task someone may abandon; making
   observation intrinsic makes an abandoned task safe **by construction**, which is what lets `WF0002`
   exist with no allowlist entry. See §4.4.
+- **D10 — `IsSealed` is the admission predicate; `DrainAsync` is the join.** A caller may observe
+  sealed before the drain completes; that gap is exactly what makes a late `TryEnter` refusal
+  meaningful (D2). Owners read `IsSealed` for their entry-point guards instead of keeping a parallel
+  `_disposed` flag (added during C3 planning; see C3 `design.md` D-C3-1).
 
 ### 2.3 Allocation strategy and gate implementation (hot-path constraint)
 
@@ -277,6 +287,25 @@ also means adding its row to `.trellis/spec/backend/index.md`, which lists every
 
 ## 4. Migration (C3, C4)
 
+### 4.0 Revision note (2026-09-21, taken during C3 planning)
+
+§4.2–§4.4 were corrected against the working tree while planning C3. The earlier sketch disagreed with
+the code in four places, all now settled and evidenced in
+`.trellis/tasks/09-20-lifecycle-migration-cluster/research/design-contradictions-and-hazards.md`:
+
+1. the store's own `_shutdown` CTS was missing from §4.3 although D7 requires the scope to own it;
+2. the UDP failure representation was split — §4.2 kept writing `_receiveFailure` while §4.3/D9 implied
+   `scope.Fault`;
+3. `scope tracks both pumps` was in tension with `Completion`'s relay-level contract and the deliberate
+   stall fast-exit;
+4. the illustrative pump body manufactured `PumpResult.Stalled` on a sealed refusal, which the acceptor
+   turns into a client reset.
+
+Line anchors were re-verified on 2026-09-21 (`RCS1075` pragma at `:324`, not `:320`; the coordinator's
+comment at `:303-307`; the receive-loop fault write at `:301` and signal block at `:308-313`; the
+allocation-gate window at `HotPathAllocationGateTests.cs:105-109`). Per-owner execution detail,
+including the hazards the sketch never mentioned, lives in C3's own `design.md`.
+
 ### 4.1 Eliminating the fire-and-forget sites
 
 | Site | Classification | Target shape |
@@ -296,8 +325,13 @@ scope feature:
 
 - `Start(Func<UdpProxySession, Task>)` (`UdpProxySession.cs:124-128`) becomes
   `Start(Action<UdpProxySession>)` — a **synchronous signal**, so the callee cannot await anything.
-- The loop keeps its tail behaviour of writing `_receiveFailure` and then invoking the signal
-  (`UdpProxySession.cs:302-313`), minus the `_ =` discard.
+- The loop keeps its tail behaviour of recording the fault and then invoking the signal (fault write
+  `UdpProxySession.cs:301`, signal block `:308-313`), minus the `_ =` discard. The recorded fault is
+  `scope.Fault` — `_receiveFailure` is **deleted**, and every reader (`State` `:109-115`, the send
+  admission `:141-145`) reads `scope.Fault` under the same `_activityGate` it uses today, so the
+  fault-vs-send race relationship is unchanged (C3 `design.md` D-C3-5).
+- The signal must return promptly: a synchronous action that awaited or blocked on
+  `session.DisposeAsync()` would deadlock against `DisposeCoreAsync`'s `await _receiveLoop` (`:236`).
 - The coordinator supplies the action and maps it onto **its own** scope:
   `coordinatorScope.Run(ct => RemoveReceiveFailedSessionCoreAsync(session), "udp.receive-failure")`.
   Starting the teardown is synchronous; joining it happens in the coordinator's `DrainAsync`.
@@ -320,11 +354,11 @@ coordinator's scope, i.e. its own drain. The loop must stay on the session's sco
 
 | Owner | Today | After |
 |-------|-------|-------|
-| `TcpRedirectSessionStore` (`:32-36,58-73,139-203`) | `_inflightSetups` + `_setupsDrained` + `_disposeTask` | `QuiescenceScope` |
-| `UdpProxySession` (`:46,54-68,139-251`) | `_activeSends` + `_receiveLoop` + `_expiring` + `_receiveFailure` + `_disposeTask` + `_lifetime` | scope (accounting + drain + owned CTS) + `_expiring` (admission, stays) |
-| `UdpProxyCoordinator` (`:24,28,37,308`) | `_inFlightTeardowns` + `_shutdown` | scope; session scopes as nested children; `_inFlightTeardowns` deleted (§4.2) |
-| `TcpProxyRelay` (`:114,129,322`) | `Completion` property + `ObservePump` | scope tracks both pumps; `Completion` keeps its relay-level (stall early-exit) semantics |
-| `TcpRedirectSession` (`:19-44`) | `AcceptLoop` property + `Lifetime` CTS | scope child + scope-owned CTS |
+| `TcpRedirectSessionStore` (`:32-36,58-73,139-203`) | `_inflightSetups` + `_setupsDrained` + `_disposeTask` + `_shutdown` CTS (`:32`) | `QuiescenceScope` owning the CTS (D7); `EnterSetup` becomes a `TryEnter`-based bool |
+| `UdpProxySession` (`:46,54-68,139-251`) | `_activeSends` + `_receiveLoop` + `_expiring` + `_receiveFailure` + `_disposeTask` + `_lifetime` | scope (accounting + drain + owned CTS); `_expiring` stays (admission); `_receiveFailure` **deleted** — `scope.Fault` is the single failure cause |
+| `UdpProxyCoordinator` (`:24,28,37,308`) | `_inFlightTeardowns` + `_shutdown` | scope owning the CTS; session scopes nested; `_inFlightTeardowns` deleted (§4.2); the scope seals after `await slot.Completion` (`:278`) and before the teardown drain (`:292`) |
+| `TcpProxyRelay` (`:114,129,322`) | `Completion` property + `ObservePump` + a leaked `pumpCancellation` CTS (`:136`) | both pumps are scope children and the leaked CTS is replaced by the scope token; `Completion` keeps its relay-level (stall early-exit) semantics; the drain is bounded by the socket close (§4.4) |
+| `TcpRedirectSession` (`:19-44`) | `AcceptLoop` property + `Lifetime` CTS | nested scope owning the CTS; the accept loop takes a lease so the session's drain joins it |
 | `TcpRelayFaultObserver` (`:27`) | external `ContinueWith` on discarded relays | **file deleted** — observation is intrinsic (§4.4) |
 
 ### 4.4 Intrinsic fault observation — deletes both observer mechanisms (F2)
@@ -345,18 +379,33 @@ Both are patches for one violation: `Completion` can complete while a child is s
 exactly what I2 forbids. The structural fix makes fault observation intrinsic to each pump body:
 
 ```csharp
-if (!_scope.TryEnter(out var lease)) return PumpResult.Stalled;   // sealed ⇒ refuse
+if (!_scope.TryEnter(out var lease)) return PumpResult.Ended;   // sealed ⇒ disposal already began
 try { /* existing read/write loop */ }
-catch (Exception exception) { _scope.RecordFault(exception); throw; }
+catch (Exception exception) { _scope.RecordFault(exception, "tcp.relay.pump"); throw; }
 finally { lease.Dispose(); }
 ```
 
 This removes the symptom (unobserved exceptions) **and** the cause (the abandoned pump is now a
 tracked child that `DrainAsync` joins). Deletions: all of `TcpRelayFaultObserver.cs`, `ObservePump`,
 the `#pragma warning disable RCS1075` plus the empty `catch (Exception)` in `DisposeAsync`
-(`:320-329`), and `TcpRedirectAcceptor.cs:120`. `ITcpRelay.Completion` keeps its relay-level
-semantics — the stall fast-exit is deliberate and awaiting a stalled pump could hang — so this is
-**not** a change to `Completion`.
+(pragma `:324`, body `:325-328`), and `TcpRedirectAcceptor.cs:120`. `ITcpRelay.Completion` keeps its
+relay-level semantics — the stall fast-exit is deliberate and awaiting a stalled pump could hang — so
+this is **not** a change to `Completion`.
+
+Two corrections from C3 planning (2026-09-21):
+
+- **A sealed refusal must not report a stall.** The earlier snippet returned `PumpResult.Stalled` on a
+  refused `TryEnter`; that value drives `EndKind = Stalled`, and `TcpRedirectAcceptor.cs:222-232`
+  injects a client reset for any non-`CleanEnded` `EndKind` — so an ordinary teardown would look like a
+  stall-timeout and produce a spurious RST. A refusal means disposal already began, so the pump reports
+  a clean end instead. The branch is unreachable in practice (both pumps are started synchronously in
+  the constructor, `:137-138`, before the relay can be sealed); it exists to make the worst case
+  harmless, not to model a live state.
+- **"Tracked" does not make `Completion` wait.** The abandoned pump is joined by the scope's drain,
+  which runs only inside `TcpProxyRelay.DisposeAsync` **after** `_localSocket.Dispose()`. Closing the
+  socket is what forces the abandoned read/write to return, so the drain is bounded, while `Completion`
+  itself still completes at the stall fast-exit without waiting for both pumps. This is the resolution
+  of the drain-reliability risk in §6.
 
 Two findings from reading this code, to be settled by C3 tests rather than by argument:
 
@@ -373,6 +422,8 @@ Two findings from reading this code, to be settled by C3 tests rather than by ar
 
 - No wire/protocol/config/schema change; no user-visible behavior change.
 - The primitive is additive; each child is an independent commit. Rollback = revert the child.
+- `IsSealed` (D10) is the only addition to C1's shipped primitive: cold-path, allocation-free, and it
+  does not touch `TryEnter`/`Exit`/`DrainAsync`.
 - Analyzer rules are inert if C2 is reverted; the primitive stays useful regardless.
 - Constraints preserved: fail-closed proxy semantics (`error-handling.md`), zero-allocation packet
   pipeline (`hot-path.md`), and the existing quality gates (`quality-guidelines.md`).
@@ -386,13 +437,13 @@ Two findings from reading this code, to be settled by C3 tests rather than by ar
 - **Lock-order drift** when the scope gate is nested under per-owner gates. C1 documents the order;
   C3 verifies no reverse acquisition exists.
 - **Phasing churn**: C2's allowlist must shrink monotonically; C3/C4 must not re-introduce sites.
-- **Drain reliability is now bounded by pump cancellation responsiveness (F2).** The scope's
-  `DrainAsync` awaits pumps that today nobody awaits (the stall fast-exit abandons one on purpose). If
-  a pump does not respond to cancellation, the drain can hang where today's code would not.
-  Mitigations: teardown closes the socket, and owners already bound their relay wait with
-  `WaitAsync(token)` (`TcpRedirectAcceptor.cs:206`, documented as "a relay whose completion never
-  settles"). C3 adds a test that a stalled/cancelled pump still reaches the drain, and must not
-  convert `Completion` into "both pumps finished".
+- **Drain reliability under the abandoned pump (F2) — resolved by ordering, still tested.** The scope's
+  `DrainAsync` joins pumps that today nobody awaits (the stall fast-exit abandons one on purpose). The
+  drain runs only after `_localSocket.Dispose()`, which forces the abandoned read/write to return, so it
+  is bounded (§4.4); owners additionally bound their relay wait with `WaitAsync(token)`
+  (`TcpRedirectAcceptor.cs:206`, documented as "a relay whose completion never settles"). C3 still adds
+  the test: a stalled/cancelled pump reaches the end of `DisposeAsync`, and `Completion` is not
+  converted into "both pumps finished".
 - **Observer redundancy is a claim, not a proof (§4.4).** The deletability of `TcpRelayFaultObserver`
   rests on `DisposeAsync`/`DiscardUnattachedRelayAsync` always awaiting `Completion`. C3 must verify by
   fault injection before deleting, and keep the `tcp.relay.faulted` log if the injection shows it was

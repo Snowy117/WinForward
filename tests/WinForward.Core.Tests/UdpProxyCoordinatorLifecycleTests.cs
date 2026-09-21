@@ -1,4 +1,5 @@
 using System.Net;
+using System.Reflection;
 using WinForward.Configuration;
 using WinForward.Protocols;
 using WinForward.Runtime.UdpProxy;
@@ -117,6 +118,89 @@ public sealed class UdpProxyCoordinatorLifecycleTests
         Assert.Equal(1, pool.Stats.Returned);
         Assert.Equal(0, pool.Stats.Outstanding);
         Assert.True(await WaitUntilTrueAsync(() => coordinator.TrySendSpanAsync(CreateFlow("192.0.2.54"), s_server, [2], default, CancellationToken.None).AsTask()));
+    }
+
+    [Fact]
+    public async Task ReceiveFailureTeardownInFlightAcrossDisposalIsStillJoined()
+    {
+        // D-C3-8/F1: the receive-failure teardown runs as a coordinator-scope child (Run), so a
+        // disposal that begins while it is mid-flight seals after admitting it and joins it in the
+        // drain. Gating the session transport's disposal parks the teardown, so the pending
+        // coordinator dispose is the discriminator: without the scope join it would complete early.
+        var factory = new FakeTransportFactory();
+        var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 1 });
+        var flow = CreateFlow("192.0.2.53");
+
+        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
+        await WaitForAsync(() => factory.Transports.Count == 1);
+        var transport = Assert.Single(factory.Transports);
+        await WaitForReadyAsync(transport, 1);
+
+        var disposeGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        transport.DisposeGate = disposeGate;
+        transport.Received.Writer.TryComplete(new IOException("relay read failed"));
+
+        // The teardown child removed the slot and is now parked in the session's transport
+        // disposal; the session's own receive loop already signalled and returned (if the signal
+        // were awaited inline, the loop would deadlock behind this teardown and the join below).
+        await transport.DisposeStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var dispose = coordinator.DisposeAsync().AsTask();
+        await Task.Delay(50);
+        Assert.False(dispose.IsCompleted);
+
+        disposeGate.SetResult();
+        await dispose.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(transport.IsDisposed);
+        await Assert.ThrowsAsync<ObjectDisposedException>(async () =>
+            await coordinator.TrySendSpanAsync(CreateFlow("192.0.2.54"), s_server, [2], default, CancellationToken.None));
+
+        // The fire-and-forget teardown list is gone by construction: the scope is the only tracker.
+        Assert.Null(typeof(UdpProxyCoordinator).GetField("_inFlightTeardowns", BindingFlags.Instance | BindingFlags.NonPublic));
+        Assert.Null(typeof(UdpProxyCoordinator).GetMethod("DrainInFlightTeardownsAsync", BindingFlags.Instance | BindingFlags.NonPublic));
+    }
+
+    [Fact]
+    public async Task FaultingReceiveFailureTeardownLogsTheWarningAndNeverEscapes()
+    {
+        // D-C3-9/D4: Run records and swallows a teardown fault, so the body itself must log the
+        // owner's domain-specific warning — and the swallowed fault must not surface as an
+        // unobserved task exception nor fail the coordinator's own disposal.
+        var logger = new RecordingRuntimeLogger();
+        var factory = new FakeTransportFactory();
+        var coordinator = UdpCoordinatorFakes.CreateCoordinator(
+            factory,
+            new FakeResponseSink(),
+            new UdpProxyOptions { Capacity = 1, Logger = logger });
+        var flow = CreateFlow("192.0.2.53");
+
+        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
+        await WaitForAsync(() => factory.Transports.Count == 1);
+        var transport = Assert.Single(factory.Transports);
+        await WaitForReadyAsync(transport, 1);
+
+        var teardownFault = new IOException("transport dispose failed");
+        var probe = new UnobservedExceptionProbe();
+        TaskScheduler.UnobservedTaskException += probe.OnUnobserved;
+        try
+        {
+            probe.Track(teardownFault);
+            transport.DisposeFault = teardownFault;
+            transport.Received.Writer.TryComplete(new IOException("relay read failed"));
+
+            await WaitForAsync(() => logger.WarnCount >= 1);
+            Assert.Contains(logger.Lines, line => line.Level == RuntimeLogLevel.Warn && line.Message.Contains("receive-failure teardown faulted", StringComparison.Ordinal));
+
+            UnobservedExceptionProbe.ForceFinalization();
+            Assert.Equal(0, probe.Count);
+        }
+        finally
+        {
+            TaskScheduler.UnobservedTaskException -= probe.OnUnobserved;
+        }
+
+        // The fault is a child fault, so the owner's disposal still completes without throwing.
+        await coordinator.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]

@@ -4,19 +4,20 @@ using System.Runtime.Versioning;
 using WinForward.Configuration;
 using WinForward.Runtime.TcpRedirect;
 using Xunit;
+using static WinForward.Core.Tests.AsyncTestExtensions;
 
 namespace WinForward.Core.Tests;
 
 /// <summary>
-/// S3: a faulted relay completion must be observed on every path that discards a relay without
-/// awaiting it — the acceptor's attach-failure branch and the relay's own dispose. Both are
-/// asserted through the debug event the fault observer emits; the exception-before-gate ordering
-/// is asserted separately through a differential unobserved-fault probe.
+/// S3/F2: fault observation is intrinsic to the pump body — a faulting pump records the fault and
+/// reports it as a pump result, so an abandoned pump can never surface as an unobserved task
+/// exception. The acceptor's attach-failure branch observes a discarded relay by disposing it, and
+/// the `tcp.relay.faulted` debug event is emitted from the pump's own catch.
 /// </summary>
 public sealed class TcpRelayObservationTests
 {
     [Fact]
-    public async Task AttachFailureObservesFaultedRelayCompletion()
+    public async Task AttachFailureDisposesTheDiscardedRelay()
     {
         var logger = new RecordingRuntimeLogger();
         var relay = new FaultableRelay();
@@ -31,48 +32,80 @@ public sealed class TcpRelayObservationTests
         await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(session.Association.AcceptedPeerEndpoint), CancellationToken.None);
         await acceptor.RunAcceptLoopAsync(session);
 
-        // The discarded relay was disposed and its completion observed before the fault lands.
+        // Observation is now the relay's own dispose: a discarded relay must have been disposed,
+        // so its completion is awaited by construction rather than by an attached observer.
         Assert.True(relay.IsDisposed);
-        relay.Fault(new IOException("pump died"));
-        AssertExactlyOneFaultedEvent(logger);
-    }
-
-    [Fact]
-    public async Task AttachFailureObservesAlreadyFaultedRelayCompletion()
-    {
-        // The continuation must also cover a completion that faulted before the discard.
-        var logger = new RecordingRuntimeLogger();
-        var relay = new FaultableRelay();
-        relay.Fault(new IOException("pump died before attach"));
-        var session = CreateSession(out var listener);
-        var acceptor = new TcpRedirectAcceptor(
-            new InlineRelayFactory(relay),
-            logger,
-            new ClientResetInjector(new FakeInjector(), logger, _ => ValueTask.CompletedTask, _ => ValueTask.CompletedTask),
-            tryAttachRelay: (_, _) => false,
-            tearDownSession: _ => ValueTask.CompletedTask);
-
-        await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(session.Association.AcceptedPeerEndpoint), CancellationToken.None);
-        await acceptor.RunAcceptLoopAsync(session);
-
-        AssertExactlyOneFaultedEvent(logger);
     }
 
     [Fact]
     [SupportedOSPlatform("windows")]
-    public async Task RelayDisposeObservesFaultedCompletion()
+    public async Task PumpFaultFaultsCompletionAndEmitsExactlyOneFaultEvent()
     {
-        // Disposing the relay faults its in-flight pump (the local socket dies under the read),
-        // so the observation must be hooked before disposal for the fault to stay observed.
+        // F2 fault injection: a genuine pump failure still faults the relay completion and is
+        // recorded as the `tcp.relay.faulted` debug event — the event did not die with the
+        // deleted external observer, it moved into the pump's own catch.
         var (localPeer, relayLocal) = await CreateSocketPairAsync();
         using var local = localPeer;
         var logger = new RecordingRuntimeLogger();
-        var relay = new TcpProxyRelay(relayLocal, new FaultingUpstreamStream(), new NoopDisposable(), logger);
+        var pumpFault = new IOException("relay write failed");
+        var relay = new TcpProxyRelay(relayLocal, new FaultingUpstreamStream(pumpFault), new NoopDisposable(), logger);
+
+        await local.SendAsync(new byte[] { 1 }, SocketFlags.None);
+
+        // The pump's own exception instance reaches the completion unwrapped: it is the recorded
+        // fault that RunPumpAsync surfaces, not a wrapper or a freshly built exception.
+        var observed = await Assert.ThrowsAsync<IOException>(async () => await relay.Completion.WaitAsync(TimeSpan.FromSeconds(2)));
+        Assert.Same(pumpFault, observed);
+        AssertExactlyOneFaultedEvent(logger);
 
         await relay.DisposeAsync();
-        await Assert.ThrowsAnyAsync<Exception>(() => relay.Completion.WaitAsync(TimeSpan.FromSeconds(2)));
+    }
 
-        AssertExactlyOneFaultedEvent(logger);
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public async Task DisposingARelayObservesItsFaultedCompletionSoItNeverEscapes()
+    {
+        // The deleted external observer's remaining job — never let a faulted completion go
+        // unobserved — is now the relay's own dispose. A pump fault is recorded and reported as a
+        // result rather than thrown, so Completion is the only faultable task a relay owns, and a
+        // foreign observer must be unnecessary. The probe is filtered to the injected fault, and it
+        // is the only reader of that completion in this test: if the disposal observation regresses,
+        // the faulted task becomes collectable and this count turns non-zero.
+        var probe = new UnobservedExceptionProbe();
+        TaskScheduler.UnobservedTaskException += probe.OnUnobserved;
+        try
+        {
+            var pumpFault = new IOException("relay write failed");
+            probe.Track(pumpFault);
+
+            await FaultAndDisposeRelayAsync(pumpFault);
+
+            UnobservedExceptionProbe.ForceFinalization();
+            Assert.Equal(0, probe.Count);
+        }
+        finally
+        {
+            TaskScheduler.UnobservedTaskException -= probe.OnUnobserved;
+        }
+    }
+
+    /// <summary>
+    /// Faults a relay's pump and disposes it without any test-side read of its completion. The relay
+    /// stays a local of this helper so it is unreachable — and therefore collectable — once it
+    /// returns.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private static async Task FaultAndDisposeRelayAsync(IOException pumpFault)
+    {
+        var (localPeer, relayLocal) = await CreateSocketPairAsync();
+        using var local = localPeer;
+        var logger = new RecordingRuntimeLogger();
+        var relay = new TcpProxyRelay(relayLocal, new FaultingUpstreamStream(pumpFault), new NoopDisposable(), logger);
+
+        await local.SendAsync(new byte[] { 1 }, SocketFlags.None);
+        await WaitForAsync(() => logger.Events.Any(e => string.Equals(e.Name, "tcp.relay.faulted", StringComparison.Ordinal)));
+
+        await relay.DisposeAsync();
     }
 
     [Fact]
@@ -97,19 +130,23 @@ public sealed class TcpRelayObservationTests
     }
 
     [Fact]
-    public void FaultObserverSuppressesTheEventWhenDebugLoggingIsDisabled()
+    [SupportedOSPlatform("windows")]
+    public async Task FaultEventIsSuppressedWhenDebugLoggingIsDisabled()
     {
-        // S3: the production default threshold (info) disables debug, so the discard paths must not
-        // depend on the event being emitted — the continuation still consumes the fault (it reads
-        // task.Exception before consulting IsEnabled in TcpRelayFaultObserver.Observe) and simply
-        // skips the event.
+        // S3: the production default threshold (info) disables debug, so observation must not
+        // depend on the event being emitted — the fault still faults the completion, it simply
+        // produces no event.
+        var (localPeer, relayLocal) = await CreateSocketPairAsync();
+        using var local = localPeer;
         var logger = new RecordingRuntimeLogger(level => level != RuntimeLogLevel.Debug);
-        var relay = new FaultableRelay();
-        TcpRelayFaultObserver.Observe(relay, logger);
+        var relay = new TcpProxyRelay(relayLocal, new FaultingUpstreamStream(new IOException("relay write failed")), new NoopDisposable(), logger);
 
-        relay.Fault(new IOException("pump died"));
+        await local.SendAsync(new byte[] { 1 }, SocketFlags.None);
 
+        await Assert.ThrowsAsync<IOException>(async () => await relay.Completion.WaitAsync(TimeSpan.FromSeconds(2)));
         Assert.DoesNotContain(logger.Events, e => string.Equals(e.Name, "tcp.relay.faulted", StringComparison.Ordinal));
+
+        await relay.DisposeAsync();
     }
 
     private static void AssertExactlyOneFaultedEvent(RecordingRuntimeLogger logger) =>
@@ -153,14 +190,10 @@ public sealed class TcpRelayObservationTests
 
     private sealed class FaultableRelay : ITcpRelay
     {
-        // Inline continuations: Fault() must complete the observation before returning, so the
-        // test never races the logger.
         private readonly TaskCompletionSource _completion = new();
 
         public Task Completion => _completion.Task;
         public bool IsDisposed { get; private set; }
-
-        public void Fault(Exception exception) => _completion.TrySetException(exception);
 
         public ValueTask DisposeAsync()
         {
@@ -169,8 +202,8 @@ public sealed class TcpRelayObservationTests
         }
     }
 
-    /// <summary>An upstream stream whose reads hang until cancelled; any write faults.</summary>
-    private sealed class FaultingUpstreamStream : Stream
+    /// <summary>An upstream stream whose reads hang until cancelled; any write faults with the injected exception.</summary>
+    private sealed class FaultingUpstreamStream(Exception pumpFault) : Stream
     {
         public override bool CanRead => true;
         public override bool CanSeek => false;
@@ -183,11 +216,11 @@ public sealed class TcpRelayObservationTests
         public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
         public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
         public override void SetLength(long value) => throw new NotSupportedException();
-        public override void Write(byte[] buffer, int offset, int count) => throw new IOException("relay write failed");
+        public override void Write(byte[] buffer, int offset, int count) => throw pumpFault;
         public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => WaitForCancellationAsync(cancellationToken);
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => new(WaitForCancellationAsync(cancellationToken));
-        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => Task.FromException(new IOException("relay write failed"));
-        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) => ValueTask.FromException(new IOException("relay write failed"));
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => Task.FromException(pumpFault);
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) => ValueTask.FromException(pumpFault);
 
         private static async Task<int> WaitForCancellationAsync(CancellationToken cancellationToken)
         {

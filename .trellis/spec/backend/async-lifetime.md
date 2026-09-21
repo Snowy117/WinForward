@@ -66,6 +66,7 @@ internal sealed class QuiescenceScope : IAsyncDisposable
 
     public CancellationToken Token { get; }        // scope-owned; never read after DrainAsync completes
     public bool IsIdle { get; }                    // pending == 0
+    public bool IsSealed { get; }                  // sealed by DrainAsync; admission predicate, not the join
     public Exception? Fault { get; }               // first recorded fault
     public string? FaultSite { get; }              // the first fault's reporting site, if supplied
 
@@ -103,6 +104,25 @@ internal struct WorkLease : IDisposable          // mutable; Dispose() => one Ex
 - **D9 — Fault observation is intrinsic to the child body.** A migrated child records its own fault
   (and may rethrow, because someone still awaits it); the scope never patches an abandoned task with
   an external `ContinueWith` observer.
+- **D10 — `IsSealed` is the admission predicate; `DrainAsync` is the join.** They are deliberately
+  different: a caller may observe sealed while leases are still outstanding, which is exactly the gap
+  that makes a late `TryEnter` refusal meaningful (D2). Owners read `IsSealed` for their entry-point
+  guards instead of keeping a parallel `_disposed` flag; `IsSealed == true` never implies
+  `IsIdle == true`.
+- **D11 — An owner keeps its own teardown single-flight; the scope's single-flight covers only the
+  drain.** `DrainAsync` is single-flight and identity-stable, but it does **not** cover the owner work
+  that runs *around* it (socket close, control-connection disposal, pool/limiter release). Reading
+  `IsSealed` *before* calling `DrainAsync` is a TOCTOU check — sealing happens **inside** the drain — so
+  two concurrent `DisposeAsync` callers can both pass it and both run the teardown. Every migrated owner
+  therefore keeps an explicit one-shot claim for its teardown body (`Interlocked.Exchange` on an `int`
+  field, or an equivalent lazy task); a later caller skips the teardown and joins `DrainAsync()`
+  instead of returning early. Two consequences the reader must know: a late caller joins only the
+  *drain*, so it does not observe an exception the claimant's owner teardown throws, and it may return
+  before that teardown's own awaits finish. Owner teardown faults stay fail-fast to the **claimant**
+  (D-C3-2); only child faults are recorded without throwing (D4).
+  (`TcpProxyRelay`, `UdpProxySession` and `UdpProxyCoordinator` each hold one such `_teardownStarted` /
+  `_disposeStarted` field; `TcpRedirectSessionStore` needs none because its whole teardown is
+  `DisposeCoreAsync`, awaited by its single caller.)
 
 ### Allocation rule (hot path)
 
@@ -227,12 +247,16 @@ program is not complete while any of them remains):
 
 | File | Rules | Removed by |
 |------|-------|-----------|
-| `src/WinForward.Runtime/TcpRedirect/TcpProxyRelay.cs` | `WF0001` `WF0002` (`:289`) | C3 |
-| `src/WinForward.Runtime/TcpRedirect/TcpRelayFaultObserver.cs` | `WF0001` `WF0002` (`:27`) | C3 (file deleted) |
-| `src/WinForward.Runtime/TcpRedirect/TcpRedirectSessionStore.cs` | `WF0001` (`:157`) | C3 |
-| `src/WinForward.Runtime/UdpProxy/UdpProxySession.cs` | `WF0001` (`:312`) | C3 |
 | `src/WinForward.Runtime/Capture/MultiAdapterCaptureLoop.cs` | `WF0001` (`:110`) | C4 |
 | `src/WinForward.Runtime/Capture/LayeredCaptureRunner.cs` | `WF0003` (`:144`, `:149`) | C4 |
+
+C3 (2026-09-21, task `09-20-lifecycle-migration-cluster`) removed the four cluster entries it owned:
+`TcpProxyRelay.cs` and `TcpRelayFaultObserver.cs` (the latter deleted with its file) in step 4,
+`TcpRedirectSessionStore.cs` in step 3 and `UdpProxySession.cs` in step 5. After C3, no `_ =`,
+`.ContinueWith`, `Task.Run` or `Task.Factory.StartNew` site remains under
+`src/WinForward.Runtime/{TcpRedirect,UdpProxy}/`. Load-bearing evidence: a scratch
+`_ = Task.Delay(1);` added under `src/WinForward.Runtime/` fails the build with
+`error WF0001: Await this awaitable or start it as a tracked child with QuiescenceScope.Run`.
 
 The single permanent exemption is `WF0001` for the primitive itself (`QuiescenceScope.cs`), below.
 
@@ -244,3 +268,38 @@ starts its own children with `_ = RunChildAsync(...)` and detaches its drain wit
 `RunChildAsync`, and its fault is recorded there — so neither discard is an unobserved
 fire-and-forget. This is the analogue of a primitive's own implementation carve-out, and it is
 separate from the temporary legacy-site allowlist, which must shrink to zero.
+
+### Per-owner notes (C3, 2026-09-21)
+
+The TCP/UDP lifecycle cluster is migrated. What each owner owns after C3, and what it deleted:
+
+| Owner | Scope | Deleted |
+|-------|-------|---------|
+| `TcpRedirectSessionStore` | `_scope = new QuiescenceScope()` — the **root** scope, owns the CTS (`ShutdownToken => _scope.Token`) | `_shutdown`, `_inflightSetups`, `_setupsDrained`, `_disposeTask`, `_disposed`, `RunDisposeAsync`; `EnterSetup`/`ExitSetup` → `bool TryEnterSetup(out WorkLease lease)` |
+| `TcpRedirectSession` | nested `new QuiescenceScope(storeToken)` | `Lifetime`, `_lifetimeDisposed`; `Retire()` = `_retired` claim + `_scope.Cancel()`; `DisposeLifetime()` → `DisposeLifetimeAsync()` |
+| `TcpProxyRelay` | `_scope = new QuiescenceScope()`, both pumps take leases on it | `_disposed`, the leaked `pumpCancellation` CTS, `ObservePump`, the whole `TcpRelayFaultObserver.cs`, `_ = ShutdownSend(...)` |
+| `TcpRedirectSession` accept loop | **no lease** (documented deviation) | — |
+| `UdpProxySession` | `_scope = new QuiescenceScope(context.Shutdown)` owns the CTS | `_lifetime`, `_disposeGate`, `_disposeTask`, `_receiveFailure`, `_disposed`, `_activeSends`, `CancelLifetime()` |
+| `UdpProxyCoordinator` | `_scope = new QuiescenceScope()` owns the CTS; session scopes nest under it | `_shutdown`, `_disposeTask`, `_disposed`, `_inFlightTeardowns`, `DrainInFlightTeardownsAsync` |
+| `UdpSessionSetup` | none — not an owner; reaches the coordinator only through `IUdpSessionSlotHost` | — |
+
+Two deviations from the program's sketch were kept deliberately and must not be "fixed" by a later
+reader:
+
+- **The TCP accept loop does not hold a scope lease.** The store joins `AcceptLoop` explicitly in
+  `DisposeCoreAsync`, which is where its program-level quiescence comes from; a lease would deadlock
+  against the in-loop `DisposeLifetimeAsync()` reached via `ObserveRelayCompletionAsync`, and a safe
+  lease form cannot be ordered against thread-pool scheduling. Consequence: the *session's*
+  `DisposeAsync` is not a quiescence point for the accept loop.
+- **`TcpRedirectSession._retired` is retained** as the owner's admission flag. `Retire()` must only
+  `Cancel()` — never seal or drain — because the accept loop and `ClientResetInjector` read
+  `session.Token` while unwinding (a drain there would release the CTS under a live reader).
+
+Fault observation is now intrinsic everywhere: each relay pump records its own fault
+(`RecordPumpFault` → `RecordFault(exception, "tcp.relay.pump")`) and reports a **result**
+(`PumpResult.Faulted`) instead of rethrowing, `RunPumpAsync` surfaces `_scope.Fault` on `Completion`,
+and `DisposeAsync` observes `Completion` on every path (`ObserveCompletionAsync`) so a faulted
+`Completion` can never escape as an unobserved task exception. The receive-failure path is a
+signal/join split: `UdpProxySession`'s loop tail calls a synchronous `Action<UdpProxySession>`, and the
+coordinator maps it to `_scope.Run(…, "udp.receive-failure")` — the signal must return promptly (an
+awaited teardown there deadlocks against the session's own disposal).

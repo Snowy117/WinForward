@@ -12,8 +12,10 @@ internal sealed record RetiredSession(TcpRedirectSession Session, ITcpRelay? Rel
 
 /// <summary>
 /// Owns the TCP redirect session set and its lifecycle invariants: every mutation of the session
-/// dictionary, the disposed flag, the dispose task, and the inflight-setup drain counter happens
-/// under one gate, so registration, teardown, expiry, and dispose remain mutually exclusive. It is
+/// dictionary happens under one gate, so registration, teardown, expiry, and dispose remain mutually
+/// exclusive. The store's lifetime CTS and its inflight-setup drain live in a
+/// <see cref="QuiescenceScope"/> (D7): <c>DisposeAsync</c> seals and drains it, which is what joins
+/// every registered setup before the ordered session teardown runs. It is
 /// also the single tombstone write point: every teardown path funnels through
 /// <see cref="RemoveAssociationFromTable"/>, which records the TIME_WAIT-grace tombstone when the
 /// removal wins. The retire path removes the table alias and arms the tombstone while still
@@ -29,11 +31,7 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
 {
     private readonly Dictionary<FlowKey, TcpRedirectSession> _sessions = [];
     private readonly Lock _gate = new();
-    private readonly CancellationTokenSource _shutdown = new();
-    private TaskCompletionSource _setupsDrained = CompletedSource();
-    private Task? _disposeTask;
-    private int _inflightSetups;
-    private bool _disposed;
+    private readonly QuiescenceScope _scope = new();
 
     /// <summary>
     /// The TIME_WAIT-grace window a torn-down redirect stays resolvable as a tombstone. 60s covers
@@ -42,9 +40,9 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
     /// </summary>
     private static readonly TimeSpan s_tombstoneGracePeriod = TimeSpan.FromSeconds(60);
 
-    public bool IsDisposed => Volatile.Read(ref _disposed);
+    public bool IsDisposed => _scope.IsSealed;
 
-    public CancellationToken ShutdownToken => _shutdown.Token;
+    public CancellationToken ShutdownToken => _scope.Token;
 
     /// <summary>The TIME_WAIT-grace tombstone index; surfaced for the coordinator's routing lookups.</summary>
     public TcpRedirectTombstoneTable Tombstones { get; } = new(capacity);
@@ -55,36 +53,25 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
         get { lock (_gate) return _sessions.Count; }
     }
 
-    public void EnterSetup()
-    {
-        lock (_gate)
-        {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_inflightSetups++ == 0) _setupsDrained = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        }
-    }
-
-    public void ExitSetup()
-    {
-        lock (_gate)
-        {
-            if (--_inflightSetups == 0) _setupsDrained.TrySetResult();
-        }
-    }
+    /// <summary>
+    /// Admits one in-flight setup into the store's quiescence scope. Returns false once disposal has
+    /// sealed the scope, in which case the caller must not start the setup and must unwind without a
+    /// cooldown. The lease is disposed by the caller when the setup completes.
+    /// </summary>
+    public bool TryEnterSetup(out WorkLease lease) => _scope.TryEnter(out lease);
 
     /// <summary>
     /// Adds a newly built session under the gate. When the store is already disposed the session
-    /// never becomes observable: it is retired, its lifetime disposed, and its self-traffic token
-    /// released before returning null.
+    /// never becomes observable: it is retired and its self-traffic token released before returning
+    /// null. The caller owns the session's lifetime drain (it has the only await that release needs).
     /// </summary>
     public TcpRedirectSession? TryRegister(TcpRedirectSession session)
     {
         lock (_gate)
         {
-            if (_disposed)
+            if (_scope.IsSealed)
             {
                 session.Retire();
-                session.DisposeLifetime();
                 session.SelfTrafficToken.Dispose();
                 return null;
             }
@@ -117,7 +104,7 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
         RetiredSession[] expired;
         lock (_gate)
         {
-            if (_disposed) return 0;
+            if (_scope.IsSealed) return 0;
             expired = [.. _sessions.Values
                 .Where(session => session.Association.Phase == RelayPhase.Redirecting && now - session.Association.LastActivityUtc >= idleTimeout)
                 .Select(RetireSessionUnderGate)];
@@ -136,47 +123,15 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
         return expired.Length;
     }
 
-    public ValueTask DisposeAsync()
-    {
-        Task disposeTask;
-        TaskCompletionSource? start = null;
-        lock (_gate)
-        {
-            if (_disposeTask is not null)
-            {
-                disposeTask = _disposeTask;
-            }
-            else
-            {
-                _disposed = true;
-                start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                disposeTask = _disposeTask = start.Task;
-            }
-        }
-
-        if (start is not null) _ = RunDisposeAsync(start);
-        return new ValueTask(disposeTask);
-    }
-
-    private async Task RunDisposeAsync(TaskCompletionSource completion)
-    {
-        try
-        {
-            await DisposeCoreAsync().ConfigureAwait(false);
-            completion.TrySetResult();
-        }
-        catch (Exception exception)
-        {
-            completion.TrySetException(exception);
-        }
-    }
+    public ValueTask DisposeAsync() => new(DisposeCoreAsync());
 
     private async Task DisposeCoreAsync()
     {
-        await _shutdown.CancelAsync().ConfigureAwait(false);
-        Task setupsDrained;
-        lock (_gate) setupsDrained = _setupsDrained.Task;
-        await setupsDrained.ConfigureAwait(false);
+        // The scope owns the store's lifetime CTS (D7) and joins every in-flight setup, so the
+        // ordered teardown keeps its historical shape with the setup drain as the scope's join:
+        // cancel the token, drain the setups, retire the sessions, then await their accept loops.
+        _scope.Cancel();
+        await _scope.DrainAsync().ConfigureAwait(false);
 
         RetiredSession[] sessions;
         lock (_gate)
@@ -190,16 +145,17 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
             var session = retired.Session;
             if (session.AcceptLoop is not null)
             {
+                // The loop's own finally drains the session, so its lifetime source is already
+                // released by the time this await observes the end — cancellation is the expected
+                // shutdown path.
                 try { await session.AcceptLoop.ConfigureAwait(false); }
-                catch (OperationCanceledException) when (_shutdown.IsCancellationRequested) { /* cancellation is the expected shutdown path */ }
+                catch (OperationCanceledException) { /* the expected shutdown path */ }
                 catch (ObjectDisposedException) { /* the listener was already disposed during shutdown */ }
             }
             // The accept loop owns the lifetime CTS disposal (R1); a session whose loop was never
             // launched has no other owner, so it is released here after the quiescence wait.
-            session.DisposeLifetime();
+            await session.DisposeLifetimeAsync().ConfigureAwait(false);
         }
-
-        _shutdown.Dispose();
     }
 
     public ValueTask TearDownSessionAsync(TcpRedirectSession session)
@@ -207,7 +163,7 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
         RetiredSession? retired;
         lock (_gate)
         {
-            if (_disposed) return ValueTask.CompletedTask;
+            if (_scope.IsSealed) return ValueTask.CompletedTask;
             retired = TryRetireSessionUnderGate(session);
         }
         return retired is not null ? ReleaseRetiredAsync(retired) : ValueTask.CompletedTask;
@@ -256,7 +212,7 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
         // The lifetime CTS is disposed by the accept loop once it ends (it is the only reader of
         // session.Token), so a retire can never pull the CTS out from under a concurrent Token
         // read (R1). A session whose loop was never launched is disposed here.
-        if (session.AcceptLoop is null) session.DisposeLifetime();
+        if (session.AcceptLoop is null) await session.DisposeLifetimeAsync().ConfigureAwait(false);
     }
 
     public bool TryAttachRelay(TcpRedirectSession session, ITcpRelay relay)
@@ -275,7 +231,7 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
         TcpRedirectSession? session;
         lock (_gate)
         {
-            if (_disposed) return;
+            if (_scope.IsSealed) return;
             _sessions.TryGetValue(association.OriginalKey, out session);
         }
         if (session is not null) await TearDownSessionAsync(session).ConfigureAwait(false);
@@ -323,12 +279,5 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
     private void RemoveAssociationFromTable(TcpRedirectAssociation association)
     {
         table.TryRemove(association, removed => Tombstones.TryAdd(removed.OriginalKey, removed.ReverseSourceEndpoint, removed.ReverseDestinationEndpoint, timeProvider.GetUtcNow() + s_tombstoneGracePeriod));
-    }
-
-    private static TaskCompletionSource CompletedSource()
-    {
-        var source = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        source.SetResult();
-        return source;
     }
 }

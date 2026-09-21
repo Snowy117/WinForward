@@ -97,7 +97,7 @@ internal sealed class UdpSessionSetup(
             var session = new UdpProxySession(new UdpProxySessionContext(flow, flowGeneration, association, transport, responseSink, clientMac, timeProvider, OnSessionActivity, logger, receiveWindowPool, receiveBufferSize, cancellationToken));
             transport = null;
             host.AttachSession(slot, session);
-            session.Start(host.RemoveReceiveFailedSessionAsync);
+            session.Start(host.RemoveReceiveFailedSession);
             UdpProxyLogging.LogDebug(logger, "udp.session.created", flow, flowGeneration, association, server.Name);
             await FlushSetupQueueAsync(flow, slot, session, cancellationToken).ConfigureAwait(false);
         }

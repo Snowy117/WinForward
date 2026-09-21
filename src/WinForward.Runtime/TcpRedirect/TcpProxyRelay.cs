@@ -104,15 +104,18 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
     // ~100-200 ns per operation at 10 Gbps single-flow chunk rates.
     internal static readonly long s_armThrottleTicks = Stopwatch.Frequency;
 
+    // Only reachable if a pump reports a fault it did not record, which the pump body cannot do.
+    private const string PumpFaultMessage = "the relay pump failed";
+
     private readonly Socket _localSocket;
     private readonly IAsyncDisposable _control;
     private readonly IRuntimeLogger _logger;
-    // Defaults to the fail-visible kind: a relay whose pumps never started (a construction-time
-    // throw before the run body) completes faulted without ever classifying itself, and that end
-    // must still surface as a client reset. CleanEnded is only ever assigned explicitly, after
-    // both pumps verifiably completed.
-    private int _disposed;
     private readonly NativeBufferPool _pumpBufferPool;
+    // Owns the pumps' lifetime token (D7) in place of the former per-relay linked source, and joins
+    // the pumps when the relay is disposed. It is sealed and drained only after the local socket is
+    // closed, which is what forces a pump the stall fast-exit abandoned to return (D-C3-3).
+    private readonly QuiescenceScope _scope = new();
+    private int _teardownStarted;
 
     public TcpProxyRelay(Socket localSocket, Stream upstream, IAsyncDisposable control, IRuntimeLogger? logger = null, NativeBufferPool? pumpBufferPool = null)
     {
@@ -128,48 +131,64 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
 
     public Task Completion { get; }
 
+    // Defaults to the fail-visible kind: a relay whose pumps never started (a construction-time
+    // throw before the run body) completes faulted without ever classifying itself, and that end
+    // must still surface as a client reset. CleanEnded is only ever assigned explicitly, after
+    // both pumps verifiably completed.
     public RelayEndKind EndKind { get; private set; } = RelayEndKind.Faulted;
 
     private async Task RunPumpAsync(Stream upstream)
     {
         await using var localStream = new NetworkStream(_localSocket, ownsSocket: true);
-        using var pumpCancellation = new CancellationTokenSource();
-        var localToUpstream = PumpAsync(localStream, upstream, _pumpBufferPool, pumpCancellation.Token);
-        var upstreamToLocal = PumpAsync(upstream, localStream, _pumpBufferPool, pumpCancellation.Token);
+        var token = _scope.Token;
+        var localToUpstream = PumpAsync(localStream, upstream, _pumpBufferPool, token);
+        var upstreamToLocal = PumpAsync(upstream, localStream, _pumpBufferPool, token);
 
-        try
+        var first = await Task.WhenAny(localToUpstream, upstreamToLocal).ConfigureAwait(false);
+        var firstResult = await first.ConfigureAwait(false);
+
+        // A pump returns Ended only when its admission was refused, meaning the scope is already sealed
+        // and disposal has begun. That is not a relay end: the join below observes the sibling and the
+        // relay ends cleanly rather than as a stall (D-C3-4).
+        if (firstResult != PumpResult.Ended)
         {
-            var first = await Task.WhenAny(localToUpstream, upstreamToLocal).ConfigureAwait(false);
-            var firstResult = await first.ConfigureAwait(false);
+            _scope.Cancel();
             if (firstResult == PumpResult.Stalled)
             {
-                await pumpCancellation.CancelAsync().ConfigureAwait(false);
-                ObservePump(first == localToUpstream ? upstreamToLocal : localToUpstream);
+                // Stall fast-exit: the relay is reclaimed without awaiting the sibling, so Completion
+                // still completes on a stall instead of waiting for both pumps. The sibling is a
+                // tracked child — the scope's drain joins it inside DisposeAsync, and the socket close
+                // there makes it return (D-C3-3).
                 EndKind = RelayEndKind.Stalled;
                 return;
             }
 
-            if (first == localToUpstream) ShutdownSend(upstream);
-            else ShutdownSend(_localSocket);
-
-            var results = await Task.WhenAll(localToUpstream, upstreamToLocal).ConfigureAwait(false);
-            if (results[0] == PumpResult.Stalled || results[1] == PumpResult.Stalled)
-            {
-                await pumpCancellation.CancelAsync().ConfigureAwait(false);
-                EndKind = RelayEndKind.Stalled;
-            }
-            else
-            {
-                EndKind = RelayEndKind.CleanEnded;
-            }
-        }
-        catch
-        {
-            await pumpCancellation.CancelAsync().ConfigureAwait(false);
-            ObservePump(localToUpstream.IsCompleted ? upstreamToLocal : localToUpstream);
+            // The faulting pump recorded its own fault before returning it (D9/F2), so surfacing it
+            // here is the only observation the orphaned sibling needs: a pump never completes with
+            // an exception of its own, so no pump task can ever be an unobserved fault.
             EndKind = RelayEndKind.Faulted;
-            throw;
+            throw _scope.Fault ?? new IOException(PumpFaultMessage);
         }
+
+        if (first == localToUpstream) ShutdownSend(upstream);
+        else ShutdownSend(_localSocket);
+
+        var results = await Task.WhenAll(localToUpstream, upstreamToLocal).ConfigureAwait(false);
+        if (results[0] == PumpResult.Faulted || results[1] == PumpResult.Faulted)
+        {
+            _scope.Cancel();
+            EndKind = RelayEndKind.Faulted;
+            throw _scope.Fault ?? new IOException(PumpFaultMessage);
+        }
+
+        if (results[0] == PumpResult.Stalled || results[1] == PumpResult.Stalled)
+        {
+            _scope.Cancel();
+            EndKind = RelayEndKind.Stalled;
+            return;
+        }
+
+        EndKind = RelayEndKind.CleanEnded;
     }
 
     // One reusable per-operation stall window per pump direction (P1): re-arms a single linked
@@ -215,8 +234,12 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
     internal static bool IsRearmDue(long lastArmTicks, long nowTicks)
         => lastArmTicks == 0 || nowTicks - lastArmTicks > s_armThrottleTicks;
 
-    private static async Task<PumpResult> PumpAsync(Stream source, Stream destination, NativeBufferPool pumpBufferPool, CancellationToken cancellationToken)
+    private async Task<PumpResult> PumpAsync(Stream source, Stream destination, NativeBufferPool pumpBufferPool, CancellationToken cancellationToken)
     {
+        // A sealed scope means disposal already began and this pump never ran: reporting a clean end
+        // rather than a stall keeps an ordinary teardown from looking like a stall timeout, which
+        // the acceptor would surface as a client reset (D-C3-4).
+        if (!_scope.TryEnter(out var workLease)) return PumpResult.Ended;
         // One native 64 KiB window per pump direction (X5/B11): directions have independent
         // lifetimes via half-close, so the lease brackets this whole pump and the pool bounds
         // steady-state memory while an 8 KiB fixed buffer paid ~8x the per-byte
@@ -261,51 +284,68 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
                 }
             }
         }
+        catch (Exception exception)
+        {
+            RecordPumpFault(exception);
+            return PumpResult.Faulted;
+        }
         finally
         {
             lease.Dispose();
+            workLease.Dispose();
         }
     }
 
-    private static bool ShutdownSend(Socket socket)
+    // Fault observation is intrinsic to the pump body (D9): the exception is recorded on the scope
+    // and reported as a result instead of being thrown, so a pump task can never be left faulted —
+    // and therefore never needs an external observer to avoid an unobserved fault (F2). The
+    // `tcp.relay.faulted` event, whose only producer used to be the deleted external observer,
+    // moves here with the fault.
+    private void RecordPumpFault(Exception exception)
+    {
+        _scope.RecordFault(exception, "tcp.relay.pump");
+        if (!_logger.IsEnabled(RuntimeLogLevel.Debug)) return;
+        _logger.Event(RuntimeLogLevel.Debug, "tcp.relay.faulted", new RuntimeLogField("error", exception.GetType().Name));
+    }
+
+    private static void ShutdownSend(Socket socket)
     {
         try
         {
             socket.Shutdown(SocketShutdown.Send);
-            return true;
         }
-        catch (SocketException) { return false; }
-        catch (ObjectDisposedException) { return false; }
+        catch (SocketException) { /* the peer is already gone */ }
+        catch (ObjectDisposedException) { /* the socket is already disposed */ }
     }
 
     private static void ShutdownSend(Stream stream)
     {
         if (stream is not NetworkStream networkStream) return;
-        _ = ShutdownSend(networkStream.Socket);
-    }
-
-    private static void ObservePump(Task<PumpResult> first)
-    {
-        _ = first.ContinueWith(
-            static task => _ = task.Exception,
-            CancellationToken.None,
-            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
+        ShutdownSend(networkStream.Socket);
     }
 
     private enum PumpResult
     {
         Ended,
         Stalled,
+        Faulted,
     }
 
     public async ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-        // The dispose path discards the relay without ever awaiting its completion — and the
-        // disposal itself faults an in-flight pump read — so the fault observer must be hooked
-        // before the sockets go away (S3).
-        TcpRelayFaultObserver.Observe(this, _logger);
+        // D11 — the scope's single-flight covers only the drain, and the seal happens *inside*
+        // DrainAsync, so a precheck on IsSealed would be TOCTOU: two concurrent callers could both
+        // run the socket/control teardown. The Interlocked claim restores the one-shot guarantee the
+        // pre-migration code had; every caller — the claimant included — joins the drain below.
+        if (Interlocked.Exchange(ref _teardownStarted, 1) != 0)
+        {
+            await _scope.DrainAsync().ConfigureAwait(false);
+            await ObserveCompletionAsync().ConfigureAwait(false);
+            return;
+        }
+
+        var drained = _scope.DrainAsync();
+        _scope.Cancel();
         _localSocket.Dispose();
         try
         {
@@ -313,20 +353,25 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
         }
         finally
         {
-            // Owning the pump boundary (R1): closing the local socket and the control stream
-            // terminates both pumps, so awaiting Completion makes DisposeAsync a real quiescence
-            // point — once it returns, no pump task is running. The fault the disposal manufactures
-            // is already observed by TcpRelayFaultObserver, so the await swallows it here.
-            try
-            {
-                await Completion.ConfigureAwait(false);
-            }
-#pragma warning disable RCS1075 // The disposal-manufactured pump fault is observed by TcpRelayFaultObserver.
-            catch (Exception)
-            {
-                // Disposal-manufactured pump fault; observed by TcpRelayFaultObserver.
-            }
-#pragma warning restore RCS1075
+            // Owning the pump boundary (R1): the cancelled token plus the socket close terminate
+            // both pumps, so the drain is a real quiescence point and stays bounded — closing the
+            // socket forces a pump the stall fast-exit abandoned to return (D-C3-3). Awaiting
+            // Completion afterwards observes the orchestration task itself, so a fault it carries
+            // can never surface as an unobserved task exception.
+            await drained.ConfigureAwait(false);
+            await ObserveCompletionAsync().ConfigureAwait(false);
+        }
+    }
+
+    private async Task ObserveCompletionAsync()
+    {
+        try
+        {
+            await Completion.ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            _scope.RecordFault(exception, "tcp.relay.completion");
         }
     }
 }

@@ -245,21 +245,48 @@ branch, and any allocation-gate test that protects a span-vs-memory overload cho
   `GC.GetAllocatedBytesForCurrentThread()` delta `== 0` across real dispatches and that the fake's
   `SpanSends` advanced by exactly the expected count. A future re-materialization on the send path
   (a new memory overload, `ToArray()`, or `new byte[]`) must make that 0-B assertion fail.
-- **An allocation gate must evaluate on one thread.** `GC.GetAllocatedBytesForCurrentThread()` is a
-  *per-thread* counter, so a gate whose measured window spans `await`s is only valid while the
-  continuation resumes on the same thread. Observed 2026-09-21 (task 09-20-quiescence-scope) on
+- **An allocation gate must open only after its path is ready, and must verify it stayed on one
+  thread.** `GC.GetAllocatedBytesForCurrentThread()` is a *per-thread* counter, so a gate over a window
+  that spans `await`s is only meaningful when (a) the driven path is actually **ready** — it takes the
+  direct/warm shape rather than a cold setup path — and (b) the reading thread did not change.
   `EstablishedUdpDatagramPathAllocatesNoManagedBytes`
-  (`tests/WinForward.Core.Tests/HotPathAllocationGateTests.cs:106-111`), which measures 64
-  dispatches across 64 `await`s: run alone it failed 4/4 (`Expected: 0, Actual: 600`), the whole
-  `HotPathAllocationGateTests` class run alone left 1 of 10 failing, and only the full suite was
-  green — with a cold pool the continuation migrates to another pool thread and the before/after
-  readings land on different threads. The dangerous direction is the reverse: a migrated
-  continuation reports the *other* thread's delta, so a small genuine regression can measure as 0
-  in the run whose shape happens to migrate. Fix the window, not the threshold — install a
-  single-threaded `SynchronizationContext` (or scheduler) for the measured region so every
-  continuation resumes on the measuring thread, or keep the window synchronous — and always pair
-  the byte assertion with a thread-independent call counter (`SpanSends`, `Sends`), which catches a
-  regression regardless of thread migration.
+  (`tests/WinForward.Core.Tests/HotPathAllocationGateTests.cs`, measured window `:148-155`, asserts
+  through `:171`) measures 64 dispatches across 64 `await`s; run alone it failed repeatedly
+  (`Expected: 0, Actual: 600`, and later `3688`, `4328`, `5352`).
+
+  **The cause is a not-yet-ready window, not thread migration** (corrected 2026-09-21 after the fix was
+  measured; the earlier "with a cold pool the continuation migrates to another pool thread and the
+  before/after readings land on different threads" explanation was **wrong**). Evidence: the managed
+  thread id was constant across 40 instrumented 64-dispatch loops (8 runs × 5 loops) — no continuation
+  migration ever occurred, consistent with the source, whose whole chain
+  (`NdisPacketActionExecutor.ProxyAsync` → `UdpProxyCoordinator.TrySendSpanAsync` →
+  `UdpProxySession.SendSpanAsync`) completes inline against the fake transport; and disabling tiered
+  compilation/PGO did **not** remove the burst. What the measurements do show is coupling to readiness:
+  the per-thread delta was non-zero **only in the first batch**, and every non-zero first batch
+  coincided with a first-batch send-count shortfall (`SpanSends` delta of 17/40/67 where 64 was
+  expected). While a session is not yet `Ready`, datagrams take the bounded drop-oldest setup queue and
+  are sent later by the background flush pipeline — so an early window rides the cold setup path, which
+  allocates once and leaks sends into the window. Once the path is ready the window is allocation-free
+  and the counter is exact (every later batch measured 0 B).
+
+  So: **fix the window, not the threshold.** Open the measured window only after (1) a probe send proves
+  the session admits directly — the counter advances by exactly one and
+  `Diagnostics.PendingSetupBytes == 0` — and (2) an allocation-stable probe batch shows the exact 0-byte
+  reading (bounded retries; the landed gate allows 8). Keep the exact `Assert.Equal(0, allocated)`,
+  assert the managed thread id did not change across the window, and always pair the byte assertion with
+  the thread-independent call counter (`SpanSends`), which catches a regression regardless. Readiness is
+  **not** a licence to relax the threshold: a real per-packet allocation never stabilizes, so the
+  bounded loop fails rather than passes (injecting `new byte[1]` on the warm path makes the gate fail
+  with "the UDP warm path never became allocation-stable").
+- **A single-threaded `SynchronizationContext` is not a substitute for the readiness precondition.**
+  This gate's chain awaits with `ConfigureAwait(false)` throughout (`NdisPacketActionExecutor.cs:360,450`
+  and the send tails), so a context cannot capture the continuations at all. (Migration was not the
+  observed failure — see the bullet above — but the thread-id assertion is kept as cheap insurance,
+  since the counter is per-thread either way.)
+- **Sibling gate, same shape.** `DispatcherWarmFastPathAllocatesNoManagedBytes` carries the same
+  readiness transient; it was left untouched as outside that task's scope, and the same
+  ready-then-measure shape applies when it is next touched. Its reported 1-of-5 class-alone failure
+  (`Actual: 1880`) could not be reproduced by a later independent run, so its frequency is unconfirmed.
 - **Approved cold-path materialization.** `Socks5UdpTransport.SendSpanAsync` copies with
   `payload.ToArray()` only on the contended-gate branch: the span views native capture memory
   that recycles once dispatch returns, so it cannot cross the gate `await`. This is a documented
@@ -272,7 +299,8 @@ branch, and any allocation-gate test that protects a span-vs-memory overload cho
 | Warm entry contains a capturing lambda anywhere in its body | 0 B gate fails by design; extract the lambda to a cold helper |
 | Warm entry returns before the cold branch | still 0 B — no display class is hoisted |
 | A materializing overload/copy is re-added on the send seam | 0 B gate fails (`SpanSends` count and/or allocation delta) |
-| A gate's measured window spans `await`s that may resume on another thread | per-thread delta is invalid — the gate can fail spuriously *or* mask a small regression; make the window thread-stable or assert a bound plus the call counter |
+| A gate's measured window opens before the driven path is ready (or spans `await`s that resume on another thread) | per-thread delta is invalid — the gate fails spuriously *or* can mask a small regression; prove direct admission and allocation stability first, then assert the thread is unchanged and keep the exact zero |
+| A gate's readiness/stable-warm-up phase is implemented as a relaxed threshold | forbidden — the stabilization loop must require an exactly-0 delta, so a genuine per-call allocation makes it fail instead of pass |
 | Span reaches `Socks5UdpTransport` with the send gate uncontended | zero-alloc sync `SendTo` |
 | Span reaches `Socks5UdpTransport` with the gate contended | `payload.ToArray()` cold copy (documented exemption) |
 
@@ -286,7 +314,7 @@ branch, and any allocation-gate test that protects a span-vs-memory overload cho
 - Every allocation gate must be verifiable in isolation, not only inside the full suite: run it with
   `dotnet test WinForward.slnx -c Release --filter "FullyQualifiedName~<GateName>"`. A gate that only
   passes when the pool is warm is a weak gate — fix it before trusting it to protect a path you are
-  about to change (see "An allocation gate must evaluate on one thread").
+  about to change (see "An allocation gate must open only after its path is ready").
 - Baseline must stay behavior-zero (678 tests green on this task).
 
 ### 6. Wrong vs Correct
@@ -308,24 +336,36 @@ private void ScheduleSessionSetup(FlowKey flow, Socks5Server server, long flowGe
 ```
 
 ```csharp
-// Wrong: the measured window spans awaits, so a continuation may resume on a pool thread —
-// `before` and `after` are then read on different threads and the delta is meaningless.
-// The same code measured 600 B in isolation and 0 B inside the full suite (2026-09-21).
+// Wrong: the measured window is opened before the driven path is ready (and without checking the
+// thread), so the first batch rides the cold setup path — `before` and `after` then disagree.
+// The same code measured 600 B alone and 0 B inside the full suite (2026-09-21); the thread id was
+// constant across the window every time, so continuation migration was NOT the cause — readiness was.
 var before = GC.GetAllocatedBytesForCurrentThread();
 for (var index = 0; index < count; index++)
     await executor.ProxyAsync(packet, server, cancellationToken);
 Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
 
-// Correct: run the whole window on one thread (single-threaded SynchronizationContext), so every
-// continuation resumes on the measuring thread; keep the thread-independent counter as backstop.
-await OnSingleThreadedContextAsync(async () =>
+// Correct: prove the path is ready and allocation-stable first, then open a thread-checked,
+// exactly-zero window. A single-threaded SynchronizationContext is NOT a substitute: this chain
+// awaits with ConfigureAwait(false) throughout (measured 2026-09-21), so a context cannot capture it.
+Assert.True(await ProbeAdmitsDirectlyAsync(), "the gate relies on direct admission, not the setup queue");
+Assert.True(await WaitForAllocationStableBatchAsync(), "the UDP warm path never became allocation-stable");
+
+var threadId = Environment.CurrentManagedThreadId;
+var before = GC.GetAllocatedBytesForCurrentThread();
+for (var index = 0; index < count; index++)
 {
-    var before = GC.GetAllocatedBytesForCurrentThread();
-    for (var index = 0; index < count; index++)
-        await executor.ProxyAsync(packet, server, cancellationToken);
-    Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
-});
+    var pending = executor.ProxyAsync(packet, server, cancellationToken);
+    Assert.True(pending.IsCompletedSuccessfully, "the gate relies on the synchronous fast path");
+    await pending;
+}
+Assert.Equal(threadId, Environment.CurrentManagedThreadId);
+Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
 Assert.Equal(count, factory.Transport!.SpanSends - spanSendsBeforeMeasure);
+
+// The documented-bound form is only for a path that genuinely must yield; the readiness and
+// allocation-stability precondition still applies, and the reason must be recorded above.
+Assert.InRange(GC.GetAllocatedBytesForCurrentThread() - before, 0, documentedBound);
 ```
 
 ## Native pool family, pooled flow/setup state, and GC-off posture (task 09-18, 2026-09-18)

@@ -168,7 +168,8 @@ internal sealed class TcpRedirectSetup(ITcpRedirectListenerFactory listenerFacto
     /// shutdown token) would otherwise leak the claimed listener/alias and the token, so every
     /// fault releases them exactly once through the store and surfaces unchanged. The
     /// already-disposed-store shape is not a fault: <see cref="TcpRedirectSessionStore.TryRegister"/>
-    /// returns null and owns its own release.
+    /// returns null after retiring the session and releasing its token, and the session's lifetime
+    /// drain runs here (the store's registration is synchronous and may not discard an awaitable).
     /// </summary>
     private async ValueTask<TcpRedirectSession?> RegisterSessionAsync(ITcpRedirectListener listener, TcpRedirectAssociation association, Endpoint translatedTuple, Socks5Server server, long flowGeneration)
     {
@@ -177,7 +178,9 @@ internal sealed class TcpRedirectSetup(ITcpRedirectListenerFactory listenerFacto
         {
             selfTrafficToken = selfTraffic.Register(new SelfTrafficRegistry.SelfTrafficKey(TransportProtocol.Tcp, translatedTuple, translatedTuple));
             var session = new TcpRedirectSession(association, listener, selfTrafficToken, server, flowGeneration, store.ShutdownToken);
-            return store.TryRegister(session);
+            var registered = store.TryRegister(session);
+            if (registered is null) await session.DisposeLifetimeAsync().ConfigureAwait(false);
+            return registered;
         }
         catch
         {

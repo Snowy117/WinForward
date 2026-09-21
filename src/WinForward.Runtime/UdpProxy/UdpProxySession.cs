@@ -43,17 +43,15 @@ internal sealed class UdpProxySession : IAsyncDisposable
     private static readonly TimeSpan s_activityPropagationInterval = TimeSpan.FromMilliseconds(100);
     private readonly IUdpProxyTransport _transport;
     private readonly IUdpResponseSink _sink;
-    private readonly CancellationTokenSource _lifetime;
+    private readonly QuiescenceScope _scope;
     private readonly TimeProvider _timeProvider;
     private readonly Action<UdpAssociation, DateTimeOffset> _activityObserver;
     private readonly IRuntimeLogger _logger;
     private readonly NativeBufferPool _receiveWindowPool;
     private readonly int _receiveBufferSize;
     private readonly Lock _activityGate = new();
-    private readonly Lock _disposeGate = new();
     private Task? _receiveLoop;
-    private Task? _disposeTask;
-    private Exception? _receiveFailure;
+    private int _teardownStarted;
     private long _lastActivityTicks;
     private long _lastActivityPropagationTicks;
     private long _lastSkipSummaryTicks;
@@ -64,8 +62,6 @@ internal sealed class UdpProxySession : IAsyncDisposable
     private long _skippedConnectionReset;
     private long _skippedDomainDestination;
     private bool _expiring;
-    private bool _disposed;
-    private int _activeSends;
 
     public UdpProxySession(UdpProxySessionContext context)
     {
@@ -82,7 +78,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
         _transport = context.Transport;
         _sink = context.Sink;
         ClientMac = context.ClientMac;
-        _lifetime = CancellationTokenSource.CreateLinkedTokenSource(context.Shutdown);
+        _scope = new QuiescenceScope(context.Shutdown);
         _timeProvider = context.TimeProvider;
         _activityObserver = context.ActivityObserver;
         _logger = context.Logger;
@@ -97,10 +93,11 @@ internal sealed class UdpProxySession : IAsyncDisposable
     public DateTimeOffset LastActivityUtc => new(Interlocked.Read(ref _lastActivityTicks), TimeSpan.Zero);
 
     /// <summary>
-    /// The session-level lifecycle state, read under the activity gate (the lock that owns
-    /// <c>_expiring</c>, <c>_receiveFailure</c>, and <c>_disposed</c>); see
-    /// <see cref="UdpSessionState"/> for the transition rules. Slot-level <see cref="UdpSessionState.SettingUp"/>
-    /// is derived by the coordinator from the slot before a session exists.
+    /// The session-level lifecycle state, read under the activity gate (the lock that orders the
+    /// admission policy <c>_expiring</c> against the scope's closed/faulted facts, so the
+    /// fault-vs-send race is exactly the pre-scope one); see <see cref="UdpSessionState"/> for the
+    /// transition rules. Slot-level <see cref="UdpSessionState.SettingUp"/> is derived by the
+    /// coordinator from the slot before a session exists.
     /// </summary>
     internal UdpSessionState State
     {
@@ -108,8 +105,8 @@ internal sealed class UdpProxySession : IAsyncDisposable
         {
             lock (_activityGate)
             {
-                if (_disposed) return UdpSessionState.Disposed;
-                if (Volatile.Read(ref _receiveFailure) is not null) return UdpSessionState.Faulted;
+                if (_scope.IsSealed) return UdpSessionState.Disposed;
+                if (_scope.Fault is not null) return UdpSessionState.Faulted;
                 return _expiring ? UdpSessionState.Expiring : UdpSessionState.Active;
             }
         }
@@ -121,7 +118,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
     /// delivers them to the client instead of the host stack.
     /// </summary>
     private MacAddress ClientMac { get; }
-    public void Start(Func<UdpProxySession, Task> receiveFailureHandler)
+    public void Start(Action<UdpProxySession> receiveFailureHandler)
     {
         ArgumentNullException.ThrowIfNull(receiveFailureHandler);
         _receiveLoop = ReceiveLoopAsync(receiveFailureHandler);
@@ -138,10 +135,13 @@ internal sealed class UdpProxySession : IAsyncDisposable
     /// </summary>
     public ValueTask<bool> SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken)
     {
+        WorkLease workLease;
         lock (_activityGate)
         {
-            if (Volatile.Read(ref _receiveFailure) is not null || _expiring) return ValueTask.FromResult(false);
-            _activeSends++;
+            if (_scope.Fault is not null || _expiring || !_scope.TryEnter(out workLease))
+            {
+                return ValueTask.FromResult(false);
+            }
         }
 
         ValueTask send;
@@ -151,20 +151,20 @@ internal sealed class UdpProxySession : IAsyncDisposable
         }
         catch
         {
-            lock (_activityGate) _activeSends--;
+            workLease.Dispose();
             throw;
         }
 
         if (send.IsCompletedSuccessfully)
         {
             TouchActivity();
-            lock (_activityGate) _activeSends--;
+            workLease.Dispose();
             return ValueTask.FromResult(true);
         }
-        return FinishSpanSendAsync(send);
+        return FinishSpanSendAsync(send, workLease);
     }
 
-    private async ValueTask<bool> FinishSpanSendAsync(ValueTask send)
+    private async ValueTask<bool> FinishSpanSendAsync(ValueTask send, WorkLease workLease)
     {
         try
         {
@@ -174,32 +174,32 @@ internal sealed class UdpProxySession : IAsyncDisposable
         }
         finally
         {
-            lock (_activityGate) _activeSends--;
+            workLease.Dispose();
         }
     }
 
     public ValueTask DisposeAsync()
     {
-        lock (_activityGate) _disposed = true;
-        lock (_disposeGate)
-        {
-            _disposeTask ??= DisposeCoreAsync();
-            return new ValueTask(_disposeTask);
-        }
+        // D11: the scope's single-flight covers only the drain, and sealing happens inside it, so a
+        // precheck on IsSealed would be TOCTOU. The one-shot claim owns the transport/loop teardown
+        // every caller joins the drain, which the teardown body reaches last.
+        return Interlocked.Exchange(ref _teardownStarted, 1) != 0
+            ? new ValueTask(_scope.DrainAsync())
+            : new ValueTask(DisposeCoreAsync());
     }
 
     internal bool TryBeginExpiry(DateTimeOffset now, TimeSpan idleTimeout)
     {
         lock (_activityGate)
         {
-            if (_disposed || _expiring || _activeSends != 0 || now - LastActivityUtc < idleTimeout) return false;
+            if (_scope.IsSealed || _expiring || !_scope.IsIdle || now - LastActivityUtc < idleTimeout) return false;
             _expiring = true;
         }
 
-        // Cancelling the per-session lifetime (not the coordinator shutdown) ends the receive loop
-        // as a normal teardown: an idle-expired session must not record a receive failure for the
+        // Cancelling the per-session scope (not the coordinator shutdown) ends the receive loop as a
+        // normal teardown: an idle-expired session must not record a receive failure for the
         // cancellation it asked for.
-        CancelLifetime();
+        _scope.Cancel();
         return true;
     }
 
@@ -208,33 +208,17 @@ internal sealed class UdpProxySession : IAsyncDisposable
         lock (_activityGate) _expiring = false;
     }
 
-    /// <summary>
-    /// Cancels the session lifetime, tolerating a lifetime already disposed by the owning disposal
-    /// path (a sweep racing disposal); the session is gone either way.
-    /// </summary>
-    private void CancelLifetime()
-    {
-        try
-        {
-            _lifetime.Cancel();
-        }
-        catch (ObjectDisposedException exception)
-        {
-            // A concurrent disposal already spent this lifetime.
-            GC.KeepAlive(exception);
-        }
-    }
-
     private async Task DisposeCoreAsync()
     {
-        CancelLifetime();
+        var token = _scope.Token;
+        _scope.Cancel();
         try
         {
             await _transport.DisposeAsync().ConfigureAwait(false);
             if (_receiveLoop is not null)
             {
                 try { await _receiveLoop.ConfigureAwait(false); }
-                catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
                 {
                     // Cancellation is the expected teardown path (idle expiry or a coordinator shutdown).
                 }
@@ -246,21 +230,33 @@ internal sealed class UdpProxySession : IAsyncDisposable
         }
         finally
         {
-            _lifetime.Dispose();
+            await _scope.DrainAsync().ConfigureAwait(false);
         }
     }
 
-    private async Task ReceiveLoopAsync(Func<UdpProxySession, Task> receiveFailureHandler)
+    private async Task ReceiveLoopAsync(Action<UdpProxySession> receiveFailureHandler)
+    {
+        await ReceiveDatagramsAsync(_scope.Token).ConfigureAwait(false);
+        if (_scope.Fault is not null)
+        {
+            // A synchronous signal, deliberately not awaited (F1): the handler starts this session's
+            // teardown on the coordinator's scope, and awaiting it here would re-enter session
+            // disposal, which joins this loop.
+            receiveFailureHandler(this);
+        }
+    }
+
+    private async Task ReceiveDatagramsAsync(CancellationToken token)
     {
         var lease = _receiveWindowPool.Rent();
         try
         {
-            while (!_lifetime.IsCancellationRequested)
+            while (!token.IsCancellationRequested)
             {
                 Socks5UdpReceiveResult receive;
                 try
                 {
-                    receive = await _transport.ReceiveAsync(lease.Memory[.._receiveBufferSize], _lifetime.Token).ConfigureAwait(false);
+                    receive = await _transport.ReceiveAsync(lease.Memory[.._receiveBufferSize], token).ConfigureAwait(false);
                 }
                 catch (SocketException exception) when (exception.SocketErrorCode == SocketError.ConnectionReset)
                 {
@@ -285,42 +281,35 @@ internal sealed class UdpProxySession : IAsyncDisposable
                     RecordSkippedDomainDestination();
                     continue;
                 }
-                await InjectResponseAsync(Endpoint.From(address, response.DestinationPort), response).ConfigureAwait(false);
+                await InjectResponseAsync(Endpoint.From(address, response.DestinationPort), response, token).ConfigureAwait(false);
             }
         }
-        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
             // Normal teardown path: idle expiry or a coordinator shutdown.
         }
-        catch (ObjectDisposedException) when (_lifetime.IsCancellationRequested)
+        catch (ObjectDisposedException) when (token.IsCancellationRequested)
         {
             // Disposal closes the receive socket during teardown.
         }
         catch (Exception exception)
         {
-            Volatile.Write(ref _receiveFailure, exception);
+            _scope.RecordFault(exception, "udp.receive");
         }
         finally
         {
             lease.Dispose();
         }
-
-        if (Volatile.Read(ref _receiveFailure) is not null)
-        {
-            // Fire-and-forget on purpose: the handler tears this session down, and awaiting it
-            // here would make session disposal (which awaits this loop) re-enter itself.
-            _ = receiveFailureHandler(this);
-        }
     }
 
     /// <summary>Hands one decoded relay response to the reinjection sink; per-response failures skip.</summary>
-    private async Task InjectResponseAsync(Endpoint source, Socks5UdpDatagram response)
+    private async Task InjectResponseAsync(Endpoint source, Socks5UdpDatagram response, CancellationToken token)
     {
         try
         {
-            await _sink.InjectAsync(Flow, source, response.Payload, ClientMac, _lifetime.Token).ConfigureAwait(false);
+            await _sink.InjectAsync(Flow, source, response.Payload, ClientMac, token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
             throw;
         }

@@ -188,12 +188,47 @@ public sealed class TcpProxyRelayTests
         await local.SendAsync(new byte[] { 1 }, SocketFlags.None);
 
         // ReSharper disable once DisposeOnUsingVariable // The test awaits this DisposeAsync to assert the post-disposal state; the await using stays as the dispose-on-failure safety net and the repeat disposal is an idempotent no-op.
-        await relay.DisposeAsync();
+        // D-C3-3: one pump is parked in a read that never completes on its own, so only the
+        // disposal ordering (seal + cancel, socket close, then drain) can make this return.
+        await relay.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.True(relay.Completion.IsCompleted);
         await WaitForAsync(() => pool.Stats.Outstanding == 0);
         Assert.Equal(0, pool.Stats.DisposedCount);
     }
+
+    [Fact]
+    public async Task ConcurrentDisposalRunsTheOwnerTeardownOnce()
+    {
+        // D11: the scope's single-flight covers only the drain, so the one-shot claim is what keeps
+        // two disposal callers from running the socket/control teardown twice. The control's
+        // disposal is counted and gated: the second caller has to join the drain while the first is
+        // parked in the owner teardown, so a double-run would show a count of two.
+        var (localPeer, relayLocal) = await CreateSocketPairAsync();
+        using var local = localPeer;
+        var control = new CountingControlDisposable();
+        await using var relay = new TcpProxyRelay(relayLocal, new FaultingStream(), control);
+
+        var first = DisposeRelayAsync(relay);
+        var second = DisposeRelayAsync(relay);
+        try
+        {
+            await WaitForAsync(() => control.DisposeCount >= 1);
+            await Task.Delay(50);
+            // A double-run parks a second caller in the gated control disposal; the finally
+            // releases the gate so the regression surfaces as a count assertion, not a hang.
+            Assert.Equal(1, control.DisposeCount);
+        }
+        finally
+        {
+            control.Release();
+        }
+
+        await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(1, control.DisposeCount);
+    }
+
+    private static async Task DisposeRelayAsync(TcpProxyRelay relay) => await relay.DisposeAsync().ConfigureAwait(false);
 
     private static async Task<(Socket Peer, Socket Relay)> CreateSocketPairAsync()
     {
@@ -221,6 +256,23 @@ public sealed class TcpProxyRelayTests
     private sealed class NoopAsyncDisposable : IAsyncDisposable
     {
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    /// <summary>Counts owner-teardown invocations and holds them until released, so a caller is provably mid-teardown.</summary>
+    private sealed class CountingControlDisposable : IAsyncDisposable
+    {
+        private readonly TaskCompletionSource _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _disposeCount;
+
+        public int DisposeCount => Volatile.Read(ref _disposeCount);
+
+        public void Release() => _gate.TrySetResult();
+
+        public async ValueTask DisposeAsync()
+        {
+            Interlocked.Increment(ref _disposeCount);
+            await _gate.Task.ConfigureAwait(false);
+        }
     }
 
     private sealed class FaultingStream : Stream

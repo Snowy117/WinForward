@@ -200,6 +200,13 @@ if (Tombstones.TryHit(reverseSource, reverseDestination, now) ||
 
 ## Relay/redirect quiescence, attach-failure teardown, and setup-fault release (wired 2026-09-20, task 09-20-transport-lifecycle)
 
+> Superseded in part by the C3 section below (2026-09-21, task `09-20-lifecycle-migration-cluster`):
+> `TcpRelayFaultObserver.Observe`, `TcpProxyRelay.ObservePump`, the store's `_shutdown` /
+> `_inflightSetups` / `_setupsDrained` / `_disposeTask` / `_disposed`, and the sync
+> `TcpRedirectSession.DisposeLifetime()` no longer exist; `EnterSetup`/`ExitSetup` became
+> `TryEnterSetup(out WorkLease)`. Keep this section for its quiescence *reasoning*; take the mechanisms
+> and signatures from the C3 section.
+
 ### 1. Scope / Trigger
 
 - Trigger: any change to TCP relay/acceptor teardown, `TcpRedirectSessionStore` lifetime
@@ -305,4 +312,126 @@ DisposeLifetime();
 // session.AcceptLoop before disposing the CTS.
 await ObserveRelayCompletionAsync(session);
 await DrainRedundantConnectionsAsync();
+```
+
+---
+
+## Relay pump tracking, scope-owned lifetimes, and intrinsic fault observation (wired 2026-09-21, task 09-20-lifecycle-migration-cluster)
+
+### 1. Scope / Trigger
+
+- Trigger: any change to `TcpProxyRelay`'s pumps or `DisposeAsync`, `TcpRedirectSession` /
+  `TcpRedirectSessionStore` lifetime ownership, the TCP setup admission seam (`TryEnterSetup`), or the
+  acceptor's relay-completion observation.
+
+The cluster now runs on `QuiescenceScope` — `async-lifetime.md` is the primitive's contract and carries
+the per-owner table. **This section supersedes the previous section where they differ**:
+`TcpRelayFaultObserver.Observe` and `TcpProxyRelay.ObservePump` are **deleted** (fault observation is
+intrinsic to each pump body); `TcpRedirectSession.DisposeLifetime()` → `DisposeLifetimeAsync()` and
+`Retire()` no longer owns a lifetime CTS (the scope does); the store's `_shutdown` CTS,
+`_inflightSetups`, `_setupsDrained`, `_disposeTask` and `_disposed` are gone; `EnterSetup`/`ExitSetup`
+are replaced by `TryEnterSetup(out WorkLease)`.
+
+### 2. Signatures
+
+- `TcpRedirectSessionStore`: `_scope = new QuiescenceScope()` owns the CTS;
+  `ShutdownToken => _scope.Token`; `IsDisposed => _scope.IsSealed`;
+  `bool TryEnterSetup(out WorkLease lease)`; `DisposeAsync() => new(DisposeCoreAsync())`.
+- `TcpRedirectSession`: `Token => _scope.Token` (a nested scope linked to the store's token);
+  `bool IsRetired`; `Retire()`; `ValueTask DisposeLifetimeAsync()`.
+- `TcpProxyRelay`: the scope-owned token replaces the old leaked `pumpCancellation` CTS;
+  `PumpAsync` is an **instance** method that takes `_scope.TryEnter(out var lease)`;
+  `enum PumpResult { Ended, Stalled, Faulted }`.
+- `TcpProxyCoordinator.SetupPendingAsync`: `if (!_store.TryEnterSetup(out var lease)) { _pendingSyn.Complete(..., writeCooldown: false, ...); return; }`
+  with `lease.Dispose()` in the `finally` **after** `_pendingSyn.Complete`.
+
+### 3. Contracts
+
+- **A sealed `TryEnter` refusal in a pump reports a clean end, never a stall.** A refusal means disposal
+  already began; `PumpResult.Stalled` would drive `EndKind = Stalled`, and the acceptor injects a client
+  RST for any non-`CleanEnded` `EndKind` — so an ordinary teardown would look like a stall timeout. The
+  branch is unreachable in practice (both pumps start synchronously in the constructor, before the relay
+  can be sealed); it exists to make the worst case harmless.
+- **A pump never leaves a faulted task.** `PumpAsync` catches everything: an
+  `OperationCanceledException` becomes `PumpResult.Stalled`, any other exception is recorded by
+  `RecordPumpFault` (which emits the Debug `tcp.relay.faulted` event) and returned as
+  `PumpResult.Faulted`. `RunPumpAsync` surfaces the recorded `_scope.Fault` on `Completion`. A pump
+  abandoned by the fast-exit therefore cannot become an unobserved fault, so no external reaper is
+  needed — this is what makes `WF0002` (`ContinueWith`) enforceable with no allowlist entry.
+- **`Completion` keeps relay-level semantics.** The stall fast-exit still returns without awaiting the
+  sibling pump, so `Completion` completes on a stall without waiting for both pumps.
+  `ITcpRelay.Completion` and `RelayEndKind` are unchanged; `DisposeAsync` observes `Completion` on every
+  path (`ObserveCompletionAsync`) so a faulted `Completion` is never unobserved.
+- **The drain is bounded by the socket close.** `DisposeAsync` order: one-shot claim → cancel →
+  `_localSocket.Dispose()` → `await _control.DisposeAsync()` → drain → observe `Completion`. Closing the
+  socket is what forces a pump abandoned by the fast-exit to return, so the drain cannot hang.
+- **Setup admission is a bool, not an exception.** `TryEnterSetup` returning `false` replaces the old
+  `EnterSetup` `ObjectDisposedException`; `_pendingSyn.Complete(writeCooldown: false)` must still run
+  **before** the lease is released, so a disposal racing a launched setup leaves no cooldown.
+- **The accept loop holds no scope lease (documented deviation).** The store joins
+  `session.AcceptLoop` explicitly in `DisposeCoreAsync`, which is where that loop's quiescence comes
+  from; the session's `DisposeAsync` is therefore **not** a quiescence point for it. A lease would
+  deadlock against the in-loop `DisposeLifetimeAsync()` reached via `ObserveRelayCompletionAsync`.
+- **`TcpRedirectSession._retired` is retained** as the owner's admission flag: `Retire()` claims and
+  `Cancel()`s — it must never seal or drain — because the accept loop and `ClientResetInjector` read
+  `session.Token` while unwinding.
+- **Owner teardown single-flight (D11).** `TcpProxyRelay.DisposeAsync` keeps an explicit one-shot
+  claim; a second caller joins the drain instead of re-running `_localSocket.Dispose()` /
+  `_control.DisposeAsync()`. A late caller joins only the drain, so it does not observe the claimant's
+  teardown fault.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Dispose a relay whose stall fast-exit abandoned a pump | drain completes (the socket close unblocks the pump); `Completion` already completed at the fast-exit |
+| Two concurrent `DisposeAsync` calls | owner teardown runs **once**; the second caller joins the drain |
+| `TryEnter` refused because the scope is sealed | pump returns `PumpResult.Ended`, never `Stalled`; no client RST |
+| Genuine pump fault | `RecordFault` + one Debug `tcp.relay.faulted`; `Completion` faults with the recorded exception; no unobserved task exception |
+| Dispose a relay mid-transfer | no spurious client reset; `EndKind` is not `Stalled` |
+| `TryEnterSetup` returns false | `_pendingSyn.Complete(writeCooldown: false)` then return; the lease releases after |
+| Store dispose with in-flight accept loops | each `await session.AcceptLoop` completes before the lifetime is released |
+
+### 5. Good/Base/Bad Cases
+
+- Good: a discarded relay is disposed → drained → its pump fault recorded and observed by construction.
+- Base: a store dispose racing an in-flight setup leaves zero active setups and no cooldown.
+- Bad: treating a sealed refusal as a stall; re-adding a `ContinueWith` observer; awaiting the sibling
+  pump on the stall path; taking a scope lease on the accept loop; re-reading `IsSealed` as the
+  teardown's one-shot guard (TOCTOU — see D11).
+
+### 6. Tests Required
+
+- `TcpProxyRelayTests` — `DisposeLeavesCompletionCompletedAndReturnsPumpBuffers` (5 s drain bound),
+  `ConcurrentDisposalRunsTheOwnerTeardownOnce`, `PumpFaultFaultsCompletionAndEmitsExactlyOneFaultEvent`,
+  `FaultEventIsSuppressedWhenDebugLoggingIsDisabled`,
+  `DisposingARelayObservesItsFaultedCompletionSoItNeverEscapes` (uses `UnobservedExceptionProbe`).
+- `TcpRelayEndResetTests.RelayEndKindIsStalledWhenPumpStalls` — pins `Completion`'s fast-exit.
+- `TcpRedirectSessionTests` — the drained-lifetime contract (a late `Retire` after the drained lifetime
+  is harmless).
+- `TcpRedirectSessionStoreTests` — `DisposeWaitsForTheRegisteredSetupLease`,
+  `TryEnterSetupIsRefusedOnceDisposed`, `RetireIsOrderedBeforeTheRelayIsDisposed`,
+  `DisposeIsSingleFlightAndLateTeardownNeverReEnters`,
+  `RegistrationLosingTheDisposeRaceLeavesTheAssociationReleasable`.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```csharp
+// A refused admission classified as a stall: an ordinary teardown looks like a stall timeout
+// and the acceptor injects a client RST. Rethrowing after recording leaves an abandoned pump's
+// task faulted with nothing left to reap it.
+if (!_scope.TryEnter(out var lease)) return PumpResult.Stalled;
+catch (Exception exception) { _scope.RecordFault(exception); throw; }
+```
+
+#### Correct
+
+```csharp
+// Refusal = disposal already began, so report a clean end. Faults are recorded AND reported as a
+// result, so no pump task can ever be faulted-but-unobserved.
+if (!_scope.TryEnter(out var lease)) return PumpResult.Ended;
+catch (OperationCanceledException) { return PumpResult.Stalled; }
+catch (Exception exception) { RecordPumpFault(exception); return PumpResult.Faulted; }
 ```

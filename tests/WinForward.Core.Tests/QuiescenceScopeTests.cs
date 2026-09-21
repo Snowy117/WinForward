@@ -24,6 +24,37 @@ public sealed class QuiescenceScopeTests
     }
 
     [Fact]
+    public void NewScopeReportsNotSealed()
+    {
+        var scope = new QuiescenceScope();
+
+        Assert.False(scope.IsSealed);
+        Assert.True(scope.IsIdle);
+    }
+
+    [Fact]
+    public async Task IsSealedIsObservableBeforeTheDrainCompletes()
+    {
+        var scope = new QuiescenceScope();
+        Assert.True(scope.TryEnter(out var lease));
+
+        var drain = scope.DrainAsync();
+
+        // The seal is the admission boundary, not the join: it is observable while the lease set
+        // is still outstanding, which is what makes a late TryEnter refusal meaningful.
+        Assert.True(scope.IsSealed);
+        Assert.False(scope.IsIdle);
+        Assert.False(drain.IsCompleted);
+        Assert.False(scope.TryEnter(out _));
+
+        lease.Dispose();
+        await drain.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.True(scope.IsSealed);
+        Assert.True(scope.IsIdle);
+    }
+
+    [Fact]
     public async Task DoubleDisposeOfOneLeaseLeavesTheCountIntact()
     {
         var scope = new QuiescenceScope();
@@ -259,14 +290,7 @@ public sealed class QuiescenceScopeTests
 
             // Forcing finalization is the point of this test: the discarded child task must be
             // collected to prove its swallowed fault never becomes an unobserved task exception.
-#pragma warning disable S1215 // GC.Collect is required to finalize the discarded child task.
-            for (var attempt = 0; attempt < 3; attempt++)
-            {
-                GC.Collect();
-                GC.WaitForPendingFinalizers();
-                GC.Collect();
-            }
-#pragma warning restore S1215
+            UnobservedExceptionProbe.ForceFinalization();
 
             Assert.Equal(0, probe.Count);
         }
@@ -321,43 +345,6 @@ public sealed class QuiescenceScopeTests
             await scope.DrainAsync().WaitAsync(TimeSpan.FromSeconds(30));
             await Task.WhenAll(workers).WaitAsync(TimeSpan.FromSeconds(30));
             Assert.True(scope.IsIdle);
-        }
-    }
-
-    private sealed class UnobservedExceptionProbe
-    {
-        private int _count;
-        private Exception? _target;
-
-        public int Count => Volatile.Read(ref _count);
-
-        public void Track(Exception target) => Volatile.Write(ref _target, target);
-
-        public void OnUnobserved(object? sender, UnobservedTaskExceptionEventArgs args)
-        {
-            _ = sender;
-            args.SetObserved();
-
-            // The scheduler event is process-global and other test classes run in parallel, so only
-            // the injected fault proves this test's property; a foreign unobserved task must not fail it.
-            var target = Volatile.Read(ref _target);
-            if (target is null || Contains(args.Exception, target))
-            {
-                Interlocked.Increment(ref _count);
-            }
-        }
-
-        private static bool Contains(AggregateException exception, Exception target)
-        {
-            foreach (var inner in exception.Flatten().InnerExceptions)
-            {
-                if (ReferenceEquals(inner, target))
-                {
-                    return true;
-                }
-            }
-
-            return false;
         }
     }
 }

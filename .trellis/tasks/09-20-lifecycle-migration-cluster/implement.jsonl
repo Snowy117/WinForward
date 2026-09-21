@@ -1,0 +1,9 @@
+{"file": ".trellis/tasks/09-20-structured-concurrency/design.md", "reason": "Program design: the primitive contract (S2, D1-D10) and the corrected migration plan (S4)"}
+{"file": ".trellis/tasks/09-20-lifecycle-migration-cluster/design.md", "reason": "This child's per-owner migration design and its D-C3-* decisions"}
+{"file": ".trellis/tasks/09-20-lifecycle-migration-cluster/research/design-contradictions-and-hazards.md", "reason": "Required reading: the 8 design-vs-code contradictions and 12 unmentioned hazards"}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "The primitive's durable contract: surface, allocation rule, lock order, Run admission"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "The allocation-gate contract this task must first harden"}
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "Relay/store contract being migrated"}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "UDP session/coordinator contract being migrated"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Fail-closed semantics that the dispose exception rules must not weaken"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "File/type/namespace conventions and the 400 effective-line cap"}

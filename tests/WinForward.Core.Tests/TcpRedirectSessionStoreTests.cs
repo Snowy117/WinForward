@@ -65,6 +65,54 @@ public sealed class TcpRedirectSessionStoreTests
         Assert.True(store.Tombstones.TryHit(association.OriginalKey, DateTimeOffset.UtcNow));
     }
 
+    [Fact]
+    public async Task DisposeWaitsForTheRegisteredSetupLease()
+    {
+        var table = new TcpRedirectTable(capacity: 8);
+        var store = new TcpRedirectSessionStore(table, new RecordingRuntimeLogger(), capacity: 8, TimeProvider.System);
+        Assert.True(store.TryEnterSetup(out var lease));
+
+        var dispose = store.DisposeAsync();
+        Assert.True(store.IsDisposed);
+        Assert.False(dispose.IsCompleted);
+
+        lease.Dispose();
+        await dispose.AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task TryEnterSetupIsRefusedOnceDisposed()
+    {
+        var table = new TcpRedirectTable(capacity: 8);
+        var store = new TcpRedirectSessionStore(table, new RecordingRuntimeLogger(), capacity: 8, TimeProvider.System);
+
+        await store.DisposeAsync();
+
+        Assert.True(store.IsDisposed);
+        Assert.False(store.TryEnterSetup(out _));
+    }
+
+    [Fact]
+    public async Task RetireIsOrderedBeforeTheRelayIsDisposed()
+    {
+        // The acceptor awaits a session's relay completion against the session token; the lifetime
+        // must already be cancelled (Retire) when the relay is disposed, so that wait unwinds as a
+        // cancellation rather than as a stall verdict — and a stall verdict injects a client reset.
+        var table = new TcpRedirectTable(capacity: 8);
+        var store = new TcpRedirectSessionStore(table, new RecordingRuntimeLogger(), capacity: 8, TimeProvider.System);
+        var association = ClaimAssociation(table);
+        var listener = new FakeListener(association.TranslatedListenerTuple);
+        var session = TcpCoordinatorFakes.CreateSession(association, listener);
+        Assert.Same(session, store.TryRegister(session));
+        var relay = new CountingRelay(() => session.IsRetired);
+        Assert.True(store.TryAttachRelay(session, relay));
+
+        await store.DisposeAsync();
+
+        Assert.Equal(1, relay.DisposeCount);
+        Assert.True(relay.RetiredAtDispose);
+    }
+
     private static TcpRedirectAssociation ClaimAssociation(TcpRedirectTable table)
     {
         var local = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000);
@@ -74,15 +122,17 @@ public sealed class TcpRedirectSessionStoreTests
         return association!;
     }
 
-    private sealed class CountingRelay : ITcpRelay
+    private sealed class CountingRelay(Func<bool>? isRetired = null) : ITcpRelay
     {
         private int _disposeCount;
 
         public Task Completion => Task.CompletedTask;
         public int DisposeCount => Volatile.Read(ref _disposeCount);
+        public bool RetiredAtDispose { get; private set; }
 
         public ValueTask DisposeAsync()
         {
+            RetiredAtDispose = isRetired?.Invoke() ?? false;
             Interlocked.Increment(ref _disposeCount);
             return ValueTask.CompletedTask;
         }

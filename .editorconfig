@@ -443,39 +443,14 @@ resharper_check_namespace_highlighting = none
 # TreatWarningsAsErrors，使规则在该开关变化时仍保持致命，同时作为逐文件豁免的挂载锚点。
 #
 # 下列临时允许清单按文件 glob 限定，逐条写出证据与删除方（C3/C4）。每条都是待偿还债务，
-# 清偿完毕前本程序不算完成。TcpProxyRelay.cs:284 的 `_ = ShutdownSend(...)`、`_ = task.Exception`、
-# `_ = await ...`、`_ = TryWrite/TryAdd/SendTo/Interlocked.Add` 与 `_ = character switch` 等右侧
-# 均非 awaitable，规则不触发，故无需条目（由分析器测试锁定为非命中形态）。
+# 清偿完毕前本程序不算完成。`_ = task.Exception`、`_ = await ...`、`_ = TryWrite/TryAdd/SendTo/
+# Interlocked.Add` 与 `_ = character switch` 等右侧均非 awaitable，规则不触发，故无需条目
+# （由分析器测试锁定为非命中形态）。
 [src/**.cs]
 dotnet_diagnostic.WF0001.severity = error
 dotnet_diagnostic.WF0002.severity = error
 dotnet_diagnostic.WF0003.severity = error
 dotnet_diagnostic.WF0004.severity = error
-
-# TcpProxyRelay.cs:289 `_ = first.ContinueWith(static task => _ = task.Exception, ...)`：
-# 被丢弃的故障观察 continuation 同时命中 WF0001（discard）与 WF0002（ContinueWith）。
-# 删除方：C3 —— ObservePump 整体删除，故障观察改为 pump 体内在（design §4.4）。
-[src/WinForward.Runtime/TcpRedirect/TcpProxyRelay.cs]
-dotnet_diagnostic.WF0001.severity = none
-dotnet_diagnostic.WF0002.severity = none
-
-# TcpRelayFaultObserver.cs:27 `_ = relay.Completion.ContinueWith(...)`：同上，两条规则都命中。
-# 删除方：C3 —— 该文件整体删除（design §4.4）。
-[src/WinForward.Runtime/TcpRedirect/TcpRelayFaultObserver.cs]
-dotnet_diagnostic.WF0001.severity = none
-dotnet_diagnostic.WF0002.severity = none
-
-# TcpRedirectSessionStore.cs:157 `if (start is not null) _ = RunDisposeAsync(start);`：
-# 内嵌语句形式的 discard——表达式语句级的规则看不见它，故 WF0001 以操作级 SimpleAssignment 检测。
-# 删除方：C3 —— DisposeAsync 改为 new ValueTask(scope.DrainAsync())（design §4.1）。
-[src/WinForward.Runtime/TcpRedirect/TcpRedirectSessionStore.cs]
-dotnet_diagnostic.WF0001.severity = none
-
-# UdpProxySession.cs:312 `_ = receiveFailureHandler(this);`：接收失败处理器是真正的重入拆除信号，
-# 不能 await（会与 DisposeAsync 构成环）。删除方：C3 —— 改为同步 signal + coordinator scope 的 Run
-# （design §4.2）。
-[src/WinForward.Runtime/UdpProxy/UdpProxySession.cs]
-dotnet_diagnostic.WF0001.severity = none
 
 # MultiAdapterCaptureLoop.cs:110 `_ = ForwardDegradationAsync(...)`：通知型回调。
 # 删除方：C4 —— 改为所属 owner 同步调用的回调（design §4.1）。

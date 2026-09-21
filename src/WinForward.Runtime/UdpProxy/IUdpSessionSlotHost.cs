@@ -24,6 +24,10 @@ internal interface IUdpSessionSlotHost
     /// <summary>Removes the flow's slot when it is still the exact <paramref name="slot"/> instance, releasing the session and draining queued datagrams fail-closed; returns true when this caller owned the removal. Only <see cref="UdpTeardownReason.SetupFailure"/> arms the setup cooldown.</summary>
     Task<bool> RemoveSlotAsync(FlowKey flow, UdpProxyCoordinator.UdpSessionSlot slot, UdpTeardownReason reason);
 
-    /// <summary>The receive-failure teardown: removes the session's slot (reason <see cref="UdpTeardownReason.Fault"/>, no cooldown) so the flow can set up anew.</summary>
-    Task RemoveReceiveFailedSessionAsync(UdpProxySession session);
+    /// <summary>
+    /// The receive-failure signal: a non-blocking notification that the session's receive loop
+    /// ended on a fault. It must return promptly — it runs inside that loop's own frame — and the
+    /// host turns it into a tracked teardown on its own scope.
+    /// </summary>
+    void RemoveReceiveFailedSession(UdpProxySession session);
 }

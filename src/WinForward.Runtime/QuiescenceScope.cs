@@ -46,6 +46,16 @@ internal sealed class QuiescenceScope(CancellationToken linkedTo = default) : IA
 
     public bool IsIdle => Volatile.Read(ref _state) >> 1 == 0;
 
+    /// <summary>
+    /// Whether the scope has been sealed by <see cref="DrainAsync"/>. The seal is one-way and is
+    /// the admission boundary: a sealed scope refuses <see cref="TryEnter(out WorkLease)"/> and
+    /// <see cref="Run(Func{CancellationToken, Task}, string)"/>. It is <em>not</em> a completion
+    /// signal — a scope can be sealed while leases are still outstanding (<see cref="IsIdle"/> is
+    /// then <see langword="false"/>), and that gap is what makes a late refusal meaningful. Join
+    /// through <see cref="DrainAsync"/>.
+    /// </summary>
+    public bool IsSealed => (Volatile.Read(ref _state) & Sealed) != 0;
+
     public Exception? Fault => Volatile.Read(ref _fault);
 
     /// <summary>
