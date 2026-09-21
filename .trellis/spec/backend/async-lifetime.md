@@ -107,6 +107,24 @@ internal struct WorkLease : IDisposable          // mutable; Dispose() => one Ex
   (one `CancelAfter` budget spanning an attempt), whose readers hold a scope lease so the deadline
   cannot be disposed under a live operation. The rule is "one owner-lifetime CTS per owner, owned by
   the scope", not "no other CTS may exist".
+  **Scope of the claim (integration review, 2026-09-21).** D7 covers every owner the program
+  *migrated*: `TcpRedirectSessionStore`, `TcpRedirectSession`, `TcpProxyRelay`, `UdpProxySession`,
+  `UdpProxyCoordinator`, `Socks5ControlConnection`, `TransactionalCaptureRuntime`,
+  `LayeredCaptureRunner`, `MultiAdapterCaptureLoop`, `IdleExpirySweeper`, `RuntimeHeartbeat`. Three
+  lifetime handles deliberately stay outside the primitive, and each is already joined by its own
+  owner, so I2 holds without them:
+  - **`SetupExecutor`** (`src/WinForward.Runtime/SetupExecutor.cs:135`, field `_shutdown`) — a
+    synchronous `IDisposable` running dedicated worker `Thread`s. `Dispose` is D11 single-flight
+    (`Interlocked.Exchange(ref _disposed, 1)`), cancels, `Thread.Join()`s every worker, then drains
+    the ring and releases the CTS — the `NdisCapturePump` shape (E6), and it is created and owned by
+    `DurableCaptureBundle`, which disposes it after both proxy coordinators. It owns no *borrowed*
+    work, so it has no seal/join of other owners' leases to express.
+  - **`NdisCapturePump`** (`src/WinForward.NdisApi/NdisCapture.cs`) — owns no CTS at all; its thread
+    is joined through the `ValueTask(outcome.Task)` completion bridge (E6). It also cannot reference
+    the primitive (`internal` to `Runtime`, and the dependency direction is `Runtime → NdisApi`).
+  - **The CLI's process-root `shutdown` CTS** (`src/WinForward.Cli/Program.cs:319`) — the
+    application's root cancellation handle and the source every scope ultimately links to, not an
+    owner of borrowed work.
 - **D8 — Terminology lives in this guide**, not in a `CONTEXT.md`/ADR set.
 - **D9 — Fault observation is intrinsic to the child body.** A migrated child records its own fault
   (and may rethrow, because someone still awaits it); the scope never patches an abandoned task with

@@ -265,7 +265,7 @@ internal sealed class TcpPendingSynSetupIndex
     /// <summary>
     /// Drops every pending entry (dispose drain): the store's setup drain already awaited every
     /// started background task, so this closes the tiny window between a task's final
-    /// <c>ExitSetup</c> and its entry removal, and credits every retained copy exactly once.
+    /// lease release and its entry removal, and credits every retained copy exactly once.
     /// </summary>
     public void RemoveAll()
     {

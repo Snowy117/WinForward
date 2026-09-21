@@ -659,9 +659,9 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
 
     private async Task DisposeCoreAsync()
     {
-        // The store's dispose drains every started background setup (R8 moved EnterSetup into
-        // the task, so the inflight counter covers them); the pending drain afterwards closes the
-        // window between a task's final ExitSetup and its entry removal, crediting every
+        // The store's dispose drains every started background setup (the pipeline runs on the
+        // store's scope, so its in-flight set covers them); the pending drain afterwards closes the
+        // window between a task's final lease release and its entry removal, crediting every
         // retained copy exactly once and dropping cooldowns so a disposed coordinator leaves no
         // per-flow state behind. Injected collaborators (the syn-copy pool, the setup executor)
         // are borrowed, not owned: composition disposes them after the coordinator's drain.
