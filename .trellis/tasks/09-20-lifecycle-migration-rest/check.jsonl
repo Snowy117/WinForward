@@ -1,0 +1,8 @@
+{"file": ".trellis/tasks/09-20-lifecycle-migration-rest/prd.md", "reason": "This child's requirements and acceptance criteria, including the per-owner quiescence and cap criteria"}
+{"file": ".trellis/tasks/09-20-lifecycle-migration-rest/design.md", "reason": "The D-C4-* decisions the implementation must match"}
+{"file": ".trellis/tasks/09-20-lifecycle-migration-rest/research/existing-tests.md", "reason": "The baseline counts and which existing tests must stay green unchanged"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "The commit gate, suppression policy, and the no-weakened-assertions rule"}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "Must verify each migrated owner honours the primitive's contract and that the allowlist really empties"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Must verify the UDP gates stay exactly zero-alloc and green in isolation"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Must verify the double-dispose and dispose-fault semantics documented there"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Must verify the 400-effective-line cap and any new file/type naming"}

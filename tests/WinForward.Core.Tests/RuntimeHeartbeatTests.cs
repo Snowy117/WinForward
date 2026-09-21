@@ -170,6 +170,55 @@ public sealed class RuntimeHeartbeatTests
     }
 
     [Fact]
+    public async Task SecondDisposeAsyncJoinsInsteadOfThrowing()
+    {
+        var logger = new RecordingRuntimeLogger();
+        var heartbeat = new RuntimeHeartbeat(logger, counters: new RuntimeCounters(), interval: s_tick);
+        heartbeat.Start();
+        await AsyncTestExtensions.WaitForAsync(() => Heartbeats(logger).Count >= 1).ConfigureAwait(false);
+
+        await heartbeat.DisposeAsync().ConfigureAwait(false);
+        // Regression: the loop is now a scope child and the scope owns the CTS. Before the migration
+        // a second dispose called CancelAsync on the already-disposed source and threw
+        // ObjectDisposedException; it must now join the same drain.
+        await heartbeat.DisposeAsync().ConfigureAwait(false);
+
+        var countAtDispose = Heartbeats(logger).Count;
+        await Task.Delay(150).ConfigureAwait(false);
+        Assert.Equal(countAtDispose, Heartbeats(logger).Count);
+    }
+
+    [Fact]
+    public async Task DisposeAsyncJoinsAnInFlightTick()
+    {
+        var logger = new RecordingRuntimeLogger();
+        var tickEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var heartbeat = new RuntimeHeartbeat(
+            logger,
+            usage: () =>
+            {
+                tickEntered.TrySetResult();
+                release.Task.GetAwaiter().GetResult();
+                return Usage(flows: 1);
+            },
+            counters: new RuntimeCounters(),
+            interval: s_tick);
+        heartbeat.Start();
+        await tickEntered.Task.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+
+        var dispose = Task.Run(async () => await heartbeat.DisposeAsync());
+        await Task.Delay(50).ConfigureAwait(false);
+
+        // Regression: if disposal did not join its Run child, it would return while the tick is still
+        // inside the usage provider.
+        Assert.False(dispose.IsCompleted);
+
+        release.TrySetResult();
+        await dispose.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+    }
+
+    [Fact]
     public async Task DefaultHeartbeatIsSilentUntilStarted()
     {
         var logger = new RecordingRuntimeLogger();

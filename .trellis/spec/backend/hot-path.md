@@ -291,6 +291,20 @@ branch, and any allocation-gate test that protects a span-vs-memory overload cho
   `payload.ToArray()` only on the contended-gate branch: the span views native capture memory
   that recycles once dispatch returns, so it cannot cross the gate `await`. This is a documented
   cold-path exemption; the warm uncontended shape stays zero-alloc.
+- **The UDP transport's disposal guard is outside the warm shape** (C4, 2026-09-21).
+  `Socks5UdpTransport.DisposeAsync` claims a one-shot `int` (`Interlocked.Exchange`) and sets it
+  **before** `_socket.Dispose()`; `SendSpanAsync` refuses with `ObjectDisposedException` on a plain
+  `Volatile.Read(ref _disposed) != 0` taken *before* `_sendGate.WaitAsync`. That is one volatile read
+  plus one branch — 0 B, no CTS, no closure, no `Run`, no state machine — and the "`_sendGate` disposed
+  last" order is unchanged, which is what keeps `WarmSyncSendAllocatesNoManagedBytes`,
+  `SendSpanAsyncWarmPathRunsNoAsyncStateMachine` and `EstablishedUdpDatagramPathAllocatesNoManagedBytes`
+  green. Its residual window (a sender preempted between the read and `WaitAsync` can still reach a
+  disposed gate) is accepted: closing it absolutely would require a lease on the per-datagram path.
+- **The capture refresh and demand machinery is off the packet path** (C4, 2026-09-21).
+  `LayeredCaptureRunner`'s monitor thread, its periodic tick, and the extracted
+  `CaptureRefreshWorkers` type allocate (a `Run` child's delegate + state machine, one OS thread) per
+  *generation or tick*, never per packet; the capture pump's own zero-allocation gate
+  (`NdisCapturePumpTests.IdlePollIterationsAllocateNoManagedBytes`) is unaffected.
 
 ### 4. Validation & Error Matrix
 

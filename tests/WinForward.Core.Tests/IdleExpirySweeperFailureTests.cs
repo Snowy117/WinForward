@@ -71,6 +71,84 @@ public sealed class IdleExpirySweeperFailureTests
         await coordinator.DisposeAsync();
     }
 
+    [Fact]
+    public async Task DisposeAsyncJoinsAnInFlightTick()
+    {
+        var logger = new RecordingRuntimeLogger();
+        var tickEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var transportFactory = new ParkedTransportFactory();
+        var coordinator = UdpCoordinatorFakes.CreateCoordinator(
+            transportFactory,
+            new NoopResponseSink(),
+            new UdpProxyOptions
+            {
+                Capacity = 16,
+                BeforeExpiryRecheck = () =>
+                {
+                    tickEntered.TrySetResult();
+                    return new ValueTask(release.Task);
+                },
+                Logger = logger,
+            });
+        var config = new ValidatedConfiguration(
+            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new PolicySnapshot([], FlowAction.Pass));
+        var dispatcher = new FlowDispatcher(config, new FakeGuard(), new FakeExecutor());
+        var flow = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
+
+        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
+        await WaitForAsync(() => transportFactory.Transport is not null);
+
+        var sweeper = new IdleExpirySweeper(
+            dispatcher,
+            tcp: null,
+            udp: coordinator,
+            interval: TimeSpan.FromMilliseconds(50),
+            flowIdleTimeout: TimeSpan.FromMinutes(5),
+            redirectIdleTimeout: TimeSpan.FromMinutes(5),
+            relayIdleTimeout: TimeSpan.FromMilliseconds(50),
+            logger: logger);
+        sweeper.Start();
+        await tickEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var dispose = sweeper.DisposeAsync().AsTask();
+        await Task.Delay(50);
+
+        // Regression: if disposal did not join its Run child, it would return while the sweep tick
+        // is still awaiting the expiry recheck.
+        Assert.False(dispose.IsCompleted);
+
+        release.TrySetResult();
+        await dispose.WaitAsync(TimeSpan.FromSeconds(10));
+
+        await sweeper.DisposeAsync();
+        await coordinator.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task SecondDisposeAsyncJoinsInsteadOfThrowing()
+    {
+        var logger = new RecordingRuntimeLogger();
+        var config = new ValidatedConfiguration(
+            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new PolicySnapshot([], FlowAction.Pass));
+        var dispatcher = new FlowDispatcher(config, new FakeGuard(), new FakeExecutor());
+        var sweeper = new IdleExpirySweeper(
+            dispatcher,
+            tcp: null,
+            udp: null,
+            interval: TimeSpan.FromMilliseconds(50),
+            logger: logger);
+        sweeper.Start();
+        await Task.Delay(80);
+
+        await sweeper.DisposeAsync();
+        // Regression: before the migration a second dispose called CancelAsync on the already-disposed
+        // CTS and threw ObjectDisposedException; it must now join the same drain.
+        await sweeper.DisposeAsync();
+    }
+
     /// <summary>A transport whose receive never completes: the session stays alive until disposal faults it.</summary>
     private sealed class ParkedTransportFactory : IUdpProxyTransportFactory
     {

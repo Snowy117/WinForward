@@ -54,12 +54,12 @@ public sealed class RuntimeHeartbeat : IAsyncDisposable
     private readonly Func<RuntimeGcSnapshot>? _gcSnapshotProvider;
     private readonly TimeSpan _interval;
     private readonly TimeProvider _time;
-    private readonly CancellationTokenSource _shutdown = new();
+    private readonly QuiescenceScope _scope = new();
     private DateTimeOffset _startedUtc;
     private IReadOnlyDictionary<string, long> _lastCounters = new Dictionary<string, long>(StringComparer.Ordinal);
     private RuntimeGcSnapshot _gcStartupMark;
     private RuntimeGcSnapshot _lastGcSnapshot;
-    private Task? _loop;
+    private int _started;
 
     public RuntimeHeartbeat(
         IRuntimeLogger logger,
@@ -103,20 +103,20 @@ public sealed class RuntimeHeartbeat : IAsyncDisposable
     /// <summary>Starts the heartbeat loop on demand; a second start is a programming error. Not starting keeps the runtime silent.</summary>
     public void Start()
     {
-        if (_loop is not null) throw new InvalidOperationException("The runtime heartbeat is already started.");
+        if (Interlocked.Exchange(ref _started, 1) != 0) throw new InvalidOperationException("The runtime heartbeat is already started.");
         _startedUtc = _time.GetUtcNow();
         _gcStartupMark = ReadGcSnapshot();
         _lastGcSnapshot = _gcStartupMark;
         _lastCounters = _counters.Snapshot();
-        _loop = RunAsync();
+        ObjectDisposedException.ThrowIf(!_scope.Run(RunAsync, "runtime.heartbeat.loop"), this);
     }
 
-    private async Task RunAsync()
+    private async Task RunAsync(CancellationToken token)
     {
         using var timer = new PeriodicTimer(_interval, _time);
         try
         {
-            while (await timer.WaitForNextTickAsync(_shutdown.Token).ConfigureAwait(false))
+            while (await timer.WaitForNextTickAsync(token).ConfigureAwait(false))
             {
                 try
                 {
@@ -130,7 +130,7 @@ public sealed class RuntimeHeartbeat : IAsyncDisposable
                 }
             }
         }
-        catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
             // Normal shutdown path.
         }
@@ -247,17 +247,8 @@ public sealed class RuntimeHeartbeat : IAsyncDisposable
         if (value > 0) fields.Add(new RuntimeLogField(key, value));
     }
 
-    public async ValueTask DisposeAsync()
-    {
-        await _shutdown.CancelAsync().ConfigureAwait(false);
-        if (_loop is not null)
-        {
-            try { await _loop.ConfigureAwait(false); }
-            catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
-            {
-                // Cancellation is the expected shutdown path.
-            }
-        }
-        _shutdown.Dispose();
-    }
+    // The drain is the whole teardown for this owner — seal, cancel (unwinding the timer wait),
+    // join the in-flight tick, release the owned CTS last — and is itself single-flight, so a
+    // second DisposeAsync joins it instead of re-running teardown.
+    public ValueTask DisposeAsync() => _scope.DisposeAsync();
 }

@@ -34,6 +34,12 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
     private readonly Socks5AddressCache? _addressCache;
     private readonly byte[] _handshakeScratch = new byte[HandshakeScratchLength];
 
+    // Admission + quiescence for the operations that read the attempt deadline (`AttemptToken`).
+    // The scope is linked to the caller's lifetime token, so it is canceled once the connection is
+    // disposed; it is also what makes the epoch CTS release ordered after every reader (D-C4-7).
+    private readonly QuiescenceScope _scope;
+    private int _disposeStarted;
+
     private Socks5ControlConnection(Socket socket, IDisposable? loopPrevention, CancellationTokenSource attemptCancellation, Socks5AddressCache? addressCache, CancellationToken connectCancellation)
     {
         _socket = socket;
@@ -42,6 +48,7 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
         _attemptCancellation = attemptCancellation;
         _connectCancellation = connectCancellation;
         _addressCache = addressCache;
+        _scope = new QuiescenceScope(connectCancellation);
     }
 
     /// <summary>
@@ -229,6 +236,18 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        // D11: one caller owns the teardown; every other caller joins the same drain.
+        if (Interlocked.Exchange(ref _disposeStarted, 1) != 0)
+        {
+            await _scope.DrainAsync().ConfigureAwait(false);
+            return;
+        }
+
+        // Sealing first is what makes the late-reader refusal meaningful: a reader is either
+        // admitted below (and the drain then waits for its lease) or refused before it can touch
+        // AttemptToken. The epoch deadline is released last, after the drain, so no admitted reader
+        // can evaluate AttemptToken on a disposed source (D-C4-7).
+        var drain = _scope.DrainAsync();
         try
         {
             await _stream.DisposeAsync().ConfigureAwait(false);
@@ -241,8 +260,20 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
             }
             finally
             {
-                _attemptCancellation.Dispose();
+                await DrainAndReleaseDeadlineAsync(drain).ConfigureAwait(false);
             }
+        }
+    }
+
+    private async ValueTask DrainAndReleaseDeadlineAsync(Task drain)
+    {
+        try
+        {
+            await drain.ConfigureAwait(false);
+        }
+        finally
+        {
+            _attemptCancellation.Dispose();
         }
     }
 
@@ -262,29 +293,49 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
 
     private async ValueTask<T> RunWithinAttemptAsync<T>(Func<CancellationToken, ValueTask<T>> operation, CancellationToken cancellationToken)
     {
-        using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(AttemptToken, cancellationToken);
+        // Admission precedes the AttemptToken read: a reader refused here never evaluates the
+        // epoch deadline, and an admitted reader's lease keeps the deadline alive until it exits.
+        var admitted = _scope.TryEnter(out var lease);
+        ObjectDisposedException.ThrowIf(!admitted, this);
         try
         {
-            return await operation(operationCancellation.Token).ConfigureAwait(false);
+            using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(AttemptToken, cancellationToken);
+            try
+            {
+                return await operation(operationCancellation.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (operationCancellation.IsCancellationRequested)
+            {
+                ThrowForAttemptCancellation(cancellationToken);
+                throw;
+            }
         }
-        catch (OperationCanceledException) when (operationCancellation.IsCancellationRequested)
+        finally
         {
-            ThrowForAttemptCancellation(cancellationToken);
-            throw;
+            lease.Dispose();
         }
     }
 
     private async ValueTask RunWithinAttemptAsync(Func<CancellationToken, ValueTask> operation, CancellationToken cancellationToken)
     {
-        using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(AttemptToken, cancellationToken);
+        var admitted = _scope.TryEnter(out var lease);
+        ObjectDisposedException.ThrowIf(!admitted, this);
         try
         {
-            await operation(operationCancellation.Token).ConfigureAwait(false);
+            using var operationCancellation = CancellationTokenSource.CreateLinkedTokenSource(AttemptToken, cancellationToken);
+            try
+            {
+                await operation(operationCancellation.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (operationCancellation.IsCancellationRequested)
+            {
+                ThrowForAttemptCancellation(cancellationToken);
+                throw;
+            }
         }
-        catch (OperationCanceledException) when (operationCancellation.IsCancellationRequested)
+        finally
         {
-            ThrowForAttemptCancellation(cancellationToken);
-            throw;
+            lease.Dispose();
         }
     }
 

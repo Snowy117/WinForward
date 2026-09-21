@@ -452,16 +452,6 @@ dotnet_diagnostic.WF0002.severity = error
 dotnet_diagnostic.WF0003.severity = error
 dotnet_diagnostic.WF0004.severity = error
 
-# MultiAdapterCaptureLoop.cs:110 `_ = ForwardDegradationAsync(...)`：通知型回调。
-# 删除方：C4 —— 改为所属 owner 同步调用的回调（design §4.1）。
-[src/WinForward.Runtime/Capture/MultiAdapterCaptureLoop.cs]
-dotnet_diagnostic.WF0001.severity = none
-
-# LayeredCaptureRunner.cs:144 `Task.Factory.StartNew` 与 :149 `Task.Run`：真实并发，需迁移为
-# scope 子任务（循环体自带 lease）。删除方：C4（design §4.1）。
-[src/WinForward.Runtime/Capture/LayeredCaptureRunner.cs]
-dotnet_diagnostic.WF0003.severity = none
-
 # 永久豁免（不在收缩清单内）：QuiescenceScope.cs:133 `_ = RunChildAsync(...)` 与 :170
 # `_ = DrainCoreAsync(...)` 是原语自身的受管子任务与分离的 drain——子任务已由 TryEnter 准入、
 # 其 lease 由 RunChildAsync 释放、故障在同一处 RecordFault 记录，drain 则自含故障（避免分离任务

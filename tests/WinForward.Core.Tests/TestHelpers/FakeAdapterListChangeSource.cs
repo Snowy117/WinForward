@@ -66,3 +66,32 @@ internal sealed class FakeAdapterListChangeSource : IAdapterListChangeSource
 
     public void Dispose() => Cancel();
 }
+
+/// <summary>
+/// An <see cref="IAdapterListChangeSource"/> whose <see cref="WaitOne"/> parks until
+/// <see cref="Release"/> is called, consulting its cancellation token only once the wait is
+/// released. A test can therefore hold a capture runner's monitor inside its blocking wait while
+/// teardown runs (task 09-20-structured-concurrency C4, the monitor-lease quiescence test).
+/// <see cref="Dispose"/> releases the wait like <see cref="FakeAdapterListChangeSource.Cancel"/>
+/// does.
+/// </summary>
+internal sealed class BlockingAdapterListChangeSource : IAdapterListChangeSource
+{
+    private readonly TaskCompletionSource _monitoring = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Completes once the monitor thread has parked inside <see cref="WaitOne"/>.</summary>
+    public Task WaitUntilMonitoringAsync() => _monitoring.Task;
+
+    /// <summary>Releases the parked wait; a cancelled token then makes <see cref="WaitOne"/> return false.</summary>
+    public void Release() => _release.TrySetResult();
+
+    public bool WaitOne(CancellationToken cancellationToken)
+    {
+        _monitoring.TrySetResult();
+        _release.Task.GetAwaiter().GetResult();
+        return !cancellationToken.IsCancellationRequested;
+    }
+
+    public void Dispose() => Release();
+}

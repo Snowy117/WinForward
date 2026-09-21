@@ -35,3 +35,12 @@
   sweeper's, a fault is the failure handler's). Teardown reasons (`SetupFailure`, `Expiry`,
   `Fault`, `Shutdown`) are explicit data; only a genuine setup failure arms the 1 s setup
   cooldown.
+- **A second `DisposeAsync` on a migrated owner joins instead of throwing** (C4, 2026-09-21): every
+  owner moved to `QuiescenceScope` makes its teardown a single-flight one-shot (`Interlocked.Exchange`)
+  whose loser awaits the same drain, so `IdleExpirySweeper` and `RuntimeHeartbeat` no longer surface an
+  `ObjectDisposedException` from `CancelAsync` on a disposed source. The scope's `DrainAsync` never
+  throws for child faults (D4), so a dispose that only joins is silent by design; an owner's *own*
+  teardown fault still propagates to the caller that ran it (C3's D-C3-2, `async-lifetime.md` D11). A
+  caller entering after the seal is refused with `ObjectDisposedException`
+  (`Socks5UdpTransport.SendSpanAsync`, `UdpProxyCoordinator`'s send entry) rather than silently
+  dropped — the fail-closed direction stays explicit.

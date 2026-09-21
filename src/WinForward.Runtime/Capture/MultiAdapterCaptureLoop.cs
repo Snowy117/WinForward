@@ -13,14 +13,17 @@ namespace WinForward.Runtime.Capture;
 /// pump returns normally, siblings keep running uncanceled, and the optional
 /// <c>onAdapterDegraded(adapter, nativeError)</c> callback is forwarded so the wiring can restore
 /// just that adapter's mode while interception continues elsewhere. The driver stays owned by the
-/// caller for the whole run, so <see cref="DisposeAsync"/> only stops the pumps.
+/// caller for the whole run, so <see cref="DisposeAsync"/> only stops the pumps and then joins any
+/// degradation forward the pumps admitted before they stopped.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class MultiAdapterCaptureLoop : IPacketCaptureLoop
 {
     private readonly NdisCapturePump[] _pumps;
     private readonly Func<WindowsAdapter, int, ValueTask>? _onAdapterDegraded;
+    private readonly QuiescenceScope _scope = new();
     private long _degradedAdapterCount;
+    private int _disposeStarted;
 
     public MultiAdapterCaptureLoop(INdisPacketReader driver, IReadOnlyList<WindowsAdapter> adapters, CapturePacketProcessor processor, TimeSpan? pollDelay = null, Func<WindowsAdapter, int, ValueTask>? onAdapterDegraded = null, Action<WindowsAdapter, int, int>? onAdapterTransientRetry = null)
     {
@@ -75,12 +78,25 @@ public sealed class MultiAdapterCaptureLoop : IPacketCaptureLoop
         }
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
+    {
+        // D11: the one-shot claim owns the teardown and every caller joins the drain. The pumps are
+        // disposed before the drain on purpose: a pump that degrades while it is being disposed is
+        // still admitted by the scope, then joined by the drain, so its forward is awaited rather
+        // than orphaned.
+        return Interlocked.Exchange(ref _disposeStarted, 1) != 0
+            ? new ValueTask(_scope.DrainAsync())
+            : new ValueTask(DisposeCoreAsync());
+    }
+
+    private async Task DisposeCoreAsync()
     {
         foreach (var pump in _pumps)
         {
             await pump.DisposeAsync().ConfigureAwait(false);
         }
+
+        await _scope.DrainAsync().ConfigureAwait(false);
     }
 
     private static async Task RunPumpAsync(NdisCapturePump pump, CancellationTokenSource linked)
@@ -104,10 +120,13 @@ public sealed class MultiAdapterCaptureLoop : IPacketCaptureLoop
     {
         Interlocked.Increment(ref _degradedAdapterCount);
         if (_onAdapterDegraded is null) return;
-        // Fire-and-forget with observation: the degraded pump has already exited its loop, so the
-        // callback cannot delay it; a faulting callback must not surface as an unobserved task
-        // exception (the wiring performs its own logging and best-effort mode restore).
-        _ = ForwardDegradationAsync(_onAdapterDegraded, adapter, nativeError);
+        // Tracked child: the degraded pump has already exited its loop, so the forward cannot delay
+        // it; the scope's drain joins the forward instead of letting it outlive the loop. A faulting
+        // callback is recorded by Run and also swallowed inside the forward (the wiring performs its
+        // own logging and best-effort mode restore).
+        _scope.Run(
+            _ => ForwardDegradationAsync(_onAdapterDegraded, adapter, nativeError),
+            "capture.degrade-forward");
     }
 
     private static async Task ForwardDegradationAsync(Func<WindowsAdapter, int, ValueTask> callback, WindowsAdapter adapter, int nativeError)

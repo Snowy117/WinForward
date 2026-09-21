@@ -99,7 +99,14 @@ internal struct WorkLease : IDisposable          // mutable; Dispose() => one Ex
 - **D6 — Nesting is explicit composition.** A parent's drain awaits each child scope's drain; there is
   no `AsyncLocal` ambient parent.
 - **D7 — Only `QuiescenceScope` owns a `CancellationTokenSource`.** `Token`/`Cancel` replace ad-hoc
-  per-owner CTSes, so "the token is no longer read after dispose" becomes structural.
+  per-owner CTSes, so "the token is no longer read after dispose" becomes structural. D7 governs the
+  **owner-lifetime** source. An **operation- or epoch-scoped** source — a stall window, a per-attempt
+  deadline — legitimately stays with the operation that creates it: its release is ordered *after* the
+  drain, and it is never the owner's lifetime handle (C4's D-C4-1). Precedents: `TcpProxyRelay`'s
+  per-direction `StallWindow` (one re-armed CTS) and `Socks5ControlConnection._attemptCancellation`
+  (one `CancelAfter` budget spanning an attempt), whose readers hold a scope lease so the deadline
+  cannot be disposed under a live operation. The rule is "one owner-lifetime CTS per owner, owned by
+  the scope", not "no other CTS may exist".
 - **D8 — Terminology lives in this guide**, not in a `CONTEXT.md`/ADR set.
 - **D9 — Fault observation is intrinsic to the child body.** A migrated child records its own fault
   (and may rethrow, because someone still awaits it); the scope never patches an abandoned task with
@@ -242,21 +249,26 @@ where warning treatment is relaxed. Two implementation details are load-bearing 
 - `WF0004` excludes any `IAssignmentOperation` (not only `ISimpleAssignmentOperation`) and any
   `IAwaitOperation`, so `_x ??= FooAsync();` and `await Task.WhenAny(a, b);` are not flagged.
 
-Temporary per-file allowlist entries (each carries its evidence and reason in `.editorconfig`; the
-program is not complete while any of them remains):
+The temporary per-file allowlist is now **empty** — that was the program's completion condition. Every
+entry that existed at C2 was repaid in the step that migrated its file:
 
-| File | Rules | Removed by |
-|------|-------|-----------|
-| `src/WinForward.Runtime/Capture/MultiAdapterCaptureLoop.cs` | `WF0001` (`:110`) | C4 |
-| `src/WinForward.Runtime/Capture/LayeredCaptureRunner.cs` | `WF0003` (`:144`, `:149`) | C4 |
+- **C3** (2026-09-21, task `09-20-lifecycle-migration-cluster`) removed the four cluster entries:
+  `TcpProxyRelay.cs` and `TcpRelayFaultObserver.cs` (the latter deleted with its file) in step 4,
+  `TcpRedirectSessionStore.cs` in step 3 and `UdpProxySession.cs` in step 5. After C3 no `_ =`,
+  `.ContinueWith`, `Task.Run` or `Task.Factory.StartNew` site remains under
+  `src/WinForward.Runtime/{TcpRedirect,UdpProxy}/`.
+- **C4** (2026-09-21, task `09-20-lifecycle-migration-rest`) removed the last two:
+  `LayeredCaptureRunner.cs` (WF0003 — the monitor became a dedicated `Thread` joined through the run
+  scope's lease, and the periodic tick a `Run` child) in step 1, and `MultiAdapterCaptureLoop.cs`
+  (WF0001 — the degradation forward became a `Run` child) in step 2. After C4 the only awaitable-discard
+  or spawn sites in `src/**` are the primitive's own two (`_ = RunChildAsync(...)`,
+  `_ = DrainCoreAsync(...)`), the awaited/non-awaitable discards documented above, and there is **no**
+  `.editorconfig` `severity = none` under `src/**` except the primitive's exemption.
 
-C3 (2026-09-21, task `09-20-lifecycle-migration-cluster`) removed the four cluster entries it owned:
-`TcpProxyRelay.cs` and `TcpRelayFaultObserver.cs` (the latter deleted with its file) in step 4,
-`TcpRedirectSessionStore.cs` in step 3 and `UdpProxySession.cs` in step 5. After C3, no `_ =`,
-`.ContinueWith`, `Task.Run` or `Task.Factory.StartNew` site remains under
-`src/WinForward.Runtime/{TcpRedirect,UdpProxy}/`. Load-bearing evidence: a scratch
-`_ = Task.Delay(1);` added under `src/WinForward.Runtime/` fails the build with
-`error WF0001: Await this awaitable or start it as a tracked child with QuiescenceScope.Run`.
+Load-bearing evidence for both removals (scratch probes, since deleted): a `_ = Task.Delay(1);` under
+`src/WinForward.Runtime/` fails the build with `error WF0001: Await this awaitable or start it as a
+tracked child with QuiescenceScope.Run`, and a `Task.Run`/`Task.Factory.StartNew` with
+`error WF0003: Start tracked work with QuiescenceScope.Run, or use a dedicated worker its owner joins`.
 
 The single permanent exemption is `WF0001` for the primitive itself (`QuiescenceScope.cs`), below.
 
@@ -303,3 +315,44 @@ and `DisposeAsync` observes `Completion` on every path (`ObserveCompletionAsync`
 signal/join split: `UdpProxySession`'s loop tail calls a synchronous `Action<UdpProxySession>`, and the
 coordinator maps it to `_scope.Run(…, "udp.receive-failure")` — the signal must return promptly (an
 awaited teardown there deadlocks against the session's own disposal).
+
+### Per-owner notes (C4, 2026-09-21)
+
+The remaining owners are migrated too. What each owns after C4, and what it deleted:
+
+| Owner | Scope | Deleted / changed |
+|-------|-------|-------------------|
+| `LayeredCaptureRunner` | `_scope = new QuiescenceScope(cancellationToken)` created at the top of `RunAsync` — owns the run CTS | the local `monitorCancellation`; `TeardownAsync`'s monitor task parameter; the refresh workers moved to `CaptureRefreshWorkers.cs` (a 417 → 388 effective-line net reduction) |
+| `MultiAdapterCaptureLoop` | `_scope = new QuiescenceScope()` (parent-less; the runtime disposes it after `_capture.RunAsync` returns) | the `_ = ForwardDegradationAsync(...)` discard; `DisposeAsync` now drains |
+| `TransactionalCaptureRuntime` (`CaptureLifecycle.cs`) | `_scope = new QuiescenceScope()` replaces `_shutdown`; linked at the single `CreateLinkedTokenSource` site | `_shutdown`; `StopAsync`'s `CancelAsync()` → `_scope.Cancel()`; `RestoreBestEffortAsync`'s `_shutdown.Dispose()` |
+| `IdleExpirySweeper`, `RuntimeHeartbeat` | `_scope = new QuiescenceScope()` replaces `_shutdown`; the loop is a `Run` child | `_shutdown`, `_loop`; `DisposeAsync` is now just the scope's; a second dispose **joins instead of throwing** |
+| `Socks5ControlConnection` | `_scope = new QuiescenceScope(_connectCancellation)` + a D11 one-shot; every attempt-token reader holds a lease | — (no handle deleted; the per-attempt deadline CTS stays, see D7 above) |
+| `Socks5UdpTransport` | **none** — an `Interlocked` disposal guard only | — |
+| `NdisCapturePump` | **none, deliberately** | — |
+
+The three shapes a later reader must not "fix":
+
+- **The capture monitor is a dedicated raw `Thread`, joined through the scope's lease.** `Run` invokes
+  its body **inline on the caller thread** and `MonitorLoop` blocks in a native `WaitOne`, so `Run`
+  would stall `RunAsync` for the monitor's lifetime. `WF0003`'s own message sanctions the alternative
+  — "or use a dedicated worker its owner joins" — and a lease taken by the thread body is that join:
+  `await _scope.DrainAsync()` *is* the join, so no completion TCS bridge is needed (unlike
+  `NdisCapturePump`, which predates the primitive). A raw `new Thread(...)` is not matched by `WF0003`
+  (the rule is syntactic over `Task.Run`/`Task.Factory.StartNew`), so this is the sanctioned door
+  rather than a suppression.
+- **A caller-awaited entry-point task is never registered as a scope child.** `TransactionalCaptureRuntime`'s
+  `_runTask` is returned by `StartAsync` and awaited by `StopAsync`; registering it would make
+  `StopAsync` wait on a drain that waits on the run task. The same reasoning covers
+  `LayeredCaptureRunner.RunAsync`'s returned task. Where an owner awaits its own tree, D11 plus this
+  rule is the prevention (it was a real deadlock class in four C4 owners).
+- **`Socks5UdpTransport` has no scope on purpose.** It owns no CTS, and `SendSpanAsync` is the warm
+  per-datagram path, so it gets only an allocation-free `Interlocked` guard that refuses a send whose
+  owner is already disposed. Its residual window (a sender preempted between the guard read and
+  `_sendGate.WaitAsync` can still reach a disposed gate) is accepted: closing it absolutely would need
+  a lease on the datagram path, which the hot-path contract forbids.
+
+Two C4 deviations worth knowing: the per-attempt deadline CTS could not be linked to the scope token
+(it is created before the connection exists), so it stays linked to the caller token and the race is
+closed by admission + release-after-drain instead; and the UDP transport's guard throws
+`ObjectDisposedException` rather than returning a bool, because `IUdpProxyTransport.SendSpanAsync` has
+no fail-closed return channel (a silent success would corrupt the coordinator's send accounting).

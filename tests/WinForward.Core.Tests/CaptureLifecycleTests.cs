@@ -144,6 +144,51 @@ public sealed class CaptureLifecycleTests
         Assert.True(runtime.ReachedPumpRun);
     }
 
+    [Fact]
+    public async Task DisposeAsyncJoinsTheInFlightCleanupAndClosesOnce()
+    {
+        var modes = new FakeModes([]);
+        var capture = new BlockingDisposeCapture();
+        var runtime = new TransactionalCaptureRuntime(modes, capture);
+
+        var dispose = AsTask(runtime.DisposeAsync());
+        await capture.DisposeStarted.Task;
+
+        // The cleanup's drain is the last ordered step before the Closed transition, so the state is
+        // still Stopping while the capture teardown is in flight.
+        Assert.Equal(CaptureRuntimeState.Stopping, runtime.State);
+
+        var join = AsTask(runtime.DisposeAsync());
+        Assert.False(join.IsCompleted);
+
+        capture.CompleteDispose();
+        await Task.WhenAll(dispose, join);
+
+        // Regression: a second DisposeAsync that re-ran the teardown (or a drain that closed before
+        // the capture teardown) would dispose the capture twice or return early.
+        Assert.Equal(1, capture.DisposeCount);
+        Assert.Equal(CaptureRuntimeState.Closed, runtime.State);
+        await runtime.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task SecondDisposeAsyncAfterCleanupReturnsWithoutThrowing()
+    {
+        var modes = new FakeModes([]);
+        var capture = new CompletingCapture();
+        var runtime = new TransactionalCaptureRuntime(modes, capture);
+
+        await runtime.DisposeAsync();
+        // Regression: the scope owns the shutdown CTS, and the drain releases it last. A second
+        // dispose must join the drained scope, not touch a released source or re-run the cleanup.
+        await runtime.DisposeAsync();
+
+        Assert.Equal(CaptureRuntimeState.Closed, runtime.State);
+        Assert.True(capture.Disposed);
+    }
+
+    private static Task AsTask(ValueTask value) => value.AsTask();
+
     private sealed class FakeCapture : IPacketCaptureLoop
     {
         public async ValueTask RunAsync(CancellationToken cancellationToken) => await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
