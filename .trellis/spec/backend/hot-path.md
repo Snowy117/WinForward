@@ -121,7 +121,13 @@ UDP session setup, or the SOCKS5 benchmark/soak suite.
   flow-key harness (460.8 B/session), so product-shaped cost is ≤4,950 B/session (measured
   4,701.0 B; was 5,266.2). When the probe moves, `SessionSetupDecompositionBenchmarks` localizes
   the move: capacity 489 / admission 829 / setup start ≤172 / session tier 2,503 / teardown 1,459
-  (matched shape, not re-measured) – 1,885 (single-pass) B per session. Anchor falsification: a
+  (matched shape, not re-measured) – 1,885 (single-pass) B per session. Split note
+  (09-22-udp-admission-capacity-alloc): of the admission 829, 356.8 is the flow-key harness (H)
+  and 272.0 is the cold `SetupWorkItem` rent production amortizes (the executor's
+  `OverflowAllocations` diagnostic is zero at steady state), so steady-state admission is ≈200
+  B/session (slot + queue + completion cell); the capacity 489 is the probe's `capacity = N`
+  pre-seed (one-time at the production 1,024 clamp), and live flows beyond the clamp pay ≈80
+  B/session of amortized dictionary growth per dictionary. Anchor falsification: a
   documented ≥3-run batch above the band on an unmodified tree is product drift to fix (never to
   relax the band).
 - **Framework socket cost stays outside this budget** (control TCP connect + SOCKS5 handshake,
