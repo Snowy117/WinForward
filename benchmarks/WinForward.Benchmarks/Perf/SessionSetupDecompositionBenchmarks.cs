@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.Net;
@@ -44,6 +45,9 @@ public class SessionSetupDecompositionBenchmarks
     /// <summary>Two bytes against a one-byte setup budget: every admission is rejected (budget backpressure), so no datagram is buffered or flushed.</summary>
     private static readonly byte[] s_overBudgetPayload = [1, 2];
 
+    /// <summary>The cold-rent probe's cached handler (a static lambda): renting never allocates the delegate itself, so A6 prices the item and its planes only.</summary>
+    private static readonly Func<SetupWorkItem, Task> s_cachedHandler = static _ => Task.CompletedTask;
+
     [Params(1, 100, 1000)]
     public int Sessions { get; set; }
 
@@ -53,6 +57,15 @@ public class SessionSetupDecompositionBenchmarks
     private readonly List<IAsyncDisposable> _pendingResources = [];
     private Lock? _lockProbeSink;
     private UdpProxySessionContext _contextSink;
+    private UdpAssociationTable? _associationTableSink;
+    private Dictionary<FlowKey, UdpProxyCoordinator.UdpSessionSlot>? _sessionDictionarySink;
+    private UdpSetupCooldownTable? _cooldownTableSink;
+    private UdpProxyCoordinator.UdpSessionSlot? _slotSink;
+    private BoundedSetupQueue? _setupQueueSink;
+    private TaskCompletionSource? _completionSink;
+    private Task? _completionTaskSink;
+    private SetupWorkItem? _rentSink;
+    private Dictionary<FlowKey, UdpProxyCoordinator.UdpSessionSlot>? _dictionaryGrowthSink;
 
     [GlobalSetup]
     public void Setup() => _socks = new Socks5Server("benchmark", "127.0.0.1", 1080, Username: null, Password: null);
@@ -641,6 +654,153 @@ public class SessionSetupDecompositionBenchmarks
         Assert(executor.IsDisposed, "E2 must complete the executor teardown inside the window");
     }
 
+    /// <summary>A1: the S0 capacity pre-seed's association-table share — one <see cref="UdpAssociationTable"/> constructed with <c>capacity = Sessions</c> and <c>initialCapacity = Sessions</c>, the coordinator's pre-seed shape at the probe's N ≤ 1000 (production clamps the pre-seed to <c>min(capacity, 1024)</c>, and growth beyond it is A9's readout). The marginal is the per-session share of the two pre-seeded dictionaries.</summary>
+    [Benchmark]
+    public void ComponentA1_AssociationTablePreSeed()
+    {
+        Volatile.Write(ref _associationTableSink, new UdpAssociationTable(capacity: Sessions, initialCapacity: Sessions));
+        Assert(_associationTableSink is not null, "A1 must construct the pre-seeded association table");
+    }
+
+    /// <summary>A2: the S0 capacity pre-seed's session-dictionary share — one <c>Dictionary&lt;FlowKey, UdpProxyCoordinator.UdpSessionSlot&gt;</c> pre-sized to <c>Sessions</c>, the coordinator's <c>_sessions</c> pre-seed (same clamp caveat as A1). The marginal is the dictionary's per-session pre-seed share.</summary>
+    [Benchmark]
+    public void ComponentA2_SessionDictionaryPreSeed()
+    {
+        Volatile.Write(ref _sessionDictionarySink, new Dictionary<FlowKey, UdpProxyCoordinator.UdpSessionSlot>(Sessions));
+        Assert(_sessionDictionarySink is not null, "A2 must construct the pre-seeded session dictionary");
+    }
+
+    /// <summary>A3: the pre-seed split's control — one <c>UdpSetupCooldownTable</c> with the coordinator's <c>capacity = Sessions</c>. The table pre-seeds nothing (its dictionary materializes only on a cooldown write), so the marginal is expected ≈ 0 and any positive reading is construction noise.</summary>
+    [Benchmark]
+    public void ComponentA3_CooldownTableConstruction()
+    {
+        Volatile.Write(ref _cooldownTableSink, new UdpSetupCooldownTable(Sessions));
+        Assert(_cooldownTableSink is not null, "A3 must construct the cooldown table");
+    }
+
+    /// <summary>A4: the admission leg's slot objects — one <c>UdpProxyCoordinator.UdpSessionSlot</c> per session, whose construction also builds the slot's inline <see cref="BoundedSetupQueue"/> (the second object the admission path pays per flow).</summary>
+    [Benchmark]
+    public void ComponentA4_SlotAndQueueObjects()
+    {
+        for (var index = 0; index < Sessions; index++)
+        {
+            _slotSink = new UdpProxyCoordinator.UdpSessionSlot();
+        }
+
+        Assert(_slotSink is not null, "A4 must construct one slot per session");
+    }
+
+    /// <summary>A4b: the admission leg's queue object alone — one <see cref="BoundedSetupQueue"/> per session with the slot's production bounds (32 packets / 32 KiB), sizing the queue's own share of A4's slot-plus-queue pair for the adoption table. The struct-inlining conversion measured net 24.0 B/session (the slot object grows 48.0 → 120.0, swallowing 72 of the 96) and was reverted — below the ≈64 B/session adoption rule — so in the current tree the case prices the class queue at 96.0 B/session and reads ≈0 only if a future decision inlines the queue into its slot.</summary>
+    [Benchmark]
+    public void ComponentA4b_BoundedSetupQueueObject()
+    {
+        for (var index = 0; index < Sessions; index++)
+        {
+            _setupQueueSink = new BoundedSetupQueue(32, 32_768);
+        }
+
+        Assert(_setupQueueSink is not null, "A4b must construct one queue per session");
+    }
+
+    /// <summary>A5: the admission leg's completion cell — one <see cref="TaskCompletionSource"/> (RunContinuationsAsynchronously) per session plus the <c>Task</c> read that <c>ScheduleSessionSetup</c> stores into the slot; cross-checks the C2e 88.0 B/session cell measurement in the admission context (C2e sized the quiescence scope's drain cell).</summary>
+    [Benchmark]
+    public void ComponentA5_CompletionCell()
+    {
+        for (var index = 0; index < Sessions; index++)
+        {
+            var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _completionSink = completion;
+            _completionTaskSink = completion.Task;
+        }
+
+        Assert(_completionSink is not null && _completionTaskSink is not null, "A5 must construct one completion cell per session");
+    }
+
+    /// <summary>A6: the admission leg's cold rent — one real <see cref="SetupExecutor"/> whose free list never fills (the case never enqueues, so no worker starts and every rent misses), one fresh <see cref="SetupWorkItem"/> plus its two pre-allocated planes per session: the shape <c>OverflowAllocations</c> counts and S1's admission executor rents on every session, while production amortizes it away by recycling (A8 is the warm-rent counterpart).</summary>
+    [Benchmark]
+    public void ComponentA6_ColdRent()
+    {
+        var executor = new SetupExecutor();
+        for (var index = 0; index < Sessions; index++)
+        {
+            _rentSink = executor.RentItem(s_cachedHandler);
+        }
+
+        Assert(executor.OverflowAllocations == Sessions, "A6 must miss the free list on every rent (nothing enqueues, so the free list stays empty)");
+        Assert(_rentSink is not null, "A6 must rent one item per session");
+        _pendingResources.Add(new SetupExecutorFixture(executor));
+    }
+
+    /// <summary>A7: the admission data path against the real types — per session: the global budget charge, one native lease rent, the payload copy into the lease span, the slot queue's inline enqueue, dequeue, budget credit and lease release. Expected ≈ 0 managed B/session (the copy and the lease stay native; the first entry sits in the single-slot fast path), validating the end-to-end native-copy claim; the slot and queue objects themselves are priced by A4, not here.</summary>
+    [Benchmark]
+    public void ComponentA7_EnqueueCycle()
+    {
+        var pool = new NativeBufferPool(UdpFrameBuilder.DefaultMaximumEthernetFrame);
+        var budget = new UdpSetupQueueBudget(UdpSetupQueueBudget.SetupQueueGlobalByteBudget, NullRuntimeLogger.Instance, TimeProvider.System);
+        var queue = new BoundedSetupQueue(32, 32_768);
+        var now = TimeProvider.System.GetUtcNow();
+        ReadOnlySpan<byte> payload = s_payload;
+        var enqueued = 0;
+        var dequeued = 0;
+        for (var index = 0; index < Sessions; index++)
+        {
+            Assert(budget.TryCharge(payload.Length), "A7 must charge the global budget for every datagram");
+            var lease = pool.Rent();
+            payload.CopyTo(lease.Span);
+            Assert(queue.TryEnqueue(lease, payload.Length, now), "A7 must accept every datagram into the empty queue");
+            enqueued++;
+            Assert(queue.TryDequeue(out var popped, out var poppedLength, out _), "A7 must dequeue the datagram it just enqueued");
+            dequeued++;
+            budget.Credit(poppedLength);
+            popped.Dispose();
+        }
+
+        Assert(enqueued == Sessions && dequeued == Sessions, "A7 must complete one enqueue/dequeue cycle per session");
+        Assert(budget.PendingBytes == 0, "A7 must credit every charge back exactly once");
+        _pendingResources.Add(new PoolFixture(pool));
+    }
+
+    /// <summary>A8: the production-shaped (warm-rent) admission leg — the S1 admission cycle (slot, completion cell, item rent, charge, queue enqueue) against a recycling admission-only executor, so the per-session cold item rent S1 carries is amortized away the way production's steady state does. S1 minus A8 quantifies the cold-rent overcharge of the S1 probe shape (A6 prices that shape directly).</summary>
+    [Benchmark]
+    public async Task ComponentA8_WarmRentAdmissionAsync()
+    {
+        var executor = new WarmAdmissionOnlySetupExecutor();
+        var fixture = CreateFixture(new BenchmarkUdpTransportFactory(), executor, Sessions);
+        var admitted = 0;
+        for (var index = 0; index < Sessions; index++)
+        {
+            if (await TrySendAsync(fixture.Coordinator, index, s_payload).ConfigureAwait(false)) admitted++;
+        }
+
+        Assert(admitted == Sessions, "every A8 admission must be accepted");
+        Assert(fixture.Coordinator.SessionCount == Sessions, "A8 must register one slot per admitted session");
+        Assert(executor.Enqueued == Sessions, "A8 must enqueue one setup item per session");
+        _pending.Add(fixture);
+    }
+
+    /// <summary>A9a: the post-pre-seed dictionary growth share the clamped pre-seed leaves — the sessions dictionary shape pre-seeded to 1,024 (spanning the resize the 2,048 adds cross), then exactly 2,048 adds with one shared value instance. The readout is the A9a minus A9b contrast divided by 2,048 (amortized per-add growth share): both cases pay the identical key-construction (H-shape) cost, which the contrast cancels, and the standard <c>(alloc@1000 − alloc@1)/999</c> marginal does not apply to this pair.</summary>
+    [Benchmark]
+    public void ComponentA9a_DictionaryGrowthSpansResize() => AddDictionaryGrowthEntries(1_024);
+
+    /// <summary>A9b: A9a's no-resize counterpart — the same 2,048 adds into the dictionary shape pre-seeded to 2,048 (just enough to absorb them without a resize), so A9a minus A9b isolates the amortized share of the resize the 1,024 pre-seed cannot; a 4,096 pre-seed was rejected in review because its own arrays exceed A9a's pre-seed plus resize and flipped the contrast negative. The standard marginal formula does not apply to this pair.</summary>
+    [Benchmark]
+    public void ComponentA9b_DictionaryGrowthNoResize() => AddDictionaryGrowthEntries(2_048);
+
+    /// <summary>The A9 pair's fixed workload: 2,048 adds of distinct key constructions beyond every other case's index range, one shared slot value (no per-add object allocation), and the stop condition.</summary>
+    private void AddDictionaryGrowthEntries(int initialCapacity)
+    {
+        const int adds = 2_048;
+        var dictionary = new Dictionary<FlowKey, UdpProxyCoordinator.UdpSessionSlot>(initialCapacity);
+        var value = new UdpProxyCoordinator.UdpSessionSlot();
+        for (var index = 0; index < adds; index++)
+        {
+            dictionary.Add(BenchmarkShared.CreateFlowKey(200_000 + index), value);
+        }
+
+        Volatile.Write(ref _dictionaryGrowthSink, dictionary);
+        Assert(_dictionaryGrowthSink.Count == adds, "A9 must add exactly 2,048 entries");
+    }
+
     private async Task PopulateAndAwaitReadyAsync(Fixture fixture)
     {
         var factory = (BenchmarkUdpTransportFactory)fixture.TransportFactory;
@@ -821,6 +981,26 @@ public class SessionSetupDecompositionBenchmarks
         }
     }
 
+    /// <summary>The A6 probe's executor: no worker ever started (the case never enqueues), so cleanup only releases the ring machinery — outside the measured window.</summary>
+    private sealed class SetupExecutorFixture(SetupExecutor executor) : IAsyncDisposable
+    {
+        public ValueTask DisposeAsync()
+        {
+            executor.Dispose();
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    /// <summary>The A7 probe's shared native pool: every lease was returned inside the window, so cleanup only frees the pool's idle buffer, outside the measured window.</summary>
+    private sealed class PoolFixture(NativeBufferPool pool) : IAsyncDisposable
+    {
+        public ValueTask DisposeAsync()
+        {
+            pool.Dispose();
+            return ValueTask.CompletedTask;
+        }
+    }
+
     /// <summary>
     /// The S1 executor: rents exactly what <see cref="SetupExecutor.RentItem"/> rents on a cold
     /// free list (a fresh <see cref="SetupWorkItem"/> plus its payload planes) and accepts the
@@ -840,6 +1020,45 @@ public class SessionSetupDecompositionBenchmarks
         {
             item._completion?.TrySetCanceled(CancellationToken.None);
             Interlocked.Increment(ref _enqueued);
+            return true;
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    /// <summary>
+    /// A8's admission-only executor with production's recycle shape: <see cref="RentItem"/> pops
+    /// the free list (only the first rent allocates fresh — production's cold path), and
+    /// <see cref="TryEnqueue"/> cancels the item's completion (the coordinator's disposal must not
+    /// wait on a setup that will never run), counts the enqueue, resets the item and returns it to
+    /// the free list. No worker and no pipeline starts — that is the S2 delta.
+    /// </summary>
+    private sealed class WarmAdmissionOnlySetupExecutor : ISetupExecutor
+    {
+        private readonly ConcurrentQueue<SetupWorkItem> _free = new();
+        private long _enqueued;
+
+        public long Enqueued => Interlocked.Read(ref _enqueued);
+
+        public SetupWorkItem RentItem(Func<SetupWorkItem, Task> handler)
+        {
+            if (_free.TryDequeue(out var item))
+            {
+                item._handler = handler;
+                return item;
+            }
+
+            return new SetupWorkItem { _handler = handler };
+        }
+
+        public bool TryEnqueue(SetupWorkItem item)
+        {
+            item._completion?.TrySetCanceled(CancellationToken.None);
+            Interlocked.Increment(ref _enqueued);
+            item.Reset();
+            _free.Enqueue(item);
             return true;
         }
 
