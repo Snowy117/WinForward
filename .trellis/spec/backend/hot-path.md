@@ -106,14 +106,26 @@ UDP session setup, or the SOCKS5 benchmark/soak suite.
   (2,887.9 ns vs 616.7 ns @1400 B); storing the raw value at creation closed the gap
   (626 ns ≈ host shape). Any per-packet stage that needs an address from a cold-edge object
   must cache `IPAddressValue` at the cold edge.
-- **UDP session cold-path bookkeeping budget: ≤1 KB per session** (slot, setup queue,
-  task machinery, MAC copy, tombstone/tracking structures, logging). Measured 2.1 KB →
-  ~0.4 KB via: single-slot setup queue fast path, no `registered` TCS (slot add under the
-  coordinator gate already orders before any handler can run), inlined setup-failure handling
-  (tombstone written iff the exception is not an OCE), method-group delegates cached in the
-  constructor, dictionary pre-sizing clamped to `min(capacity, 1024)`. Framework socket cost
-  (~84 KB/session: control TCP connect + UDP ASSOCIATE + sockets) is outside this budget and
-  out of scope.
+- **UDP session setup bookkeeping budget: ≤1,500 B per session** (capacity pre-seed, slot claim,
+  setup queue + payload copy, task machinery, tombstone/tracking structures). Measured
+  1,433 B/session, spread ≤172 B (task 09-21-session-creation-cost, 2026-09-22). The design
+  guarantees from the 2026-08-29 contract stand (single-slot setup queue fast path, no
+  `registered` TCS, inlined setup-failure handling, method-group delegates cached in the
+  constructor, dictionary pre-sizing clamped to `min(capacity, 1024)`); its ≤1 KB and
+  "measured 2.1 KB → ~0.4 KB" figures predate the session-tier and teardown attribution and are
+  superseded.
+- **Noop probe budget: `UdpSessionBenchmarks` Noop probe ≤6,000 B/session marginal** (1→1000
+  sweep; measured 5,737 B, spread 10 B). The probe's window contains its own fake transport +
+  flow-key harness (460.8 B/session), so product-shaped cost is ≤5,500 B/session
+  (measured 5,276 B). When the probe moves, `SessionSetupDecompositionBenchmarks` localizes the
+  move: capacity 489 / admission 829 / setup start ≤172 / session tier 2,891 / teardown
+  1,459 (probe shape) – 1,968 (single-pass) B per session.
+- **Framework socket cost stays outside this budget** (control TCP connect + SOCKS5 handshake,
+  UDP ASSOCIATE, relay socket) but is anchored instead of untracked: isolated create+dispose path
+  83,442 B/session (control connect + handshake 77,448 B = 92.8 %; ASSOCIATE 2,872, relay socket
+  576, transport ctor 2,386), probe-derived difference ~86,500 B/session, churn anchor (whole
+  fire→retire cycle) ≤95,000 B/session (measured 90,829–92,451 B). Reusing control connections is
+  the only structural lever there — a product/protocol decision, not an allocation micro-fix.
 - **Throughput acceptance anchor**: `tcp.throughput` socks5 mode must stay ≥70% of bare mode
   (same workers/echo/transfer-size, relay leg without SOCKS5 establishment); measured 93.9%
   (141.4 vs 150.6 MB/s, 16 conc × 1 MiB quick). `TcpRelay OneWayAsync` (~0.94 GB/s) is the
@@ -147,7 +159,7 @@ UDP session setup, or the SOCKS5 benchmark/soak suite.
 - Existing 386-test baseline (rewrite byte-for-byte round-trip, coordinator admission,
   cooldown, capacity, single-flight dispose) must hold behavior-zero.
 - Benchmark re-runs: FrameRewriter 0 B, Dispatcher WarmProxy = WarmPass allocation, UdpSession
-  Noop probe ≤ ~4 KB @100 sessions, soak ratio ≥70%.
+  Noop probe ≤6,000 B/session marginal (1→1000 sweep; N=100 row ≈6,400 B/session), soak ratio ≥70%.
 
 ### 7. Wrong vs Correct
 
