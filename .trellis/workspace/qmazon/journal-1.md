@@ -895,3 +895,28 @@ Redid 09-21-session-creation-cost on a clean instrument. Diagnosis: the recorded
 ### Status
 
 [OK] **Completed**
+
+
+## Session 35: UDP teardown and session-tier allocation reduction
+<!-- trellis-session: v=2 fp=bead59247912662f -->
+
+**Date**: 2026-09-22
+**Task**: UDP teardown and session-tier allocation reduction
+**Branch**: `feat/transport-lifecycle`
+
+### Summary
+
+Split-probed the UDP teardown leg (T) and session tier (C2) with new decomposition cases; attributed the teardown exceptions (2/session = one canceled receive across two await sites, BCL-inherent; S5's fixed 128 = SetupExecutor.Dispose 64 workers x 2) with E1/E2 micro-cases. Implemented the four adopted no-retained-cost reductions: context record struct (240), cached setup delegates (128), merged receive async methods (112), scope drain idle fast path (88) - Noop probe 5,727.0 -> 5,161.8 B/session, churn N=48/D=0 cell 13,248.9 -> 12,560.3 out of process; behavior-zero, 807 tests + build/format/jb gates green; hot-path.md and async-lifetime.md re-anchored. Pooling/slab deferred to a follow-up decision with the split numbers recorded.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cfd56fd` | perf(runtime): cut per-session UDP teardown and session-tier allocations (09-22-udp-teardown-session-tier-alloc) |
+| `27d0be1` | bench(benchmarks): UDP teardown/session-tier split probes and exception attribution (09-22-udp-teardown-session-tier-alloc) |
+| `2da59b0` | docs(spec): re-anchor the Noop probe and churn session budgets (09-22-udp-teardown-session-tier-alloc) |
+| `b2ee992` | chore(task): record 09-22-udp-teardown-session-tier-alloc artifacts |
+
+### Status
+
+[OK] **Completed**
