@@ -845,3 +845,28 @@ C4 (09-20-lifecycle-migration-rest) migrated the last lifecycle owners to Quiesc
 ### Status
 
 [OK] **Completed**
+
+
+## Session 33: Session creation cost: UDP full-stack decomposition, churn measurement, and the re-anchored budget
+<!-- trellis-session: v=2 fp=15aab02e3e974ac2 -->
+
+**Date**: 2026-09-22
+**Task**: Session creation cost: UDP full-stack decomposition, churn measurement, and the re-anchored budget
+**Branch**: `feat/transport-lifecycle`
+
+### Summary
+
+Delivered 09-21-session-creation-cost end-to-end as evidence + decision: staged Noop attribution (100%: capacity 489 / admission 829 / setup <=172 / session tier 2,891 / teardown 1,459-1,968 B/session; C2 = 93% of the tier is async/lifetime machinery), framework dial 83,442 B/session (control connect+handshake 92.8%), churn flat ~91 KB/session (<=0.9% spread, zero establishment loss) via the new udp.churn scenario; hot-path.md §3/§6 re-anchored to three falsifiable tiers (Noop probe <=6,000 raw / <=5,500 product-shaped; setup bookkeeping <=1,500; churn <=95,000 / framework <=84,000), superseding the stale <=1 KB / <=4 KB claims. Ranked follow-ups (not built): control-connection reuse ADR, teardown probe (approx 2 first-chance exceptions/session), session-tier managed slab + CTS TryReset (unsafe rejected: no allocation advantage, loses the lifetime safety net), admission/capacity; .NET 11 trial sanctioned measurement-first; TCP deferred. New benchmarks: SessionSetupDecompositionBenchmarks, FrameworkSetupBenchmarks, UdpChurnScenario. Side fix: the AnalyzerReleases AdditionalFiles duplication that had made every dotnet format run non-empty since C2. Gates: format empty, build 0w, 804 tests, jb 0.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a174f88` | chore(analyzers): drop the duplicate AnalyzerReleases AdditionalFiles (package targets already add them) |
+| `417ad8d` | bench(benchmarks): session-setup decomposition, framework dial probes, and the udp.churn scenario (09-21-session-creation-cost) |
+| `c303837` | docs(spec): re-anchor the UDP session budgets from the 2026-09-22 measurements |
+| `b7c7e66` | chore(task): record 09-21-session-creation-cost artifacts |
+
+### Status
+
+[OK] **Completed**
