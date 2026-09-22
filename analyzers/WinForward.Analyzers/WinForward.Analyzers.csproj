@@ -12,8 +12,8 @@
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" PrivateAssets="all" />
     <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" PrivateAssets="all" />
   </ItemGroup>
-  <ItemGroup>
-    <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
-    <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
-  </ItemGroup>
+  <!-- AnalyzerReleases.Shipped.md / AnalyzerReleases.Unshipped.md are picked up automatically as
+       AdditionalFiles by the Microsoft.CodeAnalysis.Analyzers buildTransitive targets; including
+       them explicitly here duplicates the item and makes every dotnet format run report
+       "Duplicate source file". -->
 </Project>
