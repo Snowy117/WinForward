@@ -114,12 +114,16 @@ UDP session setup, or the SOCKS5 benchmark/soak suite.
   constructor, dictionary pre-sizing clamped to `min(capacity, 1024)`); its ≤1 KB and
   "measured 2.1 KB → ~0.4 KB" figures predate the session-tier and teardown attribution and are
   superseded.
-- **Noop probe budget: `UdpSessionBenchmarks` Noop probe ≤6,000 B/session marginal** (1→1000
-  sweep; measured 5,737 B, spread 10 B). The probe's window contains its own fake transport +
-  flow-key harness (460.8 B/session), so product-shaped cost is ≤5,500 B/session
-  (measured 5,276 B). When the probe moves, `SessionSetupDecompositionBenchmarks` localizes the
-  move: capacity 489 / admission 829 / setup start ≤172 / session tier 2,891 / teardown
-  1,459 (probe shape) – 1,968 (single-pass) B per session.
+- **Noop probe budget: `UdpSessionBenchmarks` Noop probe ≤5,400 B/session marginal** (1→1000
+  sweep; measured 5,161.8 B, spread 14.9 B; re-anchored 2026-09-22 by
+  09-22-udp-teardown-session-tier-alloc after −565.2 B/session of measured reductions, was
+  5,727.0; headroom to the band 238 B). The probe's window contains its own fake transport +
+  flow-key harness (460.8 B/session), so product-shaped cost is ≤4,950 B/session (measured
+  4,701.0 B; was 5,266.2). When the probe moves, `SessionSetupDecompositionBenchmarks` localizes
+  the move: capacity 489 / admission 829 / setup start ≤172 / session tier 2,503 / teardown 1,459
+  (matched shape, not re-measured) – 1,885 (single-pass) B per session. Anchor falsification: a
+  documented ≥3-run batch above the band on an unmodified tree is product drift to fix (never to
+  relax the band).
 - **Framework socket cost stays outside this budget** (control TCP connect + SOCKS5 handshake,
   UDP ASSOCIATE, relay socket) but is anchored instead of untracked, and it must be measured with
   the loopback SOCKS5 server **out of process** (`--socks5-external`,
@@ -131,7 +135,10 @@ UDP session setup, or the SOCKS5 benchmark/soak suite.
   (measured 17,021 B, echo-fed shape) — re-anchored 2026-09-22 (task
   09-22-session-creation-cost-redo); the superseded 83,442 / 77,448 / ≤95,000 figures were
   inflated by the in-process harness server's per-connection 64 KiB relay buffer and are not
-  comparable. Reusing control connections is the only structural lever there — a product/protocol
+  comparable. The N=48/D=0 churn wave cell was re-measured at 12,560.3 B/session after the
+  09-22-udp-teardown-session-tier-alloc reductions (−688.6; the full wave matrix, sustained shape
+  and real probe were not re-run, so those bands stand with additional headroom). Reusing control
+  connections is the only structural lever there — a product/protocol
   decision whose allocatable share is the ~3.8 KB/session per-flow dial. Anchor falsification: a
   documented ≥3-run batch above the framework/churn anchors on an unmodified tree, with the
   in-process ratio still ≈10.5×, is product drift to fix (never to relax); if the in-process
@@ -169,7 +176,7 @@ UDP session setup, or the SOCKS5 benchmark/soak suite.
 - Existing 386-test baseline (rewrite byte-for-byte round-trip, coordinator admission,
   cooldown, capacity, single-flight dispose) must hold behavior-zero.
 - Benchmark re-runs: FrameRewriter 0 B, Dispatcher WarmProxy = WarmPass allocation, UdpSession
-  Noop probe ≤6,000 B/session marginal (1→1000 sweep; N=100 row ≈6,400 B/session), real-dial runs
+  Noop probe ≤5,400 B/session marginal (1→1000 sweep; N=100 row ≈5,900 B/session), real-dial runs
   against the out-of-process server (framework ladder ≤8,200 B/session, churn ≤14,500 B/session),
   soak ratio ≥70%.
 

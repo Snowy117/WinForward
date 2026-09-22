@@ -179,8 +179,12 @@ by measurement (`QuiescenceScopeBenchmarks`): the packed gate measured 18.60 ns/
 
 `DrainAsync` is single-flight and idempotent. Order:
 
-1. seal the packed word (`Interlocked.Or`) and take ownership of the drain task,
-2. publish the join cell, then re-check the word (see the handshake note),
+1. seal the packed word (`Interlocked.Or`) and take ownership of the drain task; when the prior
+   word's pending count was zero the join is vacuous — no lease was outstanding and the seal
+   refuses every later `TryEnter`, so no `Exit` can ever signal — and the join cell is skipped
+   entirely (the idle fast path; it saves a `TaskCompletionSource` per drain, measured 88 B/session
+   by task 09-22-udp-teardown-session-tier-alloc),
+2. otherwise publish the join cell, then re-check the word (see the handshake note),
 3. cancel the owned token,
 4. await the join (all leases released),
 5. dispose the owned CTS **last** — so a still-unwinding child can read the token — then complete the
@@ -197,7 +201,9 @@ There are exactly two cells, and the split is load-bearing:
   `ConcurrentDrainCallersObserveTheSameTaskInstance`); it completes only after the join and the CTS
   release;
 - the **join cell** (`_joined`) is allocated by the single sealer (the one caller that wins the
-  `Interlocked.Or` seal) and is what an exiting lease signals.
+  `Interlocked.Or` seal) **only when a lease was outstanding at seal**, and is what an exiting
+  lease signals; an idle seal allocates no join cell — the join is vacuous, so the cell would
+  never be read (see the ordering note above).
 
 Because callers await `_drained.Task` rather than the drain method's own task, the drain runs detached
 (`_ = DrainCoreAsync(...)`); it therefore contains its own faults so the detached task can never
