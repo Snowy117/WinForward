@@ -1,0 +1,8 @@
+# implement.md Step 3 phase 1: A4b sizing smoke — dotnet run -c Release --project benchmarks/WinForward.Benchmarks -- --filter '*ComponentA4*' --job short
+# single process, one run (smoke, not a campaign)
+pre-run (captured immediately before the run):
+2026-09-22T17:08:45+08:00
+1.12 2.05 2.07 1/1333 1631528
+post-run (log mtime 2026-09-22 17:09:28):
+2026-09-22T17:09:29+08:00
+4.96 2.85 2.34 1/1230 1633128

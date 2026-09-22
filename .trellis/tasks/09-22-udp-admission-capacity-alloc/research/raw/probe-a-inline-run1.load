@@ -1,0 +1,8 @@
+# implement.md Step 3 phase 2: post-conversion smoke (final tree) — dotnet run -c Release --project benchmarks/WinForward.Benchmarks -- --filter '*ComponentA*' '*StageS1*' --job short
+# single process, one run (smoke, not a campaign)
+pre-run (captured immediately before the run):
+2026-09-22T17:14:04+08:00
+8.37 5.08 3.32 2/1350 1639539
+post-run (log mtime 2026-09-22 17:14:58):
+2026-09-22T17:14:58+08:00
+5.52 4.86 3.35 2/1243 1641506

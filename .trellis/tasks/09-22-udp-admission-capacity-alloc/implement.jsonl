@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "pre-seed/single-slot contracts, T2 budget, measurement discipline and harness rules"}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "D1-D11 coordinator scope/teardown contracts the scheduling path must preserve"}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "bounded setup memory: global budget, TTL, charge/credit exactly-once"}
+{"file": ".trellis/tasks/archive/2026-09/09-21-session-creation-cost/research/noop-decomposition.md", "reason": "S0-S5/C1/C2 stage baseline and the rank-4 admission gap"}
+{"file": ".trellis/tasks/archive/2026-09/09-22-session-creation-cost-redo/research/reconciliation-and-decision.md", "reason": "re-anchored budgets and rank 4's next step (admission component probe)"}
+{"file": ".trellis/tasks/archive/2026-09/09-22-udp-teardown-session-tier-alloc/research/remeasure.md", "reason": "post-09-22 baselines the new probes reconcile against (Noop 5,161.8, churn 12,560.3)"}
