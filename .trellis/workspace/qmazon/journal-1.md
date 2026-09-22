@@ -920,3 +920,27 @@ Split-probed the UDP teardown leg (T) and session tier (C2) with new decompositi
 ### Status
 
 [OK] **Completed**
+
+
+## Session 36: Admission and capacity pre-seed split
+<!-- trellis-session: v=2 fp=be9530fc63d1f618 -->
+
+**Date**: 2026-09-22
+**Task**: Admission and capacity pre-seed split
+**Branch**: `feat/transport-lifecycle`
+
+### Summary
+
+Split the UDP admission leg (S1 - S0 = 828.8) and the capacity pre-seed (S0 = 488.9) with 13 new A-series decomposition cases. Exact reconciliations: S0 = association-dict 325.9 + sessions-dict 163.0 + cooldown 0.0 = 488.9; S1 = 488.9 + H 356.8 + steady-state 200.0 (slot+queue+completion cell) + cold rent 272.0; the warm-rent variant A8 = 1,045.7 proves production steady-state admission is ~200 B/session, with 79.7 B/add amortized dictionary growth beyond the 1,024 clamp (A9 contrast). No product change adopted: the one candidate (inline the per-slot queue object) measured 24.0 net after the slot's inline payload, below the 64 rule - the verified class-to-struct conversion was reverted and its patch archived for any future decision. hot-path.md section 3 now carries the split note (T2 unchanged at 1,432.9); gates green on the final tree (build/tests/807/format/jb zero issues); Noop 5,162.4 and churn 12,591.2 re-confirmed inside the established spreads.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ed204e1` | bench(benchmarks): admission/capacity split probes with warm-rent and growth variants (09-22-udp-admission-capacity-alloc) |
+| `a14ebd5` | docs(spec): annotate the admission/capacity sub-anchor with the split (09-22-udp-admission-capacity-alloc) |
+| `30bbed9` | chore(task): record 09-22-udp-admission-capacity-alloc artifacts |
+
+### Status
+
+[OK] **Completed**
