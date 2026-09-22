@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "verify the re-anchored §3/§6 text against the ledger contract and falsification conditions"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "verify the required gates ran green with real output"}
+{"file": ".trellis/tasks/archive/2026-09/09-21-session-creation-cost/research/reconciliation-and-decision.md", "reason": "verify the corrected reconciliation preserves structure and covers every recorded discrepancy"}
+{"file": ".trellis/tasks/archive/2026-09/09-21-session-creation-cost/research/framework-decomposition.md", "reason": "verify the harness-share quantification and corrected ladder attribution"}

@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "§3 ledger + §6 gates are the re-anchor target; quoting conventions for allocation budgets"}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "live-footprint guardrails (8 MiB/5 s/TTL/capacity) that the re-anchor must not change"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "the format/inspectcode/build/test gate policy the harness change must satisfy"}
+{"file": ".trellis/tasks/archive/2026-09/09-21-session-creation-cost/research/framework-decomposition.md", "reason": "ladder method, per-case parsing convention, and the contaminated baseline to correct"}
+{"file": ".trellis/tasks/archive/2026-09/09-21-session-creation-cost/research/churn-measurements.md", "reason": "churn scenario method, command lines, and the recorded cells to re-measure"}
+{"file": ".trellis/tasks/archive/2026-09/09-21-session-creation-cost/research/noop-decomposition.md", "reason": "clean instruments (Noop/stages/footprint) used for the R4 byte-stability cross-check"}
+{"file": ".trellis/tasks/archive/2026-09/09-21-session-creation-cost/research/reconciliation-and-decision.md", "reason": "anchor structure, falsification-condition convention, and the ranked list to re-derive"}
