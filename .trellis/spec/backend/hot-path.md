@@ -121,11 +121,21 @@ UDP session setup, or the SOCKS5 benchmark/soak suite.
   move: capacity 489 / admission 829 / setup start ≤172 / session tier 2,891 / teardown
   1,459 (probe shape) – 1,968 (single-pass) B per session.
 - **Framework socket cost stays outside this budget** (control TCP connect + SOCKS5 handshake,
-  UDP ASSOCIATE, relay socket) but is anchored instead of untracked: isolated create+dispose path
-  83,442 B/session (control connect + handshake 77,448 B = 92.8 %; ASSOCIATE 2,872, relay socket
-  576, transport ctor 2,386), probe-derived difference ~86,500 B/session, churn anchor (whole
-  fire→retire cycle) ≤95,000 B/session (measured 90,829–92,451 B). Reusing control connections is
-  the only structural lever there — a product/protocol decision, not an allocation micro-fix.
+  UDP ASSOCIATE, relay socket) but is anchored instead of untracked, and it must be measured with
+  the loopback SOCKS5 server **out of process** (`--socks5-external`,
+  `WINFORWARD_BENCH_EXTERNAL_SERVER=1`; an in-process run is a diagnostic whose number carries a
+  ~75,500 B/session harness share): isolated create+dispose path **7,952 B/session** (control
+  connect + greeting 3,792 = 47.7 %; ASSOCIATE 959; relay socket 576; self-traffic 160; transport
+  ctor + wiring 2,465), churn whole cycle **≤14,500 B/session** wave shape / **≤14,300**
+  sustained (measured 13,249–14,070 / 13,720–13,869 B), real probe marginal **≤17,500 B/session**
+  (measured 17,021 B, echo-fed shape) — re-anchored 2026-09-22 (task
+  09-22-session-creation-cost-redo); the superseded 83,442 / 77,448 / ≤95,000 figures were
+  inflated by the in-process harness server's per-connection 64 KiB relay buffer and are not
+  comparable. Reusing control connections is the only structural lever there — a product/protocol
+  decision whose allocatable share is the ~3.8 KB/session per-flow dial. Anchor falsification: a
+  documented ≥3-run batch above the framework/churn anchors on an unmodified tree, with the
+  in-process ratio still ≈10.5×, is product drift to fix (never to relax); if the in-process
+  value moves with it, the harness changed and the anchor is re-derived.
 - **Throughput acceptance anchor**: `tcp.throughput` socks5 mode must stay ≥70% of bare mode
   (same workers/echo/transfer-size, relay leg without SOCKS5 establishment); measured 93.9%
   (141.4 vs 150.6 MB/s, 16 conc × 1 MiB quick). `TcpRelay OneWayAsync` (~0.94 GB/s) is the
@@ -159,7 +169,9 @@ UDP session setup, or the SOCKS5 benchmark/soak suite.
 - Existing 386-test baseline (rewrite byte-for-byte round-trip, coordinator admission,
   cooldown, capacity, single-flight dispose) must hold behavior-zero.
 - Benchmark re-runs: FrameRewriter 0 B, Dispatcher WarmProxy = WarmPass allocation, UdpSession
-  Noop probe ≤6,000 B/session marginal (1→1000 sweep; N=100 row ≈6,400 B/session), soak ratio ≥70%.
+  Noop probe ≤6,000 B/session marginal (1→1000 sweep; N=100 row ≈6,400 B/session), real-dial runs
+  against the out-of-process server (framework ladder ≤8,200 B/session, churn ≤14,500 B/session),
+  soak ratio ≥70%.
 
 ### 7. Wrong vs Correct
 
@@ -540,4 +552,70 @@ _socket.SendTo(_sendBuffer.AsSpan(0, written), SocketFlags.None, _relaySocketAdd
 // Correct: gate the window on fresh overflow growth only, then — after the relays/coordinator are
 // torn down — wait (bounded) for every pool to drain to Outstanding == 0 and assert the
 // conservation identity OverflowAllocations == DisposedCount + InPool + Outstanding.
+```
+
+## Real-Dial Measurement Harness (task 09-22-session-creation-cost-redo)
+
+### 1. Scope / Trigger
+
+Trigger: any change to a benchmark instrument that dials the loopback SOCKS5 server **and** reads
+allocation counters (`FrameworkSetupBenchmarks`, the real-transport `UdpSessionBenchmarks` rows,
+`udp.churn`). The server must not share the measured process: it allocates a 64 KiB relay-loop
+buffer plus a per-connection socket/arrays per accepted control connection, and
+`GC.GetTotalAllocatedBytes` is process-wide — the 2026-09-21/22 "framework path
+83,442 B/session" was ~75,500 B/session of harness (2026-09-22 correction).
+
+### 2. Signatures
+
+- Child server mode: `--stability --serve-socks5-udp --flows <N> [--dial-delay-ms <D>]`
+- Churn opt-in: `--socks5-external`; benchmark opt-in: `WINFORWARD_BENCH_EXTERNAL_SERVER=1`
+- Helper: `ExternalLoopbackSocks5UdpServer.StartAsync(int flows, TimeSpan associateDelay, CancellationToken)` → `ControlEndpoint`, `IsEnabled`, `ThrowIfExited()`
+
+### 3. Contracts
+
+- Handshake: the child prints exactly one stdout line `{"controlPort":<P>,"echoPort":<E>}`;
+  everything else it writes goes to stderr.
+- Lifetime: the child exits on stdin EOF (parent death or disposal) or SIGTERM/SIGINT; the parent
+  closes stdin, waits 5 s, then `Kill(entireProcessTree: true)`.
+- Child content: `EchoReceiver(N)` + `LoopbackSocks5UdpServer(receiver.Endpoint, associateDelay)`
+  — the external probe is **echo-fed** (one response per session); the historical in-process probe
+  was discard-fed. Quote the shape with any probe number.
+- Default: no flag and no env var = the historical in-process harness, kept byte-identical so
+  recorded command lines keep reproducing their (harness-inflated) numbers.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| no handshake line within 15 s | `StartAsync` throws with the child's drained stderr attached |
+| child exits mid-instrument | next `ThrowIfExited()` fails the run (probe flush wait, churn wave top and response wait) — never a silent zero-response row |
+| double dispose | the latch guard makes the second call a no-op; stdin is closed once |
+| child outlives a crashed parent | stdin EOF ends it; the 5 s wait + process-tree kill covers the rest |
+
+### 5. Good/Base/Bad Cases
+
+- Good: real-dial instruments read only client allocations; the framework ladder's measured
+  harness share is ~75,500 B/session (in-process 83,442 → out-of-process 7,952).
+- Base: in-process runs stay valid as diagnostics when the harness share is stated or subtracted.
+- Bad: adding a new real-dial allocation instrument against the in-process server, or quoting an
+  in-process number without its harness share.
+
+### 6. Tests Required
+
+- Smoke: `--serve-socks5-udp --flows 8 < /dev/null` prints the handshake line and exits 0.
+- A/B anchor: the framework ladder reproduces in-process ≈83,442 / out-of-process ≈7,952 B/session
+  (≥3 runs, `--job short`); the budget anchors are in §3 above.
+
+### 7. Wrong vs Correct
+
+```csharp
+// Wrong: measure a real dial with the loopback server in the measured process — its
+// per-connection 64 KiB relay buffer + 4 MiB relay socket + control arrays land in the client's
+// GC.GetTotalAllocatedBytes (a ~9× inflation on the framework ladder).
+_server = new LoopbackSocks5UdpServer(discardEndpoint);
+
+// Correct: host the server in a child process and dial its control endpoint; the instrument
+// reads only client-side allocations and the topology matches production.
+await using var server = await ExternalLoopbackSocks5UdpServer.StartAsync(flows, TimeSpan.Zero, token);
+_socks = new Socks5Server("benchmark", "127.0.0.1", (ushort)server.ControlEndpoint.Port, null, null);
 ```
