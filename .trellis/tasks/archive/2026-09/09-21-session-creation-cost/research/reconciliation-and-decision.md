@@ -1,5 +1,16 @@
 # Reconciliation and decision — per-session session-creation cost (task 09-21-session-creation-cost, R4/R5)
 
+> **ERRATUM (2026-09-22, task `09-22-session-creation-cost-redo`).** §3 (framework table), the
+> T3 anchors (≤95,000 / ≤84,000) and the rank-1 "up to 77,448 B/session" saving are
+> harness-inflated: the loopback SOCKS5 server ran in the same process as the measured client,
+> and its per-connection 64 KiB relay buffer + socket/arrays account for ~75.5 KB/session of
+> every real-dial figure. Clean values (server out of process): framework path 7,952.0 B/session
+> (control dial 3,792.2, ASSOCIATE 959.0), real probe marginal 17,021.2, churn whole cycle
+> 13,248.9–14,069.9 (wave) / 13,720.2–13,868.6 (sustained). §2's bookkeeping contributor table,
+> T1/T2 and the teardown/exception findings are unaffected and were re-validated byte-identically.
+> Corrected report with the re-anchored T3 and the re-ranked list (repo-root-relative):
+> `.trellis/tasks/09-22-session-creation-cost-redo/research/reconciliation-and-decision.md`.
+
 Evidence base: `research/noop-decomposition.md` (R1), `research/framework-decomposition.md` (R2),
 `research/churn-measurements.md` (R3), all against HEAD `feb5955` (2026-09-21/22). This document
 reconciles the measured reality with the documented budget, proposes the re-anchored budget and its

@@ -1,5 +1,15 @@
 # Churn measurements — burst waves, sustained setup, retained footprint (task 09-21-session-creation-cost, design §4)
 
+> **ERRATUM (2026-09-22, task `09-22-session-creation-cost-redo`).** Every real-dial allocation
+> row here (the wave matrix and the sustained tables) is inflated by ~75.5 KB/session: the loopback SOCKS5 server ran in the same process as the
+> measured client and allocates a 64 KiB relay-loop buffer plus per-connection socket/arrays for
+> every accepted control connection. Clean values (server out of process): churn whole cycle
+> **13,248.9–14,069.9 B/session** (wave matrix) and **13,720.2–13,868.6 B/session** (sustained);
+> the recorded shapes still reproduce (in-process sanity cell 91,465 vs 90,829–91,088 B/session).
+> The flatness / no-loss / unamortized-shape findings and the footprint rows stand (footprint
+> uses fake transports; re-validated within the recorded band). Corrected report
+> (repo-root-relative): `.trellis/tasks/09-22-session-creation-cost-redo/research/churn-measurements.md`.
+
 Scope: UDP session churn at the design bounds (`udp.burstEstablishment` wave matrix, the new
 `udp.churn` scenario in wave and sustained modes, `udp.sessionFootprint`) through the real SOCKS5
 dial path against an in-process loopback server. Allocation bytes (`GC.GetTotalAllocatedBytes`) and

@@ -1,5 +1,19 @@
 # Framework decomposition — real-transport per-session cost (task 09-21-session-creation-cost, design §3)
 
+> **ERRATUM (2026-09-22, task `09-22-session-creation-cost-redo`).** Every server-touching
+> framework-layer number in this report is inflated by ~75.5 KB/session (the relay-socket 576 B
+> and self-traffic 160 B components are server-free and unchanged): the loopback SOCKS5 server ran in the
+> same process as the measured client, and it allocates a 64 KiB relay-loop buffer plus a
+> per-connection socket/arrays for every accepted control connection
+> (`benchmarks/WinForward.Benchmarks/Stability/LoopbackSocks5UdpServer.cs:240`, `:150`,
+> `:139-144`). Clean values (server out of process): framework path **7,952.0 B/session**
+> (control connect + greeting 3,792.2; UDP ASSOCIATE 959.0; relay socket 576; self-traffic 160;
+> transport ctor + wiring 2,464.8; harness share 75,489.6 of the recorded total), real probe
+> marginal **17,021.2 B/session** (recorded 92,255 = 75.2 KB harness + 17.0 KB clean). The
+> in-process shapes reproduce this task byte-for-byte (83,441.6 / 77,447.3 / 80,319.0), so the
+> correction is a measurement change, not behavior drift. Corrected report (repo-root-relative):
+> `.trellis/tasks/09-22-session-creation-cost-redo/research/framework-decomposition.md`.
+
 Scope: the framework layer of one UDP session — control TCP connect + SOCKS5 handshake, UDP
 ASSOCIATE, relay socket create/bind, self-traffic registration — as asked by design §3 ("use the
 existing seams to isolate, per session"). All numbers are managed-allocation bytes from
