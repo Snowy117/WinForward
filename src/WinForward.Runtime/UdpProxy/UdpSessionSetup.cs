@@ -36,6 +36,23 @@ internal sealed class UdpSessionSetup(
     /// </summary>
     private static readonly TimeSpan s_setupQueueDatagramTtl = TimeSpan.FromSeconds(5);
 
+    /// <summary>
+    /// The activity observer handed to every session context. Converted from its method group once
+    /// per setup instance instead of once per session: a method-group conversion allocates a
+    /// delegate (64 B/session measured — the C2a2 − C2a1 delta production pays and the static-lambda
+    /// probes hid), while this setup instance outlives every session it constructs.
+    /// </summary>
+    private readonly Action<UdpAssociation, DateTimeOffset> _activityObserver =
+        (association, now) => associations.TryTouch(association, now);
+
+    /// <summary>
+    /// The session's receive-failure handler, converted from the slot host's method group once per
+    /// setup instance for the same reason as <see cref="_activityObserver"/>: the injected host
+    /// outlives every session, so the per-session <c>Start(host.RemoveReceiveFailedSession)</c>
+    /// conversion was pure per-session overhead.
+    /// </summary>
+    private readonly Action<UdpProxySession> _receiveFailureHandler = host.RemoveReceiveFailedSession;
+
     private readonly SemaphoreSlim _setupLimiter = new(MaximumConcurrentSetups, MaximumConcurrentSetups);
     private long _ttlExpiredCount;
     private long _stampsRefreshedCount;
@@ -94,10 +111,10 @@ internal sealed class UdpSessionSetup(
                 throw new IOException("UDP flow association was already owned by another session; blocking the flow.");
             }
 
-            var session = new UdpProxySession(new UdpProxySessionContext(flow, flowGeneration, association, transport, responseSink, clientMac, timeProvider, OnSessionActivity, logger, receiveWindowPool, receiveBufferSize, cancellationToken));
+            var session = new UdpProxySession(new UdpProxySessionContext(flow, flowGeneration, association, transport, responseSink, clientMac, timeProvider, _activityObserver, logger, receiveWindowPool, receiveBufferSize, cancellationToken));
             transport = null;
             host.AttachSession(slot, session);
-            session.Start(host.RemoveReceiveFailedSession);
+            session.Start(_receiveFailureHandler);
             UdpProxyLogging.LogDebug(logger, "udp.session.created", flow, flowGeneration, association, server.Name);
             await FlushSetupQueueAsync(flow, slot, session, cancellationToken).ConfigureAwait(false);
         }
@@ -182,6 +199,4 @@ internal sealed class UdpSessionSetup(
     /// later observes the cancelled shutdown token before acquiring the limiter.
     /// </summary>
     internal void DisposeLimiter() => _setupLimiter.Dispose();
-
-    private void OnSessionActivity(UdpAssociation association, DateTimeOffset now) => associations.TryTouch(association, now);
 }

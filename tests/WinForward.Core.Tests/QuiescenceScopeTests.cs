@@ -95,6 +95,23 @@ public sealed class QuiescenceScopeTests
     }
 
     [Fact]
+    public async Task IdleDrainRunsCancellationCallbacksBeforeItCompletes()
+    {
+        // The idle fast path skips the join cell but must keep the joined path's order: the owned
+        // token is cancelled — its callbacks run to completion — before the drain completes, and the
+        // source is released before the completion is observable.
+        var scope = new QuiescenceScope();
+        var callbackRan = false;
+        await using (scope.Token.Register(() => callbackRan = true))
+        {
+            await scope.DrainAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        Assert.True(callbackRan);
+        Assert.Throws<ObjectDisposedException>(() => scope.Token);
+    }
+
+    [Fact]
     public async Task SealedScopeRefusesEnterAndRunWithoutInvokingTheBody()
     {
         var scope = new QuiescenceScope();

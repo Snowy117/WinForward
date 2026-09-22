@@ -12,9 +12,12 @@ namespace WinForward.Runtime.UdpProxy;
 /// association, the transport/sink collaborators, the recorded client MAC, and the activity
 /// plumbing the session reports through. Grouping them gives the setup pipeline (and the tests
 /// that construct sessions directly) one named construction vocabulary; the positional order
-/// mirrors the former constructor parameters.
+/// mirrors the former constructor parameters. A value type deliberately: the context is copied
+/// into the session constructor and the instance is never retained, so as a record class it was
+/// one heap allocation per session (240 B/session measured, probe C2a1) with no reader of its
+/// identity — record value equality is unchanged by the shape.
 /// </summary>
-internal sealed record UdpProxySessionContext(
+internal readonly record struct UdpProxySessionContext(
     FlowKey Flow,
     long FlowGeneration,
     UdpAssociation Association,
@@ -234,20 +237,16 @@ internal sealed class UdpProxySession : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// The session's receive loop. One async method on purpose: the former
+    /// <c>ReceiveLoopAsync</c> + <c>ReceiveDatagramsAsync</c> pair boxed two state machines (and two
+    /// Task objects) per session for a single loop that the outer method called exactly once, so the
+    /// split bought no seam. The loop reads the scope token and rents the receive window once up
+    /// front, and signals a genuine receive fault after the lease is released.
+    /// </summary>
     private async Task ReceiveLoopAsync(Action<UdpProxySession> receiveFailureHandler)
     {
-        await ReceiveDatagramsAsync(_scope.Token).ConfigureAwait(false);
-        if (_scope.Fault is not null)
-        {
-            // A synchronous signal, deliberately not awaited (F1): the handler starts this session's
-            // teardown on the coordinator's scope, and awaiting it here would re-enter session
-            // disposal, which joins this loop.
-            receiveFailureHandler(this);
-        }
-    }
-
-    private async Task ReceiveDatagramsAsync(CancellationToken token)
-    {
+        var token = _scope.Token;
         var lease = _receiveWindowPool.Rent();
         try
         {
@@ -266,22 +265,12 @@ internal sealed class UdpProxySession : IAsyncDisposable
                     continue;
                 }
                 TouchActivity();
-                if (!receive.HasDatagram)
+                if (!TryGetReceiveSource(receive, out var source))
                 {
-                    // One anomalous datagram (unexpected relay source, oversized, malformed) skips
-                    // and the loop keeps receiving; only socket-level failures tear the session down.
-                    RecordSkippedDatagram(receive.SkipReason);
                     continue;
                 }
-                var response = receive.Datagram;
-                if (response.DestinationAddress is not { } address)
-                {
-                    // A domain-typed response has no IP source to rebuild the frame from (S6a):
-                    // counted with the other skip-class anomalies, then skipped.
-                    RecordSkippedDomainDestination();
-                    continue;
-                }
-                await InjectResponseAsync(Endpoint.From(address, response.DestinationPort), response, token).ConfigureAwait(false);
+
+                await InjectResponseAsync(source, receive.Datagram, token).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -300,6 +289,42 @@ internal sealed class UdpProxySession : IAsyncDisposable
         {
             lease.Dispose();
         }
+
+        if (_scope.Fault is not null)
+        {
+            // A synchronous signal, deliberately not awaited (F1): the handler starts this session's
+            // teardown on the coordinator's scope, and awaiting it here would re-enter session
+            // disposal, which joins this loop.
+            receiveFailureHandler(this);
+        }
+    }
+
+    /// <summary>
+    /// Classifies one receive result: one anomalous datagram (unexpected relay source, oversized,
+    /// malformed) skips and the loop keeps receiving, a domain-typed response has no IP source to
+    /// rebuild the frame from (S6a) and is counted with the other skip-class anomalies, and only a
+    /// response with a decodable source yields its endpoint. Both skips are counted here; only
+    /// socket-level failures tear the session down.
+    /// </summary>
+    private bool TryGetReceiveSource(Socks5UdpReceiveResult receive, out Endpoint source)
+    {
+        if (!receive.HasDatagram)
+        {
+            RecordSkippedDatagram(receive.SkipReason);
+            source = default;
+            return false;
+        }
+
+        var response = receive.Datagram;
+        if (response.DestinationAddress is not { } address)
+        {
+            RecordSkippedDomainDestination();
+            source = default;
+            return false;
+        }
+
+        source = Endpoint.From(address, response.DestinationPort);
+        return true;
     }
 
     /// <summary>Hands one decoded relay response to the reinjection sink; per-response failures skip.</summary>

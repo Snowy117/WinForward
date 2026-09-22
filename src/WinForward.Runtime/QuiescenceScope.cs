@@ -26,6 +26,13 @@ namespace WinForward.Runtime;
 /// at seal, so every <see cref="DrainAsync"/> caller — concurrent or sequential — receives the same
 /// <see cref="Task"/> instance.
 /// </para>
+/// <para>
+/// Idle fast path: a drain that seals an idle scope (no lease outstanding) skips the join cell
+/// entirely. The seal refuses admission and an idle packed word means every lease has already
+/// exited, so no <c>Exit</c> can still run and nothing can ever observe the cell the sealer would
+/// have published — the join is vacuous rather than elided. Cancel, the owned-source release, and
+/// the completion happen in the same observable order as the joined path.
+/// </para>
 /// </remarks>
 internal sealed class QuiescenceScope(CancellationToken linkedTo = default) : IAsyncDisposable
 {
@@ -146,7 +153,8 @@ internal sealed class QuiescenceScope(CancellationToken linkedTo = default) : IA
 
     /// <summary>
     /// Seals the scope, cancels the owned token, and completes once every outstanding lease has been
-    /// released. Single-flight and idempotent; never throws for a child fault.
+    /// released. Single-flight and idempotent; never throws for a child fault. A scope that is idle
+    /// at seal skips the join cell — see the class remarks.
     /// </summary>
     public Task DrainAsync()
     {
@@ -157,8 +165,22 @@ internal sealed class QuiescenceScope(CancellationToken linkedTo = default) : IA
             static () => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
 
         // Single-writer seal: exactly one caller observes an unsealed prior word and owns the drain.
-        if ((Interlocked.Or(ref _state, Sealed) & Sealed) != 0)
+        var prior = Interlocked.Or(ref _state, Sealed);
+        if ((prior & Sealed) != 0)
         {
+            return drained.Task;
+        }
+
+        if (prior >> 1 == 0)
+        {
+            // Idle fast path: the prior word's pending count is zero, so no lease was outstanding when
+            // the seal was taken — and the seal refuses every later TryEnter (its CAS compares against
+            // a word without the seal bit, which can no longer be observed), so no lease can be
+            // counted after this point and no Exit() can run. The join cell would therefore never be
+            // read: the join is vacuous, and allocating it is pure per-drain overhead (88 B measured,
+            // C2e). Cancellation still runs its callbacks to completion before the drain completes,
+            // and the owned source is released before the completion cell, exactly as below.
+            _ = DrainCoreAsync(drained, joined: null);
             return drained.Task;
         }
 
@@ -183,12 +205,19 @@ internal sealed class QuiescenceScope(CancellationToken linkedTo = default) : IA
 
     public ValueTask DisposeAsync() => new(DrainAsync());
 
-    private async Task DrainCoreAsync(TaskCompletionSource drained, TaskCompletionSource joined)
+    /// <summary>
+    /// The drain body: cancel, join (unless the sealer was idle, in which case there is nothing to
+    /// join), release the owned source, complete the drain cell — in that order on every path.
+    /// </summary>
+    private async Task DrainCoreAsync(TaskCompletionSource drained, TaskCompletionSource? joined)
     {
         try
         {
             await _cts.CancelAsync().ConfigureAwait(false);
-            await joined.Task.ConfigureAwait(false);
+            if (joined is not null)
+            {
+                await joined.Task.ConfigureAwait(false);
+            }
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {

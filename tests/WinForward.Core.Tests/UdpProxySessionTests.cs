@@ -165,6 +165,24 @@ public sealed class UdpProxySessionTests
         Assert.Null(typeof(UdpProxySession).GetField("_receiveFailure", BindingFlags.Instance | BindingFlags.NonPublic));
     }
 
+    [Fact]
+    public void SessionContextStaysAValueTypeSoConstructionDoesNotAllocate()
+    {
+        // B (probe C2a1): the context is copied into the session constructor and never retained, so as
+        // a record class it cost one heap allocation per session (240 B measured). The shape is load-
+        // bearing for that saving; record value equality is unchanged by it.
+        Assert.True(typeof(UdpProxySessionContext).IsValueType);
+    }
+
+    [Fact]
+    public void ReceiveLoopIsASingleAsyncMethod()
+    {
+        // D: ReceiveLoopAsync + ReceiveDatagramsAsync boxed two state machines (and two Task objects)
+        // per session for one loop. A reintroduced inner async method would silently pay the second
+        // box again; the outer method called it exactly once, so there is no seam to preserve.
+        Assert.Null(typeof(UdpProxySession).GetMethod("ReceiveDatagramsAsync", BindingFlags.Instance | BindingFlags.NonPublic));
+    }
+
     private static UdpProxySession CreateSession(TimeProvider time, List<DateTimeOffset> propagationStamps, IUdpProxyTransport? transport = null)
     {
         var flow = FlowKey.Create(
