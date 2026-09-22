@@ -42,6 +42,8 @@ before/after delta at equal chunk sizes rather than the raw number):
 | `DispatcherBenchmarks` | warm-path dispatch (pass, trace off) | — |
 | `CapturePumpBenchmarks` | end-to-end pump round: 200 000 synthetic packets through dispatcher + processor | frame 128/1400 × batch 32/1 |
 | `UdpSessionBenchmarks` | UDP session populate + dispose cost | 1 / 100 / 1000 sessions |
+| `SessionSetupDecompositionBenchmarks` | staged Noop session-setup decomposition (capacity → admission → setup start → session tier → teardown) plus component probes and the fake baseline | 1 / 100 / 1000 sessions |
+| `FrameworkSetupBenchmarks` | per-session framework dial split (control connect + handshake, UDP ASSOCIATE, relay socket, self-traffic, transport ctor) | 1 000 create+dispose per variant |
 | `TcpRelayBenchmarks` | one-way relay transfer (256 KiB–16 MiB) | chunk 1 / 1024 / 8192 / 65536 |
 | `ChecksumBenchmarks` | scalar vs vectorized Internet checksum (P2b decision data; scalar is the baseline) | frame bytes 64 / 512 / 1514 |
 
@@ -73,8 +75,8 @@ Count-based reliability metrics under sustained load. One JSONL record per scena
 
 ```text
 dotnet run -c Release --project benchmarks/WinForward.Benchmarks -- \
-  --stability [--scenario all|udp|udpBurst|tcp|tcpthroughput|footprint|baseline] [--duration 60] [--pps 25000] \
-  [--payload-bytes 512] [--flows 256] [--burst-flows 48] [--dial-delay-ms 0] \
+  --stability [--scenario all|udp|udpBurst|udpChurn|tcp|tcpthroughput|footprint|baseline] [--duration 60] [--pps 25000] \
+  [--payload-bytes 512] [--flows 256] [--burst-flows 48] [--dial-delay-ms 0] [--churn-waves 1] \
   [--tcp-concurrency 64] [--tcp-transfer-bytes 1048576] \
   [--abort-mix clean=25,clientRst=25,relayCancel=25,upstreamTruncate=25] [--seed 42] \
   [--output <path>] [--quick]
@@ -130,6 +132,22 @@ teardown tails — are **not comparable** with current rows either.
   `--flows 16 --pps 4000` (stays under the Windows ~4.7k pps loopback ceiling);
   `--duration`/`--quick` do not apply — the scenario has fixed window lengths. Series started
   2026-09-06; baseline matrix under `results/2026-09-06-udp-burst/`.
+- **`udp.churn`** — session-creation churn: waves of `--burst-flows` short-lived sessions through
+  the real dial path, each wave retired through the coordinator's own idle-expiry path
+  (`RemoveExpiredAsync` with a zero timeout, i.e. the per-session teardown the periodic sweeper
+  would drive), with per-wave `allocatedBytes` / `bytesPerSession` / `gen0`–`gen2` deltas sampled
+  around the full create→respond→retire cycle. Every process first fires one unmeasured warmup
+  wave (first-call JIT, worker-thread creation, and socket-stack warmup would otherwise dominate a
+  short wave row). `--churn-waves K` (K ≥ 1) fires K consecutive
+  waves and emits one row per wave (parameters carry the wave index); `--churn-waves 0` cycles
+  waves back-to-back for `--duration` seconds and emits one aggregate row (`bytesPerSession`,
+  `bytesPerSecond`, `achievedSessionsPerSecond`, per-wave bytes/session min/p50/p95/max, and the
+  pooled first-response latency distribution). `--dial-delay-ms` delays the harness SOCKS5
+  server's UDP-ASSOCIATE reply, so the realized session rate approaches the 8-wide setup limiter's
+  bound (≈ 8 / delay). The same flow keys are re-offered every wave (a client tuple re-querying
+  after its session expired), and a setup-failure cooldown surfaces as that wave's establishment
+  loss. Allocation sampling uses `GC.GetTotalAllocatedBytes(precise: false)`; latency is
+  reported as ordinals only.
 - **`tcp.unexpectedEof`** — concurrent one-way transfers through `TcpProxyRelay` with an
   adversarial event fired mid-stream per transfer (weighted mix: clean / client RST / relay
   cancellation / upstream truncation at a random 20–80 % of the transfer). Receiver-side

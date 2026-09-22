@@ -63,6 +63,7 @@ internal static class SoakRunner
             SoakScenario.Footprint => [("footprint", SessionFootprintScenario.RunAsync)],
             SoakScenario.Baseline => [("baseline", UdpRawBaselineScenario.RunAsync)],
             SoakScenario.Burst => [("udpBurst", UdpBurstScenario.RunAsync)],
+            SoakScenario.Churn => [("udpChurn", UdpChurnScenario.RunAsync)],
             SoakScenario.GcSoak => [("gcSoak", GcSoakScenario.RunAsync)],
             _ =>
             [
