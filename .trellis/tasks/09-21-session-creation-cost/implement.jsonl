@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "The ≤1 KB per-session bookkeeping budget being reconciled, the sub-2× noise rule, and the allocation-gate inventory (WarmProxy 160 B, HotPathAllocationGateTests) the probes must not violate."}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "UDP session lifecycle and bounded-setup-memory contracts (8 MiB budget, 5 s TTL, two-tier activity accounting) the decomposition and churn measurements must respect."}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "QuiescenceScope/teardown contract for the session machinery whose per-session allocation is being attributed (D7 CTS ownership, drain/join cells)."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Format/inspectcode gates and the documented suppression policy for any benchmark-project additions."}
+{"file": "benchmarks/README.md", "reason": "BDN ShortRun and stability-runner usage, scenario knobs (burst flows, dial delay), JSONL schema, and interpretation rules for the planned measurements."}
