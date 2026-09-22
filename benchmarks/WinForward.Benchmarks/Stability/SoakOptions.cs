@@ -114,6 +114,12 @@ internal sealed record SoakOptions
     /// <summary>UDP churn waves (<c>--churn-waves</c>): K ≥ 1 fires K waves and reports one row per wave; 0 runs sustained churn for <see cref="DurationSeconds"/> and reports one aggregate row.</summary>
     public int ChurnWaves { get; private init; } = 1;
 
+    /// <summary>Child server mode (<c>--serve-socks5-udp</c>): host the loopback SOCKS5 UDP server for a parent process instead of running a scenario.</summary>
+    public bool ServeSocks5Udp { get; private init; }
+
+    /// <summary>UDP churn against the out-of-process server helper instead of the in-process receiver/server (<c>--socks5-external</c>).</summary>
+    public bool Socks5External { get; private init; }
+
     public static SoakOptions Parse(string[] args)
     {
         var options = new SoakOptions();
@@ -174,6 +180,10 @@ internal sealed record SoakOptions
                 return options with { DialDelayMs = AtLeast("--dial-delay-ms", Value(args, ref index), 0) };
             case "--churn-waves":
                 return options with { ChurnWaves = AtLeast("--churn-waves", Value(args, ref index), 0) };
+            case "--serve-socks5-udp":
+                return options with { ServeSocks5Udp = true };
+            case "--socks5-external":
+                return options with { Socks5External = true };
             default:
                 throw new ArgumentException($"Unknown stability argument '{args[index]}'.", nameof(args));
         }

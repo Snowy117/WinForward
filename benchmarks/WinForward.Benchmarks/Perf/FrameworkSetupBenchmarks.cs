@@ -30,27 +30,38 @@ public class FrameworkSetupBenchmarks
     [Params(1, 100, 1000)]
     public int Sessions { get; set; }
 
-    private LoopbackSocks5UdpServer _server = null!;
-    private Socket _echoDiscard = null!;
+    private LoopbackSocks5UdpServer? _server;
+    private Socket? _echoDiscard;
+    private ExternalLoopbackSocks5UdpServer? _externalServer;
     private Socks5Server _socks = null!;
     private SelfTrafficRegistry _registry = null!;
 
     [GlobalSetup]
-    public void Setup()
+    public async Task SetupAsync()
     {
-        // A bound discard socket as the relay's forward destination, mirroring UdpSessionBenchmarks.
-        _echoDiscard = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-        _echoDiscard.Bind(new IPEndPoint(IPAddress.Loopback, 0));
-        _server = new LoopbackSocks5UdpServer((IPEndPoint)_echoDiscard.LocalEndPoint!);
-        _socks = new Socks5Server("benchmark", "127.0.0.1", checked((ushort)_server.ControlEndpoint.Port), Username: null, Password: null);
+        if (ExternalLoopbackSocks5UdpServer.IsEnabled)
+        {
+            _externalServer = await ExternalLoopbackSocks5UdpServer.StartAsync(Sessions, TimeSpan.Zero, CancellationToken.None).ConfigureAwait(false);
+        }
+        else
+        {
+            // A bound discard socket as the relay's forward destination, mirroring UdpSessionBenchmarks.
+            _echoDiscard = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            _echoDiscard.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+            _server = new LoopbackSocks5UdpServer((IPEndPoint)_echoDiscard.LocalEndPoint!);
+        }
+
+        var controlPort = _externalServer is null ? _server!.ControlEndpoint.Port : _externalServer.ControlEndpoint.Port;
+        _socks = new Socks5Server("benchmark", "127.0.0.1", checked((ushort)controlPort), Username: null, Password: null);
         _registry = new SelfTrafficRegistry();
     }
 
     [GlobalCleanup]
     public async Task CleanupAsync()
     {
-        await _server.DisposeAsync().ConfigureAwait(false);
-        _echoDiscard.Dispose();
+        if (_server is not null) await _server.DisposeAsync().ConfigureAwait(false);
+        if (_externalServer is not null) await _externalServer.DisposeAsync().ConfigureAwait(false);
+        _echoDiscard?.Dispose();
     }
 
     /// <summary>The whole framework path per session: control connect + greeting, UDP ASSOCIATE, relay socket create/bind/options, self-traffic registration, transport construction — then the symmetric disposal (control close, relay socket close, token release).</summary>

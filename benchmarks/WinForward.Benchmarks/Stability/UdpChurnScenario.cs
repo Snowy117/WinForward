@@ -36,8 +36,15 @@ internal static class UdpChurnScenario
         var associateDelay = TimeSpan.FromMilliseconds(options.DialDelayMs);
         var waves = options.ChurnWaves;
         var sustained = waves <= 0;
-        await using var receiver = new EchoReceiver(flows);
-        await using var server = new LoopbackSocks5UdpServer(receiver.Endpoint, associateDelay);
+        // --socks5-external: the server and the receiver it relays into run in a child process, so
+        // their per-connection buffers (64 KiB relay loop, 4 MiB relay socket) no longer land in
+        // this process's GC.GetTotalAllocatedBytes readings. The in-process default stays as
+        // recorded, so its command lines keep reproducing their numbers.
+        await using var externalServer = options.Socks5External
+            ? await ExternalLoopbackSocks5UdpServer.StartAsync(flows, associateDelay, CancellationToken.None).ConfigureAwait(false)
+            : null;
+        await using var receiver = externalServer is null ? new EchoReceiver(flows) : null;
+        await using var server = receiver is null ? null : new LoopbackSocks5UdpServer(receiver.Endpoint, associateDelay);
         var sink = new ChurnCountingSink(flows);
         const int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame;
         using var setupQueuePool = new NativeBufferPool(maximumFrameSize);
@@ -52,17 +59,18 @@ internal static class UdpChurnScenario
             new UdpProxyOptions { Capacity = flows });
         try
         {
-            var socksServer = new Socks5Server("churn", "127.0.0.1", checked((ushort)server.ControlEndpoint.Port), Username: null, Password: null);
+            var controlPort = checked((ushort)(externalServer?.ControlEndpoint.Port ?? server!.ControlEndpoint.Port));
+            var target = new ChurnTarget(new Socks5Server("churn", "127.0.0.1", controlPort, Username: null, Password: null), externalServer);
             var flowKeys = new FlowKey[flows];
             for (var index = 0; index < flowKeys.Length; index++) flowKeys[index] = BenchmarkShared.CreateFlowKey(index);
             var timeout = ComputeWaveTimeout(flows, associateDelay);
             if (sustained)
             {
-                await RunSustainedAsync(context, coordinator, sink, socksServer, flowKeys, options, timeout).ConfigureAwait(false);
+                await RunSustainedAsync(context, coordinator, sink, target, flowKeys, options, timeout).ConfigureAwait(false);
             }
             else
             {
-                await RunWavesAsync(context, coordinator, sink, socksServer, flowKeys, options, waveCount: waves, timeout).ConfigureAwait(false);
+                await RunWavesAsync(context, coordinator, sink, target, flowKeys, options, waveCount: waves, timeout).ConfigureAwait(false);
             }
         }
         finally
@@ -86,17 +94,17 @@ internal static class UdpChurnScenario
         StabilityContext context,
         UdpProxyCoordinator coordinator,
         ChurnCountingSink sink,
-        Socks5Server socksServer,
+        ChurnTarget target,
         FlowKey[] flowKeys,
         SoakOptions options,
         int waveCount,
         TimeSpan timeout)
     {
         var payload = new byte[options.PayloadBytes];
-        var sequence = await WarmUpAsync(coordinator, sink, socksServer, flowKeys, payload, timeout).ConfigureAwait(false);
+        var sequence = await WarmUpAsync(coordinator, sink, target, flowKeys, payload, timeout).ConfigureAwait(false);
         for (var wave = 0; wave < waveCount; wave++)
         {
-            var sample = await RunWaveAsync(coordinator, sink, socksServer, flowKeys, payload, ++sequence, wave, timeout).ConfigureAwait(false);
+            var sample = await RunWaveAsync(coordinator, sink, target, flowKeys, payload, ++sequence, wave, timeout).ConfigureAwait(false);
             context.WriteResult(
                 "udp.churn",
                 new { burstFlows = options.BurstFlows, dialDelayMs = options.DialDelayMs, mode = "waves", wave, waves = waveCount },
@@ -114,12 +122,12 @@ internal static class UdpChurnScenario
     private static async Task<long> WarmUpAsync(
         UdpProxyCoordinator coordinator,
         ChurnCountingSink sink,
-        Socks5Server socksServer,
+        ChurnTarget target,
         FlowKey[] flowKeys,
         byte[] payload,
         TimeSpan timeout)
     {
-        _ = await RunWaveAsync(coordinator, sink, socksServer, flowKeys, payload, sequence: 1, wave: -1, timeout).ConfigureAwait(false);
+        _ = await RunWaveAsync(coordinator, sink, target, flowKeys, payload, sequence: 1, wave: -1, timeout).ConfigureAwait(false);
         return 1;
     }
 
@@ -127,13 +135,13 @@ internal static class UdpChurnScenario
         StabilityContext context,
         UdpProxyCoordinator coordinator,
         ChurnCountingSink sink,
-        Socks5Server socksServer,
+        ChurnTarget target,
         FlowKey[] flowKeys,
         SoakOptions options,
         TimeSpan timeout)
     {
         var payload = new byte[options.PayloadBytes];
-        var sequence = await WarmUpAsync(coordinator, sink, socksServer, flowKeys, payload, timeout).ConfigureAwait(false);
+        var sequence = await WarmUpAsync(coordinator, sink, target, flowKeys, payload, timeout).ConfigureAwait(false);
         var window = TimeSpan.FromSeconds(options.DurationSeconds);
         var totalWatch = Stopwatch.StartNew();
         long sessions = 0;
@@ -148,7 +156,7 @@ internal static class UdpChurnScenario
         var allocatedBefore = GC.GetTotalAllocatedBytes(precise: false);
         while (totalWatch.Elapsed < window && waveCount < MaximumSustainedWaves)
         {
-            var sample = await RunWaveAsync(coordinator, sink, socksServer, flowKeys, payload, ++sequence, wave: (int)(waveCount % uint.MaxValue), timeout).ConfigureAwait(false);
+            var sample = await RunWaveAsync(coordinator, sink, target, flowKeys, payload, ++sequence, wave: (int)(waveCount % uint.MaxValue), timeout).ConfigureAwait(false);
             waveCount++;
             sessions += flowKeys.Length;
             accepted += sample.Accepted;
@@ -186,22 +194,26 @@ internal static class UdpChurnScenario
     private static async Task<WaveSample> RunWaveAsync(
         UdpProxyCoordinator coordinator,
         ChurnCountingSink sink,
-        Socks5Server socksServer,
+        ChurnTarget target,
         FlowKey[] flowKeys,
         byte[] payload,
         long sequence,
         int wave,
         TimeSpan timeout)
     {
+        // A child that died between waves would otherwise turn every remaining wave into a
+        // zero-acceptance row instead of failing the instrument.
+        target.ExternalServer?.ThrowIfExited();
         sink.BeginWave();
         var gen0Before = GC.CollectionCount(0);
         var gen1Before = GC.CollectionCount(1);
         var gen2Before = GC.CollectionCount(2);
         var allocatedBefore = GC.GetTotalAllocatedBytes(precise: false);
-        var (accepted, rejected, issueTimestamps, issueEnd) = await FireWaveAsync(coordinator, socksServer, flowKeys, payload, sequence).ConfigureAwait(false);
+        var (accepted, rejected, issueTimestamps, issueEnd) = await FireWaveAsync(coordinator, target.SocksServer, flowKeys, payload, sequence).ConfigureAwait(false);
         var responseWatch = Stopwatch.StartNew();
         while (sink.FirstResponses < accepted && responseWatch.Elapsed < timeout)
         {
+            target.ExternalServer?.ThrowIfExited();
             await Task.Delay(s_responsePollInterval).ConfigureAwait(false);
         }
 
@@ -289,6 +301,14 @@ internal static class UdpChurnScenario
             max = samples.Max(),
         };
     }
+
+    /// <summary>
+    /// The wave's dial target: the SOCKS5 server handle the client dials, plus — under
+    /// <c>--socks5-external</c> — the child process answering it. The child's death must fail the
+    /// wave (its counters are the only progress signal the response wait has) rather than let the
+    /// wait time out into a silent zero-response row.
+    /// </summary>
+    private sealed record ChurnTarget(Socks5Server SocksServer, ExternalLoopbackSocks5UdpServer? ExternalServer);
 
     /// <summary>One wave's measured cycle: admission counts, first-response latencies, retirement, and the allocation/GC deltas of the complete create→retire cycle.</summary>
     private sealed record WaveSample(

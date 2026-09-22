@@ -6,6 +6,9 @@ internal static class SoakRunner
 {
     public static async Task<int> RunAsync(SoakOptions options)
     {
+        // The child server mode owns stdout — its handshake line is the parent's contract — so it
+        // never enters the scenario loop, whose context writes a metadata row to stdout first.
+        if (options.ServeSocks5Udp) return await Socks5UdpServerMode.RunAsync(options).ConfigureAwait(false);
         if (!OperatingSystem.IsWindows()) return await RunScenariosAsync(options).ConfigureAwait(false);
 
         // 10 ms pacing ticks need the 1 ms system timer; the ~15.6 ms default starves them.
