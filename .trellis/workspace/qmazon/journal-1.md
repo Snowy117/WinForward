@@ -870,3 +870,28 @@ Delivered 09-21-session-creation-cost end-to-end as evidence + decision: staged 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 34: Session creation cost redo: out-of-process harness, corrected numbers, re-anchored T3
+<!-- trellis-session: v=2 fp=f9416b94a5eb21b0 -->
+
+**Date**: 2026-09-22
+**Task**: Session creation cost redo: out-of-process harness, corrected numbers, re-anchored T3
+**Branch**: `feat/transport-lifecycle`
+
+### Summary
+
+Redid 09-21-session-creation-cost on a clean instrument. Diagnosis: the recorded 'framework path 83,442 B/session' was ~90% benchmark-harness artifact — the in-process loopback SOCKS5 server allocates a 64 KiB relay-loop buffer + 4 MiB relay socket + control arrays per accepted control connection, all charged to the client by the process-wide GC counter. Fix: added a --serve-socks5-udp child-process server mode + ExternalLoopbackSocks5UdpServer parent helper, switched the churn scenario (--socks5-external) and both BDN benchmark classes (WINFORWARD_BENCH_EXTERNAL_SERVER=1) onto it; in-process default kept byte-identical (A/B reproduced the archived ladder within 1 B). Corrected results (3-run batches): framework path 7,952.0 B/session (dial 3,792.2; ASSOCIATE 959.0; relay socket 576; self-traffic 160; transport ctor 2,464.8), real probe marginal 17,021.2 (echo-fed), churn 13,248.9-14,069.9 wave / 13,720.2-13,868.6 sustained (was 90.8-92.5 KB), harness share ~75.5 KB/session. Bookkeeping ledger (T1/T2) and the stage/teardown findings re-validated byte-identically. Deliverables: three corrected research docs, errata banners on the three archived reports, hot-path.md §3/§6 re-anchored (T3a/b/c + out-of-process rule + falsification sentence) plus a 7-section code-spec for the harness, and a re-ranked reduction list where the control-reuse lever's allocatable share is ~3.8 KB/session (not 77 KB) and bookkeeping now carries 42% of the clean whole cycle. All four quality gates green; trellis-check pass audited the numbers and found 5 doc defects (fixed).
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d4aeda5` | bench(benchmarks): out-of-process loopback SOCKS5 server mode for the real-dial instruments (09-22-session-creation-cost-redo) |
+| `6588265` | docs(spec): re-anchor the framework session budget to the out-of-process harness (09-22-session-creation-cost-redo) |
+| `dc37516` | docs(tasks): errata the 09-21 framework/churn/reconciliation reports for the harness inflation (09-22-session-creation-cost-redo) |
+| `c55e5de` | chore(task): record 09-22-session-creation-cost-redo artifacts |
+
+### Status
+
+[OK] **Completed**

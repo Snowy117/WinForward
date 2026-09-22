@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 33
+- **Total Sessions**: 34
 - **Last Active**: 2026-09-22
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~872 | Active |
+| `journal-1.md` | ~897 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 34 | 2026-09-22 | Session creation cost redo: out-of-process harness, corrected numbers, re-anchored T3 | `d4aeda5`, `6588265`, `dc37516`, `c55e5de` | `feat/transport-lifecycle` |
 | 33 | 2026-09-22 | Session creation cost: UDP full-stack decomposition, churn measurement, and the re-anchored budget | `a174f88`, `417ad8d`, `c303837`, `b7c7e66` | `feat/transport-lifecycle` |
 | 32 | 2026-09-21 | Complete the structured-concurrency program: C4 migrates the remaining lifecycle owners | `a3c0783`, `ccb0def` | `feat/transport-lifecycle` |
 | 31 | 2026-09-21 | Quiescence scope migration: TCP/UDP cluster (C3) | `a0e2b35` | `feat/transport-lifecycle` |
