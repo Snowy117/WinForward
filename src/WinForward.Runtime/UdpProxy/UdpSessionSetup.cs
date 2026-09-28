@@ -138,19 +138,32 @@ internal sealed class UdpSessionSetup(
 
     /// <summary>
     /// The single setup-failure sink: the debug event (always), the failure counter and its
-    /// rate-limited warn (genuine failures only), and the slot removal that arms the setup
-    /// cooldown. Shutdown cancellation keeps the no-cooldown semantics the observer had, and is
+    /// rate-limited warn (genuine failures only), and the slot removal that carries the teardown
+    /// reason. Shutdown cancellation keeps the no-cooldown semantics the observer had, and is
     /// not counted as a setup failure — only what arms the cooldown is what the counter reports.
+    /// <para>
+    /// An association that died while the setup queue was flushing reaches this sink through the
+    /// same flush-window send the ready path uses, so it is mapped the same way (I4/I5): counted as
+    /// <c>udpAssociationLost</c>, removed without arming the setup cooldown, and never counted as a
+    /// setup failure. A failed dial or ASSOCIATE is what the setup-failure counter and cooldown are
+    /// for.
+    /// </para>
     /// </summary>
     private async Task HandleSetupFailureAsync(FlowKey flow, UdpProxyCoordinator.UdpSessionSlot slot, Exception exception)
     {
         UdpProxyLogging.LogSetupFailure(logger, flow, exception);
-        if (exception is not OperationCanceledException)
+        var reason = exception switch
+        {
+            OperationCanceledException => UdpTeardownReason.Shutdown,
+            UdpAssociationLostException => UdpProxyCoordinator.TeardownReasonFor(exception),
+            _ => UdpTeardownReason.SetupFailure,
+        };
+        if (reason == UdpTeardownReason.SetupFailure)
         {
             RuntimeCounters.Shared.Increment(RuntimeCounters.UdpSetupFailures);
             if (_setupFailureLog.ShouldEmit()) UdpProxyLogging.LogSetupFailureWarning(logger, flow, exception);
         }
-        await host.RemoveSlotAsync(flow, slot, exception is OperationCanceledException ? UdpTeardownReason.Shutdown : UdpTeardownReason.SetupFailure).ConfigureAwait(false);
+        await host.RemoveSlotAsync(flow, slot, reason).ConfigureAwait(false);
     }
 
     /// <summary>

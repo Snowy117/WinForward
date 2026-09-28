@@ -65,6 +65,9 @@ internal sealed class FakeTransport : IUdpProxyTransport
     /// <summary>When set, <see cref="DisposeAsync"/> faults with it while still marking the transport disposed.</summary>
     public Exception? DisposeFault { get; set; }
 
+    /// <summary>When set, <see cref="SendSpanAsync"/> faults with it instead of recording the datagram (a dead relay).</summary>
+    public Exception? SendFault { get; init; }
+
     /// <summary>Queues a valid decoded relay datagram for the session's receive loop.</summary>
     public void EnqueueResponse(Socks5UdpDatagram datagram) => Received.Writer.TryWrite(Socks5UdpReceiveResult.Received(datagram));
 
@@ -73,6 +76,7 @@ internal sealed class FakeTransport : IUdpProxyTransport
 
     public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken)
     {
+        if (SendFault is not null) return ValueTask.FromException(SendFault);
         lock (Sent) Sent.Add((destination, payload.ToArray()));
         return SendGate is not null ? new ValueTask(SendGate.Task) : ValueTask.CompletedTask;
     }

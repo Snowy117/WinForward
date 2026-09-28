@@ -6,6 +6,7 @@ using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Runtime;
 using WinForward.Runtime.Socks5;
+using WinForward.Runtime.UdpProxy;
 
 namespace WinForward.Benchmarks.Perf;
 
@@ -35,6 +36,7 @@ public class FrameworkSetupBenchmarks
     private ExternalLoopbackSocks5UdpServer? _externalServer;
     private Socks5Server _socks = null!;
     private SelfTrafficRegistry _registry = null!;
+    private UdpAssociationPool _associations = null!;
 
     [GlobalSetup]
     public async Task SetupAsync()
@@ -54,6 +56,9 @@ public class FrameworkSetupBenchmarks
         var controlPort = _externalServer is null ? _server!.ControlEndpoint.Port : _externalServer.ControlEndpoint.Port;
         _socks = new Socks5Server("benchmark", "127.0.0.1", checked((ushort)controlPort), Username: null, Password: null);
         _registry = new SelfTrafficRegistry();
+        // Off keeps this instrument's recorded create+dispose anchor comparable: it measures one
+        // dial + ASSOCIATE + relay socket per session, exactly what the anchor was derived from.
+        _associations = new UdpAssociationPool(_registry, UdpAssociationReuseMode.Off);
     }
 
     [GlobalCleanup]
@@ -62,6 +67,7 @@ public class FrameworkSetupBenchmarks
         if (_server is not null) await _server.DisposeAsync().ConfigureAwait(false);
         if (_externalServer is not null) await _externalServer.DisposeAsync().ConfigureAwait(false);
         _echoDiscard?.Dispose();
+        await _associations.DisposeAsync().ConfigureAwait(false);
     }
 
     /// <summary>The whole framework path per session: control connect + greeting, UDP ASSOCIATE, relay socket create/bind/options, self-traffic registration, transport construction — then the symmetric disposal (control close, relay socket close, token release).</summary>
@@ -70,7 +76,8 @@ public class FrameworkSetupBenchmarks
     {
         for (var index = 0; index < Sessions; index++)
         {
-            var transport = await Socks5UdpTransport.CreateAsync(_socks, _registry, CancellationToken.None, createControl: null, socketFactory: null).ConfigureAwait(false);
+            var lease = await _associations.RentAsync(_socks, CancellationToken.None).ConfigureAwait(false);
+            var transport = Socks5UdpTransport.Create(lease, _registry);
             Assert(transport.LocalEndpoint.Port > 0, "the relay socket must be bound before the transport is returned");
             await transport.DisposeAsync().ConfigureAwait(false);
         }

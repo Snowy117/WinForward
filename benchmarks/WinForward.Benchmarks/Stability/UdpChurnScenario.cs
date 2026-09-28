@@ -50,8 +50,11 @@ internal static class UdpChurnScenario
         using var setupQueuePool = new NativeBufferPool(maximumFrameSize);
         using var receiveWindowPool = new NativeBufferPool(UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize));
         using var setupExecutor = new SetupExecutor();
+        var registry = new SelfTrafficRegistry();
+        // The Step 2 acceptance run exercises control-connection sharing explicitly.
+        await using var associations = new UdpAssociationPool(registry, UdpAssociationReuseMode.Always);
         var coordinator = new UdpProxyCoordinator(
-            new Socks5UdpTransportFactory(new SelfTrafficRegistry(), maximumFrameSize),
+            new Socks5UdpTransportFactory(associations, registry, maximumFrameSize),
             sink,
             setupQueuePool,
             receiveWindowPool,

@@ -1,6 +1,7 @@
 using System.Runtime.ExceptionServices;
 using WinForward.Configuration;
 using WinForward.Core;
+using WinForward.Runtime.Socks5;
 
 namespace WinForward.Runtime.UdpProxy;
 
@@ -130,7 +131,7 @@ public sealed partial class UdpProxyCoordinator
         }
         catch (Exception exception)
         {
-            await _slotHost.RemoveSlotAsync(flow, slot, UdpTeardownReason.Fault).ConfigureAwait(false);
+            await _slotHost.RemoveSlotAsync(flow, slot, TeardownReasonFor(exception)).ConfigureAwait(false);
             ExceptionDispatchInfo.Capture(exception).Throw();
             return false;
         }
@@ -155,9 +156,23 @@ public sealed partial class UdpProxyCoordinator
 
     private async ValueTask<bool> RemoveSlotSpanAsync(FlowKey flow, UdpSessionSlot slot, Exception exception)
     {
-        await _slotHost.RemoveSlotAsync(flow, slot, UdpTeardownReason.Fault).ConfigureAwait(false);
+        await _slotHost.RemoveSlotAsync(flow, slot, TeardownReasonFor(exception)).ConfigureAwait(false);
         ExceptionDispatchInfo.Capture(exception).Throw();
         return false;
+    }
+
+    /// <summary>
+    /// The teardown reason a send failure carries: an association that died without recovering is
+    /// <see cref="UdpTeardownReason.AssociationLost"/> (counted, and deliberately without the setup
+    /// cooldown — recovery is the flow's next datagram); everything else stays a generic
+    /// <see cref="UdpTeardownReason.Fault"/>. Shared with the setup pipeline, whose flush window is
+    /// the same send path: an association lost while the setup queue drains is not a setup failure.
+    /// </summary>
+    internal static UdpTeardownReason TeardownReasonFor(Exception exception)
+    {
+        if (exception is not UdpAssociationLostException) return UdpTeardownReason.Fault;
+        RuntimeCounters.Shared.Increment(RuntimeCounters.UdpAssociationLost);
+        return UdpTeardownReason.AssociationLost;
     }
 
     private void LogSpanDatagramSent(FlowKey flow, UdpProxySession session, long packetSequence, int bytes)

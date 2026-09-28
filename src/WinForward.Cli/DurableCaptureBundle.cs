@@ -59,7 +59,8 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         NativeBufferPool? relayPool = null,
         NativeBufferPool? udpDatagramPool = null,
         NativeBufferPool? udpWindowPool = null,
-        SetupExecutor? setupExecutor = null)
+        SetupExecutor? setupExecutor = null,
+        UdpAssociationPool? udpAssociationPool = null)
     {
         Dispatcher = dispatcher;
         Executor = executor;
@@ -73,6 +74,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         _udpDatagramPool = udpDatagramPool;
         _udpWindowPool = udpWindowPool;
         _setupExecutor = setupExecutor;
+        UdpAssociations = udpAssociationPool;
     }
 
     internal FlowDispatcher Dispatcher { get; }
@@ -87,6 +89,9 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
 
     /// <summary>The durable UDP session coordinator (heartbeat usage source).</summary>
     internal UdpProxyCoordinator Udp { get; }
+
+    /// <summary>The per-server association pool behind every UDP transport (heartbeat usage source).</summary>
+    internal UdpAssociationPool? UdpAssociations { get; }
 
     /// <summary>
     /// Builds the durable layer for a run. Nothing in the bundle references a specific adapter
@@ -189,24 +194,29 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         // coordinator so the pool and the session window can never disagree.
         var udpWindowPool = new NativeBufferPool(UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize));
         RegisterPool(counters, UdpWindowPoolName, udpWindowPool);
+        // One association pool backs every UDP flow's control connection (Step 2); the bundle owns
+        // it and the coordinator's transports borrow leases from it, so it outlives the coordinator.
+        var associationPool = new UdpAssociationPool(selfTraffic, configuration.UdpAssociationReuse, addressCache, logger: logger);
         UdpProxyCoordinator udpCoordinator;
         try
         {
-            udpCoordinator = UdpProxyComposer.Create(reinjector, selfTraffic, logger, healthSignal, new UdpProxyComposition(udpTargets, maximumFrameSize, udpDatagramPool, udpWindowPool, setupExecutor, addressCache, SessionCapacity: configuration.UdpSessionCapacity, RelayReceiveBufferBytes: configuration.UdpRelayReceiveBufferBytes));
+            udpCoordinator = UdpProxyComposer.Create(reinjector, selfTraffic, logger, healthSignal, new UdpProxyComposition(udpTargets, maximumFrameSize, udpDatagramPool, udpWindowPool, setupExecutor, addressCache, associationPool, SessionCapacity: configuration.UdpSessionCapacity, RelayReceiveBufferBytes: configuration.UdpRelayReceiveBufferBytes));
         }
         catch
         {
+            await associationPool.DisposeAsync().ConfigureAwait(false);
             udpDatagramPool.Dispose();
             udpWindowPool.Dispose();
             throw;
         }
         try
         {
-            return BuildBundle(configuration, reinjector, selfTraffic, logger, healthSignal, udpTargets, udpCoordinator, tcpCoordinator, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, setupExecutor);
+            return BuildBundle(configuration, reinjector, selfTraffic, logger, healthSignal, udpTargets, udpCoordinator, tcpCoordinator, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, setupExecutor, associationPool);
         }
         catch
         {
             await udpCoordinator.DisposeAsync().ConfigureAwait(false);
+            await associationPool.DisposeAsync().ConfigureAwait(false);
             udpDatagramPool.Dispose();
             udpWindowPool.Dispose();
             throw;
@@ -226,7 +236,8 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         NativeBufferPool relayPool,
         NativeBufferPool udpDatagramPool,
         NativeBufferPool udpWindowPool,
-        SetupExecutor setupExecutor)
+        SetupExecutor setupExecutor,
+        UdpAssociationPool associationPool)
     {
         var executor = new NdisPacketActionExecutor(reinjector, logger, tcpCoordinator, udpCoordinator, healthSignal: healthSignal);
         var dispatcher = new FlowDispatcher(
@@ -236,7 +247,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
             logger: logger);
         var idleExpirySweeper = new IdleExpirySweeper(dispatcher, tcpCoordinator, udpCoordinator, relayIdleTimeout: configuration.UdpSessionIdleTimeout, logger: logger);
         idleExpirySweeper.Start();
-        return new DurableCaptureBundle(dispatcher, executor, udpTargets, idleExpirySweeper, udpCoordinator, tcpCoordinator, logger, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, setupExecutor);
+        return new DurableCaptureBundle(dispatcher, executor, udpTargets, idleExpirySweeper, udpCoordinator, tcpCoordinator, logger, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, setupExecutor, associationPool);
     }
 
     /// <summary>
@@ -360,23 +371,32 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
             {
                 try
                 {
-                    // After the UDP coordinator drained and released every queued setup lease
-                    // and every session receive window.
-                    _udpDatagramPool?.Dispose();
-                    _udpWindowPool?.Dispose();
+                    // After the UDP coordinator drained every session (and with it every association
+                    // lease), close the associations: no lease may outlive its pool.
+                    if (UdpAssociations is not null) await UdpAssociations.DisposeAsync().ConfigureAwait(false);
                 }
                 finally
                 {
                     try
                     {
-                        await Tcp.DisposeAsync().ConfigureAwait(false);
+                        // After the UDP coordinator drained and released every queued setup lease
+                        // and every session receive window.
+                        _udpDatagramPool?.Dispose();
+                        _udpWindowPool?.Dispose();
                     }
                     finally
                     {
-                        // After the coordinator released every lease it held, drain the syn-copy pool.
-                        _synCopyPool?.Dispose();
-                        _relayPool?.Dispose();
-                        _setupExecutor?.Dispose();
+                        try
+                        {
+                            await Tcp.DisposeAsync().ConfigureAwait(false);
+                        }
+                        finally
+                        {
+                            // After the coordinator released every lease it held, drain the syn-copy pool.
+                            _synCopyPool?.Dispose();
+                            _relayPool?.Dispose();
+                            _setupExecutor?.Dispose();
+                        }
                     }
                 }
             }

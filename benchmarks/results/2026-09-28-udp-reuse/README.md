@@ -92,3 +92,24 @@ B/session stays comparable in shape, but kernel receive-buffer totals and any me
 harness carried a per-connection relay buffer (the superseded in-process-server figures) must be
 read with that stated. `--socks5-external` keeps the harness server's own relay buffer out of this
 number; it is a managed-allocation measurement, not a kernel-memory one.
+
+---
+
+# Step 2 — association pool acceptance (sharing ON)
+
+Recorded against the uncommitted Step 2 tree (association pool; the harness scenarios hard-code
+`always` because `udpAssociationReuse: auto` is off-equivalent until Step 3). `step2-always-*.jsonl`
+are the implementer's final-tree runs, `step2-check-churn.jsonl` the independent check's re-run; the
+two agree, so both headline claims below reproduce.
+
+| Scenario | Step 1 | Step 2 (`always`) |
+|---|---|---|
+| `udp` 25 kpps × 60 s | 1,495,689 sent = received, loss 0, 24,925 pps, 117 overflows | 1,498,696 = 1,498,696, loss 0, 24,976 pps, 16 overflows |
+| `udpBurst` 48 × 100 ms | 48/48, loss 0, p50 304.4 ms | 48/48, loss 0, p50 305.3 ms (check) / 308.8 ms (implementer) |
+| `churn` 48 × 120 s `--socks5-external` | 77,328 sessions, 13,066.5 B/session, firstResponse p50 12.5 ms | 222,192 sessions, **7,556.7 B/session (−42.2 %)**, **p50 3.241 ms (−74 %)**, 0 rejected, loss 0 |
+
+The churn gain is the point of the task: one authenticated control connection and one ASSOCIATE now
+serve 16 flows, so the per-flow framework cost (control connect + greeting + ASSOCIATE — 93 % of the
+measured per-session framework path) is amortized instead of paid per flow. The churn still lands
+inside the `hot-path.md` §3 anchors (≤14,500 wave / ≤14,300 sustained).
+

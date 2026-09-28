@@ -145,7 +145,8 @@ public sealed class Socks5ControlTimeoutTests
         var server = ServeAdvertisedAssociateAsync(tcpListener, advertised, serverCancellation.Token);
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
         var registry = new SelfTrafficRegistry();
-        var transport = await Socks5UdpTransport.CreateAsync(socksServer, registry, CancellationToken.None, createControl: null, socketFactory: null);
+        await using var fixture = await UdpTransportTestFactory.CreateAsync(socksServer, registry);
+        var transport = fixture.Transport;
         Assert.Equal(advertised, transport.RelayEndpoint);
 
         using var sender = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);

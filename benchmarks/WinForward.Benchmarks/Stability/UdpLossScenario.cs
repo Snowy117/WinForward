@@ -41,7 +41,7 @@ internal static class UdpLossScenario
         // switch's enabled state, flipped by editing the constant for a loss-localization session.
         var productEvents = CaptureProductEvents ? new CountingRuntimeLogger() : null;
         // ReSharper restore HeuristicUnreachableCode, CSharpWarnings::CS0162
-        using var scope = new CoordinatorScope(sink, options.Flows, (IRuntimeLogger?)productEvents ?? NullRuntimeLogger.Instance);
+        await using var scope = new CoordinatorScope(sink, options.Flows, (IRuntimeLogger?)productEvents ?? NullRuntimeLogger.Instance);
         var coordinator = scope.Coordinator;
         SenderStats stats;
         try
@@ -159,11 +159,12 @@ internal static class UdpLossScenario
     /// Owns the borrowed native pools and setup executor a coordinator requires (Phase A / R6) and
     /// disposes them after the coordinator, since a coordinator never disposes its collaborators.
     /// </summary>
-    private sealed class CoordinatorScope : IDisposable
+    private sealed class CoordinatorScope : IAsyncDisposable
     {
         private readonly NativeBufferPool _setupQueuePool;
         private readonly NativeBufferPool _receiveWindowPool;
         private readonly SetupExecutor _setupExecutor;
+        private readonly UdpAssociationPool _associations;
 
         public CoordinatorScope(IUdpResponseSink sink, int capacity, IRuntimeLogger logger)
         {
@@ -171,8 +172,11 @@ internal static class UdpLossScenario
             _setupQueuePool = new NativeBufferPool(maximumFrameSize);
             _receiveWindowPool = new NativeBufferPool(UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize));
             _setupExecutor = new SetupExecutor();
+            var registry = new SelfTrafficRegistry();
+            // The Step 2 acceptance run exercises control-connection sharing explicitly.
+            _associations = new UdpAssociationPool(registry, UdpAssociationReuseMode.Always);
             Coordinator = new UdpProxyCoordinator(
-                new Socks5UdpTransportFactory(new SelfTrafficRegistry(), maximumFrameSize),
+                new Socks5UdpTransportFactory(_associations, registry, maximumFrameSize),
                 sink,
                 _setupQueuePool,
                 _receiveWindowPool,
@@ -182,8 +186,11 @@ internal static class UdpLossScenario
 
         public UdpProxyCoordinator Coordinator { get; }
 
-        public void Dispose()
+        public async ValueTask DisposeAsync()
         {
+            // The coordinator drained every session (and with it every association lease) before
+            // the pool is closed.
+            await _associations.DisposeAsync().ConfigureAwait(false);
             _setupExecutor.Dispose();
             _receiveWindowPool.Dispose();
             _setupQueuePool.Dispose();

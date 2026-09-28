@@ -104,8 +104,10 @@ internal static class GcSoakScenario
         await using var tcpServer = new LoopbackSocks5TcpServer();
         var udpSink = new CountingUdpResponseSink();
         using var setupExecutor = new SetupExecutor();
+        var registry = new SelfTrafficRegistry();
+        await using var associations = new UdpAssociationPool(registry, UdpAssociationReuseMode.Always);
         var coordinator = new UdpProxyCoordinator(
-            new Socks5UdpTransportFactory(new SelfTrafficRegistry(), maximumFrameSize),
+            new Socks5UdpTransportFactory(associations, registry, maximumFrameSize),
             udpSink,
             udpSetupPool,
             udpWindowPool,

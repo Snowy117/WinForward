@@ -295,6 +295,38 @@ public sealed class ConfigurationLimitsTests
         """;
 
     [Fact]
+    public void ConfigurationDefaultsUdpAssociationReuseToAutoWhenOmitted()
+    {
+        Assert.True(ConfigurationLoader.TryParse(Config("\"udpAssociationReuse\": null"), out var dto, out _));
+        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Equal(UdpAssociationReuseMode.Auto, configuration!.UdpAssociationReuse);
+        Assert.Empty(configuration.Warnings);
+    }
+
+    [Theory]
+    [InlineData("auto", UdpAssociationReuseMode.Auto)]
+    [InlineData("always", UdpAssociationReuseMode.Always)]
+    [InlineData("off", UdpAssociationReuseMode.Off)]
+    [InlineData("  Always  ", UdpAssociationReuseMode.Always)]
+    [InlineData("OFF", UdpAssociationReuseMode.Off)]
+    public void ConfigurationParsesUdpAssociationReuseCaseInsensitively(string value, UdpAssociationReuseMode expected)
+    {
+        var json = Config($"\"udpAssociationReuse\": \"{value}\"");
+        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
+        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Equal(expected, configuration!.UdpAssociationReuse);
+        Assert.Empty(configuration.Warnings);
+    }
+
+    [Theory]
+    [InlineData("sometimes")]
+    [InlineData("")]
+    public void ConfigurationRejectsUnknownUdpAssociationReuse(string value)
+    {
+        ConfigurationAssert.Invalid(Config($"\"udpAssociationReuse\": \"{value}\""), "udpAssociationReuse");
+    }
+
+    [Fact]
     public void ExampleConfigurationsAllValidate()
     {
         // The examples/ directory is published documentation; every example must be a valid

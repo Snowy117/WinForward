@@ -35,17 +35,16 @@ public sealed class Socks5UdpConnresetTests
         var disableCalls = new List<Socket>();
         bool? boundAtDisableCall = null;
 
-        var transport = await Socks5UdpTransport.CreateAsync(
+        await using var fixture = await UdpTransportTestFactory.CreateAsync(
             socksServer,
             new SelfTrafficRegistry(),
-            CancellationToken.None,
-            createControl: null,
             family => socket = new TrackingSocket(family),
             disableUdpConnectionReset: candidate =>
             {
                 boundAtDisableCall = candidate.LocalEndPoint is not null;
                 disableCalls.Add(candidate);
             });
+        var transport = fixture.Transport;
 
         Assert.Single(disableCalls);
         Assert.Same(socket, disableCalls[0]);

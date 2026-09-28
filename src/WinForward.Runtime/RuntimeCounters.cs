@@ -43,6 +43,12 @@ public sealed class RuntimeCounters
     /// <summary>A UDP setup datagram was rejected by the aggregate setup-queue byte budget; see <c>udp.setupqueue.dropped</c>.</summary>
     public const string UdpSetupBudgetRejections = "udpSetupBudgetRejections";
 
+    /// <summary>A flow's shared SOCKS5 UDP association died without an in-place recovery, so its slot was removed as <c>UdpTeardownReason.AssociationLost</c>.</summary>
+    public const string UdpAssociationLost = "udpAssociationLost";
+
+    /// <summary>A lost SOCKS5 UDP association was re-established in place; see the <c>udp.association.recovered</c> debug event.</summary>
+    public const string UdpAssociationRecovered = "udpAssociationRecovered";
+
     /// <summary>
     /// The native-pool diagnostic key prefix (task 09-18 M0): every registered pool records
     /// cumulative rents and returns under <c>pool.&lt;name&gt;.rented</c> / <c>pool.&lt;name&gt;.returned</c>,

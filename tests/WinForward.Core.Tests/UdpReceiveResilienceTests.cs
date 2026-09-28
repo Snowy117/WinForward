@@ -118,7 +118,8 @@ public sealed class UdpReceiveResilienceTests
         var associateRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var server = Socks5TestServer.ServeAssociateOnlyAsync(tcpListener, relayEndpoint, associateRead, serverCancellation.Token);
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
-        var transport = await Socks5UdpTransport.CreateAsync(socksServer, new SelfTrafficRegistry(), CancellationToken.None, createControl: null, socketFactory: null);
+        await using var fixture = await UdpTransportTestFactory.CreateAsync(socksServer, new SelfTrafficRegistry());
+        var transport = fixture.Transport;
         var transportEndpoint = new IPEndPoint(IPAddress.Loopback, transport.LocalEndpoint.Port);
         var buffer = new byte[64];
         var destination = IPAddress.Parse("192.0.2.53");
@@ -172,7 +173,8 @@ public sealed class UdpReceiveResilienceTests
         var received = new TaskCompletionSource<List<byte[]>>(TaskCreationOptions.RunContinuationsAsynchronously);
         var server = Socks5TestServer.ServeAssociateAndCollectAsync(tcpListener, relaySocket, relayEndpoint, datagramCount, received, serverCancellation.Token);
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
-        var transport = await Socks5UdpTransport.CreateAsync(socksServer, new SelfTrafficRegistry(), CancellationToken.None, createControl: null, socketFactory: null);
+        await using var fixture = await UdpTransportTestFactory.CreateAsync(socksServer, new SelfTrafficRegistry());
+        var transport = fixture.Transport;
         var destination = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
 
         var payloads = Enumerable.Range(0, datagramCount)

@@ -40,6 +40,9 @@ public sealed class WinForwardConfigDto
 
     [JsonPropertyName("udpSessionIdleSeconds")]
     public int? UdpSessionIdleSeconds { get; init; }
+
+    [JsonPropertyName("udpAssociationReuse")]
+    public string? UdpAssociationReuse { get; init; }
 }
 
 public sealed class Socks5ServerDto
@@ -110,6 +113,13 @@ public sealed record ValidatedConfiguration(
     /// connection are released; the sweeper derives its UDP sweep cadence from this value.
     /// </summary>
     public TimeSpan UdpSessionIdleTimeout { get; init; } = ConfigurationLoader.DefaultUdpSessionIdleTimeout;
+
+    /// <summary>
+    /// Whether many UDP flows share one authenticated SOCKS5 association. <c>auto</c> (the
+    /// default) is off-equivalent until passive capability detection lands; <c>off</c> reproduces
+    /// per-flow associations exactly.
+    /// </summary>
+    public UdpAssociationReuseMode UdpAssociationReuse { get; init; } = UdpAssociationReuseMode.Auto;
 }
 
 public static class ConfigurationLoader
@@ -192,8 +202,8 @@ public static class ConfigurationLoader
         }
 
         var fallback = ParseAction(dto.FallbackAction, "fallbackAction", errors, allowProxy: false);
-        ValidateFailureAction(dto.ProxyUnavailableAction, "proxyUnavailableAction", errors);
-        ValidateFailureAction(dto.ProcessingFailureAction, "processingFailureAction", errors);
+        ValidateFailureActions(dto, errors);
+        var associationReuse = ParseAssociationReuse(dto.UdpAssociationReuse, errors);
 
         if (errors.Count > 0 || fallback is null)
         {
@@ -214,6 +224,7 @@ public static class ConfigurationLoader
         {
             Warnings = warnings,
             UdpSessionIdleTimeout = limits.UdpSessionIdleTimeout,
+            UdpAssociationReuse = associationReuse,
         };
         diagnostics = [];
         return true;
@@ -250,6 +261,25 @@ public static class ConfigurationLoader
     }
 
     private static bool IsPathSelector(string selector) => selector.IndexOfAny(['/', '\\']) >= 0;
+
+    /// <summary>
+    /// Normalizes the optional udpAssociationReuse key: omitted means <c>auto</c>, an unknown
+    /// value is a validation error (the configuration is rejected) and falls back to <c>auto</c>.
+    /// </summary>
+    private static UdpAssociationReuseMode ParseAssociationReuse(string? raw, List<ConfigDiagnostic> errors)
+    {
+        if (raw is null) return UdpAssociationReuseMode.Auto;
+        var mode = raw.Trim().ToLowerInvariant() switch
+        {
+            "auto" => UdpAssociationReuseMode.Auto,
+            "always" => UdpAssociationReuseMode.Always,
+            "off" => UdpAssociationReuseMode.Off,
+            _ => (UdpAssociationReuseMode?)null,
+        };
+        if (mode is not null) return mode.Value;
+        errors.Add(new("udpAssociationReuse", "Association reuse must be auto, always, or off."));
+        return UdpAssociationReuseMode.Auto;
+    }
 
     private static void ValidateServer(Socks5ServerDto? dto, int index, Dictionary<string, Socks5Server> servers, List<ConfigDiagnostic> errors)
     {
@@ -330,6 +360,12 @@ public static class ConfigurationLoader
             return null;
         }
         return action.Value;
+    }
+
+    private static void ValidateFailureActions(WinForwardConfigDto dto, List<ConfigDiagnostic> errors)
+    {
+        ValidateFailureAction(dto.ProxyUnavailableAction, "proxyUnavailableAction", errors);
+        ValidateFailureAction(dto.ProcessingFailureAction, "processingFailureAction", errors);
     }
 
     private static void ValidateFailureAction(string? raw, string path, List<ConfigDiagnostic> errors)

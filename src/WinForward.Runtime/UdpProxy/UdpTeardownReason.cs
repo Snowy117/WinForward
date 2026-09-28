@@ -17,6 +17,13 @@ internal enum UdpTeardownReason
     /// <summary>A genuine receive or send fault: the failure handler owns the removal.</summary>
     Fault,
 
+    /// <summary>
+    /// The flow's shared SOCKS5 UDP association died without an in-place recovery. Like
+    /// <see cref="Fault"/> it arms no setup cooldown: the next datagram re-establishes the flow
+    /// (through the pool, which dials a fresh association).
+    /// </summary>
+    AssociationLost,
+
     /// <summary>Shutdown or caller cancellation of a setup/dial.</summary>
     Shutdown,
 }

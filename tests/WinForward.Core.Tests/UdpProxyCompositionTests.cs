@@ -23,6 +23,7 @@ public sealed class UdpProxyCompositionTests
         const int sessionCapacity = 37;
         const int relayReceiveBufferBytes = 48 * 1024;
         using var setupExecutor = new SetupExecutor();
+        await using var associations = new UdpAssociationPool(new SelfTrafficRegistry(), Configuration.UdpAssociationReuseMode.Off);
         var composition = new UdpProxyComposition(
             new UdpAdapterTargetSource(),
             UdpFrameBuilder.DefaultMaximumEthernetFrame,
@@ -30,6 +31,7 @@ public sealed class UdpProxyCompositionTests
             TestPools.UdpReceiveWindowPool,
             setupExecutor,
             new Socks5AddressCache(),
+            associations,
             SessionCapacity: sessionCapacity,
             RelayReceiveBufferBytes: relayReceiveBufferBytes);
 

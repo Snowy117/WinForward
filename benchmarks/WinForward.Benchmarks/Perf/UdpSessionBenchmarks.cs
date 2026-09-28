@@ -77,7 +77,11 @@ public class UdpSessionBenchmarks
         // the recorded runs; only the out-of-process shape needs a counter, because the child owns
         // the relay's forwarded total and the echoed response is the parent-visible flush proof.
         var countingSink = _externalServer is null ? null : new ResponseCountingSink();
-        await using var coordinator = new UdpProxyCoordinator(new Socks5UdpTransportFactory(new SelfTrafficRegistry(), maximumFrameSize), (IUdpResponseSink?)countingSink ?? NoopUdpResponseSink.Instance, setupQueuePool, receiveWindowPool, setupExecutor, new UdpProxyOptions { Capacity = Sessions });
+        var registry = new SelfTrafficRegistry();
+        // Off keeps this instrument's recorded per-session framework anchor comparable: it measures
+        // one dial + relay socket per session, which is what the anchor was derived from.
+        await using var associations = new UdpAssociationPool(registry, UdpAssociationReuseMode.Off);
+        await using var coordinator = new UdpProxyCoordinator(new Socks5UdpTransportFactory(associations, registry, maximumFrameSize), (IUdpResponseSink?)countingSink ?? NoopUdpResponseSink.Instance, setupQueuePool, receiveWindowPool, setupExecutor, new UdpProxyOptions { Capacity = Sessions });
         var forwardedBaseline = _server?.RelayForwarded ?? 0;
         for (var index = 0; index < Sessions; index++)
         {

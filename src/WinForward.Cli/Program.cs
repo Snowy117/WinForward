@@ -308,7 +308,9 @@ internal static class Program
                 bundle.Tcp.SessionCount, bundle.Tcp.Capacity,
                 bundle.Udp.SessionCount, bundle.Udp.Capacity,
                 runner.PumpState.Running, runner.PumpState.Degraded,
-                (long)bundle.Udp.SessionCount * bundle.Udp.RelayReceiveBufferBytes),
+                (long)bundle.Udp.SessionCount * bundle.Udp.RelayReceiveBufferBytes,
+                bundle.UdpAssociations?.AssociationCount ?? 0,
+                bundle.UdpAssociations?.LeasedFlowCount ?? 0),
             health: healthMonitor);
         heartbeat.Start();
         return heartbeat;
