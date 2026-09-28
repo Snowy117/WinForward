@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "The relay contracts this task rewrites: session lifetime/teardown reasons, cross-family ASSOCIATE setup, bounded setup memory, skip-counter observability."}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "Ownership rules for the new pool/association owners: one QuiescenceScope per owner (D7), explicit nesting (D6), D11 single-flight teardown, WF0001-0004 spawn rules."}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Zero-allocation warm-send contract and the allocation gates the transport must keep while gaining a lease, a mutable relay address and two counters."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Fail-closed plus counted-drop conventions for association loss, budget rejection and the no-cooldown recovery rule."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "400-effective-line cap, split discipline, Runtime sub-namespace placement for the new UdpProxy files."}
+{"file": ".trellis/tasks/archive/2026-09/09-21-session-creation-cost/research/reconciliation-and-decision.md", "reason": "The reuse decision record (measured 77,448 B/session lever; upstream-attribution and failure-domain caveats; capability detection + fallback requirement) this task implements."}
+{"file": ".trellis/tasks/archive/2026-08/08-07-winforward-proxy/design.md", "reason": "The original one-association-per-flow / never-share-aliases rationale the design must stay compatible with (deterministic reverse routing)."}

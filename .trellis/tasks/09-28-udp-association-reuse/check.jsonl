@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "Verify the pooling, retention, buffer-budget and AssociationLost contracts against the shipped behaviour."}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "Verify owner scopes, nested drains, D11 teardown claims and that no new fire-and-forget site exists."}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Verify the established-datagram path is still allocation-free and the warm synchronous send shape is intact."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify fail-closed behaviour, counted drops and that only SetupFailure arms the setup cooldown."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "The format/build/test/JetBrains review bar and the suppression policy for any new diagnostic."}
