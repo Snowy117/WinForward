@@ -31,6 +31,18 @@ public sealed class RuntimeCounters
     /// <summary>A pass-through reinjection native send failed; see <c>reinject.pass-failed</c>.</summary>
     public const string PassReinjectFailed = "passReinjectFailed";
 
+    /// <summary>A UDP datagram was rejected because the session budget was full; see the rate-limited <c>udp.session.capacity-block</c> warn and the per-datagram <c>udp.session.rejected</c> trace.</summary>
+    public const string UdpCapacityRejections = "udpCapacityRejections";
+
+    /// <summary>A UDP flow was refused because the setup ring had no free work item; see <c>udp.session.rejected</c>.</summary>
+    public const string UdpSetupRejections = "udpSetupRejections";
+
+    /// <summary>A UDP session setup failed against the SOCKS5 server (a genuine failure, not shutdown cancellation); see <c>udp.setup.failed</c>.</summary>
+    public const string UdpSetupFailures = "udpSetupFailures";
+
+    /// <summary>A UDP setup datagram was rejected by the aggregate setup-queue byte budget; see <c>udp.setupqueue.dropped</c>.</summary>
+    public const string UdpSetupBudgetRejections = "udpSetupBudgetRejections";
+
     /// <summary>
     /// The native-pool diagnostic key prefix (task 09-18 M0): every registered pool records
     /// cumulative rents and returns under <c>pool.&lt;name&gt;.rented</c> / <c>pool.&lt;name&gt;.returned</c>,

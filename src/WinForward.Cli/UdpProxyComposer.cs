@@ -21,7 +21,9 @@ internal sealed record UdpProxyComposition(
     NativeBufferPool SetupQueuePool,
     NativeBufferPool ReceiveWindowPool,
     SetupExecutor SetupExecutor,
-    Socks5AddressCache AddressCache);
+    Socks5AddressCache AddressCache,
+    int SessionCapacity,
+    int RelayReceiveBufferBytes);
 
 /// <summary>
 /// Composes the durable <see cref="UdpProxyCoordinator"/> from its
@@ -54,7 +56,7 @@ internal static class UdpProxyComposer
         IInterceptionHealthSignal? healthSignal,
         UdpProxyComposition composition)
         => new(
-            new Socks5UdpTransportFactory(selfTraffic, composition.MaximumFrameSize, composition.AddressCache),
+            new Socks5UdpTransportFactory(selfTraffic, composition.MaximumFrameSize, composition.AddressCache, composition.RelayReceiveBufferBytes),
             new UdpResponseReinjector(reinjector, composition.Targets, maximumFrameSize: composition.MaximumFrameSize, logger: logger, healthSignal: healthSignal),
             composition.SetupQueuePool,
             composition.ReceiveWindowPool,
@@ -63,5 +65,7 @@ internal static class UdpProxyComposer
             {
                 Logger = logger,
                 MaximumFrameSize = composition.MaximumFrameSize,
+                Capacity = composition.SessionCapacity,
+                RelayReceiveBufferBytes = composition.RelayReceiveBufferBytes,
             });
 }

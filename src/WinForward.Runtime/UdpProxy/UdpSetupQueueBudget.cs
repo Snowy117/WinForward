@@ -47,6 +47,7 @@ internal sealed class UdpSetupQueueBudget(long byteBudget, IRuntimeLogger logger
         {
             Interlocked.Add(ref _pendingBytes, -length);
             Interlocked.Increment(ref _rejectionCount);
+            RuntimeCounters.Shared.Increment(RuntimeCounters.UdpSetupBudgetRejections);
             return false;
         }
 

@@ -30,6 +30,9 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     /// <summary>Rate limit for the deprecated-session send drop diagnostic (one line per window).</summary>
     private readonly RuntimeLogThrottle _sessionUnavailableDropLog = new(TimeSpan.FromSeconds(5));
 
+    /// <summary>Rate limit for the session-capacity rejection warning (one line per window).</summary>
+    private readonly RuntimeLogThrottle _capacityRejectionLog = new(TimeSpan.FromSeconds(5));
+
     /// <summary>Upper bound on eagerly seeded dictionary capacity; growth beyond it stays lazy.</summary>
     private const int MaximumPreSeedCapacity = 1_024;
 
@@ -50,16 +53,19 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
         var capacity = options.Capacity;
         var timeProvider = options.TimeProvider;
         var maximumFrameSize = options.MaximumFrameSize;
+        var relayReceiveBufferBytes = options.RelayReceiveBufferBytes;
         var setupQueueGlobalByteBudget = options.SetupQueueGlobalByteBudget ?? UdpSetupQueueBudget.SetupQueueGlobalByteBudget;
         if (timeProvider is null) throw new ArgumentNullException(nameof(options), "The TimeProvider option must not be null.");
         if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(options), capacity, "Capacity must be positive.");
         if (maximumFrameSize <= 0) throw new ArgumentOutOfRangeException(nameof(options), maximumFrameSize, "Maximum frame size must be positive.");
+        if (relayReceiveBufferBytes <= 0) throw new ArgumentOutOfRangeException(nameof(options), relayReceiveBufferBytes, "Relay receive buffer bytes must be positive.");
         if (setupQueueGlobalByteBudget <= 0) throw new ArgumentOutOfRangeException(nameof(options), setupQueueGlobalByteBudget, "Setup queue global byte budget must be positive.");
         var preSeed = Math.Min(capacity, MaximumPreSeedCapacity);
         _associations = new UdpAssociationTable(capacity, preSeed);
         _sessions = new Dictionary<FlowKey, UdpSessionSlot>(preSeed);
         _cooldowns = new UdpSetupCooldownTable(capacity);
         Capacity = capacity;
+        RelayReceiveBufferBytes = relayReceiveBufferBytes;
         _timeProvider = timeProvider;
         _beforeExpiryRecheck = options.BeforeExpiryRecheck;
         _logger = options.Logger ?? NullRuntimeLogger.Instance;
@@ -88,6 +94,9 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
 
     /// <summary>The session budget this coordinator was constructed with (heartbeat diagnostics).</summary>
     public int Capacity { get; }
+
+    /// <summary>The configured per-session relay socket receive buffer in bytes (heartbeat diagnostics).</summary>
+    public int RelayReceiveBufferBytes { get; }
 
     /// <summary>
     /// One flow's lifecycle state (see <see cref="UdpSessionState"/>): the slot-level

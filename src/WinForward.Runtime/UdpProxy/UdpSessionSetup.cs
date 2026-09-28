@@ -57,6 +57,9 @@ internal sealed class UdpSessionSetup(
     private long _ttlExpiredCount;
     private long _stampsRefreshedCount;
 
+    /// <summary>Rate limit for the setup-failure warning (one line per window; the counter is unconditional).</summary>
+    private readonly RuntimeLogThrottle _setupFailureLog = new(TimeSpan.FromSeconds(5));
+
     /// <summary>The total buffered datagrams dropped at flush for exceeding the setup TTL; for tests and diagnostics.</summary>
     internal long TtlExpiredCount => Interlocked.Read(ref _ttlExpiredCount);
 
@@ -125,14 +128,29 @@ internal sealed class UdpSessionSetup(
             // Handle the failure here instead of rethrowing through a second observer task:
             // the setup state machine is already boxed at its first await, so the log, the
             // setup cooldown, and the slot removal ride this frame at no extra cost.
-            // Shutdown cancellation keeps the no-cooldown semantics the observer had.
-            UdpProxyLogging.LogSetupFailure(logger, flow, exception);
-            await host.RemoveSlotAsync(flow, slot, exception is OperationCanceledException ? UdpTeardownReason.Shutdown : UdpTeardownReason.SetupFailure).ConfigureAwait(false);
+            await HandleSetupFailureAsync(flow, slot, exception).ConfigureAwait(false);
         }
         finally
         {
             _setupLimiter.Release();
         }
+    }
+
+    /// <summary>
+    /// The single setup-failure sink: the debug event (always), the failure counter and its
+    /// rate-limited warn (genuine failures only), and the slot removal that arms the setup
+    /// cooldown. Shutdown cancellation keeps the no-cooldown semantics the observer had, and is
+    /// not counted as a setup failure — only what arms the cooldown is what the counter reports.
+    /// </summary>
+    private async Task HandleSetupFailureAsync(FlowKey flow, UdpProxyCoordinator.UdpSessionSlot slot, Exception exception)
+    {
+        UdpProxyLogging.LogSetupFailure(logger, flow, exception);
+        if (exception is not OperationCanceledException)
+        {
+            RuntimeCounters.Shared.Increment(RuntimeCounters.UdpSetupFailures);
+            if (_setupFailureLog.ShouldEmit()) UdpProxyLogging.LogSetupFailureWarning(logger, flow, exception);
+        }
+        await host.RemoveSlotAsync(flow, slot, exception is OperationCanceledException ? UdpTeardownReason.Shutdown : UdpTeardownReason.SetupFailure).ConfigureAwait(false);
     }
 
     /// <summary>

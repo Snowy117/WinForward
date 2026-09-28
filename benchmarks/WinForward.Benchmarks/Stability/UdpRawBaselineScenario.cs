@@ -228,9 +228,10 @@ internal static class UdpRawBaselineScenario
     }
 
     /// <summary>
-    /// One client socket per flow, mirroring the product per-session relay socket (512 KiB
-    /// receive buffer): the paced sender transmits through it and its receive loop counts the
-    /// in-window datagrams that returned through the forwarder.
+    /// One client socket per flow with a fixed 512 KiB receive buffer: the paced sender transmits
+    /// through it and its receive loop counts the in-window datagrams that returned through the
+    /// forwarder. This scenario is the bare-OS reference topology (no product code), so the buffer
+    /// stays a fixed baseline number rather than following the configured per-session budget.
     /// </summary>
     private sealed class ClientReceiver : IAsyncDisposable
     {

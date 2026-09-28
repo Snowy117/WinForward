@@ -15,8 +15,8 @@ public sealed class RuntimeHeartbeatTests
 {
     private static readonly TimeSpan s_tick = TimeSpan.FromMilliseconds(40);
 
-    private static RuntimeHeartbeatUsage Usage(int flows = 0, int tcp = 0, int udp = 0, int pumpsRunning = 0, int pumpsDegraded = 0) =>
-        new(flows, 1000, tcp, 4096, udp, 16_384, pumpsRunning, pumpsDegraded);
+    private static RuntimeHeartbeatUsage Usage(int flows = 0, int tcp = 0, int udp = 0, int pumpsRunning = 0, int pumpsDegraded = 0, long relayBufferBytes = 0) =>
+        new(flows, 1000, tcp, 4096, udp, 16_384, pumpsRunning, pumpsDegraded, relayBufferBytes);
 
     private static List<(RuntimeLogLevel Level, RuntimeLogField[] Fields)> Heartbeats(RecordingRuntimeLogger logger) =>
         [.. logger.Events.Where(entry => string.Equals(entry.Name, "runner.heartbeat", StringComparison.Ordinal)).Select(entry => (entry.Level, entry.Fields))];
@@ -53,6 +53,23 @@ public sealed class RuntimeHeartbeatTests
         Assert.Equal(1, Field(fields, "consecutiveForced"));
         Assert.True((long)Field(fields, "cooldownSeconds")! > 0);
         Assert.Null(Field(fields, "degraded"));
+        // No relay receive-buffer estimate is supplied, so the estimate field stays omitted.
+        Assert.Null(Field(fields, "udpRelayBufferMB"));
+    }
+
+    [Fact]
+    public async Task TickReportsTheEstimatedUdpRelayBufferInMegabytes()
+    {
+        var logger = new RecordingRuntimeLogger();
+        // 100 sessions x 128 KiB = 12.5 MiB, reported truncated as an estimate.
+        var usage = Usage(udp: 100, relayBufferBytes: 100L * 128 * 1024);
+        await using var heartbeat = new RuntimeHeartbeat(logger, usage: () => usage, counters: new RuntimeCounters(), interval: s_tick);
+        heartbeat.Start();
+
+        await AsyncTestExtensions.WaitForAsync(() => Heartbeats(logger).Count >= 1).ConfigureAwait(false);
+
+        var (_, fields) = Heartbeats(logger)[0];
+        Assert.Equal(12, Field(fields, "udpRelayBufferMB"));
     }
 
     [Fact]

@@ -41,6 +41,35 @@ internal static class UdpProxyLogging
     }
 
     /// <summary>
+    /// The warn form of the setup-failure event, rate-limited by the caller. It is a plain message
+    /// rather than a second structured <c>udp.setup.failed</c> event: <see cref="LogSetupFailure"/>
+    /// owns that event name per occurrence, and the stability benchmark counts structured events by
+    /// name, so a duplicate name would double-count one failure.
+    /// </summary>
+    public static void LogSetupFailureWarning(IRuntimeLogger logger, FlowKey flow, Exception exception)
+    {
+        if (!logger.IsEnabled(RuntimeLogLevel.Warn)) return;
+        logger.Warn($"UDP session setup for {flow.Local} -> {flow.Remote} failed and will retry for a new flow: {exception.GetType().Name}: {exception.Message}");
+    }
+
+    /// <summary>
+    /// The session budget refused a datagram. The caller counts the rejection and owns the rate
+    /// limit; the capacity value is what makes the line actionable (raise it or shed the flow). The
+    /// event name mirrors <c>flow.capacity-block</c> and is distinct from the per-datagram
+    /// <c>udp.session.rejected</c> trace so the two are counted separately.
+    /// </summary>
+    public static void LogCapacityRejection(IRuntimeLogger logger, FlowKey flow, int capacity)
+    {
+        if (!logger.IsEnabled(RuntimeLogLevel.Warn)) return;
+        logger.Event(RuntimeLogLevel.Warn, "udp.session.capacity-block",
+            new("protocol", flow.Protocol),
+            new("source", flow.Local),
+            new("destination", flow.Remote),
+            new("reason", "capacity"),
+            new("capacity", capacity));
+    }
+
+    /// <summary>
     /// The ready-session send was refused because the session is expiring or faulted. The caller
     /// counts the drop and owns the rate limit; this side only formats.
     /// </summary>

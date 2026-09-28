@@ -26,11 +26,15 @@ internal static class StabilityShared
 
     internal static double TicksToSeconds(long deltaTicks) => deltaTicks / (double)Stopwatch.Frequency;
 
-    /// <summary>Product trace/debug event names surfaced in the result row; absent names count as zero.</summary>
+    /// <summary>
+    /// Product event names surfaced in the result row — per-datagram trace/debug events plus the
+    /// rate-limited warn summaries (<c>udp.session.capacity-block</c>); absent names count as zero.
+    /// </summary>
     private static readonly string[] s_productEventNames =
     [
         "udp.setupqueue.dropped",
         "udp.session.rejected",
+        "udp.session.capacity-block",
         "udp.setup.failed",
         "udp.setup.cooldown",
         "udp.packet.sent",

@@ -24,8 +24,8 @@ namespace WinForward.Benchmarks.Perf;
 [MemoryDiagnoser]
 public class FrameworkSetupBenchmarks
 {
-    /// <summary>Mirrors <c>Socks5UdpTransport.RelaySocketReceiveBufferSize</c> (private const in the product): the explicit relay receive headroom the transport applies before bind.</summary>
-    private const int RelaySocketReceiveBufferSize = 512 * 1024;
+    /// <summary>The relay receive headroom the transport applies before bind: the product's default relay receive-buffer budget, so this instrument measures the production socket shape.</summary>
+    private const int RelaySocketReceiveBufferSize = Socks5UdpTransport.DefaultRelaySocketReceiveBufferSize;
 
     [Params(1, 100, 1000)]
     public int Sessions { get; set; }
@@ -100,7 +100,7 @@ public class FrameworkSetupBenchmarks
         }
     }
 
-    /// <summary>The relay socket's own per-session cost with the product's socket options: create, 512 KiB receive buffer, non-blocking mode, wildcard bind, close.</summary>
+    /// <summary>The relay socket's own per-session cost with the product's socket options: create, the configured receive buffer, non-blocking mode, wildcard bind, close.</summary>
     [Benchmark]
     public void RelaySocket_CreateBindClose()
     {

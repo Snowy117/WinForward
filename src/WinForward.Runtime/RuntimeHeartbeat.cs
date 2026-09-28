@@ -8,6 +8,11 @@ namespace WinForward.Runtime;
 /// the current capture generation's pump counts. Zero-valued members are omitted from the
 /// emitted line, so an idle runtime keeps the heartbeat to its uptime alone.
 /// </summary>
+/// <param name="UdpRelayBufferBytes">
+/// The estimated aggregate relay receive-buffer bytes: live UDP sessions multiplied by the
+/// configured per-session buffer. An estimate only — each relay socket requests that size and the
+/// OS may cap or double it, and a session still in setup holds no relay socket yet.
+/// </param>
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
 public readonly record struct RuntimeHeartbeatUsage(
     int FlowsActive,
@@ -17,7 +22,8 @@ public readonly record struct RuntimeHeartbeatUsage(
     int UdpSessions,
     int UdpCapacity,
     int PumpsRunning,
-    int PumpsDegraded);
+    int PumpsDegraded,
+    long UdpRelayBufferBytes = 0);
 
 /// <summary>
 /// A GC observability sample (task 09-18 M0): per-generation collection counts plus the
@@ -147,7 +153,7 @@ public sealed class RuntimeHeartbeat : IAsyncDisposable
         {
             var now = _time.GetUtcNow();
             var usage = _usage?.Invoke() ?? default;
-            var fields = new List<RuntimeLogField>(12 + current.Count)
+            var fields = new List<RuntimeLogField>(13 + current.Count)
             {
                 new("uptimeSeconds", (long)(now - _startedUtc).TotalSeconds),
             };
@@ -157,6 +163,7 @@ public sealed class RuntimeHeartbeat : IAsyncDisposable
             AddPositive(fields, "tcpCapacity", usage.TcpCapacity);
             AddPositive(fields, "udpSessions", usage.UdpSessions);
             AddPositive(fields, "udpCapacity", usage.UdpCapacity);
+            AddPositive(fields, "udpRelayBufferMB", (int)(usage.UdpRelayBufferBytes / (1024 * 1024)));
             AddPositive(fields, "pumpsRunning", usage.PumpsRunning);
             AddPositive(fields, "pumpsDegraded", usage.PumpsDegraded);
             if (_health is not null)

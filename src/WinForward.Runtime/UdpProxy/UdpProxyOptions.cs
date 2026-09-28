@@ -1,4 +1,5 @@
 using WinForward.Protocols;
+using WinForward.Runtime.Socks5;
 
 namespace WinForward.Runtime.UdpProxy;
 
@@ -17,6 +18,14 @@ public sealed record UdpProxyOptions
 
     /// <summary>The session budget (also the bound on the setup-cooldown index).</summary>
     public int Capacity { get; init; } = 16_384;
+
+    /// <summary>
+    /// The per-session relay socket receive buffer in bytes, fed from the validated
+    /// <c>udpRelayReceiveBufferKb</c> budget. The transport factory applies it; the coordinator
+    /// only reports it so the heartbeat can estimate the aggregate kernel receive-buffer
+    /// footprint (configured bytes x live sessions).
+    /// </summary>
+    public int RelayReceiveBufferBytes { get; init; } = Socks5UdpTransport.DefaultRelaySocketReceiveBufferSize;
 
     /// <summary>The pinned maximum Ethernet frame size shared with the transport and reinjector; owns the receive window.</summary>
     public int MaximumFrameSize { get; init; } = UdpFrameBuilder.DefaultMaximumEthernetFrame;

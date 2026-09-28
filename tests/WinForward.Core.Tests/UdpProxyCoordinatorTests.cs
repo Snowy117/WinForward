@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using WinForward.Configuration;
 using WinForward.Protocols;
+using WinForward.Runtime;
 using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
 using Xunit;
@@ -205,6 +206,19 @@ public sealed class UdpProxyCoordinatorTests
 
         Assert.Equal(1, pool.Stats.Returned);
         Assert.Equal(0, pool.Stats.Outstanding);
+    }
+
+    [Fact]
+    public async Task CapacityRefusalIncrementsTheRejectionCounter()
+    {
+        var factory = new FakeTransportFactory();
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 1 });
+        var rejectionsBefore = RuntimeCounters.Shared.Get(RuntimeCounters.UdpCapacityRejections);
+
+        Assert.True(await coordinator.TrySendSpanAsync(CreateFlow(s_remoteAddresses[0]), s_server, [1], default, CancellationToken.None));
+        Assert.False(await coordinator.TrySendSpanAsync(CreateFlow(s_remoteAddresses[1]), s_server, [2], default, CancellationToken.None));
+
+        Assert.Equal(rejectionsBefore + 1, RuntimeCounters.Shared.Get(RuntimeCounters.UdpCapacityRejections));
     }
 
     [Fact]

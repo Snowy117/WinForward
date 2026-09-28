@@ -192,7 +192,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         UdpProxyCoordinator udpCoordinator;
         try
         {
-            udpCoordinator = UdpProxyComposer.Create(reinjector, selfTraffic, logger, healthSignal, new UdpProxyComposition(udpTargets, maximumFrameSize, udpDatagramPool, udpWindowPool, setupExecutor, addressCache));
+            udpCoordinator = UdpProxyComposer.Create(reinjector, selfTraffic, logger, healthSignal, new UdpProxyComposition(udpTargets, maximumFrameSize, udpDatagramPool, udpWindowPool, setupExecutor, addressCache, SessionCapacity: configuration.UdpSessionCapacity, RelayReceiveBufferBytes: configuration.UdpRelayReceiveBufferBytes));
         }
         catch
         {
@@ -234,7 +234,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
             reverseHandler: tcpCoordinator,
             fragmentHandler: tcpCoordinator.HandleFragmentAsync,
             logger: logger);
-        var idleExpirySweeper = new IdleExpirySweeper(dispatcher, tcpCoordinator, udpCoordinator, logger: logger);
+        var idleExpirySweeper = new IdleExpirySweeper(dispatcher, tcpCoordinator, udpCoordinator, relayIdleTimeout: configuration.UdpSessionIdleTimeout, logger: logger);
         idleExpirySweeper.Start();
         return new DurableCaptureBundle(dispatcher, executor, udpTargets, idleExpirySweeper, udpCoordinator, tcpCoordinator, logger, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, setupExecutor);
     }

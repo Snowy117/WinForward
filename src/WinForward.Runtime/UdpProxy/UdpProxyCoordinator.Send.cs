@@ -37,7 +37,9 @@ public sealed partial class UdpProxyCoordinator
             {
                 if (_sessions.Count >= Capacity)
                 {
+                    RuntimeCounters.Shared.Increment(RuntimeCounters.UdpCapacityRejections);
                     if (_logger.IsEnabled(RuntimeLogLevel.Trace)) UdpProxyLogging.LogTrace(_logger, "udp.session.rejected", flow, new RuntimeLogField("reason", "capacity"));
+                    if (_capacityRejectionLog.ShouldEmit()) UdpProxyLogging.LogCapacityRejection(_logger, flow, Capacity);
                     return ValueTask.FromResult(false);
                 }
 
@@ -51,6 +53,7 @@ public sealed partial class UdpProxyCoordinator
                 // (including the Add below) has released it.
                 if (!ScheduleSessionSetup(flow, server, flowGeneration, clientMac, slot))
                 {
+                    RuntimeCounters.Shared.Increment(RuntimeCounters.UdpSetupRejections);
                     if (_logger.IsEnabled(RuntimeLogLevel.Trace)) UdpProxyLogging.LogTrace(_logger, "udp.session.rejected", flow, new RuntimeLogField("reason", "setupRing"));
                     return ValueTask.FromResult(false);
                 }

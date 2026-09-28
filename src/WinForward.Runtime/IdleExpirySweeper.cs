@@ -15,10 +15,17 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
 {
     private static readonly TimeSpan s_sweepFailureLogInterval = TimeSpan.FromSeconds(5);
 
+    /// <summary>
+    /// The floor for the derived UDP sweep cadence: half of the shortest accepted idle timeout
+    /// (5 s) would sweep every 2.5 s, which is faster than retention accuracy requires.
+    /// </summary>
+    private static readonly TimeSpan s_minimumUdpSweepInterval = TimeSpan.FromSeconds(5);
+
     private readonly FlowDispatcher _dispatcher;
     private readonly TcpProxyCoordinator? _tcp;
     private readonly UdpProxyCoordinator? _udp;
     private readonly TimeSpan _interval;
+    private readonly TimeSpan _udpSweepInterval;
     private readonly TimeSpan _flowIdleTimeout;
     private readonly TimeSpan _redirectIdleTimeout;
     private readonly TimeSpan _relayIdleTimeout;
@@ -37,7 +44,8 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
         TimeSpan? redirectIdleTimeout = null,
         TimeSpan? relayIdleTimeout = null,
         IRuntimeLogger? logger = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        TimeSpan? udpSweepInterval = null)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
         _dispatcher = dispatcher;
@@ -47,8 +55,24 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
         _flowIdleTimeout = flowIdleTimeout ?? TimeSpan.FromMinutes(5);
         _redirectIdleTimeout = redirectIdleTimeout ?? TimeSpan.FromMinutes(5);
         _relayIdleTimeout = relayIdleTimeout ?? TimeSpan.FromMinutes(2);
+        _udpSweepInterval = DeriveUdpSweepInterval(_interval, _relayIdleTimeout, udpSweepInterval);
         _logger = logger ?? NullRuntimeLogger.Instance;
         _timeProvider = timeProvider ?? TimeProvider.System;
+    }
+
+    /// <summary>
+    /// The tick period that serves both leg cadences: the UDP leg needs an idle timeout half-life
+    /// (at least <see cref="s_minimumUdpSweepInterval"/>, so retention follows the active flow set
+    /// instead of a minutes-long tail), while the expensive TCP-session and flow-table legs keep
+    /// <paramref name="mainInterval"/> and are gated on the injected clock inside the tick. The
+    /// override is the test seam for driving the UDP cadence without waiting for a real timeout.
+    /// </summary>
+    internal static TimeSpan DeriveUdpSweepInterval(TimeSpan mainInterval, TimeSpan relayIdleTimeout, TimeSpan? udpSweepInterval)
+    {
+        if (mainInterval <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(mainInterval), mainInterval, "The main sweep interval must be positive.");
+        var requested = udpSweepInterval ?? TimeSpan.FromTicks(Math.Max(s_minimumUdpSweepInterval.Ticks, relayIdleTimeout.Ticks / 2));
+        if (requested <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(udpSweepInterval), requested, "The UDP sweep interval must be positive.");
+        return requested < mainInterval ? requested : mainInterval;
     }
 
     public void Start()
@@ -59,30 +83,29 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
 
     private async Task RunAsync(CancellationToken token)
     {
-        using var timer = new PeriodicTimer(_interval);
+        // The first main-leg sweep happens one full main interval after start, exactly as the
+        // historical PeriodicTimer(_interval) cadence did; only the UDP leg rides every tick.
+        var lastMainSweepUtc = _timeProvider.GetUtcNow();
+        using var timer = new PeriodicTimer(_udpSweepInterval);
         try
         {
             while (await timer.WaitForNextTickAsync(token))
             {
                 var now = _timeProvider.GetUtcNow();
+                var tcpCount = 0;
+                var flowCount = 0;
+                var udpCount = 0;
+                // The main-leg group (TCP redirects, then the flow table) and the UDP leg each own a
+                // try/catch: a failure in one group is surfaced (rate-limited) without skipping the
+                // other group's tick. Both groups report through the same failure logger.
                 try
                 {
-                    // TCP sweeps before flows: expiring a half-open session here releases its hold
-                    // (session first, then its grace tombstone) before the flow sweep runs, so a
-                    // dead session's flow decision expires on its own idle instead of being held a
-                    // round longer by a session that no longer exists. Flows held by a live
-                    // relaying session or a grace tombstone are skipped by the predicate and keep
-                    // their original idle point.
-                    var tcpCount = _tcp is null ? 0 : await _tcp.RemoveExpiredAsync(now, _redirectIdleTimeout).ConfigureAwait(false);
-                    Func<FlowKey, bool>? isHeld = _tcp is null ? null : _tcp.HoldsFlow;
-                    var flowCount = _dispatcher.RemoveExpiredFlows(now, _flowIdleTimeout, isHeld);
-                    var udpCount = _udp is null ? 0 : await _udp.RemoveExpiredAsync(now, _relayIdleTimeout).ConfigureAwait(false);
-                    // Rides the existing sweep tick so the capacity summary needs no dedicated timer.
-                    _tcp?.LogCapacitySummary();
-                    if (_logger.IsEnabled(Configuration.RuntimeLogLevel.Debug) && (flowCount != 0 || tcpCount != 0 || udpCount != 0))
+                    if (now - lastMainSweepUtc >= _interval)
                     {
-                        _logger.Event(Configuration.RuntimeLogLevel.Debug, "runtime.expired",
-                            new("flows", flowCount), new("tcpRedirects", tcpCount), new("udpSessions", udpCount));
+                        // Stamped before the legs run: a failing main sweep must not shorten their
+                        // cadence (the UDP leg's failures are independent of this gate).
+                        lastMainSweepUtc = now;
+                        (tcpCount, flowCount) = await SweepMainLegsAsync(now).ConfigureAwait(false);
                     }
                 }
                 catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -92,15 +115,59 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
                 catch (Exception exception)
                 {
                     // A sweep failure must not stop the capture loop; the next tick retries. It is
-                    // still surfaced (rate-limited) so a persistently failing sweep is diagnosable (S6d).
+                    // still surfaced (rate-limited) so a persistently failing leg is diagnosable (S6d).
                     LogSweepFailureRateLimited(exception);
                 }
+
+                try
+                {
+                    udpCount = await SweepUdpLegAsync(now).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch (Exception exception)
+                {
+                    LogSweepFailureRateLimited(exception);
+                }
+
+                LogExpired(tcpCount, flowCount, udpCount);
             }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
             // Normal shutdown path.
         }
+    }
+
+    /// <summary>
+    /// The gated main-leg group: TCP redirects sweep before the flow table (expiring a half-open
+    /// session releases its hold before the flow sweep runs, so a dead session's flow decision
+    /// expires on its own idle instead of being held a round longer by a session that no longer
+    /// exists), and the capacity summary rides the TCP leg so it keeps its historical cadence
+    /// rather than following the faster UDP tick. Flows held by a live relaying session or a grace
+    /// tombstone are skipped by the predicate and keep their original idle point.
+    /// </summary>
+    private async Task<(int TcpCount, int FlowCount)> SweepMainLegsAsync(DateTimeOffset now)
+    {
+        var tcpCount = _tcp is null ? 0 : await _tcp.RemoveExpiredAsync(now, _redirectIdleTimeout).ConfigureAwait(false);
+        Func<FlowKey, bool>? isHeld = _tcp is null ? null : _tcp.HoldsFlow;
+        var flowCount = _dispatcher.RemoveExpiredFlows(now, _flowIdleTimeout, isHeld);
+        _tcp?.LogCapacitySummary();
+        return (tcpCount, flowCount);
+    }
+
+    /// <summary>The UDP leg: it rides every tick on the fast cadence, independent of the main-leg gate.</summary>
+    private async Task<int> SweepUdpLegAsync(DateTimeOffset now) =>
+        _udp is null ? 0 : await _udp.RemoveExpiredAsync(now, _relayIdleTimeout).ConfigureAwait(false);
+
+    /// <summary>The per-tick <c>runtime.expired</c> aggregate, emitted only when a leg expired something.</summary>
+    private void LogExpired(int tcpCount, int flowCount, int udpCount)
+    {
+        if (!_logger.IsEnabled(Configuration.RuntimeLogLevel.Debug) || (flowCount == 0 && tcpCount == 0 && udpCount == 0)) return;
+        _logger.Event(Configuration.RuntimeLogLevel.Debug, "runtime.expired",
+            new("flows", flowCount), new("tcpRedirects", tcpCount), new("udpSessions", udpCount));
     }
 
     private void LogSweepFailureRateLimited(Exception exception)

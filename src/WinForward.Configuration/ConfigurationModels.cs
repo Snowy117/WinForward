@@ -31,6 +31,15 @@ public sealed class WinForwardConfigDto
 
     [JsonPropertyName("setupWorkerCount")]
     public int? SetupWorkerCount { get; init; }
+
+    [JsonPropertyName("udpSessionCapacity")]
+    public int? UdpSessionCapacity { get; init; }
+
+    [JsonPropertyName("udpRelayReceiveBufferKb")]
+    public int? UdpRelayReceiveBufferKb { get; init; }
+
+    [JsonPropertyName("udpSessionIdleSeconds")]
+    public int? UdpSessionIdleSeconds { get; init; }
 }
 
 public sealed class Socks5ServerDto
@@ -86,13 +95,21 @@ public sealed record ValidatedConfiguration(
     RuntimeLogLevel LogLevel = RuntimeLogLevel.Info,
     bool IncludeProcessPathInLogs = false,
     int TcpFlowCapacity = ConfigurationLoader.DefaultTcpFlowCapacity,
-    int SetupWorkerCount = 0)
+    int SetupWorkerCount = 0,
+    int UdpSessionCapacity = ConfigurationLoader.DefaultUdpSessionCapacity,
+    int UdpRelayReceiveBufferBytes = ConfigurationLoader.DefaultUdpRelayReceiveBufferBytes)
 {
     /// <summary>
     /// Non-blocking validation findings (for example a tcpFlowCapacity above the warning
     /// threshold) surfaced alongside an otherwise valid configuration.
     /// </summary>
     public IReadOnlyList<ConfigDiagnostic> Warnings { get; init; } = [];
+
+    /// <summary>
+    /// How long an idle UDP session is retained before its relay socket and SOCKS5 control
+    /// connection are released; the sweeper derives its UDP sweep cadence from this value.
+    /// </summary>
+    public TimeSpan UdpSessionIdleTimeout { get; init; } = ConfigurationLoader.DefaultUdpSessionIdleTimeout;
 }
 
 public static class ConfigurationLoader
@@ -100,16 +117,17 @@ public static class ConfigurationLoader
     /// <summary>The default concurrent proxied TCP flow budget: 16,384 ephemeral ports x 50% headroom / 2 ports per flow.</summary>
     public const int DefaultTcpFlowCapacity = 4_096;
 
-    /// <summary>The smallest accepted tcpFlowCapacity; a zero or negative budget would block every flow.</summary>
-    private const int MinimumTcpFlowCapacity = 1;
-    /// <summary>The largest accepted tcpFlowCapacity; above this the budget offers no port-pool protection at all.</summary>
-    private const int MaximumTcpFlowCapacity = 8_192;
-    /// <summary>Values above the default warn during validation because they shrink the reserved ephemeral-port headroom.</summary>
-    private const int TcpFlowCapacityWarningThreshold = 4_096;
-    /// <summary>The smallest accepted setupWorkerCount; at least one worker must exist to drain new-flow setup.</summary>
-    private const int MinimumSetupWorkerCount = 1;
-    /// <summary>The largest accepted setupWorkerCount; beyond this the dedicated threads outweigh any setup throughput gain.</summary>
-    private const int MaximumSetupWorkerCount = 256;
+    /// <summary>The default concurrent UDP session budget, unchanged from the historical hard-coded bound.</summary>
+    public const int DefaultUdpSessionCapacity = 16_384;
+
+    /// <summary>The default per-session relay socket receive buffer in KiB (matches <c>Socks5UdpTransport.DefaultRelaySocketReceiveBufferSize</c>).</summary>
+    public const int DefaultUdpRelayReceiveBufferKb = 128;
+
+    /// <summary>The default per-session relay socket receive buffer in bytes.</summary>
+    public const int DefaultUdpRelayReceiveBufferBytes = DefaultUdpRelayReceiveBufferKb * 1_024;
+
+    /// <summary>The default UDP session idle timeout; short enough that the steady-state footprint follows the active flow set.</summary>
+    public static readonly TimeSpan DefaultUdpSessionIdleTimeout = TimeSpan.FromSeconds(30);
 
     public static bool TryParse(string json, out WinForwardConfigDto? dto, out IReadOnlyList<ConfigDiagnostic> diagnostics)
     {
@@ -145,8 +163,7 @@ public static class ConfigurationLoader
         var warnings = new List<ConfigDiagnostic>();
         var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase);
         var logLevel = ParseLogLevel(dto, errors);
-        var tcpFlowCapacity = ParseTcpFlowCapacity(dto, errors, warnings);
-        var setupWorkerCount = ParseSetupWorkerCount(dto, errors);
+        var limits = ConfigurationLimits.Parse(dto, errors, warnings);
 
         if (dto.Socks5Servers is null)
         {
@@ -190,10 +207,13 @@ public static class ConfigurationLoader
             new PolicySnapshot(rules, fallback.Value),
             logLevel,
             rules.Exists(static rule => rule.Matcher.Processes?.Any(IsPathSelector) == true),
-            tcpFlowCapacity,
-            setupWorkerCount)
+            limits.TcpFlowCapacity,
+            limits.SetupWorkerCount,
+            limits.UdpSessionCapacity,
+            limits.UdpRelayReceiveBufferBytes)
         {
             Warnings = warnings,
+            UdpSessionIdleTimeout = limits.UdpSessionIdleTimeout,
         };
         diagnostics = [];
         return true;
@@ -227,42 +247,6 @@ public static class ConfigurationLoader
         if (level is not null) return level.Value;
         errors.Add(new("logLevel", "Log level must be error, warn, info, debug, or trace."));
         return RuntimeLogLevel.Info;
-    }
-
-    /// <summary>
-    /// Normalizes the optional tcpFlowCapacity budget. Omitted values fall back to the default;
-    /// out-of-range values are rejected with the accepted range, and values above the default
-    /// collect a non-blocking warning because they shrink the reserved ephemeral-port headroom.
-    /// </summary>
-    private static int ParseTcpFlowCapacity(WinForwardConfigDto dto, List<ConfigDiagnostic> errors, List<ConfigDiagnostic> warnings)
-    {
-        if (dto.TcpFlowCapacity is not { } value) return DefaultTcpFlowCapacity;
-        // ReSharper disable once ConvertIfStatementToSwitchStatement // Range-pattern precondition — a switch over the same value with a relational pattern adds ceremony and hides the fail-closed order (report the error, return the default) that pairs with the threshold warning below.
-        if (value is < MinimumTcpFlowCapacity or > MaximumTcpFlowCapacity)
-        {
-            errors.Add(new("tcpFlowCapacity", $"TCP flow capacity must be in {MinimumTcpFlowCapacity}..{MaximumTcpFlowCapacity}."));
-            return DefaultTcpFlowCapacity;
-        }
-        if (value > TcpFlowCapacityWarningThreshold)
-        {
-            warnings.Add(new("tcpFlowCapacity", $"Values above {TcpFlowCapacityWarningThreshold} leave less ephemeral-port headroom; each proxied TCP flow consumes 2 local ports."));
-        }
-        return value;
-    }
-
-    /// <summary>
-    /// Normalizes the optional setupWorkerCount override. An omitted value means auto (the executor's
-    /// 2x-logical-processor default); out-of-range values are rejected.
-    /// </summary>
-    private static int ParseSetupWorkerCount(WinForwardConfigDto dto, List<ConfigDiagnostic> errors)
-    {
-        if (dto.SetupWorkerCount is not { } value) return 0;
-        if (value is < MinimumSetupWorkerCount or > MaximumSetupWorkerCount)
-        {
-            errors.Add(new("setupWorkerCount", $"Setup worker count must be in {MinimumSetupWorkerCount}..{MaximumSetupWorkerCount}."));
-            return 0;
-        }
-        return value;
     }
 
     private static bool IsPathSelector(string selector) => selector.IndexOfAny(['/', '\\']) >= 0;

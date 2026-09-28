@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
@@ -84,6 +85,69 @@ public sealed class Socks5UdpTransportSendTests
             family => socket = new TrackingSocket(family));
 
         Assert.False(socket!.Blocking);
+
+        await transport.DisposeAsync();
+        await serverCancellation.CancelAsync();
+        await IgnoreExpectedCancellationAsync(server);
+    }
+
+    [Fact]
+    public async Task ConfiguredRelayReceiveBufferIsAppliedToTheRelaySocket()
+    {
+        using var tcpListener = new TcpListener(IPAddress.Loopback, 0);
+        using var relaySocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        tcpListener.Start();
+        relaySocket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+
+        var relayEndpoint = (IPEndPoint)relaySocket.LocalEndPoint!;
+        var controlEndpoint = (IPEndPoint)tcpListener.LocalEndpoint;
+        using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var server = ServeAssociateOnlyAsync(tcpListener, relayEndpoint, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), serverCancellation.Token);
+        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
+        const int configuredBytes = 256 * 1024;
+        TrackingSocket? socket = null;
+        var transport = await Socks5UdpTransport.CreateAsync(
+            socksServer,
+            new SelfTrafficRegistry(),
+            CancellationToken.None,
+            createControl: null,
+            family => socket = new TrackingSocket(family),
+            relayReceiveBufferBytes: configuredBytes);
+
+        // The configured budget reached the kernel socket. The comparison is tolerant because the
+        // OS owns the applied value (Linux doubles SO_RCVBUF, Windows rounds up), so an applied
+        // buffer below the configured one would mean the setting never took effect. The configured
+        // value is above the platform default here, so this is not a default-value coincidence.
+        var applied = socket!.ReceiveBufferSize;
+        Assert.True(applied >= configuredBytes, string.Create(CultureInfo.InvariantCulture, $"expected an applied relay receive buffer of at least {configuredBytes} bytes, observed {applied}"));
+
+        await transport.DisposeAsync();
+        await serverCancellation.CancelAsync();
+        await IgnoreExpectedCancellationAsync(server);
+    }
+
+    [Fact]
+    public async Task ConfiguredRelayReceiveBufferReachesTheSocketThroughTheTransportFactory()
+    {
+        using var tcpListener = new TcpListener(IPAddress.Loopback, 0);
+        using var relaySocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        tcpListener.Start();
+        relaySocket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+
+        var relayEndpoint = (IPEndPoint)relaySocket.LocalEndPoint!;
+        var controlEndpoint = (IPEndPoint)tcpListener.LocalEndpoint;
+        using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var server = ServeAssociateOnlyAsync(tcpListener, relayEndpoint, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), serverCancellation.Token);
+        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
+        const int configuredBytes = 256 * 1024;
+        var factory = new Socks5UdpTransportFactory(new SelfTrafficRegistry(), UdpFrameBuilder.DefaultMaximumEthernetFrame, relayReceiveBufferBytes: configuredBytes);
+
+        // The production factory path — not a direct Socks5UdpTransport.CreateAsync call — reaches
+        // the real relay socket. The comparison is tolerant for the same reason as the direct test:
+        // the OS owns the applied value (Linux doubles SO_RCVBUF, Windows rounds up).
+        var transport = (Socks5UdpTransport)await factory.CreateAsync(socksServer, CancellationToken.None);
+        var applied = transport.AppliedRelayReceiveBufferSize;
+        Assert.True(applied >= configuredBytes, string.Create(CultureInfo.InvariantCulture, $"expected an applied relay receive buffer of at least {configuredBytes} bytes, observed {applied}"));
 
         await transport.DisposeAsync();
         await serverCancellation.CancelAsync();

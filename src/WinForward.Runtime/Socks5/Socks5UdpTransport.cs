@@ -79,34 +79,44 @@ public sealed class Socks5UdpTransportFactory : IUdpProxyTransportFactory
     private readonly SelfTrafficRegistry _selfTraffic;
     private readonly int _maximumFrameSize;
     private readonly Socks5AddressCache? _addressCache;
+    private readonly int _relayReceiveBufferBytes;
 
     /// <summary>
     /// Creates transports whose send buffer follows the pinned frame cap (6 + 16 + cap) — the
     /// same single source of truth the coordinator's receive windows (cap + 22 + 1) and the
     /// reinjector's rebuilt frames (cap) already use. Composition passes the native ABI
-    /// constant explicitly.
+    /// constant explicitly, and the per-session relay receive buffer from the validated
+    /// <c>udpRelayReceiveBufferKb</c> budget.
     /// </summary>
-    public Socks5UdpTransportFactory(SelfTrafficRegistry selfTraffic, int maximumFrameSize, Socks5AddressCache? addressCache = null)
+    public Socks5UdpTransportFactory(SelfTrafficRegistry selfTraffic, int maximumFrameSize, Socks5AddressCache? addressCache = null, int relayReceiveBufferBytes = Socks5UdpTransport.DefaultRelaySocketReceiveBufferSize)
     {
         ArgumentNullException.ThrowIfNull(selfTraffic);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumFrameSize);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(relayReceiveBufferBytes);
         _selfTraffic = selfTraffic;
         _maximumFrameSize = maximumFrameSize;
         _addressCache = addressCache;
+        _relayReceiveBufferBytes = relayReceiveBufferBytes;
     }
 
     public async ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken) =>
-        await Socks5UdpTransport.CreateAsync(server, _selfTraffic, cancellationToken, createControl: null, socketFactory: null, maximumFrameSize: _maximumFrameSize, addressCache: _addressCache).ConfigureAwait(false);
+        await Socks5UdpTransport.CreateAsync(server, _selfTraffic, cancellationToken, createControl: null, socketFactory: null, maximumFrameSize: _maximumFrameSize, addressCache: _addressCache, relayReceiveBufferBytes: _relayReceiveBufferBytes).ConfigureAwait(false);
 }
 
 public sealed class Socks5UdpTransport : IUdpProxyTransport
 {
     /// <summary>
-    /// Explicit relay-socket receive headroom (R4): relayed responses can burst far faster than
-    /// the single receive loop reinjects them, and the OS default datagram buffer would overflow
-    /// and drop responses that were already relayed. Not a config knob; the schema is frozen.
+    /// The relay socket's default receive buffer, wired from the validated
+    /// <c>udpRelayReceiveBufferKb</c> configuration key (default 128 KiB, range 16..1024 KiB).
+    /// Relay responses can burst far faster than the single receive loop reinjects them, so the
+    /// OS default datagram buffer would overflow and drop responses that were already relayed;
+    /// the historical 512 KiB absorbed that. It is bounded now because this buffer is per
+    /// session, so the aggregate kernel memory is per-session bytes x concurrent sessions — with
+    /// relay sockets retained past their last datagram, a large constant multiplied by flow churn
+    /// instead of following the active flow set. Config validation warns when the per-session
+    /// value times a large session budget exceeds ~512 MiB.
     /// </summary>
-    private const int RelaySocketReceiveBufferSize = 512 * 1024;
+    public const int DefaultRelaySocketReceiveBufferSize = 128 * 1024;
 
     /// <summary>
     /// SIO_UDP_CONNRESET (vendor IOCTL 0x9800000C). While TRUE (the Windows default for UDP
@@ -157,6 +167,14 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
     public IPEndPoint RelayEndpoint { get; }
     public IPEndPoint LocalEndpoint => (IPEndPoint)_socket.LocalEndPoint!;
 
+    /// <summary>
+    /// The relay socket's applied receive buffer (SO_RCVBUF, as the OS settled it). Internal test
+    /// seam: it proves the configured <c>udpRelayReceiveBufferKb</c> budget reaches a real socket
+    /// through the production <see cref="Socks5UdpTransportFactory"/>, which the direct-construction
+    /// test alone cannot show.
+    /// </summary>
+    internal int AppliedRelayReceiveBufferSize => _socket.ReceiveBufferSize;
+
 #pragma warning disable CA1068 // Deliberate shape: the token follows the identifying arguments and precedes the test-only seam factories, so the production call site (createControl: null, socketFactory: null) keeps the token in the readable position; reordering would bury it between null arguments for a style-only gain.
     internal static async ValueTask<Socks5UdpTransport> CreateAsync(
         Socks5Server server,
@@ -166,9 +184,11 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
         Func<AddressFamily, Socket>? socketFactory,
         Action<Socket>? disableUdpConnectionReset = null,
         int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame,
-        Socks5AddressCache? addressCache = null)
+        Socks5AddressCache? addressCache = null,
+        int relayReceiveBufferBytes = DefaultRelaySocketReceiveBufferSize)
 #pragma warning restore CA1068
     {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(relayReceiveBufferBytes);
         Socks5ControlConnection? control = null;
         Socket? socket = null;
         SelfTrafficRegistry.SelfTrafficToken? selfTrafficToken = null;
@@ -187,7 +207,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
             var relay = await control.UdpAssociateAsync(cancellationToken).ConfigureAwait(false);
             var relayAddressFamily = relay.AddressFamily;
             socket = (socketFactory ?? (family => new Socket(family, SocketType.Dgram, ProtocolType.Udp)))(relayAddressFamily);
-            socket.ReceiveBufferSize = RelaySocketReceiveBufferSize;
+            socket.ReceiveBufferSize = relayReceiveBufferBytes;
             // Applied before bind per the IOCTL's contract (S2): an ICMP-driven reset must never
             // reach the receive loop. Injectable so tests can assert the call without a Windows socket.
             (disableUdpConnectionReset ?? s_disableUdpConnectionResetAction)(socket);
