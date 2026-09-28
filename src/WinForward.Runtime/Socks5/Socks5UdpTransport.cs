@@ -344,6 +344,10 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
                 return SendOverlappedAsync(written, cancellationToken);
             }
 
+            // Recorded only after the kernel accepted the datagram, so the capability sampler's
+            // send-side evidence counts datagrams that actually went out (I3: one interlocked
+            // increment, no allocation).
+            _lease.RecordDatagramSent();
             _sendGate.Release();
             return ValueTask.CompletedTask;
         }
@@ -365,6 +369,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
             }
 
             _ = await _socket.SendToAsync(_sendBuffer.AsMemory(0, written), SocketFlags.None, CurrentRelaySocketAddress(), cancellationToken).ConfigureAwait(false);
+            _lease.RecordDatagramSent();
         }
         finally
         {
@@ -377,6 +382,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
         try
         {
             _ = await _socket.SendToAsync(_sendBuffer.AsMemory(0, written), SocketFlags.None, CurrentRelaySocketAddress(), cancellationToken).ConfigureAwait(false);
+            _lease.RecordDatagramSent();
         }
         finally
         {
@@ -452,6 +458,9 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
         var scopeId = relay.Address.AddressFamily == AddressFamily.InterNetworkV6 ? relay.Address.ScopeId : 0;
         // ReSharper disable once ConvertIfStatementToReturnStatement // TryDecode decodes into an out parameter (side effect + binding); the early exit on malformed input must stay a separate step (B1 disposition).
         if (!Socks5UdpCodec.TryDecode(buffer[..result.ReceivedBytes], out var datagram, scopeId)) return Socks5UdpReceiveResult.Skipped(Socks5UdpReceiveSkipReason.Malformed);
+        // Only a datagram that decoded proves this flow's replies come back: a skip is one anomaly,
+        // not evidence that the server answered (design §5).
+        _lease.RecordResponseReceived();
         return Socks5UdpReceiveResult.Received(datagram);
     }
 

@@ -49,6 +49,9 @@ public sealed class RuntimeCounters
     /// <summary>A lost SOCKS5 UDP association was re-established in place; see the <c>udp.association.recovered</c> debug event.</summary>
     public const string UdpAssociationRecovered = "udpAssociationRecovered";
 
+    /// <summary>A SOCKS5 server was flipped from shared to per-flow associations because passive sampling detected source-port pinning; see the rate-limited <c>udp.association.fallback</c> warn.</summary>
+    public const string UdpAssociationFallbacks = "udpAssociationFallbacks";
+
     /// <summary>
     /// The native-pool diagnostic key prefix (task 09-18 M0): every registered pool records
     /// cumulative rents and returns under <c>pool.&lt;name&gt;.rented</c> / <c>pool.&lt;name&gt;.returned</c>,

@@ -63,15 +63,19 @@ public sealed class UdpAssociationPoolTests
     }
 
     [Fact]
-    public async Task AutoModeIsOffEquivalent()
+    public async Task AutoModeSharesUntilEvidenceSaysPerFlowOnly()
     {
-        // Step 2 contract: auto shares nothing until passive capability detection lands (Step 3).
+        // Step 3 contract: auto is the production default — share, with passive detection. Two flows
+        // with no evidence between them land on one association and the server stays on trial;
+        // UdpAssociationCapabilityTests pins the flip itself.
         await using var scope = CreateScope(UdpAssociationReuseMode.Auto);
         var first = await scope.RentAsync();
         var second = await scope.RentAsync();
 
-        Assert.Equal(2, scope.Pool.AssociationCount);
-        Assert.NotEqual(first.RelayEndpoint.Port, second.RelayEndpoint.Port);
+        Assert.Equal(1, scope.Pool.AssociationCount);
+        Assert.Equal(1, scope.Server.ConnectionCount);
+        Assert.Equal(first.RelayEndpoint.Port, second.RelayEndpoint.Port);
+        Assert.Equal(UdpServerCapability.Unknown, scope.Pool.CapabilityOf(scope.Server.Server));
     }
 
     [Fact]

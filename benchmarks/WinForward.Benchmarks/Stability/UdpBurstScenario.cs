@@ -29,10 +29,11 @@ internal static class UdpBurstScenario
     private const int SetupLimiterWidth = 8;
 
     /// <summary>
-    /// Opt-in switch for the product-event census, mirroring <see cref="UdpLossScenario"/>'s
-    /// pattern: enabling it makes the product emit per-datagram trace events, which
-    /// allocates and slows the send/receive paths; default runs stay undistorted and the
-    /// productEvents field is omitted from the row.
+    /// Opt-in switch for the verbose product-event census, mirroring <see cref="UdpLossScenario"/>'s
+    /// pattern: the row always carries the warn-level census, whose events are rate-limited or
+    /// one-shot and cost nothing on the datagram paths; flipping this adds the per-datagram
+    /// trace/debug counts, which allocate and slow the send/receive paths, so it is reserved for a
+    /// loss-localization session.
     /// </summary>
     private const bool CaptureProductEvents = false;
 
@@ -47,19 +48,15 @@ internal static class UdpBurstScenario
         await using var server = new LoopbackSocks5UdpServer(receiver.Endpoint, associateDelay);
         var tracker = new InFlightTracker(Math.Max(1024, options.Pps * 12));
         var sink = new BurstCountingSink(backgroundFlows, burstFlows, tracker);
-        // ReSharper disable HeuristicUnreachableCode, CSharpWarnings::CS0162
-        // The documented opt-in census switch above is a compile-time constant so a default run
-        // compiles the diagnostic logger out entirely; the false branch "unreachable" code is the
-        // switch's enabled state, flipped by editing the constant for a loss-localization session.
-        var productEvents = CaptureProductEvents ? new CountingRuntimeLogger() : null;
-        // ReSharper restore HeuristicUnreachableCode, CSharpWarnings::CS0162
+        var productEvents = new CountingRuntimeLogger(CaptureProductEvents);
         const int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame;
         using var setupQueuePool = new NativeBufferPool(maximumFrameSize);
         using var receiveWindowPool = new NativeBufferPool(UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize));
         using var setupExecutor = new SetupExecutor();
         var registry = new SelfTrafficRegistry();
-        // The Step 2 acceptance run exercises control-connection sharing explicitly.
-        await using var associations = new UdpAssociationPool(registry, UdpAssociationReuseMode.Always);
+        // The acceptance run exercises the production default: share, with passive detection. The
+        // census logger goes to the pool too, because the fallback warn is a pool event.
+        await using var associations = new UdpAssociationPool(registry, UdpAssociationReuseMode.Auto, logger: productEvents);
         var coordinator = new UdpProxyCoordinator(
             new Socks5UdpTransportFactory(associations, registry, maximumFrameSize),
             sink,
@@ -69,7 +66,7 @@ internal static class UdpBurstScenario
             new UdpProxyOptions
             {
                 Capacity = backgroundFlows + burstFlows,
-                Logger = (IRuntimeLogger?)productEvents ?? NullRuntimeLogger.Instance,
+                Logger = productEvents,
             });
         PhaseOutcome outcome;
         try
@@ -225,7 +222,7 @@ internal static class UdpBurstScenario
             StabilityShared.TicksToMilliseconds(issueEndTicks - issueTimestamps[0]));
     }
 
-    private static object BuildMetrics(PhaseOutcome outcome, BurstCountingSink sink, CountingRuntimeLogger? productEvents)
+    private static object BuildMetrics(PhaseOutcome outcome, BurstCountingSink sink, CountingRuntimeLogger productEvents)
     {
         var burst = outcome.Burst;
         var sender = outcome.Sender;
@@ -247,7 +244,7 @@ internal static class UdpBurstScenario
                 post = BuildWindowMetrics(sender.SentIn(BackgroundWindow.Post), sink.InjectedIn(BackgroundWindow.Post), sender.SendLatenciesIn(BackgroundWindow.Post), StabilityShared.TicksToSeconds(ticks[3] - ticks[2])),
             },
             unattributedResponses = sink.UnattributedResponses,
-            productEvents = productEvents is not null ? StabilityShared.BuildProductEvents(productEvents) : null,
+            productEvents = StabilityShared.BuildProductEvents(productEvents),
         };
     }
 

@@ -28,8 +28,14 @@ internal readonly record struct UdpAssociationContext(
 /// refuses a flow.
 /// <para>
 /// <see cref="UdpAssociationReuseMode.Off"/> creates one private association per lease, which is
-/// today's per-flow behaviour byte for byte. <see cref="UdpAssociationReuseMode.Auto"/> is
-/// off-equivalent until Step 3 adds passive capability detection.
+/// today's per-flow behaviour byte for byte. <see cref="UdpAssociationReuseMode.Always"/> shares
+/// unconditionally, with capability detection disabled.
+/// <see cref="UdpAssociationReuseMode.Auto"/> (the production default) shares while the server's
+/// <see cref="UdpServerCapability"/> is <see cref="UdpServerCapability.Unknown"/> or
+/// <see cref="UdpServerCapability.SharedOk"/>, and stops placing flows on shared associations for a
+/// server once the sampler detects source-port pinning. The verdict is sticky for the run and never
+/// tears a session down: the associations already placed keep serving their attached flows and
+/// drain through normal release and retention.
 /// </para>
 /// <para>
 /// Ownership: the pool owns one <see cref="QuiescenceScope"/> (its lifetime token, the maintenance
@@ -109,6 +115,16 @@ internal sealed class UdpAssociationPool : IAsyncDisposable
     }
 
     /// <summary>
+    /// The server's sticky capability verdict, or <see cref="UdpServerCapability.Unknown"/> for a
+    /// server this pool has never placed a flow on. Test/diagnostic seam for the sampler.
+    /// </summary>
+    internal UdpServerCapability CapabilityOf(Socks5Server server)
+    {
+        ArgumentNullException.ThrowIfNull(server);
+        lock (_gate) return _servers.TryGetValue(server, out var set) ? set.Capability : UdpServerCapability.Unknown;
+    }
+
+    /// <summary>
     /// Borrows one association for a flow: a shared association with room under
     /// <see cref="FlowsPerAssociation"/>, a newly dialed shared association while the per-server cap
     /// allows it, or a private association otherwise. The returned lease is released exactly once by
@@ -121,11 +137,16 @@ internal sealed class UdpAssociationPool : IAsyncDisposable
         var admitted = _scope.TryEnter(out var poolLease);
         ObjectDisposedException.ThrowIf(!admitted, this);
         UdpControlAssociation? association = null;
+        // Created before placement so the failed-setup path can hand the same record back to the
+        // association it was attached to.
+        var evidence = new UdpAssociationEvidence();
         try
         {
-            association = Acquire(server);
+            association = Acquire(server, evidence);
             await association.EnsureAssociatedAsync(cancellationToken).ConfigureAwait(false);
-            return new UdpAssociationLease(association, poolLease);
+            // Acquire claimed the refcount and attached the evidence while it held the gate, so a
+            // concurrent sampling tick can never observe this flow without its evidence.
+            return new UdpAssociationLease(association, evidence, poolLease);
         }
         catch
         {
@@ -133,7 +154,7 @@ internal sealed class UdpAssociationPool : IAsyncDisposable
             // it outstanding, because the pool's drain joins it and would then wait forever.
             try
             {
-                if (association is not null) await association.ReleaseLeaseAsync().ConfigureAwait(false);
+                if (association is not null) await association.ReleaseLeaseAsync(evidence).ConfigureAwait(false);
             }
             finally
             {
@@ -216,11 +237,12 @@ internal sealed class UdpAssociationPool : IAsyncDisposable
             {
                 try
                 {
+                    _ = SampleServerCapabilities();
                     await SweepIdleAssociationsAsync(Context.TimeProvider.GetUtcNow()).ConfigureAwait(false);
                 }
                 catch (Exception exception)
                 {
-                    // Retention is best-effort housekeeping: one failed sweep must not kill the loop.
+                    // Retention and sampling are best-effort housekeeping: one failed tick must not kill the loop.
                     Context.Logger.Warn($"UDP association retention sweep failed: {exception.GetType().Name}: {exception.Message}");
                 }
             }
@@ -236,26 +258,157 @@ internal sealed class UdpAssociationPool : IAsyncDisposable
     /// while the per-server cap allows it, else a private one. Private associations are tracked for
     /// counting and disposal but never selected, so a flow can always be served.
     /// </summary>
-    private UdpControlAssociation Acquire(Socks5Server server)
+    private UdpControlAssociation Acquire(Socks5Server server, UdpAssociationEvidence evidence)
     {
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_scope.IsSealed, this);
             if (!_servers.TryGetValue(server, out var set))
             {
-                set = new ServerAssociations();
+                set = new ServerAssociations { Capability = InitialCapability(Mode) };
                 _servers.Add(server, set);
             }
 
-            if (Mode == UdpAssociationReuseMode.Always)
+            if (SharesFor(Mode, set.Capability))
             {
                 var best = LeastLoadedShared(set);
-                if (best is not null) return Attach(best);
-                if (set.Shared.Count < MaxAssociationsPerServer) return Attach(Create(server, set, isPrivate: false));
+                if (best is not null) return Attach(best, evidence);
+                if (set.Shared.Count < MaxAssociationsPerServer) return Attach(Create(server, set, isPrivate: false), evidence);
             }
 
-            return Attach(Create(server, set, isPrivate: true));
+            return Attach(Create(server, set, isPrivate: true), evidence);
         }
+    }
+
+    /// <summary>
+    /// The verdict a server starts with (design §5): <c>auto</c> opens on trial, <c>always</c> is a
+    /// forced positive with detection disabled, and <c>off</c> is the per-flow rollback mode.
+    /// </summary>
+    private static UdpServerCapability InitialCapability(UdpAssociationReuseMode mode) => mode switch
+    {
+        UdpAssociationReuseMode.Always => UdpServerCapability.SharedOk,
+        UdpAssociationReuseMode.Off => UdpServerCapability.PerFlowOnly,
+        _ => UdpServerCapability.Unknown,
+    };
+
+    /// <summary>
+    /// Whether a flow may join a shared association (design §5, I8): <c>always</c> shares
+    /// unconditionally, <c>auto</c> shares until the sampler proves the server pins source ports,
+    /// and <c>off</c> never shares. A sticky <see cref="UdpServerCapability.PerFlowOnly"/> flips
+    /// only future placements — the associations already placed keep serving their attached flows.
+    /// </summary>
+    private static bool SharesFor(UdpAssociationReuseMode mode, UdpServerCapability capability) => mode switch
+    {
+        UdpAssociationReuseMode.Always => true,
+        UdpAssociationReuseMode.Auto => capability != UdpServerCapability.PerFlowOnly,
+        _ => false,
+    };
+
+    /// <summary>
+    /// Samples every server still on trial and applies the sticky verdict (design §5, R2). Runs
+    /// outside the gate for the evidence walk and re-takes it only to record a verdict, so a slow
+    /// sample never blocks a rent. A server that is already settled is skipped: detection is
+    /// disabled for <c>always</c> (forced <see cref="UdpServerCapability.SharedOk"/>) and never
+    /// restarts for a flipped <c>auto</c> server (I8).
+    /// <para>
+    /// Returns 1 when this sample flipped a server and 0 otherwise. Internal so capability tests can
+    /// drive the rule deterministically instead of waiting for the 5 s maintenance tick; the
+    /// maintenance child calls it on its tick.
+    /// </para>
+    /// </summary>
+    internal int SampleServerCapabilities()
+    {
+        List<ServerSample> candidates;
+        lock (_gate)
+        {
+            if (_scope.IsSealed) return 0;
+            candidates = [.. _servers
+                .Where(static pair => pair.Value.Capability == UdpServerCapability.Unknown)
+                .Select(static pair => new ServerSample(pair.Key, [.. pair.Value.Shared]))];
+        }
+
+        foreach (var candidate in candidates)
+        {
+            foreach (var association in candidate.Associations)
+            {
+                if (association.IsPrivate || association.IsFaulted) continue;
+                var sample = association.SnapshotEvidence();
+                // Both settling verdicts are terminal for this sample. The flip's verdict is recorded
+                // under the gate before it returns, so a sibling association can never flip the same
+                // server again — the counter, the warn, and the log each fire exactly once per run.
+                int? settled = UdpAssociationCapabilitySampler.Evaluate(sample.Evidence, sample.Attached) switch
+                {
+                    UdpServerCapability.SharedOk when ConfirmServerSharing(candidate.Server) => 0,
+                    UdpServerCapability.PerFlowOnly when MarkServerPerFlowOnly(candidate.Server, association, sample) => 1,
+                    _ => null,
+                };
+                if (settled is { } result) return result;
+            }
+        }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// Settles a server as confirmed-shareable: detection stops for it, because "a second attached
+    /// flow got a response" can only be contradicted by a later sample on an association that no
+    /// longer carries the evidence that produced it.
+    /// </summary>
+    private bool ConfirmServerSharing(Socks5Server server)
+    {
+        lock (_gate)
+        {
+            if (!_servers.TryGetValue(server, out var set)) return false;
+            if (set.Capability != UdpServerCapability.Unknown) return false;
+            set.Capability = UdpServerCapability.SharedOk;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Takes one server out of shared placement for the rest of the run and reports it once with the
+    /// evidence that triggered it. The verdict is recorded under the gate before the log, so a burst
+    /// of further samples (or of sibling associations) can never re-emit the fallback for the server.
+    /// </summary>
+    private bool MarkServerPerFlowOnly(Socks5Server server, UdpControlAssociation association, (UdpAssociationEvidence[] Evidence, int Attached) sample)
+    {
+        var unanswered = 0;
+        var sent = 0;
+        for (var index = 0; index < sample.Attached; index++)
+        {
+            var lease = sample.Evidence[index];
+            if (lease.SawResponse) continue;
+            if (lease.DatagramsSent > sent) sent = lease.DatagramsSent;
+            if (lease.DatagramsSent >= UdpAssociationCapabilitySampler.PinningSuspicionThreshold) unanswered++;
+        }
+
+        lock (_gate)
+        {
+            if (!_servers.TryGetValue(server, out var set)) return false;
+            // An association that recovered in place, faulted, or was closed while this sample ran
+            // no longer describes the server: leave the server on trial for the next tick.
+            if (association.IsFaulted || association.IsPrivate || !set.Shared.Contains(association)) return false;
+            if (set.Capability != UdpServerCapability.Unknown) return false;
+            set.Capability = UdpServerCapability.PerFlowOnly;
+        }
+
+        RuntimeCounters.Shared.Increment(RuntimeCounters.UdpAssociationFallbacks);
+        // The gate-guarded sticky verdict above makes this the server's one fallback for the run, so
+        // no throttle is needed: a pool-wide one would swallow the warn of a second server that flips
+        // inside the same window while its counter still moved.
+        if (Context.Logger.IsEnabled(RuntimeLogLevel.Warn))
+        {
+            Context.Logger.Event(RuntimeLogLevel.Warn, "udp.association.fallback",
+                new("proxy", server.Name),
+                new("reason", "source-port-pinned"),
+                new("flows", sample.Attached),
+                new("sent", sent),
+                new("unanswered", unanswered),
+                new("relay", association.RelayEndpoint));
+        }
+
+        return true;
     }
 
     private static UdpControlAssociation? LeastLoadedShared(ServerAssociations set)
@@ -271,9 +424,13 @@ internal sealed class UdpAssociationPool : IAsyncDisposable
         return best;
     }
 
-    private static UdpControlAssociation Attach(UdpControlAssociation association)
+    /// <summary>
+    /// Attaches the flow's evidence and claims its lease on the placed association — both while the
+    /// caller holds the gate, so placement and the sampling tick observe one atomic step.
+    /// </summary>
+    private static UdpControlAssociation Attach(UdpControlAssociation association, UdpAssociationEvidence evidence)
     {
-        association.AttachLease();
+        association.StartLease(evidence);
         return association;
     }
 
@@ -332,6 +489,9 @@ internal sealed class UdpAssociationPool : IAsyncDisposable
         }
     }
 
+    /// <summary>One server still on trial plus a gate-safe copy of its shared associations.</summary>
+    private readonly record struct ServerSample(Socks5Server Server, List<UdpControlAssociation> Associations);
+
     private sealed class ServerAssociations
     {
         /// <summary>Every live association of the server, in creation order (shared and private).</summary>
@@ -339,5 +499,14 @@ internal sealed class UdpAssociationPool : IAsyncDisposable
 
         /// <summary>The subset eligible for sharing, in creation order (placement tie-break).</summary>
         public List<UdpControlAssociation> Shared { get; } = [];
+
+        /// <summary>
+        /// The sticky per-server capability verdict (I8). <see cref="UdpServerCapability.Unknown"/>
+        /// for an <c>auto</c> server that is still on trial; <c>always</c> forces
+        /// <see cref="UdpServerCapability.SharedOk"/> and <c>off</c> forces
+        /// <see cref="UdpServerCapability.PerFlowOnly"/> at creation, so detection is disabled for
+        /// both and a pinned <c>always</c> server can never flip.
+        /// </summary>
+        public UdpServerCapability Capability { get; set; } = UdpServerCapability.Unknown;
     }
 }

@@ -171,11 +171,14 @@ public sealed class UdpAssociationRecoveryTests
             Assert.Equal(1, await ReceiveCountAsync(relay, CancellationToken.None));
             Assert.Equal(1, coordinator.SessionCount);
 
-            // The association dies unrecoverably: the server is gone.
+            // The association dies unrecoverably: the server is gone. The loss counter is
+            // process-global and other collections lose associations in parallel, so only its
+            // counted direction is asserted here; the local witnesses are the removed session and
+            // the un-armed cooldown below.
             var lostBefore = RuntimeCounters.Shared.Get(RuntimeCounters.UdpAssociationLost);
             await server.StopAsync();
             await WaitUntilSendFailsAsync(coordinator, flow, serverKey, payload);
-            Assert.Equal(lostBefore + 1, RuntimeCounters.Shared.Get(RuntimeCounters.UdpAssociationLost));
+            Assert.True(RuntimeCounters.Shared.Get(RuntimeCounters.UdpAssociationLost) >= lostBefore + 1);
 
             // I5: no setup cooldown was armed for the association loss.
             Assert.Equal(0, coordinator.Diagnostics.SetupCooldownCount);
@@ -209,7 +212,6 @@ public sealed class UdpAssociationRecoveryTests
             new UdpProxyOptions { Capacity = 16 });
         var flow = CreateFlow("192.0.2.53");
         var payload = new byte[PayloadLength];
-        var lostBefore = RuntimeCounters.Shared.Get(RuntimeCounters.UdpAssociationLost);
         var recoveredBefore = RuntimeCounters.Shared.Get(RuntimeCounters.UdpAssociationRecovered);
         try
         {
@@ -228,8 +230,11 @@ public sealed class UdpAssociationRecoveryTests
 
             Assert.True(await coordinator.TrySendSpanAsync(flow, serverKey, payload, default, CancellationToken.None));
             Assert.Equal(1, await ReceiveCountAsync(secondRelay, CancellationToken.None));
+            // A recovery is not an association loss: the coordinator removes a session only on
+            // AssociationLost, so the surviving session (asserted here and above) is the local
+            // witness. The process-global loss counter is shared with parallel collections and
+            // cannot attribute an increment to this test.
             Assert.Equal(1, coordinator.SessionCount);
-            Assert.Equal(lostBefore, RuntimeCounters.Shared.Get(RuntimeCounters.UdpAssociationLost));
             Assert.Equal(0, coordinator.Diagnostics.SetupCooldownCount);
         }
         finally
@@ -247,7 +252,6 @@ public sealed class UdpAssociationRecoveryTests
         var server = new Socks5Server("scripted", "127.0.0.1", 1080, Username: null, Password: null);
         var payload = new byte[PayloadLength];
         var lostBefore = RuntimeCounters.Shared.Get(RuntimeCounters.UdpAssociationLost);
-        var setupFailuresBefore = RuntimeCounters.Shared.Get(RuntimeCounters.UdpSetupFailures);
 
         // The first datagram is admitted while the association is still setting up, so it waits in
         // the setup queue; the association then dies before that queue is flushed through it.
@@ -258,9 +262,9 @@ public sealed class UdpAssociationRecoveryTests
 
         await WaitForAsync(() => coordinator.SessionCount == 0);
         // I5/R3: the flush-window loss is the same association loss the ready path reports — its own
-        // counter, no setup-failure count, and no 1 s cooldown.
-        Assert.Equal(lostBefore + 1, RuntimeCounters.Shared.Get(RuntimeCounters.UdpAssociationLost));
-        Assert.Equal(setupFailuresBefore, RuntimeCounters.Shared.Get(RuntimeCounters.UdpSetupFailures));
+        // counter (asserted in its counted direction only: the global counter is shared with parallel
+        // collections) and no 1 s cooldown, which is the local discriminator from a setup failure.
+        Assert.True(RuntimeCounters.Shared.Get(RuntimeCounters.UdpAssociationLost) >= lostBefore + 1);
         Assert.Equal(0, coordinator.Diagnostics.SetupCooldownCount);
 
         // The very next datagram starts a fresh setup instead of being refused by a cooldown.

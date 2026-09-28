@@ -13,14 +13,16 @@ namespace WinForward.Runtime.UdpProxy;
 internal sealed class UdpAssociationLease : IAsyncDisposable
 {
     private readonly UdpControlAssociation _association;
+    private readonly UdpAssociationEvidence _evidence;
 
     /// <summary>The pool-scope lease: it is what makes the pool's drain join this flow's holder.</summary>
     private WorkLease _poolLease;
     private int _released;
 
-    internal UdpAssociationLease(UdpControlAssociation association, WorkLease poolLease)
+    internal UdpAssociationLease(UdpControlAssociation association, UdpAssociationEvidence evidence, WorkLease poolLease)
     {
         _association = association;
+        _evidence = evidence;
         _poolLease = poolLease;
     }
 
@@ -43,11 +45,23 @@ internal sealed class UdpAssociationLease : IAsyncDisposable
     /// <summary>The association's stored fault, or null while it is healthy.</summary>
     internal Exception? Fault => _association.Fault;
 
+    /// <summary>
+    /// Records one datagram this lease sent successfully: the capability sampler's send-side
+    /// evidence. One interlocked increment, no allocation — this is the whole hot-path addition (I3).
+    /// </summary>
+    internal void RecordDatagramSent() => _evidence.RecordDatagramSent();
+
+    /// <summary>
+    /// Records the first relay datagram this lease decoded successfully: the capability sampler's
+    /// receive-side evidence. A skipped (never decoded) relay datagram must not reach this call.
+    /// </summary>
+    internal void RecordResponseReceived() => _evidence.RecordResponseReceived();
+
     /// <summary>Releases the association reference and the pool-scope lease, exactly once.</summary>
     public ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _released, 1) != 0) return ValueTask.CompletedTask;
         _poolLease.Dispose();
-        return _association.ReleaseLeaseAsync();
+        return _association.ReleaseLeaseAsync(_evidence);
     }
 }

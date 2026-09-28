@@ -115,9 +115,10 @@ public sealed record ValidatedConfiguration(
     public TimeSpan UdpSessionIdleTimeout { get; init; } = ConfigurationLoader.DefaultUdpSessionIdleTimeout;
 
     /// <summary>
-    /// Whether many UDP flows share one authenticated SOCKS5 association. <c>auto</c> (the
-    /// default) is off-equivalent until passive capability detection lands; <c>off</c> reproduces
-    /// per-flow associations exactly.
+    /// Whether many UDP flows share one authenticated SOCKS5 association. <c>auto</c> (the default)
+    /// shares and passively falls back to per-flow associations for a server observed to pin one
+    /// client source port per association; <c>always</c> shares with detection disabled; <c>off</c>
+    /// reproduces per-flow associations exactly.
     /// </summary>
     public UdpAssociationReuseMode UdpAssociationReuse { get; init; } = UdpAssociationReuseMode.Auto;
 }

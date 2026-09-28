@@ -22,11 +22,11 @@ internal static class UdpLossScenario
     private const int TickMilliseconds = 10;
 
     /// <summary>
-    /// Opt-in switch for the trace-capturing product-event census. Enabling Trace makes the
-    /// product emit per-datagram events (udp.packet.sent/received), which allocates and slows
-    /// the send/receive paths; default runs must stay undistorted, so productEvents is omitted
-    /// from the row unless this is flipped for a loss-localization session. The Interlocked
-    /// hops counters stay unconditional (zero distortion).
+    /// Opt-in switch for the verbose product-event census. The row always carries the warn-level
+    /// census, whose events are rate-limited or one-shot and therefore cost nothing on the datagram
+    /// paths; flipping this adds the per-datagram trace/debug counts, which allocate and slow the
+    /// send/receive paths, so it is reserved for a loss-localization session. The Interlocked hops
+    /// counters stay unconditional (zero distortion).
     /// </summary>
     private const bool CaptureProductEvents = false;
 
@@ -35,13 +35,8 @@ internal static class UdpLossScenario
         await using var receiver = new EchoReceiver(options.Flows);
         await using var server = new LoopbackSocks5UdpServer(receiver.Endpoint);
         var sink = new CountingUdpResponseSink();
-        // ReSharper disable HeuristicUnreachableCode, CSharpWarnings::CS0162
-        // The documented opt-in census switch above is a compile-time constant so a default run
-        // compiles the diagnostic logger out entirely; the false branch "unreachable" code is the
-        // switch's enabled state, flipped by editing the constant for a loss-localization session.
-        var productEvents = CaptureProductEvents ? new CountingRuntimeLogger() : null;
-        // ReSharper restore HeuristicUnreachableCode, CSharpWarnings::CS0162
-        await using var scope = new CoordinatorScope(sink, options.Flows, (IRuntimeLogger?)productEvents ?? NullRuntimeLogger.Instance);
+        var productEvents = new CountingRuntimeLogger(CaptureProductEvents);
+        await using var scope = new CoordinatorScope(sink, options.Flows, productEvents);
         var coordinator = scope.Coordinator;
         SenderStats stats;
         try
@@ -86,7 +81,7 @@ internal static class UdpLossScenario
                     relayReplies = server.RelayReplies,
                     relaySendFaults = server.RelaySendFaults,
                 },
-                productEvents = productEvents is not null ? StabilityShared.BuildProductEvents(productEvents) : null,
+                productEvents = StabilityShared.BuildProductEvents(productEvents),
             });
     }
 
@@ -173,8 +168,9 @@ internal static class UdpLossScenario
             _receiveWindowPool = new NativeBufferPool(UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize));
             _setupExecutor = new SetupExecutor();
             var registry = new SelfTrafficRegistry();
-            // The Step 2 acceptance run exercises control-connection sharing explicitly.
-            _associations = new UdpAssociationPool(registry, UdpAssociationReuseMode.Always);
+            // The acceptance run exercises the production default: share, with passive detection.
+            // The census logger goes to the pool too, because the fallback warn is a pool event.
+            _associations = new UdpAssociationPool(registry, UdpAssociationReuseMode.Auto, logger: logger);
             Coordinator = new UdpProxyCoordinator(
                 new Socks5UdpTransportFactory(_associations, registry, maximumFrameSize),
                 sink,

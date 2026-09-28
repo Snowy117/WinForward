@@ -46,20 +46,23 @@ internal static class UdpChurnScenario
         await using var receiver = externalServer is null ? new EchoReceiver(flows) : null;
         await using var server = receiver is null ? null : new LoopbackSocks5UdpServer(receiver.Endpoint, associateDelay);
         var sink = new ChurnCountingSink(flows);
+        // The warn-level census is the run's evidence that detection never flipped the server: its
+        // events are rate-limited or one-shot, so it costs nothing in the measured wave windows.
+        var productEvents = new CountingRuntimeLogger(includeVerbose: false);
         const int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame;
         using var setupQueuePool = new NativeBufferPool(maximumFrameSize);
         using var receiveWindowPool = new NativeBufferPool(UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize));
         using var setupExecutor = new SetupExecutor();
         var registry = new SelfTrafficRegistry();
-        // The Step 2 acceptance run exercises control-connection sharing explicitly.
-        await using var associations = new UdpAssociationPool(registry, UdpAssociationReuseMode.Always);
+        // The acceptance run exercises the production default: share, with passive detection.
+        await using var associations = new UdpAssociationPool(registry, UdpAssociationReuseMode.Auto, logger: productEvents);
         var coordinator = new UdpProxyCoordinator(
             new Socks5UdpTransportFactory(associations, registry, maximumFrameSize),
             sink,
             setupQueuePool,
             receiveWindowPool,
             setupExecutor,
-            new UdpProxyOptions { Capacity = flows });
+            new UdpProxyOptions { Capacity = flows, Logger = productEvents });
         try
         {
             var controlPort = checked((ushort)(externalServer?.ControlEndpoint.Port ?? server!.ControlEndpoint.Port));
@@ -69,11 +72,11 @@ internal static class UdpChurnScenario
             var timeout = ComputeWaveTimeout(flows, associateDelay);
             if (sustained)
             {
-                await RunSustainedAsync(context, coordinator, sink, target, flowKeys, options, timeout).ConfigureAwait(false);
+                await RunSustainedAsync(context, coordinator, sink, target, flowKeys, options, productEvents, timeout).ConfigureAwait(false);
             }
             else
             {
-                await RunWavesAsync(context, coordinator, sink, target, flowKeys, options, waveCount: waves, timeout).ConfigureAwait(false);
+                await RunWavesAsync(context, coordinator, sink, target, flowKeys, options, productEvents, waveCount: waves, timeout).ConfigureAwait(false);
             }
         }
         finally
@@ -100,6 +103,7 @@ internal static class UdpChurnScenario
         ChurnTarget target,
         FlowKey[] flowKeys,
         SoakOptions options,
+        CountingRuntimeLogger productEvents,
         int waveCount,
         TimeSpan timeout)
     {
@@ -111,7 +115,7 @@ internal static class UdpChurnScenario
             context.WriteResult(
                 "udp.churn",
                 new { burstFlows = options.BurstFlows, dialDelayMs = options.DialDelayMs, mode = "waves", wave, waves = waveCount },
-                sample.BuildMetrics(payload.Length));
+                sample.BuildMetrics(payload.Length, productEvents));
         }
     }
 
@@ -141,6 +145,7 @@ internal static class UdpChurnScenario
         ChurnTarget target,
         FlowKey[] flowKeys,
         SoakOptions options,
+        CountingRuntimeLogger productEvents,
         TimeSpan timeout)
     {
         var payload = new byte[options.PayloadBytes];
@@ -190,6 +195,7 @@ internal static class UdpChurnScenario
                 waveBytesPerSession = BuildDistribution(perWaveBytesPerSession),
                 firstResponseMs = LatencyDistribution.FromMilliseconds(firstResponseLatencies),
                 wallSeconds = elapsedSeconds,
+                productEvents = StabilityShared.BuildProductEvents(productEvents),
             });
     }
 
@@ -329,7 +335,7 @@ internal static class UdpChurnScenario
         long Gen1Collections,
         long Gen2Collections)
     {
-        public object BuildMetrics(int payloadBytes) => new
+        public object BuildMetrics(int payloadBytes, CountingRuntimeLogger productEvents) => new
         {
             accepted = Accepted,
             rejected = Rejected,
@@ -345,6 +351,7 @@ internal static class UdpChurnScenario
             gen1Collections = Gen1Collections,
             gen2Collections = Gen2Collections,
             payloadBytes,
+            productEvents = StabilityShared.BuildProductEvents(productEvents),
         };
     }
 

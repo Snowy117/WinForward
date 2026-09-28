@@ -28,7 +28,8 @@ internal static class StabilityShared
 
     /// <summary>
     /// Product event names surfaced in the result row — per-datagram trace/debug events plus the
-    /// rate-limited warn summaries (<c>udp.session.capacity-block</c>); absent names count as zero.
+    /// rate-limited or one-shot warn summaries (<c>udp.session.capacity-block</c>,
+    /// <c>udp.association.fallback</c>); absent names count as zero.
     /// </summary>
     private static readonly string[] s_productEventNames =
     [
@@ -37,6 +38,7 @@ internal static class StabilityShared
         "udp.session.capacity-block",
         "udp.setup.failed",
         "udp.setup.cooldown",
+        "udp.association.fallback",
         "udp.packet.sent",
         "udp.session.created",
         "udp.session.closed",
@@ -82,19 +84,22 @@ internal sealed record LatencyDistribution(double Min, double P50, double P95, d
 }
 
 /// <summary>
-/// Diagnostic-only product-event census: counts every Event() call by name (both Trace
-/// and Debug) with no formatting or I/O. Enabling Trace makes the product emit its
-/// per-datagram trace events (udp.packet.sent/received), which allocates and slows the
-/// send/receive paths — rows produced this way localize loss or establishment failures
-/// but are not throughput/latency-comparable with uninstrumented runs.
+/// Diagnostic-only product-event census: counts every Event() call by name with no formatting or
+/// I/O. With <paramref name="includeVerbose"/> false only <see cref="RuntimeLogLevel.Warn"/> is
+/// enabled, so the product's own <c>IsEnabled</c> guards keep the per-datagram trace/debug events out
+/// of the send and receive paths — a distortion-free census of the rate-limited and one-shot warns
+/// (<c>udp.session.capacity-block</c>, <c>udp.association.fallback</c>) that every stability row can
+/// carry. With it true the product also emits its per-datagram trace events
+/// (udp.packet.sent/received), which allocates and slows those paths: rows produced that way localize
+/// loss or establishment failures but are not throughput/latency-comparable with uninstrumented runs.
 /// </summary>
-internal sealed class CountingRuntimeLogger : IRuntimeLogger
+internal sealed class CountingRuntimeLogger(bool includeVerbose = true) : IRuntimeLogger
 {
     private readonly ConcurrentDictionary<string, long> _events = new(StringComparer.Ordinal);
 
     public IReadOnlyDictionary<string, long> Events => _events;
 
-    public bool IsEnabled(RuntimeLogLevel level) => true;
+    public bool IsEnabled(RuntimeLogLevel level) => includeVerbose || level == RuntimeLogLevel.Warn;
 
     public void Info(string message) { }
 

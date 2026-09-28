@@ -31,6 +31,18 @@ internal sealed record UdpRelayTarget(IPEndPoint Endpoint, SocketAddress SocketA
 /// <see cref="Recovering"/>, and only while holding that gate. The lock-free readers — leases and
 /// the watchdog — go through the volatile fields.
 /// </para>
+/// <para>
+/// The capability evidence of the attached flows is a live set owned per lease:
+/// <see cref="StartLease"/> adds the flow's record and <see cref="ReleaseLeaseAsync"/> removes it,
+/// both under <see cref="_evidenceGate"/>. That lock is a leaf — never held while taking the pool's
+/// gate, while the pool's gate may be held while taking it (attach runs under the pool gate) — so
+/// <see cref="SnapshotEvidence"/> returns records of leases attached at that instant and nothing
+/// else, however many leases the association has served before. The sampler's rule needs a live
+/// responding sibling (design §5), so a pinning server whose answered flow has already been released
+/// is not detectable by this association; detection resumes with the next answered sibling. The limit
+/// is bounded by the lease lifetime and the 5 s tick, and the verdict it feeds is per server and
+/// sticky.
+/// </para>
 /// </summary>
 internal sealed class UdpControlAssociation : IAsyncDisposable
 {
@@ -41,6 +53,8 @@ internal sealed class UdpControlAssociation : IAsyncDisposable
     private readonly UdpAssociationContext _context;
     private readonly QuiescenceScope _scope;
     private readonly Lock _associateGate = new();
+    private readonly Lock _evidenceGate = new();
+    private readonly List<UdpAssociationEvidence> _liveEvidence = [];
 
     private Socks5ControlConnection? _control;
     private UdpRelayTarget? _relayTarget;
@@ -68,7 +82,7 @@ internal sealed class UdpControlAssociation : IAsyncDisposable
     /// (today's per-flow behaviour) and for a flow that arrives when the per-server association cap
     /// is reached, and it is closed as soon as its last lease is released.
     /// </summary>
-    private bool IsPrivate { get; }
+    internal bool IsPrivate { get; }
 
     /// <summary>True while a re-association attempt is in flight; placement skips the association (pool gate).</summary>
     internal bool Recovering { get; set; }
@@ -107,21 +121,44 @@ internal sealed class UdpControlAssociation : IAsyncDisposable
     internal Task EnsureAssociatedAsync(CancellationToken cancellationToken)
         => Volatile.Read(ref _associateTask) ?? StartAssociateAsync(cancellationToken);
 
-    /// <summary>Attaches one flow lease; the pool calls this while holding its gate.</summary>
-    internal void AttachLease()
+    /// <summary>
+    /// Attaches the flow's capability evidence and claims its lease refcount; the pool calls this
+    /// while holding its gate and before the lease is returned. The evidence joins the live set here
+    /// and leaves it in <see cref="ReleaseLeaseAsync"/>, so the sampler reads exactly the leases
+    /// attached at the instant it samples.
+    /// </summary>
+    internal void StartLease(UdpAssociationEvidence evidence)
     {
+        ArgumentNullException.ThrowIfNull(evidence);
+        lock (_evidenceGate) _liveEvidence.Add(evidence);
         Volatile.Write(ref _idleSinceTicks, 0);
         Interlocked.Increment(ref _leaseCount);
     }
 
     /// <summary>
-    /// Releases one flow lease. A private or faulted association is closed by its last holder; a
-    /// warm shared association is parked with its idle clock started, so
+    /// An independent copy of the attached leases' evidence, plus how many records it holds, for the
+    /// sampler's 5 s maintenance tick (never the datagram path, so the copy is cold). The count is the
+    /// copy's own length, so the sampler cannot walk past the evidence it was handed.
+    /// </summary>
+    internal (UdpAssociationEvidence[] Evidence, int Attached) SnapshotEvidence()
+    {
+        lock (_evidenceGate)
+        {
+            return _liveEvidence.Count == 0 ? ([], 0) : ([.. _liveEvidence], _liveEvidence.Count);
+        }
+    }
+
+    /// <summary>
+    /// Releases one flow lease. The flow's evidence leaves the live set before the refcount falls, so
+    /// no later sample can read a released lease. A private or faulted association is closed by its
+    /// last holder; a warm shared association is parked with its idle clock started, so
     /// <see cref="UdpAssociationPool"/> can reuse it and retire it once it has been idle for the
     /// retention window.
     /// </summary>
-    internal async ValueTask ReleaseLeaseAsync()
+    internal async ValueTask ReleaseLeaseAsync(UdpAssociationEvidence evidence)
     {
+        ArgumentNullException.ThrowIfNull(evidence);
+        lock (_evidenceGate) _ = _liveEvidence.Remove(evidence);
         if (Interlocked.Decrement(ref _leaseCount) > 0) return;
         if (IsPrivate || IsFaulted)
         {
@@ -349,6 +386,9 @@ internal sealed class UdpControlAssociation : IAsyncDisposable
         finally
         {
             await drain.ConfigureAwait(false);
+            // The pool gate now refuses new attachments, so the live set is emptied rather than left
+            // holding evidence a late reader could mistake for an attached lease.
+            lock (_evidenceGate) _liveEvidence.Clear();
         }
     }
 }

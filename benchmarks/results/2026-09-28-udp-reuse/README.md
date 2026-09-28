@@ -113,3 +113,65 @@ serve 16 flows, so the per-flow framework cost (control connect + greeting + ASS
 measured per-session framework path) is amortized instead of paid per flow. The churn still lands
 inside the `hot-path.md` §3 anchors (≤14,500 wave / ≤14,300 sustained).
 
+---
+
+# Step 3 — capability detection on the production default (`auto`)
+
+Recorded against the uncommitted Step 3 tree **after the check's fix round** (per-lease evidence held
+as the association's live attached set, so a sample can only read the leases attached at that
+instant; a warn-level product-event census carried by every stability row). The three harness
+scenarios construct the pool with `UdpAssociationReuseMode.Auto` — the production default — instead
+of the previous hard-coded `always`; `step3fix-*.jsonl` are the runs below.
+
+| Scenario | Step 1 (per-flow) | Step 2 (`always`) | Step 3 (`auto`) |
+|---|---|---|---|
+| `udp` 25 kpps × 60 s | 1,495,689 = received, loss 0, 24,925 pps, 117 overflows | 1,498,696 = 1,498,696, loss 0, 24,976 pps, 16 overflows | 1,499,000 = 1,499,000, loss 0, **24,982.2 pps**, 15 overflows |
+| `udpBurst` 48 × 100 ms | 48/48, loss 0, p50 304.4 ms | 48/48, loss 0, p50 305.3 / 308.8 ms | 48/48, loss 0, p50 **305.5 ms**, max 613.6 ms |
+| `churn` 48 × 120 s `--socks5-external` | 77,328 sessions, 13,066.5 B/session, p50 12.513 ms | 222,768 sessions, **7,564.7 B/session**, p50 3.203 ms | 222,720 sessions, **7,577.5 B/session**, p50 3.246 ms, 0 rejected, loss 0 |
+
+**Fallback evidence.** Every row now carries the `productEvents` census and
+`udp.association.fallback` is one of its names, so "`auto` never flipped the server" is a recorded
+number instead of an unasserted claim: all three rows report **`udp.association.fallback: 0`**
+(alongside `udp.session.capacity-block: 0` and `udp.setup.failed: 0`). The census enables only
+`Warn`-level product events — every product logging site guards on `IsEnabled`, so the per-datagram
+trace/debug events stay out of the send path and the rows remain throughput/latency-comparable with
+the Step 1/2 runs; the scenarios' compile-time `CaptureProductEvents` switch still adds the verbose
+census for a loss-localization session.
+
+`auto` **shared** in all three runs: the churn B/session is the discriminator (≈7.6 KB shared vs
+≈13 KB per-flow), and zero fallback events confirm the loopback server's permissive response pattern
+was settled `SharedOk` rather than flipped to per-flow. Step 3's churn is +0.2 % over Step 2 and
+−42.0 % versus Step 1, inside the `hot-path.md` §3 anchors (≤14,500 wave / ≤14,300 sustained); the
+burst p50 sits in the same band as Steps 1–2.
+
+`step3-*.jsonl` are the pre-fix Step 3 runs the check reviewed and are kept for comparison: their
+Step 3 column was `udp` 1,497,001 / 24,947.2 pps / 35 overflows, `udpBurst` 48/48 / p50 306.0 ms, and
+`churn` 221,664 sessions / 7,582.9 B/session — the fix round's re-run above reproduces them within
+run-to-run noise, so the evidence model change moved no headline number. Those rows predate the
+census change and carry no `productEvents` field, which is exactly the gap the fix round closed.
+
+## File-size exception (dated, explicit)
+
+`directory-structure.md` caps every `.cs` file at 400 effective lines. A repo-wide scan (excluding
+`obj/`/`bin/`) finds exactly **two** files above the cap, both benchmarks and both predating this
+task: `benchmarks/WinForward.Benchmarks/Stability/GcSoakScenario.cs` (685 effective lines; the Step 3
+change is the one-token `UdpAssociationReuseMode.Always` → `Auto` switch, net 0 effective lines) and
+`benchmarks/WinForward.Benchmarks/Perf/SessionSetupDecompositionBenchmarks.cs` (909 effective lines,
+untouched). They are recorded here (2026-09-28) as an explicit exception with splitting as a
+follow-up rather than silently inherited; this task added no lines to either file. Every file this
+task touched is ≤400 effective lines (largest: `UdpChurnScenario.cs` 326,
+`UdpAssociationPool.cs` 316, `UdpAssociationCapabilityTests.cs` 288).
+
+
+## Framework instruments stay on `off`
+
+`UdpSessionBenchmarks` and `FrameworkSetupBenchmarks` still construct the pool with
+`UdpAssociationReuseMode.Off`, deliberately. They are per-session framework/allocation instruments
+whose recorded anchors (`hot-path.md` §3: the ≤5,400 B/session Noop probe, the ≤8,200 B/session
+framework ladder, the ≤14,500/≤14,300/≤17,500 churn anchors) were all measured against the per-flow
+shape. Pooling control connections removes the ~3.8 KB/session dial that those anchors bracket, so
+running them on `auto` would silently re-base every recorded number instead of comparing against it.
+The `auto` sharing claim is carried by the `udp.churn` scenario above and by the §3 ledger's
+"reusing control connections is the only structural lever there".
+
+
