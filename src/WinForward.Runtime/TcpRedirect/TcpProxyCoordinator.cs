@@ -256,11 +256,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         var entry = item._tcp._entry!;
         var frame = item._tcp._frame!;
         var server = item._server!;
-        try
-        {
-            _store.EnterSetup();
-        }
-        catch (ObjectDisposedException)
+        if (!_store.TryEnterSetup(out var lease))
         {
             // Disposal began between the pump-side retain and this task's start: the setup was
             // never observed, and shutdown unwinds without a cooldown.
@@ -271,15 +267,15 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         try
         {
             var writeCooldown = await RunSetupPipelineAsync(entry, frame, server).ConfigureAwait(false);
-            // The entry removal and its cooldown write must complete before ExitSetup unblocks
-            // the store's dispose drain: the coordinator's post-drain RemoveAll clears the index,
-            // so a write racing the drain would otherwise re-arm a cooldown on a disposed index
-            // (D3).
+            // The entry removal and its cooldown write must complete before the lease release
+            // unblocks the store's dispose drain: the coordinator's post-drain RemoveAll clears
+            // the index, so a write racing the drain would otherwise re-arm a cooldown on a
+            // disposed index (D3).
             _pendingSyn.Complete(key, entry, writeCooldown, _timeProvider.GetUtcNow());
         }
         finally
         {
-            _store.ExitSetup();
+            lease.Dispose();
         }
     }
 
@@ -663,9 +659,9 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
 
     private async Task DisposeCoreAsync()
     {
-        // The store's dispose drains every started background setup (R8 moved EnterSetup into
-        // the task, so the inflight counter covers them); the pending drain afterwards closes the
-        // window between a task's final ExitSetup and its entry removal, crediting every
+        // The store's dispose drains every started background setup (the pipeline runs on the
+        // store's scope, so its in-flight set covers them); the pending drain afterwards closes the
+        // window between a task's final lease release and its entry removal, crediting every
         // retained copy exactly once and dropping cooldowns so a disposed coordinator leaves no
         // per-flow state behind. Injected collaborators (the syn-copy pool, the setup executor)
         // are borrowed, not owned: composition disposes them after the coordinator's drain.

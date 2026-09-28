@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/09-20-structured-concurrency/design.md", "reason": "Parent design: the normative primitive (P1-P9, D1-D9, invariants I1/I2), the allocation rule and the deferred gate-choice decision (2.3), the lock order (2.4), and the spec-file contract (3.5)."}
+{"file": ".trellis/tasks/09-20-quiescence-scope/design.md", "reason": "C1 technical design: state machine, allocation contract, the Run rethrow/lease-copy hazards, the test strategy, and the gate-choice protocol."}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "The zero-allocation packet-path rule that the TryEnter/Exit contract must satisfy (requirement R5)."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "File placement, the 400-effective-line cap, and naming conventions for the new Runtime file, test file, and spec file."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Fail-closed semantics; how RecordFault differs from throwing, for the D3/D4 fault policy."}
+{"file": "benchmarks/README.md", "reason": "How to run Perf and Stability mode and how to read the output (allocation bytes are an exact gate; sub-2x ns/pps deltas are noise)."}

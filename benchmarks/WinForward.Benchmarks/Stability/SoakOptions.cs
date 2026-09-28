@@ -11,6 +11,7 @@ internal enum SoakScenario
     Footprint,
     Baseline,
     Burst,
+    Churn,
     GcSoak,
 }
 
@@ -110,6 +111,15 @@ internal sealed record SoakOptions
     public int BurstFlows { get; private init; } = 48;
     public int DialDelayMs { get; private init; }
 
+    /// <summary>UDP churn waves (<c>--churn-waves</c>): K ≥ 1 fires K waves and reports one row per wave; 0 runs sustained churn for <see cref="DurationSeconds"/> and reports one aggregate row.</summary>
+    public int ChurnWaves { get; private init; } = 1;
+
+    /// <summary>Child server mode (<c>--serve-socks5-udp</c>): host the loopback SOCKS5 UDP server for a parent process instead of running a scenario.</summary>
+    public bool ServeSocks5Udp { get; private init; }
+
+    /// <summary>UDP churn against the out-of-process server helper instead of the in-process receiver/server (<c>--socks5-external</c>).</summary>
+    public bool Socks5External { get; private init; }
+
     public static SoakOptions Parse(string[] args)
     {
         var options = new SoakOptions();
@@ -168,6 +178,12 @@ internal sealed record SoakOptions
                 return options with { BurstFlows = PositiveInt("--burst-flows", Value(args, ref index)) };
             case "--dial-delay-ms":
                 return options with { DialDelayMs = AtLeast("--dial-delay-ms", Value(args, ref index), 0) };
+            case "--churn-waves":
+                return options with { ChurnWaves = AtLeast("--churn-waves", Value(args, ref index), 0) };
+            case "--serve-socks5-udp":
+                return options with { ServeSocks5Udp = true };
+            case "--socks5-external":
+                return options with { Socks5External = true };
             default:
                 throw new ArgumentException($"Unknown stability argument '{args[index]}'.", nameof(args));
         }
@@ -193,8 +209,9 @@ internal sealed record SoakOptions
         "footprint" => SoakScenario.Footprint,
         "baseline" => SoakScenario.Baseline,
         "udpburst" => SoakScenario.Burst,
+        "udpchurn" or "churn" => SoakScenario.Churn,
         "gc-soak" or "gcsoak" => SoakScenario.GcSoak,
-        _ => throw new ArgumentException($"Unknown scenario '{raw}'; expected all, udp, udpburst, tcp, tcpthroughput, footprint, baseline, or gc-soak.", nameof(raw)),
+        _ => throw new ArgumentException($"Unknown scenario '{raw}'; expected all, udp, udpburst, udpchurn, tcp, tcpthroughput, footprint, baseline, or gc-soak.", nameof(raw)),
     };
 
     private static TcpRelayMode ParseTcpRelayMode(string raw) => raw.ToLowerInvariant() switch

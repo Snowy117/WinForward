@@ -52,9 +52,10 @@ internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IR
         {
             // This loop is the only reader of session.Token (directly and through
             // ClientResetInjector's session overload), so it owns the lifetime CTS disposal: the
-            // store defers DisposeLifetime until the loop ends and a retire can never pull the
-            // CTS out from under a concurrent Token read (R1).
-            session.DisposeLifetime();
+            // store defers DisposeLifetimeAsync until the loop ends and a retire can never pull the
+            // CTS out from under a concurrent Token read (R1). Disposal is single-flight, so the
+            // store's own drain after it awaits this loop is a no-op.
+            await session.DisposeLifetimeAsync().ConfigureAwait(false);
         }
     }
 
@@ -115,9 +116,6 @@ internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IR
         // the redirect must not be left half-open. This runs outside the setup try: a disposal
         // fault here is not a relay setup failure, and routing it through the reset/fail handler
         // would inject against an already retired session (R7).
-        // The relay is discarded without an owner that would await its completion; observe it now
-        // so a later fault never surfaces as an unobserved task exception (S3).
-        TcpRelayFaultObserver.Observe(unattachedRelay, logger);
         await DiscardUnattachedRelayAsync(unattachedRelay, accepted).ConfigureAwait(false);
         await tearDownSession(session).ConfigureAwait(false);
         return false;

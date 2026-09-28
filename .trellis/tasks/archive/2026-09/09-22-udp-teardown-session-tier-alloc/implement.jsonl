@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "budgets/anchors + measurement discipline + real-dial harness rule the probes and re-measurement must follow"}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "D1-D11 scope/drain/CTS contracts the teardown and scope changes must preserve"}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "UDP session lifetime, teardown-reason and fail-closed send contracts"}
+{"file": ".trellis/tasks/archive/2026-09/09-21-session-creation-cost/research/noop-decomposition.md", "reason": "S0-S5/C1/C2 stage-decomposition baseline and the two gaps this task closes"}
+{"file": ".trellis/tasks/archive/2026-09/09-22-session-creation-cost-redo/research/reconciliation-and-decision.md", "reason": "re-anchored budgets, ranked reductions, carried gaps and cross-checks"}

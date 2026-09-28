@@ -130,6 +130,8 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
     private readonly SocketAddress _relaySocketAddress;
     private readonly IPEndPoint _receiveSenderTemplate;
 
+    private int _disposed;
+
     private Socks5UdpTransport(Socket socket, Socks5ControlConnection control, IPEndPoint relayEndpoint, SelfTrafficRegistry.SelfTrafficToken? selfTrafficToken, int maximumFrameSize)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumFrameSize);
@@ -233,6 +235,10 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
         // Non-async warm entry (hot-path convention #3); only the contended-gate shape differs,
         // because a span over native capture memory must not cross the gate await — it is copied
         // there and rides the async slow path.
+        // The gate is disposed last, so a sender that has not yet entered it must be refused here;
+        // otherwise `_sendGate.WaitAsync` would observe the disposed gate. A single volatile read
+        // keeps the warm shape allocation-free.
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         var gateWait = _sendGate.WaitAsync(cancellationToken);
         if (!gateWait.IsCompletedSuccessfully)
         {
@@ -374,6 +380,9 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
 
     public async ValueTask DisposeAsync()
     {
+        // A repeat dispose returns without re-running the teardown; the first caller owns it.
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+
         try
         {
             _socket.Dispose();

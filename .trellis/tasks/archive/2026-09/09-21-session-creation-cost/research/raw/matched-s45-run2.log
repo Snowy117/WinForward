@@ -1,0 +1,580 @@
+// Validating benchmarks:
+// ***** BenchmarkRunner: Start   *****
+// ***** Found 6 benchmark(s) in total *****
+// ***** Building 1 exe(s) in Parallel: Start   *****
+// start dotnet  restore --nodeReuse:false /p:UseSharedCompilation=false /p:Deterministic=true /p:Optimize=true /p:ArtifactsPath="/home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-Job-ZIYXXS-1/" /p:OutDir="/home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-Job-ZIYXXS-1/bin/Release/net10.0/" /p:OutputPath="/home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-Job-ZIYXXS-1/bin/Release/net10.0/" /p:PublishDir="/home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-Job-ZIYXXS-1/publish/" in /home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-Job-ZIYXXS-1
+// command took 3.01 sec and exited with 0
+// start dotnet  build -c Release --no-restore --nodeReuse:false /p:UseSharedCompilation=false /p:Deterministic=true /p:Optimize=true /p:ArtifactsPath="/home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-Job-ZIYXXS-1/" /p:OutDir="/home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-Job-ZIYXXS-1/bin/Release/net10.0/" /p:OutputPath="/home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-Job-ZIYXXS-1/bin/Release/net10.0/" /p:PublishDir="/home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-Job-ZIYXXS-1/publish/" --output "/home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-Job-ZIYXXS-1/bin/Release/net10.0/" in /home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-Job-ZIYXXS-1
+// command took 34.9 sec and exited with 0
+// ***** Done, took 00:00:38 (38.08 sec)   *****
+// Found 6 benchmarks:
+//   SessionSetupDecompositionBenchmarks.StageS4_ReadinessTeardownOutsideAsync: Job-ZIYXXS(InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=1]
+//   SessionSetupDecompositionBenchmarks.StageS5_ReadinessTeardownInsideAsync: Job-ZIYXXS(InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=1]
+//   SessionSetupDecompositionBenchmarks.StageS4_ReadinessTeardownOutsideAsync: Job-ZIYXXS(InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=100]
+//   SessionSetupDecompositionBenchmarks.StageS5_ReadinessTeardownInsideAsync: Job-ZIYXXS(InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=100]
+//   SessionSetupDecompositionBenchmarks.StageS4_ReadinessTeardownOutsideAsync: Job-ZIYXXS(InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=1000]
+//   SessionSetupDecompositionBenchmarks.StageS5_ReadinessTeardownInsideAsync: Job-ZIYXXS(InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=1000]
+
+// **************************
+// Benchmark: SessionSetupDecompositionBenchmarks.StageS4_ReadinessTeardownOutsideAsync: Job-ZIYXXS(InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=1]
+// *** Execute ***
+// Launch: 1 / 1
+// Execute: dotnet WinForward.Benchmarks-Job-ZIYXXS-1.dll --anonymousPipes 141 142 --benchmarkName "WinForward.Benchmarks.Perf.SessionSetupDecompositionBenchmarks.StageS4_ReadinessTeardownOutsideAsync(Sessions: 1)" --job "InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3" --benchmarkId 0 in /home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-Job-ZIYXXS-1/bin/Release/net10.0
+// Failed to set up high priority (Permission denied). In order to run benchmarks with high priority, make sure you have the right permissions.
+// BeforeAnythingElse
+
+// Benchmark Process Environment Information:
+// BenchmarkDotNet v0.15.8
+// Runtime=.NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4
+// GC=Concurrent Workstation
+// HardwareIntrinsics=AVX512 BITALG+VBMI2+VNNI+VPOPCNTDQ,AVX512 IFMA+VBMI,AVX512 F+BW+CD+DQ+VL,AVX2+BMI1+BMI2+F16C+FMA+LZCNT+MOVBE,AVX,SSE3+SSSE3+SSE4.1+SSE4.2+POPCNT,X86Base+SSE+SSE2,AES+PCLMUL,AvxVnni VectorSize=256
+// Job: Job-ZIYXXS(InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3)
+
+OverheadJitting  1: 1 op, 329879.00 ns, 329.8790 us/op
+WorkloadJitting  1: 1 op, 81242896.00 ns, 81.2429 ms/op
+
+OverheadWarmup   1: 6 op, 611.00 ns, 101.8333 ns/op
+OverheadWarmup   2: 6 op, 371.00 ns, 61.8333 ns/op
+OverheadWarmup   3: 6 op, 501.00 ns, 83.5000 ns/op
+OverheadWarmup   4: 6 op, 521.00 ns, 86.8333 ns/op
+OverheadWarmup   5: 6 op, 972.00 ns, 162.0000 ns/op
+OverheadWarmup   6: 6 op, 551.00 ns, 91.8333 ns/op
+OverheadWarmup   7: 6 op, 361.00 ns, 60.1667 ns/op
+OverheadWarmup   8: 6 op, 521.00 ns, 86.8333 ns/op
+OverheadWarmup   9: 6 op, 500.00 ns, 83.3333 ns/op
+
+OverheadActual   1: 6 op, 471.00 ns, 78.5000 ns/op
+OverheadActual   2: 6 op, 481.00 ns, 80.1667 ns/op
+OverheadActual   3: 6 op, 471.00 ns, 78.5000 ns/op
+OverheadActual   4: 6 op, 461.00 ns, 76.8333 ns/op
+OverheadActual   5: 6 op, 351.00 ns, 58.5000 ns/op
+OverheadActual   6: 6 op, 491.00 ns, 81.8333 ns/op
+OverheadActual   7: 6 op, 511.00 ns, 85.1667 ns/op
+OverheadActual   8: 6 op, 521.00 ns, 86.8333 ns/op
+OverheadActual   9: 6 op, 501.00 ns, 83.5000 ns/op
+OverheadActual  10: 6 op, 461.00 ns, 76.8333 ns/op
+OverheadActual  11: 6 op, 471.00 ns, 78.5000 ns/op
+OverheadActual  12: 6 op, 431.00 ns, 71.8333 ns/op
+OverheadActual  13: 6 op, 491.00 ns, 81.8333 ns/op
+OverheadActual  14: 6 op, 461.00 ns, 76.8333 ns/op
+OverheadActual  15: 6 op, 481.00 ns, 80.1667 ns/op
+OverheadActual  16: 6 op, 491.00 ns, 81.8333 ns/op
+OverheadActual  17: 6 op, 742.00 ns, 123.6667 ns/op
+OverheadActual  18: 6 op, 481.00 ns, 80.1667 ns/op
+OverheadActual  19: 6 op, 521.00 ns, 86.8333 ns/op
+OverheadActual  20: 6 op, 471.00 ns, 78.5000 ns/op
+
+WorkloadWarmup   1: 6 op, 197142281.00 ns, 32.8570 ms/op
+WorkloadWarmup   2: 6 op, 188595334.00 ns, 31.4326 ms/op
+WorkloadWarmup   3: 6 op, 192766794.00 ns, 32.1278 ms/op
+
+// BeforeActualRun
+WorkloadActual   1: 6 op, 187126471.00 ns, 31.1877 ms/op
+WorkloadActual   2: 6 op, 185425510.00 ns, 30.9043 ms/op
+WorkloadActual   3: 6 op, 185771339.00 ns, 30.9619 ms/op
+
+// AfterActualRun
+WorkloadResult   1: 6 op, 187125990.00 ns, 31.1877 ms/op
+WorkloadResult   2: 6 op, 185425029.00 ns, 30.9042 ms/op
+WorkloadResult   3: 6 op, 185770858.00 ns, 30.9618 ms/op
+// GC:  0 0 0 200488 6
+// Threading:  0 0 6
+
+// AfterAll
+// Benchmark Process 516997 has exited with code 0.
+
+Mean = 31.018 ms, StdErr = 0.087 ms (0.28%), N = 3, StdDev = 0.150 ms
+Min = 30.904 ms, Q1 = 30.933 ms, Median = 30.962 ms, Q3 = 31.075 ms, Max = 31.188 ms
+IQR = 0.142 ms, LowerFence = 30.720 ms, UpperFence = 31.287 ms
+ConfidenceInterval = [28.284 ms; 33.751 ms] (CI 99.9%), Margin = 2.734 ms (8.81% of Mean)
+Skewness = 0.32, Kurtosis = 0.67, MValue = 2
+
+// ** Remained 5 (83.3%) benchmark(s) to run. Estimated finish 2026-09-22 0:58 (0h 0m from now) **
+// **************************
+// Benchmark: SessionSetupDecompositionBenchmarks.StageS5_ReadinessTeardownInsideAsync: Job-ZIYXXS(InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=1]
+// *** Execute ***
+// Launch: 1 / 1
+// Execute: dotnet WinForward.Benchmarks-Job-ZIYXXS-1.dll --anonymousPipes 141 142 --benchmarkName "WinForward.Benchmarks.Perf.SessionSetupDecompositionBenchmarks.StageS5_ReadinessTeardownInsideAsync(Sessions: 1)" --job "InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3" --benchmarkId 1 in /home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-Job-ZIYXXS-1/bin/Release/net10.0
+// Failed to set up high priority (Permission denied). In order to run benchmarks with high priority, make sure you have the right permissions.
+// BeforeAnythingElse
+
+// Benchmark Process Environment Information:
+// BenchmarkDotNet v0.15.8
+// Runtime=.NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4
+// GC=Concurrent Workstation
+// HardwareIntrinsics=AVX512 BITALG+VBMI2+VNNI+VPOPCNTDQ,AVX512 IFMA+VBMI,AVX512 F+BW+CD+DQ+VL,AVX2+BMI1+BMI2+F16C+FMA+LZCNT+MOVBE,AVX,SSE3+SSSE3+SSE4.1+SSE4.2+POPCNT,X86Base+SSE+SSE2,AES+PCLMUL,AvxVnni VectorSize=256
+// Job: Job-ZIYXXS(InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3)
+
+OverheadJitting  1: 1 op, 303559.00 ns, 303.5590 us/op
+WorkloadJitting  1: 1 op, 115725476.00 ns, 115.7255 ms/op
+
+OverheadWarmup   1: 6 op, 571.00 ns, 95.1667 ns/op
+OverheadWarmup   2: 6 op, 441.00 ns, 73.5000 ns/op
+OverheadWarmup   3: 6 op, 340.00 ns, 56.6667 ns/op
+OverheadWarmup   4: 6 op, 591.00 ns, 98.5000 ns/op
+OverheadWarmup   5: 6 op, 501.00 ns, 83.5000 ns/op
+OverheadWarmup   6: 6 op, 581.00 ns, 96.8333 ns/op
+OverheadWarmup   7: 6 op, 421.00 ns, 70.1667 ns/op
+
+OverheadActual   1: 6 op, 431.00 ns, 71.8333 ns/op
+OverheadActual   2: 6 op, 471.00 ns, 78.5000 ns/op
+OverheadActual   3: 6 op, 470.00 ns, 78.3333 ns/op
+OverheadActual   4: 6 op, 551.00 ns, 91.8333 ns/op
+OverheadActual   5: 6 op, 471.00 ns, 78.5000 ns/op
+OverheadActual   6: 6 op, 491.00 ns, 81.8333 ns/op
+OverheadActual   7: 6 op, 341.00 ns, 56.8333 ns/op
+OverheadActual   8: 6 op, 351.00 ns, 58.5000 ns/op
+OverheadActual   9: 6 op, 471.00 ns, 78.5000 ns/op
+OverheadActual  10: 6 op, 511.00 ns, 85.1667 ns/op
+OverheadActual  11: 6 op, 551.00 ns, 91.8333 ns/op
+OverheadActual  12: 6 op, 491.00 ns, 81.8333 ns/op
+OverheadActual  13: 6 op, 441.00 ns, 73.5000 ns/op
+OverheadActual  14: 6 op, 491.00 ns, 81.8333 ns/op
+OverheadActual  15: 6 op, 481.00 ns, 80.1667 ns/op
+OverheadActual  16: 6 op, 340.00 ns, 56.6667 ns/op
+OverheadActual  17: 6 op, 471.00 ns, 78.5000 ns/op
+OverheadActual  18: 6 op, 521.00 ns, 86.8333 ns/op
+OverheadActual  19: 6 op, 471.00 ns, 78.5000 ns/op
+OverheadActual  20: 6 op, 561.00 ns, 93.5000 ns/op
+
+WorkloadWarmup   1: 6 op, 284048758.00 ns, 47.3415 ms/op
+WorkloadWarmup   2: 6 op, 270629583.00 ns, 45.1049 ms/op
+WorkloadWarmup   3: 6 op, 266173560.00 ns, 44.3623 ms/op
+
+// BeforeActualRun
+WorkloadActual   1: 6 op, 277749552.00 ns, 46.2916 ms/op
+WorkloadActual   2: 6 op, 270645706.00 ns, 45.1076 ms/op
+WorkloadActual   3: 6 op, 286167492.00 ns, 47.6946 ms/op
+
+// AfterActualRun
+WorkloadResult   1: 6 op, 277749081.00 ns, 46.2915 ms/op
+WorkloadResult   2: 6 op, 270645235.00 ns, 45.1075 ms/op
+WorkloadResult   3: 6 op, 286167021.00 ns, 47.6945 ms/op
+// GC:  0 0 0 470832 6
+// Threading:  6 385 6
+// Exceptions:  130
+
+// AfterAll
+// Benchmark Process 519776 has exited with code 0.
+
+Mean = 46.365 ms, StdErr = 0.748 ms (1.61%), N = 3, StdDev = 1.295 ms
+Min = 45.108 ms, Q1 = 45.700 ms, Median = 46.292 ms, Q3 = 46.993 ms, Max = 47.695 ms
+IQR = 1.293 ms, LowerFence = 43.759 ms, UpperFence = 48.933 ms
+ConfidenceInterval = [22.738 ms; 69.991 ms] (CI 99.9%), Margin = 23.626 ms (50.96% of Mean)
+Skewness = 0.06, Kurtosis = 0.67, MValue = 2
+
+// ** Remained 4 (66.7%) benchmark(s) to run. Estimated finish 2026-09-22 0:58 (0h 0m from now) **
+// **************************
+// Benchmark: SessionSetupDecompositionBenchmarks.StageS4_ReadinessTeardownOutsideAsync: Job-ZIYXXS(InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=100]
+// *** Execute ***
+// Launch: 1 / 1
+// Execute: dotnet WinForward.Benchmarks-Job-ZIYXXS-1.dll --anonymousPipes 141 142 --benchmarkName "WinForward.Benchmarks.Perf.SessionSetupDecompositionBenchmarks.StageS4_ReadinessTeardownOutsideAsync(Sessions: 100)" --job "InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3" --benchmarkId 2 in /home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-Job-ZIYXXS-1/bin/Release/net10.0
+// Failed to set up high priority (Permission denied). In order to run benchmarks with high priority, make sure you have the right permissions.
+// BeforeAnythingElse
+
+// Benchmark Process Environment Information:
+// BenchmarkDotNet v0.15.8
+// Runtime=.NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4
+// GC=Concurrent Workstation
+// HardwareIntrinsics=AVX512 BITALG+VBMI2+VNNI+VPOPCNTDQ,AVX512 IFMA+VBMI,AVX512 F+BW+CD+DQ+VL,AVX2+BMI1+BMI2+F16C+FMA+LZCNT+MOVBE,AVX,SSE3+SSSE3+SSE4.1+SSE4.2+POPCNT,X86Base+SSE+SSE2,AES+PCLMUL,AvxVnni VectorSize=256
+// Job: Job-ZIYXXS(InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3)
+
+OverheadJitting  1: 1 op, 288821.00 ns, 288.8210 us/op
+WorkloadJitting  1: 1 op, 105862150.00 ns, 105.8622 ms/op
+
+OverheadWarmup   1: 6 op, 781.00 ns, 130.1667 ns/op
+OverheadWarmup   2: 6 op, 711.00 ns, 118.5000 ns/op
+OverheadWarmup   3: 6 op, 541.00 ns, 90.1667 ns/op
+OverheadWarmup   4: 6 op, 671.00 ns, 111.8333 ns/op
+OverheadWarmup   5: 6 op, 441.00 ns, 73.5000 ns/op
+OverheadWarmup   6: 6 op, 331.00 ns, 55.1667 ns/op
+OverheadWarmup   7: 6 op, 500.00 ns, 83.3333 ns/op
+OverheadWarmup   8: 6 op, 601.00 ns, 100.1667 ns/op
+OverheadWarmup   9: 6 op, 461.00 ns, 76.8333 ns/op
+
+OverheadActual   1: 6 op, 421.00 ns, 70.1667 ns/op
+OverheadActual   2: 6 op, 481.00 ns, 80.1667 ns/op
+OverheadActual   3: 6 op, 481.00 ns, 80.1667 ns/op
+OverheadActual   4: 6 op, 481.00 ns, 80.1667 ns/op
+OverheadActual   5: 6 op, 461.00 ns, 76.8333 ns/op
+OverheadActual   6: 6 op, 381.00 ns, 63.5000 ns/op
+OverheadActual   7: 6 op, 461.00 ns, 76.8333 ns/op
+OverheadActual   8: 6 op, 381.00 ns, 63.5000 ns/op
+OverheadActual   9: 6 op, 541.00 ns, 90.1667 ns/op
+OverheadActual  10: 6 op, 1483.00 ns, 247.1667 ns/op
+OverheadActual  11: 6 op, 321.00 ns, 53.5000 ns/op
+OverheadActual  12: 6 op, 551.00 ns, 91.8333 ns/op
+OverheadActual  13: 6 op, 320.00 ns, 53.3333 ns/op
+OverheadActual  14: 6 op, 451.00 ns, 75.1667 ns/op
+OverheadActual  15: 6 op, 651.00 ns, 108.5000 ns/op
+OverheadActual  16: 6 op, 441.00 ns, 73.5000 ns/op
+OverheadActual  17: 6 op, 471.00 ns, 78.5000 ns/op
+OverheadActual  18: 6 op, 672.00 ns, 112.0000 ns/op
+OverheadActual  19: 6 op, 461.00 ns, 76.8333 ns/op
+OverheadActual  20: 6 op, 481.00 ns, 80.1667 ns/op
+
+WorkloadWarmup   1: 6 op, 257558231.00 ns, 42.9264 ms/op
+WorkloadWarmup   2: 6 op, 245038513.00 ns, 40.8398 ms/op
+WorkloadWarmup   3: 6 op, 246847707.00 ns, 41.1413 ms/op
+
+// BeforeActualRun
+WorkloadActual   1: 6 op, 239591113.00 ns, 39.9319 ms/op
+WorkloadActual   2: 6 op, 260519393.00 ns, 43.4199 ms/op
+WorkloadActual   3: 6 op, 237597344.00 ns, 39.5996 ms/op
+
+// AfterActualRun
+WorkloadResult   1: 6 op, 239590647.00 ns, 39.9318 ms/op
+WorkloadResult   2: 6 op, 260518927.00 ns, 43.4198 ms/op
+WorkloadResult   3: 6 op, 237596878.00 ns, 39.5995 ms/op
+// GC:  0 0 0 2801120 6
+// Threading:  526 458 6
+
+// AfterAll
+// Benchmark Process 522575 has exited with code 0.
+
+Mean = 40.984 ms, StdErr = 1.222 ms (2.98%), N = 3, StdDev = 2.116 ms
+Min = 39.599 ms, Q1 = 39.766 ms, Median = 39.932 ms, Q3 = 41.676 ms, Max = 43.420 ms
+IQR = 1.910 ms, LowerFence = 36.900 ms, UpperFence = 44.541 ms
+ConfidenceInterval = [2.375 ms; 79.593 ms] (CI 99.9%), Margin = 38.609 ms (94.21% of Mean)
+Skewness = 0.37, Kurtosis = 0.67, MValue = 2
+
+// ** Remained 3 (50.0%) benchmark(s) to run. Estimated finish 2026-09-22 0:58 (0h 0m from now) **
+// **************************
+// Benchmark: SessionSetupDecompositionBenchmarks.StageS5_ReadinessTeardownInsideAsync: Job-ZIYXXS(InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=100]
+// *** Execute ***
+// Launch: 1 / 1
+// Execute: dotnet WinForward.Benchmarks-Job-ZIYXXS-1.dll --anonymousPipes 141 142 --benchmarkName "WinForward.Benchmarks.Perf.SessionSetupDecompositionBenchmarks.StageS5_ReadinessTeardownInsideAsync(Sessions: 100)" --job "InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3" --benchmarkId 3 in /home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-Job-ZIYXXS-1/bin/Release/net10.0
+// Failed to set up high priority (Permission denied). In order to run benchmarks with high priority, make sure you have the right permissions.
+// BeforeAnythingElse
+
+// Benchmark Process Environment Information:
+// BenchmarkDotNet v0.15.8
+// Runtime=.NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4
+// GC=Concurrent Workstation
+// HardwareIntrinsics=AVX512 BITALG+VBMI2+VNNI+VPOPCNTDQ,AVX512 IFMA+VBMI,AVX512 F+BW+CD+DQ+VL,AVX2+BMI1+BMI2+F16C+FMA+LZCNT+MOVBE,AVX,SSE3+SSSE3+SSE4.1+SSE4.2+POPCNT,X86Base+SSE+SSE2,AES+PCLMUL,AvxVnni VectorSize=256
+// Job: Job-ZIYXXS(InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3)
+
+OverheadJitting  1: 1 op, 294332.00 ns, 294.3320 us/op
+WorkloadJitting  1: 1 op, 132378634.00 ns, 132.3786 ms/op
+
+OverheadWarmup   1: 6 op, 772.00 ns, 128.6667 ns/op
+OverheadWarmup   2: 6 op, 601.00 ns, 100.1667 ns/op
+OverheadWarmup   3: 6 op, 471.00 ns, 78.5000 ns/op
+OverheadWarmup   4: 6 op, 461.00 ns, 76.8333 ns/op
+OverheadWarmup   5: 6 op, 361.00 ns, 60.1667 ns/op
+OverheadWarmup   6: 6 op, 451.00 ns, 75.1667 ns/op
+OverheadWarmup   7: 6 op, 471.00 ns, 78.5000 ns/op
+OverheadWarmup   8: 6 op, 491.00 ns, 81.8333 ns/op
+OverheadWarmup   9: 6 op, 471.00 ns, 78.5000 ns/op
+OverheadWarmup  10: 6 op, 531.00 ns, 88.5000 ns/op
+
+OverheadActual   1: 6 op, 471.00 ns, 78.5000 ns/op
+OverheadActual   2: 6 op, 481.00 ns, 80.1667 ns/op
+OverheadActual   3: 6 op, 451.00 ns, 75.1667 ns/op
+OverheadActual   4: 6 op, 480.00 ns, 80.0000 ns/op
+OverheadActual   5: 6 op, 461.00 ns, 76.8333 ns/op
+OverheadActual   6: 6 op, 501.00 ns, 83.5000 ns/op
+OverheadActual   7: 6 op, 461.00 ns, 76.8333 ns/op
+OverheadActual   8: 6 op, 470.00 ns, 78.3333 ns/op
+OverheadActual   9: 6 op, 611.00 ns, 101.8333 ns/op
+OverheadActual  10: 6 op, 411.00 ns, 68.5000 ns/op
+OverheadActual  11: 6 op, 471.00 ns, 78.5000 ns/op
+OverheadActual  12: 6 op, 471.00 ns, 78.5000 ns/op
+OverheadActual  13: 6 op, 481.00 ns, 80.1667 ns/op
+OverheadActual  14: 6 op, 521.00 ns, 86.8333 ns/op
+OverheadActual  15: 6 op, 481.00 ns, 80.1667 ns/op
+OverheadActual  16: 6 op, 451.00 ns, 75.1667 ns/op
+OverheadActual  17: 6 op, 541.00 ns, 90.1667 ns/op
+OverheadActual  18: 6 op, 341.00 ns, 56.8333 ns/op
+OverheadActual  19: 6 op, 461.00 ns, 76.8333 ns/op
+OverheadActual  20: 6 op, 501.00 ns, 83.5000 ns/op
+
+WorkloadWarmup   1: 6 op, 347757039.00 ns, 57.9595 ms/op
+WorkloadWarmup   2: 6 op, 340260064.00 ns, 56.7100 ms/op
+WorkloadWarmup   3: 6 op, 342502934.00 ns, 57.0838 ms/op
+
+// BeforeActualRun
+WorkloadActual   1: 6 op, 347522923.00 ns, 57.9205 ms/op
+WorkloadActual   2: 6 op, 319772212.00 ns, 53.2954 ms/op
+WorkloadActual   3: 6 op, 325787320.00 ns, 54.2979 ms/op
+
+// AfterActualRun
+WorkloadResult   1: 6 op, 347522452.00 ns, 57.9204 ms/op
+WorkloadResult   2: 6 op, 319771741.00 ns, 53.2953 ms/op
+WorkloadResult   3: 6 op, 325786849.00 ns, 54.2978 ms/op
+// GC:  0 0 0 3880160 6
+// Threading:  1115 740 6
+// Exceptions:  328
+
+// AfterAll
+// Benchmark Process 525377 has exited with code 0.
+
+Mean = 55.171 ms, StdErr = 1.405 ms (2.55%), N = 3, StdDev = 2.433 ms
+Min = 53.295 ms, Q1 = 53.797 ms, Median = 54.298 ms, Q3 = 56.109 ms, Max = 57.920 ms
+IQR = 2.313 ms, LowerFence = 50.328 ms, UpperFence = 59.578 ms
+ConfidenceInterval = [10.782 ms; 99.560 ms] (CI 99.9%), Margin = 44.389 ms (80.46% of Mean)
+Skewness = 0.31, Kurtosis = 0.67, MValue = 2
+
+// ** Remained 2 (33.3%) benchmark(s) to run. Estimated finish 2026-09-22 0:58 (0h 0m from now) **
+// **************************
+// Benchmark: SessionSetupDecompositionBenchmarks.StageS4_ReadinessTeardownOutsideAsync: Job-ZIYXXS(InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=1000]
+// *** Execute ***
+// Launch: 1 / 1
+// Execute: dotnet WinForward.Benchmarks-Job-ZIYXXS-1.dll --anonymousPipes 141 142 --benchmarkName "WinForward.Benchmarks.Perf.SessionSetupDecompositionBenchmarks.StageS4_ReadinessTeardownOutsideAsync(Sessions: 1000)" --job "InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3" --benchmarkId 4 in /home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-Job-ZIYXXS-1/bin/Release/net10.0
+// Failed to set up high priority (Permission denied). In order to run benchmarks with high priority, make sure you have the right permissions.
+// BeforeAnythingElse
+
+// Benchmark Process Environment Information:
+// BenchmarkDotNet v0.15.8
+// Runtime=.NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4
+// GC=Concurrent Workstation
+// HardwareIntrinsics=AVX512 BITALG+VBMI2+VNNI+VPOPCNTDQ,AVX512 IFMA+VBMI,AVX512 F+BW+CD+DQ+VL,AVX2+BMI1+BMI2+F16C+FMA+LZCNT+MOVBE,AVX,SSE3+SSSE3+SSE4.1+SSE4.2+POPCNT,X86Base+SSE+SSE2,AES+PCLMUL,AvxVnni VectorSize=256
+// Job: Job-ZIYXXS(InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3)
+
+OverheadJitting  1: 1 op, 294172.00 ns, 294.1720 us/op
+WorkloadJitting  1: 1 op, 136497483.00 ns, 136.4975 ms/op
+
+OverheadWarmup   1: 6 op, 852.00 ns, 142.0000 ns/op
+OverheadWarmup   2: 6 op, 500.00 ns, 83.3333 ns/op
+OverheadWarmup   3: 6 op, 531.00 ns, 88.5000 ns/op
+OverheadWarmup   4: 6 op, 1012.00 ns, 168.6667 ns/op
+OverheadWarmup   5: 6 op, 641.00 ns, 106.8333 ns/op
+OverheadWarmup   6: 6 op, 501.00 ns, 83.5000 ns/op
+OverheadWarmup   7: 6 op, 581.00 ns, 96.8333 ns/op
+OverheadWarmup   8: 6 op, 521.00 ns, 86.8333 ns/op
+
+OverheadActual   1: 6 op, 731.00 ns, 121.8333 ns/op
+OverheadActual   2: 6 op, 1012.00 ns, 168.6667 ns/op
+OverheadActual   3: 6 op, 882.00 ns, 147.0000 ns/op
+OverheadActual   4: 6 op, 621.00 ns, 103.5000 ns/op
+OverheadActual   5: 6 op, 771.00 ns, 128.5000 ns/op
+OverheadActual   6: 6 op, 792.00 ns, 132.0000 ns/op
+OverheadActual   7: 6 op, 471.00 ns, 78.5000 ns/op
+OverheadActual   8: 6 op, 491.00 ns, 81.8333 ns/op
+OverheadActual   9: 6 op, 551.00 ns, 91.8333 ns/op
+OverheadActual  10: 6 op, 390.00 ns, 65.0000 ns/op
+OverheadActual  11: 6 op, 501.00 ns, 83.5000 ns/op
+OverheadActual  12: 6 op, 491.00 ns, 81.8333 ns/op
+OverheadActual  13: 6 op, 511.00 ns, 85.1667 ns/op
+OverheadActual  14: 6 op, 501.00 ns, 83.5000 ns/op
+OverheadActual  15: 6 op, 531.00 ns, 88.5000 ns/op
+OverheadActual  16: 6 op, 361.00 ns, 60.1667 ns/op
+OverheadActual  17: 6 op, 642.00 ns, 107.0000 ns/op
+OverheadActual  18: 6 op, 541.00 ns, 90.1667 ns/op
+OverheadActual  19: 6 op, 541.00 ns, 90.1667 ns/op
+OverheadActual  20: 6 op, 551.00 ns, 91.8333 ns/op
+
+WorkloadWarmup   1: 6 op, 504697794.00 ns, 84.1163 ms/op
+WorkloadWarmup   2: 6 op, 480664193.00 ns, 80.1107 ms/op
+WorkloadWarmup   3: 6 op, 411615659.00 ns, 68.6026 ms/op
+
+// BeforeActualRun
+WorkloadActual   1: 6 op, 340019492.00 ns, 56.6699 ms/op
+WorkloadActual   2: 6 op, 350895599.00 ns, 58.4826 ms/op
+WorkloadActual   3: 6 op, 352766593.00 ns, 58.7944 ms/op
+
+// AfterActualRun
+WorkloadResult   1: 6 op, 340018951.00 ns, 56.6698 ms/op
+WorkloadResult   2: 6 op, 350895058.00 ns, 58.4825 ms/op
+WorkloadResult   3: 6 op, 352766052.00 ns, 58.7943 ms/op
+// GC:  1 0 0 26119192 6
+// Threading:  5903 1493 6
+
+// AfterAll
+// Benchmark Process 528181 has exited with code 0.
+
+Mean = 57.982 ms, StdErr = 0.662 ms (1.14%), N = 3, StdDev = 1.147 ms
+Min = 56.670 ms, Q1 = 57.576 ms, Median = 58.483 ms, Q3 = 58.638 ms, Max = 58.794 ms
+IQR = 1.062 ms, LowerFence = 55.983 ms, UpperFence = 60.232 ms
+ConfidenceInterval = [37.053 ms; 78.912 ms] (CI 99.9%), Margin = 20.930 ms (36.10% of Mean)
+Skewness = -0.35, Kurtosis = 0.67, MValue = 2
+
+// ** Remained 1 (16.7%) benchmark(s) to run. Estimated finish 2026-09-22 0:58 (0h 0m from now) **
+// **************************
+// Benchmark: SessionSetupDecompositionBenchmarks.StageS5_ReadinessTeardownInsideAsync: Job-ZIYXXS(InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=1000]
+// *** Execute ***
+// Launch: 1 / 1
+// Execute: dotnet WinForward.Benchmarks-Job-ZIYXXS-1.dll --anonymousPipes 141 142 --benchmarkName "WinForward.Benchmarks.Perf.SessionSetupDecompositionBenchmarks.StageS5_ReadinessTeardownInsideAsync(Sessions: 1000)" --job "InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3" --benchmarkId 5 in /home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-Job-ZIYXXS-1/bin/Release/net10.0
+// Failed to set up high priority (Permission denied). In order to run benchmarks with high priority, make sure you have the right permissions.
+// BeforeAnythingElse
+
+// Benchmark Process Environment Information:
+// BenchmarkDotNet v0.15.8
+// Runtime=.NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4
+// GC=Concurrent Workstation
+// HardwareIntrinsics=AVX512 BITALG+VBMI2+VNNI+VPOPCNTDQ,AVX512 IFMA+VBMI,AVX512 F+BW+CD+DQ+VL,AVX2+BMI1+BMI2+F16C+FMA+LZCNT+MOVBE,AVX,SSE3+SSSE3+SSE4.1+SSE4.2+POPCNT,X86Base+SSE+SSE2,AES+PCLMUL,AvxVnni VectorSize=256
+// Job: Job-ZIYXXS(InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3)
+
+OverheadJitting  1: 1 op, 845486.00 ns, 845.4860 us/op
+WorkloadJitting  1: 1 op, 184971074.00 ns, 184.9711 ms/op
+
+OverheadWarmup   1: 6 op, 551.00 ns, 91.8333 ns/op
+OverheadWarmup   2: 6 op, 941.00 ns, 156.8333 ns/op
+OverheadWarmup   3: 6 op, 651.00 ns, 108.5000 ns/op
+OverheadWarmup   4: 6 op, 651.00 ns, 108.5000 ns/op
+OverheadWarmup   5: 6 op, 621.00 ns, 103.5000 ns/op
+
+OverheadActual   1: 6 op, 541.00 ns, 90.1667 ns/op
+OverheadActual   2: 6 op, 460.00 ns, 76.6667 ns/op
+OverheadActual   3: 6 op, 461.00 ns, 76.8333 ns/op
+OverheadActual   4: 6 op, 491.00 ns, 81.8333 ns/op
+OverheadActual   5: 6 op, 460.00 ns, 76.6667 ns/op
+OverheadActual   6: 6 op, 491.00 ns, 81.8333 ns/op
+OverheadActual   7: 6 op, 561.00 ns, 93.5000 ns/op
+OverheadActual   8: 6 op, 481.00 ns, 80.1667 ns/op
+OverheadActual   9: 6 op, 441.00 ns, 73.5000 ns/op
+OverheadActual  10: 6 op, 531.00 ns, 88.5000 ns/op
+OverheadActual  11: 6 op, 481.00 ns, 80.1667 ns/op
+OverheadActual  12: 6 op, 431.00 ns, 71.8333 ns/op
+OverheadActual  13: 6 op, 521.00 ns, 86.8333 ns/op
+OverheadActual  14: 6 op, 471.00 ns, 78.5000 ns/op
+OverheadActual  15: 6 op, 471.00 ns, 78.5000 ns/op
+OverheadActual  16: 6 op, 601.00 ns, 100.1667 ns/op
+OverheadActual  17: 6 op, 441.00 ns, 73.5000 ns/op
+OverheadActual  18: 6 op, 471.00 ns, 78.5000 ns/op
+OverheadActual  19: 6 op, 682.00 ns, 113.6667 ns/op
+OverheadActual  20: 6 op, 591.00 ns, 98.5000 ns/op
+
+WorkloadWarmup   1: 6 op, 652289422.00 ns, 108.7149 ms/op
+WorkloadWarmup   2: 6 op, 576785481.00 ns, 96.1309 ms/op
+WorkloadWarmup   3: 6 op, 483547111.00 ns, 80.5912 ms/op
+
+// BeforeActualRun
+WorkloadActual   1: 6 op, 466429131.00 ns, 77.7382 ms/op
+WorkloadActual   2: 6 op, 440253276.00 ns, 73.3755 ms/op
+WorkloadActual   3: 6 op, 442187136.00 ns, 73.6979 ms/op
+
+// AfterActualRun
+WorkloadResult   1: 6 op, 466428650.00 ns, 77.7381 ms/op
+WorkloadResult   2: 6 op, 440252795.00 ns, 73.3755 ms/op
+WorkloadResult   3: 6 op, 442186655.00 ns, 73.6978 ms/op
+// GC:  2 1 0 34784760 6
+// Threading:  11941 2027 6
+// Exceptions:  2128
+
+// AfterAll
+// Benchmark Process 531002 has exited with code 0.
+
+Mean = 74.937 ms, StdErr = 1.404 ms (1.87%), N = 3, StdDev = 2.431 ms
+Min = 73.375 ms, Q1 = 73.537 ms, Median = 73.698 ms, Q3 = 75.718 ms, Max = 77.738 ms
+IQR = 2.181 ms, LowerFence = 70.265 ms, UpperFence = 78.990 ms
+ConfidenceInterval = [30.585 ms; 119.289 ms] (CI 99.9%), Margin = 44.352 ms (59.19% of Mean)
+Skewness = 0.38, Kurtosis = 0.67, MValue = 2
+
+// ** Remained 0 (0.0%) benchmark(s) to run. Estimated finish 2026-09-22 0:58 (0h 0m from now) **
+// ***** BenchmarkRunner: Finish  *****
+
+// * Export *
+  BenchmarkDotNet.Artifacts/results/WinForward.Benchmarks.Perf.SessionSetupDecompositionBenchmarks-report.csv
+  BenchmarkDotNet.Artifacts/results/WinForward.Benchmarks.Perf.SessionSetupDecompositionBenchmarks-report-github.md
+  BenchmarkDotNet.Artifacts/results/WinForward.Benchmarks.Perf.SessionSetupDecompositionBenchmarks-report.html
+
+// * Detailed results *
+SessionSetupDecompositionBenchmarks.StageS4_ReadinessTeardownOutsideAsync: Job-ZIYXXS(InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=1]
+Runtime = .NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4; GC = Concurrent Workstation
+Mean = 31.018 ms, StdErr = 0.087 ms (0.28%), N = 3, StdDev = 0.150 ms
+Min = 30.904 ms, Q1 = 30.933 ms, Median = 30.962 ms, Q3 = 31.075 ms, Max = 31.188 ms
+IQR = 0.142 ms, LowerFence = 30.720 ms, UpperFence = 31.287 ms
+ConfidenceInterval = [28.284 ms; 33.751 ms] (CI 99.9%), Margin = 2.734 ms (8.81% of Mean)
+Skewness = 0.32, Kurtosis = 0.67, MValue = 2
+-------------------- Histogram --------------------
+[30.768 ms ; 31.324 ms) | @@@
+---------------------------------------------------
+
+SessionSetupDecompositionBenchmarks.StageS5_ReadinessTeardownInsideAsync: Job-ZIYXXS(InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=1]
+Runtime = .NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4; GC = Concurrent Workstation
+Mean = 46.365 ms, StdErr = 0.748 ms (1.61%), N = 3, StdDev = 1.295 ms
+Min = 45.108 ms, Q1 = 45.700 ms, Median = 46.292 ms, Q3 = 46.993 ms, Max = 47.695 ms
+IQR = 1.293 ms, LowerFence = 43.759 ms, UpperFence = 48.933 ms
+ConfidenceInterval = [22.738 ms; 69.991 ms] (CI 99.9%), Margin = 23.626 ms (50.96% of Mean)
+Skewness = 0.06, Kurtosis = 0.67, MValue = 2
+-------------------- Histogram --------------------
+[44.521 ms ; 46.878 ms) | @@
+[46.878 ms ; 48.873 ms) | @
+---------------------------------------------------
+
+SessionSetupDecompositionBenchmarks.StageS4_ReadinessTeardownOutsideAsync: Job-ZIYXXS(InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=100]
+Runtime = .NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4; GC = Concurrent Workstation
+Mean = 40.984 ms, StdErr = 1.222 ms (2.98%), N = 3, StdDev = 2.116 ms
+Min = 39.599 ms, Q1 = 39.766 ms, Median = 39.932 ms, Q3 = 41.676 ms, Max = 43.420 ms
+IQR = 1.910 ms, LowerFence = 36.900 ms, UpperFence = 44.541 ms
+ConfidenceInterval = [2.375 ms; 79.593 ms] (CI 99.9%), Margin = 38.609 ms (94.21% of Mean)
+Skewness = 0.37, Kurtosis = 0.67, MValue = 2
+-------------------- Histogram --------------------
+[39.584 ms ; 43.436 ms) | @@@
+---------------------------------------------------
+
+SessionSetupDecompositionBenchmarks.StageS5_ReadinessTeardownInsideAsync: Job-ZIYXXS(InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=100]
+Runtime = .NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4; GC = Concurrent Workstation
+Mean = 55.171 ms, StdErr = 1.405 ms (2.55%), N = 3, StdDev = 2.433 ms
+Min = 53.295 ms, Q1 = 53.797 ms, Median = 54.298 ms, Q3 = 56.109 ms, Max = 57.920 ms
+IQR = 2.313 ms, LowerFence = 50.328 ms, UpperFence = 59.578 ms
+ConfidenceInterval = [10.782 ms; 99.560 ms] (CI 99.9%), Margin = 44.389 ms (80.46% of Mean)
+Skewness = 0.31, Kurtosis = 0.67, MValue = 2
+-------------------- Histogram --------------------
+[51.582 ms ; 56.011 ms) | @@
+[56.011 ms ; 60.135 ms) | @
+---------------------------------------------------
+
+SessionSetupDecompositionBenchmarks.StageS4_ReadinessTeardownOutsideAsync: Job-ZIYXXS(InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=1000]
+Runtime = .NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4; GC = Concurrent Workstation
+Mean = 57.982 ms, StdErr = 0.662 ms (1.14%), N = 3, StdDev = 1.147 ms
+Min = 56.670 ms, Q1 = 57.576 ms, Median = 58.483 ms, Q3 = 58.638 ms, Max = 58.794 ms
+IQR = 1.062 ms, LowerFence = 55.983 ms, UpperFence = 60.232 ms
+ConfidenceInterval = [37.053 ms; 78.912 ms] (CI 99.9%), Margin = 20.930 ms (36.10% of Mean)
+Skewness = -0.35, Kurtosis = 0.67, MValue = 2
+-------------------- Histogram --------------------
+[55.626 ms ; 57.594 ms) | @
+[57.594 ms ; 59.838 ms) | @@
+---------------------------------------------------
+
+SessionSetupDecompositionBenchmarks.StageS5_ReadinessTeardownInsideAsync: Job-ZIYXXS(InvocationCount=6, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=1000]
+Runtime = .NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4; GC = Concurrent Workstation
+Mean = 74.937 ms, StdErr = 1.404 ms (1.87%), N = 3, StdDev = 2.431 ms
+Min = 73.375 ms, Q1 = 73.537 ms, Median = 73.698 ms, Q3 = 75.718 ms, Max = 77.738 ms
+IQR = 2.181 ms, LowerFence = 70.265 ms, UpperFence = 78.990 ms
+ConfidenceInterval = [30.585 ms; 119.289 ms] (CI 99.9%), Margin = 44.352 ms (59.19% of Mean)
+Skewness = 0.38, Kurtosis = 0.67, MValue = 2
+-------------------- Histogram --------------------
+[73.344 ms ; 77.769 ms) | @@@
+---------------------------------------------------
+
+// * Summary *
+
+BenchmarkDotNet v0.15.8, Linux NixOS 26.11 (Zokor)
+AMD Ryzen 9 9955HX 2.50GHz, 1 CPU, 32 logical and 16 physical cores
+.NET SDK 10.0.401
+  [Host]     : .NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4
+  Job-ZIYXXS : .NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4
+
+InvocationCount=6  IterationCount=3  LaunchCount=1  
+UnrollFactor=1  WarmupCount=3  
+
+| Method                                | Sessions | Mean     | Error     | StdDev   | Gen0     | Gen1     | Allocated  |
+|-------------------------------------- |--------- |---------:|----------:|---------:|---------:|---------:|-----------:|
+| StageS4_ReadinessTeardownOutsideAsync | 1        | 31.02 ms |  2.734 ms | 0.150 ms |        - |        - |   32.63 KB |
+| StageS5_ReadinessTeardownInsideAsync  | 1        | 46.36 ms | 23.626 ms | 1.295 ms |        - |        - |   76.63 KB |
+| StageS4_ReadinessTeardownOutsideAsync | 100      | 40.98 ms | 38.609 ms | 2.116 ms |        - |        - |  455.91 KB |
+| StageS5_ReadinessTeardownInsideAsync  | 100      | 55.17 ms | 44.389 ms | 2.433 ms |        - |        - |  631.54 KB |
+| StageS4_ReadinessTeardownOutsideAsync | 1000     | 57.98 ms | 20.930 ms | 1.147 ms | 166.6667 |        - | 4251.17 KB |
+| StageS5_ReadinessTeardownInsideAsync  | 1000     | 74.94 ms | 44.352 ms | 2.431 ms | 333.3333 | 166.6667 | 5661.58 KB |
+
+// * Legends *
+  Sessions  : Value of the 'Sessions' parameter
+  Mean      : Arithmetic mean of all measurements
+  Error     : Half of 99.9% confidence interval
+  StdDev    : Standard deviation of all measurements
+  Gen0      : GC Generation 0 collects per 1000 operations
+  Gen1      : GC Generation 1 collects per 1000 operations
+  Allocated : Allocated memory per single operation (managed only, inclusive, 1KB = 1024B)
+  1 ms      : 1 Millisecond (0.001 sec)
+
+// * Diagnostic Output - MemoryDiagnoser *
+
+
+// ***** BenchmarkRunner: End *****
+Run time: 00:00:19 (19.01 sec), executed benchmarks: 6
+
+Global total time: 00:00:57 (57.25 sec), executed benchmarks: 6
+// * Artifacts cleanup *
+Artifacts cleanup is finished

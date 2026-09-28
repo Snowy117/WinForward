@@ -1,0 +1,573 @@
+// Validating benchmarks:
+// ***** BenchmarkRunner: Start   *****
+// ***** Found 6 benchmark(s) in total *****
+// ***** Building 1 exe(s) in Parallel: Start   *****
+// start dotnet  restore --nodeReuse:false /p:UseSharedCompilation=false /p:Deterministic=true /p:Optimize=true /p:ArtifactsPath="/home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-ShortRun-1/" /p:OutDir="/home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-ShortRun-1/bin/Release/net10.0/" /p:OutputPath="/home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-ShortRun-1/bin/Release/net10.0/" /p:PublishDir="/home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-ShortRun-1/publish/" in /home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-ShortRun-1
+// command took 3.02 sec and exited with 0
+// start dotnet  build -c Release --no-restore --nodeReuse:false /p:UseSharedCompilation=false /p:Deterministic=true /p:Optimize=true /p:ArtifactsPath="/home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-ShortRun-1/" /p:OutDir="/home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-ShortRun-1/bin/Release/net10.0/" /p:OutputPath="/home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-ShortRun-1/bin/Release/net10.0/" /p:PublishDir="/home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-ShortRun-1/publish/" --output "/home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-ShortRun-1/bin/Release/net10.0/" in /home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-ShortRun-1
+// command took 34.11 sec and exited with 0
+// ***** Done, took 00:00:37 (37.3 sec)   *****
+// Found 6 benchmarks:
+//   SessionSetupDecompositionBenchmarks.ComponentA4_SlotAndQueueObjects: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=1]
+//   SessionSetupDecompositionBenchmarks.ComponentA4b_BoundedSetupQueueObject: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=1]
+//   SessionSetupDecompositionBenchmarks.ComponentA4_SlotAndQueueObjects: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=100]
+//   SessionSetupDecompositionBenchmarks.ComponentA4b_BoundedSetupQueueObject: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=100]
+//   SessionSetupDecompositionBenchmarks.ComponentA4_SlotAndQueueObjects: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=1000]
+//   SessionSetupDecompositionBenchmarks.ComponentA4b_BoundedSetupQueueObject: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=1000]
+
+// **************************
+// Benchmark: SessionSetupDecompositionBenchmarks.ComponentA4_SlotAndQueueObjects: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=1]
+// *** Execute ***
+// Launch: 1 / 1
+// Execute: dotnet WinForward.Benchmarks-ShortRun-1.dll --anonymousPipes 141 142 --benchmarkName "WinForward.Benchmarks.Perf.SessionSetupDecompositionBenchmarks.ComponentA4_SlotAndQueueObjects(Sessions: 1)" --job ShortRun --benchmarkId 0 in /home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-ShortRun-1/bin/Release/net10.0
+// Failed to set up high priority (Permission denied). In order to run benchmarks with high priority, make sure you have the right permissions.
+// BeforeAnythingElse
+
+// Benchmark Process Environment Information:
+// BenchmarkDotNet v0.15.8
+// Runtime=.NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4
+// GC=Concurrent Workstation
+// HardwareIntrinsics=AVX512 BITALG+VBMI2+VNNI+VPOPCNTDQ,AVX512 IFMA+VBMI,AVX512 F+BW+CD+DQ+VL,AVX2+BMI1+BMI2+F16C+FMA+LZCNT+MOVBE,AVX,SSE3+SSSE3+SSE4.1+SSE4.2+POPCNT,X86Base+SSE+SSE2,AES+PCLMUL,AvxVnni VectorSize=256
+// Job: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3)
+
+OverheadJitting  1: 1 op, 360967.00 ns, 360.9670 us/op
+WorkloadJitting  1: 1 op, 1134729.00 ns, 1.1347 ms/op
+
+OverheadWarmup   1: 1 op, 411.00 ns, 411.0000 ns/op
+OverheadWarmup   2: 1 op, 271.00 ns, 271.0000 ns/op
+OverheadWarmup   3: 1 op, 421.00 ns, 421.0000 ns/op
+OverheadWarmup   4: 1 op, 341.00 ns, 341.0000 ns/op
+OverheadWarmup   5: 1 op, 261.00 ns, 261.0000 ns/op
+OverheadWarmup   6: 1 op, 271.00 ns, 271.0000 ns/op
+OverheadWarmup   7: 1 op, 271.00 ns, 271.0000 ns/op
+
+OverheadActual   1: 1 op, 420.00 ns, 420.0000 ns/op
+OverheadActual   2: 1 op, 410.00 ns, 410.0000 ns/op
+OverheadActual   3: 1 op, 420.00 ns, 420.0000 ns/op
+OverheadActual   4: 1 op, 401.00 ns, 401.0000 ns/op
+OverheadActual   5: 1 op, 411.00 ns, 411.0000 ns/op
+OverheadActual   6: 1 op, 401.00 ns, 401.0000 ns/op
+OverheadActual   7: 1 op, 271.00 ns, 271.0000 ns/op
+OverheadActual   8: 1 op, 271.00 ns, 271.0000 ns/op
+OverheadActual   9: 1 op, 271.00 ns, 271.0000 ns/op
+OverheadActual  10: 1 op, 411.00 ns, 411.0000 ns/op
+OverheadActual  11: 1 op, 450.00 ns, 450.0000 ns/op
+OverheadActual  12: 1 op, 431.00 ns, 431.0000 ns/op
+OverheadActual  13: 1 op, 431.00 ns, 431.0000 ns/op
+OverheadActual  14: 1 op, 360.00 ns, 360.0000 ns/op
+OverheadActual  15: 1 op, 350.00 ns, 350.0000 ns/op
+OverheadActual  16: 1 op, 330.00 ns, 330.0000 ns/op
+OverheadActual  17: 1 op, 331.00 ns, 331.0000 ns/op
+OverheadActual  18: 1 op, 431.00 ns, 431.0000 ns/op
+OverheadActual  19: 1 op, 431.00 ns, 431.0000 ns/op
+OverheadActual  20: 1 op, 441.00 ns, 441.0000 ns/op
+
+WorkloadWarmup   1: 1 op, 5381.00 ns, 5.3810 us/op
+WorkloadWarmup   2: 1 op, 4820.00 ns, 4.8200 us/op
+WorkloadWarmup   3: 1 op, 3658.00 ns, 3.6580 us/op
+
+// BeforeActualRun
+WorkloadActual   1: 1 op, 17586.00 ns, 17.5860 us/op
+WorkloadActual   2: 1 op, 4389.00 ns, 4.3890 us/op
+WorkloadActual   3: 1 op, 4249.00 ns, 4.2490 us/op
+
+// AfterActualRun
+WorkloadResult   1: 1 op, 17175.50 ns, 17.1755 us/op
+WorkloadResult   2: 1 op, 3978.50 ns, 3.9785 us/op
+WorkloadResult   3: 1 op, 3838.50 ns, 3.8385 us/op
+// GC:  0 0 0 144 1
+// Threading:  0 0 1
+
+// AfterAll
+// Benchmark Process 1633032 has exited with code 0.
+
+Mean = 8.331 us, StdErr = 4.423 us (53.09%), N = 3, StdDev = 7.660 us
+Min = 3.838 us, Q1 = 3.909 us, Median = 3.978 us, Q3 = 10.577 us, Max = 17.175 us
+IQR = 6.668 us, LowerFence = -6.094 us, UpperFence = 20.580 us
+ConfidenceInterval = [-131.417 us; 148.078 us] (CI 99.9%), Margin = 139.747 us (1677.47% of Mean)
+Skewness = 0.38, Kurtosis = 0.67, MValue = 2
+
+// ** Remained 5 (83.3%) benchmark(s) to run. Estimated finish 2026-09-22 17:09 (0h 0m from now) **
+// **************************
+// Benchmark: SessionSetupDecompositionBenchmarks.ComponentA4b_BoundedSetupQueueObject: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=1]
+// *** Execute ***
+// Launch: 1 / 1
+// Execute: dotnet WinForward.Benchmarks-ShortRun-1.dll --anonymousPipes 141 142 --benchmarkName "WinForward.Benchmarks.Perf.SessionSetupDecompositionBenchmarks.ComponentA4b_BoundedSetupQueueObject(Sessions: 1)" --job ShortRun --benchmarkId 1 in /home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-ShortRun-1/bin/Release/net10.0
+// Failed to set up high priority (Permission denied). In order to run benchmarks with high priority, make sure you have the right permissions.
+// BeforeAnythingElse
+
+// Benchmark Process Environment Information:
+// BenchmarkDotNet v0.15.8
+// Runtime=.NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4
+// GC=Concurrent Workstation
+// HardwareIntrinsics=AVX512 BITALG+VBMI2+VNNI+VPOPCNTDQ,AVX512 IFMA+VBMI,AVX512 F+BW+CD+DQ+VL,AVX2+BMI1+BMI2+F16C+FMA+LZCNT+MOVBE,AVX,SSE3+SSSE3+SSE4.1+SSE4.2+POPCNT,X86Base+SSE+SSE2,AES+PCLMUL,AvxVnni VectorSize=256
+// Job: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3)
+
+OverheadJitting  1: 1 op, 320184.00 ns, 320.1840 us/op
+WorkloadJitting  1: 1 op, 755123.00 ns, 755.1230 us/op
+
+OverheadWarmup   1: 1 op, 491.00 ns, 491.0000 ns/op
+OverheadWarmup   2: 1 op, 450.00 ns, 450.0000 ns/op
+OverheadWarmup   3: 1 op, 471.00 ns, 471.0000 ns/op
+OverheadWarmup   4: 1 op, 260.00 ns, 260.0000 ns/op
+OverheadWarmup   5: 1 op, 290.00 ns, 290.0000 ns/op
+OverheadWarmup   6: 1 op, 261.00 ns, 261.0000 ns/op
+
+OverheadActual   1: 1 op, 461.00 ns, 461.0000 ns/op
+OverheadActual   2: 1 op, 471.00 ns, 471.0000 ns/op
+OverheadActual   3: 1 op, 451.00 ns, 451.0000 ns/op
+OverheadActual   4: 1 op, 471.00 ns, 471.0000 ns/op
+OverheadActual   5: 1 op, 461.00 ns, 461.0000 ns/op
+OverheadActual   6: 1 op, 391.00 ns, 391.0000 ns/op
+OverheadActual   7: 1 op, 391.00 ns, 391.0000 ns/op
+OverheadActual   8: 1 op, 381.00 ns, 381.0000 ns/op
+OverheadActual   9: 1 op, 511.00 ns, 511.0000 ns/op
+OverheadActual  10: 1 op, 461.00 ns, 461.0000 ns/op
+OverheadActual  11: 1 op, 271.00 ns, 271.0000 ns/op
+OverheadActual  12: 1 op, 561.00 ns, 561.0000 ns/op
+OverheadActual  13: 1 op, 441.00 ns, 441.0000 ns/op
+OverheadActual  14: 1 op, 381.00 ns, 381.0000 ns/op
+OverheadActual  15: 1 op, 370.00 ns, 370.0000 ns/op
+OverheadActual  16: 1 op, 441.00 ns, 441.0000 ns/op
+OverheadActual  17: 1 op, 461.00 ns, 461.0000 ns/op
+OverheadActual  18: 1 op, 491.00 ns, 491.0000 ns/op
+OverheadActual  19: 1 op, 802.00 ns, 802.0000 ns/op
+OverheadActual  20: 1 op, 451.00 ns, 451.0000 ns/op
+
+WorkloadWarmup   1: 1 op, 4419.00 ns, 4.4190 us/op
+WorkloadWarmup   2: 1 op, 3918.00 ns, 3.9180 us/op
+WorkloadWarmup   3: 1 op, 5421.00 ns, 5.4210 us/op
+
+// BeforeActualRun
+WorkloadActual   1: 1 op, 18327.00 ns, 18.3270 us/op
+WorkloadActual   2: 1 op, 3667.00 ns, 3.6670 us/op
+WorkloadActual   3: 1 op, 4539.00 ns, 4.5390 us/op
+
+// AfterActualRun
+WorkloadResult   1: 1 op, 17871.00 ns, 17.8710 us/op
+WorkloadResult   2: 1 op, 3211.00 ns, 3.2110 us/op
+WorkloadResult   3: 1 op, 4083.00 ns, 4.0830 us/op
+// GC:  0 0 0 96 1
+// Threading:  0 0 1
+
+// AfterAll
+// Benchmark Process 1633047 has exited with code 0.
+
+Mean = 8.388 us, StdErr = 4.748 us (56.60%), N = 3, StdDev = 8.224 us
+Min = 3.211 us, Q1 = 3.647 us, Median = 4.083 us, Q3 = 10.977 us, Max = 17.871 us
+IQR = 7.330 us, LowerFence = -7.348 us, UpperFence = 21.972 us
+ConfidenceInterval = [-141.644 us; 158.421 us] (CI 99.9%), Margin = 150.033 us (1788.59% of Mean)
+Skewness = 0.38, Kurtosis = 0.67, MValue = 2
+
+// ** Remained 4 (66.7%) benchmark(s) to run. Estimated finish 2026-09-22 17:09 (0h 0m from now) **
+// **************************
+// Benchmark: SessionSetupDecompositionBenchmarks.ComponentA4_SlotAndQueueObjects: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=100]
+// *** Execute ***
+// Launch: 1 / 1
+// Execute: dotnet WinForward.Benchmarks-ShortRun-1.dll --anonymousPipes 141 142 --benchmarkName "WinForward.Benchmarks.Perf.SessionSetupDecompositionBenchmarks.ComponentA4_SlotAndQueueObjects(Sessions: 100)" --job ShortRun --benchmarkId 2 in /home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-ShortRun-1/bin/Release/net10.0
+// Failed to set up high priority (Permission denied). In order to run benchmarks with high priority, make sure you have the right permissions.
+// BeforeAnythingElse
+
+// Benchmark Process Environment Information:
+// BenchmarkDotNet v0.15.8
+// Runtime=.NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4
+// GC=Concurrent Workstation
+// HardwareIntrinsics=AVX512 BITALG+VBMI2+VNNI+VPOPCNTDQ,AVX512 IFMA+VBMI,AVX512 F+BW+CD+DQ+VL,AVX2+BMI1+BMI2+F16C+FMA+LZCNT+MOVBE,AVX,SSE3+SSSE3+SSE4.1+SSE4.2+POPCNT,X86Base+SSE+SSE2,AES+PCLMUL,AvxVnni VectorSize=256
+// Job: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3)
+
+OverheadJitting  1: 1 op, 342159.00 ns, 342.1590 us/op
+WorkloadJitting  1: 1 op, 1387986.00 ns, 1.3880 ms/op
+
+OverheadWarmup   1: 1 op, 441.00 ns, 441.0000 ns/op
+OverheadWarmup   2: 1 op, 381.00 ns, 381.0000 ns/op
+OverheadWarmup   3: 1 op, 391.00 ns, 391.0000 ns/op
+OverheadWarmup   4: 1 op, 281.00 ns, 281.0000 ns/op
+OverheadWarmup   5: 1 op, 350.00 ns, 350.0000 ns/op
+OverheadWarmup   6: 1 op, 261.00 ns, 261.0000 ns/op
+
+OverheadActual   1: 1 op, 591.00 ns, 591.0000 ns/op
+OverheadActual   2: 1 op, 411.00 ns, 411.0000 ns/op
+OverheadActual   3: 1 op, 381.00 ns, 381.0000 ns/op
+OverheadActual   4: 1 op, 401.00 ns, 401.0000 ns/op
+OverheadActual   5: 1 op, 1002.00 ns, 1.0020 us/op
+OverheadActual   6: 1 op, 270.00 ns, 270.0000 ns/op
+OverheadActual   7: 1 op, 431.00 ns, 431.0000 ns/op
+OverheadActual   8: 1 op, 370.00 ns, 370.0000 ns/op
+OverheadActual   9: 1 op, 410.00 ns, 410.0000 ns/op
+OverheadActual  10: 1 op, 321.00 ns, 321.0000 ns/op
+OverheadActual  11: 1 op, 441.00 ns, 441.0000 ns/op
+OverheadActual  12: 1 op, 431.00 ns, 431.0000 ns/op
+OverheadActual  13: 1 op, 421.00 ns, 421.0000 ns/op
+OverheadActual  14: 1 op, 421.00 ns, 421.0000 ns/op
+OverheadActual  15: 1 op, 451.00 ns, 451.0000 ns/op
+OverheadActual  16: 1 op, 521.00 ns, 521.0000 ns/op
+OverheadActual  17: 1 op, 511.00 ns, 511.0000 ns/op
+OverheadActual  18: 1 op, 441.00 ns, 441.0000 ns/op
+OverheadActual  19: 1 op, 390.00 ns, 390.0000 ns/op
+OverheadActual  20: 1 op, 281.00 ns, 281.0000 ns/op
+
+WorkloadWarmup   1: 1 op, 76546.00 ns, 76.5460 us/op
+WorkloadWarmup   2: 1 op, 7997.00 ns, 7.9970 us/op
+WorkloadWarmup   3: 1 op, 7916.00 ns, 7.9160 us/op
+
+// BeforeActualRun
+WorkloadActual   1: 1 op, 150298.00 ns, 150.2980 us/op
+WorkloadActual   2: 1 op, 7896.00 ns, 7.8960 us/op
+WorkloadActual   3: 1 op, 8107.00 ns, 8.1070 us/op
+
+// AfterActualRun
+WorkloadResult   1: 1 op, 149877.00 ns, 149.8770 us/op
+WorkloadResult   2: 1 op, 7475.00 ns, 7.4750 us/op
+WorkloadResult   3: 1 op, 7686.00 ns, 7.6860 us/op
+// GC:  0 0 0 14400 1
+// Threading:  0 0 1
+
+// AfterAll
+// Benchmark Process 1633056 has exited with code 0.
+
+Mean = 55.013 us, StdErr = 47.432 us (86.22%), N = 3, StdDev = 82.155 us
+Min = 7.475 us, Q1 = 7.580 us, Median = 7.686 us, Q3 = 78.781 us, Max = 149.877 us
+IQR = 71.201 us, LowerFence = -99.221 us, UpperFence = 185.583 us
+ConfidenceInterval = [-1,443.800 us; 1,553.826 us] (CI 99.9%), Margin = 1,498.813 us (2724.49% of Mean)
+Skewness = 0.38, Kurtosis = 0.67, MValue = 2
+
+// ** Remained 3 (50.0%) benchmark(s) to run. Estimated finish 2026-09-22 17:09 (0h 0m from now) **
+// **************************
+// Benchmark: SessionSetupDecompositionBenchmarks.ComponentA4b_BoundedSetupQueueObject: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=100]
+// *** Execute ***
+// Launch: 1 / 1
+// Execute: dotnet WinForward.Benchmarks-ShortRun-1.dll --anonymousPipes 141 142 --benchmarkName "WinForward.Benchmarks.Perf.SessionSetupDecompositionBenchmarks.ComponentA4b_BoundedSetupQueueObject(Sessions: 100)" --job ShortRun --benchmarkId 3 in /home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-ShortRun-1/bin/Release/net10.0
+// Failed to set up high priority (Permission denied). In order to run benchmarks with high priority, make sure you have the right permissions.
+// BeforeAnythingElse
+
+// Benchmark Process Environment Information:
+// BenchmarkDotNet v0.15.8
+// Runtime=.NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4
+// GC=Concurrent Workstation
+// HardwareIntrinsics=AVX512 BITALG+VBMI2+VNNI+VPOPCNTDQ,AVX512 IFMA+VBMI,AVX512 F+BW+CD+DQ+VL,AVX2+BMI1+BMI2+F16C+FMA+LZCNT+MOVBE,AVX,SSE3+SSSE3+SSE4.1+SSE4.2+POPCNT,X86Base+SSE+SSE2,AES+PCLMUL,AvxVnni VectorSize=256
+// Job: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3)
+
+OverheadJitting  1: 1 op, 283890.00 ns, 283.8900 us/op
+WorkloadJitting  1: 1 op, 1109772.00 ns, 1.1098 ms/op
+
+OverheadWarmup   1: 1 op, 451.00 ns, 451.0000 ns/op
+OverheadWarmup   2: 1 op, 451.00 ns, 451.0000 ns/op
+OverheadWarmup   3: 1 op, 441.00 ns, 441.0000 ns/op
+OverheadWarmup   4: 1 op, 501.00 ns, 501.0000 ns/op
+OverheadWarmup   5: 1 op, 501.00 ns, 501.0000 ns/op
+
+OverheadActual   1: 1 op, 582.00 ns, 582.0000 ns/op
+OverheadActual   2: 1 op, 521.00 ns, 521.0000 ns/op
+OverheadActual   3: 1 op, 512.00 ns, 512.0000 ns/op
+OverheadActual   4: 1 op, 612.00 ns, 612.0000 ns/op
+OverheadActual   5: 1 op, 501.00 ns, 501.0000 ns/op
+OverheadActual   6: 1 op, 501.00 ns, 501.0000 ns/op
+OverheadActual   7: 1 op, 471.00 ns, 471.0000 ns/op
+OverheadActual   8: 1 op, 340.00 ns, 340.0000 ns/op
+OverheadActual   9: 1 op, 270.00 ns, 270.0000 ns/op
+OverheadActual  10: 1 op, 270.00 ns, 270.0000 ns/op
+OverheadActual  11: 1 op, 261.00 ns, 261.0000 ns/op
+OverheadActual  12: 1 op, 270.00 ns, 270.0000 ns/op
+OverheadActual  13: 1 op, 491.00 ns, 491.0000 ns/op
+OverheadActual  14: 1 op, 571.00 ns, 571.0000 ns/op
+OverheadActual  15: 1 op, 270.00 ns, 270.0000 ns/op
+OverheadActual  16: 1 op, 260.00 ns, 260.0000 ns/op
+OverheadActual  17: 1 op, 271.00 ns, 271.0000 ns/op
+OverheadActual  18: 1 op, 521.00 ns, 521.0000 ns/op
+OverheadActual  19: 1 op, 501.00 ns, 501.0000 ns/op
+OverheadActual  20: 1 op, 281.00 ns, 281.0000 ns/op
+
+WorkloadWarmup   1: 1 op, 42707.00 ns, 42.7070 us/op
+WorkloadWarmup   2: 1 op, 6404.00 ns, 6.4040 us/op
+WorkloadWarmup   3: 1 op, 5281.00 ns, 5.2810 us/op
+
+// BeforeActualRun
+WorkloadActual   1: 1 op, 39330.00 ns, 39.3300 us/op
+WorkloadActual   2: 1 op, 6142.00 ns, 6.1420 us/op
+WorkloadActual   3: 1 op, 29661.00 ns, 29.6610 us/op
+
+// AfterActualRun
+WorkloadResult   1: 1 op, 38849.00 ns, 38.8490 us/op
+WorkloadResult   2: 1 op, 5661.00 ns, 5.6610 us/op
+WorkloadResult   3: 1 op, 29180.00 ns, 29.1800 us/op
+// GC:  0 0 0 9600 1
+// Threading:  0 0 1
+
+// AfterAll
+// Benchmark Process 1633065 has exited with code 0.
+
+Mean = 24.563 us, StdErr = 9.855 us (40.12%), N = 3, StdDev = 17.069 us
+Min = 5.661 us, Q1 = 17.421 us, Median = 29.180 us, Q3 = 34.014 us, Max = 38.849 us
+IQR = 16.594 us, LowerFence = -7.471 us, UpperFence = 58.906 us
+ConfidenceInterval = [-286.836 us; 335.963 us] (CI 99.9%), Margin = 311.400 us (1267.74% of Mean)
+Skewness = -0.25, Kurtosis = 0.67, MValue = 2
+
+// ** Remained 2 (33.3%) benchmark(s) to run. Estimated finish 2026-09-22 17:09 (0h 0m from now) **
+// **************************
+// Benchmark: SessionSetupDecompositionBenchmarks.ComponentA4_SlotAndQueueObjects: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=1000]
+// *** Execute ***
+// Launch: 1 / 1
+// Execute: dotnet WinForward.Benchmarks-ShortRun-1.dll --anonymousPipes 141 142 --benchmarkName "WinForward.Benchmarks.Perf.SessionSetupDecompositionBenchmarks.ComponentA4_SlotAndQueueObjects(Sessions: 1000)" --job ShortRun --benchmarkId 4 in /home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-ShortRun-1/bin/Release/net10.0
+// Failed to set up high priority (Permission denied). In order to run benchmarks with high priority, make sure you have the right permissions.
+// BeforeAnythingElse
+
+// Benchmark Process Environment Information:
+// BenchmarkDotNet v0.15.8
+// Runtime=.NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4
+// GC=Concurrent Workstation
+// HardwareIntrinsics=AVX512 BITALG+VBMI2+VNNI+VPOPCNTDQ,AVX512 IFMA+VBMI,AVX512 F+BW+CD+DQ+VL,AVX2+BMI1+BMI2+F16C+FMA+LZCNT+MOVBE,AVX,SSE3+SSSE3+SSE4.1+SSE4.2+POPCNT,X86Base+SSE+SSE2,AES+PCLMUL,AvxVnni VectorSize=256
+// Job: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3)
+
+OverheadJitting  1: 1 op, 611349.00 ns, 611.3490 us/op
+WorkloadJitting  1: 1 op, 1225454.00 ns, 1.2255 ms/op
+
+OverheadWarmup   1: 1 op, 481.00 ns, 481.0000 ns/op
+OverheadWarmup   2: 1 op, 531.00 ns, 531.0000 ns/op
+OverheadWarmup   3: 1 op, 511.00 ns, 511.0000 ns/op
+OverheadWarmup   4: 1 op, 551.00 ns, 551.0000 ns/op
+OverheadWarmup   5: 1 op, 561.00 ns, 561.0000 ns/op
+OverheadWarmup   6: 1 op, 481.00 ns, 481.0000 ns/op
+
+OverheadActual   1: 1 op, 491.00 ns, 491.0000 ns/op
+OverheadActual   2: 1 op, 511.00 ns, 511.0000 ns/op
+OverheadActual   3: 1 op, 551.00 ns, 551.0000 ns/op
+OverheadActual   4: 1 op, 501.00 ns, 501.0000 ns/op
+OverheadActual   5: 1 op, 491.00 ns, 491.0000 ns/op
+OverheadActual   6: 1 op, 280.00 ns, 280.0000 ns/op
+OverheadActual   7: 1 op, 290.00 ns, 290.0000 ns/op
+OverheadActual   8: 1 op, 330.00 ns, 330.0000 ns/op
+OverheadActual   9: 1 op, 531.00 ns, 531.0000 ns/op
+OverheadActual  10: 1 op, 291.00 ns, 291.0000 ns/op
+OverheadActual  11: 1 op, 592.00 ns, 592.0000 ns/op
+OverheadActual  12: 1 op, 551.00 ns, 551.0000 ns/op
+OverheadActual  13: 1 op, 290.00 ns, 290.0000 ns/op
+OverheadActual  14: 1 op, 301.00 ns, 301.0000 ns/op
+OverheadActual  15: 1 op, 260.00 ns, 260.0000 ns/op
+OverheadActual  16: 1 op, 481.00 ns, 481.0000 ns/op
+OverheadActual  17: 1 op, 341.00 ns, 341.0000 ns/op
+OverheadActual  18: 1 op, 501.00 ns, 501.0000 ns/op
+OverheadActual  19: 1 op, 351.00 ns, 351.0000 ns/op
+OverheadActual  20: 1 op, 271.00 ns, 271.0000 ns/op
+
+WorkloadWarmup   1: 1 op, 103551.00 ns, 103.5510 us/op
+WorkloadWarmup   2: 1 op, 199989.00 ns, 199.9890 us/op
+WorkloadWarmup   3: 1 op, 77638.00 ns, 77.6380 us/op
+
+// BeforeActualRun
+WorkloadActual   1: 1 op, 244801.00 ns, 244.8010 us/op
+WorkloadActual   2: 1 op, 41194.00 ns, 41.1940 us/op
+WorkloadActual   3: 1 op, 40343.00 ns, 40.3430 us/op
+
+// AfterActualRun
+WorkloadResult   1: 1 op, 244385.00 ns, 244.3850 us/op
+WorkloadResult   2: 1 op, 40778.00 ns, 40.7780 us/op
+WorkloadResult   3: 1 op, 39927.00 ns, 39.9270 us/op
+// GC:  0 0 0 144000 1
+// Threading:  0 0 1
+
+// AfterAll
+// Benchmark Process 1633076 has exited with code 0.
+
+Mean = 108.363 us, StdErr = 68.011 us (62.76%), N = 3, StdDev = 117.799 us
+Min = 39.927 us, Q1 = 40.352 us, Median = 40.778 us, Q3 = 142.582 us, Max = 244.385 us
+IQR = 102.229 us, LowerFence = -112.991 us, UpperFence = 295.925 us
+ConfidenceInterval = [-2,040.729 us; 2,257.455 us] (CI 99.9%), Margin = 2,149.092 us (1983.23% of Mean)
+Skewness = 0.38, Kurtosis = 0.67, MValue = 2
+
+// ** Remained 1 (16.7%) benchmark(s) to run. Estimated finish 2026-09-22 17:09 (0h 0m from now) **
+// **************************
+// Benchmark: SessionSetupDecompositionBenchmarks.ComponentA4b_BoundedSetupQueueObject: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=1000]
+// *** Execute ***
+// Launch: 1 / 1
+// Execute: dotnet WinForward.Benchmarks-ShortRun-1.dll --anonymousPipes 141 142 --benchmarkName "WinForward.Benchmarks.Perf.SessionSetupDecompositionBenchmarks.ComponentA4b_BoundedSetupQueueObject(Sessions: 1000)" --job ShortRun --benchmarkId 5 in /home/paff/Projects/WinForward/benchmarks/WinForward.Benchmarks/bin/Release/net10.0/WinForward.Benchmarks-ShortRun-1/bin/Release/net10.0
+// Failed to set up high priority (Permission denied). In order to run benchmarks with high priority, make sure you have the right permissions.
+// BeforeAnythingElse
+
+// Benchmark Process Environment Information:
+// BenchmarkDotNet v0.15.8
+// Runtime=.NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4
+// GC=Concurrent Workstation
+// HardwareIntrinsics=AVX512 BITALG+VBMI2+VNNI+VPOPCNTDQ,AVX512 IFMA+VBMI,AVX512 F+BW+CD+DQ+VL,AVX2+BMI1+BMI2+F16C+FMA+LZCNT+MOVBE,AVX,SSE3+SSSE3+SSE4.1+SSE4.2+POPCNT,X86Base+SSE+SSE2,AES+PCLMUL,AvxVnni VectorSize=256
+// Job: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3)
+
+OverheadJitting  1: 1 op, 259941.00 ns, 259.9410 us/op
+WorkloadJitting  1: 1 op, 866089.00 ns, 866.0890 us/op
+
+OverheadWarmup   1: 1 op, 732.00 ns, 732.0000 ns/op
+OverheadWarmup   2: 1 op, 251.00 ns, 251.0000 ns/op
+OverheadWarmup   3: 1 op, 511.00 ns, 511.0000 ns/op
+OverheadWarmup   4: 1 op, 281.00 ns, 281.0000 ns/op
+OverheadWarmup   5: 1 op, 261.00 ns, 261.0000 ns/op
+OverheadWarmup   6: 1 op, 731.00 ns, 731.0000 ns/op
+OverheadWarmup   7: 1 op, 501.00 ns, 501.0000 ns/op
+
+OverheadActual   1: 1 op, 511.00 ns, 511.0000 ns/op
+OverheadActual   2: 1 op, 411.00 ns, 411.0000 ns/op
+OverheadActual   3: 1 op, 501.00 ns, 501.0000 ns/op
+OverheadActual   4: 1 op, 491.00 ns, 491.0000 ns/op
+OverheadActual   5: 1 op, 531.00 ns, 531.0000 ns/op
+OverheadActual   6: 1 op, 481.00 ns, 481.0000 ns/op
+OverheadActual   7: 1 op, 481.00 ns, 481.0000 ns/op
+OverheadActual   8: 1 op, 861.00 ns, 861.0000 ns/op
+OverheadActual   9: 1 op, 932.00 ns, 932.0000 ns/op
+OverheadActual  10: 1 op, 381.00 ns, 381.0000 ns/op
+OverheadActual  11: 1 op, 421.00 ns, 421.0000 ns/op
+OverheadActual  12: 1 op, 532.00 ns, 532.0000 ns/op
+OverheadActual  13: 1 op, 471.00 ns, 471.0000 ns/op
+OverheadActual  14: 1 op, 471.00 ns, 471.0000 ns/op
+OverheadActual  15: 1 op, 501.00 ns, 501.0000 ns/op
+OverheadActual  16: 1 op, 812.00 ns, 812.0000 ns/op
+OverheadActual  17: 1 op, 722.00 ns, 722.0000 ns/op
+OverheadActual  18: 1 op, 642.00 ns, 642.0000 ns/op
+OverheadActual  19: 1 op, 852.00 ns, 852.0000 ns/op
+OverheadActual  20: 1 op, 310.00 ns, 310.0000 ns/op
+
+WorkloadWarmup   1: 1 op, 169386.00 ns, 169.3860 us/op
+WorkloadWarmup   2: 1 op, 26775.00 ns, 26.7750 us/op
+WorkloadWarmup   3: 1 op, 177543.00 ns, 177.5430 us/op
+
+// BeforeActualRun
+WorkloadActual   1: 1 op, 101537.00 ns, 101.5370 us/op
+WorkloadActual   2: 1 op, 24680.00 ns, 24.6800 us/op
+WorkloadActual   3: 1 op, 49170.00 ns, 49.1700 us/op
+
+// AfterActualRun
+WorkloadResult   1: 1 op, 101036.00 ns, 101.0360 us/op
+WorkloadResult   2: 1 op, 24179.00 ns, 24.1790 us/op
+WorkloadResult   3: 1 op, 48669.00 ns, 48.6690 us/op
+// GC:  0 0 0 96000 1
+// Threading:  0 0 1
+
+// AfterAll
+// Benchmark Process 1633085 has exited with code 0.
+
+Mean = 57.961 us, StdErr = 22.668 us (39.11%), N = 3, StdDev = 39.262 us
+Min = 24.179 us, Q1 = 36.424 us, Median = 48.669 us, Q3 = 74.853 us, Max = 101.036 us
+IQR = 38.428 us, LowerFence = -21.219 us, UpperFence = 132.495 us
+ConfidenceInterval = [-658.325 us; 774.248 us] (CI 99.9%), Margin = 716.286 us (1235.80% of Mean)
+Skewness = 0.22, Kurtosis = 0.67, MValue = 2
+
+// ** Remained 0 (0.0%) benchmark(s) to run. Estimated finish 2026-09-22 17:09 (0h 0m from now) **
+// ***** BenchmarkRunner: Finish  *****
+
+// * Export *
+  BenchmarkDotNet.Artifacts/results/WinForward.Benchmarks.Perf.SessionSetupDecompositionBenchmarks-report.csv
+  BenchmarkDotNet.Artifacts/results/WinForward.Benchmarks.Perf.SessionSetupDecompositionBenchmarks-report-github.md
+  BenchmarkDotNet.Artifacts/results/WinForward.Benchmarks.Perf.SessionSetupDecompositionBenchmarks-report.html
+
+// * Detailed results *
+SessionSetupDecompositionBenchmarks.ComponentA4_SlotAndQueueObjects: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=1]
+Runtime = .NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4; GC = Concurrent Workstation
+Mean = 8.331 us, StdErr = 4.423 us (53.09%), N = 3, StdDev = 7.660 us
+Min = 3.838 us, Q1 = 3.909 us, Median = 3.978 us, Q3 = 10.577 us, Max = 17.175 us
+IQR = 6.668 us, LowerFence = -6.094 us, UpperFence = 20.580 us
+ConfidenceInterval = [-131.417 us; 148.078 us] (CI 99.9%), Margin = 139.747 us (1677.47% of Mean)
+Skewness = 0.38, Kurtosis = 0.67, MValue = 2
+-------------------- Histogram --------------------
+[3.536 us ; 17.478 us) | @@@
+---------------------------------------------------
+
+SessionSetupDecompositionBenchmarks.ComponentA4b_BoundedSetupQueueObject: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=1]
+Runtime = .NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4; GC = Concurrent Workstation
+Mean = 8.388 us, StdErr = 4.748 us (56.60%), N = 3, StdDev = 8.224 us
+Min = 3.211 us, Q1 = 3.647 us, Median = 4.083 us, Q3 = 10.977 us, Max = 17.871 us
+IQR = 7.330 us, LowerFence = -7.348 us, UpperFence = 21.972 us
+ConfidenceInterval = [-141.644 us; 158.421 us] (CI 99.9%), Margin = 150.033 us (1788.59% of Mean)
+Skewness = 0.38, Kurtosis = 0.67, MValue = 2
+-------------------- Histogram --------------------
+[3.057 us ; 18.025 us) | @@@
+---------------------------------------------------
+
+SessionSetupDecompositionBenchmarks.ComponentA4_SlotAndQueueObjects: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=100]
+Runtime = .NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4; GC = Concurrent Workstation
+Mean = 55.013 us, StdErr = 47.432 us (86.22%), N = 3, StdDev = 82.155 us
+Min = 7.475 us, Q1 = 7.580 us, Median = 7.686 us, Q3 = 78.781 us, Max = 149.877 us
+IQR = 71.201 us, LowerFence = -99.221 us, UpperFence = 185.583 us
+ConfidenceInterval = [-1,443.800 us; 1,553.826 us] (CI 99.9%), Margin = 1,498.813 us (2724.49% of Mean)
+Skewness = 0.38, Kurtosis = 0.67, MValue = 2
+-------------------- Histogram --------------------
+[3.912 us ; 153.440 us) | @@@
+---------------------------------------------------
+
+SessionSetupDecompositionBenchmarks.ComponentA4b_BoundedSetupQueueObject: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=100]
+Runtime = .NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4; GC = Concurrent Workstation
+Mean = 24.563 us, StdErr = 9.855 us (40.12%), N = 3, StdDev = 17.069 us
+Min = 5.661 us, Q1 = 17.421 us, Median = 29.180 us, Q3 = 34.014 us, Max = 38.849 us
+IQR = 16.594 us, LowerFence = -7.471 us, UpperFence = 58.906 us
+ConfidenceInterval = [-286.836 us; 335.963 us] (CI 99.9%), Margin = 311.400 us (1267.74% of Mean)
+Skewness = -0.25, Kurtosis = 0.67, MValue = 2
+-------------------- Histogram --------------------
+[ 5.661 us ; 18.481 us) | @
+[18.481 us ; 54.382 us) | @@
+---------------------------------------------------
+
+SessionSetupDecompositionBenchmarks.ComponentA4_SlotAndQueueObjects: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=1000]
+Runtime = .NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4; GC = Concurrent Workstation
+Mean = 108.363 us, StdErr = 68.011 us (62.76%), N = 3, StdDev = 117.799 us
+Min = 39.927 us, Q1 = 40.352 us, Median = 40.778 us, Q3 = 142.582 us, Max = 244.385 us
+IQR = 102.229 us, LowerFence = -112.991 us, UpperFence = 295.925 us
+ConfidenceInterval = [-2,040.729 us; 2,257.455 us] (CI 99.9%), Margin = 2,149.092 us (1983.23% of Mean)
+Skewness = 0.38, Kurtosis = 0.67, MValue = 2
+-------------------- Histogram --------------------
+[34.955 us ; 249.357 us) | @@@
+---------------------------------------------------
+
+SessionSetupDecompositionBenchmarks.ComponentA4b_BoundedSetupQueueObject: ShortRun(InvocationCount=1, IterationCount=3, LaunchCount=1, UnrollFactor=1, WarmupCount=3) [Sessions=1000]
+Runtime = .NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4; GC = Concurrent Workstation
+Mean = 57.961 us, StdErr = 22.668 us (39.11%), N = 3, StdDev = 39.262 us
+Min = 24.179 us, Q1 = 36.424 us, Median = 48.669 us, Q3 = 74.853 us, Max = 101.036 us
+IQR = 38.428 us, LowerFence = -21.219 us, UpperFence = 132.495 us
+ConfidenceInterval = [-658.325 us; 774.248 us] (CI 99.9%), Margin = 716.286 us (1235.80% of Mean)
+Skewness = 0.22, Kurtosis = 0.67, MValue = 2
+-------------------- Histogram --------------------
+[ 0.694 us ;  72.154 us) | @@
+[72.154 us ; 136.766 us) | @
+---------------------------------------------------
+
+// * Summary *
+
+BenchmarkDotNet v0.15.8, Linux NixOS 26.11 (Zokor)
+AMD Ryzen 9 9955HX 2.47GHz, 1 CPU, 32 logical and 16 physical cores
+.NET SDK 10.0.401
+  [Host]   : .NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4
+  ShortRun : .NET 10.0.12 (10.0.12, 10.0.1226.42308), X64 RyuJIT x86-64-v4
+
+Job=ShortRun  InvocationCount=1  IterationCount=3  
+LaunchCount=1  UnrollFactor=1  WarmupCount=3  
+
+| Method                               | Sessions | Mean       | Error        | StdDev     | Median    | Allocated |
+|------------------------------------- |--------- |-----------:|-------------:|-----------:|----------:|----------:|
+| ComponentA4_SlotAndQueueObjects      | 1        |   8.331 us |   139.747 us |   7.660 us |  3.978 us |     144 B |
+| ComponentA4b_BoundedSetupQueueObject | 1        |   8.388 us |   150.033 us |   8.224 us |  4.083 us |      96 B |
+| ComponentA4_SlotAndQueueObjects      | 100      |  55.013 us | 1,498.813 us |  82.155 us |  7.686 us |   14400 B |
+| ComponentA4b_BoundedSetupQueueObject | 100      |  24.563 us |   311.400 us |  17.069 us | 29.180 us |    9600 B |
+| ComponentA4_SlotAndQueueObjects      | 1000     | 108.363 us | 2,149.092 us | 117.799 us | 40.778 us |  144000 B |
+| ComponentA4b_BoundedSetupQueueObject | 1000     |  57.961 us |   716.286 us |  39.262 us | 48.669 us |   96000 B |
+
+// * Warnings *
+MinIterationTime
+  SessionSetupDecompositionBenchmarks.ComponentA4_SlotAndQueueObjects: ShortRun      -> The minimum observed iteration time is 4.249us which is very small. It's recommended to increase it to at least 100ms using more operations.
+  SessionSetupDecompositionBenchmarks.ComponentA4b_BoundedSetupQueueObject: ShortRun -> The minimum observed iteration time is 3.667us which is very small. It's recommended to increase it to at least 100ms using more operations.
+  SessionSetupDecompositionBenchmarks.ComponentA4_SlotAndQueueObjects: ShortRun      -> The minimum observed iteration time is 7.896us which is very small. It's recommended to increase it to at least 100ms using more operations.
+  SessionSetupDecompositionBenchmarks.ComponentA4b_BoundedSetupQueueObject: ShortRun -> The minimum observed iteration time is 6.142us which is very small. It's recommended to increase it to at least 100ms using more operations.
+  SessionSetupDecompositionBenchmarks.ComponentA4_SlotAndQueueObjects: ShortRun      -> The minimum observed iteration time is 40.343us which is very small. It's recommended to increase it to at least 100ms using more operations.
+  SessionSetupDecompositionBenchmarks.ComponentA4b_BoundedSetupQueueObject: ShortRun -> The minimum observed iteration time is 24.68us which is very small. It's recommended to increase it to at least 100ms using more operations.
+
+// * Legends *
+  Sessions  : Value of the 'Sessions' parameter
+  Mean      : Arithmetic mean of all measurements
+  Error     : Half of 99.9% confidence interval
+  StdDev    : Standard deviation of all measurements
+  Median    : Value separating the higher half of all measurements (50th percentile)
+  Allocated : Allocated memory per single operation (managed only, inclusive, 1KB = 1024B)
+  1 us      : 1 Microsecond (0.000001 sec)
+
+// * Diagnostic Output - MemoryDiagnoser *
+
+
+// ***** BenchmarkRunner: End *****
+Run time: 00:00:01 (1.92 sec), executed benchmarks: 6
+
+Global total time: 00:00:39 (39.39 sec), executed benchmarks: 6
+// * Artifacts cleanup *
+Artifacts cleanup is finished

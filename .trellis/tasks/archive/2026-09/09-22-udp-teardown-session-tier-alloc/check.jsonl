@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "full quality gate set (build/tests/format/jb inspectcode) and the suppression policy for any diagnostics"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "0-B warm-path gates and the anchor values the re-measure must respect"}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "verify the drain/cancel/join semantics stay contract-locked"}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "verify teardown-reason and expiry semantics are unchanged"}

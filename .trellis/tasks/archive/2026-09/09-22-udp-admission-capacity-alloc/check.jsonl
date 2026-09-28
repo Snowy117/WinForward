@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "full quality gate set and the suppression policy"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "0-B warm-path gates and the T2 anchor to re-verify"}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "verify the setup-memory contracts stay locked"}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "verify scope/teardown semantics are unchanged"}

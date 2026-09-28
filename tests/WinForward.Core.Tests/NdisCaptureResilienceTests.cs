@@ -213,6 +213,45 @@ public sealed class CaptureDegradationPlumbingTests
         Assert.Equal(1, loop.DegradedAdapterCount);
     }
 
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public async Task DisposeAwaitsInFlightDegradationForward()
+    {
+        var forwarded = new TaskCompletionSource<(string AdapterId, int NativeError)>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var adapters = new[] { Adapter("a", 0x10) };
+        using var cts = new CancellationTokenSource();
+        var readers = new Dictionary<nint, INdisPacketReader> { [0x10] = new PermanentFailureReader(87) };
+        var dispatcher = new FlowDispatcher(CreatePassConfiguration(), new FakeGuard(), new NoopExecutor());
+        var processor = new CapturePacketProcessor(dispatcher);
+        var loop = new MultiAdapterCaptureLoop(new PerHandleReader(readers), adapters, processor,
+            TimeSpan.FromMilliseconds(1),
+            onAdapterDegraded: async (adapter, nativeError) =>
+            {
+                forwarded.TrySetResult((adapter.StableId, nativeError));
+                await release.Task;
+            });
+
+        // The degraded pump exits on its own, but the forward it started is parked inside the
+        // callback, so its scope lease is still outstanding when disposal begins.
+        await loop.RunAsync(cts.Token);
+        Assert.Equal(("a", 87), await forwarded.Task.WaitAsync(TimeSpan.FromSeconds(2)));
+
+        // Regression: reverting the forward to `_ = ForwardDegradationAsync(...)` would leave
+        // disposal with nothing to join, so it would complete here and orphan the callback.
+        var disposal = loop.DisposeAsync().AsTask();
+        await Task.Yield();
+        Assert.False(disposal.IsCompleted);
+
+        release.TrySetResult();
+        await disposal.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.True(disposal.IsCompleted);
+
+        // A second disposal joins the completed drain instead of re-running the teardown.
+        await loop.DisposeAsync();
+        Assert.Equal(1, loop.DegradedAdapterCount);
+    }
+
     private static ValidatedConfiguration CreatePassConfiguration()
     {
         var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase) { ["p"] = new("p", "127.0.0.1", 1080, null, null) };

@@ -46,6 +46,25 @@ internal sealed class FakeTransport : IUdpProxyTransport
     public List<(Endpoint Destination, byte[] Payload)> Sent { get; } = [];
     public Channel<Socks5UdpReceiveResult> Received { get; } = Channel.CreateUnbounded<Socks5UdpReceiveResult>();
 
+    /// <summary>
+    /// Opt-in hold for <see cref="SendSpanAsync"/>: when set, the send completes only once the test
+    /// completes the gate, so a test can observe an outstanding session send lease. Null by default
+    /// (every other test's send completes synchronously).
+    /// </summary>
+    public TaskCompletionSource? SendGate { get; init; }
+
+    /// <summary>
+    /// Opt-in hold for <see cref="DisposeAsync"/>: when set, disposal reports itself started and
+    /// then waits for the gate, so a test can park a session's teardown mid-flight. Null by default.
+    /// </summary>
+    public TaskCompletionSource? DisposeGate { get; set; }
+
+    /// <summary>Completes once <see cref="DisposeAsync"/> was entered (before the optional gate).</summary>
+    public TaskCompletionSource<bool> DisposeStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>When set, <see cref="DisposeAsync"/> faults with it while still marking the transport disposed.</summary>
+    public Exception? DisposeFault { get; set; }
+
     /// <summary>Queues a valid decoded relay datagram for the session's receive loop.</summary>
     public void EnqueueResponse(Socks5UdpDatagram datagram) => Received.Writer.TryWrite(Socks5UdpReceiveResult.Received(datagram));
 
@@ -55,7 +74,7 @@ internal sealed class FakeTransport : IUdpProxyTransport
     public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken)
     {
         lock (Sent) Sent.Add((destination, payload.ToArray()));
-        return ValueTask.CompletedTask;
+        return SendGate is not null ? new ValueTask(SendGate.Task) : ValueTask.CompletedTask;
     }
 
     public ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
@@ -70,7 +89,9 @@ internal sealed class FakeTransport : IUdpProxyTransport
     {
         IsDisposed = true;
         Received.Writer.TryComplete();
-        return ValueTask.CompletedTask;
+        DisposeStarted.TrySetResult(true);
+        if (DisposeFault is { } fault) return ValueTask.FromException(fault);
+        return DisposeGate is { } gate ? new ValueTask(gate.Task) : ValueTask.CompletedTask;
     }
 }
 

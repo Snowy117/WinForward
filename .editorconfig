@@ -424,3 +424,37 @@ resharper_check_namespace_highlighting = none
 # BenchmarkDotNet [Params] 属性由 BDN 经**反射**注入 setter，静态分析不可见——jb 误判 setter 未用。
 [benchmarks/WinForward.Benchmarks/Perf/**.cs]
 resharper_unused_auto_property_accessor_global_highlighting = none
+
+# 分析器测试工程的新增辅助类型沿用父命名空间（WinForward.Analyzers.Tests），
+# 与 tests/WinForward.Core.Tests/TestHelpers 的既有裁定同因（实测 IDE0130 与 jb CheckNamespace
+# 均精确命中该文件），按"抑制只覆盖证据所在路径"原则仅限本目录。
+[tests/WinForward.Analyzers.Tests/TestHelpers/**.cs]
+dotnet_diagnostic.IDE0130.severity = none
+resharper_check_namespace_highlighting = none
+
+# =====================================================================
+# WF0001–WF0004 生命周期规则（2026-09-21 引入，程序 09-20-structured-concurrency 子任务
+# 09-20-lifetime-analyzers / C2；规则实现在 analyzers/WinForward.Analyzers/，持久契约见
+# .trellis/spec/backend/async-lifetime.md）
+#
+# 四条规则把 fire-and-forget 逃逸语法变成构建错误。作用域仅 src/**：src/Directory.Build.props
+# 以 ProjectReference OutputItemType=Analyzer 接入，tests/** 与 benchmarks/** 不受管辖（由
+# tests/WinForward.Analyzers.Tests 的用例锁定）。严重度在此显式声明为 error 而非依赖
+# TreatWarningsAsErrors，使规则在该开关变化时仍保持致命，同时作为逐文件豁免的挂载锚点。
+#
+# 下列临时允许清单按文件 glob 限定，逐条写出证据与删除方（C3/C4）。每条都是待偿还债务，
+# 清偿完毕前本程序不算完成。`_ = task.Exception`、`_ = await ...`、`_ = TryWrite/TryAdd/SendTo/
+# Interlocked.Add` 与 `_ = character switch` 等右侧均非 awaitable，规则不触发，故无需条目
+# （由分析器测试锁定为非命中形态）。
+[src/**.cs]
+dotnet_diagnostic.WF0001.severity = error
+dotnet_diagnostic.WF0002.severity = error
+dotnet_diagnostic.WF0003.severity = error
+dotnet_diagnostic.WF0004.severity = error
+
+# 永久豁免（不在收缩清单内）：QuiescenceScope.cs:133 `_ = RunChildAsync(...)` 与 :170
+# `_ = DrainCoreAsync(...)` 是原语自身的受管子任务与分离的 drain——子任务已由 TryEnter 准入、
+# 其 lease 由 RunChildAsync 释放、故障在同一处 RecordFault 记录，drain 则自含故障（避免分离任务
+# 浮现为未观察异常）。两处丢弃都不是无人观察的 fire-and-forget（async-lifetime.md「原语的永久豁免」）。
+[src/WinForward.Runtime/QuiescenceScope.cs]
+dotnet_diagnostic.WF0001.severity = none

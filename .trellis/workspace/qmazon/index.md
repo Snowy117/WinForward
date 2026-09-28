@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 28
-- **Last Active**: 2026-09-20
+- **Total Sessions**: 36
+- **Last Active**: 2026-09-22
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~757 | Active |
+| `journal-1.md` | ~946 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,14 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 36 | 2026-09-22 | Admission and capacity pre-seed split | `ed204e1`, `a14ebd5`, `30bbed9` | `feat/transport-lifecycle` |
+| 35 | 2026-09-22 | UDP teardown and session-tier allocation reduction | `cfd56fd`, `27d0be1`, `2da59b0`, `b2ee992` | `feat/transport-lifecycle` |
+| 34 | 2026-09-22 | Session creation cost redo: out-of-process harness, corrected numbers, re-anchored T3 | `d4aeda5`, `6588265`, `dc37516`, `c55e5de` | `feat/transport-lifecycle` |
+| 33 | 2026-09-22 | Session creation cost: UDP full-stack decomposition, churn measurement, and the re-anchored budget | `a174f88`, `417ad8d`, `c303837`, `b7c7e66` | `feat/transport-lifecycle` |
+| 32 | 2026-09-21 | Complete the structured-concurrency program: C4 migrates the remaining lifecycle owners | `a3c0783`, `ccb0def` | `feat/transport-lifecycle` |
+| 31 | 2026-09-21 | Quiescence scope migration: TCP/UDP cluster (C3) | `a0e2b35` | `feat/transport-lifecycle` |
+| 30 | 2026-09-21 | Lifetime enforcement analyzers: four WF rules wired into src/** behind a proven allowlist (C2) | `2bfed0a`, `db52a93` | `feat/transport-lifecycle` |
+| 29 | 2026-09-21 | Quiescence scope primitive: measured gate choice and a fragile allocation gate found (C1) | `a167a24` | `feat/transport-lifecycle` |
 | 28 | 2026-09-20 | Transport lifecycle hardening: ownership, quiescence, session state | `4a2007e` | `feat/transport-lifecycle` |
 | 27 | 2026-09-20 | Adopt the JetBrains inspectcode gate and zero its report | `7b199df`, `25db2f5`, `1d612ea`, `baec0a2`, `b19a779`, `40df6e5`, `fb083cb` | `master` |
 | 26 | 2026-09-20 | Analyzer diagnostics cleanup: 1369 → 0 (dotnet format --severity info) | `fe21bd3`, `a6c15e0`, `b8484a1`, `1fafb33`, `aa7261d`, `d185cf1` | `master` |

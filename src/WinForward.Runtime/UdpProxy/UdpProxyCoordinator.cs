@@ -21,20 +21,11 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     private readonly ISetupExecutor _setupExecutor;
     private readonly Func<SetupWorkItem, Task> _setupHandler;
     private readonly Lock _gate = new();
-    private readonly CancellationTokenSource _shutdown = new();
+    private readonly QuiescenceScope _scope = new();
     private readonly TimeProvider _timeProvider;
     private readonly Func<ValueTask>? _beforeExpiryRecheck;
     private readonly IRuntimeLogger _logger;
-    private Task? _disposeTask;
-    private bool _disposed;
-
-    /// <summary>
-    /// Receive-failure teardowns the sessions started without awaiting (awaiting them in the
-    /// receive loop would re-enter session disposal). Guarded by <see cref="_gate"/>; drained by
-    /// <see cref="DisposeCoreAsync"/> so the coordinator, not the faulting session, owns their
-    /// completion.
-    /// </summary>
-    private readonly List<Task> _inFlightTeardowns = [];
+    private int _disposeStarted;
 
     /// <summary>Rate limit for the deprecated-session send drop diagnostic (one line per window).</summary>
     private readonly RuntimeLogThrottle _sessionUnavailableDropLog = new(TimeSpan.FromSeconds(5));
@@ -115,7 +106,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     /// <summary>
     /// The coordinator's observable counters as one snapshot: the live setup-failure cooldown
     /// count (bounded by <c>capacity</c>), the aggregate setup-queue bytes charged against the
-    /// global budget, and the setup-queue rejection / flush-TTL / dial-start re-stamp totals;
+    /// global budget, and the setup-queue rejection / flush-TTL / dial-start re-stamp totals
     /// for tests and diagnostics.
     /// </summary>
     internal UdpProxyDiagnostics Diagnostics => new(_cooldowns.Count, _budget.PendingBytes, _budget.RejectionCount, _setup.TtlExpiredCount, _setup.StampsRefreshedCount);
@@ -145,7 +136,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
         item._udp._flowGeneration = flowGeneration;
         item._udp._clientMac = capturedClientMac;
         item._udp._slot = slot;
-        item._cancellationToken = _shutdown.Token;
+        item._cancellationToken = _scope.Token;
         if (!_setupExecutor.TryEnqueue(item))
         {
             completion.TrySetCanceled(item._cancellationToken);
@@ -184,7 +175,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
         var lease = _setupQueuePool.Rent();
         if (payload.Length > lease.Length)
         {
-            // A datagram larger than the pinned frame cap cannot occur on the capture path;
+            // A datagram larger than the pinned frame cap cannot occur on the capture path
             // release the rental and fail the enqueue closed rather than copying past the lease.
             lease.Dispose();
             _budget.Credit(payload.Length);
@@ -215,40 +206,19 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
         return enqueued;
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        Task disposeTask;
-        TaskCompletionSource? completion = null;
-        lock (_gate)
-        {
-            if (_disposeTask is null)
-            {
-                _disposed = true;
-                completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                _disposeTask = completion.Task;
-            }
-            disposeTask = _disposeTask;
-        }
-
-        if (completion is not null)
-        {
-            try
-            {
-                await DisposeCoreAsync().ConfigureAwait(false);
-                completion.TrySetResult();
-            }
-            catch (Exception exception)
-            {
-                completion.TrySetException(exception);
-            }
-        }
-
-        await disposeTask.ConfigureAwait(false);
+        // D11: the scope's single-flight covers only the drain, and the seal happens inside it, so a
+        // precheck on IsSealed would be TOCTOU. The one-shot claim owns the teardown; every caller
+        // joins the drain, which the teardown body reaches last.
+        return Interlocked.Exchange(ref _disposeStarted, 1) != 0
+            ? new ValueTask(_scope.DrainAsync())
+            : new ValueTask(DisposeCoreAsync());
     }
 
     private async Task DisposeCoreAsync()
     {
-        await _shutdown.CancelAsync().ConfigureAwait(false);
+        _scope.Cancel();
         UdpSessionSlot[] slots;
         lock (_gate)
         {
@@ -277,7 +247,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
             {
                 await slot.Completion.ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
+            catch (OperationCanceledException) when (_scope.IsSealed)
             {
                 GC.KeepAlive(slot.Completion);
             }
@@ -289,43 +259,17 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
             if (slot.Session is { } session) await session.DisposeAsync().ConfigureAwait(false);
         }
 
-        await DrainInFlightTeardownsAsync().ConfigureAwait(false);
+        // D-C3-8: seal here — after every in-flight session's setup decision and teardown above, so
+        // an already-started receive-failure teardown was admitted, and before the join below, so no
+        // new one can start. DrainAsync both seals and joins the scope's children.
+        await _scope.DrainAsync().ConfigureAwait(false);
 
-        // Every started setup task was awaited above and released the limiter in its finally;
+        // Every started setup task was awaited above and released the limiter in its finally
         // tasks that start later observe the cancelled shutdown token before acquiring it.
         _setup.DisposeLimiter();
-        _shutdown.Dispose();
         // Every queued lease was drained above and every in-flight flush lease was released by
         // the awaited setup tasks. The rented pools and the setup executor are borrowed from
         // composition, which owns and disposes them after this coordinator's drain.
-    }
-
-    /// <summary>
-    /// Awaits the receive-failure teardowns the sessions started fire-and-forget. Disposing every
-    /// session in <see cref="DisposeCoreAsync"/> also drained each receive loop, so every handler
-    /// that will ever run has registered before this snapshot is taken.
-    /// </summary>
-    private async Task DrainInFlightTeardownsAsync()
-    {
-        Task[] inFlightTeardowns;
-        lock (_gate)
-        {
-            inFlightTeardowns = [.. _inFlightTeardowns];
-            _inFlightTeardowns.Clear();
-        }
-        foreach (var teardown in inFlightTeardowns)
-        {
-            try
-            {
-                await teardown.ConfigureAwait(false);
-            }
-            catch (Exception exception)
-            {
-                // The teardown's own removal path already handles its failure; disposal still
-                // finishes (the fault surfaces through the session's recorded receive failure).
-                _logger.Warn($"UDP receive-failure teardown faulted during coordinator disposal: {exception.GetType().Name}: {exception.Message}");
-            }
-        }
     }
 
     /// <summary>
@@ -446,7 +390,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
                     dropped++;
                 }
                 if (dropped > 0) _budget.NoteDrop(flow, dropped);
-                if (reason == UdpTeardownReason.SetupFailure && !_shutdown.IsCancellationRequested)
+                if (reason == UdpTeardownReason.SetupFailure && !_scope.IsSealed)
                 {
                     _cooldowns.Write(flow, _timeProvider.GetUtcNow());
                 }
@@ -457,17 +401,28 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
         return owned;
     }
 
-    Task IUdpSessionSlotHost.RemoveReceiveFailedSessionAsync(UdpProxySession session)
+    /// <summary>
+    /// The receive-failure signal (F1): starts the teardown as a child of the coordinator's scope,
+    /// which tracks it, joins it in <see cref="DisposeCoreAsync"/>, and records its fault — that is
+    /// what replaces the former fire-and-forget list. A sealed scope refuses the child, which is
+    /// safe because disposal disposes every session anyway.
+    /// </summary>
+    void IUdpSessionSlotHost.RemoveReceiveFailedSession(UdpProxySession session)
+        => _scope.Run(_ => RemoveReceiveFailedSessionAsync(session), "udp.receive-failure");
+
+    private async Task RemoveReceiveFailedSessionAsync(UdpProxySession session)
     {
-        var teardown = RemoveReceiveFailedSessionCoreAsync(session);
-        lock (_gate)
+        try
         {
-            // Prune finished entries so the set stays proportional to genuinely in-flight
-            // teardowns; the fault path is cold, so the scan costs nothing on the hot path.
-            _inFlightTeardowns.RemoveAll(static teardownTask => teardownTask.IsCompleted);
-            _inFlightTeardowns.Add(teardown);
+            await RemoveReceiveFailedSessionCoreAsync(session).ConfigureAwait(false);
         }
-        return teardown;
+        catch (Exception exception)
+        {
+            // Run records the child's fault but cannot log this domain-specific warning (D-C3-9)
+            // the record keeps the child observed either way.
+            _logger.Warn($"UDP receive-failure teardown faulted: {exception.GetType().Name}: {exception.Message}");
+            throw;
+        }
     }
 
     private async Task RemoveReceiveFailedSessionCoreAsync(UdpProxySession session)

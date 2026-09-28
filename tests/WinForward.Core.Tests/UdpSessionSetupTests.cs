@@ -131,6 +131,6 @@ public sealed class UdpSessionSetupTests
             return Task.FromResult(true);
         }
 
-        public Task RemoveReceiveFailedSessionAsync(UdpProxySession session) => Task.CompletedTask;
+        public void RemoveReceiveFailedSession(UdpProxySession session) => GC.KeepAlive(session);
     }
 }

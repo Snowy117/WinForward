@@ -1,0 +1,6 @@
+# implement.md step-3 post-change smoke: dotnet run -c Release --project benchmarks/WinForward.Benchmarks -- --filter '*StageT1*' '*ComponentC2*' --job short
+# single process, one run (smoke, not a campaign)
+pre-run (captured immediately before the run):
+0.84 1.43 2.08 2/1324 1419397
+post-run (log mtime 2026-09-22 15:23:15 +08:00):
+2.63 2.71 2.49 2/1240 1425940

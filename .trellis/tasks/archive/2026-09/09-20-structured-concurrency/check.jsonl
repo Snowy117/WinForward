@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "The gate and suppression audit used to verify each child before commit."}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Allocation-gate contract used to verify no packet-path regression in the primitive and migrations."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Fail-closed semantics to re-verify after the signal/join split in the UDP receive-failure path."}
+{"file": ".trellis/tasks/09-20-structured-concurrency/design.md", "reason": "The shared contract children are checked against (invariant I1/I2, rule table, per-owner mapping)."}

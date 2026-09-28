@@ -44,7 +44,6 @@ public sealed class LayeredCaptureRunner
     private const int MaxConsecutiveStartupRecoveries = 3;
     private readonly IAdapterEnumerationProvider _enumerationProvider;
     private readonly ICaptureGenerationFactory _generationFactory;
-    private readonly IAdapterListChangeSource _changeSource;
     private readonly PolicySnapshot _policy;
     private readonly IRuntimeLogger _logger;
     private readonly Func<CancellationToken, ValueTask> _disposeDurableAsync;
@@ -54,8 +53,10 @@ public sealed class LayeredCaptureRunner
     private readonly TimeProvider _time;
     private readonly InterceptionHealthMonitor _healthMonitor;
     private readonly RefreshDemandGate _demandGate = new();
+    private readonly CaptureRefreshWorkers _refreshWorkers;
     private readonly ConcurrentQueue<string> _pendingDegradedAdapters = new();
     private int _started;
+    private QuiescenceScope _scope = null!;
 
     private ICaptureGeneration? _generation;
     private CancellationTokenSource? _refreshCancellation;
@@ -91,7 +92,6 @@ public sealed class LayeredCaptureRunner
         }
         _enumerationProvider = enumerationProvider;
         _generationFactory = generationFactory;
-        _changeSource = changeSource;
         _policy = policy;
         _logger = logger;
         _disposeDurableAsync = disposeDurableAsync;
@@ -99,6 +99,7 @@ public sealed class LayeredCaptureRunner
         _minimumRefreshInterval = minimumRefreshInterval ?? s_defaultMinimumRefreshInterval;
         _periodicRefreshInterval = periodicRefreshInterval ?? s_defaultPeriodicRefreshInterval;
         _time = timeProvider ?? TimeProvider.System;
+        _refreshWorkers = new CaptureRefreshWorkers(changeSource, _demandGate.Signal, _periodicRefreshInterval, _time);
         _healthMonitor = interceptionHealthMonitor ?? new InterceptionHealthMonitor(logger, timeProvider: timeProvider);
         _healthMonitor.AttachTrigger(OnForcedRefreshTriggered);
     }
@@ -137,17 +138,15 @@ public sealed class LayeredCaptureRunner
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         if (Interlocked.Exchange(ref _started, 1) != 0) throw new InvalidOperationException("The capture runner has already been started.");
-        using var monitorCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _scope = new QuiescenceScope(cancellationToken);
         await using var cancelRegistration = cancellationToken.Register(
             static state => ((RefreshDemandGate)state!).Signal(), _demandGate);
-        // ReSharper disable once AccessToDisposedClosure // TeardownAsync joins this monitor task (await monitor) before RunAsync's using scope disposes monitorCancellation, so the closure never reads a disposed token source.
-        var monitor = Task.Factory.StartNew(
-            () => MonitorAsync(monitorCancellation.Token),
-            CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
-        // ReSharper disable once AccessToDisposedClosure // TeardownAsync joins this periodic-tick task (await periodicTick) before the using scope disposes monitorCancellation, the same join-before-dispose contract as the monitor task above.
-        var periodicTick = _periodicRefreshInterval > TimeSpan.Zero
-            ? Task.Run(() => PeriodicRefreshTickAsync(monitorCancellation.Token), monitorCancellation.Token)
-            : null;
+        _refreshWorkers.StartMonitor(_scope);
+        // PeriodicTimer rejects a non-positive period, so the disable guard stays outside Run.
+        if (_periodicRefreshInterval > TimeSpan.Zero)
+        {
+            _scope.Run(_refreshWorkers.PeriodicRefreshTickAsync, "capture.periodic-refresh");
+        }
         try
         {
             var initial = _enumerationProvider.Enumerate();
@@ -186,52 +185,8 @@ public sealed class LayeredCaptureRunner
         }
         finally
         {
-            await TeardownAsync(monitor, monitorCancellation, periodicTick).ConfigureAwait(false);
+            await TeardownAsync().ConfigureAwait(false);
         }
-    }
-
-    /// <summary>
-    /// Periodic link-state re-check (task 09-17 R1-A): the NDISRD bound-adapter list is not
-    /// rebuilt by host address changes (IPv6 temporary-address rotation), so a timer raises a
-    /// NON-forced refresh demand every interval. An unchanged enumeration still resolves as the
-    /// no-op skip, and the storm guard absorbs races with NDISRD signals; the demand gate sees
-    /// tick signals exactly like watcher signals, so no new state machine exists. The timer is
-    /// TimeProvider-backed to stay fake-time testable.
-    /// </summary>
-    private async Task PeriodicRefreshTickAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            using var timer = new PeriodicTimer(_periodicRefreshInterval, _time);
-            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
-            {
-                _demandGate.Signal();
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Run shutdown; a signal that can no longer be consumed changes nothing.
-        }
-    }
-
-    private Task MonitorAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            // Blocking wait: this loop owns its dedicated (LongRunning) thread by design. A false
-            // return (the change source was disposed/unblocked) ends the monitor loop.
-            while (_changeSource.WaitOne(cancellationToken)) _demandGate.Signal();
-        }
-        catch (OperationCanceledException)
-        {
-            // Monitor shutdown via its cancellation token.
-        }
-        catch (ObjectDisposedException)
-        {
-            // The change source was disposed concurrently with shutdown; no signal can follow.
-        }
-
-        return Task.CompletedTask;
     }
 
     private async Task<RefreshDemandOutcome> ProcessRefreshDemandAsync(CancellationToken cancellationToken)
@@ -451,14 +406,13 @@ public sealed class LayeredCaptureRunner
         }
     }
 
-    private async Task TeardownAsync(Task monitor, CancellationTokenSource monitorCancellation, Task? periodicTick)
+    private async Task TeardownAsync()
     {
         Exception? stopFault = null;
         try { await StopGenerationAsync().ConfigureAwait(false); }
         catch (Exception exception) { stopFault = exception; }
-        await CancelBestEffortAsync(monitorCancellation).ConfigureAwait(false);
-        await monitor.ConfigureAwait(false);
-        if (periodicTick is not null) await periodicTick.ConfigureAwait(false);
+        _scope.Cancel();
+        await _scope.DrainAsync().ConfigureAwait(false);
         try
         {
             await _disposeDurableAsync(CancellationToken.None).ConfigureAwait(false);

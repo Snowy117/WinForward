@@ -106,14 +106,49 @@ UDP session setup, or the SOCKS5 benchmark/soak suite.
   (2,887.9 ns vs 616.7 ns @1400 B); storing the raw value at creation closed the gap
   (626 ns ≈ host shape). Any per-packet stage that needs an address from a cold-edge object
   must cache `IPAddressValue` at the cold edge.
-- **UDP session cold-path bookkeeping budget: ≤1 KB per session** (slot, setup queue,
-  task machinery, MAC copy, tombstone/tracking structures, logging). Measured 2.1 KB →
-  ~0.4 KB via: single-slot setup queue fast path, no `registered` TCS (slot add under the
-  coordinator gate already orders before any handler can run), inlined setup-failure handling
-  (tombstone written iff the exception is not an OCE), method-group delegates cached in the
-  constructor, dictionary pre-sizing clamped to `min(capacity, 1024)`. Framework socket cost
-  (~84 KB/session: control TCP connect + UDP ASSOCIATE + sockets) is outside this budget and
-  out of scope.
+- **UDP session setup bookkeeping budget: ≤1,500 B per session** (capacity pre-seed, slot claim,
+  setup queue + payload copy, task machinery, tombstone/tracking structures). Measured
+  1,433 B/session, spread ≤172 B (task 09-21-session-creation-cost, 2026-09-22). The design
+  guarantees from the 2026-08-29 contract stand (single-slot setup queue fast path, no
+  `registered` TCS, inlined setup-failure handling, method-group delegates cached in the
+  constructor, dictionary pre-sizing clamped to `min(capacity, 1024)`); its ≤1 KB and
+  "measured 2.1 KB → ~0.4 KB" figures predate the session-tier and teardown attribution and are
+  superseded.
+- **Noop probe budget: `UdpSessionBenchmarks` Noop probe ≤5,400 B/session marginal** (1→1000
+  sweep; measured 5,161.8 B, spread 14.9 B; re-anchored 2026-09-22 by
+  09-22-udp-teardown-session-tier-alloc after −565.2 B/session of measured reductions, was
+  5,727.0; headroom to the band 238 B). The probe's window contains its own fake transport +
+  flow-key harness (460.8 B/session), so product-shaped cost is ≤4,950 B/session (measured
+  4,701.0 B; was 5,266.2). When the probe moves, `SessionSetupDecompositionBenchmarks` localizes
+  the move: capacity 489 / admission 829 / setup start ≤172 / session tier 2,503 / teardown 1,459
+  (matched shape, not re-measured) – 1,885 (single-pass) B per session. Split note
+  (09-22-udp-admission-capacity-alloc): of the admission 829, 356.8 is the flow-key harness (H)
+  and 272.0 is the cold `SetupWorkItem` rent production amortizes (the executor's
+  `OverflowAllocations` diagnostic is zero at steady state), so steady-state admission is ≈200
+  B/session (slot + queue + completion cell); the capacity 489 is the probe's `capacity = N`
+  pre-seed (one-time at the production 1,024 clamp), and live flows beyond the clamp pay ≈80
+  B/session of amortized dictionary growth per dictionary. Anchor falsification: a
+  documented ≥3-run batch above the band on an unmodified tree is product drift to fix (never to
+  relax the band).
+- **Framework socket cost stays outside this budget** (control TCP connect + SOCKS5 handshake,
+  UDP ASSOCIATE, relay socket) but is anchored instead of untracked, and it must be measured with
+  the loopback SOCKS5 server **out of process** (`--socks5-external`,
+  `WINFORWARD_BENCH_EXTERNAL_SERVER=1`; an in-process run is a diagnostic whose number carries a
+  ~75,500 B/session harness share): isolated create+dispose path **7,952 B/session** (control
+  connect + greeting 3,792 = 47.7 %; ASSOCIATE 959; relay socket 576; self-traffic 160; transport
+  ctor + wiring 2,465), churn whole cycle **≤14,500 B/session** wave shape / **≤14,300**
+  sustained (measured 13,249–14,070 / 13,720–13,869 B), real probe marginal **≤17,500 B/session**
+  (measured 17,021 B, echo-fed shape) — re-anchored 2026-09-22 (task
+  09-22-session-creation-cost-redo); the superseded 83,442 / 77,448 / ≤95,000 figures were
+  inflated by the in-process harness server's per-connection 64 KiB relay buffer and are not
+  comparable. The N=48/D=0 churn wave cell was re-measured at 12,560.3 B/session after the
+  09-22-udp-teardown-session-tier-alloc reductions (−688.6; the full wave matrix, sustained shape
+  and real probe were not re-run, so those bands stand with additional headroom). Reusing control
+  connections is the only structural lever there — a product/protocol
+  decision whose allocatable share is the ~3.8 KB/session per-flow dial. Anchor falsification: a
+  documented ≥3-run batch above the framework/churn anchors on an unmodified tree, with the
+  in-process ratio still ≈10.5×, is product drift to fix (never to relax); if the in-process
+  value moves with it, the harness changed and the anchor is re-derived.
 - **Throughput acceptance anchor**: `tcp.throughput` socks5 mode must stay ≥70% of bare mode
   (same workers/echo/transfer-size, relay leg without SOCKS5 establishment); measured 93.9%
   (141.4 vs 150.6 MB/s, 16 conc × 1 MiB quick). `TcpRelay OneWayAsync` (~0.94 GB/s) is the
@@ -147,7 +182,9 @@ UDP session setup, or the SOCKS5 benchmark/soak suite.
 - Existing 386-test baseline (rewrite byte-for-byte round-trip, coordinator admission,
   cooldown, capacity, single-flight dispose) must hold behavior-zero.
 - Benchmark re-runs: FrameRewriter 0 B, Dispatcher WarmProxy = WarmPass allocation, UdpSession
-  Noop probe ≤ ~4 KB @100 sessions, soak ratio ≥70%.
+  Noop probe ≤5,400 B/session marginal (1→1000 sweep; N=100 row ≈5,900 B/session), real-dial runs
+  against the out-of-process server (framework ladder ≤8,200 B/session, churn ≤14,500 B/session),
+  soak ratio ≥70%.
 
 ### 7. Wrong vs Correct
 
@@ -245,10 +282,66 @@ branch, and any allocation-gate test that protects a span-vs-memory overload cho
   `GC.GetAllocatedBytesForCurrentThread()` delta `== 0` across real dispatches and that the fake's
   `SpanSends` advanced by exactly the expected count. A future re-materialization on the send path
   (a new memory overload, `ToArray()`, or `new byte[]`) must make that 0-B assertion fail.
+- **An allocation gate must open only after its path is ready, and must verify it stayed on one
+  thread.** `GC.GetAllocatedBytesForCurrentThread()` is a *per-thread* counter, so a gate over a window
+  that spans `await`s is only meaningful when (a) the driven path is actually **ready** — it takes the
+  direct/warm shape rather than a cold setup path — and (b) the reading thread did not change.
+  `EstablishedUdpDatagramPathAllocatesNoManagedBytes`
+  (`tests/WinForward.Core.Tests/HotPathAllocationGateTests.cs`, measured window `:148-155`, asserts
+  through `:171`) measures 64 dispatches across 64 `await`s; run alone it failed repeatedly
+  (`Expected: 0, Actual: 600`, and later `3688`, `4328`, `5352`).
+
+  **The cause is a not-yet-ready window, not thread migration** (corrected 2026-09-21 after the fix was
+  measured; the earlier "with a cold pool the continuation migrates to another pool thread and the
+  before/after readings land on different threads" explanation was **wrong**). Evidence: the managed
+  thread id was constant across 40 instrumented 64-dispatch loops (8 runs × 5 loops) — no continuation
+  migration ever occurred, consistent with the source, whose whole chain
+  (`NdisPacketActionExecutor.ProxyAsync` → `UdpProxyCoordinator.TrySendSpanAsync` →
+  `UdpProxySession.SendSpanAsync`) completes inline against the fake transport; and disabling tiered
+  compilation/PGO did **not** remove the burst. What the measurements do show is coupling to readiness:
+  the per-thread delta was non-zero **only in the first batch**, and every non-zero first batch
+  coincided with a first-batch send-count shortfall (`SpanSends` delta of 17/40/67 where 64 was
+  expected). While a session is not yet `Ready`, datagrams take the bounded drop-oldest setup queue and
+  are sent later by the background flush pipeline — so an early window rides the cold setup path, which
+  allocates once and leaks sends into the window. Once the path is ready the window is allocation-free
+  and the counter is exact (every later batch measured 0 B).
+
+  So: **fix the window, not the threshold.** Open the measured window only after (1) a probe send proves
+  the session admits directly — the counter advances by exactly one and
+  `Diagnostics.PendingSetupBytes == 0` — and (2) an allocation-stable probe batch shows the exact 0-byte
+  reading (bounded retries; the landed gate allows 8). Keep the exact `Assert.Equal(0, allocated)`,
+  assert the managed thread id did not change across the window, and always pair the byte assertion with
+  the thread-independent call counter (`SpanSends`), which catches a regression regardless. Readiness is
+  **not** a licence to relax the threshold: a real per-packet allocation never stabilizes, so the
+  bounded loop fails rather than passes (injecting `new byte[1]` on the warm path makes the gate fail
+  with "the UDP warm path never became allocation-stable").
+- **A single-threaded `SynchronizationContext` is not a substitute for the readiness precondition.**
+  This gate's chain awaits with `ConfigureAwait(false)` throughout (`NdisPacketActionExecutor.cs:360,450`
+  and the send tails), so a context cannot capture the continuations at all. (Migration was not the
+  observed failure — see the bullet above — but the thread-id assertion is kept as cheap insurance,
+  since the counter is per-thread either way.)
+- **Sibling gate, same shape.** `DispatcherWarmFastPathAllocatesNoManagedBytes` carries the same
+  readiness transient; it was left untouched as outside that task's scope, and the same
+  ready-then-measure shape applies when it is next touched. Its reported 1-of-5 class-alone failure
+  (`Actual: 1880`) could not be reproduced by a later independent run, so its frequency is unconfirmed.
 - **Approved cold-path materialization.** `Socks5UdpTransport.SendSpanAsync` copies with
   `payload.ToArray()` only on the contended-gate branch: the span views native capture memory
   that recycles once dispatch returns, so it cannot cross the gate `await`. This is a documented
   cold-path exemption; the warm uncontended shape stays zero-alloc.
+- **The UDP transport's disposal guard is outside the warm shape** (C4, 2026-09-21).
+  `Socks5UdpTransport.DisposeAsync` claims a one-shot `int` (`Interlocked.Exchange`) and sets it
+  **before** `_socket.Dispose()`; `SendSpanAsync` refuses with `ObjectDisposedException` on a plain
+  `Volatile.Read(ref _disposed) != 0` taken *before* `_sendGate.WaitAsync`. That is one volatile read
+  plus one branch — 0 B, no CTS, no closure, no `Run`, no state machine — and the "`_sendGate` disposed
+  last" order is unchanged, which is what keeps `WarmSyncSendAllocatesNoManagedBytes`,
+  `SendSpanAsyncWarmPathRunsNoAsyncStateMachine` and `EstablishedUdpDatagramPathAllocatesNoManagedBytes`
+  green. Its residual window (a sender preempted between the read and `WaitAsync` can still reach a
+  disposed gate) is accepted: closing it absolutely would require a lease on the per-datagram path.
+- **The capture refresh and demand machinery is off the packet path** (C4, 2026-09-21).
+  `LayeredCaptureRunner`'s monitor thread, its periodic tick, and the extracted
+  `CaptureRefreshWorkers` type allocate (a `Run` child's delegate + state machine, one OS thread) per
+  *generation or tick*, never per packet; the capture pump's own zero-allocation gate
+  (`NdisCapturePumpTests.IdlePollIterationsAllocateNoManagedBytes`) is unaffected.
 
 ### 4. Validation & Error Matrix
 
@@ -257,6 +350,8 @@ branch, and any allocation-gate test that protects a span-vs-memory overload cho
 | Warm entry contains a capturing lambda anywhere in its body | 0 B gate fails by design; extract the lambda to a cold helper |
 | Warm entry returns before the cold branch | still 0 B — no display class is hoisted |
 | A materializing overload/copy is re-added on the send seam | 0 B gate fails (`SpanSends` count and/or allocation delta) |
+| A gate's measured window opens before the driven path is ready (or spans `await`s that resume on another thread) | per-thread delta is invalid — the gate fails spuriously *or* can mask a small regression; prove direct admission and allocation stability first, then assert the thread is unchanged and keep the exact zero |
+| A gate's readiness/stable-warm-up phase is implemented as a relaxed threshold | forbidden — the stabilization loop must require an exactly-0 delta, so a genuine per-call allocation makes it fail instead of pass |
 | Span reaches `Socks5UdpTransport` with the send gate uncontended | zero-alloc sync `SendTo` |
 | Span reaches `Socks5UdpTransport` with the gate contended | `payload.ToArray()` cold copy (documented exemption) |
 
@@ -267,6 +362,10 @@ branch, and any allocation-gate test that protects a span-vs-memory overload cho
   — the UDP gate asserts 0 allocated bytes and that the fake's `SpanSends` advances by exactly the expected count after the measurement (span is the only send seam).
 - `NativeBufferPoolTests` / `NdisPacketBufferPoolTests`: balance identity + dispose-drain races
   (`ReturnsRacingDisposeNeverStrandBuffers`).
+- Every allocation gate must be verifiable in isolation, not only inside the full suite: run it with
+  `dotnet test WinForward.slnx -c Release --filter "FullyQualifiedName~<GateName>"`. A gate that only
+  passes when the pool is warm is a weak gate — fix it before trusting it to protect a path you are
+  about to change (see "An allocation gate must open only after its path is ready").
 - Baseline must stay behavior-zero (678 tests green on this task).
 
 ### 6. Wrong vs Correct
@@ -285,6 +384,39 @@ public ValueTask<bool> TrySendSpanAsync(...)
 // so no display class is hoisted and the warm path measures 0 B.
 private void ScheduleSessionSetup(FlowKey flow, Socks5Server server, long flowGeneration, byte[]? capturedClientMac, UdpSessionSlot slot)
     => slot.Completion = Task.Run(() => _setup.CreateSessionAsync(flow, server, flowGeneration, capturedClientMac, _shutdown.Token, slot));
+```
+
+```csharp
+// Wrong: the measured window is opened before the driven path is ready (and without checking the
+// thread), so the first batch rides the cold setup path — `before` and `after` then disagree.
+// The same code measured 600 B alone and 0 B inside the full suite (2026-09-21); the thread id was
+// constant across the window every time, so continuation migration was NOT the cause — readiness was.
+var before = GC.GetAllocatedBytesForCurrentThread();
+for (var index = 0; index < count; index++)
+    await executor.ProxyAsync(packet, server, cancellationToken);
+Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+
+// Correct: prove the path is ready and allocation-stable first, then open a thread-checked,
+// exactly-zero window. A single-threaded SynchronizationContext is NOT a substitute: this chain
+// awaits with ConfigureAwait(false) throughout (measured 2026-09-21), so a context cannot capture it.
+Assert.True(await ProbeAdmitsDirectlyAsync(), "the gate relies on direct admission, not the setup queue");
+Assert.True(await WaitForAllocationStableBatchAsync(), "the UDP warm path never became allocation-stable");
+
+var threadId = Environment.CurrentManagedThreadId;
+var before = GC.GetAllocatedBytesForCurrentThread();
+for (var index = 0; index < count; index++)
+{
+    var pending = executor.ProxyAsync(packet, server, cancellationToken);
+    Assert.True(pending.IsCompletedSuccessfully, "the gate relies on the synchronous fast path");
+    await pending;
+}
+Assert.Equal(threadId, Environment.CurrentManagedThreadId);
+Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+Assert.Equal(count, factory.Transport!.SpanSends - spanSendsBeforeMeasure);
+
+// The documented-bound form is only for a path that genuinely must yield; the readiness and
+// allocation-stability precondition still applies, and the reason must be recorded above.
+Assert.InRange(GC.GetAllocatedBytesForCurrentThread() - before, 0, documentedBound);
 ```
 
 ## Native pool family, pooled flow/setup state, and GC-off posture (task 09-18, 2026-09-18)
@@ -433,4 +565,70 @@ _socket.SendTo(_sendBuffer.AsSpan(0, written), SocketFlags.None, _relaySocketAdd
 // Correct: gate the window on fresh overflow growth only, then — after the relays/coordinator are
 // torn down — wait (bounded) for every pool to drain to Outstanding == 0 and assert the
 // conservation identity OverflowAllocations == DisposedCount + InPool + Outstanding.
+```
+
+## Real-Dial Measurement Harness (task 09-22-session-creation-cost-redo)
+
+### 1. Scope / Trigger
+
+Trigger: any change to a benchmark instrument that dials the loopback SOCKS5 server **and** reads
+allocation counters (`FrameworkSetupBenchmarks`, the real-transport `UdpSessionBenchmarks` rows,
+`udp.churn`). The server must not share the measured process: it allocates a 64 KiB relay-loop
+buffer plus a per-connection socket/arrays per accepted control connection, and
+`GC.GetTotalAllocatedBytes` is process-wide — the 2026-09-21/22 "framework path
+83,442 B/session" was ~75,500 B/session of harness (2026-09-22 correction).
+
+### 2. Signatures
+
+- Child server mode: `--stability --serve-socks5-udp --flows <N> [--dial-delay-ms <D>]`
+- Churn opt-in: `--socks5-external`; benchmark opt-in: `WINFORWARD_BENCH_EXTERNAL_SERVER=1`
+- Helper: `ExternalLoopbackSocks5UdpServer.StartAsync(int flows, TimeSpan associateDelay, CancellationToken)` → `ControlEndpoint`, `IsEnabled`, `ThrowIfExited()`
+
+### 3. Contracts
+
+- Handshake: the child prints exactly one stdout line `{"controlPort":<P>,"echoPort":<E>}`;
+  everything else it writes goes to stderr.
+- Lifetime: the child exits on stdin EOF (parent death or disposal) or SIGTERM/SIGINT; the parent
+  closes stdin, waits 5 s, then `Kill(entireProcessTree: true)`.
+- Child content: `EchoReceiver(N)` + `LoopbackSocks5UdpServer(receiver.Endpoint, associateDelay)`
+  — the external probe is **echo-fed** (one response per session); the historical in-process probe
+  was discard-fed. Quote the shape with any probe number.
+- Default: no flag and no env var = the historical in-process harness, kept byte-identical so
+  recorded command lines keep reproducing their (harness-inflated) numbers.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| no handshake line within 15 s | `StartAsync` throws with the child's drained stderr attached |
+| child exits mid-instrument | next `ThrowIfExited()` fails the run (probe flush wait, churn wave top and response wait) — never a silent zero-response row |
+| double dispose | the latch guard makes the second call a no-op; stdin is closed once |
+| child outlives a crashed parent | stdin EOF ends it; the 5 s wait + process-tree kill covers the rest |
+
+### 5. Good/Base/Bad Cases
+
+- Good: real-dial instruments read only client allocations; the framework ladder's measured
+  harness share is ~75,500 B/session (in-process 83,442 → out-of-process 7,952).
+- Base: in-process runs stay valid as diagnostics when the harness share is stated or subtracted.
+- Bad: adding a new real-dial allocation instrument against the in-process server, or quoting an
+  in-process number without its harness share.
+
+### 6. Tests Required
+
+- Smoke: `--serve-socks5-udp --flows 8 < /dev/null` prints the handshake line and exits 0.
+- A/B anchor: the framework ladder reproduces in-process ≈83,442 / out-of-process ≈7,952 B/session
+  (≥3 runs, `--job short`); the budget anchors are in §3 above.
+
+### 7. Wrong vs Correct
+
+```csharp
+// Wrong: measure a real dial with the loopback server in the measured process — its
+// per-connection 64 KiB relay buffer + 4 MiB relay socket + control arrays land in the client's
+// GC.GetTotalAllocatedBytes (a ~9× inflation on the framework ladder).
+_server = new LoopbackSocks5UdpServer(discardEndpoint);
+
+// Correct: host the server in a child process and dial its control endpoint; the instrument
+// reads only client-side allocations and the topology matches production.
+await using var server = await ExternalLoopbackSocks5UdpServer.StartAsync(flows, TimeSpan.Zero, token);
+_socks = new Socks5Server("benchmark", "127.0.0.1", (ushort)server.ControlEndpoint.Port, null, null);
 ```

@@ -755,3 +755,192 @@ Planned and implemented 09-20-transport-lifecycle across Phases A-E. Ownership c
 ### Status
 
 [OK] **Completed**
+
+
+## Session 29: Quiescence scope primitive: measured gate choice and a fragile allocation gate found (C1)
+<!-- trellis-session: v=2 fp=5703a70be5b7df0a -->
+
+**Date**: 2026-09-21
+**Task**: Quiescence scope primitive: measured gate choice and a fragile allocation gate found (C1)
+**Branch**: `feat/transport-lifecycle`
+
+### Summary
+
+Planned and delivered C1 (09-20-quiescence-scope) of the structured-concurrency program, after grilling the design tree in rounds and creating the parent 09-20-structured-concurrency plus four children (quiescence-scope, lifetime-analyzers, lifecycle-migration-cluster, lifecycle-migration-rest). C1 ships QuiescenceScope + WorkLease: a packed-word CAS gate (bit 0 = sealed, rest = pending) chosen by measurement over the lock variant (18.60 ns vs 49.50 ns per enter/exit pair, both 0 B/op, outside the dev-box noise band); Enter/Exit allocate 0 bytes and the drain cell is created once at seal, never on a 0->1 transition. An independent trellis-check pass found 7 issues; the fix pass made DrainAsync identity-stable single-flight (the sealing caller previously got a different Task than later callers) with the drain cell allocated exactly once, added fault call-site attribution (RecordFault(exception, site) + FaultSite, fed by Run's name), corrected the spec's benchmark numbers, and asserted the D3/P6 no-sibling-cancellation property. While verifying, found that HotPathAllocationGateTests.EstablishedUdpDatagramPathAllocatesNoManagedBytes is not a flake but a thread-migration measurement artifact: its window spans 64 awaits while reading GC.GetAllocatedBytesForCurrentThread(), so it fails 4/4 in isolation (600 B observed) and is green only inside the full suite -- and in the dangerous direction a migrated continuation can mask a small real regression. The gate file is unmodified (pre-existing), so the contract 'an allocation gate must evaluate on one thread' was recorded in hot-path.md and the hardening was scheduled as a hard prerequisite of C3, which changes the span-send path it guards. Gates: format exit 0 empty, Release build 0 warnings, 763/763 tests, jb inspectcode 0 issues. Specs: new async-lifetime.md (glossary, I1/I2, primitive contract, Run admission rules, WF-rule stub) plus its index row; hot-path.md gate contract.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a167a24` | feat(runtime): counted quiescence scope primitive |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 30: Lifetime enforcement analyzers: four WF rules wired into src/** behind a proven allowlist (C2)
+<!-- trellis-session: v=2 fp=21ccd5410e3e41d3 -->
+
+**Date**: 2026-09-21
+**Task**: Lifetime enforcement analyzers: four WF rules wired into src/** behind a proven allowlist (C2)
+**Branch**: `feat/transport-lifecycle`
+
+### Summary
+
+Delivered C2 of the structured-concurrency program: analyzers/WinForward.Analyzers (netstandard2.0, Roslyn 4.14.0 pinned against SDK 10.0.401) with four build-breaking rules - WF0001 (discard of an unawaited awaitable), WF0002 (Task/Task<T>.ContinueWith), WF0003 (Task.Run / Task.Factory.StartNew), WF0004 (bare unawaited awaitable expression statement). WF0004 was restored after measuring that CS4014 fires only inside async methods: 'void M() { FooAsync(); }' is silent, so the synchronous-method hole needed its own rule. Rules key on awaitable types (well-known task types by OriginalDefinition plus a structural GetAwaiter/IsCompleted/OnCompleted/GetResult check) so custom awaitables are covered. A real design error was found by probing: Task<TResult> declares its own ContinueWith overloads, so matching only Task missed TcpProxyRelay.cs:289 - the very site its allowlist entry exists for; both original definitions are now matched. Wiring is deliberately narrow: a new src/Directory.Build.props re-imports the repo-root props and references the analyzer as OutputItemType=Analyzer, so src/** is governed while tests/** and benchmarks/** are not (pinned by tests). .editorconfig declares the severities as error rather than relying on TreatWarningsAsErrors and carries six temporary per-file exemptions (each with evidence and its C3/C4 remover) plus one permanent exemption for QuiescenceScope's tracked children. src/** product code is byte-identical - the rules landed with the allowlist, not with migration. Independent check: stripping every exemption reproduces exactly the 11 expected diagnostics line-for-line (no over-broad glob hides a site); per-rule adversarial breaks fail the expected tests (1 failure for WF0002, 7 for WF0001/0003/0004); deleting one exemption per rule id turns the build red at that site; a violating line under tests/ and benchmarks/ builds green; the analyzer project is inside the dotnet format gate. Gates: format exit 0 empty, Release build 0 warnings, 781 tests (763 Core + 18 Analyzers, exact), jb inspectcode zero issues. Spec: async-lifetime.md WF table completed plus the allowlist state. Two non-blocking AwaitableClassifier edges (over-fires on a non-System.Action parameterless OnCompleted delegate, under-fires on inherited awaiter members) recorded in the task notes rather than speculatively patched. Also committed the previously-missed bookkeeping that records 09-20-transport-lifecycle under its parent 08-30-proxy-perf-stability. Next: C3 migrates the TCP/UDP cluster and starts deleting these exemptions, with the allocation-gate hardening as its hard prerequisite.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2bfed0a` | feat(analyzers): build-time rules for the fire-and-forget escape syntaxes |
+| `db52a93` | chore(trellis): record 09-20-transport-lifecycle under 08-30-proxy-perf-stability |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 31: Quiescence scope migration: TCP/UDP cluster (C3)
+<!-- trellis-session: v=2 fp=e091961c35405e6d -->
+
+**Date**: 2026-09-21
+**Task**: Quiescence scope migration: TCP/UDP cluster (C3)
+**Branch**: `feat/transport-lifecycle`
+
+### Summary
+
+Migrated the TCP/UDP lifecycle cluster to QuiescenceScope: TcpRedirectSessionStore/TcpRedirectSession (root + nested scope, TryEnterSetup), TcpProxyRelay (lease-taking pumps, intrinsic fault observation, observer file deleted, bounded drain), UdpProxySession (single failure cause scope.Fault, synchronous Action signal, lease-based send admission), UdpProxyCoordinator (scope.Run teardown, _inFlightTeardowns removed, defined seal point). Hardened the UDP allocation gate before touching the path it guards and corrected its recorded root cause (not-yet-ready window, not thread migration). Recorded D11 (owner teardown keeps its own one-shot claim; IsSealed-then-DrainAsync is TOCTOU). Gates: format exit 0, Release build 0 warnings, Core.Tests 773 + Analyzers.Tests 18, UDP allocation gate green in isolation, jb inspectcode zero issues. Allowlist shrunk to the two C4 Capture entries plus the primitive exemption.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a0e2b35` | feat(runtime): migrate the TCP/UDP lifecycle cluster to QuiescenceScope |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 32: Complete the structured-concurrency program: C4 migrates the remaining lifecycle owners
+<!-- trellis-session: v=2 fp=ef21a9b20ef58275 -->
+
+**Date**: 2026-09-21
+**Task**: Complete the structured-concurrency program: C4 migrates the remaining lifecycle owners
+**Branch**: `feat/transport-lifecycle`
+
+### Summary
+
+C4 (09-20-lifecycle-migration-rest) migrated the last lifecycle owners to QuiescenceScope and emptied the C2 analyzer allowlist, completing the parent program 09-20-structured-concurrency. Migrated: LayeredCaptureRunner (the run scope owns the CTS; the blocking monitor became a dedicated Thread joined through the scope's lease, so DrainAsync IS the join; the periodic tick a Run child; refresh workers extracted so the file dropped 417 -> 388 effective lines, back under the cap), MultiAdapterCaptureLoop (own scope; the degradation forward a Run child drained by DisposeAsync, pumps disposed first), TransactionalCaptureRuntime (scope-owned CTS drained at the end of the existing single-flight cleanup; the caller-awaited run task deliberately not registered as a scope child), IdleExpirySweeper + RuntimeHeartbeat (scope-owned CTS + a Run loop child; a second DisposeAsync now joins instead of throwing ObjectDisposedException), Socks5ControlConnection (own scope; both RunWithinAttemptAsync overloads admit with a lease so the per-attempt deadline cannot be disposed under a reader; the deadline CTS itself stays, released after the drain), Socks5UdpTransport (no scope: a zero-allocation Interlocked disposal guard, the datagram path unchanged). NdisCapturePump deliberately unchanged - the primitive is Runtime-internal and the dependency direction is Runtime -> NdisApi. 13 new regression tests, each probe-verified non-vacuous; Core 786 + Analyzers 18; format, Release build (0 warnings), tests and jb inspectcode (0 issues) all clean. The parent's integration review passed all six cross-child criteria and fixed two documentation defects: D7 in async-lifetime.md overclaimed (three lifetime handles stay outside the primitive by design - SetupExecutor's worker-joining synchronous IDisposable, NdisCapturePump which owns no CTS, and the CLI's process-root CTS), and two comments still named the deleted EnterSetup/ExitSetup methods. Work commits a3c0783 (C4) and ccb0def (integration-review fixes).
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a3c0783` | feat(runtime): migrate the remaining lifecycle owners to QuiescenceScope |
+| `ccb0def` | docs(runtime): reconcile the lifetime contract after the program |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 33: Session creation cost: UDP full-stack decomposition, churn measurement, and the re-anchored budget
+<!-- trellis-session: v=2 fp=15aab02e3e974ac2 -->
+
+**Date**: 2026-09-22
+**Task**: Session creation cost: UDP full-stack decomposition, churn measurement, and the re-anchored budget
+**Branch**: `feat/transport-lifecycle`
+
+### Summary
+
+Delivered 09-21-session-creation-cost end-to-end as evidence + decision: staged Noop attribution (100%: capacity 489 / admission 829 / setup <=172 / session tier 2,891 / teardown 1,459-1,968 B/session; C2 = 93% of the tier is async/lifetime machinery), framework dial 83,442 B/session (control connect+handshake 92.8%), churn flat ~91 KB/session (<=0.9% spread, zero establishment loss) via the new udp.churn scenario; hot-path.md §3/§6 re-anchored to three falsifiable tiers (Noop probe <=6,000 raw / <=5,500 product-shaped; setup bookkeeping <=1,500; churn <=95,000 / framework <=84,000), superseding the stale <=1 KB / <=4 KB claims. Ranked follow-ups (not built): control-connection reuse ADR, teardown probe (approx 2 first-chance exceptions/session), session-tier managed slab + CTS TryReset (unsafe rejected: no allocation advantage, loses the lifetime safety net), admission/capacity; .NET 11 trial sanctioned measurement-first; TCP deferred. New benchmarks: SessionSetupDecompositionBenchmarks, FrameworkSetupBenchmarks, UdpChurnScenario. Side fix: the AnalyzerReleases AdditionalFiles duplication that had made every dotnet format run non-empty since C2. Gates: format empty, build 0w, 804 tests, jb 0.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a174f88` | chore(analyzers): drop the duplicate AnalyzerReleases AdditionalFiles (package targets already add them) |
+| `417ad8d` | bench(benchmarks): session-setup decomposition, framework dial probes, and the udp.churn scenario (09-21-session-creation-cost) |
+| `c303837` | docs(spec): re-anchor the UDP session budgets from the 2026-09-22 measurements |
+| `b7c7e66` | chore(task): record 09-21-session-creation-cost artifacts |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 34: Session creation cost redo: out-of-process harness, corrected numbers, re-anchored T3
+<!-- trellis-session: v=2 fp=f9416b94a5eb21b0 -->
+
+**Date**: 2026-09-22
+**Task**: Session creation cost redo: out-of-process harness, corrected numbers, re-anchored T3
+**Branch**: `feat/transport-lifecycle`
+
+### Summary
+
+Redid 09-21-session-creation-cost on a clean instrument. Diagnosis: the recorded 'framework path 83,442 B/session' was ~90% benchmark-harness artifact — the in-process loopback SOCKS5 server allocates a 64 KiB relay-loop buffer + 4 MiB relay socket + control arrays per accepted control connection, all charged to the client by the process-wide GC counter. Fix: added a --serve-socks5-udp child-process server mode + ExternalLoopbackSocks5UdpServer parent helper, switched the churn scenario (--socks5-external) and both BDN benchmark classes (WINFORWARD_BENCH_EXTERNAL_SERVER=1) onto it; in-process default kept byte-identical (A/B reproduced the archived ladder within 1 B). Corrected results (3-run batches): framework path 7,952.0 B/session (dial 3,792.2; ASSOCIATE 959.0; relay socket 576; self-traffic 160; transport ctor 2,464.8), real probe marginal 17,021.2 (echo-fed), churn 13,248.9-14,069.9 wave / 13,720.2-13,868.6 sustained (was 90.8-92.5 KB), harness share ~75.5 KB/session. Bookkeeping ledger (T1/T2) and the stage/teardown findings re-validated byte-identically. Deliverables: three corrected research docs, errata banners on the three archived reports, hot-path.md §3/§6 re-anchored (T3a/b/c + out-of-process rule + falsification sentence) plus a 7-section code-spec for the harness, and a re-ranked reduction list where the control-reuse lever's allocatable share is ~3.8 KB/session (not 77 KB) and bookkeeping now carries 42% of the clean whole cycle. All four quality gates green; trellis-check pass audited the numbers and found 5 doc defects (fixed).
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d4aeda5` | bench(benchmarks): out-of-process loopback SOCKS5 server mode for the real-dial instruments (09-22-session-creation-cost-redo) |
+| `6588265` | docs(spec): re-anchor the framework session budget to the out-of-process harness (09-22-session-creation-cost-redo) |
+| `dc37516` | docs(tasks): errata the 09-21 framework/churn/reconciliation reports for the harness inflation (09-22-session-creation-cost-redo) |
+| `c55e5de` | chore(task): record 09-22-session-creation-cost-redo artifacts |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 35: UDP teardown and session-tier allocation reduction
+<!-- trellis-session: v=2 fp=bead59247912662f -->
+
+**Date**: 2026-09-22
+**Task**: UDP teardown and session-tier allocation reduction
+**Branch**: `feat/transport-lifecycle`
+
+### Summary
+
+Split-probed the UDP teardown leg (T) and session tier (C2) with new decomposition cases; attributed the teardown exceptions (2/session = one canceled receive across two await sites, BCL-inherent; S5's fixed 128 = SetupExecutor.Dispose 64 workers x 2) with E1/E2 micro-cases. Implemented the four adopted no-retained-cost reductions: context record struct (240), cached setup delegates (128), merged receive async methods (112), scope drain idle fast path (88) - Noop probe 5,727.0 -> 5,161.8 B/session, churn N=48/D=0 cell 13,248.9 -> 12,560.3 out of process; behavior-zero, 807 tests + build/format/jb gates green; hot-path.md and async-lifetime.md re-anchored. Pooling/slab deferred to a follow-up decision with the split numbers recorded.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cfd56fd` | perf(runtime): cut per-session UDP teardown and session-tier allocations (09-22-udp-teardown-session-tier-alloc) |
+| `27d0be1` | bench(benchmarks): UDP teardown/session-tier split probes and exception attribution (09-22-udp-teardown-session-tier-alloc) |
+| `2da59b0` | docs(spec): re-anchor the Noop probe and churn session budgets (09-22-udp-teardown-session-tier-alloc) |
+| `b2ee992` | chore(task): record 09-22-udp-teardown-session-tier-alloc artifacts |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 36: Admission and capacity pre-seed split
+<!-- trellis-session: v=2 fp=be9530fc63d1f618 -->
+
+**Date**: 2026-09-22
+**Task**: Admission and capacity pre-seed split
+**Branch**: `feat/transport-lifecycle`
+
+### Summary
+
+Split the UDP admission leg (S1 - S0 = 828.8) and the capacity pre-seed (S0 = 488.9) with 13 new A-series decomposition cases. Exact reconciliations: S0 = association-dict 325.9 + sessions-dict 163.0 + cooldown 0.0 = 488.9; S1 = 488.9 + H 356.8 + steady-state 200.0 (slot+queue+completion cell) + cold rent 272.0; the warm-rent variant A8 = 1,045.7 proves production steady-state admission is ~200 B/session, with 79.7 B/add amortized dictionary growth beyond the 1,024 clamp (A9 contrast). No product change adopted: the one candidate (inline the per-slot queue object) measured 24.0 net after the slot's inline payload, below the 64 rule - the verified class-to-struct conversion was reverted and its patch archived for any future decision. hot-path.md section 3 now carries the split note (T2 unchanged at 1,432.9); gates green on the final tree (build/tests/807/format/jb zero issues); Noop 5,162.4 and churn 12,591.2 re-confirmed inside the established spreads.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ed204e1` | bench(benchmarks): admission/capacity split probes with warm-rent and growth variants (09-22-udp-admission-capacity-alloc) |
+| `a14ebd5` | docs(spec): annotate the admission/capacity sub-anchor with the split (09-22-udp-admission-capacity-alloc) |
+| `30bbed9` | chore(task): record 09-22-udp-admission-capacity-alloc artifacts |
+
+### Status
+
+[OK] **Completed**

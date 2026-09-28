@@ -1,0 +1,14 @@
+--- 2026-09-22T00:51:14+08:00 load=0.33 :: --filter *SessionSetupDecomposition* --job short
+exit=0 2026-09-22T00:52:14+08:00
+--- 2026-09-22T00:52:14+08:00 load=2.51 :: --filter *SessionSetupDecomposition* --job short
+exit=0 2026-09-22T00:53:15+08:00
+--- 2026-09-22T00:53:15+08:00 load=4.70 :: --filter *SessionSetupDecomposition* --job short
+exit=0 2026-09-22T00:54:14+08:00
+--- 2026-09-22T00:54:14+08:00 load=6.43 :: --filter *PopulateSessionsNoopTransportAsync* *StageS5_ReadinessTeardownInsideAsync* --unrollFactor 1 --invocationCount 6 --iterationCount 3 --warmupCount 3 --launchCount 1
+exit=0 2026-09-22T00:55:13+08:00
+reruns done 2026-09-22T00:55:13+08:00
+--- 2026-09-22T00:56:29+08:00 load=1.89 :: --filter *StageS4* *StageS5* --invocationCount 6 (matched shape)
+exit=0 2026-09-22T00:57:28+08:00
+--- 2026-09-22T00:57:28+08:00 load=4.94 :: --filter *StageS4* *StageS5* --invocationCount 6 (matched shape)
+exit=0 2026-09-22T00:58:30+08:00
+matched-s45 done 2026-09-22T00:58:30+08:00

@@ -1,0 +1,103 @@
+diff --git a/src/WinForward.Core/BoundedSetupQueue.cs b/src/WinForward.Core/BoundedSetupQueue.cs
+index c88d409..e5fa3b2 100644
+--- a/src/WinForward.Core/BoundedSetupQueue.cs
++++ b/src/WinForward.Core/BoundedSetupQueue.cs
+@@ -10,8 +10,16 @@ namespace WinForward.Core;
+ /// owner may re-stamp the queue in bulk when the age basis shifts (see
+ /// <see cref="RefreshEnqueuedStamps"/>). Not thread-safe by design: each queue is owned by one
+ /// flow's slot and every access is serialized by the owning coordinator's gate.
++/// <para>
++/// A mutable struct, kept as a direct field of its single owner so the queue state lives inline in
++/// the slot and every access mutates it through member access (<c>slot.SetupQueue.TryEnqueue(...)</c>);
++/// the owning field must therefore stay non-readonly. Never copy the queue — <c>var copy = queue;</c>,
++/// a by-value parameter, or a collection element forks its state: the copy shares the <c>_items</c>
++/// reference while the inline pending entry, <c>_hasPending</c>, and <c>Bytes</c> diverge from the
++/// owner's.
++/// </para>
+ /// </summary>
+-public sealed class BoundedSetupQueue
++public struct BoundedSetupQueue
+ {
+     // The common UDP setup window buffers a single datagram (the DNS query that triggered the
+     // flow), so the first buffered datagram lives inline and the Queue only materializes when a
+@@ -32,7 +40,7 @@ public sealed class BoundedSetupQueue
+         _maxBytes = maxBytes;
+     }
+ 
+-    public int Count => (_hasPending ? 1 : 0) + (_items?.Count ?? 0);
++    public readonly int Count => (_hasPending ? 1 : 0) + (_items?.Count ?? 0);
+     internal int Bytes { get; private set; }
+ 
+     /// <summary>
+diff --git a/src/WinForward.Runtime/UdpProxy/UdpProxyCoordinator.cs b/src/WinForward.Runtime/UdpProxy/UdpProxyCoordinator.cs
+index a6f91d1..daeff70 100644
+--- a/src/WinForward.Runtime/UdpProxy/UdpProxyCoordinator.cs
++++ b/src/WinForward.Runtime/UdpProxy/UdpProxyCoordinator.cs
+@@ -447,7 +447,12 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
+     internal sealed class UdpSessionSlot
+     {
+         public Task Completion = Task.CompletedTask;
+-        public readonly BoundedSetupQueue SetupQueue = new(SetupQueueMaximumPackets, SetupQueueMaximumBytes);
++
++        // The queue is a mutable struct kept as this slot's direct field — every call site mutates
++        // it through member access. Do not copy it out or make this field readonly (both fork the
++        // queue state; see BoundedSetupQueue's doc).
++        public BoundedSetupQueue SetupQueue = new(SetupQueueMaximumPackets, SetupQueueMaximumBytes);
++
+         public UdpProxySession? Session;
+         public bool Ready;
+     }
+diff --git a/tests/WinForward.Core.Tests/CoreFlowStructuresTests.cs b/tests/WinForward.Core.Tests/CoreFlowStructuresTests.cs
+index b9afb0d..20328e4 100644
+--- a/tests/WinForward.Core.Tests/CoreFlowStructuresTests.cs
++++ b/tests/WinForward.Core.Tests/CoreFlowStructuresTests.cs
+@@ -52,14 +52,14 @@ public sealed class CoreFlowStructuresTests
+         using var pool = new NativeBufferPool(8);
+         var queue = new BoundedSetupQueue(maxPackets: 2, maxBytes: 4);
+ 
+-        Assert.True(Enqueue(queue, pool, [1, 2]));
+-        Assert.True(Enqueue(queue, pool, [3, 4]));
+-        Assert.False(Enqueue(queue, pool, [5]));
++        Assert.True(Enqueue(ref queue, pool, [1, 2]));
++        Assert.True(Enqueue(ref queue, pool, [3, 4]));
++        Assert.False(Enqueue(ref queue, pool, [5]));
+         Assert.Equal(2, queue.Count);
+         Assert.Equal(4, queue.Bytes);
+     }
+ 
+-    private static bool Enqueue(BoundedSetupQueue queue, NativeBufferPool pool, ReadOnlySpan<byte> payload)
++    private static bool Enqueue(ref BoundedSetupQueue queue, NativeBufferPool pool, ReadOnlySpan<byte> payload)
+     {
+         var lease = pool.Rent();
+         payload.CopyTo(lease.Span);
+diff --git a/tests/WinForward.Core.Tests/UdpSetupQueueTests.cs b/tests/WinForward.Core.Tests/UdpSetupQueueTests.cs
+index 3651e71..5ddb722 100644
+--- a/tests/WinForward.Core.Tests/UdpSetupQueueTests.cs
++++ b/tests/WinForward.Core.Tests/UdpSetupQueueTests.cs
+@@ -281,7 +281,7 @@ public sealed class UdpSetupQueueTests
+         var queue = new BoundedSetupQueue(4, 1024);
+         var enqueuedAt = new DateTimeOffset(2026, 9, 6, 0, 0, 0, TimeSpan.Zero);
+         var refreshAt = enqueuedAt + TimeSpan.FromSeconds(10);
+-        Enqueue(queue, pool, [1], enqueuedAt);
++        Enqueue(ref queue, pool, [1], enqueuedAt);
+ 
+         Assert.Equal(1, queue.RefreshEnqueuedStamps(refreshAt));
+ 
+@@ -303,7 +303,7 @@ public sealed class UdpSetupQueueTests
+         var baseStamp = new DateTimeOffset(2026, 9, 6, 0, 0, 0, TimeSpan.Zero);
+         for (var index = 0; index < 3; index++)
+         {
+-            Enqueue(queue, pool, [(byte)index], baseStamp + TimeSpan.FromSeconds(index));
++            Enqueue(ref queue, pool, [(byte)index], baseStamp + TimeSpan.FromSeconds(index));
+         }
+ 
+         var refreshAt = baseStamp + TimeSpan.FromMinutes(1);
+@@ -323,7 +323,7 @@ public sealed class UdpSetupQueueTests
+         Assert.Equal(0, queue.Bytes);
+     }
+ 
+-    private static void Enqueue(BoundedSetupQueue queue, NativeBufferPool pool, ReadOnlySpan<byte> payload, DateTimeOffset enqueuedAt)
++    private static void Enqueue(ref BoundedSetupQueue queue, NativeBufferPool pool, ReadOnlySpan<byte> payload, DateTimeOffset enqueuedAt)
+     {
+         var lease = pool.Rent();
+         payload.CopyTo(lease.Span);

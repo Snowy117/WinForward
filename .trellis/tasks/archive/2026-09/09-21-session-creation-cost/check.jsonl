@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Verify the decision doc's budget claims and that no gate contract is contradicted; the proposed re-anchor diff targets this file's §3."}
+{"file": "benchmarks/README.md", "reason": "Verify every reported measurement came from a documented command and that allocation-vs-noise interpretation follows the recorded rules."}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "Confirm no product behavior changed and that the churn scenarios match the documented session semantics."}

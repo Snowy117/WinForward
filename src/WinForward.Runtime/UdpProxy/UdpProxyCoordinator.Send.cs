@@ -25,7 +25,7 @@ public sealed partial class UdpProxyCoordinator
         UdpProxySession? readySession;
         lock (_gate)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            ObjectDisposedException.ThrowIf(_scope.IsSealed, this);
             var now = _timeProvider.GetUtcNow();
             if (_cooldowns.TryHit(flow, now))
             {
@@ -87,7 +87,7 @@ public sealed partial class UdpProxyCoordinator
         {
             send = session.SendSpanAsync(flow.Remote, payload, cancellationToken);
         }
-        catch (OperationCanceledException exception) when (cancellationToken.IsCancellationRequested && !_shutdown.IsCancellationRequested)
+        catch (OperationCanceledException exception) when (cancellationToken.IsCancellationRequested && !_scope.IsSealed)
         {
             // Cancellation from this individual caller is not evidence that the
             // shared UDP transport failed.
@@ -120,7 +120,7 @@ public sealed partial class UdpProxyCoordinator
         {
             sent = await send.ConfigureAwait(false);
         }
-        catch (OperationCanceledException exception) when (cancellationToken.IsCancellationRequested && !_shutdown.IsCancellationRequested)
+        catch (OperationCanceledException exception) when (cancellationToken.IsCancellationRequested && !_scope.IsSealed)
         {
             ExceptionDispatchInfo.Capture(exception).Throw();
             return false;

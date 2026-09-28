@@ -29,7 +29,7 @@ public sealed class TransactionalCaptureRuntime : IAsyncDisposable
 {
     private readonly IAdapterModeController _modes;
     private readonly IPacketCaptureLoop _capture;
-    private readonly CancellationTokenSource _shutdown = new();
+    private readonly QuiescenceScope _scope = new();
     private readonly List<AdapterModeSnapshot> _applied = [];
     private readonly Lock _gate = new();
     private CaptureRuntimeState _state = CaptureRuntimeState.Created;
@@ -83,7 +83,7 @@ public sealed class TransactionalCaptureRuntime : IAsyncDisposable
 
     private async Task StartCoreAsync(CancellationToken cancellationToken)
     {
-        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _scope.Token);
         var runtimeCancellation = linkedCancellation.Token;
         try
         {
@@ -120,7 +120,10 @@ public sealed class TransactionalCaptureRuntime : IAsyncDisposable
             runTask = _runTask;
         }
 
-        if (cancelShutdown) await _shutdown.CancelAsync().ConfigureAwait(false);
+        // The scope owns the shutdown token (D7); Cancel() is reachable only through the first
+        // Stopping transition, which precedes the cleanup's drain, so it can never run after the
+        // release (the scope swallows a late cancel as a no-op).
+        if (cancelShutdown) _scope.Cancel();
         if (runTask is not null)
         {
             try { await runTask.ConfigureAwait(false); }
@@ -194,7 +197,6 @@ public sealed class TransactionalCaptureRuntime : IAsyncDisposable
         }
         lock (_gate) _applied.Clear();
         await _modes.DisposeAsync().ConfigureAwait(false);
-        _shutdown.Dispose();
     }
 
     private ValueTask CleanupAsync()
@@ -215,7 +217,15 @@ public sealed class TransactionalCaptureRuntime : IAsyncDisposable
         finally
         {
             try { await RestoreBestEffortAsync().ConfigureAwait(false); }
-            finally { SetClosedState(); }
+            finally
+            {
+                // The scope owns the shutdown CTS: draining it runs after the capture is disposed
+                // and the modes are restored, and releases that token last. The run task is never
+                // registered (it is the caller-awaited entry point), so this drain cannot wait on
+                // itself.
+                try { await _scope.DrainAsync().ConfigureAwait(false); }
+                finally { SetClosedState(); }
+            }
         }
     }
 

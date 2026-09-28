@@ -305,6 +305,13 @@ xUnit `Assert.Equal` generic inference does not apply the `IPAddress` → `IPAdd
 
 ## UDP session lifetime, teardown reason, and fail-closed send drop (wired 2026-09-20, task 09-20-transport-lifecycle)
 
+> Superseded in part by the C3 section below (2026-09-21, task `09-20-lifecycle-migration-cluster`):
+> `_lifetime`, `_receiveFailure`, `_activeSends`, `_disposed`, the coordinator's `_shutdown`,
+> `_inFlightTeardowns` and `DrainInFlightTeardownsAsync` no longer exist — the owners run on
+> `QuiescenceScope` and `scope.Fault` is the single failure representation. Keep this section for its
+> teardown-reason and fail-closed-drop *reasoning*; take the mechanisms and signatures from the C3
+> section.
+
 ### 1. Scope / Trigger
 
 - Trigger: any change to `UdpProxySession`'s receive loop / activity guard / disposal, the
@@ -393,5 +400,115 @@ lock (_activityGate) { if (_expiring) throw new IOException("session is expiring
 
 ```csharp
 // Report sent/not-sent; the coordinator counts a fail-closed drop and leaves the slot alone.
-lock (_activityGate) { if (_expiring || Volatile.Read(ref _receiveFailure) is not null) return false; }
+lock (_activityGate) { if (_expiring || _scope.Fault is not null) return false; }
+```
+
+---
+
+## Scope-owned UDP lifetime and the receive-failure signal/join split (wired 2026-09-21, task 09-20-lifecycle-migration-cluster)
+
+### 1. Scope / Trigger
+
+- Trigger: any change to `UdpProxySession`'s lifetime / send admission / receive loop, the coordinator's
+  slot teardown or disposal ordering, or the `IUdpSessionSlotHost` receive-failure seam.
+
+**This section supersedes the previous section's mechanisms** (`async-lifetime.md` is the primitive's
+contract and carries the per-owner table): `_lifetime` → the session's own `QuiescenceScope`, which owns
+the CTS; `_receiveFailure` → **deleted**, `_scope.Fault` is the single failure representation;
+`_activeSends` → scope accounting via `WorkLease`; `_disposed` → `_scope.IsSealed`; the coordinator's
+`_shutdown` → its own `QuiescenceScope`; `_inFlightTeardowns` + `DrainInFlightTeardownsAsync` →
+`_scope.Run(...)`; and the failure signal is a synchronous `Action<UdpProxySession>` rather than a
+fire-and-forget `Func<UdpProxySession, Task>`.
+
+### 2. Signatures
+
+- `UdpProxySession`: `_scope = new QuiescenceScope(context.Shutdown)` owns the CTS;
+  `Start(Action<UdpProxySession> receiveFailureHandler)`; `SendSpanAsync(...) -> ValueTask<bool>`;
+  `UdpSessionState State`; `Task DisposeAsync()`.
+- `IUdpSessionSlotHost.RemoveReceiveFailedSession(UdpProxySession session)` — **`void`**, not `Task`:
+  VSTHRD200 forbids an `Async` suffix on a non-awaitable, and the signal must not be awaitable.
+- `UdpProxyCoordinator`: `_scope = new QuiescenceScope()` owns the CTS; session scopes nest under
+  `_scope.Token`; `_inFlightTeardowns`/`DrainInFlightTeardownsAsync` deleted.
+
+### 3. Contracts
+
+- **One failure representation.** `scope.Fault` is the only failure state; there is no parallel
+  `_receiveFailure` field. The receive loop records the fault (`RecordFault(exception, "udp.receive")`)
+  and then signals.
+- **Admission reads stay under `_activityGate`.** `State` and `SendSpanAsync`'s admission read
+  `_scope.IsSealed` / `_scope.Fault` **inside** the existing `_activityGate` block, so the fault-vs-send
+  race relationship is exactly what it was. (`Fault` is itself lock-free; the lock, not the scope,
+  supplies this ordering.)
+- **The signal is synchronous and must return promptly.** The loop tail invokes
+  `Action<UdpProxySession>` after releasing the receive-window lease. Awaiting or blocking on
+  `session.DisposeAsync()` there deadlocks against the session's own disposal (which awaits the receive
+  loop). The coordinator maps the signal to
+  `_scope.Run(_ => RemoveReceiveFailedSessionAsync(session), "udp.receive-failure")`, which returns
+  immediately and makes the teardown a tracked child.
+- **The per-teardown warning lives inside the `Run` body** (with a rethrow so `Run` records the fault):
+  `Run` swallows the child's fault into `scope.Fault` and cannot log the owner's domain-specific warning.
+- **The coordinator seals at a defined point.** `DisposeCoreAsync` cancels the scope, clears
+  sessions/cooldowns, awaits each `slot.Completion` + `session.DisposeAsync()`, and only **then** drains
+  the scope (sealing + joining in-flight `Run` teardowns) before releasing the setup limiter. Sealing
+  earlier would refuse teardowns that in-flight sessions still need; sealing later would race the drain.
+- **`UdpSessionSetup`'s setup-failure `RemoveSlotAsync` stays a direct call** — a gate-taking decision,
+  not a fire-and-forget teardown, and it must still work while the coordinator's scope is sealed.
+- **Owner teardown single-flight (D11).** `UdpProxySession.DisposeAsync` and
+  `UdpProxyCoordinator.DisposeAsync` each keep an explicit one-shot claim; a later caller joins
+  `_scope.DrainAsync()`.
+- **`_expiring` is retained** as the owner's admission policy (the scope never unseals, so
+  expiry-vs-send cannot live in it).
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Send admitted while the session is active | lease taken under `_activityGate`, released exactly once in the send tail |
+| `DisposeAsync` with an outstanding send lease | does not complete until the lease is released; then `State == Disposed` |
+| Genuine receive fault | `scope.Fault` set; `State == Faulted`; a subsequent send fails closed (`false`, counted drop); the coordinator teardown runs via `_scope.Run` |
+| Receive fault racing coordinator shutdown | the in-flight teardown still completes (joined by the drain) |
+| Faulting teardown | warning logged inside the `Run` body; no unobserved task exception; coordinator disposal still completes |
+| Idle expiry | normal teardown; no fault recorded; the handler never fires |
+| Setup failure while the coordinator scope is sealed | slot removal still happens (direct call) |
+| Two concurrent coordinator `DisposeAsync` calls | owner teardown runs once; the second joins the drain |
+
+### 5. Good/Base/Bad Cases
+
+- Good: a receive fault records `scope.Fault`, signals synchronously, and the coordinator tears the
+  session down as a tracked child its drain joins.
+- Base: idle expiry ends the loop with no fault and no signal.
+- Bad: re-awaiting the teardown from the loop tail; reading `scope.Fault` outside `_activityGate`;
+  asserting on a `_receiveFailure` field; sealing the coordinator scope before
+  `await slot.Completion`; leaving the teardown warning outside the `Run` body.
+
+### 6. Tests Required
+
+- `UdpProxySessionTests` — `DisposeAsyncWaitsForAnOutstandingSendLease`,
+  `FaultedSessionStateHasNoParallelReceiveFailureField`, idle-expiry and genuine-fault suites.
+- `UdpProxyCoordinatorLifecycleTests` — `ReceiveFailureTeardownInFlightAcrossDisposalIsStillJoined`,
+  `FaultingReceiveFailureTeardownLogsTheWarningAndNeverEscapes`.
+- `UdpProxyCoordinatorTests` single-flight disposal; `UdpSessionSetupTests` setup-failure /
+  cancelled-dial reasons.
+- `HotPathAllocationGateTests.EstablishedUdpDatagramPathAllocatesNoManagedBytes` — unchanged and still
+  exactly 0 B (the lease replaces `_activeSends++`), and it must pass **in isolation**.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```csharp
+// The loop awaits its own teardown => disposal re-enters itself (deadlock), and the failure lives
+// in a second field the send admission must remember to read.
+lock (_activityGate) { if (_receiveFailure is not null) return false; }
+_ = receiveFailureHandler(this);
+```
+
+#### Correct
+
+```csharp
+// Single failure representation read under the same gate; a synchronous signal the coordinator
+// turns into a tracked scope child.
+lock (_activityGate) { if (_scope.Fault is not null) return false; }
+_scope.RecordFault(exception, "udp.receive");
+receiveFailureHandler(this);   // Action: returns immediately; _scope.Run(...) owns the teardown
 ```

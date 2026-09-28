@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/09-20-structured-concurrency/design.md", "reason": "Parent §3 is normative for the four rules, the src/** wiring, the Run door and the allowlist-then-shrink rollout"}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "The WF rules table C2 must complete, plus the primitive contract and the permanent-exemption rationale"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Suppression policy every allowlist entry must follow: narrow glob, concrete documented reason"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Layout, naming, 400-effective-line cap and dependency direction for the two new projects"}
+{"file": ".editorconfig", "reason": "The file C2 edits: existing section/glob/comment style and where the new [src/**.cs] section must go"}
+{"file": "Directory.Build.props", "reason": "The root props file the new src/Directory.Build.props must explicitly import"}

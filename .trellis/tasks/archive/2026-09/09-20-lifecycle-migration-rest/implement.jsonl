@@ -1,0 +1,15 @@
+{"file": ".trellis/tasks/09-20-structured-concurrency/design.md", "reason": "Program design: the primitive contract (§2, D1-D11), the Run door and its inline-launch semantics (§3.3), and the migration plan C4 finishes (§4)"}
+{"file": ".trellis/tasks/09-20-lifecycle-migration-rest/prd.md", "reason": "This child's requirements, the three planning corrections, and the acceptance criteria"}
+{"file": ".trellis/tasks/09-20-lifecycle-migration-rest/design.md", "reason": "This child's per-owner design and its D-C4-* decisions"}
+{"file": ".trellis/tasks/09-20-lifecycle-migration-rest/research/design-contradictions-and-hazards.md", "reason": "Required reading: the 8 design-vs-code contradictions and 18 hazards, including why the monitor cannot be a Run child"}
+{"file": ".trellis/tasks/09-20-lifecycle-migration-rest/research/owner-lifetime-inventory.md", "reason": "Per-owner field/handle inventory, start-observe-dispose edges, CTS ownership and nesting anchors"}
+{"file": ".trellis/tasks/09-20-lifecycle-migration-rest/research/spawn-and-allocation-audit.md", "reason": "Every spawn classified (thread affinity, closure capture, hot-path applicability) and the primitive's inline-launch proof"}
+{"file": ".trellis/tasks/09-20-lifecycle-migration-rest/research/socks5-token-audit.md", "reason": "The real SOCKS5 disposal race and the list of timeout semantics that must not change"}
+{"file": ".trellis/tasks/09-20-lifecycle-migration-rest/research/existing-tests.md", "reason": "Which tests pin which mechanism, and where each new per-owner quiescence test belongs"}
+{"file": ".trellis/tasks/09-20-lifecycle-migration-rest/research/allowlist-shrink.md", "reason": "The two .editorconfig sections to delete, their lines, and the rule-firing proof"}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "The primitive's durable contract: surface, D1-D11, allocation rule, lock order, Run admission"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "The allocation-gate contract the UDP transport change must not perturb"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Fail-closed semantics the dispose changes must not weaken"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "The 400 effective-line cap, split conventions, and the namespace/dependency direction that exclude NdisApi"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Suppression policy, behavior-zero refactor discipline, and the Release gates"}
+{"file": ".editorconfig", "reason": "The file C4 shrinks: the two sections to delete and the permanent exemption to keep"}

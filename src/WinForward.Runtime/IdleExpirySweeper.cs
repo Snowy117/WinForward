@@ -22,11 +22,11 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
     private readonly TimeSpan _flowIdleTimeout;
     private readonly TimeSpan _redirectIdleTimeout;
     private readonly TimeSpan _relayIdleTimeout;
-    private readonly CancellationTokenSource _shutdown = new();
+    private readonly QuiescenceScope _scope = new();
     private readonly IRuntimeLogger _logger;
     private readonly TimeProvider _timeProvider;
     private long _lastSweepFailureLogTicks;
-    private Task? _loop;
+    private int _started;
 
     public IdleExpirySweeper(
         FlowDispatcher dispatcher,
@@ -53,16 +53,16 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
 
     public void Start()
     {
-        if (_loop is not null) throw new InvalidOperationException("The idle-expiry sweeper is already started.");
-        _loop = RunAsync();
+        if (Interlocked.Exchange(ref _started, 1) != 0) throw new InvalidOperationException("The idle-expiry sweeper is already started.");
+        ObjectDisposedException.ThrowIf(!_scope.Run(RunAsync, "idle-expiry.loop"), this);
     }
 
-    private async Task RunAsync()
+    private async Task RunAsync(CancellationToken token)
     {
         using var timer = new PeriodicTimer(_interval);
         try
         {
-            while (await timer.WaitForNextTickAsync(_shutdown.Token))
+            while (await timer.WaitForNextTickAsync(token))
             {
                 var now = _timeProvider.GetUtcNow();
                 try
@@ -85,7 +85,7 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
                             new("flows", flowCount), new("tcpRedirects", tcpCount), new("udpSessions", udpCount));
                     }
                 }
-                catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
                 {
                     return;
                 }
@@ -97,7 +97,7 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
                 }
             }
         }
-        catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
             // Normal shutdown path.
         }
@@ -112,17 +112,8 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
         _logger.Warn($"Idle-expiry sweep failed and will retry on the next tick: {exception.GetType().Name}: {exception.Message}");
     }
 
-    public async ValueTask DisposeAsync()
-    {
-        await _shutdown.CancelAsync().ConfigureAwait(false);
-        if (_loop is not null)
-        {
-            try { await _loop.ConfigureAwait(false); }
-            catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
-            {
-                // Cancellation is the expected shutdown path.
-            }
-        }
-        _shutdown.Dispose();
-    }
+    // The drain is the whole teardown for this owner — seal, cancel (unwinding the timer wait),
+    // join the in-flight tick, release the owned CTS last — and is itself single-flight, so a
+    // second DisposeAsync joins it instead of re-running teardown.
+    public ValueTask DisposeAsync() => _scope.DisposeAsync();
 }

@@ -214,4 +214,85 @@ public sealed class Socks5UdpTransportSendTests
             await IgnoreExpectedCancellationAsync(server);
         }
     }
+
+    [Fact]
+    public async Task SendAfterDisposalIsRefusedByTheDisposalGuardNotTheDisposedGate()
+    {
+        // Regression this catches: the send gate is disposed last and used to be the only barrier,
+        // so a sender arriving after disposal entered `_sendGate.WaitAsync` and surfaced the
+        // semaphore's own ObjectDisposedException. The refusal must come from the transport's
+        // disposal guard, before the gate is touched.
+        using var tcpListener = new TcpListener(IPAddress.Loopback, 0);
+        using var relaySocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        tcpListener.Start();
+        relaySocket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+
+        var relayEndpoint = (IPEndPoint)relaySocket.LocalEndPoint!;
+        var controlEndpoint = (IPEndPoint)tcpListener.LocalEndpoint;
+        using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var server = ServeAssociateOnlyAsync(tcpListener, relayEndpoint, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), serverCancellation.Token);
+        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
+        var transport = await Socks5UdpTransport.CreateAsync(socksServer, new SelfTrafficRegistry(), CancellationToken.None, createControl: null, socketFactory: null);
+        var destination = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
+        var payload = "ABC"u8.ToArray();
+
+        await transport.DisposeAsync();
+
+        var refusal = await Assert.ThrowsAsync<ObjectDisposedException>(async () =>
+            await transport.SendSpanAsync(destination, payload, CancellationToken.None));
+        Assert.EndsWith(nameof(Socks5UdpTransport), refusal.ObjectName, StringComparison.Ordinal);
+
+        await serverCancellation.CancelAsync();
+        await IgnoreExpectedCancellationAsync(server);
+    }
+
+    [Fact]
+    public async Task SendsRacingDisposalNeverObserveTheDisposedGate()
+    {
+        // Regression this catches: a sender that has entered SendSpanAsync but not yet reached the
+        // gate must be refused by the disposal guard; it must never get the disposed semaphore's
+        // ObjectDisposedException. Only the deliberate transport-level refusal is allowed.
+        using var tcpListener = new TcpListener(IPAddress.Loopback, 0);
+        using var relaySocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        tcpListener.Start();
+        relaySocket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+
+        var relayEndpoint = (IPEndPoint)relaySocket.LocalEndPoint!;
+        var controlEndpoint = (IPEndPoint)tcpListener.LocalEndpoint;
+        using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var server = ServeAssociateOnlyAsync(tcpListener, relayEndpoint, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), serverCancellation.Token);
+        var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
+        var transport = await Socks5UdpTransport.CreateAsync(socksServer, new SelfTrafficRegistry(), CancellationToken.None, createControl: null, socketFactory: null);
+        var destination = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
+        var payload = "XYZ"u8.ToArray();
+
+        var senders = new Task[4];
+        for (var index = 0; index < senders.Length; index++)
+        {
+            senders[index] = Task.Run(async () =>
+            {
+                for (var attempt = 0; attempt < 50; attempt++)
+                {
+                    try
+                    {
+                        await transport.SendSpanAsync(destination, payload, CancellationToken.None);
+                    }
+                    catch (ObjectDisposedException exception)
+                    {
+                        Assert.DoesNotContain("SemaphoreSlim", exception.ObjectName, StringComparison.Ordinal);
+                    }
+                    catch (SocketException)
+                    {
+                        // Disposing the socket faults an in-flight or late send; that is not the gate race.
+                    }
+                }
+            });
+        }
+
+        await transport.DisposeAsync();
+        await Task.WhenAll(senders);
+
+        await serverCancellation.CancelAsync();
+        await IgnoreExpectedCancellationAsync(server);
+    }
 }
