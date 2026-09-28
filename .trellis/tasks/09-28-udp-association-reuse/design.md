@@ -116,6 +116,21 @@ Passive, sampled by the association's watchdog tick (every 5 s), no datagram-pat
 The rule is deliberately conservative in the loss direction: a false `PerFlowOnly` costs performance
 only (today's behaviour), while a false `SharedOk` would cost datagrams.
 
+**Evidence model (corrected 2026-09-28 after the Step 3 check).** The sampler reads the evidence of
+the leases *currently attached* to the association: each lease owns one evidence record (one
+`Interlocked` sent counter plus a write-once response flag) and the association keeps the live set,
+adding on attach and removing on release. An earlier ring indexed by the total attach count was
+mis-indexed once an association had served more than `FlowsPerAssociation` leases: samples then mixed
+stale, live and released slots, which produced both a false `PerFlowOnly` (lost sharing) and a false
+`SharedOk` from a released slot on a pinning server (continued datagram loss). Never reintroduce
+index-by-count over a fixed ring; the live-set model is the contract, and the >16-lease case is
+pinned by test.
+
+**Known limit (accepted).** The rule requires a *live* responding sibling, so a pinning server whose
+answered flow has already been released can no longer be detected by that association. The window is
+bounded by the lease lifetime and the 5 s tick; the fallback is per server and sticky, so any other
+association of the same server still carries the verdict.
+
 ## 6. Budget and observability (R4/R5)
 
 Configuration (all validated in `ConfigurationModels.cs` with errors/warnings in the

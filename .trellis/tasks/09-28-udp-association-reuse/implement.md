@@ -165,3 +165,22 @@ lands there); the harness scenarios switch from the hard-coded `always` to the p
 **Flagged:** `ConfigurationModels.cs` is at 397/400 effective lines — the next configuration key must
 split the file first.
 
+### Phase C — Step 3 (capability detection + sticky fallback; `auto` = share + detect)
+
+| Round | Agent | Outcome |
+|---|---|---|
+| Implement | `trellis-implement` (subagent) | `UdpAssociationCapability.cs` (sticky `Unknown/SharedOk/PerFlowOnly`, per-lease evidence, pure sampler rule threshold 3), pool gating via `SharesFor`, rate-limited `udp.association.fallback` + `UdpAssociationFallbacks`, harness scenarios switched to the production `auto`. Build 0 warnings, 886 tests (877 + 9), format empty, jb 0, acceptance on `auto` zero loss with the churn discriminator **7,582.9 B/session** (Step 1 per-flow 13,066.5) proving sharing held. |
+| Check | `trellis-check` (subagent) | **PASS-WITH-FIXES**: **F1 HIGH** — the evidence ring was indexed by the total attach count, so past 16 leases a sample mixed stale/live/released slots (probe-proven: false `PerFlowOnly`, missed detection, and a false `SharedOk` from a released slot on a pinning server); F2 wraparound; F3 pool-wide warn throttle could swallow a server's one-shot warn; F4 a latent parallel-test flake; plus the census gap that made "no fallback event" unevidenced. Reproduced all four gates and the acceptance numbers. |
+| Fix | `trellis-implement` (subagent) | Per-lease evidence with an explicit live set (ring and its index math removed), throttle dropped, racy global-counter assertion replaced, `udp.association.fallback` added to the census, recycling + long-lived-evidence regression tests. |
+
+**Design text corrected by the check:** §5's evidence model is now the live-set contract with the
+mis-indexing recorded as "never reintroduce index-by-count over a fixed ring", and the accepted limit
+that a pinning server whose answered flow was released cannot be detected by that association.
+
+**Over-cap benchmark files (explicit, dated exception).** `directory-structure.md` caps every `.cs`
+file at 400 effective lines. Two benchmark files exceed it and are **not** part of this task's edit
+surface: `benchmarks/WinForward.Benchmarks/Stability/GcSoakScenario.cs` (685; the Step 3 change is a
+one-token pool-mode switch, net 0 effective lines) and
+`benchmarks/WinForward.Benchmarks/Perf/SessionSetupDecompositionBenchmarks.cs` (909, untouched). Both
+predate this task; splitting them is recorded here as a follow-up rather than silently inherited.
+
