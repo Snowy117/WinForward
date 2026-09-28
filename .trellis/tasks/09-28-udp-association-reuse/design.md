@@ -36,9 +36,12 @@ Ownership rules (per `async-lifetime.md`):
 
 - The pool and each association are owners: one `QuiescenceScope` each (D7), explicit D11 one-shot
   teardown claims, and every watchdog/recovery/re-association child is a `scope.Run` child (WF0003).
-- Nested lifetime: the bundle's disposal order becomes sweeper → UDP coordinator → pools/setup
-  executor → **association pool**; the pool's drain seals, then joins every association's drain,
-  which joins every watchdog child. No session may outlive a lease (I1).
+- Nested lifetime: the bundle disposes sweeper → UDP coordinator → **association pool** → native
+  pools/setup executor → TCP → syn/relay pools. The load-bearing constraint is that the UDP
+  coordinator has drained every lease before both the association pool and the native pools are
+  released (the relative order of those two is immaterial: the pool borrows no native pool); the
+  pool's drain then seals, joins every association's drain, which joins every watchdog child. No
+  session may outlive a lease (I1).
 - The transport stops owning the control connection: its `DisposeAsync` returns the lease
   (refcount--) and keeps disposing only the socket, self-traffic token and send gate. This keeps
   `UdpProxySession.DisposeCoreAsync` untouched.
@@ -70,13 +73,16 @@ Ownership rules (per `async-lifetime.md`):
 - **I5 — No cooldown on association loss**: `RemoveSlotAsync` arms the 1 s setup cooldown only for
   `SetupFailure`, so `AssociationLost` recovers on the next datagram. Pinned by test.
 - **I6 — Bounded blast radius**: `MaxAssociationsPerServer = 16` (internal constant) and
-  `FlowsPerAssociation = 16`; a new lease over the cap opens a new association, and flows are hashed
-  by local port so a death affects at most one fan-out slice. Exceeding the association cap falls back
-  to per-flow associations for that server (never refuses the flow).
+  `FlowsPerAssociation = 16`; placement picks the least-loaded shared association (creation order
+  breaks ties) — the blast radius is bounded by `FlowsPerAssociation`, not by a hash, so no
+  correctness property depends on placement stability. Exceeding the association cap falls back to
+  per-flow associations for that server (never refuses the flow).
 - **I7 — In-place re-association**: on watchdog-detected death the association re-dials and
   re-ASSOCIATEs; if the new relay endpoint's address family matches the old one, it publishes the new
   `SocketAddress` to attached transports (`Volatile.Write`) and no session is lost. A family change or
-  a failed recovery is an association fault (I4).
+  a failed recovery is an association fault (I4). The budget is **one bounded attempt per detected
+  death** (≈5 s, no backoff): a server that keeps closing control connections gets a fresh bounded
+  attempt for each death rather than a per-association retry budget.
 - **I8 — Sticky capability**: `PerFlowOnly` is per server and lasts the run; existing shared
   associations drain naturally (no new leases), existing sessions are never torn down by the flip.
 
@@ -178,7 +184,17 @@ Explicitly not touched: `UdpProxyCoordinator` slot/gate logic, `UdpSessionSetup`
   `Unknown`), sticky verdict, `always`/`off` overrides, flip keeps existing sessions alive.
 - `UdpAssociationRecoveryTests`: watchdog detects a dropped control connection, in-place
   re-association keeps sessions and their sockets, family change faults them with
-  `AssociationLost`, no setup cooldown armed, no unobserved task exception.
+  `AssociationLost`, no setup cooldown armed, no unobserved task exception. Extended by the Step 2
+  check/fix round with: session survival across a same-family recovery at **coordinator** level
+  (`SessionCount` stays 1 and a post-recovery datagram is delivered), the injectable recovery bound
+  (a never-completing recovery faults the lease inside the bound, no retry storm), and the
+  self-traffic registration swap after a rebind (old tuple released, new one owned, no leak).
+- `UdpAssociationPoolTests`: additionally N transports through the production factory over one
+  shared association with N distinct local relay ports, and the retirement of a faulted
+  zero-lease association by the maintenance sweep.
+- `UdpSessionSetupTests` (or the coordinator suite): a flush-window association loss maps to
+  `AssociationLost` with the association counter and **no** setup cooldown (A2), distinct from a
+  genuine setup failure.
 - `Socks5UdpTransportLeaseTests`: lease released exactly once on every construction-failure path;
   `off` mode reproduces per-flow associations byte-for-byte.
 - `UdpRelayTests` / `UdpProxyCoordinatorTests` / `UdpSessionSetupTests`: green unchanged, plus a new

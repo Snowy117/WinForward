@@ -102,11 +102,17 @@ bounded per-session socket/port/kernel-buffer budget and the observability to se
       re-association succeeds, the teardown reason is counted, no socket or lease is orphaned, and no
       setup cooldown is armed.
 - [ ] `udpAssociationReuse: off` passes the existing UDP suites unchanged (rollback mode).
-- [ ] Pool drain: no lease outlives its owner; bundle disposal order (sweeper → UDP → pools/executor →
-      association pool) is asserted; a faulted association never surfaces as an unobserved task
-      exception.
+- [ ] Pool drain: no lease outlives its owner; the bundle's dispose releases the drained UDP
+      coordinator before the association pool and the native pools (the relative order of the latter
+      two is immaterial), and after disposal the coordinator reports zero sessions and the pool zero
+      associations/leases; a faulted association never surfaces as an unobserved task exception.
 - [ ] Allocation gates unchanged; `udp.burstEstablishment` and `udp.lossRate` matrices re-run green
       after the retention/buffer changes.
+
+Ordering note: `udpAssociationReuse: auto` is off-equivalent until Step 3 lands passive detection, so
+the default-configuration soak above becomes a *sharing* acceptance only with Step 3. The Step 2
+acceptance runs exercise sharing explicitly (the harness scenarios hard-code `always`); Step 3 runs
+them on the production default (`auto`, share + detect).
 
 ## Out of scope
 

@@ -140,3 +140,28 @@ only above the 4096 default, so defaults stay silent).
 → 48/48 first responses, loss 0, p50 304 ms (2026-09-06 baseline 325 ms); `churn` 48 flows × 120 s
 external server → 77,328 sessions, 0 rejected, loss 0, 13,066 B/session (anchor ≤14,500).
 
+### Phase B — Step 2 (association pool)
+
+| Round | Agent | Outcome |
+|---|---|---|
+| Implement | `trellis-implement` (subagent) | `UdpControlAssociation` + `UdpAssociationPool` + `UdpAssociationLease`; transport ownership inverted (lease instead of owning the control connection); `udpAssociationReuse` key (`auto` off-equivalent until Step 3); `AssociationLost` teardown reason + `udpAssociationLost`/`udpAssociationRecovered`; heartbeat `udpAssociations`/`udpLeasedFlows`. Build 0 warnings, 872 tests (baseline 843, +29), format empty, acceptance with sharing ON zero loss and **churn 13,066 → 7,557 B/session (−42 %)**, first-response p50 12.5 → 3.2 ms. |
+| Check | `trellis-check` (subagent) | **PASS-WITH-FIXES**: 19 `jb inspectcode` issues; the setup-flush path misclassified association loss as `SetupFailure` (armed the 1 s cooldown); watchdog had no catch-all; relay endpoint/address could pair across two publications; a tautological test and three missing behaviour-pinning tests. Independently reproduced both headline numbers (7,556.7 B/session, p50 3.241 ms) and confirmed the interfaces are byte-identical to HEAD. |
+| Fix | `trellis-implement` (subagent) | jb → 0, flush-path mapping, watchdog catch-all, single immutable relay-target publication, restored/added tests, plus the two parent findings below. |
+
+**Parent findings folded into the fix round:** (P1) the pool's maintenance `PeriodicTimer(period,
+TimeProvider)` silently faulted for providers without `CreateTimer` (the test fake), killing
+retention — the timer now uses the system clock while the idle comparison keeps the injected clock;
+(P2) a *shared* association that faults with zero leases was never disposed (its last release had
+already run) and lingered in `All` — the maintenance sweep now retires faulted zero-lease
+associations, never from inside the watchdog (that would self-drain).
+
+**Naming deviation:** the pooled owner is `UdpControlAssociation` because
+`WinForward.Runtime.UdpProxy.UdpAssociation` already exists (the flow↔relay-alias record used by
+`UdpAssociationTable`); `UdpAssociationPool`/`UdpAssociationLease` keep their planned names.
+
+**Deferred to Step 3:** `auto` becomes share + passive detection (so the default-mode acceptance run
+lands there); the harness scenarios switch from the hard-coded `always` to the production default;
+`GcSoakScenario` (pre-existing over-cap file, now hard-coded `always`) is revisited then.
+**Flagged:** `ConfigurationModels.cs` is at 397/400 effective lines — the next configuration key must
+split the file first.
+
