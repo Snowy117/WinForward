@@ -32,7 +32,8 @@
     "09-20-transport-lifecycle",
     "09-28-udp-association-reuse",
     "09-29-tcp-udp-path-structural-perf",
-    "09-29-tcp-redirect-batched-injection"
+    "09-29-tcp-redirect-batched-injection",
+    "09-29-benchmark-coverage-remaining-findings"
   ],
   "parent": null,
   "relatedFiles": [],

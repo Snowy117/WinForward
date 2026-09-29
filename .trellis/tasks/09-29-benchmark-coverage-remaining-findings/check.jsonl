@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "verify the new measurements against this contract"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "verify the new measurements against this contract"}
+{"file": "benchmarks/README.md", "reason": "verify the new measurements against this contract"}
+{"file": ".trellis/tasks/archive/2026-08/08-30-proxy-perf-stability-research/research/measurement-gaps.md", "reason": "verify the new measurements against this contract"}

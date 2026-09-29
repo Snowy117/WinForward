@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/archive/2026-09/09-29-tcp-udp-path-structural-perf/research.md", "reason": "F2-F8 findings and the exact measurement each one names"}
+{"file": ".trellis/tasks/archive/2026-08/08-30-proxy-perf-stability-research/research/measurement-gaps.md", "reason": "the prior gap list: which items are closed and which stay open"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "measurement discipline, allocation-gate and real-collaborator conventions"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "fake-collaborator rule, Release-gate discipline, file budget"}
+{"file": "benchmarks/README.md", "reason": "harness modes, existing families, comparability rules the new rows must follow"}
