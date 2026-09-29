@@ -352,6 +352,21 @@ internal sealed class FakeInjector(int? throwOnCall = null, bool throwIfCanceled
         if (throwOnCall is { } call && Interlocked.Increment(ref _calls) == call) throw exception ?? new IOException("injection failed");
         lock (InjectedFrames) InjectedFrames.Add((stagedFrame.GetFrame().ToArray(), towardMstcp, adapterHandle));
     }
+
+    /// <summary>
+    /// Records one <see cref="InjectedFrames"/> entry per frame, exactly as the single-send overload
+    /// would, so a test written against the frame-level surface keeps its semantics when the frames
+    /// arrive through the batched path. The call counter still advances once per call, so
+    /// <c>throwOnCall</c> keeps meaning "the Nth injection call".
+    /// </summary>
+    public void InjectBatch(NdisPacketBuffer[] frames, int count, bool towardMstcp, nint adapterHandle)
+    {
+        if (throwOnCall is { } call && Interlocked.Increment(ref _calls) == call) throw exception ?? new IOException("injection failed");
+        lock (InjectedFrames)
+        {
+            for (var index = 0; index < count; index++) InjectedFrames.Add((frames[index].GetFrame().ToArray(), towardMstcp, adapterHandle));
+        }
+    }
 }
 
 internal sealed class GatedRelayFactory : ITcpProxyRelayFactory

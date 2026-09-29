@@ -69,4 +69,7 @@ internal sealed class ThrowingRedirectInjector : ITcpRedirectInjector
 
     public void Inject(NdisPacketBuffer stagedFrame, bool towardMstcp, nint adapterHandle, CancellationToken cancellationToken) =>
         throw new InvalidOperationException("injection is not expected on this path");
+
+    public void InjectBatch(NdisPacketBuffer[] frames, int count, bool towardMstcp, nint adapterHandle) =>
+        throw new InvalidOperationException("injection is not expected on this path");
 }

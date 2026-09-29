@@ -54,6 +54,40 @@ public sealed class HotPathAllocationGateTests
     }
 
     [Fact]
+    public async Task DeferredInPlaceRedirectInjectionAllocatesNoManagedBytes()
+    {
+        var injector = new CountingInjector();
+        var listenerFactory = new FakeListenerFactory();
+        var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, new TcpRedirectTable(), new SelfTrafficRegistry(), new FakeLocalAddressProvider());
+        await using (coordinator)
+        {
+            await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
+            var template = MakeForwardTcpPacket(s_clientIpv4, s_destIpv4, 53000, 443, TcpFlagAck, payload: [1, 2, 3, 4]);
+            using var slot = new NdisPacketBuffer();
+            slot.SetFrame(template.Lease.Frame.Span, NdisApiAbi.PacketFlagOnSend, 0x1234);
+            var dataFrame = new CapturedFlowPacket(new PacketLease(slot), template.Context, template.Metadata, NativeFrame: new NativeFrameHandle(slot));
+
+            for (var warm = 0; warm < 8; warm++)
+            {
+                if (await coordinator.HandlePacketAsync(dataFrame, s_server, CancellationToken.None) != TcpRedirectOutcome.Injected) Assert.Fail("deferred in-place reinjection was not committed");
+                coordinator.FlushPendingRedirectInjections(0x1234);
+            }
+
+            var before = GC.GetAllocatedBytesForCurrentThread();
+            const int count = 64;
+            for (var index = 0; index < count; index++)
+            {
+                if (await coordinator.HandlePacketAsync(dataFrame, s_server, CancellationToken.None) != TcpRedirectOutcome.Injected) Assert.Fail("deferred in-place reinjection was not committed");
+                coordinator.FlushPendingRedirectInjections(0x1234);
+            }
+            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.Equal(0, allocated);
+            Assert.Equal(8 + count, injector.Calls);
+        }
+    }
+
+    [Fact]
     public async Task ReverseRewriteAndInjectAllocatesNoManagedBytes()
     {
         var injector = new CountingInjector();
@@ -439,6 +473,9 @@ public sealed class HotPathAllocationGateTests
         public ValueTask InjectAsync(ReadOnlyMemory<byte> rewrittenFrame, bool towardMstcp, nint adapterHandle, CancellationToken cancellationToken) => ValueTask.CompletedTask;
 
         public void Inject(NdisPacketBuffer stagedFrame, bool towardMstcp, nint adapterHandle, CancellationToken cancellationToken) => Interlocked.Increment(ref _calls);
+
+        /// <summary>Counts the frames a batched send carries, so <see cref="Calls"/> keeps meaning "frames injected".</summary>
+        public void InjectBatch(NdisPacketBuffer[] frames, int count, bool towardMstcp, nint adapterHandle) => Interlocked.Add(ref _calls, count);
     }
 
     /// <summary>

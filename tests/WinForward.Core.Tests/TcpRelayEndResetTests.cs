@@ -273,6 +273,16 @@ public sealed class TcpRelayEndResetTests
             lock (Frames) Frames.Add((stagedFrame.GetFrame().ToArray(), towardMstcp, adapterHandle));
             order.Add("reset");
         }
+
+        /// <summary>Appends a batch's frames in order, marking each one as an injection like the single-send overloads.</summary>
+        public void InjectBatch(NdisPacketBuffer[] frames, int count, bool towardMstcp, nint adapterHandle)
+        {
+            lock (Frames)
+            {
+                for (var index = 0; index < count; index++) Frames.Add((frames[index].GetFrame().ToArray(), towardMstcp, adapterHandle));
+            }
+            for (var index = 0; index < count; index++) order.Add("reset");
+        }
     }
 
     private sealed class FaultingUpstreamStream : Stream
