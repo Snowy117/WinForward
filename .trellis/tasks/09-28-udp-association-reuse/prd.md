@@ -90,9 +90,17 @@ bounded per-session socket/port/kernel-buffer budget and the observability to se
 
 ## Acceptance criteria
 
-- [ ] Default configuration, churn soak at ≥100 new UDP flows/s for ≥1 h: relay sockets, fds,
-      ephemeral ports and estimated kernel receive-buffer bytes stay flat (not linear in flow count),
-      zero datagram loss, and no first-response latency regression against the recorded baseline.
+- [ ] Default configuration, churn soak at ≥100 new UDP flows/s for ≥1 h, stated in the **two terms it
+      actually has**: (i) **bounded over time** — the live population tracks `rate × retention` instead
+      of accumulating, so relay sockets, fds, ephemeral ports and the estimated kernel receive-buffer
+      bytes stay flat as the run proceeds (the `udpSessionBudget` soak asserts the steady-state ceiling
+      and the drain-to-zero); and (ii) **sub-linear in the concurrent flow count** — at the default caps
+      one authenticated association serves 16 flows, so the control-connection half of the descriptor
+      cost is amortized (`associations ≈ sessions / udpAssociationFlowsPerAssociation`). One relay
+      socket per live flow is by design (R1/I2), so the descriptor floor is ≈1 per live flow and the
+      kernel-buffer estimate stays `rate × retention × relay buffer`; the soak reports both. The 1 h run
+      is recorded with `--require-pooling`, so its verdict states which term held. Zero datagram loss,
+      and no first-response latency regression against the recorded baseline.
 - [ ] Permissive fake server: N flows share K associations (K ≪ N), responses never cross wires, and
       per-flow client MAC / origin adapter are preserved for forwarded flows.
 - [ ] Source-port-pinning fake server: detection fires within its window, the server flips to
@@ -130,3 +138,12 @@ them on the production default (`auto`, share + detect).
   with R1–R3, because pooling alone does not fix the reported symptom for same-remote churn (DNS
   towards one resolver keeps one socket per concurrent flow).
 - **D3 (proposed, pending approval)**: relay-socket sharing (Axis B) stays a separate follow-up task.
+- **D4 (2026-09-28, user — Phase D)**: the soak measured the shared head at 16 × 16 = 256 flows per
+  server against the acceptance load (≈4,500 live sessions at 100 flows/s with the 45 s retention), so
+  94 % of flows fell back to private per-flow associations and the descriptor shape was ≈1.95/session —
+  the per-flow shape, with the per-flow TCP controls the diagnosis blamed for ephemeral-port pressure.
+  The user chose **A&C**: raise the ceiling and expose both pool caps as validated configuration keys
+  (`udpAssociationMaxPerServer` default 1024, `udpAssociationFlowsPerAssociation` default 16), keeping
+  `FlowsPerAssociation` at 16 because it is the blast-radius knob. The shared head becomes 16,384 flows
+  per server = the default `udpSessionCapacity`, so every admitted flow can be shared. Not fixed by
+  this: the descriptor floor stays ≈1 per live flow (one relay socket per flow is R1/I2 by design).

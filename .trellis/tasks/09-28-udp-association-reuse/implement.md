@@ -184,3 +184,46 @@ one-token pool-mode switch, net 0 effective lines) and
 `benchmarks/WinForward.Benchmarks/Perf/SessionSetupDecompositionBenchmarks.cs` (909, untouched). Both
 predate this task; splitting them is recorded here as a follow-up rather than silently inherited.
 
+### Phase D — Step 4 (the `udp.sessionBudget` soak) + the caps decision
+
+| Round | Agent | Outcome |
+|---|---|---|
+| Implement | `trellis-implement` (subagent) | New `--scenario udpSessionBudget` (`--rate`/`--capacity`/`--churn-seconds`/`--drain-seconds`; `UdpSessionBudgetRun` + `UdpSessionBudgetInstrumentation`; 20 new test cases), phases warm-up → churn → drain with 5 s sampling, the production sweep cadence (15 s for the 30 s idle), descriptor sampling with the harness's own sockets subtracted, and assertions for loss/rejections, the retention ceiling, the descriptor budget, `associations <= sessions/flows`, and drain-to-zero. Build 0 warnings, 911 tests, format empty, jb 0. |
+| Check | `trellis-check` (subagent) | **PASS-WITH-FIXES**: independently reproduced both soak shapes and the pooling finding, proved the measurement attribution exact and the verdict-before-throw path live (a deliberate violation run produced 8 failures); found two instrument weaknesses worth fixing before the 1 h artifact is quoted — the retention ceiling is not discriminating at the scenario's own default churn length, and the only pooling-discriminating assertion is skipped exactly at the acceptance load (reported in the row, not hidden) — plus five low-severity instrument items (no kernel-buffer estimate field, no first-response comparison, raw managed-bytes ratio, churn arrival schedule seeded from construction, `--capacity` validation gap). |
+
+**The finding (and why it mattered).** At the acceptance load (100 new flows/s, 45 s retention ⇒
+≈4,500 live sessions) the pool's shared head of 16 × 16 = 256 flows per server was exhausted, so 94 %
+of flows were served by private associations: **1.95 fds/session, the same shape as
+`udpAssociationReuse: off`**, and one TCP control connection per flow — the ephemeral-port pressure the
+original diagnosis identified. The population itself was correctly bounded by retention (4,500 steady,
+not 360,000 after an hour), zero loss and drain-to-zero held. Recorded as the acceptance's stated
+residual rather than hidden by loosening a threshold; the soak's own descriptor-budget formula was
+shown to be non-discriminating (it charges the association term, so a per-flow shape fits too) and a
+discriminating `associations <= ceil(sessions/16) + 16` check was added.
+
+**User decision (D4, A&C) — executed as a caps round:** raise `udpAssociationMaxPerServer` to **1024**
+(the surgical knob: only `FlowsPerAssociation` bounds a death's blast radius) and expose both pool caps
+as validated keys, keeping `FlowsPerAssociation` at **16**. The default head becomes 16,384 flows per
+server = the default `udpSessionCapacity`, so every admitted flow can be shared. Explicitly **not**
+fixed by this: the descriptor floor stays ≈1 per live flow (one relay socket per flow is R1/I2 by
+design) and the kernel-buffer estimate stays `rate × retention × 128 KiB`. `ConfigurationModels.cs`
+(397/400 effective) is split as part of the round, as flagged in Phase B.
+
+| Round | Agent | Outcome |
+|---|---|---|
+| Caps implement | `trellis-implement` (subagent) | Two keys (`udpAssociationMaxPerServer` 1024 / 1..16384, `udpAssociationFlowsPerAssociation` 16 / 1..256), `ConfigurationModels.cs` split 397→375 + new partial 47, `ConfigurationLimits.cs` 105→133, pool bounds configurable, composition seam `UdpProxyComposer.CreateAssociationPool`. 936 tests (+25). Descriptor shape at the acceptance load **1.94 → 1.0703 fds/session**, 282 shared associations instead of ~4,250, first-response p50 2.05 → 1.01 ms, zero loss, drain-to-zero. |
+| Caps check | `trellis-check` (subagent) | **PASS-WITH-FIXES** (no product defect, no weakened assertion): the move-only split textually verified member-by-member, placement proven to read the configured bounds, the default-head invariant proven discriminating, both soak shapes reproduced (1.0624 fds/session), the full config accept/reject matrix probed end-to-end through the product CLI. Found one **instrument** defect that gates the acceptance artifact: `SharedAssociationCeiling` added the whole ceiling as slack, so raising it 16 → 1024 loosened the acceptance bound from 298 to 1,306 allowed associations (tolerating ≈24 % private flows); plus three doc nits and the decision whether to warn when the caps cannot cover the admission population. |
+| Instrument fix | `trellis-implement` (subagent) | Slack clamped (`min(cap, 16)` → 298 at the load), retention-discriminance precondition + default churn 60 → 90 s, `--require-pooling` + a two-field verdict, kernel receive-buffer estimate + per-session ratio asserted inside the retention bound, managed-bytes baseline, arrival schedule anchored at churn start, `--capacity` range-validated, bridge constants deleted, product cross-key warning (Fix G), results README refreshed + post-caps archives. **Extra finding that gated the artifact:** the 5 s sample rows alias the sawtooth crest (sampled 4,000 sessions / 280 associations vs the true peak 4,500 / 282), so the pooling halves are now asserted against the arrival-granularity steady peak — without it the shipped post-caps shape would have failed by 14 associations on an instrument artifact. |
+
+**Fix G (product, folded into the instrument round):** a cross-key validation *warning* (not an error)
+now fires when `udpAssociationMaxPerServer × udpAssociationFlowsPerAssociation < udpSessionCapacity`,
+because that configuration silently serves the overflow from per-flow control connections — exactly the
+invisible resource shape this task's soak uncovered. Silent at the defaults (16,384 = 16,384).
+
+### Phase E — Step 5 (docs and specs)
+
+| Round | Agent | Outcome |
+|---|---|---|
+| Docs | `trellis-implement` (subagent, docs-only; no dotnet) | Root README: all six UDP keys (HEAD documented none), a "UDP resource shape" paragraph stating the ≈1-per-live-flow descriptor floor and the kernel-buffer expression, three diagnostic-event rows. `udp-relay.md`: a new pooling contract section (shapes, validation matrix, good/base/bad cases, evidence, right-vs-wrong) plus seven stale statements corrected (loop-prevention tuple, `CreateAsync`→`Create`, factory signature, "fixed RelayEndpoint", teardown reason, two "60 s sweep" lines, coordinator location). `hot-path.md`, `traffic-policy-lifecycle.md`, `error-handling.md`: counter semantics, the real sweeper cadence per leg, and the "only `SetupFailure` arms the cooldown" taxonomy. `async-lifetime.md` (parent): the D7 owner list now names the pool and the association with their nesting and the fixed pool-gate → evidence-gate lock order. |
+| Check | — | Docs are covered by the caps-round check (which verified the code claims they rest on) and by the parent's review; no separate agent round was spent here. |
+

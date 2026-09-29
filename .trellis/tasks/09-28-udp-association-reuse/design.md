@@ -72,11 +72,24 @@ Ownership rules (per `async-lifetime.md`):
   No `_ =`, no `Task.Run`, no new fire-and-forget (WF rules).
 - **I5 — No cooldown on association loss**: `RemoveSlotAsync` arms the 1 s setup cooldown only for
   `SetupFailure`, so `AssociationLost` recovers on the next datagram. Pinned by test.
-- **I6 — Bounded blast radius**: `MaxAssociationsPerServer = 16` (internal constant) and
-  `FlowsPerAssociation = 16`; placement picks the least-loaded shared association (creation order
-  breaks ties) — the blast radius is bounded by `FlowsPerAssociation`, not by a hash, so no
-  correctness property depends on placement stability. Exceeding the association cap falls back to
-  per-flow associations for that server (never refuses the flow).
+- **I6 — Bounded blast radius**: `FlowsPerAssociation` (default **16**, configurable) bounds how many
+  concurrent flows one shared association serves, which is exactly the blast radius of an association
+  death; `MaxAssociationsPerServer` (default **1024**, configurable) is a per-server *ceiling* on
+  shared associations, not a preallocation — the pool creates only what placement needs. The defaults
+  give a shared head of 16,384 flows per server, i.e. **the default head covers the whole default
+  `udpSessionCapacity`**, so every admitted flow can be shared; the invariant
+  `maxPerServer × flowsPerAssociation >= udpSessionCapacity` is pinned by test. Placement picks the
+  least-loaded shared association (creation order breaks ties) — O(shared associations), bounded by
+  the ceiling; the blast radius stays bounded by `FlowsPerAssociation`, not by a hash, so no
+  correctness property depends on placement stability. Exceeding `FlowsPerAssociation` moves the flow
+  to *another shared* association while the ceiling allows; only ceiling exhaustion falls back to a
+  per-flow (private) association, so the pool never refuses a flow.
+  *(Revised in Phase D: the original 16 × 16 = 256 head was measured against the acceptance load —
+  100 flows/s with the 45 s retention window ⇒ ≈4,500 live sessions — where 94 % of flows fell back to
+  private associations and the descriptor shape was ≈1.95/session, i.e. the per-flow shape, with the
+  per-flow TCP controls the original diagnosis blamed for ephemeral-port pressure. The user decided to
+  raise the ceiling and expose both caps. Raising the caps does **not** make the footprint flat: one
+  relay socket per live flow is by design (R1/I2), so the floor is ≈1 descriptor per live flow.)*
 - **I7 — In-place re-association**: on watchdog-detected death the association re-dials and
   re-ASSOCIATEs; if the new relay endpoint's address family matches the old one, it publishes the new
   `SocketAddress` to attached transports (`Volatile.Write`) and no session is lost. A family change or
