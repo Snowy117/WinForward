@@ -122,6 +122,47 @@ public sealed class SetupExecutorTests
     }
 
     [Fact]
+    public async Task SetupExecutorDisposeRacingTheFirstEnqueueLeavesNoItemUnsettled()
+    {
+        // TryEnqueue reads _disposed == 0, then Dispose can set it, join the workers, drain the
+        // (still empty) ring and dispose the shutdown source and the signal while the enqueue is
+        // still appending and the worker start is still in flight. Two contracts hang off that one
+        // window: a worker must not fault its thread on the disposed shutdown source (it exits like
+        // a cancelled one), and an accepted item must settle its completion rather than sit in a
+        // ring nobody drains. The interleaving needs no forcing — it fires within the first hundred
+        // attempts (measured 2026-09-30: the host aborted on every run without the worker guard,
+        // and 1997 of 1998 accepted items were stranded without the post-enqueue recheck).
+        const int attempts = 512;
+        var accepted = 0;
+        for (var attempt = 0; attempt < attempts; attempt++)
+        {
+            var executor = new SetupExecutor(workerCount: 1, ringCapacity: 4);
+            var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var item = executor.RentItem(static _ => Task.CompletedTask);
+            item._completion = completion;
+            var dispose = Task.Run(executor.Dispose);
+
+            var enqueued = executor.TryEnqueue(item);
+            await dispose;
+
+            if (enqueued)
+            {
+                accepted++;
+                Assert.True(completion.Task.IsCompleted, "an accepted setup item was stranded by the racing shutdown");
+            }
+            else
+            {
+                // The refusal path is explicit: nothing ran the item, so nothing settles it.
+                Assert.False(completion.Task.IsCompleted, "a refused setup item settled a completion nothing ran");
+            }
+
+            Assert.Equal(0, executor.PendingCount);
+        }
+
+        Assert.True(accepted > 0, "the dispose race never accepted an enqueue");
+    }
+
+    [Fact]
     public void DefaultRingCapacityCoversThePendingSynIndexCap()
     {
         // The pending-SYN index drains through this ring, so the ring must not be the smaller of

@@ -208,6 +208,12 @@ public sealed class SetupExecutor : ISetupExecutor
         }
 
         Interlocked.Increment(ref _enqueuedCount);
+        // Post-enqueue recheck, the pattern the pool family already uses for the same window
+        // (NdisPacketBufferPool.OnReturned, NativeBufferPool.Release): a Dispose that began after
+        // the disposed check above can drain the ring before this append, and its drain has already
+        // finished. Whichever drainer runs second observes the item, so its completion is failed
+        // closed here instead of stranding its awaiter forever.
+        if (Volatile.Read(ref _disposed) != 0) DrainRing();
         return true;
     }
 
@@ -240,15 +246,22 @@ public sealed class SetupExecutor : ISetupExecutor
 
     private void WorkerLoop()
     {
-        var token = _shutdown.Token;
         while (true)
         {
             try
             {
-                _signal.Wait(token);
+                _signal.Wait(_shutdown.Token);
             }
             catch (OperationCanceledException)
             {
+                return;
+            }
+            catch (ObjectDisposedException)
+            {
+                // A shutdown that began while TryEnqueue was starting this worker disposes the
+                // shutdown source and the semaphore under it. The executor is gone, so the worker
+                // exits the way a cancelled one does instead of faulting its thread unhandled and
+                // taking the process down with it.
                 return;
             }
 
@@ -299,10 +312,20 @@ public sealed class SetupExecutor : ISetupExecutor
             foreach (var thread in workers) thread.Join();
         }
 
-        while (_ring.TryDequeue(out var item)) DrainItem(item);
+        DrainRing();
 
         _signal.Dispose();
         _shutdown.Dispose();
+    }
+
+    /// <summary>
+    /// Fail-closes every item currently in the ring. Shared by <see cref="Dispose"/> and the
+    /// post-enqueue recheck in <see cref="TryEnqueue"/>: the two drainers race safely because the
+    /// ring hands each item to exactly one <c>TryDequeue</c>, so every item is drained exactly once.
+    /// </summary>
+    private void DrainRing()
+    {
+        while (_ring.TryDequeue(out var item)) DrainItem(item);
     }
 
     /// <summary>
