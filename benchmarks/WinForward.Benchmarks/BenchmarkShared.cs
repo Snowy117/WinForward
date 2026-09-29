@@ -84,6 +84,79 @@ internal static class BenchmarkShared
         return frame;
     }
 
+    /// <summary>
+    /// The IPv6 counterpart of <see cref="CreateIpv4TcpFrame(int, bool)"/>: Ethernet + IPv6 (40 bytes,
+    /// next header TCP) + TCP (20 bytes), same bare-SYN/mid-flow variants, with the TCP checksum
+    /// computed over the IPv6 pseudo-header — which is what the endpoint rewriter's incremental update
+    /// (RFC 1624) starts from, so a frame without it would measure a different path than captured
+    /// traffic takes. The checksum is verified independently by <c>BenchmarkFrameBuilderTests</c>.
+    /// </summary>
+    public static byte[] CreateIpv6TcpFrame(int frameSize, bool bareSyn)
+    {
+        const int ethernetLength = 14;
+        const int ipv6Length = 40;
+        const int tcpOffset = ethernetLength + ipv6Length;
+        if (frameSize is < tcpOffset + 20 or > UdpFrameBuilder.MaximumEthernetFrame) throw new ArgumentOutOfRangeException(nameof(frameSize));
+        var frame = new byte[frameSize];
+        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(12, 2), 0x86dd);
+        frame[ethernetLength] = 0x60;
+        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(18, 2), checked((ushort)(frameSize - ethernetLength - ipv6Length)));
+        frame[20] = 6;
+        frame[21] = 64;
+        IPAddress.Parse("2001:db8::10").TryWriteBytes(frame.AsSpan(22, 16), out _);
+        IPAddress.Parse("2001:db8::80").TryWriteBytes(frame.AsSpan(38, 16), out _);
+        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(tcpOffset, 2), 53_000);
+        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(tcpOffset + 2, 2), 443);
+        frame[tcpOffset + 12] = 0x50;
+        for (var index = tcpOffset + 20; index < frame.Length; index++) frame[index] = unchecked((byte)index);
+
+        if (bareSyn)
+        {
+            BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(18, 2), 20);
+            frame[tcpOffset + 13] = 0x02;
+        }
+        else
+        {
+            frame[tcpOffset + 13] = 0x10;
+        }
+
+        var tcpLength = BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(18, 2));
+        frame[tcpOffset + 16] = 0;
+        frame[tcpOffset + 17] = 0;
+        var sum = Sum16(frame.AsSpan(22, 16)) + Sum16(frame.AsSpan(38, 16)) + 6u + tcpLength + Sum16(frame.AsSpan(tcpOffset, tcpLength));
+        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(tcpOffset + 16, 2), (ushort)~Fold16(sum));
+        return frame;
+    }
+
+    /// <summary>
+    /// The IPv6 counterpart of <see cref="CreateIpv4UdpFrame"/>: Ethernet + IPv6 (40 bytes, next header
+    /// UDP) + UDP (8 bytes) + payload, same field layout conventions as <see cref="CreateIpv6TcpFrame"/>.
+    /// The UDP checksum stays zero, as in the IPv4 UDP builder and the test project's IPv6 UDP builder:
+    /// these are parse-only shapes, and neither <c>IPTcpUdpPacket</c> nor <c>IPUdpPacket</c> reads the
+    /// checksum, so computing one would add setup work without changing the measured parse.
+    /// </summary>
+    public static byte[] CreateIpv6UdpFrame(int frameSize)
+    {
+        const int ethernetLength = 14;
+        const int ipv6Length = 40;
+        const int udpOffset = ethernetLength + ipv6Length;
+        if (frameSize is < 64 or > UdpFrameBuilder.MaximumEthernetFrame) throw new ArgumentOutOfRangeException(nameof(frameSize));
+        var frame = new byte[frameSize];
+        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(12, 2), 0x86dd);
+        frame[ethernetLength] = 0x60;
+        // The IPv6 payload length covers the UDP header plus the payload, and the UDP length repeats it.
+        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(18, 2), checked((ushort)(frameSize - udpOffset)));
+        frame[20] = 17;
+        frame[21] = 64;
+        IPAddress.Parse("2001:db8::10").TryWriteBytes(frame.AsSpan(22, 16), out _);
+        IPAddress.Parse("2001:db8::53").TryWriteBytes(frame.AsSpan(38, 16), out _);
+        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(udpOffset, 2), 53_000);
+        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(udpOffset + 2, 2), 53);
+        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(udpOffset + 4, 2), checked((ushort)(frameSize - udpOffset)));
+        for (var index = udpOffset + 8; index < frame.Length; index++) frame[index] = unchecked((byte)index);
+        return frame;
+    }
+
     private static uint Sum16(ReadOnlySpan<byte> data)
     {
         uint sum = 0;

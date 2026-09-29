@@ -56,7 +56,18 @@ internal static class SoakRunner
     /// so folding it into the shared stability sweep would silently drag every existing run to
     /// that length. <c>udpSessionBudget</c> is excluded for the same reason at a smaller scale: its
     /// churn + drain windows resolve a ~3.5-minute default even though the scenario's own knobs are
-    /// short.
+    /// short. <c>scaling</c> is excluded because it is a micro contention probe, not a soak: it
+    /// measures every configuration twice (fake and real guard arms), so folding it into the sweep
+    /// would double its length to answer a question no soak row depends on. <c>sweep</c> is excluded
+    /// because it seeds a 65,536-entry table and sweeps it in a loop: it is a probe, not a soak.
+    /// <c>pump</c> and <c>residency</c> are excluded for the same probe reason, and <c>tcpChurn</c>
+    /// because its rate is a scenario knob of its own: folding it into the sweep would add a
+    /// connection-churn load to runs whose verdicts say nothing about churn.
+    /// <c>pump</c> is excluded for the same reason at the smallest scale: it drives the real capture
+    /// pump through fake readers to sample idle CPU and wake latency — a micro probe, not a soak.
+    /// <c>residency</c> is excluded because it is a census, not a soak: it builds 65,536-capacity table
+    /// state, <c>--flows</c> live relays and <c>--udp-flows</c> sessions and samples memory once per
+    /// stage, so folding it into the sweep would add a topology no existing row depends on.
     /// </summary>
     internal static IReadOnlyList<(string Name, Func<StabilityContext, SoakOptions, Task> Run)> SelectScenarios(SoakScenario scenario)
     {
@@ -70,6 +81,11 @@ internal static class SoakRunner
             SoakScenario.Burst => [("udpBurst", UdpBurstScenario.RunAsync)],
             SoakScenario.Churn => [("udpChurn", UdpChurnScenario.RunAsync)],
             SoakScenario.SessionBudget => [("udpSessionBudget", UdpSessionBudgetScenario.RunAsync)],
+            SoakScenario.Scaling => [("scaling", ScalingContentionScenario.RunAsync)],
+            SoakScenario.Sweep => [("flowTableSweep", SweepPauseScenario.RunAsync)],
+            SoakScenario.Pump => [("pump", PumpIdleWakeScenario.RunAsync)],
+            SoakScenario.TcpChurn => [("tcpChurn", TcpChurnScenario.RunAsync)],
+            SoakScenario.Residency => [("residency", ResidencyCensusScenario.RunAsync)],
             SoakScenario.GcSoak => [("gcSoak", GcSoakScenario.RunAsync)],
             _ =>
             [

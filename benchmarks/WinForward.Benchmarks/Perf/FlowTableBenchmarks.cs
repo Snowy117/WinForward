@@ -87,3 +87,84 @@ public class FlowTableHitBenchmarks
         return value;
     }
 }
+
+/// <summary>
+/// The flow table at its production cardinality (the default <c>tcpFlowCapacity</c>, 4,096) in the two
+/// orientations a proxied connection actually resolves, plus the per-hit activity-clock read that rides
+/// along with them (research F4/F3.4).
+/// <para>
+/// The existing hit row uses a <em>foreign</em> origin (cross-adapter) and cardinalities chosen for the
+/// original probe sweep; these rows are the same-orientation and reversed-orientation shapes at the
+/// shipped capacity, so a change to the key's hash, the orientation index, or the per-hit clock can be
+/// read as a delta here. The claim path is deliberately not a row: BenchmarkDotNet invokes one method
+/// many times per iteration and this table has no per-invocation reset, so a "new key" claim would
+/// silently degrade into a resolve partway through the iteration. The claim cost is measured instead by
+/// the controlled loop in the sweep/churn scenarios, where the table's lifetime is owned by the harness.
+/// </para>
+/// </summary>
+[MemoryDiagnoser]
+public class FlowTableProductionShapeBenchmarks
+{
+    private static long s_sink;
+
+    private const int Cardinality = 4_096;
+
+    private FlowTable _table = null!;
+    private FlowKey _stored;
+    private FlowKey _reverse;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _table = new FlowTable(capacity: Cardinality + 2);
+        for (var index = 0; index < Cardinality; index++)
+        {
+            if (!_table.TryClaimResolved(BenchmarkShared.CreateFlowKey(index), static () => FlowDecision.Fallback(FlowAction.Pass), out _))
+            {
+                throw new InvalidOperationException("Unable to populate the flow-table production-shape benchmark.");
+            }
+        }
+
+        _stored = BenchmarkShared.CreateFlowKey(Cardinality / 2);
+
+        // The orientation a proxied reply arrives in: the same transport tuple seen from the other end.
+        _reverse = _stored with { Local = _stored.Remote, Remote = _stored.Local };
+
+        // A row that silently measured the miss path would report a plausible number for the wrong
+        // question, so both orientations are proven to resolve before either is timed.
+        if (!_table.TryResolve(_stored, out _) || !_table.TryResolve(_reverse, out _))
+        {
+            throw new InvalidOperationException("The production-shape rows must resolve both the stored and the reverse orientation.");
+        }
+    }
+
+    [Benchmark]
+    public long ResolveSameOrientationHit()
+    {
+        long value = 0;
+        value += _table.TryResolve(_stored, out var state) ? state!.Generation : 0;
+        Volatile.Write(ref s_sink, value);
+        return value;
+    }
+
+    [Benchmark]
+    public long ResolveReverseAliasHit()
+    {
+        long value = 0;
+        value += _table.TryResolve(_reverse, out var state) ? state!.Generation : 0;
+        Volatile.Write(ref s_sink, value);
+        return value;
+    }
+
+    /// <summary>
+    /// The clock read the two hit rows include: subtracting this from them bounds what the bucketed
+    /// activity time (F3.4) can remove.
+    /// </summary>
+    [Benchmark]
+    public long ReadActivityClock()
+    {
+        var value = TimeProvider.System.GetUtcNow().UtcTicks;
+        Volatile.Write(ref s_sink, value);
+        return value;
+    }
+}

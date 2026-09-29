@@ -9,12 +9,17 @@ internal enum SoakScenario
     Udp,
     Tcp,
     TcpThroughput,
+    TcpChurn,
     Footprint,
     Baseline,
     Burst,
     Churn,
     SessionBudget,
+    Scaling,
+    Sweep,
     GcSoak,
+    Pump,
+    Residency,
 }
 
 internal enum TcpRelayMode
@@ -103,6 +108,14 @@ internal sealed record SoakOptions
     public int Pps { get; private init; } = 25_000;
     public int PayloadBytes { get; private init; } = 512;
     public int Flows { get; private init; } = 256;
+
+    /// <summary>
+    /// Residency census (<c>--udp-flows</c>): the live UDP session population, kept separate from
+    /// <see cref="Flows"/> so the TCP relay population and the UDP session population can be sized
+    /// independently (they are different resources with different per-unit costs).
+    /// </summary>
+    public int UdpFlows { get; private init; } = 100;
+
     public int TcpConcurrency { get; private init; } = 64;
     public int TcpTransferBytes { get; private init; } = 1_048_576;
     public TcpRelayMode TcpRelayMode { get; private init; } = TcpRelayMode.Socks5;
@@ -143,6 +156,33 @@ internal sealed record SoakOptions
 
     /// <summary>Child server mode (<c>--serve-socks5-udp</c>): host the loopback SOCKS5 UDP server for a parent process instead of running a scenario.</summary>
     public bool ServeSocks5Udp { get; private init; }
+
+    /// <summary>
+    /// TCP churn (<c>--attribution-delay-ms</c>): a synthetic per-flow stall on the selected fraction
+    /// of new connections, standing in for the pump-thread process attribution (research F8) that only
+    /// runs on Windows. Zero disables it.
+    /// </summary>
+    public int AttributionDelayMs { get; private init; }
+
+    /// <summary>
+    /// TCP churn (<c>--attribution-delay-percent</c>): the share of connections that pay
+    /// <see cref="AttributionDelayMs"/>, modelling the real rule that attribution runs for the flows a
+    /// process rule matches rather than for every flow. The delayed class is reported separately.
+    /// </summary>
+    public int AttributionDelayPercent { get; private init; } = 5;
+
+    /// <summary>
+    /// Scaling-contention probe (<c>--threads</c>): pin one worker count instead of the 1/2/4 sweep, so
+    /// a single configuration can be reproduced in isolation.
+    /// </summary>
+    public int Threads { get; private init; }
+
+    /// <summary>
+    /// Scaling-contention probe (<c>--shared-key-percent</c>): share of lookups aimed at a shared key
+    /// pool (the reverse-leg traffic every adapter sees), which is the part of the workload that
+    /// contends hardest. <c>0</c> runs fully disjoint partitions.
+    /// </summary>
+    public int SharedKeyPercent { get; private init; } = 10;
 
     /// <summary>UDP churn against the out-of-process server helper instead of the in-process receiver/server (<c>--socks5-external</c>).</summary>
     public bool Socks5External { get; private init; }
@@ -187,8 +227,8 @@ internal sealed record SoakOptions
                 return options with { Pps = PositiveInt("--pps", Value(args, ref index)) };
             case "--payload-bytes":
                 return options with { PayloadBytes = AtLeast("--payload-bytes", Value(args, ref index), 12) };
-            case "--flows":
-                return options with { Flows = PositiveInt("--flows", Value(args, ref index)) };
+            case "--flows" or "--udp-flows":
+                return ApplyPopulationArgument(options, args, ref index);
             case "--tcp-concurrency":
                 return options with { TcpConcurrency = PositiveInt("--tcp-concurrency", Value(args, ref index)) };
             case "--tcp-transfer-bytes":
@@ -221,9 +261,32 @@ internal sealed record SoakOptions
                 return options with { ServeSocks5Udp = true };
             case "--socks5-external":
                 return options with { Socks5External = true };
+            case "--threads":
+                return options with { Threads = PositiveInt("--threads", Value(args, ref index)) };
+            case "--attribution-delay-ms":
+                return options with { AttributionDelayMs = AtLeast("--attribution-delay-ms", Value(args, ref index), 0) };
+            case "--attribution-delay-percent":
+                return options with { AttributionDelayPercent = AtLeast("--attribution-delay-percent", Value(args, ref index), 0) };
+            case "--shared-key-percent":
+                return options with { SharedKeyPercent = AtLeast("--shared-key-percent", Value(args, ref index), 0) };
             default:
                 throw new ArgumentException($"Unknown stability argument '{args[index]}'.", nameof(args));
         }
+    }
+
+    /// <summary>
+    /// The two population selectors. <c>--flows</c> sizes the TCP side (flow table and relays) and
+    /// <c>--udp-flows</c> the UDP side, so the census can size either population without the other.
+    /// </summary>
+    private static SoakOptions ApplyPopulationArgument(SoakOptions options, string[] args, ref int index)
+    {
+        var flag = args[index];
+        var population = PositiveInt(flag, Value(args, ref index));
+        return flag switch
+        {
+            "--udp-flows" => options with { UdpFlows = population },
+            _ => options with { Flows = population },
+        };
     }
 
     private static string Value(string[] args, ref int index)
@@ -249,7 +312,12 @@ internal sealed record SoakOptions
         "udpchurn" or "churn" => SoakScenario.Churn,
         "udpsessionbudget" or "sessionbudget" or "budget" => SoakScenario.SessionBudget,
         "gc-soak" or "gcsoak" => SoakScenario.GcSoak,
-        _ => throw new ArgumentException($"Unknown scenario '{raw}'; expected all, udp, udpburst, udpchurn, udpsessionbudget, tcp, tcpthroughput, footprint, baseline, or gc-soak.", nameof(raw)),
+        "tcpchurn" => SoakScenario.TcpChurn,
+        "scaling" or "contention" => SoakScenario.Scaling,
+        "sweep" or "sweeppause" => SoakScenario.Sweep,
+        "pump" or "pumpidlewake" => SoakScenario.Pump,
+        "residency" or "residencycensus" => SoakScenario.Residency,
+        _ => throw new ArgumentException($"Unknown scenario '{raw}'; expected all, udp, udpburst, udpchurn, udpsessionbudget, scaling, sweep, pump, residency, tcp, tcpchurn, tcpthroughput, footprint, baseline, or gc-soak.", nameof(raw)),
     };
 
     private static TcpRelayMode ParseTcpRelayMode(string raw) => raw.ToLowerInvariant() switch
