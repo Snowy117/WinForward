@@ -944,3 +944,41 @@ Split the UDP admission leg (S1 - S0 = 828.8) and the capacity pre-seed (S0 = 48
 ### Status
 
 [OK] **Completed**
+
+
+## Session 37: TCP redirect lane-batched injection + in-place rewrite (research F1)
+<!-- trellis-session: v=2 fp=8f41af6b4f43508b -->
+
+**Date**: 2026-09-29
+**Task**: TCP redirect lane-batched injection + in-place rewrite (research F1)
+**Branch**: `master`
+
+### Summary
+
+Task 09-29-tcp-redirect-batched-injection (research F1): the client-facing TCP redirect data legs joined the batched-injection mechanism and rewrite in place on the capture slot — ~32x fewer injection IOCTLs, one memcpy and one pool round trip removed per proxied packet. Independent trellis-check found a real R6 zero-allocation violation in the lane container (264 B per (adapter,direction) per iteration), fixed with a spare-lane pool and gated by a new allocation test; three residual findings (orphan cross-adapter lane, degraded-retry duplication, spurious DEBUG assert) were fixed and pinned.
+
+### Main Changes
+
+- Redirect data legs now accumulate into per-(adapter, target direction) lanes flushed once per pump iteration and rewrite in place on the pump's capture slot (no rental, no copy); control frames stay immediate; cross-adapter targets are scope-gated; a failed batch degrades per frame into the established client-reset/fail-closed tail.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `98d7232` | perf(redirect): batch TCP redirect data-leg injection and rewrite in place (09-29-tcp-redirect-batched-injection) |
+| `1a56eec` | test(redirect): cover lane batching, in-place staging and the 0 B lane gate (09-29-tcp-redirect-batched-injection) |
+| `9225ae6` | fix(test): assert accept-loop back-off by attempt count, not wall-clock elapsed (09-29-tcp-redirect-batched-injection) |
+| `73d21f2` | docs(spec): record the redirect deferred-injection and in-place contracts (09-29-tcp-redirect-batched-injection) |
+| `57c7fe5` | chore(task): record 09-29-tcp-redirect-batched-injection artifacts |
+
+### Testing
+
+- [OK] Release: build 0W/0E; 952 Core.Tests + 18 Analyzers passed; dotnet format --verify-no-changes empty; jb inspectcode 0 issues. Windows-only anchors (TcpThroughputScenario socks5/bare, gc-soak) deferred to windows-real-nic.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Archive-check 09-28-udp-association-reuse (looks complete); Windows real-NIC validation of the batched redirect path; remaining F2/F3/F4/F5/F6/F8 findings from 09-29-tcp-udp-path-structural-perf.

@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 36
-- **Last Active**: 2026-09-22
+- **Total Sessions**: 37
+- **Last Active**: 2026-09-29
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~946 | Active |
+| `journal-1.md` | ~984 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 37 | 2026-09-29 | TCP redirect lane-batched injection + in-place rewrite (research F1) | `98d7232`, `1a56eec`, `9225ae6`, `73d21f2`, `57c7fe5` | `master` |
 | 36 | 2026-09-22 | Admission and capacity pre-seed split | `ed204e1`, `a14ebd5`, `30bbed9` | `feat/transport-lifecycle` |
 | 35 | 2026-09-22 | UDP teardown and session-tier allocation reduction | `cfd56fd`, `27d0be1`, `2da59b0`, `b2ee992` | `feat/transport-lifecycle` |
 | 34 | 2026-09-22 | Session creation cost redo: out-of-process harness, corrected numbers, re-anchored T3 | `d4aeda5`, `6588265`, `dc37516`, `c55e5de` | `feat/transport-lifecycle` |
