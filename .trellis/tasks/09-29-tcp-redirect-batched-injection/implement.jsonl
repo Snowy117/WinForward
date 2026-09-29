@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "backend spec entry point + pre-development checklist"}
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "redirect leg contracts the change must preserve (mid-flow/reverse rewrite, failure surface, direction matrix)"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "zero-allocation, in-place reinjection and batching contracts"}
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "driver reinjection handle rules and the batched send ABI"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "fail-closed semantics for injection failures"}
+{"file": ".trellis/tasks/archive/2026-09/09-29-tcp-udp-path-structural-perf/research.md", "reason": "source finding F1 (evidence, cost model, proposal, risks)"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "new lane overflow/degradation log events must follow the structured event + rate-limit conventions"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "file-size/split/naming rules for the new lanes type"}

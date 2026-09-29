@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "gate + suppression policy used by the check phase"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "allocation and batching contracts to verify"}
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "redirect behavior parity to verify"}
+{"file": ".trellis/spec/backend/index.md", "reason": "quality check entry point"}
+{"file": ".trellis/tasks/archive/2026-08/08-30-batched-ioctls/research/abi-packets-success.md", "reason": "batched send ABI is all-or-nothing (failure/retry semantics)"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "verify the new failure/overflow events follow the logging contract"}
