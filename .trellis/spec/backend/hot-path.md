@@ -70,6 +70,15 @@ attribution, socket setup, logging, tests) are exempt.
    UnionPadding); DeviceFlags/Flags/Length/payload stay as captured. Materialized or
    buffer-less packets take the pooled-copy fallback. Enumeration handle ≠ captured
    `m_hAdapter` (see windows-ndisapi.md).
+   **Since 2026-09-29 the TCP redirect data legs do the same** (task
+   09-29-tcp-redirect-batched-injection): a pump-dispatched packet whose lease never materialized is
+   rewritten on its capture slot and the slot is queued into a per-(adapter, direction) injection lane,
+   so the slot is retained past the synchronous section until that iteration's flush — which runs before
+   the next read and, at loop exit, before `ReleaseBatchBuffers()`. The rewrite is same-length (endpoint
+   + checksum rewrite, MAC swap), the direction flag and enumeration handle are restamped, and the
+   pre-rewrite bytes are read first by the sequence trackers. Never retain such a slot beyond the flush,
+   and never treat the capture buffer as read-only after a redirect leg has handled it (the redirect
+   contract in windows-ndisapi.md § "Redirect deferred-injection lanes" is the authority).
 7. **Span-writing codecs.** Datagram encode uses `TryEncode(..., Span<byte>, out written)`
    into a reusable buffer (`Socks5UdpTransport._sendBuffer`); allocating overloads exist for
    tests only.
