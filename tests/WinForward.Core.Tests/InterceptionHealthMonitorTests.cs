@@ -29,7 +29,7 @@ public sealed class InterceptionHealthMonitorTests
         var logger = new RecordingRuntimeLogger();
         var monitor = new InterceptionHealthMonitor(
             logger,
-            counter => { lock (triggers) triggers.Add(counter); },
+            trigger => { lock (triggers) triggers.Add(trigger.Counter); },
             time,
             thresholds);
         return new Harness(monitor, time, logger, triggers);
@@ -160,6 +160,47 @@ public sealed class InterceptionHealthMonitorTests
 
         Assert.Equal(2, harness.TriggerCount);
         Assert.Equal(1, harness.Monitor.ConsecutiveForcedTriggers);
+    }
+
+    /// <summary>
+    /// The trigger handed to the handler is the trigger-time observation, not a later read of the
+    /// monitor. The demand-processing success hook can run as soon as the trigger is published —
+    /// here it runs inside the handler, which is the same interleaving — and it must not be able to
+    /// rewrite what the handler reports: before the snapshot, the handler read the streak and the
+    /// window counts back from the monitor and logged the post-reset zero for a trigger that had
+    /// fired at streak 1 (<c>LayeredCaptureRunnerHealthSignalTests</c>'s recorded failure).
+    /// </summary>
+    [Fact]
+    public void TriggerSnapshotSurvivesAResetInsideTheHandler()
+    {
+        var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
+        var observed = new List<ForcedRefreshTrigger>();
+        InterceptionHealthMonitor monitor = null!;
+        // ReSharper disable once AccessToModifiedClosure // the handler runs only after the constructor returns, so the captured slot is assigned before any call; the test's point is the reset happening inside the handler.
+        monitor = new InterceptionHealthMonitor(
+            logger: null,
+            trigger =>
+            {
+                monitor.NoteRefreshCompleted();
+                observed.Add(trigger);
+            },
+            time,
+            new Dictionary<string, int>(StringComparer.Ordinal) { [Counter] = 3 });
+
+        monitor.ReportFailure(Counter);
+        monitor.ReportFailure(Counter);
+        monitor.ReportFailure(Counter);
+
+        var trigger = Assert.Single(observed);
+        Assert.Equal(Counter, trigger.Counter);
+        Assert.Equal(1, trigger.Consecutive);
+        Assert.False(trigger.Degraded);
+        Assert.True(trigger.CooldownRemaining > TimeSpan.Zero);
+        Assert.Equal(3, trigger.WindowCounts[Counter]);
+        Assert.Equal(0, monitor.ConsecutiveForcedTriggers);
+        // The reset cleared the live window (count 0) while the handed snapshot keeps the
+        // trigger-time count.
+        Assert.Equal(0, monitor.WindowSnapshot()[Counter]);
     }
 
     [Fact]

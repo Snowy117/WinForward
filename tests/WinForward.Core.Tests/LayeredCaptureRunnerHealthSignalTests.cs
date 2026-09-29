@@ -47,9 +47,12 @@ public sealed class LayeredCaptureRunnerHealthSignalTests
         Assert.Equal(RuntimeCounters.RelaySetupFailed, CaptureRunnerHarness.FieldValue(fields, "reason"));
         Assert.Equal("1", CaptureRunnerHarness.FieldValue(fields, "consecutive"));
 
-        // The forced install completed, so the demand-processing success hook already reset
-        // the monitor's consecutive streak.
+        // The forced install completed, so the demand-processing success hook resets the
+        // monitor's consecutive streak. The hook runs after the install returns, while the waits
+        // above only observe generation 1 starting, so the reset is awaited rather than assumed:
+        // reading the post-state too early observed the pre-reset streak.
         var monitor = Assert.IsType<InterceptionHealthMonitor>(signal);
+        await AsyncTestExtensions.WaitForAsync(() => monitor is { ConsecutiveForcedTriggers: 0, IsDegraded: false }, timeoutMs: 5000).ConfigureAwait(false);
         Assert.Equal(0, monitor.ConsecutiveForcedTriggers);
         Assert.False(monitor.IsDegraded);
     }

@@ -238,21 +238,29 @@ public sealed class LayeredCaptureRunner
     /// catch faster than its interval. Arming rides the existing forced semantics (the flag is
     /// consumed once by the next demand; an install clears it), and the storm guard still paces
     /// the rebuild itself. The warn is observational and never changes the refresh outcome.
+    /// <para>
+    /// Every logged field comes from <paramref name="trigger"/>, the snapshot the monitor captured
+    /// in the same locked section that armed this trigger: the demand signalled here is processed
+    /// concurrently by <see cref="RunAsync"/>'s loop, whose success hook
+    /// (<see cref="InterceptionHealthMonitor.NoteRefreshCompleted"/>) resets the streak and clears
+    /// the windows, so reading the monitor back from this handler logged a post-reset
+    /// <c>consecutive=0</c> for a trigger that fired at streak <c>1</c>
+    /// (<c>LayeredCaptureRunnerHealthSignalTests</c>).
+    /// </para>
     /// </summary>
-    private void OnForcedRefreshTriggered(string counter)
+    private void OnForcedRefreshTriggered(ForcedRefreshTrigger trigger)
     {
         _forceRebuild = true;
         _demandGate.Signal();
         if (!_logger.IsEnabled(RuntimeLogLevel.Warn)) return;
-        var counters = _healthMonitor.WindowSnapshot();
-        var fields = new List<RuntimeLogField>(4 + counters.Count)
+        var fields = new List<RuntimeLogField>(4 + trigger.WindowCounts.Count)
         {
-            new("reason", counter),
-            new("consecutive", _healthMonitor.ConsecutiveForcedTriggers),
-            new("cooldownSeconds", (long)_healthMonitor.CooldownRemaining.TotalSeconds),
+            new("reason", trigger.Counter),
+            new("consecutive", trigger.Consecutive),
+            new("cooldownSeconds", (long)trigger.CooldownRemaining.TotalSeconds),
         };
-        if (_healthMonitor.IsDegraded) fields.Add(new("degraded", "true"));
-        foreach (var pair in counters.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
+        if (trigger.Degraded) fields.Add(new("degraded", "true"));
+        foreach (var pair in trigger.WindowCounts.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
         {
             fields.Add(new RuntimeLogField(pair.Key, pair.Value));
         }

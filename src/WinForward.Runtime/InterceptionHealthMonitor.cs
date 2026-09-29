@@ -16,6 +16,18 @@ public interface IInterceptionHealthSignal
 }
 
 /// <summary>
+/// One trigger-time observation of the monitor, captured under the monitor's gate in the same
+/// locked section that armed the trigger: the counter that crossed, the consecutive-trigger streak
+/// and degraded flag the trigger decision saw, the cooldown the trigger just earned, and every
+/// tracked counter's window count (saturated at its threshold). The attached handler logs these
+/// fields instead of reading the monitor back, because the demand-processing success hook
+/// (<see cref="InterceptionHealthMonitor.NoteRefreshCompleted"/>) runs concurrently with the
+/// handler and resets the streak and windows — reading them afterwards reported the post-reset
+/// <c>0</c> for a trigger that fired at streak <c>1</c>.
+/// </summary>
+public readonly record struct ForcedRefreshTrigger(string Counter, int Consecutive, bool Degraded, TimeSpan CooldownRemaining, IReadOnlyDictionary<string, int> WindowCounts);
+
+/// <summary>
 /// Thresholds interception-path failure signals and paces the forced refreshes they request
 /// (task 09-17 R1-B, design §3.1): a per-counter 30 s sliding-window count crossing its
 /// threshold fires the attached trigger once, then a 60 s cooldown shared by every counter
@@ -25,13 +37,15 @@ public interface IInterceptionHealthSignal
 /// drops to one per 5 minutes — the forced-rebuild counterpart of the runner's startup-recovery
 /// budget, so a persistent failure source cannot drive a rebuild loop at cooldown rate.
 /// All state sits behind one gate; a report costs a locked ring append with no allocation
-/// (the reinjector sites fire per datagram under failure, so the report path stays lean).
+/// (the reinjector sites fire per datagram under failure, so the report path stays lean), and the
+/// only allocation on that path is the trigger snapshot, which is built once per threshold
+/// crossing — at most one per 60 s cooldown.
 /// Window counts saturate at the threshold — the trigger decision needs "at least threshold
 /// within the window", while <see cref="RuntimeCounters"/> keeps the true aggregates.
 /// </summary>
 public sealed class InterceptionHealthMonitor(
     IRuntimeLogger? logger = null,
-    Action<string>? onTrigger = null,
+    Action<ForcedRefreshTrigger>? onTrigger = null,
     TimeProvider? timeProvider = null,
     IReadOnlyDictionary<string, int>? thresholds = null) : IInterceptionHealthSignal
 {
@@ -57,7 +71,7 @@ public sealed class InterceptionHealthMonitor(
     private readonly IReadOnlyDictionary<string, int> _thresholds = thresholds ?? DefaultThresholds;
     private readonly IRuntimeLogger _logger = logger ?? NullRuntimeLogger.Instance;
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
-    private Action<string>? _onTrigger = onTrigger;
+    private Action<ForcedRefreshTrigger>? _onTrigger = onTrigger;
     private DateTimeOffset _nextTriggerUtc;
     private bool _degraded;
     private int _consecutiveForced;
@@ -89,16 +103,20 @@ public sealed class InterceptionHealthMonitor(
 
     /// <summary>
     /// A copy of every tracked counter's current window count (saturated at its threshold) —
-    /// the <c>runner.forcedRefresh</c> context and the heartbeat's health summary source.
+    /// the heartbeat's health summary source. A trigger handler must use the counts handed to it
+    /// in <see cref="ForcedRefreshTrigger"/> instead: this read is not the trigger's observation.
     /// </summary>
     public IReadOnlyDictionary<string, int> WindowSnapshot()
     {
-        lock (_gate)
-        {
-            var snapshot = new Dictionary<string, int>(_windows.Count, StringComparer.Ordinal);
-            foreach (var pair in _windows) snapshot[pair.Key] = pair.Value.Count;
-            return snapshot;
-        }
+        lock (_gate) return SnapshotWindows();
+    }
+
+    /// <summary>Builds the window-count copy; the caller holds <see cref="_gate"/>.</summary>
+    private Dictionary<string, int> SnapshotWindows()
+    {
+        var snapshot = new Dictionary<string, int>(_windows.Count, StringComparer.Ordinal);
+        foreach (var pair in _windows) snapshot[pair.Key] = pair.Value.Count;
+        return snapshot;
     }
 
     /// <summary>
@@ -107,7 +125,7 @@ public sealed class InterceptionHealthMonitor(
     /// <c>Program</c> creates the monitor, hands it to both sides, and the runner attaches here.
     /// Throws when a handler is already attached.
     /// </summary>
-    public void AttachTrigger(Action<string> onTrigger)
+    public void AttachTrigger(Action<ForcedRefreshTrigger> onTrigger)
     {
         ArgumentNullException.ThrowIfNull(onTrigger);
         lock (_gate)
@@ -119,8 +137,8 @@ public sealed class InterceptionHealthMonitor(
 
     public void ReportFailure(string counter)
     {
-        string fired;
-        Action<string>? handler;
+        ForcedRefreshTrigger trigger;
+        Action<ForcedRefreshTrigger>? handler;
         var degradedNow = false;
         int consecutive;
         lock (_gate)
@@ -138,13 +156,17 @@ public sealed class InterceptionHealthMonitor(
                 degradedNow = true;
             }
             _nextTriggerUtc = now + (_degraded ? s_degradedTriggerSpacing : s_defaultTriggerCooldown);
-            fired = counter;
+            // The trigger decision and the state its handler reports are one atomic observation:
+            // NoteRefreshCompleted() (the demand-processing success hook) runs concurrently and
+            // resets the streak and windows, so a handler that read them back afterwards could log
+            // the post-reset zero for a trigger that fired at streak 1.
+            trigger = new ForcedRefreshTrigger(counter, consecutive, _degraded, _nextTriggerUtc - now, SnapshotWindows());
             handler = _onTrigger;
         }
         // Outside the gate: the transition to degraded happened exactly once under it, and the
         // handler may itself consult the snapshot state.
         if (degradedNow) LogDegraded(consecutive);
-        handler?.Invoke(fired);
+        handler?.Invoke(trigger);
     }
 
     /// <summary>
