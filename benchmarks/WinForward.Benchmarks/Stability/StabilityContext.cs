@@ -41,6 +41,13 @@ internal sealed class StabilityContext : IDisposable
         Write(JsonSerializer.Serialize(record, s_serialization));
     }
 
+    /// <summary>
+    /// Serializes one metrics row exactly as the JSONL writer does. A test can assert what a row
+    /// carries — the ratios and the baselines they are recomputed from — without re-deriving the
+    /// writer's naming policy, which is what makes the row, not the in-memory record, the contract.
+    /// </summary>
+    internal static string SerializeMetrics(object metrics) => JsonSerializer.Serialize(metrics, s_serialization);
+
     private void Write(string json)
     {
         Console.Out.WriteLine(json);

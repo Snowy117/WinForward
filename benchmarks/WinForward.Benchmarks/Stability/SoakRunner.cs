@@ -54,7 +54,9 @@ internal static class SoakRunner
     /// The scenarios a <see cref="SoakScenario"/> selection expands to. <c>gc-soak</c> is
     /// deliberately excluded from <see cref="SoakScenario.All"/>: it resolves a 30-minute default,
     /// so folding it into the shared stability sweep would silently drag every existing run to
-    /// that length.
+    /// that length. <c>udpSessionBudget</c> is excluded for the same reason at a smaller scale: its
+    /// churn + drain windows resolve a ~3.5-minute default even though the scenario's own knobs are
+    /// short.
     /// </summary>
     internal static IReadOnlyList<(string Name, Func<StabilityContext, SoakOptions, Task> Run)> SelectScenarios(SoakScenario scenario)
     {
@@ -67,6 +69,7 @@ internal static class SoakRunner
             SoakScenario.Baseline => [("baseline", UdpRawBaselineScenario.RunAsync)],
             SoakScenario.Burst => [("udpBurst", UdpBurstScenario.RunAsync)],
             SoakScenario.Churn => [("udpChurn", UdpChurnScenario.RunAsync)],
+            SoakScenario.SessionBudget => [("udpSessionBudget", UdpSessionBudgetScenario.RunAsync)],
             SoakScenario.GcSoak => [("gcSoak", GcSoakScenario.RunAsync)],
             _ =>
             [

@@ -1,4 +1,5 @@
 using System.Globalization;
+using WinForward.Configuration;
 
 namespace WinForward.Benchmarks.Stability;
 
@@ -12,6 +13,7 @@ internal enum SoakScenario
     Baseline,
     Burst,
     Churn,
+    SessionBudget,
     GcSoak,
 }
 
@@ -114,6 +116,31 @@ internal sealed record SoakOptions
     /// <summary>UDP churn waves (<c>--churn-waves</c>): K ≥ 1 fires K waves and reports one row per wave; 0 runs sustained churn for <see cref="DurationSeconds"/> and reports one aggregate row.</summary>
     public int ChurnWaves { get; private init; } = 1;
 
+    /// <summary>UDP session-budget soak (<c>--rate</c>): new flows per second during the churn window.</summary>
+    public int Rate { get; private init; } = 20;
+
+    /// <summary>UDP session-budget soak (<c>--capacity</c>): the coordinator's session capacity, constrained to the product's own <c>1..16384</c> range; the validated configuration default (16,384) unless overridden.</summary>
+    public int Capacity { get; private init; } = ConfigurationLoader.DefaultUdpSessionCapacity;
+
+    /// <summary>
+    /// UDP session-budget soak (<c>--churn-seconds</c>): length of the new-flow churn window. The
+    /// default clears the retention ceiling's discrimination minimum at the default rate with room
+    /// for sample cadence (20 × 90 = 1,800 cumulative flows against the ceiling 1,240 = 20 ×
+    /// (idle 30 s + 2 × sweep 15 s) + margin 40), so the shipped invocation cannot silently record a
+    /// vacuous retention claim.
+    /// </summary>
+    public int ChurnSeconds { get; private init; } = 90;
+
+    /// <summary>UDP session-budget soak (<c>--drain-seconds</c>): length of the no-new-flows drain window after the churn.</summary>
+    public int DrainSeconds { get; private init; } = 120;
+
+    /// <summary>
+    /// UDP session-budget soak (<c>--require-pooling</c>): fail the run unless the pooling coverage
+    /// check was evaluated inside the pool's shared head, so a saturated sample cannot skip the only
+    /// pooling-discriminating assertion while the run still reports a pass.
+    /// </summary>
+    public bool RequirePooling { get; private init; }
+
     /// <summary>Child server mode (<c>--serve-socks5-udp</c>): host the loopback SOCKS5 UDP server for a parent process instead of running a scenario.</summary>
     public bool ServeSocks5Udp { get; private init; }
 
@@ -180,6 +207,16 @@ internal sealed record SoakOptions
                 return options with { DialDelayMs = AtLeast("--dial-delay-ms", Value(args, ref index), 0) };
             case "--churn-waves":
                 return options with { ChurnWaves = AtLeast("--churn-waves", Value(args, ref index), 0) };
+            case "--rate":
+                return options with { Rate = PositiveInt("--rate", Value(args, ref index)) };
+            case "--capacity":
+                return options with { Capacity = UdpCapacity(Value(args, ref index)) };
+            case "--churn-seconds":
+                return options with { ChurnSeconds = PositiveInt("--churn-seconds", Value(args, ref index)) };
+            case "--drain-seconds":
+                return options with { DrainSeconds = PositiveInt("--drain-seconds", Value(args, ref index)) };
+            case "--require-pooling":
+                return options with { RequirePooling = true };
             case "--serve-socks5-udp":
                 return options with { ServeSocks5Udp = true };
             case "--socks5-external":
@@ -210,8 +247,9 @@ internal sealed record SoakOptions
         "baseline" => SoakScenario.Baseline,
         "udpburst" => SoakScenario.Burst,
         "udpchurn" or "churn" => SoakScenario.Churn,
+        "udpsessionbudget" or "sessionbudget" or "budget" => SoakScenario.SessionBudget,
         "gc-soak" or "gcsoak" => SoakScenario.GcSoak,
-        _ => throw new ArgumentException($"Unknown scenario '{raw}'; expected all, udp, udpburst, udpchurn, tcp, tcpthroughput, footprint, baseline, or gc-soak.", nameof(raw)),
+        _ => throw new ArgumentException($"Unknown scenario '{raw}'; expected all, udp, udpburst, udpchurn, udpsessionbudget, tcp, tcpthroughput, footprint, baseline, or gc-soak.", nameof(raw)),
     };
 
     private static TcpRelayMode ParseTcpRelayMode(string raw) => raw.ToLowerInvariant() switch
@@ -223,6 +261,17 @@ internal sealed record SoakOptions
 
     private static int PositiveInt(string name, string raw) =>
         int.TryParse(raw, CultureInfo.InvariantCulture, out var value) && value > 0 ? value : throw new ArgumentException($"{name} must be a positive integer.", nameof(raw));
+
+    /// <summary>
+    /// The coordinator's session capacity, constrained to the product's own range
+    /// (<c>ConfigurationLimits</c> accepts 1..16,384, the default being the historical maximum). The
+    /// soak's "strictly below <c>--capacity</c>" assertion is vacuous for a capacity the product would
+    /// refuse, so the out-of-range value is rejected at parse time instead.
+    /// </summary>
+    private static int UdpCapacity(string raw) =>
+        int.TryParse(raw, CultureInfo.InvariantCulture, out var value) && value is >= 1 and <= ConfigurationLoader.DefaultUdpSessionCapacity
+            ? value
+            : throw new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"--capacity must be an integer in 1..{ConfigurationLoader.DefaultUdpSessionCapacity}, the product's accepted udpSessionCapacity range."), nameof(raw));
 
     private static int AtLeast(string name, string raw, int minimum) =>
         int.TryParse(raw, CultureInfo.InvariantCulture, out var value) && value >= minimum ? value : throw new ArgumentException(string.Create(CultureInfo.InvariantCulture, $"{name} must be an integer >= {minimum}."), nameof(raw));

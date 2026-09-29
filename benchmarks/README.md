@@ -75,9 +75,10 @@ Count-based reliability metrics under sustained load. One JSONL record per scena
 
 ```text
 dotnet run -c Release --project benchmarks/WinForward.Benchmarks -- \
-  --stability [--scenario all|udp|udpBurst|udpChurn|tcp|tcpthroughput|footprint|baseline] [--duration 60] [--pps 25000] \
+  --stability [--scenario all|udp|udpBurst|udpChurn|udpSessionBudget|tcp|tcpthroughput|footprint|baseline] [--duration 60] [--pps 25000] \
   [--payload-bytes 512] [--flows 256] [--burst-flows 48] [--dial-delay-ms 0] [--churn-waves 1] \
-  [--tcp-concurrency 64] [--tcp-transfer-bytes 1048576] \
+  [--rate 20] [--capacity 16384] [--churn-seconds 90] [--drain-seconds 120] [--require-pooling] \
+  [--tcp-concurrency 64] [--tcp-transfer-bytes 1048576] [--socks5-external] \
   [--abort-mix clean=25,clientRst=25,relayCancel=25,upstreamTruncate=25] [--seed 42] \
   [--output <path>] [--quick]
 ```
@@ -148,6 +149,18 @@ teardown tails — are **not comparable** with current rows either.
   after its session expired), and a setup-failure cooldown surfaces as that wave's establishment
   loss. Allocation sampling uses `GC.GetTotalAllocatedBytes(precise: false)`; latency is
   reported as ordinals only.
+- **`udp.sessionBudget`** — the session-budget soak (PRD acceptance 1): `--rate` new flows/s for
+  `--churn-seconds`, then `--drain-seconds` with no new flows, sampling the live sessions, the
+  process's own descriptors, the pool's associations/leases, and the estimated kernel receive buffer
+  every 5 s. It asserts no loss or rejection, the retention ceiling
+  `rate × (idle + 2 × sweep) + margin` (and the receive-buffer estimate as its byte form), the
+  per-session descriptor budget, the shared-placement ceiling `ceil(sessions / flows) + 16` while the
+  population fits the pool's shared head, and drain-to-zero. A churn window whose cumulative flow
+  count does not exceed the ceiling is refused before the load — it could not discriminate retention
+  from accumulation — and `--require-pooling` fails the run unless the pooling half was evaluated
+  (default off; a saturated population otherwise skips it). The verdict row names both halves
+  independently (`verdict.retentionBounded`, `verdict.poolingCovered`). Series and commands:
+  `results/2026-09-28-udp-reuse/`.
 - **`tcp.unexpectedEof`** — concurrent one-way transfers through `TcpProxyRelay` with an
   adversarial event fired mid-stream per transfer (weighted mix: clean / client RST / relay
   cancellation / upstream truncation at a random 20–80 % of the transfer). Receiver-side

@@ -17,7 +17,12 @@ namespace WinForward.Benchmarks.Stability;
 /// </summary>
 internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
 {
-    private const int MaximumControlConnections = 4096;
+    /// <summary>
+    /// The bound on concurrent control connections, set to the product's own UDP session capacity
+    /// ceiling so the harness can serve every concurrent association a default-capacity run can
+    /// hold. Each connection owns one control socket and one relay socket.
+    /// </summary>
+    private const int MaximumControlConnections = 16_384;
 
     private readonly IPEndPoint _echoDestination;
     private readonly TimeSpan _associateDelay;
@@ -59,6 +64,12 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
 
     /// <summary>Raw total of SocketExceptions caught by the relay loops' forward/reply sends.</summary>
     public long RelaySendFaults => Interlocked.Read(ref _relaySendFaults);
+
+    /// <summary>
+    /// Live control connections; each owns one control socket and one relay socket, so this is the
+    /// harness's own two-socket contribution to the hosting process's descriptor count.
+    /// </summary>
+    public int ConnectionCount => Volatile.Read(ref _connectionCount);
 
     public async ValueTask DisposeAsync()
     {
