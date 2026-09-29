@@ -1059,3 +1059,40 @@ Diagnosed and fixed both defects the benchmark-coverage check found, and reporte
 ### Next Steps
 
 - Task 09-30-exact-gate-residual-lumps: diagnose the once-per-process host lumps that survive the tiering-off contract (pump 168/5216 B, sweep 7384 B) and the LayeredCaptureRunnerHealthSignalTests forced-refresh race, land a gate shape or fix that still fails on an injected allocation, then prove >=40 consecutive green full-suite runs. After that, the operator's F2-F8 pipeline in the order F3, F2, F4, F5, F8, F6, F7.
+
+
+## Session 40: Test stabilization part 2: the residual exact-gate lump and the health-signal race
+<!-- trellis-session: v=2 fp=0018c9eb987c9c4d -->
+
+**Date**: 2026-09-30
+**Task**: Test stabilization part 2: the residual exact-gate lump and the health-signal race
+**Branch**: `master`
+
+### Summary
+
+Attributed the residual suite-level lump as far as the evidence allows, landed disposition (c) with a per-gate-process proof, and fixed the health-signal race at its ordering cause. The suite-level rate is recorded, not claimed.
+
+### Main Changes
+
+- Multiplicity: 0/27 processes and 0/249,881 windows in isolation, so the residual is suite-process-conditional, not window-conditional. Attribution: dotnet-trace installed with its observation guarantee pre-registered, proved able to name a continuously allocating type and proved blind to the one-shot class under diagnosis (0 samples for a single 8 KB allocation the counter read as 8,280 B), so R1 was re-scoped and the product is explicitly NOT claimed excluded. Disposition (c): no product fix for the lump, no gate change; the per-gate-process proof (20 runs x 4 gates, 80/80 green, 0 signature matches, class totals asserted) plus the accepted rates with CIs and the sensitivity floor. Race: InterceptionHealthMonitor now captures a ForcedRefreshTrigger snapshot in the same locked section that arms the trigger, so NoteRefreshCompleted cannot rewrite what the runner logs; a new deterministic test runs the reset inside the handler.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3962832` | chore(task): archive 09-30-exact-gate-residual-lumps |
+| `d3b50c1` | chore(task): record the residual-lump task and seed its follow-up (exact-gate-residual-lumps) |
+| `ac98dbc` | docs(spec): record the residual lump's multiplicity, attribution limit and per-gate proof (exact-gate-residual-lumps) |
+| `4a23906` | fix(runtime): snapshot the forced-refresh trigger under the monitor gate (exact-gate-residual-lumps) |
+
+### Testing
+
+- [OK] build 0 warnings; suite 981 + 18 green; dotnet format exit 0 empty; jb inspectcode 2 genuine findings in the new test code fixed -> test project 0 issues; frozen tree rev=e28cb87 tree=883583fc055516886b90b30091c07597a9ae677e; per-gate 80/80; suite rate measured 2/13 with one signature-matched hit (sweep 7448 B) and one new failure (UdpAssociationHeadTests 282 vs 281) carried by 09-30-udp-association-head-count-flake
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Task 09-30-udp-association-head-count-flake (part 3): diagnose the UDP association head count flake (Expected 282, Actual 281 at UdpAssociationHeadTests.cs:104), then the operator's F2-F8 pipeline in the order F3 sweeps, F2 locks, F4 keys/parsing, F5 pump I/O, F8 attribution, F6 UDP footprint, F7 WFP - each with a PRD reviewed by a sub-agent, implementation, an independent check, a recorded benchmark proof before archiving, commit, archive and journal.
