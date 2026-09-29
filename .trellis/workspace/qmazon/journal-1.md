@@ -1021,3 +1021,41 @@ Built the measurement coverage the archived F2-F8 research names, recorded befor
 ### Next Steps
 
 - Operator pipeline: stabilise the flaky/hang tests first, then one Trellis task per finding in the order F3 sweeps, F2 locks, F4 keys/parsing, F5 pump I/O, F8 attribution, F6 UDP footprint, F7 WFP — each with PRD, a review sub-agent, implement, check, a benchmark proof recorded under benchmarks/results/, commit and archive.
+
+
+## Session 39: Test stabilization part 1: the tiering flake and the SetupExecutor enqueue/dispose race
+<!-- trellis-session: v=2 fp=9daf47afb9b8ee02 -->
+
+**Date**: 2026-09-30
+**Task**: Test stabilization part 1: the tiering flake and the SetupExecutor enqueue/dispose race
+**Branch**: `master`
+
+### Summary
+
+Diagnosed and fixed both defects the benchmark-coverage check found, and reported honestly that the suite-level stability criterion is not met by the residual family.
+
+### Main Changes
+
+- Defect A: an expert review killed three false premises, and the diagnosis then showed the failing test was the dispatcher gate (7520 = 4 x 1880 summed lumps), with the lump living in a counter-read-only control loop - tiered compilation publishing hot code allocates once on the calling thread. Fixed by a host contract (TieredCompilation=false) plus the landed gate shape (synchronous completion, asserted thread id, exact zero, call-count backstop), with discrimination re-proven at 5632 B and 22528 B exact. Defect B: the SetupExecutor enqueue-after-drain race fired naturally (pre-fix 3/3 host aborts and 1997/1998 stranded completions), fixed with the pool family's post-enqueue recheck and a worker guard. Hunt: 47 suite runs, no hang, p < 6.4 pct, with the naming mechanism demonstrated by an injected hang.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9b692c2` | chore(task): archive 09-30-test-flake-and-hang-stabilization |
+| `fa227b6` | chore(task): record the test-stabilization task and seed its follow-up (test-flake-and-hang-stabilization) |
+| `963bbe4` | docs(spec): record the tiering host contract, the gate shape and the repeat-run proof (test-flake-and-hang-stabilization) |
+| `dc16b85` | test: pin the allocation-gate host contract and the gate shape (test-flake-and-hang-stabilization) |
+| `136d278` | fix(runtime): settle every accepted setup item when Dispose races an enqueue (test-flake-and-hang-stabilization) |
+
+### Testing
+
+- [OK] build 0 warnings; suite 980 + 18 green under --blame-hang; dotnet format exit 0 empty; jb inspectcode 0 Issue after fixing its one genuine finding (a vestigial probeKeepGoing variable, fixed by asserting it); filter 100/100 consecutive green; full-suite >=40 consecutive NOT met - 29 runs, longest streak 12, residual carried by 09-30-exact-gate-residual-lumps
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Task 09-30-exact-gate-residual-lumps: diagnose the once-per-process host lumps that survive the tiering-off contract (pump 168/5216 B, sweep 7384 B) and the LayeredCaptureRunnerHealthSignalTests forced-refresh race, land a gate shape or fix that still fails on an injected allocation, then prove >=40 consecutive green full-suite runs. After that, the operator's F2-F8 pipeline in the order F3, F2, F4, F5, F8, F6, F7.
