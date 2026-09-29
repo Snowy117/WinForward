@@ -326,3 +326,174 @@ of the attainable win first; revisit WFP only if the target becomes "10 Gbps+ at
   costs dominated historical designs; the pump's synchronous shape is deliberate.
 - Relaxing the 0 B allocation gates to admit "small" per-packet costs — `hot-path.md` explicitly
   forbids threshold relaxation; every proposal above keeps the steady-state 0 B shape.
+
+---
+
+## Addendum (2026-09-29, second pass): steady-state memory, the claim-path correction, F8, and the target FlowTable
+
+This addendum covers the resident-memory question (~100 MB private working set on a typical desktop
+at steady load) and corrects an over-simplification in the first pass: the claim path is **not**
+uniformly cold, and the one configuration shape in which it is genuinely cold exposes a previously
+unrecorded structural finding (F8).
+
+### A1. Where the ~100 MB lives (code-grounded census model)
+
+Typical desktop load (~100 live TCP connections, ~300 UDP flows, 1–2 adapters), estimated from the
+composition in `src/WinForward.Cli/DurableCaptureBundle.cs` and the table/pool implementations:
+
+| # | Component | Estimate | Mechanism |
+|---|-----------|----------|-----------|
+| 1a | `FlowTable` pre-allocation | **~20 MB managed** | `_states` pre-sized to 65,536 (~112 B/Entry ≈ 7.3 MB) + `_transportIndex` pre-sized to 131,072 (~88 B/Entry ≈ 11.5 MB) + `_freeStates` 0.5 MB (`src/WinForward.Core/FlowTable.cs:25-27`). Allocated at startup, mostly empty forever. |
+| 1b | Managed baseline | ~13 MB | gc-soak measured post-full-GC heap ~12–13 MiB (small-capacity harness; production adds 1a). |
+| 1c | GC committed-but-unused headroom | ~10–20 MB | Workstation non-concurrent GC + 128 MiB `HeapHardLimit` (`WinForward.Cli.csproj:35`): segments committed during churn bursts are not returned until a gen2 GC chooses to decommit. |
+| 2 | Relay pump windows (native) | **~13 MB @100 conns** | 2 × 64 KiB per TCP connection held for the connection's whole life (`TcpProxyRelay.cs:243-248`); an idle SSH connection costs the same 128 KiB as a saturated one. |
+| 3 | Runtime base (AOT code pages, socket plumbing, thread pool) | ~20 MB | Typical single-file AOT networking process; `InvariantGlobalization` already on. |
+| 4 | UDP sessions (user mode) | ~3 MB @300 | ~10 KB/session: 1.6 KB native receive window + session/transport/socket/receive-loop objects. (The 128 KiB relay receive buffer is **kernel** memory — not private WS, but still system memory.) |
+| 5 | Other native pools | ~1.5 MB | syn-copy / setup-queue / receive-window / NDIS packet pools, each 256 × ~1.5 KB at high-water (all constructed with default capacity, `DurableCaptureBundle.cs:118-195`). |
+| 6 | Threads | ~1.5–2 MB | pump per adapter + `SetupExecutor` default `max(2×CPU, 16)` workers + sweeper/heartbeat/monitor. |
+| 7 | ndisapi.dll, batch buffers, misc | ~1 MB | 32 × ~2 KB per adapter batch. |
+
+The fixable structural share is items 1a, 1c and 2 — roughly 50–60% of the observed footprint.
+
+### A2. The claim path is not uniformly cold (correction)
+
+The first pass justified lazy table growth with "new-flow claim is already a cold path". Measured
+against the code, that claim splits three ways (`FlowDispatcher.DispatchSlowAsync`):
+
+- **Shape A — no process rules** (network/port/adapter rules only): attribution is skipped entirely
+  (`AttributeProcessAsync` gates on `_policy.RequiresProcessAttribution`), so claim ≈ self-traffic
+  check + reverse prefilter + `Policy.Evaluate` + insert ≈ **1–3 µs — warm-ish, not cold**. Desktop
+  churn is dominated by DNS/QUIC/TCP connects (10–100 claims/s, ~1,000/s bursts), so the per-claim
+  cost is irrelevant, but the real price of lazy growth is not per-claim: it is the ~6 whole-table
+  O(N) rehash stalls per run (1024→…→65,536), each stalling every pump under the global gate
+  (~1.5–2 ms worst at 32k→64k). At desktop rates the driver queue absorbs it; under sustained load
+  with a genuinely large working set it could overflow the queue.
+  **Corrected recommendation:** floor pre-size of 4,096–8,192 (~0.5–1 MB) + lazy doubling beyond,
+  or — better — the sharded design of A4, where per-shard growth divides any rehash stall by the
+  shard count (~64×) and makes incremental-rehash machinery unnecessary.
+- **Shape B — any rule carries `Processes`**: claim is **freezing** (F8 below), and rehash noise
+  is irrelevant next to it. The correct response is to fix F8, not to accept it.
+- **Shape C — forwarded (VM) flows**: attribution is skipped by origin, so claim ≈ adapter-qualified
+  rule scan + insert ≈ 1–2 µs, but VM churn can be tens of times desktop churn — not cold, yet it
+  raises the weight of F2 (lock contention) correspondingly.
+
+Related small print: `Policy.Evaluate` runs **inside** the flow-table gate today (the `decide()`
+factory is invoked under `TryClaimResolved`'s lock) and its `RemoteNetworks.Any(...)` /
+`RemotePorts.Any(...)` LINQ allocates a closure per evaluation — worth hand-rolling into loops when
+the claim path is next touched.
+
+### A3. F8: process attribution runs on the pump thread (new finding)
+
+With any process rule configured, every new **host** flow pays, synchronously on the capture pump
+thread (`WindowsProcessAttributor.FindAsync`, `src/WinForward.Windows/ProcessAttribution.cs:28`):
+
+1. `GetExtendedTcpTable`/`GetExtendedUdpTable` — a **system-wide connection-table enumeration**
+   (thousands of rows on a busy desktop), preceded by a size probe and followed by a full managed
+   copy (`new TcpOwner[rowCount]`, plus two `new IPAddress` per TCP row) and a LINQ
+   `Where/Select/Distinct/ToArray`;
+2. on a miss, `await Task.Delay(2 ms)` and the **whole scan again**;
+3. on a hit, `Process.GetProcessById` + `OpenProcess` + `QueryFullProcessImageName`.
+
+The pump's `InvokeHandler` blocks on the handler's ValueTask (`NdisCapturePump.cs:327-346`), so the
+entire sequence — including the 2 ms retry — stalls **every** flow on that adapter, ~0.5–7 ms per
+new flow, at tens of new flows per second during browsing bursts, while generating MB/s of transient
+allocations that contradict the GC-off posture. One new flow stalls all flows.
+
+**Proposals (two, complementary):**
+
+- **Move attribution off the pump, reusing the proven R8 shape.** On a flow miss that requires
+  attribution, retain the packet in a bounded per-flow pending structure (the TCP pending-SYN index
+  and the UDP setup queue are the existing templates), return the pump immediately, and run
+  attribution + policy evaluation + claim on a setup worker; the completion applies the decision and
+  drains the flow's pending packets in order. This generalizes `TcpPendingSynSetupIndex` from
+  "SYN retention" to "first-packet-of-flow retention".
+- **Cache the owner tables as a ~250–500 ms snapshot.** Flow churn arrives in bursts (one page load
+  = dozens of near-simultaneous connections); one scan should serve a whole burst. On a snapshot
+  miss, fall back to a fresh scan (= today's behavior) and refresh the snapshot with the result, so
+  the worst case is unchanged and the common case costs one scan per burst. Staleness risk is a
+  ≤250 ms window where a very young socket is unattributed — already covered by the existing
+  attribution-miss path (policy continues without a process match), and the miss-retry already
+  accepts a smaller version of the same window today.
+
+### A4. The target FlowTable shape (unified design; supersedes the scattered F2/F3/F4/M1 sketches)
+
+Design goals: memory follows the live working set (not the capacity cap); the warm resolve is
+lock-free, single-probe, and clock-call-free; one table serves both orientations; expiry is
+O(expired)-ish with bounded pause; the public API (`TryResolve` / `TryClaimResolved` /
+`RemoveExpired` / `Count` / `Capacity`) and the dispatcher's semantics are unchanged.
+
+1. **Canonical transport key.** Normalize the endpoint pair order-independently (order the two
+   endpoints by (address bits, port); the pair (ep_lo, ep_hi) is the canonical key, with family and
+   protocol). Forward and reverse packets hash identically, so the `_transportIndex` dictionary
+   (~12 MB) dies; origin kind/adapter stay provenance on the state, preserving today's
+   reverse/cross-adapter aliasing semantics. Combined with F4's interned adapter slot, the key is
+   ≤48 B of pure integers.
+2. **Layout: grow-only state slab + per-shard open-addressing index.** 64 shards selected by the
+   hash's high bits. Each shard holds a power-of-two `(ulong hashTag, int stateIndex)` index
+   (12–16 B/slot, linear probe, backward-shift deletion, grow at load 0.7) and its own write lock.
+   The full key lives once, in the state slab. Readers snapshot the index array reference
+   (`Volatile.Read`) and probe lock-free; a slot tag match is **confirmed against the full key in
+   the slab**, so a torn/concurrent slot read can only produce a false miss (which the claim path
+   re-checks under the shard lock), never a false hit.
+3. **Warm resolve.** Hash (64-bit mix over the canonical key, computed from the parse-once view) →
+   shard → probe → confirm → `Volatile.Write(state.activityBucket, currentBucket)` with the bucket
+   passed down from the pump iteration. No lock, no clock call, ~15–40 ns.
+4. **Claim.** Miss → full self-traffic check (moved here from the dispatcher warm entry, F2.1; self
+   flows are deliberately **not** cached, so an unregistered relay tuple can never alias a later
+   non-self flow to a stale pass) → (after F8, attribution already happened on a setup worker) →
+   `Policy.Evaluate` → shard lock → re-probe (double-check) → global `Interlocked` capacity gate
+   (fail-closed block beyond 65,536, unchanged) → publish fully-initialized state, then the slot.
+   Evaluation stays under the shard lock in v1 (contention is already divided by 64); if rule-heavy
+   configs profile hot, v2 moves evaluation out with a per-key claiming marker.
+5. **Activity and expiry.** `uint activityBucket` (1–2 s granularity) replaces `DateTimeOffset`;
+   touch is one volatile store, relinked into a per-shard wheel only when the bucket changes (≤1
+   lock per flow per ~2 s on hot flows, zero on cold). Sweep walks aged-out wheel buckets per shard
+   — O(expired), pause bounded by shard count, zero allocation, and the `isHeld` predicate runs
+   **outside** any table lock (today it runs under the flow gate and enters TCP-store locks — a
+   lock-nesting edge worth removing regardless). Lighter fallback: per-shard incremental cursor
+   scan (K slots per tick) if the wheel's links prove fiddly.
+6. **Growth.** Per-shard doubling from a small floor (64 slots/shard ≈ 4k total ≈ <100 KB at
+   startup). A shard rehash of ~1k entries costs ~20–30 µs under that shard's lock only — sharding
+   already supplies the "incremental rehash" benefit, so no Redis-style migration machinery.
+   Readers probing a stale (pre-grow) array false-miss and re-check under the shard lock: safe.
+7. **What dies:** `_transportIndex` (~12 MB), the 65,536/131,072 pre-allocations (~7.8 MB), the
+   `_freeStates` recycling (states become short-lived gen0 objects; per-flow allocation is already
+   blessed by the session-bookkeeping budgets), `DateTimeOffset` activity tracking, the per-hit
+   clock call, and the read-path global gate.
+
+   Memory at 3–5k live flows (typical desktop): slab ~0.5 MB + index ~0.2 MB ≈ **<1 MB vs ~20 MB
+   today**; at the full 65,536 capacity: ~7–8 MB, still below today's empty-table cost.
+
+### A5. Randomized/approximate structures: two safe targets, three forbidden ones
+
+The safe targets share a property: they remember **bad news**, so forgetting early degrades to the
+pre-table behavior (harmless) and false hits are made astronomically rare with wide fingerprints.
+
+- **TIME_WAIT tombstones** (today exact dictionaries, ~4–6 MB at capacity): replace with a
+  direct-mapped fingerprint cache — `hash(key)` selects a slot storing a 32-bit fingerprint +
+  8-byte timestamp; inserts overwrite collisions. Collision = false negative = a straggler leaks to
+  the pass path (exactly the pre-tombstone behavior); fingerprint hit rate 2⁻³² ≈ never. Prefer
+  this over a Bloom filter: Bloom false positives are *deterministic per key*, so an unlucky new
+  connection's SYN would be swallowed for the whole grace window, while the fingerprint cache's
+  effective false-positive rate is ~8 orders of magnitude lower. ~256 KB replaces ~4–6 MB.
+- **Setup/RST cooldown tables** (UDP 1 s, TCP capacity-reset): same lossy-cache treatment; they are
+  rate limiters, so early eviction is unobservable. ~64–256 KB each.
+
+Forbidden: **flow decisions** (a false positive routes traffic to the wrong proxy or blocks the
+wrong flow — a security-relevant error, and membership structures cannot store a decision anyway);
+**SelfTrafficRegistry** (a false negative loops the proxy into its own traffic); **redirect-table
+indexes** (routing correctness). The `_candidatePorts` reference counts could shrink from
+`int[65536]` (256 KB) to a 4-bit nibble array (32 KB) with saturation — minor, optional.
+
+### A6. Roadmap delta
+
+| # | Item | Nature | Expected gain | Risk |
+|---|------|--------|---------------|------|
+| 7 | A4 FlowTable rebuild (canonical key, sharding, slab, bucketed activity) | Data structure + concurrency | −19 MB steady state; lock-free resolve; O(expired) sweeps | Medium; wide diff, gated by existing table tests |
+| 8 | F8 attribution off-pump (R8 shape) + owner-table snapshot cache | Pipeline | Removes ms-scale all-flow stalls and MB/s transient garbage with process rules | Medium; pending-packet ordering needs the TCP/UDP templates' care |
+| 9 | Relay window size classes (4/16/64 KiB by fill-rate EMA) + pool trim | Resource | −10 MB @100 conns; idle connections at 8 KiB | Medium; `TcpThroughputScenario` ≥70% anchor must hold |
+| 10 | Idle GC compaction + `TotalCommittedBytes` in the heartbeat snapshot | Runtime | −10–15 MB committed headroom; production visibility | Low; a few ms at idle transitions |
+| 11 | Lossy fingerprint caches for tombstones/cooldowns | Approximation | −5–8 MB | Low; failure modes converge to pre-table behavior |
+| 12 | UDP adaptive TTL (one-shot sessions ~5 s) + smaller default relay receive buffer | Policy/config | −2–3 MB + kernel memory | Low |
+
+(Items 1–6 from the first-pass roadmap stand as recorded.)
