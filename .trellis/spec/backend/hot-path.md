@@ -894,7 +894,8 @@ because something real slipped through without it.
   product allocation, and it is not a regression to rediscover.
 - **The repeat-run proof is the only accepted stability evidence.** A single green run says nothing about
   a ~8 % flake. Use the procedure in §4; a failure anywhere in the loop stops the proof and returns to
-  diagnosis.
+  diagnosis. That loop proves a *product/allocation-regression* claim; the host-residual family is proven by
+  the per-gate process run in the section below, and the two procedures are not interchangeable.
 - **The landed shape extends to every exact window in the suite**, not only the two that flaked:
   `CapturePumpReadCallTests.CountingReaderIdleIterationsAllocateNoManagedBytes`,
   `NdisCapturePumpTests.IdlePollIterationsAllocateNoManagedBytes` and
@@ -958,7 +959,9 @@ knows what was actually achieved rather than what was planned:
   the PRD recorded (2/13 = 15 %), so it is a pre-existing host condition rather than a regression — but
   the **≥40-consecutive-green-suite-run criterion is not met** and must not be reported as met. The
   settled half of the fix is the tiering host contract above; the unsettled half is a per-window control
-  that can tell a host lump from a driven allocation.
+  that can tell a host lump from a driven allocation — priced and rejected by
+  `09-30-exact-gate-residual-lumps` (see its section below), whose replacement is the per-gate process
+  proof.
 - **Hang hunt (defect B's second half): not reproduced in 47 full-suite runs** under
   `--blame-hang --blame-hang-timeout 90s --blame-hang-dump-type mini --results-directory /tmp/wf-blame`
   — zero hang-shaped runs and zero `Sequence_*.xml` files, so the 95 % upper bound is **p < 3/47 = 6.4 %**
@@ -1023,4 +1026,171 @@ var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 Assert.Equal(measuredThreadId, Environment.CurrentManagedThreadId);
 Assert.Equal(0, allocated);
 Assert.Equal(1 + 8 + count, executor.PassCount);
+```
+
+## The residual exact-gate lump: multiplicity, the attribution limit, and the per-gate proof (diagnosed 2026-09-30, task 09-30-exact-gate-residual-lumps)
+
+### 1. Scope / Trigger
+
+- **Trigger**: with the tiering host contract in place (§"Allocation-gate stability"), the full suite still
+  failed about one run in ten with a one-shot lump inside one exact allocation window —
+  `CapturePumpReadCallTests.CountingReaderIdleIterationsAllocateNoManagedBytes` 168 B / 5,216 B and
+  `SweepAllocationGateTests.FlowTableSweepAllocatesNoManagedBytes` 7,384 B (plus 7,448 B in the hunt) — on
+  paths whose only work is polling. The predecessor's follow-up — "a per-window control that can tell a host
+  lump from a driven allocation" — is answered here (priced and rejected), and the proof procedure is
+  replaced by per-gate process runs.
+- **Scope**: the two victim windows, every exact window in the tree by inheritance, the attribution
+  instruments, the proof procedure, and the health-signal race that shared the same failure family. **No
+  gate threshold, window shape, assertion or warm-up changed.**
+
+### 2. Contracts
+
+- **The residual is not a property of the window bodies (measured 2026-09-30).** A temporary in-assembly
+  reproducer (`ResidualLumpProbe`, deleted after the measurement; `NdisCapturePump.RunIterationForTests` is
+  `internal`, so only an `InternalsVisibleTo` assembly can drive the window bodies) re-ran the exact window
+  bodies with **per-iteration** deltas, no excluded iterations, recording iteration index, bytes, thread id
+  and Gen0/1/2 — one process per arm, never concurrently with a suite run:
+
+  | Window body | Thread / co-resident load | Measured | Window lumps |
+  |---|---|---:|---:|
+  | pump idle iteration | xunit thread | 17,053,000 iterations / 17,053 windows | 0 |
+  | pump idle iteration | dedicated `Thread` | 17,000,000 / 17,000 | 0 |
+  | pump idle iteration | pool thread, not the test's | 12,693,000 / 12,693 | 0 |
+  | pump idle iteration | + 8 allocation loaders | 9,202,000 / 9,202 (9,595 Gen0, 2 Gen1) | 0 |
+  | pump idle iteration | + 8 blocking full-GC loaders | 1,026,000 / 1,026 (4,476 Gen0/1/2) | 0 |
+  | pump idle iteration | + 4 thread-churn loaders | 16,535,000 / 16,535 | 0 |
+  | pump idle iteration with a live on-thread allocation context (8 KB per window) | + 8 blocking full-GC loaders | 466,000 / 466 (3,551 Gen0/1/2) | 0 |
+  | flow-table sweep | xunit thread / dedicated `Thread` / pool thread | 53,107 windows (screen + census) | 0 |
+  | counter-read-only control (same loop, no product call) | xunit thread | 3,223,621,000 / 3,223,621 windows | 0 |
+  | counter-read-only control with a live allocation context | + 8 blocking full-GC loaders | 2,394,000 / 2,394 | 0 |
+
+  Each no-load arm shows exactly **one** nonzero delta at iteration 0 of the census loop (152–272 B) — the
+  counter-read-only control reproduces it identically while driving no product code, so it is the census
+  loop's own first-transition overhead, not the residual. The arms that re-open the window per iteration
+  (`Mark()`) show none at all. A bare console host (`TieredCompilation=false`, public counter read only)
+  measured **0 lumps in 148,525,260 counter-read iterations**. The thread-identity, GC-count and
+  per-window fields are in the raw census lines.
+- **Multiplicity census (27 processes, one arm per process, 12 s each).** 6,014,442,625 iterations over
+  6,061,021 windows; the only nonzero deltas in the whole run are the fifteen iteration-0 transition
+  artifacts above (one per pump/control process, all 152 B, all control-reproduced). Per arm: pump window
+  6 × (10.2 M iterations / 10.2 k windows), dedicated 3 × (10.2 M), pool 3 × (10.3 M), sweep 6 + 3 + 3
+  processes (46,625 windows), counter-read-only control 3 × (1.96–1.97 billion iterations / 1.96 M
+  windows).
+  Combined with the screen above: **0 lumps in 196,774 pump windows and 53,107 sweep windows; 0 in
+  11,509,218 control windows.**
+- **The pool arm needs `ThreadPool.UnsafeQueueUserWorkItem`, not `Task.Run(...).GetAwaiter().GetResult()`.**
+  The xunit test thread is itself a pool thread, so the pool may execute the task inline on it — the first
+  run of that arm silently measured the test thread again (`thread == testThread`). Check the thread id in
+  any future arm.
+- **Multiplicity.** In isolation the residual's measured count is **0 lumps per process** (27 arm
+  processes, >200,000 window-body windows; Wilson 95 % upper bound 12.5 % per process) and **0 per window**
+  (0 in 249,881 window-body windows; Wilson 95 % upper bound 1.6 × 10⁻⁵ per window). In the suite's own
+  captures every lump failure names **one gate and one size** — 168 / 5,216 / 7,384 / 7,448 B in the 29-run
+  proof and the 47-run hunt — and no run shows two failing gates. "Once per process, random iteration" is
+  the **tiering** control's signature and stays in that family.
+- **The event is suite-process-conditional, not window-conditional.** Spread over the gates' exact
+  windows, the recorded ~10 % per-run lump rate implies a per-window rate of order 10⁻², at which the
+  isolated census would have fired hundreds to thousands of times; zero were observed. Whatever triggers the
+  residual needs the co-resident suite process (≈980 sibling tests, their threads, their JIT/loader
+  activity), not the window body — which is why per-gate isolation changes *attribution, not incidence*, and
+  cannot place a window after the event.
+- **No allocator can be named with the available instrument (recorded, not asserted).** `dotnet-trace
+  collect --profile gc-verbose` was installed for the purpose, and **what it guarantees to observe was
+  written down before it ran**: allocation sampling is **budget-based** (a thread's allocation context is
+  sampled roughly once per ~100 KB that thread allocates), so a sparse ≤8 KB one-shot on a thread that
+  allocates nothing else is never sampled. Measured: the positive control (an 8 KB class allocated every
+  iteration) produced **1,559 samples naming the type**, while the same class allocated **once** produced
+  **zero** samples — although the per-thread counter read its 8,280 B lump. A null capture therefore means
+  "the instrument could not see it", never "nothing allocated". `dotnet-gcdump` is weaker still: it forces a
+  collection, so a transient lump is gone before the dump.
+- **The per-window control is priced and rejected — the `:878-881` follow-up is closed.** A control window
+  shaped like a gate window (same counter reads, no product call) cannot separate a random host lump from a
+  driven allocation: the lump lands in exactly one of the two windows, so their difference is nonzero
+  whichever cause it had. A **co-resident** control is worse — the residual fires at most once per suite
+  process, so the control would absorb the event and mask the gates it is meant to calibrate. Every control
+  above therefore runs in its own process, never with a suite run.
+- **The `:940` forbidden row stands, and the honest injected-allocation check is what keeps it.** No
+  tolerant shape was adopted — the gates keep `Assert.Equal(0, allocated)` and their call-count backstop.
+  min-of-K and "at most one of K windows nonzero" tolerate exactly the class under diagnosis (a lump in one
+  window) and are refuted by that check; min-of-K additionally loses three to four orders of magnitude of
+  power for a 1-in-5,000-iteration regression (0.02 % against 18 %). Re-proven on this task's tree: one
+  `new byte[64]` per measured iteration → pump gate `Actual: 88000` (1,000 × 88 B), one `new byte[64]`
+  inside the single sweep window → sweep gate `Actual: 88`; both restored → green. A gate shape that cannot
+  fail that check is not a gate.
+- **Disposition: no product fix, no gate change, per-gate proof.** The counter-read-only control **of the
+  residual itself** (tiering off, suite process) could not be run — the event never appears in an isolated
+  process, and a co-resident control masks the gates — so **the product is not excluded by a control of the
+  residual**; that limitation is recorded rather than smoothed over. What the evidence supports is the
+  operational proof: run each exact gate in its own process, record the measured per-gate residual rate, and
+  keep the **suite-level rate as an accepted host property** — allocation lumps 3/29 = 10.3 %, Wilson 95 %
+  [3.6 %, 26.4 %]; 4/29 = 13.8 % [5.5 %, 30.6 %] including the health-signal race this task fixed; the
+  47-run `--blame-hang` hunt adds 1/47 = 2.1 % [0.4 %, 11.1 %]; pooled 4/76 = 5.3 % [2.1 %, 12.8 %].
+- **Sensitivity statement.** The disposition does not lower regression sensitivity — same exact window, same
+  N — but it changes **what is proven**: per-gate process runs sample a process running one gate instead of
+  a co-resident suite, so the suite-conditional trigger above is not exercised by the proof. The regression
+  floor of an N-run proof over a 1,000-iteration window is `1 − (1 − 1,000/K)^N`: N = 20 gives
+  K = 5,000 → 98.8 %, K = 10,000 → 87.8 %, K = 20,000 → 64.2 %, K = 50,000 → 33.2 %, and a regression
+  rarer than ~1 allocation per 50,000 iterations is no longer reliably caught. That floor is intrinsic to
+  the run count, not a consequence of per-gate isolation.
+- **An accepted host property, not a stability guarantee.** The finished record claims **no rate threshold**.
+  A per-gate failure counts as the accepted host event only when the checkable signature holds: the gate is
+  a recorded victim, the delta equals one of 168 / 5,216 / 7,384 / 7,448 B, the run passed the gate's own
+  `Assert.True(stabilized)` preflight, and the injected-allocation check still fails when re-run. Any other
+  failure is an incomplete diagnosis, not an accepted event.
+- **Do not re-test** (this task's negative results): thread context (xunit thread / dedicated `Thread` / a
+  genuinely other pool thread), allocation pressure, blocking full collections, thread churn, a live
+  allocation context on the measured thread, the counter-read-only control in the suite host and in a bare
+  console host, and profiler-based attribution of a ≤8 KB one-shot. The tiering, `gcConcurrent`, OSR-only,
+  forced-collection, diagnostics-server and warm-up families stay excluded by the predecessor's section.
+
+### 3. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Exact gate fails in the suite with a nonzero delta | classify: recorded victim gate + the gate's clean `stabilized` preflight + the injected check still failing → accepted host event; anything else stops the work |
+| Exact gate fails in its own process (per-gate proof) | same classification; the **measured** per-gate rate is recorded, never a threshold |
+| A proposed gate shape tolerates one nonzero window | forbidden — one injected allocation inside one window must still fail it |
+| A reproducer runs concurrently with a suite run | forbidden — it absorbs the once-per-suite-process event and masks the gates |
+| A profiler null capture over a window body | not evidence of "nothing allocated": budget-based sampling cannot see a ≤8 KB one-shot on a non-allocating thread |
+| A gate failure reports bytes with no per-iteration location | acceptable only for the recorded signature sizes; prefer per-iteration deltas before changing anything |
+
+### 4. Tests Required — the per-gate proof procedure
+
+The suite-level loop is **not** the criterion. Run each exact gate in its own process, N runs per gate,
+record every run's padded summary, its totals assertion (`981 + 18`), the git hash, the tree fingerprint and
+the exit status; a failure is accepted only under the signature predicate above:
+
+```bash
+log=/tmp/wf-lumps-proof.txt; : > "$log"; rev=$(git rev-parse --short HEAD); tree=$(git write-tree)
+summary='Failed: *[0-9]+, Passed: *[0-9]+, Skipped: *[0-9]+, Total: *[0-9]+'
+totals='HotPathAllocationGateTests:11 CapturePumpReadCallTests:3 SweepAllocationGateTests:2 NdisCapturePumpTests:14'
+signature='^(168|5216|7384|7448)$'
+for entry in $totals; do
+  gate=${entry%%:*}; expected=${entry##*:}
+  for i in $(seq 1 20); do
+    out=$(dotnet test WinForward.slnx -c Release --filter "FullyQualifiedName~$gate" 2>&1); rc=$?
+    line=$(echo "$out" | rg -o "$summary" | tail -1)
+    actual=$(echo "$out" | rg -o 'Actual: *[0-9]+' | tail -1 | rg -o '[0-9]+')
+    echo "gate $gate run $i $rev $tree rc=$rc total=$expected $line actual=${actual:-none}" >> "$log"
+    echo "$out" | rg -q "Total: *$expected" || { echo "VACUOUS MATCH: $gate run $i"; break; }
+    if [ "$rc" -ne 0 ]; then
+      if echo "${actual:-x}" | rg -q "$signature"; then echo "accepted host hit: $gate run $i ($actual B)"; else echo "UNEXPLAINED FAILURE: $gate run $i"; break; fi
+    fi
+  done
+done
+```
+
+### 5. Wrong vs Correct
+
+```csharp
+// Wrong: "prove" stability by re-running the suite until it is green. Each run carries the
+// suite-conditional host event, the green streak is luck, and a failure is re-run away.
+// Wrong: tolerate one nonzero window (min-of-K, "at most one nonzero") — that is exactly the
+// class under diagnosis, and the injected-allocation check fails this shape by construction.
+// Wrong: co-resident control windows — they absorb the once-per-suite-process event.
+
+// Correct: no gate change; classify by the checkable signature and measure the rate.
+//   per-gate process run + recorded padded summary + totals + hash + fingerprint
+//   + injected-allocation check re-run on the frozen tree
+// The gates keep the exact zero; only the proof procedure and what it proves changed.
 ```
