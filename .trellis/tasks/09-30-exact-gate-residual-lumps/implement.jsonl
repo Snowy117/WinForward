@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "the gate shape and the tiering host contract this task must preserve"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "gate, suppression and evidence rules"}
+{"file": ".trellis/tasks/archive/2026-09/09-30-test-flake-and-hang-stabilization/implement.md", "reason": "the predecessor's completion record with the residual evidence and the negative results"}
+{"file": ".trellis/spec/backend/windows-ndisapi.md", "reason": "the health-signal invariant home (NoteRefreshCompleted / runner.forcedRefresh)"}
