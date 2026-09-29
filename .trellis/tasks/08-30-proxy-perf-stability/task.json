@@ -30,7 +30,8 @@
     "09-06-udp-burst-ttl-attribution",
     "09-06-local-mux-transport",
     "09-20-transport-lifecycle",
-    "09-28-udp-association-reuse"
+    "09-28-udp-association-reuse",
+    "09-29-tcp-udp-path-structural-perf"
   ],
   "parent": null,
   "relatedFiles": [],
