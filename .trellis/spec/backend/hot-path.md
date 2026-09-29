@@ -314,7 +314,12 @@ branch, and any allocation-gate test that protects a span-vs-memory overload cho
   migration ever occurred, consistent with the source, whose whole chain
   (`NdisPacketActionExecutor.ProxyAsync` → `UdpProxyCoordinator.TrySendSpanAsync` →
   `UdpProxySession.SendSpanAsync`) completes inline against the fake transport; and disabling tiered
-  compilation/PGO did **not** remove the burst. What the measurements do show is coupling to readiness:
+  compilation/PGO did **not** remove the burst — an early window riding the cold setup path is not a
+  tiering event, so that negative result stands (reconciled 2026-09-30: tiering *does* add a separate
+  one-time lump to the counter, which `TieredCompilation=0` removes on every shape measured since; see
+  "Allocation-gate stability" below. Read the 2026-09-21 result as "readiness was the cause *of that
+  burst*", not as "tiering cannot perturb a per-thread window"). What the measurements do show is
+  coupling to readiness:
   the per-thread delta was non-zero **only in the first batch**, and every non-zero first batch
   coincided with a first-batch send-count shortfall (`SpanSends` delta of 17/40/67 where 64 was
   expected). While a session is not yet `Ready`, datagrams take the bounded drop-oldest setup queue and
@@ -382,7 +387,7 @@ branch, and any allocation-gate test that protects a span-vs-memory overload cho
   `dotnet test WinForward.slnx -c Release --filter "FullyQualifiedName~<GateName>"`. A gate that only
   passes when the pool is warm is a weak gate — fix it before trusting it to protect a path you are
   about to change (see "An allocation gate must open only after its path is ready").
-- Baseline must stay behavior-zero (678 tests green on this task).
+- Baseline must stay behavior-zero (678 tests green on this task; the suite is 980 Core.Tests + 18 Analyzers = 998 as of 2026-09-30).
 
 ### 6. Wrong vs Correct
 
@@ -829,3 +834,193 @@ because something real slipped through without it.
   the builder (the test project's own checksum code, the production parser).
 - A scenario-selection test when a scenario is added or deliberately excluded from `--scenario all`, so the
   documented invocation stays falsifiable.
+
+## Allocation-gate stability: the tiering host contract, the gate shape, and the repeat-run proof (task 09-30-test-flake-and-hang-stabilization, 2026-09-30)
+
+### 1. Scope / Trigger
+
+- **Trigger**: an exact 0-byte gate over `GC.GetAllocatedBytesForCurrentThread()` failed roughly one run
+  in six (`HotPathAllocationGateTests.DispatcherWarmFastPathAllocatesNoManagedBytes`,
+  `Expected: 0 / Actual: 1880`), in isolation as well as under the full suite. The recorded failure was
+  once attributed to `ReverseRewriteAndInjectAllocatesNoManagedBytes` with `Actual: 7520`.
+- **Scope**: every exact per-thread allocation window in the test tree, the environment its host runs in,
+  and the run-count procedure that proves a fix. The product path was never at fault here.
+
+### 2. Contracts
+
+- **The per-thread counter is not sound on its own across a window.** `GC.GetAllocatedBytesForCurrentThread()`
+  returns the current thread's cumulative allocated bytes. In a host with tiered compilation enabled the
+  runtime performs **one-time managed allocations on the calling thread as hot code is published**
+  (call counting and on-stack replacement both do it), and such a lump can land inside a measured window
+  whose driven code allocates nothing. Measured 2026-09-30 on this host:
+  - a loop whose only work was reading the counter saw a single **7,336–7,360 B** jump in **12/20** and
+    **17/20** process runs, always in one batch, at a random iteration;
+  - `HotPathAllocationGateTests.DispatcherWarmFastPathAllocatesNoManagedBytes` failed **2/20** runs with
+    **1,880 B**, and an instrumented run located the lump at iteration 65 of 256 with **8,008 B**;
+  - one-time first-use costs are visible the same way and are absorbed by the warm-up (the first call of
+    a fresh `NoInlining` method measured **136 B**; the dispatcher path's first batch measured **824 B**).
+- **The measurement environment is part of the gate.** `WinForward.Core.Tests` therefore sets
+  `<TieredCompilation>false</TieredCompilation>`: every method is compiled by the optimizing JIT on first
+  use, so no tiering event can land in a window, and the gates measure the optimized steady state that
+  production reaches after warm-up anyway. Evidence (20 runs per arm, class filter): OSR-only off
+  (`TieredCompilationQuickJitForLoops=false`) **2/20** fails, a raised call-count threshold
+  (`TC_CallCountThreshold=1000000`) **2/20** fails, `TieredCompilation=0` **0/20** and
+  `TieredCompilation=0 DOTNET_gcConcurrent=0` **0/20**. The same toggle on the counter-read probe:
+  17/20 and 12/20 baseline, 0/20 with `TieredCompilation=0`.
+- **A residual host lump survives every host setting tried, and it is not the product.** With tiering
+  disabled the full suite still caught lumps inside exact windows —
+  `CapturePumpReadCallTests.CountingReaderIdleIterationsAllocateNoManagedBytes` 168 B and 5,216 B,
+  `SweepAllocationGateTests.FlowTableSweepAllocatesNoManagedBytes` 7,384 B — on paths whose only work is
+  polling, with the sweep figure carrying the same "8,192 − k" signature as the counter-read probe.
+  Rate: 3 failures in the 30 full-suite runs that carried the tiering fix, and 1 more in the 10 runs
+  after it. `DOTNET_gcConcurrent=0` looked like a second fix (0/20 full-suite runs against 3/30 without
+  it) but **did not replicate** (1 failure in the next 10 runs), so that setting was reverted and the
+  arm is recorded as a negative result. Disposition: the family is bounded, self-naming (the gate names
+  itself and its exact bytes) and explicitly *not* product code; a future task that wants a
+  deterministic full suite must build a per-window control that can tell a host lump from a driven
+  allocation, because no preflight, host toggle or assertion shape tested here does it.
+- **Ruled out, do not re-derive**: the counter being unfaithful on an *idle* thread (0 jumps under forced
+  Gen0/Gen1/Gen2 collections and 668 sibling-triggered collections in a console host), the VSTest
+  diagnostics server (`DOTNET_EnableDiagnostics=0` → 15/20), and warm-up tuning. Tiering and concurrent
+  GC are the two families; both fixes are host configuration, never a relaxed threshold, and an
+  exactly-zero probe batch before the window does **not** protect the window itself against either —
+  the second pump failure (5,216 B) landed after eight clean probe batches.
+  One probe arm (tiering *and* diagnostics disabled together) still showed 3/20, so the family is
+  **suppressed, not proven impossible** — the acceptance evidence is the run-count proof below, not the
+  configuration alone.
+- **The host change costs ~3 s per suite run.** `TieredCompilation=false` makes the test host compile
+  every method with the optimizing JIT on first use, so the suite went from ~7 s to ~10.5 s per
+  full-suite run (+50 %). That is the recorded price of determinism; it buys gates whose failure means a
+  product allocation, and it is not a regression to rediscover.
+- **The repeat-run proof is the only accepted stability evidence.** A single green run says nothing about
+  a ~8 % flake. Use the procedure in §4; a failure anywhere in the loop stops the proof and returns to
+  diagnosis.
+- **The landed shape extends to every exact window in the suite**, not only the two that flaked:
+  `CapturePumpReadCallTests.CountingReaderIdleIterationsAllocateNoManagedBytes`,
+  `NdisCapturePumpTests.IdlePollIterationsAllocateNoManagedBytes` and
+  `SweepAllocationGateTests.FlowTableSweepAllocatesNoManagedBytes` now open their windows only after a
+  bounded run of probe batches that each read an **exactly-zero** delta on an unchanged thread (the UDP
+  gate's landed shape). The probe batches are part of the contract, not decoration: the same host lump
+  that failed the dispatcher gate was caught in the pump gate (168 B) and in the sweep gate (7,384 B —
+  the same "8,192 − k" signature as the counter-read probe) during full-suite runs.
+- **Harness assertions inside a measured region are pollution.** `Assert.Equal` allocates (measured
+  ~200–300 B per call; a sweep gate's probe loop that asserted inside its own window reported "never
+  became allocation-stable" on *every* batch until the assertion moved out), while
+  `Assert.True(condition, message)` does not (the UDP gate's measured loop has carried it at 0 B for 100
+  runs). Keep every assertion outside the window, or use the boolean form.
+- **Every gate states its window contract in code**: assert the driven operation completed synchronously
+  (`IsCompletedSuccessfully`) so no continuation can migrate, capture `Environment.CurrentManagedThreadId`
+  before the window and assert it unchanged after, keep the exact `Assert.Equal(0, allocated)`, and keep
+  the thread-independent call-count backstop. `DispatcherWarmFastPathAllocatesNoManagedBytes` and
+  `ReverseRewriteAndInjectAllocatesNoManagedBytes` carry all four; the UDP gate's landed
+  readiness/stability preflight plus the same four is the reference shape.
+- **The gate's discrimination must be re-proven after any change to its window.** Inject one allocation
+  inside the measured region and record the exact failure before restoring: on 2026-09-30 a single
+  `new byte[64]` per iteration failed the reverse gate with `Actual: 5632` (64 × 88 B) and the dispatcher
+  gate with `Actual: 22528` (256 × 88 B), and both were green again after restoring.
+- **Setup-executor shutdown races settle on both sides** (same window family as the pool drains in §"Native
+  pool family"): `SetupExecutor.TryEnqueue` rechecks `_disposed` *after* the ring append and drains on the
+  enqueuer's side, and a worker whose semaphore or shutdown source was disposed under it exits like a
+  cancelled one instead of faulting its thread unhandled. Measured 2026-09-30 on
+  `SetupExecutorDisposeRacingTheFirstEnqueueLeavesNoItemUnsettled` (512 natural attempts, no seam): without
+  the worker guard the test host aborted inside the first hundred attempts on 3/3 runs, without the
+  post-enqueue recheck 1,997 of 1,998 accepted items were stranded with their completions never settled,
+  and with both the test is green over 2,000 attempts.
+
+### 3. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Exact allocation gate run in a host with tiered compilation enabled | report-only: a tiering lump can fail a gate at random; disable tiering for the gate host |
+| Gate window opened without the synchronous-completion assertion | forbidden — an incomplete `ValueTask` can resume on another thread and invalidate the per-thread reading |
+| Measured thread id changed across the window | gate fails; the reading is invalid, not the path |
+| Gate failure message reports bytes but no iteration | acceptable only after a bisected cause; prefer locating the lump per iteration before changing anything |
+| Shutdown begins between an enqueue's disposed check and its ring append | the enqueuer's post-enqueue recheck drains the item; the completion settles cancelled, never hangs |
+| A worker starts after its shutdown source or semaphore was disposed | the worker exits like a cancelled one; it must not fault its thread unhandled |
+| A stability fix that relaxes the byte assertion or skips an iteration | forbidden — the window keeps its exact zero and its call-count backstop |
+
+### 4. Tests Required — the repeat-run procedure
+
+Recorded outcome of this task's own proof runs (tree `0cf25ba` + the fix set, 2026-09-30), so a reader
+knows what was actually achieved rather than what was planned:
+
+- **Class filter (`FullyQualifiedName~HotPathAllocationGateTests`): 100/100 consecutive green runs**, each
+  with `Total: 11` and exit status 0 — against the recorded pre-fix baseline of 1/25 isolated runs
+  (pooled 3/38 = 7.9 %, Wilson 95 % CI [2.7 %, 20.8 %]).
+- **Full suite: not fully green in this environment.** On the final host config this task measured 29
+  full-suite runs and 4 failed (13.8 %): 3 host lumps inside exact gates —
+  `CapturePumpReadCallTests.CountingReaderIdleIterationsAllocateNoManagedBytes` 168 B (that one under
+  `--blame-hang`, whose collector runs in-host) and 5,216 B, and
+  `SweepAllocationGateTests.FlowTableSweepAllocatesNoManagedBytes` 7,384 B — plus 1 unrelated timing
+  flake in `LayeredCaptureRunnerHealthSignalTests` (a refresh-counter assertion, not an allocation
+  gate). The affected class produced **zero** full-suite failures in those runs, and the longest
+  consecutive green streak observed was 12. The rate is the same order as the pre-fix full-suite rate
+  the PRD recorded (2/13 = 15 %), so it is a pre-existing host condition rather than a regression — but
+  the **≥40-consecutive-green-suite-run criterion is not met** and must not be reported as met. The
+  settled half of the fix is the tiering host contract above; the unsettled half is a per-window control
+  that can tell a host lump from a driven allocation.
+- **Hang hunt (defect B's second half): not reproduced in 47 full-suite runs** under
+  `--blame-hang --blame-hang-timeout 90s --blame-hang-dump-type mini --results-directory /tmp/wf-blame`
+  — zero hang-shaped runs and zero `Sequence_*.xml` files, so the 95 % upper bound is **p < 3/47 = 6.4 %**
+  for a 41-minute-class hang per run (a healthy run is ~15 s under blame). The three non-hang failures in
+  those runs were one more host lump (`SweepAllocationGateTests` 7,448 B) and two runs of
+  `LayeredCaptureRunnerHealthSignalTests.FailureThresholdForcesARefreshDespiteIdenticalEnumeration`
+  (`consecutive` read "0" where the test expects "1", a race between the forced-refresh logging and the
+  success hook, not an allocation gate and outside this task's scope).
+
+
+- `HotPathAllocationGateTests.DispatcherWarmFastPathAllocatesNoManagedBytes` and
+  `ReverseRewriteAndInjectAllocatesNoManagedBytes` assert all four window-contract properties from §2.
+- `SetupExecutorTests.SetupExecutorDisposeRacingTheFirstEnqueueLeavesNoItemUnsettled` drives the natural
+  dispose/enqueue race and asserts every accepted item settles and the refusal path stays explicit.
+- **Known gap, no assertion-based regression test for the worker-abort half.** Before the worker guard,
+  the observable behaviour is an *unhandled* `ObjectDisposedException` on a `wf-setup-*` thread, which
+  aborts the test host instead of failing an assertion — measured on 3/3 runs of the natural race, each
+  inside the first hundred attempts. A test cannot assert on a process abort, so the landed test covers
+  only the settlement half (which does fail an assertion: 1,997 of 1,998 accepted items stranded without
+  the recheck). The guard is therefore covered by its recorded pre-fix evidence, not by a test that
+  turns red on removal; treat that as an accepted gap until a host-level observation exists.
+- **Stability proof (≥100 consecutive green filter runs, ≥40 consecutive green full-suite runs).** Run
+  from the repository root with the tree frozen; every run records its padded summary line, the git
+  revision and the process exit status; never `--no-build` (a stale binary greens vacuously) and never a
+  discarded stream; a failure stops the loop and returns to diagnosis:
+  ```bash
+  summary='Failed: *[0-9]+, Passed: *[0-9]+, Skipped: *[0-9]+, Total: *[0-9]+'
+  for i in $(seq 1 100); do
+    out=$(dotnet test WinForward.slnx -c Release --filter 'FullyQualifiedName~HotPathAllocationGateTests' 2>&1); rc=$?
+    echo "filter $i $(git rev-parse --short HEAD) rc=$rc $(echo "$out" | rg -o "$summary" | tail -1)"
+    [ "$rc" -eq 0 ] || break
+    echo "$out" | rg -q 'Total: *11' || break          # a vacuous filter match must not pass
+    echo "$out" | rg -q 'Failed: *0,' || break
+  done
+  ```
+  Run the same loop without `--filter` for the ≥40 full-suite runs. The power behind the counts: against
+  the recorded 7.9 % (3/38) failure rate, 100 green filter runs and 40 green suite runs are 99.97 % and
+  96.28 %; 20 suite runs would be only 80.7 % and are not accepted. The baseline for comparison is the
+  pre-fix record (1/25 isolated runs, 2/13 suite runs, pooled 3/38 = 7.9 %, Wilson 95 % CI
+  [2.7 %, 20.8 %]).
+
+### 5. Wrong vs Correct
+
+```csharp
+// Wrong: an exact window in a tiering host, with no completion or thread check. A tiering lump
+// (measured 1,880 B on this gate) or a continuation resuming elsewhere both read as a product leak.
+var before = GC.GetAllocatedBytesForCurrentThread();
+for (var index = 0; index < count; index++) await dispatcher.DispatchAsync(packets[index], token);
+Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+
+// Correct: the host runs TieredCompilation=false, the window asserts the synchronous fast path and
+// the thread identity, and the exact zero and the call-count backstop stay in place.
+var measuredThreadId = Environment.CurrentManagedThreadId;
+var before = GC.GetAllocatedBytesForCurrentThread();
+for (var index = 0; index < count; index++)
+{
+    var pending = dispatcher.DispatchAsync(packets[index], token);
+    Assert.True(pending.IsCompletedSuccessfully, "the allocation gate relies on the synchronous fast path");
+    await pending;
+}
+var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+Assert.Equal(measuredThreadId, Environment.CurrentManagedThreadId);
+Assert.Equal(0, allocated);
+Assert.Equal(1 + 8 + count, executor.PassCount);
+```
