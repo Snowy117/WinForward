@@ -982,3 +982,42 @@ Task 09-29-tcp-redirect-batched-injection (research F1): the client-facing TCP r
 ### Next Steps
 
 - Archive-check 09-28-udp-association-reuse (looks complete); Windows real-NIC validation of the batched redirect path; remaining F2/F3/F4/F5/F6/F8 findings from 09-29-tcp-udp-path-structural-perf.
+
+
+## Session 38: Benchmark coverage for the remaining structural findings (F2-F8)
+<!-- trellis-session: v=2 fp=92411211c09e78fa -->
+
+**Date**: 2026-09-30
+**Task**: Benchmark coverage for the remaining structural findings (F2-F8)
+**Branch**: `master`
+
+### Summary
+
+Built the measurement coverage the archived F2-F8 research names, recorded before-baselines, and made each claim either an exact gate or a labelled series. No product behaviour changed.
+
+### Main Changes
+
+- New scenarios and rows: scaling contention with the real self-traffic registry A/B, UDP ready-path contention, flow-table production shapes, sweep-pause probe plus a controlled claim loop, TCP churn with an attribution tail, composed IPv4/IPv6 redirect data path, pump idle/wake, live-residency census. Four exact gates (sweep zero-allocation, pump read calls and idle allocation, composed-leg zero allocation) and frame-builder validity tests. Independent check verified every quoted number against its artifact, proved five self-checks can fail by injection, and raised two blockers: the JetBrains gate (13 genuine findings, fixed; the 57 CSharpErrors were a cold-cache artifact) and a pre-existing flaky allocation gate plus one 41-minute hang, both recorded for a dedicated follow-up.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `47c3110` | chore(task): archive 09-29-benchmark-coverage-remaining-findings |
+| `312add1` | chore(task): record the benchmark-coverage task and sync the parent backlog (benchmark-coverage-remaining-findings) |
+| `c18b06c` | docs(spec): record measurement self-check conventions (benchmark-coverage-remaining-findings) |
+| `0538819` | docs(bench): document the new scenarios, artifacts and the inspection evidence (benchmark-coverage-remaining-findings) |
+| `a43645d` | test(bench): sweep, frame-builder, read-call and data-path allocation gates (benchmark-coverage-remaining-findings) |
+| `4d5fb76` | perf(bench): F2-F8 measurement coverage: scenarios, rows and harness plumbing (benchmark-coverage-remaining-findings) |
+
+### Testing
+
+- [OK] build 0 warnings; Core.Tests 979 + Analyzers 18, 0 failures (also under --blame-hang); dotnet format --verify-no-changes exit 0 with empty output; jb inspectcode 0 Issue / 0 CSharpErrors; git diff -- src/ empty
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Operator pipeline: stabilise the flaky/hang tests first, then one Trellis task per finding in the order F3 sweeps, F2 locks, F4 keys/parsing, F5 pump I/O, F8 attribution, F6 UDP footprint, F7 WFP — each with PRD, a review sub-agent, implement, check, a benchmark proof recorded under benchmarks/results/, commit and archive.

@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 37
-- **Last Active**: 2026-09-29
+- **Total Sessions**: 38
+- **Last Active**: 2026-09-30
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~984 | Active |
+| `journal-1.md` | ~1023 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 38 | 2026-09-30 | Benchmark coverage for the remaining structural findings (F2-F8) | `47c3110`, `312add1`, `c18b06c`, `0538819`, `a43645d`, `4d5fb76` | `master` |
 | 37 | 2026-09-29 | TCP redirect lane-batched injection + in-place rewrite (research F1) | `98d7232`, `1a56eec`, `9225ae6`, `73d21f2`, `57c7fe5` | `master` |
 | 36 | 2026-09-22 | Admission and capacity pre-seed split | `ed204e1`, `a14ebd5`, `30bbed9` | `feat/transport-lifecycle` |
 | 35 | 2026-09-22 | UDP teardown and session-tier allocation reduction | `cfd56fd`, `27d0be1`, `2da59b0`, `b2ee992` | `feat/transport-lifecycle` |
