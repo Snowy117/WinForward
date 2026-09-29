@@ -90,7 +90,7 @@ bounded per-session socket/port/kernel-buffer budget and the observability to se
 
 ## Acceptance criteria
 
-- [ ] Default configuration, churn soak at ≥100 new UDP flows/s for ≥1 h, stated in the **two terms it
+- [x] Default configuration, churn soak at ≥100 new UDP flows/s for ≥1 h, stated in the **two terms it
       actually has**: (i) **bounded over time** — the live population tracks `rate × retention` instead
       of accumulating, so relay sockets, fds, ephemeral ports and the estimated kernel receive-buffer
       bytes stay flat as the run proceeds (the `udpSessionBudget` soak asserts the steady-state ceiling
@@ -101,21 +101,38 @@ bounded per-session socket/port/kernel-buffer budget and the observability to se
       kernel-buffer estimate stays `rate × retention × relay buffer`; the soak reports both. The 1 h run
       is recorded with `--require-pooling`, so its verdict states which term held. Zero datagram loss,
       and no first-response latency regression against the recorded baseline.
-- [ ] Permissive fake server: N flows share K associations (K ≪ N), responses never cross wires, and
+- [x] Permissive fake server: N flows share K associations (K ≪ N), responses never cross wires, and
       per-flow client MAC / origin adapter are preserved for forwarded flows.
-- [ ] Source-port-pinning fake server: detection fires within its window, the server flips to
+- [x] Source-port-pinning fake server: detection fires within its window, the server flips to
       per-flow associations, no datagrams are lost around the flip, and the verdict is sticky for the
       run (asserted, not just logged).
-- [ ] Association drop: watchdog detects it, the blast radius is bounded by the fan-out cap,
+- [x] Association drop: watchdog detects it, the blast radius is bounded by the fan-out cap,
       re-association succeeds, the teardown reason is counted, no socket or lease is orphaned, and no
       setup cooldown is armed.
-- [ ] `udpAssociationReuse: off` passes the existing UDP suites unchanged (rollback mode).
-- [ ] Pool drain: no lease outlives its owner; the bundle's dispose releases the drained UDP
+- [x] `udpAssociationReuse: off` passes the existing UDP suites unchanged (rollback mode).
+- [x] Pool drain: no lease outlives its owner; the bundle's dispose releases the drained UDP
       coordinator before the association pool and the native pools (the relative order of the latter
       two is immaterial), and after disposal the coordinator reports zero sessions and the pool zero
       associations/leases; a faulted association never surfaces as an unobserved task exception.
-- [ ] Allocation gates unchanged; `udp.burstEstablishment` and `udp.lossRate` matrices re-run green
+- [x] Allocation gates unchanged; `udp.burstEstablishment` and `udp.lossRate` matrices re-run green
       after the retention/buffer changes.
+
+### Completion verification (2026-09-29, session 37)
+
+Independently re-verified before archiving, because the task's boxes were never ticked although the work
+had landed: all four acceptance test suites exist (`UdpAssociationPoolTests`,
+`UdpAssociationRecoveryTests`, `Socks5UdpTransportLeaseTests`, `UdpAssociationCapabilityTests`), all six
+UDP config keys are documented in `README.md` (lines 112–143), the pooling/retention/failure-taxonomy
+specs were updated (`udp-relay.md` pooling contract + `hot-path.md`, `error-handling.md`,
+`traffic-policy-lifecycle.md`, `async-lifetime.md`), the burst/udp/churn matrices are archived under
+`benchmarks/results/2026-09-28-udp-reuse/`, and the 1-hour acceptance run is recorded there
+(`step4-session-budget-1h.jsonl`, measured 2026-09-29): verdict row
+`{"passed":true,"retentionBounded":true,"poolingCovered":true,"requirePooling":true,"failures":[]}` —
+360,000 flows, 0 lost / 0 rejected datagrams, steady population 4,500 vs the 6,200 ceiling
+(`retentionDiscriminating: true`), 282 shared associations vs the 296 ceiling, 1.070 descriptors per
+live session, first-response p50 0.878 ms, drain to zero sessions/associations/leases, no capacity-block
+or setup-failure events. The task's D3 follow-up (relay-socket sharing) remains intentionally out of
+scope and is recorded in the report.
 
 Ordering note: `udpAssociationReuse: auto` is off-equivalent until Step 3 lands passive detection, so
 the default-configuration soak above becomes a *sharing* acceptance only with Step 3. The Step 2
