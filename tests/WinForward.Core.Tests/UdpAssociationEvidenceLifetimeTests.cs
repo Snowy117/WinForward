@@ -14,7 +14,7 @@ namespace WinForward.Core.Tests;
 /// Capability evidence belongs to the leases attached when the sampler runs (design §5): a shared
 /// association that has served many leases must neither lose a live flow's evidence nor sample a
 /// released flow's. The first three tests drive one association through more attach/release cycles
-/// than <see cref="UdpAssociationPool.FlowsPerAssociation"/> before the sampled pair attaches; the
+/// than <see cref="UdpAssociationPool.DefaultFlowsPerAssociation"/> before the sampled pair attaches; the
 /// last one exercises the flip through the real session/admission stack.
 /// </summary>
 public sealed class UdpAssociationEvidenceLifetimeTests
@@ -200,13 +200,13 @@ public sealed class UdpAssociationEvidenceLifetimeTests
     }
 
     /// <summary>
-    /// Attaches and releases <see cref="UdpAssociationPool.FlowsPerAssociation"/> + 1 leases on the
+    /// Attaches and releases <see cref="UdpAssociationPool.DefaultFlowsPerAssociation"/> + 1 leases on the
     /// server's warm shared association, so the pair that attaches next sits on an association that
     /// has already served more leases than it can hold at once.
     /// </summary>
     private static async Task RecycleLeasesAsync(UdpAssociationPool pool, ScriptedSocks5UdpServer server)
     {
-        for (var cycle = 0; cycle <= UdpAssociationPool.FlowsPerAssociation; cycle++)
+        for (var cycle = 0; cycle <= UdpAssociationPool.DefaultFlowsPerAssociation; cycle++)
         {
             var lease = await pool.RentAsync(server.Server, CancellationToken.None);
             await lease.DisposeAsync();

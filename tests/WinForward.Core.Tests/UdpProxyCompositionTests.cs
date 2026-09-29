@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using WinForward.Cli;
+using WinForward.Configuration;
 using WinForward.Protocols;
 using WinForward.Runtime;
 using WinForward.Runtime.Socks5;
@@ -23,7 +24,7 @@ public sealed class UdpProxyCompositionTests
         const int sessionCapacity = 37;
         const int relayReceiveBufferBytes = 48 * 1024;
         using var setupExecutor = new SetupExecutor();
-        await using var associations = new UdpAssociationPool(new SelfTrafficRegistry(), Configuration.UdpAssociationReuseMode.Off);
+        await using var associations = new UdpAssociationPool(new SelfTrafficRegistry(), UdpAssociationReuseMode.Off);
         var composition = new UdpProxyComposition(
             new UdpAdapterTargetSource(),
             UdpFrameBuilder.DefaultMaximumEthernetFrame,
@@ -44,5 +45,30 @@ public sealed class UdpProxyCompositionTests
 
         Assert.Equal(sessionCapacity, coordinator.Capacity);
         Assert.Equal(relayReceiveBufferBytes, coordinator.RelayReceiveBufferBytes);
+    }
+
+    [Fact]
+    public async Task CreateAssociationPoolCarriesBothPlacementBoundsAsDistinctValues()
+    {
+        // The two UDP placement bounds are adjacent int members of the validated configuration, and
+        // a transposition (a ceiling of 31 associations of 7 flows) is a valid pool shape that no
+        // later assertion would catch, so the seam is pinned here as the capacity/buffer seam above.
+        var configuration = new ValidatedConfiguration(
+            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new PolicySnapshot([], FlowAction.Pass))
+        {
+            UdpAssociationReuse = UdpAssociationReuseMode.Off,
+            UdpAssociationMaxPerServer = 31,
+            UdpAssociationFlowsPerAssociation = 7,
+        };
+
+        await using var pool = UdpProxyComposer.CreateAssociationPool(
+            configuration,
+            new SelfTrafficRegistry(),
+            new Socks5AddressCache(),
+            NullRuntimeLogger.Instance);
+
+        Assert.Equal(31, pool.MaxAssociationsPerServerLimit);
+        Assert.Equal(7, pool.FlowsPerAssociationLimit);
     }
 }

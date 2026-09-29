@@ -196,7 +196,8 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         RegisterPool(counters, UdpWindowPoolName, udpWindowPool);
         // One association pool backs every UDP flow's control connection (Step 2); the bundle owns
         // it and the coordinator's transports borrow leases from it, so it outlives the coordinator.
-        var associationPool = new UdpAssociationPool(selfTraffic, configuration.UdpAssociationReuse, addressCache, logger: logger);
+        // The two bounds multiply into the shared head, so both ride the validated configuration.
+        var associationPool = UdpProxyComposer.CreateAssociationPool(configuration, selfTraffic, addressCache, logger);
         UdpProxyCoordinator udpCoordinator;
         try
         {

@@ -14,9 +14,21 @@ namespace WinForward.Core.Tests;
 /// </summary>
 internal static class UdpAssociationFakes
 {
-    /// <summary>Starts a pool in the given mode with an optional recording logger; the caller owns it.</summary>
-    internal static UdpAssociationPool CreatePool(UdpAssociationReuseMode mode, IRuntimeLogger? logger = null) =>
-        new(new SelfTrafficRegistry(), mode, logger: logger);
+    /// <summary>
+    /// Starts a pool in the given mode with an optional recording logger and optional placement
+    /// bounds; the caller owns it. Omitted bounds are the pool's own defaults.
+    /// </summary>
+    internal static UdpAssociationPool CreatePool(
+        UdpAssociationReuseMode mode,
+        IRuntimeLogger? logger = null,
+        int maxAssociationsPerServer = UdpAssociationPool.DefaultMaxAssociationsPerServer,
+        int flowsPerAssociation = UdpAssociationPool.DefaultFlowsPerAssociation) =>
+        new(
+            new SelfTrafficRegistry(),
+            mode,
+            logger: logger,
+            maxAssociationsPerServer: maxAssociationsPerServer,
+            flowsPerAssociation: flowsPerAssociation);
 
     /// <summary>Rents one lease and wraps it in a transport, so a failed assertion cannot strand a holder.</summary>
     internal static TransportScope CreateTransport(UdpAssociationPool pool, SelfTrafficRegistry registry, ScriptedSocks5UdpServer server) =>

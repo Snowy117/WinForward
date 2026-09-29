@@ -343,10 +343,14 @@ public sealed class UdpAssociationCapabilityTests
         return evidence;
     }
 
-    /// <summary>Runs the sampler's rule over one association's evidence, as the pool does.</summary>
+    /// <summary>
+    /// Runs the sampler's rule over one association's evidence, as the pool does. The array is
+    /// padded past the attached count on purpose: the sampler reads exactly the attached leases and
+    /// never the untouched slots behind them.
+    /// </summary>
     private static UdpServerCapability? Verdict(params UdpAssociationEvidence[] evidence)
     {
-        var slots = new UdpAssociationEvidence[UdpAssociationPool.FlowsPerAssociation];
+        var slots = new UdpAssociationEvidence[evidence.Length + 1];
         evidence.CopyTo(slots, 0);
         return UdpAssociationCapabilitySampler.Evaluate(slots, evidence.Length);
     }

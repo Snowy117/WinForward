@@ -10,7 +10,9 @@ internal readonly record struct ConfigurationLimitValues(
     int SetupWorkerCount,
     int UdpSessionCapacity,
     int UdpRelayReceiveBufferBytes,
-    TimeSpan UdpSessionIdleTimeout);
+    TimeSpan UdpSessionIdleTimeout,
+    int UdpAssociationMaxPerServer,
+    int UdpAssociationFlowsPerAssociation);
 
 /// <summary>
 /// Bounds, warning thresholds, and diagnostics for the numeric configuration limits. The loader
@@ -57,23 +59,42 @@ internal static class ConfigurationLimits
     /// <summary>The largest accepted udpSessionIdleSeconds.</summary>
     private const int MaximumUdpSessionIdleSeconds = 600;
 
+    /// <summary>The smallest accepted udpAssociationMaxPerServer; a zero ceiling would disable shared associations entirely.</summary>
+    private const int MinimumUdpAssociationMaxPerServer = 1;
+    /// <summary>The largest accepted udpAssociationMaxPerServer; beyond it the per-server ceiling stops being a bound an operator can reason about.</summary>
+    private const int MaximumUdpAssociationMaxPerServer = 16_384;
+    /// <summary>The smallest accepted udpAssociationFlowsPerAssociation; a zero bound would refuse every shared placement.</summary>
+    private const int MinimumUdpAssociationFlowsPerAssociation = 1;
+    /// <summary>
+    /// The largest accepted udpAssociationFlowsPerAssociation. It is the blast radius of one
+    /// association death and the capability sampler's live-evidence set, so the accepted ceiling
+    /// stays far below the session capacity on purpose.
+    /// </summary>
+    private const int MaximumUdpAssociationFlowsPerAssociation = 256;
+
     /// <summary>
     /// Normalizes every numeric limit in one pass. The per-session relay receive buffer is
     /// normalized before the UDP session capacity because the capacity's warning sentence names the
     /// aggregate kernel receive buffer that only both validated values compute; the buffer's own
-    /// cross-value warning is emitted once both are validated.
+    /// cross-value warning is emitted once both are validated, and the association head's
+    /// cross-value warning once both association bounds are.
     /// </summary>
     internal static ConfigurationLimitValues Parse(WinForwardConfigDto dto, List<ConfigDiagnostic> errors, List<ConfigDiagnostic> warnings)
     {
         var udpRelayReceiveBufferKb = ParseUdpRelayReceiveBufferKb(dto, errors);
         var udpSessionCapacity = ParseUdpSessionCapacity(dto, udpRelayReceiveBufferKb, errors, warnings);
         WarnOnAggregateRelayReceiveBuffer(udpRelayReceiveBufferKb, udpSessionCapacity, warnings);
+        var udpAssociationMaxPerServer = ParseUdpAssociationMaxPerServer(dto, errors);
+        var udpAssociationFlowsPerAssociation = ParseUdpAssociationFlowsPerAssociation(dto, errors);
+        WarnOnAssociationHeadBelowSessionCapacity(udpSessionCapacity, udpAssociationMaxPerServer, udpAssociationFlowsPerAssociation, warnings);
         return new(
             ParseTcpFlowCapacity(dto, errors, warnings),
             ParseSetupWorkerCount(dto, errors),
             udpSessionCapacity,
             udpRelayReceiveBufferKb * 1_024,
-            ParseUdpSessionIdleTimeout(dto, errors));
+            ParseUdpSessionIdleTimeout(dto, errors),
+            udpAssociationMaxPerServer,
+            udpAssociationFlowsPerAssociation);
     }
 
     /// <summary>
@@ -172,6 +193,21 @@ internal static class ConfigurationLimits
     }
 
     /// <summary>
+    /// The head-vs-capacity half of the association guard: the two validated caps multiply into the
+    /// shared head — the flows one server can serve from shared associations — and the coordinator
+    /// admits up to <c>udpSessionCapacity</c> flows. When the product is smaller, the excess flows
+    /// are not refused: each is served from its own private association, i.e. its own control
+    /// connection, which is invisible in every row except the descriptor and port counts. The
+    /// defaults (16 × 1,024 = 16,384) cover the default capacity exactly and stay silent.
+    /// </summary>
+    private static void WarnOnAssociationHeadBelowSessionCapacity(int sessionCapacity, int maxAssociationsPerServer, int flowsPerAssociation, List<ConfigDiagnostic> warnings)
+    {
+        var sharedHead = (long)maxAssociationsPerServer * flowsPerAssociation;
+        if (sharedHead >= sessionCapacity) return;
+        warnings.Add(new("udpAssociationMaxPerServer", string.Create(CultureInfo.InvariantCulture, $"The shared association head is {maxAssociationsPerServer} × {flowsPerAssociation} = {sharedHead} flows per server, below the {sessionCapacity}-flow UDP session capacity: a single server's flows beyond the head are served from private per-flow associations, so the excess each hold their own control connection instead of sharing one.")));
+    }
+
+    /// <summary>
     /// Normalizes the optional udpSessionIdleSeconds value (R4): how long an idle UDP session is
     /// retained before the sweeper releases its relay socket and control connection. Omitted values
     /// fall back to the default; out-of-range values are rejected. The sweeper's UDP cadence derives
@@ -187,5 +223,40 @@ internal static class ConfigurationLimits
             return ConfigurationLoader.DefaultUdpSessionIdleTimeout;
         }
         return TimeSpan.FromSeconds(value);
+    }
+
+    /// <summary>
+    /// Normalizes the optional udpAssociationMaxPerServer ceiling: how many shared associations one
+    /// server may hold. Omitted values fall back to the default; out-of-range values are rejected.
+    /// The ceiling is not a preallocation — the pool opens only the associations placement needs —
+    /// so there is no threshold warning; the head it multiplies into is bounded by the session
+    /// capacity the coordinator admits.
+    /// </summary>
+    private static int ParseUdpAssociationMaxPerServer(WinForwardConfigDto dto, List<ConfigDiagnostic> errors)
+    {
+        if (dto.UdpAssociationMaxPerServer is not { } value) return ConfigurationLoader.DefaultUdpAssociationMaxPerServer;
+        if (value is < MinimumUdpAssociationMaxPerServer or > MaximumUdpAssociationMaxPerServer)
+        {
+            errors.Add(new("udpAssociationMaxPerServer", $"UDP association ceiling must be in {MinimumUdpAssociationMaxPerServer}..{MaximumUdpAssociationMaxPerServer} per server."));
+            return ConfigurationLoader.DefaultUdpAssociationMaxPerServer;
+        }
+        return value;
+    }
+
+    /// <summary>
+    /// Normalizes the optional udpAssociationFlowsPerAssociation bound: how many concurrent flows
+    /// one shared association serves, which is also the blast radius of an association death and
+    /// the capability sampler's live-evidence set. Omitted values fall back to the default;
+    /// out-of-range values are rejected.
+    /// </summary>
+    private static int ParseUdpAssociationFlowsPerAssociation(WinForwardConfigDto dto, List<ConfigDiagnostic> errors)
+    {
+        if (dto.UdpAssociationFlowsPerAssociation is not { } value) return ConfigurationLoader.DefaultUdpAssociationFlowsPerAssociation;
+        if (value is < MinimumUdpAssociationFlowsPerAssociation or > MaximumUdpAssociationFlowsPerAssociation)
+        {
+            errors.Add(new("udpAssociationFlowsPerAssociation", $"UDP flows per shared association must be in {MinimumUdpAssociationFlowsPerAssociation}..{MaximumUdpAssociationFlowsPerAssociation}."));
+            return ConfigurationLoader.DefaultUdpAssociationFlowsPerAssociation;
+        }
+        return value;
     }
 }

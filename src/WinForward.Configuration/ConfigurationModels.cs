@@ -6,7 +6,7 @@ using WinForward.Core;
 
 namespace WinForward.Configuration;
 
-public sealed class WinForwardConfigDto
+public sealed partial class WinForwardConfigDto
 {
     [JsonPropertyName("logLevel")]
     public JsonElement LogLevel { get; init; }
@@ -31,18 +31,6 @@ public sealed class WinForwardConfigDto
 
     [JsonPropertyName("setupWorkerCount")]
     public int? SetupWorkerCount { get; init; }
-
-    [JsonPropertyName("udpSessionCapacity")]
-    public int? UdpSessionCapacity { get; init; }
-
-    [JsonPropertyName("udpRelayReceiveBufferKb")]
-    public int? UdpRelayReceiveBufferKb { get; init; }
-
-    [JsonPropertyName("udpSessionIdleSeconds")]
-    public int? UdpSessionIdleSeconds { get; init; }
-
-    [JsonPropertyName("udpAssociationReuse")]
-    public string? UdpAssociationReuse { get; init; }
 }
 
 public sealed class Socks5ServerDto
@@ -92,7 +80,7 @@ public enum RuntimeLogLevel
     Trace,
 }
 
-public sealed record ValidatedConfiguration(
+public sealed partial record ValidatedConfiguration(
     IReadOnlyDictionary<string, Socks5Server> Servers,
     PolicySnapshot Policy,
     RuntimeLogLevel LogLevel = RuntimeLogLevel.Info,
@@ -107,38 +95,12 @@ public sealed record ValidatedConfiguration(
     /// threshold) surfaced alongside an otherwise valid configuration.
     /// </summary>
     public IReadOnlyList<ConfigDiagnostic> Warnings { get; init; } = [];
-
-    /// <summary>
-    /// How long an idle UDP session is retained before its relay socket and SOCKS5 control
-    /// connection are released; the sweeper derives its UDP sweep cadence from this value.
-    /// </summary>
-    public TimeSpan UdpSessionIdleTimeout { get; init; } = ConfigurationLoader.DefaultUdpSessionIdleTimeout;
-
-    /// <summary>
-    /// Whether many UDP flows share one authenticated SOCKS5 association. <c>auto</c> (the default)
-    /// shares and passively falls back to per-flow associations for a server observed to pin one
-    /// client source port per association; <c>always</c> shares with detection disabled; <c>off</c>
-    /// reproduces per-flow associations exactly.
-    /// </summary>
-    public UdpAssociationReuseMode UdpAssociationReuse { get; init; } = UdpAssociationReuseMode.Auto;
 }
 
-public static class ConfigurationLoader
+public static partial class ConfigurationLoader
 {
     /// <summary>The default concurrent proxied TCP flow budget: 16,384 ephemeral ports x 50% headroom / 2 ports per flow.</summary>
     public const int DefaultTcpFlowCapacity = 4_096;
-
-    /// <summary>The default concurrent UDP session budget, unchanged from the historical hard-coded bound.</summary>
-    public const int DefaultUdpSessionCapacity = 16_384;
-
-    /// <summary>The default per-session relay socket receive buffer in KiB (matches <c>Socks5UdpTransport.DefaultRelaySocketReceiveBufferSize</c>).</summary>
-    public const int DefaultUdpRelayReceiveBufferKb = 128;
-
-    /// <summary>The default per-session relay socket receive buffer in bytes.</summary>
-    public const int DefaultUdpRelayReceiveBufferBytes = DefaultUdpRelayReceiveBufferKb * 1_024;
-
-    /// <summary>The default UDP session idle timeout; short enough that the steady-state footprint follows the active flow set.</summary>
-    public static readonly TimeSpan DefaultUdpSessionIdleTimeout = TimeSpan.FromSeconds(30);
 
     public static bool TryParse(string json, out WinForwardConfigDto? dto, out IReadOnlyList<ConfigDiagnostic> diagnostics)
     {
@@ -176,31 +138,10 @@ public static class ConfigurationLoader
         var logLevel = ParseLogLevel(dto, errors);
         var limits = ConfigurationLimits.Parse(dto, errors, warnings);
 
-        if (dto.Socks5Servers is null)
-        {
-            errors.Add(new("socks5Servers", "Field is required."));
-        }
-        else
-        {
-            for (var index = 0; index < dto.Socks5Servers.Count; index++)
-            {
-                ValidateServer(dto.Socks5Servers[index], index, servers, errors);
-            }
-        }
+        ValidateServers(dto, servers, errors);
 
         var rules = new List<PolicyRule>();
-        if (dto.Rules is null)
-        {
-            errors.Add(new("rules", "Field is required."));
-        }
-        else
-        {
-            for (var index = 0; index < dto.Rules.Count; index++)
-            {
-                var rule = ParseRule(dto.Rules[index], index, servers, errors);
-                if (rule is not null) rules.Add(rule);
-            }
-        }
+        ValidateRules(dto, servers, rules, errors);
 
         var fallback = ParseAction(dto.FallbackAction, "fallbackAction", errors, allowProxy: false);
         ValidateFailureActions(dto, errors);
@@ -226,6 +167,8 @@ public static class ConfigurationLoader
             Warnings = warnings,
             UdpSessionIdleTimeout = limits.UdpSessionIdleTimeout,
             UdpAssociationReuse = associationReuse,
+            UdpAssociationMaxPerServer = limits.UdpAssociationMaxPerServer,
+            UdpAssociationFlowsPerAssociation = limits.UdpAssociationFlowsPerAssociation,
         };
         diagnostics = [];
         return true;
@@ -263,23 +206,33 @@ public static class ConfigurationLoader
 
     private static bool IsPathSelector(string selector) => selector.IndexOfAny(['/', '\\']) >= 0;
 
-    /// <summary>
-    /// Normalizes the optional udpAssociationReuse key: omitted means <c>auto</c>, an unknown
-    /// value is a validation error (the configuration is rejected) and falls back to <c>auto</c>.
-    /// </summary>
-    private static UdpAssociationReuseMode ParseAssociationReuse(string? raw, List<ConfigDiagnostic> errors)
+    private static void ValidateServers(WinForwardConfigDto dto, Dictionary<string, Socks5Server> servers, List<ConfigDiagnostic> errors)
     {
-        if (raw is null) return UdpAssociationReuseMode.Auto;
-        var mode = raw.Trim().ToLowerInvariant() switch
+        if (dto.Socks5Servers is null)
         {
-            "auto" => UdpAssociationReuseMode.Auto,
-            "always" => UdpAssociationReuseMode.Always,
-            "off" => UdpAssociationReuseMode.Off,
-            _ => (UdpAssociationReuseMode?)null,
-        };
-        if (mode is not null) return mode.Value;
-        errors.Add(new("udpAssociationReuse", "Association reuse must be auto, always, or off."));
-        return UdpAssociationReuseMode.Auto;
+            errors.Add(new("socks5Servers", "Field is required."));
+            return;
+        }
+
+        for (var index = 0; index < dto.Socks5Servers.Count; index++)
+        {
+            ValidateServer(dto.Socks5Servers[index], index, servers, errors);
+        }
+    }
+
+    private static void ValidateRules(WinForwardConfigDto dto, Dictionary<string, Socks5Server> servers, List<PolicyRule> rules, List<ConfigDiagnostic> errors)
+    {
+        if (dto.Rules is null)
+        {
+            errors.Add(new("rules", "Field is required."));
+            return;
+        }
+
+        for (var index = 0; index < dto.Rules.Count; index++)
+        {
+            var rule = ParseRule(dto.Rules[index], index, servers, errors);
+            if (rule is not null) rules.Add(rule);
+        }
     }
 
     private static void ValidateServer(Socks5ServerDto? dto, int index, Dictionary<string, Socks5Server> servers, List<ConfigDiagnostic> errors)

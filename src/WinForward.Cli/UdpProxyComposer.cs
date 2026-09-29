@@ -50,6 +50,25 @@ internal static class UdpProxyComposer
         }
     }
 
+    /// <summary>
+    /// Creates the per-server association pool from the validated placement bounds and reuse mode.
+    /// The bounds multiply into the shared head, which is why both are passed as distinct arguments
+    /// here rather than read from the pool's defaults. The caller owns the pool and disposes it
+    /// after the coordinator has released every lease.
+    /// </summary>
+    internal static UdpAssociationPool CreateAssociationPool(
+        ValidatedConfiguration configuration,
+        SelfTrafficRegistry selfTraffic,
+        Socks5AddressCache addressCache,
+        IRuntimeLogger logger)
+        => new(
+            selfTraffic,
+            configuration.UdpAssociationReuse,
+            addressCache,
+            logger: logger,
+            maxAssociationsPerServer: configuration.UdpAssociationMaxPerServer,
+            flowsPerAssociation: configuration.UdpAssociationFlowsPerAssociation);
+
     internal static UdpProxyCoordinator Create(
         IPacketReinjector reinjector,
         SelfTrafficRegistry selfTraffic,

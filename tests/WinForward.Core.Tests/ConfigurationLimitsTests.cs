@@ -233,6 +233,10 @@ public sealed class ConfigurationLimitsTests
     [InlineData("udpRelayReceiveBufferKb", 1024)]
     [InlineData("udpSessionIdleSeconds", 5)]
     [InlineData("udpSessionIdleSeconds", 600)]
+    [InlineData("udpAssociationMaxPerServer", 1)]
+    [InlineData("udpAssociationMaxPerServer", 16384)]
+    [InlineData("udpAssociationFlowsPerAssociation", 1)]
+    [InlineData("udpAssociationFlowsPerAssociation", 256)]
     public void ConfigurationAcceptsUdpBudgetAtTheSupportedRangeBoundaries(string key, int value)
     {
         var json = Config(string.Create(CultureInfo.InvariantCulture, $"\"{key}\": {value}"));
@@ -243,6 +247,8 @@ public sealed class ConfigurationLimitsTests
         {
             "udpSessionCapacity" => configuration!.UdpSessionCapacity,
             "udpRelayReceiveBufferKb" => configuration!.UdpRelayReceiveBufferBytes / 1024,
+            "udpAssociationMaxPerServer" => configuration!.UdpAssociationMaxPerServer,
+            "udpAssociationFlowsPerAssociation" => configuration!.UdpAssociationFlowsPerAssociation,
             _ => (int)configuration!.UdpSessionIdleTimeout.TotalSeconds,
         });
     }
@@ -254,6 +260,12 @@ public sealed class ConfigurationLimitsTests
     [InlineData("udpRelayReceiveBufferKb", 1025)]
     [InlineData("udpSessionIdleSeconds", 4)]
     [InlineData("udpSessionIdleSeconds", 601)]
+    [InlineData("udpAssociationMaxPerServer", 0)]
+    [InlineData("udpAssociationMaxPerServer", -1)]
+    [InlineData("udpAssociationMaxPerServer", 16385)]
+    [InlineData("udpAssociationFlowsPerAssociation", 0)]
+    [InlineData("udpAssociationFlowsPerAssociation", -1)]
+    [InlineData("udpAssociationFlowsPerAssociation", 257)]
     public void ConfigurationRejectsUdpBudgetOutsideSupportedRange(string key, int value)
     {
         // The parsers fall back to their defaults internally, but an out-of-range value is an
@@ -268,12 +280,56 @@ public sealed class ConfigurationLimitsTests
     [InlineData("udpSessionCapacity", "\"4096\"")]
     [InlineData("udpRelayReceiveBufferKb", "128.5")]
     [InlineData("udpSessionIdleSeconds", "\"30\"")]
+    [InlineData("udpAssociationMaxPerServer", "\"1024\"")]
+    [InlineData("udpAssociationMaxPerServer", "\"many\"")]
+    [InlineData("udpAssociationFlowsPerAssociation", "16.5")]
+    [InlineData("udpAssociationFlowsPerAssociation", "\"\"")]
     public void ConfigurationRejectsNonIntegerUdpBudgetAtParseTime(string key, string value)
     {
         var json = Config($"\"{key}\": {value}");
 
         Assert.False(ConfigurationLoader.TryParse(json, out _, out var diagnostics));
         Assert.Contains(diagnostics, diagnostic => diagnostic.Path.Contains(key, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ConfigurationDefaultsUdpAssociationHeadWhenOmitted()
+    {
+        Assert.True(ConfigurationLoader.TryParse(Config(""), out var dto, out _));
+        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Equal(ConfigurationLoader.DefaultUdpAssociationMaxPerServer, configuration!.UdpAssociationMaxPerServer);
+        Assert.Equal(ConfigurationLoader.DefaultUdpAssociationFlowsPerAssociation, configuration.UdpAssociationFlowsPerAssociation);
+        Assert.Empty(configuration.Warnings);
+    }
+
+    [Fact]
+    public void ConfigurationTreatsExplicitNullUdpAssociationHeadAsDefault()
+    {
+        var json = Config("""
+          "udpAssociationMaxPerServer": null,
+          "udpAssociationFlowsPerAssociation": null
+        """);
+
+        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
+        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Equal(ConfigurationLoader.DefaultUdpAssociationMaxPerServer, configuration!.UdpAssociationMaxPerServer);
+        Assert.Equal(ConfigurationLoader.DefaultUdpAssociationFlowsPerAssociation, configuration.UdpAssociationFlowsPerAssociation);
+        Assert.Empty(configuration.Warnings);
+    }
+
+    [Fact]
+    public void ConfigurationParsesUdpAssociationHeadValues()
+    {
+        var json = Config("""
+          "udpAssociationMaxPerServer": 2048,
+          "udpAssociationFlowsPerAssociation": 32
+        """);
+
+        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
+        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Equal(2048, configuration!.UdpAssociationMaxPerServer);
+        Assert.Equal(32, configuration.UdpAssociationFlowsPerAssociation);
+        Assert.Empty(configuration.Warnings);
     }
 
     /// <summary>The minimal valid configuration with <paramref name="body"/> appended as extra members.</summary>

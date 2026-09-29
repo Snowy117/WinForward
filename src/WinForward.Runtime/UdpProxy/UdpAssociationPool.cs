@@ -20,12 +20,21 @@ internal readonly record struct UdpAssociationContext(
 
 /// <summary>
 /// The per-server warm set of authenticated SOCKS5 UDP associations. One pool serves the whole
-/// runtime: associations never mix servers, and each server's set is bounded by
-/// <see cref="MaxAssociationsPerServer"/> shared associations of up to
-/// <see cref="FlowsPerAssociation"/> concurrent flows. Placement picks the least-loaded shared
-/// association (creation order breaks ties); once every shared association is full and the cap is
-/// reached, the flow is served from a private association instead of being refused — the pool never
-/// refuses a flow.
+/// runtime: associations never mix servers, and each server's set is bounded by the configured
+/// association ceiling (<see cref="MaxAssociationsPerServerLimit"/>, <c>udpAssociationMaxPerServer</c>,
+/// 1,024 by default) shared associations of up to <see cref="FlowsPerAssociationLimit"/> concurrent
+/// flows each (<c>udpAssociationFlowsPerAssociation</c>, 16 by default). The two multiply into the
+/// shared head — 16,384 flows per server at the defaults, which is the default
+/// <c>udpSessionCapacity</c>, so every flow the coordinator admits can be shared. The coordinator's
+/// capacity, not the head, bounds the population.
+/// <para>
+/// Placement picks the least-loaded shared association (creation order breaks ties); once every
+/// shared association is full and the ceiling is reached, the flow is served from a private
+/// association instead of being refused — the pool never refuses a flow. The ceiling is a bound on
+/// connections, not a preallocation: a lightly loaded server holds only the associations its flows
+/// need. The least-loaded scan is O(shared associations) at most — 1,024 at the default ceiling —
+/// and runs once per flow setup, never on the datagram path.
+/// </para>
 /// <para>
 /// <see cref="UdpAssociationReuseMode.Off"/> creates one private association per lease, which is
 /// today's per-flow behaviour byte for byte. <see cref="UdpAssociationReuseMode.Always"/> shares
@@ -46,11 +55,21 @@ internal readonly record struct UdpAssociationContext(
 /// </summary>
 internal sealed class UdpAssociationPool : IAsyncDisposable
 {
-    /// <summary>The bound on shared associations per server (I6); beyond it flows fall back to private associations.</summary>
-    internal const int MaxAssociationsPerServer = 16;
+    /// <summary>
+    /// The default ceiling on shared associations per server (I6): a ceiling, not a preallocation —
+    /// the pool opens only the associations placement needs — and exceeding it falls back to
+    /// per-flow associations for that server instead of refusing a flow. 1,024 multiplied by
+    /// <see cref="DefaultFlowsPerAssociation"/> covers the default configuration's 16,384 concurrent
+    /// UDP sessions, so every flow the coordinator admits can be shared.
+    /// </summary>
+    internal const int DefaultMaxAssociationsPerServer = ConfigurationLoader.DefaultUdpAssociationMaxPerServer;
 
-    /// <summary>The bound on concurrent flows one shared association serves (I6), which is also the blast radius of an association death.</summary>
-    internal const int FlowsPerAssociation = 16;
+    /// <summary>
+    /// The default number of concurrent flows one shared association serves (I6), which is also the
+    /// blast radius of an association death and the capability sampler's live-evidence set.
+    /// Deliberately the small knob: the per-server ceiling above carries the shared head.
+    /// </summary>
+    internal const int DefaultFlowsPerAssociation = ConfigurationLoader.DefaultUdpAssociationFlowsPerAssociation;
 
     /// <summary>How long an association with no outstanding lease is kept warm for reuse.</summary>
     internal static readonly TimeSpan s_idleRetireTimeout = TimeSpan.FromSeconds(60);
@@ -71,6 +90,8 @@ internal sealed class UdpAssociationPool : IAsyncDisposable
     /// <param name="logger">Lifecycle diagnostics; null keeps the pool silent.</param>
     /// <param name="createControl">Test seam replacing the real dial, mirroring the former transport parameter.</param>
     /// <param name="recoveryTimeout">Test seam bounding one in-place re-association attempt; null uses <see cref="UdpControlAssociation.s_defaultRecoveryTimeout"/>.</param>
+    /// <param name="maxAssociationsPerServer">The validated <c>udpAssociationMaxPerServer</c> ceiling; <see cref="DefaultMaxAssociationsPerServer"/> when the composition supplies none.</param>
+    /// <param name="flowsPerAssociation">The validated <c>udpAssociationFlowsPerAssociation</c> bound; <see cref="DefaultFlowsPerAssociation"/> when the composition supplies none.</param>
     internal UdpAssociationPool(
         SelfTrafficRegistry selfTraffic,
         UdpAssociationReuseMode mode,
@@ -78,18 +99,36 @@ internal sealed class UdpAssociationPool : IAsyncDisposable
         TimeProvider? timeProvider = null,
         IRuntimeLogger? logger = null,
         Func<Socks5Server, CancellationToken, ValueTask<Socks5ControlConnection>>? createControl = null,
-        TimeSpan? recoveryTimeout = null)
+        TimeSpan? recoveryTimeout = null,
+        int maxAssociationsPerServer = DefaultMaxAssociationsPerServer,
+        int flowsPerAssociation = DefaultFlowsPerAssociation)
     {
         ArgumentNullException.ThrowIfNull(selfTraffic);
         var recovery = recoveryTimeout ?? UdpControlAssociation.s_defaultRecoveryTimeout;
         if (recovery <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(recoveryTimeout), recovery, "The recovery timeout must be positive.");
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxAssociationsPerServer);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(flowsPerAssociation);
         Context = new UdpAssociationContext(selfTraffic, addressCache, createControl, timeProvider ?? TimeProvider.System, logger ?? NullRuntimeLogger.Instance, recovery);
         Mode = mode;
+        MaxAssociationsPerServerLimit = maxAssociationsPerServer;
+        FlowsPerAssociationLimit = flowsPerAssociation;
         _scope = new QuiescenceScope();
         _scope.Run(MaintainAsync, "udp.association.maintain");
     }
 
     internal UdpAssociationContext Context { get; }
+
+    /// <summary>
+    /// The ceiling this pool places against: how many shared associations one server may hold
+    /// before further flows fall back to private associations.
+    /// </summary>
+    internal int MaxAssociationsPerServerLimit { get; }
+
+    /// <summary>
+    /// The concurrent-flow bound this pool places against: one shared association serves at most
+    /// this many flows, and it bounds how many leases the capability sampler can observe at once.
+    /// </summary>
+    internal int FlowsPerAssociationLimit { get; }
 
     /// <summary>The validated reuse mode this pool was created with.</summary>
     private UdpAssociationReuseMode Mode { get; }
@@ -126,10 +165,10 @@ internal sealed class UdpAssociationPool : IAsyncDisposable
 
     /// <summary>
     /// Borrows one association for a flow: a shared association with room under
-    /// <see cref="FlowsPerAssociation"/>, a newly dialed shared association while the per-server cap
-    /// allows it, or a private association otherwise. The returned lease is released exactly once by
-    /// its transport and reports the association's current relay endpoint, family, and fault state
-    /// for its whole lifetime.
+    /// <see cref="FlowsPerAssociationLimit"/>, a newly dialed shared association while the per-server
+    /// ceiling allows it, or a private association otherwise. The returned lease is released exactly
+    /// once by its transport and reports the association's current relay endpoint, family, and fault
+    /// state for its whole lifetime.
     /// </summary>
     internal async ValueTask<UdpAssociationLease> RentAsync(Socks5Server server, CancellationToken cancellationToken)
     {
@@ -255,8 +294,9 @@ internal sealed class UdpAssociationPool : IAsyncDisposable
 
     /// <summary>
     /// Placement: the least-loaded shared association with room, else a fresh shared association
-    /// while the per-server cap allows it, else a private one. Private associations are tracked for
-    /// counting and disposal but never selected, so a flow can always be served.
+    /// while the per-server ceiling allows it, else a private one. Private associations are tracked
+    /// for counting and disposal but never selected, so a flow can always be served. The scan is
+    /// O(shared associations) — bounded by the configured ceiling — and runs once per flow setup.
     /// </summary>
     private UdpControlAssociation Acquire(Socks5Server server, UdpAssociationEvidence evidence)
     {
@@ -273,7 +313,7 @@ internal sealed class UdpAssociationPool : IAsyncDisposable
             {
                 var best = LeastLoadedShared(set);
                 if (best is not null) return Attach(best, evidence);
-                if (set.Shared.Count < MaxAssociationsPerServer) return Attach(Create(server, set, isPrivate: false), evidence);
+                if (set.Shared.Count < MaxAssociationsPerServerLimit) return Attach(Create(server, set, isPrivate: false), evidence);
             }
 
             return Attach(Create(server, set, isPrivate: true), evidence);

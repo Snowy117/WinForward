@@ -83,7 +83,7 @@ public sealed class UdpAssociationPoolTests
     {
         await using var scope = CreateScope(UdpAssociationReuseMode.Always);
         var leases = new List<UdpAssociationLease>();
-        for (var index = 0; index < UdpAssociationPool.FlowsPerAssociation; index++) leases.Add(await scope.RentAsync());
+        for (var index = 0; index < UdpAssociationPool.DefaultFlowsPerAssociation; index++) leases.Add(await scope.RentAsync());
 
         Assert.Equal(1, scope.Pool.AssociationCount);
         Assert.Equal(1, scope.Server.ConnectionCount);
@@ -93,7 +93,7 @@ public sealed class UdpAssociationPoolTests
         Assert.Equal(2, scope.Pool.AssociationCount);
         Assert.Equal(2, scope.Server.ConnectionCount);
         Assert.NotEqual(leases[0].RelayEndpoint.Port, seventeenth.RelayEndpoint.Port);
-        Assert.Equal(UdpAssociationPool.FlowsPerAssociation + 1, scope.Pool.LeasedFlowCount);
+        Assert.Equal(UdpAssociationPool.DefaultFlowsPerAssociation + 1, scope.Pool.LeasedFlowCount);
     }
 
     [Fact]
@@ -125,7 +125,7 @@ public sealed class UdpAssociationPoolTests
     {
         await using var scope = CreateScope(UdpAssociationReuseMode.Always);
         var first = new List<UdpAssociationLease>();
-        for (var index = 0; index < UdpAssociationPool.FlowsPerAssociation; index++) first.Add(await scope.RentAsync());
+        for (var index = 0; index < UdpAssociationPool.DefaultFlowsPerAssociation; index++) first.Add(await scope.RentAsync());
         var second = await scope.RentAsync();
         Assert.Equal(2, scope.Pool.AssociationCount);
 
@@ -141,26 +141,29 @@ public sealed class UdpAssociationPoolTests
     }
 
     [Fact]
-    public async Task PerServerCapFallsBackToAPrivateAssociationInsteadOfRefusingTheFlow()
+    public async Task PerServerCeilingFallsBackToAPrivateAssociationInsteadOfRefusingTheFlow()
     {
-        await using var scope = CreateScope(UdpAssociationReuseMode.Always);
-        const int sharedCapacity = UdpAssociationPool.MaxAssociationsPerServer * UdpAssociationPool.FlowsPerAssociation;
+        // Both bounds are configuration, not constants: with a ceiling of two associations of at
+        // most three flows the first six flows are shared, and the seventh is still served — from a
+        // private association — because the pool never refuses a flow.
+        await using var scope = CreateScope(UdpAssociationReuseMode.Always, maxAssociationsPerServer: 2, flowsPerAssociation: 3);
+        const int sharedCapacity = 2 * 3;
         for (var index = 0; index < sharedCapacity; index++) _ = await scope.RentAsync();
 
-        Assert.Equal(UdpAssociationPool.MaxAssociationsPerServer, scope.Pool.AssociationCount);
+        Assert.Equal(2, scope.Pool.AssociationCount);
         Assert.Equal(sharedCapacity, scope.Pool.LeasedFlowCount);
 
-        // The cap is reached: the flow is still served, from a private association.
+        // The ceiling is reached: the flow is still served, from a private association.
         var overCap = await scope.RentAsync();
-        Assert.Equal(UdpAssociationPool.MaxAssociationsPerServer + 1, scope.Pool.AssociationCount);
+        Assert.Equal(3, scope.Pool.AssociationCount);
         Assert.Equal(sharedCapacity + 1, scope.Pool.LeasedFlowCount);
 
         // A private association dies with its only lease and never enters the shared set.
         await overCap.DisposeAsync();
-        Assert.Equal(UdpAssociationPool.MaxAssociationsPerServer, scope.Pool.AssociationCount);
+        Assert.Equal(2, scope.Pool.AssociationCount);
         Assert.Equal(sharedCapacity, scope.Pool.LeasedFlowCount);
 
-        Assert.Equal(UdpAssociationPool.MaxAssociationsPerServer + 1, scope.Server.ConnectionCount);
+        Assert.Equal(3, scope.Server.ConnectionCount);
     }
 
     [Fact]
@@ -313,8 +316,19 @@ public sealed class UdpAssociationPoolTests
     private static ScriptedSocks5UdpServer CreateServer(int portBase = FirstRelayPort) =>
         new(new IPEndPoint(IPAddress.Loopback, portBase), ordinal => new IPEndPoint(IPAddress.Loopback, portBase + ordinal));
 
-    private static PoolScope CreateScope(UdpAssociationReuseMode mode, TimeProvider? timeProvider = null) =>
-        new(new UdpAssociationPool(new SelfTrafficRegistry(), mode, timeProvider: timeProvider), CreateServer());
+    private static PoolScope CreateScope(
+        UdpAssociationReuseMode mode,
+        TimeProvider? timeProvider = null,
+        int maxAssociationsPerServer = UdpAssociationPool.DefaultMaxAssociationsPerServer,
+        int flowsPerAssociation = UdpAssociationPool.DefaultFlowsPerAssociation) =>
+        new(
+            new UdpAssociationPool(
+                new SelfTrafficRegistry(),
+                mode,
+                timeProvider: timeProvider,
+                maxAssociationsPerServer: maxAssociationsPerServer,
+                flowsPerAssociation: flowsPerAssociation),
+            CreateServer());
 
     /// <summary>
     /// Owns the pool and every lease a test rents from it, so a failed assertion still releases the

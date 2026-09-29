@@ -16,8 +16,9 @@ internal sealed record UdpRelayTarget(IPEndPoint Endpoint, SocketAddress SocketA
 
 /// <summary>
 /// One authenticated SOCKS5 control connection plus its UDP ASSOCIATE result, serving up to
-/// <see cref="UdpAssociationPool.FlowsPerAssociation"/> concurrent flows. Every flow still owns
-/// its own relay socket, so reverse routing is unchanged; only the control connection is shared.
+/// <see cref="UdpAssociationPool.FlowsPerAssociationLimit"/> concurrent flows — the configured
+/// <c>udpAssociationFlowsPerAssociation</c> bound. Every flow still owns its own relay socket, so
+/// reverse routing is unchanged; only the control connection is shared.
 /// <para>
 /// The association owns the control connection, its lease refcount, the watchdog that detects
 /// association death (the control stream ending), and the in-place re-association that keeps every
@@ -107,11 +108,12 @@ internal sealed class UdpControlAssociation : IAsyncDisposable
     internal int LeaseCount => Volatile.Read(ref _leaseCount);
 
     /// <summary>
-    /// Whether this association can serve one more flow. Placement reads it under the pool gate;
-    /// the refcount itself is interlocked because releases run outside that gate.
+    /// Whether this association can serve one more flow, under the pool's configured flow bound.
+    /// Placement reads it under the pool gate; the refcount itself is interlocked because releases
+    /// run outside that gate.
     /// </summary>
     internal bool IsAvailableForPlacement =>
-        !IsFaulted && !Recovering && Volatile.Read(ref _leaseCount) < UdpAssociationPool.FlowsPerAssociation;
+        !IsFaulted && !Recovering && Volatile.Read(ref _leaseCount) < _owner.FlowsPerAssociationLimit;
 
     /// <summary>
     /// Dials and performs UDP ASSOCIATE at most once per association; concurrent first rents join
