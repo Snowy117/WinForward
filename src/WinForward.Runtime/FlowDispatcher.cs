@@ -20,10 +20,13 @@ public readonly record struct PacketCaptureMetadata(uint DeviceFlags, nint Adapt
 }
 
 /// <summary>
-/// The capture pump's native buffer holding an unmodified frame, valid for the whole synchronous
-/// dispatch of its packet (the pump awaits each handler, so the batch slot cannot be reused
-/// earlier). Carried alongside the lease so the pass executor can reinject in place; consumers
-/// that rewrite or relay must copy through the lease instead of retaining this buffer.
+/// The capture pump's native buffer holding a frame, valid until the pump reuses the slot in its
+/// next batch read (the pump awaits each handler and runs its batch-completed callback before that
+/// read, so the slot cannot be reused earlier). Carried alongside the lease so an in-place
+/// reinjection can hand the pump's own buffer to the batched send: the pass executor and the TCP
+/// redirect data legs rewrite it in place, and a redirect injection lane may retain it until that
+/// iteration's flush. A consumer that needs the bytes past that window — a relay, or any reader
+/// keeping the frame beyond its own call — must copy through the lease.
 /// </summary>
 [StructLayout(LayoutKind.Auto)]
 public readonly record struct NativeFrameHandle(NdisPacketBuffer? Buffer);

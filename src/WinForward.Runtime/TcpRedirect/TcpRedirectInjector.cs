@@ -34,4 +34,15 @@ public sealed class TcpRedirectInjector(IPacketReinjector reinjector, NdisPacket
         if (towardMstcp) reinjector.SendToMstcp(adapterHandle, stagedFrame);
         else reinjector.SendToAdapter(adapterHandle, stagedFrame);
     }
+
+    public void InjectBatch(NdisPacketBuffer[] frames, int count, bool towardMstcp, nint adapterHandle)
+    {
+        ArgumentNullException.ThrowIfNull(frames);
+        // Same direction matrix as the two single-packet overloads: a toward-MSTCP batch is the
+        // ON_RECEIVE shape, a toward-adapter batch the ON_SEND shape, both already stamped by the
+        // caller's CompleteFrame. The driver owns chunking, the adapter-gate lease, and the
+        // all-or-nothing failure contract (NdisApiDriver.SendPacketsBatch).
+        if (towardMstcp) reinjector.SendPacketsToMstcp(adapterHandle, frames, count);
+        else reinjector.SendPacketsToAdapter(adapterHandle, frames, count);
+    }
 }

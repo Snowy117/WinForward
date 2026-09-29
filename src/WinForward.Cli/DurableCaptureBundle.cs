@@ -79,7 +79,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
 
     internal FlowDispatcher Dispatcher { get; }
 
-    internal NdisPacketActionExecutor Executor { get; }
+    private NdisPacketActionExecutor Executor { get; }
 
     /// <summary>The refreshable UDP reinjection-target snapshot, swapped at every scope install.</summary>
     internal UdpAdapterTargetSource UdpTargets { get; }
@@ -337,7 +337,10 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
     /// for adapters that left the scope. Both steps run strictly between generations — the runner
     /// completes the outgoing generation's run (including its loop-exit lane flush) before
     /// installing the next scope, so no pump can still be appending to a retired lane. An empty
-    /// scope retires every lane: interception is paused, so no lane can accumulate.
+    /// scope retires every lane: interception is paused, so no lane can accumulate. The redirect
+    /// lanes take the same scope: a redirect lane is only drained by the pump it is keyed on, so a
+    /// cross-adapter target that left the scope must stop deferring (its frames keep the immediate
+    /// send, which fails closed through the per-flow tail).
     /// </summary>
     internal void OnScopeInstalled(IReadOnlyList<AdapterEnumerationItem> scope)
     {
@@ -345,6 +348,21 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         var handles = new nint[scope.Count];
         for (var index = 0; index < scope.Count; index++) handles[index] = scope[index].Adapter.RuntimeHandle;
         Executor.RetireLanesExcept(handles);
+        Tcp.UpdateRedirectTargets(handles);
+    }
+
+    /// <summary>
+    /// The pump's batch-completed callback: every pass frame accumulated for
+    /// <paramref name="adapterHandle"/> leaves in one batched send per direction, then every
+    /// deferred redirect frame for that adapter. The pass flush deliberately runs first: the one
+    /// plausible same-flow interleaving is a data frame that passed before its flow's association
+    /// existed (a redirect-setup race) followed by redirect frames once the background setup
+    /// completes, and pass-first preserves that capture order.
+    /// </summary>
+    internal void FlushPendingInjections(nint adapterHandle)
+    {
+        Executor.FlushPendingPasses(adapterHandle);
+        Tcp.FlushPendingRedirectInjections(adapterHandle);
     }
 
     public ValueTask DisposeAsync()

@@ -80,6 +80,26 @@ public interface ITcpRedirectInjector
     /// caller's property and must be returned by the caller on every path.
     /// </summary>
     void Inject(NdisPacketBuffer stagedFrame, bool towardMstcp, nint adapterHandle, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Sends the first <paramref name="count"/> frames of a same-(direction, adapter) batch as ONE
+    /// native batched request (the driver chunks internally above the ABI's per-request packet
+    /// budget). Every frame is already staged — direction flag and enumeration adapter handle
+    /// stamped by the caller through <c>GetFrameStorage</c>/<c>CompleteFrame</c>, exactly like
+    /// <see cref="Inject"/> — so this overload performs no staging, no copy, and no direction
+    /// decision beyond selecting <c>SendPacketsToMstcp</c>/<c>SendPacketsToAdapter</c>. The caller
+    /// owns the buffers before and after the call: the send is synchronous and retains nothing, and
+    /// a lane flush releases the rented ones itself, exactly once, after the attempt. The batched
+    /// send IOCTLs report no per-packet success count (<c>lpOutBuffer=NULL</c>,
+    /// <c>METHOD_BUFFERED</c>; verified ABI property, evidence in the archived
+    /// <c>abi-packets-success.md</c>), so a rejected chunk delivered none of its frames. A call
+    /// within the driver's per-request packet budget (126 packets at the pinned ABI, see
+    /// <c>NdisApiDriver.SendPacketsBatch</c>) is therefore ALL-OR-NOTHING, and a caller may treat a
+    /// failure as "every frame failed" and retry each one; a wider call spans several independently
+    /// attempted chunks, so a blanket per-frame retry would re-deliver the frames of the chunks
+    /// that already succeeded.
+    /// </summary>
+    void InjectBatch(NdisPacketBuffer[] frames, int count, bool towardMstcp, nint adapterHandle);
 }
 
 /// <summary>

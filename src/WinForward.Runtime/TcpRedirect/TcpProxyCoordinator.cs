@@ -23,7 +23,7 @@ namespace WinForward.Runtime.TcpRedirect;
 /// (accept/relay loop), and <see cref="ClientResetInjector"/> (client-visible failure surface); this
 /// class owns entry routing.
 /// </summary>
-public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
+public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
 {
     private readonly ITcpRedirectInjector _injector;
     private readonly NdisPacketBufferPool _framePool;
@@ -36,6 +36,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
     private readonly TcpRedirectSetup _setup;
     private readonly ClientResetInjector _clientReset;
     private readonly TcpRedirectAcceptor _acceptor;
+    private readonly RedirectInjectionLanes _redirectLanes = new();
     private readonly TcpPendingSynSetupIndex _pendingSyn = new();
     private readonly Lock _disposeGate = new();
     private Task? _disposeTask;
@@ -66,7 +67,7 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         if (capacity < 1) throw new ArgumentOutOfRangeException(nameof(options), capacity, "Capacity must be positive.");
         Table = table;
         _injector = injector;
-        _framePool = NdisPacketBufferPool.Shared;
+        _framePool = options.FramePool ?? NdisPacketBufferPool.Shared;
         _synCopyPool = synCopyPool;
         _setupExecutor = setupExecutor;
         _setupHandler = SetupPendingAsync;
@@ -86,33 +87,6 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
 
     /// <summary>The concurrent proxied-flow budget this coordinator was constructed with (heartbeat diagnostics).</summary>
     public int Capacity { get; }
-
-    /// <summary>
-    /// The coordinator's observable counters as one snapshot: the concurrent-loser total from the
-    /// redirect-table exactly-once path (a non-zero value after a concurrent burst proves that path
-    /// was exercised under genuine concurrency), the capacity-gate rejection total (explicit budget
-    /// management, not setup failure), and the pending-SYN-setup counts (live entries, charged
-    /// bytes, retention-TTL expiries, setup-failure cooldowns); for tests and diagnostics.
-    /// </summary>
-    internal TcpRedirectDiagnostics Diagnostics => new(_setup.ConcurrentLoserCount, Interlocked.Read(ref _capacityRejectionCount), _pendingSyn.ActiveCount, _pendingSyn.ChargedBytes, _pendingSyn.TtlExpiredCount, _pendingSyn.CooldownCount);
-
-    /// <summary>
-    /// Emits an info-level summary of capacity-gate rejections, but only when the count advanced
-    /// since the previous call. The idle-expiry sweeper invokes this on its existing periodic tick
-    /// so no dedicated timer is introduced. Per-rejection trace events already exist
-    /// (<c>tcp.redirect.rejected reason=capacity</c>); this is the info-level aggregate.
-    /// </summary>
-    internal void LogCapacitySummary()
-    {
-        if (!_logger.IsEnabled(RuntimeLogLevel.Info)) return;
-        var total = Interlocked.Read(ref _capacityRejectionCount);
-        var previouslyReported = Interlocked.Exchange(ref _reportedCapacityRejectionCount, total);
-        if (total == previouslyReported) return;
-        _logger.Event(RuntimeLogLevel.Info, "tcp.redirect.capacity",
-            new("budget", Capacity),
-            new("rejectedTotal", total),
-            new("rejectedSinceLastSummary", total - previouslyReported));
-    }
 
     public async ValueTask<TcpRedirectOutcome> HandleSynAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
     {
@@ -322,58 +296,6 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
         }
     }
 
-#pragma warning disable RCS1229 // Deliberate non-async warm entry (hot-path.md #3): the per-packet path must not pay an async state machine; synchronous failures before the returned ValueTask are part of the warm contract (cold tails live in async helpers).
-    private ValueTask<TcpRedirectOutcome> ReinjectExistingFlowDataAsync(CapturedFlowPacket packet, TcpRedirectAssociation association, CancellationToken cancellationToken)
-#pragma warning restore RCS1229
-    {
-        // Stage the frame into a pooled native buffer (A3): one copy out of the synchronous
-        // capture view, the sequence tracker reads it pre-rewrite, the forward-leg rewrite runs
-        // in place on the native span, and the injector sends the same buffer — the rewrite
-        // scratch and the send buffer are a single rental, so the managed ArrayPool
-        // materialization and the injector's second copy both disappear. Frames are bounded by
-        // the pinned ABI (the capture path itself rejects longer frames), so the staging copy
-        // always fits the native storage.
-        var source = packet.InspectionSpan;
-        var buffer = _framePool.Rent();
-        try
-        {
-            source.CopyTo(buffer.GetFrameStorage());
-            buffer.CompleteFrame(source.Length, NdisApiAbi.PacketFlagOnReceive, packet.Metadata.AdapterHandle);
-            var frame = buffer.GetFrame();
-            // Read-then-write: advance the client sequence tracker on the pre-rewrite copy,
-            // keeping the reset builder's ack in the client's window.
-            TcpSequenceObservation.TrackClientSequence(frame, association);
-            var originalClient = packet.Context.Key.Local;
-            var originalServer = association.OriginalKey.Remote;
-            if (!TcpFrameRewriter.TryRewriteForwardLeg(frame, originalClient, originalServer, association, association.TranslatedListenerTuple.Port))
-            {
-                return FailAssociationAndBlockAsync(association);
-            }
-            try
-            {
-                _injector.Inject(buffer, towardMstcp: true, packet.Metadata.AdapterHandle, cancellationToken);
-            }
-            catch (OperationCanceledException exception)
-                when (cancellationToken.IsCancellationRequested)
-            {
-                return ValueTask.FromException<TcpRedirectOutcome>(exception);
-            }
-            catch (OperationCanceledException exception)
-            {
-                return FailAssociationAndRethrowAsync(association, exception);
-            }
-            catch (Exception exception)
-            {
-                return HandleInjectionFailureAndBlockAsync(association, packet.Metadata.AdapterHandle, towardMstcp: true, exception);
-            }
-            TcpRedirectLogging.LogTrace(_logger, "tcp.redirect.injected", packet, association);
-            return ValueTask.FromResult(TcpRedirectOutcome.Injected);
-        }
-        finally
-        {
-            buffer.Dispose();
-        }
-    }
 
     /// <summary>Fails the association and reports the fail-closed outcome (cold tail).</summary>
     private async ValueTask<TcpRedirectOutcome> FailAssociationAndBlockAsync(TcpRedirectAssociation association)
@@ -395,94 +317,6 @@ public sealed class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseHandler
     {
         await _clientReset.HandleInjectionFailureAsync(association, adapterHandle, towardMstcp, exception).ConfigureAwait(false);
         return TcpRedirectOutcome.Blocked;
-    }
-
-#pragma warning disable RCS1229 // Deliberate non-async warm entry (hot-path.md #3): the per-packet reverse path must not pay an async state machine; synchronous failures before the returned ValueTask are part of the warm contract.
-    public ValueTask<TcpRedirectOutcome> HandleReverseAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
-#pragma warning restore RCS1229
-    {
-        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease; CapturedFlowPacketGuards.ThrowLeaseRequired reports the null member (quality-guidelines.md).
-        if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
-        ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
-
-        var key = packet.Context.Key;
-        // M5 belt-and-suspenders: this coordinator owns TCP redirect table entries only. The
-        // dispatcher already gates the reverse handler to TCP (H1), but a non-TCP packet must never
-        // be routed into reverse handling regardless of call context.
-        if (key.Protocol != TransportProtocol.Tcp) return ValueTask.FromResult(TcpRedirectOutcome.NotRelevant);
-        if (!Table.TryResolveByReverse(key.Local, key.Remote, _timeProvider.GetUtcNow(), out var association) || association is null) return ValueTask.FromResult(TcpRedirectOutcome.NotRelevant);
-
-        var original = association.OriginalKey;
-        // Host-originated flows terminate on this host (reverse to MSTCP); forwarded flows (client
-        // on a VM/remote side) must be sent back to the origin adapter instead.
-        var towardMstcp = original.Origin == FlowOriginKind.Host;
-        var targetHandle = towardMstcp ? packet.Metadata.AdapterHandle : association.OriginAdapterHandle;
-
-        // Stage the frame into a pooled native buffer (A3): the trackers read the pre-rewrite
-        // copy, the endpoint rewrite and MAC swap run in place on the native span, and the
-        // injector sends the same buffer — no managed materialization, no second copy.
-        var source = packet.InspectionSpan;
-        var buffer = _framePool.Rent();
-        try
-        {
-            source.CopyTo(buffer.GetFrameStorage());
-            buffer.CompleteFrame(source.Length, towardMstcp ? NdisApiAbi.PacketFlagOnReceive : NdisApiAbi.PacketFlagOnSend, targetHandle);
-            var frame = buffer.GetFrame();
-            // Read-then-write: record the SYN-ACK sequence and advance the server sequence tracker
-            // on the pre-rewrite copy before the in-place rewrite mutates the frame.
-            TcpSequenceObservation.RecordServerSynAck(frame, association);
-            TcpSequenceObservation.TrackServerSequence(frame, association);
-            if (!PacketChecksums.TryRewriteTcpEndpoints(frame, original.Remote.Address, original.Remote.Port, original.Local.Address, original.Local.Port))
-            {
-                return FailAssociationAndBlockAsync(association);
-            }
-            // The MAC swap makes the looped-back frame look inbound from the router for a host flow.
-            // A forwarded flow's reversed frame is emitted on the origin adapter toward the client, and
-            // its arrival MACs (this host -> client) are already correct.
-            if (towardMstcp) TcpFrameRewriter.SwapEthernetMacs(frame);
-            return InjectReverseFrameAsync(packet, association, buffer, towardMstcp, targetHandle, cancellationToken);
-        }
-        finally
-        {
-            buffer.Dispose();
-        }
-    }
-
-    /// <summary>
-    /// Sends the rewritten reverse frame and maps every failure to the established reverse-path
-    /// posture: caller cancellation propagates untouched, a foreign OCE fails the association, any
-    /// other injection failure surfaces to the client through <see cref="ClientResetInjector"/>
-    /// before failing closed. Non-async so the per-packet reverse path never boxes a state
-    /// machine; the cold failure tails run in their own async helpers.
-    /// </summary>
-#pragma warning disable RCS1229 // Deliberate non-async warm entry (hot-path.md #3): the per-packet reverse path must not pay an async state machine; the cold failure tails run in their own async helpers.
-    private ValueTask<TcpRedirectOutcome> InjectReverseFrameAsync(CapturedFlowPacket packet, TcpRedirectAssociation association, NdisPacketBuffer buffer, bool towardMstcp, nint targetHandle, CancellationToken cancellationToken)
-#pragma warning restore RCS1229
-    {
-        try
-        {
-            if (!towardMstcp && targetHandle == 0)
-            {
-                return FailAssociationAndBlockAsync(association);
-            }
-            _injector.Inject(buffer, towardMstcp, targetHandle, cancellationToken);
-        }
-        catch (OperationCanceledException exception)
-            when (cancellationToken.IsCancellationRequested)
-        {
-            return ValueTask.FromException<TcpRedirectOutcome>(exception);
-        }
-        catch (OperationCanceledException exception)
-        {
-            return FailAssociationAndRethrowAsync(association, exception);
-        }
-        catch (Exception exception)
-        {
-            return HandleInjectionFailureAndBlockAsync(association, targetHandle, towardMstcp, exception);
-        }
-
-        TcpRedirectLogging.LogTrace(_logger, "tcp.reverse.injected", packet, association);
-        return ValueTask.FromResult(TcpRedirectOutcome.Injected);
     }
 
     /// <summary>

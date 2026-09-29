@@ -1,3 +1,5 @@
+using WinForward.NdisApi;
+
 namespace WinForward.Runtime.TcpRedirect;
 
 /// <summary>
@@ -19,4 +21,12 @@ public sealed record TcpRedirectOptions
 
     /// <summary>Optional sink for client-visible failure health signals; null reports to the shared no-op.</summary>
     public IInterceptionHealthSignal? HealthSignal { get; init; }
+
+    /// <summary>
+    /// Test/benchmark seam: the native pool the redirect data legs stage their frames into; null
+    /// keeps <see cref="NdisPacketBufferPool.Shared"/>. A dedicated pool lets a rent-site balance
+    /// regression assert <c>Rented == Returned</c> exactly instead of reading the process-wide
+    /// pool's cumulative counters (which parallel tests share).
+    /// </summary>
+    internal NdisPacketBufferPool? FramePool { get; init; }
 }
