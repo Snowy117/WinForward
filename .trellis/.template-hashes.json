@@ -229,6 +229,10 @@
     ".qoder/hooks/inject-shell-session-context.py": "45a8b060c68b04d2d92bf0b8d5626651f490bd05a314a6af52179515a07d8d06",
     ".qoder/hooks/inject-workflow-state.py": "71ef1aa1ed1051a697cae3c9ebffa518958a3bbd4d147434f382348829915f8c",
     ".qoder/hooks/session-start.py": "c399c59cfeb88f1fc2b962cbeaf288f2a89f99ec627fc7e7974586ebe918a35f",
-    ".qoder/settings.json": "b620d303d534e157d1581460104ac08f228ce53d167243acb67e0ab16cc93770"
+    ".qoder/settings.json": "b620d303d534e157d1581460104ac08f228ce53d167243acb67e0ab16cc93770",
+    ".dsh/skills/trellis-continue/SKILL.md": "a81e9c4d262d88881111a2c7c08c61ace21a353f59117ce5fef90081b688cf8d",
+    ".dsh/skills/trellis-finish-work/SKILL.md": "a82d556384ce53eaaabedc63973b5d5f84236c94b7c7d786c77d8f8731fa4347",
+    ".dsh/skills/trellis-start/SKILL.md": "5fe15d32a8ea075b7d37b814b1e46cf398370095a48d415eb5ceeff5a8865c46",
+    ".dsh/DSH.md": "648b18898d5088115959af4d1500dab5c0612813ce72a32b017a72441fb9dfc6"
   }
 }
