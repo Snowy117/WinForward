@@ -36,16 +36,29 @@ before/after delta at equal chunk sizes rather than the raw number):
 | Class | Covers | Sweep |
 |---|---|---|
 | `ParserBenchmarks` | IPv4/UDP frame parse, payload parse, SOCKS5 UDP decode/encode/span-encode | frame bytes 64 / 512 / 1514 |
+| `ParserBenchmarks` (IPv6 rows) | IPv6/UDP frame parse and payload parse (`Ipv6UdpTryParse` / `Ipv6UdpPayload`), mirroring the IPv4 pair against `BenchmarkShared.CreateIpv6UdpFrame` | frame bytes 64 / 512 / 1514 |
 | `NdisBufferBenchmarks` | `NdisPacketBuffer` allocate+set+dispose vs reuse | frame bytes 64 / 512 / 1514 |
 | `FlowTableMissBenchmarks` / `FlowTableHitBenchmarks` | flow-table resolve miss / cross-adapter hit | cardinality 0–65 535 |
+| `FlowTableProductionShapeBenchmarks` | the shipped cardinality's real orientations: same-orientation hit, reverse-alias hit (every proxied reply), and the per-hit activity-clock reference row | cardinality 4 096 |
 | `SelfTrafficBenchmarks` | self-traffic registry wildcard miss | cardinality 0–65 535 |
 | `DispatcherBenchmarks` | warm-path dispatch (pass, trace off) | — |
+| `UdpReadyPathContentionBenchmarks` | the UDP ready path's per-datagram cost under 1/2/4 worker threads (counting fake transport, so the number is the coordinator gate + session lookup, not sockets) | workers 1 / 2 / 4 |
 | `CapturePumpBenchmarks` | end-to-end pump round: 200 000 synthetic packets through dispatcher + processor | frame 128/1400 × batch 32/1 |
 | `UdpSessionBenchmarks` | UDP session populate + dispose cost | 1 / 100 / 1000 sessions |
 | `SessionSetupDecompositionBenchmarks` | staged Noop session-setup decomposition (capacity → admission → setup start → session tier → teardown) plus component probes and the fake baseline | 1 / 100 / 1000 sessions |
 | `FrameworkSetupBenchmarks` | per-session framework dial split (control connect + handshake, UDP ASSOCIATE, relay socket, self-traffic, transport ctor) | 1 000 create+dispose per variant |
 | `TcpRelayBenchmarks` | one-way relay transfer (256 KiB–16 MiB) | chunk 1 / 1024 / 8192 / 65536 |
+| `TcpRedirectDataPathBenchmarks` | the composed per-packet proxy cost: sequence tracking → forward/reverse rewrite → MAC swap, in host and forwarded association shapes, IPv4 and IPv6 | frame bytes 128 / 1400 × IPv4/IPv6 |
 | `ChecksumBenchmarks` | scalar vs vectorized Internet checksum (P2b decision data; scalar is the baseline) | frame bytes 64 / 512 / 1514 |
+
+`TcpRedirectDataPathBenchmarks` is the composed row for the redirect data path: one invocation performs
+the real per-packet work a proxied TCP frame pays — sequence tracking, the leg's endpoint rewrite, and
+the MAC swap — in both association shapes and both families, and `[GlobalSetup]` proves every row's
+rewrite succeeds on the pristine frame before anything is timed. The driver send is deliberately **out
+of scope**: it is an IOCTL, so a counting fake would measure the fake rather than the driver, and the
+Windows driver's cost is not observable from a Linux micro row. The two new `ParserBenchmarks` IPv6
+rows are parse-only shapes (Ethernet + IPv6 + UDP, zero UDP checksum — neither production parser reads
+the checksum field), so like the IPv4 pair they measure header classification plus payload length.
 
 Interpretation guidance from the hot-path conventions still applies: treat ns/pps deltas under
 ~2× as noise on a dev box; allocation bytes and GC counts are the exact gates. Use the same
@@ -75,12 +88,17 @@ Count-based reliability metrics under sustained load. One JSONL record per scena
 
 ```text
 dotnet run -c Release --project benchmarks/WinForward.Benchmarks -- \
-  --stability [--scenario all|udp|udpBurst|udpChurn|udpSessionBudget|tcp|tcpthroughput|footprint|baseline] [--duration 60] [--pps 25000] \
-  [--payload-bytes 512] [--flows 256] [--burst-flows 48] [--dial-delay-ms 0] [--churn-waves 1] \
+  --stability [--scenario all|udp|udpBurst|udpChurn|udpSessionBudget|tcp|tcpChurn|tcpthroughput|footprint|baseline|residency|scaling|sweep|pump] [--duration 60] [--pps 25000] \
+  [--payload-bytes 512] [--flows 256] [--udp-flows 100] [--burst-flows 48] [--dial-delay-ms 0] [--churn-waves 1] \
   [--rate 20] [--capacity 16384] [--churn-seconds 90] [--drain-seconds 120] [--require-pooling] \
   [--tcp-concurrency 64] [--tcp-transfer-bytes 1048576] [--socks5-external] \
+  [--attribution-delay-ms 0] [--attribution-delay-percent 5] [--threads 0] [--shared-key-percent 10] \
   [--abort-mix clean=25,clientRst=25,relayCancel=25,upstreamTruncate=25] [--seed 42] \
   [--output <path>] [--quick]
+
+Every scenario not listed in the `all` arm of the parser is excluded there deliberately; the runner's
+own summary enumerates the reason per exclusion (`gc-soak`, `udpSessionBudget`, `scaling`, `sweep`,
+`pump`, `residency`, `tcpChurn`).
 ```
 
 `--quick` = `--duration 15 --pps 10000 --tcp-concurrency 16 --flows 64`.
@@ -170,6 +188,102 @@ teardown tails — are **not comparable** with current rows either.
   fake transports: `workingSetDeltaBytes`, `gen0Collections`, `allocatedBytes` captured with the
   session pool live (before disposal). This is the old `udpSessions.active` metric; a
   working-set level is not a time distribution, so it lives here rather than in BenchmarkDotNet.
+- **`scaling.contention`** — the lock chain's contention and scaling curve (research F2): one shared
+  `FlowTable` seeded with `--flows` live states plus one self-traffic registry, driven by 1/2/4
+  dedicated worker threads (released from a common gate, so the window excludes start skew) that each
+  walk their own key partition with every `--shared-key-percent`-th lookup aimed at a shared pool (the
+  reverse-leg traffic every adapter sees). The measured unit is the pair a warm packet pays —
+  `ISelfTrafficGuard.IsOwned` then `FlowTable.TryResolve`. Every configuration is measured **twice**:
+  once with `NeverOwnedGuard` (the guard shape every existing dispatcher row uses) and once with a real
+  populated `SelfTrafficRegistry`; the fake arm cannot see the self-traffic work at all, which is the
+  point of the A/B. Reports resolutions/s, per-worker rates, worker spread, and a verdict row carrying
+  the scaling ratio `throughput(N) / (N × throughput(1))` per arm. **Report-only** (`gated: false`) —
+  contention curves are noisy, so the artifact is the curve, not a pass line; run it 3× and quote the
+  median. `--threads N` pins one configuration instead of the sweep. Excluded from `--scenario all`
+  (a micro probe, and the A/B doubles the run). First series:
+  `results/2026-09-29-benchmark-coverage/scaling-contention.jsonl` — at `--flows 4096` the real arm
+  measured 3.33M / 3.40M / 2.70M resolutions/s for 1/2/4 threads (ratio 1 / 0.51 / 0.203) against the
+  fake arm's 6.77M / 4.64M / 4.27M (ratio 1 / 0.343 / 0.158): the self-traffic check alone halves the
+  single-thread rate, and adding workers makes aggregate throughput *worse* — the F2 claim, quantified.
+
+- **`flowTable.sweepPause`** — the sweep's stop-the-world pause (research F3): a 65,536-entry table is
+  refilled with already-expired states and swept with the production call (`FlowTable.RemoveExpired` plus
+  the coordinator's "still held?" predicate) while `--tcp-concurrency` observer threads resolve live TCP
+  keys. Live keys are held by protocol through the hold predicate, so the observers never lose their
+  working set, and a resolve that misses aborts the run instead of reporting a pause for the wrong work.
+  Reports the sweep's mean/max wall time, its allocation per sweep, and the observer-side **maximum**
+  pause plus counts over 0.1 / 0.5 / 1 / 5 ms — an exact maximum rather than a sampled percentile,
+  because the one pause that matters is the one a sample misses. The research's 0.5 ms line is recorded
+  as `targetMaxPauseMs` and **not** enforced (`gated: false`); the sweep's zero allocation is the exact
+  gate and lives in `SweepAllocationGateTests`. `--flows` can raise but not lower the 65,536 floor.
+  Excluded from `--scenario all` (it seeds a 65k table and loops: a probe, not a soak). First series:
+  `results/2026-09-29-benchmark-coverage/sweep-pause.jsonl` — sweep 25.1 ms mean / 87.1 ms max, resolve
+  pause up to **39.5 ms against the 0.5 ms target**, 14,022 resolves over 1 ms in 15 s, 0 B per sweep.
+- **`pump.idleWake`** — the capture pump's idle cost and its wake→dispatch latency (research F5), driven
+  through fake readers so no hardware is needed. The idle row runs an always-empty reader for
+  `--duration` (capped at 15 s) and reports `cpuSecondsPerIdleSecond` (a `Process.TotalProcessorTime`
+  delta taken over the window on the scenario thread), `polls`/`pollsPerSecond`, and the window's managed
+  allocation — which must be **0 B**, enforced in the row itself (a non-zero delta fails the run), so the
+  existing idle-allocation invariant is carried by the real run loop rather than the test seam. The wake
+  row parks `TryReadPackets` on a semaphore until the harness arms exactly one frame — the F5.2
+  `SetPacketEvent`+wait shape, with the harness confirming the reader is parked before it arms so a hot
+  handoff cannot masquerade as a wake — and reports the arrival→dispatch p50/p95/p99/max over 5,000
+  wakes (plus 500 unrecorded warmups; a wake that does not dispatch within the timeout fails the run
+  instead of being silently dropped). Both rows carry the F5.1 seam-level read-call accounting
+  (`readCallsPerPoll`, `readCallsPerPacket`), and `CapturePumpReadCallTests` gates that pattern exactly
+  (one `TryReadPackets` call per poll and one per batch, never one per packet; one handler call per
+  packet). **The driver's internal queue-query + batch-read IOCTL pair sits below the
+  `INdisPacketReader` seam** (`NdisApiDriver.TryReadPackets` queries and then reads under one gate
+  lease), so the "speculative read halves the IOCTLs" claim is not observable from the harness and needs
+  the real driver on Windows; what these rows establish is that the pump issues exactly one read per poll,
+  which makes that driver-internal pair the only remaining candidate. Report-only timing
+  (`gated: false`): the exact numbers are the row's 0 B and the xunit call counts. Excluded from
+  `--scenario all` (a micro probe, not a soak). First series:
+  `results/2026-09-29-benchmark-coverage/pump-idle-wake.jsonl` — **0.0178–0.0185 CPU seconds per idle
+  second at ~880 polls/s and 0 B allocated** (the 1 ms pacing resolves at ~1.13 ms on this host, so the
+  cadence is `Thread.Sleep` resolution and the ~20 µs of CPU per poll is the timer/wake cost, not packet
+  work), and a wake **p50/p95/p99 of 0.078 / 0.124 / 0.188 ms** (max 0.58–0.82 ms) — the ~0.08 ms median
+  is the latency an event-driven wake would cost where the 1 ms poll delay costs up to a full millisecond.
+
+- **`flowTable.claim`** — the insert path's cost on a fresh table (2,339.7 ns and 192.02 B per claim at
+  the production cardinality), the half of the probe-cost question BenchmarkDotNet cannot express: a
+  "new key" row would silently become a resolve row once the table filled mid-iteration.
+
+- **`tcp.churn`** — new-flow churn through the real TCP redirect relay path (research F8):
+  `--rate` connections/s, `--tcp-concurrency` workers, each connection dialled, SOCKS5-established, sent
+  `--payload-bytes` and closed. Reports the first-byte distribution per class (p50/p95/p99/max and mean,
+  never a mean alone), establishment outcomes with failure reasons, transient allocation per second and
+  per connection, and the server's own CONNECT-reply and echoed-byte counts as cross-checks.
+  `--attribution-delay-ms` with `--attribution-delay-percent` injects a synthetic per-flow stall on the
+  selected share of connections, which is the shape of the pump-thread process attribution that only runs
+  on Windows: the delayed class is reported separately so "the tail moved and the middle did not" is
+  readable from one artifact. Report-only (`gated: false`); on Windows run it with the delay at 0 and the
+  real attributor supplies the stall. First series:
+  `results/2026-09-29-benchmark-coverage/tcp-churn-*.jsonl` — ~91 KB allocated per new flow, and a 50 ms
+  stall on 1 % of connections moves the pooled p99 from 8.3 ms to ~52 ms (≈6×) while the stable-class mean
+  stays at 2.34 / 2.36 / 2.21 ms across the three runs.
+
+- **`residency.census`** — the live-residency census (research A1/A4 memory items plus F6's TCP half):
+  a zero-flow baseline taken in-process, then three populations built in order — the flow table seeded
+  to `--flows` live states at its production 65,536-state capacity, `--flows` real loopback SOCKS5
+  relays held open (two 64 KiB native pump windows each), and `--udp-flows` coordinator sessions over
+  fake transports — with `GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();` immediately
+  before every sample. Each row reports `GC.GetTotalMemory(forceFullCollection: true)`,
+  `TotalCommittedBytes`, working set, `PrivateMemorySize64`, descriptors, per-generation collection
+  counts and the flow table's `Count`/`Capacity` as absolute values, as deltas against the baseline,
+  and as deltas against the previous stage — read `vsPreviousStage`, because the populations are
+  cumulative and its delta is the one attributable to that stage's own population. **Report-only**
+  (`gated: false`): no byte or timing threshold can fail the run. The only aborts are the population
+  proofs (`--flows` flow states, the loopback server's CONNECT-reply count, the transport factory's
+  created count cross-checked against the coordinator's `SessionCount`) — a census of a population
+  that silently failed to build would be a fabricated number. Excluded from `--scenario all` (a
+  census, not a soak). `--flows` sizes the TCP populations, `--udp-flows` the UDP one. First series:
+  `results/2026-09-29-benchmark-coverage/residency-census.jsonl` — the flow table costs **32.5 MB
+  whether it holds 1, 100 or 1000 live states** (A1 item 1a's pre-allocation, ≈251 B per live
+  state), a held-open relay adds **146–160 KB** of working set and **4.22 descriptors**, and a
+  fake-transport UDP session adds **≈4.2 KB managed / 41–44 KB working set**. `PrivateMemorySize64`
+  is reported but is not a per-population column on Linux (it is `VmData`, which carries the
+  allocator's per-thread arenas): see the artifact's readings.
 
 A nonzero loss rate or an EOF count under an adversarial mix is an observation, not a harness
 failure — the numbers become meaningful as a comparison series across builds. For UDP, loss
