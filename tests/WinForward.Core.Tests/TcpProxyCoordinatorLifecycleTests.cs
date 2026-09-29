@@ -388,27 +388,27 @@ public sealed class TcpProxyCoordinatorLifecycleTests
 
         await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
 
-        // Allow the accept loop to make a handful of backed-off attempts. With a 100 ms back-off
-        // between transient failures, this window yields a few calls, and the elapsed time proves
-        // real back-pressure was applied rather than a tight busy-loop.
-        var elapsed = await MeasureWindowAsync(() => throwingListener.AcceptCount >= 3, TimeSpan.FromMilliseconds(300));
+        // Allow the accept loop to make a handful of backed-off attempts. Attempts are counted
+        // relative to the window's start: retries that ran while the preceding setup awaited say
+        // nothing about the loop's pacing.
+        var attemptsAtWindowStart = throwingListener.AcceptCount;
+        await MeasureWindowAsync(() => throwingListener.AcceptCount > attemptsAtWindowStart, TimeSpan.FromMilliseconds(300));
+        var windowAttempts = throwingListener.AcceptCount - attemptsAtWindowStart;
+        Assert.True(windowAttempts is >= 1 and <= 5, string.Create(CultureInfo.InvariantCulture, $"a 100 ms back-off over a 300 ms window admits a few retries, saw {windowAttempts}"));
         Assert.True(throwingListener.AcceptCount < 25, string.Create(CultureInfo.InvariantCulture, $"accept calls over the window should be bounded, saw {throwingListener.AcceptCount}"));
-        Assert.True(elapsed >= TimeSpan.FromMilliseconds(50), string.Create(CultureInfo.InvariantCulture, $"the retry should have observed back-off back-pressure, saw {elapsed.TotalMilliseconds:F0}ms"));
 
         // Dispose must terminate the throwing accept loop promptly (cancel + listener dispose).
         // ReSharper disable once DisposeOnUsingVariable // The explicit DisposeAsync is the scenario under test: if it hung behind the persistently-throwing accept loop the test would time out; the await using disposal only backstops failure paths.
         await coordinator.DisposeAsync();
     }
 
-    /// <summary>Polls <paramref name="condition"/> until it holds or the window elapses; returns the time spent.</summary>
-    private static async Task<TimeSpan> MeasureWindowAsync(Func<bool> condition, TimeSpan window)
+    /// <summary>Polls <paramref name="condition"/> until it holds or the window elapses.</summary>
+    private static async Task MeasureWindowAsync(Func<bool> condition, TimeSpan window)
     {
-        var started = DateTime.UtcNow;
-        var deadline = started.Add(window);
+        var deadline = DateTime.UtcNow.Add(window);
         while (!condition() && DateTime.UtcNow < deadline)
         {
             await Task.Delay(5, CancellationToken.None).ConfigureAwait(false);
         }
-        return DateTime.UtcNow - started;
     }
 }
