@@ -784,3 +784,48 @@ await using var associations = new UdpAssociationPool(registry, UdpAssociationRe
 // Correct: the instrument keeps the shape its anchor was measured on.
 await using var associations = new UdpAssociationPool(registry, UdpAssociationReuseMode.Off);
 ```
+
+## Measurement self-checks (task 09-29-benchmark-coverage-remaining-findings, 2026-09-29)
+
+### 1. Scope / Trigger
+
+Any new benchmark row, stability scenario or allocation/timing gate. A measurement that silently measures
+the wrong path is worse than no measurement: it produces a plausible number that later work optimizes
+against. Every one of the traps below was hit while building this task's coverage, so each check exists
+because something real slipped through without it.
+
+### 2. Contracts
+
+- **Prove the measured path is taken, in setup.** A frame that the rewriter rejects is *faster* to process
+  than a frame it accepts, so a row measuring the rejection path looks like an improvement. Rows must
+  assert their operation succeeds on the pristine input before anything is timed
+  (`TcpRedirectDataPathBenchmarks.ProveRowsSucceed`, the parser rows throwing on `TryParse == false`), and
+  setup must fail loudly otherwise.
+- **Prove the population is live before sampling.** A census or churn row whose population silently failed
+  to build reports per-flow costs for flows that do not exist. Assert the population against an
+  independent counter (the server's CONNECT-reply count, the factory's created count, the table's own
+  `Count`) and abort the run on mismatch — the population proof is the only thing allowed to abort a
+  report-only row.
+- **Model the wait being measured.** A wake-latency row must confirm the reader actually parked before it
+  is armed; arming first measures a hot handoff (0.5 µs) and calls it a wake (78 µs). The same rule
+  applies to any latency whose claim is "the cost of waiting".
+- **Keep the harness out of its own window.** Take allocation baselines after the harness has created its
+  own clocks, buffers and lists, or the gate reports the harness's allocations as the product's (the
+  pump-idle gate failed with exactly 40 B of `Stopwatch` before this was fixed).
+- **Never use a fake collaborator for the thing under test.** A guard/executor/transport that answers
+  before touching the code under test makes the measured delta structurally zero: `NeverOwnedGuard` hides
+  the whole self-traffic path, and the same workload through the real registry costs 2× at one thread.
+- **Prove the gate can fail.** For every exact gate, inject the violation once (a 16-byte allocation, a
+  one-short population) and record the exact failure message before restoring the file; a gate whose
+  failure mode has never been observed is an assumption.
+- **Report-only unless the metric is exact.** Timing, throughput, percentiles and residency are series
+  comparisons; allocation bytes, call counts and GC counts are gates. The research targets (e.g. "max
+  resolve pause < 0.5 ms") are recorded as target lines in the verdict row, never as pass/fail lines.
+
+### 3. Tests Required
+
+- One gate test per exact claim, in a file of its own when the existing gate file is near the line budget.
+- One self-check test for any new frame or key builder, checked against an implementation independent of
+  the builder (the test project's own checksum code, the production parser).
+- A scenario-selection test when a scenario is added or deliberately excluded from `--scenario all`, so the
+  documented invocation stays falsifiable.
