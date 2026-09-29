@@ -109,6 +109,41 @@ JSON, rejected on any unknown property. The top level is:
   `4096` are accepted with a validation warning about port-pool pressure. Omitting the field
   deliberately tightens the limit from the previous implicit 16,384 sessions; configure a higher
   value explicitly (max 8192) if more concurrent flows are required.
+- `udpSessionCapacity`: optional concurrent proxied UDP session budget, `1..16384`, default
+  `16384`. Like a proxied TCP flow, each UDP session consumes two local ports (SOCKS5 control
+  connection + relay socket), so values above `4096` are accepted with a validation warning that
+  also names the aggregate kernel receive buffer at that capacity. A datagram for a flow above the
+  budget is refused fail-closed with a rate-limited `udp.session.capacity-block` warn and the
+  `udpCapacityRejections` counter; the flow retries on its next datagram.
+- `udpRelayReceiveBufferKb`: optional per-relay-socket kernel receive buffer in KiB, `16..1024`,
+  default `128`. It is applied to every relay socket before bind; responses can burst faster than
+  one receive loop reinjects them, so the buffer absorbs the burst. Because it is per session, a
+  per-session value above `256` combined with a session capacity above `2048` is accepted with a
+  validation warning about the aggregate kernel receive buffer.
+- `udpSessionIdleSeconds`: optional idle retention for a UDP session, `5..600`, default `30`
+  seconds — after the last send or receive, the session's relay socket and its association lease
+  are released (a shared association itself stays warm for reuse for another 60 s). The sweeper's
+  UDP cadence derives from this value: half the idle timeout, at least 5 s, and never longer than
+  the 60 s main sweep interval (15 s at the default).
+- `udpAssociationReuse`: how UDP flows share authenticated SOCKS5 associations — `auto` (default),
+  `always`, or `off` (case-insensitive; any other value is rejected). `auto` shares and passively
+  falls back to per-flow associations for a server observed to pin one client source port per
+  association — sticky for the run and reported once with a warn and the `udpAssociationFallbacks`
+  counter; `always` shares with detection disabled; `off` reproduces the per-flow association
+  behaviour exactly and is the rollback lever.
+- `udpAssociationMaxPerServer`: per-server **ceiling** on shared associations, `1..16384`, default
+  `1024`. It is a bound on connections, not a preallocation: the pool opens only the associations
+  placement needs, and a flow arriving once the ceiling is reached is served from a private
+  per-flow association instead of being refused.
+- `udpAssociationFlowsPerAssociation`: concurrent flows one shared association serves, `1..256`,
+  default `16`. It is simultaneously the blast radius of one association death (every attached flow
+  fails on its next datagram and re-establishes) and the capability sampler's live-evidence set, so
+  raising it trades sharing for recovery fan-out. At the defaults both caps multiply into a shared
+  head of 16,384 flows per server — the default `udpSessionCapacity` — so every admitted flow can be
+  shared. If the two caps multiply to less than `udpSessionCapacity`, validation warns (it does not
+  refuse): the flows beyond that head are served from private per-flow associations, so they each
+  hold their own control connection instead of sharing one, and the excess is invisible in every
+  counter except the descriptor and port counts.
 - `logLevel`: optional runtime verbosity: `error`, `warn`, `info`, `debug`, or `trace`. Values are
   case-insensitive and surrounding whitespace is ignored; omitted `logLevel` defaults to `info`.
   `info` retains concise lifecycle output, `debug` adds flow and proxy lifecycle events, and `trace`
@@ -120,6 +155,19 @@ JSON, rejected on any unknown property. The top level is:
   byte counts only: credentials, authentication traffic, payloads, and raw packet bytes are never
   logged. Process names are included when attribution succeeds; full process paths are included
   only when a rule uses a path-based process selector.
+
+**UDP resource shape.** Association sharing removes the per-flow control connection, not the relay
+socket: every live flow keeps its own local relay socket, because that local port plus the relay
+endpoint is what routes a response back to its flow. The descriptor floor is therefore ≈1 per live
+session plus one shared control connection per association (≈1/16 at the defaults), and the kernel
+receive-buffer estimate stays `live sessions × udpRelayReceiveBufferKb`. The recorded
+`udp.sessionBudget` soak measured 1.94–1.95 descriptors per live session at 100 new flows/s while
+the pooled head was saturated at 256 flows per server (the pool's original 16 × 16 default) and
+1.06 in the pooled regime; the two association caps above raise the default head to the default
+session capacity, so the pooled shape covers the admitted population. Re-measured on those shipped
+caps, the same 100 new flows/s load holds ≈1.06 descriptors per live session and ≈0.063 associations
+per session (≈282 shared control connections for ≈4,500 live flows), with the soak's retention and
+pooling verdict halves both recorded as held.
 
 The configuration is validated fully before interception starts and is kept immutable for the
 lifetime of a run. Configuration hot reload is not supported.
@@ -141,6 +189,9 @@ The operationally relevant ones:
 | `udp.reinject.unresolved` | warn | A host UDP response could not resolve its origin adapter and fell back to the host target (rate-limited, counted). |
 | `udp.reinject.drop` | warn | A UDP response was dropped fail-closed (unresolvable origin or missing client MAC; rate-limited, counted). |
 | `udp.targets.noMac` | warn | The capture scope contains adapters without a usable MAC (forwarded responses to them drop fail-closed); emitted on first occurrence and when the affected adapter set changes, not on every adapter refresh. |
+| `udp.session.capacity-block` | warn | A UDP datagram was refused fail-closed because the session budget is full and its flow has no slot (rate-limited, counted as `udpCapacityRejections`); the flow retries on its next datagram. |
+| `udp.association.fallback` | warn | Passive sampling detected a SOCKS5 server that pins one client source port per association, so that server is served by per-flow associations for the rest of the run. Emitted once per server per run (counted as `udpAssociationFallbacks`). |
+| `udp.association.lost` | warn | A shared SOCKS5 UDP association died without an in-place recovery; its attached flows re-establish on their next datagram (rate-limited; the association-lost removals are counted per affected flow as `udpAssociationLost`). |
 | `adapter.addressQuery.failed` | debug | The periodic adapter address-fingerprint query failed (non-fatal; the refresh diff continues without addresses). |
 | `runner.forcedRefresh` | warn | Interception-path failure rates crossed their thresholds, so a forced adapter-view refresh (generation rebuild) was armed. |
 | `runner.forcedRefresh.degraded` | error | Forced refreshes keep triggering without a successful refresh in between; the trigger cadence drops to one per 5 minutes. |

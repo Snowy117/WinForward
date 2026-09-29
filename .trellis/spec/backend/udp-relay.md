@@ -34,9 +34,9 @@
   var target = adaptersByStableId[flow.OriginAdapterId!];
   reinjector.SendToMstcp(target.Handle, buffer);
   ```
-- Loop prevention: `Socks5UdpTransport` registers `(Udp, localSocketEndpoint, relayEndpoint)` in `SelfTrafficRegistry` when `UDP ASSOCIATE` returns the dynamic relay endpoint, and releases the token on dispose — catch-all proxy rules never recursively intercept WinForward's own UDP relay traffic. The factory takes the registry.
+- Loop prevention: `Socks5UdpTransport.Create` registers `(Udp, localSocketEndpoint, relayEndpoint)` in `SelfTrafficRegistry` from the lease's current relay endpoint before the first datagram, and releases the token on dispose — catch-all proxy rules never recursively intercept WinForward's own UDP relay traffic. A shared association's in-place re-association publishes a new relay endpoint (see the pooling section below), so the transport replaces the tuple on its next send (`RebindRelay`: register the new tuple, adopt the endpoint, dispose the old token). The factory takes the pool and the registry.
 - **Session activity accounting is two-tier** (task 08-29-udp-throughput-loss D3): `UdpProxySession` updates `_lastActivityTicks` on *every* send and receive (Interlocked, exact — idle-expiry decisions in `TryBeginExpiry` read this exact value), while propagation to the association-table observer (`UdpAssociationTable` touch) is throttled to at most once per `ActivityPropagationInterval` (100ms) per session via Interlocked CAS; the first activity after creation or after an interval propagates immediately. The table serves reverse-leg classification and sweep pruning on seconds-scale timeouts, so 100ms granularity is unobservable there; per-datagram table touches were pure overhead. Do not throttle the timestamp itself — that would delay expiry.
-- **Relay sockets disable `SIO_UDP_CONNRESET`, and `ConnectionReset` is a skip, not a failure** (task 08-29-proxy-stability-perf S2, 2026-08-29): on Windows an ICMP port-unreachable for a destination the relay socket wrote to surfaces as `SocketException(ConnectionReset)` on the next receive, which used to tear the session down (churn: re-ASSOCIATE per cycle under a noisy path). Two layers, both required: (1) `Socks5UdpTransport.CreateAsync` issues the vendor IOCTL `0x9800000C` with a 4-byte `FALSE` **before bind** via an internal seam — the default implementation is guarded by `OperatingSystem.IsWindows()` because Linux `Socket.IOControl` throws `PlatformNotSupportedException` (test seam asserts the call on any OS); (2) `ConnectionReset` is classified as a skip at both the transport layer (`ClassifyReceiveFault`) and the session receive loop — counted in the 5 s skip summary (`connectionReset=`), loop survives, session reusable. All other socket errors remain fatal. Locked by `Socks5UdpConnresetTests` + `UdpReceiveResilienceTests`.
+- **Relay sockets disable `SIO_UDP_CONNRESET`, and `ConnectionReset` is a skip, not a failure** (task 08-29-proxy-stability-perf S2, 2026-08-29): on Windows an ICMP port-unreachable for a destination the relay socket wrote to surfaces as `SocketException(ConnectionReset)` on the next receive, which used to tear the session down (churn: re-ASSOCIATE per cycle under a noisy path). Two layers, both required: (1) `Socks5UdpTransport.Create` issues the vendor IOCTL `0x9800000C` with a 4-byte `FALSE` **before bind** via an internal seam — the default implementation is guarded by `OperatingSystem.IsWindows()` because Linux `Socket.IOControl` throws `PlatformNotSupportedException` (test seam asserts the call on any OS); (2) `ConnectionReset` is classified as a skip at both the transport layer (`ClassifyReceiveFault`) and the session receive loop — counted in the 5 s skip summary (`connectionReset=`), loop survives, session reusable. All other socket errors remain fatal. Locked by `Socks5UdpConnresetTests` + `UdpReceiveResilienceTests`.
 - **Skip-summary counters cover silent drop shapes** (same task S6): domain-typed relay responses (`DestinationAddress == null` after decode) are dropped but **counted** (`domainDestination=` in the 5 s rate-limited debug summary) instead of vanishing silently; the executor's per-datagram UDP failure warn is rate-limited (5 s window, check-first so suppressed calls allocate nothing).
 
 ---
@@ -61,9 +61,10 @@
 
 - `Socks5ControlConnection.UdpAssociateAsync(CancellationToken)` (`src/WinForward.Runtime/Socks5/Socks5ControlConnection.cs`) sends the
   UDP ASSOCIATE request without a caller-provided local endpoint.
-- `IUdpProxyTransportFactory.CreateAsync(Socks5Server, CancellationToken)` and
-  `Socks5UdpTransport.CreateAsync(Socks5Server, SelfTrafficRegistry,
-  CancellationToken)` (`src/WinForward.Runtime/Socks5/Socks5UdpTransport.cs`) do not accept the original flow's address family.
+- `IUdpProxyTransportFactory.CreateAsync(Socks5Server, CancellationToken)` and the internal
+  `Socks5UdpTransport.Create(lease, SelfTrafficRegistry, ...)`
+  (`src/WinForward.Runtime/Socks5/Socks5UdpTransport.cs`) do not accept the original flow's address
+  family: the relay family is the association lease's negotiated relay family.
 - Module boundary: the transport seam (`IUdpProxyTransport`/`IUdpProxyTransportFactory` and their receive-result vocabulary `Socks5UdpReceiveResult`/`Socks5UdpReceiveSkipReason`) lives in `src/WinForward.Runtime/Socks5/Socks5UdpTransport.cs` and is UdpProxy's sanctioned cross-group edge into Socks5 (mirroring TcpRedirect→Socks5); the datagram wire codec itself (`Socks5UdpDatagram`, `Socks5UdpCodec`) lives in `src/WinForward.Protocols/Socks5Udp.cs`.
 
 ### 3. Contracts
@@ -81,8 +82,8 @@
 - `Socks5UdpCodec.TryEncode/Encode` (`src/WinForward.Protocols/Socks5Udp.cs`) preserves the original destination's IPv4/domain/
   IPv6 ATYP independently of the relay socket family. A valid IPv4 relay can
   therefore carry an IPv6 destination ATYP.
-- Proxy setup errors remain fail-closed. Socket, UDP self-traffic token, and
-  control connection are each released when owned; disposal continues through
+- Proxy setup errors remain fail-closed. Socket, UDP self-traffic token, and the
+  association lease are each released when owned; disposal continues through
   later resources if an earlier disposal throws.
 
 ### 4. Validation & Error Matrix
@@ -135,7 +136,7 @@ var socket = new Socket(relay.AddressFamily, SocketType.Dgram, ProtocolType.Udp)
 Task 08-30-atomic-retire (research R4/R3-UDP). Pre-fix worst case: 16,384 flows
 × 32 KiB queues = 512 MiB held for hours against a dead SOCKS5 server, then
 delivered long-expired; the setup-cooldown index (`UdpSetupCooldownTable`) was
-unbounded between 60 s sweeps.
+unbounded between sweep ticks.
 
 Structure note (2026-09-08, P1): the concerns live in separately named types —
 `UdpProxyCoordinator` (slot dict + admission + teardown) composes
@@ -211,7 +212,8 @@ window is always "setup cooldown" (the word tombstone is retired from UDP).
 - **Setup cooldowns are bounded**: `UdpSetupCooldownTable` capacity = the
   coordinator's session `capacity`; a write at capacity evicts the
   oldest-deadline entry (refusal would degrade the cooldown into an
-  immediate-retry storm). Lazy prune on touch and the 60 s sweep are unchanged.
+  immediate-retry storm). Lazy prune on touch and the sweeper's UDP leg — its own derived cadence,
+  15 s at the default 30 s retention (see the pooling section below) — are unchanged.
 
 ### 4. Validation & Error Matrix
 
@@ -268,16 +270,16 @@ coordinator/reinjector already honor — on a jumbo-capable ABI every payload
 
 - `IUdpProxyTransport.SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken)` — the Core struct, not `IPEndPoint`; span-only since task 09-19-compat-api-cleanup (the memory overload was removed).
 - `Socks5UdpDatagram(IPAddressValue? DestinationAddress, string? DestinationDomain, ushort DestinationPort, ReadOnlyMemory<byte> Payload)` — `null` (nullable struct) still marks a domain-typed datagram.
-- `Socks5UdpTransportFactory(SelfTrafficRegistry selfTraffic, int maximumFrameSize)` — required cap parameter; internal `Socks5UdpTransport.CreateAsync` seam mirrors it with a `UdpFrameBuilder.DefaultMaximumEthernetFrame` default.
+- `Socks5UdpTransportFactory(UdpAssociationPool pool, SelfTrafficRegistry selfTraffic, int maximumFrameSize, int relayReceiveBufferBytes)` — the pool is the association source and the frame cap stays required; the internal `Socks5UdpTransport.Create(lease, …)` seam mirrors the cap and buffer with defaults (`UdpFrameBuilder.DefaultMaximumEthernetFrame`, `DefaultRelaySocketReceiveBufferSize`).
 - Per-transport cached `_receiveSenderTemplate` (`IPEndPoint`, ctor-computed from the relay address family).
 
 ### 3. Contracts
 
-- **Forward leg passes `Endpoint` straight through** (`UdpProxySession.SendSpanAsync` → transport): no `ToIPAddress()`/`new IPEndPoint` materialization anywhere on the send path; the transport encodes via `Socks5UdpCodec.TryEncode(IPAddressValue, ...)` and the actual `SendTo` target stays the fixed `RelayEndpoint`.
+- **Forward leg passes `Endpoint` straight through** (`UdpProxySession.SendSpanAsync` → transport): no `ToIPAddress()`/`new IPEndPoint` materialization anywhere on the send path; the transport encodes via `Socks5UdpCodec.TryEncode(IPAddressValue, ...)` and the actual `SendTo` target is the lease's current relay publication, re-read per send as one reference compare against the cached publication (only an in-place re-association replaces it, see the pooling section below).
 - **Decode produces `IPAddressValue?` directly** (`FromIPv4` / `FromIPv6(bytes, scopeId)`): the caller-supplied relay scope lands in `IPAddressValue.ScopeId` exactly as it previously landed in `IPAddress.ScopeId`; the session's reverse leg builds `Endpoint.From(address, port)` with zero framework-address round-trips. The `IPAddress`-taking `TryEncode`/`Encode` overloads were removed (task 09-19-compat-api-cleanup); `TryEncode(IPAddressValue, ...)` is the sole encode seam, and tests/loopback callers materialize a `byte[]` themselves.
 - **One sender template per transport**: `ReceiveFromAsync` does not mutate the passed endpoint (the observed remote arrives in `SocketReceiveFromResult.RemoteEndPoint`), so a readonly ctor-computed template is shared across receives.
 - **Send buffer derives from the same frame cap as every sibling**: `_sendBuffer = new byte[6 + 16 + maximumFrameSize]` (guard `> 0`), mirroring the coordinator's receive sizing (`cap + 22 + 1`) and the reinjector's frame bound (`cap`). Capture bounds payloads at `cap − 42`, so the send buffer always encodes anything the pipeline can capture; the fail-closed IOException for a genuinely larger datagram stays as the assumption guard.
-- **Composition single source of truth** (`Program.cs` `CreateUdpCoordinator`): one hoisted `NdisApiAbi.MaximumEthernetFrame` flows to `Socks5UdpTransportFactory`, `UdpResponseReinjector`, and `UdpProxyCoordinator`. Send buffer, receive buffer, reinjector cap, and the native ABI must agree; only the ABI constant should ever change.
+- **Composition single source of truth** (`Cli/UdpProxyComposer.cs`): one hoisted `NdisApiAbi.MaximumEthernetFrame` flows to `Socks5UdpTransportFactory`, `UdpResponseReinjector`, and `UdpProxyCoordinator`. Send buffer, receive buffer, reinjector cap, and the native ABI must agree; only the ABI constant should ever change.
 - **Oversized-response boundary**: the deliverable relay-response payload ceiling is `cap − 42` (1472 B at the pinned 1514 ABI — standard-MTU QUIC/WireGuard 1472 B packets pass exactly); larger responses skip as `Oversized` (5 s summary counter) and oversized rebuilt frames drop fail-closed. A jumbo-capable ABI lifts the ceiling end-to-end now that the send buffer follows the cap.
 
 ### 4. Validation & Error Matrix
@@ -320,7 +322,7 @@ xUnit `Assert.Equal` generic inference does not apply the `IPAddress` → `IPAdd
 ### 2. Signatures
 
 - `UdpSessionState { SettingUp, Active, Expiring, Faulted, Disposed }` and
-  `UdpTeardownReason { SetupFailure, Expiry, Fault, Shutdown }`
+  `UdpTeardownReason { SetupFailure, Expiry, Fault, AssociationLost, Shutdown }`
   (`UdpProxy/UdpSessionState.cs`, `UdpProxy/UdpTeardownReason.cs`).
 - `UdpProxySession.SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken)`
   -> `ValueTask<bool>` (`true` = sent; `false` = not sent because the session is expiring or
@@ -347,7 +349,9 @@ xUnit `Assert.Equal` generic inference does not apply the `IPAddress` → `IPAdd
   (Expiry -> the sweeper owns removal; Fault -> the failure handler owns removal). A genuine
   transport exception keeps the existing remove-slot + rethrow path.
 - **Teardown reason is data**: every slot removal passes a `UdpTeardownReason`; only
-  `SetupFailure` arms the 1 s setup cooldown. Teardown logging carries the reason.
+  `SetupFailure` arms the 1 s setup cooldown. An association that died without recovering in place
+  is `AssociationLost` — counted, and deliberately without the cooldown (see the pooling section
+  below). Teardown logging carries the reason.
 - **Owned drain for the residual handler**: the coordinator tracks in-flight receive-failure
   teardowns and awaits them in its `DisposeCoreAsync` (`DrainInFlightTeardownsAsync`); the
   receive loop still does **not** await the handler (re-entrancy hazard).
@@ -511,4 +515,124 @@ _ = receiveFailureHandler(this);
 lock (_activityGate) { if (_scope.Fault is not null) return false; }
 _scope.RecordFault(exception, "udp.receive");
 receiveFailureHandler(this);   // Action: returns immediately; _scope.Run(...) owns the teardown
+```
+
+---
+
+## UDP association pooling: one authenticated control connection, one relay socket per flow (wired 2026-09-28, task 09-28-udp-association-reuse)
+
+### 1. Scope / Trigger
+
+- Trigger: any change to `UdpAssociationPool` / `UdpControlAssociation` / `UdpAssociationLease`, the
+  `Socks5UdpTransportFactory` seam, `UdpTeardownReason`, the UDP placement/capability configuration
+  keys, or the UDP side of `DurableCaptureBundle` composition.
+- `udpAssociationReuse: off` is the rollback lever and reproduces per-flow associations byte for
+  byte: one private association per flow, closed as soon as its last lease is released.
+
+### 2. Signatures
+
+- `UdpAssociationPool(SelfTrafficRegistry, UdpAssociationReuseMode, Socks5AddressCache?, TimeProvider?, IRuntimeLogger?, Func<Socks5Server, CancellationToken, ValueTask<Socks5ControlConnection>>? createControl, TimeSpan? recoveryTimeout, int maxAssociationsPerServer = DefaultMaxAssociationsPerServer, int flowsPerAssociation = DefaultFlowsPerAssociation)` (`UdpProxy/UdpAssociationPool.cs`) — one pool serves the whole runtime, one warm set per `Socks5Server`; `RentAsync(server, ct) -> UdpAssociationLease` places a flow. `DurableCaptureBundle` creates and owns the pool through `UdpProxyComposer.CreateAssociationPool` from the validated `udpAssociationReuse` / `udpAssociationMaxPerServer` / `udpAssociationFlowsPerAssociation` values.
+- `UdpControlAssociation` (`UdpProxy/UdpControlAssociation.cs`): one authenticated `Socks5ControlConnection`, one `UDP ASSOCIATE`, the control-stream watchdog, and the in-place re-association. Diagnostics `LeaseCount`, `IsFaulted`, `RelayEndpoint`, `RelayTarget`.
+- `UdpAssociationLease` (`UdpProxy/UdpAssociationLease.cs`): `RelayTarget` / `RelayEndpoint` / `RelayAddressFamily` / `IsFaulted` / `Fault`, plus the two datagram-path evidence calls `RecordDatagramSent()` / `RecordResponseReceived()`; `DisposeAsync()` releases the lease exactly once and is the transport's only association mutation.
+- `UdpServerCapability { Unknown, SharedOk, PerFlowOnly }`, `UdpAssociationEvidence`, and `UdpAssociationCapabilitySampler.Evaluate(evidence, attached)` with `PinningSuspicionThreshold = 3` (`UdpProxy/UdpAssociationCapability.cs`).
+- `UdpAssociationLostException` (`Socks5/Socks5UdpTransport.cs`): the fail-fast the transport throws on its next send once its lease is faulted.
+- Caps and defaults: `udpAssociationMaxPerServer` default 1,024 (`1..16384`), `udpAssociationFlowsPerAssociation` default 16 (`1..256`). The product is the shared head — 16,384 flows per server at the defaults, exactly the default `udpSessionCapacity` — pinned by `UdpAssociationHeadTests`.
+
+### 3. Contracts
+
+- **Sharing covers the control connection only (R1/I1/I2).** One authenticated association serves up to `udpAssociationFlowsPerAssociation` concurrent flows, and **every flow keeps its own relay socket**: the local relay port still identifies the flow, so `RelayAlias` uniqueness, the per-flow self-traffic tuple, and reverse routing are unchanged. The descriptor floor is therefore ≈1 per live flow plus one shared control connection per association (≈1/16 at the defaults); the kernel receive-buffer estimate stays `live sessions × udpRelayReceiveBufferKb`.
+- **Placement never refuses a flow (I6).** `RentAsync` takes the least-loaded shared association with room (creation order breaks ties), opens a new shared association while the per-server ceiling allows, and otherwise serves the flow from a *private* association. The ceiling is a bound on connections, not a preallocation; the scan is O(shared associations) and runs once per flow setup, never on the datagram path. A private association is never handed to a second flow.
+- **Capability is a sticky per-server verdict (R2/I8).** `auto` starts every server `Unknown` (share + sample), `always` forces `SharedOk` with detection disabled, `off` forces `PerFlowOnly` from the first placement. A flip changes only *future* placement: associations already placed keep serving their attached flows, no session is torn down, and the verdict lasts the run.
+- **The sampler rule is conservative (design §5).** On the pool's 5 s maintenance tick, for each association of a still-`Unknown` server the sampler reads the evidence of the leases **currently attached**: two attached flows with a decoded response ⇒ `SharedOk` (detection stops); one responding flow plus a sibling with ≥3 successful sends and no response ⇒ `PerFlowOnly`; fewer than two attached flows ⇒ no verdict. The asymmetry is deliberate: a false `PerFlowOnly` costs only the sharing win, while a false `SharedOk` costs datagrams, so `SharedOk` requires positive proof. A `PerFlowOnly` flip emits the one-shot `udp.association.fallback` warn (`reason=source-port-pinned`, with `flows`/`sent`/`unanswered`/`relay`) and `udpAssociationFallbacks`, exactly once per server per run (the verdict is recorded under the pool gate before the log).
+- **Evidence lives with the live attached set, never with a ring (I3).** Each lease owns one `UdpAssociationEvidence` (one `Interlocked` sent counter plus a write-once response flag); `StartLease` adds the record and `ReleaseLeaseAsync` removes it, both under the association's leaf `_evidenceGate`, so `SnapshotEvidence()` returns exactly the leases attached at that instant however many leases the association has served before. An earlier index-by-attach-count ring mixed stale, live, and released slots — never reintroduce that shape.
+- **Known limit of the rule (accepted).** The rule needs a *live* responding sibling, so a pinning server whose answered flow has already been released is not detectable by that association. The window is bounded by the lease lifetime and the 5 s tick, and the verdict is per server and sticky, so any other association of the same server still carries it.
+- **Association death and the one bounded recovery (R3/I4/I7).** The watchdog blocks on the control stream: a 0-byte read or a stream fault is death (RFC 1928 defines no control-connection traffic after ASSOCIATE, so any received byte is not); our own cancellation/disposal is a normal exit. Each detected death gets **one bounded in-place attempt** (dial + ASSOCIATE, 5 s default budget, no backoff, no retry budget). Same address family ⇒ the new relay endpoint is published, the attached flows keep their session, relay socket, and alias, and `udpAssociationRecovered` + the debug `udp.association.recovered` event record it. A changed address family or a failed recovery faults the association; each attached transport then fails closed on its next send with `UdpAssociationLostException`.
+- **Association loss is not a setup failure (I5).** The coordinator maps that exception to `UdpTeardownReason.AssociationLost`, counts `udpAssociationLost` once per send failure classified as association-lost (each attached flow's next send), and arms **no** setup cooldown, so the flow re-establishes on its next datagram (through the pool, which dials a fresh association). The same mapping covers the setup-queue flush window, which rides the same send path. In contrast a failed dial/ASSOCIATE is a setup failure: counted `udpSetupFailures` and the 1 s cooldown is armed.
+- **Retention.** A shared association with no outstanding lease is kept warm for 60 s (`UdpAssociationPool.s_idleRetireTimeout`) and reused by a later flow; the pool's own 5 s maintenance child also retires a faulted zero-lease association. UDP *sessions* are retained for `udpSessionIdleSeconds` (default 30 s), and the sweeper's UDP leg derives its cadence from that value: `min(mainInterval, max(5 s, idle/2))` — 15 s at the defaults. Each relay socket's receive buffer is `udpRelayReceiveBufferKb` (default 128 KiB, range 16..1024), applied before bind.
+- **Ownership (`async-lifetime.md`).** The pool and each association are owners: one `QuiescenceScope` each, an explicit one-shot teardown, and every watchdog/recovery child is a `scope.Run` child. `DurableCaptureBundle` disposes sweeper → UDP coordinator → **association pool** → UDP native pools → TCP, so the coordinator has drained every lease before the pool is released; the pool's drain seals, joins every lease holder, and only then closes the associations.
+- **Hot path unchanged (R6/I3).** No pool interaction per datagram: the only additions on the established path are one `Interlocked` increment after the kernel accepted a send, a write-once flag for the first successfully decoded relay response, and one reference compare for the current relay publication. Skipped relay datagrams (unexpected source, oversized, malformed, connection reset) record nothing.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| `auto`, server `Unknown`, association has room | flow joins the least-loaded shared association; one control connection for up to `flowsPerAssociation` flows |
+| Every shared association full, ceiling not reached | a new shared association is dialed (ceiling is a bound, not a preallocation) |
+| Ceiling reached | the flow is served from a private per-flow association, never refused |
+| `off` mode | one private association per flow; closed on its last lease release (rollback shape) |
+| Two or more attached flows decoded a response | sticky `SharedOk`; sampling stops for the server |
+| One responder + a sibling with ≥3 unanswered sends | sticky `PerFlowOnly`, one `udp.association.fallback` warn, `udpAssociationFallbacks`++ |
+| Fewer than two attached flows | no verdict; keep sharing and sampling |
+| Control stream ends (0-byte read) or faults | watchdog recovers in place once, or faults the association |
+| Re-association returns the same address family | new relay published; sessions, relay sockets, and aliases survive; `udpAssociationRecovered`++ |
+| Re-association changes family / fails / exceeds the 5 s budget | association faulted; each attached transport throws `UdpAssociationLostException` on its next send |
+| Send against a faulted lease | `AssociationLost` slot removal, `udpAssociationLost`++, **no** setup cooldown |
+| Failed dial/ASSOCIATE during setup | `SetupFailure`, `udpSetupFailures`++, 1 s setup cooldown armed |
+| Association idle with no lease for 60 s | retired by the pool's 5 s maintenance sweep |
+| Faulted association with no lease (last release raced the fault) | retired by the same sweep, never left in the live set |
+
+### 5. Good/Base/Bad Cases
+
+- Good: a permissive server carries 16 flows on one authenticated control connection at
+  `--socks5-external`, one relay socket each; the recorded Step 2/3 churn runs measure
+  **7,556.7** (`always`, independent re-run) / **7,564.7** (`always`, implementer) / **7,577.5**
+  (`auto`) B/session against the Step 1 per-flow **13,066.5 B/session**
+  (`benchmarks/results/2026-09-28-udp-reuse/`, 48-flow × 120 s sustained churn, out-of-process
+  SOCKS5 server) — the saved share is the per-flow control connect + greeting + ASSOCIATE. In the
+  same directory, the Step 4 `udp.sessionBudget` soak measures
+  1.94–1.95 descriptors per live session at 100 new flows/s while the pooled head was saturated at
+  256 flows per server (the pool's original 16 × 16 default, superseded by this task's caps) and
+  1.06 in the pooled regime (rate 5), i.e. the pooling ratio is real but one relay socket per live
+  flow remains.
+- Base: a server that pins one client source port per association flips to per-flow associations
+  after the first sampled window; attached sessions keep running and no datagram is lost to the
+  flip (Step 3 records `udp.association.fallback: 0` for the permissive loopback server — the
+  detector fired only on the pinning fake).
+- Bad: placing a flow on a faulted or recovering association; indexing evidence by attach count;
+  arming the setup cooldown for `AssociationLost`; sharing one relay socket across flows (the
+  2026-08-07 determinism objection — still out of scope).
+
+### 6. Tests Required
+
+- `UdpAssociationPoolTests`: rent/return refcount, warm reuse, least-loaded placement, ceiling
+  overflow to private associations, drain joins lease holders, single-flight teardown, no orphan
+  sockets.
+- `UdpAssociationCapabilityTests` / `UdpAssociationEvidenceLifetimeTests`: the pinning rule
+  (positive, negative, single-attach `Unknown`), sticky verdict, `always`/`off` overrides, the flip
+  keeping existing sessions alive, and the >`FlowsPerAssociation` lease case that the live-set
+  model exists for.
+- `UdpAssociationRecoveryTests`: watchdog-detected death, in-place re-association keeping sessions
+  and sockets, family change faulting them with `AssociationLost`, no setup cooldown armed, no
+  unobserved task exception, and the self-traffic registration swap after a rebind.
+- `Socks5UdpTransportLeaseTests`: the lease is released exactly once on every construction-failure
+  path; `off` reproduces per-flow associations.
+- `UdpAssociationHeadTests` / `UdpProxyCompositionTests`: the default caps cover the default
+  session capacity, the configured bounds reach placement distinctly, and the transposition guard
+  pins the two adjacent placement bounds at the composition seam.
+- `UdpSessionSetupTests`: an association lost while the setup queue flushes maps to
+  `AssociationLost` with the counter and no cooldown, distinct from a genuine setup failure.
+
+### 7. Wrong vs Correct
+
+```csharp
+// Wrong: derive the capability verdict from a per-association ring indexed by the attach count —
+// after FlowsPerAssociation leases it reads mixed stale/live/released slots and both flips are wrong.
+var lease = _ring[Interlocked.Increment(ref _attachCount) % _ring.Length];
+
+// Correct: the association holds its live attached set; the sampler copies exactly those records.
+internal (UdpAssociationEvidence[] Evidence, int Attached) SnapshotEvidence()
+{
+    lock (_evidenceGate) return _liveEvidence.Count == 0 ? ([], 0) : ([.. _liveEvidence], _liveEvidence.Count);
+}
+```
+
+```csharp
+// Wrong: the transport owns a control connection and re-dials per flow — one descriptor pair and
+// one full SOCKS5 handshake per flow, the churn cost the pool exists to remove.
+_control = await Socks5ControlConnection.ConnectAsync(server, token);
+_relay = await _control.UdpAssociateAsync(token);
+
+// Correct: the transport borrows a lease from the per-server pool and owns only its relay socket.
+var lease = await _pool.RentAsync(server, cancellationToken);
+return Socks5UdpTransport.Create(lease, _selfTraffic, ..., _relayReceiveBufferBytes);
 ```
