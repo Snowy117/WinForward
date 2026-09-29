@@ -101,14 +101,21 @@ public sealed class HotPathAllocationGateTests
 
             for (var warm = 0; warm < 8; warm++) await coordinator.HandleReverseAsync(synAck, CancellationToken.None);
 
+            // Same window contract as the dispatcher gate above: the reverse handler's warm entry
+            // returns a completed ValueTask, so the loop stays on one thread and the per-thread
+            // reading is valid; the thread identity is asserted to keep that property honest.
+            var measuredThreadId = Environment.CurrentManagedThreadId;
             var before = GC.GetAllocatedBytesForCurrentThread();
             const int count = 64;
             for (var index = 0; index < count; index++)
             {
-                if (await coordinator.HandleReverseAsync(synAck, CancellationToken.None) != TcpRedirectOutcome.Injected) Assert.Fail("reverse reinjection was not injected");
+                var pending = coordinator.HandleReverseAsync(synAck, CancellationToken.None);
+                Assert.True(pending.IsCompletedSuccessfully, "the allocation gate relies on the synchronous fast path");
+                if (await pending != TcpRedirectOutcome.Injected) Assert.Fail("reverse reinjection was not injected");
             }
             var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
+            Assert.Equal(measuredThreadId, Environment.CurrentManagedThreadId);
             Assert.Equal(0, allocated);
             Assert.Equal(8 + count, injector.Calls);
         }
@@ -359,10 +366,21 @@ public sealed class HotPathAllocationGateTests
         var packets = new CapturedFlowPacket[count];
         for (var index = 0; index < count; index++) packets[index] = MakePacket();
 
+        // The measured window drives a synchronously-completing dispatch, so no continuation can
+        // migrate and the per-thread reading is valid; the thread is asserted unchanged to keep
+        // that property honest (hot-path.md, "An allocation gate must open only after its path is
+        // ready, and must verify it stayed on one thread").
+        var measuredThreadId = Environment.CurrentManagedThreadId;
         var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var index = 0; index < count; index++) await dispatcher.DispatchAsync(packets[index], CancellationToken.None);
+        for (var index = 0; index < count; index++)
+        {
+            var pending = dispatcher.DispatchAsync(packets[index], CancellationToken.None);
+            Assert.True(pending.IsCompletedSuccessfully, "the allocation gate relies on the synchronous fast path");
+            await pending;
+        }
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
+        Assert.Equal(measuredThreadId, Environment.CurrentManagedThreadId);
         Assert.Equal(0, allocated);
         Assert.Equal(1 + 8 + count, executor.PassCount);
         Assert.Equal(1 + 8 + count, handler.WantsCount);

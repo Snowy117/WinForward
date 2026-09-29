@@ -88,6 +88,22 @@ public sealed class CapturePumpReadCallTests
         // Warm the JIT outside the measured window.
         for (var warm = 0; warm < 64; warm++) pump.RunIterationForTests(CancellationToken.None);
 
+        // Open the measured window only after the instrument itself is quiet: the per-thread counter
+        // can move by a host-level lump that no driven code caused (hot-path.md, "Allocation-gate
+        // stability"). Every probe batch must read an exactly-zero delta, so a genuine per-call
+        // allocation still fails before the window opens.
+        const int maximumProbeBatches = 8;
+        var stabilized = false;
+        for (var batch = 0; batch < maximumProbeBatches && !stabilized; batch++)
+        {
+            var probeThreadId = Environment.CurrentManagedThreadId;
+            var probeBefore = GC.GetAllocatedBytesForCurrentThread();
+            for (var index = 0; index < iterations; index++) pump.RunIterationForTests(CancellationToken.None);
+            stabilized = Environment.CurrentManagedThreadId == probeThreadId && GC.GetAllocatedBytesForCurrentThread() == probeBefore;
+        }
+        Assert.True(stabilized, "the pump idle path never became allocation-stable");
+
+        var measuredThreadId = Environment.CurrentManagedThreadId;
         var callsBefore = reader.ReadCalls;
         var before = GC.GetAllocatedBytesForCurrentThread();
         var keepGoing = true;
@@ -95,6 +111,7 @@ public sealed class CapturePumpReadCallTests
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
         Assert.True(keepGoing);
+        Assert.Equal(measuredThreadId, Environment.CurrentManagedThreadId);
         Assert.Equal(0, allocated);
         Assert.Equal(iterations, reader.ReadCalls - callsBefore);
     }

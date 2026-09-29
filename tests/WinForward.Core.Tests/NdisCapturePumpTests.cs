@@ -305,13 +305,32 @@ public sealed class NdisCapturePumpTests
         // Warm the JIT outside the measured window.
         for (var warm = 0; warm < 64; warm++) pump.RunIterationForTests(CancellationToken.None);
 
+        // Open the measured window only after the instrument itself is quiet: the per-thread counter
+        // can move by a host-level lump that no driven code caused (hot-path.md, "Allocation-gate
+        // stability"). Every probe batch must read an exactly-zero delta, so a genuine per-call
+        // allocation still fails before the window opens.
+        const int iterations = 1_000;
+        const int maximumProbeBatches = 8;
+        var probeKeepGoing = true;
+        var stabilized = false;
+        for (var batch = 0; batch < maximumProbeBatches && !stabilized; batch++)
+        {
+            var probeThreadId = Environment.CurrentManagedThreadId;
+            var probeBefore = GC.GetAllocatedBytesForCurrentThread();
+            for (var index = 0; index < iterations; index++) probeKeepGoing &= pump.RunIterationForTests(CancellationToken.None);
+            stabilized = Environment.CurrentManagedThreadId == probeThreadId && GC.GetAllocatedBytesForCurrentThread() == probeBefore;
+        }
+        Assert.True(probeKeepGoing, "the pump stopped during the allocation-stability probe");
+        Assert.True(stabilized, "the pump idle path never became allocation-stable");
+
+        var measuredThreadId = Environment.CurrentManagedThreadId;
         var before = GC.GetAllocatedBytesForCurrentThread();
         var keepGoing = true;
-        const int iterations = 1_000;
         for (var index = 0; index < iterations; index++) keepGoing &= pump.RunIterationForTests(CancellationToken.None);
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
         Assert.True(keepGoing);
+        Assert.Equal(measuredThreadId, Environment.CurrentManagedThreadId);
         Assert.Equal(0, allocated);
     }
 

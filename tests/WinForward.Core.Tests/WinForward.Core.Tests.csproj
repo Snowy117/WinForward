@@ -1,6 +1,19 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <IsPackable>false</IsPackable>
+    <!--
+      The allocation gates measure GC.GetAllocatedBytesForCurrentThread() across a short loop that
+      drives an allocation-free path. Tiered compilation makes that reading unsound: its machinery
+      performs a one-time managed allocation on the calling thread as a hot method's code version is
+      published (call counting and on-stack replacement both do it), and the window catches the lump
+      when it lands inside the measured iterations (measured 2026-09-30: 12/20 and 17/20 process runs
+      showed a 7,336-7,360 B jump in a loop whose only work was reading the counter, and the
+      DispatcherWarmFastPath gate failed 2/20 runs with 1,880 B). With TieredCompilation=false every
+      method is compiled by the optimizing JIT on first use, so no tiering event can land in a window
+      and the gates measure the optimized steady state production reaches anyway. Tiering stays on for
+      every other project.
+    -->
+    <TieredCompilation>false</TieredCompilation>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />

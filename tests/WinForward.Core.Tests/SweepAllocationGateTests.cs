@@ -27,17 +27,32 @@ public sealed class SweepAllocationGateTests
         var table = new FlowTable(capacity: Flows + 16);
         var keys = BuildKeys();
 
-        // Two warm sweeps: the first grows the scratch list and returns every state to the pool, so the
-        // measured sweep sees steady state rather than one-time growth.
-        Seed(table, keys);
-        Assert.Equal(Flows, table.RemoveExpired(DateTimeOffset.UtcNow.AddSeconds(1), TimeSpan.Zero));
-        Seed(table, keys);
-        Assert.Equal(Flows, table.RemoveExpired(DateTimeOffset.UtcNow.AddSeconds(1), TimeSpan.Zero));
-        Seed(table, keys);
+        // Probe sweeps until the instrument itself is quiet: the first grows the scratch list and
+        // returns every state to the pool, so once a sweep reads an exactly-zero delta on one thread
+        // the measured sweep sees steady state rather than one-time growth. Requiring the exact zero
+        // here is what keeps a genuine sweep allocation failing rather than stabilizing
+        // (hot-path.md, "Allocation-gate stability").
+        const int maximumProbeSweeps = 8;
+        var stabilized = false;
+        for (var sweep = 0; sweep < maximumProbeSweeps && !stabilized; sweep++)
+        {
+            Seed(table, keys);
+            var probeThreadId = Environment.CurrentManagedThreadId;
+            var probeBefore = GC.GetAllocatedBytesForCurrentThread();
+            var probeRemoved = table.RemoveExpired(DateTimeOffset.UtcNow.AddSeconds(1), TimeSpan.Zero);
+            stabilized = Environment.CurrentManagedThreadId == probeThreadId && GC.GetAllocatedBytesForCurrentThread() == probeBefore;
+            // The assertion stays outside the probe's measured region: xunit's Assert.Equal allocates.
+            Assert.Equal(Flows, probeRemoved);
+        }
+        Assert.True(stabilized, "the flow-table sweep never became allocation-stable");
 
-        var removed = 0;
-        var allocated = MeasureAllocated(() => removed = table.RemoveExpired(DateTimeOffset.UtcNow.AddSeconds(1), TimeSpan.Zero));
+        Seed(table, keys);
+        var measuredThreadId = Environment.CurrentManagedThreadId;
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        var removed = table.RemoveExpired(DateTimeOffset.UtcNow.AddSeconds(1), TimeSpan.Zero);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
+        Assert.Equal(measuredThreadId, Environment.CurrentManagedThreadId);
         Assert.Equal(Flows, removed);
         Assert.Equal(0, allocated);
     }
