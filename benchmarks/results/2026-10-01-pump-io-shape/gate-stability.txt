@@ -1,0 +1,236 @@
+# F5 per-gate proof loop (hot-path.md 'The residual exact-gate lump' §4)
+# revision 56dd85f  tree 6599093d8033ce2b624a0b110c4fb2a65aa41d5f
+# totals='HotPathAllocationGateTests:11 CapturePumpReadCallTests:4 SweepAllocationGateTests:12 NdisCapturePumpTests:14 NdisCapturePumpIdleWaitTests:5 NdisApiReadShapeTests:14'
+# signature accepted as the recorded host event: ^(168|5216|7384|7448)$
+gate HotPathAllocationGateTests run 1 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 2 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 3 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 4 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 5 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 6 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 7 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 8 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 9 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 10 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 11 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 12 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 13 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 14 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 15 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 16 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 17 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 18 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 19 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 20 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate CapturePumpReadCallTests run 1 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 2 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 3 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 4 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 5 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 6 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 7 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 8 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 9 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 10 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 11 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 12 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 13 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 14 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 15 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 16 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 17 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 18 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 19 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 20 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate SweepAllocationGateTests run 1 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 2 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 3 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 4 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 5 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 6 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 7 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 8 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 9 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 10 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 11 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 12 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 13 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 14 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 15 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 16 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 17 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 18 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 19 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 20 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate NdisCapturePumpTests run 1 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 2 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 3 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 4 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 5 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 6 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 7 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 8 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 9 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 10 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 11 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 12 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 13 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 14 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 15 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 16 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 17 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 18 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 19 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 20 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpIdleWaitTests run 1 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate NdisCapturePumpIdleWaitTests run 2 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate NdisCapturePumpIdleWaitTests run 3 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate NdisCapturePumpIdleWaitTests run 4 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate NdisCapturePumpIdleWaitTests run 5 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate NdisCapturePumpIdleWaitTests run 6 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate NdisCapturePumpIdleWaitTests run 7 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate NdisCapturePumpIdleWaitTests run 8 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate NdisCapturePumpIdleWaitTests run 9 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate NdisCapturePumpIdleWaitTests run 10 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate NdisCapturePumpIdleWaitTests run 11 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate NdisCapturePumpIdleWaitTests run 12 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate NdisCapturePumpIdleWaitTests run 13 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate NdisCapturePumpIdleWaitTests run 14 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate NdisCapturePumpIdleWaitTests run 15 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate NdisCapturePumpIdleWaitTests run 16 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate NdisCapturePumpIdleWaitTests run 17 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate NdisCapturePumpIdleWaitTests run 18 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate NdisCapturePumpIdleWaitTests run 19 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate NdisCapturePumpIdleWaitTests run 20 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate NdisApiReadShapeTests run 1 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisApiReadShapeTests run 2 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisApiReadShapeTests run 3 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisApiReadShapeTests run 4 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisApiReadShapeTests run 5 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisApiReadShapeTests run 6 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisApiReadShapeTests run 7 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisApiReadShapeTests run 8 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisApiReadShapeTests run 9 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisApiReadShapeTests run 10 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisApiReadShapeTests run 11 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisApiReadShapeTests run 12 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisApiReadShapeTests run 13 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisApiReadShapeTests run 14 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisApiReadShapeTests run 15 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisApiReadShapeTests run 16 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisApiReadShapeTests run 17 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisApiReadShapeTests run 18 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisApiReadShapeTests run 19 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisApiReadShapeTests run 20 56dd85f 6599093d8033ce2b624a0b110c4fb2a65aa41d5f rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+DONE
+
+# ---- injected-allocation discrimination re-proof (hot-path.md §2: "The gate's discrimination
+# ---- must be re-proven after any change to its window"), 2026-10-01, same tree.
+# Command: dotnet test WinForward.slnx -c Release --filter "FullyQualifiedName~<gate>"
+#
+# NdisCapturePumpIdleWaitTests.IdleWaitIterationsAllocateNoManagedBytes
+#   injection: `new byte[64]` per iteration inside the measured window (1,000 iterations),
+#              stored into a static field so the object escapes and the runtime cannot
+#              stack-allocate it
+#   result:    Assert.Equal() Failure: Values differ / Expected: 0 / Actual: 88000   (= 1,000 x 88 B)
+#   restored:  green (see the loop above: 20/20 within total=5)
+#   note:      a first attempt using `new byte[64].Length == 0` did NOT fail the gate: with .NET 10
+#              object stack allocation the non-escaping array was elided, so an injection that does
+#              not escape the method is not a discrimination proof on this runtime. The escaping
+#              store is what makes it one.
+#
+# NdisApiReadShapeTests.DriverReadPathAllocatesNoManagedBytes
+#   injection: the same escaping `new byte[64]` per iteration inside the measured window
+#   result:    Assert.Equal() Failure: Values differ / Expected: 0 / Actual: 88000
+#   restored:  green (see the loop above: 20/20 within total=14)
+
+# =====================================================================================
+# Check round — independent re-derivation (trellis-check, 2026-10-01)
+#
+# Tree: base revision 56dd85f, measured-surface content fingerprint
+#   c9c40c81d1137ad8cc58456e904674bd902be0ff2c5ae5db70a1eac44c996cf8
+# (`git write-tree` is NOT usable here: with the change uncommitted it returns the index tree
+#  6599093d8033ce2b624a0b110c4fb2a65aa41d5f, i.e. HEAD's tree, which contains none of F5.)
+# Procedure: hot-path.md "Allocation-gate lump" §4 per-gate process runs, never --no-build,
+# padded summary + totals assertion + exit status + lump classification per run.
+#
+# The `totals=` string below is the set of classes this loop ran, which is the five allocation-gate
+# classes of hot-path.md plus the two structural F5 classes. `NdisApiReadShapeTests` and
+# MultiAdapterCaptureLoopArrivalSignalTests are NOT folded into hot-path.md's `totals=` string,
+# which drives the lump-signature predicate; they carry their repetition proof through this loop
+# (exact totals, 20/20 each) exactly like class-totals.txt describes for the former.
+#
+# Result: 140/140 consecutive green runs, every class at its exact expected total, zero vacuous
+# matches, zero lump readings of any kind (so the accepted-signature predicate was never exercised):
+#   HotPathAllocationGateTests 20/20 total=11
+#   CapturePumpReadCallTests 20/20 total=4
+#   SweepAllocationGateTests 20/20 total=12
+#   NdisCapturePumpTests 20/20 total=14
+#   NdisCapturePumpIdleWaitTests 20/20 total=5
+#   NdisApiReadShapeTests 20/20 total=14
+#   MultiAdapterCaptureLoopArrivalSignalTests 20/20 total=4   <-- not in the implementer's 120-run loop
+#
+# ---- discrimination re-proof, repeated independently (same tree) ----
+# Command: dotnet test WinForward.slnx -c Release --filter
+#   "FullyQualifiedName~NdisCapturePumpIdleWaitTests.IdleWaitIterationsAllocateNoManagedBytes|
+#    FullyQualifiedName~NdisApiReadShapeTests.DriverReadPathAllocatesNoManagedBytes"
+#   injection: an escaping `new byte[64]` store per iteration inside the *measured* window only
+#              (static field, read after the window). The probe/stabilisation batches are NOT
+#              injected, so a failure here is the exact-zero assertion, not "never became
+#              allocation-stable".
+#   result:    NdisApiReadShapeTests.DriverReadPathAllocatesNoManagedBytes     Expected: 0 / Actual: 88000
+#              NdisCapturePumpIdleWaitTests.IdleWaitIterationsAllocateNoManagedBytes
+#                                                                              Expected: 0 / Actual: 88000
+#              (= 1,000 x 88 B; reproduces the implementer's recorded figure)
+#   restored:  both green again, and both test files byte-identical to their pre-injection
+#              sha256 (3973549c41aa5e617d9ff29cdbb804fabbb42615aa82ee16e05f019bf7b73350 /
+#              a41b5af87113f35ca9a38b36ca9f2c561667ce420d1e3ed878a15730b7e95118).
+#   Confirms the recorded finding: a non-escaping `new byte[64].Length == 0` does not fail these
+#   windows on .NET 10 (object stack allocation elides it), so the escaping store is what makes
+#   the probe a discrimination proof.
+#
+# ---- full-suite runs (a different procedure from the per-gate loop; recorded, not gated) ----
+# Full suite is NOT fully green in this environment for either arm — the host-lump family
+# hot-path.md §"The residual exact-gate lump" already records for this host:
+#   baseline worktree at 56dd85f (no F5 at all): 19/20 green. 1 failure:
+#     SweepAllocationGateTests.FlowTableSweepWithHoldPredicateAllocatesNoManagedBytes Actual: 7704
+#   landed tree: 17/20 green. 3 failures, all the same pre-existing gate
+#     (NdisCapturePumpTests.cs is not touched by this task):
+#     NdisCapturePumpTests.IdlePollIterationsAllocateNoManagedBytes  Actual: 432, 432, 1840
+#   the trigger for this round: one earlier landed run failed
+#     CapturePumpReadCallTests.CountingReaderIdleIterationsAllocateNoManagedBytes Actual: 1096
+#   final frozen-tree run after every check fix: green
+#     WinForward.Analyzers.Tests 18/18 + WinForward.Core.Tests 1081/1081
+# Attribution: every value is a fixed lump, never proportional to the 1,000-iteration window, and
+# no run reported "never became allocation-stable" (what a real per-iteration allocation produces);
+# the same family fires on the pre-change tree; the per-gate process runs are 140/140 green. The
+# landed 3/20 vs baseline 1/20 rates are not statistically separable at n=20 (Fisher p ~ 0.6).
+# The observed values 432/1096/1840/7704 are members of the family but are NOT in hot-path.md's
+# recorded `signature=` predicate (^(168|5216|7384|7448)$); that predicate was deliberately left
+# un-widened, so a future loop still stops on them and re-diagnoses.
+
+# =====================================================================================
+# Commit-gate round — per-gate re-proof after the `dotnet format` fixes (2026-10-01)
+#
+# The operator's format gate reported 12 diagnostics in this task's surface; all 12 were fixed
+# (implement.md, "Commit-gate round"). The two classes whose *test files* changed are the two that
+# carry this task's new exact gates, so their per-gate loop was re-run on the resulting tree rather
+# than carried over:
+#   tree: fingerprint eccd8a9c95721daa3cce1d23c9e8e747bfaac42ca90a34fccf752e6ad96e22b3, rev 56dd85f
+#   result: 40/40 consecutive green runs, exact totals (5 and 14), zero lump readings of any kind
+#   note:   no gate window changed in this round — the edits inside those files are the IDE0230
+#           UTF-8 literal, the MA0076 invariant-culture assert messages, two IDE0042 deconstructions
+#           in the recording fake, one MA0154 langword and one MA0042 CancelAsync. The check round's
+#           140/140 loop above stays attributed to its own fingerprint c9c40c81.
+
+# =====================================================================================
+# Commit-gate round — `jb inspectcode` fixes (2026-10-01)
+#
+# fingerprint da99a967abddb3ccf9666812fb4dc168886e235a12879bd8d83a13d7a2591075, rev 56dd85f.
+# No gate window changed. The `pump` stability scenario was run end to end to validate the new
+# stop path (RequestStopForTests instead of a manual dispose of the await using pump) — exit 0, no
+# deadlock, all five rows written: pump.idle 897.8 polls/s 0 B; pump.idleEvent 150 waits / 150 polls,
+# 10 waits/s, 0 B; pump.idleWake 5,000 frame reads, p50 0.0672 ms; pump.idleWakeEvent 5,000 frame
+# reads + 5,001 empty reads, 1.0002 park confirmations per wake, 5,000/5,000 signal-driven.
+# Affected classes 41/41 green; full suite 18 + 1,081 green, 0 failed. (Diagnostic run, written to
+# /tmp; the recorded after-series above stays attributed to its own fingerprint.)

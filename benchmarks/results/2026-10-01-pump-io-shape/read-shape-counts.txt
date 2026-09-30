@@ -1,0 +1,126 @@
+# F5 per-drain native call sequence — before/after, and the two recorded reds
+
+Task `.trellis/tasks/10-01-pump-io-shape`. Host: AMD Ryzen 9 9955HX, NixOS 26.11, .NET 10.0.12,
+Release. Base revision `56dd85f`; measured-surface content fingerprint
+`da99a967abddb3ccf9666812fb4dc168886e235a12879bd8d83a13d7a2591075` (see the artifact README for what it
+covers — `git write-tree` returns the index tree, which predates this uncommitted change).
+Instrument: `INdisReadPacketCalls` (`src/WinForward.NdisApi/NdisReadPacketCalls.cs`) — the
+driver↔native seam — driven through `NdisApiDriver.CreateForTests` by
+`tests/WinForward.Core.Tests/NdisApiReadShapeTests.cs`, which records every call's name, order and
+requested count. **What this proves and does not prove** is `design.md` §3.2: the recorded call
+*shape* only. It never proves that a real IOCTL round trip happened, and never which empty-queue
+semantics the real driver implements (open items 1–3 of the artifact README).
+
+Commands (all from the repository root):
+
+```bash
+dotnet test WinForward.slnx -c Release --filter "FullyQualifiedName~NdisApiReadShapeTests"
+# red capture 1 (instrumented pre-change body, guard absent):
+dotnet test WinForward.slnx -c Release -p:TreatWarningsAsErrors=false --filter "FullyQualifiedName~NdisApiReadShapeTests"
+# red capture 2 (read-first body without the §3.5 guard):
+dotnet test WinForward.slnx -c Release -p:TreatWarningsAsErrors=false --filter "FullyQualifiedName~TheMismatchNeverReachesTheTransientRetryBudget|FullyQualifiedName~AGuardedProbeThatAlsoFailsThrowsTheReadErrorLikeToday"
+```
+
+`-p:TreatWarningsAsErrors=false` appears only in the two red captures: the temporary bodies leave
+members unreferenced, and a warning-as-error build would refuse to run them. Neither red tree was
+ever committed.
+
+---
+
+## 1. After — per-drain call shape (exact, `NdisApiReadShapeTests`)
+
+Recorded sequences; `Read(n)` / `Query` name the seam calls and `n` is the requested slot count.
+
+| Drain | Recorded order | Requested counts | Drives |
+|---|---|---|---|
+| non-empty, read succeeds with 4 | `[Read]` | `[32]` | `SpeculativeReadIssuesOneReadAndNoQueryForANonEmptyDrain` |
+| empty, read succeeds with 0 (hypothesis B) | `[Read]` | `[32]` | `AnEmptyQueueYieldsZeroPacketsWithNoErrorUnderEitherReadResult` |
+| empty, read fails, query 0 (hypothesis A) | `[Read, Query]` | `[32]` | same fact |
+| empty, read fails, query fails | `[Read, Query]` | `[32]` | `AFailedReadWithAFailedQueryStillThrowsTheQueryError` (throws the query error) |
+| non-empty, read fails, guard's first observation | `[Read, Query, Read]` | `[32, 3]` | `AMismatchHealsTheShapeInsteadOfThrowing` |
+| same handle, later non-empty drains (sticky) | `[Query, Read]` | `[3]` | `TheGuardFiresExactlyOnceAndLaterDrainsAreQueryFirst` |
+| non-empty, read fails, probe fails too | `[Read, Query, Read]` | `[32, 3]` | `AGuardedProbeThatAlsoFailsThrowsTheReadErrorLikeToday` (throws the read error) |
+| 1,000 mixed conforming drains | 1,000 × `[Read]`, zero `Query` | all `[32]` | `TheGuardNeverFiresOnAConformingDriver` |
+
+Counter read-outs at the seam (`NdisApiDriver.ReadDiagnostics`, asserted by
+`TheReadDiagnosticsCountOneReadPerDrainAndOneQueryOnlyOnAFailedRead`): three drains
+(non-empty / empty / failed-read-then-query-0) ⇒ `BatchReads 3, QueueSizeQueries 1, EmptyReads 2,
+FailedReads 1, LastFailedReadNativeError 31, ReadShapeMismatchCount 0`. The conforming 1,000-drain
+series ⇒ `QueueSizeQueries 0, FailedReads 0, ReadShapeMismatchCount 0`. The healed series ⇒
+`BatchReads 5, QueueSizeQueries 4, ReadShapeMismatchCount 1` (four drains, five reads: the healing
+drain's probe is the extra one).
+
+Driver-internal derived counts, before → after, per drain:
+
+| Drain | Before (derived, notes §7) | After (recorded above) |
+|---|---|---|
+| non-empty, read OK | query + read = 2 IOCTLs | 1 read, 0 queries |
+| empty | 1 query, 0 reads | 1 read, 0 queries (hypothesis B) / 1 read + 1 query (hypothesis A) |
+| non-empty, first read failure for the handle | query + read + throw | read + query + probe read; heals once per handle |
+| same handle afterwards | query + read + throw | query + read + throw, byte-identical to before |
+
+The null-slot contract moved with the shape: a null hole in the caller array now throws
+`ArgumentNullException` from `BuildMultiRequest` on **every** drain, because the request always
+walks the whole array (`ANullHoleInTheBatchArrayThrowsOnADrainThatWouldOtherwiseBeEmpty`).
+
+---
+
+## 2. Red capture 1 — the instrumented pre-change body
+
+Body: `TryReadPackets` calls `ReadQueryFirst` unconditionally (the query leads; the read is issued
+only when the query reports non-empty). No guard, no read-first attempt. Result:
+**Failed: 12, Passed: 2, Total: 14.**
+
+Red set (exact failure text, abridged to the assertion line):
+
+| Fact | Failure |
+|---|---|
+| `SpeculativeReadIssuesOneReadAndNoQueryForANonEmptyDrain` | `Expected: 0 / Actual: 1` (query calls) — and, with the order assertion first, `Expected: "[Read]" / Actual: "[Query, Read]"` |
+| `SpeculativeReadNeverQueriesBeforeReading` | `Expected: 4 / Actual: 0` |
+| `AnEmptyQueueYieldsZeroPacketsWithNoErrorUnderEitherReadResult` | `Expected: "[Read]" / Actual: "[Query]"` (hypothesis B never issues a read on this body) |
+| `AMismatchHealsTheShapeInsteadOfThrowing` | `Win32Exception: Unable to read NDISAPI packets from a non-empty queue (native error 31, requested 3, adapter 0x2B).` |
+| `TheGuardFiresExactlyOnceAndLaterDrainsAreQueryFirst` | same `Win32Exception` |
+| `TheGuardNeverFiresOnAConformingDriver` | `Expected: 1000 / Actual: 0` (no read is ever issued) |
+| `TheMismatchNeverReachesTheTransientRetryBudget` | `Assert.Single() Failure: The collection was empty` (no guard, so no diagnostic — but note this body *delivers* the packets, which is why red 2 needs the unguarded read-first body) |
+| `TheMismatchDiagnosticCarriesTheAdapterRequestedDepthAndError` | `Win32Exception` as above |
+| `AGuardedProbeThatAlsoFailsThrowsTheReadErrorLikeToday` | `Expected: 1 / Actual: 0` (mismatch count) |
+| `TheReadDiagnosticsCountOneReadPerDrainAndOneQueryOnlyOnAFailedRead` | `Expected: 4 / Actual: 0` |
+| `DriverReadPathAllocatesNoManagedBytes` | `Expected: 1000 / Actual: 0` (the byte window drives no read at all) |
+| `ANullHoleInTheBatchArrayThrowsOnADrainThatWouldOtherwiseBeEmpty` | `Expected: typeof(ArgumentNullException) / Actual: typeof(DllNotFoundException)` — **deviation from `implement.md` Step 1**, which predicted this fact green on the pre-change body: the query-first body never builds the request on an empty queue, so it reaches `ndisapi.dll` instead of the null-slot guard. The fact is red here for the right reason. |
+
+Green on this body, as `implement.md` Step 1 predicted: `AReadFailureOnANonEmptyQueueWhoseGuardedProbeAlsoFailsThrowsTheReadError` and `AFailedReadWithAFailedQueryStillThrowsTheQueryError` — both are pure throw-classification facts, and the throw is the same on every body.
+
+## 3. Red capture 2 — the read-first body without the guard
+
+Body: the landed read-first shape with the §3.5 guard point removed (`read failed + query > 0` throws
+immediately), driven through a **real** `NdisCapturePump` over a **real** `NdisApiDriver` built by
+`CreateForTests` with a fake whose every read fails (error 31) and whose query reports 3 queued.
+`TransientRetryBaseDelay = TimeSpan.Zero` so the retry budget is crossed without waits.
+
+| Fact | Failure |
+|---|---|
+| `TheMismatchNeverReachesTheTransientRetryBudget` | `Expected: "False\|0\|0\|0" / Actual: "True\|5\|1\|31"` — `IsDegraded = true`, `TransientReadRetryCount = 5`, `TransientReadIncidentCount = 1`, `LastDegradedNativeErrorCode = 31`. The pump never delivered the packet: the run completed **without** throwing (a degraded exit), so the fact's normal `Assert.ThrowsAnyAsync<OperationCanceledException>` saw no exception at all. |
+| `AGuardedProbeThatAlsoFailsThrowsTheReadErrorLikeToday` | `Expected: 1 / Actual: 0` (mismatch count; the sticky flag is likewise false) |
+
+This is the false degradation the guard removes: a working adapter with packets available loses
+interception after five retries, and no diagnostic is published. Both red bodies were temporary —
+the landed tree is the read-first shape **with** the guard, and the fact is green there.
+
+## 4. Guard read-out (landed tree)
+
+| Reading | Value | Fact |
+|---|---|---|
+| `ReadShapeMismatchCount` after one mismatching drain | 1 (at most once per handle) | `AMismatchHealsTheShapeInsteadOfThrowing` |
+| `ReadShapeMismatchCount` after three further drains | 1 (sticky, never re-arms) | `TheGuardFiresExactlyOnceAndLaterDrainsAreQueryFirst` |
+| `ReadShapeMismatchCount` over 1,000 conforming drains | 0 | `TheGuardNeverFiresOnAConformingDriver` |
+| `IsQueryFirstForDiagnostics` | true only for the mismatching handle | the three facts above |
+| Published `NdisReadShapeMismatch` | `(0x2B, 32, 3, 31)` = (handle, requested capacity, queued, native error) | `TheMismatchDiagnosticCarriesTheAdapterRequestedDepthAndError` |
+| Pump after healing | delivered, `IsDegraded = false`, `TransientReadRetryCount = 0`, `TransientReadIncidentCount = 0` | `TheMismatchNeverReachesTheTransientRetryBudget` |
+
+## 5. Byte gates at the seam
+
+`NdisApiReadShapeTests.DriverReadPathAllocatesNoManagedBytes`: 1,000 drains per probe batch over a
+non-recording fake cycling `{4, 0}` (packet and empty drains both in the window), the standard window
+contract (exactly-zero probe batches, unchanged managed thread id, `Assert.Equal(0, allocated)`, a
+thread-independent call-count backstop of 1,000). Green. `pump.idleEvent`'s own 0 B throw covers the
+~150 real 100 ms timeouts; the discrimination re-proof for this gate is in `gate-stability.txt`.

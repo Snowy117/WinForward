@@ -227,30 +227,36 @@ teardown tails — are **not comparable** with current rows either.
   `results/2026-09-29-benchmark-coverage/sweep-pause.jsonl` — sweep 25.1 ms mean / 87.1 ms max, resolve
   pause up to **39.5 ms against the 0.5 ms target**, 14,022 resolves over 1 ms in 15 s, 0 B per sweep.
 - **`pump.idleWake`** — the capture pump's idle cost and its wake→dispatch latency (research F5), driven
-  through fake readers so no hardware is needed. The idle row runs an always-empty reader for
-  `--duration` (capped at 15 s) and reports `cpuSecondsPerIdleSecond` (a `Process.TotalProcessorTime`
-  delta taken over the window on the scenario thread), `polls`/`pollsPerSecond`, and the window's managed
-  allocation — which must be **0 B**, enforced in the row itself (a non-zero delta fails the run), so the
-  existing idle-allocation invariant is carried by the real run loop rather than the test seam. The wake
-  row parks `TryReadPackets` on a semaphore until the harness arms exactly one frame — the F5.2
-  `SetPacketEvent`+wait shape, with the harness confirming the reader is parked before it arms so a hot
-  handoff cannot masquerade as a wake — and reports the arrival→dispatch p50/p95/p99/max over 5,000
-  wakes (plus 500 unrecorded warmups; a wake that does not dispatch within the timeout fails the run
-  instead of being silently dropped). Both rows carry the F5.1 seam-level read-call accounting
+  through fake readers so no hardware is needed. Four rows. The idle row (`pump.idle`, no arrival signal)
+  runs an always-empty reader for `--duration` (capped at 15 s) and reports `cpuSecondsPerIdleSecond` (a
+  `Process.TotalProcessorTime` delta taken over the window on the scenario thread),
+  `polls`/`pollsPerSecond`, and the window's managed allocation — which must be **0 B**, enforced in the
+  row itself (a non-zero delta fails the run). `pump.idleEvent` (F5, 2026-10-01) runs the same window with
+  the production `NdisPacketArrivalSignal` installed over an event the harness never sets, so every wait
+  runs to its 100 ms bound: it reports `waits`/`waitsPerSecond` and `emptyReadsPerSecond` beside the CPU
+  number, and its own 0 B throw is what covers ~150 **real** timeouts (the xunit gates can only exercise
+  `WaitOne(0)`'s fast path). `pump.idleWake` parks `TryReadPackets` on a semaphore until the harness arms
+  exactly one frame — the reader-side proxy for the arrival shape — while `pump.idleWakeEvent` parks the
+  **pump** in the arrival wait and has the harness arm the frame and set the event, confirming the park
+  (one more `Wait` entry than the previous wake) before every measured arrival so a hot handoff cannot
+  masquerade as a wake; a missing park entry, a timeout-driven return, or a lost dispatch fails the run
+  instead of being silently dropped. Both wake rows report arrival→dispatch p50/p95/p99/max over 5,000
+  wakes (plus 500 unrecorded warmups). All four carry the F5.1 seam-level read-call accounting
   (`readCallsPerPoll`, `readCallsPerPacket`), and `CapturePumpReadCallTests` gates that pattern exactly
   (one `TryReadPackets` call per poll and one per batch, never one per packet; one handler call per
-  packet). **The driver's internal queue-query + batch-read IOCTL pair sits below the
-  `INdisPacketReader` seam** (`NdisApiDriver.TryReadPackets` queries and then reads under one gate
-  lease), so the "speculative read halves the IOCTLs" claim is not observable from the harness and needs
-  the real driver on Windows; what these rows establish is that the pump issues exactly one read per poll,
-  which makes that driver-internal pair the only remaining candidate. Report-only timing
-  (`gated: false`): the exact numbers are the row's 0 B and the xunit call counts. Excluded from
-  `--scenario all` (a micro probe, not a soak). First series:
-  `results/2026-09-29-benchmark-coverage/pump-idle-wake.jsonl` — **0.0178–0.0185 CPU seconds per idle
-  second at ~880 polls/s and 0 B allocated** (the 1 ms pacing resolves at ~1.13 ms on this host, so the
-  cadence is `Thread.Sleep` resolution and the ~20 µs of CPU per poll is the timer/wake cost, not packet
-  work), and a wake **p50/p95/p99 of 0.078 / 0.124 / 0.188 ms** (max 0.58–0.82 ms) — the ~0.08 ms median
-  is the latency an event-driven wake would cost where the 1 ms poll delay costs up to a full millisecond.
+  packet; one read + one wait for a signal-installed idle iteration). **F5.1's driver-internal read shape
+  is gated at its own seam** (`NdisApiReadShapeTests`, over `NdisApiDriver.CreateForTests` and the
+  `INdisReadPacketCalls` interface): one batched read and no queue query per non-empty drain, the query
+  only on the non-success path. What the stability rows add is the pump's own cadence, which is what makes
+  the idle-IOCTL-rate claim (`~886 polls/s → ~10 waits/s`) measurable. Report-only timing
+  (`gated: false`): the exact numbers are the rows' 0 B throws, the exact wait/read counts and the xunit
+  call counts. Excluded from `--scenario all` (a micro probe, not a soak). Series:
+  `results/2026-09-29-benchmark-coverage/pump-idle-wake.jsonl` (before) and
+  `results/2026-10-01-pump-io-shape/pump-idle-wake-after.jsonl` (after) — **0.0178–0.0185 CPU seconds per
+  idle second at ~880 polls/s and 0 B allocated** (the 1 ms pacing resolves at ~1.13 ms on this host, so
+  the cadence is `Thread.Sleep` resolution and the ~20 µs of CPU per poll is the timer/wake cost, not
+  packet work), the idle wait at **~10 waits/s and ~0.0005 CPU seconds per idle second**, and wake
+  **p50/p95/p99 of ~0.07 / ~0.11 / ~0.15 ms** on both the reader-side proxy and the pump-side wait.
 
 - **`flowTable.claim`** — the insert path's cost on a fresh table (2,339.7 ns and 192.02 B per claim at
   the production cardinality), the half of the probe-cost question BenchmarkDotNet cannot express: a

@@ -1,0 +1,89 @@
+# F5 class totals and the per-gate repetition proof
+
+Task `.trellis/tasks/10-01-pump-io-shape`. Host: AMD Ryzen 9 9955HX, NixOS 26.11, .NET 10.0.12,
+Release. Revision `56dd85f`; measured-surface content fingerprint
+`da99a967abddb3ccf9666812fb4dc168886e235a12879bd8d83a13d7a2591075` (see the artifact README — `git
+write-tree` returns the index tree `6599093d…`, which predates this uncommitted change and therefore
+does not identify the tree these runs measured).
+Procedure: `hot-path.md` → "The residual exact-gate lump" §4 (per-gate process runs, never
+`--no-build`, padded summary + totals assertion + hash + fingerprint + exit status per run). Raw log:
+`gate-stability.txt`.
+
+## Per-class totals (each class 20/20 green runs, own process)
+
+| Class | Total | Runs green | Role |
+|---|---|---|---|
+| `HotPathAllocationGateTests` | 11 | 20/20 | exact allocation gates (dispatcher warm path, reverse rewrite+inject) |
+| `CapturePumpReadCallTests` | 4 | 20/20 | pump↔driver read-call seam (`PumpMakesExactlyOneReadCallPerPollAndPerBatch` unchanged, `CountingReaderIdleIterationsAllocateNoManagedBytes` unchanged, the new one-read-one-wait idle fact, scenario selection) |
+| `SweepAllocationGateTests` | 12 | 20/20 | F3 exact sweep gates |
+| `NdisCapturePumpTests` | 14 | 20/20 | pump loop, ordering, disposal, `IdlePollIterationsAllocateNoManagedBytes` |
+| `NdisCapturePumpIdleWaitTests` | 5 | 20/20 | **new (F5)**: arrival-wait shape, sleep fallback, wake, parked disposal, `IdleWaitIterationsAllocateNoManagedBytes` |
+| `NdisApiReadShapeTests` | 14 | 20/20 | **new (F5)**: structural read-shape/classifier/guard class (see below) |
+
+**Refreshed per-gate totals string** (the `totals=` variable of the §4 loop):
+
+```text
+HotPathAllocationGateTests:11 CapturePumpReadCallTests:4 SweepAllocationGateTests:12 NdisCapturePumpTests:14 NdisCapturePumpIdleWaitTests:5
+```
+
+The recorded predecessor string (`HotPathAllocationGateTests:11 CapturePumpReadCallTests:3
+SweepAllocationGateTests:12 NdisCapturePumpTests:14`) moved for exactly two reasons: one new fact in
+`CapturePumpReadCallTests` and one new allocation-gate class. No pre-existing fact was removed or
+relaxed. `hot-path.md` now carries this string.
+
+## `NdisApiReadShapeTests`' own repetition proof
+
+`NdisApiReadShapeTests` is a **structural class, not a fifth allocation-gate entry**: 14 facts, of
+which exactly one (`DriverReadPathAllocatesNoManagedBytes`) is an exact allocation window. Its totals
+are part of the loop above (`total=14`, 20/20 green, zero failures, zero vacuous matches), which is the
+same repetition proof the gate classes get; it is deliberately not folded into the `totals=` string
+because that string drives the per-gate *lump signature* predicate, and a structural class has no
+`Actual: <lump>` reading to classify.
+
+## Deviation from the strict §4 procedure
+
+The §4 loop accepts a nonzero-delta failure only under the recorded host-lump signature
+(`168|5216|7384|7448`) and stops the work otherwise. Across the 120 runs above there were **no
+failures of any kind**, so the acceptance predicate was never exercised. The injected-allocation
+discrimination re-proof (in `gate-stability.txt`) is the check that the two new exact windows still
+fail when they should: both reported `Actual: 88000` and were green again after restoring.
+
+## Check round (independent verification, 2026-10-01)
+
+- **Per-gate loop re-derived and extended**: 7 classes x 20 process runs = **140/140 green**, every
+  class at its exact expected total, zero vacuous matches — including
+  `MultiAdapterCaptureLoopArrivalSignalTests` (4 facts), the one class this task grew that the
+  implementer's 120-run loop did not cover. Raw log: `gate-stability.txt`'s check-round section.
+- **Discrimination re-proved** for both new exact gates with an escaping `new byte[64]` inside the
+  measured window: `Actual: 88000` each (== 1,000 x 88 B), restored green and byte-identical.
+- **Full suite is not fully green on this host for either arm** (the documented host-lump family):
+  the pre-change baseline worktree at `56dd85f` failed 1/20 runs (a sweep gate, 7,704 B) and the
+  landed tree 3/20 (all `NdisCapturePumpTests.IdlePollIterationsAllocateNoManagedBytes`, 432/432/1,840
+  B) — a gate in a file this task does not touch. Every value is a fixed lump, never proportional to
+  the 1,000-iteration window, and the per-gate runs are 140/140. See `gate-stability.txt` for the
+  full argument, the first trigger (`CountingReaderIdleIterationsAllocateNoManagedBytes`, 1,096 B)
+  and the note that 432/1,096/1,840/7,704 are not in `hot-path.md`'s recorded `signature=` predicate.
+
+## Full-suite result
+
+`dotnet build WinForward.slnx -c Release` — **0 warnings, 0 errors**.
+
+`dotnet test WinForward.slnx -c Release` on the landed tree (one run, as instructed):
+
+```text
+Passed!  - Failed: 0, Passed:   18, Skipped: 0, Total:   18 - WinForward.Analyzers.Tests.dll
+Passed!  - Failed: 0, Passed: 1081, Skipped: 0, Total: 1081 - WinForward.Core.Tests.dll
+```
+
+The F4 archive recorded `WinForward.Core.Tests 1,057` + `WinForward.Analyzers.Tests 18`. The landed
+delta is **exactly +24**, the new facts and nothing else: `NdisApiReadShapeTests` 14,
+`NdisCapturePumpIdleWaitTests` 5, `MultiAdapterCaptureLoopArrivalSignalTests` 4, and one new fact in
+`CapturePumpReadCallTests`. No test was removed, skipped or relaxed.
+
+The check round re-verified both the counts and the delta from its own runs: the pre-change baseline
+worktree reports `Total: 1057`, the landed tree `Total: 1081`, and the final frozen-tree run after
+every check fix was green (`18` + `1081`, 0 failed).
+
+F2/F3/F4 regression surface, all green in that run: `WarmPathGateTests` family,
+`SweepAllocationGateTests`, `FlowKeyShapeTests`/`PackedFlowKeyTests`/`PacketPathWalkCountTests`, the
+four allocation-gate classes, and `NdisCaptureResilienceTests`/`CaptureLifecycleTests`.
