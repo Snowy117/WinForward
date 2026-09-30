@@ -1391,3 +1391,87 @@ layout.
 ### Status
 
 [OK] **Completed**
+
+
+## Session 45: F5 pump I/O: read-first drains with a self-healing ABI guard, and an event-driven idle wake (31x idle CPU)
+<!-- trellis-session: v=2 fp=988d148d34614f7f -->
+
+**Date**: 2026-10-01
+**Task**: F5 pump I/O: read-first drains with a self-healing ABI guard, and an event-driven idle wake (31x idle CPU)
+**Branch**: `master`
+
+### Summary
+
+The capture drain issues the batched read first (the queue query demoted to the non-success disambiguator, both ABI hypotheses proven at a new driver-native seam) and idles on the driver's packet-arrival event instead of a 1 ms sleep. Idle CPU 0.0178 -> 0.00055 CPU-s/s (~31x, same-session A/B), cadence 886 -> 10 waits/s, wake p50 0.078 -> 0.066 ms. Since the real ABI cannot be verified on this host, a self-healing guard arms a sticky query-first shape on a read failure with a non-empty queue and logs it, instead of retrying into a false adapter degradation (red-before True|5|1|31). Nine Windows experiments recorded with fallbacks.
+
+### Main Changes
+
+### Main Changes
+
+F5 of the structural perf research (`09-29-tcp-udp-path-structural-perf`) — the capture pump stops paying
+two IOCTLs per drain and a 1 ms sleep per idle poll. The drain now issues the **batched read first** and the
+queue-size query is demoted to the **non-success disambiguator**: the empty case is recognised from the read
+result where the ABI carries it, and where the read does not succeed the query separates "empty" from
+"driver error", reproducing the old classification state-for-state. Both ABI hypotheses are implemented and
+proven at the **driver↔native** seam, whose read/query counters are new (the pump↔driver seam already
+existed and proves nothing new); the fail-closed equivalence table was written down and pinned row by row.
+
+Because this host has no Windows driver, the read-first shape had an unverified hazard: an ABI that fails a
+request larger than the queue depth would retry into a **false adapter degradation** after ~3.1 s. The
+operator rejected both "detect it on Windows later" and re-introducing a pre-emptive query, so the task
+landed a **self-healing ABI-mismatch guard**: a failed read with a non-empty queue arms a sticky
+per-handle query-first shape, publishes a rate-limited `adapter.readShape.mismatch` diagnostic (adapter,
+requested count, observed depth, native error) through a sink the driver owns, and retries the drain
+immediately instead of entering the transient budget. A conforming driver never arms it. The red-before is
+recorded: without the guard the mismatching fake degrades the adapter (`True|5|1|31`, no throw).
+
+The idle path became a bounded **event wait** on the driver's packet-arrival signal
+(`SetPacketEvent`, auto-reset, with the retention argument that makes "empty read → signal → wait" safe),
+behind an injectable `INdisPacketArrivalSignal`; a pump with no signal keeps the sleep-poll shape
+byte-identically.
+
+### Measurement
+
+| Reading | Before | After |
+|---|---|---|
+| idle CPU (CPU-s per idle second) | 0.017798 / 0.018501 / 0.017826 | **0.000548 / 0.000534 / 0.000580** (~31×, same-session A/B) |
+| poll cadence | 877.6 / 885.6 / 885.8 polls/s | **10.0 waits/s** (~90× fewer) |
+| wake p50 | 0.0779 / 0.0783 / 0.0791 ms | **0.0660 / 0.0658 / 0.0653 ms** |
+| park confirmations/wake | n/a | **1.0002**, with 5,000/5,000 signal-driven returns |
+| drained reads (loaded) | `[Query, Read]` | `[Read]` |
+| empty drain | `[Query]` then read | `[Read]` (hypothesis B) or `[Read, Query]` (hypothesis A), no error |
+
+### Testing
+
+- [OK] Release build 0 warnings/0 errors; full suite **1081 + 18** green (the +24 delta is exactly the new
+  facts); per-gate stability **140/140** across 7 classes plus **40/40** after the gate-carrying files moved.
+- [OK] `dotnet format` exit 0 with empty output; `jb inspectcode` **0 issues** (22 diagnostics fixed across
+  three rounds; two narrow suppressions, each with a verifiable reason).
+- [OK] Two new exact 0 B gates (`IdleWaitIterationsAllocateNoManagedBytes`,
+  `DriverReadPathAllocatesNoManagedBytes`), both discrimination-proved — with the finding that a
+  non-escaping `new byte[64]` inside a window does **not** fail on .NET 10, so the probe must escape.
+- [OK] Nine Windows experiments recorded with expected observation and fallback, the partial-batch row
+  acceptance-relevant; the pinned ABI itself stays unverified and nothing in the docs reads as if it were.
+
+### Status
+
+[OK] **Completed** (archived 2026-10-01)
+
+### Next Steps
+
+- F8 pump-thread attribution (next in the F2–F8 pipeline): move process attribution off the pump thread and
+  cache the owner tables as a short-lived snapshot. Then F6 UDP footprint, F7 WFP scoping.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6cb27bf` | test(bench): F5 read-shape counters, idle-wait rows and the before/after evidence (pump-io-shape) |
+| `a488a99` | perf(ndis): read-first drain with a self-healing ABI-mismatch guard and an event-driven idle wait (pump-io-shape) |
+| `ec0762f` | docs(spec): record the F5 read-shape, guard and arrival-signal contracts plus the Windows open items (pump-io-shape) |
+| `e888921` | chore(task): record the F5 task and sync the parent backlog (pump-io-shape) |
+
+### Status
+
+[OK] **Completed**
