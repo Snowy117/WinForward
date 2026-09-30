@@ -136,6 +136,15 @@ internal sealed record SoakOptions
     public int Capacity { get; private init; } = ConfigurationLoader.DefaultUdpSessionCapacity;
 
     /// <summary>
+    /// Sweep probe calibration (<c>--sweep-window-control-ms</c>): when positive, the sweep scenario arms
+    /// its in-window flag and then waits this long <em>instead of calling the sweep at all</em>, so the
+    /// recorded pause figures can be quoted against a run that performed no product work inside the
+    /// window. Zero runs the real sweep. This is the noise-floor control the F3 acceptance evidence needs:
+    /// the in-window maximum measures host scheduling and lock queueing, not hold length.
+    /// </summary>
+    public int SweepWindowControlMs { get; private init; }
+
+    /// <summary>
     /// UDP session-budget soak (<c>--churn-seconds</c>): length of the new-flow churn window. The
     /// default clears the retention ceiling's discrimination minimum at the default rate with room
     /// for sample cadence (20 × 90 = 1,800 cumulative flows against the ceiling 1,240 = 20 ×
@@ -251,6 +260,8 @@ internal sealed record SoakOptions
                 return options with { Rate = PositiveInt("--rate", Value(args, ref index)) };
             case "--capacity":
                 return options with { Capacity = UdpCapacity(Value(args, ref index)) };
+            case "--sweep-window-control-ms":
+                return options with { SweepWindowControlMs = AtLeast("--sweep-window-control-ms", Value(args, ref index), 0) };
             case "--churn-seconds":
                 return options with { ChurnSeconds = PositiveInt("--churn-seconds", Value(args, ref index)) };
             case "--drain-seconds":
@@ -263,15 +274,23 @@ internal sealed record SoakOptions
                 return options with { Socks5External = true };
             case "--threads":
                 return options with { Threads = PositiveInt("--threads", Value(args, ref index)) };
-            case "--attribution-delay-ms":
-                return options with { AttributionDelayMs = AtLeast("--attribution-delay-ms", Value(args, ref index), 0) };
-            case "--attribution-delay-percent":
-                return options with { AttributionDelayPercent = AtLeast("--attribution-delay-percent", Value(args, ref index), 0) };
+            case "--attribution-delay-ms" or "--attribution-delay-percent":
+                return ApplyAttributionDelay(options, args, ref index);
             case "--shared-key-percent":
                 return options with { SharedKeyPercent = AtLeast("--shared-key-percent", Value(args, ref index), 0) };
             default:
                 throw new ArgumentException($"Unknown stability argument '{args[index]}'.", nameof(args));
         }
+    }
+
+    /// <summary>The paired synthetic-attribution knobs, which share one non-negative parse.</summary>
+    private static SoakOptions ApplyAttributionDelay(SoakOptions options, string[] args, ref int index)
+    {
+        var name = args[index];
+        var value = AtLeast(name, Value(args, ref index), 0);
+        return string.Equals(name, "--attribution-delay-ms", StringComparison.Ordinal)
+            ? options with { AttributionDelayMs = value }
+            : options with { AttributionDelayPercent = value };
     }
 
     /// <summary>

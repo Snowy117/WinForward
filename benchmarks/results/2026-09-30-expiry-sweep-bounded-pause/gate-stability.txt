@@ -1,0 +1,101 @@
+# Per-gate stability proof (hot-path.md §4) — 4 gate classes x 20 runs, one gate per process.
+# Command: dotnet test WinForward.slnx -c Release --filter "FullyQualifiedName~<gate>"
+# Failure signature predicate: ^(168|5216|7384|7448)$ ; anything else stops the loop.
+# revision=911ad19 tree=48e106500ef2a53b09bb80c27f5cdb4b25765279
+gate HotPathAllocationGateTests run 1 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 2 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 3 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 4 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 5 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 6 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 7 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 8 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 9 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 10 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 11 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 12 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 13 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 14 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 15 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 16 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 17 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 18 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 19 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 20 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate CapturePumpReadCallTests run 1 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 2 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 3 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 4 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 5 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 6 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 7 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 8 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 9 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 10 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 11 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 12 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 13 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 14 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 15 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 16 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 17 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 18 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 19 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 20 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate SweepAllocationGateTests run 1 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 2 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 3 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 4 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 5 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 6 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 7 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 8 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 9 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 10 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 11 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 12 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 13 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 14 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 15 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 16 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 17 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 18 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 19 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 20 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate NdisCapturePumpTests run 1 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 2 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 3 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 4 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 5 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 6 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 7 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 8 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 9 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 10 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 11 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 12 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 13 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 14 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 15 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 16 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 17 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 18 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 19 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 20 911ad19 48e106500ef2a53b09bb80c27f5cdb4b25765279 rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+# done
+
+# ---- addendum (independent check session) ----
+# The runs above were taken on this task's worktree. Every product/test change of the task is unstaged,
+# so `git write-tree` returned HEAD's tree (911ad19): the per-run fingerprint above identifies the index,
+# not the tested working tree. Working-tree identity:
+#   git diff HEAD | sha256sum = 9c4b0a793e2d83ef63e632aacd74aa6238fd40132ae116292c2c81de17287694
+#   (taken after the check session's edits; untracked task/artifact files are covered by no fingerprint)
+# Files edited AFTER the loop above (none is in the four filtered gate classes; no product-path change):
+#   .trellis/spec/backend/hot-path.md (suite-total prose)
+#   .trellis/spec/backend/traffic-policy-lifecycle.md (cadence formula)
+#   benchmarks/WinForward.Benchmarks/Stability/SweepPauseScenario.cs (class XML doc only)
+#   tests/WinForward.Core.Tests/CoreFlowStructuresTests.cs (release-ordering fix in FlowTableSweepPredicateParkDoesNotBlockConcurrentResolve)
+#   task/artifact prose: design.md and benchmarks/results/2026-09-30-expiry-sweep-bounded-pause/README.md (untracked)
+# Re-verified on the edited tree: dotnet build -c Release --no-incremental = 0 warnings / 0 errors;
+#   dotnet test -c Release = WinForward.Analyzers.Tests 18/18 + WinForward.Core.Tests 995/995, 0 failed, exit 0;
+#   one run per gate filter = HotPathAllocationGateTests 11, CapturePumpReadCallTests 3, SweepAllocationGateTests 12, NdisCapturePumpTests 14, all green.

@@ -213,10 +213,17 @@ teardown tails — are **not comparable** with current rows either.
   working set, and a resolve that misses aborts the run instead of reporting a pause for the wrong work.
   Reports the sweep's mean/max wall time, its allocation per sweep, and the observer-side **maximum**
   pause plus counts over 0.1 / 0.5 / 1 / 5 ms — an exact maximum rather than a sampled percentile,
-  because the one pause that matters is the one a sample misses. The research's 0.5 ms line is recorded
-  as `targetMaxPauseMs` and **not** enforced (`gated: false`); the sweep's zero allocation is the exact
-  gate and lives in `SweepAllocationGateTests`. `--flows` can raise but not lower the 65,536 floor.
-  Excluded from `--scenario all` (it seeds a 65k table and loops: a probe, not a soak). First series:
+  because the one pause that matters is the one a sample misses. Every timing field is **report-only**
+  (`gated: false`) and is quoted against the calibration control below; the sweep's hold bound is proven
+  by counts in `SweepAllocationGateTests.FlowTableSweepHoldWorkIsBoundedByChunkEntries`, and its zero
+  allocation by `SweepAllocationGateTests`. `--flows` can raise but not lower the 65,536 floor.
+  `--sweep-window-control-ms <n>` runs the **calibration control**: the sweeper thread arms the same
+  in-window flag and then waits *n* ms instead of calling the sweep (no refill, no removal, no tripwire;
+  `removedPerSweep` reports 0 and the row's `note` says it is a control). A control run at `120` measured
+  a 5.19 ms in-window maximum and 12,336 in-window pauses over 0.5 ms with **zero product work inside the
+  window**, which is why no in-window timing maximum is an acceptance figure on a shared host: the same
+  order of pauses appears with no sweep at all. Excluded from `--scenario all` (it seeds a 65k table and
+  loops: a probe, not a soak). First series:
   `results/2026-09-29-benchmark-coverage/sweep-pause.jsonl` — sweep 25.1 ms mean / 87.1 ms max, resolve
   pause up to **39.5 ms against the 0.5 ms target**, 14,022 resolves over 1 ms in 15 s, 0 B per sweep.
 - **`pump.idleWake`** — the capture pump's idle cost and its wake→dispatch latency (research F5), driven

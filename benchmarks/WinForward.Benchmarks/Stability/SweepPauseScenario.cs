@@ -22,6 +22,23 @@ namespace WinForward.Benchmarks.Stability;
 /// sweep. The verdict row is report-only with the research's 0.5 ms line recorded as the target, and it
 /// carries the sweep's own allocation (which must stay zero — the xunit gate asserts that exactly).
 /// </para>
+/// <para>
+/// The raw series cannot carry the finding by itself: the scenario refills each round with 65,536
+/// <em>individual</em> claims that contend on the same table gate, so most observer-visible pauses are
+/// refill cost the sweep does not own. The probe therefore also scopes a phase to the sweep itself — a
+/// flag armed immediately around the <see cref="FlowTable.RemoveExpired"/> call — and an observer counts
+/// a resolve as in-window only when it <em>started</em> while that flag was set.
+/// <c>maxSweepWindowPauseMs</c> and the <c>pausesInWindow*</c> counts are phase-scoped
+/// <em>diagnostics</em>: the phase fixed attribution (they no longer include the refill contention) but
+/// not attributability to the hold, because the calibration control — the same flag armed for
+/// <c>--sweep-window-control-ms</c> with <em>no product call at all</em> — measures the same order of
+/// in-window pauses on a shared host. No timing field in this row is an acceptance figure; the sweep's
+/// hold bound is proven by counts in
+/// <c>SweepAllocationGateTests.FlowTableSweepHoldWorkIsBoundedByChunkEntries</c>. The user-visible win
+/// here is <c>sweepWindowResolves</c>, which reports the window's own population so a vacuous window is
+/// visible, and the probe aborts on a zero-window run rather than publishing a maximum for a window that
+/// never existed.
+/// </para>
 /// </summary>
 internal static class SweepPauseScenario
 {
@@ -93,7 +110,8 @@ internal static class SweepPauseScenario
     /// <summary>
     /// The pause probe: one sweeper thread filling and sweeping, one observer thread per
     /// <c>--tcp-concurrency</c>, all released from a common gate so they share one observation window.
-    /// Reports the sweep's own wall time and allocation plus the observer-side maximum and thresholds.
+    /// With <c>--sweep-window-control-ms</c> the sweeper thread arms the same window and waits instead of
+    /// sweeping, which is the noise-floor control the timing figures are quoted against.
     /// </summary>
     private static void MeasureSweepPause(StabilityContext context, FlowTable table, FlowKey[] sweptKeys, FlowKey[] observerKeys, SoakOptions options)
     {
@@ -101,13 +119,14 @@ internal static class SweepPauseScenario
         var observation = new ObserverResult[observers];
         var sweeps = new SweepStats[1];
         var signal = new StopSignal();
+        var window = new SweepWindow();
         var gate = new ManualResetEventSlim(initialState: false);
         var threads = new Thread[observers + 1];
         for (var index = 0; index < observers; index++)
         {
             var observer = index;
             // ReSharper disable once AccessToDisposedClosure // every thread is joined before the gate is disposed below.
-            threads[observer] = new Thread(() => observation[observer] = Observe(table, observerKeys, gate, signal))
+            threads[observer] = new Thread(() => observation[observer] = Observe(table, observerKeys, gate, signal, window))
             {
                 IsBackground = true,
                 Name = string.Create(CultureInfo.InvariantCulture, $"sweep-observer-{observer}"),
@@ -115,7 +134,7 @@ internal static class SweepPauseScenario
         }
 
         // ReSharper disable once AccessToDisposedClosure // the sweeper is joined with the observers before the gate is disposed.
-        threads[observers] = new Thread(() => sweeps[0] = SweepLoop(table, sweptKeys, gate, signal, options.DurationSeconds))
+        threads[observers] = new Thread(() => sweeps[0] = SweepLoop(table, sweptKeys, gate, signal, window, options.DurationSeconds, options.SweepWindowControlMs))
         {
             IsBackground = true,
             Name = "sweep-sweeper",
@@ -126,40 +145,85 @@ internal static class SweepPauseScenario
         foreach (var thread in threads) thread.Join();
         gate.Dispose();
 
-        var sweep = sweeps[0];
+        ReportSweepMetrics(context, observation, sweeps[0], sweptKeys.Length, observers, options.DurationSeconds, options.SweepWindowControlMs);
+    }
+
+    /// <summary>
+    /// Aggregates the per-observer statistics into the row. Every timing field is a report-only diagnostic:
+    /// the control run (the same window armed with no product call at all) shows the in-window maximum
+    /// measures host scheduling and lock queueing, not hold length, so the acceptance evidence for the
+    /// sweep's hold bound is the countable probe in <c>SweepAllocationGateTests</c>, not a number here. A
+    /// window that observed no resolve would publish a vacuously zero maximum, which reads as a pass, so it
+    /// aborts like the other tripwires instead.
+    /// </summary>
+    private static void ReportSweepMetrics(StabilityContext context, ObserverResult[] observation, SweepStats sweep, int flows, int observers, int durationSeconds, int controlWindowMs)
+    {
+        var windowResolves = observation.Sum(result => result.WindowResolves);
+        if (windowResolves == 0) throw new InvalidOperationException("The sweep window observed no resolve: the phase-scoped pause metric would be vacuous.");
+        var isControl = controlWindowMs > 0;
+
         var results = new
         {
             sweep.Sweeps,
-            removedPerSweep = sweptKeys.Length,
+            removedPerSweep = isControl ? 0 : flows,
             sweepMeanMs = Round(StabilityShared.TicksToMilliseconds(sweep.TotalTicks) / Math.Max(1, sweep.Sweeps), 3),
             sweepMaxMs = Round(StabilityShared.TicksToMilliseconds(sweep.MaxTicks), 3),
             sweepAllocatedBytesPerSweep = sweep.AllocatedBytes / Math.Max(1, sweep.AllocationSamples),
             observers,
             resolves = observation.Sum(result => result.Resolves),
-            maxPauseMs = Round(StabilityShared.TicksToMilliseconds(observation.Max(result => result.MaxTicks)), 4),
-            pausesOver100us = observation.Sum(result => result.Over100Microseconds),
-            pausesOver500us = observation.Sum(result => result.Over500Microseconds),
-            pausesOver1ms = observation.Sum(result => result.Over1Millisecond),
-            pausesOver5ms = observation.Sum(result => result.Over5Milliseconds),
+            maxPauseMs = Round(StabilityShared.TicksToMilliseconds(observation.Max(result => result.Raw.MaxTicks)), 4),
+            pausesOver100us = observation.Sum(result => result.Raw.Over100Microseconds),
+            pausesOver500us = observation.Sum(result => result.Raw.Over500Microseconds),
+            pausesOver1ms = observation.Sum(result => result.Raw.Over1Millisecond),
+            pausesOver5ms = observation.Sum(result => result.Raw.Over5Milliseconds),
+            sweepWindowResolves = windowResolves,
+            maxSweepWindowPauseMs = Round(StabilityShared.TicksToMilliseconds(observation.Max(result => result.Window.MaxTicks)), 4),
+            pausesInWindowOver100us = observation.Sum(result => result.Window.Over100Microseconds),
+            pausesInWindowOver500us = observation.Sum(result => result.Window.Over500Microseconds),
+            pausesInWindowOver1ms = observation.Sum(result => result.Window.Over1Millisecond),
+            pausesInWindowOver5ms = observation.Sum(result => result.Window.Over5Milliseconds),
+            sweepWindowControlMs = controlWindowMs,
             targetMaxPauseMs = 0.5,
             gated = false,
-            note = "Report-only pause probe (design §3): the research's 0.5 ms line is recorded as a target, not enforced, because a loaded host can inflate a single pause. The exact gate is the sweep's zero allocation, asserted in SweepAllocationGateTests.",
+            note = isControl
+                ? "Calibration control: the in-window flag was armed for sweepWindowControlMs per iteration and NO product call was made, so every pause figure here is the host's scheduling and lock-queueing floor for this observer count. It is the number the real runs' timing figures are quoted against; no field in this row is an acceptance figure."
+                : "Report-only pause probe with a phase-scoped sweep window: in-window means the resolve started while the sweeper had the flag armed around FlowTable.RemoveExpired, so the in-window fields exclude the scenario's own refill contention. No field here is an acceptance figure — the control run (armed window, no product call) shows the same order of in-window pauses, so they measure host scheduling and lock queueing, not hold length. The sweep's hold bound is proven by counts in SweepAllocationGateTests.FlowTableSweepHoldWorkIsBoundedByChunkEntries; the raw maxPauseMs / pausesOver* series are report-only and quoted normalized per sweep (at least 96% of them are the 65,536 per-round refill claims contending on the same gate). sweepWindowResolves (>= 1,000,000 per 15 s window is the D-C claim) proves the warm path is not starving and that the window is not vacuous.",
         };
-        context.WriteResult("flowTable.sweepPause", new { flows = sweptKeys.Length, observerFlows = ObserverFlows, observers, durationSeconds = options.DurationSeconds }, results);
-        context.WriteResult("flowTable.sweepPause.verdict", new { flows = sweptKeys.Length, observers, durationSeconds = options.DurationSeconds }, results);
+        context.WriteResult("flowTable.sweepPause", new { flows, observerFlows = ObserverFlows, observers, durationSeconds, sweepWindowControlMs = controlWindowMs }, results);
+        context.WriteResult("flowTable.sweepPause.verdict", new { flows, observers, durationSeconds, sweepWindowControlMs = controlWindowMs }, results);
     }
 
     /// <summary>
     /// The sweeper: refill with states already past the idle timeout, sweep them, repeat until the
-    /// window closes. The refill is deliberately outside the measured region — the pause under test is
-    /// the scan and removal, not the population churn that precedes it — and a sweep that fails to
-    /// remove every expired flow aborts the run rather than reporting a pause for less work.
+    /// observation window closes. The refill is deliberately outside the measured region — the pause
+    /// under test is the scan and removal, not the population churn that precedes it — and a sweep that
+    /// fails to remove every expired flow aborts the run rather than reporting a pause for less work. The
+    /// phase flag is armed around the sweep call alone, so no observer can mistake refill contention for
+    /// the sweep's own pause. In control mode the flag is armed for <paramref name="controlWindowMs"/> and
+    /// nothing else happens: no refill, no sweep, no tripwire — the row is the calibration floor.
     /// </summary>
-    private static SweepStats SweepLoop(FlowTable table, FlowKey[] sweptKeys, ManualResetEventSlim gate, StopSignal signal, int durationSeconds)
+    private static SweepStats SweepLoop(FlowTable table, FlowKey[] sweptKeys, ManualResetEventSlim gate, StopSignal signal, SweepWindow window, int durationSeconds, int controlWindowMs)
     {
         gate.Wait();
         var stats = new SweepStats();
         var watch = Stopwatch.StartNew();
+        if (controlWindowMs > 0)
+        {
+            while (!signal.Stopped)
+            {
+                var allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
+                var started = Stopwatch.GetTimestamp();
+                window.Enter();
+                Thread.Sleep(controlWindowMs);
+                window.Exit();
+                stats.Record(Stopwatch.GetTimestamp() - started, GC.GetTotalAllocatedBytes(precise: true) - allocatedBefore);
+                if (watch.Elapsed.TotalSeconds >= durationSeconds) signal.Stop();
+            }
+
+            signal.Stop();
+            return stats;
+        }
+
         while (!signal.Stopped)
         {
             foreach (var key in sweptKeys) Claim(table, key);
@@ -169,7 +233,9 @@ internal static class SweepPauseScenario
             // The claim stamps the state with the wall clock (FlowState.Reset), so "expired" is
             // expressed by moving the sweep's own notion of now past the idle timeout rather than by
             // faking a clock the table does not consult for activity.
+            window.Enter();
             var removed = table.RemoveExpired(DateTimeOffset.UtcNow.Add(s_idleTimeout).AddSeconds(1), s_idleTimeout, static key => key.Protocol == TransportProtocol.Tcp);
+            window.Exit();
             var elapsed = Stopwatch.GetTimestamp() - started;
             if (removed != sweptKeys.Length) throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture, $"The sweep removed {removed} of {sweptKeys.Length} expired flows."));
             stats.Record(elapsed, GC.GetTotalAllocatedBytes(precise: true) - allocatedBefore);
@@ -184,9 +250,10 @@ internal static class SweepPauseScenario
     /// One observer loop. Every resolve is timestamped; the loop keeps the exact maximum and counts how
     /// often a resolve crossed each pause threshold, so a single stop-the-world tick cannot be averaged
     /// away. A resolve that misses would mean the hold predicate let the observer set expire — fatal to
-    /// the measurement, so it aborts the run instead of reporting a plausible number.
+    /// the measurement, so it aborts the run instead of reporting a plausible number. The same statistics
+    /// are kept a second time for the resolves that started inside the sweep's phase window.
     /// </summary>
-    private static ObserverResult Observe(FlowTable table, FlowKey[] keys, ManualResetEventSlim gate, StopSignal signal)
+    private static ObserverResult Observe(FlowTable table, FlowKey[] keys, ManualResetEventSlim gate, StopSignal signal, SweepWindow window)
     {
         gate.Wait();
 
@@ -198,30 +265,32 @@ internal static class SweepPauseScenario
         var fiveHundred = Stopwatch.Frequency / 2_000;
         var oneMs = Stopwatch.Frequency / 1_000;
         var fiveMs = Stopwatch.Frequency / 200;
+        var raw = new PauseCounters(hundred, fiveHundred, oneMs, fiveMs);
+        var inWindowCounters = new PauseCounters(hundred, fiveHundred, oneMs, fiveMs);
         var resolves = 0L;
-        var maxTicks = 0L;
-        var over100 = 0L;
-        var over500 = 0L;
-        var over1ms = 0L;
-        var over5ms = 0L;
+        var windowResolves = 0L;
         var cursor = 0;
         while (!signal.Stopped)
         {
             var key = keys[cursor];
             cursor++;
             if (cursor == keys.Length) cursor = 0;
+
+            // Read before the resolve, never after: in-window must mean the resolve started while the
+            // sweeper had the flag armed, or a resolve that merely outlived a sweep would be attributed
+            // to it.
+            var inWindow = window.Active;
             var started = Stopwatch.GetTimestamp();
             if (!table.TryResolve(key, out _)) throw new InvalidOperationException("The observer's live key expired: the sweep's hold predicate is not protecting the observer set.");
             var elapsed = Stopwatch.GetTimestamp() - started;
             resolves++;
-            if (elapsed > maxTicks) maxTicks = elapsed;
-            if (elapsed > hundred) over100++;
-            if (elapsed > fiveHundred) over500++;
-            if (elapsed > oneMs) over1ms++;
-            if (elapsed > fiveMs) over5ms++;
+            raw.Record(elapsed);
+            if (!inWindow) continue;
+            windowResolves++;
+            inWindowCounters.Record(elapsed);
         }
 
-        return new ObserverResult(resolves, maxTicks, over100, over500, over1ms, over5ms);
+        return new ObserverResult(resolves, raw, windowResolves, inWindowCounters);
     }
 
     /// <summary>Artifact rounding: the analyzer requires an explicit midpoint mode, and ToEven is the runtime's own default.</summary>
@@ -276,7 +345,50 @@ internal static class SweepPauseScenario
         }
     }
 
-    private sealed record ObserverResult(long Resolves, long MaxTicks, long Over100Microseconds, long Over500Microseconds, long Over1Millisecond, long Over5Milliseconds);
+    private sealed record ObserverResult(long Resolves, PauseCounters Raw, long WindowResolves, PauseCounters Window);
+
+    /// <summary>
+    /// One population's exact pause maximum and threshold counts: every resolve, or the sweep-window slice
+    /// of them. Mutated only by the observer thread that owns it, outside the resolve's own measurement.
+    /// </summary>
+    private sealed class PauseCounters(long hundredMicroseconds, long fiveHundredMicroseconds, long oneMillisecond, long fiveMilliseconds)
+    {
+        public long MaxTicks { get; private set; }
+
+        public long Over100Microseconds { get; private set; }
+
+        public long Over500Microseconds { get; private set; }
+
+        public long Over1Millisecond { get; private set; }
+
+        public long Over5Milliseconds { get; private set; }
+
+        public void Record(long ticks)
+        {
+            if (ticks > MaxTicks) MaxTicks = ticks;
+            if (ticks > hundredMicroseconds) Over100Microseconds++;
+            if (ticks > fiveHundredMicroseconds) Over500Microseconds++;
+            if (ticks > oneMillisecond) Over1Millisecond++;
+            if (ticks > fiveMilliseconds) Over5Milliseconds++;
+        }
+    }
+
+    /// <summary>
+    /// The sweep phase flag, armed immediately around the <see cref="FlowTable.RemoveExpired"/> call and
+    /// cleared right after it. A volatile <see langword="int"/> rather than a local or a plain field: the
+    /// sweeper writes it and every observer reads it without a lock, and a plain <see langword="bool"/>
+    /// field would race.
+    /// </summary>
+    private sealed class SweepWindow
+    {
+        private int _active;
+
+        public bool Active => Volatile.Read(ref _active) != 0;
+
+        public void Enter() => Volatile.Write(ref _active, 1);
+
+        public void Exit() => Volatile.Write(ref _active, 0);
+    }
 
     /// <summary>Shared stop flag: a captured local cannot be read through <see cref="Volatile"/> by reference, and a plain bool field would race.</summary>
     private sealed class StopSignal
