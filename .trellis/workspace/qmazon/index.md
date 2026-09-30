@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 45
+- **Total Sessions**: 46
 - **Last Active**: 2026-10-01
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1477 | Active |
+| `journal-1.md` | ~1559 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 46 | 2026-10-01 | F8 attribution off the pump thread: a bounded pending index and an owner-table epoch coalescer (pump stall 7.5 ms -> 0.02 ms) | `acca507`, `4a0f70e`, `f121a3d`, `ee40987` | `master` |
 | 45 | 2026-10-01 | F5 pump I/O: read-first drains with a self-healing ABI guard, and an event-driven idle wake (31x idle CPU) | `6cb27bf`, `a488a99`, `ec0762f`, `e888921` | `master` |
 | 44 | 2026-10-01 | F4 keys and parsing: a 64 B interned key, one parse per frame, lock-free trackers (and a live mis-rewrite found by hardening) | `31b340b`, `7cc794a`, `d43d85d`, `59e80fc` | `master` |
 | 43 | 2026-09-30 | F2 warm-path lock chain: direct-mapped warm cache (and the ConcurrentDictionary mechanism rejected by the 0 B gate) | `ea13924`, `02fee48`, `cee7063`, `fc0a867` | `master` |

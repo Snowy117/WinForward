@@ -1475,3 +1475,85 @@ byte-identically.
 ### Status
 
 [OK] **Completed**
+
+
+## Session 46: F8 attribution off the pump thread: a bounded pending index and an owner-table epoch coalescer (pump stall 7.5 ms -> 0.02 ms)
+<!-- trellis-session: v=2 fp=c5c45837ea680f02 -->
+
+**Date**: 2026-10-01
+**Task**: F8 attribution off the pump thread: a bounded pending index and an owner-table epoch coalescer (pump stall 7.5 ms -> 0.02 ms)
+**Branch**: `master`
+
+### Summary
+
+Process attribution leaves the capture pump: a bounded per-flow pending index admitted by its own adapter's pump, a setup worker running attribution while the claim stays on the pump at delivery, in-order drain through a claim-last critical section, and an epoch coalescer so concurrent new flows share one system-wide table scan (UDP deliberately never caches - its predicate is local-port-only). Pump-thread attributions 64 -> 0, pumpBlockedMs p95 7.52-7.56 -> 0.019-0.028 ms (~380x), 16 concurrent flows -> 1 scan; tcpChurn calibration held; suite 1124+18 green; both commit gates at zero.
+
+### Main Changes
+
+### Main Changes
+
+F8 of the structural perf research (`09-29-tcp-udp-path-structural-perf`, addendum §A3) — process
+attribution leaves the capture pump thread. A flow-table miss that requires attribution is now admitted into
+a bounded per-flow pending index (cap, global byte budget, 1 s cooldown, 5 s TTL, exactly one counted
+refusal per class) **by its own adapter's pump**; a setup worker runs the attribution while the **claim stays
+on the pump** at delivery, which is what keeps F1's batched-lane contract and F2's warm path untouched. The
+pump drains a decided flow's retained packets in order through a claim-last critical section, the batch is
+never detached from its entry (a per-batch `finally` Blocks the unexecuted remainder), and the failure arm
+never claims — it Blocks, counts and arms the cooldown, with shutdown cancellation exempt. Admission is
+gated to the attribution-eligible shape (process rules configured, host origin), so forwarded and no-rule
+flows keep today's inline path.
+
+The owner tables got an **epoch coalescer**: concurrent misses share one system-wide scan, and a retry joins
+a later epoch by request instant instead of scanning again. **UDP never serves from the snapshot** — its
+predicate matches the local port alone, so a recycled port inside the window would attribute a flow to the
+previous process (planning caught this fail-open and closed it by caching TCP only).
+
+### Measurement
+
+| Reading | Before | After |
+|---|---|---|
+| pump-thread attributions (scenario, 64 flows) | 64 | **0** |
+| setup-worker attributions | 0 | **64** |
+| `pumpBlockedMs` p95 | 7.519–7.561 ms | **0.019–0.028 ms** (~380×) |
+| scans for 16 concurrent new flows | 16 | **1** (`scansPerFlow` 0.0625) |
+| `tcpChurn` allocated bytes/connection (must-not-move) | 91,088 / 91,066 / 91,031 | 91,046 / 91,069 / 91,057 |
+
+### Testing
+
+- [OK] Release build 0 warnings/0 errors; full suite **1124 + 18** green (six consecutive green suite runs on
+  the final tree; the +25 facts are exactly the new ones).
+- [OK] `dotnet format` exit 0 with empty output; `jb inspectcode` **0 issues** (58 findings fixed across two
+  rounds — the dead `AttributionDiagnostics` snapshot, several dead fake members and an unused index field
+  deleted rather than suppressed; three narrow suppressions with inline reasons).
+- [OK] Per-gate stability 45/45 (9 classes × N=5) plus refreshed totals; the composite arrival gate and the
+  rewritten coalescing fact both re-proved discriminating.
+- [OK] Fixes worth naming: seven promised `RuntimeCounters` keys were never incremented (wired); the wake
+  registry leaked one `EventWaitHandle` per adapter registration and was never disposed (now one per handle,
+  disposed by the bundle); TTL-reclaimed packets are counted fail-closed drops; the wake fires on the
+  `TryEnqueue`-refusal arm too; and one new fact was timing-flaky (rewritten deterministically).
+- [OK] Windows residuals recorded: the handle→pump 1:1 precondition, iphlpapi behaviour, the deferred UDP
+  snapshot, accepted UDP ring refusals, and N=5 (not 20) per gate.
+
+### Status
+
+[OK] **Completed** (archived 2026-10-01)
+
+### Next Steps
+
+- F6 UDP per-session footprint (next in the F2–F8 pipeline): the relay receive-buffer default, the
+  receive-window pool sizing and the adaptive idle TTL. Then F7 WFP scoping (scope by research first; if it
+  is not implementable in this repository, the PRD and its review record that outcome).
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `acca507` | test(bench): F8 attribution-off-pump scenario, fakes and the before/after evidence (attribution-off-pump) |
+| `4a0f70e` | perf(flow): attribution off the pump thread with a bounded pending index and an owner-table epoch coalescer (attribution-off-pump) |
+| `f121a3d` | docs(spec): record the F8 pending-index, coalescer and wake contracts plus the Windows items (attribution-off-pump) |
+| `ee40987` | chore(task): record the F8 task and sync the parent backlog (attribution-off-pump) |
+
+### Status
+
+[OK] **Completed**
