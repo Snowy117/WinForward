@@ -29,6 +29,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
     private readonly NativeBufferPool? _relayPool;
     private readonly NativeBufferPool? _udpDatagramPool;
     private readonly NativeBufferPool? _udpWindowPool;
+    private readonly NativeBufferPool? _attributionPool;
     private readonly SetupExecutor? _setupExecutor;
     private readonly IRuntimeLogger _logger;
     private readonly Lock _gate = new();
@@ -38,6 +39,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
     private const string RelayPoolName = "tcp.relay";
     private const string UdpDatagramPoolName = "udp.setupQueue";
     private const string UdpWindowPoolName = "udp.receiveWindow";
+    private const string AttributionPoolName = "flow.attribution";
     private HashSet<string>? _lastNoMacAdapters;
     private string? _lastZeroMacHostId;
 
@@ -60,9 +62,11 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         NativeBufferPool? relayPool = null,
         NativeBufferPool? udpDatagramPool = null,
         NativeBufferPool? udpWindowPool = null,
+        NativeBufferPool? attributionPool = null,
         SetupExecutor? setupExecutor = null,
         UdpAssociationPool? udpAssociationPool = null,
-        ActivityBucketClock? activityClock = null)
+        ActivityBucketClock? activityClock = null,
+        FlowAttributionWakeRegistry? wakeRegistry = null)
     {
         Dispatcher = dispatcher;
         Executor = executor;
@@ -76,8 +80,10 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         _relayPool = relayPool;
         _udpDatagramPool = udpDatagramPool;
         _udpWindowPool = udpWindowPool;
+        _attributionPool = attributionPool;
         _setupExecutor = setupExecutor;
         UdpAssociations = udpAssociationPool;
+        WakeRegistry = wakeRegistry;
         ActivityClock = activityClock ?? new ActivityBucketClock();
     }
 
@@ -110,6 +116,12 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
 
     /// <summary>The per-server association pool behind every UDP transport (heartbeat usage source).</summary>
     internal UdpAssociationPool? UdpAssociations { get; }
+
+    /// <summary>
+    /// The pipeline-owned wake events, one per adapter that registered a driver signal. The capture
+    /// generation composes the composites; the bundle owns the registry's lifetime.
+    /// </summary>
+    internal FlowAttributionWakeRegistry? WakeRegistry { get; }
 
     /// <summary>
     /// Builds the durable layer for a run. Nothing in the bundle references a specific adapter
@@ -220,6 +232,11 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         // coordinator so the pool and the session window can never disagree.
         var udpWindowPool = new NativeBufferPool(UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize));
         RegisterPool(counters, UdpWindowPoolName, udpWindowPool);
+        // One native pool backs every retained attribution packet. Its capacity is the pipeline's
+        // own global byte budget divided by the buffer size, so the pool can hold the budget's
+        // worth of frames without an overflow allocation.
+        var attributionPool = new NativeBufferPool(maximumFrameSize, (int)(FlowAttributionPendingIndex.DefaultGlobalByteBudget / maximumFrameSize));
+        RegisterPool(counters, AttributionPoolName, attributionPool);
         // One association pool backs every UDP flow's control connection (Step 2); the bundle owns
         // it and the coordinator's transports borrow leases from it, so it outlives the coordinator.
         // The two bounds multiply into the shared head, so both ride the validated configuration.
@@ -234,11 +251,12 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
             await associationPool.DisposeAsync().ConfigureAwait(false);
             udpDatagramPool.Dispose();
             udpWindowPool.Dispose();
+            attributionPool.Dispose();
             throw;
         }
         try
         {
-            return BuildBundle(configuration, reinjector, selfTraffic, logger, healthSignal, udpTargets, adapterSlots, udpCoordinator, tcpCoordinator, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, setupExecutor, associationPool, activityClock);
+            return BuildBundle(configuration, reinjector, selfTraffic, logger, healthSignal, udpTargets, adapterSlots, udpCoordinator, tcpCoordinator, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, attributionPool, setupExecutor, associationPool, activityClock);
         }
         catch
         {
@@ -246,6 +264,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
             await associationPool.DisposeAsync().ConfigureAwait(false);
             udpDatagramPool.Dispose();
             udpWindowPool.Dispose();
+            attributionPool.Dispose();
             throw;
         }
     }
@@ -264,6 +283,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         NativeBufferPool relayPool,
         NativeBufferPool udpDatagramPool,
         NativeBufferPool udpWindowPool,
+        NativeBufferPool attributionPool,
         SetupExecutor setupExecutor,
         UdpAssociationPool associationPool,
         ActivityBucketClock activityClock)
@@ -274,10 +294,14 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
             reverseHandler: tcpCoordinator,
             fragmentHandler: tcpCoordinator.HandleFragmentAsync,
             logger: logger,
-            activityClock: activityClock);
-        var idleExpirySweeper = new IdleExpirySweeper(dispatcher, tcpCoordinator, udpCoordinator, relayIdleTimeout: configuration.UdpSessionIdleTimeout, logger: logger);
+            activityClock: activityClock,
+            attributionPool: attributionPool,
+            setupExecutor: setupExecutor);
+        var idleExpirySweeper = new IdleExpirySweeper(dispatcher, tcpCoordinator, udpCoordinator, relayIdleTimeout: configuration.UdpSessionIdleTimeout, logger: logger, attributionSweep: dispatcher.Attribution is { } attributionPipeline ? attributionPipeline.RemoveExpired : null);
         idleExpirySweeper.Start();
-        return new DurableCaptureBundle(dispatcher, executor, udpTargets, idleExpirySweeper, udpCoordinator, tcpCoordinator, logger, adapterSlots, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, setupExecutor, associationPool, activityClock);
+        var wakeRegistry = new FlowAttributionWakeRegistry();
+        if (dispatcher.Attribution is { } pipeline) pipeline.Wake = wakeRegistry;
+        return new DurableCaptureBundle(dispatcher, executor, udpTargets, idleExpirySweeper, udpCoordinator, tcpCoordinator, logger, adapterSlots, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, attributionPool, setupExecutor, associationPool, activityClock, wakeRegistry);
     }
 
     /// <summary>
@@ -400,6 +424,10 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         // and once at loop exit, including empty polls): every activity stamp and sweep cutoff is served
         // from the bucket this publishes, so no packet path reads a clock.
         ActivityClock.Tick();
+        // Decided attributions first: their pass frames must reach the lanes before this iteration's
+        // flush, and this callback is also the loop-exit one, so a delivery here is never left
+        // lane'd when RetireLanesExcept runs.
+        Dispatcher.Attribution?.DeliverDecided(adapterHandle);
         Executor.FlushPendingPasses(adapterHandle);
         Tcp.FlushPendingRedirectInjections(adapterHandle);
     }
@@ -418,6 +446,10 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         try
         {
             await _sweeper.DisposeAsync().ConfigureAwait(false);
+            // After the sweeper (no more TTL ticks) and before any pool: sealing the pipeline is
+            // what stops new attribution work, and every pending entry settles while the pumps have
+            // stopped and the pools it releases into are still alive.
+            if (Dispatcher.Attribution is { } attribution) await attribution.DisposeAsync().ConfigureAwait(false);
         }
         finally
         {
@@ -452,7 +484,11 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
                         {
                             // After the coordinator released every lease it held, drain the syn-copy pool.
                             _synCopyPool?.Dispose();
+                            _attributionPool?.Dispose();
                             _relayPool?.Dispose();
+                            // Last of the wake owners: the pipeline that signalled these events is
+                            // already sealed and every pump has stopped, so no waiter can be parked.
+                            WakeRegistry?.Dispose();
                             _setupExecutor?.Dispose();
                         }
                     }

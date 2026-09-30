@@ -106,6 +106,13 @@ public sealed class NdisCaptureGenerationFactory : ICaptureGenerationFactory
         _pollDelay = pollDelay;
     }
 
+    /// <summary>
+    /// The pipeline-owned wake registry, installed by the composition that created the pipeline
+    /// before the first generation is built. Null keeps every pump on the bare driver signal, which
+    /// costs delivery latency only — the pump re-reads on every timeout regardless.
+    /// </summary>
+    internal FlowAttributionWakeRegistry? WakeRegistry { get; init; }
+
     public ICaptureGeneration Create(IReadOnlyList<AdapterEnumerationItem> scope)
     {
         ArgumentNullException.ThrowIfNull(scope);
@@ -171,7 +178,12 @@ public sealed class NdisCaptureGenerationFactory : ICaptureGenerationFactory
         {
             var binding = bindings[index];
             var registered = _driver.TryRegisterPacketEvent(binding.Adapter.RuntimeHandle, out var signal, out var nativeError);
-            signals.Add(signal);
+            // A registered driver signal is composed with the pipeline's own wake event, so a
+            // decided attribution wakes this adapter's pump instead of waiting out the idle bound.
+            // A refused registration has no signal to compose and simply gets no wake.
+            signals.Add(registered && signal is NdisPacketArrivalSignal driverSignal && WakeRegistry is not null
+                ? WakeRegistry.Register(binding.Adapter.RuntimeHandle, driverSignal)
+                : signal);
             if (registered) continue;
             if (_packetEventUnavailableWarn.ShouldEmit())
             {

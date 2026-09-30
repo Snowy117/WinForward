@@ -277,15 +277,19 @@ internal static class Program
         Func<WindowsAdapter, int, ValueTask> onAdapterDegraded)
     {
         var retryLogGate = new AdapterTransientRetryLogGate(logger);
+        var generations = new NdisCaptureGenerationFactory(
+            driver,
+            new CapturePacketProcessor(bundle.Dispatcher, bundle.AdapterSlots, logger, bundle.FlushPendingInjections),
+            bundle.AdapterSlots,
+            logger,
+            onAdapterDegraded: onAdapterDegraded,
+            onAdapterTransientRetry: (adapter, nativeError, attempt) => retryLogGate.Log(adapter.StableId, adapter.FriendlyName, nativeError, attempt))
+        {
+            WakeRegistry = bundle.WakeRegistry,
+        };
         return new LayeredCaptureRunner(
             new NdisAdapterEnumerationProvider(driver, logger),
-            new NdisCaptureGenerationFactory(
-                driver,
-                new CapturePacketProcessor(bundle.Dispatcher, bundle.AdapterSlots, logger, bundle.FlushPendingInjections),
-                bundle.AdapterSlots,
-                logger,
-                onAdapterDegraded: onAdapterDegraded,
-                onAdapterTransientRetry: (adapter, nativeError, attempt) => retryLogGate.Log(adapter.StableId, adapter.FriendlyName, nativeError, attempt)),
+            generations,
             watcher,
             configuration.Policy,
             logger,

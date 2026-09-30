@@ -265,6 +265,35 @@ public sealed class FlowTable
     }
 
     /// <summary>
+    /// The allocation-free overload for a caller that already holds the decision: identical to
+    /// <see cref="TryClaimResolved(FlowKey, Func{FlowDecision}, out FlowState?)"/> with the
+    /// factory's result supplied by value, so a pump-thread delivery pays no closure for it.
+    /// </summary>
+    public bool TryClaimResolved(FlowKey key, FlowDecision decision, out FlowState? state)
+    {
+        lock (_gate)
+        {
+            NoteGateHold();
+            if (TryResolveLocked(key, out state)) return state is not null;
+            if (_states.Count >= Capacity)
+            {
+                state = null;
+                return false;
+            }
+
+            var created = RentState();
+            created.Reset(key, decision, ++_nextGeneration, ActivityClock.Tick());
+            _states.Add(key, created);
+            AddToTransportIndex(created);
+            _liveStates[_liveCount] = created;
+            _liveCount++;
+            Volatile.Write(ref _warm[SlotOf(key)], created);
+            state = created;
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Removes flow decisions idle past <paramref name="idleTimeout"/>. An entry whose idle has
     /// elapsed but whose <paramref name="isHeld"/> predicate reports a live holder (e.g. a TCP
     /// redirect session still relaying, or a flow inside its post-teardown grace window) is

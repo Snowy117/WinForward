@@ -1,7 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
-using System.Net;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
@@ -18,16 +17,34 @@ public sealed partial class WindowsProcessAttributor : IProcessAttributor
     private readonly Dictionary<ProcessCacheKey, ProcessIdentity> _identityCache = [];
     private readonly Queue<ProcessCacheKey> _cacheOrder = [];
     private readonly Lock _cacheGate = new();
+    private readonly ProcessOwnerTableCache _ownerTables;
 
     public WindowsProcessAttributor(int cacheCapacity = 1024)
+        : this(cacheCapacity, CreateDefaultOwnerTableReader(), ProcessOwnerTableCache.DefaultWindowMs)
+    {
+    }
+
+    /// <summary>
+    /// The seam constructor: the owner-table provider and the snapshot window are injectable so the
+    /// cache's coalescing, reuse and staleness rules are exercisable without the native tables.
+    /// </summary>
+    internal WindowsProcessAttributor(int cacheCapacity, IProcessOwnerTableReader ownerTableReader, int ownerTableCacheWindowMs, Func<DateTimeOffset>? clock = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(cacheCapacity);
         _cacheCapacity = cacheCapacity;
+        _ownerTables = new ProcessOwnerTableCache(ownerTableReader, ownerTableCacheWindowMs, clock);
     }
+
+    /// <summary>The one owner-table provider for a host without the native tables.</summary>
+    private static IProcessOwnerTableReader CreateDefaultOwnerTableReader() =>
+        OperatingSystem.IsWindows() ? new IPHelperOwnerTableReader() : UnavailableOwnerTableReader.Instance;
 
     public async ValueTask<ProcessIdentity?> FindAsync(FlowKey key, CancellationToken cancellationToken)
     {
-        if (!OperatingSystem.IsWindows()) return null;
+        // Attempt 1 asks now; the retry asks again 2 ms later. Both go through the snapshot cache
+        // with their own request instant, so the retry coalesces onto any read another caller
+        // started after it asked instead of forcing a second scan, while the worst case (one read,
+        // then one genuine post-delay read) is unchanged.
         var result = FindOwnerSafely(key);
         if (result is null && s_retryDelay > TimeSpan.Zero)
         {
@@ -35,22 +52,15 @@ public sealed partial class WindowsProcessAttributor : IProcessAttributor
             result = FindOwnerSafely(key);
         }
 
-        return result is null ? null : ReadProcessIdentity(result.Value);
+        // The owner tables are reachable on any host through the injected reader — that is what
+        // makes the cache's coalescing and staleness rules testable here — but reading a process
+        // identity is native to Windows, so an owner found off-Windows resolves to no identity.
+        return result is null || !OperatingSystem.IsWindows() ? null : ReadProcessIdentity(result.Value);
     }
 
-    private static uint? FindOwner(FlowKey key)
+    private uint? FindOwnerSafely(FlowKey key)
     {
-        return key.Protocol switch
-        {
-            TransportProtocol.Udp => IPHelperTables.FindUdpOwner(key.Local),
-            TransportProtocol.Tcp => IPHelperTables.FindTcpOwner(key.Local, key.Remote),
-            _ => null,
-        };
-    }
-
-    private static uint? FindOwnerSafely(FlowKey key)
-    {
-        try { return FindOwner(key); }
+        try { return _ownerTables.Lookup(key); }
         catch (Win32Exception) { return null; }
         catch (InvalidOperationException) { return null; }
         catch (ArgumentException) { return null; }
@@ -169,123 +179,11 @@ public sealed partial class WindowsProcessAttributor : IProcessAttributor
     }
 }
 
-internal static partial class IPHelperTables
+/// <summary>
+/// The bounds helpers the <c>iphlpapi</c> table readers share.
+/// </summary>
+internal static class IPHelperTables
 {
-    private const int AfInet = 2;
-    private const int AfInet6 = 23;
-    private const int ErrorInsufficientBuffer = 122;
-    private const int TcpTableOwnerPidAll = 5;
-
-    public static uint? FindUdpOwner(Endpoint local)
-    {
-        var owners = local.AddressFamily == AddressFamilyKind.IPv4 ? ReadUdp4() : ReadUdp6();
-        var wildcard = local.AddressFamily == AddressFamilyKind.IPv4 ? IPAddress.Any : IPAddress.IPv6Any;
-        // The row address is a framework IPAddress while Endpoint carries IPAddressValue: the
-        // comparison must convert the row (IPAddress.Equals against a boxed IPAddressValue is
-        // always false, which would silently drop every exact-address match).
-        var localAddress = local.Address;
-        var matches = owners.Where(row => row.Port == local.Port && (row.Address.Equals(wildcard) || IPAddressValue.From(row.Address).Equals(localAddress))).Select(row => row.ProcessId).Distinct().ToArray();
-        return matches.Length == 1 ? matches[0] : null;
-    }
-
-    public static uint? FindTcpOwner(Endpoint local, Endpoint remote)
-    {
-        var owners = local.AddressFamily == AddressFamilyKind.IPv4 ? ReadTcp4() : ReadTcp6();
-        var matches = owners.Where(row => row.Local.Port == local.Port && row.Remote.Port == remote.Port && row.Local.Address.Equals(local.Address) && row.Remote.Address.Equals(remote.Address)).Select(row => row.ProcessId).Distinct().ToArray();
-        return matches.Length == 1 ? matches[0] : null;
-    }
-
-    private static unsafe UdpOwner[] ReadUdp4()
-    {
-        var buffer = ReadTable(AfInet, IPHelperAbi.UdpTableOwnerPid, out var rowCount, out var bytesWritten);
-        try
-        {
-            ValidateRowCount(rowCount, bytesWritten, sizeof(IPHelperAbi.MibUdpRowOwnerPid), "IPv4 UDP owner table");
-            var rows = new UdpOwner[rowCount];
-            for (var index = 0; index < rows.Length; index++)
-            {
-                var row = ReadRow<IPHelperAbi.MibUdpRowOwnerPid>(buffer, index);
-                rows[index] = new UdpOwner(new IPAddress(row.LocalAddress), IPHelperAbi.DecodeNetworkPort(row.LocalPort), row.ProcessId);
-            }
-            return rows;
-        }
-        finally { Marshal.FreeHGlobal(buffer); }
-    }
-
-    private static unsafe UdpOwner[] ReadUdp6()
-    {
-        var buffer = ReadTable(AfInet6, IPHelperAbi.UdpTableOwnerPid, out var rowCount, out var bytesWritten);
-        try
-        {
-            ValidateRowCount(rowCount, bytesWritten, sizeof(IPHelperAbi.MibUdp6RowOwnerPid), "IPv6 UDP owner table");
-            var rows = new UdpOwner[rowCount];
-            for (var index = 0; index < rows.Length; index++)
-            {
-                var row = ReadRow<IPHelperAbi.MibUdp6RowOwnerPid>(buffer, index);
-                rows[index] = new UdpOwner(IPHelperAbi.DecodeIpv6Address(new ReadOnlySpan<byte>(row.LocalAddress, 16), row.ScopeId), IPHelperAbi.DecodeNetworkPort(row.LocalPort), row.ProcessId);
-            }
-            return rows;
-        }
-        finally { Marshal.FreeHGlobal(buffer); }
-    }
-
-    private static unsafe TcpOwner[] ReadTcp4()
-    {
-        var buffer = ReadTable(AfInet, TcpTableOwnerPidAll, out var rowCount, out var bytesWritten);
-        try
-        {
-            ValidateRowCount(rowCount, bytesWritten, sizeof(IPHelperAbi.MibTcpRowOwnerPid), "IPv4 TCP owner table");
-            var rows = new TcpOwner[rowCount];
-            for (var index = 0; index < rows.Length; index++)
-            {
-                var row = ReadRow<IPHelperAbi.MibTcpRowOwnerPid>(buffer, index);
-                rows[index] = new TcpOwner(new Endpoint(AddressFamilyKind.IPv4, new IPAddress(row.LocalAddress), IPHelperAbi.DecodeNetworkPort(row.LocalPort)), new Endpoint(AddressFamilyKind.IPv4, new IPAddress(row.RemoteAddress), IPHelperAbi.DecodeNetworkPort(row.RemotePort)), row.ProcessId);
-            }
-            return rows;
-        }
-        finally { Marshal.FreeHGlobal(buffer); }
-    }
-
-    private static unsafe TcpOwner[] ReadTcp6()
-    {
-        var buffer = ReadTable(AfInet6, TcpTableOwnerPidAll, out var rowCount, out var bytesWritten);
-        try
-        {
-            ValidateRowCount(rowCount, bytesWritten, sizeof(IPHelperAbi.MibTcp6RowOwnerPid), "IPv6 TCP owner table");
-            var rows = new TcpOwner[rowCount];
-            for (var index = 0; index < rows.Length; index++)
-            {
-                var row = ReadRow<IPHelperAbi.MibTcp6RowOwnerPid>(buffer, index);
-                rows[index] = new TcpOwner(new Endpoint(AddressFamilyKind.IPv6, IPHelperAbi.DecodeIpv6Address(new ReadOnlySpan<byte>(row.LocalAddress, 16), row.LocalScopeId), IPHelperAbi.DecodeNetworkPort(row.LocalPort)), new Endpoint(AddressFamilyKind.IPv6, IPHelperAbi.DecodeIpv6Address(new ReadOnlySpan<byte>(row.RemoteAddress, 16), row.RemoteScopeId), IPHelperAbi.DecodeNetworkPort(row.RemotePort)), row.ProcessId);
-            }
-            return rows;
-        }
-        finally { Marshal.FreeHGlobal(buffer); }
-    }
-
-    private static nint ReadTable(int addressFamily, int tableClass, out int rowCount, out uint bytesWritten)
-    {
-        uint size = 0;
-        var result = tableClass == IPHelperAbi.UdpTableOwnerPid
-            ? Native.GetExtendedUdpTable(nint.Zero, ref size, order: false, addressFamily, tableClass, 0)
-            : Native.GetExtendedTcpTable(nint.Zero, ref size, order: false, addressFamily, tableClass, 0);
-        if (result != ErrorInsufficientBuffer || size < 4) throw new Win32Exception(result);
-        var buffer = Marshal.AllocHGlobal(checked((int)size));
-        result = tableClass == IPHelperAbi.UdpTableOwnerPid
-            ? Native.GetExtendedUdpTable(buffer, ref size, order: false, addressFamily, tableClass, 0)
-            : Native.GetExtendedTcpTable(buffer, ref size, order: false, addressFamily, tableClass, 0);
-        if (result != 0)
-        {
-            Marshal.FreeHGlobal(buffer);
-            throw new Win32Exception(result);
-        }
-        rowCount = Marshal.ReadInt32(buffer);
-        // The in/out size parameter carries the driver-written byte count on success; callers
-        // cross-check it against the announced row count before dereferencing any row.
-        bytesWritten = size;
-        return buffer;
-    }
-
     /// <summary>
     /// Fails closed when an iphlpapi owner table announces a row count its own written byte
     /// count cannot hold. The row count is read from the driver-filled buffer itself, so a
@@ -310,16 +208,4 @@ internal static partial class IPHelperTables
     /// </summary>
     internal static unsafe T ReadRow<T>(nint buffer, int index, int firstRowOffset = 4) where T : unmanaged =>
         Unsafe.ReadUnaligned<T>((void*)(buffer + firstRowOffset + (index * sizeof(T))));
-
-    private readonly record struct UdpOwner(IPAddress Address, ushort Port, uint ProcessId);
-    [StructLayout(LayoutKind.Auto)] private readonly record struct TcpOwner(Endpoint Local, Endpoint Remote, uint ProcessId);
-
-    private static partial class Native
-    {
-        [LibraryImport("iphlpapi.dll", EntryPoint = "GetExtendedTcpTable")]
-        internal static partial int GetExtendedTcpTable(nint table, ref uint size, [MarshalAs(UnmanagedType.Bool)] bool order, int addressFamily, int tableClass, uint reserved);
-
-        [LibraryImport("iphlpapi.dll", EntryPoint = "GetExtendedUdpTable")]
-        internal static partial int GetExtendedUdpTable(nint table, ref uint size, [MarshalAs(UnmanagedType.Bool)] bool order, int addressFamily, int tableClass, uint reserved);
-    }
 }

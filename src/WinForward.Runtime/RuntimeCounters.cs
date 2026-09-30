@@ -28,6 +28,33 @@ public sealed class RuntimeCounters
     /// <summary>Host-flow process attribution returned no owner (after the attributor's internal retry); see <c>flow.attribution-miss</c>.</summary>
     public const string AttributionMiss = "attributionMiss";
 
+    /// <summary>A new-flow packet was refused a pending-attribution entry (entry cap or global retained-byte budget); see the rate-limited <c>flow.attribution.pending-rejected</c> warn.</summary>
+    public const string AttributionPendingRejected = "attributionPendingRejected";
+
+    /// <summary>A packet of an already-pending flow was refused (per-flow ring full, or a frame larger than the retention pool's buffer); see the rate-limited <c>flow.attribution.flow-full</c> trace.</summary>
+    public const string AttributionFlowFull = "attributionFlowFull";
+
+    /// <summary>A packet was blocked fail-closed because the attribution pipeline is sealed (shutdown); the flow is never attributed inline instead.</summary>
+    public const string AttributionSealed = "attributionSealed";
+
+    /// <summary>A packet was blocked fail-closed because the flow is inside its post-failure attribution cooldown.</summary>
+    public const string AttributionCooldownBlocks = "attributionCooldownBlocks";
+
+    /// <summary>The setup executor refused the attribution work item (ring full); the entry was failed closed rather than left pending.</summary>
+    public const string AttributionSetupRejected = "attributionSetupRejected";
+
+    /// <summary>A genuine attribution or policy failure failed one flow's pending packets closed and arms the 1 s per-flow cooldown. Shutdown cancellation is deliberately not counted here.</summary>
+    public const string AttributionSetupFailed = "attributionSetupFailed";
+
+    /// <summary>The flow-table claim failed at capacity after the pending packets were delivered; the entry is kept and its later packets block fail-closed.</summary>
+    public const string AttributionClaimFailed = "attributionClaimFailed";
+
+    /// <summary>A pending attribution entry was reclaimed at its retention TTL; its packets were blocked and a later packet of the flow re-admits.</summary>
+    public const string AttributionPendingTtlExpired = "attributionPendingTtlExpired";
+
+    /// <summary>A transport tuple already attributed (on another adapter, or after its entry was reclaimed) admitted a second entry and paid a second attribution.</summary>
+    public const string AttributionReAdmission = "attributionReAdmission";
+
     /// <summary>A pass-through reinjection native send failed; see <c>reinject.pass-failed</c>.</summary>
     public const string PassReinjectFailed = "passReinjectFailed";
 

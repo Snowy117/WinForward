@@ -163,14 +163,17 @@ public sealed class SetupExecutorTests
     }
 
     [Fact]
-    public void DefaultRingCapacityCoversThePendingSynIndexCap()
+    public void DefaultRingCapacityCoversBothFiniteProducerCaps()
     {
-        // The pending-SYN index drains through this ring, so the ring must not be the smaller of
-        // the two: an index that could retain more entries than the ring queues would reject
-        // setups at load. The load-bearing relation is the inequality — a larger ring is safe.
+        // Both finite-capacity producers drain through this ring: the pending-SYN index and the
+        // deferred-attribution index. An index that could retain more entries than the ring queues
+        // would reject setups at load, so the ring must cover their sum. The load-bearing relation
+        // is the inequality — a larger ring is safe. UDP session setup is deliberately excluded:
+        // it enqueues per admitted session against a sixteen-thousand-flow capacity, so no
+        // satisfiable inequality covers it, and its refusals are counted and fail-closed.
         Assert.True(
-            SetupExecutor.DefaultRingCapacity >= TcpPendingSynSetupIndex.DefaultCapacity,
-            "the setup ring must be at least as large as the TCP pending-SYN index cap");
+            SetupExecutor.DefaultRingCapacity >= TcpPendingSynSetupIndex.DefaultCapacity + FlowAttributionPendingIndex.DefaultCapacity,
+            "the setup ring must cover the sum of the TCP pending-SYN and deferred-attribution index caps");
     }
 
     private static async Task RunRoundAsync(SetupExecutor executor, int slotCount)

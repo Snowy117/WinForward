@@ -91,7 +91,7 @@ public interface IPacketActionExecutor
     ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken);
 }
 
-public sealed class FlowDispatcher
+public sealed class FlowDispatcher : IFlowAttributionHost
 {
     /// <summary>The executor step a completed packet dispatches into; chosen by value so the
     /// completion path allocates no delegate or closure.</summary>
@@ -109,6 +109,7 @@ public sealed class FlowDispatcher
     private readonly ISelfTrafficGuard _selfTraffic;
     private readonly IPacketActionExecutor _executor;
     private readonly IProcessAttributor? _attributor;
+    private readonly ISetupExecutor? _setupExecutor;
     private readonly ITcpReverseHandler? _reverseHandler;
     private readonly Func<CapturedFlowPacket, CancellationToken, ValueTask<TcpRedirectOutcome>>? _fragmentHandler;
     private readonly IRuntimeLogger _logger;
@@ -116,7 +117,7 @@ public sealed class FlowDispatcher
     private readonly RuntimeLogThrottle _capacityBlockWarn = new(TimeSpan.FromSeconds(5));
     private readonly RuntimeLogThrottle _attributionMissWarn = new(TimeSpan.FromSeconds(5));
 
-    public FlowDispatcher(ValidatedConfiguration configuration, ISelfTrafficGuard selfTraffic, IPacketActionExecutor executor, IProcessAttributor? attributor = null, int flowCapacity = 65_536, ITcpReverseHandler? reverseHandler = null, Func<CapturedFlowPacket, CancellationToken, ValueTask<TcpRedirectOutcome>>? fragmentHandler = null, IRuntimeLogger? logger = null, ActivityBucketClock? activityClock = null)
+    public FlowDispatcher(ValidatedConfiguration configuration, ISelfTrafficGuard selfTraffic, IPacketActionExecutor executor, IProcessAttributor? attributor = null, int flowCapacity = 65_536, ITcpReverseHandler? reverseHandler = null, Func<CapturedFlowPacket, CancellationToken, ValueTask<TcpRedirectOutcome>>? fragmentHandler = null, IRuntimeLogger? logger = null, ActivityBucketClock? activityClock = null, NativeBufferPool? attributionPool = null, ISetupExecutor? setupExecutor = null)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(selfTraffic);
@@ -127,11 +128,26 @@ public sealed class FlowDispatcher
         _selfTraffic = selfTraffic;
         _executor = executor;
         _attributor = attributor;
+        _setupExecutor = setupExecutor;
         _reverseHandler = reverseHandler;
         _fragmentHandler = fragmentHandler;
         _logger = logger ?? NullRuntimeLogger.Instance;
         _includeProcessPathInLogs = configuration.IncludeProcessPathInLogs;
+        // The deferred pipeline exists only where attribution can actually run: without a process
+        // selector, an attributor, or an executor to run its work items, every eligible shape keeps
+        // today's inline path byte-for-byte.
+        if (attributionPool is not null && setupExecutor is not null && attributor is not null && _policy.RequiresProcessAttribution)
+        {
+            Attribution = new FlowAttributionPipeline(attributionPool, this, _logger);
+        }
     }
+
+    /// <summary>
+    /// The deferred-attribution pipeline, or null when this dispatcher was composed without one
+    /// (no process selector, no attributor, or no attribution pool and setup executor). Owned and
+    /// disposed by the composition that supplied the pool.
+    /// </summary>
+    internal FlowAttributionPipeline? Attribution { get; }
 
     /// <summary>
     /// Removes flow decisions idle past <paramref name="idleTimeout"/> so the bounded flow table
@@ -233,6 +249,8 @@ public sealed class FlowDispatcher
             return;
         }
 
+        if (await TryDeferAttributionAsync(packet, cancellationToken).ConfigureAwait(false)) return;
+
         var context = packet.Context;
         context = await AttributeProcessAsync(context, cancellationToken).ConfigureAwait(false);
 
@@ -279,10 +297,60 @@ public sealed class FlowDispatcher
         return true;
     }
 
+    /// <summary>
+    /// Routes an eligible new-flow miss into the deferred pipeline. Returns true when the packet is
+    /// settled — retained for a worker verdict, or blocked fail-closed — and false when the caller
+    /// must continue its inline path.
+    /// <para>
+    /// Every ineligible shape (no process selector, a forwarded origin, a context that already
+    /// carries a process) is refused here before the pipeline is touched, so those flows keep
+    /// today's path byte-for-byte instead of paying a worker round-trip for nothing.
+    /// </para>
+    /// </summary>
+    private async ValueTask<bool> TryDeferAttributionAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
+    {
+        if (Attribution is null || !ShouldAttribute(packet.Context)) return false;
+        switch (Attribution.Admit(packet))
+        {
+            case AttributionAdmission.Deferred:
+                // The retained copy is the pipeline's; releasing the capture lease on the admitting
+                // pump thread is what keeps the thread-local recycle cache correct.
+                _ = packet.Lease.TryComplete(PacketDisposition.Deferred);
+                return true;
+            case AttributionAdmission.Inline:
+                // Admission found the flow while it held the pending gate; an expiry between the
+                // two resolutions is the only way past this, and the inline path recovers it.
+                if (_flows.TryResolve(packet.Context.Key, out var admitted) && admitted is not null)
+                {
+                    await ExecuteDecisionAsync(packet with { FlowGeneration = admitted.Generation }, admitted.Decision, cancellationToken).ConfigureAwait(false);
+                    return true;
+                }
+
+                return false;
+            case AttributionAdmission.BlockedFailed
+                or AttributionAdmission.BlockedSealed
+                or AttributionAdmission.BlockedPending
+                or AttributionAdmission.BlockedFlowFull
+                or AttributionAdmission.BlockedCooldown:
+                return await BlockFailClosedAsync(packet, cancellationToken).ConfigureAwait(false);
+        }
+
+        // Unreachable for every current outcome; a member added to the enum settles fail-closed here
+        // rather than leaving the packet neither retained nor blocked.
+        return await BlockFailClosedAsync(packet, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>The refusal arm: the packet is blocked fail-closed and reported as settled.</summary>
+    private async ValueTask<bool> BlockFailClosedAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
+    {
+        await CompleteAsync(packet, PacketDisposition.Block, PacketAction.Block, server: null, cancellationToken).ConfigureAwait(false);
+        return true;
+    }
+
     private async ValueTask<FlowContext> AttributeProcessAsync(FlowContext context, CancellationToken cancellationToken)
     {
-        if (!_policy.RequiresProcessAttribution || _attributor is null || context.Process is not null || context.Key.Origin != FlowOriginKind.Host) return context;
-        var identity = await _attributor.FindAsync(context.Key, cancellationToken).ConfigureAwait(false);
+        if (!ShouldAttribute(context)) return context;
+        var identity = await _attributor!.FindAsync(context.Key, cancellationToken).ConfigureAwait(false);
         if (identity is null)
         {
             LogAttributionMiss(context);
@@ -290,6 +358,33 @@ public sealed class FlowDispatcher
         }
         return context with { Process = new ProcessMetadata(identity.Value.Name, identity.Value.FullPath) };
     }
+
+    /// <summary>
+    /// The single eligibility predicate for process attribution, shared by the inline path and the
+    /// deferred pipeline's admission so the two cannot drift. A miss still means "no process
+    /// match": evaluation continues without one, exactly as before.
+    /// </summary>
+    private bool ShouldAttribute(FlowContext context) =>
+        _policy.RequiresProcessAttribution
+        && _attributor is not null
+        && context.Process is null
+        && context.Key.Origin == FlowOriginKind.Host;
+
+    FlowTable IFlowAttributionHost.Flows => _flows;
+
+    ISetupExecutor IFlowAttributionHost.SetupExecutor =>
+        _setupExecutor ?? throw new InvalidOperationException("The deferred-attribution pipeline requires a setup executor.");
+
+    IPacketActionExecutor IFlowAttributionHost.Executor => _executor;
+
+    IReadOnlyDictionary<string, Socks5Server> IFlowAttributionHost.Servers => _servers;
+
+    PolicySnapshot IFlowAttributionHost.Policy => _policy;
+
+    ValueTask<FlowContext> IFlowAttributionHost.AttributeAsync(FlowContext context, CancellationToken cancellationToken) =>
+        AttributeProcessAsync(context, cancellationToken);
+
+    void IFlowAttributionHost.LogCapacityBlock(FlowContext context) => LogCapacityBlock(context);
 
     /// <summary>
     /// The capacity-gate block warn (<c>flow.capacity-block</c>): the flow table is full, so a new

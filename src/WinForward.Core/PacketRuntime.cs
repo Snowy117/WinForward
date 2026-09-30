@@ -7,6 +7,14 @@ public enum PacketDisposition
     Pass,
     Block,
     ProxyConsumed,
+
+    /// <summary>
+    /// The packet's frame was retained by the deferred-attribution pipeline, so its lease must be
+    /// released on the admitting pump thread without any executor call. Unread by the dispatch
+    /// path: the disposition exists so the completion is observable and the release still happens
+    /// exactly once.
+    /// </summary>
+    Deferred,
 }
 
 /// <summary>

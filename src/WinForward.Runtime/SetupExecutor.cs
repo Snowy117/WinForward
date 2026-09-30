@@ -34,6 +34,9 @@ public sealed class SetupWorkItem
     /// <summary>The UDP-only setup payload plane, allocated once with the item.</summary>
     internal readonly UdpSetupWork _udp = new();
 
+    /// <summary>The deferred-attribution payload plane, allocated once with the item.</summary>
+    internal readonly FlowAttributionWork _attribution = new();
+
     internal void Reset()
     {
         _handler = null!;
@@ -43,6 +46,7 @@ public sealed class SetupWorkItem
         _cancellationToken = CancellationToken.None;
         _tcp.Reset();
         _udp.Reset();
+        _attribution.Reset();
     }
 }
 
@@ -82,6 +86,18 @@ internal sealed class UdpSetupWork
     }
 }
 
+/// <summary>
+/// The deferred-attribution payload plane of a <see cref="SetupWorkItem"/>: the pending entry the
+/// worker attributes and delivers. Pre-allocated once with the item so admission allocates nothing
+/// for its hand-off.
+/// </summary>
+internal sealed class FlowAttributionWork
+{
+    internal PendingFlowAttribution? _entry;
+
+    internal void Reset() => _entry = null;
+}
+
 /// <summary>The seam coordinators use to hand new-flow setup off the pump thread.</summary>
 /// <remarks>
 /// This seam exists for composition and test infrastructure: the production adapter is
@@ -114,13 +130,18 @@ public interface ISetupExecutor : IDisposable
 public sealed class SetupExecutor : ISetupExecutor
 {
     /// <summary>
-    /// Bound on queued setup items. It must not be smaller than the TCP pending-SYN index cap
-    /// (<see cref="TcpRedirect.TcpPendingSynSetupIndex.DefaultCapacity"/>): that index can retain
-    /// a full cap of pending SYNs at once and every one of them enqueues here, so a smaller ring
-    /// could reject setups under load. The load-bearing relation is this ordering inequality, not
-    /// an equality — a larger ring is always safe.
+    /// Bound on queued setup items. It must not be smaller than the sum of the two producers whose
+    /// caps are finite: the TCP pending-SYN index
+    /// (<see cref="TcpRedirect.TcpPendingSynSetupIndex.DefaultCapacity"/>) and the deferred
+    /// attribution index (<see cref="FlowAttributionPendingIndex.DefaultCapacity"/>). Either can
+    /// retain a full cap of pending work at once and every entry enqueues here, so a smaller ring
+    /// could reject setups under load. A third producer — UDP session setup — enqueues one item per
+    /// admitted session against a sixteen-thousand-flow session capacity, so no inequality covering
+    /// it is satisfiable; a full ring can therefore refuse a UDP setup item, which is counted
+    /// (<c>RuntimeCounters.UdpSetupRejections</c>) and fail-closed by design. The load-bearing
+    /// relation is the sum below, not an equality — a larger ring is always safe.
     /// </summary>
-    public const int DefaultRingCapacity = 1_024;
+    public const int DefaultRingCapacity = 2_048;
 
     /// <summary>
     /// 2x the logical processor count, floored at 16 so the 8-wide UDP setup limiter (plus the

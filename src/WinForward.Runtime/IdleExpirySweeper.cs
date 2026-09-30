@@ -24,6 +24,7 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
     private readonly FlowDispatcher _dispatcher;
     private readonly TcpProxyCoordinator? _tcp;
     private readonly UdpProxyCoordinator? _udp;
+    private readonly Func<DateTimeOffset, int>? _attributionSweep;
     private readonly TimeSpan _interval;
     private readonly TimeSpan _udpSweepInterval;
     private readonly TimeSpan _flowIdleTimeout;
@@ -49,12 +50,14 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
         TimeSpan? relayIdleTimeout = null,
         IRuntimeLogger? logger = null,
         TimeProvider? timeProvider = null,
-        TimeSpan? udpSweepInterval = null)
+        TimeSpan? udpSweepInterval = null,
+        Func<DateTimeOffset, int>? attributionSweep = null)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
         _dispatcher = dispatcher;
         _tcp = tcp;
         _udp = udp;
+        _attributionSweep = attributionSweep;
         _interval = interval ?? TimeSpan.FromMinutes(1);
         _flowIdleTimeout = flowIdleTimeout ?? TimeSpan.FromMinutes(5);
         _redirectIdleTimeout = redirectIdleTimeout ?? TimeSpan.FromMinutes(5);
@@ -97,52 +100,70 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
             while (await timer.WaitForNextTickAsync(token))
             {
                 var now = _timeProvider.GetUtcNow();
-                var tcpCount = 0;
-                var flowCount = 0;
-                var udpCount = 0;
-                // The main-leg group (TCP redirects, then the flow table) and the UDP leg each own a
-                // try/catch: a failure in one group is surfaced (rate-limited) without skipping the
-                // other group's tick. Both groups report through the same failure logger.
-                try
-                {
-                    if (now - lastMainSweepUtc >= _interval)
-                    {
-                        // Stamped before the legs run: a failing main sweep must not shorten their
-                        // cadence (the UDP leg's failures are independent of this gate).
-                        lastMainSweepUtc = now;
-                        (tcpCount, flowCount) = await SweepMainLegsAsync(now).ConfigureAwait(false);
-                    }
-                }
-                catch (OperationCanceledException) when (token.IsCancellationRequested)
-                {
-                    return;
-                }
-                catch (Exception exception)
-                {
-                    // A sweep failure must not stop the capture loop; the next tick retries. It is
-                    // still surfaced (rate-limited) so a persistently failing leg is diagnosable (S6d).
-                    LogSweepFailureRateLimited(exception);
-                }
-
-                try
-                {
-                    udpCount = await SweepUdpLegAsync(now).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) when (token.IsCancellationRequested)
-                {
-                    return;
-                }
-                catch (Exception exception)
-                {
-                    LogSweepFailureRateLimited(exception);
-                }
-
-                LogExpired(tcpCount, flowCount, udpCount);
+                var (tcpCount, flowCount, sweptAt) = await SweepMainLegSafelyAsync(now, lastMainSweepUtc, token).ConfigureAwait(false);
+                lastMainSweepUtc = sweptAt;
+                var udpCount = await SweepUdpLegSafelyAsync(now, token).ConfigureAwait(false);
+                var attributionCount = SweepAttributionLegSafely(now);
+                LogExpired(tcpCount, flowCount, udpCount, attributionCount);
             }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
             // Normal shutdown path.
+        }
+    }
+
+    /// <summary>
+    /// The gated main-leg group behind its own failure containment. The cadence stamp is returned
+    /// rather than mutated so a failing sweep still advances it: the main legs are stamped before
+    /// they run, so a failure cannot shorten their cadence.
+    /// </summary>
+    private async Task<(int TcpCount, int FlowCount, DateTimeOffset SweptAt)> SweepMainLegSafelyAsync(DateTimeOffset now, DateTimeOffset lastMainSweepUtc, CancellationToken token)
+    {
+        if (now - lastMainSweepUtc < _interval) return (0, 0, lastMainSweepUtc);
+        try
+        {
+            var (tcpCount, flowCount) = await SweepMainLegsAsync(now).ConfigureAwait(false);
+            return (tcpCount, flowCount, now);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !token.IsCancellationRequested)
+        {
+            // A sweep failure must not stop the capture loop; the next tick retries. It is still
+            // surfaced (rate-limited) so a persistently failing leg is diagnosable (S6d).
+            LogSweepFailureRateLimited(exception);
+            return (0, 0, now);
+        }
+    }
+
+    /// <summary>The UDP leg behind its own failure containment, independent of the main-leg gate.</summary>
+    private async Task<int> SweepUdpLegSafelyAsync(DateTimeOffset now, CancellationToken token)
+    {
+        try
+        {
+            return await SweepUdpLegAsync(now).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !token.IsCancellationRequested)
+        {
+            LogSweepFailureRateLimited(exception);
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// The pending-attribution TTL leg. It is synchronous and allocation-free when nothing expires,
+    /// so it rides every tick without a cadence of its own.
+    /// </summary>
+    private int SweepAttributionLegSafely(DateTimeOffset now)
+    {
+        if (_attributionSweep is null) return 0;
+        try
+        {
+            return _attributionSweep(now);
+        }
+        catch (Exception exception)
+        {
+            LogSweepFailureRateLimited(exception);
+            return 0;
         }
     }
 
@@ -167,11 +188,11 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
         _udp is null ? 0 : await _udp.RemoveExpiredAsync(now, _relayIdleTimeout).ConfigureAwait(false);
 
     /// <summary>The per-tick <c>runtime.expired</c> aggregate, emitted only when a leg expired something.</summary>
-    private void LogExpired(int tcpCount, int flowCount, int udpCount)
+    private void LogExpired(int tcpCount, int flowCount, int udpCount, int attributionCount)
     {
-        if (!_logger.IsEnabled(Configuration.RuntimeLogLevel.Debug) || (flowCount == 0 && tcpCount == 0 && udpCount == 0)) return;
+        if (!_logger.IsEnabled(Configuration.RuntimeLogLevel.Debug) || (flowCount == 0 && tcpCount == 0 && udpCount == 0 && attributionCount == 0)) return;
         _logger.Event(Configuration.RuntimeLogLevel.Debug, "runtime.expired",
-            new("flows", flowCount), new("tcpRedirects", tcpCount), new("udpSessions", udpCount));
+            new("flows", flowCount), new("tcpRedirects", tcpCount), new("udpSessions", udpCount), new("attributionPending", attributionCount));
     }
 
     private void LogSweepFailureRateLimited(Exception exception)

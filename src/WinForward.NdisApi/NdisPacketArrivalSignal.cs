@@ -25,7 +25,6 @@ public interface INdisPacketArrivalSignal : IDisposable
 /// </summary>
 public sealed class NdisPacketArrivalSignal : INdisPacketArrivalSignal
 {
-    private readonly WaitHandle _arrival;
     private readonly Action? _release;
     private int _disposed;
 
@@ -42,13 +41,19 @@ public sealed class NdisPacketArrivalSignal : INdisPacketArrivalSignal
     public NdisPacketArrivalSignal(WaitHandle arrival, Action? release = null)
     {
         ArgumentNullException.ThrowIfNull(arrival);
-        _arrival = arrival;
+        Handle = arrival;
         _release = release;
     }
 
-    public bool Wait(TimeSpan timeout) => _arrival.WaitOne(timeout <= TimeSpan.Zero
+    public bool Wait(TimeSpan timeout) => Handle.WaitOne(timeout <= TimeSpan.Zero
         ? 0
         : (int)Math.Min(timeout.TotalMilliseconds, int.MaxValue));
+
+    /// <summary>
+    /// The underlying event, for a composite that parks on this signal and another handle at once.
+    /// This signal keeps owning the handle: nothing else may dispose it or wait on it afterwards.
+    /// </summary>
+    public WaitHandle Handle { get; }
 
     /// <summary>
     /// Runs the release first, then disposes the event, so the driver can never signal a closed
@@ -63,7 +68,7 @@ public sealed class NdisPacketArrivalSignal : INdisPacketArrivalSignal
         }
         finally
         {
-            _arrival.Dispose();
+            Handle.Dispose();
         }
     }
 }

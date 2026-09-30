@@ -6,4 +6,10 @@
   <ItemGroup>
     <ProjectReference Include="../WinForward.Core/WinForward.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- The owner-table seam, the snapshot cache and the attributor's injection constructor are
+         internal: the benchmark harness scripts owner tables through them exactly as the tests do,
+         and the Windows-only native boundary stays behind the same seam in both. -->
+    <InternalsVisibleTo Include="WinForward.Benchmarks" />
+  </ItemGroup>
 </Project>
