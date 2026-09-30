@@ -23,6 +23,7 @@
 
 - NDISAPI `GetTcpipBoundAdaptersInfo` internal name is typically `\DEVICE\{GUID}`; stripping the `\DEVICE\` prefix yields the adapter's NetCfgInstanceId, which equals `NetworkInterface.Id` (`{GUID}`, same casing on observed systems — compare case-insensitively and brace-insensitively via `Guid.TryParse` normalization).
 - **Correlation is GUID-primary.** MAC is only a sanity-check fallback when the internal name is not a GUID.
+- **Adapter identity is interned once per process (F4, 2026-09-30).** `AdapterSlotTable` (created once in `DurableCaptureBundle`, injected into the durable `CapturePacketProcessor`) interns each adapter's GUID-primary `StableId` into a monotone, never-reused `ushort` slot at generation build, and `FlowKey` stores that slot plus the parsing enumeration's `Generation` instead of a string. The generation is deliberately **not** part of the interned identity (it moves on every enumeration), so the table is bounded by the number of distinct adapters the process has ever seen; slots are never reused, which is what makes an old key unable to alias a different adapter (ABA). Interning and refresh run once per adapter per enumeration under a gate: `TryIntern` on an already-interned stable ID republishes a replacement immutable `AdapterMetadata` and is the table's only writer (the design's by-slot `Observe` seam was removed as unused); the read side (`TryResolve`) is a lock-free array index. Facts: `AdapterSlotTableRoundTripsStableId`, `TryInternIsIdempotentPerStableIdAndSlotsAreNeverReused` (idempotence and never-reuse in one fact), `AdapterSlotSurvivesARefresh`, `FlowKeyEqualityKeepsTheGeneration`.
 - `RuntimeHandle` is process-lifetime state: never persist it, never print it as identity, rebuild it on adapter-list change.
 - Ambiguity rule: a correlation key must match **exactly one** IP Helper adapter; zero or multiple matches fall back (see matrix).
 - IP Helper owner-PID IPv6 `ScopeId` fields are host-order DWORDs and must be preserved when constructing `IPAddress`; only owner-row port fields use network byte order and require conversion.
@@ -218,6 +219,7 @@ if (TryExtractGuid(adapter.InternalName, out var guid))
 | Driver signals list change | watcher `WaitOne` returns true; runner re-enumerates and diffs |
 | Enumeration identical to current generation | `adapter.refresh` no-op log; pumps/modes untouched |
 | Scope adapter disappeared | warn + dropped from scope; run continues on remaining |
+| Adapter cannot be interned (slot space exhausted, F4) | **refused at generation build**: excluded from the capture scope + one rate-limited `adapter.slot-exhausted` error; never keyed as `NoSlot`. The table-level refusal is pinned by `AnAdapterThatCannotBeInternedIsRefusedNotAliased`; the factory's exclusion/log loop has no test (Windows-only, real driver required) |
 | New adapter + unconstrained rule | adopted into scope and intercepted after refresh |
 | New adapter + fully constrained policy | NOT adopted |
 | Ambiguous name selector at refresh | warn + addition skipped, non-fatal |

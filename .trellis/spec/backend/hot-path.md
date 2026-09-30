@@ -73,9 +73,12 @@ attribution, socket setup, logging, tests) are exempt.
    fast path. Any `SocketException` falls back to the overlapped async send, which parks on a
    full kernel queue instead of busy-failing; every gate/buffer-release path must release
    exactly once per call.
-4. **Packets are structs.** `FlowContext`, `CapturedFlowPacket`, `NativeFrameHandle` are
-   `readonly record struct` with `[StructLayout(LayoutKind.Auto)]`; completion is
-   enum-driven (`PacketAction`), never closures/delegates.
+4. **Packets are structs.** `FlowContext`, `CapturedFlowPacket`, `NativeFrameHandle` and
+   `PacketLayout` are `readonly record struct` with `[StructLayout(LayoutKind.Auto)]`; completion is
+   enum-driven (`PacketAction`), never closures/delegates. F4 (2026-09-30) sizes, asserted exactly by
+   `FlowKeyShapeTests.StructSizesForDiagnostics`: `FlowKey` 64, `FlowContext` 80 (key + two interned
+   metadata references), `CapturedFlowPacket` 152 (incl. the 16-byte layout), `FlowStateView` 96,
+   `PacketView` 96, `Endpoint` 48; `PacketLayout` is 16 (`PacketLayoutTests.PacketLayoutFitsSixteenBytes`).
 5. **Native-frame lease lifetime.** `PacketLease.TakeNative(IFrameSource)` recycles
    per-thread. The native frame stays valid for the whole dispatch (the pump awaits each
    handler, so batch slots cannot be reused earlier — locked by
@@ -100,11 +103,55 @@ attribution, socket setup, logging, tests) are exempt.
 7. **Span-writing codecs.** Datagram encode uses `TryEncode(..., Span<byte>, out written)`
    into a reusable buffer (`Socks5UdpTransport._sendBuffer`); allocating overloads exist for
    tests only.
-8. **Flow keys hash flat.** `FlowKey`/`TransportTuple` use manual `HashCode.Combine` over
-   both endpoints' bits/ports/family/proto; `Equals` orders cheapest discriminators first
-   and compares every field (including `OriginAdapterId` and `ScopeId`).
+8. **Flow keys hash flat.** `FlowKey`/`TransportTuple` store packed address halves/ports/scopes and
+   hash through one shared `HashCode.Combine` expression (`FlowHash.CombinePacked`; `Combine` and
+   `CombineCanonical` delegate to it, so the packed and materialized forms are the same eight values
+   by construction); `Equals` orders cheapest discriminators first and compares every field
+   (including `OriginAdapterSlot`, `OriginAdapterGeneration` and both `ScopeId`s). **F4
+   (2026-09-30):** `FlowKey` has no reference-typed field, so no string comparison can exist on any
+   lookup path, and the struct is **exactly 64 B** (`FlowKeyFitsOneCacheLineAndHasNoReferenceTypedFields`
+   asserts the size bound and the absence of reference-typed fields in one fact,
+   `FlowKeyShapeTests.StructSizesForDiagnostics` asserts the exact 64,
+   `FlowKeyPackedRoundTripsEndpoints`, `ReverseSwapsEndpointsAndScopes`,
+   `PackedAndMaterializedHashesAgree`).
 9. **Measurement discipline.** Benchmark gates are stated in allocation bytes and GC counts;
    treat ns/pps deltas under ~2× as noise on the dev box.
+10. **A frame is parsed once; the packet carries the parse's proofs.** `IPHeaderLength`,
+    `TransportLength` and the TCP flags byte are produced by the capture processor's one
+    `IPTcpUdpPacket.TryParse` (the view `PacketFlowClassifier` then consumes) and derived into a 16-byte `PacketLayout`
+    (`WinForward.Protocols`) carried on `CapturedFlowPacket`. `TcpFrameRewriter.IsTcpSyn`, both
+    `TcpSequenceObservation` reads and the layout overload of
+    `PacketChecksums.TryRewriteTcpEndpoints` consume it and never re-walk the headers; the
+    span-taking entry points stay as the independent oracle. The layout carries the address family
+    (the rewriter's write geometry depends on it) and keeps only what the parse cannot prove:
+    `IsTcp`, `frame.Length >= TransportEnd`, and the argument-address family equality. Facts:
+    `LayoutSynTestMatchesTheSpanTest`, `RedirectedForwardPacketWalksHeadersExactlyOnce`,
+    `RedirectedReversePacketWalksHeadersExactlyOnce`, `ViewDrivenRewriterRejectsWhatTheSpanRewriterRejects`,
+    `SequenceAdvanceIgnoresEthernetPadding`, `ExtensionHeaderFramesProduceTheSameAdvance`,
+    `PacketLayoutFitsSixteenBytes`.
+11. **A defaulted layout is refused, not applied.** `PacketTransport.Tcp` is `0`, so
+    `default(PacketLayout)` — what a hand-built `CapturedFlowPacket` without a layout carries —
+    reads as a valid TCP layout whose transport header sits at the IP header's offset with an IPv4
+    family. The layout therefore carries an explicit validity stamp that only
+    `PacketLayout.From(in PacketView)` writes; every consumer gates on `IsTcp`/`IsValid`, and a
+    defaulted layout is refused **byte-identically** (fail-closed) instead of being rewritten at
+    wrong offsets. A packet without a layout can also never be routed into SYN handling, because
+    `TcpProxyCoordinator.HandlePacketAsync` reads the layout-driven `IsTcpSyn`; it takes the data
+    path, whose rewrite refuses and blocks the association.
+    `CapturePacketProcessor.ProcessAsync` stamps every flow packet it dispatches
+    (facts: `OnlyAParsedFrameYieldsAValidLayout`,
+    `DefaultedLayoutIsRefusedByteIdenticallyRatherThanRewritten`, `DefaultedLayoutObservesNoSequence`,
+    `RedirectLegRefusesADefaultedLayoutByteIdentically`,
+    `EveryDispatchedFlowPacketCarriesAParsedLayout`). The non-flow arm carries `default` by design and
+    no consumer on that path reads a layout.
+12. **Sequence trackers are atomic, not locked.** `TcpRedirectAssociation`'s two trackers are `long`
+    (−1 = unobserved) written by a CAS-max loop over the unchanged wrap-aware `IsSequenceAhead`
+    predicate and read with `Volatile.Read`; the association holds no reference-typed instance field
+    (no `Lock`), so a redirected forward+reverse packet pair takes **zero** gate entries and no
+    per-association lock allocation. The cold RST readers tolerate a weakly consistent value by
+    construction. Facts: `RedirectPacketTakesZeroSequenceGateEntries`,
+    `TcpRedirectAssociationHoldsNoLockField`, `ConcurrentSequenceObservationsKeepTheLargerValue`,
+    `UnobservedTrackerReadsNullAndObservedZeroReadsZero`.
 
 ## SOCKS5 Path Contracts (task 08-29-socks5-perf-fullpath)
 
@@ -524,6 +571,17 @@ GC configuration. This is the contract for the full-path zeroing milestone (M1-M
   stay exact (no maintained counter) and no per-claim allocation is added —
   `FlowTableClaimAndExpireCycleAllocatesNoManagedBytes` is the acceptance gate (the reverted
   `ConcurrentDictionary` variant measured 488 B/claim+expire and is the recorded comparator).
+  **F4 (2026-09-30) re-proved this cache under the packed key**: `FlowTable.SlotOf` reads
+  `FlowHash.CombineCanonicalPacked` over the key's packed halves, `TransportTuple` is a packed 48 B
+  value with the same field set, and `Matches` still corroborates by tuple equality — so packed-hash
+  drift can only cost a warm slot, never a wrong answer
+  (`PackedAndMaterializedCanonicalHashesAgree`, `CanonicalSlotIsOrderIndependent`,
+  `FlowTableTransportTupleIsUniqueAcrossOrigins` and `WarmCacheHitServesTheValidatedView` for the
+  forward and reverse corroboration, `FlowTableWarmResolveAllocatesNoManagedBytes` re-run unchanged).
+  The tuple's field-set equality is a source-level property of a private nested type with no
+  dedicated discrimination fact: the packed rewrite's coverage is the observable corroboration
+  above, so a field dropped from `TransportTuple.Equals` would only be caught if it also changed an
+  existing fact's outcome (recorded residual, `implement.md`).
 - **FlowTable live-slot registry + chunked sweep (task 09-30-expiry-sweep-bounded-pause).** The table
   keeps `_liveStates[0.._liveCount)` as a hole-free mirror of `_states` (append in `TryClaimResolved`
   under `_gate`; removal is a swap-remove **at the cursor** that happens strictly **before**
@@ -1310,6 +1368,11 @@ research, landed after F3's bounded-hold sweeps.
   (direct-mapped caches validated by immutable association fields, falling back to the gated authority),
   `ISelfTrafficGuard.IsWildcardOwned` (`ConcurrentDictionary`) and the UDP ready path's session cache are
   lock-free; a cache miss is always a fall-back to the unchanged gated path, never an approximation.
+  **F4 (2026-09-30)** keeps this contract while the key and the corroboration tuple became packed: the
+  slot function and `Matches` read packed fields (no `Endpoint` materialization), and the adapter slot
+  the key now carries is interned at classification, never resolved on a warm probe — the packed
+  re-proof is the warm-cache bullet above, with `FlowKey.IsReverseOf` serving the dispatcher's
+  endpoint-swap test without materializing four `Endpoint`s.
 - **TCP pays one reverse probe and no redirect gate on a warm packet.** `IsReverseCandidate` is gone:
   the coordinator resolves once via `TryResolveByReverse` and passes the association into
   `HandleReverseAsync`, which no longer probes. `HandlePacketAsync` keeps the listener-port prefilter in
@@ -1361,3 +1424,49 @@ if (now - association.LastActivityUtc >= idleTimeout) Remove(association);
 var cutoffBucket = ActivityBucket.Cutoff(now, idleTimeout);
 if (association.BucketForDiagnostics < cutoffBucket) RemoveUnderGate(association);
 ```
+
+## F4 flow identity, parse-once and slim context — spec-row → proof map (task 09-30-flow-key-parse-once, 2026-09-30)
+
+Task record: `.trellis/tasks/09-30-flow-key-parse-once/`; evidence:
+`benchmarks/results/2026-09-30-flow-key-parse-once/` (`README.md`, `walk-and-gate-counts.txt`,
+`defaulted-layout-hardening.txt`, `step6-ipv6-delta-verdict.txt`, `class-totals.txt`,
+`gate-stability.txt`). Every row below is a binding row in this spec directory that F4 changed,
+with the fact that discharges it. All claims are exact counts/sizes except the AC-4 series, which is
+a **recorded reading** (per-leg no-regression; the improvement figure and the IPv6:IPv4 ratio are
+readings, never thresholds — contract 9).
+
+| Spec row | After F4 | Proof |
+|---|---|---|
+| this file, contract 4 | `PacketLayout` on the packet; sizes `FlowKey` 64 / `FlowContext` 80 / `CapturedFlowPacket` 152 / `FlowStateView` 96 | `FlowKeyShapeTests.StructSizesForDiagnostics` |
+| this file, contract 8 | packed key with no reference-typed field; shared `FlowHash.CombinePacked` | `FlowKeyFitsOneCacheLineAndHasNoReferenceTypedFields`, `FlowKeyShapeTests.StructSizesForDiagnostics` (exact 64), `FlowKeyPackedRoundTripsEndpoints`, `ReverseSwapsEndpointsAndScopes`, `PackedAndMaterializedHashesAgree`, `PackedAndMaterializedCanonicalHashesAgree`, `CanonicalSlotIsOrderIndependent` |
+| this file, contract 10 | one parse per redirected packet; every layout consumer reads the layout | `RedirectedForwardPacketWalksHeadersExactlyOnce`, `RedirectedReversePacketWalksHeadersExactlyOnce` (red-before 4/4 per leg), `LayoutSynTestMatchesTheSpanTest`, `ViewDrivenRewriterRejectsWhatTheSpanRewriterRejects`, `SequenceAdvanceIgnoresEthernetPadding`, `ExtensionHeaderFramesProduceTheSameAdvance`, `PacketLayoutFitsSixteenBytes` |
+| this file, contract 11 | a defaulted layout is refused byte-identically by every consumer | `OnlyAParsedFrameYieldsAValidLayout`, `DefaultedLayoutIsRefusedByteIdenticallyRatherThanRewritten`, `DefaultedLayoutObservesNoSequence`, `RedirectLegRefusesADefaultedLayoutByteIdentically`, `EveryDispatchedFlowPacketCarriesAParsedLayout` |
+| this file, contract 12 | CAS-max `long` trackers, no gate and no lock on the association | `RedirectPacketTakesZeroSequenceGateEntries` (red 2), `TcpRedirectAssociationHoldsNoLockField`, `ConcurrentSequenceObservationsKeepTheLargerValue`, `UnobservedTrackerReadsNullAndObservedZeroReadsZero` |
+| this file, F2 warm cache + "warm resolves take no global gate" | packed slot function and packed 48 B `TransportTuple`; no `Endpoint` materialization on a warm probe | the two agreement facts + `FlowTableTransportTupleIsUniqueAcrossOrigins` / `WarmCacheHitServesTheValidatedView` (forward and reverse corroboration) + the F2 facts re-run unchanged (`FlowTableWarmResolveAllocatesNoManagedBytes` among them). The planned `TransportTupleEqualsTheKeysTransportFields` was not written: `TransportTuple` is a private nested type, so a direct field-set fact would need a visibility change — recorded residual |
+| this file, "Closure-hoisting and allocation-gate" → Tests Required | per-packet 0 B gates unchanged; the layout refactor surfaced one gate that had been passing on a mis-rewrite | `HotPathAllocationGateTests` 11/11 (unchanged), `class-totals.txt`, `defaulted-layout-hardening.txt` |
+| `quality-guidelines.md` § Current Conventions (rewrite primitive) | layout overload keeps `IsTcp`, `TransportEnd` and family equality only; span entry point is the oracle | `ViewDrivenRewriterRejectsWhatTheSpanRewriterRejects`, `DefaultedLayoutIsRefusedByteIdenticallyRatherThanRewritten` |
+| `quality-guidelines.md` (hard invariant linkages) | one `FlowHash.CombinePacked` behind both entry points and both packed callers | `PackedAndMaterializedHashesAgree`, `PackedAndMaterializedCanonicalHashesAgree` |
+| `quality-guidelines.md` § Testing Requirements (rewrite tests) | the oracle/mutable-offset discipline extends to the layout overload and the defaulted layout | the two rewriter facts above |
+| `tcp-local-redirect.md` (TFO SYN / sequence tracking) | layout-driven SYN and advance predicates; CAS-max trackers | the contract-10/12 rows above + `SynWithPayloadIsRedirectedLikeBareSyn`, `RetransmittedSynWithPayloadReusesAssociation` (unchanged) |
+| `windows-ndisapi.md` (adapter identity) | interned monotone slot table; an adapter that cannot be interned is refused, never keyed | `AdapterSlotTableRoundTripsStableId`, `TryInternIsIdempotentPerStableIdAndSlotsAreNeverReused`, `AdapterSlotSurvivesARefresh`, `AnAdapterThatCannotBeInternedIsRefusedNotAliased`, `FlowKeyEqualityKeepsTheGeneration` |
+| `udp-relay.md` (host-flow response adapter binding + Required tests) | `Resolve(ushort slot)` over a slot-indexed array; `AdapterIds` resolves through the slot table | `DurableCaptureBundleTests.ScopeHeadBecomesHostFallbackAndEachAdapterResolves` (slot → target over the production `UpdateUdpTargets` path), `UdpAdapterTargetSourceTests.AdapterIdsResolveThroughTheSlotTable`, `ResolveReadsTheLatestSnapshotAfterUpdateWithoutReconstruction`, and the three unchanged response-target tests |
+| `traffic-policy-lifecycle.md` (policy domains) | the same five properties, backed by interned metadata + the packed key | policy suites unchanged; `FlowContextMetadataTests` |
+
+**Accepted semantic deltas** (recorded, not smoothed over): `FlowContext`/`CapturedFlowPacket` are
+record structs whose generated equality now compares metadata references instead of four strings
+(nothing in `src/` compares either by equality; the metadata shapes are records, so equal triples
+still compare equal); `FlowContext.RemotePort` is the key's remote port, so the three construction
+sites that used to pass it explicitly no longer can disagree with the key;
+`FlowKey.Create(…, AdapterSlotTable, …)` on an unregistered adapter yields `NoSlot`, which only cold
+edges and tests reach — capture-scope adapters are interned at generation build and refused there.
+
+**Residuals** (verified, not smoothed over): the non-flow arm carries `default(PacketLayout)` by design
+and no consumer reads it; the Windows composition-level slot refusal has no Linux harness — only the
+table-level refusal is pinned (`AnAdapterThatCannotBeInternedIsRefusedNotAliased`), while the factory's
+scope-exclusion/log loop is untested; `ProcessMetadata` is allocated once per attributed claim and no
+0 B gate drives that path; the design's by-slot `AdapterSlotTable.Observe` seam was removed as unused (the refresh
+runs through `TryIntern`); `TransportTuple`'s per-field equality has no direct fact (it is a private nested type), so
+the warm corroboration is pinned observably; `PacketView`'s constructor is public, so `PacketLayout.From`
+stamps a hand-built view too — the validity stamp excludes `default`, it does not authenticate a parse;
+the companion benchmark series are shape witnesses (their exact siblings are the gate classes, green in
+every run).
