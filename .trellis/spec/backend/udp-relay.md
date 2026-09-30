@@ -327,7 +327,10 @@ xUnit `Assert.Equal` generic inference does not apply the `IPAddress` → `IPAdd
 - `UdpProxySession.SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken)`
   -> `ValueTask<bool>` (`true` = sent; `false` = not sent because the session is expiring or
   has failed).
-- `UdpProxySession.State` — computed under the session `_activityGate`.
+- `UdpProxySession.State` — computed under the session `_activityGate` (lifecycle only; the send and
+  touch paths no longer take it).
+- `UdpProxySession.LastActivityUtc` — derived from the internal activity bucket (500 ms quantum), the
+  same representation the coordinator's expiry scan and `TryBeginExpiry` compare.
 - `UdpProxyCoordinator.RemoveSlotAsync(slot, UdpTeardownReason)`; the cooldown is armed only
   for `SetupFailure`.
 
@@ -440,10 +443,20 @@ fire-and-forget `Func<UdpProxySession, Task>`.
 - **One failure representation.** `scope.Fault` is the only failure state; there is no parallel
   `_receiveFailure` field. The receive loop records the fault (`RecordFault(exception, "udp.receive")`)
   and then signals.
-- **Admission reads stay under `_activityGate`.** `State` and `SendSpanAsync`'s admission read
-  `_scope.IsSealed` / `_scope.Fault` **inside** the existing `_activityGate` block, so the fault-vs-send
-  race relationship is exactly what it was. (`Fault` is itself lock-free; the lock, not the scope,
-  supplies this ordering.)
+- **The send path takes no `_activityGate` (task 09-30-warm-path-lock-chain, 2026-09-30).**
+  `SendSpanAsync`'s admission is `Volatile.Read(ref _expiring) || _scope.Fault is not null ||
+  !_scope.TryEnter(out var workLease)` — the scope's lock-free CAS is the admission authority and
+  its drain joins outstanding leases, so disposal still cannot free the transport under a sender.
+  `_activityGate` is retained only for the lifecycle transitions (`State`, `TryBeginExpiry`,
+  `CancelExpiry`), which are off the packet path; `_expiring` is read/written volatile there.
+  Consequence, recorded: a sender admitted between the sweeper's idle re-check and its `_expiring`
+  store goes **out** instead of becoming a counted `UdpFailClosedDrop` — the benign direction
+  (design §6.3/§7 delta 5). The READY-path contract is stronger still: a cache-resident ready
+  session takes **zero** coordinator gate entries, **zero** session activity-gate entries and
+  **zero** clock reads (`UdpReadySendTakesZeroActivityGateEntries`,
+  `UdpReadyDatagramTakesZeroCoordinatorGateEntriesAndZeroClockReads`); the cooldown probe and the
+  clock read live on the admission path, a ready session never consults them (a flow in cooldown
+  has no slot by construction — the cooldown write and the slot removal share one `_gate` hold).
 - **The signal is synchronous and must return promptly.** The loop tail invokes
   `Action<UdpProxySession>` after releasing the receive-window lease. Awaiting or blocking on
   `session.DisposeAsync()` there deadlocks against the session's own disposal (which awaits the receive
@@ -468,7 +481,10 @@ fire-and-forget `Func<UdpProxySession, Task>`.
 
 | Condition | Required result |
 |---|---|
-| Send admitted while the session is active | lease taken under `_activityGate`, released exactly once in the send tail |
+| Send admitted while the session is active | lease taken with no `_activityGate` (scope CAS only), released exactly once in the send tail |
+| Ready session hit (cache-validated, `Session.Flow` matches) | zero coordinator gate entries, zero activity-gate entries, zero clock reads; the transport send runs inline |
+| Session expiring/faulted at admission | `false` returned, counted `UdpFailClosedDrop` by the caller, no lease taken |
+| Flow inside its 1 s setup cooldown | rejected on the admission path before any slot; the ready path cannot observe this state |
 | `DisposeAsync` with an outstanding send lease | does not complete until the lease is released; then `State == Disposed` |
 | Genuine receive fault | `scope.Fault` set; `State == Faulted`; a subsequent send fails closed (`false`, counted drop); the coordinator teardown runs via `_scope.Run` |
 | Receive fault racing coordinator shutdown | the in-flight teardown still completes (joined by the drain) |

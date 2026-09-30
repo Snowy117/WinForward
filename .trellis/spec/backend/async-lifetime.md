@@ -179,8 +179,12 @@ internal struct WorkLease : IDisposable          // mutable; Dispose() => one Ex
 
 The scope holds **no lock** — its state is a packed word mutated only by interlocked operations — so it
 is a leaf by construction: no scope method acquires another lock and no scope method invokes owner code
-while holding one. An owner may therefore hold its own gate across `TryEnter` (e.g. `UdpProxySession`
-checks admission under `_activityGate`, then enters); no acquisition order can invert. This was chosen
+while holding one. An owner may therefore hold its own gate across `TryEnter`; no acquisition order can
+invert. Since task 09-30-warm-path-lock-chain (2026-09-30) the in-tree example is no longer the UDP
+session: `UdpProxySession.SendSpanAsync` enters the scope with **no** `_activityGate` held (the CAS is
+the admission authority and the drain joins outstanding leases), and `_activityGate` survives only for
+the lifecycle transitions (`State`, `TryBeginExpiry`, `CancelExpiry`). An owner that keeps a gate
+across `TryEnter` is still permitted — the lock-order property is unchanged. This was chosen
 by measurement (`QuiescenceScopeBenchmarks`): the packed gate measured 18.60 ns/op vs 49.50 ns/op for a
 `lock` gate, both at 0 B/op.
 

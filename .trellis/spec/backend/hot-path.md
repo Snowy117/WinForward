@@ -26,18 +26,36 @@ attribution, socket setup, logging, tests) are exempt.
 3. **No async state machines on the steady-state path.** A fat async method (large struct
    locals hoisted into the state machine) heap-allocates per call even when it completes
    synchronously (~193 B/op measured). `FlowDispatcher.DispatchAsync` is a non-async entry
-   that runs the synchronous warm shape (trace-off ∧ reverse-diversion declined ∧ not
-   self-owned ∧ resolved ∧ (Pass ∨ Block ∨ Proxy-with-inline-server-hit)) and returns the
-   executor's ValueTask directly; everything else falls into `DispatchSlowAsync`. The
-   reverse diversion is decided by `ITcpReverseHandler.WantsPacket(in CapturedFlowPacket)`
+   that runs the synchronous warm shape (trace-off ∧ reverse-diversion declined ∧ no
+   wildcard self-traffic tuple ∧ resolved ∧ (Pass ∨ Block ∨ Proxy-with-inline-server-hit))
+   and returns the executor's ValueTask directly; everything else falls into
+   `DispatchSlowAsync`. The reverse diversion is decided by
+   `ITcpReverseHandler.WantsPacket(in CapturedFlowPacket)`
    (task 08-30-hot-path-revival, X1): TCP ∧ src port ∈ active listener-port set
    (`TcpRedirectTable` `int[65536]` reference counts, Inc in `TryClaim` under the gate
    before SYN injection, Dec in `TryRemove`/`RemoveExpired`; query `Volatile.Read != 0`).
    `WantsPacket` is ONLY the warm-entry diversion precheck — the slow path's
-   `TryHandleReverseAsync` always calls the full handler (protocol gate + full-tuple
-   `IsReverseCandidate` + tombstone), so prefilter misses degrade to the slow path, never
-   to wrong routing (listener-shaped tuples cannot resolve in any `FlowTable.TryResolve`
-   mode; pinned by the tombstone-straggler test). Production-composition benchmarks
+   `TryHandleReverseAsync` always calls the full handler (protocol gate + the single
+   `TryResolveByReverse` fold probe + tombstone), so prefilter misses degrade to the slow
+   path, never to wrong routing (listener-shaped tuples cannot resolve in any
+   `FlowTable.TryResolve` mode; pinned by the tombstone-straggler test).
+   **F2 (2026-09-30) moved the per-packet lookups off the global gates**: the self-traffic
+   bypass on the warm entry is the **wildcard relay-socket half only**
+   (`ISelfTrafficGuard.IsWildcardOwned`, two lock-free `ConcurrentDictionary` probes); the
+   **exact-tuple half runs once per claim** (`TryHandleSelfTrafficAsync`), because a
+   self-owned exact tuple never produces a flow-table state. Dropping the wildcard half
+   instead is forbidden — `TcpProxyRelay` registers `(Tcp, Any:port, proxyEndpoint)` before
+   its SYN, and a recycled ephemeral port would otherwise resolve a stale proxy state and
+   redirect WinForward's own control connection into its own proxy
+   (`ARelayWildcardTupleIsNeverProxiedOnAWarmHit`, red against the naive-deletion variant).
+   The flow resolve is `FlowTable.TryResolveWarm` (one volatile slot read + the validated
+   snapshot; no gate, no clock) and the TCP redirect pair is one `TryResolveByReverse`
+   cache probe (the gated `_byReverse` authority on a miss), so a warm forward TCP packet
+   takes **zero** redirect gate entries and a warm reverse packet exactly one probe; the
+   UDP ready path resolves its session from a direct-mapped cache and takes **zero**
+   coordinator gate entries. Per-lookup gate counts and the parked-gate facts live in
+   `benchmarks/results/2026-09-30-warm-path-lock-chain/` (the artifact's spec-row → proof
+   table). Production-composition benchmarks
    (`WarmPassProductionAsync`/`WarmProxyProductionAsync`, real-predicate fake handler) gate
    the warm shape at 160 B — handler-less benchmarks alone proved nothing while X1 made
    the warm entry dead code in production. Proxy is the product's
@@ -486,7 +504,26 @@ GC configuration. This is the contract for the full-path zeroing milestone (M1-M
   `TryResolve` calls `Touch` before returning, so a live state cannot be idle-expired. Reuse
   means a `FlowState` reference held *past* expiry could observe the next flow's fields —
   callers must read state within the gate-held / `Touch`-refreshed operation (no production path
-  retains a `FlowState` across an await).
+  retains a `FlowState` across an await). **Since F2 (2026-09-30) the warm entry reads the
+  validated view instead of the instance**: `FlowTable.TryResolveWarm` returns a `FlowStateView`
+  produced by the state's barrier-bracketed seqlock (`TrySnapshot`) plus a transport-tuple
+  corroboration, so a recycled/torn state is a false miss, never a wrong decision. The gated
+  `TryResolve`/`TryClaimResolved` still hand out the pooled instance (the pre-existing post-gate
+  ABA on the slow/claim path is a recorded follow-up, design §2.7).
+- **FlowTable warm cache (task 09-30-warm-path-lock-chain).** `FlowState?[] _warm` is a
+  pre-allocated direct-mapped cache over the gated `Dictionary` authorities (capacity × 64 slots,
+  clamped to [4,096, 262,144]; 2 MB at the shipped 65,536 default, allocated once in the ctor and
+  never grown). A hit is served only after the seqlock snapshot and the exact tuple corroboration,
+  so a collision, an unpopulated slot or a torn read is a **false miss** (the gated path, unchanged)
+  and never a wrong decision. One window is inherent to the shape and is stated rather than smoothed
+  over: a probe that loaded the slot reference before a concurrent sweep's `ReferenceEquals`-guarded
+  clear can still return the triple it validated, i.e. serve the decision the flow had at the moment
+  the slot was read; the reader whose snapshot lands after the recycling `Reset` gets a false miss.
+  Population at claim, write-through on a gated hit and the `ReferenceEquals`-guarded clear in the
+  sweep's removal hold are the only writes, all under `_gate`; the authorities' `Count`/`Capacity`
+  stay exact (no maintained counter) and no per-claim allocation is added —
+  `FlowTableClaimAndExpireCycleAllocatesNoManagedBytes` is the acceptance gate (the reverted
+  `ConcurrentDictionary` variant measured 488 B/claim+expire and is the recorded comparator).
 - **FlowTable live-slot registry + chunked sweep (task 09-30-expiry-sweep-bounded-pause).** The table
   keeps `_liveStates[0.._liveCount)` as a hole-free mirror of `_states` (append in `TryClaimResolved`
   under `_gate`; removal is a swap-remove **at the cursor** that happens strictly **before**
@@ -496,8 +533,15 @@ GC configuration. This is the contract for the full-path zeroing milestone (M1-M
   the first idle-elapsed candidate, the `isHeld` predicate runs with **no table lock held** (the nested
   store/tombstone-lock edge is gone — a held entry keeps its original idle point), and a removal hold
   re-checks identity/idleness/key-presence and removes exactly one entry, so the removal lands at the
-  cursor and the swapped-in tail is examined next (no rewind, no batch). Deadline semantics are the
-  integer form of the old subtraction: **expired is `LastActivityUtc.UtcTicks <= cutoffTicks`**.
+  cursor and the swapped-in tail is examined next (no rewind, no batch). Deadline semantics: **expired
+  is `ActivityBucket < cutoffBucket`** (task 09-30-warm-path-lock-chain; supersedes the
+  `LastActivityUtc.UtcTicks <= cutoffTicks` integer form), where `cutoffBucket =
+  ActivityBucket.Cutoff(now, idleTimeout)` is computed once per call from the argument and
+  `idleTimeout <= TimeSpan.Zero` yields `long.MaxValue` (the drain call sites keep "retire everything
+  on this call"). The strict `<` is load-bearing: a stamp is quantised **down** to its bucket, so
+  retirement lands in `(idleTimeout, idleTimeout + 500 ms]` — never early, at most one bucket late —
+  while `<=` would retire up to one bucket early. The comparison always reads the internal integer
+  bucket, never `LastActivityUtc`.
   `SweepChunkEntries` is a scan bound only — one entry per removal hold whatever it is — and the sweep's
   own duration is report-only (every removal takes its own gate hold).
 - **SetupExecutor.** Per-item exception containment (`TrySetException`), balanced
@@ -1228,4 +1272,92 @@ done
 //   per-gate process run + recorded padded summary + totals + hash + fingerprint
 //   + injected-allocation check re-run on the frozen tree
 // The gates keep the exact zero; only the proof procedure and what it proves changed.
+```
+
+## Warm-path lock-free resolve, the activity bucket and the self-traffic split (task 09-30-warm-path-lock-chain, 2026-09-30)
+
+### 1. Scope / Trigger
+
+Trigger: any change to the warm resolve of a flow decision, the TCP reverse/original probes, the UDP
+ready path, the activity stamp/expiry representation, the self-traffic guard, or the composition's
+per-iteration callback. This is finding F2 of the archived `09-29-tcp-udp-path-structural-perf`
+research, landed after F3's bounded-hold sweeps.
+
+### 2. Contracts
+
+- **One activity bucket, 500 ms, one clock per composition.** `ActivityBucket.TicksPerBucket` is 500 ms
+  (the binding half of F3 item 4 is "≥8 buckets per retention window"; the 5 s session floor makes the
+  old "≥1 s" half unsatisfiable). `ActivityBucketClock` is created **once** in `DurableCaptureBundle`,
+  threaded into the `FlowDispatcher`'s `FlowTable`, the `TcpProxyCoordinator` and the
+  `UdpProxyCoordinator`/`UdpProxySession`, and advanced by three sources: the pump's per-iteration
+  callback (`DurableCaptureBundle.FlushPendingInjections`, the only `OnBatchCompleted` chain point),
+  every claim (`FlowState.Reset` via `Tick()`) and every sweep (`RemoveExpired` publishes the instant
+  it was handed, so the cutoff and the stamps cannot drift inside a call). A missed wiring freezes the
+  bucket and expires active flows — pinned by
+  `DurableCaptureBundleTests.ActivityBucketClockTicksExactlyOncePerPumpIteration` (one tick per pump
+  iteration, empty polls included, zero per packet) and by the throwing-clock facts.
+- **No clock read on the warm path.** A hit stores/derives the bucket: `FlowState.TouchBucket`,
+  `TcpRedirectAssociation.Touch` and `UdpProxySession.TouchActivity` write one integer each; the TCP
+  coordinator's per-packet instant is `ActivityBucket.ToUtc(clock.Current)` and the UDP ready path reads
+  none. The tombstone / setup-cooldown / pending-SYN / setup-queue stamps keep the real clock (their
+  windows are not bucket comparisons).
+- **Never early.** Every sweep compares the **internal integer bucket** with a strict `<` cutoff
+  (`ActivityBucket.Cutoff(now, idleTimeout)`), so retirement lands in `(idleTimeout, idleTimeout + w]`;
+  `idleTimeout <= TimeSpan.Zero` keeps "retire everything on this call". `LastActivityUtc` is derived
+  and only for logs/tests.
+- **Warm resolves take no global gate.** `FlowTable.TryResolveWarm` (one volatile slot read + the
+  seqlock snapshot + tuple corroboration), `TcpRedirectTable.TryResolveByReverse`/`TryResolveByOriginal`
+  (direct-mapped caches validated by immutable association fields, falling back to the gated authority),
+  `ISelfTrafficGuard.IsWildcardOwned` (`ConcurrentDictionary`) and the UDP ready path's session cache are
+  lock-free; a cache miss is always a fall-back to the unchanged gated path, never an approximation.
+- **TCP pays one reverse probe and no redirect gate on a warm packet.** `IsReverseCandidate` is gone:
+  the coordinator resolves once via `TryResolveByReverse` and passes the association into
+  `HandleReverseAsync`, which no longer probes. `HandlePacketAsync` keeps the listener-port prefilter in
+  front of the probe (a reverse tuple's source port is always a live listener port, so a miss proves
+  absence) — that is what makes a cache-resident warm forward packet cost zero redirect gate entries.
+  The prefilter is a candidate filter, not a forward-direction absence proof: client source ports and
+  listener ports are both OS-assigned ephemerals, so a forward flow whose source port number is itself a
+  live listener port pays one gated reverse probe per packet for as long as that listener exists (one
+  gate entry fewer than the pre-change candidate+resolve pair) and then falls through to the original
+  index. A cache collision costs the same one gated probe on either direction.
+- **UDP ready path is wait-free and gate-free.** `TrySendSpanAsync` resolves the ready session from the
+  pre-allocated cache (validated by `Session.Flow`), else takes the admission path, which keeps the
+  cooldown probe, the clock read, the capacity check and the re-check of `slot.Ready` under `_gate`.
+  `UdpProxySession.SendSpanAsync`/`TouchActivity` no longer take `_activityGate`: `_scope.TryEnter` is
+  the admission authority and the scope's drain joins outstanding leases. The propagation sentinel is
+  `long.MinValue` (bucket 0 is a real bucket), and `TryBeginExpiry` re-checks in bucket space under the
+  gate it still holds.
+- **The self-traffic wildcard half stays on the warm entry.** Loop prevention is fail-closed: a relay
+  control socket registers `(protocol, Any:port, remote)` before its SYN, so the warm entry must answer
+  that half. The exact-tuple half runs once per claim and a claimed state is its "proven not self"
+  record; the accepted delta (an exact registration after the claim keeps proxying while traffic flows)
+  is recorded in the task's design §4/§7.
+- **Counts are the proof.** Per warm hit: registry gate 1 → 0, exact-tuple guard probes 1 → 0, flow-table
+  gate 1 → 0, redirect gate 2 → 0 (one reverse probe), UDP coordinator gate 1 → 0, session activity-gate
+  entries 2 → 0, clock reads 2 → 0. The parked-gate facts
+  (`WarmResolveCompletesWhileFlowTableGateIsHeld`, `ReverseResolveCompletesWhileRedirectGateIsHeld`,
+  `UdpReadySendCompletesWhileCoordinatorGateIsHeld`) prove the removal structurally; every count and its
+  before/after text is in `benchmarks/results/2026-09-30-warm-path-lock-chain/warm-path-gate-counts.txt`.
+
+### 3. Wrong vs Correct
+
+```csharp
+// Wrong: read the flow table's pooled instance outside the gate (a recycled state can be observed),
+// or leave the whole self-traffic check off the warm entry (a recycled ephemeral port then resolves a
+// stale proxy state and redirects WinForward's own relay connection into its own proxy).
+if (_selfTraffic.IsOwned(packet.Context)) return DispatchSlowAsync(packet, cancellationToken);
+if (!_flows.TryResolve(packet.Context.Key, out var state)) return DispatchSlowAsync(packet, cancellationToken);
+
+// Correct: the warm entry answers the wildcard half lock-free and reads a validated view; the exact
+// half and the full check run once per claim.
+if (_selfTraffic.IsWildcardOwned(packet.Context)) return DispatchSlowAsync(packet, cancellationToken);
+if (!_flows.TryResolveWarm(packet.Context.Key, out var existing)) return DispatchSlowAsync(packet, cancellationToken);
+
+// Wrong: compare activity in DateTimeOffset space on a per-entry basis, or with `<=`
+// (retires up to one bucket early).
+if (now - association.LastActivityUtc >= idleTimeout) Remove(association);
+
+// Correct: one bucket cutoff per call, strict `<` on the internal integer bucket.
+var cutoffBucket = ActivityBucket.Cutoff(now, idleTimeout);
+if (association.BucketForDiagnostics < cutoffBucket) RemoveUnderGate(association);
 ```
