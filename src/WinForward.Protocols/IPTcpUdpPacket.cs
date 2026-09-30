@@ -15,6 +15,13 @@ public enum PacketTransport : byte
 /// that is safe for flow classification. The transport is either TCP or UDP; the source and
 /// destination endpoints are exposed for flow-key construction. IP fragments and unsupported
 /// IPv6 extension-header chains are rejected because they cannot be classified safely.
+/// <para>
+/// <see cref="TransportLength"/> and <see cref="TcpFlags"/> are the two derived facts the
+/// per-packet consumers need beyond the header offsets: the TCP sequence observation reads the
+/// length from the IP header (never the frame length, which Ethernet padding pollutes) and the
+/// flags byte decides the SYN/FIN advancement. Both are produced by the one parse so no
+/// downstream path re-walks the frame to derive them. <see cref="TcpFlags"/> is 0 for UDP.
+/// </para>
 /// </summary>
 [StructLayout(LayoutKind.Auto)]
 public readonly record struct PacketView(
@@ -24,7 +31,9 @@ public readonly record struct PacketView(
     ushort SourcePort,
     ushort DestinationPort,
     int IPHeaderLength,
-    int TransportHeaderLength);
+    int TransportHeaderLength,
+    int TransportLength,
+    byte TcpFlags);
 
 public static class IPTcpUdpPacket
 {
@@ -42,6 +51,7 @@ public static class IPTcpUdpPacket
     /// </summary>
     public static bool TryParse(ReadOnlySpan<byte> frame, out PacketView view)
     {
+        PacketPathProbe.ParseWalk?.Invoke();
         view = default;
         if (frame.Length < EthernetHeaderLength + 20) return false;
         var etherType = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(12, 2));
@@ -116,7 +126,7 @@ public static class IPTcpUdpPacket
         {
             var declaredLength = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(transportOffset + 4, 2));
             if (declaredLength < 8 || declaredLength > availableLength) return false;
-            view = new PacketView(PacketTransport.Udp, source, destination, sourcePort, destinationPort, ipHeaderLength, 8);
+            view = new PacketView(PacketTransport.Udp, source, destination, sourcePort, destinationPort, ipHeaderLength, 8, availableLength, 0);
             return true;
         }
 
@@ -124,7 +134,7 @@ public static class IPTcpUdpPacket
         // TCP data-offset field is the top four bits of the 12th byte (offset 12 within the header).
         var dataOffset = (frame[transportOffset + 12] >> 4) * 4;
         if (dataOffset < 20 || dataOffset > availableLength) return false;
-        view = new PacketView(PacketTransport.Tcp, source, destination, sourcePort, destinationPort, ipHeaderLength, dataOffset);
+        view = new PacketView(PacketTransport.Tcp, source, destination, sourcePort, destinationPort, ipHeaderLength, dataOffset, availableLength, frame[transportOffset + 13]);
         return true;
     }
 }

@@ -30,9 +30,9 @@ internal static class TcpCoordinatorFakes
         var local = Endpoint.From(client, clientPort);
         var remote = Endpoint.From(destination, destinationPort);
         var key = FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Host);
-        var context = new FlowContext(key, "app.exe", ProcessPath: null, AdapterId: null, "eth0", destinationPort);
+        var context = FlowBuilders.Context(key, "app.exe", adapterId: "eth0");
         var lease = new PacketLease(frame);
-        return new CapturedFlowPacket(lease, context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 0x1234));
+        return new CapturedFlowPacket(lease, context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 0x1234), Layout: LayoutOf(frame));
     }
 
     internal static CapturedFlowPacket MakeForwardedSynPacket(IPAddress client, IPAddress destination, ushort clientPort, ushort destinationPort, Action<byte[]>? mutateFrame = null)
@@ -43,11 +43,10 @@ internal static class TcpCoordinatorFakes
         mutateFrame?.Invoke(frame);
         var local = Endpoint.From(client, clientPort);
         var remote = Endpoint.From(destination, destinationPort);
-        var adapter = new AdapterContext("veth-1", 7);
-        var key = FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Forwarded, adapter);
-        var context = new FlowContext(key, ProcessName: null, ProcessPath: null, "veth-1", "vEthernet 1", destinationPort);
+        var key = FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Forwarded, FlowBuilders.SlotOf("veth-1", 7), 7);
+        var context = FlowBuilders.Context(key, adapterId: "veth-1", adapterName: "vEthernet 1");
         var lease = new PacketLease(frame);
-        return new CapturedFlowPacket(lease, context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, 0x1234));
+        return new CapturedFlowPacket(lease, context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, 0x1234), Layout: LayoutOf(frame));
     }
 
     internal static CapturedFlowPacket MakeReversePacketClassifierOrientation(IPAddress source, ushort sourcePort, IPAddress destination, ushort destinationPort, nint adapterHandle = 0x1234, Action<byte[]>? mutateFrame = null, byte[]? payload = null)
@@ -59,9 +58,9 @@ internal static class TcpCoordinatorFakes
         var local = Endpoint.From(source, sourcePort);
         var remote = Endpoint.From(destination, destinationPort);
         var key = FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Host);
-        var context = new FlowContext(key, "app.exe", ProcessPath: null, AdapterId: null, "eth0", destinationPort);
+        var context = FlowBuilders.Context(key, "app.exe", adapterId: "eth0");
         var lease = new PacketLease(frame);
-        return new CapturedFlowPacket(lease, context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, adapterHandle));
+        return new CapturedFlowPacket(lease, context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, adapterHandle), Layout: LayoutOf(frame));
     }
 
     internal const byte TcpFlagAck = 0x10;
@@ -82,8 +81,8 @@ internal static class TcpCoordinatorFakes
         var local = Endpoint.From(client, clientPort);
         var remote = Endpoint.From(destination, destinationPort);
         var key = FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Host);
-        var context = new FlowContext(key, "app.exe", ProcessPath: null, AdapterId: null, "eth0", destinationPort);
-        return new CapturedFlowPacket(new PacketLease(frame), context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 0x1234));
+        var context = FlowBuilders.Context(key, "app.exe", adapterId: "eth0");
+        return new CapturedFlowPacket(new PacketLease(frame), context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 0x1234), Layout: LayoutOf(frame));
     }
 
     internal static FlowKey MakeHostFlowKey() => FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
@@ -110,6 +109,7 @@ internal static class TcpCoordinatorFakes
             table,
             selfTraffic,
             localAddresses,
+            FlowBuilders.Slots,
             synCopyPool ?? TestPools.SynCopyPool,
             setupExecutor ?? TestPools.SetupExecutor,
             options);

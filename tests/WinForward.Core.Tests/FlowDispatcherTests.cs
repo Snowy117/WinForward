@@ -154,7 +154,7 @@ public sealed class FlowDispatcherTests
     }
 
     private static FlowKey CreateKey(TransportProtocol protocol = TransportProtocol.Udp) => FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), protocol, FlowOriginKind.Host);
-    private static FlowContext Context(FlowKey key) => new(key, "dns.exe", ProcessPath: null, AdapterId: null, AdapterName: null, key.Remote.Port);
+    private static FlowContext Context(FlowKey key) => FlowBuilders.Context(key, "dns.exe");
 
     /// <summary>
     /// A reverse handler whose <see cref="WantsPacket"/> always diverts — the pre-X1 dispatcher

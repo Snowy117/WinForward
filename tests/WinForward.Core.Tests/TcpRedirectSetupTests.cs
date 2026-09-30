@@ -29,6 +29,7 @@ public sealed class TcpRedirectSetupTests
             table,
             selfTraffic,
             new FakeLocalAddressProvider(),
+            FlowBuilders.Slots,
             new FakeInjector(),
             logger,
             store,
@@ -49,5 +50,5 @@ public sealed class TcpRedirectSetupTests
     }
 
     private static FlowContext OwnershipContext(Endpoint translatedTuple)
-        => new(FlowKey.Create(translatedTuple, translatedTuple, TransportProtocol.Tcp, FlowOriginKind.Host), ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, translatedTuple.Port);
+        => FlowBuilders.Context(FlowKey.Create(translatedTuple, translatedTuple, TransportProtocol.Tcp, FlowOriginKind.Host));
 }

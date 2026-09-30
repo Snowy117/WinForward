@@ -274,8 +274,8 @@ public sealed class WarmPathGateTests
     public void FlowTableTransportTupleIsUniqueAcrossOrigins()
     {
         var table = new FlowTable(capacity: 8);
-        var host = MakeUdpKey(35_000) with { OriginAdapterId = "host", OriginAdapterGeneration = 1 };
-        var forwarded = host with { Origin = FlowOriginKind.Forwarded, OriginAdapterId = "forwarded", OriginAdapterGeneration = 2 };
+        var host = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 35_000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host, FlowBuilders.SlotOf("host", 1), 1);
+        var forwarded = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 35_000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Forwarded, FlowBuilders.SlotOf("forwarded", 2), 2);
         var decisionCount = 0;
 
         Assert.True(table.TryClaimResolved(host, () => { decisionCount++; return FlowDecision.Fallback(FlowAction.Pass); }, out var firstState));
@@ -289,7 +289,7 @@ public sealed class WarmPathGateTests
         Assert.True(table.TryResolveWarm(forwarded, out var warm));
         Assert.Equal(FlowAction.Pass, warm.Decision.Action);
 
-        var reverse = host with { Local = host.Remote, Remote = host.Local };
+        var reverse = host.Reverse();
         Assert.True(table.TryResolveWarm(reverse, out var reverseWarm));
         Assert.Equal(host, reverseWarm.Key);
     }
@@ -329,7 +329,7 @@ public sealed class WarmPathGateTests
         Assert.Equal(decision, warm.Decision);
         Assert.Equal(state!.Generation, warm.Generation);
 
-        var reverse = key with { Local = key.Remote, Remote = key.Local };
+        var reverse = key.Reverse();
         Assert.True(table.TryResolveWarm(reverse, out var reverseWarm));
         Assert.Equal(warm.Key, reverseWarm.Key);
         Assert.Equal(warm.Decision, reverseWarm.Decision);

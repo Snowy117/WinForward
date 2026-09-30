@@ -139,8 +139,8 @@ public sealed class BenchmarkFrameBuilderTests
         var client = ipv6 ? Endpoint.From(s_client, 53_000) : Endpoint.From(IPAddress.Parse("192.0.2.10"), 53_000);
         var server = ipv6 ? Endpoint.From(s_server, 443) : Endpoint.From(IPAddress.Parse("192.0.2.80"), 443);
         var translated = Endpoint.From(ipv6 ? IPAddress.Parse("2001:db8::1080") : IPAddress.Parse("192.168.77.2"), 1080);
-        var key = FlowKey.Create(client, server, TransportProtocol.Tcp, FlowOriginKind.Host, new AdapterContext("adapter-0", 0));
-        var forwardedKey = FlowKey.Create(client, server, TransportProtocol.Tcp, FlowOriginKind.Forwarded, new AdapterContext("adapter-0", 0));
+        var key = FlowKey.Create(client, server, TransportProtocol.Tcp, FlowOriginKind.Host, BenchmarkShared.SlotOf("adapter-0"), 0);
+        var forwardedKey = FlowKey.Create(client, server, TransportProtocol.Tcp, FlowOriginKind.Forwarded, BenchmarkShared.SlotOf("adapter-0"), 0);
         var host = new TcpRedirectAssociation(key, server, 0, translated, forwardLocalAddress: null, 1, DateTimeOffset.UnixEpoch);
         var forwardLocal = ipv6 ? IPAddress.Parse("2001:db8::1") : IPAddress.Parse("192.168.77.1");
         var forwarded = new TcpRedirectAssociation(forwardedKey, server, 0, translated, IPAddressValue.From(forwardLocal), 2, DateTimeOffset.UnixEpoch);

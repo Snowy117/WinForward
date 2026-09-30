@@ -21,13 +21,16 @@ namespace WinForward.Runtime.Capture;
 public sealed class CapturePacketProcessor
 {
     private readonly FlowDispatcher _dispatcher;
+    private readonly AdapterSlotTable _adapterSlots;
     private readonly IRuntimeLogger _logger;
     private long _nextPacketSequence;
 
-    public CapturePacketProcessor(FlowDispatcher dispatcher, IRuntimeLogger? logger = null, Action<nint>? onBatchCompleted = null)
+    public CapturePacketProcessor(FlowDispatcher dispatcher, AdapterSlotTable adapterSlots, IRuntimeLogger? logger = null, Action<nint>? onBatchCompleted = null)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
+        ArgumentNullException.ThrowIfNull(adapterSlots);
         _dispatcher = dispatcher;
+        _adapterSlots = adapterSlots;
         _logger = logger ?? NullRuntimeLogger.Instance;
         OnBatchCompleted = onBatchCompleted;
     }
@@ -40,7 +43,13 @@ public sealed class CapturePacketProcessor
     /// </summary>
     public Action<nint>? OnBatchCompleted { get; }
 
-    public async ValueTask ProcessAsync(NdisCapturedPacket packet, WindowsAdapter adapter, CancellationToken cancellationToken)
+    /// <summary>
+    /// Processes one captured packet. <paramref name="adapterSlot"/> is the adapter's interned slot,
+    /// resolved once per adapter when the capture generation was built; the classification uses it
+    /// and the adapter's own generation together, so the key never mixes two enumerations, and reads
+    /// the slot's interned identity for the context rather than copying adapter strings per packet.
+    /// </summary>
+    public async ValueTask ProcessAsync(NdisCapturedPacket packet, WindowsAdapter adapter, ushort adapterSlot, CancellationToken cancellationToken)
     {
         // The native frame stays owned by the pump for the whole dispatch (the pump awaits this
         // handler before touching its batch again), so parsing can run on the native span and the
@@ -66,13 +75,13 @@ public sealed class CapturePacketProcessor
         {
             if (!IPTcpUdpPacket.TryParse(frameSpan, out var view))
             {
-                var nonFlowContext = PacketFlowClassifier.ClassifyNonFlow(adapter, isOnSend);
+                var nonFlowContext = PacketFlowClassifier.ClassifyNonFlow(adapter, isOnSend, adapterSlot, _adapterSlots);
                 await _dispatcher.DispatchNonFlowAsync(new CapturedFlowPacket(lease, nonFlowContext, metadata, sequence, NativeFrame: nativeFrame), cancellationToken).ConfigureAwait(false);
                 return;
             }
 
-            var flowContext = PacketFlowClassifier.ClassifyFlow(view, adapter, isOnSend);
-            await _dispatcher.DispatchAsync(new CapturedFlowPacket(lease, flowContext, metadata, sequence, NativeFrame: nativeFrame), cancellationToken).ConfigureAwait(false);
+            var flowContext = PacketFlowClassifier.ClassifyFlow(view, adapter, isOnSend, adapterSlot, _adapterSlots);
+            await _dispatcher.DispatchAsync(new CapturedFlowPacket(lease, flowContext, metadata, sequence, NativeFrame: nativeFrame, Layout: PacketLayout.From(view)), cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

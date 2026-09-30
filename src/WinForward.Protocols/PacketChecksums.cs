@@ -45,6 +45,7 @@ public static class PacketChecksums
 
     public static bool TryRewriteTcpEndpoints(Span<byte> ethernetFrame, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
     {
+        PacketPathProbe.RevalidateWalk?.Invoke();
         if (ethernetFrame.Length < 14) return false;
         var etherType = BinaryPrimitives.ReadUInt16BigEndian(ethernetFrame.Slice(12, 2));
         return etherType switch
@@ -53,6 +54,29 @@ public static class PacketChecksums
             0x86dd => TryRewriteIpv6Tcp(ethernetFrame, sourceAddress, sourcePort, destinationAddress, destinationPort),
             _ => false,
         };
+    }
+
+    /// <summary>
+    /// The layout-driven TCP endpoint rewrite for a frame a successful
+    /// <see cref="IPTcpUdpPacket.TryParse"/> already proved: it consumes the parse's proofs
+    /// (Ethernet II framing, IP version, header length in range, the transport protocol, no IPv4
+    /// fragmentation, the total/payload length inside the frame, the IPv6 extension chain, the TCP
+    /// header's presence and the <c>dataOffset</c> bound) and keeps only what the layout cannot
+    /// prove — the layout is a parsed TCP layout (never the defaulted one a packet without a parse
+    /// carries), the frame still covers the IP datagram the layout describes, and the argument
+    /// addresses' family is the frame's family, because the write geometry depends on it and the
+    /// addresses come from an association rather than the frame. It rejects without mutating,
+    /// exactly like the span entry point that remains the independent oracle.
+    /// </summary>
+    public static bool TryRewriteTcpEndpoints(Span<byte> ethernetFrame, in PacketLayout layout, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
+    {
+        PacketPathProbe.ViewRewrite?.Invoke();
+        if (!layout.IsTcp) return false;
+        if (ethernetFrame.Length < layout.TransportEnd) return false;
+        if (sourceAddress.Family != destinationAddress.Family || (byte)sourceAddress.Family != layout.Family) return false;
+        return layout.Family == (byte)AddressFamilyKind.IPv6
+            ? RewriteIpv6Tcp(ethernetFrame, layout.TransportOffset, sourceAddress, sourcePort, destinationAddress, destinationPort)
+            : RewriteIpv4Tcp(ethernetFrame, layout.TransportOffset, sourceAddress, sourcePort, destinationAddress, destinationPort);
     }
 
     private static bool TryRewriteIpv4(Span<byte> frame, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
@@ -117,6 +141,12 @@ public static class PacketChecksums
         var dataOffset = (frame[tcpOffset + 12] >> 4) * 4;
         if (dataOffset < 20 || dataOffset > tcpLength) return false;
 
+        return RewriteIpv4Tcp(frame, tcpOffset, sourceAddress, sourcePort, destinationAddress, destinationPort);
+    }
+
+    private static bool RewriteIpv4Tcp(Span<byte> frame, int tcpOffset, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
+    {
+        const int ipOffset = 14;
         var oldSource0 = ReadWord(frame, ipOffset + 12);
         var oldSource1 = ReadWord(frame, ipOffset + 14);
         var oldDestination0 = ReadWord(frame, ipOffset + 16);
@@ -154,6 +184,12 @@ public static class PacketChecksums
         var dataOffset = (frame[tcpOffset + 12] >> 4) * 4;
         if (dataOffset < 20 || dataOffset > tcpLength) return false;
 
+        return RewriteIpv6Tcp(frame, tcpOffset, sourceAddress, sourcePort, destinationAddress, destinationPort);
+    }
+
+    private static bool RewriteIpv6Tcp(Span<byte> frame, int tcpOffset, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
+    {
+        const int ipOffset = 14;
         Span<ushort> oldAddressWords = stackalloc ushort[16];
         FillAddressWords(frame, ipOffset, oldAddressWords);
         var oldSourcePort = ReadWord(frame, tcpOffset);

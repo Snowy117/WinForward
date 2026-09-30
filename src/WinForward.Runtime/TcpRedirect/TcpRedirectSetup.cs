@@ -19,7 +19,7 @@ internal sealed record RedirectSetup(TcpRedirectAssociation Association, TcpRedi
 /// the rewritten frame. Any step failing returns null (fail-closed) after releasing the listener,
 /// the table alias, and the self-traffic token it may have acquired.
 /// </summary>
-internal sealed class TcpRedirectSetup(ITcpRedirectListenerFactory listenerFactory, TcpRedirectTable table, SelfTrafficRegistry selfTraffic, IAdapterLocalAddressProvider localAddresses, ITcpRedirectInjector injector, IRuntimeLogger logger, TcpRedirectSessionStore store, ClientResetInjector clientReset, NativeBufferPool synCopyPool, TimeProvider timeProvider)
+internal sealed class TcpRedirectSetup(ITcpRedirectListenerFactory listenerFactory, TcpRedirectTable table, SelfTrafficRegistry selfTraffic, IAdapterLocalAddressProvider localAddresses, AdapterSlotTable slots, ITcpRedirectInjector injector, IRuntimeLogger logger, TcpRedirectSessionStore store, ClientResetInjector clientReset, NativeBufferPool synCopyPool, TimeProvider timeProvider)
 {
     private long _concurrentLoserCount;
 
@@ -97,10 +97,10 @@ internal sealed class TcpRedirectSetup(ITcpRedirectListenerFactory listenerFacto
     private IPAddressValue? ResolveForwardLocalAddress(FlowKey key)
     {
         if (key.Origin != FlowOriginKind.Forwarded) return null;
-        if (key.OriginAdapterId is not { } originAdapterId) return null;
+        if (!slots.TryResolve(key.OriginAdapterSlot, out var adapterMetadata) || adapterMetadata is null) return null;
         // Hot-path contract 1: this cold edge performs the flow's only From(IPAddress)
         // conversion; the per-packet rewrite reads the stored raw address instead.
-        var address = localAddresses.SelectLocalAddress(originAdapterId, key.AddressFamily, key.Local.Address.ToIPAddress());
+        var address = localAddresses.SelectLocalAddress(adapterMetadata.StableId, key.AddressFamily, key.Local.Address.ToIPAddress());
         return address is not null ? IPAddressValue.From(address) : (IPAddressValue?)null;
     }
 
@@ -116,7 +116,9 @@ internal sealed class TcpRedirectSetup(ITcpRedirectListenerFactory listenerFacto
         // The rewrite below mutates the lease's pooled frame in place, so the original-SYN
         // template must be recorded first; afterwards the frame only holds the rewritten form.
         var frame = packet.Lease.Frame;
-        var (_, _, originalClient, originalServer, _, _, _) = packet.Context.Key;
+        var key = packet.Context.Key;
+        var originalClient = key.Local;
+        var originalServer = key.Remote;
 
         if (!TcpFrameRewriter.TryGetWritableFrame(frame, out var writableFrame))
         {
@@ -126,9 +128,9 @@ internal sealed class TcpRedirectSetup(ITcpRedirectListenerFactory listenerFacto
             return null;
         }
 
-        TcpSequenceObservation.RecordClientSyn(frame.Span, association, synCopyPool);
+        TcpSequenceObservation.RecordClientSyn(frame.Span, packet.Layout, association, synCopyPool);
 
-        if (!TcpFrameRewriter.TryRewriteForwardLeg(writableFrame, originalClient, originalServer, association, translatedTuple.Port))
+        if (!TcpFrameRewriter.TryRewriteForwardLeg(writableFrame, packet.Layout, originalClient, originalServer, association, translatedTuple.Port))
         {
             await store.TearDownSessionAsync(session).ConfigureAwait(false);
             TcpRedirectLogging.LogTrace(logger, "tcp.redirect.rejected", packet, association, "rewrite");

@@ -22,7 +22,7 @@ public sealed class TcpPendingSynSetupTests
 
     private static FlowKey Key(ushort port) => FlowKey.Create(Endpoint.From(s_client, port), Endpoint.From(s_destination, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
 
-    private static FlowContext Context(FlowKey key) => new(key, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, key.Remote.Port);
+    private static FlowContext Context(FlowKey key) => FlowBuilders.Context(key);
 
     /// <summary>
     /// A factory whose allocations park until released OR the token fires — unlike the shared
@@ -77,7 +77,7 @@ public sealed class TcpPendingSynSetupTests
     private static bool TryRetain(TcpPendingSynSetupIndex index, NativeBufferPool pool, FlowKey key, int byteCount, DateTimeOffset now, out PendingSynSetup? created)
     {
         var lease = pool.Rent();
-        if (index.TryRetain(key, lease, Math.Min(byteCount, lease.Length), Context(key), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 0x1234), 1, 1, now, out created)) return true;
+        if (index.TryRetain(key, lease, Math.Min(byteCount, lease.Length), Context(key), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 0x1234), 1, 1, default, now, out created)) return true;
         lease.Dispose();
         return false;
     }

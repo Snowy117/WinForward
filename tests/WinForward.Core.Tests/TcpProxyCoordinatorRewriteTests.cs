@@ -1,6 +1,5 @@
 using System.Buffers.Binary;
 using System.Net;
-using System.Runtime.InteropServices;
 using WinForward.Configuration;
 using WinForward.Runtime;
 using WinForward.Runtime.TcpRedirect;
@@ -221,7 +220,7 @@ public sealed class TcpProxyCoordinatorRewriteTests
     }
 
     [Fact]
-    public async Task SynRewriteParseFailureLeavesFrameByteIdentical()
+    public async Task TruncatedSynRewriteFailureLeavesFrameByteIdentical()
     {
         // Parse-before-write invariant of the in-place rewrite: a frame that fails the rewrite's
         // parse stage must be left byte-identical (never a half-rewritten form), and the flow
@@ -231,11 +230,10 @@ public sealed class TcpProxyCoordinatorRewriteTests
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable();
         await using var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
-        var packet = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
-        Assert.True(MemoryMarshal.TryGetArray(packet.Lease.Frame, out var segment));
-        // An ARP ethertype cannot pass the rewrite's parse stage, so the rewrite fails before
-        // any field write.
-        BinaryPrimitives.WriteUInt16BigEndian(segment.Array.AsSpan(segment.Offset + 12, 2), 0x0806);
+        var template = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
+        // The rewrite's retained bound: the frame must still cover the IP datagram the layout
+        // describes. A frame truncated below the layout's end rejects before any field write.
+        var packet = template with { Lease = new PacketLease(template.Lease.Frame[..40]) };
         var expected = packet.Lease.Frame.ToArray();
 
         var outcome = await coordinator.HandleSynAsync(packet, s_server, CancellationToken.None);
@@ -287,7 +285,7 @@ public sealed class TcpProxyCoordinatorRewriteTests
         var local = Endpoint.From(s_clientIpv4, listenerPort);
         var remote = Endpoint.From(s_destIpv4, listenerPort);
         var udpKey = FlowKey.Create(local, remote, TransportProtocol.Udp, FlowOriginKind.Host);
-        var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), new FlowContext(udpKey, "dns.exe", ProcessPath: null, AdapterId: null, "eth0", listenerPort));
+        var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), FlowBuilders.Context(udpKey, "dns.exe", adapterId: "eth0"));
 
         var outcome = await coordinator.HandleReverseIfApplicableAsync(packet, CancellationToken.None);
 

@@ -30,6 +30,22 @@ internal static class TcpFrameRewriter
     }
 
     /// <summary>
+    /// The layout-driven forward-leg rewrite: the same two shapes as
+    /// <see cref="TryRewriteForwardLeg(Span{byte}, Endpoint, Endpoint, TcpRedirectAssociation, ushort)"/>,
+    /// with the endpoint rewrite consuming the parse's proofs instead of re-walking the frame.
+    /// </summary>
+    public static bool TryRewriteForwardLeg(Span<byte> frame, in PacketLayout layout, Endpoint originalClient, Endpoint originalServer, TcpRedirectAssociation association, ushort listenerPort)
+    {
+        if (association.ForwardLocalAddress is { } forwardLocalAddress)
+        {
+            return PacketChecksums.TryRewriteTcpEndpoints(frame, layout, originalClient.Address, originalClient.Port, forwardLocalAddress, listenerPort);
+        }
+        if (!PacketChecksums.TryRewriteTcpEndpoints(frame, layout, originalServer.Address, originalClient.Port, originalClient.Address, listenerPort)) return false;
+        SwapEthernetMacs(frame);
+        return true;
+    }
+
+    /// <summary>
     /// Obtains a writable view of a captured frame for in-place rewriting. The capture path
     /// always wraps a pooled <see cref="byte"/>[] in the lease, but a lease over non-array
     /// memory cannot be rewritten in place; callers fail closed rather than fall back to a copy.
@@ -73,5 +89,20 @@ internal static class TcpFrameRewriter
         const byte syn = 0x02;
         const byte ack = 0x10;
         return (flags & syn) != 0 && (flags & ack) == 0;
+    }
+
+    /// <summary>
+    /// The layout-driven SYN test: the parse already proved the frame is TCP and read the flags
+    /// byte, so this is the same predicate without the frame walk. The gate is
+    /// <see cref="PacketLayout.IsTcp"/> — never a raw transport compare — because
+    /// <see cref="PacketTransport.Tcp"/> is <c>0</c>: a literal or an ungated compare would read the
+    /// defaulted layout of a packet that never parsed as TCP and could silently disable or misfire
+    /// SYN detection.
+    /// </summary>
+    public static bool IsTcpSyn(in PacketLayout layout)
+    {
+        const byte syn = 0x02;
+        const byte ack = 0x10;
+        return layout.IsTcp && (layout.TcpFlags & syn) != 0 && (layout.TcpFlags & ack) == 0;
     }
 }

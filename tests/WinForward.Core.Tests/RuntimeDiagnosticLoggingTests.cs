@@ -185,12 +185,12 @@ public sealed class RuntimeDiagnosticLoggingTests
     private static CapturedFlowPacket PassPacket() =>
         new(
             new PacketLease(FrameBuilders.CreateIpv4UdpFrame()),
-            new FlowContext(
+            FlowBuilders.Context(
                 FlowKey.Create(Endpoint.From(s_client, 53000), Endpoint.From(s_destination, 53), TransportProtocol.Udp, FlowOriginKind.Host),
-                ProcessName: null, ProcessPath: null, "wlan-1", "Wi-Fi", 53),
+                adapterId: "wlan-1", adapterName: "Wi-Fi"),
             new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
 
-    private static FlowContext FlowContext(FlowKey key) => new(key, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, key.Remote.Port);
+    private static FlowContext FlowContext(FlowKey key) => FlowBuilders.Context(key);
 
     /// <summary>Fails every batched flush (and optionally every single send) with a native error.</summary>
     // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local // Deliberate failure-injection seam: the flag selects whether single sends fail in addition to batched flushes, so both native-failure paths are exercised deterministically.

@@ -92,7 +92,7 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
 
         var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
         var key = FlowKey.Create(listenerTuple, listenerTuple, TransportProtocol.Tcp, FlowOriginKind.Host);
-        var context = new FlowContext(key, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, listenerTuple.Port);
+        var context = FlowBuilders.Context(key);
 
         Assert.True(selfTraffic.IsOwned(context));
     }
@@ -305,7 +305,7 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
 
         var observedLocal = Endpoint.From(IPAddress.Parse("192.168.77.2"), 40000);
         var key = FlowKey.Create(observedLocal, remote, TransportProtocol.Udp, FlowOriginKind.Host);
-        var context = new FlowContext(key, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, remote.Port);
+        var context = FlowBuilders.Context(key);
         Assert.True(registry.IsOwned(context));
 
         token.Dispose();
@@ -327,17 +327,17 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
 
         var observedLocal = Endpoint.From(IPAddress.Parse("192.168.77.1"), 40000);
         var observedKey = FlowKey.Create(observedLocal, proxy, TransportProtocol.Tcp, FlowOriginKind.Host);
-        var observed = new FlowContext(observedKey, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, proxy.Port);
+        var observed = FlowBuilders.Context(observedKey);
         Assert.True(registry.IsOwned(observed));
 
         // The proxy's response (reverse direction) is owned too.
-        var reverse = new FlowContext(observedKey.Reverse(), ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, proxy.Port);
+        var reverse = FlowBuilders.Context(observedKey.Reverse());
         Assert.True(registry.IsOwned(reverse));
 
         // An unrelated application sharing the proxy endpoint but using its own source port is not
         // exempted: loop prevention is exact to WinForward-owned sockets, never a broad exemption.
         var otherLocal = Endpoint.From(IPAddress.Parse("192.168.77.1"), 41001);
-        var other = new FlowContext(FlowKey.Create(otherLocal, proxy, TransportProtocol.Tcp, FlowOriginKind.Host), ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, proxy.Port);
+        var other = FlowBuilders.Context(FlowKey.Create(otherLocal, proxy, TransportProtocol.Tcp, FlowOriginKind.Host));
         Assert.False(registry.IsOwned(other));
     }
 }

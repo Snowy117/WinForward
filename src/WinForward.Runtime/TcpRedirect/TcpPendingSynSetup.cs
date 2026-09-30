@@ -1,4 +1,5 @@
 using WinForward.Core;
+using WinForward.Protocols;
 
 namespace WinForward.Runtime.TcpRedirect;
 
@@ -23,6 +24,14 @@ internal sealed class PendingSynSetup
 
     public required FlowContext Context { get; init; }
     public required PacketCaptureMetadata Metadata { get; init; }
+
+    /// <summary>
+    /// The parse layout of the launch-time frame copy, so the background setup's rebuilt packet
+    /// carries the same proofs the dispatching parse produced. A retransmission overwrite replaces
+    /// the retained lease but not this: the running setup task already holds its own launch-time
+    /// managed copy, and the layout belongs to that copy.
+    /// </summary>
+    public required PacketLayout Layout { get; init; }
     public long PacketSequence { get; init; }
     public long FlowGeneration { get; init; }
     public DateTimeOffset LastWriteUtc { get; set; }
@@ -130,7 +139,7 @@ internal sealed class TcpPendingSynSetupIndex
     /// byte budget refuses the retain (fail-closed backpressure, never a cooldown); the caller
     /// keeps ownership of <paramref name="frame"/> and must release it.
     /// </summary>
-    public bool TryRetain(FlowKey key, NativeLease frame, int frameLength, FlowContext context, PacketCaptureMetadata metadata, long packetSequence, long flowGeneration, DateTimeOffset now, out PendingSynSetup? created)
+    public bool TryRetain(FlowKey key, NativeLease frame, int frameLength, FlowContext context, PacketCaptureMetadata metadata, long packetSequence, long flowGeneration, PacketLayout layout, DateTimeOffset now, out PendingSynSetup? created)
     {
         lock (_gate)
         {
@@ -170,6 +179,7 @@ internal sealed class TcpPendingSynSetupIndex
                 Metadata = metadata,
                 PacketSequence = packetSequence,
                 FlowGeneration = flowGeneration,
+                Layout = layout,
                 LastWriteUtc = now,
             };
             _pending.Add(key, entry);

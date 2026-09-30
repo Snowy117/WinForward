@@ -94,7 +94,7 @@ public sealed class Socks5UdpTransportLeaseTests
         var local = Endpoint.From(boundLocal.Address, checked((ushort)boundLocal.Port));
         var relay = Endpoint.From(RelayEndpoint().Address, checked((ushort)RelayEndpoint().Port));
         var relayFlow = FlowKey.Create(local, relay, TransportProtocol.Udp, FlowOriginKind.Host);
-        var context = new FlowContext(relayFlow, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, relay.Port);
+        var context = FlowBuilders.Context(relayFlow);
         Assert.False(registry.IsOwned(context));
         Assert.Equal(1, pool.LeasedFlowCount);
         await lease.DisposeAsync();

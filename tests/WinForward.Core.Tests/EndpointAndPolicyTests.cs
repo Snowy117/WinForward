@@ -24,9 +24,9 @@ public sealed class EndpointAndPolicyTests
     [Fact]
     public void PolicyUsesFirstMatchingRule()
     {
-        var context = new FlowContext(
+        var context = FlowBuilders.Context(
             FlowKey.Create(Endpoint.From(IPAddress.Loopback, 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host),
-            "dns.exe", ProcessPath: null, AdapterId: null, AdapterName: null, 53);
+            "dns.exe");
         var policy = new PolicySnapshot(
         [
             new(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "dns.exe" }), new FlowDecision(FlowAction.Block, 0, ProxyServerName: null)),
@@ -47,8 +47,8 @@ public sealed class EndpointAndPolicyTests
             Endpoint.From(IPAddress.Parse("192.0.2.53"), 443),
             TransportProtocol.Tcp,
             FlowOriginKind.Forwarded,
-            new AdapterContext("id-b", 1));
-        var context = new FlowContext(key, ProcessName: null, ProcessPath: null, "id-b", "vEthernet B", 443);
+            FlowBuilders.SlotOf("id-b", 1), 1);
+        var context = FlowBuilders.Context(key, adapterId: "id-b", adapterName: "vEthernet B");
         var policy = new PolicySnapshot(
         [
             new(new RuleMatcher(), new FlowDecision(FlowAction.Proxy, 0, "primary")),
@@ -71,8 +71,8 @@ public sealed class EndpointAndPolicyTests
             Endpoint.From(IPAddress.Parse("192.0.2.53"), 443),
             TransportProtocol.Udp,
             FlowOriginKind.Forwarded,
-            new AdapterContext("id-a", 1));
-        var context = new FlowContext(key, ProcessName: null, ProcessPath: null, "id-a", "vEthernet A", 443);
+            FlowBuilders.SlotOf("id-a", 1), 1);
+        var context = FlowBuilders.Context(key, adapterId: "id-a", adapterName: "vEthernet A");
         var policy = new PolicySnapshot(
         [
             new(new RuleMatcher(), new FlowDecision(FlowAction.Block, 0, ProxyServerName: null)),
@@ -99,16 +99,16 @@ public sealed class EndpointAndPolicyTests
     [Fact]
     public void ProcessSelectorMatchesFilenameOrNormalizedFullPathExactly()
     {
-        var filenameContext = new FlowContext(
+        var filenameContext = FlowBuilders.Context(
             FlowKey.Create(Endpoint.From(IPAddress.Loopback, 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host),
-            ProcessName: null, @"C:\Windows\System32\DNS.EXE", AdapterId: null, AdapterName: null, 53);
+            processPath: @"C:\Windows\System32\DNS.EXE");
         var filenamePolicy = new PolicySnapshot(
             [new(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "dns.exe" }), new FlowDecision(FlowAction.Block, 0, ProxyServerName: null))],
             FlowAction.Pass);
 
         Assert.Equal(FlowAction.Block, filenamePolicy.Evaluate(filenameContext).Action);
 
-        var pathContext = filenameContext with { ProcessName = "dns.exe", ProcessPath = @"C:\Program Files\WinForward\dns.exe" };
+        var pathContext = FlowBuilders.Context(filenameContext.Key, "dns.exe", @"C:\Program Files\WinForward\dns.exe");
         var pathPolicy = new PolicySnapshot(
             [new(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "c:/program files/winforward/dns.exe" }), new FlowDecision(FlowAction.Block, 0, ProxyServerName: null))],
             FlowAction.Pass);
@@ -122,9 +122,9 @@ public sealed class EndpointAndPolicyTests
     [Fact]
     public void ProcessSelectorDirectoryMatchesProgramsInDirectoryAndSubdirectories()
     {
-        var context = new FlowContext(
+        var context = FlowBuilders.Context(
             FlowKey.Create(Endpoint.From(IPAddress.Loopback, 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host),
-            "tool.exe", @"C:\Program Files\MyApp\Bin\Sub\TOOL.EXE", AdapterId: null, AdapterName: null, 53);
+            "tool.exe", @"C:\Program Files\MyApp\Bin\Sub\TOOL.EXE");
         var policy = new PolicySnapshot(
             [new(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { @"c:\program files\myapp" }), new FlowDecision(FlowAction.Block, 0, ProxyServerName: null))],
             FlowAction.Pass);
@@ -135,9 +135,9 @@ public sealed class EndpointAndPolicyTests
     [Fact]
     public void ProcessSelectorDirectoryMatchesDirectChildAndTrailingSeparatorForm()
     {
-        var context = new FlowContext(
+        var context = FlowBuilders.Context(
             FlowKey.Create(Endpoint.From(IPAddress.Loopback, 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host),
-            "app.exe", @"C:\Program Files\MyApp\App.EXE", AdapterId: null, AdapterName: null, 53);
+            "app.exe", @"C:\Program Files\MyApp\App.EXE");
         var policy = new PolicySnapshot(
             [new(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "c:/program files/myapp/" }), new FlowDecision(FlowAction.Block, 0, ProxyServerName: null))],
             FlowAction.Pass);
@@ -148,9 +148,9 @@ public sealed class EndpointAndPolicyTests
     [Fact]
     public void ProcessSelectorDirectoryDoesNotMatchSiblingPrefix()
     {
-        var context = new FlowContext(
+        var context = FlowBuilders.Context(
             FlowKey.Create(Endpoint.From(IPAddress.Loopback, 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host),
-            "app.exe", @"C:\ToolsFoo\App.EXE", AdapterId: null, AdapterName: null, 53);
+            "app.exe", @"C:\ToolsFoo\App.EXE");
         var policy = new PolicySnapshot(
             [new(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { @"c:\tools" }), new FlowDecision(FlowAction.Block, 0, ProxyServerName: null))],
             FlowAction.Pass);
@@ -161,9 +161,9 @@ public sealed class EndpointAndPolicyTests
     [Fact]
     public void ProcessSelectorDirectoryDoesNotMatchParentOrUnrelatedPaths()
     {
-        var context = new FlowContext(
+        var context = FlowBuilders.Context(
             FlowKey.Create(Endpoint.From(IPAddress.Loopback, 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host),
-            "app.exe", @"C:\Other\App.EXE", AdapterId: null, AdapterName: null, 53);
+            "app.exe", @"C:\Other\App.EXE");
         var policy = new PolicySnapshot(
             [new(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { @"C:\Tools" }), new FlowDecision(FlowAction.Block, 0, ProxyServerName: null))],
             FlowAction.Pass);
@@ -176,7 +176,7 @@ public sealed class EndpointAndPolicyTests
     {
         Assert.True(IPPrefix.TryParse("192.0.2.0/24", out var network));
         var key = FlowKey.Create(Endpoint.From(IPAddress.Loopback, 50000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
-        var context = new FlowContext(key, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, 53);
+        var context = FlowBuilders.Context(key);
         var policy = new PolicySnapshot([new(new RuleMatcher(RemoteNetworks: [network]), new FlowDecision(FlowAction.Block, 0, ProxyServerName: null))], FlowAction.Pass);
 
         Assert.Equal(FlowAction.Block, policy.Evaluate(context).Action);
@@ -227,7 +227,7 @@ public sealed class EndpointAndPolicyTests
     public void PolicyAndAcrossFieldsRequiresEveryPopulatedField()
     {
         var key = FlowKey.Create(Endpoint.From(IPAddress.Loopback, 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 80), TransportProtocol.Udp, FlowOriginKind.Host);
-        var context = new FlowContext(key, "dns.exe", ProcessPath: null, AdapterId: null, AdapterName: null, 80);
+        var context = FlowBuilders.Context(key, "dns.exe");
         var policy = new PolicySnapshot(
             [new(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "dns.exe" }, RemotePorts: [(53, 53)]), new FlowDecision(FlowAction.Block, 0, ProxyServerName: null))],
             FlowAction.Pass);
@@ -235,7 +235,8 @@ public sealed class EndpointAndPolicyTests
         // Process matches but the remote port does not -> the AND rule must not match.
         Assert.Equal(FlowAction.Pass, policy.Evaluate(context).Action);
 
-        var matchingContext = context with { RemotePort = 53 };
+        // The remote port is the key's, so the matching shape is a key for the matching port.
+        var matchingContext = FlowBuilders.Context(FlowKey.Create(Endpoint.From(IPAddress.Loopback, 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host), "dns.exe");
         Assert.Equal(FlowAction.Block, policy.Evaluate(matchingContext).Action);
     }
 
@@ -243,7 +244,7 @@ public sealed class EndpointAndPolicyTests
     public void PolicyAlternativesWithinFieldUseOrSemantics()
     {
         var key = FlowKey.Create(Endpoint.From(IPAddress.Loopback, 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 443), TransportProtocol.Udp, FlowOriginKind.Host);
-        var context = new FlowContext(key, "dns.exe", ProcessPath: null, AdapterId: null, AdapterName: null, 443);
+        var context = FlowBuilders.Context(key, "dns.exe");
         var policy = new PolicySnapshot(
             [new(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "other.exe", "dns.exe" }, RemotePorts: [(80, 80), (443, 443)]), new FlowDecision(FlowAction.Block, 0, ProxyServerName: null))],
             FlowAction.Pass);

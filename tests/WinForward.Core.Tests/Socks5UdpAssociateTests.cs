@@ -80,11 +80,11 @@ public sealed class Socks5UdpAssociateTests
         var local = Endpoint.From(packet.Sender.Address, checked((ushort)packet.Sender.Port));
         var relay = Endpoint.From(relayEndpoint.Address, checked((ushort)relayEndpoint.Port));
         var relayFlow = FlowKey.Create(local, relay, TransportProtocol.Udp, FlowOriginKind.Host);
-        Assert.True(registry.IsOwned(new FlowContext(relayFlow, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, relay.Port)));
+        Assert.True(registry.IsOwned(FlowBuilders.Context(relayFlow)));
 
         await coordinator.DisposeAsync();
 
-        Assert.False(registry.IsOwned(new FlowContext(relayFlow, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, relay.Port)));
+        Assert.False(registry.IsOwned(FlowBuilders.Context(relayFlow)));
         await server;
     }
 
@@ -182,13 +182,7 @@ public sealed class Socks5UdpAssociateTests
         var transport = fixture.Transport;
         var local = Endpoint.From(transport.LocalEndpoint.Address, checked((ushort)transport.LocalEndpoint.Port));
         var relay = Endpoint.From(transport.RelayEndpoint.Address, checked((ushort)transport.RelayEndpoint.Port));
-        var context = new FlowContext(
-            FlowKey.Create(local, relay, TransportProtocol.Udp, FlowOriginKind.Host),
-            ProcessName: null,
-            ProcessPath: null,
-            AdapterId: null,
-            AdapterName: null,
-            relay.Port);
+        var context = FlowBuilders.Context(FlowKey.Create(local, relay, TransportProtocol.Udp, FlowOriginKind.Host));
         socket!.OnDisposing = () => Assert.True(registry.IsOwned(context));
 
         await transport.DisposeAsync();
@@ -226,13 +220,7 @@ public sealed class Socks5UdpAssociateTests
         var packet = await relayPacket.Task.WaitAsync(CancellationToken.None);
         var local = Endpoint.From(packet.Sender.Address, checked((ushort)packet.Sender.Port));
         var relay = Endpoint.From(relayEndpoint.Address, checked((ushort)relayEndpoint.Port));
-        var context = new FlowContext(
-            FlowKey.Create(local, relay, TransportProtocol.Udp, FlowOriginKind.Host),
-            ProcessName: null,
-            ProcessPath: null,
-            AdapterId: null,
-            AdapterName: null,
-            relay.Port);
+        var context = FlowBuilders.Context(FlowKey.Create(local, relay, TransportProtocol.Udp, FlowOriginKind.Host));
         socket!.DisposeException = new IOException("synthetic socket disposal failure");
 
         var exception = await Assert.ThrowsAsync<IOException>(async () => await transport.DisposeAsync());

@@ -38,7 +38,8 @@ public readonly record struct CapturedFlowPacket(
     PacketCaptureMetadata Metadata = default,
     long PacketSequence = 0,
     long FlowGeneration = 0,
-    NativeFrameHandle NativeFrame = default)
+    NativeFrameHandle NativeFrame = default,
+    PacketLayout Layout = default)
 {
     /// <summary>
     /// A read-only view of the frame bytes for synchronous header inspection: the native capture
@@ -184,7 +185,7 @@ public sealed class FlowDispatcher
             // An unresolved server name and the UDP reverse-response special case handled by
             // DispatchSlowAsync keep their slow-path behavior.
             if (decision.ProxyServerName is null || !_servers.TryGetValue(decision.ProxyServerName, out var server)) return DispatchSlowAsync(packet, cancellationToken);
-            if (packet.Context.Key.Protocol == TransportProtocol.Udp && IsReverseOf(existing.Key, packet.Context.Key)) return DispatchSlowAsync(packet, cancellationToken);
+            if (packet.Context.Key.Protocol == TransportProtocol.Udp && existing.Key.IsReverseOf(packet.Context.Key)) return DispatchSlowAsync(packet, cancellationToken);
             packet = packet with { FlowGeneration = existing.Generation };
             // ReSharper disable once ConvertIfStatementToReturnStatement // The condition completes the lease (side effect + state transition); folding it into a conditional expression hides the "already consumed" early exit (B1 disposition).
             if (!packet.Lease.TryComplete(PacketDisposition.ProxyConsumed)) return ValueTask.CompletedTask;
@@ -223,7 +224,7 @@ public sealed class FlowDispatcher
             // direction: the stored flow key is (client:port -> server:port), a response is the
             // reverse. TCP reverse packets are handled by the reverse hook before this point.
             if (existing.Decision.Action == FlowAction.Proxy && packet.Context.Key.Protocol == TransportProtocol.Udp &&
-                IsReverseOf(existing.Key, packet.Context.Key))
+                existing.Key.IsReverseOf(packet.Context.Key))
             {
                 await CompleteAsync(packet, PacketDisposition.Pass, PacketAction.Pass, server: null, cancellationToken).ConfigureAwait(false);
                 return;
@@ -280,14 +281,14 @@ public sealed class FlowDispatcher
 
     private async ValueTask<FlowContext> AttributeProcessAsync(FlowContext context, CancellationToken cancellationToken)
     {
-        if (!_policy.RequiresProcessAttribution || _attributor is null || context.ProcessName is not null || context.ProcessPath is not null || context.Key.Origin != FlowOriginKind.Host) return context;
+        if (!_policy.RequiresProcessAttribution || _attributor is null || context.Process is not null || context.Key.Origin != FlowOriginKind.Host) return context;
         var identity = await _attributor.FindAsync(context.Key, cancellationToken).ConfigureAwait(false);
         if (identity is null)
         {
             LogAttributionMiss(context);
             return context;
         }
-        return context with { ProcessName = identity.Value.Name, ProcessPath = identity.Value.FullPath };
+        return context with { Process = new ProcessMetadata(identity.Value.Name, identity.Value.FullPath) };
     }
 
     /// <summary>
@@ -372,12 +373,6 @@ public sealed class FlowDispatcher
 
     private FlowDecision EvaluateNewFlow(FlowContext context) =>
         context.Key.Origin == FlowOriginKind.Forwarded ? _policy.EvaluateForwarded(context) : _policy.Evaluate(context);
-
-    private static bool IsReverseOf(FlowKey stored, FlowKey observed) =>
-        stored.AddressFamily == observed.AddressFamily &&
-        stored.Protocol == observed.Protocol &&
-        stored.Local == observed.Remote &&
-        stored.Remote == observed.Local;
 
     private async ValueTask ExecuteDecisionAsync(CapturedFlowPacket packet, FlowDecision decision, CancellationToken cancellationToken)
     {

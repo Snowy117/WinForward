@@ -314,6 +314,26 @@ public sealed class TcpRedirectInjectionBatchingTests
         Assert.Single(harness.Injector.BatchCalls);
     }
 
+    /// <summary>
+    /// A packet that never parsed carries <c>default(PacketLayout)</c>, whose zeroed transport reads
+    /// as TCP, whose zero IP header length puts the transport header where the IP header starts and
+    /// whose zeroed family reads as IPv4. The data leg must refuse that layout rather than apply it —
+    /// the frame the leg would have sent stays byte-identical and the association fails closed.
+    /// </summary>
+    [Fact]
+    public async Task RedirectLegRefusesADefaultedLayoutByteIdentically()
+    {
+        await using var harness = new RedirectHarness();
+        await harness.EstablishHostRedirectAsync(53000);
+        var pristine = BuildIpv4TcpFrame(s_clientIpv4, s_destIpv4, 53000, 443, payload: [1]);
+
+        var (outcome, frame) = await harness.DispatchForwardDataWithoutLayoutAsync(53000, 1);
+
+        Assert.Equal(TcpRedirectOutcome.Blocked, outcome);
+        Assert.Equal(pristine, frame);
+        Assert.Equal(0, harness.Coordinator.Diagnostics.RedirectPendingCount);
+    }
+
     [Fact]
     public async Task MaterializedLeaseTakesThePooledFallbackAndReturnsItExactlyOnce()
     {
@@ -443,7 +463,7 @@ public sealed class TcpRedirectInjectionBatchingTests
 
         public ValueTask<TcpRedirectOutcome> DispatchForwardedDataAsync(ushort clientPort, byte marker, nint adapterHandle = AdapterHandle, bool pumpOwned = true)
         {
-            var key = FlowKey.Create(Endpoint.From(s_clientIpv4, clientPort), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Forwarded, new AdapterContext("veth-1", 7));
+            var key = FlowKey.Create(Endpoint.From(s_clientIpv4, clientPort), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Forwarded, FlowBuilders.SlotOf("veth-1", 7), 7);
             return DispatchAsync(BuildIpv4TcpFrame(s_clientIpv4, s_destIpv4, clientPort, 443, payload: [marker]), key, adapterHandle, pumpOwned);
         }
 
@@ -456,8 +476,22 @@ public sealed class TcpRedirectInjectionBatchingTests
         /// <summary>The lease of the most recent pump-owned dispatch, for the materialization assertion.</summary>
         public PacketLease? LastLease { get; private set; }
 
+        /// <summary>The outcome of the most recent pump-owned dispatch.</summary>
+        private TcpRedirectOutcome LastOutcome { get; set; }
+
         public Task<NdisPacketBuffer> DispatchForwardDataInPlaceAsync(ushort clientPort, byte marker) =>
             DispatchKeepingSlotAsync(ForwardDataFrame(clientPort, marker), ForwardKey(clientPort), AdapterHandle, materializeLease: false);
+
+        /// <summary>
+        /// Drives the forward data leg with a packet whose layout was never derived from a parse — the
+        /// shape a hand-built <see cref="CapturedFlowPacket"/> carries — and reports the outcome with
+        /// the capture slot's bytes, which is what this leg would hand the wire.
+        /// </summary>
+        public async Task<(TcpRedirectOutcome Outcome, byte[] Frame)> DispatchForwardDataWithoutLayoutAsync(ushort clientPort, byte marker)
+        {
+            var capture = await DispatchKeepingSlotAsync(ForwardDataFrame(clientPort, marker), ForwardKey(clientPort), AdapterHandle, materializeLease: false, withLayout: false).ConfigureAwait(false);
+            return (LastOutcome, capture.GetFrame().ToArray());
+        }
 
         public Task<NdisPacketBuffer> DispatchForwardDataWithMaterializedLeaseAsync(ushort clientPort, byte marker) =>
             DispatchKeepingSlotAsync(ForwardDataFrame(clientPort, marker), ForwardKey(clientPort), AdapterHandle, materializeLease: true);
@@ -468,16 +502,16 @@ public sealed class TcpRedirectInjectionBatchingTests
         private static byte[] ForwardDataFrame(ushort clientPort, byte marker) =>
             BuildIpv4TcpFrame(s_clientIpv4, s_destIpv4, clientPort, 443, payload: [marker]);
 
-        private async Task<NdisPacketBuffer> DispatchKeepingSlotAsync(byte[] frame, FlowKey key, nint adapterHandle, bool materializeLease)
+        private async Task<NdisPacketBuffer> DispatchKeepingSlotAsync(byte[] frame, FlowKey key, nint adapterHandle, bool materializeLease, bool withLayout = true)
         {
-            var context = new FlowContext(key, "app.exe", ProcessPath: null, AdapterId: null, "eth0", key.Remote.Port);
+            var context = FlowBuilders.Context(key, "app.exe", adapterId: "eth0");
             var metadata = new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, adapterHandle);
             var capture = new NdisPacketBuffer();
             _captureSlots.Add(capture);
             capture.SetFrame(frame, NdisApiAbi.PacketFlagOnSend, adapterHandle);
             LastLease = materializeLease ? new PacketLease(frame) : new PacketLease(capture);
-            var packet = new CapturedFlowPacket(LastLease, context, metadata, NativeFrame: new NativeFrameHandle(capture));
-            await Coordinator.HandlePacketAsync(packet, s_server, CancellationToken.None).ConfigureAwait(false);
+            var packet = new CapturedFlowPacket(LastLease, context, metadata, NativeFrame: new NativeFrameHandle(capture), Layout: withLayout ? LayoutOf(frame) : default);
+            LastOutcome = await Coordinator.HandlePacketAsync(packet, s_server, CancellationToken.None).ConfigureAwait(false);
             return capture;
         }
 
@@ -489,11 +523,11 @@ public sealed class TcpRedirectInjectionBatchingTests
 
         private async ValueTask<TcpRedirectOutcome> DispatchAsync(byte[] frame, FlowKey key, nint adapterHandle, bool pumpOwned)
         {
-            var context = new FlowContext(key, "app.exe", ProcessPath: null, AdapterId: null, "eth0", key.Remote.Port);
+            var context = FlowBuilders.Context(key, "app.exe", adapterId: "eth0");
             var metadata = new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, adapterHandle);
             if (!pumpOwned)
             {
-                var materialized = new CapturedFlowPacket(new PacketLease(frame), context, metadata);
+                var materialized = new CapturedFlowPacket(new PacketLease(frame), context, metadata, Layout: LayoutOf(frame));
                 return await Coordinator.HandlePacketAsync(materialized, s_server, CancellationToken.None).ConfigureAwait(false);
             }
             // A pump batch slot lives for the whole iteration and is released only after the
@@ -503,7 +537,7 @@ public sealed class TcpRedirectInjectionBatchingTests
             var capture = new NdisPacketBuffer();
             _captureSlots.Add(capture);
             capture.SetFrame(frame, NdisApiAbi.PacketFlagOnSend, adapterHandle);
-            var packet = new CapturedFlowPacket(new PacketLease(capture), context, metadata, NativeFrame: new NativeFrameHandle(capture));
+            var packet = new CapturedFlowPacket(new PacketLease(capture), context, metadata, NativeFrame: new NativeFrameHandle(capture), Layout: LayoutOf(frame));
             return await Coordinator.HandlePacketAsync(packet, s_server, CancellationToken.None).ConfigureAwait(false);
         }
     }

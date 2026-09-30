@@ -222,7 +222,7 @@ public sealed class TcpReversePrefilterTests
 
     private static FlowKey MakeUdpKey(ushort localPort) => FlowKey.Create(Endpoint.From(s_client, localPort), Endpoint.From(s_destination, 53), TransportProtocol.Udp, FlowOriginKind.Host);
 
-    private static FlowContext MakeContext(FlowKey key) => new(key, ProcessName: null, ProcessPath: null, key.OriginAdapterId, AdapterName: null, key.Remote.Port);
+    private static FlowContext MakeContext(FlowKey key) => FlowBuilders.Context(key);
 
     private static CapturedFlowPacket MakePacket(FlowKey key) => new(new PacketLease(new byte[] { 1 }), MakeContext(key));
 

@@ -288,17 +288,19 @@ public sealed class CoreFlowStructuresTests
             Endpoint.From(IPAddress.Parse("198.51.100.53"), 53),
             TransportProtocol.Udp,
             FlowOriginKind.Host,
-            new AdapterContext("host", 1));
+            FlowBuilders.SlotOf("host", 1),
+            1);
         var claimed = table.TryClaimResolved(key, () => FlowDecision.Fallback(FlowAction.Pass), out var state)
             ? state!
             : throw new InvalidOperationException("Flow table claim failed.");
         claimed.Touch(DateTimeOffset.UtcNow - TimeSpan.FromMinutes(2));
-        var crossAdapter = key with
-        {
-            Origin = FlowOriginKind.Forwarded,
-            OriginAdapterId = "forwarded",
-            OriginAdapterGeneration = 2,
-        };
+        var crossAdapter = FlowKey.Create(
+            Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000),
+            Endpoint.From(IPAddress.Parse("198.51.100.53"), 53),
+            TransportProtocol.Udp,
+            FlowOriginKind.Forwarded,
+            FlowBuilders.SlotOf("forwarded", 2),
+            2);
 
         Assert.Equal(1, table.RemoveExpired(DateTimeOffset.UtcNow, TimeSpan.FromMinutes(1)));
         Assert.False(table.TryResolve(crossAdapter, out _));

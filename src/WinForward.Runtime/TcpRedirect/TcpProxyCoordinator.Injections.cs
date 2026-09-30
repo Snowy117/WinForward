@@ -253,10 +253,10 @@ public sealed partial class TcpProxyCoordinator
             var frame = StageFrame(packet, buffer, inPlace, NdisApiAbi.PacketFlagOnReceive, adapterHandle);
             // Read-then-write: advance the client sequence tracker on the pre-rewrite bytes,
             // keeping the reset builder's ack in the client's window.
-            TcpSequenceObservation.TrackClientSequence(frame, association);
+            TcpSequenceObservation.TrackClientSequence(frame, packet.Layout, association);
             var originalClient = packet.Context.Key.Local;
             var originalServer = association.OriginalKey.Remote;
-            if (!TcpFrameRewriter.TryRewriteForwardLeg(frame, originalClient, originalServer, association, association.TranslatedListenerTuple.Port))
+            if (!TcpFrameRewriter.TryRewriteForwardLeg(frame, packet.Layout, originalClient, originalServer, association, association.TranslatedListenerTuple.Port))
             {
                 return FailAssociationAndBlockAsync(association);
             }
@@ -318,9 +318,9 @@ public sealed partial class TcpProxyCoordinator
             var frame = StageFrame(packet, buffer, inPlace, directionFlags, targetHandle);
             // Read-then-write: record the SYN-ACK sequence and advance the server sequence tracker
             // on the pre-rewrite bytes before the rewrite mutates them.
-            TcpSequenceObservation.RecordServerSynAck(frame, association);
-            TcpSequenceObservation.TrackServerSequence(frame, association);
-            if (!PacketChecksums.TryRewriteTcpEndpoints(frame, original.Remote.Address, original.Remote.Port, original.Local.Address, original.Local.Port))
+            TcpSequenceObservation.RecordServerSynAck(frame, packet.Layout, association);
+            TcpSequenceObservation.TrackServerSequence(frame, packet.Layout, association);
+            if (!PacketChecksums.TryRewriteTcpEndpoints(frame, packet.Layout, original.Remote.Address, original.Remote.Port, original.Local.Address, original.Local.Port))
             {
                 return FailAssociationAndBlockAsync(association);
             }

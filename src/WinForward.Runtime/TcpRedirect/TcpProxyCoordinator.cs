@@ -55,6 +55,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
         TcpRedirectTable table,
         SelfTrafficRegistry selfTraffic,
         IAdapterLocalAddressProvider localAddresses,
+        AdapterSlotTable slots,
         NativeBufferPool synCopyPool,
         ISetupExecutor setupExecutor,
         TcpRedirectOptions? options = null)
@@ -65,6 +66,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
         ArgumentNullException.ThrowIfNull(table);
         ArgumentNullException.ThrowIfNull(selfTraffic);
         ArgumentNullException.ThrowIfNull(localAddresses);
+        ArgumentNullException.ThrowIfNull(slots);
         ArgumentNullException.ThrowIfNull(synCopyPool);
         ArgumentNullException.ThrowIfNull(setupExecutor);
         options ??= new TcpRedirectOptions();
@@ -84,7 +86,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
         _prunePendingSyn = _pendingSyn.RemoveExpired;
         _clientReset = new ClientResetInjector(injector, _logger, _store.TearDownSessionAsync, _store.FailAssociationAsync, Capacity, healthSignal: options.HealthSignal, timeProvider: _timeProvider);
         _acceptor = new TcpRedirectAcceptor(relayFactory, _logger, _clientReset, _store.TryAttachRelay, _store.TearDownSessionAsync);
-        _setup = new TcpRedirectSetup(listenerFactory, table, selfTraffic, localAddresses, injector, _logger, _store, _clientReset, _synCopyPool, _timeProvider);
+        _setup = new TcpRedirectSetup(listenerFactory, table, selfTraffic, localAddresses, slots, injector, _logger, _store, _clientReset, _synCopyPool, _timeProvider);
     }
 
     internal TcpRedirectTable Table { get; }
@@ -165,7 +167,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
         var source = packet.InspectionSpan;
         var lease = _synCopyPool.Rent();
         source.CopyTo(lease.Span);
-        if (!_pendingSyn.TryRetain(key, lease, source.Length, packet.Context, packet.Metadata, packet.PacketSequence, packet.FlowGeneration, _timeProvider.GetUtcNow(), out var created))
+        if (!_pendingSyn.TryRetain(key, lease, source.Length, packet.Context, packet.Metadata, packet.PacketSequence, packet.FlowGeneration, packet.Layout, _timeProvider.GetUtcNow(), out var created))
         {
             // The index refused the retain and kept ownership of nothing new: release the rental.
             // Bounded pending index (entry cap or global byte budget) is explicit backpressure,
@@ -268,7 +270,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
     {
         try
         {
-            var packet = new CapturedFlowPacket(new PacketLease(frame), entry.Context, entry.Metadata, entry.PacketSequence, entry.FlowGeneration);
+            var packet = new CapturedFlowPacket(new PacketLease(frame), entry.Context, entry.Metadata, entry.PacketSequence, entry.FlowGeneration, Layout: entry.Layout);
             var setup = await _setup.SetupNewRedirectAsync(packet, server, _store.ShutdownToken).ConfigureAwait(false);
             if (setup is null)
             {
@@ -395,7 +397,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
         var key = packet.Context.Key;
         // A2: the SYN bit-test reads the synchronous frame view (the native capture buffer while
         // the lease is unmaterialized) — a pure span read that never forces a pooled managed copy.
-        var syn = TcpFrameRewriter.IsTcpSyn(packet.InspectionSpan);
+        var syn = TcpFrameRewriter.IsTcpSyn(packet.Layout);
 
         // The listener-port prefilter is exact for "this cannot be a reverse candidate" (a reverse
         // tuple's source port is always a live listener port, and the count rises in the same hold that

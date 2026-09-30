@@ -180,6 +180,9 @@ public sealed class NdisCaptureResilienceTests
 /// </summary>
 public sealed class CaptureDegradationPlumbingTests
 {
+    private static AdapterCaptureBinding[] CaptureBindings(IEnumerable<WindowsAdapter> adapters) =>
+        [.. adapters.Select(adapter => new AdapterCaptureBinding(adapter, FlowBuilders.SlotOf(adapter.StableId, adapter.Generation)))];
+
     private static WindowsAdapter Adapter(string id, nint handle) => new(id, id, $@"\DEVICE\{{{id}}}", handle, 1);
 
     [Fact]
@@ -195,8 +198,8 @@ public sealed class CaptureDegradationPlumbingTests
             [0x11] = new CancellingReader(cts, readsBeforeCancel: 3),
         };
         var dispatcher = new FlowDispatcher(CreatePassConfiguration(), new FakeGuard(), new NoopExecutor());
-        var processor = new CapturePacketProcessor(dispatcher);
-        var loop = new MultiAdapterCaptureLoop(new PerHandleReader(readers), adapters, processor,
+        var processor = new CapturePacketProcessor(dispatcher, FlowBuilders.Slots);
+        var loop = new MultiAdapterCaptureLoop(new PerHandleReader(readers), CaptureBindings(adapters), processor,
             TimeSpan.FromMilliseconds(1),
             onAdapterDegraded: (adapter, nativeError) =>
             {
@@ -223,8 +226,8 @@ public sealed class CaptureDegradationPlumbingTests
         using var cts = new CancellationTokenSource();
         var readers = new Dictionary<nint, INdisPacketReader> { [0x10] = new PermanentFailureReader(87) };
         var dispatcher = new FlowDispatcher(CreatePassConfiguration(), new FakeGuard(), new NoopExecutor());
-        var processor = new CapturePacketProcessor(dispatcher);
-        var loop = new MultiAdapterCaptureLoop(new PerHandleReader(readers), adapters, processor,
+        var processor = new CapturePacketProcessor(dispatcher, FlowBuilders.Slots);
+        var loop = new MultiAdapterCaptureLoop(new PerHandleReader(readers), CaptureBindings(adapters), processor,
             TimeSpan.FromMilliseconds(1),
             onAdapterDegraded: async (adapter, nativeError) =>
             {

@@ -69,16 +69,16 @@ public sealed class PacketParsingTests
     public void ClassifyFlowUsesDirectionForOriginAndAdapterForIdentity()
     {
         var adapter = new WindowsAdapter("id-a", "Ethernet", "internal-a", 1, 7);
-        var view = new PacketView(PacketTransport.Tcp, IPAddress.Parse("192.0.2.10"), IPAddress.Parse("192.0.2.53"), 53000, 443, 20, 20);
+        var view = new PacketView(PacketTransport.Tcp, IPAddress.Parse("192.0.2.10"), IPAddress.Parse("192.0.2.53"), 53000, 443, 20, 20, TransportLength: 20, TcpFlags: 0x02);
 
-        var host = PacketFlowClassifier.ClassifyFlow(view, adapter, isOnSend: true);
+        var host = PacketFlowClassifier.ClassifyFlow(view, adapter, isOnSend: true, FlowBuilders.SlotOf(adapter.StableId, adapter.Generation, adapter.FriendlyName), FlowBuilders.Slots);
         Assert.Equal(FlowOriginKind.Host, host.Key.Origin);
         Assert.Equal("id-a", host.AdapterId);
         Assert.Equal("Ethernet", host.AdapterName);
         Assert.Equal((ushort)443, host.RemotePort);
         Assert.Equal(adapter.Generation, host.Key.OriginAdapterGeneration);
 
-        var forwarded = PacketFlowClassifier.ClassifyFlow(view, adapter, isOnSend: false);
+        var forwarded = PacketFlowClassifier.ClassifyFlow(view, adapter, isOnSend: false, FlowBuilders.SlotOf(adapter.StableId, adapter.Generation, adapter.FriendlyName), FlowBuilders.Slots);
         Assert.Equal(FlowOriginKind.Forwarded, forwarded.Key.Origin);
     }
 
@@ -86,9 +86,9 @@ public sealed class PacketParsingTests
     public void ClassifyFlowPreservesIpv6Endpoints()
     {
         var adapter = new WindowsAdapter("id-6", "vEthernet", "internal-6", 2, 1);
-        var view = new PacketView(PacketTransport.Udp, IPAddress.Parse("2001:db8::10"), IPAddress.Parse("2001:db8::53"), 53000, 53, 40, 8);
+        var view = new PacketView(PacketTransport.Udp, IPAddress.Parse("2001:db8::10"), IPAddress.Parse("2001:db8::53"), 53000, 53, 40, 8, TransportLength: 8, TcpFlags: 0);
 
-        var context = PacketFlowClassifier.ClassifyFlow(view, adapter, isOnSend: false);
+        var context = PacketFlowClassifier.ClassifyFlow(view, adapter, isOnSend: false, FlowBuilders.SlotOf(adapter.StableId, adapter.Generation, adapter.FriendlyName), FlowBuilders.Slots);
 
         Assert.Equal(AddressFamilyKind.IPv6, context.Key.AddressFamily);
         Assert.Equal(Endpoint.From(IPAddress.Parse("2001:db8::10"), 53000), context.Key.Local);

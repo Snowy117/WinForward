@@ -498,7 +498,7 @@ public sealed class TcpProxyCoordinatorCapacityTests
     {
         var frame = FrameBuilders.BuildIpv4TcpFrame(client, destination, clientPort, destinationPort, FrameBuilders.TcpFlagSyn, sequence: sequence);
         var key = FlowKey.Create(Endpoint.From(client, clientPort), Endpoint.From(destination, destinationPort), TransportProtocol.Tcp, FlowOriginKind.Host);
-        var context = new FlowContext(key, "app.exe", ProcessPath: null, AdapterId: null, "eth0", destinationPort);
+        var context = FlowBuilders.Context(key, "app.exe", adapterId: "eth0");
         return new CapturedFlowPacket(new PacketLease(frame), context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 0x1234));
     }
 }

@@ -55,6 +55,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         UdpProxyCoordinator udp,
         TcpProxyCoordinator tcp,
         IRuntimeLogger logger,
+        AdapterSlotTable? adapterSlots = null,
         NativeBufferPool? synCopyPool = null,
         NativeBufferPool? relayPool = null,
         NativeBufferPool? udpDatagramPool = null,
@@ -70,6 +71,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         Udp = udp;
         Tcp = tcp;
         _logger = logger;
+        AdapterSlots = adapterSlots ?? new AdapterSlotTable();
         _synCopyPool = synCopyPool;
         _relayPool = relayPool;
         _udpDatagramPool = udpDatagramPool;
@@ -92,6 +94,13 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
 
     /// <summary>The refreshable UDP reinjection-target snapshot, swapped at every scope install.</summary>
     internal UdpAdapterTargetSource UdpTargets { get; }
+
+    /// <summary>
+    /// The process-lived adapter interning table every key's slot and every reinjection target
+    /// comes from. <c>Program.cs</c> hands it to the durable packet processor and the capture
+    /// generation factory so slots are resolved once per adapter per generation.
+    /// </summary>
+    internal AdapterSlotTable AdapterSlots { get; }
 
     /// <summary>The durable TCP redirect coordinator (heartbeat usage source).</summary>
     internal TcpProxyCoordinator Tcp { get; }
@@ -119,6 +128,9 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         RuntimeCounters? counters = null)
     {
         var runtimeCounters = counters ?? RuntimeCounters.Shared;
+        // One interning table for the whole process: keys carry a slot, so it must outlive every
+        // capture generation and every adapter-list refresh (design §3.1).
+        var adapterSlots = new AdapterSlotTable();
         // One activity clock for the whole composition: the flow table's warm stamps, both
         // coordinators' per-packet stamps and both sweeps' cutoffs must all land on the same bucket.
         var activityClock = new ActivityBucketClock();
@@ -142,7 +154,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         TcpProxyCoordinator tcpCoordinator;
         try
         {
-            tcpCoordinator = TcpRedirectComposer.Create(configuration, reinjector, selfTraffic, logger, healthSignal, new TcpRedirectComposition(redirectTable, synCopyPool, relayPool, setupExecutor, addressCache, activityClock));
+            tcpCoordinator = TcpRedirectComposer.Create(configuration, reinjector, selfTraffic, logger, healthSignal, new TcpRedirectComposition(redirectTable, adapterSlots, synCopyPool, relayPool, setupExecutor, addressCache, activityClock));
         }
         catch
         {
@@ -153,7 +165,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         }
         try
         {
-            return await BuildWithUdpAsync(configuration, reinjector, selfTraffic, logger, healthSignal, runtimeCounters, tcpCoordinator, synCopyPool, relayPool, setupExecutor, addressCache, activityClock).ConfigureAwait(false);
+            return await BuildWithUdpAsync(configuration, reinjector, selfTraffic, logger, healthSignal, runtimeCounters, tcpCoordinator, adapterSlots, synCopyPool, relayPool, setupExecutor, addressCache, activityClock).ConfigureAwait(false);
         }
         catch
         {
@@ -186,6 +198,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         IInterceptionHealthSignal? healthSignal,
         RuntimeCounters counters,
         TcpProxyCoordinator tcpCoordinator,
+        AdapterSlotTable adapterSlots,
         NativeBufferPool synCopyPool,
         NativeBufferPool relayPool,
         SetupExecutor setupExecutor,
@@ -197,7 +210,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         // rebuilt-frame cap, and the native ABI capture size must all agree. Only the ABI constant
         // should ever change; every component follows it from here.
         const int maximumFrameSize = NdisApiAbi.MaximumEthernetFrame;
-        var udpTargets = new UdpAdapterTargetSource();
+        var udpTargets = new UdpAdapterTargetSource(adapterSlots);
         await UdpProxyComposer.PrimeSocks5AddressCacheAsync(configuration, addressCache, logger).ConfigureAwait(false);
         // One native pool backs every queued setup datagram (B4); the bundle owns it and the
         // coordinator borrows it, so it is disposed here after release.
@@ -214,7 +227,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         UdpProxyCoordinator udpCoordinator;
         try
         {
-            udpCoordinator = UdpProxyComposer.Create(reinjector, selfTraffic, logger, healthSignal, new UdpProxyComposition(udpTargets, maximumFrameSize, udpDatagramPool, udpWindowPool, setupExecutor, addressCache, associationPool, SessionCapacity: configuration.UdpSessionCapacity, RelayReceiveBufferBytes: configuration.UdpRelayReceiveBufferBytes, ActivityClock: activityClock));
+            udpCoordinator = UdpProxyComposer.Create(reinjector, selfTraffic, logger, healthSignal, new UdpProxyComposition(udpTargets, adapterSlots, maximumFrameSize, udpDatagramPool, udpWindowPool, setupExecutor, addressCache, associationPool, SessionCapacity: configuration.UdpSessionCapacity, RelayReceiveBufferBytes: configuration.UdpRelayReceiveBufferBytes, ActivityClock: activityClock));
         }
         catch
         {
@@ -225,7 +238,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         }
         try
         {
-            return BuildBundle(configuration, reinjector, selfTraffic, logger, healthSignal, udpTargets, udpCoordinator, tcpCoordinator, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, setupExecutor, associationPool, activityClock);
+            return BuildBundle(configuration, reinjector, selfTraffic, logger, healthSignal, udpTargets, adapterSlots, udpCoordinator, tcpCoordinator, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, setupExecutor, associationPool, activityClock);
         }
         catch
         {
@@ -244,6 +257,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         IRuntimeLogger logger,
         IInterceptionHealthSignal? healthSignal,
         UdpAdapterTargetSource udpTargets,
+        AdapterSlotTable adapterSlots,
         UdpProxyCoordinator udpCoordinator,
         TcpProxyCoordinator tcpCoordinator,
         NativeBufferPool synCopyPool,
@@ -263,7 +277,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
             activityClock: activityClock);
         var idleExpirySweeper = new IdleExpirySweeper(dispatcher, tcpCoordinator, udpCoordinator, relayIdleTimeout: configuration.UdpSessionIdleTimeout, logger: logger);
         idleExpirySweeper.Start();
-        return new DurableCaptureBundle(dispatcher, executor, udpTargets, idleExpirySweeper, udpCoordinator, tcpCoordinator, logger, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, setupExecutor, associationPool, activityClock);
+        return new DurableCaptureBundle(dispatcher, executor, udpTargets, idleExpirySweeper, udpCoordinator, tcpCoordinator, logger, adapterSlots, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, setupExecutor, associationPool, activityClock);
     }
 
     /// <summary>
@@ -282,7 +296,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
     {
         if (scope.Count == 0)
         {
-            UdpTargets.Update(host: null, new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase));
+            UdpTargets.Update(host: null, new Dictionary<ushort, UdpAdapterTarget>());
             _lastNoMacAdapters = null;
             _lastZeroMacHostId = null;
             return;
@@ -308,7 +322,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         }
 
         var noMacAdapters = new List<AdapterEnumerationItem>();
-        var adapterTargets = new Dictionary<string, UdpAdapterTarget>(StringComparer.OrdinalIgnoreCase);
+        var adapterTargets = new Dictionary<ushort, UdpAdapterTarget>();
         foreach (var adapter in scope)
         {
             if (IsZeroMac(adapter.Mac))
@@ -316,7 +330,13 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
                 noMacAdapters.Add(adapter);
                 continue;
             }
-            adapterTargets[adapter.StableId] = new UdpAdapterTarget(adapter.Adapter.RuntimeHandle, adapter.Mac);
+            // The same interning table the flow keys use: the scope's adapters were interned when
+            // the generation was built, so the target map and the keys cannot disagree about which
+            // adapter a flow came from.
+            if (AdapterSlots.TryGetSlot(adapter.StableId, out var slot))
+            {
+                adapterTargets[slot] = new UdpAdapterTarget(adapter.Adapter.RuntimeHandle, adapter.Mac);
+            }
         }
         WarnNoMacAdaptersOnChange(noMacAdapters);
 

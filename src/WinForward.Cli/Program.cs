@@ -281,7 +281,8 @@ internal static class Program
             new NdisAdapterEnumerationProvider(driver, logger),
             new NdisCaptureGenerationFactory(
                 driver,
-                new CapturePacketProcessor(bundle.Dispatcher, logger, bundle.FlushPendingInjections),
+                new CapturePacketProcessor(bundle.Dispatcher, bundle.AdapterSlots, logger, bundle.FlushPendingInjections),
+                bundle.AdapterSlots,
                 logger,
                 onAdapterDegraded: onAdapterDegraded,
                 onAdapterTransientRetry: (adapter, nativeError, attempt) => retryLogGate.Log(adapter.StableId, adapter.FriendlyName, nativeError, attempt)),

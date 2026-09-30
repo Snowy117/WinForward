@@ -32,7 +32,7 @@ public sealed class BatchedPassReinjectionE2eTests
             new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Pass));
         var dispatcher = new FlowDispatcher(configuration, new FakeGuard(), executor);
-        var processor = new CapturePacketProcessor(dispatcher, onBatchCompleted: executor.FlushPendingPasses);
+        var processor = new CapturePacketProcessor(dispatcher, FlowBuilders.Slots, onBatchCompleted: executor.FlushPendingPasses);
         var adapter = new WindowsAdapter("id-a", "Ethernet", "internal-a", 0x55, 1);
         using var cts = new CancellationTokenSource();
         var reader = new FiniteMixedPassReader(Batches * BatchCapacity, cts, 0x55);
@@ -40,7 +40,7 @@ public sealed class BatchedPassReinjectionE2eTests
         await using var pump = new NdisCapturePump(
             reader,
             adapter.RuntimeHandle,
-            (packet, cancellationToken) => processor.ProcessAsync(packet, adapter, cancellationToken),
+            (packet, cancellationToken) => processor.ProcessAsync(packet, adapter, FlowBuilders.SlotOf(adapter.StableId, adapter.Generation), cancellationToken),
             new NdisCapturePumpOptions
             {
                 PollDelay = TimeSpan.FromMilliseconds(1),
@@ -88,7 +88,7 @@ public sealed class BatchedPassReinjectionE2eTests
             var lease = new PacketLease(packet.Buffer);
             var packet2 = new CapturedFlowPacket(
                 lease,
-                new FlowContext(FlowKeyFor(packet), ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, 443),
+                FlowBuilders.Context(FlowKeyFor(packet)),
                 new PacketCaptureMetadata(packet.DeviceFlags, packet.AdapterHandle, packet.Flags),
                 NativeFrame: new NativeFrameHandle(packet.Buffer));
             return executor.PassAsync(packet2);

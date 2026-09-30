@@ -319,13 +319,7 @@ public sealed class UdpAssociationRecoveryTests
     private static FlowContext RelayContext(Endpoint local, IPEndPoint relay)
     {
         var relayEndpoint = Endpoint.From(relay.Address, checked((ushort)relay.Port));
-        return new FlowContext(
-            FlowKey.Create(local, relayEndpoint, TransportProtocol.Udp, FlowOriginKind.Host),
-            ProcessName: null,
-            ProcessPath: null,
-            AdapterId: null,
-            AdapterName: null,
-            relayEndpoint.Port);
+        return Context(FlowKey.Create(local, relayEndpoint, TransportProtocol.Udp, FlowOriginKind.Host));
     }
 
     private static Socket NewRelaySocket()

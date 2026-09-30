@@ -1,6 +1,4 @@
-using System.Buffers.Binary;
 using System.Net;
-using System.Runtime.InteropServices;
 using WinForward.Configuration;
 using WinForward.NdisApi;
 using WinForward.Runtime;
@@ -56,8 +54,7 @@ public sealed class NdisPacketActionExecutorLoggingTests
         await coordinator.DrainPendingSetupsAsync();
 
         var malformed = MakeSynPacket(s_client, s_destination, 53000, 443);
-        Assert.True(MemoryMarshal.TryGetArray(malformed.Lease.Frame, out var segment));
-        BinaryPrimitives.WriteUInt16BigEndian(segment.Array.AsSpan(segment.Offset + 12, 2), 0x0806);
+        malformed = malformed with { Lease = new PacketLease(malformed.Lease.Frame[..40]) };
         await executor.ProxyAsync(malformed, s_server, CancellationToken.None);
 
         var (_, message) = Assert.Single(logger.Lines, line => line.Level == RuntimeLogLevel.Warn && line.Message.Contains("reason=redirect", StringComparison.Ordinal));
@@ -114,5 +111,5 @@ public sealed class NdisPacketActionExecutorLoggingTests
             FlowContext(FlowKey.Create(Endpoint.From(s_client, 53000), Endpoint.From(s_destination, 53), TransportProtocol.Udp, FlowOriginKind.Host)),
             new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
 
-    private static FlowContext FlowContext(FlowKey key) => new(key, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, key.Remote.Port);
+    private static FlowContext FlowContext(FlowKey key) => FlowBuilders.Context(key);
 }

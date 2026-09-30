@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using WinForward.Configuration;
+using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Windows;
 
@@ -70,14 +71,17 @@ public sealed class NdisCaptureGenerationFactory : ICaptureGenerationFactory
 {
     private readonly NdisApiDriver _driver;
     private readonly CapturePacketProcessor _processor;
+    private readonly AdapterSlotTable _slots;
     private readonly IRuntimeLogger _logger;
     private readonly Func<WindowsAdapter, int, ValueTask>? _onAdapterDegraded;
     private readonly Action<WindowsAdapter, int, int>? _onAdapterTransientRetry;
     private readonly TimeSpan? _pollDelay;
+    private readonly RuntimeLogThrottle _slotExhaustedWarn = new(TimeSpan.FromMinutes(1));
 
     public NdisCaptureGenerationFactory(
         NdisApiDriver driver,
         CapturePacketProcessor processor,
+        AdapterSlotTable slots,
         IRuntimeLogger logger,
         Func<WindowsAdapter, int, ValueTask>? onAdapterDegraded = null,
         Action<WindowsAdapter, int, int>? onAdapterTransientRetry = null,
@@ -85,9 +89,11 @@ public sealed class NdisCaptureGenerationFactory : ICaptureGenerationFactory
     {
         ArgumentNullException.ThrowIfNull(driver);
         ArgumentNullException.ThrowIfNull(processor);
+        ArgumentNullException.ThrowIfNull(slots);
         ArgumentNullException.ThrowIfNull(logger);
         _driver = driver;
         _processor = processor;
+        _slots = slots;
         _logger = logger;
         _onAdapterDegraded = onAdapterDegraded;
         _onAdapterTransientRetry = onAdapterTransientRetry;
@@ -97,10 +103,33 @@ public sealed class NdisCaptureGenerationFactory : ICaptureGenerationFactory
     public ICaptureGeneration Create(IReadOnlyList<AdapterEnumerationItem> scope)
     {
         ArgumentNullException.ThrowIfNull(scope);
-        var adapters = scope.Select(item => item.Adapter).ToArray();
+        // Interning happens once per adapter per generation. An adapter this process cannot name is
+        // refused here, before it enters the scope, rather than keyed with NoSlot: two adapters whose
+        // keys collapsed onto NoSlot would compare equal on a shared 5-tuple and serve each other's
+        // state, which is the multi-VM case the adapter identity exists for.
+        var bindings = new List<AdapterCaptureBinding>(scope.Count);
+        for (var index = 0; index < scope.Count; index++)
+        {
+            var adapter = scope[index].Adapter;
+            if (_slots.TryIntern(adapter.StableId, adapter.Generation, adapter.FriendlyName, out var slot))
+            {
+                bindings.Add(new AdapterCaptureBinding(adapter, slot));
+                continue;
+            }
+
+            if (_slotExhaustedWarn.ShouldEmit())
+            {
+                _logger.Event(RuntimeLogLevel.Error, "adapter.slot-exhausted",
+                    new RuntimeLogField("adapter", adapter.StableId),
+                    new RuntimeLogField("name", adapter.FriendlyName),
+                    new RuntimeLogField("slots", _slots.CountForDiagnostics));
+            }
+        }
+
+        var adapters = bindings.Select(binding => binding.Adapter).ToArray();
         TransactionalCaptureRuntime? runtime = null;
         // ReSharper disable once AccessToModifiedClosure // runtime is assigned on the statement after this construction and the callback fires only from a running pump, which cannot exist before the runtime created below starts this loop.
-        var loop = new MultiAdapterCaptureLoop(_driver, adapters, _processor, _pollDelay,
+        var loop = new MultiAdapterCaptureLoop(_driver, bindings, _processor, _pollDelay,
             onAdapterDegraded: (adapter, nativeError) => HandleDegradedAsync(runtime!, adapter, nativeError),
             onAdapterTransientRetry: _onAdapterTransientRetry);
         runtime = new TransactionalCaptureRuntime(new NdisAdapterModeController(_driver, adapters), loop);

@@ -119,35 +119,60 @@ public sealed class TcpRedirectAssociation
     /// passed the redirect. A reset acknowledging this value stays in the client's window even
     /// after it already sent request data; null degrades to <see cref="ClientInitialSeq"/> + 1.
     /// </summary>
-    public uint? ClientNextSeq { get { lock (_sequenceGate) return _clientNextSeq; } }
+    public uint? ClientNextSeq
+    {
+        get
+        {
+            var value = Volatile.Read(ref _clientNextSeq);
+            return value < 0 ? null : (uint)value;
+        }
+    }
 
     /// <summary>The server-side counterpart of <see cref="ClientNextSeq"/>, tracked on the reverse leg.</summary>
-    public uint? ServerNextSeq { get { lock (_sequenceGate) return _serverNextSeq; } }
-
-    private readonly Lock _sequenceGate = new();
-    private uint? _clientNextSeq;
-    private uint? _serverNextSeq;
+    public uint? ServerNextSeq
+    {
+        get
+        {
+            var value = Volatile.Read(ref _serverNextSeq);
+            return value < 0 ? null : (uint)value;
+        }
+    }
 
     /// <summary>
-    /// Advances the forward-leg tracker to <paramref name="sequenceNext"/> when it lies ahead of
-    /// the tracked value (TCP wraparound-aware), so retransmissions and pure ACKs never move it
-    /// backwards. Guarded by its own lock: the trackers are written on the data path and read on
-    /// the teardown path, neither of which holds the table gate.
+    /// The unobserved sentinel. The trackers are <see cref="long"/> so <c>0xFFFFFFFF</c> stays a
+    /// legal tracked sequence and this value is unreachable from real data, and so a reader sees one
+    /// aligned 64-bit word — never a torn <c>uint?</c> pair.
+    /// </summary>
+    private const long Unobserved = -1;
+
+    private long _clientNextSeq = Unobserved;
+    private long _serverNextSeq = Unobserved;
+
+    /// <summary>
+    /// Advances the forward-leg tracker to <paramref name="sequenceNext"/> when it lies ahead of the
+    /// tracked value (TCP wraparound-aware), so retransmissions and pure ACKs never move it
+    /// backwards. The CAS-max loop is the lock's exact predicate: an unobserved tracker always
+    /// writes ("first observation wins"), otherwise racers serialise on the compare-exchange and the
+    /// loser re-reads and re-tests.
     /// </summary>
     internal void ObserveClientSequence(uint sequenceNext)
     {
-        lock (_sequenceGate)
+        while (true)
         {
-            if (_clientNextSeq is not { } current || IsSequenceAhead(sequenceNext, current)) _clientNextSeq = sequenceNext;
+            var current = Volatile.Read(ref _clientNextSeq);
+            if (current >= 0 && !IsSequenceAhead(sequenceNext, (uint)current)) return;
+            if (Interlocked.CompareExchange(ref _clientNextSeq, sequenceNext, current) == current) return;
         }
     }
 
     /// <summary>The reverse-leg counterpart of <see cref="ObserveClientSequence"/>.</summary>
     internal void ObserveServerSequence(uint sequenceNext)
     {
-        lock (_sequenceGate)
+        while (true)
         {
-            if (_serverNextSeq is not { } current || IsSequenceAhead(sequenceNext, current)) _serverNextSeq = sequenceNext;
+            var current = Volatile.Read(ref _serverNextSeq);
+            if (current >= 0 && !IsSequenceAhead(sequenceNext, (uint)current)) return;
+            if (Interlocked.CompareExchange(ref _serverNextSeq, sequenceNext, current) == current) return;
         }
     }
 

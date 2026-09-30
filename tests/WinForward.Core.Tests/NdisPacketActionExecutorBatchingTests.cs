@@ -433,7 +433,7 @@ public sealed class NdisPacketActionExecutorBatchingTests
             new PacketCaptureMetadata(isOnSend ? NdisApiAbi.PacketFlagOnSend : NdisApiAbi.PacketFlagOnReceive, adapterHandle));
     }
 
-    private static FlowContext FlowContext(FlowKey key) => new(key, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, key.Remote.Port);
+    private static FlowContext FlowContext(FlowKey key) => FlowBuilders.Context(key);
 
     private sealed class ThrowingBatchReinjector : IPacketReinjector
     {

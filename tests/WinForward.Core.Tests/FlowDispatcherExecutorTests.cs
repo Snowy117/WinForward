@@ -155,8 +155,8 @@ public sealed class FlowDispatcherExecutorTests
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor);
         var adapterA = new WindowsAdapter("id-a", "vEthernet A", "a", 1, 1);
         var adapterB = new WindowsAdapter("id-b", "vEthernet B", "b", 2, 1);
-        var selected = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), PacketFlowClassifier.ClassifyNonFlow(adapterA, isOnSend: false));
-        var unselected = new CapturedFlowPacket(new PacketLease(new byte[] { 2 }), PacketFlowClassifier.ClassifyNonFlow(adapterB, isOnSend: false));
+        var selected = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), PacketFlowClassifier.ClassifyNonFlow(adapterA, isOnSend: false, FlowBuilders.SlotOf(adapterA.StableId, adapterA.Generation, adapterA.FriendlyName), FlowBuilders.Slots));
+        var unselected = new CapturedFlowPacket(new PacketLease(new byte[] { 2 }), PacketFlowClassifier.ClassifyNonFlow(adapterB, isOnSend: false, FlowBuilders.SlotOf(adapterB.StableId, adapterB.Generation, adapterB.FriendlyName), FlowBuilders.Slots));
 
         await dispatcher.DispatchNonFlowAsync(selected, CancellationToken.None);
         await dispatcher.DispatchNonFlowAsync(unselected, CancellationToken.None);
@@ -181,7 +181,7 @@ public sealed class FlowDispatcherExecutorTests
         var executor = new FakeExecutor();
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor);
         var adapter = new WindowsAdapter("id-a", "Ethernet", "a", 1, 1);
-        var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), PacketFlowClassifier.ClassifyNonFlow(adapter, isOnSend: true));
+        var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), PacketFlowClassifier.ClassifyNonFlow(adapter, isOnSend: true, FlowBuilders.SlotOf(adapter.StableId, adapter.Generation, adapter.FriendlyName), FlowBuilders.Slots));
 
         await dispatcher.DispatchNonFlowAsync(packet, CancellationToken.None);
 
@@ -293,9 +293,10 @@ public sealed class FlowDispatcherExecutorTests
         var frame = FrameBuilders.CreateIpv4TcpFrame();
         buffer.SetFrame(frame, NdisApiAbi.PacketFlagOnSend, 7);
 
-        await new CapturePacketProcessor(dispatcher).ProcessAsync(
+        await new CapturePacketProcessor(dispatcher, FlowBuilders.Slots).ProcessAsync(
             NdisCapturedPacket.FromCapture(buffer, 7),
             adapter,
+            FlowBuilders.SlotOf(adapter.StableId, adapter.Generation),
             CancellationToken.None);
         executor.FlushPendingPasses(7);
 
@@ -382,9 +383,10 @@ public sealed class FlowDispatcherExecutorTests
         using var buffer = new NdisPacketBuffer();
         buffer.SetFrame(FrameBuilders.CreateIpv4TcpFrame(), NdisApiAbi.PacketFlagOnSend, 7, flags: 0x4000_0021);
 
-        await new CapturePacketProcessor(dispatcher).ProcessAsync(
+        await new CapturePacketProcessor(dispatcher, FlowBuilders.Slots).ProcessAsync(
             NdisCapturedPacket.FromCapture(buffer, 7),
             adapter,
+            FlowBuilders.SlotOf(adapter.StableId, adapter.Generation),
             CancellationToken.None);
         executor.FlushPendingPasses(7);
 
@@ -439,18 +441,19 @@ public sealed class FlowDispatcherExecutorTests
         return new ValidatedConfiguration(servers, new PolicySnapshot(rules, fallback));
     }
 
-    private static FlowContext FlowContext(FlowKey key) => new(key, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, key.Remote.Port);
+    private static FlowContext FlowContext(FlowKey key) => FlowBuilders.Context(key);
 
     private static CapturedFlowPacket FlowPacket(ushort localPort, FlowOriginKind origin, string adapterId, string adapterName)
     {
-        var adapter = new AdapterContext(adapterId, 1);
+        var adapterSlot = FlowBuilders.SlotOf(adapterId, 1);
         var key = FlowKey.Create(
             Endpoint.From(IPAddress.Parse("192.0.2.10"), localPort),
             Endpoint.From(IPAddress.Parse("192.0.2.53"), 443),
             TransportProtocol.Tcp,
             origin,
-            adapter);
-        var context = new FlowContext(key, ProcessName: null, ProcessPath: null, adapterId, adapterName, key.Remote.Port);
+            adapterSlot,
+            1);
+        var context = FlowBuilders.Context(key, adapterId: adapterId, adapterName: adapterName);
         return new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), context);
     }
 }

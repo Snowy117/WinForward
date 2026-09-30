@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Net;
+using WinForward.Protocols;
 
 namespace WinForward.Core.Tests;
 
@@ -12,6 +13,18 @@ namespace WinForward.Core.Tests;
 internal static class FrameBuilders
 {
     public const byte TcpFlagSyn = 0x02;
+
+    /// <summary>
+    /// The parse layout of a test frame, for the packet constructors whose consumers are
+    /// layout-driven. A test frame that does not parse is a harness bug, not a packet shape.
+    /// </summary>
+    internal static PacketLayout LayoutOf(byte[] frame)
+    {
+        // ReSharper disable once ConvertIfStatementToReturnStatement // Guard-clause + throw reads failure-first; the suggested `cond ? throw ... : value` form has no precedent in this repo (B1 disposition).
+        if (!IPTcpUdpPacket.TryParse(frame, out var view)) throw new InvalidOperationException("the test frame does not parse");
+        return PacketLayout.From(view);
+    }
+
     private const byte TcpFlagPshAck = 0x18;
     public static byte[] BuildIpv4TcpSyn(IPAddress source, IPAddress destination, ushort sourcePort, ushort destinationPort, byte[]? payload = null) =>
         BuildIpv4TcpFrame(source, destination, sourcePort, destinationPort, TcpFlagSyn, payload: payload);

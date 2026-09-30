@@ -27,6 +27,7 @@ public sealed class UdpProxyCompositionTests
         await using var associations = new UdpAssociationPool(new SelfTrafficRegistry(), UdpAssociationReuseMode.Off);
         var composition = new UdpProxyComposition(
             new UdpAdapterTargetSource(),
+            FlowBuilders.Slots,
             UdpFrameBuilder.DefaultMaximumEthernetFrame,
             TestPools.UdpSetupQueuePool,
             TestPools.UdpReceiveWindowPool,

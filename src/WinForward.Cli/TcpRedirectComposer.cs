@@ -17,6 +17,7 @@ namespace WinForward.Cli;
 /// </summary>
 internal sealed record TcpRedirectComposition(
     TcpRedirectTable RedirectTable,
+    AdapterSlotTable Slots,
     NativeBufferPool SynCopyPool,
     NativeBufferPool RelayPool,
     SetupExecutor SetupExecutor,
@@ -45,6 +46,7 @@ internal static class TcpRedirectComposer
             composition.RedirectTable,
             selfTraffic,
             new WindowsAdapterLocalAddressProvider(),
+            composition.Slots,
             composition.SynCopyPool,
             composition.SetupExecutor,
             new TcpRedirectOptions

@@ -206,8 +206,15 @@ public sealed class FlowTable
         return storedTuple.Equals(queried) || storedTuple.Reverse().Equals(queried);
     }
 
-    private int SlotOf(FlowKey key) =>
-        FlowHash.CombineCanonical(key.AddressFamily, key.Protocol, key.Local, key.Remote) & (_warm.Length - 1);
+    private int SlotOf(FlowKey key) => FlowHash.CombineCanonicalPacked(
+        (byte)key.AddressFamily,
+        (byte)key.Protocol,
+        key.LocalLow,
+        key.LocalHigh,
+        key.LocalPort,
+        key.RemoteLow,
+        key.RemoteHigh,
+        key.RemotePort) & (_warm.Length - 1);
 
     /// <summary>
     /// Resolves a flow for a packet whose key may differ from the stored key in direction, origin
@@ -469,30 +476,58 @@ public sealed class FlowTable
 
     [StructLayout(LayoutKind.Auto)]
     private readonly record struct TransportTuple(
-        AddressFamilyKind AddressFamily,
-        TransportProtocol Protocol,
-        Endpoint Local,
-        Endpoint Remote)
+        byte AddressFamily,
+        byte Protocol,
+        ulong LocalLow,
+        ulong LocalHigh,
+        ushort LocalPort,
+        uint LocalScopeId,
+        ulong RemoteLow,
+        ulong RemoteHigh,
+        ushort RemotePort,
+        uint RemoteScopeId)
     {
-        public static TransportTuple From(FlowKey key) => new(key.AddressFamily, key.Protocol, key.Local, key.Remote);
-        public TransportTuple Reverse() => this with { Local = Remote, Remote = Local };
+        public static TransportTuple From(FlowKey key) => new(
+            (byte)key.AddressFamily,
+            (byte)key.Protocol,
+            key.LocalLow,
+            key.LocalHigh,
+            key.LocalPort,
+            key.LocalScopeId,
+            key.RemoteLow,
+            key.RemoteHigh,
+            key.RemotePort,
+            key.RemoteScopeId);
 
-        // Transport-only hash set shared with FlowKey via FlowHash.Combine. FlowKey compares
+        public TransportTuple Reverse() => this with
+        {
+            LocalLow = RemoteLow,
+            LocalHigh = RemoteHigh,
+            LocalPort = RemotePort,
+            LocalScopeId = RemoteScopeId,
+            RemoteLow = LocalLow,
+            RemoteHigh = LocalHigh,
+            RemotePort = LocalPort,
+            RemoteScopeId = LocalScopeId,
+        };
+
+        // Transport-only hash set shared with FlowKey via FlowHash. FlowKey compares
         // origin-aware yet must hash transport-only so origin variants land in the same bucket as
         // the flows they alias; this orientation-agnostic index key needs the same buckets for the
-        // reverse tuple. Both delegate to the one expression, so the two hash sets cannot drift.
-        public override int GetHashCode() => FlowHash.Combine(AddressFamily, Protocol, Local, Remote);
+        // reverse tuple. Both delegate to the one packed expression, so the two hash sets cannot
+        // drift.
+        public override int GetHashCode() => FlowHash.CombinePacked(AddressFamily, Protocol, LocalLow, LocalHigh, LocalPort, RemoteLow, RemoteHigh, RemotePort);
 
         public bool Equals(TransportTuple other) =>
             Protocol == other.Protocol &&
             AddressFamily == other.AddressFamily &&
-            Local.Port == other.Local.Port &&
-            Remote.Port == other.Remote.Port &&
-            Local.Address.Bits == other.Local.Address.Bits &&
-            Remote.Address.Bits == other.Remote.Address.Bits &&
-            Local.Address.Family == other.Local.Address.Family &&
-            Remote.Address.Family == other.Remote.Address.Family &&
-            Local.Address.ScopeId == other.Local.Address.ScopeId &&
-            Remote.Address.ScopeId == other.Remote.Address.ScopeId;
+            LocalPort == other.LocalPort &&
+            RemotePort == other.RemotePort &&
+            LocalLow == other.LocalLow &&
+            LocalHigh == other.LocalHigh &&
+            RemoteLow == other.RemoteLow &&
+            RemoteHigh == other.RemoteHigh &&
+            LocalScopeId == other.LocalScopeId &&
+            RemoteScopeId == other.RemoteScopeId;
     }
 }

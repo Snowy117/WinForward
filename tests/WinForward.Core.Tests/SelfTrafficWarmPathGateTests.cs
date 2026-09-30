@@ -101,7 +101,7 @@ public sealed class SelfTrafficWarmPathGateTests
 
         internal ValueTask DispatchAsync(FlowKey key)
         {
-            var context = new FlowContext(key, "app.exe", ProcessPath: null, AdapterId: null, "eth0", key.Remote.Port);
+            var context = FlowBuilders.Context(key, "app.exe", adapterId: "eth0");
             return Dispatcher.DispatchAsync(new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), context), CancellationToken.None);
         }
     }

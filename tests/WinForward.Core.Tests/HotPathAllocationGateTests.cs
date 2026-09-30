@@ -65,7 +65,9 @@ public sealed class HotPathAllocationGateTests
             var template = MakeForwardTcpPacket(s_clientIpv4, s_destIpv4, 53000, 443, TcpFlagAck, payload: [1, 2, 3, 4]);
             using var slot = new NdisPacketBuffer();
             slot.SetFrame(template.Lease.Frame.Span, NdisApiAbi.PacketFlagOnSend, 0x1234);
-            var dataFrame = new CapturedFlowPacket(new PacketLease(slot), template.Context, template.Metadata, NativeFrame: new NativeFrameHandle(slot));
+            // The slot holds the same bytes as the template, so it carries the same parse layout:
+            // a layout-less packet is refused by the rewrite rather than applied at wrong offsets.
+            var dataFrame = new CapturedFlowPacket(new PacketLease(slot), template.Context, template.Metadata, NativeFrame: new NativeFrameHandle(slot), Layout: template.Layout);
 
             for (var warm = 0; warm < 8; warm++)
             {
@@ -136,7 +138,7 @@ public sealed class HotPathAllocationGateTests
         Assert.True(UdpFrameBuilder.TryBuildInto(IPAddressValue.From(s_clientIpv4), 53000, IPAddressValue.From(s_destIpv4), 53, payload, [0x02, 0x00, 0x00, 0x00, 0x00, 0x01], [0x02, 0x00, 0x00, 0x00, 0x00, 0x02], frameBuffer, out var frameLength));
         var frame = frameBuffer.AsSpan(0, frameLength).ToArray();
         var flow = FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 53), TransportProtocol.Udp, FlowOriginKind.Host);
-        var packet = new CapturedFlowPacket(new PacketLease(frame), new FlowContext(flow, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, 53), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
+        var packet = new CapturedFlowPacket(new PacketLease(frame), FlowBuilders.Context(flow), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
 
         // The first datagram arms the background setup (cold, allocates freely); the session is
         // warm once its flush delivers the buffered datagram through the transport.
@@ -389,7 +391,7 @@ public sealed class HotPathAllocationGateTests
 
         return;
 
-        CapturedFlowPacket MakePacket() => new(new PacketLease(new byte[] { 1, 2, 3, 4 }), new FlowContext(key, ProcessName: null, ProcessPath: null, key.OriginAdapterId, AdapterName: null, key.Remote.Port));
+        CapturedFlowPacket MakePacket() => new(new PacketLease(new byte[] { 1, 2, 3, 4 }), FlowBuilders.Context(key));
     }
 
     /// <summary>

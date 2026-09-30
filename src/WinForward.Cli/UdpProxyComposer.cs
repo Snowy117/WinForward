@@ -17,6 +17,7 @@ namespace WinForward.Cli;
 /// </summary>
 internal sealed record UdpProxyComposition(
     UdpAdapterTargetSource Targets,
+    AdapterSlotTable Slots,
     int MaximumFrameSize,
     NativeBufferPool SetupQueuePool,
     NativeBufferPool ReceiveWindowPool,
@@ -78,7 +79,7 @@ internal static class UdpProxyComposer
         UdpProxyComposition composition)
         => new(
             new Socks5UdpTransportFactory(composition.Associations, selfTraffic, composition.MaximumFrameSize, composition.RelayReceiveBufferBytes),
-            new UdpResponseReinjector(reinjector, composition.Targets, maximumFrameSize: composition.MaximumFrameSize, logger: logger, healthSignal: healthSignal),
+            new UdpResponseReinjector(reinjector, composition.Targets, composition.Slots, maximumFrameSize: composition.MaximumFrameSize, logger: logger, healthSignal: healthSignal),
             composition.SetupQueuePool,
             composition.ReceiveWindowPool,
             composition.SetupExecutor,

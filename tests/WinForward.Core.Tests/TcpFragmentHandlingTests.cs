@@ -217,7 +217,7 @@ public sealed class TcpFragmentHandlingTests
     private static CapturedFlowPacket MakeNonFlowPacket(byte[] frame, bool isOnSend, string adapterId = "eth0")
     {
         var adapter = new WindowsAdapter(adapterId, string.Equals(adapterId, "veth-1", StringComparison.Ordinal) ? "vEthernet 1" : "Ethernet", adapterId, 0x1234, 1);
-        var context = PacketFlowClassifier.ClassifyNonFlow(adapter, isOnSend);
+        var context = PacketFlowClassifier.ClassifyNonFlow(adapter, isOnSend, FlowBuilders.SlotOf(adapter.StableId, adapter.Generation, adapter.FriendlyName), FlowBuilders.Slots);
         return new CapturedFlowPacket(new PacketLease(frame), context, new PacketCaptureMetadata(
             isOnSend ? NdisApiAbi.PacketFlagOnSend : NdisApiAbi.PacketFlagOnReceive, 0x1234));
     }
@@ -277,9 +277,9 @@ public sealed class TcpFragmentHandlingTests
             var dispatcher = new FlowDispatcher(config, selfTraffic, executor, reverseHandler: coordinator, fragmentHandler: coordinator.HandleFragmentAsync);
             // The tombstone is keyed by the association's original key, which carries the
             // forwarded origin and its adapter context.
-            var adapter = new AdapterContext("veth-1", 7);
+            var adapterSlot = FlowBuilders.SlotOf("veth-1", 7);
             var key = forwarded
-                ? FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Forwarded, adapter)
+                ? FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Forwarded, adapterSlot, 7)
                 : FlowKey.Create(Endpoint.From(client, 53000), Endpoint.From(destination, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
             return new FragmentHarness(coordinator, listenerFactory, relayFactory, injector, reinjector, executor, logger, dispatcher, forwarded, key);
         }

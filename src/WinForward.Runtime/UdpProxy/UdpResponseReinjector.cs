@@ -41,6 +41,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
 
     private readonly IPacketReinjector _reinjector;
     private readonly IUdpAdapterTargetSource _adapterTargets;
+    private readonly AdapterSlotTable _slots;
     private readonly NdisPacketBufferPool _bufferPool;
     private readonly int _maximumFrameSize;
     private readonly IRuntimeLogger _logger;
@@ -64,6 +65,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
     public UdpResponseReinjector(
         IPacketReinjector reinjector,
         IUdpAdapterTargetSource adapterTargets,
+        AdapterSlotTable? slots = null,
         int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame,
         IRuntimeLogger? logger = null,
         NdisPacketBufferPool? bufferPool = null,
@@ -71,6 +73,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
     {
         ArgumentNullException.ThrowIfNull(reinjector);
         ArgumentNullException.ThrowIfNull(adapterTargets);
+        _slots = slots ?? new AdapterSlotTable();
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumFrameSize);
         _reinjector = reinjector;
         _adapterTargets = adapterTargets;
@@ -169,7 +172,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         towardMstcp = true;
         if (originalFlow.Origin != FlowOriginKind.Forwarded)
         {
-            if (originalFlow.OriginAdapterId is { } originAdapterId && _adapterTargets.Resolve(originAdapterId) is { } hostOriginAdapter)
+            if (originalFlow.OriginAdapterSlot != AdapterSlotTable.NoSlot && _adapterTargets.Resolve(originalFlow.OriginAdapterSlot) is { } hostOriginAdapter)
             {
                 target = hostOriginAdapter;
                 return true;
@@ -186,7 +189,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
             return false;
         }
 
-        if (originalFlow.OriginAdapterId is null || _adapterTargets.Resolve(originalFlow.OriginAdapterId) is not { } originAdapter)
+        if (originalFlow.OriginAdapterSlot == AdapterSlotTable.NoSlot || _adapterTargets.Resolve(originalFlow.OriginAdapterSlot) is not { } originAdapter)
         {
             target = default;
             if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogTrace("udp.response.dropped", originalFlow, new RuntimeLogField("reason", "missingOriginAdapter"));
@@ -241,6 +244,9 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         }
     }
 
+    private string? ResolveAdapterId(ushort slot) =>
+        _slots.TryResolve(slot, out var metadata) && metadata is not null ? metadata.StableId : null;
+
     private void LogHostAdapterFallback(FlowKey originalFlow)
     {
         RuntimeCounters.Shared.Increment(RuntimeCounters.UdpOriginUnresolved);
@@ -249,7 +255,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         _logger.Event(RuntimeLogLevel.Warn, "udp.reinject.unresolved",
             new("source", originalFlow.Local),
             new("destination", originalFlow.Remote),
-            new("originAdapter", originalFlow.OriginAdapterId),
+            new("originAdapter", ResolveAdapterId(originalFlow.OriginAdapterSlot)),
             new("mapAdapters", string.Join(',', _adapterTargets.AdapterIds)),
             new("fallback", "host"));
     }
@@ -273,7 +279,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
             new("source", originalFlow.Local),
             new("destination", originalFlow.Remote),
             new("originKind", originalFlow.Origin),
-            new("originAdapter", originalFlow.OriginAdapterId),
+            new("originAdapter", ResolveAdapterId(originalFlow.OriginAdapterSlot)),
             new("reason", reason));
     }
 }

@@ -5,6 +5,13 @@ using WinForward.Windows;
 namespace WinForward.Runtime.Capture;
 
 /// <summary>
+/// One in-scope adapter paired with the slot its identity was interned under. The pair is produced
+/// once when a capture generation is built, so classification never consults the interning table on
+/// a packet path.
+/// </summary>
+public readonly record struct AdapterCaptureBinding(WindowsAdapter Adapter, ushort Slot);
+
+/// <summary>
 /// An <see cref="IPacketCaptureLoop"/> that runs one <see cref="NdisCapturePump"/> per in-scope
 /// adapter concurrently. Graceful cancellation (the linked token) lets every pump exit normally. An
 /// unexpected failure in any pump cancels the shared token so sibling pumps stop promptly, then the
@@ -25,24 +32,24 @@ public sealed class MultiAdapterCaptureLoop : IPacketCaptureLoop
     private long _degradedAdapterCount;
     private int _disposeStarted;
 
-    public MultiAdapterCaptureLoop(INdisPacketReader driver, IReadOnlyList<WindowsAdapter> adapters, CapturePacketProcessor processor, TimeSpan? pollDelay = null, Func<WindowsAdapter, int, ValueTask>? onAdapterDegraded = null, Action<WindowsAdapter, int, int>? onAdapterTransientRetry = null)
+    public MultiAdapterCaptureLoop(INdisPacketReader driver, IReadOnlyList<AdapterCaptureBinding> bindings, CapturePacketProcessor processor, TimeSpan? pollDelay = null, Func<WindowsAdapter, int, ValueTask>? onAdapterDegraded = null, Action<WindowsAdapter, int, int>? onAdapterTransientRetry = null)
     {
         ArgumentNullException.ThrowIfNull(driver);
-        ArgumentNullException.ThrowIfNull(adapters);
+        ArgumentNullException.ThrowIfNull(bindings);
         ArgumentNullException.ThrowIfNull(processor);
         _onAdapterDegraded = onAdapterDegraded;
         var onBatchCompleted = processor.OnBatchCompleted;
-        _pumps = [.. adapters
-            .Select(adapter => new NdisCapturePump(
+        _pumps = [.. bindings
+            .Select(binding => new NdisCapturePump(
                 driver,
-                adapter.RuntimeHandle,
-                (packet, cancellationToken) => processor.ProcessAsync(packet, adapter, cancellationToken),
+                binding.Adapter.RuntimeHandle,
+                (packet, cancellationToken) => processor.ProcessAsync(packet, binding.Adapter, binding.Slot, cancellationToken),
                 new NdisCapturePumpOptions
                 {
                     PollDelay = pollDelay,
-                    OnBatchCompleted = onBatchCompleted is null ? null : () => onBatchCompleted(adapter.RuntimeHandle),
-                    OnTransientRetry = onAdapterTransientRetry is null ? null : (nativeError, attempt) => onAdapterTransientRetry(adapter, nativeError, attempt),
-                    OnDegraded = nativeError => OnPumpDegraded(adapter, nativeError),
+                    OnBatchCompleted = onBatchCompleted is null ? null : () => onBatchCompleted(binding.Adapter.RuntimeHandle),
+                    OnTransientRetry = onAdapterTransientRetry is null ? null : (nativeError, attempt) => onAdapterTransientRetry(binding.Adapter, nativeError, attempt),
+                    OnDegraded = nativeError => OnPumpDegraded(binding.Adapter, nativeError),
                 }))];
     }
 

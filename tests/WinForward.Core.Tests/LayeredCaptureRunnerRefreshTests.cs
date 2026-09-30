@@ -426,7 +426,7 @@ public sealed class LayeredCaptureRunnerRefreshTests
             FlowOriginKind.Host);
         return new CapturedFlowPacket(
             lease,
-            new FlowContext(key, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, key.Remote.Port),
+            FlowBuilders.Context(key),
             new PacketCaptureMetadata(isOnSend ? NdisApiAbi.PacketFlagOnSend : NdisApiAbi.PacketFlagOnReceive, adapterHandle));
     }
 }

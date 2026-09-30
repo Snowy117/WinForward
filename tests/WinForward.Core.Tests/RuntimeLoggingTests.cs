@@ -105,7 +105,7 @@ public sealed class RuntimeLoggingTests
             Endpoint.From(IPAddress.Parse("198.51.100.20"), 443),
             TransportProtocol.Tcp,
             FlowOriginKind.Host);
-        var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), new FlowContext(key, "browser.exe", @"C:\Users\test\browser.exe", "adapter-id", "Ethernet", 443), PacketSequence: 17);
+        var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), FlowBuilders.Context(key, "browser.exe", @"C:\Users\test\browser.exe", "adapter-id", "Ethernet"), PacketSequence: 17);
 
         await dispatcher.DispatchAsync(packet, CancellationToken.None);
 
@@ -131,7 +131,7 @@ public sealed class RuntimeLoggingTests
             IncludeProcessPathInLogs: true);
         var dispatcher = new FlowDispatcher(configuration, new FakeGuard(), new RecordingExecutor(), logger: logger);
         var key = FlowKey.Create(Endpoint.From(IPAddress.Loopback, 50000), Endpoint.From(IPAddress.Parse("198.51.100.20"), 443), TransportProtocol.Tcp, FlowOriginKind.Host);
-        var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), new FlowContext(key, "browser.exe", @"C:\Apps\browser.exe", AdapterId: null, AdapterName: null, 443));
+        var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), FlowBuilders.Context(key, "browser.exe", @"C:\Apps\browser.exe"));
 
         await dispatcher.DispatchAsync(packet, CancellationToken.None);
 
