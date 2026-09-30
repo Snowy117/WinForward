@@ -82,6 +82,14 @@ internal sealed class ScriptedSocks5UdpServer : IAsyncDisposable
     /// <summary>Completed greeting + UDP ASSOCIATE exchanges.</summary>
     public int AssociateReplyCount => Volatile.Read(ref _associateReplies);
 
+    /// <summary>
+    /// Test-only gate around the ASSOCIATE reply write. When set it runs after the reply counter is
+    /// published and before the reply bytes are written, so a test can hold the reply unreadable and
+    /// observe what the counter already reports in that window. The order inside the write is
+    /// load-bearing: publish the counter, then this hook, then the write.
+    /// </summary>
+    public Func<CancellationToken, ValueTask>? AssociateReplyWriteGate { get; set; }
+
     /// <summary>Advertises <paramref name="relayEndpoint"/> on the next control connection only.</summary>
     public void AdvertiseNext(IPEndPoint relayEndpoint)
     {
@@ -182,8 +190,15 @@ internal sealed class ScriptedSocks5UdpServer : IAsyncDisposable
                 reply[3] = relay.AddressFamily == AddressFamily.InterNetwork ? (byte)1 : (byte)4;
                 addressBytes.CopyTo(reply, 4);
                 BinaryPrimitives.WriteUInt16BigEndian(reply.AsSpan(4 + addressBytes.Length), checked((ushort)relay.Port));
-                await stream.WriteAsync(reply, token).ConfigureAwait(false);
+                // The counter is published before the reply can be read, and the test gate sits between
+                // the two. A client's rent completes the moment it reads the reply bytes, so an
+                // increment after the write lags a completed rent by a scheduling window; publishing
+                // first makes AssociateReplyCount at least the readable state, which is what every
+                // assertion that reads it observes. A reply write that then fails over-counts —
+                // acceptable for a fake, and no dependent test aborts mid-ASSOCIATE.
                 Interlocked.Increment(ref _associateReplies);
+                if (AssociateReplyWriteGate is { } writeGate) await writeGate(token).ConfigureAwait(false);
+                await stream.WriteAsync(reply, token).ConfigureAwait(false);
 
                 // Hold the association open: the client's watchdog blocks on this read and observes
                 // EOF the moment the connection is dropped or the client closes it. A server that
