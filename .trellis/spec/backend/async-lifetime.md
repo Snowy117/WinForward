@@ -129,8 +129,11 @@ internal struct WorkLease : IDisposable          // mutable; Dispose() => one Ex
     `DurableCaptureBundle`, which disposes it after both proxy coordinators. It owns no *borrowed*
     work, so it has no seal/join of other owners' leases to express.
   - **`NdisCapturePump`** (`src/WinForward.NdisApi/NdisCapture.cs`) — owns no CTS at all; its thread
-    is joined through the `ValueTask(outcome.Task)` completion bridge (E6). It also cannot reference
-    the primitive (`internal` to `Runtime`, and the dependency direction is `Runtime → NdisApi`).
+    is joined through the `ValueTask(outcome.Task)` completion bridge (E6). It also owns no
+    `IDisposable`: the per-adapter packet-arrival signal its idle path waits on (F5, 2026-10-01) is
+    **borrowed** through `NdisCapturePumpOptions.PacketArrivalSignal`, and the
+    `MultiAdapterCaptureLoop` that created the list releases it. It cannot reference the primitive
+    (`internal` to `Runtime`, and the dependency direction is `Runtime → NdisApi`).
   - **The CLI's process-root `shutdown` CTS** (`src/WinForward.Cli/Program.cs:319`) — the
     application's root cancellation handle and the source every scope ultimately links to, not an
     owner of borrowed work.
@@ -360,7 +363,7 @@ The remaining owners are migrated too. What each owns after C4, and what it dele
 | Owner | Scope | Deleted / changed |
 |-------|-------|-------------------|
 | `LayeredCaptureRunner` | `_scope = new QuiescenceScope(cancellationToken)` created at the top of `RunAsync` — owns the run CTS | the local `monitorCancellation`; `TeardownAsync`'s monitor task parameter; the refresh workers moved to `CaptureRefreshWorkers.cs` (a 417 → 388 effective-line net reduction) |
-| `MultiAdapterCaptureLoop` | `_scope = new QuiescenceScope()` (parent-less; the runtime disposes it after `_capture.RunAsync` returns) | the `_ = ForwardDegradationAsync(...)` discard; `DisposeAsync` now drains |
+| `MultiAdapterCaptureLoop` | `_scope = new QuiescenceScope()` (parent-less; the runtime disposes it after `_capture.RunAsync` returns); also owns the per-generation `IReadOnlyList<INdisPacketArrivalSignal?>`, released in `DisposeCoreAsync` **after** every pump has stopped (F5, 2026-10-01) | the `_ = ForwardDegradationAsync(...)` discard; `DisposeAsync` now drains |
 | `TransactionalCaptureRuntime` (`CaptureLifecycle.cs`) | `_scope = new QuiescenceScope()` replaces `_shutdown`; linked at the single `CreateLinkedTokenSource` site | `_shutdown`; `StopAsync`'s `CancelAsync()` → `_scope.Cancel()`; `RestoreBestEffortAsync`'s `_shutdown.Dispose()` |
 | `IdleExpirySweeper`, `RuntimeHeartbeat` | `_scope = new QuiescenceScope()` replaces `_shutdown`; the loop is a `Run` child | `_shutdown`, `_loop`; `DisposeAsync` is now just the scope's; a second dispose **joins instead of throwing** |
 | `Socks5ControlConnection` | `_scope = new QuiescenceScope(_connectCancellation)` + a D11 one-shot; every attempt-token reader holds a lease | — (no handle deleted; the per-attempt deadline CTS stays, see D7 above) |

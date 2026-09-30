@@ -1033,7 +1033,11 @@ because something real slipped through without it.
   failing assert that skips the release hangs the pool's drain instead of failing the test).
 - **The landed shape extends to every exact window in the suite**, not only the two that flaked:
   `CapturePumpReadCallTests.CountingReaderIdleIterationsAllocateNoManagedBytes`,
-  `NdisCapturePumpTests.IdlePollIterationsAllocateNoManagedBytes` and
+  `NdisCapturePumpTests.IdlePollIterationsAllocateNoManagedBytes`,
+  `NdisCapturePumpIdleWaitTests.IdleWaitIterationsAllocateNoManagedBytes` (F5, 2026-10-01: the
+  production `NdisPacketArrivalSignal.Wait` entry point over an unsignaled event, timeout zero),
+  `NdisApiReadShapeTests.DriverReadPathAllocatesNoManagedBytes` (F5: the driver's per-drain read
+  path through `CreateForTests`) and
   `SweepAllocationGateTests.FlowTableSweepAllocatesNoManagedBytes` now open their windows only after a
   bounded run of probe batches that each read an **exactly-zero** delta on an unchanged thread (the UDP
   gate's landed shape). The probe batches are part of the contract, not decoration: the same host lump
@@ -1300,7 +1304,7 @@ signature predicate above:
 ```bash
 log=/tmp/wf-lumps-proof.txt; : > "$log"; rev=$(git rev-parse --short HEAD); tree=$(git write-tree)
 summary='Failed: *[0-9]+, Passed: *[0-9]+, Skipped: *[0-9]+, Total: *[0-9]+'
-totals='HotPathAllocationGateTests:11 CapturePumpReadCallTests:3 SweepAllocationGateTests:12 NdisCapturePumpTests:14'
+totals='HotPathAllocationGateTests:11 CapturePumpReadCallTests:4 SweepAllocationGateTests:12 NdisCapturePumpTests:14 NdisCapturePumpIdleWaitTests:5'
 signature='^(168|5216|7384|7448)$'
 for entry in $totals; do
   gate=${entry%%:*}; expected=${entry##*:}
