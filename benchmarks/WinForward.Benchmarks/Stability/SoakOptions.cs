@@ -20,6 +20,7 @@ internal enum SoakScenario
     GcSoak,
     Pump,
     Residency,
+    Attribution,
 }
 
 internal enum TcpRelayMode
@@ -181,6 +182,14 @@ internal sealed record SoakOptions
     public int AttributionDelayPercent { get; private init; } = 5;
 
     /// <summary>
+    /// The F8 acceptance arm (<c>--attribution-cost-ms</c>): the modelled cost of one process
+    /// attribution — the system-wide owner-table enumeration plus the process open — charged by the
+    /// scenario's attributor. Zero is the control arm, which measures the pipeline with no
+    /// attribution cost at all.
+    /// </summary>
+    public int AttributionCostMs { get; private init; }
+
+    /// <summary>
     /// Scaling-contention probe (<c>--threads</c>): pin one worker count instead of the 1/2/4 sweep, so
     /// a single configuration can be reproduced in isolation.
     /// </summary>
@@ -238,49 +247,60 @@ internal sealed record SoakOptions
                 return options with { PayloadBytes = AtLeast("--payload-bytes", Value(args, ref index), 12) };
             case "--flows" or "--udp-flows":
                 return ApplyPopulationArgument(options, args, ref index);
-            case "--tcp-concurrency":
-                return options with { TcpConcurrency = PositiveInt("--tcp-concurrency", Value(args, ref index)) };
-            case "--tcp-transfer-bytes":
-                return options with { TcpTransferBytes = PositiveInt("--tcp-transfer-bytes", Value(args, ref index)) };
             case "--tcp-relay-mode":
                 return options with { TcpRelayMode = ParseTcpRelayMode(Value(args, ref index)) };
             case "--abort-mix":
                 return options with { AbortMix = AbortMix.Parse(Value(args, ref index)) };
-            case "--seed":
-                return options with { Seed = AnyInt("--seed", Value(args, ref index)) };
             case "--output":
                 return options with { OutputPath = Value(args, ref index) };
-            case "--burst-flows":
-                return options with { BurstFlows = PositiveInt("--burst-flows", Value(args, ref index)) };
-            case "--dial-delay-ms":
-                return options with { DialDelayMs = AtLeast("--dial-delay-ms", Value(args, ref index), 0) };
-            case "--churn-waves":
-                return options with { ChurnWaves = AtLeast("--churn-waves", Value(args, ref index), 0) };
-            case "--rate":
-                return options with { Rate = PositiveInt("--rate", Value(args, ref index)) };
             case "--capacity":
                 return options with { Capacity = UdpCapacity(Value(args, ref index)) };
-            case "--sweep-window-control-ms":
-                return options with { SweepWindowControlMs = AtLeast("--sweep-window-control-ms", Value(args, ref index), 0) };
-            case "--churn-seconds":
-                return options with { ChurnSeconds = PositiveInt("--churn-seconds", Value(args, ref index)) };
-            case "--drain-seconds":
-                return options with { DrainSeconds = PositiveInt("--drain-seconds", Value(args, ref index)) };
-            case "--require-pooling":
-                return options with { RequirePooling = true };
             case "--serve-socks5-udp":
                 return options with { ServeSocks5Udp = true };
+            case "--require-pooling":
+                return options with { RequirePooling = true };
             case "--socks5-external":
                 return options with { Socks5External = true };
+            case "--seed":
+                return options with { Seed = AnyInt("--seed", Value(args, ref index)) };
+            case "--tcp-concurrency" or "--tcp-transfer-bytes" or "--burst-flows" or "--dial-delay-ms"
+                or "--churn-waves" or "--rate" or "--sweep-window-control-ms" or "--churn-seconds" or "--drain-seconds":
+                return ApplyNumericArgument(options, args, ref index);
             case "--threads":
                 return options with { Threads = PositiveInt("--threads", Value(args, ref index)) };
             case "--attribution-delay-ms" or "--attribution-delay-percent":
                 return ApplyAttributionDelay(options, args, ref index);
+            case "--attribution-cost-ms":
+                return options with { AttributionCostMs = AtLeast("--attribution-cost-ms", Value(args, ref index), 0) };
             case "--shared-key-percent":
                 return options with { SharedKeyPercent = AtLeast("--shared-key-percent", Value(args, ref index), 0) };
             default:
                 throw new ArgumentException($"Unknown stability argument '{args[index]}'.", nameof(args));
         }
+    }
+
+    /// <summary>
+    /// The plain non-negative numeric knobs, keyed by name: each stores the same value it parses, so
+    /// one arm covers them all without listing fifteen otherwise identical cases.
+    /// </summary>
+    private static SoakOptions ApplyNumericArgument(SoakOptions options, string[] args, ref int index)
+    {
+        var name = args[index];
+        var positive = name is "--rate" or "--churn-seconds" or "--drain-seconds" or "--tcp-concurrency" or "--tcp-transfer-bytes" or "--burst-flows";
+        var value = positive ? PositiveInt(name, Value(args, ref index)) : AtLeast(name, Value(args, ref index), 0);
+        return name switch
+        {
+            "--tcp-concurrency" => options with { TcpConcurrency = value },
+            "--tcp-transfer-bytes" => options with { TcpTransferBytes = value },
+            "--burst-flows" => options with { BurstFlows = value },
+            "--dial-delay-ms" => options with { DialDelayMs = value },
+            "--churn-waves" => options with { ChurnWaves = value },
+            "--rate" => options with { Rate = value },
+            "--sweep-window-control-ms" => options with { SweepWindowControlMs = value },
+            "--churn-seconds" => options with { ChurnSeconds = value },
+            "--drain-seconds" => options with { DrainSeconds = value },
+            _ => throw new ArgumentException($"Unknown stability argument '{name}'.", nameof(args)),
+        };
     }
 
     /// <summary>The paired synthetic-attribution knobs, which share one non-negative parse.</summary>
@@ -336,7 +356,8 @@ internal sealed record SoakOptions
         "sweep" or "sweeppause" => SoakScenario.Sweep,
         "pump" or "pumpidlewake" => SoakScenario.Pump,
         "residency" or "residencycensus" => SoakScenario.Residency,
-        _ => throw new ArgumentException($"Unknown scenario '{raw}'; expected all, udp, udpburst, udpchurn, udpsessionbudget, scaling, sweep, pump, residency, tcp, tcpchurn, tcpthroughput, footprint, baseline, or gc-soak.", nameof(raw)),
+        "attribution" or "attributionoffpump" => SoakScenario.Attribution,
+        _ => throw new ArgumentException($"Unknown scenario '{raw}'; expected all, udp, udpburst, udpchurn, udpsessionbudget, scaling, sweep, pump, residency, attribution, tcp, tcpchurn, tcpthroughput, footprint, baseline, or gc-soak.", nameof(raw)),
     };
 
     private static TcpRelayMode ParseTcpRelayMode(string raw) => raw.ToLowerInvariant() switch

@@ -1,0 +1,30 @@
+HotPathAllocationGateTests rc=0 Failed:     0, Passed:    11, Skipped:     0, Total:    11
+CapturePumpReadCallTests rc=0 Failed:     0, Passed:     4, Skipped:     0, Total:     4
+SweepAllocationGateTests rc=0 Failed:     0, Passed:    12, Skipped:     0, Total:    12
+NdisCapturePumpTests rc=0 Failed:     0, Passed:    14, Skipped:     0, Total:    14
+NdisCapturePumpIdleWaitTests rc=0 Failed:     0, Passed:     5, Skipped:     0, Total:     5
+FlowAttributionPendingIndexTests rc=0 Failed:     0, Passed:     9, Skipped:     0, Total:     9
+FlowAttributionPipelineTests rc=0 Failed:     0, Passed:    16, Skipped:     0, Total:    16
+ProcessOwnerTableCacheTests rc=0 Failed:     0, Passed:    11, Skipped:     0, Total:    11
+FlowDispatcher rc=0 Failed:     0, Passed:    28, Skipped:     0, Total:    28
+SetupExecutorTests rc=0 Failed:     0, Passed:     6, Skipped:     0, Total:     6
+NdisPacketActionExecutorBatchingTests rc=0 Failed:     0, Passed:    14, Skipped:     0, Total:    14
+TcpRedirectInjectionBatchingTests rc=0 Failed:     0, Passed:    14, Skipped:     0, Total:    14
+WarmPathGateTests rc=0 Failed:     0, Passed:    25, Skipped:     0, Total:    25
+
+--- check round (independent verification, 2026-10-01), same tree, serialized runs ---
+HotPathAllocationGateTests rc=0 Failed:     0, Passed:    11, Skipped:     0, Total:    11
+CapturePumpReadCallTests rc=0 Failed:     0, Passed:     4, Skipped:     0, Total:     4
+SweepAllocationGateTests rc=0 Failed:     0, Passed:    12, Skipped:     0, Total:    12
+NdisCapturePumpTests rc=0 Failed:     0, Passed:    14, Skipped:     0, Total:    14
+NdisCapturePumpIdleWaitTests rc=0 Failed:     0, Passed:     5, Skipped:     0, Total:     5
+FlowAttributionPendingIndexTests rc=0 Failed:     0, Passed:    10, Skipped:     0, Total:    10
+FlowAttributionPipelineTests rc=0 Failed:     0, Passed:    19, Skipped:     0, Total:    19
+ProcessOwnerTableCacheTests rc=0 Failed:     0, Passed:    11, Skipped:     0, Total:    11
+CompositePacketArrivalSignalTests rc=0 Failed:     0, Passed:     3, Skipped:     0, Total:     3   (new in the check round)
+FlowDispatcher (all classes) rc=0 Failed:     0, Passed:    28, Skipped:     0, Total:    28
+SetupExecutorTests rc=0 Failed:     0, Passed:     6, Skipped:     0, Total:     6
+NdisPacketActionExecutorBatchingTests rc=0 Failed:     0, Passed:    14, Skipped:     0, Total:    14
+TcpRedirectInjectionBatchingTests rc=0 Failed:     0, Passed:    14, Skipped:     0, Total:    14
+WarmPathGateTests rc=0 Failed:     0, Passed:    25, Skipped:     0, Total:    25
+full suite rc=0 Failed:     0, Passed:  1124, Skipped:     0, Total:  1124   (three consecutive fully green runs on the final tree; the four earlier single-failure runs are itemised in gate-stability.txt)

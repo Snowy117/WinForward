@@ -68,6 +68,9 @@ internal static class SoakRunner
     /// <c>residency</c> is excluded because it is a census, not a soak: it builds 65,536-capacity table
     /// state, <c>--flows</c> live relays and <c>--udp-flows</c> sessions and samples memory once per
     /// stage, so folding it into the sweep would add a topology no existing row depends on.
+    /// <c>attribution</c> is excluded for the same probe reason: it drives the deferred-attribution
+    /// pipeline from a dedicated thread to sample where attribution runs and what the pump pays, so
+    /// its numbers say nothing about the relay soak's verdicts.
     /// </summary>
     internal static IReadOnlyList<(string Name, Func<StabilityContext, SoakOptions, Task> Run)> SelectScenarios(SoakScenario scenario)
     {
@@ -86,6 +89,7 @@ internal static class SoakRunner
             SoakScenario.Pump => [("pump", PumpIdleWakeScenario.RunAsync)],
             SoakScenario.TcpChurn => [("tcpChurn", TcpChurnScenario.RunAsync)],
             SoakScenario.Residency => [("residency", ResidencyCensusScenario.RunAsync)],
+            SoakScenario.Attribution => [("attribution", AttributionOffPumpScenario.RunAsync)],
             SoakScenario.GcSoak => [("gcSoak", GcSoakScenario.RunAsync)],
             _ =>
             [

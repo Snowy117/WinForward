@@ -1,0 +1,63 @@
+F8 attribution-off-pump — the red-before
+========================================
+
+Tree (before arm): ba51205 (+ the pre-change scenario file, see below)
+Tree (after arm):  the landed F8 tree
+Host: NixOS 26.11, .NET 10.0.12, --quick (Flows = 64, 4 packets per flow, 7 ms modelled cost)
+
+1. Exact attribution-thread counts (the AC-1 red)
+-----------------------------------------------
+BEFORE  attributionsOnPumpThread = 64   (one per new flow, synchronously on the pump thread)
+BEFORE  attributionsOnSetupWorker = 0
+AFTER   attributionsOnPumpThread = 0
+AFTER   attributionsOnSetupWorker = 64  (exactly one per admitted pending entry)
+
+3 runs each, `--scenario attribution --quick --attribution-cost-ms 7`:
+  before-1: 64 / 0     after-1: 0 / 64
+  before-2: 64 / 0     after-2: 0 / 64
+  before-3: 64 / 0     after-3: 0 / 64
+
+The control arm (`--attribution-cost-ms 0`) reproduces the same split with no modelled cost:
+  before: 64 / 0       after: 0 / 64
+
+2. The pump stall series (pumpBlockedMs, milliseconds)
+-----------------------------------------------------
+BEFORE  p50 0.0039–0.0055   p95 7.519–7.561   p99 7.678–7.915   max 31.5–33.7
+AFTER   p50 0.0038–0.0053   p95 0.019–0.028   p99 0.628–0.727   max 17.1–18.0
+
+The p95 moves by ~380x: the modelled per-flow attribution cost stops being paid by the pump
+thread. The p50 does not move because only the first packet of a flow pays it (192 of the 256
+packets in the run are warm).
+
+3. The state that did not exist before
+--------------------------------------
+BEFORE  admittedEntries = 0, retainedPackets = 0
+AFTER   admittedEntries = 64, retainedPackets = 256, deliveredPackets = 256, reAdmissions = 0
+
+4. What did NOT run
+-------------------
+No Windows table read ran. The real enumeration lives behind `IPHelperOwnerTableReader`
+(`iphlpapi.dll`) and cannot execute on this host; the `attribution` row's cost is the
+`--attribution-cost-ms` model, and the `attribution.ownerBurst` row scripts the tables through the
+injectable `IProcessOwnerTableReader`. Every number above is seam-level.
+
+5. The one instrument difference between the arms
+-------------------------------------------------
+The workload, packet script, counters and metrics are identical; only the arm wiring differs,
+because the pre-change product API has no pipeline to wire:
+
+  after : dispatcher ctor takes `attributionPool:` / `setupExecutor:`, the pump loop calls
+          `pipeline.DeliverDecided(AdapterHandle)`, and the `attribution.ownerBurst` row runs.
+  before: the dispatcher ctor takes neither, the pump loop calls nothing between packets, and
+          there is no ownerBurst row.
+
+  after  file sha256: see README.md "Instrument hashes"
+  before file sha256: see README.md "Instrument hashes"
+
+6. The red budget gate
+----------------------
+`FlowAttributionPipelineTests.PendingAdmitAllocatesOnlyTheDocumentedColdBudget` cannot exist before
+the pipeline does (it calls `FlowAttributionPipeline.Admit`). Its red is therefore the same fact as
+section 1 — before the change there is no deferred admission at all — and its own discrimination was
+proved the other way round, by injecting an allocation inside its measured window (see
+`gate-stability.txt`).
