@@ -34,7 +34,8 @@
     "09-29-tcp-udp-path-structural-perf",
     "09-29-tcp-redirect-batched-injection",
     "09-29-benchmark-coverage-remaining-findings",
-    "09-30-expiry-sweep-bounded-pause"
+    "09-30-expiry-sweep-bounded-pause",
+    "09-30-warm-path-lock-chain"
   ],
   "parent": null,
   "relatedFiles": [],
