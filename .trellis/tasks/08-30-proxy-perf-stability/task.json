@@ -35,7 +35,8 @@
     "09-29-tcp-redirect-batched-injection",
     "09-29-benchmark-coverage-remaining-findings",
     "09-30-expiry-sweep-bounded-pause",
-    "09-30-warm-path-lock-chain"
+    "09-30-warm-path-lock-chain",
+    "09-30-flow-key-parse-once"
   ],
   "parent": null,
   "relatedFiles": [],
