@@ -37,7 +37,8 @@
     "09-30-expiry-sweep-bounded-pause",
     "09-30-warm-path-lock-chain",
     "09-30-flow-key-parse-once",
-    "10-01-pump-io-shape"
+    "10-01-pump-io-shape",
+    "10-01-attribution-off-pump"
   ],
   "parent": null,
   "relatedFiles": [],
