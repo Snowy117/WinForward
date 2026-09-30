@@ -1133,3 +1133,86 @@ Fixed a test-fixture ordering race that made ten assertions flaky, corrected an 
 ### Next Steps
 
 - F2-F8 pipeline is PAUSED by the operator. On resume, the order is F3 sweeps, F2 locks, F4 keys/parsing, F5 pump I/O, F8 attribution, F6 UDP footprint, F7 WFP (scope by research first), each with a PRD reviewed by a sub-agent, implementation, an independent check, a recorded benchmark proof before archiving, commit, archive and journal. The residual suite-level host lump family remains an accepted, documented host property (disposition (c) of 09-30-exact-gate-residual-lumps) with its gate coverage now widened.
+
+
+## Session 42: F3 expiry sweeps: bounded-pause rounds at minimal hold granularity (and two measurement-driven reversals)
+<!-- trellis-session: v=2 fp=95194a693766cf3c -->
+
+**Date**: 2026-09-30
+**Task**: F3 expiry sweeps: bounded-pause rounds at minimal hold granularity (and two measurement-driven reversals)
+**Branch**: `master`
+
+### Summary
+
+Five sweep sites stop scanning their whole population under a table gate: FlowTable gets a live-slot registry and a chunked round whose holds examine <=256 entries and remove <=1 (predicate outside every table lock), the other sites reuse their retirement scratch and gate their async ticks with a SemaphoreSlim. Acceptance is work-per-hold by exact counts; the wall-clock pause series is report-only because a no-sweep control reproduces it. Batched removals were implemented, measured and rejected (they cost an order of magnitude of warm-path progress). Warm resolves during sweep windows: 6.5-10.4k -> 13.1-14.1M.
+
+### Main Changes
+
+### Main Changes
+
+F3 of the structural perf research (`09-29-tcp-udp-path-structural-perf`) — the expiry sweeps stop walking
+their whole population under a table gate. Site 1 (`FlowTable.RemoveExpired`) became a chunked round at
+**minimal hold granularity**: a new `_liveStates` live-slot registry replaces the 65,536-entry scan, every
+`_gate` hold examines at most `SweepChunkEntries` (256) entries and removes at most one, and the holds-flow
+predicate now runs with no table lock held, which removes the store/tombstone lock-nesting edge. Sites 2–6
+(`TcpRedirectTable`, `TcpRedirectSessionStore` + `TcpRedirectTombstoneTable`, `UdpProxyCoordinator`,
+`UdpAssociationPool`, `UdpAssociationTable`) reuse their retirement scratch, re-check under one short hold,
+and the three async sites gate their tick with `SemaphoreSlim(1,1)` because a `Lock` cannot span an await;
+two per-tick delegate allocations (`_prunePendingSyn`, `_holdsFlow`) were hoisted.
+
+### Measurement-driven reversals (the load-bearing part of this task)
+
+1. The first acceptance instrument was wrong: of the baseline's 21,252 pauses > 500 us, >=96 % came from the
+   scenario's own 65,536 refill claims contending on the same gate, and a control run with the sweep window
+   armed but **no product call at all** still measured a 5.19 ms in-window max. Acceptance moved from
+   wall-clock pause to **work per hold, by exact counts**, with the pause series demoted to report-only.
+2. The reviewer's proposed batched-removal sketch had a counterexample: without a cursor rewind the
+   all-idle-elapsed round removes only 32,768 of 65,536 (simulated, then reproduced by deleting the rewind
+   line: `Expected: 65536 / Actual: 32768`).
+3. Batched removals were then implemented, measured and **rejected**: 256 removals per hold bought the
+   sweep's own duration (120 -> 35 ms) with an order of magnitude of the property the task exists to fix
+   (13.1–14.1 M in-window resolves -> 89–120 k). The landed shape is minimal hold granularity and the
+   sweep's own duration is deliberately report-only.
+
+### Evidence
+
+| Criterion | Result |
+|---|---|
+| Work per hold (exact counts) | MaxExaminations 1 (all-idle fixture) / 256 (production shape), **MaxRemovals 1**, one call still removes all 65,536 |
+| Warm path stops starving | resolves completed inside sweep windows 6,469–10,446 -> **13,145,035–14,070,168** per 15 s (3 runs) |
+| Production-shaped sweep | 4,096 live / 32 idle: 48 scan + 32 removal holds, 0.033–0.036 ms, duty cycle ~0.0001 % at the 60 s cadence |
+| Allocation gates | sites 2–6 red -> 0 B (355,672 / 520 / 272 / 328 / 4,184 -> 0); site 1's gate and the predicate/registry facts green |
+| Suite / gates | 1,013 tests green; per-gate proof **80/80** process runs green (totals 11/3/12/14, no lump, no vacuous match); `dotnet format` empty; `jb inspectcode` 0 issues |
+
+### Testing
+
+- [OK] Release build 0 warnings/0 errors; `dotnet test -c Release` 995 + 18 green on the final tree.
+- [OK] Nine exact allocation windows re-discriminated (one injected `new byte[64]` -> `Actual: 88`, restored).
+- [OK] Specs updated: `hot-path.md` (registry + minimal-granularity + no-op-tick gate shape + acceptance
+  classification + totals), `traffic-policy-lifecycle.md` (per-site retirement, semaphore gate, corrected
+  `DeriveUdpSweepInterval`), gate rows in `tcp-local-redirect.md` / `udp-relay.md`.
+
+### Status
+
+[OK] **Completed** (archived 2026-09-30)
+
+### Next Steps
+
+- F2 locks (next in the operator's F2–F8 pipeline): self-traffic reorder, lock-free resolve, UDP
+  ready-path. The F3.4 activity bucket is deferred to it, with the seven-item representation contract in
+  the archived task's `research/implementation-notes.md` §8 and the `FlowState.Reset` clock-source defect
+  (D9) named there. Then F4 keys/parsing, F5 pump I/O, F8 attribution, F6 UDP footprint, F7 WFP scoping.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c73506d` | test(bench): phase-scoped sweep-window metrics, control mode and the F3 before/after evidence (expiry-sweep-bounded-pause) |
+| `f9361da` | perf(flow): bounded-hold expiry sweeps at every site; hold predicate off the table lock (expiry-sweep-bounded-pause) |
+| `18671e8` | docs(spec): record the F3 sweep contracts, gate shapes and the cadence correction (expiry-sweep-bounded-pause) |
+| `3563bdc` | chore(task): record the F3 sweep task and sync the parent backlog (expiry-sweep-bounded-pause) |
+
+### Status
+
+[OK] **Completed**
