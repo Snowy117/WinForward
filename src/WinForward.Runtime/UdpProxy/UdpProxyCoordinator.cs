@@ -21,6 +21,13 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     private readonly ISetupExecutor _setupExecutor;
     private readonly Func<SetupWorkItem, Task> _setupHandler;
     private readonly Lock _gate = new();
+
+    // Sweep-level single flight held across the whole async method (a Lock cannot span the teardown
+    // awaits). Uncontended, WaitAsync() returns a cached completed task, so the no-op tick neither
+    // suspends nor allocates. The semaphore — not _gate — is what makes the reused idle scratch sound,
+    // because the scan and the teardown loop run outside _gate and RemoveExpiredAsync is public.
+    private readonly SemaphoreSlim _sweepGate = new(1, 1);
+    private readonly List<(UdpSessionSlot Slot, UdpProxySession Session)> _idleScratch = [];
     private readonly QuiescenceScope _scope = new();
     private readonly TimeProvider _timeProvider;
     private readonly Func<ValueTask>? _beforeExpiryRecheck;
@@ -337,34 +344,57 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     /// and releases their associations, so short-lived DNS/QUIC-style flows do not accumulate to
     /// the bounded capacity. Also prunes expired setup cooldowns. Idle expiry
     /// (design §7/§8) runs on a periodic sweep in the runtime.
+    /// <para>
+    /// The scan collects candidates into a reused scratch under one gate hold, then the teardown loop runs
+    /// outside the gate with the same <see cref="UdpProxySession.TryBeginExpiry"/> re-verifier as before.
+    /// The whole tick is single-flight through <see cref="_sweepGate"/> because the scratch's lifetime is no
+    /// longer covered by <c>_gate</c> and this method is public.
+    /// </para>
     /// </summary>
     public async ValueTask<int> RemoveExpiredAsync(DateTimeOffset now, TimeSpan idleTimeout)
     {
-        (UdpSessionSlot Slot, UdpProxySession Session)[] idle;
-        lock (_gate)
+#pragma warning disable MA0040 // QuiescenceScope.Token throws once the scope is disposed; a late tick must still return cleanly, and the gate is a single-flight guard rather than a cancellation point.
+        await _sweepGate.WaitAsync().ConfigureAwait(false);
+#pragma warning restore MA0040
+        try
         {
-            _cooldowns.PruneExpired(now);
-            idle = [.. _sessions.Values
-                .Where(slot => slot.Session is { } session && now - session.LastActivityUtc >= idleTimeout)
-                .Select(slot => (slot, slot.Session!))];
-        }
-
-        if (idle.Length > 0 && _beforeExpiryRecheck is not null) await _beforeExpiryRecheck().ConfigureAwait(false);
-
-        var removed = 0;
-        foreach (var (slot, session) in idle)
-        {
-            if (!session.TryBeginExpiry(now, idleTimeout)) continue;
-            if (!await _slotHost.RemoveSlotAsync(session.Flow, slot, UdpTeardownReason.Expiry).ConfigureAwait(false))
+            // Cleared at the start of the critical section: the candidates stay live in _sessions, so an
+            // aborted tick is simply re-discovered by the next scan.
+            _idleScratch.Clear();
+            lock (_gate)
             {
-                session.CancelExpiry();
-                continue;
+                _cooldowns.PruneExpired(now);
+                foreach (var slot in _sessions.Values)
+                {
+                    if (slot.Session is { } session && now - session.LastActivityUtc >= idleTimeout)
+                    {
+                        _idleScratch.Add((slot, session));
+                    }
+                }
             }
-            UdpProxyLogging.LogDebug(_logger, "udp.session.expired", session.Flow, session.FlowGeneration, session.Association, serverName: null);
-            removed++;
-        }
 
-        return removed;
+            if (_idleScratch.Count > 0 && _beforeExpiryRecheck is not null) await _beforeExpiryRecheck().ConfigureAwait(false);
+
+            var removed = 0;
+            for (var index = 0; index < _idleScratch.Count; index++)
+            {
+                var (slot, session) = _idleScratch[index];
+                if (!session.TryBeginExpiry(now, idleTimeout)) continue;
+                if (!await _slotHost.RemoveSlotAsync(session.Flow, slot, UdpTeardownReason.Expiry).ConfigureAwait(false))
+                {
+                    session.CancelExpiry();
+                    continue;
+                }
+                UdpProxyLogging.LogDebug(_logger, "udp.session.expired", session.Flow, session.FlowGeneration, session.Association, serverName: null);
+                removed++;
+            }
+
+            return removed;
+        }
+        finally
+        {
+            _sweepGate.Release();
+        }
     }
 
     /// <summary>

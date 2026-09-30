@@ -22,6 +22,7 @@ internal sealed class TcpRedirectTombstoneTable
     private readonly Dictionary<ReverseTuple, TombstoneEntry> _byReverse = [];
     private readonly Queue<TombstoneEntry> _insertionOrder = new();
     private readonly Lock _gate = new();
+    private readonly List<TombstoneEntry> _expiredScratch = [];
     private readonly int _capacity;
 
     public TcpRedirectTombstoneTable(int capacity)
@@ -93,10 +94,18 @@ internal sealed class TcpRedirectTombstoneTable
     {
         lock (_gate)
         {
-            var expired = _byForward.Values.Where(entry => now >= entry.ExpiryUtc).ToArray();
-            foreach (var entry in expired) RemoveEntryUnderGate(entry);
+            // Reused scratch, filled and drained under the same hold, so the existing gate already covers
+            // its lifetime and no sweep gate is needed here.
+            _expiredScratch.Clear();
+            foreach (var entry in _byForward.Values)
+            {
+                if (now >= entry.ExpiryUtc) _expiredScratch.Add(entry);
+            }
+
+            var removed = _expiredScratch.Count;
+            foreach (var entry in _expiredScratch) RemoveEntryUnderGate(entry);
             DrainStaleQueueHeadUnderGate(now);
-            return expired.Length;
+            return removed;
         }
     }
 

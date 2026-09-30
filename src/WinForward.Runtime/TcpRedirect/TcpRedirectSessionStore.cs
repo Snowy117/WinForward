@@ -33,6 +33,15 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
     private readonly Lock _gate = new();
     private readonly QuiescenceScope _scope = new();
 
+    // Sweep-level single flight held across the whole async method. A Lock cannot be used here: the
+    // disposal tail awaits, and a lock must not be held across an await. Uncontended WaitAsync() returns
+    // a cached completed task, so the no-op tick neither suspends nor allocates. The semaphore — not
+    // _gate — is what makes the reused scratches' lifetime sound, because the scan and the disposal loop
+    // run outside _gate and RemoveExpiredAsync is reachable from more than one caller.
+    private readonly SemaphoreSlim _sweepGate = new(1, 1);
+    private readonly List<TcpRedirectSession> _expiredScratch = [];
+    private readonly List<(TcpRedirectSession Session, ITcpRelay? Relay)> _retiredScratch = [];
+
     /// <summary>
     /// The TIME_WAIT-grace window a torn-down redirect stays resolvable as a tombstone. 60s covers
     /// the handshake tail (the client's final ACK) and common FIN retransmissions (RTO backoff
@@ -96,31 +105,95 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
     /// no activity for the idle timeout, then reclaims elapsed tombstones. A relaying session is
     /// deliberately not expired here (M4); its teardown is tied to relay completion. The optional
     /// pending-SYN prune hook (R8) rides this existing sweep tick (no dedicated timer), running
-    /// inside the same sweep phase as the store's own expiry so their clocks agree.
+    /// inside the same sweep phase as the store's own expiry so their clocks agree, and takes the tick's
+    /// timestamp so its caller can cache one delegate instead of allocating a closure per tick.
+    /// <para>
+    /// The tick is single-flight across its whole body (scan, per-candidate retire hold, disposal tail):
+    /// the scan and the disposals run outside the store gate, so the reused scratches are protected by
+    /// <see cref="_sweepGate"/> rather than by <c>_gate</c>.
+    /// </para>
     /// </summary>
-    public async ValueTask<int> RemoveExpiredAsync(DateTimeOffset now, TimeSpan idleTimeout, Action? prunePending)
+    public async ValueTask<int> RemoveExpiredAsync(DateTimeOffset now, TimeSpan idleTimeout, Action<DateTimeOffset>? prunePending)
     {
-        prunePending?.Invoke();
-        RetiredSession[] expired;
-        lock (_gate)
+#pragma warning disable MA0040 // QuiescenceScope.Token throws once the scope is disposed, and a late tick must still return cleanly (TcpRedirectSessionStoreTests.DisposeIsSingleFlightAndLateTeardownNeverReEnters). The gate is a single-flight guard, not a cancellation point.
+        // ReSharper disable once MethodSupportsCancellation -- same reason as the pragma above.
+        await _sweepGate.WaitAsync().ConfigureAwait(false);
+#pragma warning restore MA0040
+        try
         {
-            if (_scope.IsSealed) return 0;
-            expired = [.. _sessions.Values
-                .Where(session => session.Association.Phase == RelayPhase.Redirecting && now - session.Association.LastActivityUtc >= idleTimeout)
-                .Select(RetireSessionUnderGate)];
+            prunePending?.Invoke(now);
+
+            // Cleared at the start of the critical section: the candidates are still registered in
+            // _sessions, so an aborted tick simply re-discovers them next tick.
+            _expiredScratch.Clear();
+            lock (_gate)
+            {
+                if (_scope.IsSealed) return 0;
+                foreach (var session in _sessions.Values)
+                {
+                    if (session.Association.Phase == RelayPhase.Redirecting && now - session.Association.LastActivityUtc >= idleTimeout)
+                    {
+                        _expiredScratch.Add(session);
+                    }
+                }
+            }
+
+            foreach (var session in _expiredScratch)
+            {
+                lock (_gate)
+                {
+                    // Re-check under the gate: the session may have relayed, been torn down, or been touched
+                    // since the scan released it.
+                    if (!_sessions.TryGetValue(session.Association.OriginalKey, out var current) ||
+                        !ReferenceEquals(current, session) ||
+                        session.Association.Phase != RelayPhase.Redirecting ||
+                        now - session.Association.LastActivityUtc < idleTimeout)
+                    {
+                        continue;
+                    }
+
+                    RetireSessionUnderGate(session, _retiredScratch);
+                }
+            }
+
+            var retiredCount = _retiredScratch.Count;
+            await ReleaseRetiredScratchAsync().ConfigureAwait(false);
+
+            // Rides the same sweep tick (no dedicated timer): tombstones whose grace window elapsed are
+            // reclaimed here, after which same-tuple packets fall back to the pre-tombstone behavior.
+            // Tombstones are not included in the return value — it counts expired redirect sessions,
+            // keeping the sweeper's runtime.expired accounting unchanged.
+            Tombstones.RemoveExpired(now);
+            return retiredCount;
+        }
+        finally
+        {
+            _sweepGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Drains the retired scratch outside the gate, containing each entry's failure so one bad disposal
+    /// cannot strand its siblings — which is also what guarantees the clear runs. Called only from the
+    /// sweep's critical section, so the list belongs to that caller; a catastrophic abort before the clear
+    /// leaves the list intact for the next tick, whose loop drains it whole before appending its own
+    /// entries (self-healing by construction).
+    /// </summary>
+    private async ValueTask ReleaseRetiredScratchAsync()
+    {
+        for (var index = 0; index < _retiredScratch.Count; index++)
+        {
+            try
+            {
+                await ReleaseRetiredAsync(_retiredScratch[index]).ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                logger.Warn($"TCP redirect session release failed ({exception.GetType().Name}).");
+            }
         }
 
-        foreach (var retired in expired)
-        {
-            await ReleaseRetiredAsync(retired).ConfigureAwait(false);
-        }
-
-        // Rides the same sweep tick (no dedicated timer): tombstones whose grace window elapsed are
-        // reclaimed here, after which same-tuple packets fall back to the pre-tombstone behavior.
-        // Tombstones are not included in the return value — it counts expired redirect sessions,
-        // keeping the sweeper's runtime.expired accounting unchanged.
-        Tombstones.RemoveExpired(now);
-        return expired.Length;
+        _retiredScratch.Clear();
     }
 
     public ValueTask DisposeAsync() => new(DisposeCoreAsync());
@@ -139,10 +212,9 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
             sessions = [.. _sessions.Values.Select(RetireSessionUnderGate)];
         }
 
-        foreach (var retired in sessions)
+        foreach (var (session, relay) in sessions)
         {
-            await ReleaseRetiredAsync(retired).ConfigureAwait(false);
-            var session = retired.Session;
+            await ReleaseRetiredAsync((session, relay)).ConfigureAwait(false);
             if (session.AcceptLoop is not null)
             {
                 // The loop's own finally drains the session, so its lifetime source is already
@@ -166,7 +238,7 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
             if (_scope.IsSealed) return ValueTask.CompletedTask;
             retired = TryRetireSessionUnderGate(session);
         }
-        return retired is not null ? ReleaseRetiredAsync(retired) : ValueTask.CompletedTask;
+        return retired is not null ? ReleaseRetiredAsync((retired.Session, retired.Relay)) : ValueTask.CompletedTask;
     }
 
     private RetiredSession? TryRetireSessionUnderGate(TcpRedirectSession session)
@@ -175,7 +247,16 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
         return RetireSessionUnderGate(session);
     }
 
-    private RetiredSession RetireSessionUnderGate(TcpRedirectSession session)
+    private RetiredSession RetireSessionUnderGate(TcpRedirectSession session) => new(session, RetireSessionBodyUnderGate(session));
+
+    /// <summary>
+    /// The sweep's allocation-free capture: the same retire body, writing the (session, relay) pair into
+    /// the caller's reused scratch instead of allocating a <see cref="RetiredSession"/> per retirement.
+    /// </summary>
+    private void RetireSessionUnderGate(TcpRedirectSession session, List<(TcpRedirectSession Session, ITcpRelay? Relay)> sink) =>
+        sink.Add((session, RetireSessionBodyUnderGate(session)));
+
+    private ITcpRelay? RetireSessionBodyUnderGate(TcpRedirectSession session)
     {
         _sessions.Remove(session.Association.OriginalKey);
         session.Association.Phase = RelayPhase.Closing;
@@ -187,10 +268,10 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
         // the removal and the grace tombstone land in the same critical section as the retire.
         // Lock order store → table → tombstone is documented on the class.
         RemoveAssociationFromTable(session.Association);
-        return new RetiredSession(session, relay);
+        return relay;
     }
 
-    private async ValueTask ReleaseRetiredAsync(RetiredSession retired)
+    private async ValueTask ReleaseRetiredAsync((TcpRedirectSession Session, ITcpRelay? Relay) retired)
     {
         var session = retired.Session;
         TcpRedirectLogging.LogDebug(logger, "tcp.redirect.closed", session, "closed");
@@ -242,7 +323,8 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
     /// Releases an association that never had a registered session (the store was disposed during
     /// setup registration): removes the table alias with its grace tombstone, then disposes the
     /// listener and the self-traffic token. The retire path does NOT come through here — its alias
-    /// removal and tombstone already ran atomically inside <see cref="RetireSessionUnderGate"/>.
+    /// removal and tombstone already ran atomically inside
+    /// <see cref="RetireSessionUnderGate(TcpRedirectSession)"/>.
     /// </summary>
     public async ValueTask ReleaseAssociationAsync(ITcpRedirectListener listener, TcpRedirectAssociation association, SelfTrafficRegistry.SelfTrafficToken? selfTrafficToken)
     {

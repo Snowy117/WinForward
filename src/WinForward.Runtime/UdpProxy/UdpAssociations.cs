@@ -27,6 +27,12 @@ public sealed class UdpAssociationTable
     private readonly Dictionary<FlowKey, UdpAssociation> _byOriginal = [];
     private readonly Dictionary<RelayAlias, UdpAssociation> _byRelay = [];
     private readonly Lock _gate = new();
+
+    // Sweep-level single flight, outer to _gate and never taken while _gate is held. The sweep collects
+    // candidates into a reused scratch and then removes them one short hold at a time, which is why _gate
+    // no longer covers the scratch's lifetime.
+    private readonly Lock _sweepGate = new();
+    private readonly List<UdpAssociation> _expiredScratch = [];
     private readonly int _capacity;
     private long _nextGeneration;
 
@@ -123,17 +129,46 @@ public sealed class UdpAssociationTable
         }
     }
 
+    /// <summary>
+    /// Removes associations idle past <paramref name="idleTimeout"/>. The table has <em>no production
+    /// caller</em> — tests only — but it carries the same contract as the other sweep sites so "every sweep
+    /// site allocates nothing" holds repo-wide: one scan hold into a reused scratch, then one short hold per
+    /// removal that re-checks the association's presence and idleness.
+    /// </summary>
     public int RemoveExpired(DateTimeOffset now, TimeSpan idleTimeout)
     {
-        lock (_gate)
+        lock (_sweepGate)
         {
-            var expired = _byOriginal.Values.Where(value => now - value.LastActivityUtc >= idleTimeout).Distinct().ToArray();
-            foreach (var association in expired)
+            _expiredScratch.Clear();
+            lock (_gate)
             {
-                _byOriginal.Remove(association.OriginalKey);
-                _byRelay.Remove(association.RelayAlias);
+                foreach (var association in _byOriginal.Values)
+                {
+                    if (now - association.LastActivityUtc >= idleTimeout) _expiredScratch.Add(association);
+                }
             }
-            return expired.Length;
+
+            var removed = 0;
+            foreach (var association in _expiredScratch)
+            {
+                lock (_gate)
+                {
+                    // Re-check under the gate: a lookup may have touched the association, or a teardown may
+                    // have removed it, since the scan released it.
+                    if (!_byOriginal.TryGetValue(association.OriginalKey, out var current) ||
+                        !ReferenceEquals(current, association) ||
+                        now - association.LastActivityUtc < idleTimeout)
+                    {
+                        continue;
+                    }
+
+                    _byOriginal.Remove(association.OriginalKey);
+                    _byRelay.Remove(association.RelayAlias);
+                    removed++;
+                }
+            }
+
+            return removed;
         }
     }
 

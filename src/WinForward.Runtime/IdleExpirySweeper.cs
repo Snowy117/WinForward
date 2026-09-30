@@ -30,6 +30,10 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
     private readonly TimeSpan _redirectIdleTimeout;
     private readonly TimeSpan _relayIdleTimeout;
     private readonly QuiescenceScope _scope = new();
+
+    // Cached per-tick hold predicate: an instance-method-group conversion in the tick would build a new
+    // Func<FlowKey,bool> on every main-leg sweep.
+    private readonly Func<FlowKey, bool>? _holdsFlow;
     private readonly IRuntimeLogger _logger;
     private readonly TimeProvider _timeProvider;
     private long _lastSweepFailureLogTicks;
@@ -56,6 +60,7 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
         _redirectIdleTimeout = redirectIdleTimeout ?? TimeSpan.FromMinutes(5);
         _relayIdleTimeout = relayIdleTimeout ?? TimeSpan.FromMinutes(2);
         _udpSweepInterval = DeriveUdpSweepInterval(_interval, _relayIdleTimeout, udpSweepInterval);
+        _holdsFlow = tcp is null ? null : tcp.HoldsFlow;
         _logger = logger ?? NullRuntimeLogger.Instance;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
@@ -152,8 +157,7 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
     private async Task<(int TcpCount, int FlowCount)> SweepMainLegsAsync(DateTimeOffset now)
     {
         var tcpCount = _tcp is null ? 0 : await _tcp.RemoveExpiredAsync(now, _redirectIdleTimeout).ConfigureAwait(false);
-        Func<FlowKey, bool>? isHeld = _tcp is null ? null : _tcp.HoldsFlow;
-        var flowCount = _dispatcher.RemoveExpiredFlows(now, _flowIdleTimeout, isHeld);
+        var flowCount = _dispatcher.RemoveExpiredFlows(now, _flowIdleTimeout, _holdsFlow);
         _tcp?.LogCapacitySummary();
         return (tcpCount, flowCount);
     }

@@ -159,6 +159,12 @@ public sealed class TcpRedirectTable
     private readonly Dictionary<ReverseRedirectTuple, TcpRedirectAssociation> _byReverse = [];
     private readonly Dictionary<AddressPair, TcpRedirectAssociation> _byAddressPair = [];
     private readonly Lock _gate = new();
+
+    // Sweep-level single flight, outer to _gate and never taken while _gate is held. The sweep collects
+    // candidates into a reused scratch (so a tick allocates nothing) and then removes them one short hold
+    // at a time, which is why _gate no longer covers the scratch's lifetime.
+    private readonly Lock _sweepGate = new();
+    private readonly List<TcpRedirectAssociation> _expiredScratch = [];
     private readonly int _capacity;
     // X1: reference count per listener port. A reverse candidate's source port is always a live
     // listener port, so a zero count proves the packet cannot match the reverse index. Mutations
@@ -316,21 +322,52 @@ public sealed class TcpRedirectTable
         }
     }
 
+    /// <summary>
+    /// Removes associations idle past <paramref name="idleTimeout"/>. The table has <em>no production
+    /// caller</em> — tests only; the live TCP expiry leg is
+    /// <see cref="TcpRedirectSessionStore.RemoveExpiredAsync"/> — but its gate is a warm packet-path gate,
+    /// so the sweep keeps the same contract as the live sites: one scan hold that collects idle-elapsed
+    /// associations into a reused scratch (no predicates, no removals), then one short hold per removal that
+    /// re-checks the association's presence and idleness before running the removal body.
+    /// </summary>
     public int RemoveExpired(DateTimeOffset now, TimeSpan idleTimeout)
     {
-        lock (_gate)
+        lock (_sweepGate)
         {
-            var expired = _byOriginal.Values.Where(value => now - value.LastActivityUtc >= idleTimeout).Distinct().ToArray();
-            foreach (var association in expired)
+            _expiredScratch.Clear();
+            lock (_gate)
             {
-                _byOriginal.Remove(association.OriginalKey);
-                _byTranslatedListener.Remove(association.TranslatedListenerTuple);
-                _byReverse.Remove(new ReverseRedirectTuple(association.ReverseSourceEndpoint, association.ReverseDestinationEndpoint));
-                RemoveAddressPairUnderGate(association);
-                association.ReleaseOriginalSynTemplate();
-                Interlocked.Decrement(ref _candidatePorts[association.TranslatedListenerTuple.Port]);
+                foreach (var association in _byOriginal.Values)
+                {
+                    if (now - association.LastActivityUtc >= idleTimeout) _expiredScratch.Add(association);
+                }
             }
-            return expired.Length;
+
+            var removed = 0;
+            foreach (var association in _expiredScratch)
+            {
+                lock (_gate)
+                {
+                    // Re-check under the gate: the association may have been torn down, or touched by a
+                    // reverse/forward resolve, since the scan released it.
+                    if (!_byOriginal.TryGetValue(association.OriginalKey, out var current) ||
+                        !ReferenceEquals(current, association) ||
+                        now - association.LastActivityUtc < idleTimeout)
+                    {
+                        continue;
+                    }
+
+                    _byOriginal.Remove(association.OriginalKey);
+                    _byTranslatedListener.Remove(association.TranslatedListenerTuple);
+                    _byReverse.Remove(new ReverseRedirectTuple(association.ReverseSourceEndpoint, association.ReverseDestinationEndpoint));
+                    RemoveAddressPairUnderGate(association);
+                    association.ReleaseOriginalSynTemplate();
+                    Interlocked.Decrement(ref _candidatePorts[association.TranslatedListenerTuple.Port]);
+                    removed++;
+                }
+            }
+
+            return removed;
         }
     }
 

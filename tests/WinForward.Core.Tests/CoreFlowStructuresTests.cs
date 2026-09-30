@@ -140,6 +140,135 @@ public sealed class CoreFlowStructuresTests
     }
 
     [Fact]
+    public void FlowTableSweepCompletesOneRoundWithClaimsInterleaved()
+    {
+        // The sweep releases the table gate between chunks now, so a claim can land mid-round. Every state
+        // that was idle-elapsed at entry must still be gone when the call returns, and the replacement —
+        // appended past the cursor — must survive. On the pre-chunk tree this shape failed with
+        // InvalidOperationException: the callback's claim mutated the dictionary the sweep enumerated
+        // under its gate.
+        var table = new FlowTable(capacity: 64);
+        var expiredKeys = new FlowKey[12];
+        for (var index = 0; index < expiredKeys.Length; index++) expiredKeys[index] = MakeUdpKey(checked((ushort)(20_000 + index)));
+        var liveKey = MakeUdpKey(21_000);
+        var idleStamp = DateTimeOffset.UtcNow - TimeSpan.FromMinutes(2);
+        foreach (var key in expiredKeys) ClaimAt(table, key, idleStamp);
+        ClaimAt(table, liveKey, DateTimeOffset.UtcNow);
+        var now = DateTimeOffset.UtcNow;
+        var replacement = MakeUdpKey(22_000);
+
+        var holds = 0;
+        var claimedMidRound = false;
+        var claimed = false;
+        FlowState? claimedState = null;
+        var removed = table.RemoveExpired(now, TimeSpan.FromMinutes(1), isHeld: _ =>
+        {
+            holds++;
+            // The claim is issued from the second candidate on, so at least one entry has already been
+            // removed and the round is provably in progress.
+            if (holds > 1 && !claimedMidRound)
+            {
+                claimedMidRound = true;
+                claimed = table.TryClaimResolved(replacement, static () => FlowDecision.Fallback(FlowAction.Pass), out claimedState);
+            }
+
+            return false;
+        });
+
+        Assert.True(claimedMidRound);
+        Assert.True(claimed);
+        Assert.Equal(expiredKeys.Length, removed);
+        Assert.Equal(expiredKeys.Length, holds);
+        foreach (var key in expiredKeys) Assert.False(table.TryResolve(key, out _));
+        Assert.True(table.TryResolve(liveKey, out _));
+        Assert.True(table.TryResolve(replacement, out var replacementState));
+        Assert.Same(claimedState, replacementState);
+        Assert.Equal(2, table.Count);
+        Assert.Equal(table.Count, table.LiveStateCountForDiagnostics);
+    }
+
+    [Fact]
+    public void FlowTableSweepPredicateParkDoesNotBlockConcurrentResolve()
+    {
+        // Requirement 3, the concurrency half: while the hold predicate is parked, the table gate must be
+        // free, so a warm resolve completes instead of queueing behind caller code that takes the store's
+        // and the tombstone's locks. Dedicated threads, never Task.Run: the xunit thread is itself a pool
+        // thread, and an inlined task would park the test thread inside its own predicate.
+        var table = new FlowTable(capacity: 32);
+        var liveKey = MakeUdpKey(21_000);
+        ClaimAt(table, liveKey, DateTimeOffset.UtcNow);
+        var expiredKey = MakeUdpKey(20_000);
+        ClaimAt(table, expiredKey, DateTimeOffset.UtcNow - TimeSpan.FromMinutes(2));
+        var now = DateTimeOffset.UtcNow;
+
+        // TaskCompletionSource rather than ManualResetEventSlim: neither thread that captures these may
+        // outlive a disposal, and a TCS owns no handle to dispose in the first place.
+        var parked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var removed = -1;
+        var sweeper = new Thread(() => removed = table.RemoveExpired(now, TimeSpan.FromMinutes(1), _ =>
+        {
+            parked.TrySetResult();
+            // Parked until the release; after it, the entry is not held and expires at its original point.
+            return !release.Task.Wait(TimeSpan.FromSeconds(10));
+        }))
+        {
+            IsBackground = true,
+            Name = "flow-sweep-parked-predicate",
+        };
+
+        var resolved = false;
+        var resolver = new Thread(() => resolved = table.TryResolve(liveKey, out _))
+        {
+            IsBackground = true,
+            Name = "flow-resolve-during-park",
+        };
+
+        sweeper.Start();
+        try
+        {
+            Assert.True(parked.Task.Wait(TimeSpan.FromSeconds(10)), "the sweep never invoked the hold predicate");
+            resolver.Start();
+            Assert.True(resolver.Join(TimeSpan.FromSeconds(10)), "the concurrent resolve queued behind the parked predicate");
+            Assert.True(resolved);
+        }
+        finally
+        {
+            // Release before asserting anything else: on the failure this test exists to detect, the
+            // sweeper is still parked inside the predicate, and the assertion would leave it there.
+            release.TrySetResult();
+        }
+
+        Assert.True(sweeper.Join(TimeSpan.FromSeconds(10)));
+        Assert.Equal(1, removed);
+        Assert.Equal(1, table.Count);
+        Assert.True(table.TryResolve(liveKey, out _));
+    }
+
+    /// <summary>
+    /// Round completeness at 65,536 idle-elapsed flows in one call. Each removal happens at the cursor and
+    /// pulls the tail down onto it, so the swapped-in element is examined next and the round walks the whole
+    /// registry without a rewind (the batched-removal variant needed one, and this is the shape that caught
+    /// its absence: with batching and no rewind the call returned half the table). It is also the shape the
+    /// sweep scenario's <c>removedPerSweep == 65,536</c> tripwire requires.
+    /// </summary>
+    [Fact]
+    public void FlowTableSweepRemovesEveryIdleFlowInOneRound()
+    {
+        const int flows = 65_536;
+        var table = new FlowTable(capacity: flows + 16);
+        var idleStamp = DateTimeOffset.UtcNow - TimeSpan.FromMinutes(2);
+        for (var index = 0; index < flows; index++)
+        {
+            ClaimAt(table, MakeUdpKey(checked((ushort)(20_000 + (index % 4_096))), checked((ushort)(1_000 + (index / 4_096)))), idleStamp);
+        }
+
+        Assert.Equal(flows, table.RemoveExpired(DateTimeOffset.UtcNow, TimeSpan.FromMinutes(1)));
+        Assert.Equal(0, table.Count);
+        Assert.Equal(0, table.LiveStateCountForDiagnostics);
+    }
+
+    [Fact]
     public void FlowTableExpiryRemovesCrossAdapterTransportAliases()
     {
         var table = new FlowTable();
@@ -210,5 +339,20 @@ public sealed class CoreFlowStructuresTests
         Assert.True(table.TryClaim(firstOriginal, relay, DateTimeOffset.UtcNow, out _));
         Assert.False(table.TryClaim(secondOriginal, relay, DateTimeOffset.UtcNow, out var collision));
         Assert.Null(collision);
+    }
+
+    private static FlowKey MakeUdpKey(ushort port, ushort remotePort = 53) =>
+        FlowKey.Create(
+            Endpoint.From(IPAddress.Parse("192.0.2.10"), port),
+            Endpoint.From(IPAddress.Parse("192.0.2.53"), remotePort),
+            TransportProtocol.Udp,
+            FlowOriginKind.Host);
+
+    private static void ClaimAt(FlowTable table, FlowKey key, DateTimeOffset lastActivityUtc)
+    {
+        var state = table.TryClaimResolved(key, static () => FlowDecision.Fallback(FlowAction.Pass), out var claimed)
+            ? claimed!
+            : throw new InvalidOperationException("Flow table claim failed.");
+        state.Touch(lastActivityUtc);
     }
 }

@@ -38,6 +38,10 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
     private readonly TcpRedirectAcceptor _acceptor;
     private readonly RedirectInjectionLanes _redirectLanes = new();
     private readonly TcpPendingSynSetupIndex _pendingSyn = new();
+
+    // Cached per-tick hook: passed to the store's sweep so its tick neither allocates a closure over
+    // `now` nor rebuilds a method-group delegate.
+    private readonly Action<DateTimeOffset> _prunePendingSyn;
     private readonly Lock _disposeGate = new();
     private Task? _disposeTask;
     private long _capacityRejectionCount;
@@ -75,6 +79,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
         Capacity = capacity;
         _timeProvider = options.TimeProvider;
         _store = new TcpRedirectSessionStore(table, _logger, Capacity, _timeProvider);
+        _prunePendingSyn = _pendingSyn.RemoveExpired;
         _clientReset = new ClientResetInjector(injector, _logger, _store.TearDownSessionAsync, _store.FailAssociationAsync, Capacity, healthSignal: options.HealthSignal, timeProvider: _timeProvider);
         _acceptor = new TcpRedirectAcceptor(relayFactory, _logger, _clientReset, _store.TryAttachRelay, _store.TearDownSessionAsync);
         _setup = new TcpRedirectSetup(listenerFactory, table, selfTraffic, localAddresses, injector, _logger, _store, _clientReset, _synCopyPool, _timeProvider);
@@ -454,7 +459,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
     /// stalled relay is reclaimed by the read/write timeouts in <see cref="TcpProxyRelay"/>.
     /// </summary>
     public ValueTask<int> RemoveExpiredAsync(DateTimeOffset now, TimeSpan idleTimeout)
-        => _store.RemoveExpiredAsync(now, idleTimeout, () => _pendingSyn.RemoveExpired(now));
+        => _store.RemoveExpiredAsync(now, idleTimeout, _prunePendingSyn);
 
     /// <summary>
     /// Whether this coordinator still holds state for the flow: an active session exists (a

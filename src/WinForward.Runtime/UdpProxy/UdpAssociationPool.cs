@@ -78,6 +78,13 @@ internal sealed class UdpAssociationPool : IAsyncDisposable
 
     private readonly QuiescenceScope _scope;
     private readonly Lock _gate = new();
+
+    // Sweep-level single flight held across the whole async method (the disposal loop awaits, so a Lock
+    // is illegal). Uncontended, WaitAsync() returns a cached completed task, so a no-op tick neither
+    // suspends nor allocates. The semaphore — not _gate — covers the reused retire scratch's lifetime,
+    // because the disposal loop runs outside the gate.
+    private readonly SemaphoreSlim _sweepGate = new(1, 1);
+    private readonly List<UdpControlAssociation> _retireScratch = [];
     private readonly Dictionary<Socks5Server, ServerAssociations> _servers = [];
     private readonly RuntimeLogThrottle _faultLog = new(TimeSpan.FromSeconds(5));
     private int _disposeStarted;
@@ -213,20 +220,45 @@ internal sealed class UdpAssociationPool : IAsyncDisposable
     /// </summary>
     internal async ValueTask<int> SweepIdleAssociationsAsync(DateTimeOffset now)
     {
-        List<UdpControlAssociation> retired;
-        lock (_gate)
+#pragma warning disable MA0040 // QuiescenceScope.Token throws once the scope is disposed; a late tick must still return cleanly, and the gate is a single-flight guard rather than a cancellation point.
+        // ReSharper disable once MethodSupportsCancellation -- same reason as the pragma above.
+        await _sweepGate.WaitAsync().ConfigureAwait(false);
+#pragma warning restore MA0040
+        try
         {
-            if (_scope.IsSealed) return 0;
-            retired = [.. _servers.Values.SelectMany(static set => set.All)
-                .Where(association => association.CanRetire(now, s_idleRetireTimeout) || association.CanRetireFaulted)];
-            foreach (var association in retired)
+            // Cleared at the start of the critical section: an association already removed from Shared but
+            // not yet disposed is still in set.All and still retirable, so an aborted tick re-discovers it.
+            _retireScratch.Clear();
+            lock (_gate)
             {
-                if (_servers.TryGetValue(association.Server, out var set)) set.Shared.Remove(association);
-            }
-        }
+                if (_scope.IsSealed) return 0;
 
-        foreach (var association in retired) await association.DisposeAsync().ConfigureAwait(false);
-        return retired.Count;
+                // One hold covers the scan, the retire test and every Shared removal: the decision and the
+                // removal stay atomic, and the test reads the association's own volatiles rather than
+                // another lock, so there is no nesting edge.
+                foreach (var set in _servers.Values)
+                {
+                    foreach (var association in set.All)
+                    {
+                        if (!association.CanRetire(now, s_idleRetireTimeout) && !association.CanRetireFaulted) continue;
+                        _retireScratch.Add(association);
+                        set.Shared.Remove(association);
+                    }
+                }
+            }
+
+            var retiredCount = _retireScratch.Count;
+            for (var index = 0; index < retiredCount; index++)
+            {
+                await _retireScratch[index].DisposeAsync().ConfigureAwait(false);
+            }
+
+            return retiredCount;
+        }
+        finally
+        {
+            _sweepGate.Release();
+        }
     }
 
     public ValueTask DisposeAsync()
