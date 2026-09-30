@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 
 namespace WinForward.NdisApi;
@@ -20,16 +21,17 @@ internal static class NdisNativeCallStatus
         throw new Win32Exception(nativeError, string.Create(CultureInfo.InvariantCulture, $"Unable to inspect the NDISAPI packet queue (native error {nativeError}, adapter 0x{adapterHandle:X})."));
     }
 
-    internal static int InterpretBatchReadResult(uint queuedPacketCount, int requestedCount, int nativeResult, int nativeError, uint packetsSuccess, nint adapterHandle)
+    internal static int ClampReadCount(uint packetsSuccess, int requestedCount)
     {
-        if (queuedPacketCount == 0) return 0;
-        if (nativeResult == 0)
-        {
-            throw new Win32Exception(nativeError, string.Create(CultureInfo.InvariantCulture, $"Unable to read NDISAPI packets from a non-empty queue (native error {nativeError}, queued {queuedPacketCount}, requested {requestedCount}, adapter 0x{adapterHandle:X})."));
-        }
         // The driver fills dwPacketsSuccess with the actual count; clamp defensively so a
         // misbehaving driver can never make the pump read past the prepared buffers.
         return (int)Math.Min(packetsSuccess, (uint)requestedCount);
+    }
+
+    [DoesNotReturn]
+    internal static void ThrowReadFailedOnNonEmptyQueue(uint queuedPacketCount, int requestedCount, int readError, nint adapterHandle)
+    {
+        throw new Win32Exception(readError, string.Create(CultureInfo.InvariantCulture, $"Unable to read NDISAPI packets from a non-empty queue (native error {readError}, queued {queuedPacketCount}, requested {requestedCount}, adapter 0x{adapterHandle:X})."));
     }
 
     /// <summary>

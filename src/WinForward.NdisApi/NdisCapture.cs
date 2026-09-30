@@ -33,12 +33,23 @@ public interface INdisPacketReader
 /// init properties, so call sites set only the knobs they need. Every member defaults to null,
 /// which selects the pump's built-in default for that knob. The two <see langword="internal"/> members are
 /// test and benchmark seams (reached through <c>InternalsVisibleTo</c>) and are never set by
-/// production.
+/// production; the public knobs are production-injectable, and <see cref="IdleWaitTimeout"/> is a
+/// documented constant with an override rather than a config surface.
 /// </summary>
 public sealed record NdisCapturePumpOptions
 {
     /// <summary>Idle pacing between empty-queue polls; null keeps the pump's 1 ms default.</summary>
     public TimeSpan? PollDelay { get; init; }
+
+    /// <summary>
+    /// The adapter's packet-arrival signal; when set, an empty-queue iteration parks in one bounded
+    /// wait on it instead of sleeping the poll delay. Null keeps the sleep-poll shape. Borrowed:
+    /// the pump never disposes it — whoever created it owns it.
+    /// </summary>
+    public INdisPacketArrivalSignal? PacketArrivalSignal { get; init; }
+
+    /// <summary>The arrival wait's upper bound; null keeps the pump's 100 ms default.</summary>
+    public TimeSpan? IdleWaitTimeout { get; init; }
 
     /// <summary>Runs after every iteration's slot loop (and once on run exit); null disables.</summary>
     public Action? OnBatchCompleted { get; init; }
@@ -83,9 +94,9 @@ public sealed record NdisCapturePumpOptions
 /// batch it belongs to. Batch buffers live for the pump's lifetime and are released exactly once,
 /// when the run loop exits or the pump is disposed; disposal signals stop but never cancels the run
 /// (the loop re-checks the stop flag every iteration and its only waits are bounded by the
-/// configured poll delay, a single transient-retry backoff sleep, or an in-flight handler) and
-/// parks on the run's completion when a run is in flight, so the buffers are never freed under a
-/// live loop.
+/// configured poll delay or the arrival wait's timeout, a single transient-retry backoff sleep, or
+/// an in-flight handler) and parks on the run's completion when a run is in flight, so the buffers
+/// are never freed under a live loop.
 /// A transient native read failure (see <see cref="NdisNativeCallStatus.IsTransientReadError"/>)
 /// is retried with bounded exponential backoff; exhaustion or a permanent failure is a
 /// degraded exit — the loop returns normally (no throw) and the optional
@@ -106,10 +117,22 @@ public sealed class NdisCapturePump : IAsyncDisposable
     private static readonly TimeSpan s_defaultTransientRetryBaseDelay = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan s_transientRetryDelayCap = TimeSpan.FromMilliseconds(1600);
 
+    /// <summary>
+    /// The arrival wait's default bound. A 100 ms ceiling keeps a lost wake below Windows' initial
+    /// RTO (~300 ms) so it costs latency rather than a retransmission, while an idle pump with a
+    /// live signal wakes on arrival and spends ~10 waits/s instead of the ~886 timer wakeups/s the
+    /// 1 ms poll delay costs. It is also the stop-latency bound for a parked pump: production
+    /// cancels the run before awaiting it, so every parked pump wakes concurrently and the wall
+    /// clock is about one timeout.
+    /// </summary>
+    private static readonly TimeSpan s_defaultIdleWaitTimeout = TimeSpan.FromMilliseconds(100);
+
     private readonly INdisPacketReader _driver;
     private readonly nint _adapterHandle;
     private readonly Func<NdisCapturedPacket, CancellationToken, ValueTask> _handler;
     private readonly TimeSpan _pollDelay;
+    private readonly INdisPacketArrivalSignal? _arrivalSignal;
+    private readonly TimeSpan _idleWaitTimeout;
     private readonly NdisPacketBuffer[] _batchBuffers;
     private readonly Action? _onBatchCompleted;
     private readonly Action<int, int>? _onTransientRetry;
@@ -140,6 +163,8 @@ public sealed class NdisCapturePump : IAsyncDisposable
         _adapterHandle = adapterHandle;
         _handler = handler;
         _pollDelay = options?.PollDelay ?? TimeSpan.FromMilliseconds(1);
+        _arrivalSignal = options?.PacketArrivalSignal;
+        _idleWaitTimeout = options?.IdleWaitTimeout ?? s_defaultIdleWaitTimeout;
         _batchBuffers = new NdisPacketBuffer[capacity];
         for (var index = 0; index < capacity; index++) _batchBuffers[index] = new NdisPacketBuffer();
         _onBatchCompleted = options?.OnBatchCompleted;
@@ -186,6 +211,14 @@ public sealed class NdisCapturePump : IAsyncDisposable
     /// thread. Returns false when the iteration ended the loop (stop/degradation).
     /// </summary>
     internal bool RunIterationForTests(CancellationToken cancellationToken) => RunIteration(cancellationToken);
+
+    /// <summary>
+    /// Test and benchmark seam: sets the stop flag without releasing the pump, so a harness that owns
+    /// the pump through an <c>await using</c> scope can end the run, await it, and still leave the
+    /// release to that scope. Exactly what <see cref="DisposeAsync"/> does before it parks on the
+    /// run, and nothing more.
+    /// </summary>
+    internal void RequestStopForTests() => Interlocked.Exchange(ref _stopped, 1);
 
     /// <summary>
     /// The dedicated thread body. Runs the synchronous loop, then its exit sequence (final
@@ -310,12 +343,18 @@ public sealed class NdisCapturePump : IAsyncDisposable
     }
 
     /// <summary>
-    /// Zero-allocation idle pacing: <see cref="Thread.Sleep(TimeSpan)"/> replaces <c>Task.Delay</c>
-    /// so an idle pump allocates nothing while keeping the ~1 ms poll cadence. The loop re-checks
-    /// cancellation/stop on the next iteration, so a signal adds at most one poll delay of
-    /// latency — the same bound as the historical <c>Task.Delay(_pollDelay, token)</c>.
+    /// Zero-allocation idle pacing. With an arrival signal installed the iteration parks in one
+    /// bounded wait on it, so an idle pump wakes on arrival and costs ~1/timeout waits per second
+    /// instead of the poll cadence; without one it keeps <see cref="Thread.Sleep(TimeSpan)"/> at
+    /// <c>PollDelay</c>, replacing <c>Task.Delay</c> so an idle pump allocates nothing. Either way
+    /// the loop re-checks cancellation/stop on the next iteration, so a signal adds at most one
+    /// poll delay (sleep) or one idle-wait timeout (arrival wait) of latency.
     /// </summary>
-    private void PaceIdle() => Thread.Sleep(_pollDelay);
+    private void PaceIdle()
+    {
+        if (_arrivalSignal is null) Thread.Sleep(_pollDelay);
+        else _arrivalSignal.Wait(_idleWaitTimeout);
+    }
 
     /// <summary>
     /// Invokes the packet handler and waits for its <see cref="ValueTask"/> to complete before the
@@ -409,8 +448,8 @@ public sealed class NdisCapturePump : IAsyncDisposable
     /// using them (previously safe only by the caller convention of awaiting
     /// <see cref="RunAsync"/> first). Disposal signals stop but never cancels the run: the loop
     /// re-checks the stop flag every iteration and its only waits are bounded by the configured
-    /// poll delay (default 1 ms), a single transient-retry backoff sleep, or an in-flight handler,
-    /// so this await is bounded too. A
+    /// poll delay (default 1 ms) or the arrival wait's timeout (default 100 ms), a single
+    /// transient-retry backoff sleep, or an in-flight handler, so this await is bounded too. A
     /// run that already started owns the buffer release in its own exit sequence; a pump whose run
     /// never started releases the buffers directly and completes synchronously.
     /// </summary>

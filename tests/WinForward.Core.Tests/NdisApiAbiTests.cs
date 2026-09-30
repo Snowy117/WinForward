@@ -56,25 +56,29 @@ public sealed class NdisApiAbiTests
     }
 
     [Fact]
-    public void BatchReadResultSeparatesEmptyQueueFromNativeFailures()
+    public void ReadFailureOnANonEmptyQueueThrowsTheReadErrorWithTheRequestedCapacity()
     {
-        // An empty queue never reaches the batched read; the result is 0 without touching native error state.
-        Assert.Equal(0, NdisNativeCallStatus.InterpretBatchReadResult(queuedPacketCount: 0, requestedCount: 0, nativeResult: 0, nativeError: 87, packetsSuccess: 0, 2));
+        // Both fields a production log needs: the queue depth the query reported, and the request
+        // of the call that actually failed.
+        var exception = Assert.Throws<Win32Exception>(() => NdisNativeCallStatus.ThrowReadFailedOnNonEmptyQueue(queuedPacketCount: 5, requestedCount: 32, readError: 87, adapterHandle: 2));
 
-        var exception = Assert.Throws<Win32Exception>(() => NdisNativeCallStatus.InterpretBatchReadResult(queuedPacketCount: 5, requestedCount: 4, nativeResult: 0, nativeError: 87, packetsSuccess: 0, 2));
         Assert.Equal(87, exception.NativeErrorCode);
         Assert.Contains("non-empty queue", exception.Message, StringComparison.Ordinal);
-        Assert.Contains("requested 4", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("queued 5", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("requested 32", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("adapter 0x2", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void BatchReadResultReturnsDriverCountClampedToRequest()
+    public void ClampedReadCountNeverExceedsTheRequest()
     {
-        Assert.Equal(4, NdisNativeCallStatus.InterpretBatchReadResult(queuedPacketCount: 10, requestedCount: 4, nativeResult: 1, nativeError: 0, packetsSuccess: 4, 2));
+        Assert.Equal(4, NdisNativeCallStatus.ClampReadCount(packetsSuccess: 4, requestedCount: 4));
         // A partial read (fewer packets than requested) reports the actual count.
-        Assert.Equal(2, NdisNativeCallStatus.InterpretBatchReadResult(queuedPacketCount: 10, requestedCount: 4, nativeResult: 1, nativeError: 0, packetsSuccess: 2, 2));
+        Assert.Equal(2, NdisNativeCallStatus.ClampReadCount(packetsSuccess: 2, requestedCount: 4));
         // A driver over-reporting dwPacketsSuccess can never push the pump past the prepared buffers.
-        Assert.Equal(4, NdisNativeCallStatus.InterpretBatchReadResult(queuedPacketCount: 10, requestedCount: 4, nativeResult: 1, nativeError: 0, packetsSuccess: 99, 2));
+        Assert.Equal(4, NdisNativeCallStatus.ClampReadCount(packetsSuccess: 99, requestedCount: 4));
+        // A successful read that filled nothing is the empty queue.
+        Assert.Equal(0, NdisNativeCallStatus.ClampReadCount(packetsSuccess: 0, requestedCount: 4));
     }
 
     [Fact]

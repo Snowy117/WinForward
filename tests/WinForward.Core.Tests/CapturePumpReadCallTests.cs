@@ -72,6 +72,26 @@ public sealed class CapturePumpReadCallTests
     }
 
     /// <summary>
+    /// The idle-wait shape at the read seam: an iteration with an arrival signal installed issues
+    /// exactly one read and exactly one wait — the signal replaces the poll delay, it never adds a
+    /// second read or turns the wait into a re-read loop.
+    /// </summary>
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public async Task SignalInstalledIdleIterationIssuesOneReadAndOneWait()
+    {
+        var signal = new CountingArrivalSignal();
+        var reader = new CountingCaptureReader([static (_, _) => 0]);
+        await using var pump = new NdisCapturePump(reader, AdapterHandle + 1, static (_, _) => ValueTask.CompletedTask,
+            new NdisCapturePumpOptions { PollDelay = TimeSpan.Zero, IdleWaitTimeout = TimeSpan.Zero, PacketArrivalSignal = signal });
+
+        for (var iteration = 0; iteration < 8; iteration++) Assert.True(pump.RunIterationForTests(CancellationToken.None));
+
+        Assert.Equal(8, reader.ReadCalls);
+        Assert.Equal(8, signal.Waits);
+    }
+
+    /// <summary>
     /// The idle-path zero-allocation invariant, held for the counting shape this file's gate uses: a
     /// probe that allocated per read would perturb the very loop it counts, and the pump's idle
     /// iteration — read, batch-completed callback, zero-allocation pacing — must stay byte-free. The

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.Versioning;
 using WinForward.Configuration;
 using WinForward.Core;
@@ -77,6 +78,11 @@ public sealed class NdisCaptureGenerationFactory : ICaptureGenerationFactory
     private readonly Action<WindowsAdapter, int, int>? _onAdapterTransientRetry;
     private readonly TimeSpan? _pollDelay;
     private readonly RuntimeLogThrottle _slotExhaustedWarn = new(TimeSpan.FromMinutes(1));
+    private readonly RuntimeLogThrottle _packetEventUnavailableWarn = new(TimeSpan.FromMinutes(1));
+    // One throttle per adapter handle, so every adapter's single arming can be logged: a shared
+    // window would suppress each sibling's line, which is the only evidence the Windows experiment
+    // reads.
+    private readonly ConcurrentDictionary<nint, RuntimeLogThrottle> _readShapeMismatchWarns = new();
 
     public NdisCaptureGenerationFactory(
         NdisApiDriver driver,
@@ -127,13 +133,83 @@ public sealed class NdisCaptureGenerationFactory : ICaptureGenerationFactory
         }
 
         var adapters = bindings.Select(binding => binding.Adapter).ToArray();
+        // The read-shape guard's only evidence channel: the driver cannot log (IRuntimeLogger lives
+        // above it in the dependency order), so the composition resolves the handle back to the
+        // adapter identity of the generation that registered it.
+        _driver.ReadShapeMismatchSink = mismatch => ReportReadShapeMismatch(bindings, mismatch);
+        var arrivalSignals = RegisterArrivalSignals(bindings);
         TransactionalCaptureRuntime? runtime = null;
-        // ReSharper disable once AccessToModifiedClosure // runtime is assigned on the statement after this construction and the callback fires only from a running pump, which cannot exist before the runtime created below starts this loop.
-        var loop = new MultiAdapterCaptureLoop(_driver, bindings, _processor, _pollDelay,
-            onAdapterDegraded: (adapter, nativeError) => HandleDegradedAsync(runtime!, adapter, nativeError),
-            onAdapterTransientRetry: _onAdapterTransientRetry);
+        MultiAdapterCaptureLoop loop;
+        try
+        {
+            // ReSharper disable once AccessToModifiedClosure // runtime is assigned on the statement after this construction and the callback fires only from a running pump, which cannot exist before the runtime created below starts this loop.
+            loop = new MultiAdapterCaptureLoop(_driver, bindings, _processor, _pollDelay,
+                onAdapterDegraded: (adapter, nativeError) => HandleDegradedAsync(runtime!, adapter, nativeError),
+                onAdapterTransientRetry: _onAdapterTransientRetry,
+                arrivalSignals: arrivalSignals);
+        }
+        catch
+        {
+            foreach (var signal in arrivalSignals) signal?.Dispose();
+            throw;
+        }
+
         runtime = new TransactionalCaptureRuntime(new NdisAdapterModeController(_driver, adapters), loop);
         return new RuntimeCaptureGeneration(runtime, () => loop.PumpState);
+    }
+
+    /// <summary>
+    /// One packet-arrival registration per in-scope adapter, positionally paired with
+    /// <paramref name="bindings"/>. A refused registration is a warn and a null entry, never a
+    /// failure: degraded performance must not abort a capture run, so that adapter keeps the pump's
+    /// sleep-poll shape and every sibling keeps its signal.
+    /// </summary>
+    private List<INdisPacketArrivalSignal?> RegisterArrivalSignals(List<AdapterCaptureBinding> bindings)
+    {
+        var signals = new List<INdisPacketArrivalSignal?>(bindings.Count);
+        for (var index = 0; index < bindings.Count; index++)
+        {
+            var binding = bindings[index];
+            var registered = _driver.TryRegisterPacketEvent(binding.Adapter.RuntimeHandle, out var signal, out var nativeError);
+            signals.Add(signal);
+            if (registered) continue;
+            if (_packetEventUnavailableWarn.ShouldEmit())
+            {
+                _logger.Event(RuntimeLogLevel.Warn, "capture.packetEvent.unavailable",
+                    new RuntimeLogField("adapter", binding.Adapter.StableId),
+                    new RuntimeLogField("name", binding.Adapter.FriendlyName),
+                    new RuntimeLogField("nativeError", nativeError));
+            }
+        }
+
+        return signals;
+    }
+
+    /// <summary>
+    /// One rate-limited warn per arming of the read-shape guard, carrying everything the Windows
+    /// experiment needs: which adapter healed, what it asked for, what the queue held and the native
+    /// error of the failed read. No line means the driver conforms to the full-capacity request.
+    /// </summary>
+    private void ReportReadShapeMismatch(IReadOnlyList<AdapterCaptureBinding> bindings, NdisReadShapeMismatch mismatch)
+    {
+        if (!_readShapeMismatchWarns.GetOrAdd(mismatch.AdapterHandle, static _ => new RuntimeLogThrottle(TimeSpan.FromMinutes(1))).ShouldEmit()) return;
+        var adapter = FindAdapterByHandle(bindings, mismatch.AdapterHandle);
+        _logger.Event(RuntimeLogLevel.Warn, "adapter.readShape.mismatch",
+            new RuntimeLogField("adapter", adapter?.StableId ?? "unknown"),
+            new RuntimeLogField("name", adapter?.FriendlyName ?? "unknown"),
+            new RuntimeLogField("requested", mismatch.RequestedCount),
+            new RuntimeLogField("queued", mismatch.QueuedPacketCount),
+            new RuntimeLogField("nativeError", mismatch.NativeError));
+    }
+
+    private static WindowsAdapter? FindAdapterByHandle(IReadOnlyList<AdapterCaptureBinding> bindings, nint adapterHandle)
+    {
+        for (var index = 0; index < bindings.Count; index++)
+        {
+            if (bindings[index].Adapter.RuntimeHandle == adapterHandle) return bindings[index].Adapter;
+        }
+
+        return null;
     }
 
     private async ValueTask HandleDegradedAsync(TransactionalCaptureRuntime runtime, WindowsAdapter adapter, int nativeError)

@@ -197,6 +197,19 @@ internal static partial class NdisApiNative
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
     internal static partial int SetAdapterListChangeEvent(NdisApiSafeHandle handle, nint win32Event);
 
+    /// <summary>
+    /// Registers (or, with a NULL event, releases) the adapter's packet-arrival notification. Pinned
+    /// from <c>wiresock/ndisapi@417b8734</c>: <c>include/ndisapi.h:307</c> (C wrapper),
+    /// <c>ndisapi/ndisapi.cpp:3586</c>, <c>ndisapi.vs2012/ndisapi.def:16</c>; the bare-name export was
+    /// hardware-verified on the real DLL on 2026-08-27 (only the export table — the signalling
+    /// behaviour itself is unverified here). The pinned header documents the driver as signalling the
+    /// caller's Win32 event while the adapter's packet queue is non-empty; the caller owns the event's
+    /// lifetime.
+    /// </summary>
+    [LibraryImport(LibraryName, EntryPoint = "SetPacketEvent", SetLastError = true)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
+    internal static partial int SetPacketEvent(NdisApiSafeHandle handle, nint adapterHandle, nint win32Event);
+
     [LibraryImport(LibraryName, EntryPoint = "SetAdapterMode", SetLastError = true)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]
     internal static unsafe partial int SetAdapterMode(NdisApiSafeHandle handle, AdapterMode* mode);
