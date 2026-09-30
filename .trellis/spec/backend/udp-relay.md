@@ -389,6 +389,7 @@ xUnit `Assert.Equal` generic inference does not apply the `IPAddress` → `IPAdd
 - Existing ready-path, skip-class, connreset, budget-credit, and dispose-drain suites stay
   green; `HotPathAllocationGateTests.EstablishedUdpDatagramPathAllocatesNoManagedBytes`
   unchanged.
+- Sweep gates (task 09-30-expiry-sweep-bounded-pause): `SweepAllocationGateTests.UdpProxyCoordinatorSweepAllocatesNoManagedBytes` (no-op tick over 16 fake-transport sessions — the tick that repeats every 15 s — 272 B → 0), `…UdpAssociationPoolSweepAllocatesNoManagedBytes` (no-op tick over shared associations with outstanding leases, 328 B → 0) and `…UdpAssociationTableSweepAllocatesNoManagedBytes` (retiring tick over 64 idle associations, 4,184 B → 0). All three hold a reused scratch and a `SemaphoreSlim(1,1)` (or `Lock`) sweep gate; the pool gate releases every lease before asserting so a failing window cannot hang the pool drain.
 
 ### 7. Wrong vs Correct
 

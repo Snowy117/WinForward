@@ -487,6 +487,19 @@ GC configuration. This is the contract for the full-path zeroing milestone (M1-M
   means a `FlowState` reference held *past* expiry could observe the next flow's fields —
   callers must read state within the gate-held / `Touch`-refreshed operation (no production path
   retains a `FlowState` across an await).
+- **FlowTable live-slot registry + chunked sweep (task 09-30-expiry-sweep-bounded-pause).** The table
+  keeps `_liveStates[0.._liveCount)` as a hole-free mirror of `_states` (append in `TryClaimResolved`
+  under `_gate`; removal is a swap-remove **at the cursor** that happens strictly **before**
+  `ReturnState`, so a recycled state can never keep a registry slot; `LiveStateCountForDiagnostics`
+  takes `_gate` so a churn test can assert it equals `Count`). `RemoveExpired` walks that registry at
+  **minimal hold granularity**: a scan hold examines ≤ `SweepChunkEntries` (256) entries and stops on
+  the first idle-elapsed candidate, the `isHeld` predicate runs with **no table lock held** (the nested
+  store/tombstone-lock edge is gone — a held entry keeps its original idle point), and a removal hold
+  re-checks identity/idleness/key-presence and removes exactly one entry, so the removal lands at the
+  cursor and the swapped-in tail is examined next (no rewind, no batch). Deadline semantics are the
+  integer form of the old subtraction: **expired is `LastActivityUtc.UtcTicks <= cutoffTicks`**.
+  `SweepChunkEntries` is a scan bound only — one entry per removal hold whatever it is — and the sweep's
+  own duration is report-only (every removal takes its own gate hold).
 - **SetupExecutor.** Per-item exception containment (`TrySetException`), balanced
   pending/enqueued/completed/rejected counters, lazy worker start, and `Dispose` joins workers,
   drains queued items (canceling their completions), and refuses new work. A worker that
@@ -820,6 +833,16 @@ because something real slipped through without it.
 - **Never use a fake collaborator for the thing under test.** A guard/executor/transport that answers
   before touching the code under test makes the measured delta structurally zero: `NeverOwnedGuard` hides
   the whole self-traffic path, and the same workload through the real registry costs 2× at one thread.
+- **A wall-clock maximum is not an acceptance figure when the host queueing dominates it.**
+  `flowTable.sweepPause`'s phase-scoped `maxSweepWindowPauseMs` fixed *attribution* (in-window resolves
+  no longer include the scenario's own refill contention) but not *attributability to the hold*: the
+  calibration control — the same in-window flag armed ~120 ms with **no product call at all**, now
+  reproducible with `--sweep-window-control-ms <n>` — measured 5.19 ms with 12,336 in-window overshoots,
+  the same order as the code under test, and the raw series stays refill-dominated (≥96 %). Sweep
+  acceptance is therefore proven by **countable work-per-hold probes**
+  (`SweepAllocationGateTests.FlowTableSweepHoldWorkIsBoundedByChunkEntries` and
+  `…FlowTableProductionShapeSweepRecordsItsHoldShape`), with every timing field classified report-only
+  and quoted beside the control.
 - **Prove the gate can fail.** For every exact gate, inject the violation once (a 16-byte allocation, a
   one-short population) and record the exact failure message before restoring the file; a gate whose
   failure mode has never been observed is an assumption.
@@ -896,6 +919,16 @@ because something real slipped through without it.
   a ~8 % flake. Use the procedure in §4; a failure anywhere in the loop stops the proof and returns to
   diagnosis. That loop proves a *product/allocation-regression* claim; the host-residual family is proven by
   the per-gate process run in the section below, and the two procedures are not interchangeable.
+- **Gate the tick shape the site actually repeats.** A retiring tick whose teardown `await`s disposal
+  outside the gate cannot be byte-exact inside the window (the disposal legitimately allocates and
+  suspends), so the three async sweep legs are gated on a **no-op tick over a populated world** —
+  `TcpRedirectSessionStoreSweepAllocatesNoManagedBytes` (64 registered `Redirecting` sessions + unexpired
+  tombstones), `UdpProxyCoordinatorSweepAllocatesNoManagedBytes` (16 fake-transport sessions) and
+  `UdpAssociationPoolSweepAllocatesNoManagedBytes` (shared associations with outstanding leases, so
+  `CanRetire` is false). The population is the proof that the window is not vacuous: an empty store would
+  green a "skip the scan when empty" fast path. The synchronous tables are gated on their real retiring
+  tick instead. A gate whose driven call can strand a lease must release it **before** asserting (a
+  failing assert that skips the release hangs the pool's drain instead of failing the test).
 - **The landed shape extends to every exact window in the suite**, not only the two that flaked:
   `CapturePumpReadCallTests.CountingReaderIdleIterationsAllocateNoManagedBytes`,
   `NdisCapturePumpTests.IdlePollIterationsAllocateNoManagedBytes` and
@@ -1157,13 +1190,15 @@ Assert.Equal(1 + 8 + count, executor.PassCount);
 ### 4. Tests Required — the per-gate proof procedure
 
 The suite-level loop is **not** the criterion. Run each exact gate in its own process, N runs per gate,
-record every run's padded summary, its totals assertion (`981 + 18`), the git hash, the tree fingerprint and
-the exit status; a failure is accepted only under the signature predicate above:
+record every run's padded summary, its totals assertion (`995 + 18` at the 09-30-expiry-sweep-bounded-pause
+tree — the loop itself asserts the per-class totals string below, so refresh these two figures whenever the
+suite grows), the git hash, the tree fingerprint and the exit status; a failure is accepted only under the
+signature predicate above:
 
 ```bash
 log=/tmp/wf-lumps-proof.txt; : > "$log"; rev=$(git rev-parse --short HEAD); tree=$(git write-tree)
 summary='Failed: *[0-9]+, Passed: *[0-9]+, Skipped: *[0-9]+, Total: *[0-9]+'
-totals='HotPathAllocationGateTests:11 CapturePumpReadCallTests:3 SweepAllocationGateTests:2 NdisCapturePumpTests:14'
+totals='HotPathAllocationGateTests:11 CapturePumpReadCallTests:3 SweepAllocationGateTests:12 NdisCapturePumpTests:14'
 signature='^(168|5216|7384|7448)$'
 for entry in $totals; do
   gate=${entry%%:*}; expected=${entry##*:}
