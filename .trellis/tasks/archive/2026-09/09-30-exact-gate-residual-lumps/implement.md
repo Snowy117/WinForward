@@ -146,6 +146,31 @@ suite-level streak, and the suite-level rate is recorded as an accepted host pro
 | 5 spec | `hot-path.md`: new section with the arm table, census, multiplicity, the suite-conditional finding, the tool blindness, the per-window control priced and rejected, the `:940` forbidden row kept with the injected numbers, the disposition, the accepted rates with CIs, the sensitivity floor, the do-not-re-test list and the per-gate procedure. `windows-ndisapi.md`: the trigger-time-snapshot invariant added to both copies of the adapter-view self-healing section. |
 | 6 gates | Release build 0 warnings; suite **981 + 18**, 0 failed; `dotnet format` exit 0 empty; `jb inspectcode` reported 2 genuine findings in the new test code (`AccessToModifiedClosure`, `MergeIntoPattern`), both fixed (the pattern merged; the self-reference suppressed with the reason that the handler runs only after the constructor returns), after which the test project reports **0 issues / 0 `CSharpErrors`**. Reproducer deleted; no scratch remnants. |
 
+> **Correction (task `09-30-udp-association-head-count-flake`, 2026-09-30).** The failure recorded here was
+> misattributed. The artifact reports the failing statement at `UdpAssociationHeadTests.cs:110`
+> (`Assert.Equal(282, server.AssociateReplyCount)`), not `:104` (`pool.AssociationCount`); because xunit stops
+> at the first failing assertion, lines 103 / 104 / 105 / 109 passed and the pool's sharing shape (282
+> associations, 4,500 leases, 282 connections) was intact. The cause was the **test fixture**:
+> `ScriptedSocks5UdpServer` incremented its ASSOCIATE-reply counter *after* the reply write while the client's
+> rent completes on reading that reply, so the counter could lag a completed rent. Fixed in the follow-up task
+> by publishing the counter before the reply is readable, with a blocked-write test as the deterministic proof.
+> The "product sharing invariant, plausibly a race between the count and the rent completion" reading below is
+> superseded.
+
+> **Addendum (task `09-30-udp-association-head-count-flake`, 2026-09-30).** The signature list above is
+> **incomplete**: during that task's proof, one full-suite run at `rev=3b9689c`, `tree=e1e380063f95bd87ac96dbf7d9cae6e57cd166f1`
+> failed `HotPathAllocationGateTests.UdpSetupEnqueuePathAllocatesNoManagedBytes` with
+> `Expected: 0, Actual: 56` — an exact-allocation gate of the same family (an exactly-zero assertion on a
+> measured region that allocates nothing in isolation) at a size **not** among 168 / 5,216 / 7,384 / 7,448.
+> The signature predicates in the disposition must therefore be read as "**any `*AllocateNoManagedBytes`
+> exact-allocation gate**, past its own `Assert.True(stabilized)` preflight, with a delta of a size the
+> census cannot produce by a product path" — the family is defined by the **gate shape, not by a closed
+> list of gates and sizes**: that same session also produced `NdisCapturePumpTests.IdlePollIterationsAllocateNoManagedBytes`
+> at 6,128 B and `Socks5UdpTransportSendTests.WarmSyncSendAllocatesNoManagedBytes` at 7,872 B (and one run
+> with two such gates failing at once), against 22 green suite runs. Each new instance is recorded here as
+> it appears rather than treated as noise. The per-gate proof itself is unaffected: all five dependent classes and the new
+> ordering class ran 20/20 green in the same session.
+
 **Proof on the frozen tree** (`rev=e28cb87`, `tree=883583fc055516886b90b30091c07597a9ae677e`):
 
 - **Per-gate criterion: met.** 20 process runs per gate × 4 gates = **80/80 green**, **0** signature-matched

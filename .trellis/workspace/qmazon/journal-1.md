@@ -1087,7 +1087,7 @@ Attributed the residual suite-level lump as far as the evidence allows, landed d
 
 ### Testing
 
-- [OK] build 0 warnings; suite 981 + 18 green; dotnet format exit 0 empty; jb inspectcode 2 genuine findings in the new test code fixed -> test project 0 issues; frozen tree rev=e28cb87 tree=883583fc055516886b90b30091c07597a9ae677e; per-gate 80/80; suite rate measured 2/13 with one signature-matched hit (sweep 7448 B) and one new failure (UdpAssociationHeadTests 282 vs 281) carried by 09-30-udp-association-head-count-flake
+- [OK] build 0 warnings; suite 981 + 18 green; dotnet format exit 0 empty; jb inspectcode 2 genuine findings in the new test code fixed -> test project 0 issues; frozen tree rev=e28cb87 tree=883583fc055516886b90b30091c07597a9ae677e; per-gate 80/80; suite rate measured 2/13 with one signature-matched hit (sweep 7448 B) and one new failure (UdpAssociationHeadTests 282 vs 281) carried by 09-30-udp-association-head-count-flake [CORRECTION 2026-09-30: that failure was at UdpAssociationHeadTests.cs:110 on server.AssociateReplyCount, not :104 on pool.AssociationCount; the pool's shape assertions passed in the same run, and the cause was the scripted fake publishing its reply counter after the reply write, fixed in the follow-up task]
 
 ### Status
 
@@ -1095,4 +1095,4 @@ Attributed the residual suite-level lump as far as the evidence allows, landed d
 
 ### Next Steps
 
-- Task 09-30-udp-association-head-count-flake (part 3): diagnose the UDP association head count flake (Expected 282, Actual 281 at UdpAssociationHeadTests.cs:104), then the operator's F2-F8 pipeline in the order F3 sweeps, F2 locks, F4 keys/parsing, F5 pump I/O, F8 attribution, F6 UDP footprint, F7 WFP - each with a PRD reviewed by a sub-agent, implementation, an independent check, a recorded benchmark proof before archiving, commit, archive and journal.
+- Task 09-30-udp-association-head-count-flake (part 3): diagnose the fixture reply-counter race (Expected 282, Actual 281 at UdpAssociationHeadTests.cs:110, server.AssociateReplyCount; the pool's shape was intact), then the operator's F2-F8 pipeline in the order F3 sweeps, F2 locks, F4 keys/parsing, F5 pump I/O, F8 attribution, F6 UDP footprint, F7 WFP - each with a PRD reviewed by a sub-agent, implementation, an independent check, a recorded benchmark proof before archiving, commit, archive and journal.

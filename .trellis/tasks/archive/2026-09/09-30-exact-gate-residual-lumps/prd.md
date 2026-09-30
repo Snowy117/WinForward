@@ -121,7 +121,7 @@ hunt (1+2 total).
       exist without a seam.
 - [x] **Per-gate criterion met** (disposition (c)): 80/80 green process runs (20 × 4 gates), 0
       signature-matched host hits, 0 unexplained failures, class totals asserted every run.
-- [x] **Suite-level rate measured and recorded** rather than claimed: 13 runs → 2 failures (~15 %), one a
+- [x] **Suite-level rate measured and recorded** (the second failure's attribution was later corrected — see the correction note in `implement.md`: it was the fake server's reply counter, not `pool.AssociationCount`) rather than claimed: 13 runs → 2 failures (~15 %), one a
       **signature match** (`SweepAllocationGateTests`, `Actual: 7448`) and therefore the accepted host
       event, one **not** (`UdpAssociationHeadTests.TheDefaultHeadKeepsTheAcceptanceLoadShared`,
       `Expected: 282, Actual: 281`) and therefore carried by the follow-up task
