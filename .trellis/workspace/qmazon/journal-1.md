@@ -1304,3 +1304,90 @@ lookup).
 ### Status
 
 [OK] **Completed**
+
+
+## Session 44: F4 keys and parsing: a 64 B interned key, one parse per frame, lock-free trackers (and a live mis-rewrite found by hardening)
+<!-- trellis-session: v=2 fp=ff2a890f3ac37b28 -->
+
+**Date**: 2026-10-01
+**Task**: F4 keys and parsing: a 64 B interned key, one parse per frame, lock-free trackers (and a live mis-rewrite found by hardening)
+**Branch**: `master`
+
+### Summary
+
+FlowKey 128->64 B via an interned adapter slot (generation kept, refusal instead of aliasing), parse-once through a 16-byte PacketLayout with a validity stamp, CAS-max sequence trackers with the gate deleted, and an 80 B interned per-packet context. All 16 datapath rows improve (worst 1.50x; the IPv6 reverse row 1.68-1.88x), ResolveWarmHit 76->26 ns, walks 4->1 per leg. Hardening the defaulted layout exposed a live latent mis-rewrite at offset 26 that the allocation gate had been passing over. The optional IPv6 checksum step was rejected by measurement.
+
+### Main Changes
+
+### Main Changes
+
+F4 of the structural perf research (`09-29-tcp-udp-path-structural-perf`) — the packet path stops paying for
+data structures built for convenience. `FlowKey` went 128 → **64 B**: the `string? OriginAdapterId` became a
+`ushort OriginAdapterSlot` interned through a process-lived `AdapterSlotTable` (monotone, never-reused slots;
+an un-internable adapter is refused rather than aliased onto `NoSlot`; the generation stays an integer key
+field so equality keeps today's semantics), the endpoints are packed with computed `Local`/`Remote`
+accessors, and F2's warm-cache hash/equality were re-proven against an independent pre-F4 oracle rather than
+against the packed function itself. A frame is now parsed **once**: a 16-byte `PacketLayout` (with the
+address family, plus a private-constructor stamp that makes `default` invalid) is carried on the packet and
+consumed by `IsTcpSyn`, all four sequence observations, the rewriter and the checksum path, with the
+span-taking entry points kept as the oracle. The two `uint?` sequence trackers and their `_sequenceGate`
+became CAS-max `long`s (two lock entries per packet gone), and the per-packet context is interned
+(`FlowContext` 168 → **80 B**, `CapturedFlowPacket` 224 → **152 B**, `FlowStateView` → 96 B).
+
+### The hardening that found a live bug
+
+The previous agent flagged that a `default(PacketLayout)` is indistinguishable from a valid TCP layout
+(`PacketTransport.Tcp == 0`). Hardening it produced three red-before facts on the unmodified tree, and one
+was **live**: `HotPathAllocationGateTests.DeferredInPlaceRedirectInjectionAllocatesNoManagedBytes` had been
+passing while its leg mis-rewrote a frame at offset 26. Only `PacketLayout.From(in PacketView)` can stamp a
+valid layout now, every consumer gates on `IsTcp`, and a dispatched flow packet provably carries a parsed
+layout.
+
+### Measurement
+
+- All 16 `tcp-redirect-data-path` rows improve, none regresses (worst 1.50×, max after/before 0.665); the
+  AC-4 row `ReverseLegForwarded` IPv6 112.05 → 59.64 ns (128 B) and 122.07 → 72.87 ns (1400 B); the
+  IPv6:IPv4 ratio reading moved 1.65 → 1.92 (recorded, not gated) while the absolute gap narrowed
+  48.07 → 34.97 ns.
+- `flow-table-production-shape` `ResolveWarmHit` 76.21 → 26.06 ns; walk counts (not timings) carry the
+  parse-once claim: 4 walks/leg → 1 parse + 0 revalidations + 1 view rewrite, red-before re-derived from
+  the pre-change source.
+- The optional single-pass IPv6 checksum delta was **rejected by measurement**: the adoption precondition
+  ("still slow while every other row is unmoved") was false, and its isolated ~5.5 ns win is under this
+  host's noise floor.
+- Sizes asserted exactly: `FlowKey` 64, `FlowContext` 80, `CapturedFlowPacket` 152, `FlowStateView` 96,
+  `PacketLayout` 16.
+
+### Testing
+
+- [OK] Release build 0 warnings/0 errors; full suite **1057 + 18** green (five runs across the task).
+- [OK] `dotnet format` exit 0 with empty output; `jb inspectcode` **0 issues** (29 + 44 findings fixed
+  across two passes, 4 narrow suppressions, each with a verifiable reason — `[ThreadStatic]` cannot back an
+  auto-property, the cross-assembly layout accessors are the repo's documented false-positive class, and two
+  join-before-dispose orderings).
+- [OK] Per-gate stability: 42 process runs over 17 classes, 0 failures, 0 vacuous totals, every total
+  stable; the four exact allocation gates unchanged at 11/3/12/14.
+- [OK] Six spec files updated plus a 14-row F4 spec-row → proof map.
+
+### Status
+
+[OK] **Completed** (archived 2026-09-30)
+
+### Next Steps
+
+- F5 pump I/O (next in the F2–F8 pipeline): speculative batched read and an event-driven idle wake, with the
+  on-Windows ABI question recorded. Then F8 attribution, F6 UDP footprint, F7 WFP scoping.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `31b340b` | test(bench): F4 walk/gate probes, size facts and the before/after series (flow-key-parse-once) |
+| `7cc794a` | perf(core): interned adapter slot in a 64 B flow key, parse-once layout, lock-free sequence trackers, 80 B context (flow-key-parse-once) |
+| `d43d85d` | docs(spec): record the F4 key/parse/context contracts, the layout stamp and the spec-row map (flow-key-parse-once) |
+| `59e80fc` | chore(task): record the F4 task and sync the parent backlog (flow-key-parse-once) |
+
+### Status
+
+[OK] **Completed**
