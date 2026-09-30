@@ -122,12 +122,26 @@ internal struct WorkLease : IDisposable          // mutable; Dispose() => one Ex
   association's evidence gate, never the reverse. Three
   lifetime handles deliberately stay outside the primitive, and each is already joined by its own
   owner, so I2 holds without them:
+  - **`FlowAttributionPipeline`** (F8, 2026-10-01) is an owner of the same shape: it holds one
+    `QuiescenceScope`, every worker item takes a lease before it attributes, and its `DisposeAsync`
+    seals admission (a later `Admit` blocks fail-closed rather than attributing inline), fails every
+    pending entry closed through the executor, joins the in-flight leases and releases the retained
+    copies. Its retention pool is created and disposed by `DurableCaptureBundle`, which disposes the
+    pipeline immediately after the sweeper and the pool in the last block, so no retained lease
+    outlives its pool. Its per-adapter decided queue lives under the pipeline's own leaf gate; delivery
+    runs only on the pump that owns the entry's adapter.
   - **`SetupExecutor`** (`src/WinForward.Runtime/SetupExecutor.cs:135`, field `_shutdown`) — a
     synchronous `IDisposable` running dedicated worker `Thread`s. `Dispose` is D11 single-flight
     (`Interlocked.Exchange(ref _disposed, 1)`), cancels, `Thread.Join()`s every worker, then drains
     the ring and releases the CTS — the `NdisCapturePump` shape (E6), and it is created and owned by
     `DurableCaptureBundle`, which disposes it after both proxy coordinators. It owns no *borrowed*
-    work, so it has no seal/join of other owners' leases to express.
+    work, so it has no seal/join of other owners' leases to express. **Its ring bound is the sum of its
+    finite-capacity producers** (F8, 2026-10-01): `DefaultRingCapacity` is 2,048, the sum of the TCP
+    pending-SYN index cap and the deferred-attribution index cap, both 1,024. UDP session setup is
+    deliberately outside the inequality — it enqueues one item per admitted session against a
+    16,384-flow session capacity, so no satisfiable bound covers it; a full ring can therefore refuse
+    a UDP setup item, which is counted (`RuntimeCounters.UdpSetupRejections`) and fail-closed. The
+    load-bearing form is the test `SetupExecutorTests.DefaultRingCapacityCoversBothFiniteProducerCaps`.
   - **`NdisCapturePump`** (`src/WinForward.NdisApi/NdisCapture.cs`) — owns no CTS at all; its thread
     is joined through the `ValueTask(outcome.Task)` completion bridge (E6). It also owns no
     `IDisposable`: the per-adapter packet-arrival signal its idle path waits on (F5, 2026-10-01) is
@@ -363,8 +377,9 @@ The remaining owners are migrated too. What each owns after C4, and what it dele
 | Owner | Scope | Deleted / changed |
 |-------|-------|-------------------|
 | `LayeredCaptureRunner` | `_scope = new QuiescenceScope(cancellationToken)` created at the top of `RunAsync` — owns the run CTS | the local `monitorCancellation`; `TeardownAsync`'s monitor task parameter; the refresh workers moved to `CaptureRefreshWorkers.cs` (a 417 → 388 effective-line net reduction) |
-| `MultiAdapterCaptureLoop` | `_scope = new QuiescenceScope()` (parent-less; the runtime disposes it after `_capture.RunAsync` returns); also owns the per-generation `IReadOnlyList<INdisPacketArrivalSignal?>`, released in `DisposeCoreAsync` **after** every pump has stopped (F5, 2026-10-01) | the `_ = ForwardDegradationAsync(...)` discard; `DisposeAsync` now drains |
+| `MultiAdapterCaptureLoop` | `_scope = new QuiescenceScope()` (parent-less; the runtime disposes it after `_capture.RunAsync` returns); also owns the per-generation `IReadOnlyList<INdisPacketArrivalSignal?>`, released in `DisposeCoreAsync` **after** every pump has stopped (F5, 2026-10-01). F8 composes each of those signals with a pipeline-owned event: the composite disposes the borrowed driver signal (the loop's list entry, unchanged) while `FlowAttributionWakeRegistry` owns the events — one per adapter handle, reused across generations — and `DurableCaptureBundle` disposes the registry after the pipeline is sealed and every pump has stopped | the `_ = ForwardDegradationAsync(...)` discard; `DisposeAsync` now drains |
 | `TransactionalCaptureRuntime` (`CaptureLifecycle.cs`) | `_scope = new QuiescenceScope()` replaces `_shutdown`; linked at the single `CreateLinkedTokenSource` site | `_shutdown`; `StopAsync`'s `CancelAsync()` → `_scope.Cancel()`; `RestoreBestEffortAsync`'s `_shutdown.Dispose()` |
+| `FlowAttributionPipeline` (F8, 2026-10-01) | `_scope = new QuiescenceScope()`; admission takes no lease (it is synchronous and bounded), every setup work item takes one | — |
 | `IdleExpirySweeper`, `RuntimeHeartbeat` | `_scope = new QuiescenceScope()` replaces `_shutdown`; the loop is a `Run` child | `_shutdown`, `_loop`; `DisposeAsync` is now just the scope's; a second dispose **joins instead of throwing** |
 | `Socks5ControlConnection` | `_scope = new QuiescenceScope(_connectCancellation)` + a D11 one-shot; every attempt-token reader holds a lease | — (no handle deleted; the per-attempt deadline CTS stays, see D7 above) |
 | `Socks5UdpTransport` | **none** — an `Interlocked` disposal guard only | — |

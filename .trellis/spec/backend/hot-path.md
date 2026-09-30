@@ -1037,7 +1037,13 @@ because something real slipped through without it.
   `NdisCapturePumpIdleWaitTests.IdleWaitIterationsAllocateNoManagedBytes` (F5, 2026-10-01: the
   production `NdisPacketArrivalSignal.Wait` entry point over an unsignaled event, timeout zero),
   `NdisApiReadShapeTests.DriverReadPathAllocatesNoManagedBytes` (F5: the driver's per-drain read
-  path through `CreateForTests`) and
+  path through `CreateForTests`),
+  `FlowAttributionPipelineTests.PendingAdmitAllocatesOnlyTheDocumentedColdBudget` (F8, 2026-10-01: the
+  deferred-attribution admission — the cold budget is one entry object + one 32-slot ring + the first
+  retained slot, and every later packet of an already-pending flow is an exactly-zero ring append) and
+  `CompositePacketArrivalSignalTests.CompositeArrivalWaitAllocatesNoManagedBytes` (F8: the production
+  two-handle park, `CompositePacketArrivalSignal.Wait` over the borrowed driver signal and the
+  pipeline-owned event, both unsignaled at a zero timeout) and
   `SweepAllocationGateTests.FlowTableSweepAllocatesNoManagedBytes` now open their windows only after a
   bounded run of probe batches that each read an **exactly-zero** delta on an unchanged thread (the UDP
   gate's landed shape). The probe batches are part of the contract, not decoration: the same host lump
@@ -1304,7 +1310,7 @@ signature predicate above:
 ```bash
 log=/tmp/wf-lumps-proof.txt; : > "$log"; rev=$(git rev-parse --short HEAD); tree=$(git write-tree)
 summary='Failed: *[0-9]+, Passed: *[0-9]+, Skipped: *[0-9]+, Total: *[0-9]+'
-totals='HotPathAllocationGateTests:11 CapturePumpReadCallTests:4 SweepAllocationGateTests:12 NdisCapturePumpTests:14 NdisCapturePumpIdleWaitTests:5'
+totals='HotPathAllocationGateTests:11 CapturePumpReadCallTests:4 SweepAllocationGateTests:12 NdisCapturePumpTests:14 NdisCapturePumpIdleWaitTests:5 FlowAttributionPipelineTests:19 FlowAttributionPendingIndexTests:10 ProcessOwnerTableCacheTests:11 CompositePacketArrivalSignalTests:3'
 signature='^(168|5216|7384|7448)$'
 for entry in $totals; do
   gate=${entry%%:*}; expected=${entry##*:}
@@ -1398,7 +1404,12 @@ research, landed after F3's bounded-hold sweeps.
   control socket registers `(protocol, Any:port, remote)` before its SYN, so the warm entry must answer
   that half. The exact-tuple half runs once per claim and a claimed state is its "proven not self"
   record; the accepted delta (an exact registration after the claim keeps proxying while traffic flows)
-  is recorded in the task's design §4/§7.
+  is recorded in the task's design §4/§7. **F8 (2026-10-01) restates the half's frequency**: a flow whose
+  attribution is pending has no claimed state yet, so each of its packets re-enters the full slow path —
+  including the gated exact-tuple check — once per packet instead of once per claim. That is bounded by
+  the pending ring (32 packets) and the retention TTL (5 s), counted by the pipeline's delivered-packet
+  counter, and it is the recorded price of keeping the claim on the pump; an admission-side
+  short-circuit is a recorded non-goal (`FlowAttributionPipelineTests`).
 - **Counts are the proof.** Per warm hit: registry gate 1 → 0, exact-tuple guard probes 1 → 0, flow-table
   gate 1 → 0, redirect gate 2 → 0 (one reverse probe), UDP coordinator gate 1 → 0, session activity-gate
   entries 2 → 0, clock reads 2 → 0. The parked-gate facts
@@ -1474,3 +1485,72 @@ the warm corroboration is pinned observably; `PacketView`'s constructor is publi
 stamps a hand-built view too — the validity stamp excludes `default`, it does not authenticate a parse;
 the companion benchmark series are shape witnesses (their exact siblings are the gate classes, green in
 every run).
+
+## The owner-table epoch coalescer (F8, 2026-10-01)
+
+### 1. Scope / Trigger
+
+Any change to `ProcessOwnerTableCache`, `IProcessOwnerTableReader`/`IPHelperOwnerTableReader`,
+`WindowsProcessAttributor.FindAsync`, or the deferred-attribution pipeline's owner-table reads.
+
+### 2. Contracts
+
+- **One snapshot slot and one single-flight refresh gate per `OwnerTableKind`** (Tcp4, Tcp6, Udp4,
+  Udp6). Concurrent missers join one in-flight read whose snapshot is published after the last of
+  them asked, so a burst's own newly-bound sockets are visible to the shared read. A window alone
+  cannot deliver that: a socket's row appears at bind, microseconds before the packet that triggers
+  the lookup, so it can never be in a snapshot taken before the burst. The recorded series is the
+  `attribution.ownerBurst` row — 16 concurrent flows over one scripted table cost **1** read — and
+  the exact form is `ProcessOwnerTableCacheTests.NConcurrentMissesInsideTheWindowReadTheTableExactlyOnce`.
+  The scan count is a **series, never a threshold**.
+- **The freshness rule is the request instant, not a flag.** A snapshot taken before the caller asked
+  may only answer a **positive TCP row**; a miss always falls through to a read, so a flow whose
+  socket bound after the last read still gets a real scan (`WinForwardProcessAttributor.FindAsync`'s
+  2 ms retry is just a lookup with a later instant, which is what lets it coalesce onto an epoch that
+  started after it asked instead of forcing a second scan).
+- **Positive caching is per kind, and the bound is the predicate's.** A TCP row matches all four tuple
+  fields, so a row that survives into a later request describes the same connection; an exact-4-tuple
+  reuse inside the 300 ms window is effectively impossible under TIME_WAIT, so TCP reuse is accepted.
+  A UDP row matches the **local port alone**, so a recycled port inside the window would attribute a
+  flow to the previous process (fail-open) — **UDP never reuses a snapshot older than the request**,
+  only coalescing onto an epoch published at or after it. Closing the UDP half needs the
+  `*_TABLE_OWNER_MODULE` creation timestamp, which is a recorded on-Windows follow-up.
+- **The seam is the platform boundary.** `IPHelperOwnerTableReader` is the single
+  `[SupportedOSPlatform("windows")]` type and owns the size probe, the fail-closed row-count
+  validation and the `FreeHGlobal`. The default reader off-Windows is
+  `UnavailableOwnerTableReader`, so the observable result there stays `null` while the managed cache
+  logic is exercisable on any host through an injected reader. The predicates moved into
+  `OwnerTable` unchanged and the `Where/Select/Distinct/ToArray` became one predicate pass, so a
+  snapshot hit and a fresh scan answer identically for identical rows.
+- **The wake signal is latency, never correctness, and its ownership is split three ways.**
+  `CompositePacketArrivalSignal` composes the **borrowed** driver signal with one event the
+  `FlowAttributionWakeRegistry` owns: the composite disposes the driver signal in place of the list
+  owner (so the driver registration is still released exactly once), the registry never touches a
+  composite, and the registry keeps **one event per adapter handle** — reused across generations —
+  which `DurableCaptureBundle` disposes after the pumps have stopped and the pipeline is sealed
+  (a disposed event is reported as "not signalled", so a racing `Wait`/`Signal` cannot throw out of
+  the idle path). A refused driver registration registers nothing and the pipeline's signal becomes
+  a no-op: delivery then waits at most the poll delay or the idle bound, which the facts pin
+  (`CompositePacketArrivalSignalTests`, `FlowAttributionPipelineTests.ThePipelineSignalsOnlyItsOwnAdaptersEvent`).
+
+### 3. Tests Required
+
+`ProcessOwnerTableCacheTests`: coalescing, the retry joining a later epoch, a post-read bind forcing
+exactly one more read, a cached TCP hit, UDP never reusing, window expiry, scan/snapshot agreement,
+the recycled-port asymmetry, `window = 0`, and the unavailable reader.
+
+### 4. Wrong vs Correct
+
+```csharp
+// Wrong: serve a UDP answer from a snapshot taken before the request — the predicate is the local
+// port alone, so a recycled port attributes the flow to the previous process (fail-open).
+return snapshot.Table.Lookup(key);
+
+// Correct: only a positive TCP row may be reused; a UDP lookup coalesces onto an epoch published at
+// or after its request instant and otherwise reads.
+if (snapshot is not null && ReusesSnapshot(kind) && snapshot.IsUsable && IsFresh(snapshot, now) && snapshot.TakenUtc <= requestInstant
+    && snapshot.Table.Lookup(key) is { } cached)
+{
+    return cached;
+}
+```
