@@ -1,0 +1,120 @@
+# Per-class padded totals after Steps 1-7 + the defaulted-layout hardening
+
+Tree: base `ca8d999` (`git write-tree` b6e93b5248ed5c67345fa1385643ba37a3d8bdcb) + this task's work,
+uncommitted. Command per class:
+
+```bash
+dotnet test WinForward.slnx -c Release --filter "FullyQualifiedName~<class>"
+```
+
+The `hot-path.md` "Tests Required" totals string is **unchanged** by this task:
+
+```text
+HotPathAllocationGateTests:11 CapturePumpReadCallTests:3 SweepAllocationGateTests:12 NdisCapturePumpTests:14
+```
+
+```text
+HotPathAllocationGateTests       Failed: 0, Passed: 11, Skipped: 0, Total: 11
+CapturePumpReadCallTests         Failed: 0, Passed:  3, Skipped: 0, Total:  3
+SweepAllocationGateTests         Failed: 0, Passed: 12, Skipped: 0, Total: 12
+NdisCapturePumpTests             Failed: 0, Passed: 14, Skipped: 0, Total: 14
+WarmPathGateTests                Failed: 0, Passed: 25, Skipped: 0, Total: 25
+TcpRedirectWarmPathGateTests     Failed: 0, Passed:  2, Skipped: 0, Total:  2
+UdpWarmPathGateTests             Failed: 0, Passed:  7, Skipped: 0, Total:  7
+SelfTrafficWarmPathGateTests     Failed: 0, Passed:  4, Skipped: 0, Total:  4
+FlowKeyShapeTests                Failed: 0, Passed:  1, Skipped: 0, Total:  1
+PackedFlowKeyTests               Failed: 0, Passed:  8, Skipped: 0, Total:  8
+AdapterSlotTableTests            Failed: 0, Passed:  7, Skipped: 0, Total:  7
+SequenceTrackerTests             Failed: 0, Passed:  3, Skipped: 0, Total:  3
+PacketLayoutTests                Failed: 0, Passed:  8, Skipped: 0, Total:  8
+PacketPathWalkCountTests         Failed: 0, Passed:  5, Skipped: 0, Total:  5
+FlowContextMetadataTests         Failed: 0, Passed:  2, Skipped: 0, Total:  2
+TcpRedirectInjectionBatchingTests Failed: 0, Passed: 14, Skipped: 0, Total: 14
+```
+
+## Mapping against the Steps 1-5 totals (a grown class must not be compared to a stale string)
+
+| class | after Steps 1-5 | after Steps 6-7 + hardening | what grew it |
+|---|---:|---:|---|
+| `PacketLayoutTests` | 5 | **8** | `OnlyAParsedFrameYieldsAValidLayout`, `DefaultedLayoutIsRefusedByteIdenticallyRatherThanRewritten`, `DefaultedLayoutObservesNoSequence` |
+| `PacketPathWalkCountTests` | 4 | **5** | `EveryDispatchedFlowPacketCarriesAParsedLayout` |
+| `TcpRedirectInjectionBatchingTests` | 13 | **14** | `RedirectLegRefusesADefaultedLayoutByteIdentically` |
+| `FlowContextMetadataTests` | — | **2** | new class: the Step-7 context facts |
+| `FlowKeyShapeTests` | 1 | 1 | the same fact now asserts `FlowContext` 80 / `CapturedFlowPacket` 152 |
+| every other class | unchanged | unchanged | Step 7 and the hardening add no facts elsewhere |
+
+## Full suite
+
+```text
+WinForward.Core.Tests            Failed: 0, Passed: 1057, Skipped: 0, Total: 1057
+WinForward.Analyzers.Tests       Failed: 0, Passed:   18, Skipped: 0, Total:   18
+```
+
+Baseline at Step 0 was 1050 + 18; this task added 7 facts (3 layout, 1 walk-count, 1 redirect-leg
+refusal, 2 context-metadata).
+
+## Independent check session (2026-09-30) — per-class re-derivation
+
+Same working set, after the check session's fixes (C1–C7 in `implement.md`: the `UdpAdapterTargetSource`
+seed constructor, the packed-canonical fact's independent materialized oracle, a reject-path assertion
+in the layout truncation corpus, the `Observe`/spec/artifact wording corrections — no behaviour change
+on any measured packet path).
+
+Fingerprints, because the `git write-tree` value above **is the base tree** (nothing is staged, so it
+does not fingerprint the work):
+
+```text
+git rev-parse --short HEAD                     = ca8d999
+git write-tree                                 = b6e93b5248ed5c67345fa1385643ba37a3d8bdcb   (= the base tree; nothing staged)
+git diff HEAD | sha256 (first 16)              = 92cb7906ba858faf
+untracked src/tests/benchmarks excl. results   = b1ffee511c4ff831
+```
+
+Build: 0 warnings / 0 errors. Full suite: **1057 + 18 passed, 0 failed** (3 consecutive runs at this
+tree). One transient full-suite failure appeared in the first run after the source fixes; it was not
+captured by name and did not reproduce in 3 further full-suite runs nor in any of the 42
+per-class runs below — recorded as a residual.
+
+Every class was run in its own process (never `--no-build`), 2 runs each and 4 runs for the four exact
+gates; the padded summaries and exit statuses are in `gate-stability.txt`. No class failed, no totals
+assertion was vacuous, and every class's total was identical across its runs:
+
+| class | runs | observed total (stable across runs) |
+|---|---:|---:|
+| `HotPathAllocationGateTests` | 4 | 11 |
+| `CapturePumpReadCallTests` | 4 | 3 |
+| `SweepAllocationGateTests` | 4 | 12 |
+| `NdisCapturePumpTests` | 4 | 14 |
+| `WarmPathGateTests` | 2 | 25 |
+| `TcpRedirectWarmPathGateTests` | 2 | 2 |
+| `UdpWarmPathGateTests` | 2 | 7 |
+| `SelfTrafficWarmPathGateTests` | 2 | 4 |
+| `FlowKeyShapeTests` | 2 | 1 |
+| `PackedFlowKeyTests` | 2 | 8 |
+| `AdapterSlotTableTests` | 2 | 7 |
+| `SequenceTrackerTests` | 2 | 3 |
+| `PacketLayoutTests` | 2 | 8 |
+| `PacketPathWalkCountTests` | 2 | 5 |
+| `FlowContextMetadataTests` | 2 | 2 |
+| `TcpRedirectInjectionBatchingTests` | 2 | 14 |
+| `UdpAdapterTargetSourceTests` | 2 | 11 (not in the original table; its fact gained an assertion, the count is unchanged) |
+
+### Format-gate round (C8)
+
+The operator's `dotnet format` round (29 diagnostics, all fixed without suppression) converted the
+field-returning accessors to get-only auto-properties and deleted the unused
+`AdapterSlotTable.Observe`. Working-tree fingerprints at the re-measured tree:
+`git diff HEAD | sha256` (first 16) = fd89fb5d06506525; untracked src/tests/benchmarks (excl. results)
+= f79ad7487335b385. Every class above was re-run green with its total unchanged (`FlowKey` is still
+exactly 64 B and `PacketLayout` 16 B — the size facts are the guard), the four exact gates 3x each,
+and the full suite is 1057 + 18 passed / 0 failed. See `gate-stability.txt`'s second appended block.
+
+### jb inspectcode round (C9)
+
+The operator's jb round (44 findings) was resolved without suppression except where documented (the two
+AGENTS.md `MemberCanBePrivate.Global` packet-layout accessors, the B1 guard-clause cref pattern, and the
+`ClassNeverInstantiated.Global` false positive on the coordinator's constructor-less partial part); the
+thread-safety findings were restructured rather than suppressed. Working-tree fingerprints at this tree:
+`git diff HEAD | sha256` (first 16) = 4030ef3d34b86770; untracked src/tests/benchmarks (excl. results) = a8c7d14d2155c169.
+Every class above keeps its total, the full suite is 1057 + 18 passed / 0 failed, and the four exact
+gates plus the four warm-path classes are green (see `gate-stability.txt`'s third appended block).

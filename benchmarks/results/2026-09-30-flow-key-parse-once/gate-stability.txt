@@ -1,0 +1,163 @@
+# Gate stability at the closing tree (one run per class — the 20-run procedure was not re-derived)
+
+Task `09-30-flow-key-parse-once`, Step 8. `hot-path.md`'s per-gate proof procedure (20 runs per gate in
+its own process, failures classified by the recorded signature `^(168|5216|7384|7448)$`) is a
+**host-noise** procedure. `design.md` §11.8 settles this task's obligation: re-run the four allocation
+classes **once** and record their totals; repeat the 20-run loop only if a gate actually fails.
+
+Tree: `ca8d999` + this task's work, uncommitted (`git write-tree`
+b6e93b5248ed5c67345fa1385643ba37a3d8bdcb).
+
+```bash
+for c in HotPathAllocationGateTests CapturePumpReadCallTests SweepAllocationGateTests \
+         NdisCapturePumpTests WarmPathGateTests TcpRedirectWarmPathGateTests \
+         UdpWarmPathGateTests SelfTrafficWarmPathGateTests; do
+  dotnet test WinForward.slnx -c Release --filter "FullyQualifiedName~$c"
+done
+```
+
+```text
+HotPathAllocationGateTests       Failed: 0, Passed: 11, Skipped: 0, Total: 11
+CapturePumpReadCallTests         Failed: 0, Passed:  3, Skipped: 0, Total:  3
+SweepAllocationGateTests         Failed: 0, Passed: 12, Skipped: 0, Total: 12
+NdisCapturePumpTests             Failed: 0, Passed: 14, Skipped: 0, Total: 14
+WarmPathGateTests                Failed: 0, Passed: 25, Skipped: 0, Total: 25
+TcpRedirectWarmPathGateTests     Failed: 0, Passed:  2, Skipped: 0, Total:  2
+UdpWarmPathGateTests             Failed: 0, Passed:  7, Skipped: 0, Total:  7
+SelfTrafficWarmPathGateTests     Failed: 0, Passed:  4, Skipped: 0, Total:  4
+```
+
+**No gate failed**, on this tree or at any rollback point during the task, so no gate was classified
+and the 20-run loop was not repeated. The totals string `HotPathAllocationGateTests:11
+CapturePumpReadCallTests:3 SweepAllocationGateTests:12 NdisCapturePumpTests:14` that the proof loop
+asserts is unchanged by this task.
+
+## Discrimination re-proofs (design §11.6) — the ones this session actually ran
+
+| injection | expected failure | observed |
+|---|---|---|
+| a zeroed `default(PacketLayout)` handed to the layout consumers | every consumer refuses, frame byte-identical | **red before** the hardening: the rewriter accepted it (`true`), the sequence read observed 0, the redirect leg returned `Injected`; green after (`defaulted-layout-hardening.txt`) — and the injection surfaced one existing allocation gate that had been passing on the mis-rewrite |
+| `PacketLayout` losing a field or growing past 16 B | `PacketLayoutFitsSixteenBytes` | the validity stamp was added *inside* the existing padding byte; the size fact stays green at 16 |
+| warm-batch allocation on the hardened path | `HotPathAllocationGateTests` (11) | 11/11 green after each change |
+
+The Step-1/3/5 discrimination re-proofs were **not** recorded by the previous agent (an earlier
+revision of this file claimed they were in `README.md`; they were not). The independent check session
+re-ran them against this tree, each as a temporary edit that was reverted immediately and verified
+byte-identical by md5:
+
+| injection (temporary, reverted) | expected failure | observed |
+|---|---|---|
+| `PacketLayout.IsTcp` loses the stamp check (the pre-hardening gate) | the three defaulted-layout facts | **red, same signatures as `defaulted-layout-hardening.txt`**: `OnlyAParsedFrameYieldsAValidLayout` (`Expected: False / Actual: True`), `DefaultedLayoutIsRefusedByteIdenticallyRatherThanRewritten` (`Expected: False / Actual: True`), `DefaultedLayoutObservesNoSequence`, `RedirectLegRefusesADefaultedLayoutByteIdentically` (`Expected: Blocked / Actual: Injected`) — 4 failed / 0 passed |
+| `TcpFrameRewriter.IsTcpSyn(in PacketLayout)` compares `layout.Transport == 1` (the R12 bug) | `LayoutSynTestMatchesTheSpanTest` | red: `Expected: True / Actual: False` (SYN detection disabled) |
+| `FlowHash.CombineCanonicalPacked` orders by the low address half first | `PackedAndMaterializedCanonicalHashesAgree` | red **only after the check session's fix**: `Expected: 1213610649 / Actual: 1809849290`. Before the fix the same injection passed 8/8 — the fact's "materialized" side delegated to the packed function, so it could not see an ordering change (see `implement.md` C2) |
+| `FlowKey` grown by one 8-byte field (72 B) | the size facts | red: `FlowKeyFitsOneCacheLineAndHasNoReferenceTypedFields` ("FlowKey is 72 bytes") and `StructSizesForDiagnostics` (`Expected: 64 / Actual: 72`) |
+| `UdpAdapterTargetSource`'s seed snapshot built over a throwaway slot table (the pre-fix line) | `AdapterIdsResolveThroughTheSlotTable` | red: `Expected: ["wlan-1"] / Actual: []` (see `implement.md` C1) |
+
+Those re-proofs replace the previous file's claim; the Step-1/3/5 facts they protect (`IsTcpSyn`'s
+gate, the packed canonical order, the size bound) are green in the full suite.
+
+# appended by the independent check session (sub-agent), 2026-09-30
+#
+# Re-derivation on the frozen working set, after the check session's fixes (C1-C7 in implement.md;
+# no behaviour change on any measured packet path). Fingerprints:
+#   git rev-parse --short HEAD = ca8d999
+#   git write-tree            = b6e93b5248ed5c67345fa1385643ba37a3d8bdcb (index tree; nothing staged, so it equals the BASE tree and
+#                               does not fingerprint the work -- recorded because the procedure asks
+#                               for it; the two working-tree hashes below are the real fingerprint)
+#   git diff HEAD | sha256 (first 16)             = 92cb7906ba858faf
+#   untracked src/tests/benchmarks (excl results) = b1ffee511c4ff831
+# Build: 0 warnings / 0 errors. Full suite: 1057 + 18 passed, 0 failed (3 consecutive runs).
+#
+# Procedure: one process per run, class filter, never --no-build; 4 runs for the four exact gates,
+# 2 for the F2/F3 structural classes and for every class this task grew. Failures are classified
+# only by the recorded host signature ^(168|5216|7384|7448)$.
+#
+# Result: 42 runs, 0 failures, 0 vacuous totals assertions, every class's total identical
+# across its runs. The N=20 loop of hot-path.md 4 was therefore not re-derived (design 11.8's
+# obligation, now met with more samples than the implementer's single run per class).
+
+gate HotPathAllocationGateTests run 1 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 2 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 3 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 4 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate CapturePumpReadCallTests run 1 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 2 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 3 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 4 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate SweepAllocationGateTests run 1 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 2 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 3 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 4 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate NdisCapturePumpTests run 1 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 2 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 3 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 4 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate WarmPathGateTests run 1 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=25 Failed:     0, Passed:    25, Skipped:     0, Total:    25 actual=none
+gate WarmPathGateTests run 2 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=25 Failed:     0, Passed:    25, Skipped:     0, Total:    25 actual=none
+gate TcpRedirectWarmPathGateTests run 1 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=2 Failed:     0, Passed:     2, Skipped:     0, Total:     2 actual=none
+gate TcpRedirectWarmPathGateTests run 2 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=2 Failed:     0, Passed:     2, Skipped:     0, Total:     2 actual=none
+gate UdpWarmPathGateTests run 1 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=7 Failed:     0, Passed:     7, Skipped:     0, Total:     7 actual=none
+gate UdpWarmPathGateTests run 2 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=7 Failed:     0, Passed:     7, Skipped:     0, Total:     7 actual=none
+gate SelfTrafficWarmPathGateTests run 1 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate SelfTrafficWarmPathGateTests run 2 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate FlowKeyShapeTests run 1 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=1 Failed:     0, Passed:     1, Skipped:     0, Total:     1 actual=none
+gate FlowKeyShapeTests run 2 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=1 Failed:     0, Passed:     1, Skipped:     0, Total:     1 actual=none
+gate PackedFlowKeyTests run 1 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=8 Failed:     0, Passed:     8, Skipped:     0, Total:     8 actual=none
+gate PackedFlowKeyTests run 2 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=8 Failed:     0, Passed:     8, Skipped:     0, Total:     8 actual=none
+gate AdapterSlotTableTests run 1 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=7 Failed:     0, Passed:     7, Skipped:     0, Total:     7 actual=none
+gate AdapterSlotTableTests run 2 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=7 Failed:     0, Passed:     7, Skipped:     0, Total:     7 actual=none
+gate SequenceTrackerTests run 1 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate SequenceTrackerTests run 2 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate PacketLayoutTests run 1 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=8 Failed:     0, Passed:     8, Skipped:     0, Total:     8 actual=none
+gate PacketLayoutTests run 2 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=8 Failed:     0, Passed:     8, Skipped:     0, Total:     8 actual=none
+gate PacketPathWalkCountTests run 1 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate PacketPathWalkCountTests run 2 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate FlowContextMetadataTests run 1 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=2 Failed:     0, Passed:     2, Skipped:     0, Total:     2 actual=none
+gate FlowContextMetadataTests run 2 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=2 Failed:     0, Passed:     2, Skipped:     0, Total:     2 actual=none
+gate TcpRedirectInjectionBatchingTests run 1 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate TcpRedirectInjectionBatchingTests run 2 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate UdpAdapterTargetSourceTests run 1 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=observed Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate UdpAdapterTargetSourceTests run 2 ca8d999 b6e93b5248ed5c67345fa1385643ba37a3d8bdcb rc=0 expected=observed Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+
+# appended by the independent check session: format-gate round (29 diagnostics, C8 in implement.md)
+#
+# The auto-property conversion (RCS1085) and the Observe deletion changed the working tree after the
+# 42-run block above, so the affected classes and the four exact gates were re-run at this tree:
+#   git rev-parse --short HEAD = ca8d999
+#   git write-tree            = b6e93b5248ed5c67345fa1385643ba37a3d8bdcb (base tree; nothing staged)
+#   git diff HEAD | sha256 (first 16)             = fd89fb5d06506525
+#   untracked src/tests/benchmarks (excl results) = f79ad7487335b385
+# Build: 0 warnings / 0 errors. Full suite: 1057 + 18 passed, 0 failed.
+# Affected classes (1 run each, own process, --no-build after the verified build): FlowKeyShapeTests 1,
+# PackedFlowKeyTests 8, PacketLayoutTests 8, AdapterSlotTableTests 7, SequenceTrackerTests 3,
+# PacketPathWalkCountTests 5, FlowContextMetadataTests 2, TcpRedirectInjectionBatchingTests 14 — all
+# Failed: 0; every total identical to the block above. Four exact gates 3 runs each, all green:
+#   HotPathAllocationGateTests 11 | CapturePumpReadCallTests 3 | SweepAllocationGateTests 12 | NdisCapturePumpTests 14
+# The 42-run block above remains the record for its own tree (diffHEAD 92cb7906ba858faf /
+# untracked b1ffee511c4ff831); no failure was classified by the host signature in either block.
+# The build and the full suite were re-run at this final tree after the last doc/spec wording
+# edits (0 warnings / 0 errors; 1057 + 18 passed, 0 failed), and the affected classes were
+# re-run once more green (1/8/8/7). The tracked-file hash above includes those spec edits; no
+# source or test file changed after the runs, which the untracked-source hash covers.
+
+# appended by the independent check session: jb inspectcode round (44 findings, C9 in implement.md)
+#
+# Fingerprints at this tree (the tracked-file hash includes the C8/C9 spec+source edits):
+#   git rev-parse --short HEAD = ca8d999
+#   git write-tree            = b6e93b5248ed5c67345fa1385643ba37a3d8bdcb (base tree; nothing staged)
+#   git diff HEAD | sha256 (first 16)             = 4030ef3d34b86770
+#   untracked src/tests/benchmarks (excl results) = a8c7d14d2155c169
+# Build: 0 warnings / 0 errors (Release). Full suite: 1057 + 18 passed, 0 failed.
+# Affected classes (own process, --no-build after the verified build), all Failed: 0 and every total
+# unchanged from the blocks above: PacketPathWalkCountTests 5, SequenceTrackerTests 3, PacketLayoutTests 8,
+# FlowKeyShapeTests 1, PackedFlowKeyTests 8, AdapterSlotTableTests 7, TcpRedirectInjectionBatchingTests 14,
+# UdpAssociationRecoveryTests 7, NdisPacketActionExecutorLoggingTests 4, TcpRedirectCoordinatorRewriteTests 16,
+# FlowContextMetadataTests 2.
+# Gate classes, 2 runs each, own process, all green with the expected totals:
+#   HotPathAllocationGateTests 11 | CapturePumpReadCallTests 3 | SweepAllocationGateTests 12 | NdisCapturePumpTests 14
+#   WarmPathGateTests 25 | TcpRedirectWarmPathGateTests 2 | UdpWarmPathGateTests 7 | SelfTrafficWarmPathGateTests 4
+# The probe sites now use null propagation (UseNullPropagation); the 0 B gates above are the evidence that
+# the shape stays allocation-free.
+# Doc-comment check (compiler, --generate-documentation, not one of the operator gates): every cref on this
+# task's surface resolves; the only remaining CS1574s in the solution are the two pre-existing ones
+# (FlowDispatcher.cs:57, DispatcherBenchmarks.cs:149).

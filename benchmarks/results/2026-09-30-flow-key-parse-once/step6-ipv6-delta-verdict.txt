@@ -1,0 +1,68 @@
+# Step 6 verdict: the single-pass IPv6 address delta is rejected by measurement
+
+Task `09-30-flow-key-parse-once`. `implement.md` Step 6 is an **optional commit**: the single-pass,
+wide-load IPv6 address delta in `PacketChecksums.TryRewriteIpv6Tcp`, adopted "only if the post-Step-5
+re-run shows a win on the IPv6 reverse rows with every other row unmoved" (`design.md` §6). It was
+**not adopted**. This file records the readings the decision is made on; nothing here is a gate.
+
+## Reproduced from the artifact series (per-row medians of the 3 runs each)
+
+Source: `tcp-redirect-data-path-{before,after}-{1,2,3}.csv` in this directory, re-aggregated for
+this record (`--job short`, ns/op, 0 B allocated on every row).
+
+| row | family | frame | before | after | speed-up |
+|---|---|---:|---:|---:|---:|
+| `ReverseLegForwarded` (the AC-4 row) | IPv6 | 128 | 112.05 | 59.64 | 1.88× |
+| `ReverseLegForwarded` (the AC-4 row) | IPv6 | 1400 | 122.07 | 72.87 | 1.68× |
+| `ReverseLegForwarded` | IPv4 | 128 | 53.86 | 25.99 | 2.07× |
+| `ReverseLegForwarded` | IPv4 | 1400 | 74.00 | 37.90 | 1.95× |
+| `ReverseLegHost` | IPv6 | 128 | 90.39 | 55.06 | 1.64× |
+| `ReverseLegHost` | IPv6 | 1400 | 102.69 | 68.28 | 1.50× |
+
+**Every one of the 16 rows improves**, so AC-4's discharge — per-leg no-regression — holds with no
+threshold anywhere (the worst row still improves 1.50×; the largest after/before ratio over all rows
+is 0.665). The AC-4 row itself improves **1.68×** (IPv6, 1400 B) and 1.88× (IPv6, 128 B).
+
+Two readings that point the other way, both recorded rather than smoothed over:
+
+- **The IPv6:IPv4 ratio widened**: 1400 B 1.65 → **1.92**; 128 B 2.08 → **2.29**. The work the
+  landing steps removed (a lock pair, three header walks) is family-neutral, while the remaining
+  family-specific term is the IPv6 checksum delta, which shrinks neither side proportionally.
+- **The absolute IPv6−IPv4 gap narrowed**: 1400 B 48.07 → **34.97 ns** (−13.1); 128 B 58.19 →
+  **33.65 ns** (−24.5). The row's family-specific residual is real and smaller than it was.
+
+## Why the optional commit is dropped
+
+1. **Its precondition is false.** `design.md` §6 adopts the delta only when "the IPv6 reverse rows
+   still read slow **with every other row unmoved**". Every other row moved — and improved — so this
+   series cannot attribute anything to a checksum-shaped change. The recorded 1.65 → 1.92 ratio is a
+   *reading*, and the PRD restated AC-4 around exactly that: per-leg no-regression is the discharge,
+   the improvement and the ratio are readings, not gates.
+2. **The only measured evidence for the change is below this host's noise floor.** The planning probe
+   measured the wide-load delta at **22.1–22.6 ns vs 27.6–28.3 ns** narrow (`research/
+   implementation-notes.md` §7.3) — ≈5.5 ns on the isolated delta, ≈7.5 % of the 72.87 ns AC-4 row,
+   and `hot-path.md` contract 9 makes sub-2× deltas on this host unmeasurable. Its bit-identity proof
+   (2,000,000 random 32-byte pairs, 0 mismatches) is an equivalence proof, not a win.
+3. **The larger structural half is unmeasured.** Dropping the 32-byte `stackalloc` snapshot and its
+   second pass is the bigger term (the rewriter's family delta measured +43 to +49 ns: IPv6
+   63.7–69.8 vs IPv4 20.3–20.8), and it cannot be separated from host noise without editing product
+   code. Landing an unmeasured rewrite of the transparent-redirect primitive
+   (`quality-guidelines.md:14`) is the opposite of the evidence-gated discipline this task ran on.
+
+Re-opening the step would need a controlled A/B of the delta rewrite itself with the host quiet on
+all four reverse-forwarded cells; that measurement does not exist and the landing steps already
+delivered the row's improvement, so the option is closed as **rejected by measurement**.
+
+## Attribution (which step owns the AC-4 row)
+
+`tcp-redirect-data-path` is `memcpy + TrackServerSequence + TryRewriteTcpEndpoints` — it contains no
+key and no dictionary probe (`research/implementation-notes.md` §7.2), so the key steps must **not**
+be credited here. The named mechanisms are:
+
+- **Step 2** (atomic CAS-max trackers): removes the `_sequenceGate` lock pair from
+  `TrackServerSequence` on **both** legs, measured 22.9–29.0 ns uncontended at census time. Step 1
+  recorded the red count (**2** gate entries per packet pair), Step 2 the after count (**0**).
+- **Step 3** (parse once): the row's re-parsing sequence observation and its span-revalidating
+  rewriter became the layout-driven entries (walk counts 4/4 → 1/1 per leg).
+- Steps 4–5 (packed key) and Step 7 (slim context) are **not** on this row and are not credited with
+  its movement; they are measured on `flow-table-production-shape` and `dispatcher` respectively.

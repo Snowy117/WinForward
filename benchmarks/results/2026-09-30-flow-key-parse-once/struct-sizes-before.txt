@@ -1,0 +1,11 @@
+# Unsafe.SizeOf<T>() on base ca8d999 + Step 1 probes (before)
+FlowKey             = 128
+FlowContext         = 168
+CapturedFlowPacket  = 224
+FlowStateView       = 160
+PacketView          = 80
+Endpoint            = 48
+# per-packet counts (same tree)
+header walks per redirected forward packet = 4 (ParseWalk 3 + RevalidateWalk 1)
+header walks per redirected reverse packet = 4 (ParseWalk 3 + RevalidateWalk 1)
+sequence-gate entries per redirected packet pair = 2

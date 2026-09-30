@@ -33,7 +33,8 @@ public class FlowTableMissBenchmarks
             Endpoint.From(IPAddress.Parse("203.0.113.254"), 65535),
             TransportProtocol.Udp,
             FlowOriginKind.Forwarded,
-            new AdapterContext("missing", 99));
+            BenchmarkShared.SlotOf("missing", 99),
+            99);
     }
 
     [Benchmark]
@@ -70,12 +71,14 @@ public class FlowTableHitBenchmarks
             }
         }
 
-        _hit = BenchmarkShared.CreateFlowKey(Cardinality / 2) with
-        {
-            Origin = FlowOriginKind.Forwarded,
-            OriginAdapterId = "other-adapter",
-            OriginAdapterGeneration = 42,
-        };
+        var baseKey = BenchmarkShared.CreateFlowKey(Cardinality / 2);
+        _hit = FlowKey.Create(
+            baseKey.Local,
+            baseKey.Remote,
+            baseKey.Protocol,
+            FlowOriginKind.Forwarded,
+            BenchmarkShared.SlotOf("other-adapter", 42),
+            42);
     }
 
     [Benchmark]
@@ -128,7 +131,7 @@ public class FlowTableProductionShapeBenchmarks
         _stored = BenchmarkShared.CreateFlowKey(Cardinality / 2);
 
         // The orientation a proxied reply arrives in: the same transport tuple seen from the other end.
-        _reverse = _stored with { Local = _stored.Remote, Remote = _stored.Local };
+        _reverse = _stored.Reverse();
 
         // A row that silently measured the miss path would report a plausible number for the wrong
         // question, so both orientations are proven to resolve before either is timed.

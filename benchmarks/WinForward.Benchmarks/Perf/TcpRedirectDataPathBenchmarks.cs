@@ -41,6 +41,7 @@ public class TcpRedirectDataPathBenchmarks
     private Endpoint _server;
     private TcpRedirectAssociation _host = null!;
     private TcpRedirectAssociation _forwarded = null!;
+    private PacketLayout _layout;
 
     [GlobalSetup]
     public void Setup()
@@ -56,8 +57,8 @@ public class TcpRedirectDataPathBenchmarks
             ? Endpoint.From(IPAddress.Parse("2001:db8::80"), 443)
             : Endpoint.From(IPAddress.Parse("192.0.2.80"), 443);
 
-        var hostKey = FlowKey.Create(_client, _server, TransportProtocol.Tcp, FlowOriginKind.Host, new AdapterContext("adapter-0", 0));
-        var forwardedKey = FlowKey.Create(_client, _server, TransportProtocol.Tcp, FlowOriginKind.Forwarded, new AdapterContext("adapter-0", 0));
+        var hostKey = FlowKey.Create(_client, _server, TransportProtocol.Tcp, FlowOriginKind.Host, BenchmarkShared.SlotOf("adapter-0"), 0);
+        var forwardedKey = FlowKey.Create(_client, _server, TransportProtocol.Tcp, FlowOriginKind.Forwarded, BenchmarkShared.SlotOf("adapter-0"), 0);
         var translated = Endpoint.From(IPAddress.Parse(Ipv6 ? "2001:db8::1080" : "192.168.77.2"), ListenerPort);
         var now = DateTimeOffset.UnixEpoch;
         _host = new TcpRedirectAssociation(hostKey, _server, 0, translated, forwardLocalAddress: null, 1, now);
@@ -65,6 +66,10 @@ public class TcpRedirectDataPathBenchmarks
         // adapter, and a mismatched family makes the rewriter reject every packet.
         var forwardLocal = IPAddress.Parse(Ipv6 ? "2001:db8::1" : "192.168.77.1");
         _forwarded = new TcpRedirectAssociation(forwardedKey, _server, 0, translated, IPAddressValue.From(forwardLocal), 2, now);
+        // Production carries the classification parse's layout on the packet; the rows below
+        // consume it the way the coordinator's data legs do, so they measure the shipped shape.
+        if (!IPTcpUdpPacket.TryParse(_pristine, out var view)) throw new InvalidOperationException("The benchmark frame does not parse.");
+        _layout = PacketLayout.From(view);
 
         ProveRowsSucceed();
     }
@@ -73,24 +78,24 @@ public class TcpRedirectDataPathBenchmarks
     public bool ForwardLegHost()
     {
         _pristine.AsSpan().CopyTo(_scratch);
-        TcpSequenceObservation.TrackClientSequence(_scratch, _host);
-        return TcpFrameRewriter.TryRewriteForwardLeg(_scratch, _client, _server, _host, ListenerPort);
+        TcpSequenceObservation.TrackClientSequence(_scratch, _layout, _host);
+        return TcpFrameRewriter.TryRewriteForwardLeg(_scratch, _layout, _client, _server, _host, ListenerPort);
     }
 
     [Benchmark]
     public bool ForwardLegForwarded()
     {
         _pristine.AsSpan().CopyTo(_scratch);
-        TcpSequenceObservation.TrackClientSequence(_scratch, _forwarded);
-        return TcpFrameRewriter.TryRewriteForwardLeg(_scratch, _client, _server, _forwarded, ListenerPort);
+        TcpSequenceObservation.TrackClientSequence(_scratch, _layout, _forwarded);
+        return TcpFrameRewriter.TryRewriteForwardLeg(_scratch, _layout, _client, _server, _forwarded, ListenerPort);
     }
 
     [Benchmark]
     public bool ReverseLegHost()
     {
         _pristine.AsSpan().CopyTo(_scratch);
-        TcpSequenceObservation.TrackServerSequence(_scratch, _host);
-        if (!PacketChecksums.TryRewriteTcpEndpoints(_scratch, _server.Address, _server.Port, _client.Address, ListenerPort)) return false;
+        TcpSequenceObservation.TrackServerSequence(_scratch, _layout, _host);
+        if (!PacketChecksums.TryRewriteTcpEndpoints(_scratch, _layout, _server.Address, _server.Port, _client.Address, ListenerPort)) return false;
         TcpFrameRewriter.SwapEthernetMacs(_scratch);
         return true;
     }
@@ -99,8 +104,8 @@ public class TcpRedirectDataPathBenchmarks
     public bool ReverseLegForwarded()
     {
         _pristine.AsSpan().CopyTo(_scratch);
-        TcpSequenceObservation.TrackServerSequence(_scratch, _forwarded);
-        return PacketChecksums.TryRewriteTcpEndpoints(_scratch, _server.Address, _server.Port, _client.Address, ListenerPort);
+        TcpSequenceObservation.TrackServerSequence(_scratch, _layout, _forwarded);
+        return PacketChecksums.TryRewriteTcpEndpoints(_scratch, _layout, _server.Address, _server.Port, _client.Address, ListenerPort);
     }
 
     /// <summary>
@@ -119,15 +124,15 @@ public class TcpRedirectDataPathBenchmarks
     {
         _pristine.AsSpan().CopyTo(_scratch);
         var association = host ? _host : _forwarded;
-        TcpSequenceObservation.TrackClientSequence(_scratch, association);
-        return TcpFrameRewriter.TryRewriteForwardLeg(_scratch, _client, _server, association, ListenerPort);
+        TcpSequenceObservation.TrackClientSequence(_scratch, _layout, association);
+        return TcpFrameRewriter.TryRewriteForwardLeg(_scratch, _layout, _client, _server, association, ListenerPort);
     }
 
     private bool Reverse(bool host)
     {
         _pristine.AsSpan().CopyTo(_scratch);
-        TcpSequenceObservation.TrackServerSequence(_scratch, host ? _host : _forwarded);
-        if (!PacketChecksums.TryRewriteTcpEndpoints(_scratch, _server.Address, _server.Port, _client.Address, ListenerPort)) return false;
+        TcpSequenceObservation.TrackServerSequence(_scratch, _layout, host ? _host : _forwarded);
+        if (!PacketChecksums.TryRewriteTcpEndpoints(_scratch, _layout, _server.Address, _server.Port, _client.Address, ListenerPort)) return false;
         if (host) TcpFrameRewriter.SwapEthernetMacs(_scratch);
         return true;
     }

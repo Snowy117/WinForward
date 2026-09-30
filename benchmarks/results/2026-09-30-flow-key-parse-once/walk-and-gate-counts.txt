@@ -1,0 +1,94 @@
+# F4 struct sizes and per-packet work counts — exact evidence
+
+Tree: base `ca8d999` (+ Step 1 probes for the before column). Every size below is
+`System.Runtime.CompilerServices.Unsafe.SizeOf<T>()`, asserted exactly by
+`tests/WinForward.Core.Tests/FlowKeyShapeTests.StructSizesForDiagnostics` and printed by it
+(`PacketLayout`'s 16 is asserted by `PacketLayoutTests.PacketLayoutFitsSixteenBytes`); every
+count is asserted by `PacketPathWalkCountTests`.
+
+## Struct sizes (exact)
+
+| type | before | after Steps 3–5 | after Steps 6–7 | note |
+|---|---:|---:|---:|---|
+| `FlowKey` | 128 | 64 | **64** | exactly the one-cache-line contract; no headroom |
+| `FlowContext` | 168 | 104 | **80** | Step 7: `Key` (64) + `AdapterMetadata?` + `ProcessMetadata?`; the four strings and the redundant port are gone |
+| `CapturedFlowPacket` | 224 | 176 | **152** | gained the 16-byte `PacketLayout`, lost 24 B with the slim context |
+| `FlowStateView` | 160 | 96 | **96** | packed key + decision + generation |
+| `PacketView` | 80 | 96 | 96 | gained `TransportLength` (int) + `TcpFlags` (byte); 16-byte `UInt128` alignment rounds 82 → 96 (design estimated 88) |
+| `Endpoint` | 48 | 48 | 48 | unchanged; only `FlowKey` stopped storing two of them |
+| `PacketLayout` | — | 16 | 16 | new; the hardening's validity stamp fits the padding, so it stays 16 |
+
+Command:
+
+```bash
+dotnet test WinForward.slnx -c Release --filter 'FullyQualifiedName~StructSizesForDiagnostics' --logger "console;verbosity=detailed"
+```
+
+## Header walks per redirected packet (exact)
+
+Probe: `PacketPathProbe.ParseWalk` / `RevalidateWalk` / `ViewRewrite` (`[ThreadStatic]`, null in
+production), driven through `CapturePacketProcessor.ProcessAsync` → `FlowDispatcher` →
+`TcpProxyCoordinator` on one thread (`RedirectedForwardPacketWalksHeadersExactlyOnce`,
+`RedirectedReversePacketWalksHeadersExactlyOnce`; thread id asserted unchanged).
+
+| leg | before (red) | after |
+|---|---|---|
+| forward mid-flow, per packet | `ParseWalk` 3 + `RevalidateWalk` 1 = **4** | `ParseWalk` 1 + `RevalidateWalk` 0 + `ViewRewrite` 1 = **1 parse + 1 view rewrite** |
+| reverse, per packet | `ParseWalk` 3 + `RevalidateWalk` 1 = **4** | `ParseWalk` 1 + `RevalidateWalk` 0 + `ViewRewrite` 1 |
+
+The red split is quoted from the Step-1 run of the same harness (source line
+`Assert.Equal(3 * count, parse.Count); Assert.Equal(count, revalidate.Count);` in
+`PacketPathWalkCountTests`, flipped to `count / 0 / count` when Step 3 landed).
+
+## Sequence-gate entries per redirected packet (exact)
+
+The Step-1 instrument (`TcpRedirectAssociation.SequenceGateEntryProbe` +
+`SequenceGateEntryCountForDiagnostics`, both deleted with `_sequenceGate` in Step 2) recorded **2**
+entries for a forward+reverse packet pair (one per leg — the census's "two lock entries per
+packet"); its fact `RedirectedPacketPairTakesTheSequenceGateTwice` (also deleted) asserted
+`before + 1` after the forward drive and `before + 2` after the reverse drive.
+
+After Step 2 the gate is deleted with the instrument, so `RedirectPacketTakesZeroSequenceGateEntries`
+asserts the structural fact (`TcpRedirectAssociation` has no reference-typed instance field — a gate
+cannot exist without one) on a drive that proves itself non-vacuous (both trackers advance).
+`TcpRedirectAssociationHoldsNoLockField` pins the same structural fact directly.
+
+## Defaulted-layout refusals (exact)
+
+`PacketLayout` gates every consumer on `IsTcp` (a parsed layout whose transport is TCP), so a
+`default(PacketLayout)` — the layout a packet that never parsed carries — is refused rather than
+applied at the IP header's own offset. Red-before: 3 facts failed, the rewriter accepted the
+defaulted layout and the real redirect leg staged the mis-rewritten frame for injection; one
+allocation gate had been passing on exactly that behavior. Full text and commands:
+`defaulted-layout-hardening.txt`.
+
+| check | before | after |
+|---|---|---|
+| layout-driven rewrite with a defaulted layout | accepted (`true`), frame mutated at `14 + 12` | refused (`false`), frame byte-identical (`DefaultedLayoutIsRefusedByteIdenticallyRatherThanRewritten`) |
+| sequence observation with a defaulted layout | observed a bogus value from offset 18 (`Actual: 0`) | tracker stays unobserved (`DefaultedLayoutObservesNoSequence`) |
+| redirect forward leg with a defaulted layout | `Injected` (frame queued) | `Blocked` fail-closed, slot byte-identical (`RedirectLegRefusesADefaultedLayoutByteIdentically`) |
+| dispatched flow packets carrying a parsed layout | not asserted | all valid (`EveryDispatchedFlowPacketCarriesAParsedLayout`) |
+
+## Commands
+
+```bash
+dotnet test WinForward.slnx -c Release --filter 'FullyQualifiedName~PacketPathWalkCountTests'
+dotnet test WinForward.slnx -c Release --filter 'FullyQualifiedName~SequenceTrackerTests'
+dotnet test WinForward.slnx -c Release --filter 'FullyQualifiedName~AdapterSlotTableTests'
+dotnet test WinForward.slnx -c Release --filter 'FullyQualifiedName~PackedFlowKeyTests'
+dotnet test WinForward.slnx -c Release --filter 'FullyQualifiedName~PacketLayoutTests'
+dotnet test WinForward.slnx -c Release --filter 'FullyQualifiedName~FlowContextMetadataTests'
+dotnet test WinForward.slnx -c Release --filter 'FullyQualifiedName~DefaultedLayout|FullyQualifiedName~RefusesADefaultedLayout'
+```
+
+## Independent check session (2026-09-30)
+
+- The red split (**3 `ParseWalk` + 1 `RevalidateWalk` per leg**) was re-derived from the pre-change
+  source in `/tmp/wf-f4-before` (base `ca8d999` + the Step-1 probes, no `PacketLayout`): the forward
+  leg's `TcpProxyCoordinator.HandlePacketAsync` called the span `IsTcpSyn`, the reverse leg called
+  `RecordServerSynAck` + `TrackServerSequence` (two parses), both legs called the span rewriter, and
+  the processor's `TryParse` is the third parse — 4 walks either way, matching the table above.
+- The exact counts are re-asserted green in their own processes: `PacketPathWalkCountTests` 5/5 and
+  `SequenceTrackerTests` 3/3 (two runs each, `class-totals.txt`).
+- The sequence-gate **2** is a Step-1 instrument reading: its probe and its fact were deleted with the
+  gate in Step 2, so it is a recorded red-before number, not a currently assertable fact.

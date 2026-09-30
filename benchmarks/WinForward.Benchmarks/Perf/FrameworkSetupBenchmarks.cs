@@ -133,7 +133,7 @@ public class FrameworkSetupBenchmarks
             var local = Endpoint.From(IPAddress.Loopback, checked((ushort)(10_000 + (index % 50_000))));
             var remote = Endpoint.From(IPAddress.Loopback, 50_000);
             var key = FlowKey.Create(local, remote, TransportProtocol.Udp, FlowOriginKind.Host);
-            var context = new FlowContext(key, ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, remote.Port);
+            var context = new FlowContext(key, Adapter: null, Process: null);
             var token = _registry.Register(new SelfTrafficRegistry.SelfTrafficKey(TransportProtocol.Udp, local, remote));
             Assert(_registry.IsOwned(context), "the registry must own the registered tuple before release");
             token.Dispose();

@@ -38,7 +38,8 @@ public class SelfTrafficBenchmarks
                 Endpoint.From(IPAddress.Parse("203.0.113.10"), 53),
                 TransportProtocol.Udp,
                 FlowOriginKind.Host),
-            ProcessName: null, ProcessPath: null, AdapterId: null, AdapterName: null, 53);
+            Adapter: null,
+            Process: null);
     }
 
     [GlobalCleanup]

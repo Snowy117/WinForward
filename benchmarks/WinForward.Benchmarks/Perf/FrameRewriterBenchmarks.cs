@@ -8,9 +8,9 @@ namespace WinForward.Benchmarks.Perf;
 
 /// <summary>
 /// Per-packet TCP frame rewriting for proxied TCP flows — the only per-packet work the proxy
-/// data plane adds over a plain pass. Covers <see cref="TcpFrameRewriter.IsTcpSyn"/> (the
+/// data plane adds over a plain pass. Covers <see cref="TcpFrameRewriter.IsTcpSyn(ReadOnlySpan{byte})"/> (the
 /// SYN gate every captured TCP frame passes), <see cref="TcpFrameRewriter.SwapEthernetMacs"/>
-/// (host-shape MAC swap), and <see cref="TcpFrameRewriter.TryRewriteForwardLeg"/> in both
+/// (host-shape MAC swap), and <see cref="TcpFrameRewriter.TryRewriteForwardLeg(Span{byte}, Endpoint, Endpoint, TcpRedirectAssociation, ushort)"/> in both
 /// association shapes (host IP-swap vs forwarded DNAT).
 /// </summary>
 [MemoryDiagnoser]
@@ -38,7 +38,7 @@ public class FrameRewriterBenchmarks
         _client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53_000);
         _server = Endpoint.From(IPAddress.Parse("192.0.2.80"), 443);
         var hostKey = BenchmarkShared.CreateFlowKey(0);
-        var forwardedKey = FlowKey.Create(_client, _server, TransportProtocol.Tcp, FlowOriginKind.Forwarded, new AdapterContext("adapter-0", 0));
+        var forwardedKey = FlowKey.Create(_client, _server, TransportProtocol.Tcp, FlowOriginKind.Forwarded, BenchmarkShared.SlotOf("adapter-0"), 0);
         var translated = Endpoint.From(IPAddress.Parse("192.168.77.2"), ListenerPort);
         var now = DateTimeOffset.UnixEpoch;
         _hostAssociation = new TcpRedirectAssociation(hostKey, _server, 0, translated, forwardLocalAddress: null, 1, now);

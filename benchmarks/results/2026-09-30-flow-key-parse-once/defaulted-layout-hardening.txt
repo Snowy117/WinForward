@@ -1,0 +1,110 @@
+# The defaulted-layout hazard: red-before, fix, green-after
+
+Task `09-30-flow-key-parse-once`, the hardening Step 8 asked for on top of Steps 0-7. The hazard was
+the previous agent's hardest attack point: `PacketTransport.Tcp` is **0**, so `default(PacketLayout)`
+— what a hand-built `CapturedFlowPacket` without a layout carries — is indistinguishable from a
+parsed TCP layout whose transport header sits at the IP header's offset and whose family is IPv4.
+
+## The facts (red on the unmodified tree)
+
+```bash
+dotnet test tests/WinForward.Core.Tests/WinForward.Core.Tests.csproj -c Release \
+  --filter "FullyQualifiedName~DefaultedLayout|FullyQualifiedName~RefusesADefaultedLayout"
+```
+
+```text
+  Failed PacketLayoutTests.DefaultedLayoutObservesNoSequence [44 ms]
+   Assert.Null() Failure: Value of type 'Nullable<uint>' has a value
+Expected: null
+Actual:   0
+  Failed PacketLayoutTests.DefaultedLayoutIsRefusedByteIdenticallyRatherThanRewritten [13 ms]
+   Assert.False() Failure
+Expected: False
+Actual:   True
+  Failed TcpRedirectInjectionBatchingTests.RedirectLegRefusesADefaultedLayoutByteIdentically [300 ms]
+   Assert.Equal() Failure: Values differ
+Expected: Blocked
+Actual:   Injected
+Failed!  - Failed: 3, Passed: 0, Skipped: 0, Total: 3
+```
+
+Reading of the red: the layout-driven rewriter **accepted** the defaulted layout (its
+`Transport != Tcp` test passed because `Tcp == 0` and its family test passed because IPv4 `== 0`)
+and wrote the IPv4 endpoints at `14 + 12` — the IP header's own first bytes — while the real forward
+leg staged that frame for injection (`Injected`, not the fail-closed `Blocked`). The sequence read
+observed `0` from the same wrong offset instead of leaving the tracker unobserved.
+
+The hazard was **live in the tree**, not hypothetical: `HotPathAllocationGateTests
+.DeferredInPlaceRedirectInjectionAllocatesNoManagedBytes` built its in-place packet without a layout
+and passed while the leg rewrote at the wrong offsets (it asserts the outcome, never the bytes):
+
+```text
+[xUnit.net 00:00:01.63]     WinForward.Core.Tests.HotPathAllocationGateTests.DeferredInPlaceRedirectInjectionAllocatesNoManagedBytes [FAIL]
+  Error Message:
+   deferred in-place reinjection was not committed
+```
+
+That gate now carries the template packet's parse layout (the staged slot holds the same bytes), so
+it measures the warm in-place path it was written for.
+
+## The fix
+
+`PacketLayout` gained an explicit validity encoding: a private `ParsedStamp` byte that only
+`From(in PacketView)` writes, plus `IsValid` and `IsTcp` (`IsValid ∧ transport == TCP`). The
+constructor is private, so **no value can claim to be a parsed layout except one a parse produced**,
+and `default(PacketLayout)` — the only invalid value reachable — fails both gates. Every consumer
+now gates on `IsTcp` (`PacketChecksums.TryRewriteTcpEndpoints(layout)`, `TcpFrameRewriter.IsTcpSyn`,
+`TcpSequenceObservation.RecordClientSyn` / `RecordServerSynAck` / `TryReadTcpSequenceAdvance`), and
+the stamp occupies the record's existing padding byte, so `PacketLayoutFitsSixteenBytes` still holds
+at 16 B.
+
+A second fail-closed consequence falls out of the same gate: `TcpProxyCoordinator.HandlePacketAsync`
+reads the layout-driven `IsTcpSyn`, so a packet without a layout can never be routed into SYN
+handling — it takes the data path, whose rewrite refuses and blocks the association. No layout-less
+packet can open a redirect.
+
+The constructive half is asserted too: `PacketPathWalkCountTests
+.EveryDispatchedFlowPacketCarriesAParsedLayout` drives the real
+`CapturePacketProcessor.ProcessAsync` → dispatcher → executor path and asserts every dispatched flow
+packet's layout `IsValid` (the non-flow arm carries no layout by design and no consumer on that path
+reads one).
+
+## Green after
+
+```text
+dotnet test ... --filter "FullyQualifiedName~DefaultedLayout|FullyQualifiedName~RefusesADefaultedLayout|FullyQualifiedName~PacketLayoutTests"
+Passed!  - Failed:     0, Passed:     9, Skipped:     0, Total:     9
+
+dotnet test ... --filter "FullyQualifiedName~PacketPathWalkCountTests"
+Passed!  - Failed:     0, Passed:     5, Skipped:     0, Total:     5
+```
+
+Facts: `PacketLayoutTests.OnlyAParsedFrameYieldsAValidLayout`,
+`PacketLayoutTests.DefaultedLayoutIsRefusedByteIdenticallyRatherThanRewritten`,
+`PacketLayoutTests.DefaultedLayoutObservesNoSequence`,
+`TcpRedirectInjectionBatchingTests.RedirectLegRefusesADefaultedLayoutByteIdentically`,
+`PacketPathWalkCountTests.EveryDispatchedFlowPacketCarriesAParsedLayout`.
+
+No existing packet test was weakened to get here; the three that changed
+(`DeferredInPlaceRedirectInjectionAllocatesNoManagedBytes`, the batching harness, the classifier
+call sites) now pass the layout the packet's own frame parses to, which is what production does.
+
+## Independent check session (2026-09-30)
+
+The red-before was **reproduced** on the fixed tree by neutralizing exactly the stamp gate
+(`PacketLayout.IsTcp` reduced to `_transport == (byte)PacketTransport.Tcp` — the pre-hardening
+predicate), rebuilding, and running the same filtered command:
+
+```text
+Failed!  - Failed: 4, Passed: 0, Skipped: 0, Total: 4
+  OnlyAParsedFrameYieldsAValidLayout                         Expected: False / Actual: True
+  DefaultedLayoutIsRefusedByteIdenticallyRatherThanRewritten Expected: False / Actual: True
+  DefaultedLayoutObservesNoSequence                          (tracker observed a value)
+  RedirectLegRefusesADefaultedLayoutByteIdentically          Expected: Blocked / Actual: Injected
+```
+
+The signatures match the red recorded above (the fourth fact is `OnlyAParsedFrameYieldsAValidLayout`,
+which the original record counted separately as a green-after fact). The neutralizing edit was then
+reverted and the file verified byte-identical by md5 (`7f87331ac51d8edf0c9a728466a879e9`); the
+green-after filter (`DefaultedLayout|RefusesADefaultedLayout|PacketLayoutTests`) re-ran at **9 passed /
+0 failed** and `PacketPathWalkCountTests` at **5 passed / 0 failed**, matching the counts above.

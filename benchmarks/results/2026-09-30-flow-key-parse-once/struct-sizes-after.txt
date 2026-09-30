@@ -1,0 +1,13 @@
+# Unsafe.SizeOf<T>() after Steps 1-7 (tree = ca8d999 + this task's work; uncommitted)
+FlowKey             = 64    (exactly the one-cache-line contract; no headroom)
+FlowContext         = 80    (Step 7: Key + interned AdapterMetadata? + ProcessMetadata? — the design's target)
+CapturedFlowPacket  = 152   (Step 7: the 16-byte PacketLayout plus the slimmed context — the design's target)
+FlowStateView       = 96
+PacketView          = 96    (gained TransportLength + TcpFlags; 16-byte UInt128 alignment)
+Endpoint            = 48
+PacketLayout        = 16    (still 16 with the validity stamp: 4 bytes of fields + 3 ints)
+# per-packet counts, same tree (after)
+header walks per redirected packet = 1 processor parse + 1 layout-driven rewrite (RevalidateWalk 0)
+sequence-gate entries per redirected packet pair = 0 (no reference-typed field on the association)
+defaulted-layout consumers = 0 accepted (PacketLayout.IsTcp gates every consumer; see
+                                 defaulted-layout-hardening.txt)

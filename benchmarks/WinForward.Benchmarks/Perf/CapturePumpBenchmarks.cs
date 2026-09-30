@@ -34,13 +34,13 @@ public class CapturePumpBenchmarks
         var executor = new CountingExecutor();
         var logger = new ThresholdOnlyLogger(RuntimeLogLevel.Info);
         var dispatcher = new FlowDispatcher(passConfiguration, new NeverOwnedGuard(), executor, logger: logger);
-        var processor = new CapturePacketProcessor(dispatcher, logger);
+        var processor = new CapturePacketProcessor(dispatcher, new AdapterSlotTable(), logger);
         var adapter = new WindowsAdapter("bench-adapter", "Benchmark Adapter", @"\DEVICE\{00000000-B3NCH-4ARK-0000-000000000000}", 0x55, 1);
         var frame = BenchmarkShared.CreateIpv4TcpFrame(FrameBytes);
 
         using var completion = new CancellationTokenSource();
         var reader = new FiniteCaptureReader(frame, PacketsPerRound, DistinctFlows, completion, NdisApiAbi.PacketFlagOnSend);
-        await using var pump = new NdisCapturePump(reader, adapter.RuntimeHandle, (packet, cancellationToken) => processor.ProcessAsync(packet, adapter, cancellationToken), new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), BatchCapacity = BatchCapacity });
+        await using var pump = new NdisCapturePump(reader, adapter.RuntimeHandle, (packet, cancellationToken) => processor.ProcessAsync(packet, adapter, BenchmarkShared.SlotOf("bench-adapter"), cancellationToken), new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1), BatchCapacity = BatchCapacity });
 
         try
         {

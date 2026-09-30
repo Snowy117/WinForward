@@ -172,13 +172,22 @@ internal static class BenchmarkShared
         return (ushort)sum;
     }
 
+    private static readonly AdapterSlotTable s_slots = new();
+
+    /// <summary>The interned slot for a benchmark adapter stable ID (cold, setup-time only).</summary>
+    public static ushort SlotOf(string stableId, long generation = 0)
+    {
+        s_slots.TryIntern(stableId, generation, stableId, out var slot);
+        return slot;
+    }
+
     public static FlowKey CreateFlowKey(int index)
     {
         var first = index / 65_536;
         var second = index % 65_536;
         var local = Endpoint.From(IPAddress.Parse(string.Create(CultureInfo.InvariantCulture, $"10.{first % 256}.{second / 256}.{second % 256}")), checked((ushort)(1_024 + (index % 50_000))));
         var remote = Endpoint.From(IPAddress.Parse(string.Create(CultureInfo.InvariantCulture, $"172.{16 + (first % 16)}.{second / 256}.{second % 256}")), checked((ushort)(1 + (index % 65_535))));
-        return FlowKey.Create(local, remote, TransportProtocol.Udp, FlowOriginKind.Host, new AdapterContext(string.Create(CultureInfo.InvariantCulture, $"adapter-{index % 4}"), index % 4));
+        return FlowKey.Create(local, remote, TransportProtocol.Udp, FlowOriginKind.Host, SlotOf(string.Create(CultureInfo.InvariantCulture, $"adapter-{index % 4}"), index % 4), index % 4);
     }
 
     /// <summary>A TCP flow key with a controllable local (source) port, for the reverse-prefilter
@@ -187,10 +196,13 @@ internal static class BenchmarkShared
     {
         var local = Endpoint.From(IPAddress.Parse("10.0.0.1"), localPort);
         var remote = Endpoint.From(IPAddress.Parse("172.16.0.1"), 443);
-        return FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Host, new AdapterContext("adapter-0", 0));
+        return FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Host, SlotOf("adapter-0"), 0);
     }
 
-    public static FlowContext CreateContext(FlowKey key) => new(key, ProcessName: null, ProcessPath: null, key.OriginAdapterId, AdapterName: null, key.Remote.Port);
+    public static FlowContext CreateContext(FlowKey key) => new(key, AdapterForLogs(key), Process: null);
+
+    /// <summary>The benchmark context's interned adapter identity, resolved from the key's slot (cold).</summary>
+    private static AdapterMetadata? AdapterForLogs(FlowKey key) => s_slots.TryResolve(key.OriginAdapterSlot, out var metadata) ? metadata : null;
 }
 
 internal sealed class NeverOwnedGuard : ISelfTrafficGuard
