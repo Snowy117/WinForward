@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 42
+- **Total Sessions**: 43
 - **Last Active**: 2026-09-30
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1218 | Active |
+| `journal-1.md` | ~1306 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 43 | 2026-09-30 | F2 warm-path lock chain: direct-mapped warm cache (and the ConcurrentDictionary mechanism rejected by the 0 B gate) | `ea13924`, `02fee48`, `cee7063`, `fc0a867` | `master` |
 | 42 | 2026-09-30 | F3 expiry sweeps: bounded-pause rounds at minimal hold granularity (and two measurement-driven reversals) | `c73506d`, `f9361da`, `18671e8`, `3563bdc` | `master` |
 | 41 | 2026-09-30 | Test stabilization part 3: the fake server's reply-counter race (and the residual family's real boundary) | `d149cb4`, `eb8c42e`, `6cace12`, `aa6c29f` | `master` |
 | 40 | 2026-09-30 | Test stabilization part 2: the residual exact-gate lump and the health-signal race | `3962832`, `d3b50c1`, `ac98dbc`, `4a23906` | `master` |

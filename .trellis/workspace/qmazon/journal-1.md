@@ -1216,3 +1216,91 @@ two per-tick delegate allocations (`_prunePendingSyn`, `_holdsFlow`) were hoiste
 ### Status
 
 [OK] **Completed**
+
+
+## Session 43: F2 warm-path lock chain: direct-mapped warm cache (and the ConcurrentDictionary mechanism rejected by the 0 B gate)
+<!-- trellis-session: v=2 fp=c53d28701d2b1a10 -->
+
+**Date**: 2026-09-30
+**Task**: F2 warm-path lock chain: direct-mapped warm cache (and the ConcurrentDictionary mechanism rejected by the 0 B gate)
+**Branch**: `master`
+
+### Summary
+
+The warm path stops paying 3-5 global locks per packet: lock-free 500 ms activity buckets ticked once per pump iteration, a pre-allocated direct-mapped warm cache with exact key validation over the gated dictionary, the self-traffic exact-tuple check moved to claim time with the wildcard half kept lock-free, one reverse probe for TCP, and a wait-free UDP ready send. Warm-arm self-normalised four-thread ratio 0.153-0.161 -> 0.933-0.980, UDP ReadySend 523 -> 186-188 ns, 0 B everywhere. The first mechanism (ConcurrentDictionary + FlowState view) hit the ratio and was rejected for allocating 488 B per claim against the exact 0 B gate.
+
+### Main Changes
+
+### Main Changes
+
+F2 of the structural perf research (`09-29-tcp-udp-path-structural-perf`) — the warm packet path stops
+paying its lock chain. Activity became a lock-free 500 ms bucket (`ActivityBucket`/`ActivityBucketClock`,
+ticked once per pump iteration in the composition through `FlushPendingInjections`, with `FlowState.Reset`
+routed through the injected clock, fixing F3's D9 defect); `FlowTable` gained a **pre-allocated
+direct-mapped warm cache** with exact key validation (seqlock snapshot + transport-tuple corroboration)
+over the still-authoritative gated `Dictionary`, so the warm resolve takes no gate while the exact 0 B
+claim/expire gate stays exact; the self-traffic **exact-tuple** half moved to claim time while the
+**wildcard relay-socket** half stays on the warm path, lock-free; TCP pays one reverse probe instead of two
+gate entries; the UDP ready send is wait-free (no `_activityGate` on the send/touch paths, cached session
+lookup).
+
+### Measurement-driven reversals (again the load-bearing part)
+
+1. The first mechanism — `ConcurrentDictionary` indexes plus a `FlowState` view — **delivered the ratio**
+   (0.628 four-thread self-normalised, 11.06 M/s) and then was **rejected by the allocation contract**: it
+   allocates a `Node` per inserted key, 488 B per claim (three nodes), so
+   `FlowTableClaimAndExpireCycleAllocatesNoManagedBytes` read `Expected: 0, Actual: 124928`. Sanctioning
+   that would have regressed a deliberate pooled-state gate.
+2. The replacement cache then **missed the criterion as first specified** (2 × capacity slots → λ ≈ 0.4 →
+   ~33 % miss → ratio 0.39–0.50 modelled) until the sizing was derived from the measured endpoints and set
+   at 64 × capacity (m ≈ 1.6 %, 2 MB).
+3. After the cache landed, the ratio still read 0.389–0.406 — and the decomposition showed why: the cache
+   probe costs ~7 ns at a 0.73–0.93 % miss rate, while the **still-gated wildcard guard** cost ~142 ns, and
+   the four-thread ceiling was identical to the rejected variant's. Step 4's lock-free guard was the lever,
+   not the resolve mechanism.
+
+### Evidence
+
+| Criterion | Result |
+|---|---|
+| Warm resolve takes no global gate (exact) | flow table 1→0 gate entries, redirect 2→0 gates / 2→1 probes, UDP coordinator 1→0, session activity gate 2→0; parked-gate facts green, red `Expected: 0, Actual: 256` before |
+| Self-traffic split | 0 exact probes over 256 warm hits, 8/8 claims, relay-wildcard fact green (red only against the naive-deletion variant: 1/2 — recorded honestly) |
+| Activity bucket | no clock read in `Touch` (throwing-clock facts), `ReadActivityClock` retired, 16 pump iterations → 16 ticks |
+| Scaling | warm arm self-normalised four-thread ratio **0.980 / 0.957 / 0.933** (line 0.6); 1-thread 5.96–6.03 M/s; fixed-denominator 1.753 / 1.733 / 1.685; miss 0.69–1.10 %; per-lookup CPU flat 166–178 ns across 1/2/4 threads |
+| UDP ready path | four-worker `ReadySend` **186.1 / 187.8 / 186.8 ns** (line ≤261.7), 0 B every row |
+| Memory | `_warm` 2,097,152 B; residency +2.61 MB (+7.9 %) vs recorded floor; gc-soak slope 0, pool outstanding/overflow delta 0 |
+
+### Testing
+
+- [OK] Release build 0 warnings/0 errors; full suite 1021 + 18 green (two runs; one earlier run hit the
+  documented suite-conditional host lump on `SynRetentionWithWarmSynCopyPoolAllocatesNoManagedBytes`
+  — 4,520 B, a new size in the widened `*AllocateNoManagedBytes` family, green 6/6 in per-gate process runs
+  and green in the next full-suite run; recorded in `gate-stability.txt`).
+- [OK] `dotnet format` exit 0 with empty output; `jb inspectcode` **0 issues** (21 fixed in two passes,
+  none by suppression).
+- [OK] Per-gate stability: `HotPathAllocationGateTests` 11/11, `SweepAllocationGateTests` 20/20 (Total 12),
+  `CapturePumpReadCallTests` 20/20, plus the structural 20/20 for the warm-path classes.
+- [OK] Six spec files updated with the new contracts and the spec-row → proof map.
+
+### Status
+
+[OK] **Completed** (archived 2026-09-30)
+
+### Next Steps
+
+- F4 keys/parsing (next in the F2–F8 pipeline): interned adapter slot, parse-once view, atomic sequence
+  trackers, slimmer `FlowContext`. Then F5 pump I/O, F8 attribution, F6 UDP footprint, F7 WFP scoping.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ea13924` | test(bench): warm-resolve arm, gate/clock probes and the scaling/UDP evidence (warm-path-lock-chain) |
+| `02fee48` | perf(flow): lock-free warm path - bucketed activity, direct-mapped warm cache, claim-time self-traffic, one reverse probe, wait-free UDP send (warm-path-lock-chain) |
+| `cee7063` | docs(spec): record the F2 warm-path contracts, cache failure modes and the spec-row-to-proof map (warm-path-lock-chain) |
+| `fc0a867` | chore(task): record the F2 warm-path task and sync the parent backlog (warm-path-lock-chain) |
+
+### Status
+
+[OK] **Completed**
