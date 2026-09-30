@@ -22,7 +22,7 @@ public sealed class TcpProxyCoordinatorRewriteTests
     public void NonExactReverseProbeDoesNotRefreshActivity()
     {
         var table = new TcpRedirectTable();
-        var now = DateTimeOffset.UtcNow;
+        var now = ActivityBucket.ToUtc(ActivityBucket.FromUtc(DateTimeOffset.UtcNow));
         var key = FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
         Assert.True(table.TryClaim(key, key.Remote, 0x1234, Endpoint.From(IPAddress.Loopback, 42000), forwardLocalAddress: null, now, out var claimed));
         Assert.NotNull(claimed);
@@ -48,7 +48,7 @@ public sealed class TcpProxyCoordinatorRewriteTests
 
         var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
         var reverse = MakeReversePacketClassifierOrientation(s_clientIpv4, listenerTuple.Port, s_destIpv4, 53000);
-        var outcome = await coordinator.HandleReverseAsync(reverse, CancellationToken.None);
+        var outcome = await HandleReverseAsync(coordinator, table, reverse, CancellationToken.None);
 
         Assert.Equal(TcpRedirectOutcome.Injected, outcome);
         Assert.Equal(2, injector.InjectedFrames.Count);
@@ -68,7 +68,7 @@ public sealed class TcpProxyCoordinatorRewriteTests
 
         var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
         var reverse = MakeReversePacketClassifierOrientation(s_clientIpv4, listenerTuple.Port, s_destIpv4, 53000);
-        var outcome = await coordinator.HandleReverseAsync(reverse, CancellationToken.None);
+        var outcome = await HandleReverseAsync(coordinator, table, reverse, CancellationToken.None);
 
         Assert.Equal(TcpRedirectOutcome.Injected, outcome);
         Assert.Equal(2, injector.InjectedFrames.Count);
@@ -106,7 +106,7 @@ public sealed class TcpProxyCoordinatorRewriteTests
         injector.InjectedFrames.Clear();
         var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
         var reverse = MakeReversePacketClassifierOrientation(s_clientIpv4, listenerTuple.Port, s_destIpv4, 53000, mutateFrame: f => { f[0] = 0x11; f[6] = 0x22; });
-        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleReverseAsync(reverse, CancellationToken.None));
+        Assert.Equal(TcpRedirectOutcome.Injected, await HandleReverseAsync(coordinator, table, reverse, CancellationToken.None));
 
         var injectedFrame = Assert.Single(injector.InjectedFrames).Frame;
         var rewrittenSrcAddress = new IPAddress(injectedFrame.AsSpan(26, 4).ToArray());
@@ -207,7 +207,7 @@ public sealed class TcpProxyCoordinatorRewriteTests
         injector.InjectedFrames.Clear();
         var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
         var reverse = MakeReversePacketClassifierOrientation(forwardLocal, listenerTuple.Port, client, 53000, 0x5678, f => { f[0] = 0xCC; f[6] = 0xDD; });
-        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleReverseAsync(reverse, CancellationToken.None));
+        Assert.Equal(TcpRedirectOutcome.Injected, await HandleReverseAsync(coordinator, table, reverse, CancellationToken.None));
 
         var (frame, towardMstcp, adapterHandle) = Assert.Single(injector.InjectedFrames);
         Assert.False(towardMstcp);
@@ -264,7 +264,7 @@ public sealed class TcpProxyCoordinatorRewriteTests
         injector.InjectedFrames.Clear();
         var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
         var reverse = MakeReversePacketClassifierOrientation(s_clientIpv4, listenerTuple.Port, s_destIpv4, 53000);
-        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleReverseAsync(reverse, CancellationToken.None));
+        Assert.Equal(TcpRedirectOutcome.Injected, await HandleReverseAsync(coordinator, table, reverse, CancellationToken.None));
 
         var (_, towardMstcp, _) = Assert.Single(injector.InjectedFrames);
         Assert.True(towardMstcp);

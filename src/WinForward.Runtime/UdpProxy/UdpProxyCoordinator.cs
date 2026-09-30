@@ -1,3 +1,4 @@
+using System.Numerics;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Runtime.Socks5;
@@ -13,6 +14,16 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
 
     private readonly UdpAssociationTable _associations;
     private readonly Dictionary<FlowKey, UdpSessionSlot> _sessions;
+
+    // Direct-mapped ready-path cache over the gated _sessions authority, allocated once in the
+    // constructor and never grown. A slot is validated by the attached session's own flow key, so a
+    // collision, an unattached slot or a stale entry falls back to the gated admission path — never to
+    // another flow's session. Only _sessions mutations (admission, removal, dispose) write it, always
+    // under _gate. A reader that loaded an entry before a removal's clear reaches the session the
+    // removal is tearing down: an expiring or faulted session refuses the datagram and the caller
+    // counts the fail-closed drop, while the plain-disposal path reaches the transport teardown the
+    // removal already started (the pre-existing outstanding-lease window of `udp-relay.md`).
+    private readonly UdpSessionSlot?[] _sessionCache;
     private readonly UdpSetupCooldownTable _cooldowns;
     private readonly UdpSetupQueueBudget _budget;
     private readonly UdpSessionSetup _setup;
@@ -21,6 +32,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     private readonly ISetupExecutor _setupExecutor;
     private readonly Func<SetupWorkItem, Task> _setupHandler;
     private readonly Lock _gate = new();
+    private int _gateEntryCount;
 
     // Sweep-level single flight held across the whole async method (a Lock cannot span the teardown
     // awaits). Uncontended, WaitAsync() returns a cached completed task, so the no-op tick neither
@@ -70,10 +82,13 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
         var preSeed = Math.Min(capacity, MaximumPreSeedCapacity);
         _associations = new UdpAssociationTable(capacity, preSeed);
         _sessions = new Dictionary<FlowKey, UdpSessionSlot>(preSeed);
+        var cacheSlots = BitOperations.RoundUpToPowerOf2((uint)Math.Clamp((long)capacity * 8, 1_024, 16_384));
+        _sessionCache = new UdpSessionSlot?[cacheSlots];
         _cooldowns = new UdpSetupCooldownTable(capacity);
         Capacity = capacity;
         RelayReceiveBufferBytes = relayReceiveBufferBytes;
         _timeProvider = timeProvider;
+        ActivityClock = options.ActivityClock ?? new ActivityBucketClock(timeProvider);
         _beforeExpiryRecheck = options.BeforeExpiryRecheck;
         _logger = options.Logger ?? NullRuntimeLogger.Instance;
         _budget = new UdpSetupQueueBudget(setupQueueGlobalByteBudget, _logger, _timeProvider);
@@ -87,6 +102,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
             _associations,
             responseSink,
             timeProvider,
+            ActivityClock,
             _logger,
             receiveWindowPool,
             receiveBufferSize,
@@ -96,7 +112,67 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     /// <summary>The number of live UDP sessions (heartbeat diagnostics; gate-consistent).</summary>
     public int SessionCount
     {
-        get { lock (_gate) return _sessions.Count; }
+        get
+        {
+            lock (_gate)
+            {
+                NoteGateEntry();
+                return _sessions.Count;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The composition's shared activity clock (the same instance the flow table and the redirect table
+    /// use). Tests drive it to a bucket edge; the ready path only ever reads <see cref="ActivityBucketClock.Current"/>.
+    /// </summary>
+    internal ActivityBucketClock ActivityClock { get; }
+
+    /// <summary>
+    /// The live session attached to <paramref name="flow"/>, read under the gate (diagnostics only: a
+    /// fact attaches the session's own hold probe). Null when the flow has no session yet.
+    /// </summary>
+    internal UdpProxySession? SessionForDiagnostics(FlowKey flow)
+    {
+        lock (_gate)
+        {
+            NoteGateEntry();
+            return _sessions.TryGetValue(flow, out var slot) ? slot.Session : null;
+        }
+    }
+
+    /// <summary>The ready-path cache's slot count (diagnostics only): a collision fact needs the mask.</summary>
+    internal int SessionCacheSlotCountForDiagnostics => _sessionCache.Length;
+
+    /// <summary>Whether <paramref name="flow"/>'s session is attached and ready (diagnostics only).</summary>
+    internal bool SessionReadyForDiagnostics(FlowKey flow)
+    {
+        lock (_gate)
+        {
+            NoteGateEntry();
+            return _sessions.TryGetValue(flow, out var slot) && slot is { Ready: true, Session: not null };
+        }
+    }
+
+    /// <summary>
+    /// The gate-entry diagnostics sink, or null in production (diagnostics only). It fires immediately
+    /// after every <see cref="_gate"/> acquisition, so a test can park a holder inside the gate or
+    /// count the entries a driven packet path takes.
+    /// </summary>
+    internal Action? GateHoldProbe { get; set; }
+
+    /// <summary>
+    /// The number of <see cref="_gate"/> acquisitions recorded since the process started, counted only
+    /// while <see cref="GateHoldProbe"/> is attached (diagnostics only, never on the product path).
+    /// </summary>
+    internal int GateEntryCountForDiagnostics => Volatile.Read(ref _gateEntryCount);
+
+    private void NoteGateEntry()
+    {
+        var probe = GateHoldProbe;
+        if (probe is null) return;
+        Interlocked.Increment(ref _gateEntryCount);
+        probe();
     }
 
     /// <summary>The session budget this coordinator was constructed with (heartbeat diagnostics).</summary>
@@ -115,7 +191,11 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     internal UdpSessionState SessionState(FlowKey flow)
     {
         UdpProxySession? session;
-        lock (_gate) session = _sessions.TryGetValue(flow, out var slot) ? slot.Session : null;
+        lock (_gate)
+        {
+            NoteGateEntry();
+            session = _sessions.TryGetValue(flow, out var slot) ? slot.Session : null;
+        }
         return session?.State ?? UdpSessionState.SettingUp;
     }
 
@@ -238,8 +318,12 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
         UdpSessionSlot[] slots;
         lock (_gate)
         {
+            NoteGateEntry();
             slots = [.. _sessions.Values];
             _sessions.Clear();
+            // Every slot is drained below; the ready-path cache is wiped whole because no entry can
+            // survive the drain, so no per-entry ReferenceEquals guard is meaningful here.
+            Array.Clear(_sessionCache);
             _cooldowns.Clear();
             // The cleared slots are unreachable for every other drain path (a setup task's
             // RemoveSlotAsync observes the removal first), so the queued datagrams are drained
@@ -294,7 +378,11 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     /// </summary>
     void IUdpSessionSlotHost.AttachSession(UdpSessionSlot slot, UdpProxySession session)
     {
-        lock (_gate) slot.Session = session;
+        lock (_gate)
+        {
+            NoteGateEntry();
+            slot.Session = session;
+        }
     }
 
     /// <summary>
@@ -306,6 +394,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     {
         lock (_gate)
         {
+            NoteGateEntry();
             return _sessions.TryGetValue(flow, out var current) && ReferenceEquals(current, slot)
                 ? slot.SetupQueue.RefreshEnqueuedStamps(_timeProvider.GetUtcNow())
                 : 0;
@@ -323,12 +412,14 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     {
         lock (_gate)
         {
+            NoteGateEntry();
             // Another owner (receive failure, expiry, disposal, a replacement setup) took over
             // this slot's teardown and owns the session and the queued datagrams.
             if (!_sessions.TryGetValue(flow, out var current) || !ReferenceEquals(current, slot)) return (UdpSessionSetup.FlushStep.NotOwner, default, 0, default);
             if (!slot.SetupQueue.TryDequeue(out var pending, out var length, out var enqueuedAt))
             {
                 slot.Ready = true;
+                PublishSessionSlot(flow, slot);
                 return (UdpSessionSetup.FlushStep.QueueEmpty, default, 0, default);
             }
 
@@ -361,12 +452,16 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
             // Cleared at the start of the critical section: the candidates stay live in _sessions, so an
             // aborted tick is simply re-discovered by the next scan.
             _idleScratch.Clear();
+            var cutoffBucket = ActivityBucket.Cutoff(now, idleTimeout);
             lock (_gate)
             {
+                NoteGateEntry();
                 _cooldowns.PruneExpired(now);
                 foreach (var slot in _sessions.Values)
                 {
-                    if (slot.Session is { } session && now - session.LastActivityUtc >= idleTimeout)
+                    // A pre-filter only: TryBeginExpiry re-checks the same bucket cutoff under the
+                    // session's own gate, so a candidate collected one bucket early can never retire early.
+                    if (slot.Session is { } session && session.ActivityBucketForDiagnostics < cutoffBucket)
                     {
                         _idleScratch.Add((slot, session));
                     }
@@ -415,9 +510,11 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
         var owned = false;
         lock (_gate)
         {
+            NoteGateEntry();
             if (_sessions.TryGetValue(flow, out var current) && ReferenceEquals(current, slot))
             {
                 _sessions.Remove(flow);
+                ClearSessionSlot(flow, slot);
                 owned = true;
                 session = slot.Session;
                 if (session is not null) _associations.TryRemove(session.Association);
@@ -469,6 +566,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
         UdpSessionSlot? slot = null;
         lock (_gate)
         {
+            NoteGateEntry();
             if (_sessions.TryGetValue(session.Flow, out var current) && ReferenceEquals(current.Session, session)) slot = current;
         }
         if (slot is null) return;
@@ -487,7 +585,22 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     {
         public Task Completion = Task.CompletedTask;
         public readonly BoundedSetupQueue SetupQueue = new(SetupQueueMaximumPackets, SetupQueueMaximumBytes);
-        public UdpProxySession? Session;
-        public bool Ready;
+
+        /// <summary>
+        /// The attached session, published before <see cref="Ready"/> (both under the coordinator gate), so
+        /// a lock-free reader that validates the session's flow key and then reads <see cref="Ready"/> is
+        /// guaranteed the pair.
+        /// </summary>
+        public UdpProxySession? Session
+        {
+            get => Volatile.Read(ref field);
+            set => Volatile.Write(ref field, value);
+        }
+
+        public bool Ready
+        {
+            get => Volatile.Read(ref field);
+            set => Volatile.Write(ref field, value);
+        }
     }
 }

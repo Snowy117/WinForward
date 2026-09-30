@@ -68,7 +68,19 @@ internal static class CapturedFlowPacketGuards
 
 public interface ISelfTrafficGuard
 {
+    /// <summary>
+    /// The full ownership check: the exact-tuple pair and the wildcard relay-socket pair. Claim-time
+    /// only (a self-owned exact tuple never produces a flow-table state), so it may take the registry
+    /// gate.
+    /// </summary>
     bool IsOwned(FlowContext context);
+
+    /// <summary>
+    /// The wildcard half alone: a relay control socket registered as <c>(protocol, Any:port, remote)</c>
+    /// before its SYN leaves the host. Loop prevention is fail-closed (traffic-policy-lifecycle.md), so
+    /// this half stays on the warm entry; the implementation answers it without a process-wide lock.
+    /// </summary>
+    bool IsWildcardOwned(FlowContext context);
 }
 
 public interface IPacketActionExecutor
@@ -103,14 +115,14 @@ public sealed class FlowDispatcher
     private readonly RuntimeLogThrottle _capacityBlockWarn = new(TimeSpan.FromSeconds(5));
     private readonly RuntimeLogThrottle _attributionMissWarn = new(TimeSpan.FromSeconds(5));
 
-    public FlowDispatcher(ValidatedConfiguration configuration, ISelfTrafficGuard selfTraffic, IPacketActionExecutor executor, IProcessAttributor? attributor = null, int flowCapacity = 65_536, ITcpReverseHandler? reverseHandler = null, Func<CapturedFlowPacket, CancellationToken, ValueTask<TcpRedirectOutcome>>? fragmentHandler = null, IRuntimeLogger? logger = null)
+    public FlowDispatcher(ValidatedConfiguration configuration, ISelfTrafficGuard selfTraffic, IPacketActionExecutor executor, IProcessAttributor? attributor = null, int flowCapacity = 65_536, ITcpReverseHandler? reverseHandler = null, Func<CapturedFlowPacket, CancellationToken, ValueTask<TcpRedirectOutcome>>? fragmentHandler = null, IRuntimeLogger? logger = null, ActivityBucketClock? activityClock = null)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(selfTraffic);
         ArgumentNullException.ThrowIfNull(executor);
         _policy = configuration.Policy;
         _servers = configuration.Servers;
-        _flows = new FlowTable(flowCapacity);
+        _flows = new FlowTable(flowCapacity, activityClock: activityClock);
         _selfTraffic = selfTraffic;
         _executor = executor;
         _attributor = attributor;
@@ -138,15 +150,16 @@ public sealed class FlowDispatcher
     public int FlowCapacity => _flows.Capacity;
 
     /// <summary>
-    /// Dispatches a classified flow packet. The steady-state shape (self traffic excluded, flow
+    /// Dispatches a classified flow packet. The steady-state shape (no self-traffic wildcard, flow
     /// already resolved, pass, block, or a proxy decision that resolves inline to a known server)
     /// runs entirely synchronously on this non-async entry so the per-packet path allocates
     /// nothing: the executor call is returned directly and awaited exactly once by the caller.
     /// Every other shape — trace logging, a packet the wired reverse handler's diversion
-    /// predicate claims (X1: TCP with a live listener source port), self traffic, reverse UDP
-    /// responses, new flows needing attribution, and proxy decisions that cannot resolve inline —
-    /// falls into <see cref="DispatchSlowAsync"/>, which keeps the full state machine and all
-    /// diagnostic logging.
+    /// predicate claims (X1: TCP with a live listener source port), a wildcard self-traffic tuple,
+    /// reverse UDP responses, new flows needing attribution (where the full self-traffic check
+    /// runs), and proxy decisions that cannot resolve inline — falls into
+    /// <see cref="DispatchSlowAsync"/>, which keeps the full state machine and all diagnostic
+    /// logging.
     /// </summary>
     public ValueTask DispatchAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
@@ -158,9 +171,9 @@ public sealed class FlowDispatcher
         // a miss falls through here, and when the flow table also misses, the slow path still
         // runs the full handler — so tombstone stragglers keep their grace-drop behavior.
         if (_reverseHandler is not null && _reverseHandler.WantsPacket(packet)) return DispatchSlowAsync(packet, cancellationToken);
-        // ReSharper disable once DuplicatedSequentialIfBodies // Warm-path bypass enumeration: the trace-only bypass (above) and each lane below (X1 reverse claim, self-traffic ownership, unresolved flow) is a distinct documented reason; merging couples unrelated predicates into one >150-char guard.
-        if (_selfTraffic.IsOwned(packet.Context)) return DispatchSlowAsync(packet, cancellationToken);
-        if (!_flows.TryResolve(packet.Context.Key, out var existing) || existing is null) return DispatchSlowAsync(packet, cancellationToken);
+        // ReSharper disable once DuplicatedSequentialIfBodies // Warm-path bypass enumeration: the trace-only bypass (above) and each lane below (X1 reverse claim, self-traffic wildcard ownership, unresolved flow) is a distinct documented reason; merging couples unrelated predicates into one >150-char guard.
+        if (_selfTraffic.IsWildcardOwned(packet.Context)) return DispatchSlowAsync(packet, cancellationToken);
+        if (!_flows.TryResolveWarm(packet.Context.Key, out var existing)) return DispatchSlowAsync(packet, cancellationToken);
 
         var decision = existing.Decision;
         if (decision.Action == FlowAction.Proxy)

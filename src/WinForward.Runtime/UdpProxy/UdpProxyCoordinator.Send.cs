@@ -22,10 +22,43 @@ public sealed partial class UdpProxyCoordinator
     {
         if (flow.Protocol != TransportProtocol.Udp) throw new ArgumentException("UDP coordinator accepts only UDP flow keys.", nameof(flow));
 
+        // Ready-first: a cache-resident, flow-validated session is sent without taking the coordinator
+        // gate and without reading a clock. The admission path (setup in flight, a cooldown, a new flow,
+        // or a cache collision/unpopulated slot) keeps both. The slot's Session is published before Ready
+        // under the gate, so validating the flow key first and then reading Ready is sound.
+        var cached = Volatile.Read(ref _sessionCache[SessionCacheSlot(flow)]);
+        if (cached is { Session: { } session, Ready: true } && session.Flow.Equals(flow))
+        {
+            return SendOnReadySessionSpanAsync(flow, cached, session, payload, packetSequence, cancellationToken);
+        }
+
+        return SendAdmissionPathSpanAsync(flow, server, payload, clientMac, packetSequence, flowGeneration, cancellationToken);
+    }
+
+    private int SessionCacheSlot(FlowKey flow) => flow.GetHashCode() & (_sessionCache.Length - 1);
+
+    private void PublishSessionSlot(FlowKey flow, UdpSessionSlot slot) => Volatile.Write(ref _sessionCache[SessionCacheSlot(flow)], slot);
+
+    private void ClearSessionSlot(FlowKey flow, UdpSessionSlot slot)
+    {
+        var index = SessionCacheSlot(flow);
+        if (ReferenceEquals(Volatile.Read(ref _sessionCache[index]), slot)) Volatile.Write(ref _sessionCache[index], null);
+    }
+
+    /// <summary>
+    /// The admission path: everything that is not a ready cache hit. It takes the coordinator gate, reads
+    /// the clock once (the cooldown probe needs it), re-checks the cooldown and the slot, admits a new
+    /// slot when the flow has none, and re-checks <see cref="UdpSessionSlot.Ready"/> under the gate — a
+    /// datagram first read as "not ready" must not be enqueued after the flush already drained the queue
+    /// and flipped the slot ready, or it would sit until its TTL.
+    /// </summary>
+    private ValueTask<bool> SendAdmissionPathSpanAsync(FlowKey flow, Socks5Server server, ReadOnlySpan<byte> payload, MacAddress clientMac, long packetSequence, long flowGeneration, CancellationToken cancellationToken)
+    {
         UdpSessionSlot? readySlot;
         UdpProxySession? readySession;
         lock (_gate)
         {
+            NoteGateEntry();
             ObjectDisposedException.ThrowIf(_scope.IsSealed, this);
             var now = _timeProvider.GetUtcNow();
             if (_cooldowns.TryHit(flow, now))
@@ -59,6 +92,7 @@ public sealed partial class UdpProxyCoordinator
                     return ValueTask.FromResult(false);
                 }
                 _sessions.Add(flow, slot);
+                PublishSessionSlot(flow, slot);
             }
 
             if (slot.Ready)

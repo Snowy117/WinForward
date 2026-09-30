@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Runtime.InteropServices;
 using WinForward.Core;
 
@@ -42,7 +43,7 @@ public sealed class TcpRedirectAssociation
         }
         AcceptedPeerEndpoint = ReverseDestinationEndpoint;
         Generation = generation;
-        LastActivityUtc = now;
+        _activityBucket = ActivityBucket.FromUtc(now);
     }
 
     public FlowKey OriginalKey { get; }
@@ -59,7 +60,18 @@ public sealed class TcpRedirectAssociation
     public Endpoint AcceptedPeerEndpoint { get; }
     public long Generation { get; }
     public RelayPhase Phase { get; internal set; }
-    public DateTimeOffset LastActivityUtc { get; private set; }
+
+    /// <summary>
+    /// The association's idle stamp, derived from <see cref="ActivityBucket"/>: a warm resolve writes
+    /// one integer and never reads a clock, and the sweeps compare buckets (never this property, whose
+    /// value is quantised down to its bucket and can be up to 500 ms older than the true instant).
+    /// </summary>
+    public DateTimeOffset LastActivityUtc => ActivityBucket.ToUtc(Volatile.Read(ref _activityBucket));
+
+    /// <summary>The internal integer bucket the sweeps compare; the never-early operator reads this.</summary>
+    internal long BucketForDiagnostics => Volatile.Read(ref _activityBucket);
+
+    private long _activityBucket;
 
     /// <summary>
     /// The client ISN observed on the original SYN and a bounded copy of that frame, recorded at
@@ -143,7 +155,7 @@ public sealed class TcpRedirectAssociation
     /// difference is positive and non-zero (strictly forward within the comparison window).</summary>
     private static bool IsSequenceAhead(uint candidate, uint current) => candidate != current && (int)(candidate - current) > 0;
 
-    public void Touch(DateTimeOffset now) => LastActivityUtc = now;
+    public void Touch(DateTimeOffset now) => Volatile.Write(ref _activityBucket, ActivityBucket.FromUtc(now));
 }
 
 /// <summary>
@@ -172,19 +184,67 @@ public sealed class TcpRedirectTable
     // per-packet warm path.
     private readonly int[] _candidatePorts = new int[65_536];
     private long _nextGeneration;
+    private int _gateEntryCount;
+    private int _reverseProbeCount;
+
+    // Direct-mapped warm caches over the two per-packet indexes, allocated once in the constructor and
+    // never grown. The validated field pairs are get-only, so a served entry is always the association
+    // the slot named and never a different one: an unpopulated slot or a collision fails validation and
+    // falls back to the gated authority. It can be stale, though — a reader that loaded the reference
+    // before a removal's guarded clear still returns that association, because the index delete and the
+    // cache clear are not one atomic step with an in-flight probe — and the caller then handles one
+    // packet on an association that was retired a moment later. `RemoveUnderGate` is the single
+    // invalidation point every removal path shares.
+    private readonly TcpRedirectAssociation?[] _warmReverse;
+    private readonly TcpRedirectAssociation?[] _warmOriginal;
 
     public TcpRedirectTable(int? capacity = null)
     {
         if (capacity is < 1) throw new ArgumentOutOfRangeException(nameof(capacity), capacity, "Capacity must be positive.");
         _capacity = capacity ?? 16_384;
+        var slots = BitOperations.RoundUpToPowerOf2((uint)Math.Clamp((long)_capacity * 8, 1_024, 16_384));
+        _warmReverse = new TcpRedirectAssociation?[slots];
+        _warmOriginal = new TcpRedirectAssociation?[slots];
     }
 
     public int Count
     {
         get
         {
-            lock (_gate) return _byOriginal.Count;
+            lock (_gate)
+            {
+                NoteGateEntry();
+                return _byOriginal.Count;
+            }
         }
+    }
+
+    /// <summary>
+    /// The gate-entry diagnostics sink, or null in production (diagnostics only). It fires immediately
+    /// after every <see cref="_gate"/> acquisition, so a test can park a holder inside the gate or
+    /// count the entries a driven packet path takes.
+    /// </summary>
+    internal Action? GateHoldProbe { get; set; }
+
+    /// <summary>
+    /// The number of <see cref="_gate"/> acquisitions recorded since the process started, counted only
+    /// while <see cref="GateHoldProbe"/> is attached (diagnostics only, never on the product path).
+    /// </summary>
+    internal int GateEntryCountForDiagnostics => Volatile.Read(ref _gateEntryCount);
+
+    /// <summary>
+    /// The number of <see cref="TryResolveByReverse"/> probes recorded since the process started, counted
+    /// under the same attachment as <see cref="GateEntryCountForDiagnostics"/> (diagnostics only): the
+    /// fold's contract is a probe count, and a warm reverse packet must take exactly one.
+    /// </summary>
+    internal int ReverseProbeCountForDiagnostics => Volatile.Read(ref _reverseProbeCount);
+
+    private void NoteGateEntry()
+    {
+        var probe = GateHoldProbe;
+        if (probe is null) return;
+        Interlocked.Increment(ref _gateEntryCount);
+        probe();
     }
 
     /// <summary>
@@ -199,6 +259,7 @@ public sealed class TcpRedirectTable
     {
         lock (_gate)
         {
+            NoteGateEntry();
             if (_byOriginal.TryGetValue(originalKey, out var existing))
             {
                 existing.Touch(now);
@@ -227,6 +288,8 @@ public sealed class TcpRedirectTable
             // carries no ports, so attribution is inherently ambiguous there and the newest
             // claim is the best guess (S1).
             _byAddressPair[NormalizeAddressPair(originalKey.Local.Address, originalKey.Remote.Address)] = created;
+            Volatile.Write(ref _warmReverse[ReverseSlot(created.ReverseSourceEndpoint, created.ReverseDestinationEndpoint)], created);
+            Volatile.Write(ref _warmOriginal[OriginalSlot(originalKey)], created);
             // X1: the count rises inside the claim gate before the caller can rewrite and inject
             // the SYN, so the listener's first reverse candidate (the SYN-ACK) can never arrive
             // before its port is observable on the warm path.
@@ -241,14 +304,28 @@ public sealed class TcpRedirectTable
     /// follows the association origin: a host flow's listener replies from
     /// client-address:proxy-port to server-address:original-client-port, while a forwarded flow's
     /// listener replies from adapter-local-address:proxy-port to client-address:original-client-port.
+    /// A validated cache hit takes no gate; a miss falls back to the gated authority, so a collision,
+    /// an unpopulated slot or a stale entry can only cost the lock — never a wrong answer.
     /// </summary>
     public bool TryResolveByReverse(Endpoint local, Endpoint remote, DateTimeOffset now, out TcpRedirectAssociation? association)
     {
+        if (GateHoldProbe is not null) Interlocked.Increment(ref _reverseProbeCount);
+        var slot = ReverseSlot(local, remote);
+        var cached = Volatile.Read(ref _warmReverse[slot]);
+        if (cached is not null && cached.ReverseSourceEndpoint == local && cached.ReverseDestinationEndpoint == remote)
+        {
+            cached.Touch(now);
+            association = cached;
+            return true;
+        }
+
         lock (_gate)
         {
+            NoteGateEntry();
             if (_byReverse.TryGetValue(new ReverseRedirectTuple(local, remote), out association))
             {
                 association.Touch(now);
+                Volatile.Write(ref _warmReverse[slot], association);
                 return true;
             }
             association = null;
@@ -256,21 +333,43 @@ public sealed class TcpRedirectTable
         }
     }
 
-    public bool IsReverseCandidate(Endpoint local, Endpoint remote)
-    {
-        lock (_gate) return _byReverse.ContainsKey(new ReverseRedirectTuple(local, remote));
-    }
-
     /// <summary>
     /// Whether any live association's listener occupies <paramref name="port"/> (the X1 warm-path
-    /// prefilter). A reverse candidate's source port is always a listener port, so a miss proves
-    /// the packet cannot match the reverse index; a hit is merely a candidate — the full
-    /// <see cref="IsReverseCandidate"/> tuple check runs on the slow path.
+    /// prefilter). A reverse candidate's source port is always a listener port — the reference count
+    /// rises in <see cref="TryClaim"/> in the same hold that adds the reverse index entry, and falls in
+    /// the same hold that removes it — so a miss proves the packet cannot match the reverse index; a hit
+    /// is merely a candidate, and the full tuple check runs before anything is reversed.
     /// </summary>
     internal bool IsReverseCandidatePort(ushort port) => Volatile.Read(ref _candidatePorts[port]) != 0;
 
-    public bool TryResolveByOriginal(FlowKey originalKey, DateTimeOffset now, out TcpRedirectAssociation? association) =>
-        TryFind(_byOriginal, originalKey, now, out association);
+    /// <summary>
+    /// Resolves the association that owns <paramref name="originalKey"/>, from the lock-free cache when
+    /// its validated entry is resident and from the gated authority otherwise (which warms the slot).
+    /// </summary>
+    public bool TryResolveByOriginal(FlowKey originalKey, DateTimeOffset now, out TcpRedirectAssociation? association)
+    {
+        var slot = OriginalSlot(originalKey);
+        var cached = Volatile.Read(ref _warmOriginal[slot]);
+        if (cached is not null && cached.OriginalKey.Equals(originalKey))
+        {
+            cached.Touch(now);
+            association = cached;
+            return true;
+        }
+
+        lock (_gate)
+        {
+            NoteGateEntry();
+            if (_byOriginal.TryGetValue(originalKey, out association))
+            {
+                association.Touch(now);
+                Volatile.Write(ref _warmOriginal[slot], association);
+                return true;
+            }
+            association = null;
+            return false;
+        }
+    }
 
     /// <summary>
     /// Resolves an association whose original flow endpoints match the given IP address pair in
@@ -286,6 +385,7 @@ public sealed class TcpRedirectTable
         var pair = NormalizeAddressPair(first, second);
         lock (_gate)
         {
+            NoteGateEntry();
             if (_byAddressPair.TryGetValue(pair, out var found))
             {
                 found.Touch(now);
@@ -308,18 +408,35 @@ public sealed class TcpRedirectTable
     {
         lock (_gate)
         {
+            NoteGateEntry();
             if (!_byOriginal.TryGetValue(association.OriginalKey, out var current) || !ReferenceEquals(current, association)) return false;
-            _byOriginal.Remove(association.OriginalKey);
-            _byTranslatedListener.Remove(association.TranslatedListenerTuple);
-            _byReverse.Remove(new ReverseRedirectTuple(association.ReverseSourceEndpoint, association.ReverseDestinationEndpoint));
-            RemoveAddressPairUnderGate(association);
-            association.ReleaseOriginalSynTemplate();
-            // X1: released under the same gate; the ReferenceEquals guard above makes idempotent
-            // removals a no-op here, so the count never double-decrements.
-            Interlocked.Decrement(ref _candidatePorts[association.TranslatedListenerTuple.Port]);
+            RemoveUnderGate(association);
             onRemoved?.Invoke(association);
             return true;
         }
+    }
+
+    /// <summary>
+    /// The one removal body: every index this association occupies is released, its listener port count
+    /// falls, and both warm-cache entries are cleared with an
+    /// <see cref="object.ReferenceEquals(object, object)"/> guard (never a
+    /// blind wipe of a colliding association's entry). Factoring it is what makes "no removal site can
+    /// forget the caches" structural rather than a review promise.
+    /// </summary>
+    private void RemoveUnderGate(TcpRedirectAssociation association)
+    {
+        _byOriginal.Remove(association.OriginalKey);
+        _byTranslatedListener.Remove(association.TranslatedListenerTuple);
+        _byReverse.Remove(new ReverseRedirectTuple(association.ReverseSourceEndpoint, association.ReverseDestinationEndpoint));
+        RemoveAddressPairUnderGate(association);
+        association.ReleaseOriginalSynTemplate();
+        // X1: released under the same gate as the index removal; the caller's ReferenceEquals guard
+        // makes idempotent removals a no-op here, so the count never double-decrements.
+        Interlocked.Decrement(ref _candidatePorts[association.TranslatedListenerTuple.Port]);
+        var reverseSlot = ReverseSlot(association.ReverseSourceEndpoint, association.ReverseDestinationEndpoint);
+        if (ReferenceEquals(Volatile.Read(ref _warmReverse[reverseSlot]), association)) Volatile.Write(ref _warmReverse[reverseSlot], null);
+        var originalSlot = OriginalSlot(association.OriginalKey);
+        if (ReferenceEquals(Volatile.Read(ref _warmOriginal[originalSlot]), association)) Volatile.Write(ref _warmOriginal[originalSlot], null);
     }
 
     /// <summary>
@@ -332,14 +449,16 @@ public sealed class TcpRedirectTable
     /// </summary>
     public int RemoveExpired(DateTimeOffset now, TimeSpan idleTimeout)
     {
+        var cutoffBucket = ActivityBucket.Cutoff(now, idleTimeout);
         lock (_sweepGate)
         {
             _expiredScratch.Clear();
             lock (_gate)
             {
+                NoteGateEntry();
                 foreach (var association in _byOriginal.Values)
                 {
-                    if (now - association.LastActivityUtc >= idleTimeout) _expiredScratch.Add(association);
+                    if (association.BucketForDiagnostics < cutoffBucket) _expiredScratch.Add(association);
                 }
             }
 
@@ -348,21 +467,17 @@ public sealed class TcpRedirectTable
             {
                 lock (_gate)
                 {
+                    NoteGateEntry();
                     // Re-check under the gate: the association may have been torn down, or touched by a
                     // reverse/forward resolve, since the scan released it.
                     if (!_byOriginal.TryGetValue(association.OriginalKey, out var current) ||
                         !ReferenceEquals(current, association) ||
-                        now - association.LastActivityUtc < idleTimeout)
+                        association.BucketForDiagnostics >= cutoffBucket)
                     {
                         continue;
                     }
 
-                    _byOriginal.Remove(association.OriginalKey);
-                    _byTranslatedListener.Remove(association.TranslatedListenerTuple);
-                    _byReverse.Remove(new ReverseRedirectTuple(association.ReverseSourceEndpoint, association.ReverseDestinationEndpoint));
-                    RemoveAddressPairUnderGate(association);
-                    association.ReleaseOriginalSynTemplate();
-                    Interlocked.Decrement(ref _candidatePorts[association.TranslatedListenerTuple.Port]);
+                    RemoveUnderGate(association);
                     removed++;
                 }
             }
@@ -373,7 +488,11 @@ public sealed class TcpRedirectTable
 
     public TcpRedirectAssociation[] Snapshot()
     {
-        lock (_gate) return [.. _byOriginal.Values];
+        lock (_gate)
+        {
+            NoteGateEntry();
+            return [.. _byOriginal.Values];
+        }
     }
 
     private void RemoveAddressPairUnderGate(TcpRedirectAssociation association)
@@ -386,19 +505,9 @@ public sealed class TcpRedirectTable
     private static AddressPair NormalizeAddressPair(IPAddressValue first, IPAddressValue second)
         => first.Bits <= second.Bits ? new AddressPair(first, second) : new AddressPair(second, first);
 
-    private bool TryFind<TKey>(Dictionary<TKey, TcpRedirectAssociation> table, TKey key, DateTimeOffset now, out TcpRedirectAssociation? association) where TKey : notnull
-    {
-        lock (_gate)
-        {
-            if (table.TryGetValue(key, out association))
-            {
-                association.Touch(now);
-                return true;
-            }
-            association = null;
-            return false;
-        }
-    }
+    private int ReverseSlot(Endpoint source, Endpoint destination) => HashCode.Combine(source, destination) & (_warmReverse.Length - 1);
+
+    private int OriginalSlot(FlowKey originalKey) => originalKey.GetHashCode() & (_warmOriginal.Length - 1);
 
     [StructLayout(LayoutKind.Auto)]
     private readonly record struct ReverseRedirectTuple(Endpoint Source, Endpoint Destination);

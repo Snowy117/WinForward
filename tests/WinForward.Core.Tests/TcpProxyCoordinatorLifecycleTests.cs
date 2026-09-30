@@ -77,7 +77,7 @@ public sealed class TcpProxyCoordinatorLifecycleTests
         // The listener's SYN-ACK passes the reverse hook, which records the server ISN.
         var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
         var synAck = MakeReversePacketClassifierOrientation(s_clientIpv4, listenerTuple.Port, s_destIpv4, 53000, mutateFrame: f => f[47] = 0x12);
-        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleReverseAsync(synAck, CancellationToken.None));
+        Assert.Equal(TcpRedirectOutcome.Injected, await HandleReverseAsync(coordinator, table, synAck, CancellationToken.None));
 
         var listener = Assert.Single(listenerFactory.Listeners);
         await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(Endpoint.From(s_destIpv4, 53000)), CancellationToken.None);
@@ -113,7 +113,7 @@ public sealed class TcpProxyCoordinatorLifecycleTests
 
         var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
         var synAck = MakeReversePacketClassifierOrientation(forwardLocal, listenerTuple.Port, client, 53000, mutateFrame: f => f[47] = 0x12);
-        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleReverseAsync(synAck, CancellationToken.None));
+        Assert.Equal(TcpRedirectOutcome.Injected, await HandleReverseAsync(coordinator, table, synAck, CancellationToken.None));
 
         var listener = Assert.Single(listenerFactory.Listeners);
         await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(Endpoint.From(client, 53000)), CancellationToken.None);
@@ -146,7 +146,7 @@ public sealed class TcpProxyCoordinatorLifecycleTests
 
         var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
         var synAck = MakeReversePacketClassifierOrientation(s_clientIpv4, listenerTuple.Port, s_destIpv4, 53000, mutateFrame: f => f[47] = 0x12);
-        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleReverseAsync(synAck, CancellationToken.None));
+        Assert.Equal(TcpRedirectOutcome.Injected, await HandleReverseAsync(coordinator, table, synAck, CancellationToken.None));
 
         // Client sends 5 bytes of request data (seq = ISN+1 = 2), then a FIN (seq = 7): the
         // tracker must end at 8 — payload plus the FIN's one sequence number.
@@ -188,7 +188,7 @@ public sealed class TcpProxyCoordinatorLifecycleTests
 
         var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
         var synAck = MakeReversePacketClassifierOrientation(s_clientIpv4, listenerTuple.Port, s_destIpv4, 53000, mutateFrame: f => f[47] = 0x12);
-        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleReverseAsync(synAck, CancellationToken.None));
+        Assert.Equal(TcpRedirectOutcome.Injected, await HandleReverseAsync(coordinator, table, synAck, CancellationToken.None));
         var serverData = MakeReversePacketClassifierOrientation(s_clientIpv4, listenerTuple.Port, s_destIpv4, 53000,
             mutateFrame: f =>
             {
@@ -196,7 +196,7 @@ public sealed class TcpProxyCoordinatorLifecycleTests
                 BinaryPrimitives.WriteUInt32BigEndian(f.AsSpan(38, 4), 2);
             },
             payload: [1, 2, 3, 4, 5, 6, 7, 8]);
-        Assert.Equal(TcpRedirectOutcome.Injected, await coordinator.HandleReverseAsync(serverData, CancellationToken.None));
+        Assert.Equal(TcpRedirectOutcome.Injected, await HandleReverseAsync(coordinator, table, serverData, CancellationToken.None));
 
         var listener = Assert.Single(listenerFactory.Listeners);
         await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(Endpoint.From(s_destIpv4, 53000)), CancellationToken.None);

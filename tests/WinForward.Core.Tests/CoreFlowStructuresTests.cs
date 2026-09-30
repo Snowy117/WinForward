@@ -87,14 +87,19 @@ public sealed class CoreFlowStructuresTests
         var claimed = table.TryClaimResolved(key, () => FlowDecision.Fallback(FlowAction.Pass), out var state)
             ? state!
             : throw new InvalidOperationException("Flow table claim failed.");
-        var beforeLookup = DateTimeOffset.UtcNow;
-        claimed.Touch(beforeLookup - TimeSpan.FromMinutes(2));
+        claimed.Touch(DateTimeOffset.UtcNow - TimeSpan.FromMinutes(2));
 
         Assert.True(table.TryResolve(key, out var resolved));
         Assert.Same(claimed, resolved);
-        Assert.InRange(claimed.LastActivityUtc, beforeLookup, DateTimeOffset.UtcNow);
-        Assert.Equal(0, table.RemoveExpired(claimed.LastActivityUtc + TimeSpan.FromMinutes(1) - TimeSpan.FromTicks(1), TimeSpan.FromMinutes(1)));
-        Assert.Equal(1, table.RemoveExpired(claimed.LastActivityUtc + TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1)));
+        // The hit stores the clock's published bucket, so the stamp is that bucket's start instant.
+        Assert.Equal(ActivityBucket.ToUtc(table.ActivityClock.Current), claimed.LastActivityUtc);
+
+        // Retained at exactly the idle boundary, retired by the first sweep at or after the next bucket
+        // edge: a quantised-down stamp is never retired early.
+        var stampBucket = ActivityBucket.FromUtc(claimed.LastActivityUtc);
+        var retirement = ActivityBucket.ToUtc(stampBucket + 1) + TimeSpan.FromMinutes(1);
+        Assert.Equal(0, table.RemoveExpired(retirement - TimeSpan.FromTicks(1), TimeSpan.FromMinutes(1)));
+        Assert.Equal(1, table.RemoveExpired(retirement, TimeSpan.FromMinutes(1)));
     }
 
     [Fact]
@@ -109,12 +114,18 @@ public sealed class CoreFlowStructuresTests
         claimed.Touch(time.GetUtcNow() - TimeSpan.FromMinutes(2));
 
         time.Advance(TimeSpan.FromMinutes(30));
+        // Claims, sweeps and the pump's per-iteration callback are the tick sources; a unit test drives
+        // the tick itself, exactly as the composition's per-iteration callback does in production.
+        table.ActivityClock.Tick();
 
         Assert.True(table.TryResolve(key, out var resolved));
         Assert.Same(claimed, resolved);
-        Assert.Equal(time.GetUtcNow(), claimed.LastActivityUtc);
-        Assert.Equal(0, table.RemoveExpired(time.GetUtcNow() + TimeSpan.FromMinutes(1) - TimeSpan.FromTicks(1), TimeSpan.FromMinutes(1)));
-        Assert.Equal(1, table.RemoveExpired(time.GetUtcNow() + TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1)));
+        Assert.Equal(ActivityBucket.ToUtc(ActivityBucket.FromUtc(time.GetUtcNow())), claimed.LastActivityUtc);
+
+        var stampBucket = ActivityBucket.FromUtc(claimed.LastActivityUtc);
+        var retirement = ActivityBucket.ToUtc(stampBucket + 1) + TimeSpan.FromMinutes(1);
+        Assert.Equal(0, table.RemoveExpired(retirement - TimeSpan.FromTicks(1), TimeSpan.FromMinutes(1)));
+        Assert.Equal(1, table.RemoveExpired(retirement, TimeSpan.FromMinutes(1)));
     }
 
     [Fact]

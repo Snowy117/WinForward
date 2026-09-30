@@ -1,3 +1,4 @@
+using WinForward.Core;
 using WinForward.NdisApi;
 
 namespace WinForward.Runtime.TcpRedirect;
@@ -18,6 +19,13 @@ public sealed record TcpRedirectOptions
 
     /// <summary>The clock driving tombstone grace, setup cooldowns, capacity-reset cooldowns, and pending-SYN TTLs (injectable for fake-time tests).</summary>
     public TimeProvider TimeProvider { get; init; } = TimeProvider.System;
+
+    /// <summary>
+    /// The composition's shared activity-bucket clock, driving the warm path's activity stamp and the
+    /// sweep cutoffs. Null derives a private clock from <see cref="TimeProvider"/>, so compositions
+    /// that only inject a time provider keep their behaviour.
+    /// </summary>
+    public ActivityBucketClock? ActivityClock { get; init; }
 
     /// <summary>Optional sink for client-visible failure health signals; null reports to the shared no-op.</summary>
     public IInterceptionHealthSignal? HealthSignal { get; init; }

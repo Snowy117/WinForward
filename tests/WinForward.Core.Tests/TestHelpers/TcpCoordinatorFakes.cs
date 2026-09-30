@@ -168,6 +168,14 @@ internal static class TcpCoordinatorFakes
         await WaitForAsync(() => harness.RelayFactory.Relay is not null);
     }
 
+    /// <summary>Resolves the packet's reverse association, then invokes the coordinator's reverse handler.</summary>
+    internal static ValueTask<TcpRedirectOutcome> HandleReverseAsync(TcpProxyCoordinator coordinator, TcpRedirectTable table, CapturedFlowPacket packet, CancellationToken cancellationToken = default)
+    {
+        var key = packet.Context.Key;
+        Assert.True(table.TryResolveByReverse(key.Local, key.Remote, DateTimeOffset.UtcNow, out var association), "the test packet has no reverse association");
+        return coordinator.HandleReverseAsync(packet, association!, cancellationToken);
+    }
+
     /// <summary>
     /// Dispatches a SYN through the coordinator and awaits the background redirect setup R8 moved
     /// off the pump thread, so tests observe the settled state (listener created, rewritten SYN

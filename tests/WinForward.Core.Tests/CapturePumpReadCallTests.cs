@@ -145,44 +145,4 @@ public sealed class CapturePumpReadCallTests
         public void Increment() => Count++;
     }
 
-    /// <summary>
-    /// An <see cref="INdisPacketReader"/> over a fixed script (the last entry repeats forever) that
-    /// records every call's returned count into a pre-sized array: those counts are this gate's
-    /// evidence, and recording into pre-sized storage is what keeps the counting itself allocation-free
-    /// so the idle gate measures the pump rather than the probe.
-    /// </summary>
-    private sealed class CountingCaptureReader(Func<nint, NdisPacketBuffer[], int>[] script) : INdisPacketReader
-    {
-        private readonly int[] _observed = new int[256];
-
-        public int ReadCalls { get; private set; }
-
-        public int EmptyReads { get; private set; }
-
-        public int BatchReads { get; private set; }
-
-        public long PacketsReturned { get; private set; }
-
-        /// <summary>The returned count of every completed read, in call order — the iteration shape the gate pins.</summary>
-        public int[] ObservedCounts() => _observed[..ReadCalls];
-
-        public int TryReadPackets(nint adapterHandle, NdisPacketBuffer[] buffers)
-        {
-            var index = Math.Min(ReadCalls, script.Length - 1);
-            var count = script[index](adapterHandle, buffers);
-            if (ReadCalls < _observed.Length) _observed[ReadCalls] = count;
-            ReadCalls++;
-            if (count == 0)
-            {
-                EmptyReads++;
-            }
-            else
-            {
-                BatchReads++;
-                PacketsReturned += count;
-            }
-
-            return count;
-        }
-    }
 }

@@ -135,6 +135,28 @@ internal static class FlowHash
         remote.Port,
         (byte)addressFamily,
         (byte)protocol);
+
+    /// <summary>
+    /// The order-independent form of <see cref="Combine"/>: the two endpoints are ordered by
+    /// <c>(address bits, port)</c> first, so a packet and its reverse select the same value. The flow
+    /// table's warm cache keys its slots on this, which is why it can serve exactly what the two
+    /// orientation-aware dictionary probes serve (the table holds at most one state per transport
+    /// tuple, pinned by <c>FlowTableTransportTupleIsUniqueAcrossOrigins</c>). It delegates to
+    /// <see cref="Combine"/> so the cache's slot function stays the same transport-only mix the
+    /// dictionaries bucket by — collisions are fine, divergence is not.
+    /// </summary>
+    internal static int CombineCanonical(AddressFamilyKind addressFamily, TransportProtocol protocol, Endpoint first, Endpoint second)
+    {
+        var (low, high) = OrdersBefore(first, second) ? (first, second) : (second, first);
+        return Combine(addressFamily, protocol, low, high);
+    }
+
+    /// <summary>A total order on endpoints: address bits, then port (equal endpoints order either way).</summary>
+    private static bool OrdersBefore(in Endpoint first, in Endpoint second)
+    {
+        var bits = first.Address.Bits.CompareTo(second.Address.Bits);
+        return bits != 0 ? bits < 0 : first.Port <= second.Port;
+    }
 }
 
 public readonly record struct FlowDecision(FlowAction Action, int? RuleIndex, string? ProxyServerName)
@@ -151,8 +173,27 @@ public readonly record struct FlowContext(
     string? AdapterName,
     ushort RemotePort);
 
+/// <summary>
+/// The validated snapshot of a pooled <see cref="FlowState"/>: the three members a warm resolve
+/// consumer reads, captured while the state's publication version was stable and corroborated against
+/// the key it was looked up by. A caller never holds the pooled instance across a released gate.
+/// </summary>
+[StructLayout(LayoutKind.Auto)]
+public readonly record struct FlowStateView(FlowKey Key, FlowDecision Decision, long Generation);
+
 public sealed class FlowState
 {
+    /// <summary>
+    /// Publication version: even while the fields are stable, odd while <see cref="Reset"/> is
+    /// rewriting them, monotone (never reset to zero, never decremented). A reader brackets its field
+    /// reads with this value and rejects a view whose two reads differ or whose first read is odd.
+    /// Wraparound is harmless: the reader compares for equality and checks parity, neither of which a
+    /// wrap changes, and the writer is single (every reset runs under the flow table's gate).
+    /// </summary>
+    private int _version;
+
+    private long _activityBucket;
+
     /// <summary>
     /// Pool-construction shape: the properties are only meaningful after <see cref="Reset"/>,
     /// which every pooled claim performs before the state becomes visible in a flow table.
@@ -164,20 +205,71 @@ public sealed class FlowState
     public FlowKey Key { get; private set; }
     public FlowDecision Decision { get; private set; }
     public long Generation { get; private set; }
-    public DateTimeOffset LastActivityUtc { get; private set; }
 
-    public void Touch(DateTimeOffset now) => LastActivityUtc = now;
+    /// <summary>
+    /// The activity stamp's bucket, derived to its bucket's start instant. Bucket-quantised: the true
+    /// activity instant is inside this bucket, up to one bucket wide.
+    /// </summary>
+    public DateTimeOffset LastActivityUtc => ActivityBucket.ToUtc(Volatile.Read(ref _activityBucket));
+
+    /// <summary>The raw bucket the sweep compares (diagnostics only).</summary>
+    internal long ActivityBucketForDiagnostics => Volatile.Read(ref _activityBucket);
+
+    /// <summary>Stores the bucket of <paramref name="now"/>. One volatile store, no clock read.</summary>
+    public void Touch(DateTimeOffset now) => Volatile.Write(ref _activityBucket, ActivityBucket.FromUtc(now));
+
+    /// <summary>Stores an already-published bucket (the warm path's touch).</summary>
+    internal void TouchBucket(long bucket) => Volatile.Write(ref _activityBucket, bucket);
+
+    /// <summary>
+    /// Captures the state's published triple, or rejects the read when a concurrent
+    /// <see cref="Reset"/> overlaps it. The full fences mirror the writer's: <c>Volatile.Read</c>
+    /// is acquire-only, so it does not by itself prevent the field loads from floating above it on a
+    /// weak memory model (ARM64), which would let a mixed triple validate against the old version.
+    /// </summary>
+    internal bool TrySnapshot(out FlowStateView view)
+    {
+        var version = Volatile.Read(ref _version);
+        if ((version & 1) != 0)
+        {
+            view = default;
+            return false;
+        }
+
+        Interlocked.MemoryBarrier();
+        var key = Key;
+        var decision = Decision;
+        var generation = Generation;
+        Interlocked.MemoryBarrier();
+        if (Volatile.Read(ref _version) != version)
+        {
+            view = default;
+            return false;
+        }
+
+        view = new FlowStateView(key, decision, generation);
+        return true;
+    }
 
     /// <summary>
     /// Re-initializes a pooled instance in place for a new claim. Overwrites every field —
-    /// including <see cref="LastActivityUtc"/>, which starts a fresh idle window — so a recycled
-    /// state carries no trace of its previous flow.
+    /// including the activity bucket, which starts a fresh idle window — so a recycled state carries
+    /// no trace of its previous flow. The version protocol is what a lock-free reader validates
+    /// against: publish odd (rewrite in progress) → full fence → the fields → full fence → publish
+    /// even (stable). <c>Volatile.Write</c> is release-only, so without the first fence a
+    /// reader could observe the new fields while both of its version reads still see the old even
+    /// value — a mixed triple that no key mismatch would catch on a weak memory model.
     /// </summary>
-    internal void Reset(FlowKey key, FlowDecision decision, long generation)
+    internal void Reset(FlowKey key, FlowDecision decision, long generation, long activityBucket)
     {
+        var version = Volatile.Read(ref _version);
+        Volatile.Write(ref _version, version + 1);
+        Interlocked.MemoryBarrier();
         Key = key;
         Decision = decision;
         Generation = generation;
-        LastActivityUtc = DateTimeOffset.UtcNow;
+        Volatile.Write(ref _activityBucket, activityBucket);
+        Interlocked.MemoryBarrier();
+        Volatile.Write(ref _version, version + 2);
     }
 }

@@ -60,7 +60,8 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         NativeBufferPool? udpDatagramPool = null,
         NativeBufferPool? udpWindowPool = null,
         SetupExecutor? setupExecutor = null,
-        UdpAssociationPool? udpAssociationPool = null)
+        UdpAssociationPool? udpAssociationPool = null,
+        ActivityBucketClock? activityClock = null)
     {
         Dispatcher = dispatcher;
         Executor = executor;
@@ -75,9 +76,17 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         _udpWindowPool = udpWindowPool;
         _setupExecutor = setupExecutor;
         UdpAssociations = udpAssociationPool;
+        ActivityClock = activityClock ?? new ActivityBucketClock();
     }
 
     internal FlowDispatcher Dispatcher { get; }
+
+    /// <summary>
+    /// The one activity clock of this composition, ticked once per pump iteration by
+    /// <see cref="FlushPendingInjections"/> and shared with the flow table and both coordinators, so
+    /// every activity stamp and every sweep cutoff are on the same bucket.
+    /// </summary>
+    private ActivityBucketClock ActivityClock { get; }
 
     private NdisPacketActionExecutor Executor { get; }
 
@@ -110,6 +119,9 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         RuntimeCounters? counters = null)
     {
         var runtimeCounters = counters ?? RuntimeCounters.Shared;
+        // One activity clock for the whole composition: the flow table's warm stamps, both
+        // coordinators' per-packet stamps and both sweeps' cutoffs must all land on the same bucket.
+        var activityClock = new ActivityBucketClock();
         // The tcpFlowCapacity budget is the single source of truth for both the coordinator's
         // session gate and the redirect table's bounded capacity (design §4).
         var redirectTable = new TcpRedirectTable(capacity: configuration.TcpFlowCapacity);
@@ -130,7 +142,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         TcpProxyCoordinator tcpCoordinator;
         try
         {
-            tcpCoordinator = TcpRedirectComposer.Create(configuration, reinjector, selfTraffic, logger, healthSignal, new TcpRedirectComposition(redirectTable, synCopyPool, relayPool, setupExecutor, addressCache));
+            tcpCoordinator = TcpRedirectComposer.Create(configuration, reinjector, selfTraffic, logger, healthSignal, new TcpRedirectComposition(redirectTable, synCopyPool, relayPool, setupExecutor, addressCache, activityClock));
         }
         catch
         {
@@ -141,7 +153,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         }
         try
         {
-            return await BuildWithUdpAsync(configuration, reinjector, selfTraffic, logger, healthSignal, runtimeCounters, tcpCoordinator, synCopyPool, relayPool, setupExecutor, addressCache).ConfigureAwait(false);
+            return await BuildWithUdpAsync(configuration, reinjector, selfTraffic, logger, healthSignal, runtimeCounters, tcpCoordinator, synCopyPool, relayPool, setupExecutor, addressCache, activityClock).ConfigureAwait(false);
         }
         catch
         {
@@ -177,7 +189,8 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         NativeBufferPool synCopyPool,
         NativeBufferPool relayPool,
         SetupExecutor setupExecutor,
-        Socks5AddressCache addressCache)
+        Socks5AddressCache addressCache,
+        ActivityBucketClock activityClock)
     {
         // Single source of truth for every datagram-path buffer bound: the transport send buffer
         // (6 + 16 + cap), the coordinator receive windows (cap + 22 + 1), the reinjector's
@@ -201,7 +214,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         UdpProxyCoordinator udpCoordinator;
         try
         {
-            udpCoordinator = UdpProxyComposer.Create(reinjector, selfTraffic, logger, healthSignal, new UdpProxyComposition(udpTargets, maximumFrameSize, udpDatagramPool, udpWindowPool, setupExecutor, addressCache, associationPool, SessionCapacity: configuration.UdpSessionCapacity, RelayReceiveBufferBytes: configuration.UdpRelayReceiveBufferBytes));
+            udpCoordinator = UdpProxyComposer.Create(reinjector, selfTraffic, logger, healthSignal, new UdpProxyComposition(udpTargets, maximumFrameSize, udpDatagramPool, udpWindowPool, setupExecutor, addressCache, associationPool, SessionCapacity: configuration.UdpSessionCapacity, RelayReceiveBufferBytes: configuration.UdpRelayReceiveBufferBytes, ActivityClock: activityClock));
         }
         catch
         {
@@ -212,7 +225,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         }
         try
         {
-            return BuildBundle(configuration, reinjector, selfTraffic, logger, healthSignal, udpTargets, udpCoordinator, tcpCoordinator, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, setupExecutor, associationPool);
+            return BuildBundle(configuration, reinjector, selfTraffic, logger, healthSignal, udpTargets, udpCoordinator, tcpCoordinator, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, setupExecutor, associationPool, activityClock);
         }
         catch
         {
@@ -238,17 +251,19 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         NativeBufferPool udpDatagramPool,
         NativeBufferPool udpWindowPool,
         SetupExecutor setupExecutor,
-        UdpAssociationPool associationPool)
+        UdpAssociationPool associationPool,
+        ActivityBucketClock activityClock)
     {
         var executor = new NdisPacketActionExecutor(reinjector, logger, tcpCoordinator, udpCoordinator, healthSignal: healthSignal);
         var dispatcher = new FlowDispatcher(
             configuration, selfTraffic, executor, new WindowsProcessAttributor(),
             reverseHandler: tcpCoordinator,
             fragmentHandler: tcpCoordinator.HandleFragmentAsync,
-            logger: logger);
+            logger: logger,
+            activityClock: activityClock);
         var idleExpirySweeper = new IdleExpirySweeper(dispatcher, tcpCoordinator, udpCoordinator, relayIdleTimeout: configuration.UdpSessionIdleTimeout, logger: logger);
         idleExpirySweeper.Start();
-        return new DurableCaptureBundle(dispatcher, executor, udpTargets, idleExpirySweeper, udpCoordinator, tcpCoordinator, logger, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, setupExecutor, associationPool);
+        return new DurableCaptureBundle(dispatcher, executor, udpTargets, idleExpirySweeper, udpCoordinator, tcpCoordinator, logger, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, setupExecutor, associationPool, activityClock);
     }
 
     /// <summary>
@@ -361,6 +376,10 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
     /// </summary>
     internal void FlushPendingInjections(nint adapterHandle)
     {
+        // The one per-iteration clock read of the data path (the pump invokes this once per iteration
+        // and once at loop exit, including empty polls): every activity stamp and sweep cutoff is served
+        // from the bucket this publishes, so no packet path reads a clock.
+        ActivityClock.Tick();
         Executor.FlushPendingPasses(adapterHandle);
         Tcp.FlushPendingRedirectInjections(adapterHandle);
     }

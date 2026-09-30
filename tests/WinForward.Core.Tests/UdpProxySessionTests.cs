@@ -8,10 +8,9 @@ using Xunit;
 namespace WinForward.Core.Tests;
 
 /// <summary>
-/// D3 activity propagation: the association-table touch is throttled to one propagation per
-/// interval (the first after any quieter-than-interval gap goes through immediately), while the
-/// session's own <see cref="UdpProxySession.LastActivityUtc"/> stays exact per operation so
-/// idle-expiry semantics are unchanged.
+/// D3 activity propagation: the association-table touch is throttled to one propagation per activity
+/// bucket, while the session's own <see cref="UdpProxySession.LastActivityUtc"/> is a bucket-derived
+/// stamp (exact to 500 ms) driven by the published clock, so idle-expiry semantics stay never-early.
 /// </summary>
 public sealed class UdpProxySessionTests
 {
@@ -33,17 +32,18 @@ public sealed class UdpProxySessionTests
     }
 
     [Fact]
-    public async Task RapidSendsPropagateAtMostOncePerInterval()
+    public async Task RapidSendsPropagateAtMostOncePerBucket()
     {
         var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
+        var clock = new ActivityBucketClock(time);
         var stamps = new List<DateTimeOffset>();
-        var session = CreateSession(time, stamps);
+        var session = CreateSession(time, stamps, clock: clock);
         await using (session)
         {
             await session.SendSpanAsync(session.Flow.Remote, [1], CancellationToken.None);
             Assert.Single(stamps);
+            Assert.Equal(ActivityBucket.ToUtc(clock.Current), session.LastActivityUtc);
 
-            // Sends inside the interval keep the session timestamp exact but do not propagate.
             for (var index = 0; index < 5; index++)
             {
                 time.Advance(TimeSpan.FromMilliseconds(10));
@@ -51,14 +51,14 @@ public sealed class UdpProxySessionTests
             }
 
             Assert.Single(stamps);
-            Assert.Equal(time.GetUtcNow(), session.LastActivityUtc);
+            Assert.Equal(ActivityBucket.ToUtc(clock.Current), session.LastActivityUtc);
 
-            // Crossing the interval lets exactly the next send propagate.
-            time.Advance(TimeSpan.FromMilliseconds(60));
+            time.Advance(TimeSpan.FromMilliseconds(500));
+            clock.Tick();
             await session.SendSpanAsync(session.Flow.Remote, [3], CancellationToken.None);
             Assert.Equal(2, stamps.Count);
-            Assert.Equal(time.GetUtcNow(), session.LastActivityUtc);
-            Assert.Equal(time.GetUtcNow(), stamps[1]);
+            Assert.Equal(ActivityBucket.ToUtc(clock.Current), session.LastActivityUtc);
+            Assert.Equal(ActivityBucket.ToUtc(clock.Current), stamps[1]);
         }
     }
 
@@ -183,7 +183,7 @@ public sealed class UdpProxySessionTests
         Assert.Null(typeof(UdpProxySession).GetMethod("ReceiveDatagramsAsync", BindingFlags.Instance | BindingFlags.NonPublic));
     }
 
-    private static UdpProxySession CreateSession(TimeProvider time, List<DateTimeOffset> propagationStamps, IUdpProxyTransport? transport = null)
+    private static UdpProxySession CreateSession(TimeProvider time, List<DateTimeOffset> propagationStamps, IUdpProxyTransport? transport = null, ActivityBucketClock? clock = null)
     {
         var flow = FlowKey.Create(
             Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000),
@@ -211,6 +211,7 @@ public sealed class UdpProxySessionTests
             NullRuntimeLogger.Instance,
             s_receiveWindowPool,
             1537,
-            CancellationToken.None));
+            CancellationToken.None,
+            clock));
     }
 }

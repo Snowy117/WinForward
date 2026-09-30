@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Numerics;
 using System.Runtime.InteropServices;
 
 namespace WinForward.Core;
@@ -19,6 +20,15 @@ public sealed class FlowTable
     private readonly Dictionary<FlowKey, FlowState> _states;
     private readonly Dictionary<TransportTuple, FlowState> _transportIndex;
 
+    // The warm read cache: one pre-allocated direct-mapped slot array over the gated dictionaries, and
+    // the only allocation this mechanism adds (once, in the constructor, never grown). A slot holds the
+    // state a lookup by the slot's canonical transport tuple last resolved to; it is populated at claim,
+    // written through on every gated hit and cleared when the sweep removes its state. A collision
+    // overwrites the slot (the other flow falls back to the gated path), so the cache can only produce a
+    // false miss — never a false hit, because the served state passes the same seqlock bracket and
+    // transport-tuple corroboration the gated path encodes.
+    private readonly FlowState?[] _warm;
+
     // Live-slot registry: _liveStates[0.._liveCount) is exactly the set of FlowState instances in
     // _states, with no holes and no duplicates. The dictionary has no enumeration that can be resumed
     // across a released gate, so the sweep walks this array instead and keeps the cursor across its
@@ -31,7 +41,6 @@ public sealed class FlowTable
     // Sweep-level single flight, outer to _gate and never taken while _gate is held. Two interleaved
     // rounds could otherwise double-return a state to _freeStates and let two flows share one FlowState.
     private readonly Lock _sweepGate = new();
-    private readonly TimeProvider _timeProvider;
     private int _liveCount;
     private int _freeStateCount;
     private long _nextGeneration;
@@ -39,14 +48,23 @@ public sealed class FlowTable
     /// <summary>
     /// Creates a flow table. A null <paramref name="timeProvider"/> uses <see cref="TimeProvider.System"/>
     /// (production behavior); tests inject a controllable clock to assert refresh and expiry boundaries exactly.
+    /// The <paramref name="activityClock"/> is the composition's shared bucket clock when one is threaded
+    /// through; a null value derives a private clock from <paramref name="timeProvider"/>, so
+    /// <c>new FlowTable(timeProvider: time)</c> keeps driving the table's activity from that provider.
     /// </summary>
-    public FlowTable(int capacity = 65_536, TimeProvider? timeProvider = null)
+    public FlowTable(int capacity = 65_536, TimeProvider? timeProvider = null, ActivityBucketClock? activityClock = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capacity);
         Capacity = capacity;
-        _timeProvider = timeProvider ?? TimeProvider.System;
+        ActivityClock = activityClock ?? new ActivityBucketClock(timeProvider);
         _states = new Dictionary<FlowKey, FlowState>(capacity);
         _transportIndex = new Dictionary<TransportTuple, FlowState>(capacity * 2);
+        // Four slots per expected live flow (lambda ~= 0.016 for the realistic working set) keeps the
+        // modelled collision miss rate near 2 %, which the acceptance arithmetic needs; the cap bounds
+        // the array at 2 MB and is the single tunable if the measured ratio wants more headroom. A power
+        // of two lets the slot index mask instead of divide.
+        var slotTarget = (int)Math.Clamp((long)capacity * 64, 4_096, 262_144);
+        _warm = new FlowState?[BitOperations.RoundUpToPowerOf2((uint)slotTarget)];
         _liveStates = new FlowState[capacity];
         _freeStates = new FlowState[capacity];
     }
@@ -57,7 +75,14 @@ public sealed class FlowTable
     /// <summary>The number of tracked flows (a gate-consistent snapshot; diagnostics only).</summary>
     public int Count
     {
-        get { lock (_gate) return _states.Count; }
+        get
+        {
+            lock (_gate)
+            {
+                NoteGateHold();
+                return _states.Count;
+            }
+        }
     }
 
     /// <summary>
@@ -66,8 +91,27 @@ public sealed class FlowTable
     /// </summary>
     internal int LiveStateCountForDiagnostics
     {
-        get { lock (_gate) return _liveCount; }
+        get
+        {
+            lock (_gate)
+            {
+                NoteGateHold();
+                return _liveCount;
+            }
+        }
     }
+
+    /// <summary>
+    /// The number of warm-cache slots (diagnostics only): a collision fact needs the mask, and the
+    /// slot count is a pure function of the construction capacity.
+    /// </summary>
+    internal int WarmSlotCountForDiagnostics => _warm.Length;
+
+    /// <summary>
+    /// The activity clock this table stamps and sweeps against. Tests drive it to a bucket edge; the
+    /// composition threads the same instance into every consumer so cutoffs and stamps cannot drift.
+    /// </summary>
+    internal ActivityBucketClock ActivityClock { get; }
 
     /// <summary>
     /// Whether the calling thread holds the table gate (diagnostics only): a test predicate reads it to
@@ -81,6 +125,15 @@ public sealed class FlowTable
     /// no allocation and no conditional-compilation hook.
     /// </summary>
     internal SweepHoldProbe? HoldProbe { get; set; }
+
+    /// <summary>
+    /// The gate-hold diagnostics sink, or null in production (diagnostics only). It fires immediately
+    /// after every <see cref="_gate"/> acquisition, so a test can park a holder inside the gate or count
+    /// the gate entries a driven path takes.
+    /// </summary>
+    internal Action? GateHoldProbe { get; set; }
+
+    private void NoteGateHold() => GateHoldProbe?.Invoke();
 
     /// <summary>
     /// Counts what each <see cref="_gate"/> hold inside <see cref="RemoveExpired"/> did, so the
@@ -121,6 +174,42 @@ public sealed class FlowTable
     }
 
     /// <summary>
+    /// The lock-free warm probe: one volatile slot read plus the state's validated snapshot and an exact
+    /// transport-tuple corroboration. <see langword="false"/> means "take the gated path", never "the
+    /// flow is absent" — a collision, an unpopulated slot, a torn read or a recycled state all fall back
+    /// to <see cref="TryResolve"/>, which answers with the authoritative decision and warms the slot.
+    /// No gate, no clock read, no allocation.
+    /// </summary>
+    public bool TryResolveWarm(FlowKey key, out FlowStateView view)
+    {
+        var tuple = TransportTuple.From(key);
+        var candidate = Volatile.Read(ref _warm[SlotOf(key)]);
+        if (candidate is not null && candidate.TrySnapshot(out view) && Matches(tuple, view.Key))
+        {
+            candidate.TouchBucket(ActivityClock.Current);
+            return true;
+        }
+
+        view = default;
+        return false;
+    }
+
+    /// <summary>
+    /// The exact relation the gated resolve encodes: the state's stored key has the queried transport
+    /// tuple in either orientation. It is equivalent to the OR of the two dictionary probes because the
+    /// table holds at most one state per transport tuple (the transport index rejects a duplicate and a
+    /// second claim of the same tuple resolves to the existing state).
+    /// </summary>
+    private static bool Matches(in TransportTuple queried, FlowKey stored)
+    {
+        var storedTuple = TransportTuple.From(stored);
+        return storedTuple.Equals(queried) || storedTuple.Reverse().Equals(queried);
+    }
+
+    private int SlotOf(FlowKey key) =>
+        FlowHash.CombineCanonical(key.AddressFamily, key.Protocol, key.Local, key.Remote) & (_warm.Length - 1);
+
+    /// <summary>
     /// Resolves a flow for a packet whose key may differ from the stored key in direction, origin
     /// kind, or origin adapter. A flow is identified by its transport tuple (address family,
     /// protocol, and the local/remote endpoint pair in either orientation); origin kind and origin
@@ -132,6 +221,7 @@ public sealed class FlowTable
     {
         lock (_gate)
         {
+            NoteGateHold();
             return TryResolveLocked(key, out state);
         }
     }
@@ -146,6 +236,7 @@ public sealed class FlowTable
     {
         lock (_gate)
         {
+            NoteGateHold();
             if (TryResolveLocked(key, out state)) return state is not null;
             if (_states.Count >= Capacity)
             {
@@ -155,11 +246,12 @@ public sealed class FlowTable
 
             var decision = decide();
             var created = RentState();
-            created.Reset(key, decision, ++_nextGeneration);
+            created.Reset(key, decision, ++_nextGeneration, ActivityClock.Tick());
             _states.Add(key, created);
             AddToTransportIndex(created);
             _liveStates[_liveCount] = created;
             _liveCount++;
+            Volatile.Write(ref _warm[SlotOf(key)], created);
             state = created;
             return true;
         }
@@ -191,21 +283,29 @@ public sealed class FlowTable
         {
             // One comparison per entry instead of a DateTimeOffset subtraction, and the shape a bucketed
             // activity stamp needs: cut off at an integer computed once per call (research F3.4).
-            var cutoffTicks = now.UtcTicks - idleTimeout.Ticks;
+            var cutoffBucket = ActivityBucket.Cutoff(now, idleTimeout);
+            // Publish the caller's instant: the sweep compares against the clock it was handed instead of
+            // reading the clock a second time, so the two cannot drift apart inside the call.
+            ActivityClock.Publish(now);
             var probe = HoldProbe;
+            var gateProbe = GateHoldProbe;
 
             // The round's progress target (the states present at entry) under the gate. It is not the
             // registry's validity bound: _liveCount also shrinks as this round removes, and the loop
             // needs both so it can never read the stale slot at cursor == _liveCount after the last
             // removal and hand the same state to _freeStates twice.
             int roundLimit;
-            lock (_gate) roundLimit = _liveCount;
+            lock (_gate)
+            {
+                gateProbe?.Invoke();
+                roundLimit = _liveCount;
+            }
 
             var cursor = 0;
             var removed = 0;
             while (cursor < roundLimit && cursor < _liveCount)
             {
-                var candidate = ScanChunk(ref cursor, roundLimit, cutoffTicks, out var examinations);
+                var candidate = ScanChunk(ref cursor, roundLimit, cutoffBucket, out var examinations);
                 probe?.RecordScanHold(examinations);
 
                 // The chunk held only live entries: take the next chunk, or finish when a bound is reached.
@@ -215,12 +315,16 @@ public sealed class FlowTable
                 // without touching its activity, so it expires at its original idle point.
                 if (isHeld is not null && isHeld(candidate.Key))
                 {
-                    lock (_gate) cursor++;
+                    lock (_gate)
+                    {
+                        gateProbe?.Invoke();
+                        cursor++;
+                    }
                     probe?.RecordRemovalHold(0);
                     continue;
                 }
 
-                var removalsHere = RemoveCandidateAt(ref cursor, candidate, cutoffTicks);
+                var removalsHere = RemoveCandidateAt(ref cursor, candidate, cutoffBucket);
                 probe?.RecordRemovalHold(removalsHere);
                 removed += removalsHere;
             }
@@ -238,20 +342,20 @@ public sealed class FlowTable
     /// cost is this chunk's cost; <paramref name="examinations"/> includes the candidate returned, which is
     /// the last entry this hold looked at.
     /// </summary>
-    private FlowState? ScanChunk(ref int cursor, int roundLimit, long cutoffTicks, out int examinations)
+    private FlowState? ScanChunk(ref int cursor, int roundLimit, long cutoffBucket, out int examinations)
     {
         lock (_gate)
         {
+            NoteGateHold();
             var examined = 0;
             while (cursor < roundLimit && cursor < _liveCount && examined < SweepChunkEntries)
             {
                 var state = _liveStates[cursor];
 
-                // The comparison is the integer form of the DateTimeOffset subtraction this replaced:
-                // idle has elapsed once `now - LastActivityUtc >= idleTimeout`, i.e. once the stamp is at
-                // or below the cutoff. A strict `<` here would keep one extra tick of retention and break
-                // the exact boundary the expiry tests pin.
-                if (state.LastActivityUtc.UtcTicks > cutoffTicks)
+                // Bucket-space comparison, never on LastActivityUtc: a stamp is the bucket its instant
+                // falls in (quantised down), so a strict `<` retires in `(idleTimeout, idleTimeout + w]`
+                // — never early, at most one bucket late — while `<=` would retire up to one bucket early.
+                if (state.ActivityBucketForDiagnostics >= cutoffBucket)
                 {
                     cursor++;
                     examined++;
@@ -274,17 +378,25 @@ public sealed class FlowTable
     /// rewind. The cursor only advances when the entry survived, so a claim that revived the candidate
     /// wins and is retried next round. Returns 1 when a state was removed, 0 otherwise.
     /// </summary>
-    private int RemoveCandidateAt(ref int cursor, FlowState candidate, long cutoffTicks)
+    private int RemoveCandidateAt(ref int cursor, FlowState candidate, long cutoffBucket)
     {
         lock (_gate)
         {
+            NoteGateHold();
             if (cursor < _liveCount &&
                 ReferenceEquals(_liveStates[cursor], candidate) &&
-                candidate.LastActivityUtc.UtcTicks <= cutoffTicks &&
+                candidate.ActivityBucketForDiagnostics < cutoffBucket &&
                 _states.Remove(candidate.Key, out _))
             {
                 RemoveFromTransportIndex(candidate);
                 _liveStates[cursor] = _liveStates[--_liveCount];
+                // Clear the warm slot before the state can be recycled. A reader that loaded the
+                // reference before this clear and completes its snapshot before ReturnState's Reset can
+                // still be served the triple that was valid when it read the slot (the removal is not
+                // atomic with an in-flight probe); one whose snapshot lands after the recycling Reset
+                // fails the seqlock or the tuple corroboration and takes the gated path.
+                var slot = SlotOf(candidate.Key);
+                if (ReferenceEquals(Volatile.Read(ref _warm[slot]), candidate)) Volatile.Write(ref _warm[slot], null);
                 ReturnState(candidate);
                 return 1;
             }
@@ -304,6 +416,7 @@ public sealed class FlowTable
     {
         lock (_gate)
         {
+            NoteGateHold();
             Debug.Assert(_liveCount == _states.Count, $"The flow-table live registry holds {_liveCount} slots for {_states.Count} states.");
         }
     }
@@ -322,7 +435,7 @@ public sealed class FlowTable
 
     private void ReturnState(FlowState state)
     {
-        state.Reset(default, default, 0);
+        state.Reset(default, default, 0, 0);
         if (_freeStateCount < _freeStates.Length) _freeStates[_freeStateCount++] = state;
     }
 
@@ -330,7 +443,9 @@ public sealed class FlowTable
     {
         if (_states.TryGetValue(key, out state) || _transportIndex.TryGetValue(TransportTuple.From(key), out state))
         {
-            state.Touch(_timeProvider.GetUtcNow());
+            state.TouchBucket(ActivityClock.Current);
+            // Write-through: the second lookup of this flow is already a warm probe.
+            Volatile.Write(ref _warm[SlotOf(key)], state);
             return true;
         }
 

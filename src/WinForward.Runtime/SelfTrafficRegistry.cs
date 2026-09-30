@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using WinForward.Core;
 
@@ -6,7 +7,7 @@ namespace WinForward.Runtime;
 public sealed class SelfTrafficRegistry : ISelfTrafficGuard
 {
     private readonly Dictionary<SelfTrafficKey, long> _entries = [];
-    private readonly Dictionary<WildcardKey, long> _wildcards = [];
+    private readonly ConcurrentDictionary<WildcardKey, long> _wildcards = [];
     private readonly Lock _gate = new();
     private long _generation;
 
@@ -32,6 +33,23 @@ public sealed class SelfTrafficRegistry : ISelfTrafficGuard
         }
     }
 
+    /// <summary>
+    /// The wildcard half of <see cref="IsOwned"/> alone: two lock-free probes over the relay-socket
+    /// registrations whose local address is any. A relay control socket registers
+    /// <c>(protocol, Any:port, remote)</c> before its SYN leaves the host — its socket is bound to a
+    /// wildcard local endpoint, so the matcher has to cover whatever source IP the routing stack picks.
+    /// Answering this half on the warm entry is what keeps an ephemeral port recycled from a proxied
+    /// host flow from resolving that flow's stale state and redirecting WinForward's own control
+    /// connection into its own proxy; the exact-tuple half cannot serve that purpose, because it is only
+    /// checked before a claim and a claimed state is already the "proven not self" record there.
+    /// </summary>
+    public bool IsWildcardOwned(FlowContext context)
+    {
+        var key = SelfTrafficKey.From(context);
+        var reverse = key with { Local = key.Remote, Remote = key.Local };
+        return _wildcards.ContainsKey(WildcardKey.From(key)) || _wildcards.ContainsKey(WildcardKey.From(reverse));
+    }
+
     private static bool IsWildcardLocal(IPAddressValue address) => address.IsIPv4Any || address.IsIPv6Any;
 
     private void Remove(SelfTrafficKey key, long generation)
@@ -41,7 +59,7 @@ public sealed class SelfTrafficRegistry : ISelfTrafficGuard
             if (_entries.TryGetValue(key, out var current) && current == generation)
             {
                 _entries.Remove(key);
-                if (IsWildcardLocal(key.Local.Address)) _wildcards.Remove(WildcardKey.From(key));
+                if (IsWildcardLocal(key.Local.Address)) _wildcards.TryRemove(WildcardKey.From(key), out _);
             }
         }
     }

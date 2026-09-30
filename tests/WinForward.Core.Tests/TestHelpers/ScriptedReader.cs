@@ -21,3 +21,42 @@ internal sealed class ScriptedReader(Func<NdisPacketBuffer[], int>[] reads, Win3
         return reads[index](buffers);
     }
 }
+
+/// <summary>
+/// A scripted reader that records every call's returned count into pre-sized storage, so the counting
+/// itself allocates nothing: the pump's read-call and idle-allocation gates measure the pump rather
+/// than the probe.
+/// </summary>
+internal sealed class CountingCaptureReader(Func<nint, NdisPacketBuffer[], int>[] script) : INdisPacketReader
+{
+    private readonly int[] _observed = new int[256];
+
+    public int ReadCalls { get; private set; }
+
+    public int EmptyReads { get; private set; }
+
+    public int BatchReads { get; private set; }
+
+    public long PacketsReturned { get; private set; }
+
+    public int[] ObservedCounts() => _observed[..ReadCalls];
+
+    public int TryReadPackets(nint adapterHandle, NdisPacketBuffer[] buffers)
+    {
+        var index = Math.Min(ReadCalls, script.Length - 1);
+        var count = script[index](adapterHandle, buffers);
+        if (ReadCalls < _observed.Length) _observed[ReadCalls] = count;
+        ReadCalls++;
+        if (count == 0)
+        {
+            EmptyReads++;
+        }
+        else
+        {
+            BatchReads++;
+            PacketsReturned += count;
+        }
+
+        return count;
+    }
+}

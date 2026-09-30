@@ -20,6 +20,7 @@ internal sealed class UdpSessionSetup(
     UdpAssociationTable associations,
     IUdpResponseSink responseSink,
     TimeProvider timeProvider,
+    ActivityBucketClock activityClock,
     IRuntimeLogger logger,
     NativeBufferPool receiveWindowPool,
     int receiveBufferSize,
@@ -114,7 +115,7 @@ internal sealed class UdpSessionSetup(
                 throw new IOException("UDP flow association was already owned by another session; blocking the flow.");
             }
 
-            var session = new UdpProxySession(new UdpProxySessionContext(flow, flowGeneration, association, transport, responseSink, clientMac, timeProvider, _activityObserver, logger, receiveWindowPool, receiveBufferSize, cancellationToken));
+            var session = new UdpProxySession(new UdpProxySessionContext(flow, flowGeneration, association, transport, responseSink, clientMac, timeProvider, _activityObserver, logger, receiveWindowPool, receiveBufferSize, cancellationToken, activityClock));
             transport = null;
             host.AttachSession(slot, session);
             session.Start(_receiveFailureHandler);

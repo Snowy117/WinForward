@@ -20,7 +20,8 @@ internal sealed record TcpRedirectComposition(
     NativeBufferPool SynCopyPool,
     NativeBufferPool RelayPool,
     SetupExecutor SetupExecutor,
-    Socks5AddressCache AddressCache);
+    Socks5AddressCache AddressCache,
+    ActivityBucketClock? ActivityClock = null);
 
 /// <summary>
 /// Composes the durable <see cref="TcpProxyCoordinator"/> from its
@@ -51,5 +52,6 @@ internal static class TcpRedirectComposer
                 Logger = logger,
                 Capacity = configuration.TcpFlowCapacity,
                 HealthSignal = healthSignal,
+                ActivityClock = composition.ActivityClock,
             });
 }

@@ -92,14 +92,16 @@ public sealed class HotPathAllocationGateTests
     {
         var injector = new CountingInjector();
         var listenerFactory = new FakeListenerFactory();
-        var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, new TcpRedirectTable(), new SelfTrafficRegistry(), new FakeLocalAddressProvider());
+        var table = new TcpRedirectTable();
+        var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, new SelfTrafficRegistry(), new FakeLocalAddressProvider());
         await using (coordinator)
         {
             await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
             var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
             var synAck = MakeReversePacketClassifierOrientation(s_clientIpv4, listenerTuple.Port, s_destIpv4, 53000, mutateFrame: frame => frame[47] = 0x12);
+            Assert.True(table.TryResolveByReverse(synAck.Context.Key.Local, synAck.Context.Key.Remote, DateTimeOffset.UtcNow, out var association));
 
-            for (var warm = 0; warm < 8; warm++) await coordinator.HandleReverseAsync(synAck, CancellationToken.None);
+            for (var warm = 0; warm < 8; warm++) await coordinator.HandleReverseAsync(synAck, association!, CancellationToken.None);
 
             // Same window contract as the dispatcher gate above: the reverse handler's warm entry
             // returns a completed ValueTask, so the loop stays on one thread and the per-thread
@@ -109,7 +111,7 @@ public sealed class HotPathAllocationGateTests
             const int count = 64;
             for (var index = 0; index < count; index++)
             {
-                var pending = coordinator.HandleReverseAsync(synAck, CancellationToken.None);
+                var pending = coordinator.HandleReverseAsync(synAck, association!, CancellationToken.None);
                 Assert.True(pending.IsCompletedSuccessfully, "the allocation gate relies on the synchronous fast path");
                 if (await pending != TcpRedirectOutcome.Injected) Assert.Fail("reverse reinjection was not injected");
             }

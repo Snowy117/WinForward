@@ -243,6 +243,7 @@ public sealed class UdpProxyCoordinatorLifecycleTests
         var transport = Assert.Single(factory.Transports);
         await WaitForReadyAsync(transport, 1);
         time.Advance(TimeSpan.FromMinutes(2));
+        coordinator.ActivityClock.Tick();
         Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [2], default, CancellationToken.None));
         await WaitForReadyAsync(transport, 2);
 
@@ -268,6 +269,7 @@ public sealed class UdpProxyCoordinatorLifecycleTests
         // clock before that expires the not-yet-ready slot by its creation timestamp instead.
         await WaitForReadyAsync(Assert.Single(factory.Transports), 1);
         time.Advance(TimeSpan.FromMinutes(2));
+        coordinator.ActivityClock.Tick();
         Assert.True(await coordinator.TrySendSpanAsync(first, s_server, [2], default, CancellationToken.None));
         Assert.Equal(0, await coordinator.RemoveExpiredAsync(time.GetUtcNow(), TimeSpan.FromMinutes(1)));
 
@@ -337,6 +339,7 @@ public sealed class UdpProxyCoordinatorLifecycleTests
         var transport = Assert.Single(factory.Transports);
         await WaitForReadyAsync(transport, 1);
         time.Advance(TimeSpan.FromMinutes(2));
+        coordinator.ActivityClock.Tick();
 
         snapshotTaken = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         resumeSweep = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -379,6 +382,7 @@ public sealed class UdpProxyCoordinatorLifecycleTests
         var transport = Assert.Single(factory.Transports);
         await WaitForReadyAsync(transport, 1);
         time.Advance(TimeSpan.FromMinutes(2));
+        coordinator.ActivityClock.Tick();
 
         snapshotTaken = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         resumeSweep = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);

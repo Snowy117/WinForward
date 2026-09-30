@@ -99,7 +99,7 @@ public sealed class TcpProxyCoordinatorCapacityTests
 
         var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
         var synAck = MakeReversePacketClassifierOrientation(s_clientIpv4, listenerTuple.Port, s_destIpv4, 53000, mutateFrame: f => f[47] = 0x12);
-        Assert.Equal(TcpRedirectOutcome.Blocked, await coordinator.HandleReverseAsync(synAck, CancellationToken.None));
+        Assert.Equal(TcpRedirectOutcome.Blocked, await HandleReverseAsync(coordinator, table, synAck, CancellationToken.None));
 
         var (level, _, fields) = Assert.Single(logger.Events, item => string.Equals(item.Name, "tcp.redirect.failed", StringComparison.Ordinal));
         Assert.Equal(RuntimeLogLevel.Warn, level);

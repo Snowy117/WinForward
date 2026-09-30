@@ -32,6 +32,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
     private readonly Func<SetupWorkItem, Task> _setupHandler;
     private readonly IRuntimeLogger _logger;
     private readonly TimeProvider _timeProvider;
+    private readonly ActivityBucketClock _activityClock;
     private readonly TcpRedirectSessionStore _store;
     private readonly TcpRedirectSetup _setup;
     private readonly ClientResetInjector _clientReset;
@@ -78,6 +79,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
         _logger = options.Logger ?? NullRuntimeLogger.Instance;
         Capacity = capacity;
         _timeProvider = options.TimeProvider;
+        _activityClock = options.ActivityClock ?? new ActivityBucketClock(_timeProvider);
         _store = new TcpRedirectSessionStore(table, _logger, Capacity, _timeProvider);
         _prunePendingSyn = _pendingSyn.RemoveExpired;
         _clientReset = new ClientResetInjector(injector, _logger, _store.TearDownSessionAsync, _store.FailAssociationAsync, Capacity, healthSignal: options.HealthSignal, timeProvider: _timeProvider);
@@ -356,7 +358,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
         // listener port must be left to normal flow/policy handling, never dropped here.
         var key = packet.Context.Key;
         if (key.Protocol != TransportProtocol.Tcp) return TcpRedirectOutcome.NotRelevant;
-        if (!Table.IsReverseCandidate(key.Local, key.Remote))
+        if (!Table.TryResolveByReverse(key.Local, key.Remote, ActivityNow, out var association) || association is null)
         {
             // TIME_WAIT grace: the reverse leg of a redirect torn down within the grace window still
             // resolves here, so listener-side stragglers of the finished handshake are consumed
@@ -366,8 +368,16 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
                 : TcpRedirectOutcome.NotRelevant;
         }
 
-        return await HandleReverseAsync(packet, cancellationToken).ConfigureAwait(false);
+        return await HandleReverseAsync(packet, association, cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// The warm path's activity instant: the published bucket, so a per-packet resolve and touch never
+    /// read a clock. A stamp is quantised down, and every consumer's comparison is a strict <c>&lt;</c>
+    /// on buckets, so this can only retire up to one bucket late — never early. The tombstone probes keep
+    /// the real clock: their grace window is not a bucket-space comparison.
+    /// </summary>
+    private DateTimeOffset ActivityNow => ActivityBucket.ToUtc(_activityClock.Current);
 
     /// <summary>
     /// Routes a proxy-selected TCP packet to the correct redirect phase. The flow dispatcher sends
@@ -383,14 +393,18 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
         ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
 
         var key = packet.Context.Key;
-        var now = _timeProvider.GetUtcNow();
         // A2: the SYN bit-test reads the synchronous frame view (the native capture buffer while
         // the lease is unmaterialized) — a pure span read that never forces a pooled managed copy.
         var syn = TcpFrameRewriter.IsTcpSyn(packet.InspectionSpan);
 
-        if (Table.IsReverseCandidate(key.Local, key.Remote))
+        // The listener-port prefilter is exact for "this cannot be a reverse candidate" (a reverse
+        // tuple's source port is always a live listener port, and the count rises in the same hold that
+        // publishes the reverse index entry), so a forward packet pays neither the reverse probe nor its
+        // gate. A prefilter hit is only a candidate; a miss on the full tuple check falls through.
+        if (Table.IsReverseCandidatePort(key.Local.Port) &&
+            Table.TryResolveByReverse(key.Local, key.Remote, ActivityNow, out var reverseAssociation) && reverseAssociation is not null)
         {
-            return HandleReverseAsync(packet, cancellationToken);
+            return HandleReverseAsync(packet, reverseAssociation, cancellationToken);
         }
 
         if (syn)
@@ -405,7 +419,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
         // Mid-flow data on the original client->listener leg: rewrite the destination to the proxy
         // listener tuple so the redirected connection receives the client's payload. Only flows with
         // an active redirect association are rewritten; anything else is not ours to handle.
-        if (Table.TryResolveByOriginal(key, now, out var existing) && existing is not null)
+        if (Table.TryResolveByOriginal(key, ActivityNow, out var existing) && existing is not null)
         {
             return ReinjectExistingFlowDataAsync(packet, existing, cancellationToken);
         }
@@ -416,7 +430,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
         // server — which never saw the proxied connection and answers the unknown tuple with a
         // bounced RST.
         // ReSharper disable once ConvertIfStatementToReturnStatement // Tombstones.TryHit is a side-effecting probe; the ternary would exceed the line budget and bury the "already-finished handshake straggler" early exit (B1 disposition).
-        if (_store.Tombstones.TryHit(key, now)) return ValueTask.FromResult(TcpRedirectOutcome.Dropped);
+        if (_store.Tombstones.TryHit(key, _timeProvider.GetUtcNow())) return ValueTask.FromResult(TcpRedirectOutcome.Dropped);
 
         return ValueTask.FromResult(TcpRedirectOutcome.NotRelevant);
     }

@@ -126,12 +126,13 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
             // Cleared at the start of the critical section: the candidates are still registered in
             // _sessions, so an aborted tick simply re-discovers them next tick.
             _expiredScratch.Clear();
+            var cutoffBucket = ActivityBucket.Cutoff(now, idleTimeout);
             lock (_gate)
             {
                 if (_scope.IsSealed) return 0;
                 foreach (var session in _sessions.Values)
                 {
-                    if (session.Association.Phase == RelayPhase.Redirecting && now - session.Association.LastActivityUtc >= idleTimeout)
+                    if (session.Association.Phase == RelayPhase.Redirecting && session.Association.BucketForDiagnostics < cutoffBucket)
                     {
                         _expiredScratch.Add(session);
                     }
@@ -147,7 +148,7 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
                     if (!_sessions.TryGetValue(session.Association.OriginalKey, out var current) ||
                         !ReferenceEquals(current, session) ||
                         session.Association.Phase != RelayPhase.Redirecting ||
-                        now - session.Association.LastActivityUtc < idleTimeout)
+                        session.Association.BucketForDiagnostics >= cutoffBucket)
                     {
                         continue;
                     }

@@ -290,7 +290,7 @@ public sealed partial class TcpProxyCoordinator
     }
 
 #pragma warning disable RCS1229 // Deliberate non-async warm entry (hot-path.md #3): the per-packet reverse path must not pay an async state machine; synchronous failures before the returned ValueTask are part of the warm contract.
-    public ValueTask<TcpRedirectOutcome> HandleReverseAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
+    public ValueTask<TcpRedirectOutcome> HandleReverseAsync(CapturedFlowPacket packet, TcpRedirectAssociation association, CancellationToken cancellationToken)
 #pragma warning restore RCS1229
     {
         // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease; CapturedFlowPacketGuards.ThrowLeaseRequired reports the null member (quality-guidelines.md).
@@ -302,7 +302,6 @@ public sealed partial class TcpProxyCoordinator
         // dispatcher already gates the reverse handler to TCP (H1), but a non-TCP packet must never
         // be routed into reverse handling regardless of call context.
         if (key.Protocol != TransportProtocol.Tcp) return ValueTask.FromResult(TcpRedirectOutcome.NotRelevant);
-        if (!Table.TryResolveByReverse(key.Local, key.Remote, _timeProvider.GetUtcNow(), out var association) || association is null) return ValueTask.FromResult(TcpRedirectOutcome.NotRelevant);
 
         var original = association.OriginalKey;
         // Host-originated flows terminate on this host (reverse to MSTCP); forwarded flows (client

@@ -134,3 +134,25 @@ internal sealed class MutableTimeProvider(DateTimeOffset initial) : TimeProvider
     public override DateTimeOffset GetUtcNow() => _now;
     public void Advance(TimeSpan duration) => _now = _now.Add(duration);
 }
+
+/// <summary>
+/// Counts clock reads and can be armed to throw on the next one, so a warm path that still reads the
+/// clock fails its fact instead of quietly passing on a quantised value.
+/// </summary>
+internal sealed class CountingTimeProvider(DateTimeOffset initial) : TimeProvider
+{
+    private readonly MutableTimeProvider _inner = new(initial);
+    private int _reads;
+
+    public int Reads => Volatile.Read(ref _reads);
+
+    public bool ThrowOnRead { get; set; }
+
+    public override DateTimeOffset GetUtcNow()
+    {
+        Interlocked.Increment(ref _reads);
+        return ThrowOnRead
+            ? throw new InvalidOperationException("the driven path read the activity clock")
+            : _inner.GetUtcNow();
+    }
+}

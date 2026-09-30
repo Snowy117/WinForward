@@ -20,6 +20,8 @@ internal sealed class FakeGuard : ISelfTrafficGuard
     public bool Owned { get; init; }
 
     public bool IsOwned(FlowContext context) => Owned;
+
+    public bool IsWildcardOwned(FlowContext context) => Owned;
 }
 
 internal sealed class FakeAttributor(string? name) : IProcessAttributor

@@ -1,3 +1,4 @@
+using WinForward.Core;
 using WinForward.Protocols;
 using WinForward.Runtime.Socks5;
 
@@ -30,8 +31,15 @@ public sealed record UdpProxyOptions
     /// <summary>The pinned maximum Ethernet frame size shared with the transport and reinjector; owns the receive window.</summary>
     public int MaximumFrameSize { get; init; } = UdpFrameBuilder.DefaultMaximumEthernetFrame;
 
-    /// <summary>The clock driving setup cooldowns, datagram TTLs, and activity stamps (injectable for fake-time tests).</summary>
+    /// <summary>The clock driving setup cooldowns, datagram TTLs, tombstone-style stamps and the ready path's activity store (injectable for fake-time tests).</summary>
     public TimeProvider TimeProvider { get; init; } = TimeProvider.System;
+
+    /// <summary>
+    /// The composition's shared activity-bucket clock, driving the sessions' activity stamps and the
+    /// expiry scan's cutoff. Null derives a private clock from <see cref="TimeProvider"/>, so
+    /// compositions that only inject a time provider keep their behaviour.
+    /// </summary>
+    public ActivityBucketClock? ActivityClock { get; init; }
 
     /// <summary>Test seam: awaited between the expiry snapshot and the per-session recheck; null in production.</summary>
     internal Func<ValueTask>? BeforeExpiryRecheck { get; init; }

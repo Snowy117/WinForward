@@ -1,6 +1,7 @@
 using System.Runtime.Versioning;
 using WinForward.Cli;
 using WinForward.Configuration;
+using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.Capture;
 using WinForward.Runtime.TcpRedirect;
@@ -29,16 +30,16 @@ public sealed class DurableCaptureBundleTests
     private static AdapterEnumerationItem Item(string stableId, nint handle, byte[] mac) =>
         new(new WindowsAdapter(stableId, stableId, stableId, handle, 1), mac, 1500);
 
-    private static DurableCaptureBundle CreateBundle(RecordingRuntimeLogger logger)
+    private static DurableCaptureBundle CreateBundle(RecordingRuntimeLogger logger, ActivityBucketClock? activityClock = null)
     {
         var configuration = new ValidatedConfiguration(
             new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Pass));
-        var dispatcher = new FlowDispatcher(configuration, new FakeGuard(), new FakeExecutor());
+        var dispatcher = new FlowDispatcher(configuration, new FakeGuard(), new FakeExecutor(), activityClock: activityClock);
         var executor = new NdisPacketActionExecutor(new FakeReinjector());
         var udpTargets = new UdpAdapterTargetSource();
         var sweeper = new IdleExpirySweeper(dispatcher, tcp: null, udp: null, logger: logger);
-        var udp = UdpCoordinatorFakes.CreateCoordinator(new FakeTransportFactory(), new FakeResponseSink());
+        var udp = UdpCoordinatorFakes.CreateCoordinator(new FakeTransportFactory(), new FakeResponseSink(), activityClock is null ? null : new UdpProxyOptions { ActivityClock = activityClock });
         var tcp = TcpCoordinatorFakes.CreateCoordinator(
             new FakeListenerFactory(),
             new FakeRelayFactory(),
@@ -46,8 +47,33 @@ public sealed class DurableCaptureBundleTests
             new TcpRedirectTable(),
             new SelfTrafficRegistry(),
             new FakeLocalAddressProvider(),
-            new TcpRedirectOptions { Logger = logger });
-        return new DurableCaptureBundle(dispatcher, executor, udpTargets, sweeper, udp, tcp, logger);
+            new TcpRedirectOptions { Logger = logger, ActivityClock = activityClock });
+        return new DurableCaptureBundle(dispatcher, executor, udpTargets, sweeper, udp, tcp, logger, activityClock: activityClock);
+    }
+
+    /// <summary>
+    /// The frozen-bucket guard: the composition's one clock is ticked by the pump's per-iteration
+    /// callback (<c>Program.cs</c> wires <see cref="CapturePacketProcessor.OnBatchCompleted"/> to
+    /// <see cref="DurableCaptureBundle.FlushPendingInjections"/>), so every iteration — empty poll
+    /// included — advances it exactly once and no packet does.
+    /// </summary>
+    [Fact]
+    public async Task ActivityBucketClockTicksExactlyOncePerPumpIteration()
+    {
+        var logger = new RecordingRuntimeLogger();
+        var clock = new ActivityBucketClock();
+        var ticks = 0;
+        clock.TickProbe = () => Interlocked.Increment(ref ticks);
+        await using var bundle = CreateBundle(logger, clock);
+        var processor = new CapturePacketProcessor(bundle.Dispatcher, logger, bundle.FlushPendingInjections);
+        var reader = new CountingCaptureReader([static (_, _) => 0]);
+        await using var pump = new NdisCapturePump(reader, 0x2A, static (_, _) => ValueTask.CompletedTask, new NdisCapturePumpOptions { PollDelay = TimeSpan.Zero, OnBatchCompleted = () => processor.OnBatchCompleted!(0x2A) });
+
+        const int iterations = 16;
+        for (var index = 0; index < iterations; index++) pump.RunIterationForTests(CancellationToken.None);
+
+        Assert.Equal(iterations, ticks);
+        Assert.Equal(iterations, reader.ReadCalls);
     }
 
     private static byte[] MacOf(UdpAdapterTarget? target) => target!.Value.Mac;

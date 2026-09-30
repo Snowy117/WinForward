@@ -24,7 +24,8 @@ internal sealed record UdpProxyComposition(
     Socks5AddressCache AddressCache,
     UdpAssociationPool Associations,
     int SessionCapacity,
-    int RelayReceiveBufferBytes);
+    int RelayReceiveBufferBytes,
+    ActivityBucketClock? ActivityClock = null);
 
 /// <summary>
 /// Composes the durable <see cref="UdpProxyCoordinator"/> from its
@@ -87,5 +88,6 @@ internal static class UdpProxyComposer
                 MaximumFrameSize = composition.MaximumFrameSize,
                 Capacity = composition.SessionCapacity,
                 RelayReceiveBufferBytes = composition.RelayReceiveBufferBytes,
+                ActivityClock = composition.ActivityClock,
             });
 }

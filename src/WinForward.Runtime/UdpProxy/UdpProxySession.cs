@@ -29,7 +29,8 @@ internal readonly record struct UdpProxySessionContext(
     IRuntimeLogger Logger,
     NativeBufferPool ReceiveWindowPool,
     int ReceiveBufferSize,
-    CancellationToken Shutdown);
+    CancellationToken Shutdown,
+    ActivityBucketClock? ActivityClock = null);
 
 internal sealed class UdpProxySession : IAsyncDisposable
 {
@@ -37,26 +38,35 @@ internal sealed class UdpProxySession : IAsyncDisposable
     private static readonly TimeSpan s_rateLimitedLogInterval = TimeSpan.FromSeconds(5);
 
     /// <summary>
-    /// Minimum interval between activity propagations to the association table. The table
-    /// serves reverse-leg classification and idle-sweep pruning on seconds-scale timeouts, so
-    /// coarser propagation granularity is unobservable there, while the per-datagram cost of
-    /// the touch drops to one Interlocked exchange. <see cref="LastActivityUtc"/> stays exact
-    /// per operation, so idle-expiry semantics are unaffected.
+    /// Minimum activity distance between propagations to the association table. The table serves
+    /// reverse-leg classification and idle-sweep pruning on seconds-scale timeouts, so coarser
+    /// propagation granularity is unobservable there, while the per-datagram cost of the touch drops to
+    /// one volatile store. <see cref="LastActivityUtc"/> is a bucket-derived stamp, exact to 500 ms.
     /// </summary>
-    private static readonly TimeSpan s_activityPropagationInterval = TimeSpan.FromMilliseconds(100);
+    private const long ActivityPropagationBuckets = 1;
+
+    /// <summary>
+    /// The "never propagated" sentinel. Bucket 0 is a real bucket (any instant in
+    /// <c>[1970-01-01, +500 ms)</c>), so a <c>0</c> sentinel would suppress a session's first
+    /// propagation when its clock starts at the Unix epoch.
+    /// </summary>
+    private const long NeverPropagated = long.MinValue;
+
     private readonly IUdpProxyTransport _transport;
     private readonly IUdpResponseSink _sink;
     private readonly QuiescenceScope _scope;
     private readonly TimeProvider _timeProvider;
+    private readonly ActivityBucketClock _activityClock;
     private readonly Action<UdpAssociation, DateTimeOffset> _activityObserver;
     private readonly IRuntimeLogger _logger;
     private readonly NativeBufferPool _receiveWindowPool;
     private readonly int _receiveBufferSize;
     private readonly Lock _activityGate = new();
+    private int _activityGateEntryCount;
     private Task? _receiveLoop;
     private int _teardownStarted;
-    private long _lastActivityTicks;
-    private long _lastActivityPropagationTicks;
+    private long _lastActivityBucket;
+    private long _lastActivityPropagationBucket = NeverPropagated;
     private long _lastSkipSummaryTicks;
     private long _lastInjectionFailureLogTicks;
     private long _skippedUnexpectedSource;
@@ -83,17 +93,48 @@ internal sealed class UdpProxySession : IAsyncDisposable
         ClientMac = context.ClientMac;
         _scope = new QuiescenceScope(context.Shutdown);
         _timeProvider = context.TimeProvider;
+        _activityClock = context.ActivityClock ?? new ActivityBucketClock(context.TimeProvider);
         _activityObserver = context.ActivityObserver;
         _logger = context.Logger;
         _receiveWindowPool = context.ReceiveWindowPool;
         _receiveBufferSize = context.ReceiveBufferSize;
-        _lastActivityTicks = context.TimeProvider.GetUtcNow().UtcTicks;
+        _lastActivityBucket = _activityClock.Current;
     }
 
     public FlowKey Flow { get; }
     public long FlowGeneration { get; }
     public UdpAssociation Association { get; }
-    public DateTimeOffset LastActivityUtc => new(Interlocked.Read(ref _lastActivityTicks), TimeSpan.Zero);
+
+    /// <summary>
+    /// The session's idle stamp, derived from <see cref="ActivityBucket"/>: a send writes one integer
+    /// from the published clock and never reads a clock. The value is quantised down to its bucket, so
+    /// an idle sweep can retire the session up to one bucket late and never early.
+    /// </summary>
+    public DateTimeOffset LastActivityUtc => ActivityBucket.ToUtc(Volatile.Read(ref _lastActivityBucket));
+
+    /// <summary>The internal integer bucket the coordinator's expiry scan compares.</summary>
+    internal long ActivityBucketForDiagnostics => Volatile.Read(ref _lastActivityBucket);
+
+    /// <summary>
+    /// The activity-gate diagnostics sink, or null in production (diagnostics only). It fires after
+    /// every <see cref="_activityGate"/> acquisition, so a test can count the gate entries a driven
+    /// send or touch path takes.
+    /// </summary>
+    internal Action? ActivityGateHoldProbe { get; set; }
+
+    /// <summary>
+    /// The number of <see cref="_activityGate"/> acquisitions recorded since the process started,
+    /// counted only while <see cref="ActivityGateHoldProbe"/> is attached (diagnostics only).
+    /// </summary>
+    internal int ActivityGateEntryCountForDiagnostics => Volatile.Read(ref _activityGateEntryCount);
+
+    private void NoteActivityGateEntry()
+    {
+        var probe = ActivityGateHoldProbe;
+        if (probe is null) return;
+        Interlocked.Increment(ref _activityGateEntryCount);
+        probe();
+    }
 
     /// <summary>
     /// The session-level lifecycle state, read under the activity gate (the lock that orders the
@@ -108,9 +149,10 @@ internal sealed class UdpProxySession : IAsyncDisposable
         {
             lock (_activityGate)
             {
+                NoteActivityGateEntry();
                 if (_scope.IsSealed) return UdpSessionState.Disposed;
                 if (_scope.Fault is not null) return UdpSessionState.Faulted;
-                return _expiring ? UdpSessionState.Expiring : UdpSessionState.Active;
+                return Volatile.Read(ref _expiring) ? UdpSessionState.Expiring : UdpSessionState.Active;
             }
         }
     }
@@ -138,13 +180,9 @@ internal sealed class UdpProxySession : IAsyncDisposable
     /// </summary>
     public ValueTask<bool> SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken)
     {
-        WorkLease workLease;
-        lock (_activityGate)
+        if (Volatile.Read(ref _expiring) || _scope.Fault is not null || !_scope.TryEnter(out var workLease))
         {
-            if (_scope.Fault is not null || _expiring || !_scope.TryEnter(out workLease))
-            {
-                return ValueTask.FromResult(false);
-            }
+            return ValueTask.FromResult(false);
         }
 
         ValueTask send;
@@ -193,10 +231,12 @@ internal sealed class UdpProxySession : IAsyncDisposable
 
     internal bool TryBeginExpiry(DateTimeOffset now, TimeSpan idleTimeout)
     {
+        var cutoffBucket = ActivityBucket.Cutoff(now, idleTimeout);
         lock (_activityGate)
         {
-            if (_scope.IsSealed || _expiring || !_scope.IsIdle || now - LastActivityUtc < idleTimeout) return false;
-            _expiring = true;
+            NoteActivityGateEntry();
+            if (_scope.IsSealed || Volatile.Read(ref _expiring) || !_scope.IsIdle || Volatile.Read(ref _lastActivityBucket) >= cutoffBucket) return false;
+            Volatile.Write(ref _expiring, true);
         }
 
         // Cancelling the per-session scope (not the coordinator shutdown) ends the receive loop as a
@@ -208,7 +248,11 @@ internal sealed class UdpProxySession : IAsyncDisposable
 
     internal void CancelExpiry()
     {
-        lock (_activityGate) _expiring = false;
+        lock (_activityGate)
+        {
+            NoteActivityGateEntry();
+            Volatile.Write(ref _expiring, false);
+        }
     }
 
     private async Task DisposeCoreAsync()
@@ -409,20 +453,16 @@ internal sealed class UdpProxySession : IAsyncDisposable
 
     private void TouchActivity()
     {
-        var now = _timeProvider.GetUtcNow();
-        lock (_activityGate)
-        {
-            if (_expiring) return;
-            Interlocked.Exchange(ref _lastActivityTicks, now.UtcTicks);
-        }
+        var bucket = _activityClock.Current;
+        if (Volatile.Read(ref _expiring)) return;
+        Volatile.Write(ref _lastActivityBucket, bucket);
 
-        // Propagate to the association table at most once per interval. Zero means "never
-        // propagated", so a session's first activity — and the first activity after any
-        // quieter-than-interval gap — is delivered immediately.
-        var nowTicks = now.UtcTicks;
-        var lastPropagation = Interlocked.Read(ref _lastActivityPropagationTicks);
-        if (nowTicks - lastPropagation < s_activityPropagationInterval.Ticks) return;
-        if (Interlocked.CompareExchange(ref _lastActivityPropagationTicks, nowTicks, lastPropagation) != lastPropagation) return;
-        _activityObserver(Association, now);
+        // Propagate to the association table at most once per bucket. The sentinel is not 0: bucket 0 is
+        // a real bucket, so a session whose clock starts at the Unix epoch must still propagate its first
+        // activity immediately.
+        var lastPropagation = Volatile.Read(ref _lastActivityPropagationBucket);
+        if (lastPropagation != NeverPropagated && bucket - lastPropagation < ActivityPropagationBuckets) return;
+        if (Interlocked.CompareExchange(ref _lastActivityPropagationBucket, bucket, lastPropagation) != lastPropagation) return;
+        _activityObserver(Association, ActivityBucket.ToUtc(bucket));
     }
 }
