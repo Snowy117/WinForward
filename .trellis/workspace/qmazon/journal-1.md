@@ -1096,3 +1096,40 @@ Attributed the residual suite-level lump as far as the evidence allows, landed d
 ### Next Steps
 
 - Task 09-30-udp-association-head-count-flake (part 3): diagnose the fixture reply-counter race (Expected 282, Actual 281 at UdpAssociationHeadTests.cs:110, server.AssociateReplyCount; the pool's shape was intact), then the operator's F2-F8 pipeline in the order F3 sweeps, F2 locks, F4 keys/parsing, F5 pump I/O, F8 attribution, F6 UDP footprint, F7 WFP - each with a PRD reviewed by a sub-agent, implementation, an independent check, a recorded benchmark proof before archiving, commit, archive and journal.
+
+
+## Session 41: Test stabilization part 3: the fake server's reply-counter race (and the residual family's real boundary)
+<!-- trellis-session: v=2 fp=b64c99f2a0eb0b8a -->
+
+**Date**: 2026-09-30
+**Task**: Test stabilization part 3: the fake server's reply-counter race (and the residual family's real boundary)
+**Branch**: `master`
+
+### Summary
+
+Fixed a test-fixture ordering race that made ten assertions flaky, corrected an earlier misattribution in the archive and the journal, and widened the residual host family's definition to the gate shape after it appeared at four gates and three new sizes.
+
+### Main Changes
+
+- The 282-vs-281 failure was NOT pool.AssociationCount (that assertion passed, as did three others above it): it was server.AssociateReplyCount at UdpAssociationHeadTests.cs:110, and the cause was ScriptedSocks5UdpServer incrementing its counter after the reply write while a client's rent completes on reading it. The fix orders publish the counter, run the test gate, then write; the new ScriptedSocks5UdpServerOrderingTests holds the write open and failed Expected 1 Actual 0 before the change. Ten dependent assertions in five files, all deterministic after the fix. Also corrected the archived residual record and the journal, which had blamed pool.AssociationCount, and added an addendum widening the residual host family to 'any *AllocateNoManagedBytes exact gate' after this session produced four gates and three sizes not in the recorded signature (56, 6128, 7872 B plus 7448 B).
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d149cb4` | chore(task): archive 09-30-udp-association-head-count-flake |
+| `eb8c42e` | chore(task): record the fixture race task and correct the earlier misattribution (udp-association-head-count-flake) |
+| `6cace12` | docs(spec): record the publish-before-await and publish-before-readable invariants (udp-association-head-count-flake) |
+| `aa6c29f` | fix(test): publish the fake's ASSOCIATE reply counter before the reply is readable (udp-association-head-count-flake) |
+
+### Testing
+
+- [OK] build 0 warnings; suite 982 + 18 green; dotnet format exit 0 empty; jb inspectcode 0 issues / 0 CSharpErrors; proof on frozen rev=3b9689c tree=e1e3800: new class 20/20, five dependent classes 100/100 (totals asserted each run), full suite 22/26 green with the 4 failures all in the residual host family and zero AssociateReplyCount failures in 146 runs; code and spec byte-identical between the frozen tree and the final tree (verified by tree diff)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- F2-F8 pipeline is PAUSED by the operator. On resume, the order is F3 sweeps, F2 locks, F4 keys/parsing, F5 pump I/O, F8 attribution, F6 UDP footprint, F7 WFP (scope by research first), each with a PRD reviewed by a sub-agent, implementation, an independent check, a recorded benchmark proof before archiving, commit, archive and journal. The residual suite-level host lump family remains an accepted, documented host property (disposition (c) of 09-30-exact-gate-residual-lumps) with its gate coverage now widened.
