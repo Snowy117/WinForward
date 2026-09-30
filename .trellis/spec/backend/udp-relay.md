@@ -542,6 +542,7 @@ receiveFailureHandler(this);   // Action: returns immediately; _scope.Run(...) o
 
 - **Sharing covers the control connection only (R1/I1/I2).** One authenticated association serves up to `udpAssociationFlowsPerAssociation` concurrent flows, and **every flow keeps its own relay socket**: the local relay port still identifies the flow, so `RelayAlias` uniqueness, the per-flow self-traffic tuple, and reverse routing are unchanged. The descriptor floor is therefore ≈1 per live flow plus one shared control connection per association (≈1/16 at the defaults); the kernel receive-buffer estimate stays `live sessions × udpRelayReceiveBufferKb`.
 - **Placement never refuses a flow (I6).** `RentAsync` takes the least-loaded shared association with room (creation order breaks ties), opens a new shared association while the per-server ceiling allows, and otherwise serves the flow from a *private* association. The ceiling is a bound on connections, not a preallocation; the scan is O(shared associations) and runs once per flow setup, never on the datagram path. A private association is never handed to a second flow.
+- **Placement publishes and claims before it awaits (task 09-30-udp-association-head-count-flake).** `RentAsync`'s `Acquire` runs under `lock (_gate)` and, in that same critical section, adds a freshly created association to `set.All` (`Create`) and claims the lease with its evidence (`Attach` → `StartLease`); only then does `RentAsync` await `EnsureAssociatedAsync`. The order is the invariant: no lease can exist before its association is counted, so `AssociationCount` never under-reports the placed population and a sampler or maintenance tick never observes a placed flow without its evidence. Never move a publish or a lease claim after the await.
 - **Capability is a sticky per-server verdict (R2/I8).** `auto` starts every server `Unknown` (share + sample), `always` forces `SharedOk` with detection disabled, `off` forces `PerFlowOnly` from the first placement. A flip changes only *future* placement: associations already placed keep serving their attached flows, no session is torn down, and the verdict lasts the run.
 - **The sampler rule is conservative (design §5).** On the pool's 5 s maintenance tick, for each association of a still-`Unknown` server the sampler reads the evidence of the leases **currently attached**: two attached flows with a decoded response ⇒ `SharedOk` (detection stops); one responding flow plus a sibling with ≥3 successful sends and no response ⇒ `PerFlowOnly`; fewer than two attached flows ⇒ no verdict. The asymmetry is deliberate: a false `PerFlowOnly` costs only the sharing win, while a false `SharedOk` costs datagrams, so `SharedOk` requires positive proof. A `PerFlowOnly` flip emits the one-shot `udp.association.fallback` warn (`reason=source-port-pinned`, with `flows`/`sent`/`unanswered`/`relay`) and `udpAssociationFallbacks`, exactly once per server per run (the verdict is recorded under the pool gate before the log).
 - **Evidence lives with the live attached set, never with a ring (I3).** Each lease owns one `UdpAssociationEvidence` (one `Interlocked` sent counter plus a write-once response flag); `StartLease` adds the record and `ReleaseLeaseAsync` removes it, both under the association's leaf `_evidenceGate`, so `SnapshotEvidence()` returns exactly the leases attached at that instant however many leases the association has served before. An earlier index-by-attach-count ring mixed stale, live, and released slots — never reintroduce that shape.
@@ -609,6 +610,17 @@ receiveFailureHandler(this);   // Action: returns immediately; _scope.Run(...) o
 - `UdpAssociationHeadTests` / `UdpProxyCompositionTests`: the default caps cover the default
   session capacity, the configured bounds reach placement distinctly, and the transposition guard
   pins the two adjacent placement bounds at the composition seam.
+- `ScriptedSocks5UdpServerOrderingTests`: the scripted fake publishes its ASSOCIATE-reply counter
+  **before** the reply bytes are readable, proven by a gate that holds the write open
+  (`ScriptedSocks5UdpServer.AssociateReplyWriteGate`) while the test asserts the counter already
+  reports the reply. A fixture that reports protocol progress must publish its counter before the
+  bytes the client completes on: the client's rent completes on the read, so an increment after the
+  write is racy by construction under suite load (the 09-30 flake read `Expected: 282, Actual: 281`
+  at `UdpAssociationHeadTests.cs:110` while the pool's own shape assertions on the lines above had
+  passed). The ten assertions that read `AssociateReplyCount` and depend on this order are
+  `UdpAssociationHeadTests.cs:110,140`, `UdpAssociationCapabilityTests.cs:47,148,269,304`,
+  `UdpAssociationRecoveryTests.cs:44,57`, `UdpAssociationEvidenceLifetimeTests.cs:173`, and
+  `UdpAssociationPoolTests.cs:276`.
 - `UdpSessionSetupTests`: an association lost while the setup queue flushes maps to
   `AssociationLost` with the counter and no cooldown, distinct from a genuine setup failure.
 
