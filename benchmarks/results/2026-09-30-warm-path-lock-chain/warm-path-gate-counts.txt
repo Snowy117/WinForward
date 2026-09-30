@@ -1,0 +1,336 @@
+# F2 warm-path gate/clock counts — exact evidence log
+
+Tree: base `c6f58b7`. Every run below records the revision at the time it was taken.
+Host: AMD Ryzen 9 9955HX (16 physical / 32 logical), NixOS 26.11, .NET 10.0.12, Release.
+
+This file carries the countable evidence: the pre-change counts per warm packet, the exact failure text
+of each fact that is red before its step, the post-change counts, and the one step that is **blocked**
+(Step 3) with the measurement that blocks it.
+
+## Step 1 — before counts (instrumented, `c6f58b7` + probes)
+
+The diagnostics probes are null in production and are attached only by tests. Counts below are the ones
+each patch step must move; the code anchors were re-verified against this tree in Step 0.
+
+| # | Site | Lock entries / probes / clock reads per warm operation | Anchor |
+|---|---|---|---|
+| 1 | dispatcher warm entry, self traffic (`IsOwned`) | registry `_gate` ×1 + ≤4 probes (2 exact-tuple + 2 wildcard) | `src/WinForward.Runtime/SelfTrafficRegistry.cs` (`IsOwned`) |
+| 2 | `FlowTable.TryResolve` | flow-table `_gate` ×1 + 1–2 dictionary probes + 1 clock read | `src/WinForward.Core/FlowTable.cs` (`TryResolve` → `TryResolveLocked`) |
+| 3 | TCP redirect reverse pair (forward packet: `IsReverseCandidate` miss + `TryResolveByOriginal`) | redirect `_gate` ×2 + reverse-index probes ×2 | `TcpProxyCoordinator.cs`, `TcpProxyCoordinator.Injections.cs` |
+| 4 | UDP ready datagram | coordinator `_gate` ×1 + cooldown `_gate` ×1 + session `_activityGate` ×2 + 2 probes + 1 clock read | `UdpProxyCoordinator.Send.cs`, `UdpProxySession.cs` |
+
+Probes added in Step 1 (report-only; null in production): `FlowTable.GateHoldProbe`,
+`TcpRedirectTable.GateHoldProbe` + `GateEntryCountForDiagnostics`, `UdpProxyCoordinator.GateHoldProbe` +
+`GateEntryCountForDiagnostics`, `UdpProxySession.ActivityGateHoldProbe` +
+`ActivityGateEntryCountForDiagnostics`. The counters increment only while their probe is attached.
+
+## Step 2 — bucketed activity: clock call gone, retention never early
+
+Exact facts (`WarmPathGateTests`, green at `c6f58b7` + Steps 1–2):
+
+- `ActivityBucketClockReadsTheClockExactlyOncePerTickAndNeverOnAWarmResolve`: construction 1 read,
+  `Current` 0, `Tick()` exactly +1, `Publish(utc)` 0; with a clock armed to throw after one tick, a
+  `TryResolve` hit **and** a `RemoveExpired` both leave the read count flat.
+- `FlowTableRetainsAStateUntilTheBucketAfterItsIdleWindow`: stamped at `t0`, retained at `t0 + idle`
+  and at `edge + idle − 1 tick`, removed at `edge + idle` (never early; ≤1 bucket late).
+- `ZeroIdleTimeoutStillRetiresEveryStateOnTheCall`: 3 states stamped in the current bucket, all 3
+  retired with `TimeSpan.Zero` (the `long.MaxValue` cutoff rule).
+- `FlowTableActivitySurvivesARecycledState`: a claim → expire → re-claim cycle leaves the recycled
+  state holding only the new flow's bucket.
+- Boundary rewrites: `CoreFlowStructuresTests.FlowTableLookupRefreshesActivityBeforeIdleExpiry` /
+  `...FromInjectedClock` (`c6f58b7` versions pinned the exact `t0 + idle` retirement and the
+  `TimeProvider` stamp; both now assert the bucket form).
+
+Series — `FlowTableProductionShape` `--job short`, one run each (mean of 3 iterations, 0 B per the
+recorded table):
+
+| Row | Recorded (`2026-09-29`) | After Step 2 | After Step 3 (cache, landed) |
+|---|---:|---:|---:|
+| `ResolveSameOrientationHit` | 117.29 ns | 63.165 ns | 72.664 ns |
+| `ResolveReverseAliasHit` | 138.42 ns | 98.091 ns | 69.550 ns |
+| `ReadActivityClock` | 40.56 ns | 40.347 ns (retired in Step 7) | 40.754 ns |
+
+The hit rows run the gated `TryResolve`, so they now include the cache write-through (a few ns); the
+recorded-vs-landed deltas remain the removed per-hit clock read, and every row is 0 B.
+
+The hit rows move because `Touch` no longer reads `TimeProvider.GetUtcNow()`; that is AC 4's effect, not
+a drift. Timings are report-only.
+
+## Step 3 — flow-table warm resolve: the direct-mapped warm cache (landed)
+
+Mechanism: the gated `Dictionary` authority is untouched; `FlowState?[] _warm`
+(`BitOperations.RoundUpToPowerOf2(clamp(capacity * 64, 4,096, 262,144))` — 262,144 slots / 2 MB at the
+shipped default) is populated at claim, written through on every gated resolve hit, and cleared in
+`RemoveCandidateAt` with a `ReferenceEquals` guard immediately before `ReturnState`. Slots are keyed by
+`FlowHash.CombineCanonical` (endpoints ordered by `(bits, port)`), and a hit is only served after
+`FlowState.TrySnapshot` (the Step 2 seqlock) plus transport-tuple corroboration in either orientation,
+so a collision, a torn read or a recycled state is a false miss, never a wrong decision.
+
+### Acceptance: the gate that killed the concurrent-index variant
+
+```text
+dotnet test WinForward.slnx -c Release --filter "FullyQualifiedName~FlowTableClaimAndExpireCycleAllocatesNoManagedBytes"
+  Passed! - Failed: 0, Passed: 1, Skipped: 0, Total: 1        # exact Assert.Equal(0, allocated) held
+
+dotnet test WinForward.slnx -c Release --filter "FullyQualifiedName~HotPathAllocationGateTests"
+  Passed! - Failed: 0, Passed: 11, Skipped: 0, Total: 11      # dispatcher warm path now runs the cache probe
+```
+
+Rejected comparator (the reverted concurrent-index variant, kept as the discrimination evidence):
+
+```text
+  Failed HotPathAllocationGateTests.FlowTableClaimAndExpireCycleAllocatesNoManagedBytes
+Expected: 0
+Actual:   124928                    # 488 B per claim+expire cycle over 256 cycles
+```
+
+### The exact facts, red before the change (`c6f58b7` + Steps 1–2, gated resolve)
+
+```text
+dotnet test WinForward.slnx -c Release --filter "FullyQualifiedName~WarmPathGateTests"
+
+  Failed WarmPathGateTests.WarmResolveTakesNoFlowTableGateEntries [13 ms]
+   Assert.Equal() Failure: Values differ
+Expected: 0
+Actual:   256                       # one flow-table _gate entry per warm resolve, 256 resolves
+
+  Failed WarmPathGateTests.WarmResolveCompletesWhileFlowTableGateIsHeld [10 s]
+   the warm resolve queued behind the parked flow-table gate
+```
+
+Both facts are green on the landed cache mechanism (0 of 256 gate entries; the concurrent probe
+completes while a holder is parked inside `_gate`). The first red run's count is also the *before*
+figure the cache had to move: 1 flow-table `_gate` entry per warm resolve → 0.
+
+The rejected concurrent-index variant (`step3-blocked.patch`) is the discrimination evidence for the
+0 B gate: its claim path allocated `ConcurrentDictionary` nodes — measured 160 B per bare
+`ConcurrentDictionary<FlowKey,int>` add+remove cycle, and 488 B per table claim+expire cycle (the
+`_states` node plus both `_transportIndex` orientation nodes) — which is exactly the `Actual: 124,928`
+over 256 cycles the gate reported before the variant was reverted.
+
+### Landed facts (`WarmPathGateTests`, all green on the landed tree)
+
+- `WarmResolveTakesNoFlowTableGateEntries` — 256 warm probes ⇒ 256 hits, **0** `_gate` entries.
+- `WarmResolveCompletesWhileFlowTableGateIsHeld` — a concurrent warm probe completes while another
+  thread is parked inside `_gate` (dedicated threads, bounded waits).
+- `FlowTableWarmResolveAllocatesNoManagedBytes` — 256 probes inside an exactly-zero per-thread window
+  (probe batch converges at 0 B, thread identity asserted, exact `Assert.Equal(0, allocated)`, call-count
+  backstop) on a populated table.
+- `FlowTableCollidingFlowsFallBackToTheGatedPath` — a forced canonical-slot collision: the displaced
+  flow's warm probe misses, its gated resolve returns its own decision and warms the slot back; both
+  flows keep their own decisions throughout.
+- `FlowTableRemovedFlowIsNeverServedFromItsOldSlot` — the sweep clears the slot; the recycled instance's
+  snapshot describes the new flow; a re-claim serves the new decision and a newer generation.
+- `FlowTableTransportTupleIsUniqueAcrossOrigins` — a second claim of the same transport tuple under
+  another origin resolves to the existing state (one state, policy evaluated once) — the invariant the
+  tuple-only corroboration rests on.
+- `FlowTableRegistryMirrorsCountAcrossChurn` — `Count == LiveStateCountForDiagnostics` across 8
+  claim/expire rounds; the cache adds no bookkeeping.
+- `WarmCacheHitServesTheValidatedView` — a cache hit's `Key`/`Decision`/`Generation` equal the gated
+  authority's for the same key, in both orientations.
+
+### Series: the acceptance ratio is NOT met as written
+
+3 runs, `--duration 63`, `--flows 4096` (7 s windows), warm arm (cache probe + the still-gated wildcard
+guard — Step 4 has not landed):
+
+| Run | 1t (res/s) | 2t | 4t | 4t self-normalised ratio | 4t vs recorded baseline | miss rate |
+|---|---:|---:|---:|---:|---:|---:|
+| after 1 | 6,813,459.0 | 10,248,915.3 | 11,061,680.1 | 0.406 | 0.830 | 0.732 % |
+| after 2 | 6,586,236.3 | 10,010,978.5 | 10,566,255.2 | 0.401 | 0.793 | 0.932 % |
+| after 3 | 6,703,677.3 | 10,104,898.9 | 10,426,814.1 | 0.389 | 0.782 | 0.910 % |
+
+The 1-thread arm clears its ≥ 3.00 M/s floor; the 4-thread **self-normalised ratio is 0.389–0.406
+against the ≥ 0.6 line → the criterion as written fails**. Per-lookup CPU cost: 146.8–151.8 ns at 1
+thread, 195.1–199.8 ns at 2, 361.6–383.6 ns at 4.
+
+Decomposition from the companion arms in the same runs (run 1, M res/s 1t/2t/4t): `fake` 7.44/4.39/3.78
+(gated resolve, no guard), `real` 3.62/3.23/2.59 (guarded, gated resolve), `warm` 6.81/10.25/11.06.
+Hence at one thread: guard ≈ `real − fake` ≈ 142 ns, cache probe ≈ `warm − guard` ≈ **7 ns** (vs ~134 ns
+for the gated resolve). The one-thread arm is ~95 % guard, and the four-thread ceiling (~11 M/s) is
+identical to the reverted concurrent-index variant's 11.06 M/s — so it is set by what both mechanisms
+still shared (the wildcard guard's registry gate, Step 4; plus per-hit activity-store coherence), not by
+the cache. Miss rate 0.73–0.93 % is already below the design's ~1.6 % target.
+
+**Consequence for the operator's named levers**: raising the slot cap (524,288 / 4 MB) or adding K-way
+probing lowers a miss rate that is not the binding term. The ratio's denominator shed the 134 ns gated
+resolve (5.16 → 6.7 M/s one-thread) while the numerator is capped by the guard-limited four-thread
+ceiling; the criterion should be re-read, or the guard measured separately (Step 4), before any
+slot-shape change.
+
+### Residuals recorded, not fixed
+
+- The dispatcher's **slow** path still reads the pooled instance after the gate is released (the
+  pre-existing claim-path ABA); `TryResolve`/`TryClaimResolved` keep their signatures per the design, so
+  the fix stays a follow-up.
+- Step 7's per-iteration tick is still unwired, so the flow-table clock refreshes only on claims and the
+  60 s main sweep and retirement of a stopped flow can be ≈60 s early (bounded; Step 7 lands the tick).
+- `FlowTable.WarmSlotCountForDiagnostics` was added beyond the plan's diagnostics list so the collision
+  fact can compute the slot mask deterministically.
+
+## Step 4 — self-traffic split: the exact half leaves the warm entry, the wildcard half stays
+
+Facts live in `SelfTrafficWarmPathGateTests` (a counting guard records full `IsOwned` calls and
+wildcard-only `IsWildcardOwned` calls separately). Pre-split red, recorded before the change:
+
+```text
+dotnet test WinForward.slnx -c Release --filter "FullyQualifiedName~SelfTrafficWarmPathGateTests"
+
+  Failed SelfTrafficWarmPathGateTests.WarmHitTakesZeroExactTupleGuardProbes
+Expected: 1 / Actual: 2          # the claim packet ran the full check twice: warm entry + claim path
+  Failed SelfTrafficWarmPathGateTests.EveryClaimCallsTheFullGuardExactlyOnce
+Expected: 8 / Actual: 16         # 8 claims x 2 full checks
+  Failed SelfTrafficWarmPathGateTests.ASelfOwnedTupleIsNeverClaimed
+Expected: 1 / Actual: 2
+  Passed SelfTrafficWarmPathGateTests.ARelayWildcardTupleIsNeverProxiedOnAWarmHit
+```
+
+The wildcard fact cannot be red on the unmodified tree (the old warm entry ran the full check). The
+honest red is the **naive-deletion variant**: the warm-entry check removed outright, as requirement 2's
+first wording read. Recorded failure text of that variant, run and then restored:
+
+```text
+  Failed SelfTrafficWarmPathGateTests.ARelayWildcardTupleIsNeverProxiedOnAWarmHit
+   Assert.Equal() Failure: Values differ
+Expected: 1
+Actual:   2                     # the relay's (Tcp, Any:P, proxyEndpoint) tuple resolved the stale
+                                # proxy state on the warm hit and was proxied into WinForward's own proxy
+   at SelfTrafficWarmPathGateTests.ARelayWildcardTupleIsNeverProxiedOnAWarmHit() :line 57
+```
+
+Landed: `_wildcards` is a `ConcurrentDictionary<WildcardKey, long>` (mutations still under `_gate` with
+the generation check), `IsWildcardOwned` is two lock-free probes, and `FlowDispatcher.DispatchAsync`
+calls `IsWildcardOwned` on the warm entry while `TryHandleSelfTrafficAsync` keeps the full `IsOwned`
+before every claim.
+
+```text
+dotnet test WinForward.slnx -c Release --filter "FullyQualifiedName~SelfTrafficWarmPathGateTests"
+  Passed! - Failed: 0, Passed: 4, Skipped: 0, Total: 4
+
+dotnet test WinForward.slnx -c Release --filter "FullyQualifiedName~Dispatcher|FullyQualifiedName~SelfTraffic|FullyQualifiedName~ReversePrefilter"
+  Passed! - Failed: 0, Passed: 48, Skipped: 0, Total: 48   # corrected by the check pass (the recorded 50 did
+                                                            #   not reproduce; the union is 48 test cases)
+```
+
+Counts per warm hit, before → after: registry `_gate` entries 1 → **0**; exact-tuple (`IsOwned`)
+probes 1 → **0**; wildcard probes 2 → 2 (now lock-free). The claim path keeps exactly one full check.
+
+## Step 5 — TCP redirect: one fold probe, two warm caches, no gate on a warm packet
+
+Landed: `TcpRedirectTable._warmReverse`/`_warmOriginal` (direct-mapped, `RoundUpToPowerOf2(clamp(capacity
+* 8, 1_024, 16_384))` slots, validated by the association's get-only `ReverseSourceEndpoint`/
+`ReverseDestinationEndpoint` and `OriginalKey`), population in `TryClaim`, write-through on the gated
+fallback, and one factored `RemoveUnderGate` used by `TryRemove` and both `RemoveExpired` bodies (it
+clears both cache entries with a `ReferenceEquals` guard). `IsReverseCandidate` is deleted; the
+coordinator resolves once via `TryResolveByReverse` and passes the association into
+`HandleReverseAsync`, whose own probe is gone. `HandlePacketAsync` keeps the listener-port prefilter in
+front of the probe. Association activity is a bucket stamp; `TcpRedirectTable.RemoveExpired` and
+`TcpRedirectSessionStore.RemoveExpiredAsync` compare `BucketForDiagnostics < ActivityBucket.Cutoff(now,
+idleTimeout)`. `Count` still reads `_byOriginal.Count` under `_gate` — **no maintained counter** (the
+plan's `_count` line is superseded by design §5 / review disposition 16: the `Dictionary` authority is
+unchanged, so a counter would be a second source of truth).
+
+Diagnostics: `TcpRedirectTable.ReverseProbeCountForDiagnostics` was added (counted under the same
+attachment as `GateEntryCountForDiagnostics`) because the fold's contract is a **probe** count, not a
+gate count.
+
+Red before (temporary variant: the cache probe forced through the gate, restored immediately):
+
+```text
+  Failed TcpRedirectWarmPathGateTests.ReverseResolveCompletesWhileRedirectGateIsHeld [10 s]
+   the warm reverse resolve queued behind the parked redirect-table gate
+```
+
+Green after (the fact and its companion):
+
+```text
+dotnet test WinForward.slnx -c Release --filter "FullyQualifiedName~TcpRedirectWarmPathGateTests"
+  Passed! - Failed: 0, Passed: 2, Skipped: 0, Total: 2
+
+  TcpRedirectWarmPacketTakesZeroGateEntriesAndZeroClockReads:
+    warm forward packet  -> 0 redirect _gate entries, 0 clock reads, 0 reverse probes (port prefilter)
+    warm reverse packet  -> 0 redirect _gate entries, 0 clock reads, exactly 1 reverse probe
+    (the pre-change shape was 2 gated probes of _byReverse per reverse packet: IsReverseCandidate +
+     HandleReverseAsync's own TryResolveByReverse, with a clock read between them)
+```
+
+Per warm TCP packet: redirect gate entries **2 → 0**, reverse-index probes **2 → 1**, clock reads
+**1–2 → 0**.
+
+## Step 6 — UDP ready path: ready-first, wait-free, no session gate
+
+Landed: `TrySendSpanAsync` probes a pre-allocated session cache (`UdpSessionSlot?[]`,
+`clamp(capacity * 8, 1_024, 16_384)` slots) and validates `slot.Session.Flow`; everything else takes the
+admission path (`SendAdmissionPathSpanAsync`), which keeps the cooldown probe, the clock read, the
+capacity check and the under-gate `slot.Ready` re-check. `_sessions` stays the gated `Dictionary`
+authority; the cache is published at the admission add and at the ready flip and cleared with a
+`ReferenceEquals` guard on removal (`Array.Clear` on the dispose drain, where every slot goes).
+`UdpSessionSlot.Session`/`Ready` are volatile accessors with `Session` published first.
+`UdpProxySession.SendSpanAsync`/`TouchActivity` drop `_activityGate` (scope CAS only); the activity
+stamp is the published bucket with a `long.MinValue` "never propagated" sentinel; `TryBeginExpiry`
+re-checks `ActivityBucket.Cutoff` under the gate.
+
+Red before (temporary variants, each restored immediately):
+
+```text
+  ### ready probe removed (every send through the admission path)
+  Failed UdpWarmPathGateTests.UdpReadySendCompletesWhileCoordinatorGateIsHeld [10 s]
+   the ready send queued behind the parked coordinator gate
+
+  ### _activityGate restored on the send admission (the pre-change shape)
+  Failed UdpWarmPathGateTests.UdpReadySendTakesZeroActivityGateEntries [194 ms]
+   Assert.Equal() Failure: Values differ
+Expected: 0
+Actual:   32                    # one activity-gate entry per ready datagram, 32 sends
+```
+
+Green after:
+
+```text
+dotnet test WinForward.slnx -c Release --filter "FullyQualifiedName~UdpWarmPathGateTests"
+  Passed! - Failed: 0, Passed: 7, Skipped: 0, Total: 7
+```
+
+Counts per ready datagram, before → after: coordinator `_gate` entries 1 → **0**; cooldown `_gate`
+entries 1 → **0** (a ready flow cannot be cooling down: the cooldown write and the slot removal share
+one gate hold); session `_activityGate` entries 2 → **0**; clock reads 2 → **0**. The transport
+`_sendGate` is unchanged and excluded by construction (the benchmark uses a fake transport).
+
+## Step 7 — one clock, one tick per pump iteration
+
+`DurableCaptureBundle` creates the one `ActivityBucketClock`, threads it into `FlowDispatcher` →
+`FlowTable`, into `TcpRedirectComposition` → `TcpRedirectOptions.ActivityClock` and into
+`UdpProxyComposition` → `UdpProxyOptions.ActivityClock` → `UdpProxySessionContext`, and ticks it in
+`FlushPendingInjections` (the `OnBatchCompleted` chain point wired at `Program.cs`).
+
+```text
+dotnet test WinForward.slnx -c Release --filter "FullyQualifiedName~DurableCaptureBundleTests"
+  Passed! - Failed: 0, Passed: 11, Skipped: 0, Total: 11   # corrected by the check pass: the class holds 10
+                                                            #   HEAD facts + the new tick fact; the earlier 15
+                                                            #   did not match this class's test count
+  # ActivityBucketClockTicksExactlyOncePerPumpIteration: 16 idle pump iterations -> 16 ticks, 16 reads
+```
+
+`FlowTableProductionShapeBenchmarks.ReadActivityClock` is retired (the product no longer calls a clock on
+any packet path; the row's recorded ~40 ns is the headroom the bucket bought) and `ResolveWarmHit` is the
+replacement row (76–80 ns, 0 B).
+
+## Frozen-tree suite
+
+```text
+dotnet build WinForward.slnx -c Release                  # 0 warnings, 0 errors
+dotnet test WinForward.slnx -c Release                   # 1021 + 18 = 1039 passed, 0 failed
+dotnet test ... --filter "FullyQualifiedName~HotPathAllocationGateTests"     # 11/11
+dotnet test ... --filter "FullyQualifiedName~SweepAllocationGateTests"       # 12/12
+dotnet test ... --filter "FullyQualifiedName~WarmPathGateTests"              # 25/25 (the filter matches all
+                                                                            #   four structural classes:
+                                                                            #   WarmPathGateTests 12 +
+                                                                            #   SelfTrafficWarmPathGateTests 4 +
+                                                                            #   TcpRedirectWarmPathGateTests 2 +
+                                                                            #   UdpWarmPathGateTests 7)
+dotnet test ... --filter "FullyQualifiedName~SelfTrafficWarmPathGateTests"   # 4/4
+dotnet test ... --filter "FullyQualifiedName~TcpRedirectWarmPathGateTests"   # 2/2
+dotnet test ... --filter "FullyQualifiedName~UdpWarmPathGateTests"           # 7/7
+```
+
+`dotnet format` and `jb inspectcode` are the operator's gates and were deliberately not run here.

@@ -196,6 +196,8 @@ internal static class BenchmarkShared
 internal sealed class NeverOwnedGuard : ISelfTrafficGuard
 {
     public bool IsOwned(FlowContext context) => false;
+
+    public bool IsWildcardOwned(FlowContext context) => false;
 }
 
 internal sealed class CountingExecutor : IPacketActionExecutor

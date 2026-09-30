@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using WinForward.Core;
 using WinForward.Runtime;
 
@@ -9,17 +10,23 @@ namespace WinForward.Benchmarks.Stability;
 /// <summary>
 /// Contention and scaling probe for the global lock chain (research F2). One shared flow table plus
 /// one self-traffic registry, driven by 1/2/4 worker threads that resolve mostly disjoint keys through
-/// the two operations a warm packet pays: <see cref="ISelfTrafficGuard.IsOwned"/> and
-/// <see cref="FlowTable.TryResolve"/>. The claim under test is the scaling ratio
-/// <c>throughput(N) / (N × throughput(1))</c>: both are single-instance locks, so every extra worker
-/// should push the ratio below 1.
+/// the operations a warm packet pays. The claim under test is the scaling ratio
+/// <c>throughput(N) / (N × throughput(1))</c>: every process-wide lock on the warm path pushes the
+/// ratio below 1.
 /// <para>
-/// The run measures the same workload twice — once with <see cref="NeverOwnedGuard"/> (the guard shape
-/// the existing dispatcher benchmarks use) and once with a real populated
-/// <see cref="SelfTrafficRegistry"/> — because the self-traffic reorder (F2.1) can only move the second
-/// arm: the fake guard answers without touching a lock, so a row built on it reports a constant zero
-/// delta for work that changed exactly that collaborator. Report-only (design §3): the artifact is the
-/// curve, not a pass line.
+/// Three arms: <c>fake</c> (<see cref="NeverOwnedGuard"/>, the guard shape the dispatcher benchmarks
+/// use, plus the real gated resolve), <c>real</c> (a populated <see cref="SelfTrafficRegistry"/> and the
+/// full <see cref="ISelfTrafficGuard.IsOwned"/>), and <c>warm</c> — the post-reorder production shape:
+/// the same populated registry, the retained lock-free wildcard half
+/// (<see cref="ISelfTrafficGuard.IsWildcardOwned"/>) and the lock-free cache probe
+/// (<see cref="FlowTable.TryResolveWarm"/>) in place of the per-lookup exact-tuple check and the gated
+/// resolve. The warm arm counts the probe's hits and misses, so its ratio is attributable to the
+/// measured cache miss rate; the arm charges a miss only the failed probe (the production fallback is
+/// the dispatcher's slow path, which is not part of this resolve-shaped unit). The fake arm
+/// cannot show the reorder (it answers without touching a lock); the real arm is the pre-change
+/// comparator. Only <c>warm</c> carries the acceptance figure, and its verdict row records both the
+/// self-normalised ratio and the ratio against the recorded one-thread baseline, because the
+/// self-normalised denominator is this run's own one-thread arm and therefore rises with the fix.
 /// </para>
 /// </summary>
 internal static class ScalingContentionScenario
@@ -33,12 +40,14 @@ internal static class ScalingContentionScenario
     /// <summary>Lookups per batch; the batch keeps the clock check out of the inner loop.</summary>
     private const int BatchSize = 64;
 
+    /// <summary>The recorded one-thread baseline of the pre-change <c>real</c> arm (resolutions/s).</summary>
+    private const double RecordedOneThreadBaseline = 3_331_758.3;
+
     private static long s_sink;
 
     public static Task RunAsync(StabilityContext context, SoakOptions options)
     {
         var threads = options.Threads > 0 ? [options.Threads] : s_threadSweep;
-        var windowSeconds = Math.Max(1, options.DurationSeconds / (2 * threads.Length));
         var sharedKeyPercent = Math.Clamp(options.SharedKeyPercent, 0, 50);
         var sharedPeriod = sharedKeyPercent == 0 ? int.MaxValue : Math.Max(1, 100 / sharedKeyPercent);
 
@@ -49,14 +58,22 @@ internal static class ScalingContentionScenario
         var sharedCount = sharedKeyPercent == 0 ? 0 : Math.Clamp(options.Flows * sharedKeyPercent / 100, 1, keys.Length);
 
         // The registry's tuples are disjoint from every resolved key, so the measured shape is the
-        // common warm case: the check takes the lock and probes, then answers "not ours".
+        // common warm case: the check probes and then answers "not ours".
         var registered = new SelfTrafficRegistry();
         for (var index = 0; index < SelfTrafficTuples; index++)
         {
             registered.Register(SelfTrafficRegistry.SelfTrafficKey.From(BenchmarkShared.CreateContext(BenchmarkShared.CreateFlowKey(options.Flows + 1_000 + index))));
         }
 
-        var arms = new GuardArm[] { new(GuardArmKind.Fake, new NeverOwnedGuard()), new(GuardArmKind.Real, registered) };
+        var arms = new GuardArm[]
+        {
+            new(GuardArmKind.Fake, new NeverOwnedGuard(), WildcardOnly: false),
+            new(GuardArmKind.Real, registered, WildcardOnly: false),
+            new(GuardArmKind.Warm, registered, WildcardOnly: true),
+        };
+        // The window divisor counts every arm actually run: a two-arm constant silently shortens each
+        // window as soon as an arm is added, which breaks comparability with the recorded series.
+        var windowSeconds = Math.Max(1, options.DurationSeconds / (arms.Length * threads.Length));
         var results = new List<ArmResult>(arms.Length * threads.Length);
         foreach (var arm in arms)
         {
@@ -68,7 +85,7 @@ internal static class ScalingContentionScenario
                     "scaling.contention",
                     new
                     {
-                        selfTrafficGuard = arm.Kind == GuardArmKind.Fake ? "fake" : "real",
+                        selfTrafficGuard = Name(arm.Kind),
                         threads = threadCount,
                         flows = options.Flows,
                         sharedKeyCount = sharedCount,
@@ -96,14 +113,14 @@ internal static class ScalingContentionScenario
         var partitions = new int[threadCount][];
         for (var worker = 0; worker < threadCount; worker++) partitions[worker] = BuildPartition(keys.Length, threadCount, worker);
 
-        var counts = new long[threadCount];
+        var counts = new WorkerCounts[threadCount];
         var gate = new ManualResetEventSlim(initialState: false);
         var workers = new Thread[threadCount];
         for (var index = 0; index < threadCount; index++)
         {
             var worker = index;
             // ReSharper disable once AccessToDisposedClosure // every worker is joined before the gate is disposed below.
-            workers[worker] = new Thread(() => counts[worker] = RunWorker(arm.Guard, table, keys, contexts, partitions[worker], sharedCount, sharedPeriod, windowSeconds, gate))
+            workers[worker] = new Thread(() => counts[worker] = RunWorker(arm, table, keys, contexts, partitions[worker], sharedCount, sharedPeriod, windowSeconds, gate))
             {
                 IsBackground = true,
                 Name = string.Create(CultureInfo.InvariantCulture, $"scaling-contention-{worker}"),
@@ -116,14 +133,23 @@ internal static class ScalingContentionScenario
         foreach (var worker in workers) worker.Join();
         wall.Stop();
         gate.Dispose();
-        Volatile.Write(ref s_sink, counts.Sum());
-        return new ArmResult(arm.Kind, threadCount, counts, wall.Elapsed.TotalSeconds, windowSeconds);
+        Volatile.Write(ref s_sink, counts.Sum(static c => c.Resolutions));
+        return new ArmResult(
+            arm.Kind,
+            threadCount,
+            [.. counts.Select(static c => c.Resolutions)],
+            [.. counts.Select(static c => c.CacheHits)],
+            [.. counts.Select(static c => c.CacheMisses)],
+            wall.Elapsed.TotalSeconds,
+            windowSeconds);
     }
 
-    private static long RunWorker(ISelfTrafficGuard guard, FlowTable table, FlowKey[] keys, FlowContext[] contexts, int[] partition, int sharedCount, int sharedPeriod, int windowSeconds, ManualResetEventSlim gate)
+    private static WorkerCounts RunWorker(GuardArm arm, FlowTable table, FlowKey[] keys, FlowContext[] contexts, int[] partition, int sharedCount, int sharedPeriod, int windowSeconds, ManualResetEventSlim gate)
     {
         gate.Wait();
         long count = 0;
+        long hits = 0;
+        long misses = 0;
         var partitionCursor = 0;
         var sharedCursor = 0;
         var sinceShared = 0;
@@ -132,18 +158,28 @@ internal static class ScalingContentionScenario
         {
             for (var step = 0; step < BatchSize; step++)
             {
+                // Every lookup is one unit of work (the recorded before-series counted the gated resolve
+                // the same way), and the warm arm additionally splits that unit into cache hits/misses.
+                LookupOutcome outcome;
                 if (sharedCount > 0 && sinceShared == 0)
                 {
-                    count += Resolve(guard, table, keys[sharedCursor], contexts[sharedCursor]) ? 1 : 0;
+                    outcome = Resolve(arm, table, keys[sharedCursor], contexts[sharedCursor]);
                     sharedCursor++;
                     if (sharedCursor == sharedCount) sharedCursor = 0;
                 }
                 else
                 {
                     var key = partition[partitionCursor];
-                    count += Resolve(guard, table, keys[key], contexts[key]) ? 1 : 0;
+                    outcome = Resolve(arm, table, keys[key], contexts[key]);
                     partitionCursor++;
                     if (partitionCursor == partition.Length) partitionCursor = 0;
+                }
+
+                count++;
+                if (outcome.WarmProbe)
+                {
+                    if (outcome.CacheHit) hits++;
+                    else misses++;
                 }
 
                 if (sinceShared >= sharedPeriod) sinceShared = 0;
@@ -151,7 +187,7 @@ internal static class ScalingContentionScenario
             }
         }
 
-        return count;
+        return new WorkerCounts(count, hits, misses);
     }
 
     /// <summary>
@@ -160,8 +196,14 @@ internal static class ScalingContentionScenario
     /// measurement is the collaborators, not the loop.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool Resolve(ISelfTrafficGuard guard, FlowTable table, in FlowKey key, in FlowContext context) =>
-        !guard.IsOwned(context) && table.TryResolve(key, out _);
+    private static LookupOutcome Resolve(GuardArm arm, FlowTable table, in FlowKey key, in FlowContext context)
+    {
+        var owned = arm.WildcardOnly ? arm.Guard.IsWildcardOwned(context) : arm.Guard.IsOwned(context);
+        if (owned) return default;
+        if (!arm.WildcardOnly) return new LookupOutcome(WarmProbe: false, CacheHit: table.TryResolve(key, out _));
+        var hit = table.TryResolveWarm(key, out _);
+        return new LookupOutcome(WarmProbe: true, CacheHit: hit);
+    }
 
     private static FlowKey[] BuildKeys(int flows)
     {
@@ -204,15 +246,24 @@ internal static class ScalingContentionScenario
     /// <summary>Artifact rounding: the analyzer requires an explicit midpoint mode, and ToEven is the runtime's own default.</summary>
     private static double Round(double value, int digits) => Math.Round(value, digits, MidpointRounding.ToEven);
 
+    private static string Name(GuardArmKind kind) => kind switch
+    {
+        GuardArmKind.Fake => "fake",
+        GuardArmKind.Real => "real",
+        _ => "warm",
+    };
+
     private static object BuildVerdict(List<ArmResult> results, int[] threads)
     {
         return new
         {
             gated = false,
-            note = "Report-only contention curve (design §3). The fake arm is the shape the existing dispatcher benchmarks use; only the real arm can show the self-traffic reorder (F2.1).",
+            note = "Report-only contention curve. Only the warm arm (populated registry, lock-free wildcard half, lock-free cache probe, no per-lookup exact IsOwned and no gated resolve) carries the acceptance figure; the fake arm answers without touching a lock and cannot show the reorder, and the real arm is the pre-change comparator. warmResolve records both the self-normalised ratio (denominator = this run's own one-thread arm, which rises with the fix) and ratioVersusRecordedBaseline against the recorded 3,331,758.3/s one-thread baseline, plus the measured cache miss rate so the ratio is attributable. A warm miss is charged only the failed probe; the production fallback is the dispatcher's slow path and is outside this resolve-shaped unit.",
             baselineThreads = threads[0],
             fakeGuard = Describe(GuardArmKind.Fake),
             realGuard = Describe(GuardArmKind.Real),
+            warmResolve = DescribeWarm(),
+            recordedOneThreadBaseline = RecordedOneThreadBaseline,
         };
 
         object Describe(GuardArmKind kind)
@@ -225,19 +276,55 @@ internal static class ScalingContentionScenario
                 workerSpread = arm.Select(result => Round(result.WorkerSpread, 2)).ToArray(),
             };
         }
+
+        object DescribeWarm()
+        {
+            var arm = results.Where(result => result.Kind == GuardArmKind.Warm).ToArray();
+            return new
+            {
+                resolutionsPerSecond = arm.Select(result => Round(result.ResolutionsPerSecond, 1)).ToArray(),
+                scalingRatio = arm.Select(result => Round(result.ResolutionsPerSecond / (result.Threads * arm[0].ResolutionsPerSecond), 3)).ToArray(),
+                ratioVersusRecordedBaseline = arm.Select(result => Round(result.ResolutionsPerSecond / (result.Threads * RecordedOneThreadBaseline), 3)).ToArray(),
+                lookups = arm.Select(static result => result.Lookups).ToArray(),
+                cacheHits = arm.Select(static result => result.Hits.Sum()).ToArray(),
+                cacheMisses = arm.Select(static result => result.Misses.Sum()).ToArray(),
+                cacheMissRate = arm.Select(result => Round(result.MissRate, 5)).ToArray(),
+                workerSpread = arm.Select(result => Round(result.WorkerSpread, 2)).ToArray(),
+            };
+        }
     }
 
     private enum GuardArmKind
     {
         Fake,
         Real,
+        Warm,
     }
 
-    private readonly record struct GuardArm(GuardArmKind Kind, ISelfTrafficGuard Guard);
+    private readonly record struct GuardArm(GuardArmKind Kind, ISelfTrafficGuard Guard, bool WildcardOnly);
 
-    private sealed record ArmResult(GuardArmKind Kind, int Threads, long[] Counts, double Seconds, int WindowSeconds)
+    /// <summary>One worker's totals: lookups performed, and the warm arm's cache hit/miss split.</summary>
+    [StructLayout(LayoutKind.Auto)]
+    private readonly record struct WorkerCounts(long Resolutions, long CacheHits, long CacheMisses);
+
+    /// <summary>One lookup's outcome: whether it was the warm cache probe, and whether the cache served it.</summary>
+    [StructLayout(LayoutKind.Auto)]
+    private readonly record struct LookupOutcome(bool WarmProbe, bool CacheHit);
+
+    private sealed record ArmResult(GuardArmKind Kind, int Threads, long[] Counts, long[] Hits, long[] Misses, double Seconds, int WindowSeconds)
     {
         public double ResolutionsPerSecond => Counts.Sum() / Seconds;
+
+        public long Lookups => Counts.Sum();
+
+        public double MissRate
+        {
+            get
+            {
+                var probes = Hits.Sum() + Misses.Sum();
+                return probes == 0 ? 0 : (double)Misses.Sum() / probes;
+            }
+        }
 
         public double WorkerSpread
         {
@@ -260,6 +347,9 @@ internal static class ScalingContentionScenario
                 workerResolutionsPerSecondMax = rates.Max(),
                 workerSpread = Round(WorkerSpread, 2),
                 windowSeconds = WindowSeconds,
+                cacheHits = Hits.Sum(),
+                cacheMisses = Misses.Sum(),
+                cacheMissRate = Round(MissRate, 5),
             };
         }
     }

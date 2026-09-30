@@ -1,0 +1,148 @@
+# F2 warm-path gate stability — the repetition proof for the touched surface
+
+Tree: base `c6f58b7` + the landed Steps 1–7 working set (no commit; `git rev-parse --short HEAD`
+reports the base revision). Host: NixOS 26.11, .NET 10.0.12, Release, `TieredCompilation=false`
+(the test project's host contract).
+
+Procedure: one process per run, class filter, never `--no-build`, the padded summary and a
+non-vacuous totals assertion recorded for every run (hot-path.md §4's per-gate proof, extended to
+the structural class this task added).
+
+```text
+gate HotPathAllocationGateTests run 1 c6f58b7 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11
+gate HotPathAllocationGateTests run 2 c6f58b7 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11
+gate HotPathAllocationGateTests run 3 c6f58b7 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11
+gate HotPathAllocationGateTests run 4 c6f58b7 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11
+gate HotPathAllocationGateTests run 5 c6f58b7 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11
+gate HotPathAllocationGateTests run 6 c6f58b7 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11
+gate HotPathAllocationGateTests run 7 c6f58b7 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11
+gate HotPathAllocationGateTests run 8 c6f58b7 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11
+gate HotPathAllocationGateTests run 9 c6f58b7 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11
+gate HotPathAllocationGateTests run 10 c6f58b7 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11
+gate HotPathAllocationGateTests run 11 c6f58b7 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11
+gate HotPathAllocationGateTests run 12 c6f58b7 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11
+gate HotPathAllocationGateTests run 13 c6f58b7 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11
+gate HotPathAllocationGateTests run 14 c6f58b7 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11
+gate HotPathAllocationGateTests run 15 c6f58b7 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11
+gate HotPathAllocationGateTests run 16 c6f58b7 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11
+gate HotPathAllocationGateTests run 17 c6f58b7 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11
+gate HotPathAllocationGateTests run 18 c6f58b7 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11
+gate HotPathAllocationGateTests run 19 c6f58b7 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11
+gate HotPathAllocationGateTests run 20 c6f58b7 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11
+gate WarmPathGateTests run 1 c6f58b7 rc=0 total=25 Failed:     0, Passed:    25, Skipped:     0, Total:    25
+gate WarmPathGateTests run 2 c6f58b7 rc=0 total=25 Failed:     0, Passed:    25, Skipped:     0, Total:    25
+gate WarmPathGateTests run 3 c6f58b7 rc=0 total=25 Failed:     0, Passed:    25, Skipped:     0, Total:    25
+gate WarmPathGateTests run 4 c6f58b7 rc=0 total=25 Failed:     0, Passed:    25, Skipped:     0, Total:    25
+gate WarmPathGateTests run 5 c6f58b7 rc=0 total=25 Failed:     0, Passed:    25, Skipped:     0, Total:    25
+gate WarmPathGateTests run 6 c6f58b7 rc=0 total=25 Failed:     0, Passed:    25, Skipped:     0, Total:    25
+gate WarmPathGateTests run 7 c6f58b7 rc=0 total=25 Failed:     0, Passed:    25, Skipped:     0, Total:    25
+gate WarmPathGateTests run 8 c6f58b7 rc=0 total=25 Failed:     0, Passed:    25, Skipped:     0, Total:    25
+gate WarmPathGateTests run 9 c6f58b7 rc=0 total=25 Failed:     0, Passed:    25, Skipped:     0, Total:    25
+gate WarmPathGateTests run 10 c6f58b7 rc=0 total=25 Failed:     0, Passed:    25, Skipped:     0, Total:    25
+gate WarmPathGateTests run 11 c6f58b7 rc=0 total=25 Failed:     0, Passed:    25, Skipped:     0, Total:    25
+gate WarmPathGateTests run 12 c6f58b7 rc=0 total=25 Failed:     0, Passed:    25, Skipped:     0, Total:    25
+gate WarmPathGateTests run 13 c6f58b7 rc=0 total=25 Failed:     0, Passed:    25, Skipped:     0, Total:    25
+gate WarmPathGateTests run 14 c6f58b7 rc=0 total=25 Failed:     0, Passed:    25, Skipped:     0, Total:    25
+gate WarmPathGateTests run 15 c6f58b7 rc=0 total=25 Failed:     0, Passed:    25, Skipped:     0, Total:    25
+gate WarmPathGateTests run 16 c6f58b7 rc=0 total=25 Failed:     0, Passed:    25, Skipped:     0, Total:    25
+gate WarmPathGateTests run 17 c6f58b7 rc=0 total=25 Failed:     0, Passed:    25, Skipped:     0, Total:    25
+gate WarmPathGateTests run 18 c6f58b7 rc=0 total=25 Failed:     0, Passed:    25, Skipped:     0, Total:    25
+gate WarmPathGateTests run 19 c6f58b7 rc=0 total=25 Failed:     0, Passed:    25, Skipped:     0, Total:    25
+gate WarmPathGateTests run 20 c6f58b7 rc=0 total=25 Failed:     0, Passed:    25, Skipped:     0, Total:    25
+REP DONE
+```
+
+Result: **20/20 consecutive green runs** for `HotPathAllocationGateTests` (Total: 11 each — the
+0 B claim/expire gate, the dispatcher warm-path gate and the established-UDP gate among them) and
+**20/20** for every structural class matching `WarmPathGateTests` (Total: 25 each =
+WarmPathGateTests 12 + SelfTrafficWarmPathGateTests 4 + TcpRedirectWarmPathGateTests 2 +
+UdpWarmPathGateTests 7). No run was vacuous and none failed; the loop stops on the first failure or
+a totals mismatch, so this is a clean streak, not a re-run-until-green.
+
+The four-class allocation loop of hot-path.md §4 (`HotPathAllocationGateTests`,
+`CapturePumpReadCallTests`, `SweepAllocationGateTests`, `NdisCapturePumpTests`) keeps its totals
+and signature strings untouched; the three classes this task deliberately did not change are covered
+once by the frozen-tree full-suite run (1021 + 18 green) and are left to the operator's per-gate
+loop rather than claimed here.
+# appended by the independent check session (sub-agent), 2026-09-30
+#
+# Re-derivation on the same frozen working set (base c6f58b7 + the landed Steps 1-7, plus the
+# check session's comment/spec/record corrections; no .cs behaviour changed). Fingerprints:
+#   git rev-parse --short HEAD = c6f58b7
+#   git write-tree            = 8eddb3fae3637bbf06bfac9d26933c348bc10561 (index tree; nothing staged)
+#   git diff HEAD | sha256 (first 16) = 6b104e2037f8baa8 at loop start (doc-only edits followed)
+# Build: 0 warnings / 0 errors. Full suite: 1021 + 18 passed, 0 failed.
+#
+# HotPathAllocationGateTests: 11 consecutive green runs (the spec's N=20 re-run was stopped at 11
+# to spend the remaining budget on the two classes the implementer's loop did not cover; the class
+# was already 20/20 in the section above).
+gate HotPathAllocationGateTests run 1 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 2 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 3 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 4 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 5 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 6 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 7 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 8 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 9 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 10 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 11 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+#
+# SweepAllocationGateTests: 20/20 - the F3 sweep gate covers changed product code (FlowTable's
+# bucket comparison, the Publish tick and the warm-slot clear), so it belongs to this task's surface
+# even though its test file was not edited.
+gate SweepAllocationGateTests run 1 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 2 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 3 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 4 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 5 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 6 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 7 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 8 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 9 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 10 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 11 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 12 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 13 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 14 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 15 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 16 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 17 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 18 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 19 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate SweepAllocationGateTests run 20 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+#
+# CapturePumpReadCallTests: 20/20 - the pump class itself is unchanged and its window wires its own
+# OnBatchCompleted (not the bundle's tick), so this is an adjacent-surface control, not a touched gate.
+gate CapturePumpReadCallTests run 1 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 2 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 3 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 4 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 5 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 6 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 7 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 8 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 9 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 10 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 11 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 12 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 13 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 14 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 15 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 16 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 17 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 18 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 19 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CapturePumpReadCallTests run 20 c6f58b7 8eddb3fae3637bbf06bfac9d26933c348bc10561 rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+#
+# NdisCapturePumpTests (Total: 14) was not re-run: no product file on its path changed (the new tick
+# lives in DurableCaptureBundle.FlushPendingInjections, which no NdisCapturePump test wires).
+# No run was vacuous and no failure of any signature occurred: 11/11 + 20/20 + 20/20 green.
+
+# Operator note (2026-09-30, post-check gate run): one suite-level failure of an exact allocation gate
+# that this task does not touch — HotPathAllocationGateTests.SynRetentionWithWarmSynCopyPoolAllocatesNoManagedBytes,
+# Expected 0 / Actual 4520 B, in a full-suite run of the frozen tree. 4520 is a new size inside the
+# documented suite-conditional host-lump family (widened to any *AllocateNoManagedBytes exact gate by
+# 09-30-exact-gate-residual-lumps + the udp-association-head-count-flake addendum); the gate is green
+# 6/6 in per-gate process runs on the same tree, and the immediately following full-suite run is green
+# 1021+18. Recorded as the accepted host event, not explained away.

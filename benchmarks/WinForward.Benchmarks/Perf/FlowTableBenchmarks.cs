@@ -157,13 +157,16 @@ public class FlowTableProductionShapeBenchmarks
     }
 
     /// <summary>
-    /// The clock read the two hit rows include: subtracting this from them bounds what the bucketed
-    /// activity time (F3.4) can remove.
+    /// The post-change production shape the dispatcher's warm entry drives: the direct-mapped cache
+    /// probe with its seqlock snapshot and transport-tuple corroboration, no gate and no clock read.
+    /// The retired <c>ReadActivityClock</c> row (~40 ns) measured the per-hit clock call this row no
+    /// longer contains, so it is recorded as obsolete rather than re-measured.
     /// </summary>
     [Benchmark]
-    public long ReadActivityClock()
+    public long ResolveWarmHit()
     {
-        var value = TimeProvider.System.GetUtcNow().UtcTicks;
+        long value = 0;
+        value += _table.TryResolveWarm(_stored, out var view) ? view.Generation : 0;
         Volatile.Write(ref s_sink, value);
         return value;
     }
