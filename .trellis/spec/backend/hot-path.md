@@ -287,7 +287,7 @@ Trigger: any change to `TcpProxyRelay`'s pump loop, `PacketChecksums`, or the ch
 
 - `TcpProxyRelay` owns one reusable `StallWindow` (linked CTS) **per direction per session**; `Arm()` runs before every `ReadAsync`/`WriteAsync`, throttled to at most once per second (task 08-30-fast-hardening X8a): the first arm is unconditional, subsequent arms only when >1 s (`Stopwatch` ticks, internal static `StallWindow.IsRearmDue(lastArmTicks, nowTicks)`, strictly greater) has elapsed since the last arm.
 - Each pump direction rents one 64 KiB buffer from `ArrayPool<byte>.Shared` (`PumpBufferSize = 64 * 1024`, task 08-30-fast-hardening X5) for its whole lifetime — one rent per direction (half-close gives independent lifetimes), returned exactly once in `finally` on every exit path; loop bounds use `buffer.Length` (the pool may return a larger array).
-- `PacketChecksums.TryRewriteIpv4Tcp/TryRewriteIpv6Tcp` use RFC 1624 incremental update; the internal full-recompute oracle is kept for property tests (`InternalsVisibleTo("WinForward.Core.Tests")`).
+- `PacketChecksums.TryRewriteIpv4Tcp/TryRewriteIpv6Tcp` use RFC 1624 incremental update; the internal full-recompute oracle is kept for property tests (`InternalsVisibleTo("WinForward.Protocols.Tests")`).
 - `PacketChecksums.Sum` is `Vector256`-vectorized when hardware-accelerated, scalar fold-while-adding otherwise.
 
 ### 3. Contracts
@@ -368,8 +368,8 @@ branch, and any allocation-gate test that protects a span-vs-memory overload cho
   that spans `await`s is only meaningful when (a) the driven path is actually **ready** — it takes the
   direct/warm shape rather than a cold setup path — and (b) the reading thread did not change.
   `EstablishedUdpDatagramPathAllocatesNoManagedBytes`
-  (`tests/WinForward.Core.Tests/HotPathAllocationGateTests.cs`, measured window `:148-155`, asserts
-  through `:171`) measures 64 dispatches across 64 `await`s; run alone it failed repeatedly
+  (`tests/WinForward.Performance.Tests/HotPathAllocationGateTests.cs`, measured window `:195-202`, asserts
+  through `:205`) measures 64 dispatches across 64 `await`s; run alone it failed repeatedly
   (`Expected: 0, Actual: 600`, and later `3688`, `4328`, `5352`).
 
   **The cause is a not-yet-ready window, not thread migration** (corrected 2026-09-21 after the fix was
@@ -1006,8 +1006,10 @@ because something real slipped through without it.
     **1,880 B**, and an instrumented run located the lump at iteration 65 of 256 with **8,008 B**;
   - one-time first-use costs are visible the same way and are absorbed by the warm-up (the first call of
     a fresh `NoInlining` method measured **136 B**; the dispatcher path's first batch measured **824 B**).
-- **The measurement environment is part of the gate.** `WinForward.Core.Tests` therefore sets
-  `<TieredCompilation>false</TieredCompilation>`: every method is compiled by the optimizing JIT on first
+- **The measurement environment is part of the gate.** `tests/Directory.Build.props` therefore sets
+  `<TieredCompilation>false</TieredCompilation>` for every test project (the setting moved there from
+  `WinForward.Core.Tests` when the 10-01 test-project split spread the gates across four projects):
+  every method is compiled by the optimizing JIT on first
   use, so no tiering event can land in a window, and the gates measure the optimized steady state that
   production reaches after warm-up anyway. Evidence (20 runs per arm, class filter): OSR-only off
   (`TieredCompilationQuickJitForLoops=false`) **2/20** fails, a raised call-count threshold
@@ -1332,22 +1334,25 @@ Assert.Equal(1 + 8 + count, executor.PassCount);
 
 The suite-level loop is **not** the criterion. Run each exact gate in its own process, N runs per gate,
 record every run's padded summary, its totals assertion (the suite total is `1,141 + 18` on the
-2026-10-01 F6 tree, up from `995 + 18` at the 09-30-expiry-sweep-bounded-pause tree), the git hash, the
+2026-10-01 F6 tree, up from `995 + 18` at the 09-30-expiry-sweep-bounded-pause tree; the same day's
+test-project split kept the total and spread the 1,141 across twelve layered projects), the git hash, the
 tree fingerprint and the exit status; a failure is accepted only under the signature predicate above.
-**Qualify the filter with the namespace** (`FullyQualifiedName~WinForward.Core.Tests.$gate`): a bare
-class-name substring is no longer unique — `~SweepAllocationGateTests` also matches
-`UdpAdaptiveSweepAllocationGateTests` and reads `Total: 13` instead of 12, so the loop below stops on a
-false `VACUOUS MATCH` (measured 2026-10-01 during the F6 check; the namespace-qualified filter reads 12):
+**Qualify the filter with the test project's namespace** — the gates live in four projects since the
+split, so the `totals` map below carries each gate's fully-qualified class name and the loop filters on
+`FullyQualifiedName~$gate`. A bare class-name substring is still not unique:
+`~SweepAllocationGateTests` also matches `UdpAdaptiveSweepAllocationGateTests` and reads `Total: 13`
+instead of 12, so the loop stops on a false `VACUOUS MATCH` (measured 2026-10-01 during the F6 check;
+the namespace-qualified filter reads 12):
 
 ```bash
 log=/tmp/wf-lumps-proof.txt; : > "$log"; rev=$(git rev-parse --short HEAD); tree=$(git write-tree)
 summary='Failed: *[0-9]+, Passed: *[0-9]+, Skipped: *[0-9]+, Total: *[0-9]+'
-totals='HotPathAllocationGateTests:11 CapturePumpReadCallTests:4 SweepAllocationGateTests:12 NdisCapturePumpTests:14 NdisCapturePumpIdleWaitTests:5 FlowAttributionPipelineTests:19 FlowAttributionPendingIndexTests:10 ProcessOwnerTableCacheTests:11 CompositePacketArrivalSignalTests:3 UdpAdaptiveSweepAllocationGateTests:1'
+totals='WinForward.Performance.Tests.HotPathAllocationGateTests:11 WinForward.NdisApi.Tests.CapturePumpReadCallTests:4 WinForward.Performance.Tests.SweepAllocationGateTests:12 WinForward.NdisApi.Tests.NdisCapturePumpTests:14 WinForward.NdisApi.Tests.NdisCapturePumpIdleWaitTests:5 WinForward.Runtime.Flow.Tests.FlowAttributionPipelineTests:19 WinForward.Runtime.Flow.Tests.FlowAttributionPendingIndexTests:10 WinForward.Windows.Tests.ProcessOwnerTableCacheTests:11 WinForward.NdisApi.Tests.CompositePacketArrivalSignalTests:3 WinForward.Performance.Tests.UdpAdaptiveSweepAllocationGateTests:1'
 signature='^(168|5216|7384|7448)$'
 for entry in $totals; do
   gate=${entry%%:*}; expected=${entry##*:}
   for i in $(seq 1 20); do
-    out=$(dotnet test WinForward.slnx -c Release --filter "FullyQualifiedName~WinForward.Core.Tests.$gate" 2>&1); rc=$?
+    out=$(dotnet test WinForward.slnx -c Release --filter "FullyQualifiedName~$gate" 2>&1); rc=$?
     line=$(echo "$out" | rg -o "$summary" | tail -1)
     actual=$(echo "$out" | rg -o 'Actual: *[0-9]+' | tail -1 | rg -o '[0-9]+')
     echo "gate $gate run $i $rev $tree rc=$rc total=$expected $line actual=${actual:-none}" >> "$log"
