@@ -70,7 +70,9 @@ internal static class SoakRunner
     /// stage, so folding it into the sweep would add a topology no existing row depends on.
     /// <c>attribution</c> is excluded for the same probe reason: it drives the deferred-attribution
     /// pipeline from a dedicated thread to sample where attribution runs and what the pump pays, so
-    /// its numbers say nothing about the relay soak's verdicts.
+    /// its numbers say nothing about the relay soak's verdicts. <c>retention</c> is excluded for the
+    /// same reason: it builds two fixed 64-session cohorts over fake transports to isolate the
+    /// one-shot/sustained classification, so it is a controlled probe rather than a soak.
     /// </summary>
     internal static IReadOnlyList<(string Name, Func<StabilityContext, SoakOptions, Task> Run)> SelectScenarios(SoakScenario scenario)
     {
@@ -90,6 +92,7 @@ internal static class SoakRunner
             SoakScenario.TcpChurn => [("tcpChurn", TcpChurnScenario.RunAsync)],
             SoakScenario.Residency => [("residency", ResidencyCensusScenario.RunAsync)],
             SoakScenario.Attribution => [("attribution", AttributionOffPumpScenario.RunAsync)],
+            SoakScenario.Retention => [("retention", UdpSessionRetentionScenario.RunAsync)],
             SoakScenario.GcSoak => [("gcSoak", GcSoakScenario.RunAsync)],
             _ =>
             [

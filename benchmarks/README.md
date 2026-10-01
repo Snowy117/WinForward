@@ -88,7 +88,7 @@ Count-based reliability metrics under sustained load. One JSONL record per scena
 
 ```text
 dotnet run -c Release --project benchmarks/WinForward.Benchmarks -- \
-  --stability [--scenario all|udp|udpBurst|udpChurn|udpSessionBudget|tcp|tcpChurn|tcpthroughput|footprint|baseline|residency|scaling|sweep|pump] [--duration 60] [--pps 25000] \
+  --stability [--scenario all|udp|udpBurst|udpChurn|udpSessionBudget|tcp|tcpChurn|tcpthroughput|footprint|baseline|residency|retention|scaling|sweep|pump] [--duration 60] [--pps 25000] \
   [--payload-bytes 512] [--flows 256] [--udp-flows 100] [--burst-flows 48] [--dial-delay-ms 0] [--churn-waves 1] \
   [--rate 20] [--capacity 16384] [--churn-seconds 90] [--drain-seconds 120] [--require-pooling] \
   [--tcp-concurrency 64] [--tcp-transfer-bytes 1048576] [--socks5-external] \
@@ -98,7 +98,7 @@ dotnet run -c Release --project benchmarks/WinForward.Benchmarks -- \
 
 Every scenario not listed in the `all` arm of the parser is excluded there deliberately; the runner's
 own summary enumerates the reason per exclusion (`gc-soak`, `udpSessionBudget`, `scaling`, `sweep`,
-`pump`, `residency`, `tcpChurn`).
+`pump`, `residency`, `retention`, `tcpChurn`).
 ```
 
 `--quick` = `--duration 15 --pps 10000 --tcp-concurrency 16 --flows 64`.
@@ -188,6 +188,25 @@ teardown tails — are **not comparable** with current rows either.
   fake transports: `workingSetDeltaBytes`, `gen0Collections`, `allocatedBytes` captured with the
   session pool live (before disposal). This is the old `udpSessions.active` metric; a
   working-set level is not a time distribution, so it lives here rather than in BenchmarkDotNet.
+  Each population also emits `udp.sessionFootprint.cycle` with `overflowFirstWave` /
+  `overflowSecondWave` — the receive-window pool's cumulative overflow counter after a first
+  population and after a second one over the same pool. The pool is built through
+  `UdpProxyCoordinator.ReceiveWindowPoolCapacity(sessions)`, so the row mirrors composition: a first
+  fill reads N at any capacity, and only the second wave's growth discriminates a pool sized from the
+  session capacity from one left at the type's default.
+- **`udp.sessionRetention`** — the mixed one-shot/sustained retention arm (F6): two identically built
+  cohorts of 32 one-shot (one datagram, answered) and 32 sustained (two datagrams) sessions over fake
+  transports that carry the exchange evidence, one shared mutable clock, and **one sweep per cohort at
+  the same instant** — the control with both timeouts equal to the configured retention (nothing is
+  past it, so both classes stay resident) and the treatment with the 5 s one-shot class (exactly the
+  one-shot class retires). One coordinator per cohort is load-bearing: a coordinator sweep is
+  population-wide. The row carries `oneShot`/`sustained`, the two TTLs it drove and the resident count
+  per class; the run aborts unless each cohort's population is proven live before its sweep (the shared
+  factory's created count and every transport's flush, cross-checked against the coordinator's slot
+  count), the treatment's two TTLs differ, and the arms come out in the predicted shape. The control is
+  the attribution: the two rows share every input except the classification. Excluded from
+  `--scenario all` (a controlled probe, not a soak); series:
+  `results/2026-10-01-udp-session-footprint/session-retention.jsonl`.
 - **`scaling.contention`** — the lock chain's contention and scaling curve (research F2): one shared
   `FlowTable` seeded with `--flows` live states plus one self-traffic registry, driven by 1/2/4
   dedicated worker threads (released from a common gate, so the window excludes start skew) that each

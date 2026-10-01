@@ -22,6 +22,7 @@ internal sealed class UdpSessionBudgetRun(
     ProcessResourceSampler sampler,
     CountingRuntimeLogger productEvents,
     TimeSpan idleTimeout,
+    TimeSpan oneShotIdleTimeout,
     TimeSpan sweepInterval,
     int warmupFlows,
     int churnFlows)
@@ -47,6 +48,7 @@ internal sealed class UdpSessionBudgetRun(
         socks5External = options.Socks5External,
         requirePooling = options.RequirePooling,
         idleTimeoutSeconds = idleTimeout.TotalSeconds,
+        oneShotIdleTimeoutSeconds = oneShotIdleTimeout.TotalSeconds,
         sweepIntervalSeconds = sweepInterval.TotalSeconds,
     };
 
@@ -76,6 +78,7 @@ internal sealed class UdpSessionBudgetRun(
         var payload = new byte[options.PayloadBytes];
         for (var flow = 0; flow < warmupFlows; flow++)
         {
+            TickActivityClock();
             DatagramHeader.Write(payload, flow + 1, flow);
             _ = await coordinator.TrySendSpanAsync(BenchmarkShared.CreateFlowKey(flow), socksServer, payload, default, CancellationToken.None).ConfigureAwait(false);
         }
@@ -83,6 +86,7 @@ internal sealed class UdpSessionBudgetRun(
         var watch = Stopwatch.StartNew();
         while (sink.WarmupFirstResponses < warmupFlows && watch.Elapsed < s_warmupTimeout)
         {
+            TickActivityClock();
             await DelayAsync(s_warmupPollInterval).ConfigureAwait(false);
         }
 
@@ -94,6 +98,7 @@ internal sealed class UdpSessionBudgetRun(
         var retireWatch = Stopwatch.StartNew();
         while (coordinator.SessionCount > 0 && retireWatch.Elapsed < s_retireTimeout)
         {
+            TickActivityClock();
             _expired += await coordinator.RemoveExpiredAsync(TimeProvider.System.GetUtcNow(), TimeSpan.Zero).ConfigureAwait(false);
         }
 
@@ -126,6 +131,9 @@ internal sealed class UdpSessionBudgetRun(
         var nextSample = s_sampleInterval;
         for (var flow = 0; flow < churnFlows; flow++)
         {
+            // The pump's per-iteration tick, before this arrival: the new session's first stamp and the
+            // cutoff its sweep compares are then the same instant, exactly as in production.
+            TickActivityClock();
             var flowId = warmupFlows + flow;
             DatagramHeader.Write(payload, flow + 1, flowId);
             _issueTicks[flow] = Stopwatch.GetTimestamp();
@@ -178,6 +186,7 @@ internal sealed class UdpSessionBudgetRun(
         var nextSample = s_sampleInterval;
         while (drainWatch.Elapsed < drainWindow)
         {
+            TickActivityClock();
             await DelayAsync(s_drainPollInterval).ConfigureAwait(false);
             await SweepAsync(_watch.Elapsed).ConfigureAwait(false);
             if (drainWatch.Elapsed < nextSample) continue;
@@ -203,9 +212,19 @@ internal sealed class UdpSessionBudgetRun(
         while (elapsed >= _nextSweep)
         {
             _nextSweep += sweepInterval;
-            _expired += await coordinator.RemoveExpiredAsync(TimeProvider.System.GetUtcNow(), idleTimeout).ConfigureAwait(false);
+            _expired += await coordinator.RemoveExpiredAsync(TimeProvider.System.GetUtcNow(), idleTimeout, oneShotIdleTimeout).ConfigureAwait(false);
         }
     }
+
+    /// <summary>
+    /// Mirrors the capture pump's per-iteration activity tick
+    /// (<c>DurableCaptureBundle.FlushPendingInjections</c>), which is what advances the composition's
+    /// <see cref="WinForward.Core.ActivityBucketClock"/> in production. The soak drives the sweep directly and has no
+    /// pump, so without this tick the clock would stay frozen at the coordinator's construction bucket,
+    /// every session would carry the same stamp, and the sweep would mass-retire the whole population at
+    /// the first tick past the retention — a sawtooth artifact instead of the retention the verdicts name.
+    /// </summary>
+    private void TickActivityClock() => coordinator.ActivityClock.Tick();
 
     private SessionBudgetSample Sample(string phase)
     {

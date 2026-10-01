@@ -278,6 +278,59 @@ internal sealed class BenchmarkUdpTransport(int localPort, BenchmarkUdpTransport
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
 
+/// <summary>
+/// A fake relay transport that also carries the exchange evidence, so a retention scenario can place
+/// a flow in either retention class without driving real datagrams through it. The counters are
+/// settable by the scenario and read back through <see cref="IUdpExchangeCounters"/> as part of its
+/// population proof.
+/// </summary>
+internal sealed class BenchmarkExchangeTransport(int localPort) : IUdpProxyTransport, IUdpExchangeCounters
+{
+    private int _sent;
+
+    public IPEndPoint RelayEndpoint { get; } = new(IPAddress.Loopback, 50_000);
+    public IPEndPoint LocalEndpoint { get; } = new(IPAddress.Loopback, localPort);
+
+    /// <summary>The datagrams handed to this transport: the flush proof a scenario waits on.</summary>
+    public int SentCount => Volatile.Read(ref _sent);
+
+    public int DatagramsSent { get; set; }
+    public bool SawResponse { get; set; }
+
+    public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref _sent);
+        return ValueTask.CompletedTask;
+    }
+
+    public async ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+    {
+        await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
+        throw new InvalidOperationException("The benchmark receive should end through cancellation.");
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}
+
+/// <summary>
+/// Creates <see cref="BenchmarkExchangeTransport"/> instances with distinct local ports (so the
+/// relay-alias collision guard never rejects a distinct flow) and keeps the creation order, which is
+/// what lets a scenario map its flow list to transports by index.
+/// </summary>
+internal sealed class BenchmarkExchangeTransportFactory : IUdpProxyTransportFactory
+{
+    private int _nextPort = 10_000;
+
+    public List<BenchmarkExchangeTransport> Transports { get; } = [];
+
+    public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
+    {
+        var transport = new BenchmarkExchangeTransport(Interlocked.Increment(ref _nextPort));
+        Transports.Add(transport);
+        return ValueTask.FromResult<IUdpProxyTransport>(transport);
+    }
+}
+
 internal sealed class NoopUdpResponseSink : IUdpResponseSink
 {
     public static readonly NoopUdpResponseSink Instance = new();

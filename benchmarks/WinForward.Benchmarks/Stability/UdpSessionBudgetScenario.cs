@@ -34,6 +34,15 @@ namespace WinForward.Benchmarks.Stability;
 /// turns the same refusal on the pooling half, which a saturated population would otherwise skip.
 /// </para>
 /// <para>
+/// The run mirrors two production wiring points rather than re-deriving them: the sweep interval comes
+/// from <see cref="IdleExpirySweeper.DeriveUdpSweepInterval"/> over the effective retention floor, and
+/// the coordinator's activity clock is ticked once per driven iteration (the run's
+/// <c>TickActivityClock</c>), the cadence the capture pump's <c>FlushPendingInjections</c> gives it in
+/// production. The second mirror is load-bearing: a soak with a frozen clock stamps every session at the
+/// coordinator's construction bucket, so the first sweep past the retention mass-retires the whole
+/// population and the run measures a sawtooth artifact instead of the retention its verdicts name.
+/// </para>
+/// <para>
 /// The descriptor series describes this process: with the in-process harness SOCKS5 server, the two
 /// sockets it owns per accepted control connection are subtracted
 /// (<see cref="ProcessResourceSampler"/>); <c>--socks5-external</c> moves them into a child process.
@@ -55,10 +64,12 @@ internal static class UdpSessionBudgetScenario
     public static async Task RunAsync(StabilityContext context, SoakOptions options)
     {
         var idleTimeout = ConfigurationLoader.DefaultUdpSessionIdleTimeout;
-        // The production UDP cadence for that idle timeout, taken from the sweeper itself instead of
-        // re-derived here: max(5 s, idle / 2), capped by the 60 s main-leg interval (15 s for the
-        // default 30 s retention).
-        var sweepInterval = IdleExpirySweeper.DeriveUdpSweepInterval(s_mainSweepInterval, idleTimeout, udpSweepInterval: null);
+        var oneShotIdleTimeout = UdpProxyCoordinator.OneShotIdleTimeout;
+        // The production UDP cadence for the effective retention floor — the shorter of the configured
+        // retention and the one-shot class — taken from the sweeper itself instead of re-derived here:
+        // max(5 s, floor / 2), capped by the 60 s main-leg interval (5 s for the default 30 s retention
+        // and the 5 s one-shot class, was 15 s under uniform retention).
+        var sweepInterval = IdleExpirySweeper.DeriveUdpSweepInterval(s_mainSweepInterval, IdleExpirySweeper.EffectiveUdpRetentionFloor(idleTimeout, oneShotIdleTimeout), udpSweepInterval: null);
         ValidateChurnWindow(options, idleTimeout, sweepInterval);
         // Warm-up flows: one shared association's worth at the configured fan-out bound, without
         // dominating a short churn window.
@@ -89,7 +100,7 @@ internal static class UdpSessionBudgetScenario
             receiveWindowPool,
             setupExecutor,
             new UdpProxyOptions { Capacity = options.Capacity, Logger = productEvents });
-        var run = new UdpSessionBudgetRun(context, options, coordinator, associations, sink, sampler, productEvents, idleTimeout, sweepInterval, warmupFlows, churnFlows);
+        var run = new UdpSessionBudgetRun(context, options, coordinator, associations, sink, sampler, productEvents, idleTimeout, oneShotIdleTimeout, sweepInterval, warmupFlows, churnFlows);
         try
         {
             var controlPort = checked((ushort)(externalServer?.ControlEndpoint.Port ?? server!.ControlEndpoint.Port));

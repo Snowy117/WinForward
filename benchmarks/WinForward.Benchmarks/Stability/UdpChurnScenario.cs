@@ -12,7 +12,7 @@ namespace WinForward.Benchmarks.Stability;
 /// <summary>
 /// UDP session churn at the design bounds (task 09-21-session-creation-cost, design §4): waves of
 /// <c>--burst-flows</c> short-lived sessions through the real dial path, each wave retired through
-/// the coordinator's own idle-expiry path (<see cref="UdpProxyCoordinator.RemoveExpiredAsync"/> with
+/// the coordinator's own idle-expiry path (<see cref="UdpProxyCoordinator.RemoveExpiredAsync(DateTimeOffset, TimeSpan)"/> with
 /// a zero timeout — the per-session teardown the periodic sweeper would drive), with per-wave
 /// <c>GC.GetTotalAllocatedBytes</c> / GC-collection sampling. Wave mode (<c>--churn-waves K</c>,
 /// K ≥ 1) fires K consecutive waves and emits one row per wave; sustained mode (<c>--churn-waves 0</c>)

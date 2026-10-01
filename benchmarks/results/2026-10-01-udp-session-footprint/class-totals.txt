@@ -1,0 +1,18 @@
+F6 udp-session-footprint — per-class fact totals (tree 91be11c, e7fb73fd0089286d87c4d98ec07cb34eec5282b5)
+collected 2026-10-01T09:42:31+08:00 on NixOS 26.11 / .NET 10.0.12 X64; suite total 18 + 1,141
+HotPathAllocationGateTests.                                            Failed:     0, Passed:    11, Skipped:     0, Total:    11
+CapturePumpReadCallTests.                                              Failed:     0, Passed:     4, Skipped:     0, Total:     4
+SweepAllocationGateTests.                                              Failed:     0, Passed:    12, Skipped:     0, Total:    12
+UdpAdaptiveSweepAllocationGateTests.                                   Failed:     0, Passed:     1, Skipped:     0, Total:     1
+NdisCapturePumpTests.                                                  Failed:     0, Passed:    14, Skipped:     0, Total:    14
+NdisCapturePumpIdleWaitTests.                                          Failed:     0, Passed:     5, Skipped:     0, Total:     5
+FlowAttributionPipelineTests.                                          Failed:     0, Passed:    19, Skipped:     0, Total:    19
+FlowAttributionPendingIndexTests.                                      Failed:     0, Passed:    10, Skipped:     0, Total:    10
+ProcessOwnerTableCacheTests.                                           Failed:     0, Passed:    11, Skipped:     0, Total:    11
+CompositePacketArrivalSignalTests.                                     Failed:     0, Passed:     3, Skipped:     0, Total:     3
+UdpReceiveWindowPoolTests.                                             Failed:     0, Passed:     4, Skipped:     0, Total:     4
+UdpSessionRetentionTests.                                              Failed:     0, Passed:     8, Skipped:     0, Total:     8
+Socks5UdpTransportLeaseTests.                                          Failed:     0, Passed:     8, Skipped:     0, Total:     8
+ConfigurationLimitsTests.                                              Failed:     0, Passed:    63, Skipped:     0, Total:    63
+UdpSessionBudgetAcceptanceTests.                                       Failed:     0, Passed:    11, Skipped:     0, Total:    11
+UdpSessionBudgetScenarioTests.                                         Failed:     0, Passed:    26, Skipped:     0, Total:    26

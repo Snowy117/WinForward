@@ -21,6 +21,7 @@ internal enum SoakScenario
     Pump,
     Residency,
     Attribution,
+    Retention,
 }
 
 internal enum TcpRelayMode
@@ -148,9 +149,10 @@ internal sealed record SoakOptions
     /// <summary>
     /// UDP session-budget soak (<c>--churn-seconds</c>): length of the new-flow churn window. The
     /// default clears the retention ceiling's discrimination minimum at the default rate with room
-    /// for sample cadence (20 × 90 = 1,800 cumulative flows against the ceiling 1,240 = 20 ×
-    /// (idle 30 s + 2 × sweep 15 s) + margin 40), so the shipped invocation cannot silently record a
-    /// vacuous retention claim.
+    /// for sample cadence (20 × 90 = 1,800 cumulative flows against the ceiling 840 = 20 ×
+    /// (idle 30 s + 2 × sweep 5 s) + margin 40), so the shipped invocation cannot silently record a
+    /// vacuous retention claim. The sweep is the production derivation for the effective retention
+    /// floor, i.e. the 5 s one-shot class.
     /// </summary>
     public int ChurnSeconds { get; private init; } = 90;
 
@@ -357,7 +359,8 @@ internal sealed record SoakOptions
         "pump" or "pumpidlewake" => SoakScenario.Pump,
         "residency" or "residencycensus" => SoakScenario.Residency,
         "attribution" or "attributionoffpump" => SoakScenario.Attribution,
-        _ => throw new ArgumentException($"Unknown scenario '{raw}'; expected all, udp, udpburst, udpchurn, udpsessionbudget, scaling, sweep, pump, residency, attribution, tcp, tcpchurn, tcpthroughput, footprint, baseline, or gc-soak.", nameof(raw)),
+        "retention" or "sessionretention" => SoakScenario.Retention,
+        _ => throw new ArgumentException($"Unknown scenario '{raw}'; expected all, udp, udpburst, udpchurn, udpsessionbudget, scaling, sweep, pump, residency, attribution, retention, tcp, tcpchurn, tcpthroughput, footprint, baseline, or gc-soak.", nameof(raw)),
     };
 
     private static TcpRelayMode ParseTcpRelayMode(string raw) => raw.ToLowerInvariant() switch

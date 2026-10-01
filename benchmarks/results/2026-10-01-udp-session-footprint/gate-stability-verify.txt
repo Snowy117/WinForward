@@ -1,0 +1,128 @@
+# F6 independent per-gate re-derivation (check sub-agent, 2026-10-01) — companion to gate-stability.txt.
+# Built once (`dotnet build -c Release`, 0 warnings) and run with --no-build; the test-assembly hash is
+# recorded before and after the loop, so a stale binary cannot green the proof. Per-class totals are the
+# vacuity guard. Fingerprints: rev=91be11c, working tree (git stash create) 456567417bf0b8214c2616a728b84a5d32ea2dbe,
+# untracked-file hash dbc5d5e784544804 — note gate-stability.txt quotes e7fb73fd…, the *index* tree, which
+# with nothing staged is the base revision's tree and does not identify the tree under test.
+# One arm aborted on the spec's filter as written: `FullyQualifiedName~SweepAllocationGateTests` also matches
+# WinForward.Core.Tests.UdpAdaptiveSweepAllocationGateTests, so it reads Total: 13 against the expected 12 and
+# the loop stops on a false VACUOUS MATCH. The namespace-qualified filter is appended at the end (10/10 green).
+# F6 independent per-gate proof: rev=91be11c tracked-tree=456567417bf0b8214c2616a728b84a5d32ea2dbe untracked-sha1=dbc5d5e784544804
+# probe=10.0.401 host=Linux 6.18.53 x86_64 build=[0 Warning(s) 0 Error(s) ] core-dll=1b1f19d2000263cc analyzers-dll=e01b04c2a851cd52
+gate UdpAdaptiveSweepAllocationGateTests run 1 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=1 Failed:     0, Passed:     1, Skipped:     0, Total:     1 actual=none
+gate UdpAdaptiveSweepAllocationGateTests run 2 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=1 Failed:     0, Passed:     1, Skipped:     0, Total:     1 actual=none
+gate UdpAdaptiveSweepAllocationGateTests run 3 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=1 Failed:     0, Passed:     1, Skipped:     0, Total:     1 actual=none
+gate UdpAdaptiveSweepAllocationGateTests run 4 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=1 Failed:     0, Passed:     1, Skipped:     0, Total:     1 actual=none
+gate UdpAdaptiveSweepAllocationGateTests run 5 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=1 Failed:     0, Passed:     1, Skipped:     0, Total:     1 actual=none
+gate UdpAdaptiveSweepAllocationGateTests run 6 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=1 Failed:     0, Passed:     1, Skipped:     0, Total:     1 actual=none
+gate UdpAdaptiveSweepAllocationGateTests run 7 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=1 Failed:     0, Passed:     1, Skipped:     0, Total:     1 actual=none
+gate UdpAdaptiveSweepAllocationGateTests run 8 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=1 Failed:     0, Passed:     1, Skipped:     0, Total:     1 actual=none
+gate UdpAdaptiveSweepAllocationGateTests run 9 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=1 Failed:     0, Passed:     1, Skipped:     0, Total:     1 actual=none
+gate UdpAdaptiveSweepAllocationGateTests run 10 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=1 Failed:     0, Passed:     1, Skipped:     0, Total:     1 actual=none
+gate UdpAdaptiveSweepAllocationGateTests run 11 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=1 Failed:     0, Passed:     1, Skipped:     0, Total:     1 actual=none
+gate UdpAdaptiveSweepAllocationGateTests run 12 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=1 Failed:     0, Passed:     1, Skipped:     0, Total:     1 actual=none
+gate UdpAdaptiveSweepAllocationGateTests run 13 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=1 Failed:     0, Passed:     1, Skipped:     0, Total:     1 actual=none
+gate UdpAdaptiveSweepAllocationGateTests run 14 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=1 Failed:     0, Passed:     1, Skipped:     0, Total:     1 actual=none
+gate UdpAdaptiveSweepAllocationGateTests run 15 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=1 Failed:     0, Passed:     1, Skipped:     0, Total:     1 actual=none
+gate UdpAdaptiveSweepAllocationGateTests run 16 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=1 Failed:     0, Passed:     1, Skipped:     0, Total:     1 actual=none
+gate UdpAdaptiveSweepAllocationGateTests run 17 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=1 Failed:     0, Passed:     1, Skipped:     0, Total:     1 actual=none
+gate UdpAdaptiveSweepAllocationGateTests run 18 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=1 Failed:     0, Passed:     1, Skipped:     0, Total:     1 actual=none
+gate UdpAdaptiveSweepAllocationGateTests run 19 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=1 Failed:     0, Passed:     1, Skipped:     0, Total:     1 actual=none
+gate UdpAdaptiveSweepAllocationGateTests run 20 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=1 Failed:     0, Passed:     1, Skipped:     0, Total:     1 actual=none
+gate HotPathAllocationGateTests run 1 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 2 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 3 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 4 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 5 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 6 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 7 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 8 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 9 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate HotPathAllocationGateTests run 10 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate SweepAllocationGateTests run 1 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=12 Failed:     0, Passed:    13, Skipped:     0, Total:    13 actual=none
+VACUOUS MATCH: SweepAllocationGateTests run 1
+gate Socks5UdpTransportSendTests run 1 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=10 Failed:     0, Passed:    10, Skipped:     0, Total:    10 actual=none
+gate Socks5UdpTransportSendTests run 2 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=10 Failed:     0, Passed:    10, Skipped:     0, Total:    10 actual=none
+gate Socks5UdpTransportSendTests run 3 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=10 Failed:     0, Passed:    10, Skipped:     0, Total:    10 actual=none
+gate Socks5UdpTransportSendTests run 4 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=10 Failed:     0, Passed:    10, Skipped:     0, Total:    10 actual=none
+gate Socks5UdpTransportSendTests run 5 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=10 Failed:     0, Passed:    10, Skipped:     0, Total:    10 actual=none
+gate Socks5UdpTransportSendTests run 6 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=10 Failed:     0, Passed:    10, Skipped:     0, Total:    10 actual=none
+gate Socks5UdpTransportSendTests run 7 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=10 Failed:     0, Passed:    10, Skipped:     0, Total:    10 actual=none
+gate Socks5UdpTransportSendTests run 8 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=10 Failed:     0, Passed:    10, Skipped:     0, Total:    10 actual=none
+gate Socks5UdpTransportSendTests run 9 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=10 Failed:     0, Passed:    10, Skipped:     0, Total:    10 actual=none
+gate Socks5UdpTransportSendTests run 10 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=10 Failed:     0, Passed:    10, Skipped:     0, Total:    10 actual=none
+gate CapturePumpReadCallTests run 1 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 2 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 3 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 4 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 5 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 6 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 7 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 8 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 9 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate CapturePumpReadCallTests run 10 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate NdisCapturePumpTests run 1 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 2 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 3 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 4 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpTests run 5 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=14 Failed:     0, Passed:    14, Skipped:     0, Total:    14 actual=none
+gate NdisCapturePumpIdleWaitTests run 1 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate NdisCapturePumpIdleWaitTests run 2 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate NdisCapturePumpIdleWaitTests run 3 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate NdisCapturePumpIdleWaitTests run 4 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate NdisCapturePumpIdleWaitTests run 5 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=5 Failed:     0, Passed:     5, Skipped:     0, Total:     5 actual=none
+gate FlowAttributionPipelineTests run 1 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=19 Failed:     0, Passed:    19, Skipped:     0, Total:    19 actual=none
+gate FlowAttributionPipelineTests run 2 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=19 Failed:     0, Passed:    19, Skipped:     0, Total:    19 actual=none
+gate FlowAttributionPipelineTests run 3 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=19 Failed:     0, Passed:    19, Skipped:     0, Total:    19 actual=none
+gate FlowAttributionPipelineTests run 4 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=19 Failed:     0, Passed:    19, Skipped:     0, Total:    19 actual=none
+gate FlowAttributionPipelineTests run 5 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=19 Failed:     0, Passed:    19, Skipped:     0, Total:    19 actual=none
+gate FlowAttributionPendingIndexTests run 1 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=10 Failed:     0, Passed:    10, Skipped:     0, Total:    10 actual=none
+gate FlowAttributionPendingIndexTests run 2 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=10 Failed:     0, Passed:    10, Skipped:     0, Total:    10 actual=none
+gate FlowAttributionPendingIndexTests run 3 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=10 Failed:     0, Passed:    10, Skipped:     0, Total:    10 actual=none
+gate FlowAttributionPendingIndexTests run 4 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=10 Failed:     0, Passed:    10, Skipped:     0, Total:    10 actual=none
+gate FlowAttributionPendingIndexTests run 5 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=10 Failed:     0, Passed:    10, Skipped:     0, Total:    10 actual=none
+gate ProcessOwnerTableCacheTests run 1 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate ProcessOwnerTableCacheTests run 2 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate ProcessOwnerTableCacheTests run 3 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate ProcessOwnerTableCacheTests run 4 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate ProcessOwnerTableCacheTests run 5 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate CompositePacketArrivalSignalTests run 1 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CompositePacketArrivalSignalTests run 2 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CompositePacketArrivalSignalTests run 3 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CompositePacketArrivalSignalTests run 4 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate CompositePacketArrivalSignalTests run 5 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=3 Failed:     0, Passed:     3, Skipped:     0, Total:     3 actual=none
+gate UdpReceiveWindowPoolTests run 1 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate UdpReceiveWindowPoolTests run 2 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate UdpReceiveWindowPoolTests run 3 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=4 Failed:     0, Passed:     4, Skipped:     0, Total:     4 actual=none
+gate UdpSessionRetentionTests run 1 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=8 Failed:     0, Passed:     8, Skipped:     0, Total:     8 actual=none
+gate UdpSessionRetentionTests run 2 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=8 Failed:     0, Passed:     8, Skipped:     0, Total:     8 actual=none
+gate UdpSessionRetentionTests run 3 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=8 Failed:     0, Passed:     8, Skipped:     0, Total:     8 actual=none
+gate ConfigurationLimitsTests run 1 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=63 Failed:     0, Passed:    63, Skipped:     0, Total:    63 actual=none
+gate ConfigurationLimitsTests run 2 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=63 Failed:     0, Passed:    63, Skipped:     0, Total:    63 actual=none
+gate ConfigurationLimitsTests run 3 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=63 Failed:     0, Passed:    63, Skipped:     0, Total:    63 actual=none
+gate Socks5UdpTransportLeaseTests run 1 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=8 Failed:     0, Passed:     8, Skipped:     0, Total:     8 actual=none
+gate Socks5UdpTransportLeaseTests run 2 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=8 Failed:     0, Passed:     8, Skipped:     0, Total:     8 actual=none
+gate Socks5UdpTransportLeaseTests run 3 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=8 Failed:     0, Passed:     8, Skipped:     0, Total:     8 actual=none
+gate UdpSessionBudgetAcceptanceTests run 1 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate UdpSessionBudgetAcceptanceTests run 2 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate UdpSessionBudgetAcceptanceTests run 3 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=11 Failed:     0, Passed:    11, Skipped:     0, Total:    11 actual=none
+gate UdpSessionBudgetScenarioTests run 1 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=26 Failed:     0, Passed:    26, Skipped:     0, Total:    26 actual=none
+gate UdpSessionBudgetScenarioTests run 2 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=26 Failed:     0, Passed:    26, Skipped:     0, Total:    26 actual=none
+gate UdpSessionBudgetScenarioTests run 3 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=26 Failed:     0, Passed:    26, Skipped:     0, Total:    26 actual=none
+# runs=99 core-dll-after=1b1f19d2000263cc analyzers-dll-after=e01b04c2a851cd52 binary-stable=yes
+# TOTAL FAILURES(outside signature): 1
+# The SweepAllocationGateTests arm as specified in hot-path.md §4 aborts: the bare
+# `FullyQualifiedName~SweepAllocationGateTests` filter also matches
+# WinForward.Core.Tests.UdpAdaptiveSweepAllocationGateTests (measured Total: 13, expected 12).
+# Re-run with the namespace-qualified filter:
+gate WinForward.Core.Tests.SweepAllocationGateTests run 1 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate WinForward.Core.Tests.SweepAllocationGateTests run 2 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate WinForward.Core.Tests.SweepAllocationGateTests run 3 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate WinForward.Core.Tests.SweepAllocationGateTests run 4 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate WinForward.Core.Tests.SweepAllocationGateTests run 5 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate WinForward.Core.Tests.SweepAllocationGateTests run 6 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate WinForward.Core.Tests.SweepAllocationGateTests run 7 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate WinForward.Core.Tests.SweepAllocationGateTests run 8 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate WinForward.Core.Tests.SweepAllocationGateTests run 9 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+gate WinForward.Core.Tests.SweepAllocationGateTests run 10 91be11c 456567417bf0b8214c2616a728b84a5d32ea2dbe rc=0 total=12 Failed:     0, Passed:    12, Skipped:     0, Total:    12 actual=none
+# sweep arm (namespace-qualified filter) 10/10 green
