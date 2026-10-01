@@ -1,5 +1,6 @@
 using System.Net;
 using WinForward.Runtime.TcpRedirect;
+using WinForward.TestSupport;
 using Xunit;
 
 namespace WinForward.Core.Tests;

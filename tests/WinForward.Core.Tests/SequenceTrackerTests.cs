@@ -2,7 +2,7 @@ using System.Net;
 using System.Reflection;
 using WinForward.Runtime.TcpRedirect;
 using Xunit;
-using static WinForward.Core.Tests.TcpCoordinatorFakes;
+using static WinForward.TestSupport.TcpCoordinatorFakes;
 
 namespace WinForward.Core.Tests;
 

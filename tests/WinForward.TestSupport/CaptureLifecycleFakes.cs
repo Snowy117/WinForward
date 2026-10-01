@@ -1,6 +1,6 @@
 using WinForward.Runtime.Capture;
 
-namespace WinForward.Core.Tests;
+namespace WinForward.TestSupport;
 
 /// <summary>
 /// Capture-runtime lifecycle fakes shared by the capture test files: a scriptable mode

@@ -3,8 +3,8 @@ using System.Runtime.CompilerServices;
 using WinForward.Protocols;
 using WinForward.Runtime.TcpRedirect;
 using Xunit;
-using static WinForward.Core.Tests.FrameBuilders;
-using static WinForward.Core.Tests.TcpCoordinatorFakes;
+using static WinForward.TestSupport.FrameBuilders;
+using static WinForward.TestSupport.TcpCoordinatorFakes;
 
 namespace WinForward.Core.Tests;
 

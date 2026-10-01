@@ -27,5 +27,6 @@
     <ProjectReference Include="../../src/WinForward.Windows/WinForward.Windows.csproj" />
     <ProjectReference Include="../../src/WinForward.Cli/WinForward.Cli.csproj" />
     <ProjectReference Include="../../benchmarks/WinForward.Benchmarks/WinForward.Benchmarks.csproj" />
+    <ProjectReference Include="../WinForward.TestSupport/WinForward.TestSupport.csproj" />
   </ItemGroup>
 </Project>

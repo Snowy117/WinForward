@@ -5,7 +5,7 @@ using WinForward.Runtime;
 using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
 
-namespace WinForward.Core.Tests;
+namespace WinForward.TestSupport;
 
 /// <summary>
 /// Builds a real transport over a one-flow association pool, the way production composition does

@@ -1,6 +1,7 @@
 using WinForward.Runtime;
+using WinForward.TestSupport;
 using Xunit;
-using static WinForward.Core.Tests.AsyncTestExtensions;
+using static WinForward.TestSupport.AsyncTestExtensions;
 
 namespace WinForward.Core.Tests;
 

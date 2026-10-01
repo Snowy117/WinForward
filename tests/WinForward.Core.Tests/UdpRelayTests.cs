@@ -7,9 +7,10 @@ using WinForward.Protocols;
 using WinForward.Runtime;
 using WinForward.Runtime.Capture;
 using WinForward.Runtime.UdpProxy;
+using WinForward.TestSupport;
 using Xunit;
-using static WinForward.Core.Tests.AsyncTestExtensions;
-using static WinForward.Core.Tests.ChecksumMath;
+using static WinForward.TestSupport.AsyncTestExtensions;
+using static WinForward.TestSupport.ChecksumMath;
 
 namespace WinForward.Core.Tests;
 

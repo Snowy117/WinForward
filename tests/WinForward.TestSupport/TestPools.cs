@@ -1,8 +1,9 @@
+using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.UdpProxy;
 
-namespace WinForward.Core.Tests;
+namespace WinForward.TestSupport;
 
 /// <summary>
 /// Process-wide native pools and one shared setup executor for coordinator construction in tests

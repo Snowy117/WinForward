@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using WinForward.Runtime.Capture;
+using WinForward.TestSupport;
 using Xunit;
 
 namespace WinForward.Core.Tests;

@@ -3,7 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using Xunit;
 
-namespace WinForward.Core.Tests;
+namespace WinForward.TestSupport;
 
 /// <summary>
 /// Minimal in-process SOCKS5 server helpers: greeting/method-selection exchanges, UDP

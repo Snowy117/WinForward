@@ -1,7 +1,7 @@
 using WinForward.NdisApi;
 using WinForward.Runtime.Capture;
 
-namespace WinForward.Core.Tests;
+namespace WinForward.TestSupport;
 
 /// <summary>
 /// In-memory <see cref="IPacketReinjector"/> fakes. <see cref="FakeReinjector"/> records every

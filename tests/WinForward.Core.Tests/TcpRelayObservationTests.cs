@@ -3,8 +3,9 @@ using System.Net.Sockets;
 using System.Runtime.Versioning;
 using WinForward.Configuration;
 using WinForward.Runtime.TcpRedirect;
+using WinForward.TestSupport;
 using Xunit;
-using static WinForward.Core.Tests.AsyncTestExtensions;
+using static WinForward.TestSupport.AsyncTestExtensions;
 
 namespace WinForward.Core.Tests;
 

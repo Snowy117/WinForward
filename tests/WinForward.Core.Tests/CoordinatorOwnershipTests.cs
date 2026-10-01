@@ -2,6 +2,7 @@ using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.TcpRedirect;
 using WinForward.Runtime.UdpProxy;
+using WinForward.TestSupport;
 using Xunit;
 
 namespace WinForward.Core.Tests;

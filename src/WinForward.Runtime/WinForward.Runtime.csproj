@@ -5,6 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="WinForward.Core.Tests" />
+    <InternalsVisibleTo Include="WinForward.TestSupport" />
     <InternalsVisibleTo Include="WinForward.Benchmarks" />
     <!-- The CLI composition root (assembly name "WinForward") wires internal runtime seams
          (executor lane retirement via DurableCaptureBundle.OnScopeInstalled) that stay internal

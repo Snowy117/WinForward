@@ -1,4 +1,4 @@
-namespace WinForward.Core.Tests;
+namespace WinForward.TestSupport;
 
 /// <summary>Async polling and expected-cancellation helpers shared by coordinator tests.</summary>
 internal static class AsyncTestExtensions

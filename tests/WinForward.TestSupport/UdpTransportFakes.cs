@@ -2,11 +2,12 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading.Channels;
 using WinForward.Configuration;
+using WinForward.Core;
 using WinForward.Protocols;
 using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
 
-namespace WinForward.Core.Tests;
+namespace WinForward.TestSupport;
 
 /// <summary>
 /// In-memory fakes for the SOCKS5 UDP relay transport seam: a factory emitting distinct bound

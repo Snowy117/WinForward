@@ -6,9 +6,10 @@ using WinForward.Protocols;
 using WinForward.Runtime;
 using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
+using WinForward.TestSupport;
 using Xunit;
 using Xunit.Abstractions;
-using static WinForward.Core.Tests.AsyncTestExtensions;
+using static WinForward.TestSupport.AsyncTestExtensions;
 
 namespace WinForward.Core.Tests;
 

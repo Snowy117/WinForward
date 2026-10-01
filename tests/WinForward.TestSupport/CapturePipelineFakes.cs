@@ -1,11 +1,12 @@
 using System.Collections.Concurrent;
 using WinForward.Configuration;
+using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.TcpRedirect;
 using WinForward.Windows;
 
-namespace WinForward.Core.Tests;
+namespace WinForward.TestSupport;
 
 /// <summary>
 /// Dispatcher/executor fakes shared by the capture-pipeline test files: a never-owning

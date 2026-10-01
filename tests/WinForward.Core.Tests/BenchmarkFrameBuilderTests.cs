@@ -3,6 +3,7 @@ using System.Net;
 using WinForward.Benchmarks;
 using WinForward.Protocols;
 using WinForward.Runtime.TcpRedirect;
+using WinForward.TestSupport;
 using Xunit;
 
 namespace WinForward.Core.Tests;

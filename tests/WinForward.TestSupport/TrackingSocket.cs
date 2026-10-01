@@ -1,6 +1,6 @@
 using System.Net.Sockets;
 
-namespace WinForward.Core.Tests;
+namespace WinForward.TestSupport;
 
 /// <summary>
 /// A socket double that tracks disposal through the protected <see cref="Socket.Dispose(bool)"/>

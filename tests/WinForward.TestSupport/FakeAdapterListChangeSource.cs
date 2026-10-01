@@ -1,6 +1,6 @@
 using WinForward.Runtime.Capture;
 
-namespace WinForward.Core.Tests;
+namespace WinForward.TestSupport;
 
 /// <summary>
 /// Manual-trigger <see cref="IAdapterListChangeSource"/> for consumer-side tests (design §3.2

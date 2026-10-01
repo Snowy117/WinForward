@@ -4,8 +4,9 @@ using System.Net.Sockets;
 using WinForward.Configuration;
 using WinForward.Runtime;
 using WinForward.Runtime.UdpProxy;
+using WinForward.TestSupport;
 using Xunit;
-using static WinForward.Core.Tests.UdpAssociationFakes;
+using static WinForward.TestSupport.UdpAssociationFakes;
 
 namespace WinForward.Core.Tests;
 

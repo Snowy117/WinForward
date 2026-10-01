@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <!--
+      The xunit package is referenced for Assert, and its build props unconditionally set
+      IsTestProject=true. Without an override, `dotnet test` would launch a VSTest host against this
+      library: it references no test SDK and no test adapter, so that host dies on the missing
+      xunit.abstractions dependency and aborts the run. This project holds shared fakes and builders,
+      not tests, so it opts out; the override is evaluated after the package props and thus wins.
+    -->
+    <IsTestProject>false</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- The fakes, builders and harnesses are internal by design; each test project that compiles
+         against them needs friend access. -->
+    <InternalsVisibleTo Include="WinForward.Core.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="xunit" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/WinForward.Configuration/WinForward.Configuration.csproj" />
+    <ProjectReference Include="../../src/WinForward.Core/WinForward.Core.csproj" />
+    <ProjectReference Include="../../src/WinForward.NdisApi/WinForward.NdisApi.csproj" />
+    <ProjectReference Include="../../src/WinForward.Protocols/WinForward.Protocols.csproj" />
+    <ProjectReference Include="../../src/WinForward.Runtime/WinForward.Runtime.csproj" />
+    <ProjectReference Include="../../src/WinForward.Windows/WinForward.Windows.csproj" />
+  </ItemGroup>
+</Project>

@@ -5,7 +5,7 @@ using System.Net;
 using System.Net.Sockets;
 using WinForward.Configuration;
 
-namespace WinForward.Core.Tests;
+namespace WinForward.TestSupport;
 
 /// <summary>
 /// A loopback SOCKS5 server that serves the greeting plus UDP ASSOCIATE on every accepted control

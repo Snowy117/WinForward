@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using WinForward.Configuration;
 using WinForward.Runtime;
+using WinForward.TestSupport;
 using Xunit;
 
 namespace WinForward.Core.Tests;

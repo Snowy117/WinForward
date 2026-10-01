@@ -3,8 +3,8 @@ using System.Net.Sockets;
 using WinForward.Configuration;
 using WinForward.Runtime.Socks5;
 using Xunit;
-using static WinForward.Core.Tests.AsyncTestExtensions;
-using static WinForward.Core.Tests.Socks5TestServer;
+using static WinForward.TestSupport.AsyncTestExtensions;
+using static WinForward.TestSupport.Socks5TestServer;
 
 namespace WinForward.Core.Tests;
 

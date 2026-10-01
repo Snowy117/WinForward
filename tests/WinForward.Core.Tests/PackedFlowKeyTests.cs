@@ -4,7 +4,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using WinForward.Runtime.TcpRedirect;
 using Xunit;
-using static WinForward.Core.Tests.FlowBuilders;
+using static WinForward.TestSupport.FlowBuilders;
 
 namespace WinForward.Core.Tests;
 

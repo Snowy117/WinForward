@@ -2,7 +2,7 @@ using System.Buffers.Binary;
 using System.Net;
 using WinForward.Protocols;
 
-namespace WinForward.Core.Tests;
+namespace WinForward.TestSupport;
 
 /// <summary>
 /// Ethernet II + IPv4/IPv6 + TCP/UDP test frame builders. Every builder produces a structurally

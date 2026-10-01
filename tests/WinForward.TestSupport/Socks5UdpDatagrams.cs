@@ -1,7 +1,8 @@
 using System.Net;
+using WinForward.Core;
 using WinForward.Protocols;
 
-namespace WinForward.Core.Tests;
+namespace WinForward.TestSupport;
 
 /// <summary>
 /// Test-side materialization of a SOCKS5 UDP datagram for socket sends. The production encoder

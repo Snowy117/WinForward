@@ -4,9 +4,10 @@ using System.Net;
 using WinForward.Configuration;
 using WinForward.Runtime;
 using WinForward.Runtime.TcpRedirect;
+using WinForward.TestSupport;
 using Xunit;
-using static WinForward.Core.Tests.AsyncTestExtensions;
-using static WinForward.Core.Tests.TcpCoordinatorFakes;
+using static WinForward.TestSupport.AsyncTestExtensions;
+using static WinForward.TestSupport.TcpCoordinatorFakes;
 
 namespace WinForward.Core.Tests;
 

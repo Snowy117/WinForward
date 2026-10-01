@@ -1,7 +1,7 @@
 using WinForward.Configuration;
 using WinForward.Runtime;
 
-namespace WinForward.Core.Tests;
+namespace WinForward.TestSupport;
 
 /// <summary>
 /// Captures every structured event and plain-text line with its level; <see cref="WarnCount"/>

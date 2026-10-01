@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.Versioning;
 using WinForward.NdisApi;
+using WinForward.TestSupport;
 using Xunit;
 
 namespace WinForward.Core.Tests;

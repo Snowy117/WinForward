@@ -1,6 +1,6 @@
 using WinForward.NdisApi;
 
-namespace WinForward.Core.Tests;
+namespace WinForward.TestSupport;
 
 /// <summary>
 /// A counting <see cref="INdisPacketArrivalSignal"/> that honours the requested timeout by sleeping

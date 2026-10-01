@@ -1,7 +1,8 @@
 using System.Net;
+using WinForward.Core;
 using WinForward.Windows;
 
-namespace WinForward.Core.Tests;
+namespace WinForward.TestSupport;
 
 /// <summary>
 /// Returns a fixed adapter-local address (or null to model an addressless adapter) and counts

@@ -6,6 +6,7 @@ using WinForward.Runtime;
 using WinForward.Runtime.Capture;
 using WinForward.Runtime.TcpRedirect;
 using WinForward.Runtime.UdpProxy;
+using WinForward.TestSupport;
 using WinForward.Windows;
 using Xunit;
 

@@ -3,6 +3,7 @@ using System.Reflection;
 using WinForward.Runtime;
 using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
+using WinForward.TestSupport;
 using Xunit;
 
 namespace WinForward.Core.Tests;

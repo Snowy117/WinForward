@@ -1,7 +1,7 @@
 using System.ComponentModel;
 using WinForward.NdisApi;
 
-namespace WinForward.Core.Tests;
+namespace WinForward.TestSupport;
 
 /// <summary>
 /// An <see cref="INdisPacketReader"/> over a fixed script: each call advances to the next read

@@ -3,6 +3,7 @@ using System.Runtime.Versioning;
 using WinForward.Configuration;
 using WinForward.NdisApi;
 using WinForward.Runtime.UdpProxy;
+using WinForward.TestSupport;
 using Xunit;
 
 namespace WinForward.Core.Tests;

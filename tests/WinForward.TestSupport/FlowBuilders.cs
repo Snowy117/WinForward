@@ -1,6 +1,7 @@
 using System.Net;
+using WinForward.Core;
 
-namespace WinForward.Core.Tests;
+namespace WinForward.TestSupport;
 
 /// <summary>
 /// Flow-key builders shared by the UDP coordinator suites: the canonical host-to-DNS flow

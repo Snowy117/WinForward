@@ -1,7 +1,7 @@
 using WinForward.Configuration;
 using Xunit;
 
-namespace WinForward.Core.Tests;
+namespace WinForward.TestSupport;
 
 /// <summary>
 /// Shared assertion for configuration documents that must parse successfully but fail

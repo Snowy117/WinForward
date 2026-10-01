@@ -6,9 +6,10 @@ using WinForward.Protocols;
 using WinForward.Runtime;
 using WinForward.Runtime.Capture;
 using WinForward.Runtime.TcpRedirect;
+using WinForward.TestSupport;
 using WinForward.Windows;
 using Xunit;
-using static WinForward.Core.Tests.TcpCoordinatorFakes;
+using static WinForward.TestSupport.TcpCoordinatorFakes;
 
 namespace WinForward.Core.Tests;
 

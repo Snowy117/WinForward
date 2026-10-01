@@ -1,10 +1,11 @@
 using System.Net.Sockets;
 using WinForward.Configuration;
+using WinForward.Core;
 using WinForward.Runtime;
 using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
 
-namespace WinForward.Core.Tests;
+namespace WinForward.TestSupport;
 
 /// <summary>
 /// Builds a UDP coordinator whose borrowed pools and setup executor default to the process-wide

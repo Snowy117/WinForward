@@ -1,8 +1,9 @@
 using WinForward.Configuration;
 using WinForward.Runtime;
 using WinForward.Runtime.UdpProxy;
+using WinForward.TestSupport;
 using Xunit;
-using static WinForward.Core.Tests.FlowBuilders;
+using static WinForward.TestSupport.FlowBuilders;
 
 namespace WinForward.Core.Tests;
 

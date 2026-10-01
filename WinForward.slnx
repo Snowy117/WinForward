@@ -11,6 +11,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/WinForward.Core.Tests/WinForward.Core.Tests.csproj" />
     <Project Path="tests/WinForward.Analyzers.Tests/WinForward.Analyzers.Tests.csproj" />
+    <Project Path="tests/WinForward.TestSupport/WinForward.TestSupport.csproj" />
   </Folder>
   <Folder Name="/analyzers/">
     <Project Path="analyzers/WinForward.Analyzers/WinForward.Analyzers.csproj" />

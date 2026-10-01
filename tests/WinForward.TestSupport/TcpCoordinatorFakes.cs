@@ -2,16 +2,17 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading.Channels;
 using WinForward.Configuration;
+using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.Capture;
 using WinForward.Runtime.TcpRedirect;
 using WinForward.Windows;
 using Xunit;
-using static WinForward.Core.Tests.AsyncTestExtensions;
-using static WinForward.Core.Tests.FrameBuilders;
+using static WinForward.TestSupport.AsyncTestExtensions;
+using static WinForward.TestSupport.FrameBuilders;
 
-namespace WinForward.Core.Tests;
+namespace WinForward.TestSupport;
 
 /// <summary>
 /// Shared fakes, packet builders, and the dispatcher harness for the TcpProxyCoordinator

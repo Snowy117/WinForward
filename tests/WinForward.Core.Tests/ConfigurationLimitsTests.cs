@@ -1,6 +1,7 @@
 using System.Globalization;
 using WinForward.Configuration;
 using WinForward.Runtime.Socks5;
+using WinForward.TestSupport;
 using Xunit;
 
 namespace WinForward.Core.Tests;

@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using WinForward.Protocols;
 
-namespace WinForward.Core.Tests;
+namespace WinForward.TestSupport;
 
 /// <summary>
 /// Shared 16-bit internet checksum math for test frame construction and validation: every frame

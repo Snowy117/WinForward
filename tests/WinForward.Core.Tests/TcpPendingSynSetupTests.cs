@@ -3,8 +3,9 @@ using WinForward.Configuration;
 using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.TcpRedirect;
+using WinForward.TestSupport;
 using Xunit;
-using static WinForward.Core.Tests.TcpCoordinatorFakes;
+using static WinForward.TestSupport.TcpCoordinatorFakes;
 
 namespace WinForward.Core.Tests;
 

@@ -5,7 +5,7 @@ using WinForward.Runtime;
 using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
 
-namespace WinForward.Core.Tests;
+namespace WinForward.TestSupport;
 
 /// <summary>
 /// The relays and plumbing the UDP association suites share: a permissive relay that echoes every

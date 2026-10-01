@@ -1,8 +1,9 @@
 using System.Globalization;
+using WinForward.Core;
 using WinForward.Runtime.Capture;
 using WinForward.Windows;
 
-namespace WinForward.Core.Tests;
+namespace WinForward.TestSupport;
 
 /// <summary>
 /// Manual-switch <see cref="IAdapterEnumerationProvider"/> for capture-runner tests (task

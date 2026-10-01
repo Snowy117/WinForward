@@ -1,4 +1,4 @@
-namespace WinForward.Core.Tests;
+namespace WinForward.TestSupport;
 
 /// <summary>
 /// Counts <see cref="TaskScheduler.UnobservedTaskException"/> reports that reference an explicitly

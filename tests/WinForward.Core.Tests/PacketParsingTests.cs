@@ -1,6 +1,7 @@
 using System.Net;
 using WinForward.Protocols;
 using WinForward.Runtime;
+using WinForward.TestSupport;
 using WinForward.Windows;
 using Xunit;
 
