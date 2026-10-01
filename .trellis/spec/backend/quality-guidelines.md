@@ -56,6 +56,7 @@
 ### 2. Signatures
 
 - `UdpProxyCoordinator(transportFactory, responseSink, UdpProxyOptions?)` owns the receive-window bound via `UdpProxyOptions.MaximumFrameSize` (default `UdpFrameBuilder.DefaultMaximumEthernetFrame`).
+- `UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize)` sizes one window (`cap + 22 + 1`) and `UdpProxyCoordinator.ReceiveWindowPoolCapacity(sessionCapacity)` sizes the shared pool: `sessionCapacity + ReceiveWindowRetireHeadroom(sessionCapacity)`, with the allowance `max(4 × udpAssociationFlowsPerAssociation, sessionCapacity / 16)`. `DurableCaptureBundle` passes both, so the pool and the session window can never disagree.
 - `UdpResponseReinjector(..., int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame, ...)` owns the rebuilt-frame bound.
 - `Socks5UdpTransport.ReceiveAsync(Memory<byte> buffer, CancellationToken)` returns a discriminated `Socks5UdpReceiveResult`; a receive whose byte count fills the supplied buffer reports the `Oversized` skip instead of a datagram.
 
@@ -63,6 +64,7 @@
 
 - Composition passes the same pinned `maximumFrameSize` to the coordinator and reinjector. A relay response that cannot fit the reinjection cap must never be accepted into a larger independent receive contract.
 - Per active UDP session, rent one buffer sized `maximumFrameSize + 22 + 1`: maximum Ethernet frame, maximum SOCKS5 UDP header, and one oversize sentinel byte.
+- **The shared receive-window pool is sized from the configured session capacity, and never *exactly* it** (F6, 2026-10-01). One lease per live session is the population, because the receive loop rents one window for its whole life and returns it in `finally`; the retire allowance covers the admit-while-retiring overlap, which has no in-code bound — slot removal happens under the gate and only then awaits session disposal outside it while admission is gated on the slot count, and receive-failure teardowns are concurrent scope children that never take the sweep gate — so a capacity of exactly `udpSessionCapacity` would re-enter the tracked-overflow path under the very event the pool exists to smooth. Capacity is a **bound, not a preallocation**: a first fill of N sessions overflows N times at *any* capacity, so the sizing proof is **zero growth across a second population cycle** (`UdpReceiveWindowPoolTests`), never an absolute `OverflowAllocations == 0`. The recorded residual: a fault storm larger than the allowance still allocates fresh leases transiently and self-correctingly.
 - The receive loop owns the rented array for its full lifetime and returns it exactly once in `finally`, including cancellation, socket disposal, malformed input, immediate receive failure, and normal session teardown.
 - `receivedBytes >= buffer.Length` means the datagram may be truncated — it is a **skip**, not a session failure (superseded 2026-08-28, task 08-28-udp-loss-design-flaws D2).
 - **Per-datagram anomalies skip, never tear down** (supersedes the earlier throw-based matrix): `Socks5UdpTransport.ReceiveAsync` returns a discriminated `Socks5UdpReceiveResult` — a valid datagram, or a skip with reason `UnexpectedSource` / `Oversized` / `Malformed`. The session receive loop counts skips, emits a per-session rate-limited (>=5s) summary log, and continues; only socket-level exceptions (`SocketException`, `ObjectDisposedException`, shutdown cancellation) are fatal via `_receiveFailure`. Per-response sink (`InjectAsync`) failures are likewise isolated per response. A single >=1537B or malformed relay datagram must NOT stop response delivery for the flow.
@@ -91,6 +93,7 @@
 ### 6. Tests Required
 
 - Assert coordinator and reinjector receive the same non-default frame cap from composition.
+- Assert the pool's sizing rule (`ReceiveWindowPoolCapacity(cap) == cap + ReceiveWindowRetireHeadroom(cap)`, the allowance bands, and that it is never exactly `cap`) and its behavioural proof: a pool built from the rule shows **zero overflow growth across a second population cycle**, with the balance identity (`Rented == Returned`, `Outstanding == 0`, `InPool == population`) asserted after every lease is released (`UdpReceiveWindowPoolTests`).
 - Inject a tracking `ArrayPool<byte>` and assert one rent/one return after normal shutdown and immediate receive failure.
 - Assert a receive that fills the sentinel window is rejected before decode/sink invocation.
 - Preserve malformed datagram, oversized rebuilt frame, host/forwarded reinjection direction, client-MAC, cancellation, expiry, and coordinator single-flight disposal tests.

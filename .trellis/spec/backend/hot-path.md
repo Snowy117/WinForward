@@ -789,9 +789,11 @@ contract itself (placement, capability verdict, recovery, retention) is in
 - `RuntimeCounters`: `UdpCapacityRejections`, `UdpSetupFailures`, `UdpAssociationLost`,
   `UdpAssociationRecovered`, `UdpAssociationFallbacks` (alongside the pre-existing
   `UdpSetupRejections` / `UdpSetupBudgetRejections`).
-- Transport defaults: `Socks5UdpTransport.DefaultRelaySocketReceiveBufferSize = 128 * 1024`;
-  `ConfigurationLoader.DefaultUdpRelayReceiveBufferKb = 128`;
-  `ConfigurationLoader.DefaultUdpSessionIdleTimeout = 30 s`.
+- Transport defaults: `Socks5UdpTransport.DefaultRelaySocketReceiveBufferSize = 64 * 1024`;
+  `ConfigurationLoader.DefaultUdpRelayReceiveBufferKb = 64`;
+  `ConfigurationLoader.DefaultUdpSessionIdleTimeout = 30 s`, with
+  `UdpProxyCoordinator.OneShotIdleTimeout = 5 s` as the retention of a completed one-shot exchange and
+  the UDP tick derived from the effective floor (5 s at the defaults).
 
 ### 3. Contracts
 
@@ -821,9 +823,16 @@ contract itself (placement, capability verdict, recovery, retention) is in
   counts each server flipped to per-flow associations for the run, at most once per server (the
   gate-guarded sticky verdict is what makes the warn and the counter one-shot together).
 - **The recorded framework/churn anchors are per-flow shapes and stay comparable.** The default
-  relay receive buffer is 128 KiB per socket (was a hard-coded 512 KiB) and the session retention
-  is 30 s (UDP sweep 15 s), so kernel receive-buffer totals and any pre-Step-1 measurement must be
-  read with that shape; managed bytes per session keep their meaning. `UdpSessionBenchmarks` and
+  relay receive buffer is **64 KiB** per socket (128 KiB through the F6 task's Step 1, a hard-coded
+  512 KiB before that) and the session retention is the **two-class** shape: the configured
+  `udpSessionIdleSeconds` (30 s) for every session except a completed one-shot exchange, which
+  retires at `UdpProxyCoordinator.OneShotIdleTimeout` = 5 s, swept on the cadence the *effective*
+  retention floor derives (`IdleExpirySweeper.EffectiveUdpRetentionFloor` → 5 s, was 15 s under
+  uniform retention). Kernel receive-buffer totals and any pre-F6 measurement must therefore be read
+  with the shape they were recorded on; the 2026-10-01 artifact
+  (`benchmarks/results/2026-10-01-udp-session-footprint/`) re-ran the loss/burst/churn anchors on the
+  shipped shape and they held (loss 0, burst 48/48 with `establishmentLossRate` 0, churn inside its
+  ≤8,200 B/session band), so the numbers below keep their meaning without a re-base. `UdpSessionBenchmarks` and
   `FrameworkSetupBenchmarks` still construct the pool with `UdpAssociationReuseMode.Off`, so the
   ≤5,400 B/session Noop probe, the ≤8,200 B/session framework ladder, and the
   ≤14,500/≤14,300/≤17,500 churn anchors continue to describe the per-flow shape they were recorded
@@ -935,6 +944,19 @@ because something real slipped through without it.
 - **Never use a fake collaborator for the thing under test.** A guard/executor/transport that answers
   before touching the code under test makes the measured delta structurally zero: `NeverOwnedGuard` hides
   the whole self-traffic path, and the same workload through the real registry costs 2× at one thread.
+- **Mirror every production wiring point the measurement depends on, not only the one under test.**
+  A scenario that drives a coordinator's sweep directly has no capture pump, so it must tick the
+  composition's `ActivityBucketClock` itself at the pump's cadence
+  (`DurableCaptureBundle.FlushPendingInjections`; `UdpSessionBudgetRun.TickActivityClock` is the mirror).
+  A frozen clock leaves every session stamped at the coordinator's construction bucket, so the first
+  sweep past the retention **mass-retires the whole population** and the run measures a sawtooth
+  artifact instead of the retention it names. Measured 2026-10-01 (F6): the frozen-clock
+  `udp.sessionBudget` read a 4,479-session steady peak before the change and 500 after, and the after
+  run's `poolingCovered` verdict failed because the association high-water mark (60 s warm retention)
+  still reflected the pre-steady transient while the session peak was measured only post-steady; the
+  same tree with the tick mirrored read 4,539 before and 1,014 after, both verdicts green. A verdict
+  that changes when an *instrument* mirror is added is an instrument defect — fix the mirror, never the
+  ceiling or the load.
 - **A wall-clock maximum is not an acceptance figure when the host queueing dominates it.**
   `flowTable.sweepPause`'s phase-scoped `maxSweepWindowPauseMs` fixed *attribution* (in-window resolves
   no longer include the scenario's own refill contention) but not *attributability to the hold*: the
@@ -1063,7 +1085,12 @@ because something real slipped through without it.
 - **The gate's discrimination must be re-proven after any change to its window.** Inject one allocation
   inside the measured region and record the exact failure before restoring: on 2026-09-30 a single
   `new byte[64]` per iteration failed the reverse gate with `Actual: 5632` (64 × 88 B) and the dispatcher
-  gate with `Actual: 22528` (256 × 88 B), and both were green again after restoring.
+  gate with `Actual: 22528` (256 × 88 B), and both were green again after restoring. **Keep the injected
+  allocation alive** (`GC.KeepAlive(new byte[64])`, or a use the optimizer cannot sink): a bare
+  `_ = new byte[64]` is dead and was measured *eliminated* on .NET 10.0.401 (2026-10-01 F6 check — two
+  runs of `UdpAdaptiveSweepAllocationGateTests` passed with the bare form and failed at `Actual: 88` with
+  the `GC.KeepAlive` form; the pump gate read `Actual: 88000`, 1,000 × 88 B). A probe that the JIT
+  removes proves nothing about the window.
 - **Setup-executor shutdown races settle on both sides** (same window family as the pool drains in §"Native
   pool family"): `SetupExecutor.TryEnqueue` rechecks `_disposed` *after* the ring append and drains on the
   enqueuer's side, and a worker whose semaphore or shutdown source was disposed under it exits like a
@@ -1260,7 +1287,9 @@ Assert.Equal(1 + 8 + count, executor.PassCount);
   window) and are refuted by that check; min-of-K additionally loses three to four orders of magnitude of
   power for a 1-in-5,000-iteration regression (0.02 % against 18 %). Re-proven on this task's tree: one
   `new byte[64]` per measured iteration → pump gate `Actual: 88000` (1,000 × 88 B), one `new byte[64]`
-  inside the single sweep window → sweep gate `Actual: 88`; both restored → green. A gate shape that cannot
+  inside the single sweep window → sweep gate `Actual: 88`; both restored → green. (F6 check,
+  2026-10-01: the injected allocation must be kept alive — see the probe-form contract in §2; the
+  figures above reproduce with `GC.KeepAlive(new byte[64])`.) A gate shape that cannot
   fail that check is not a gate.
 - **Disposition: no product fix, no gate change, per-gate proof.** The counter-read-only control **of the
   residual itself** (tiering off, suite process) could not be run — the event never appears in an isolated
@@ -1302,20 +1331,23 @@ Assert.Equal(1 + 8 + count, executor.PassCount);
 ### 4. Tests Required — the per-gate proof procedure
 
 The suite-level loop is **not** the criterion. Run each exact gate in its own process, N runs per gate,
-record every run's padded summary, its totals assertion (`995 + 18` at the 09-30-expiry-sweep-bounded-pause
-tree — the loop itself asserts the per-class totals string below, so refresh these two figures whenever the
-suite grows), the git hash, the tree fingerprint and the exit status; a failure is accepted only under the
-signature predicate above:
+record every run's padded summary, its totals assertion (the suite total is `1,141 + 18` on the
+2026-10-01 F6 tree, up from `995 + 18` at the 09-30-expiry-sweep-bounded-pause tree), the git hash, the
+tree fingerprint and the exit status; a failure is accepted only under the signature predicate above.
+**Qualify the filter with the namespace** (`FullyQualifiedName~WinForward.Core.Tests.$gate`): a bare
+class-name substring is no longer unique — `~SweepAllocationGateTests` also matches
+`UdpAdaptiveSweepAllocationGateTests` and reads `Total: 13` instead of 12, so the loop below stops on a
+false `VACUOUS MATCH` (measured 2026-10-01 during the F6 check; the namespace-qualified filter reads 12):
 
 ```bash
 log=/tmp/wf-lumps-proof.txt; : > "$log"; rev=$(git rev-parse --short HEAD); tree=$(git write-tree)
 summary='Failed: *[0-9]+, Passed: *[0-9]+, Skipped: *[0-9]+, Total: *[0-9]+'
-totals='HotPathAllocationGateTests:11 CapturePumpReadCallTests:4 SweepAllocationGateTests:12 NdisCapturePumpTests:14 NdisCapturePumpIdleWaitTests:5 FlowAttributionPipelineTests:19 FlowAttributionPendingIndexTests:10 ProcessOwnerTableCacheTests:11 CompositePacketArrivalSignalTests:3'
+totals='HotPathAllocationGateTests:11 CapturePumpReadCallTests:4 SweepAllocationGateTests:12 NdisCapturePumpTests:14 NdisCapturePumpIdleWaitTests:5 FlowAttributionPipelineTests:19 FlowAttributionPendingIndexTests:10 ProcessOwnerTableCacheTests:11 CompositePacketArrivalSignalTests:3 UdpAdaptiveSweepAllocationGateTests:1'
 signature='^(168|5216|7384|7448)$'
 for entry in $totals; do
   gate=${entry%%:*}; expected=${entry##*:}
   for i in $(seq 1 20); do
-    out=$(dotnet test WinForward.slnx -c Release --filter "FullyQualifiedName~$gate" 2>&1); rc=$?
+    out=$(dotnet test WinForward.slnx -c Release --filter "FullyQualifiedName~WinForward.Core.Tests.$gate" 2>&1); rc=$?
     line=$(echo "$out" | rg -o "$summary" | tail -1)
     actual=$(echo "$out" | rg -o 'Actual: *[0-9]+' | tail -1 | rg -o '[0-9]+')
     echo "gate $gate run $i $rev $tree rc=$rc total=$expected $line actual=${actual:-none}" >> "$log"
