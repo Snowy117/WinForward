@@ -15,6 +15,12 @@
       DispatcherWarmFastPath gate failed 2/20 runs with 1,880 B). With TieredCompilation=false every
       method is compiled by the optimizing JIT on first use, so no tiering event can land in a window
       and the gates measure the optimized steady state production reaches anyway.
+
+      The setting lives here rather than on each test project because allocation measurement is
+      spread across five production layers plus the performance suite, and which files measure
+      allocations is not a stable property of a layer. A per-project declaration would need
+      re-derivation every time a test gained an allocation assertion, and missing one leaves a
+      flaky gate whose failure looks like a product regression.
     -->
     <TieredCompilation>false</TieredCompilation>
   </PropertyGroup>

@@ -169,7 +169,7 @@ dotnet_diagnostic.IDE0055.severity = warning
 # - MA0056 / MA0015 / S4456（tests 段）：测试树零 virtual/abstract 成员、零参数异常抛出、零迭代器。
 # 若未来引入上述模式并在门禁中触发诊断，按 spec 以局部 pragma + 理由（或按需重建规则级条目）处理。
 # 2026-09-19 复审补记（用户指示——抑制必须按证据路径 glob 限定，不得以“当前无命中”为由全局豁免）：
-# MA0041 与 IDE0130 已由全局条目改为路径限定（tests/ 与 tests/WinForward.Core.Tests/TestHelpers/），
+# MA0041 与 IDE0130 已由全局条目改为路径限定（tests/ 与 tests/WinForward.TestSupport/），
 # src 重回对应规则的正常管辖。
 
 # MA0038（Make method static，已被作者弃用、继任者即 CA1822）：2026-09-20 用户裁定直接规则级关闭。
@@ -191,7 +191,7 @@ dotnet_diagnostic.RCS1146.severity = none
 # MA0048（File name must match type name，默认 warning）：实测 205 处命中 / 64 文件——本仓刻意的
 # “一文件多类型”组织模式：src 的聚合契约/记录文件（Domain.cs、ConfigurationModels.cs、
 # NdisApiAbi.cs、TcpRedirectInterfaces.cs 等）、benchmarks/BenchmarkShared.cs、
-# tests/TestHelpers/TcpCoordinatorFakes.cs 等。强制拆分会破坏既有组织，属根本不兼容。
+# tests/WinForward.TestSupport/TcpCoordinatorFakes.cs 等。强制拆分会破坏既有组织，属根本不兼容。
 # （原注举例 AccessControlContracts.cs/EF 实体/JsonStreamEvent 均为其它仓库文本，已改。）
 dotnet_diagnostic.MA0048.severity = none
 #
@@ -270,13 +270,9 @@ dotnet_diagnostic.xUnit2020.severity = none
 dotnet_diagnostic.xUnit2023.severity = none
 dotnet_diagnostic.xUnit2029.severity = none
 
-# IDE0130（namespace 与文件夹不匹配）：测试辅助类型刻意使用父命名空间（WinForward.Core.Tests），
-# 避免每个测试文件追加 using——改为子命名空间需改 19 个辅助文件 + 全部消费方，属净 churn。
-# 按“抑制只覆盖证据所在路径”原则仅限 TestHelpers 目录（2026-09-19 复审）：src 与其它 tests 目录
-# 不受影响，未来若出现不匹配诊断即正常上报。原“fixer 改 MSBuild document properties 致 format 崩溃”
-# 说法系其它仓库继承文本，本仓未复现（审计删除）。
-[tests/WinForward.Core.Tests/TestHelpers/**.cs]
-dotnet_diagnostic.IDE0130.severity = none
+# 2026-10-01（任务 10-01-split-test-projects）：原先限定于 tests/WinForward.Core.Tests/TestHelpers/
+# 的 IDE0130 抑制随辅助类型迁入 tests/WinForward.TestSupport/ 而移除——新路径的 namespace 与项目
+# RootNamespace 一致，规则不再触发，无需把抑制迁移过去。
 
 # CSharp code style settings:
 [*.cs]
@@ -417,17 +413,16 @@ resharper_invert_if_highlighting = none
 [tests/**.cs]
 resharper_method_supports_cancellation_highlighting = none
 
-# 测试辅助类型刻意使用父命名空间（与 IDE0130 同路径同裁定，见上文 [tests/.../TestHelpers] 段）。
-[tests/WinForward.Core.Tests/TestHelpers/**.cs]
-resharper_check_namespace_highlighting = none
+# 2026-10-01（同上）：jb 的 CheckNamespace 抑制与该 IDE0130 抑制同因同去——新路径的 namespace
+# 与项目 RootNamespace 一致，规则不再触发。
 
 # BenchmarkDotNet [Params] 属性由 BDN 经**反射**注入 setter，静态分析不可见——jb 误判 setter 未用。
 [benchmarks/WinForward.Benchmarks/Perf/**.cs]
 resharper_unused_auto_property_accessor_global_highlighting = none
 
-# 分析器测试工程的新增辅助类型沿用父命名空间（WinForward.Analyzers.Tests），
-# 与 tests/WinForward.Core.Tests/TestHelpers 的既有裁定同因（实测 IDE0130 与 jb CheckNamespace
-# 均精确命中该文件），按"抑制只覆盖证据所在路径"原则仅限本目录。
+# 分析器测试工程的新增辅助类型沿用父命名空间（WinForward.Analyzers.Tests）：
+# 实测 IDE0130 与 jb CheckNamespace
+# 均精确命中该文件，按"抑制只覆盖证据所在路径"原则仅限本目录。
 [tests/WinForward.Analyzers.Tests/TestHelpers/**.cs]
 dotnet_diagnostic.IDE0130.severity = none
 resharper_check_namespace_highlighting = none
