@@ -1557,3 +1557,93 @@ previous process (planning caught this fail-open and closed it by caching TCP on
 ### Status
 
 [OK] **Completed**
+
+
+## Session 47: F6 UDP footprint: 64 KiB relay buffers, a capacity-sized pool and a two-class idle TTL (resident set -78%)
+<!-- trellis-session: v=2 fp=15daa262ba9a3123 -->
+
+**Date**: 2026-10-01
+**Task**: F6 UDP footprint: 64 KiB relay buffers, a capacity-sized pool and a two-class idle TTL (resident set -78%)
+**Branch**: `master`
+
+### Summary
+
+The UDP per-session footprint drops: 128 -> 64 KiB relay receive buffers, a receive-window pool sized from the session capacity with a derived retire headroom (cycle overflow +742 -> +0 at 1000 sessions), and a two-class idle TTL where a completed one-shot (DNS) is retired at 5 s while sustained exchanges keep 30 s. The soak's cadence-coupled acceptance was re-based on the measured resident set after finding the soak itself defective (it never ticked the activity clock, mass-wiping the population): resident peak 4539 -> 1014, association high-water 284 -> 64, sampled kernel estimate 505 -> 34 MiB. Anchors held; suite 1141+18 green; both commit gates at zero.
+
+### Main Changes
+
+### Main Changes
+
+F6 of the structural perf research (`09-29-tcp-udp-path-structural-perf` §F6) — the per-session UDP
+footprint stops being sized for a world the session does not live in.
+
+The relay socket's kernel receive buffer default drops **128 → 64 KiB** in both constants, with the config
+override and the validation/warning pair intact. The shared receive-window pool is now sized from the
+configured session capacity — `ReceiveWindowPoolCapacity(cap) = cap + max(4 × association fan-out, cap/16)`
+— so a second population cycle at capacity reads **+0** overflow growth where the retired default of 256
+grew +742 at 1,000 sessions; the headroom is derived from the retire/admit overlap (a slot leaves the session
+table before its lease returns, and receive-failure teardown runs concurrently without the sweep gate),
+following the attribution pool's precedent.
+
+Idle retention becomes **two-class**: a completed one-shot exchange (one datagram sent, already answered —
+the DNS majority) is retired on a **5 s** TTL, while every other session keeps the configured 30 s. The
+classification reads the per-datagram counters the transport already maintains through a new internal seam,
+so the packet path gains no work, and the sweep cadence is derived from the effective retention floor
+(15 → 5 s), which also tightens F8's pending-entry lifetime to `(5, 10] s`.
+
+### Measurement
+
+| Reading | Before | After |
+|---|---|---|
+| resident session peak (soak, fixed instrument) | 4,539 | **1,014** (−77.7 %) |
+| association high-water | 284 | **64** |
+| sampled kernel receive estimate | 504.9 MiB | **33.3–34.9 MiB** |
+| drain to zero | 135.4 s | **100.3 s** |
+| soak verdicts | true / true / **false** | **true / true / false, 3/3 runs** |
+| pool cycle at 1,000 sessions | +742 overflow | **+0** |
+
+Projections at the shipped 16,384-session capacity: 2 GiB → **1 GiB** of kernel receive buffers, and
+563 → **281 MiB** at the soak's measured 4,500-session peak. The must-not-move anchors held (`udp` loss 0,
+`udpBurst` 48/48 with zero establishment loss, `udpChurn` inside its B/session band).
+
+### Testing
+
+- [OK] Release build 0 warnings/0 errors; suite **1,141 + 18** green (the +17 facts are exactly the new ones).
+- [OK] `dotnet format` exit 0 with empty output; `jb inspectcode` **0 issues** (26 findings fixed across
+  rounds; three narrow suppressions and five dead members deleted, none relaxed).
+- [OK] Per-gate proof **109 own-process runs** re-derived by the checker (new gate ×20, ten gate classes
+  ×5–10, six grown non-gate classes ×3), every run exit 0, zero gate failures, zero host hits.
+- [OK] **Instrument defect found and fixed**: the `sessionBudget` soak never ticked the coordinator's activity
+  clock, so every session's stamp froze and the first sweep past retention mass-wiped the population — its
+  association high-water mark and its steady-state peak therefore described different populations. The soak
+  now ticks per driven iteration, mirroring `DurableCaptureBundle.FlushPendingInjections`, and the defect is a
+  new measurement self-check contract in `hot-path.md`. Both arms were re-captured on the fixed instrument
+  and the acceptance ceilings re-derived from the measured resident set.
+- [OK] Two red-befores are permanent: the retired capacity's +44 cycle growth is an executable in-tree fact,
+  and `UdpAdaptiveSweepAllocationGateTests` proves the shared tick allocates nothing.
+
+### Status
+
+[OK] **Completed** (archived 2026-10-01)
+
+### Next Steps
+
+- F7 (WFP scoping) is **paused by the operator** pending a decision; the I/O fast path stays driver/pump-bound
+  with the user-mode crossing at the ceiling. The recorded residuals stand: the acceptance ceiling's 4.1×
+  headroom bounds accumulation rather than the shipped one-shot band, a fault storm can exceed the retire
+  allowance, a sparse flow re-establishes per datagram, and kernel-side drops are invisible to these
+  instruments.
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7dc2979` | test(bench): F6 footprint cycle row, retention arm and the re-based soak evidence (udp-session-footprint) |
+| `b12baab` | perf(udp): 64 KiB relay buffers, capacity-sized receive-window pool and a two-class idle TTL (udp-session-footprint) |
+| `6457eeb` | docs(spec): record the F6 footprint contracts and the soak cadence self-check (udp-session-footprint) |
+| `9832012` | chore(task): record the F6 task and sync the parent backlog (udp-session-footprint) |
+
+### Status
+
+[OK] **Completed**

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 46
+- **Total Sessions**: 47
 - **Last Active**: 2026-10-01
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1559 | Active |
+| `journal-1.md` | ~1649 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 47 | 2026-10-01 | F6 UDP footprint: 64 KiB relay buffers, a capacity-sized pool and a two-class idle TTL (resident set -78%) | `7dc2979`, `b12baab`, `6457eeb`, `9832012` | `master` |
 | 46 | 2026-10-01 | F8 attribution off the pump thread: a bounded pending index and an owner-table epoch coalescer (pump stall 7.5 ms -> 0.02 ms) | `acca507`, `4a0f70e`, `f121a3d`, `ee40987` | `master` |
 | 45 | 2026-10-01 | F5 pump I/O: read-first drains with a self-healing ABI guard, and an event-driven idle wake (31x idle CPU) | `6cb27bf`, `a488a99`, `ec0762f`, `e888921` | `master` |
 | 44 | 2026-10-01 | F4 keys and parsing: a 64 B interned key, one parse per frame, lock-free trackers (and a live mis-rewrite found by hardening) | `31b340b`, `7cc794a`, `d43d85d`, `59e80fc` | `master` |
