@@ -4,7 +4,6 @@
     <RootNamespace>WinForward.Runtime</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <InternalsVisibleTo Include="WinForward.Core.Tests" />
     <InternalsVisibleTo Include="WinForward.TestSupport" />
     <InternalsVisibleTo Include="WinForward.Runtime.TcpRedirect.Tests" />
     <InternalsVisibleTo Include="WinForward.Runtime.Flow.Tests" />

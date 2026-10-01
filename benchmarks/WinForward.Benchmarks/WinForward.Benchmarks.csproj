@@ -10,7 +10,6 @@
     <PackageReference Include="BenchmarkDotNet" />
   </ItemGroup>
   <ItemGroup>
-    <InternalsVisibleTo Include="WinForward.Core.Tests" />
     <InternalsVisibleTo Include="WinForward.Performance.Tests" />
     <InternalsVisibleTo Include="WinForward.Runtime.UdpProxy.Tests" />
     <InternalsVisibleTo Include="WinForward.NdisApi.Tests" />

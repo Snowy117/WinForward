@@ -3,7 +3,6 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
-[assembly: InternalsVisibleTo("WinForward.Core.Tests")]
 [assembly: InternalsVisibleTo("WinForward.Benchmarks")]
 [assembly: InternalsVisibleTo("WinForward.NdisApi.Tests")]
 [assembly: InternalsVisibleTo("WinForward.Runtime.Capture.Tests")]

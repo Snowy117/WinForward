@@ -7,7 +7,6 @@
     <ProjectReference Include="../WinForward.Core/WinForward.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <InternalsVisibleTo Include="WinForward.Core.Tests" />
     <InternalsVisibleTo Include="WinForward.Protocols.Tests" />
     <InternalsVisibleTo Include="WinForward.Integration.Tests" />
   </ItemGroup>
