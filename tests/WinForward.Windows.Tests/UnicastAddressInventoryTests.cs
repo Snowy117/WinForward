@@ -1,7 +1,6 @@
 using System.Net;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using WinForward.Windows;
 using Xunit;
 
 namespace WinForward.Windows.Tests;

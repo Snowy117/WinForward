@@ -3,8 +3,6 @@ using System.Globalization;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
-using WinForward.Runtime;
-using WinForward.Runtime.Capture;
 using WinForward.TestSupport;
 using WinForward.Windows;
 using Xunit;

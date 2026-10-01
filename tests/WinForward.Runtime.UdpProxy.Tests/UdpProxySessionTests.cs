@@ -1,9 +1,7 @@
 using System.Net;
 using System.Reflection;
 using WinForward.Core;
-using WinForward.Runtime;
 using WinForward.Runtime.Socks5;
-using WinForward.Runtime.UdpProxy;
 using WinForward.TestSupport;
 using Xunit;
 

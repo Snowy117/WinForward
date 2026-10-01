@@ -1,7 +1,6 @@
 using System.Globalization;
 using WinForward.Configuration;
 using WinForward.Runtime.Socks5;
-using WinForward.Runtime.UdpProxy;
 using WinForward.TestSupport;
 using Xunit;
 using static WinForward.TestSupport.AsyncTestExtensions;

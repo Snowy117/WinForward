@@ -1,5 +1,4 @@
 using WinForward.Core;
-using WinForward.Runtime.Capture;
 using WinForward.Windows;
 using Xunit;
 

@@ -1,4 +1,3 @@
-using WinForward.Runtime;
 using WinForward.TestSupport;
 using Xunit;
 using static WinForward.TestSupport.AsyncTestExtensions;

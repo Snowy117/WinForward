@@ -1,4 +1,3 @@
-using WinForward.Configuration;
 using WinForward.TestSupport;
 using Xunit;
 

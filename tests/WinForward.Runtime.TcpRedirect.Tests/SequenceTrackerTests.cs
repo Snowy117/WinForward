@@ -1,7 +1,6 @@
 using System.Net;
 using System.Reflection;
 using WinForward.Core;
-using WinForward.Runtime.TcpRedirect;
 using Xunit;
 using static WinForward.TestSupport.TcpCoordinatorFakes;
 

@@ -1,4 +1,3 @@
-using WinForward.Runtime.Capture;
 using WinForward.TestSupport;
 using Xunit;
 

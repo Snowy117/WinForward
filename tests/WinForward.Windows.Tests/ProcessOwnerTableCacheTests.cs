@@ -1,7 +1,6 @@
 using System.Net;
 using WinForward.Core;
 using WinForward.TestSupport;
-using WinForward.Windows;
 using Xunit;
 
 namespace WinForward.Windows.Tests;

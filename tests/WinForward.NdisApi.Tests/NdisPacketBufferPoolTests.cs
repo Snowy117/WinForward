@@ -1,4 +1,3 @@
-using WinForward.NdisApi;
 using Xunit;
 
 namespace WinForward.NdisApi.Tests;

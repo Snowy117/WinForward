@@ -1,7 +1,6 @@
 using System.Net;
 using System.Runtime.CompilerServices;
 using WinForward.Core;
-using WinForward.Protocols;
 using WinForward.Runtime.TcpRedirect;
 using Xunit;
 using static WinForward.TestSupport.FrameBuilders;

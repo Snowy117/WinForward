@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Globalization;
-using WinForward.NdisApi;
 using WinForward.Runtime;
 using Xunit;
 

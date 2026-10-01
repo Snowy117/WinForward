@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using WinForward.NdisApi;
 using WinForward.Windows;
 using Xunit;
 

@@ -1,6 +1,5 @@
 using System.Net;
 using WinForward.Configuration;
-using WinForward.Runtime.UdpProxy;
 using WinForward.TestSupport;
 using Xunit;
 using static WinForward.TestSupport.UdpAssociationFakes;

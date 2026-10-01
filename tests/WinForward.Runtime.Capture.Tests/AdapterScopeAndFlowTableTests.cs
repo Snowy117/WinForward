@@ -1,6 +1,5 @@
 using System.Net;
 using WinForward.Core;
-using WinForward.Runtime.Capture;
 using WinForward.TestSupport;
 using WinForward.Windows;
 using Xunit;

@@ -1,6 +1,5 @@
 using System.Runtime.Versioning;
 using WinForward.Benchmarks.Stability;
-using WinForward.NdisApi;
 using WinForward.TestSupport;
 using Xunit;
 

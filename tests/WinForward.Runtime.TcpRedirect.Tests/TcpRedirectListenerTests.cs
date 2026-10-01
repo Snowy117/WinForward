@@ -2,7 +2,6 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.Versioning;
 using WinForward.Core;
-using WinForward.Runtime.TcpRedirect;
 using Xunit;
 
 namespace WinForward.Runtime.TcpRedirect.Tests;

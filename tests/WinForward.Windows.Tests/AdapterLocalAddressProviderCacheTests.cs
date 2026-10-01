@@ -3,7 +3,6 @@ using System.Net.NetworkInformation;
 using System.Runtime.Versioning;
 using WinForward.Core;
 using WinForward.TestSupport;
-using WinForward.Windows;
 using Xunit;
 
 namespace WinForward.Windows.Tests;

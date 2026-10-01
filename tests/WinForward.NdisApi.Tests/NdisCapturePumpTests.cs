@@ -1,5 +1,4 @@
 using System.Runtime.Versioning;
-using WinForward.NdisApi;
 using WinForward.TestSupport;
 using Xunit;
 

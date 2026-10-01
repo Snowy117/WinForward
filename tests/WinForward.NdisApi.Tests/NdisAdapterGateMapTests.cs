@@ -1,5 +1,4 @@
 using System.Globalization;
-using WinForward.NdisApi;
 using Xunit;
 
 namespace WinForward.NdisApi.Tests;

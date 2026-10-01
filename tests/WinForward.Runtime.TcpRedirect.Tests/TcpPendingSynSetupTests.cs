@@ -2,8 +2,6 @@ using System.Net;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
-using WinForward.Runtime;
-using WinForward.Runtime.TcpRedirect;
 using WinForward.TestSupport;
 using Xunit;
 using static WinForward.TestSupport.TcpCoordinatorFakes;

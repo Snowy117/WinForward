@@ -2,7 +2,6 @@ using System.Globalization;
 using System.Net;
 using WinForward.Configuration;
 using WinForward.Core;
-using WinForward.Runtime;
 using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
 using WinForward.TestSupport;

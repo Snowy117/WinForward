@@ -1,7 +1,6 @@
 using System.Buffers.Binary;
 using System.Net;
 using WinForward.Core;
-using WinForward.Protocols;
 using WinForward.TestSupport;
 using Xunit;
 

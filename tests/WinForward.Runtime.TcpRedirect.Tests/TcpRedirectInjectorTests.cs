@@ -1,7 +1,6 @@
 using System.Runtime.Versioning;
 using WinForward.NdisApi;
 using WinForward.Runtime.Capture;
-using WinForward.Runtime.TcpRedirect;
 using Xunit;
 
 namespace WinForward.Runtime.TcpRedirect.Tests;

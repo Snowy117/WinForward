@@ -2,8 +2,6 @@ using System.Net;
 using System.Net.Sockets;
 using WinForward.Configuration;
 using WinForward.Core;
-using WinForward.Runtime;
-using WinForward.Runtime.Socks5;
 using WinForward.TestSupport;
 using Xunit;
 using static WinForward.TestSupport.AsyncTestExtensions;
