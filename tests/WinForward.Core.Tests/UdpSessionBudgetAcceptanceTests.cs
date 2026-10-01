@@ -14,36 +14,58 @@ namespace WinForward.Core.Tests;
 public sealed class UdpSessionBudgetAcceptanceTests
 {
     private static readonly TimeSpan s_idle = ConfigurationLoader.DefaultUdpSessionIdleTimeout;
-    private static readonly TimeSpan s_sweep = TimeSpan.FromSeconds(15);
+
+    /// <summary>
+    /// The shipped UDP sweep interval: the effective retention floor (the 5 s one-shot class) halved
+    /// and floored, i.e. 5 s. It is not a hand number — it is
+    /// <c>IdleExpirySweeper.DeriveUdpSweepInterval(main, EffectiveUdpRetentionFloor(idle, oneShot))</c>,
+    /// pinned by <c>UdpSessionRetentionTests.EffectiveUdpRetentionFloorFloorsOnTheOneShotClass</c>.
+    /// </summary>
+    private static readonly TimeSpan s_sweep = TimeSpan.FromSeconds(5);
+
     private const int FlowsPerAssociation = ConfigurationLoader.DefaultUdpAssociationFlowsPerAssociation;
     private const int MaxAssociationsPerServer = ConfigurationLoader.DefaultUdpAssociationMaxPerServer;
     private const int RelayReceiveBufferBytes = ConfigurationLoader.DefaultUdpRelayReceiveBufferBytes;
-    private const int AcceptanceLoadSessions = 4_500;
+
+    /// <summary>
+    /// The acceptance load's steady-state peak at <c>--rate 100</c>: the resident set the shipped
+    /// two-class retention and 5 s sweep produce, which is what the retention ceiling and the pooling
+    /// half are asserted against. It is the measured median <c>steadyStateSessions</c> of the three
+    /// after-arm runs in
+    /// <c>benchmarks/results/2026-10-01-udp-session-footprint/session-budget-after.jsonl</c>
+    /// (1,014 / 1,038 / 1,014), i.e. the one-shot band
+    /// <c>rate × (short 5 s + 2 × sweep 5 s) ≈ 1,500</c> with the sawtooth's phase. The same instrument
+    /// measures 4,539 on the pre-change uniform-retention arm, so the load's meaning is "the resident set
+    /// the shipped retention produces", not the pre-change peak; with a frozen activity clock — the
+    /// defect the scenario now mirrors the pump's tick to avoid — it read 500 here, which was a
+    /// mass-wipe artifact.
+    /// </summary>
+    private const int AcceptanceLoadSessions = 1_014;
 
     [Fact]
     public void TheAcceptanceLoadCeilingIsTheIdealFanOutPlusTheClampedSlack()
     {
-        // ceil(4,500 / 16) = 282 shared associations serve the load at the ideal fan-out; the slack
+        // ceil(1,014 / 16) = 64 shared associations serve the load at the ideal fan-out; the slack
         // is a small constant because cold and warm associations kept beyond it are legitimate but
         // must not scale with the per-server ceiling.
-        Assert.Equal(282, (AcceptanceLoadSessions + FlowsPerAssociation - 1) / FlowsPerAssociation);
-        Assert.Equal(298, SessionBudgetMath.SharedAssociationCeiling(AcceptanceLoadSessions, FlowsPerAssociation, MaxAssociationsPerServer));
-        Assert.Equal(282 + SessionBudgetMath.SharedAssociationSlack, SessionBudgetMath.SharedAssociationCeiling(AcceptanceLoadSessions, FlowsPerAssociation, MaxAssociationsPerServer));
+        Assert.Equal(64, (AcceptanceLoadSessions + FlowsPerAssociation - 1) / FlowsPerAssociation);
+        Assert.Equal(80, SessionBudgetMath.SharedAssociationCeiling(AcceptanceLoadSessions, FlowsPerAssociation, MaxAssociationsPerServer));
+        Assert.Equal(64 + SessionBudgetMath.SharedAssociationSlack, SessionBudgetMath.SharedAssociationCeiling(AcceptanceLoadSessions, FlowsPerAssociation, MaxAssociationsPerServer));
         // The ceiling is independent of the per-server cap above the slack: raising the cap to the
         // product maximum leaves the bound where it is, so a caps change cannot loosen it.
-        Assert.Equal(298, SessionBudgetMath.SharedAssociationCeiling(AcceptanceLoadSessions, FlowsPerAssociation, 16_384));
+        Assert.Equal(80, SessionBudgetMath.SharedAssociationCeiling(AcceptanceLoadSessions, FlowsPerAssociation, 16_384));
         // A deliberately small cap still tightens it.
-        Assert.Equal(282 + 4, SessionBudgetMath.SharedAssociationCeiling(AcceptanceLoadSessions, FlowsPerAssociation, 4));
+        Assert.Equal(64 + 4, SessionBudgetMath.SharedAssociationCeiling(AcceptanceLoadSessions, FlowsPerAssociation, 4));
     }
 
     [Fact]
     public void ATenthOfTheAcceptanceLoadHeldPrivatelyFailsTheSharedPlacementCeiling()
     {
-        // 450 of 4,500 flows served from private per-flow associations: 450 + ceil(4,050 / 16) = 704
-        // associations, well above the 298 the shared placement allows.
+        // 101 of 1,014 flows served from private per-flow associations: 101 + ceil(913 / 16) = 159
+        // associations, well above the 80 the shared placement allows.
         const int privateAssociations = AcceptanceLoadSessions / 10;
         const int sharedAssociations = (AcceptanceLoadSessions - privateAssociations + FlowsPerAssociation - 1) / FlowsPerAssociation;
-        Assert.Equal(704, privateAssociations + sharedAssociations);
+        Assert.Equal(159, privateAssociations + sharedAssociations);
         Assert.True(privateAssociations + sharedAssociations > SessionBudgetMath.SharedAssociationCeiling(AcceptanceLoadSessions, FlowsPerAssociation, MaxAssociationsPerServer));
 
         var acceptance = Acceptance("--rate", "100", "--churn-seconds", "90");
@@ -60,7 +82,7 @@ public sealed class UdpSessionBudgetAcceptanceTests
         // shape: the pooling ceiling is the assertion that sees it, and the verdict halves let a
         // reader see that only that term failed.
         Assert.True(acceptance.RetentionBounded);
-        Assert.Contains("above the shared-placement ceiling 298", Assert.Single(acceptance.Failures), StringComparison.Ordinal);
+        Assert.Contains("above the shared-placement ceiling 80", Assert.Single(acceptance.Failures), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -68,22 +90,22 @@ public sealed class UdpSessionBudgetAcceptanceTests
     {
         var acceptance = Acceptance("--rate", "100", "--churn-seconds", "3600", "--require-pooling");
         acceptance.Evaluate(new SessionBudgetOutcome(
-            [Sample(sessions: AcceptanceLoadSessions, associations: 285, fileDescriptors: AcceptanceLoadSessions + 285 + 3, baselineFileDescriptors: 100)],
+            [Sample(sessions: AcceptanceLoadSessions, associations: 66, fileDescriptors: AcceptanceLoadSessions + 66 + 3, baselineFileDescriptors: 100)],
             Drain(360_000),
             Accepted: 360_000,
             Rejected: 0,
             ChurnPeakSessions: AcceptanceLoadSessions,
             SteadyPeakSessions: AcceptanceLoadSessions,
-            SteadyPeakAssociations: 285));
+            SteadyPeakAssociations: 66));
 
         Assert.True(acceptance.Passed, string.Join(" | ", acceptance.Failures));
         Assert.True(acceptance.RetentionBounded);
         Assert.True(acceptance.PoolingCovered);
         Assert.False(acceptance.PoolingSaturated);
         Assert.Equal(0, acceptance.SessionsBeyondSharedBudget);
-        Assert.Equal(6_200, acceptance.SessionCeiling);
-        // 63 x 100 = 6,300 flows, the first window that exceeds the 6,200 ceiling.
-        Assert.Equal(63, acceptance.MinimumChurnSeconds);
+        Assert.Equal(4_200, acceptance.SessionCeiling);
+        // 43 x 100 = 4,300 flows, the first window that exceeds the 4,200 ceiling.
+        Assert.Equal(43, acceptance.MinimumChurnSeconds);
     }
 
     [Fact]
@@ -92,14 +114,16 @@ public sealed class UdpSessionBudgetAcceptanceTests
         // The pre-caps head (16 x 16 = 256 flows per server) is the shape the coverage check cannot
         // describe: the pool serves the overflow from private associations, so the run must say so
         // rather than never evaluate the pooling term.
+        const int sharedFlowBudget = 16 * 16;
+        const int privateAssociations = AcceptanceLoadSessions - sharedFlowBudget;
         var outcome = new SessionBudgetOutcome(
-            [Sample(sessions: AcceptanceLoadSessions, associations: 4_244 + 16, fileDescriptors: 100 + AcceptanceLoadSessions + 4_244)],
+            [Sample(sessions: AcceptanceLoadSessions, associations: privateAssociations + 16, fileDescriptors: 100 + AcceptanceLoadSessions + privateAssociations)],
             Drain(9_000),
             Accepted: 9_000,
             Rejected: 0,
             ChurnPeakSessions: AcceptanceLoadSessions,
             SteadyPeakSessions: AcceptanceLoadSessions,
-            SteadyPeakAssociations: 4_244 + 16);
+            SteadyPeakAssociations: privateAssociations + 16);
         var lenient = new SessionBudgetAcceptance(Options("--rate", "100", "--churn-seconds", "90"), s_idle, s_sweep, FlowsPerAssociation, 16, RelayReceiveBufferBytes);
         lenient.Evaluate(outcome);
         Assert.False(lenient.PoolingCovered);
@@ -117,26 +141,26 @@ public sealed class UdpSessionBudgetAcceptanceTests
     [Fact]
     public void ANonDiscriminatingChurnWindowIsRefusedInsteadOfClaimingRetention()
     {
-        // 100 flows/s x 60 s = 6,000 flows against the 6,200 ceiling: a run that never expired a
+        // 100 flows/s x 40 s = 4,000 flows against the 4,200 ceiling: a run that never expired a
         // session would still pass, so the retention property is not claimable.
-        var options = Options("--rate", "100", "--churn-seconds", "60");
+        var options = Options("--rate", "100", "--churn-seconds", "40");
         var acceptance = new SessionBudgetAcceptance(options, s_idle, s_sweep, FlowsPerAssociation, MaxAssociationsPerServer, RelayReceiveBufferBytes);
         acceptance.Evaluate(new SessionBudgetOutcome(
             [Sample(sessions: AcceptanceLoadSessions)],
-            Drain(6_000),
-            Accepted: 6_000,
+            Drain(4_000),
+            Accepted: 4_000,
             Rejected: 0,
             ChurnPeakSessions: AcceptanceLoadSessions,
             SteadyPeakSessions: AcceptanceLoadSessions,
-            SteadyPeakAssociations: 282));
+            SteadyPeakAssociations: 107));
 
         Assert.False(acceptance.RetentionDiscriminating);
         Assert.False(acceptance.RetentionBounded);
-        Assert.Equal(63, acceptance.MinimumChurnSeconds);
-        Assert.Contains(acceptance.Failures, failure => failure.Contains("raise --churn-seconds above 62", StringComparison.Ordinal));
+        Assert.Equal(43, acceptance.MinimumChurnSeconds);
+        Assert.Contains(acceptance.Failures, failure => failure.Contains("raise --churn-seconds above 42", StringComparison.Ordinal));
         // The shape is refused before the load, so a bad invocation cannot spend the soak.
         Assert.Contains(
-            "raise --churn-seconds above 62",
+            "raise --churn-seconds above 42",
             Assert.Throws<InvalidOperationException>(() => UdpSessionBudgetScenario.ValidateChurnWindow(options, s_idle, s_sweep)).Message,
             StringComparison.Ordinal);
     }
@@ -147,7 +171,7 @@ public sealed class UdpSessionBudgetAcceptanceTests
         var options = SoakOptions.Parse(["--scenario", "udpSessionBudget"]);
         var margin = SessionBudgetMath.SteadyStateMargin(options.Rate);
         var ceiling = SessionBudgetMath.SteadyStateSessionCeiling(options.Rate, s_idle, s_sweep, margin);
-        Assert.Equal(1_240, ceiling);
+        Assert.Equal(840, ceiling);
         Assert.True(options.Rate * options.ChurnSeconds > ceiling);
         UdpSessionBudgetScenario.ValidateChurnWindow(options, s_idle, s_sweep);
     }
@@ -191,14 +215,14 @@ public sealed class UdpSessionBudgetAcceptanceTests
             SteadyPeakSessions: AcceptanceLoadSessions,
             SteadyPeakAssociations: 0));
         Assert.True(acceptance.RetentionBounded, string.Join(" | ", acceptance.Failures));
-        Assert.Equal(6_200L * RelayReceiveBufferBytes, acceptance.RelayReceiveBufferBudget);
+        Assert.Equal(4_200L * RelayReceiveBufferBytes, acceptance.RelayReceiveBufferBudget);
         Assert.Equal(buffer, acceptance.WorstSteady!.RelayReceiveBufferBytes);
         Assert.Equal(RelayReceiveBufferBytes, acceptance.WorstSteady.RelayReceiveBufferBytesPerSession);
 
         // An estimate inflated past the retention bound is rejected, not merely reported.
         var inflated = Acceptance("--rate", "100", "--churn-seconds", "90");
         inflated.Evaluate(new SessionBudgetOutcome(
-            [Sample(sessions: AcceptanceLoadSessions, relayReceiveBufferBytes: (6_200L * RelayReceiveBufferBytes) + 1)],
+            [Sample(sessions: AcceptanceLoadSessions, relayReceiveBufferBytes: (4_200L * RelayReceiveBufferBytes) + 1)],
             Drain(9_000),
             Accepted: 9_000,
             Rejected: 0,
@@ -209,10 +233,12 @@ public sealed class UdpSessionBudgetAcceptanceTests
         Assert.Contains(inflated.Failures, failure => failure.Contains("above the retention bound", StringComparison.Ordinal));
 
         // An estimate that does not reproduce the configured per-session buffer is rejected too, so
-        // the reported bytes cannot drift away from the population they are derived from.
+        // the reported bytes cannot drift away from the population they are derived from. 32 KiB is
+        // deliberately below the shipped default: an estimate at the default would be correct and
+        // the misattribution check would pass vacuously.
         var misattributed = Acceptance("--rate", "100", "--churn-seconds", "90");
         misattributed.Evaluate(new SessionBudgetOutcome(
-            [Sample(sessions: AcceptanceLoadSessions, relayReceiveBufferBytes: (long)AcceptanceLoadSessions * 64 * 1_024)],
+            [Sample(sessions: AcceptanceLoadSessions, relayReceiveBufferBytes: (long)AcceptanceLoadSessions * 32 * 1_024)],
             Drain(9_000),
             Accepted: 9_000,
             Rejected: 0,
@@ -263,25 +289,31 @@ public sealed class UdpSessionBudgetAcceptanceTests
     [Fact]
     public void ThePoolingCheckReadsTheArrivalGranularPeakNotTheSampledRow()
     {
-        // The rate-100 shape as measured: the live population sawtooths between ~3,000 and ~4,500 as
-        // each 15 s sweep releases a cohort, and the 5 s rows alias it — the worst row sees 4,000
-        // sessions with the ratcheted 280 associations, which would read as 30 associations above the
-        // ideal fan-out. The arrival-granular peak sees the 4,478 sessions and 282 associations that
-        // the pool actually placed, i.e. ceil(4,478 / 16) = 280 plus 2 retained associations.
+        // The acceptance shape: the live population sawtooths as each sweep releases a cohort, and the
+        // 5 s rows alias it — a sampled row can read well below the arrival-granular peak while the
+        // association count has already ratcheted to the peak's placement, so the sample reads above
+        // the ideal fan-out of its own smaller population. The arrival-granular peak sees the load
+        // itself and the associations the pool actually placed, i.e. ceil(load / 16) plus the
+        // retained slack.
+        const int sampledSessions = AcceptanceLoadSessions / 2;
+        const int placedAssociations = (AcceptanceLoadSessions + FlowsPerAssociation - 1) / FlowsPerAssociation;
         var acceptance = Acceptance("--rate", "100", "--churn-seconds", "90", "--require-pooling");
         acceptance.Evaluate(new SessionBudgetOutcome(
-            [Sample(sessions: 4_000, associations: 280, fileDescriptors: 4_280, baselineFileDescriptors: 100)],
+            [Sample(sessions: sampledSessions, associations: placedAssociations, fileDescriptors: sampledSessions + placedAssociations, baselineFileDescriptors: 100)],
             Drain(9_000),
             Accepted: 9_000,
             Rejected: 0,
-            ChurnPeakSessions: 4_000,
-            SteadyPeakSessions: 4_478,
-            SteadyPeakAssociations: 282));
+            ChurnPeakSessions: sampledSessions,
+            SteadyPeakSessions: AcceptanceLoadSessions,
+            SteadyPeakAssociations: placedAssociations + 2));
 
-        Assert.Equal(282, acceptance.SteadyPeakAssociations);
-        Assert.Equal(4_478, acceptance.SteadyPeakSessions);
-        Assert.Equal(280, (4_478 + FlowsPerAssociation - 1) / FlowsPerAssociation);
-        Assert.Equal(0.063, acceptance.PeakAssociationsPerSession, 3);
+        Assert.Equal(placedAssociations + 2, acceptance.SteadyPeakAssociations);
+        Assert.Equal(AcceptanceLoadSessions, acceptance.SteadyPeakSessions);
+        Assert.Equal((AcceptanceLoadSessions + FlowsPerAssociation - 1) / FlowsPerAssociation, placedAssociations);
+        Assert.Equal((double)(placedAssociations + 2) / AcceptanceLoadSessions, acceptance.PeakAssociationsPerSession, 3);
+        // The sampled shape alone would fail the pooling check: that is what makes the arrival-granular
+        // reading the discriminating one.
+        Assert.True(placedAssociations > SessionBudgetMath.SharedAssociationCeiling(sampledSessions, FlowsPerAssociation, MaxAssociationsPerServer));
         Assert.True(acceptance.RetentionBounded, string.Join(" | ", acceptance.Failures));
         Assert.True(acceptance.PoolingCovered);
         Assert.True(acceptance.Passed, string.Join(" | ", acceptance.Failures));

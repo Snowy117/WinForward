@@ -216,6 +216,48 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
         checked(maximumFrameSize + MaximumSocks5UdpHeaderSize + OversizeSentinelSize);
 
     /// <summary>
+    /// The receive-window pool's capacity for a composition admitting <paramref name="sessionCapacity"/>
+    /// live sessions: one lease per live session, plus <see cref="ReceiveWindowRetireHeadroom"/>.
+    /// <para>
+    /// One lease per live session is exact — <see cref="UdpProxySession"/> rents one window for its
+    /// whole receive loop and returns it in the loop's <see langword="finally"/> — but the pool must also cover
+    /// the admit-while-retiring overlap: slot removal happens under the gate and only then awaits
+    /// session disposal outside it, while admission is gated on the slot count, so a newly admitted
+    /// session can rent before a retiring one has returned its window. Capacity is a bound, not a
+    /// preallocation: <see cref="NativeBufferPool"/> allocates on demand and retains only what was
+    /// ever rented, so the allowance costs nothing until it is used.
+    /// </para>
+    /// </summary>
+    internal static int ReceiveWindowPoolCapacity(int sessionCapacity) =>
+        checked(sessionCapacity + ReceiveWindowRetireHeadroom(sessionCapacity));
+
+    /// <summary>
+    /// The concurrent-retirement allowance the pool capacity carries. The expiry retire is serial (one
+    /// slot removal per candidate, awaited by the sweeper), but receive-failure teardowns are
+    /// concurrent scope children that never take the sweep gate, and send-path and setup removals
+    /// await their own teardown from their own callers, so the overlap has no in-code bound and a
+    /// simultaneous multi-session fault is the worst case. The allowance is therefore a documented
+    /// policy number rather than a proof: four association-wide fault bursts at the default fan-out
+    /// (<c>udpAssociationFlowsPerAssociation</c>, the blast radius of one association death), and at
+    /// least a sixteenth of the capacity so it scales with a raised <c>udpSessionCapacity</c>. The
+    /// attribution pool's capacity in composition is the in-tree precedent for sizing a pool so the
+    /// steady state cannot overflow; a storm larger than the allowance still allocates fresh leases
+    /// transiently, which is bounded by the storm and never a steady state.
+    /// </summary>
+    internal static int ReceiveWindowRetireHeadroom(int sessionCapacity) =>
+        Math.Max(4 * ConfigurationLoader.DefaultUdpAssociationFlowsPerAssociation, sessionCapacity / 16);
+
+    /// <summary>
+    /// The retention a <em>completed one-shot exchange</em> keeps (see
+    /// <see cref="UdpProxySession.TryBeginExpiry(DateTimeOffset, TimeSpan, TimeSpan)"/>), the second
+    /// of the two composition-owned retention constants. Five seconds is the shortest accepted
+    /// <c>udpSessionIdleSeconds</c> and the shortest retention the 500 ms activity quantum was
+    /// designed for, so it is the finest class the sweep can honour without changing the quantum. A
+    /// configured retention at or below it makes the two classes identical, i.e. uniform retention.
+    /// </summary>
+    public static readonly TimeSpan OneShotIdleTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
     /// Starts the off-gate setup task for a new flow. Kept out of the send entries because a
     /// captured-parameter lambda makes the compiler hoist its display class to the method
     /// entry, charging every warm datagram the setup closure's allocation even when the
@@ -427,68 +469,6 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
             // charge is released here, exactly once, regardless of the sink outcome.
             _budget.Credit(length);
             return (UdpSessionSetup.FlushStep.Dequeued, pending, length, enqueuedAt);
-        }
-    }
-
-    /// <summary>
-    /// Removes sessions whose last send or receive is older than <paramref name="idleTimeout"/>
-    /// and releases their associations, so short-lived DNS/QUIC-style flows do not accumulate to
-    /// the bounded capacity. Also prunes expired setup cooldowns. Idle expiry
-    /// (design §7/§8) runs on a periodic sweep in the runtime.
-    /// <para>
-    /// The scan collects candidates into a reused scratch under one gate hold, then the teardown loop runs
-    /// outside the gate with the same <see cref="UdpProxySession.TryBeginExpiry"/> re-verifier as before.
-    /// The whole tick is single-flight through <see cref="_sweepGate"/> because the scratch's lifetime is no
-    /// longer covered by <c>_gate</c> and this method is public.
-    /// </para>
-    /// </summary>
-    public async ValueTask<int> RemoveExpiredAsync(DateTimeOffset now, TimeSpan idleTimeout)
-    {
-#pragma warning disable MA0040 // QuiescenceScope.Token throws once the scope is disposed; a late tick must still return cleanly, and the gate is a single-flight guard rather than a cancellation point.
-        await _sweepGate.WaitAsync().ConfigureAwait(false);
-#pragma warning restore MA0040
-        try
-        {
-            // Cleared at the start of the critical section: the candidates stay live in _sessions, so an
-            // aborted tick is simply re-discovered by the next scan.
-            _idleScratch.Clear();
-            var cutoffBucket = ActivityBucket.Cutoff(now, idleTimeout);
-            lock (_gate)
-            {
-                NoteGateEntry();
-                _cooldowns.PruneExpired(now);
-                foreach (var slot in _sessions.Values)
-                {
-                    // A pre-filter only: TryBeginExpiry re-checks the same bucket cutoff under the
-                    // session's own gate, so a candidate collected one bucket early can never retire early.
-                    if (slot.Session is { } session && session.ActivityBucketForDiagnostics < cutoffBucket)
-                    {
-                        _idleScratch.Add((slot, session));
-                    }
-                }
-            }
-
-            if (_idleScratch.Count > 0 && _beforeExpiryRecheck is not null) await _beforeExpiryRecheck().ConfigureAwait(false);
-
-            var removed = 0;
-            for (var index = 0; index < _idleScratch.Count; index++)
-            {
-                var (slot, session) = _idleScratch[index];
-                if (!session.TryBeginExpiry(now, idleTimeout)) continue;
-                if (!await _slotHost.RemoveSlotAsync(session.Flow, slot, UdpTeardownReason.Expiry).ConfigureAwait(false))
-                {
-                    session.CancelExpiry();
-                    continue;
-                }
-                UdpProxyLogging.LogDebug(_logger, "udp.session.expired", session.Flow, session.FlowGeneration, session.Association, serverName: null);
-                removed++;
-            }
-
-            return removed;
-        }
-        finally
-        {
-            _sweepGate.Release();
         }
     }
 

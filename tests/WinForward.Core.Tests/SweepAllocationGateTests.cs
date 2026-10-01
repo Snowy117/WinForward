@@ -476,8 +476,9 @@ public sealed class SweepAllocationGateTests
     /// <summary>
     /// Site 4 (<c>UdpProxyCoordinator.RemoveExpiredAsync</c>): the <em>no-op</em> tick over a populated
     /// session set (16 fake-transport sessions, none idle-elapsed), which is the tick that repeats every
-    /// 15 s in production. The retiring tick is not the gated shape because its teardown awaits slot
-    /// removal outside this gate's scope.
+    /// 5 s in production (the effective retention floor is the 5 s one-shot class). The retiring tick is
+    /// not the gated shape because its teardown awaits slot removal outside this gate's scope; the
+    /// adaptive two-class tick has its own gate in <c>UdpAdaptiveSweepAllocationGateTests</c>.
     /// </summary>
     [Fact]
     public async Task UdpProxyCoordinatorSweepAllocatesNoManagedBytes()

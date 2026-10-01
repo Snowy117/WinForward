@@ -52,7 +52,19 @@ internal sealed class UdpProxySession : IAsyncDisposable
     /// </summary>
     private const long NeverPropagated = long.MinValue;
 
+    /// <summary>
+    /// The datagram count at or below which an answered flow is a <em>completed one-shot exchange</em>
+    /// (DNS — the UDP majority — is one query and one reply). The reply is counted by
+    /// <see cref="IUdpExchangeCounters.SawResponse"/>, not by the send counter, so one is the whole
+    /// threshold; a second datagram is positive evidence of a stream and keeps the configured
+    /// retention for the rest of the flow's life. The sampler's
+    /// <c>PinningSuspicionThreshold</c> is deliberately not reused: it answers "three unanswered
+    /// sends", a different question.
+    /// </summary>
+    private const int OneShotDatagramThreshold = 1;
+
     private readonly IUdpProxyTransport _transport;
+    private readonly IUdpExchangeCounters? _exchange;
     private readonly IUdpResponseSink _sink;
     private readonly QuiescenceScope _scope;
     private readonly TimeProvider _timeProvider;
@@ -89,6 +101,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
         FlowGeneration = context.FlowGeneration;
         Association = context.Association;
         _transport = context.Transport;
+        _exchange = context.Transport as IUdpExchangeCounters;
         _sink = context.Sink;
         ClientMac = context.ClientMac;
         _scope = new QuiescenceScope(context.Shutdown);
@@ -229,9 +242,26 @@ internal sealed class UdpProxySession : IAsyncDisposable
             : new ValueTask(DisposeCoreAsync());
     }
 
-    internal bool TryBeginExpiry(DateTimeOffset now, TimeSpan idleTimeout)
+    /// <summary>
+    /// The two-class idle admission. A session whose flow has sent at most
+    /// <see cref="OneShotDatagramThreshold"/> datagram and has already received a response is a
+    /// completed one-shot exchange and takes <paramref name="oneShotIdleTimeout"/>; everything else —
+    /// including a flow whose first reply has not arrived yet, and any transport that does not carry
+    /// exchange evidence — keeps <paramref name="idleTimeout"/>. The classification is monotone
+    /// (<c>DatagramsSent</c> only grows and <c>SawResponse</c> is write-once), so a session can only
+    /// leave the one-shot class.
+    /// <para>
+    /// The predicate is read once per <em>idle candidate</em> per sweep tick, before the gate: the
+    /// candidate pre-filter already bounds it to sessions past the short cutoff, and
+    /// <see cref="_scope"/>.IsIdle plus the bucket cutoff re-checked under <see cref="_activityGate"/>
+    /// remain the authority — reading the class outside the gate only selects which cutoff is compared.
+    /// <see cref="TouchActivity"/> stays lock-free, so the datagram path gains no contention.
+    /// </para>
+    /// </summary>
+    internal bool TryBeginExpiry(DateTimeOffset now, TimeSpan idleTimeout, TimeSpan oneShotIdleTimeout)
     {
-        var cutoffBucket = ActivityBucket.Cutoff(now, idleTimeout);
+        var effective = IsCompletedOneShotExchange && oneShotIdleTimeout < idleTimeout ? oneShotIdleTimeout : idleTimeout;
+        var cutoffBucket = ActivityBucket.Cutoff(now, effective);
         lock (_activityGate)
         {
             NoteActivityGateEntry();
@@ -245,6 +275,18 @@ internal sealed class UdpProxySession : IAsyncDisposable
         _scope.Cancel();
         return true;
     }
+
+    /// <summary>
+    /// Uniform retention, kept as a delegating overload: it is the shape every caller that has one
+    /// timeout to offer (the F3 uniform callers, and tests draining a session with
+    /// <see cref="TimeSpan.Zero"/>) already speaks.
+    /// </summary>
+    internal bool TryBeginExpiry(DateTimeOffset now, TimeSpan idleTimeout) =>
+        TryBeginExpiry(now, idleTimeout, idleTimeout);
+
+    /// <summary>Whether this session's exchange is over: one datagram, already answered.</summary>
+    private bool IsCompletedOneShotExchange =>
+        _exchange is { DatagramsSent: <= OneShotDatagramThreshold, SawResponse: true };
 
     internal void CancelExpiry()
     {

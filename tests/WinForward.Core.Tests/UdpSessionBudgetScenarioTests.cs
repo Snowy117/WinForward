@@ -10,7 +10,9 @@ namespace WinForward.Core.Tests;
 public sealed class UdpSessionBudgetScenarioTests
 {
     private static readonly TimeSpan s_idle = ConfigurationLoader.DefaultUdpSessionIdleTimeout;
-    private static readonly TimeSpan s_sweep = TimeSpan.FromSeconds(15);
+
+    /// <summary>The shipped UDP sweep interval: the effective retention floor (the 5 s one-shot class) halved and floored.</summary>
+    private static readonly TimeSpan s_sweep = TimeSpan.FromSeconds(5);
 
     [Theory]
     [InlineData("udpSessionBudget")]
@@ -28,7 +30,7 @@ public sealed class UdpSessionBudgetScenarioTests
         var options = SoakOptions.Parse(["--scenario", "udpSessionBudget"]);
         Assert.Equal(20, options.Rate);
         Assert.Equal(ConfigurationLoader.DefaultUdpSessionCapacity, options.Capacity);
-        // 90 s clears the retention ceiling's discrimination minimum (63 s at the default rate) with
+        // 90 s clears the retention ceiling's discrimination minimum (43 s at the default rate) with
         // headroom, so the shipped invocation cannot record a vacuous retention claim.
         Assert.Equal(90, options.ChurnSeconds);
         Assert.Equal(120, options.DrainSeconds);

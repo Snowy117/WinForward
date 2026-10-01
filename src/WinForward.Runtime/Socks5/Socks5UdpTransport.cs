@@ -96,6 +96,22 @@ public interface IUdpProxyTransportFactory
 }
 
 /// <summary>
+/// The per-flow exchange evidence a retention policy reads: the two counters the association lease
+/// already maintains for the capability sampler, exposed on the transport seam because the lease is
+/// private to the concrete transport. Both reads are plain volatile loads off the packet path, and a
+/// transport that does not implement this interface is classified as <em>sustained</em> — the
+/// retention-safe direction, and what keeps a foreign or fake transport's sweep behaviour unchanged.
+/// </summary>
+internal interface IUdpExchangeCounters
+{
+    /// <summary>The datagrams this flow sent successfully.</summary>
+    int DatagramsSent { get; }
+
+    /// <summary>Whether this flow ever decoded a relay response.</summary>
+    bool SawResponse { get; }
+}
+
+/// <summary>
 /// Rents one association lease per flow from the pool and wraps it in a relay transport. The
 /// factory owns no control connection: the pool keeps the authenticated association warm across
 /// flows, and the transport owns only its relay socket, its self-traffic tuple, and the lease.
@@ -158,20 +174,25 @@ public sealed class Socks5UdpTransportFactory : IUdpProxyTransportFactory
     }
 }
 
-public sealed class Socks5UdpTransport : IUdpProxyTransport
+public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounters
 {
     /// <summary>
     /// The relay socket's default receive buffer, wired from the validated
-    /// <c>udpRelayReceiveBufferKb</c> configuration key (default 128 KiB, range 16..1024 KiB).
-    /// Relay responses can burst far faster than the single receive loop reinjects them, so the
-    /// OS default datagram buffer would overflow and drop responses that were already relayed;
-    /// the historical 512 KiB absorbed that. It is bounded now because this buffer is per
-    /// session, so the aggregate kernel memory is per-session bytes x concurrent sessions — with
-    /// relay sockets retained past their last datagram, a large constant multiplied by flow churn
-    /// instead of following the active flow set. Config validation warns when the per-session
-    /// value times a large session budget exceeds ~512 MiB.
+    /// <c>udpRelayReceiveBufferKb</c> configuration key (default 64 KiB, range 16..1024 KiB).
+    /// Relay responses can burst faster than the single receive loop reinjects them, so the OS
+    /// default datagram buffer would overflow and drop responses that were already relayed; the
+    /// historical 512 KiB absorbed that. It is bounded because this buffer is per session: the
+    /// aggregate kernel memory is per-session bytes x concurrent sessions, and relay sockets are
+    /// retained for the session's whole life, so a large constant multiplies by flow churn instead
+    /// of following the active flow set. 64 KiB holds ≈44 maximum-size (standard-MTU) responses or
+    /// ≈128 512-byte ones per socket — orders of magnitude above the receive loop's per-datagram
+    /// latency at the recorded load — and halves the aggregate at any population. A response burst
+    /// larger than the buffer arriving between two decode passes is dropped silently by the kernel;
+    /// the recorded loss/burst/churn anchors are the only instrument that can observe that, and
+    /// <c>udpRelayReceiveBufferKb: 128</c> restores the previous value. Config validation warns when
+    /// the per-session value times a large session budget exceeds ~512 MiB.
     /// </summary>
-    public const int DefaultRelaySocketReceiveBufferSize = 128 * 1024;
+    public const int DefaultRelaySocketReceiveBufferSize = 64 * 1024;
 
     /// <summary>
     /// SIO_UDP_CONNRESET (vendor IOCTL 0x9800000C). While TRUE (the Windows default for UDP
@@ -241,6 +262,12 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport
     /// test alone cannot show.
     /// </summary>
     internal int AppliedRelayReceiveBufferSize => _socket.ReceiveBufferSize;
+
+    // Explicit: the retention policy's evidence seam is deliberately not part of the transport
+    // contract, so adding it cannot change what an IUdpProxyTransport implementer must provide.
+    int IUdpExchangeCounters.DatagramsSent => _lease.DatagramsSent;
+
+    bool IUdpExchangeCounters.SawResponse => _lease.SawResponse;
 
     /// <summary>
     /// Builds the per-flow transport over a borrowed association lease: the relay socket is bound

@@ -1,5 +1,6 @@
 using System.Globalization;
 using WinForward.Configuration;
+using WinForward.Runtime.Socks5;
 using Xunit;
 
 namespace WinForward.Core.Tests;
@@ -169,9 +170,32 @@ public sealed class ConfigurationLimitsTests
         Assert.Empty(configuration.Warnings);
     }
 
+    [Fact]
+    public void ConfigurationOverrideRestoresThePreviousRelayReceiveBufferDefault()
+    {
+        // The configuration key is the documented way back to the historical 128 KiB per-session
+        // relay buffer; the default itself is asserted by ConfigurationDefaultsUdpBudgetWhenOmitted.
+        var json = Config("\"udpRelayReceiveBufferKb\": 128");
+
+        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
+        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Equal(128 * 1024, configuration!.UdpRelayReceiveBufferBytes);
+        Assert.Empty(configuration.Warnings);
+    }
+
+    [Fact]
+    public void TheRelayReceiveBufferDefaultConstantsAgree()
+    {
+        // Two constants describe one default: the configuration key's KiB (what composition feeds
+        // every relay socket) and the transport's bytes (what a caller taking the transport default
+        // directly gets). A drift would size two different sockets from one named default.
+        Assert.Equal(ConfigurationLoader.DefaultUdpRelayReceiveBufferKb * 1024, Socks5UdpTransport.DefaultRelaySocketReceiveBufferSize);
+        Assert.Equal(Socks5UdpTransport.DefaultRelaySocketReceiveBufferSize, ConfigurationLoader.DefaultUdpRelayReceiveBufferBytes);
+    }
+
     [Theory]
-    [InlineData(4097, 512)]
-    [InlineData(16384, 2_048)]
+    [InlineData(4097, 256)]
+    [InlineData(16384, 1_024)]
     public void ConfigurationWarnsAboveDefaultUdpSessionCapacityWithoutBlocking(int value, int aggregateMiB)
     {
         var json = Config(string.Create(CultureInfo.InvariantCulture, $"\"udpSessionCapacity\": {value}"));
@@ -183,7 +207,8 @@ public sealed class ConfigurationLimitsTests
         var warning = Assert.Single(configuration.Warnings);
         Assert.Equal("udpSessionCapacity", warning.Path);
         // The sentence names the aggregate kernel receive buffer the validated per-session default
-        // multiplies into, so the default-buffer case (128 KiB x a raised capacity) is not silent.
+        // multiplies into, so a raised capacity running the default buffer is not silent. The
+        // expected MiB below are derived from that default and move with it.
         Assert.Contains(
             string.Create(CultureInfo.InvariantCulture, $"up to {ConfigurationLoader.DefaultUdpRelayReceiveBufferKb} KiB of kernel receive buffer ({aggregateMiB} MiB at this capacity)"),
             warning.Message,

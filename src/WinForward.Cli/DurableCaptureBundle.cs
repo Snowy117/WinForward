@@ -229,8 +229,10 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         var udpDatagramPool = new NativeBufferPool(maximumFrameSize);
         RegisterPool(counters, UdpDatagramPoolName, udpDatagramPool);
         // One native pool backs every session receive window (B11); its size comes from the
-        // coordinator so the pool and the session window can never disagree.
-        var udpWindowPool = new NativeBufferPool(UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize));
+        // coordinator so the pool and the session window can never disagree, and its capacity from
+        // the coordinator's session-capacity rule so one lease per live session plus the
+        // retire/admit allowance fits without a tracked overflow allocation.
+        var udpWindowPool = new NativeBufferPool(UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize), UdpProxyCoordinator.ReceiveWindowPoolCapacity(configuration.UdpSessionCapacity));
         RegisterPool(counters, UdpWindowPoolName, udpWindowPool);
         // One native pool backs every retained attribution packet. Its capacity is the pipeline's
         // own global byte budget divided by the buffer size, so the pool can hold the budget's
@@ -297,7 +299,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
             activityClock: activityClock,
             attributionPool: attributionPool,
             setupExecutor: setupExecutor);
-        var idleExpirySweeper = new IdleExpirySweeper(dispatcher, tcpCoordinator, udpCoordinator, relayIdleTimeout: configuration.UdpSessionIdleTimeout, logger: logger, attributionSweep: dispatcher.Attribution is { } attributionPipeline ? attributionPipeline.RemoveExpired : null);
+        var idleExpirySweeper = new IdleExpirySweeper(dispatcher, tcpCoordinator, udpCoordinator, relayIdleTimeout: configuration.UdpSessionIdleTimeout, logger: logger, attributionSweep: dispatcher.Attribution is { } attributionPipeline ? attributionPipeline.RemoveExpired : null, udpOneShotIdleTimeout: UdpProxyCoordinator.OneShotIdleTimeout);
         idleExpirySweeper.Start();
         var wakeRegistry = new FlowAttributionWakeRegistry();
         if (dispatcher.Attribution is { } pipeline) pipeline.Wake = wakeRegistry;

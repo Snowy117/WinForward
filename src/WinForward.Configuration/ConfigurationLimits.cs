@@ -139,7 +139,7 @@ internal static class ConfigurationLimits
     /// values above the default collect the ephemeral-port warning the TCP budget carries (each UDP
     /// session also consumes 2 local ports), extended with the aggregate kernel receive buffer the
     /// validated per-session buffer multiplies into — the combination that is otherwise silent, for
-    /// example the 128 KiB default times a raised capacity.
+    /// example the shipped per-session default times a raised capacity.
     /// </summary>
     private static int ParseUdpSessionCapacity(WinForwardConfigDto dto, int relayReceiveBufferKb, List<ConfigDiagnostic> errors, List<ConfigDiagnostic> warnings)
     {

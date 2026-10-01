@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using WinForward.Configuration;
@@ -6,6 +7,7 @@ using WinForward.Runtime;
 using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
 using Xunit;
+using Xunit.Abstractions;
 using static WinForward.Core.Tests.AsyncTestExtensions;
 
 namespace WinForward.Core.Tests;
@@ -16,7 +18,7 @@ namespace WinForward.Core.Tests;
 /// applied, or a bind that fails must still return the association (and close a private one), and
 /// disposing a lease repeatedly must release the association only once.
 /// </summary>
-public sealed class Socks5UdpTransportLeaseTests
+public sealed class Socks5UdpTransportLeaseTests(ITestOutputHelper output)
 {
     [Fact]
     public async Task FactoryReleasesTheLeaseWhenTheRelaySocketCannotBeCreated()
@@ -134,6 +136,30 @@ public sealed class Socks5UdpTransportLeaseTests
         Assert.Equal(1, peerCount);
         await transport.DisposeAsync();
         await AssertLeaseReleasedAsync(pool, server);
+    }
+
+    /// <summary>
+    /// The configured relay receive budget reaches a real socket through the production factory, which
+    /// the direct-construction test alone cannot show. On Linux the kernel doubles <c>SO_RCVBUF</c>, so
+    /// the exact statement is the configured value and this fact asserts the socket's applied value is
+    /// at least the request; the read-back is written into the test output so the platform difference
+    /// is visible rather than assumed.
+    /// </summary>
+    [Theory]
+    [InlineData(128 * 1024)]
+    [InlineData(ConfigurationLoader.DefaultUdpRelayReceiveBufferBytes)]
+    public async Task FactoryAppliesTheConfiguredRelayReceiveBufferToARealSocket(int requestedBytes)
+    {
+        var registry = new SelfTrafficRegistry();
+        await using var server = new ScriptedSocks5UdpServer(RelayEndpoint());
+        await using var pool = new UdpAssociationPool(registry, UdpAssociationReuseMode.Off);
+        var factory = new Socks5UdpTransportFactory(pool, registry, UdpFrameBuilder.DefaultMaximumEthernetFrame, requestedBytes);
+
+        await using var transport = await factory.CreateAsync(server.Server, CancellationToken.None);
+
+        var applied = Assert.IsType<Socks5UdpTransport>(transport).AppliedRelayReceiveBufferSize;
+        output.WriteLine(string.Create(CultureInfo.InvariantCulture, $"requested={requestedBytes} applied={applied}"));
+        Assert.True(applied >= requestedBytes, string.Create(CultureInfo.InvariantCulture, $"the relay socket applied {applied} bytes for a requested {requestedBytes}"));
     }
 
     // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local // False positive: both parameters are the assertion's input — the pool's counters are compared by the Assert.* calls below and the server is polled by the wait predicate, which is what makes this the shared exactly-once-release proof of the construction-failure suite.

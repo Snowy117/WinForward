@@ -63,7 +63,7 @@ public static partial class ConfigurationLoader
     public const int DefaultUdpSessionCapacity = 16_384;
 
     /// <summary>The default per-session relay socket receive buffer in KiB (matches <c>Socks5UdpTransport.DefaultRelaySocketReceiveBufferSize</c>).</summary>
-    public const int DefaultUdpRelayReceiveBufferKb = 128;
+    public const int DefaultUdpRelayReceiveBufferKb = 64;
 
     /// <summary>The default per-session relay socket receive buffer in bytes.</summary>
     public const int DefaultUdpRelayReceiveBufferBytes = DefaultUdpRelayReceiveBufferKb * 1_024;

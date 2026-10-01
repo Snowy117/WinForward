@@ -30,6 +30,7 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
     private readonly TimeSpan _flowIdleTimeout;
     private readonly TimeSpan _redirectIdleTimeout;
     private readonly TimeSpan _relayIdleTimeout;
+    private readonly TimeSpan? _udpOneShotIdleTimeout;
     private readonly QuiescenceScope _scope = new();
 
     // Cached per-tick hold predicate: an instance-method-group conversion in the tick would build a new
@@ -51,7 +52,8 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
         IRuntimeLogger? logger = null,
         TimeProvider? timeProvider = null,
         TimeSpan? udpSweepInterval = null,
-        Func<DateTimeOffset, int>? attributionSweep = null)
+        Func<DateTimeOffset, int>? attributionSweep = null,
+        TimeSpan? udpOneShotIdleTimeout = null)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
         _dispatcher = dispatcher;
@@ -62,7 +64,8 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
         _flowIdleTimeout = flowIdleTimeout ?? TimeSpan.FromMinutes(5);
         _redirectIdleTimeout = redirectIdleTimeout ?? TimeSpan.FromMinutes(5);
         _relayIdleTimeout = relayIdleTimeout ?? TimeSpan.FromMinutes(2);
-        _udpSweepInterval = DeriveUdpSweepInterval(_interval, _relayIdleTimeout, udpSweepInterval);
+        _udpOneShotIdleTimeout = udpOneShotIdleTimeout;
+        _udpSweepInterval = DeriveUdpSweepInterval(_interval, EffectiveUdpRetentionFloor(_relayIdleTimeout, udpOneShotIdleTimeout), udpSweepInterval);
         _holdsFlow = tcp is null ? null : tcp.HoldsFlow;
         _logger = logger ?? NullRuntimeLogger.Instance;
         _timeProvider = timeProvider ?? TimeProvider.System;
@@ -82,6 +85,15 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
         if (requested <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(udpSweepInterval), requested, "The UDP sweep interval must be positive.");
         return requested < mainInterval ? requested : mainInterval;
     }
+
+    /// <summary>
+    /// The retention the UDP tick is derived from: the shorter of the configured retention and the
+    /// one-shot class, so a short class is swept on its own scale instead of on the long class's
+    /// cadence. A null one-shot timeout — or one at or above the configured retention — keeps the
+    /// configured retention and therefore the previous cadence exactly.
+    /// </summary>
+    internal static TimeSpan EffectiveUdpRetentionFloor(TimeSpan relayIdleTimeout, TimeSpan? oneShotIdleTimeout) =>
+        oneShotIdleTimeout is { } oneShot && oneShot < relayIdleTimeout ? oneShot : relayIdleTimeout;
 
     public void Start()
     {
@@ -185,7 +197,7 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
 
     /// <summary>The UDP leg: it rides every tick on the fast cadence, independent of the main-leg gate.</summary>
     private async Task<int> SweepUdpLegAsync(DateTimeOffset now) =>
-        _udp is null ? 0 : await _udp.RemoveExpiredAsync(now, _relayIdleTimeout).ConfigureAwait(false);
+        _udp is null ? 0 : await _udp.RemoveExpiredAsync(now, _relayIdleTimeout, _udpOneShotIdleTimeout ?? _relayIdleTimeout).ConfigureAwait(false);
 
     /// <summary>The per-tick <c>runtime.expired</c> aggregate, emitted only when a leg expired something.</summary>
     private void LogExpired(int tcpCount, int flowCount, int udpCount, int attributionCount)

@@ -57,6 +57,12 @@ internal sealed class UdpAssociationLease : IAsyncDisposable
     /// </summary>
     internal void RecordResponseReceived() => _evidence.RecordResponseReceived();
 
+    /// <summary>The datagrams this lease sent successfully (the exchange-evidence read side).</summary>
+    internal int DatagramsSent => _evidence.DatagramsSent;
+
+    /// <summary>Whether this lease ever decoded a relay response (the exchange-evidence read side).</summary>
+    internal bool SawResponse => _evidence.SawResponse;
+
     /// <summary>Releases the association reference and the pool-scope lease, exactly once.</summary>
     public ValueTask DisposeAsync()
     {
