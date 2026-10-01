@@ -29,10 +29,34 @@ src/
 ├── WinForward.Runtime/        # 捕获/调度运行时；内部分 4 个子命名空间（见下节）
 └── WinForward.Windows/        # Windows 专属（AdapterIdentity 等）
 tests/
-└── WinForward.Core.Tests/     # xunit；类-每-文件
-    └── TestHelpers/           # 跨测试文件共享的 fakes/helpers
+├── Directory.Build.props      # 测试项目共享配置（TieredCompilation=false；显式 import 仓库根 props）
+├── WinForward.TestSupport/    # 跨测试项目共享的 fakes/builders（**非测试项目**：IsTestProject=false）
+├── WinForward.Core.Tests/     # 每个 src 层一个 xunit 项目（类-每-文件）；Runtime 按其子命名空间再分
+├── WinForward.Configuration.Tests/
+├── WinForward.Protocols.Tests/
+├── WinForward.NdisApi.Tests/
+├── WinForward.Windows.Tests/
+├── WinForward.Runtime.Capture.Tests/
+├── WinForward.Runtime.Flow.Tests/        # Runtime 根命名空间面（dispatcher/attribution/sweeper/diagnostics）
+├── WinForward.Runtime.TcpRedirect.Tests/
+├── WinForward.Runtime.UdpProxy.Tests/
+├── WinForward.Runtime.Socks5.Tests/
+├── WinForward.Integration.Tests/         # 跨层端到端 + Cli 组合（DurableCaptureBundle、composition）
+├── WinForward.Performance.Tests/         # 分配门控 + GC soak + benchmark harness 校验
+└── WinForward.Analyzers.Tests/           # 分析器规则测试（独立，不共享 TestSupport）
 benchmarks/                    # 基准宿主（BenchmarkDotNet 性能基准 + 稳定性 soak 运行器，同样受文件行数约定约束）
 ```
+
+### 测试项目切分（2026-10-01 确立，任务 10-01-split-test-projects）
+
+此前全部 126 个测试类挤在单个 `WinForward.Core.Tests` 中，且该项目的 csproj 引用全部 7 个 `src/` 项目加 `benchmarks/`，依赖图读不出任何信息。现按被测生产层切分为 12 个 xunit 项目加一个共享支持库。
+
+- 测试项目与 `src/` 分层一一对应；`WinForward.Runtime` 内部既有的 4 个子命名空间各自成项，另设 `Runtime.Flow.Tests` 承接根命名空间面。
+- 每个测试项目只引用它真正编译依赖的生产项目：`ProjectReference` 集合 = 其源码 `using` 到的生产项目集合 ∪ `TestSupport`，不再保留"引用全部"的姿态。
+- 测试命名空间 = 项目名，`--filter` 与堆栈可直接定位到项目。
+- 命名空间变更会改变 C# 的**父命名空间隐式可见性**。旧树所有文件位于 `WinForward.Core.Tests`（父级 `WinForward.Core`），因此无需任何 `using` 就能解析 `Endpoint`、`FlowKey` 等 Core 类型；迁移后该祖先不再可达，必须显式补 `using`。这是拆分中改动量最大的一类编辑。
+- 生产项目对测试项目的 `InternalsVisibleTo` 由编译器证据决定，缺授权表现为 `CS0122`（及成员级 `CS1061`/`CS0117`/`CS7036`）。`CS0122` 会**掩蔽**其后的错误——不可访问的类型会让编译器停止分析使用它的表达式——因此授权落地后必须重新构建、再迭代一轮才能收敛。
+- `WinForward.TestSupport` 需**反向**给每个消费它的测试项目授权：其 fake、builder、harness 均为 internal，跨程序集使用需要 friend access。
 
 ### Runtime 子命名空间（2026-08-29 确立）
 
@@ -79,8 +103,10 @@ benchmarks/                    # 基准宿主（BenchmarkDotNet 性能基准 + �
 - 产品代码文件 = 主类型名 PascalCase；xunit 测试文件 = 测试类名 + `Tests` 后缀，按主题命名（`TcpProxyCoordinatorLifecycleTests`、`ConfigurationValidationTests`）。
 - 测试 fake/helper 组织：
   - 仅单文件使用 → 留在该文件内（private nested 或文件私有均可）。
-  - **≥ 2 个文件重复 → 提取到 `tests/WinForward.Core.Tests/TestHelpers/`**，按类别分组文件（`ChecksumMath`、`FrameBuilders`、`FlowBuilders`、`UdpTransportFakes`、`PacketReinjectorFakes`、`TcpCoordinatorFakes`、`Socks5TestServer`…）。
-  - TestHelpers 使用测试项目根 namespace（`WinForward.Core.Tests`，不加 `.TestHelpers` 后缀）；fake 从 private nested 提升为 internal（`InternalsVisibleTo` 已配置）。
+  - **≥ 2 个测试文件重复 → 提取到 `tests/WinForward.TestSupport/`**，按类别分组文件（`ChecksumMath`、`FrameBuilders`、`FlowBuilders`、`UdpTransportFakes`、`PacketReinjectorFakes`、`TcpCoordinatorFakes`、`Socks5TestServer`…）。该库是**非测试项目**（显式 `<IsTestProject>false</IsTestProject>`，因为 `xunit.core.props` 会无条件把它设为 true，从而让 `dotnet test` 对库启动测试宿主并以 exit 1 中止整轮），供各测试项目 `ProjectReference`。
+  - TestSupport 的文件使用自身 namespace（`WinForward.TestSupport`，与项目名一致，无 `.TestHelpers` 后缀）；fake 从 private nested 提升为 internal。
+  - fake 为 internal，因此**每个消费它的测试项目**都需在 `WinForward.TestSupport.csproj` 获得 `InternalsVisibleTo`。该库自行声明 `xunit` 包引用（部分 helper 使用 `Assert`）。
+  - 若 TestSupport 自身需要访问生产代码的 internal 接缝，在对应生产项目声明 `InternalsVisibleTo("WinForward.TestSupport")`；2026-10-01 实测仅 `Runtime`（`UdpAssociationPool`）与 `Windows`（`OwnerTable`/`OwnerTableKind`）有此需要。
   - 合并重复 fake 时取行为超集（先例：`FakeReinjector` 同时记录 `DeviceFlags` 与 `Flags` 两个 flag 平面；`TrackingSocket` 支持可选 SocketType/ProtocolType）。
 
 ---

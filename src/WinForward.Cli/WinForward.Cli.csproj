@@ -36,6 +36,7 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="WinForward.Core.Tests" />
+    <InternalsVisibleTo Include="WinForward.Integration.Tests" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../WinForward.Core/WinForward.Core.csproj" />

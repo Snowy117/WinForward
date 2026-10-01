@@ -190,6 +190,41 @@ internal static class FrameBuilders
         return frame;
     }
 
+    // ---- Fragment builders ----
+
+    internal static byte[] BuildIpv4Fragment(IPAddress source, IPAddress destination, ushort sourcePort, ushort destinationPort)
+    {
+        var frame = BuildIpv4TcpFrame(source, destination, sourcePort, destinationPort);
+        // Flags/fragment-offset field (frame 20..21): MF set makes the frame unparseable as a
+        // flow, so the capture path routes it as non-flow. The stale checksum is irrelevant —
+        // the fragment path never rewrites the frame.
+        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(20, 2), 0x2000);
+        return frame;
+    }
+
+    internal static byte[] BuildIpv6Fragment(IPAddress source, IPAddress destination, ushort sourcePort, ushort destinationPort)
+    {
+        // IPv6(40) + fragment header(8) + TCP(20): nextHeader 44, the fragment header carries
+        // TCP with a zero offset.
+        const int tcpLength = 20;
+        var frame = new byte[14 + 40 + 8 + tcpLength];
+        frame[12] = 0x86;
+        frame[13] = 0xdd;
+        frame[14] = 0x60;
+        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(18, 2), 8 + tcpLength);
+        frame[20] = 44;
+        source.TryWriteBytes(frame.AsSpan(22, 16), out _);
+        destination.TryWriteBytes(frame.AsSpan(38, 16), out _);
+        const int fragment = 54;
+        frame[fragment] = 6;
+        BinaryPrimitives.WriteUInt32BigEndian(frame.AsSpan(fragment + 4, 4), 1);
+        const int tcp = 62;
+        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(tcp, 2), sourcePort);
+        BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(tcp + 2, 2), destinationPort);
+        frame[tcp + 13] = 0x18;
+        return frame;
+    }
+
     // ---- Capture-pipeline fixed-address wrappers ----
 
     internal static byte[] CreateIpv4TcpFrame() =>

@@ -6,6 +6,15 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="WinForward.Core.Tests" />
+    <InternalsVisibleTo Include="WinForward.Configuration.Tests" />
+    <InternalsVisibleTo Include="WinForward.Integration.Tests" />
+    <InternalsVisibleTo Include="WinForward.Performance.Tests" />
+    <InternalsVisibleTo Include="WinForward.Protocols.Tests" />
+    <InternalsVisibleTo Include="WinForward.Runtime.Capture.Tests" />
+    <InternalsVisibleTo Include="WinForward.Runtime.Flow.Tests" />
+    <InternalsVisibleTo Include="WinForward.Runtime.Socks5.Tests" />
+    <InternalsVisibleTo Include="WinForward.Runtime.TcpRedirect.Tests" />
+    <InternalsVisibleTo Include="WinForward.Runtime.UdpProxy.Tests" />
     <InternalsVisibleTo Include="WinForward.Benchmarks" />
   </ItemGroup>
 </Project>

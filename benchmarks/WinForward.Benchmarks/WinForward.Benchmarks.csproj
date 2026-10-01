@@ -11,6 +11,9 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="WinForward.Core.Tests" />
+    <InternalsVisibleTo Include="WinForward.Performance.Tests" />
+    <InternalsVisibleTo Include="WinForward.Runtime.UdpProxy.Tests" />
+    <InternalsVisibleTo Include="WinForward.NdisApi.Tests" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/WinForward.Configuration/WinForward.Configuration.csproj" />

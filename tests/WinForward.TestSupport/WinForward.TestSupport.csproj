@@ -14,6 +14,17 @@
     <!-- The fakes, builders and harnesses are internal by design; each test project that compiles
          against them needs friend access. -->
     <InternalsVisibleTo Include="WinForward.Core.Tests" />
+    <InternalsVisibleTo Include="WinForward.Configuration.Tests" />
+    <InternalsVisibleTo Include="WinForward.Integration.Tests" />
+    <InternalsVisibleTo Include="WinForward.NdisApi.Tests" />
+    <InternalsVisibleTo Include="WinForward.Performance.Tests" />
+    <InternalsVisibleTo Include="WinForward.Protocols.Tests" />
+    <InternalsVisibleTo Include="WinForward.Runtime.Capture.Tests" />
+    <InternalsVisibleTo Include="WinForward.Runtime.Flow.Tests" />
+    <InternalsVisibleTo Include="WinForward.Runtime.Socks5.Tests" />
+    <InternalsVisibleTo Include="WinForward.Runtime.TcpRedirect.Tests" />
+    <InternalsVisibleTo Include="WinForward.Runtime.UdpProxy.Tests" />
+    <InternalsVisibleTo Include="WinForward.Windows.Tests" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="xunit" />

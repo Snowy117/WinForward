@@ -9,6 +9,17 @@
     <Project Path="src/WinForward.Protocols/WinForward.Protocols.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/WinForward.Configuration.Tests/WinForward.Configuration.Tests.csproj" />
+    <Project Path="tests/WinForward.Integration.Tests/WinForward.Integration.Tests.csproj" />
+    <Project Path="tests/WinForward.NdisApi.Tests/WinForward.NdisApi.Tests.csproj" />
+    <Project Path="tests/WinForward.Performance.Tests/WinForward.Performance.Tests.csproj" />
+    <Project Path="tests/WinForward.Protocols.Tests/WinForward.Protocols.Tests.csproj" />
+    <Project Path="tests/WinForward.Runtime.Capture.Tests/WinForward.Runtime.Capture.Tests.csproj" />
+    <Project Path="tests/WinForward.Runtime.Flow.Tests/WinForward.Runtime.Flow.Tests.csproj" />
+    <Project Path="tests/WinForward.Runtime.Socks5.Tests/WinForward.Runtime.Socks5.Tests.csproj" />
+    <Project Path="tests/WinForward.Runtime.TcpRedirect.Tests/WinForward.Runtime.TcpRedirect.Tests.csproj" />
+    <Project Path="tests/WinForward.Runtime.UdpProxy.Tests/WinForward.Runtime.UdpProxy.Tests.csproj" />
+    <Project Path="tests/WinForward.Windows.Tests/WinForward.Windows.Tests.csproj" />
     <Project Path="tests/WinForward.Core.Tests/WinForward.Core.Tests.csproj" />
     <Project Path="tests/WinForward.Analyzers.Tests/WinForward.Analyzers.Tests.csproj" />
     <Project Path="tests/WinForward.TestSupport/WinForward.TestSupport.csproj" />
