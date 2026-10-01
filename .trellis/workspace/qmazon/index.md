@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 47
+- **Total Sessions**: 48
 - **Last Active**: 2026-10-01
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1649 | Active |
+| `journal-1.md` | ~1677 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 48 | 2026-10-01 | Test project split: twelve layered projects, a shared TestSupport library, and the evidence-backed friend grants | `d368492`, `dda8b83`, `6fb8c16`, `a82d853`, `58ef217`, `47adc1c`, `092e726` | `master` |
 | 47 | 2026-10-01 | F6 UDP footprint: 64 KiB relay buffers, a capacity-sized pool and a two-class idle TTL (resident set -78%) | `7dc2979`, `b12baab`, `6457eeb`, `9832012` | `master` |
 | 46 | 2026-10-01 | F8 attribution off the pump thread: a bounded pending index and an owner-table epoch coalescer (pump stall 7.5 ms -> 0.02 ms) | `acca507`, `4a0f70e`, `f121a3d`, `ee40987` | `master` |
 | 45 | 2026-10-01 | F5 pump I/O: read-first drains with a self-healing ABI guard, and an event-driven idle wake (31x idle CPU) | `6cb27bf`, `a488a99`, `ec0762f`, `e888921` | `master` |

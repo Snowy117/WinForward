@@ -1647,3 +1647,31 @@ Projections at the shipped 16,384-session capacity: 2 GiB → **1 GiB** of kerne
 ### Status
 
 [OK] **Completed**
+
+
+## Session 48: Test project split: twelve layered projects, a shared TestSupport library, and the evidence-backed friend grants
+<!-- trellis-session: v=2 fp=ed10b2c3e4710a4d -->
+
+**Date**: 2026-10-01
+**Task**: Test project split: twelve layered projects, a shared TestSupport library, and the evidence-backed friend grants
+**Branch**: `master`
+
+### Summary
+
+Split tests/WinForward.Core.Tests (151 files, 1141 tests) into twelve layered test projects plus a non-test WinForward.TestSupport library with zero behavior change: 25 helpers extracted first, then 120 files moved, every using block re-balanced against the compiler, and 21 friend grants derived from CS0122/CS1061/CS0117 evidence. Batch 4 re-verified all 39 grants by remove-and-rebuild (29 kept, 8 unproven and 2 dead removed), pruned the 136 redundant usings the move left behind that jb's CheckRedundantUsingDirective flags, and repointed the spec's gate filters, test layout and 1,159-test baseline. Gates on the final tree: Release build 0 warnings, 1159 passed across 13 assemblies in 19 s (bound 2 min), dotnet format exit 0 empty, jb inspectcode 0 issues.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d368492` | test(split): extract shared fakes and builders into WinForward.TestSupport (split-test-projects) |
+| `dda8b83` | test(split): move the suite into twelve layered test projects (split-test-projects) |
+| `6fb8c16` | test(split): centralize the test settings and trim the leftover Core project (split-test-projects) |
+| `a82d853` | test(split): prune the friend grants the compiler never needed (split-test-projects) |
+| `58ef217` | style(test): drop the using directives the split made redundant (split-test-projects) |
+| `47adc1c` | docs(spec): record the split's test layout, baseline and gate filters (split-test-projects) |
+| `092e726` | chore(task): record the split-test-projects task and its verification (split-test-projects) |
+
+### Status
+
+[OK] **Completed**
