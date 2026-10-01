@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Acceptance bar for structural refactors: baseline count equality, zero analyzer diagnostics, no assertion edits"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Expected post-split tests/ layout and helper organization to verify against"}

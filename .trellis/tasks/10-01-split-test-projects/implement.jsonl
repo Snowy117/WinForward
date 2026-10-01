@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Test tree layout, TestHelpers extraction rules, and split discipline this refactor must follow"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Behavior-zero refactor discipline: recorded test-count baseline, mechanical line-range moves, Release-mode gates"}
