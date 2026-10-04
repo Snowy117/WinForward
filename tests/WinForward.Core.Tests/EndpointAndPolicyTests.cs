@@ -23,6 +23,21 @@ public sealed class EndpointAndPolicyTests
     }
 
     [Fact]
+    public void EndpointPeerIdentityIgnoresTheIpv6ScopeWhileEqualityKeepsIt()
+    {
+        var wireForm = Endpoint.From(IPAddress.Parse("fe80::215:5dff:fe03:728b"), 52_840);
+        var socketForm = Endpoint.From(IPAddress.Parse("fe80::215:5dff:fe03:728b%26"), 52_840);
+
+        Assert.NotEqual(wireForm, socketForm);
+        Assert.True(wireForm.MatchesPeerIgnoringScope(socketForm));
+        Assert.True(socketForm.MatchesPeerIgnoringScope(wireForm));
+
+        Assert.False(wireForm.MatchesPeerIgnoringScope(Endpoint.From(IPAddress.Parse("fe80::215:5dff:fe03:728b%26"), 52_841)));
+        Assert.False(wireForm.MatchesPeerIgnoringScope(Endpoint.From(IPAddress.Parse("fe80::215:5dff:fe03:728c%26"), 52_840)));
+        Assert.False(wireForm.MatchesPeerIgnoringScope(Endpoint.From(IPAddress.Parse("192.0.2.53"), 52_840)));
+    }
+
+    [Fact]
     public void PolicyUsesFirstMatchingRule()
     {
         var context = FlowBuilders.Context(

@@ -70,7 +70,7 @@ internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IR
         ITcpRelay? unattachedRelay;
         try
         {
-            if (accepted.RemoteEndPoint != session.Association.AcceptedPeerEndpoint)
+            if (!accepted.RemoteEndPoint.MatchesPeerIgnoringScope(session.Association.AcceptedPeerEndpoint))
             {
                 if (logger.IsEnabled(RuntimeLogLevel.Warn))
                 {

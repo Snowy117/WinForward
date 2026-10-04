@@ -61,6 +61,8 @@ public readonly struct Endpoint : IEquatable<Endpoint>
     public bool Equals(Endpoint other) => Port == other.Port && Address.Equals(other.Address);
     public override bool Equals(object? obj) => obj is Endpoint other && Equals(other);
 
+    public bool MatchesPeerIgnoringScope(Endpoint other) => Port == other.Port && AddressFamily == other.AddressFamily && Address.Bits == other.Address.Bits;
+
     public override int GetHashCode() => HashCode.Combine(Port, Address);
 
     public static bool operator ==(Endpoint left, Endpoint right) => left.Equals(right);
