@@ -16,7 +16,7 @@ namespace WinForward.Performance.Tests;
 /// The sweep allocation contract (research F3.3: "no allocation under any table lock"). One fact per
 /// sweep site, with the gated tick the design names for it (<c>design.md</c> §6.1): a <em>retiring</em>
 /// tick for the synchronous table sweeps (the flow table and the two test-only tables) and a
-/// <em>no-op</em> tick over a populated world for the three async legs, whose retiring ticks await
+/// <em>no-op</em> tick over a populated world for the two async legs, whose retiring ticks await
 /// disposal outside the gate's scope.
 /// </summary>
 /// <remarks>
@@ -526,63 +526,7 @@ public sealed class SweepAllocationGateTests
     }
 
     /// <summary>
-    /// Site 5 (<c>UdpAssociationPool.SweepIdleAssociationsAsync</c>): the <em>no-op</em> tick over a
-    /// populated pool whose shared associations have outstanding leases, so nothing is retirable. The
-    /// scan is one hold covering the retire test and the shared removals; the disposal loop is outside.
-    /// </summary>
-    [Fact]
-    public async Task UdpAssociationPoolSweepAllocatesNoManagedBytes()
-    {
-        const int flowsPerAssociation = 4;
-        const int leases = 16;
-        await using var server = CreateAssociationPoolServer();
-        await using var pool = UdpAssociationFakes.CreatePool(UdpAssociationReuseMode.Always, flowsPerAssociation: flowsPerAssociation);
-        var held = new List<UdpAssociationLease>();
-        try
-        {
-            for (var index = 0; index < leases; index++) held.Add(await pool.RentAsync(server.Server, CancellationToken.None));
-            Assert.Equal(leases / flowsPerAssociation, pool.AssociationCount);
-            Assert.Equal(leases, pool.LeasedFlowCount);
-
-            var now = DateTimeOffset.UtcNow;
-            const int maximumProbeTicks = 8;
-            var stabilized = false;
-            for (var tick = 0; tick < maximumProbeTicks && !stabilized; tick++)
-            {
-                var probeThreadId = Environment.CurrentManagedThreadId;
-                var probeBefore = GC.GetAllocatedBytesForCurrentThread();
-                var probe = pool.SweepIdleAssociationsAsync(now);
-                Assert.True(probe.IsCompletedSuccessfully, "the no-op sweep must complete synchronously");
-                var probeRemoved = await probe;
-                stabilized = Environment.CurrentManagedThreadId == probeThreadId && GC.GetAllocatedBytesForCurrentThread() == probeBefore;
-                Assert.Equal(0, probeRemoved);
-            }
-            Assert.True(stabilized, "the udp association pool sweep never became allocation-stable");
-
-            var measuredThreadId = Environment.CurrentManagedThreadId;
-            var before = GC.GetAllocatedBytesForCurrentThread();
-            var pending = pool.SweepIdleAssociationsAsync(now);
-            var synchronous = pending.IsCompletedSuccessfully;
-            var removed = await pending;
-            var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-
-            Assert.True(synchronous, "the no-op sweep must complete synchronously");
-            Assert.Equal(measuredThreadId, Environment.CurrentManagedThreadId);
-            Assert.Equal(0, removed);
-            Assert.Equal(0, allocated);
-            // Thread-independent backstop: the leased world survived the no-op tick.
-            Assert.Equal(leases, pool.LeasedFlowCount);
-            Assert.Equal(leases / flowsPerAssociation, pool.AssociationCount);
-        }
-        finally
-        {
-            // The pool's drain joins every holder by design, so a failing assertion must not leave one.
-            foreach (var lease in held) await lease.DisposeAsync();
-        }
-    }
-
-    /// <summary>
-    /// Site 6 (<c>UdpAssociationTable.RemoveExpired</c>): a retiring tick over 64 idle-elapsed
+    /// Site 5 (<c>UdpAssociationTable.RemoveExpired</c>): a retiring tick over 64 idle-elapsed
     /// associations. The table has no production caller (tests only); the fact exists so "every sweep site
     /// allocates nothing" holds repo-wide.
     /// </summary>
@@ -621,9 +565,6 @@ public sealed class SweepAllocationGateTests
         Assert.False(table.TryFindOriginal(keys[0], now, out _));
         Assert.False(table.TryFindOriginal(keys[^1], now, out _));
     }
-
-    private static ScriptedSocks5UdpServer CreateAssociationPoolServer() =>
-        new(new IPEndPoint(IPAddress.Loopback, 41_000), ordinal => new IPEndPoint(IPAddress.Loopback, 41_000 + ordinal));
 
     private static FlowKey[] BuildUdpAssociationKeys(int count)
     {

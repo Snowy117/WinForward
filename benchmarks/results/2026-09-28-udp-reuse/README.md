@@ -1,5 +1,21 @@
 # 2026-09-28 UDP association reuse — Step 1 acceptance baseline
 
+> **Removed feature, 2026-10-05 (task `10-05-remove-udp-association-sharing`, R6).** This directory
+> records the UDP association-sharing work: Step 1's pre-pool baseline, Step 2's `always` column, the
+> caps round, and the pooled session-budget soaks. Sharing no longer exists — the three configuration
+> keys (`udpAssociationReuse`, `udpAssociationMaxPerServer`, `udpAssociationFlowsPerAssociation`)
+> were removed, the pool / lease / control-association / capability machinery was deleted, and a
+> proxy-decided flow now owns its own authenticated association. Every placement name and
+> `reuse`-related symbol in the prose and commands below therefore describes a removed feature: the
+> `off` / `auto` / `always` columns, `UdpAssociationReuseMode`, the shared-placement ceiling, the
+> `pooling` block and `--require-pooling`, and the removed `udp.association.fallback` /
+> `udp.association.recovered` events (their recorded zeros are historical observations, not current
+> columns). Those commands are **historical**: the flags are gone from the harness, and a command
+> line that still passes them fails at parse with the harness's unknown-argument error. Confirmation
+> series for the surviving columns:
+> [`../2026-10-05-no-association-sharing/`](../2026-10-05-no-association-sharing/README.md).
+> **No number in this directory was edited or deleted** — this note is the only change.
+
 > **Superseded in part, 2026-10-05 (task `10-05-harness-response-ownership`).** The **per-flow success
 > columns** of this directory's `udp.churn` and `udpBurstEstablishment` rows — `firstResponses`,
 > `establishmentLossRate`, and the `firstResponseMs` distribution — are not measured per flow: the

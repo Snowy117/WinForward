@@ -1,3 +1,4 @@
+using System.Net;
 using System.Runtime.Versioning;
 using WinForward.Cli;
 using WinForward.Configuration;
@@ -8,6 +9,7 @@ using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
 using WinForward.TestSupport;
 using Xunit;
+using static WinForward.TestSupport.AsyncTestExtensions;
 
 namespace WinForward.Integration.Tests;
 
@@ -15,7 +17,8 @@ namespace WinForward.Integration.Tests;
 /// The composition seam between the validated UDP budget and the coordinator (R4): the two adjacent
 /// int members of <see cref="UdpProxyComposition"/> — session capacity and relay receive buffer
 /// bytes — must reach the coordinator as distinct values, so a positional transposition (which
-/// would silently install a 16 KiB relay buffer) fails here instead of in the relay.
+/// would silently install a 16 KiB relay buffer) fails here instead of in the relay. Every flow's
+/// association belongs to its transport, so the composition carries no association owner.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class UdpProxyCompositionTests
@@ -26,7 +29,6 @@ public sealed class UdpProxyCompositionTests
         const int sessionCapacity = 37;
         const int relayReceiveBufferBytes = 48 * 1024;
         using var setupExecutor = new SetupExecutor();
-        await using var associations = new UdpAssociationPool(new SelfTrafficRegistry(), UdpAssociationReuseMode.Off);
         var composition = new UdpProxyComposition(
             new UdpAdapterTargetSource(),
             FlowBuilders.Slots,
@@ -35,7 +37,6 @@ public sealed class UdpProxyCompositionTests
             TestPools.UdpReceiveWindowPool,
             setupExecutor,
             new Socks5AddressCache(),
-            associations,
             SessionCapacity: sessionCapacity,
             RelayReceiveBufferBytes: relayReceiveBufferBytes);
 
@@ -51,27 +52,42 @@ public sealed class UdpProxyCompositionTests
     }
 
     [Fact]
-    public async Task CreateAssociationPoolCarriesBothPlacementBoundsAsDistinctValues()
+    public async Task CreateWiresOneAuthenticatedAssociationPerFlow()
     {
-        // The two UDP placement bounds are adjacent int members of the validated configuration, and
-        // a transposition (a ceiling of 31 associations of 7 flows) is a valid pool shape that no
-        // later assertion would catch, so the seam is pinned here as the capacity/buffer seam above.
-        var configuration = new ValidatedConfiguration(
-            new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
-            new PolicySnapshot([], FlowAction.Pass))
-        {
-            UdpAssociationReuse = UdpAssociationReuseMode.Off,
-            UdpAssociationMaxPerServer = 31,
-            UdpAssociationFlowsPerAssociation = 7,
-        };
-
-        await using var pool = UdpProxyComposer.CreateAssociationPool(
-            configuration,
-            new SelfTrafficRegistry(),
+        await using var server = new ScriptedSocks5UdpServer(new IPEndPoint(IPAddress.Loopback, 43_500));
+        using var setupExecutor = new SetupExecutor();
+        var composition = new UdpProxyComposition(
+            new UdpAdapterTargetSource(),
+            FlowBuilders.Slots,
+            UdpFrameBuilder.DefaultMaximumEthernetFrame,
+            TestPools.UdpSetupQueuePool,
+            TestPools.UdpReceiveWindowPool,
+            setupExecutor,
             new Socks5AddressCache(),
-            NullRuntimeLogger.Instance);
+            SessionCapacity: 16,
+            RelayReceiveBufferBytes: ConfigurationLoader.DefaultUdpRelayReceiveBufferBytes);
 
-        Assert.Equal(31, pool.MaxAssociationsPerServerLimit);
-        Assert.Equal(7, pool.FlowsPerAssociationLimit);
+        await using var coordinator = UdpProxyComposer.Create(
+            new FakeReinjector(),
+            new SelfTrafficRegistry(),
+            NullRuntimeLogger.Instance,
+            healthSignal: null,
+            composition);
+        var target = ProxyTarget.FromServer(server.Server);
+        var payload = new byte[] { 1, 2, 3 };
+
+        Assert.True(await coordinator.TrySendSpanAsync(Flow(53_001), target, payload, default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(Flow(53_002), target, payload, default, CancellationToken.None));
+
+        // The composition's SOCKS5 transport factory serves every flow with its own authenticated
+        // association: two flows, two control connections, two UDP ASSOCIATE exchanges.
+        await WaitForAsync(() => server.AssociateReplyCount == 2);
+        Assert.Equal(2, server.ConnectionCount);
     }
+
+    private static FlowKey Flow(ushort localPort) => FlowKey.Create(
+        Endpoint.From(IPAddress.Parse("192.0.2.10"), localPort),
+        Endpoint.From(IPAddress.Parse("192.0.2.53"), 53),
+        TransportProtocol.Udp,
+        FlowOriginKind.Host);
 }

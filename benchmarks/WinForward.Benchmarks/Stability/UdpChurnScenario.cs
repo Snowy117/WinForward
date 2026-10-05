@@ -59,9 +59,8 @@ internal static class UdpChurnScenario
         using var receiveWindowPool = new NativeBufferPool(UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize));
         using var setupExecutor = new SetupExecutor();
         var registry = new SelfTrafficRegistry();
-        await using var associations = new UdpAssociationPool(registry, options.ReuseMode, logger: productEvents);
         var coordinator = new UdpProxyCoordinator(
-            CreateTransportFactory(options, associations, registry, maximumFrameSize),
+            CreateTransportFactory(options, registry, maximumFrameSize, productEvents),
             sink,
             setupQueuePool,
             receiveWindowPool,
@@ -95,15 +94,15 @@ internal static class UdpChurnScenario
     /// <summary>
     /// The transport the column sends through: the product composite with both factories for a local
     /// target (<c>--target local</c> prices the wiring the CLI composes), the bare relay factory for
-    /// the SOCKS5 columns (the shape the reuse series was recorded with).
+    /// the SOCKS5 columns.
     /// </summary>
     private static IUdpProxyTransportFactory CreateTransportFactory(
         SoakOptions options,
-        UdpAssociationPool associations,
         SelfTrafficRegistry registry,
-        int maximumFrameSize)
+        int maximumFrameSize,
+        IRuntimeLogger logger)
     {
-        var socks5 = new Socks5UdpTransportFactory(associations, registry, maximumFrameSize);
+        var socks5 = new Socks5UdpTransportFactory(registry, maximumFrameSize, logger: logger);
         return options.Target == SoakTargetKind.Local
             ? new UdpTransportFactory(socks5, new LocalUdpTransportFactory(registry, maximumFrameSize))
             : socks5;
@@ -152,7 +151,7 @@ internal static class UdpChurnScenario
             var sample = await RunWaveAsync(coordinator, sink, target, options, flowKeys, payload, ++sequence, wave, timeout).ConfigureAwait(false);
             context.WriteResult(
                 "udp.churn",
-                new { burstFlows = options.BurstFlows, dialDelayMs = options.DialDelayMs, mode = "waves", wave, waves = waveCount, reuse = options.ReuseMode, target = options.Target },
+                new { burstFlows = options.BurstFlows, dialDelayMs = options.DialDelayMs, mode = "waves", wave, waves = waveCount, target = options.Target },
                 sample.BuildMetrics(payload.Length, productEvents, observationStart.Since(target.Server, target.Responder)));
         }
     }
@@ -221,7 +220,7 @@ internal static class UdpChurnScenario
         var elapsedSeconds = totalWatch.Elapsed.TotalSeconds;
         context.WriteResult(
             "udp.churn",
-            new { burstFlows = options.BurstFlows, dialDelayMs = options.DialDelayMs, mode = "sustained", durationSeconds = options.DurationSeconds, reuse = options.ReuseMode, target = options.Target },
+            new { burstFlows = options.BurstFlows, dialDelayMs = options.DialDelayMs, mode = "sustained", durationSeconds = options.DurationSeconds, target = options.Target },
             new
             {
                 waves = waveCount,

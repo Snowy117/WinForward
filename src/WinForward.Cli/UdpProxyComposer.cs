@@ -11,9 +11,10 @@ namespace WinForward.Cli;
 /// <summary>
 /// The bundle-created collaborators the durable UDP coordinator is wired from (P3): the
 /// refreshable reinjection-target snapshot, the pinned frame cap, the shared native pools and
-/// setup executor, the shared SOCKS5 address cache, and the per-server association pool. Creation,
-/// registration, rollback, and disposal stay in <see cref="DurableCaptureBundle"/>; the coordinator
-/// borrows the pools, the executor, and the association pool and never disposes them.
+/// setup executor, and the shared SOCKS5 address cache. Creation, registration, rollback, and
+/// disposal stay in <see cref="DurableCaptureBundle"/>; the coordinator borrows the pools, the
+/// executor, and the address cache and never disposes them. Every UDP flow's association is the
+/// flow transport's own, so the composition carries no association owner.
 /// </summary>
 internal sealed record UdpProxyComposition(
     UdpAdapterTargetSource Targets,
@@ -23,7 +24,6 @@ internal sealed record UdpProxyComposition(
     NativeBufferPool ReceiveWindowPool,
     SetupExecutor SetupExecutor,
     Socks5AddressCache AddressCache,
-    UdpAssociationPool Associations,
     int SessionCapacity,
     int RelayReceiveBufferBytes,
     ActivityBucketClock? ActivityClock = null);
@@ -55,24 +55,10 @@ internal static class UdpProxyComposer
     }
 
     /// <summary>
-    /// Creates the per-server association pool from the validated placement bounds and reuse mode.
-    /// The bounds multiply into the shared head, which is why both are passed as distinct arguments
-    /// here rather than read from the pool's defaults. The caller owns the pool and disposes it
-    /// after the coordinator has released every lease.
+    /// Creates the UDP coordinator over the composition's collaborators. The SOCKS5 transport
+    /// factory dials, ASSOCIATEs, and binds one association per flow, so the coordinator owns no
+    /// association lifecycle of its own.
     /// </summary>
-    internal static UdpAssociationPool CreateAssociationPool(
-        ValidatedConfiguration configuration,
-        SelfTrafficRegistry selfTraffic,
-        Socks5AddressCache addressCache,
-        IRuntimeLogger logger)
-        => new(
-            selfTraffic,
-            configuration.UdpAssociationReuse,
-            addressCache,
-            logger: logger,
-            maxAssociationsPerServer: configuration.UdpAssociationMaxPerServer,
-            flowsPerAssociation: configuration.UdpAssociationFlowsPerAssociation);
-
     internal static UdpProxyCoordinator Create(
         IPacketReinjector reinjector,
         SelfTrafficRegistry selfTraffic,
@@ -81,7 +67,7 @@ internal static class UdpProxyComposer
         UdpProxyComposition composition)
         => new(
             new UdpTransportFactory(
-                new Socks5UdpTransportFactory(composition.Associations, selfTraffic, composition.MaximumFrameSize, composition.RelayReceiveBufferBytes),
+                new Socks5UdpTransportFactory(selfTraffic, composition.MaximumFrameSize, composition.RelayReceiveBufferBytes, composition.AddressCache, logger),
                 new LocalUdpTransportFactory(selfTraffic, composition.MaximumFrameSize, composition.RelayReceiveBufferBytes)),
             new UdpResponseReinjector(reinjector, composition.Targets, composition.Slots, maximumFrameSize: composition.MaximumFrameSize, logger: logger, healthSignal: healthSignal),
             composition.SetupQueuePool,

@@ -19,8 +19,8 @@ internal static class SessionBudgetMath
     /// The descriptor slack the acceptance allows per live session on top of its relay socket:
     /// the proxy's per-session descriptor cost is one relay socket (plus bookkeeping that must not
     /// create a descriptor), and 25 % absorbs transient teardown/setup overlap at a sample instant.
-    /// A per-flow control connection doubles the per-session cost (relay socket + control socket),
-    /// which is what this bound exists to reject once the association term is charged separately.
+    /// The shipped per-flow shape adds one control connection per live session, which the budget
+    /// charges separately through its control-connection term.
     /// </summary>
     internal const double DescriptorSlackPerSession = 1.25;
 
@@ -48,40 +48,15 @@ internal static class SessionBudgetMath
     /// <summary>
     /// The descriptor budget for a live population: one relay socket per session with
     /// <see cref="DescriptorSlackPerSession"/> slack, plus one control connection per association.
-    /// Charging the association term per association — not per session — is the pooling accounting:
-    /// a shared association costs one descriptor for up to <c>FlowsPerAssociation</c> flows.
+    /// The shipped shape has one association per live flow, so the association term is one connection
+    /// per session — charged from the server's own live count when it was observed, and from that
+    /// one-per-session allowance when it was not.
     /// </summary>
     internal static long FileDescriptorBudget(long sessions, long associations)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(sessions);
         ArgumentOutOfRangeException.ThrowIfNegative(associations);
         return checked((long)Math.Ceiling(sessions * DescriptorSlackPerSession)) + associations;
-    }
-
-    /// <summary>
-    /// The shared-association slack the pooling coverage check allows on top of the ideal fan-out
-    /// <c>ceil(sessions / flowsPerAssociation)</c>. A few associations beyond the ideal placement are
-    /// legitimate — a partially filled warm set, a population peak that made placement open one more
-    /// association than the steady state needs, cold associations kept warm across a lull — and the
-    /// honest residual is that such a shape can sit slightly above the ideal fan-out. The slack is
-    /// clamped to this constant so it cannot scale with the per-server ceiling: a slack as large as
-    /// the ceiling would let the acceptance load tolerate ≈1,100 private (per-flow) control
-    /// connections, which is the descriptor shape this check exists to reject.
-    /// </summary>
-    internal const int SharedAssociationSlack = 16;
-
-    /// <summary>
-    /// The shared-association ceiling for a population inside the pool's shared budget: every
-    /// <c>FlowsPerAssociation</c> flows share one association, plus at most
-    /// <see cref="SharedAssociationSlack"/> associations for the legitimate cold/warm set. The cap
-    /// itself still bounds the slack, so a deliberately small ceiling tightens the check.
-    /// </summary>
-    internal static long SharedAssociationCeiling(long sessions, int flowsPerAssociation, int maxAssociationsPerServer)
-    {
-        ArgumentOutOfRangeException.ThrowIfNegative(sessions);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(flowsPerAssociation);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxAssociationsPerServer);
-        return ((sessions + flowsPerAssociation - 1) / flowsPerAssociation) + Math.Min(maxAssociationsPerServer, SharedAssociationSlack);
     }
 
     /// <summary>
@@ -149,9 +124,16 @@ internal sealed class SessionBudgetArrivals(TimeSpan start, TimeSpan tick)
     }
 }
 
-/// <summary>One sampled instant: the coordinator/pool counters, the process's descriptor and memory shape, and the running churn totals.</summary>
+/// <summary>
+/// One sampled instant: the process's descriptor and memory shape, and the harness SOCKS5 server's own
+/// view of the control connections it is serving.
+/// <see cref="HarnessControlConnections"/> is the server's live count and
+/// <see cref="HarnessServerConnections"/> the two sockets it owns per live connection (the control
+/// socket and that connection's relay socket); the count is null when the server ran out of process
+/// (<c>--socks5-external</c>) and this parent holds no counter to read.
+/// </summary>
 [StructLayout(LayoutKind.Auto)]
-internal readonly record struct ResourceSample(int ProxyFileDescriptors, int RawFileDescriptors, int HarnessServerConnections, long ManagedBytes, long WorkingSetBytes);
+internal readonly record struct ResourceSample(int ProxyFileDescriptors, int RawFileDescriptors, int HarnessServerConnections, int? HarnessControlConnections, long ManagedBytes, long WorkingSetBytes);
 
 /// <summary>
 /// Samples the process's descriptor and memory footprint for the session-budget series.
@@ -160,7 +142,8 @@ internal readonly record struct ResourceSample(int ProxyFileDescriptors, int Raw
 /// SOCKS5 server runs inside this process, the two sockets it owns per accepted control connection
 /// (<see cref="LoopbackSocks5UdpServer.ConnectionCount"/>) are subtracted from the raw count: the
 /// acceptance is about the proxy's own sockets, and <c>--socks5-external</c> removes the harness's
-/// from the process entirely.
+/// from the process entirely. The same read is what the session-budget rows record as their
+/// <c>associations</c> column, so the observation is taken once per sample.
 /// </summary>
 internal sealed class ProcessResourceSampler(LoopbackSocks5UdpServer? inProcessServer) : IDisposable
 {
@@ -170,8 +153,9 @@ internal sealed class ProcessResourceSampler(LoopbackSocks5UdpServer? inProcessS
     {
         _process.Refresh();
         var raw = OpenFileDescriptors();
-        var harness = inProcessServer is null ? 0 : 2 * inProcessServer.ConnectionCount;
-        return new ResourceSample(raw - harness, raw, harness, GC.GetTotalMemory(forceFullCollection: false), _process.WorkingSet64);
+        var liveControls = inProcessServer?.ConnectionCount;
+        var harness = liveControls is { } controls ? 2 * controls : 0;
+        return new ResourceSample(raw - harness, raw, harness, liveControls, GC.GetTotalMemory(forceFullCollection: false), _process.WorkingSet64);
     }
 
     public void Dispose() => _process.Dispose();
@@ -196,9 +180,10 @@ internal sealed class ProcessResourceSampler(LoopbackSocks5UdpServer? inProcessS
 /// the first response is also the only one, so the record doubles as the loss and latency source.
 /// <para>
 /// A response is recorded only for the flow it arrived on: the payload carries its sender's flow id,
-/// the <c>originalFlow</c> argument is the flow whose relay socket the reply came in on, and a shared
-/// association's server replies to its last sender. A foreign reply is marked against its sender and
-/// never advances a timestamp, so a churn flow answered with a sibling's echo stays unanswered.
+/// the <c>originalFlow</c> argument is the flow whose relay socket the reply came in on, and a server
+/// may answer from a different endpoint or write to its last sender. A foreign reply is marked
+/// against its sender and never advances a timestamp, so a churn flow answered with a sibling's echo
+/// stays unanswered.
 /// </para>
 /// </summary>
 internal sealed class SessionBudgetSink(int churnOffset, int flowCapacity, FlowKey[] flowKeys) : IUdpResponseSink
@@ -264,23 +249,24 @@ internal sealed class SessionBudgetSink(int churnOffset, int flowCapacity, FlowK
 }
 
 /// <summary>
-/// One row of the session-budget series: the live session/association shape, the proxy's own
+/// One row of the session-budget series: the live session/control-connection shape, the proxy's own
 /// descriptor count, the estimated kernel receive buffer, the churn counters, and the derived
-/// ratios. The two ratio fields are the pooling evidence — <see cref="FileDescriptorsPerSession"/>
-/// near 1 means every live session costs one relay socket and the control connections are amortized
-/// across the association's flows. Both per-session measurements are deltas against the run's
-/// post-warm-up baseline (<see cref="BaselineFileDescriptors"/>, <see cref="BaselineManagedBytes"/>),
-/// which every row carries so either ratio is recomputable from the row alone: the raw managed total
-/// is a process-wide number that would otherwise read as tens of megabytes per session in the
-/// in-process harness shape.
+/// ratios. <see cref="Associations"/> is the harness SOCKS5 server's own count of the control
+/// connections it is serving — accepted minus closed, read on the peer side of the dial rather than
+/// copied from the coordinator — so a connection that outlives its session is visible in the row; it
+/// is null when the server ran out of process and nobody in this process observed it, and the JSONL
+/// writer then omits the field rather than reporting an unread count. Both per-session
+/// measurements are deltas against the run's post-warm-up baseline
+/// (<see cref="BaselineFileDescriptors"/>, <see cref="BaselineManagedBytes"/>), which every row
+/// carries so either ratio is recomputable from the row alone: the raw managed total is a process-wide
+/// number that would otherwise read as tens of megabytes per session in the in-process harness shape.
 /// </summary>
 internal sealed record SessionBudgetSample(
     string Phase,
     int Index,
     double ElapsedSeconds,
     int Sessions,
-    int Associations,
-    int LeasedFlows,
+    int? Associations,
     int FileDescriptors,
     int RawFileDescriptors,
     int HarnessServerConnections,
@@ -302,20 +288,25 @@ internal sealed record SessionBudgetSample(
 {
     public double FileDescriptorsPerSession => SessionBudgetMath.Ratio(FileDescriptors - BaselineFileDescriptors, Sessions);
 
-    /// <summary>This row's own sampled associations per live session; the summary quotes the steady peak's ratio instead.</summary>
-    private double AssociationsPerSession => SessionBudgetMath.Ratio(Associations, Sessions);
-
     public double ManagedBytesPerSession => SessionBudgetMath.Ratio(ManagedBytes - BaselineManagedBytes, Sessions);
 
     /// <summary>The estimated kernel receive buffer per live session; equals the configured relay buffer for a non-empty population.</summary>
     public double RelayReceiveBufferBytesPerSession => SessionBudgetMath.Ratio(RelayReceiveBufferBytes, Sessions);
 
     /// <summary>
+    /// The control-connection term the descriptor budget charges for this sample: the server's own
+    /// live count when it was observed, otherwise the shipped shape's one connection per live session —
+    /// an allowance the budget states rather than an observation, which is all an out-of-process
+    /// harness server leaves.
+    /// </summary>
+    public long ControlConnectionsCharged => Associations ?? Sessions;
+
+    /// <summary>
     /// The churn population's per-flow response accounting: <see cref="DatagramsReceived"/> is the
     /// <c>own</c> term (a response counted only when it arrived on the flow that asked), so
-    /// <c>own + Misdelivered + NoResponse</c> is this run's accepted churn flows. Under sharing a flow
-    /// whose echo arrived on a sibling is the <c>Misdelivered</c> term instead, so no-response is left
-    /// for flows no echo was observed for at all.
+    /// <c>own + Misdelivered + NoResponse</c> is this run's accepted churn flows. An echo that arrived
+    /// on another flow is the <c>Misdelivered</c> term instead, so no-response is left for flows no
+    /// echo was observed for at all.
     /// </summary>
     private long NoResponse => Math.Max(0, Accepted - DatagramsReceived - Misdelivered);
 
@@ -326,14 +317,12 @@ internal sealed record SessionBudgetSample(
         elapsedSeconds = ElapsedSeconds,
         sessions = Sessions,
         associations = Associations,
-        leasedFlows = LeasedFlows,
         fileDescriptors = FileDescriptors,
         rawFileDescriptors = RawFileDescriptors,
         harnessServerConnections = HarnessServerConnections,
         baselineFileDescriptors = BaselineFileDescriptors,
         baselineManagedBytes = BaselineManagedBytes,
         fileDescriptorsPerSession = FileDescriptorsPerSession,
-        associationsPerSession = AssociationsPerSession,
         managedBytesPerSession = ManagedBytesPerSession,
         managedBytes = ManagedBytes,
         workingSetBytes = WorkingSetBytes,

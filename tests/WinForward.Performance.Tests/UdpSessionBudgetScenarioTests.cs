@@ -35,7 +35,6 @@ public sealed class UdpSessionBudgetScenarioTests
         // headroom, so the shipped invocation cannot record a vacuous retention claim.
         Assert.Equal(90, options.ChurnSeconds);
         Assert.Equal(120, options.DrainSeconds);
-        Assert.False(options.RequirePooling);
     }
 
     [Fact]
@@ -46,13 +45,6 @@ public sealed class UdpSessionBudgetScenarioTests
         Assert.Equal(2_048, options.Capacity);
         Assert.Equal(3_600, options.ChurnSeconds);
         Assert.Equal(300, options.DrainSeconds);
-    }
-
-    [Fact]
-    public void SessionBudgetRequirePoolingIsOptIn()
-    {
-        Assert.False(SoakOptions.Parse(["--scenario", "udpSessionBudget"]).RequirePooling);
-        Assert.True(SoakOptions.Parse(["--scenario", "udpSessionBudget", "--require-pooling"]).RequirePooling);
     }
 
     [Theory]
@@ -150,30 +142,20 @@ public sealed class UdpSessionBudgetScenarioTests
     }
 
     [Fact]
-    public void DescriptorBudgetFitsOneRelaySocketPerSessionAndOneControlConnectionPerAssociation()
+    public void DescriptorBudgetFitsThePerFlowRelaySocketAndControlConnection()
     {
-        // The pooled shape over a population inside the shared budget: one relay socket per live
-        // session plus one control connection per association (16 flows per association).
+        // The shipped shape over a live population: one relay socket and one control connection per
+        // session, i.e. two descriptors per session against a budget of ceil(sessions x 1.25) plus
+        // one association per session.
         const long sessions = 3_000;
-        const long associations = 188;
-        const long measured = sessions + associations;
-        Assert.True(measured <= SessionBudgetMath.FileDescriptorBudget(sessions, associations));
-        // A second descriptor per session — a per-flow control connection that is NOT charged as an
-        // association, or a leaked socket — does not fit the 1.25-per-session slack.
-        Assert.True((2 * sessions) > SessionBudgetMath.FileDescriptorBudget(sessions, associations));
+        const long measured = sessions + sessions;
+        Assert.True(measured <= SessionBudgetMath.FileDescriptorBudget(sessions, sessions));
+        // A third descriptor per session — a leaked socket, or an association whose teardown does not
+        // follow its session's — does not fit the 1.25-per-session slack plus the association term.
+        Assert.True((3 * sessions) > SessionBudgetMath.FileDescriptorBudget(sessions, sessions));
         // The budget is expressed in the live population only, so a run with ten times the cumulative
         // flows but the same steady state costs the same.
-        Assert.Equal((long)Math.Ceiling(sessions * SessionBudgetMath.DescriptorSlackPerSession) + associations, SessionBudgetMath.FileDescriptorBudget(sessions, associations));
-    }
-
-    [Fact]
-    public void SharedAssociationCeilingSeesPerFlowConnections()
-    {
-        // Pooled: 187 live sessions share 12 associations (16 flows each) under the 16-association cap.
-        Assert.True(12 <= SessionBudgetMath.SharedAssociationCeiling(187, 16, 16));
-        // Per-flow: one association per session cannot hide inside the fan-out ceiling.
-        Assert.True(187 > SessionBudgetMath.SharedAssociationCeiling(187, 16, 16));
-        Assert.True(374 > SessionBudgetMath.SharedAssociationCeiling(374, 16, 16));
+        Assert.Equal((long)Math.Ceiling(sessions * SessionBudgetMath.DescriptorSlackPerSession) + sessions, SessionBudgetMath.FileDescriptorBudget(sessions, sessions));
     }
 
     [Fact]
@@ -278,6 +260,8 @@ public sealed class UdpSessionBudgetScenarioTests
         Assert.True(sample.ProxyFileDescriptors > 0);
         Assert.Equal(sample.RawFileDescriptors, sample.ProxyFileDescriptors);
         Assert.Equal(0, sample.HarnessServerConnections);
+        // No in-process server to read: the associations column is nobody's observation, not a zero.
+        Assert.Null(sample.HarnessControlConnections);
         Assert.True(sample.WorkingSetBytes > 0);
     }
 

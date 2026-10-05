@@ -8,9 +8,9 @@ namespace WinForward.Runtime.UdpProxy;
 
 /// <summary>
 /// Creates the per-flow transport for a local target: one socket per flow, bound like a relay
-/// socket and pointed at the configured endpoint, with no association to rent and no pool or
-/// capability sampler to consult. A target of any other kind is refused up front, so a
-/// mis-composed factory fails closed instead of dereferencing a target it does not serve.
+/// socket and pointed at the configured endpoint, with no association to rent. A target of any other
+/// kind is refused up front, so a mis-composed factory fails closed instead of dereferencing a target
+/// it does not serve.
 /// </summary>
 public sealed class LocalUdpTransportFactory : IUdpProxyTransportFactory
 {

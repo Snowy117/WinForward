@@ -22,7 +22,7 @@ public sealed class RuntimeCounters
     /// <summary>A UDP response was dropped fail-closed (unresolvable origin/host target); see <c>udp.reinject.drop</c>.</summary>
     public const string UdpFailClosedDrop = "udpFailClosedDrop";
 
-    /// <summary>A UDP relay response declared a source other than the flow's own destination; observes cross-destination misdelivery only — see <c>udp.response.foreign_source</c>.</summary>
+    /// <summary>A UDP relay response declared a source other than the receiving flow's own destination (a server may legitimately answer from another endpoint); see <c>udp.response.foreign_source</c>.</summary>
     public const string UdpResponseSourceMismatch = "udpResponseSourceMismatch";
 
     /// <summary>A flow was blocked because the flow table is at capacity; see <c>flow.capacity-block</c>.</summary>
@@ -73,14 +73,8 @@ public sealed class RuntimeCounters
     /// <summary>A UDP setup datagram was rejected by the aggregate setup-queue byte budget; see <c>udp.setupqueue.dropped</c>.</summary>
     public const string UdpSetupBudgetRejections = "udpSetupBudgetRejections";
 
-    /// <summary>A flow's shared SOCKS5 UDP association died without an in-place recovery, so its slot was removed as <c>UdpTeardownReason.AssociationLost</c>.</summary>
+    /// <summary>A flow's SOCKS5 UDP association died (its control stream ended), so its slot was removed as <c>UdpTeardownReason.AssociationLost</c>; see the rate-limited <c>udp.association.lost</c> warn.</summary>
     public const string UdpAssociationLost = "udpAssociationLost";
-
-    /// <summary>A lost SOCKS5 UDP association was re-established in place; see the <c>udp.association.recovered</c> debug event.</summary>
-    public const string UdpAssociationRecovered = "udpAssociationRecovered";
-
-    /// <summary>A SOCKS5 server was flipped from shared to per-flow associations because passive sampling detected source-port pinning; see the rate-limited <c>udp.association.fallback</c> warn.</summary>
-    public const string UdpAssociationFallbacks = "udpAssociationFallbacks";
 
     /// <summary>A UDP flow was created over a local target instead of a SOCKS5 association; the trace log names the flow's target on <c>udp.session.created</c>.</summary>
     public const string UdpLocalTargetFlows = "udpLocalTargetFlows";

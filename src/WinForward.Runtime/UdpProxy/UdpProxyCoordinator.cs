@@ -231,20 +231,27 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
         checked(sessionCapacity + ReceiveWindowRetireHeadroom(sessionCapacity));
 
     /// <summary>
+    /// The floor of the concurrent-retirement allowance the receive-window pool capacity carries:
+    /// sixty-four sessions retiring at once, i.e. four fault bursts of the sixteen concurrent flows
+    /// one control connection used to serve — the stampede the allowance was first sized against,
+    /// kept as one named number now that a flow owns its association outright.
+    /// </summary>
+    internal const int ReceiveWindowRetireFloor = 64;
+
+    /// <summary>
     /// The concurrent-retirement allowance the pool capacity carries. The expiry retire is serial (one
     /// slot removal per candidate, awaited by the sweeper), but receive-failure teardowns are
     /// concurrent scope children that never take the sweep gate, and send-path and setup removals
     /// await their own teardown from their own callers, so the overlap has no in-code bound and a
     /// simultaneous multi-session fault is the worst case. The allowance is therefore a documented
-    /// policy number rather than a proof: four association-wide fault bursts at the default fan-out
-    /// (<c>udpAssociationFlowsPerAssociation</c>, the blast radius of one association death), and at
+    /// policy number rather than a proof: <see cref="ReceiveWindowRetireFloor"/> sessions, and at
     /// least a sixteenth of the capacity so it scales with a raised <c>udpSessionCapacity</c>. The
     /// attribution pool's capacity in composition is the in-tree precedent for sizing a pool so the
     /// steady state cannot overflow; a storm larger than the allowance still allocates fresh leases
     /// transiently, which is bounded by the storm and never a steady state.
     /// </summary>
     internal static int ReceiveWindowRetireHeadroom(int sessionCapacity) =>
-        Math.Max(4 * ConfigurationLoader.DefaultUdpAssociationFlowsPerAssociation, sessionCapacity / 16);
+        Math.Max(ReceiveWindowRetireFloor, sessionCapacity / 16);
 
     /// <summary>
     /// The retention a <em>completed one-shot exchange</em> keeps (see

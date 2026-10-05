@@ -1,5 +1,19 @@
 # 2026-10-05 UDP association reuse — response-ownership-corrected baseline
 
+> **Removed feature, 2026-10-05 (task `10-05-remove-udp-association-sharing`, R6).** Every column in
+> this directory — `off`, `auto` and `always`, across churn, burst and the session-budget soaks — is
+> a measurement of UDP association sharing, which no longer exists: the three configuration keys were
+> removed, the pool / lease / control-association / capability machinery was deleted, and a
+> proxy-decided flow now owns its own authenticated association. The `reuse` parameter on every row
+> and the `reuseMode` metadata field name the removed knob, and the commands below are
+> **historical**: `--reuse` is gone from the harness, and a command line that still passes it fails
+> at parse with the harness's unknown-argument error. The `off` column recorded the placement the
+> tree now ships (one association per flow, reached then through the pool's `Off` branch), so its
+> resource and latency figures still describe the surviving shape; `auto` and `always` describe a
+> path that is no longer reachable. Confirmation series for the surviving columns:
+> [`../2026-10-05-no-association-sharing/`](../2026-10-05-no-association-sharing/README.md).
+> **No number in this directory was edited or deleted** — this note is the only change.
+
 Task `10-05-harness-response-ownership` (child of `10-05-udp-association-sharing-correctness`, R1).
 This directory is the corrected baseline for the sharing comparison: the harness now records a relay
 reply as a flow's first response **only when the reply arrived on the flow that asked for it**, and

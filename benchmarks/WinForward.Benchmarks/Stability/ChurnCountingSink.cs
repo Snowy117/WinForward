@@ -12,9 +12,9 @@ namespace WinForward.Benchmarks.Stability;
 /// <para>
 /// A response is recorded only for the flow it actually arrived on: the payload carries its sender's
 /// flow id, and <see cref="InjectAsync"/>'s <c>originalFlow</c> is the flow whose relay socket the
-/// reply came in on. A shared association's server writes every reply to the last client that sent
-/// (<c>LoopbackSocks5UdpServer.SendReplyAsync</c> models the connection-oriented server under test),
-/// so without that check a sibling's reply would be recorded as this flow's own first response.
+/// reply came in on. A server that answers from a different endpoint, or a last-sender write path,
+/// can deliver a sibling's reply here, so without that check the reply would be recorded as this
+/// flow's own first response.
 /// </para>
 /// </summary>
 internal sealed class ChurnCountingSink(int flows, FlowKey[] flowKeys) : IUdpResponseSink

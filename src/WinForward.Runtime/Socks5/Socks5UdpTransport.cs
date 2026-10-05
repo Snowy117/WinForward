@@ -8,14 +8,20 @@ using WinForward.Runtime.UdpProxy;
 namespace WinForward.Runtime.Socks5;
 
 /// <summary>
-/// Rents one association lease per flow from the pool and wraps it in a relay transport. The
-/// factory owns no control connection: the pool keeps the authenticated association warm across
-/// flows, and the transport owns only its relay socket, its self-traffic tuple, and the lease.
+/// Creates the per-flow relay transport: one authenticated SOCKS5 UDP association per flow (its own
+/// control connection and its own <c>UDP ASSOCIATE</c>), plus the flow's own relay socket. The
+/// factory owns no association: it builds one per call and hands it to the transport, which owns it
+/// for the flow's life.
 /// </summary>
 public sealed class Socks5UdpTransportFactory : IUdpProxyTransportFactory
 {
-    private readonly UdpAssociationPool _pool;
-    private readonly SelfTrafficRegistry _selfTraffic;
+    /// <summary>
+    /// The association-lost warn's window, held by the factory so it covers every association the
+    /// composition creates.
+    /// </summary>
+    private static readonly TimeSpan s_lostLogInterval = TimeSpan.FromSeconds(5);
+
+    private readonly Socks5UdpAssociationContext _associations;
     private readonly int _maximumFrameSize;
     private readonly int _relayReceiveBufferBytes;
     private readonly Func<AddressFamily, Socket>? _socketFactory;
@@ -24,30 +30,37 @@ public sealed class Socks5UdpTransportFactory : IUdpProxyTransportFactory
     /// <summary>
     /// Creates transports whose send buffer follows the pinned frame cap (6 + 16 + cap) — the
     /// same single source of truth the coordinator's receive windows (cap + 22 + 1) and the
-    /// reinjector's rebuilt frames (cap) already use — and whose association comes from the
-    /// per-server pool. Composition passes the native ABI constant explicitly, and the per-session
-    /// relay receive buffer from the validated <c>udpRelayReceiveBufferKb</c> budget.
+    /// reinjector's rebuilt frames (cap) already use — and whose control connection is dialed per
+    /// flow. Composition passes the native ABI constant explicitly, and the per-session relay
+    /// receive buffer from the validated <c>udpRelayReceiveBufferKb</c> budget.
     /// </summary>
-    /// <param name="pool">The per-server association pool every flow's lease is rented from.</param>
     /// <param name="selfTraffic">Loop-prevention registry the relay tuple is registered in before the first datagram.</param>
     /// <param name="maximumFrameSize">The pinned capture frame cap the send buffer follows (6 + 16 + cap).</param>
     /// <param name="relayReceiveBufferBytes">The per-session relay socket receive buffer from the validated <c>udpRelayReceiveBufferKb</c> budget.</param>
-    /// <param name="socketFactory">Test seam: the relay socket constructor, so a construction failure can be driven through the production lease-release path.</param>
+    /// <param name="addressCache">Shared SOCKS5 endpoint cache; null resolves on every dial.</param>
+    /// <param name="logger">Lifecycle diagnostics; null keeps the association silent.</param>
+    /// <param name="createControl">Test seam replacing the real dial.</param>
+    /// <param name="socketFactory">Test seam: the relay socket constructor, so a construction failure can be driven through the production association-release path.</param>
     /// <param name="disableUdpConnectionReset">Test seam: the SIO_UDP_CONNRESET posture applied before bind (asserted without a Windows host).</param>
     internal Socks5UdpTransportFactory(
-        UdpAssociationPool pool,
         SelfTrafficRegistry selfTraffic,
         int maximumFrameSize,
         int relayReceiveBufferBytes = Socks5UdpTransport.DefaultRelaySocketReceiveBufferSize,
+        Socks5AddressCache? addressCache = null,
+        IRuntimeLogger? logger = null,
+        Func<Socks5Server, CancellationToken, ValueTask<Socks5ControlConnection>>? createControl = null,
         Func<AddressFamily, Socket>? socketFactory = null,
         Action<Socket>? disableUdpConnectionReset = null)
     {
-        ArgumentNullException.ThrowIfNull(pool);
         ArgumentNullException.ThrowIfNull(selfTraffic);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumFrameSize);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(relayReceiveBufferBytes);
-        _pool = pool;
-        _selfTraffic = selfTraffic;
+        _associations = new Socks5UdpAssociationContext(
+            selfTraffic,
+            addressCache,
+            createControl,
+            logger ?? NullRuntimeLogger.Instance,
+            new RuntimeLogThrottle(s_lostLogInterval));
         _maximumFrameSize = maximumFrameSize;
         _relayReceiveBufferBytes = relayReceiveBufferBytes;
         _socketFactory = socketFactory;
@@ -56,22 +69,22 @@ public sealed class Socks5UdpTransportFactory : IUdpProxyTransportFactory
 
     public async ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken)
     {
-        // This factory serves SOCKS5 targets only (a local target has no association to rent), so
+        // This factory serves SOCKS5 targets only (a local target has no association to dial), so
         // the impossible shape fails closed instead of dereferencing a null server.
         if (target.Socks5 is not { } server)
         {
             throw new InvalidOperationException($"The SOCKS5 UDP transport factory was asked for local target '{target.Name}'.");
         }
 
-        var lease = await _pool.RentAsync(server, cancellationToken).ConfigureAwait(false);
+        var association = await Socks5UdpAssociation.ConnectAsync(server, _associations, cancellationToken).ConfigureAwait(false);
         try
         {
-            return Socks5UdpTransport.Create(lease, _selfTraffic, _socketFactory, _disableUdpConnectionReset, _maximumFrameSize, _relayReceiveBufferBytes);
+            return Socks5UdpTransport.Create(association, _associations.SelfTraffic, _socketFactory, _disableUdpConnectionReset, _maximumFrameSize, _relayReceiveBufferBytes);
         }
         catch
         {
-            // A transport that never came into existence must not hold its association lease.
-            await lease.DisposeAsync().ConfigureAwait(false);
+            // A transport that never came into existence must not leave its control connection open.
+            await association.DisposeAsync().ConfigureAwait(false);
             throw;
         }
     }
@@ -112,29 +125,27 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
     private static readonly Action<Socket> s_disableUdpConnectionResetAction = DisableUdpConnectionReset;
 
     private readonly Socket _socket;
-    private readonly UdpAssociationLease _lease;
-    private readonly SelfTrafficRegistry _selfTraffic;
-    private readonly Endpoint _localRelayEndpoint;
+    private readonly Socks5UdpAssociation _association;
+    private readonly SocketAddress _relaySocketAddress;
     private readonly SemaphoreSlim _sendGate = new(1, 1);
     private readonly byte[] _sendBuffer;
     private readonly IPEndPoint _receiveSenderTemplate;
+    private readonly SelfTrafficRegistry.SelfTrafficToken? _selfTrafficToken;
 
-    /// <summary>The current relay publication; replaced only by an in-place re-association (cold path).</summary>
-    private UdpRelayTarget _relayTarget;
+    /// <summary>The datagrams this flow sent successfully (the exchange-evidence read side).</summary>
+    private int _datagramsSent;
 
-    /// <summary>The relay's loop-prevention registration; replaced with the destination on re-association.</summary>
-    private SelfTrafficRegistry.SelfTrafficToken? _selfTrafficToken;
+    /// <summary>Whether this flow ever decoded a relay response (the exchange-evidence read side).</summary>
+    private int _sawResponse;
 
     private int _disposed;
 
-    private Socks5UdpTransport(UdpAssociationLease lease, SelfTrafficRegistry selfTraffic, Socket socket, Endpoint localRelayEndpoint, SelfTrafficRegistry.SelfTrafficToken? selfTrafficToken, int maximumFrameSize)
+    private Socks5UdpTransport(Socks5UdpAssociation association, Socket socket, SocketAddress relaySocketAddress, SelfTrafficRegistry.SelfTrafficToken? selfTrafficToken, int maximumFrameSize)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumFrameSize);
-        _lease = lease;
-        _selfTraffic = selfTraffic;
+        _association = association;
         _socket = socket;
-        _localRelayEndpoint = localRelayEndpoint;
-        _relayTarget = lease.RelayTarget;
+        _relaySocketAddress = relaySocketAddress;
         _selfTrafficToken = selfTrafficToken;
         // Sized from the same pinned frame cap the coordinator's receive windows (cap + 22 + 1)
         // and the reinjector's rebuilt frames (cap) use: 6 + 16 covers the worst SOCKS5 UDP
@@ -145,16 +156,16 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
         // The receive-sender family is fixed by the relay endpoint, so one template per
         // transport replaces the per-receive endpoint allocation; ReceiveFromAsync reports the
         // actual remote in its result and never mutates the template.
-        _receiveSenderTemplate = lease.RelayAddressFamily == AddressFamily.InterNetwork
+        _receiveSenderTemplate = association.RelayAddressFamily == AddressFamily.InterNetwork
             ? new IPEndPoint(IPAddress.Any, 0)
             : new IPEndPoint(IPAddress.IPv6Any, 0);
     }
 
     /// <summary>
-    /// The relay endpoint the flow currently sends to: read through the lease, so an in-place
-    /// re-association of the shared association is visible without touching this transport.
+    /// The relay endpoint this flow sends to and accepts replies from: the relay its own
+    /// association negotiated, fixed for the flow's life.
     /// </summary>
-    public IPEndPoint PeerEndpoint => _lease.RelayEndpoint;
+    public IPEndPoint PeerEndpoint => _association.RelayEndpoint;
 
     public IPEndPoint LocalEndpoint => (IPEndPoint)_socket.LocalEndPoint!;
 
@@ -168,32 +179,33 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
 
     // Explicit: the retention policy's evidence seam is deliberately not part of the transport
     // contract, so adding it cannot change what an IUdpProxyTransport implementer must provide.
-    int IUdpExchangeCounters.DatagramsSent => _lease.DatagramsSent;
+    int IUdpExchangeCounters.DatagramsSent => Volatile.Read(ref _datagramsSent);
 
-    bool IUdpExchangeCounters.SawResponse => _lease.SawResponse;
+    bool IUdpExchangeCounters.SawResponse => Volatile.Read(ref _sawResponse) != 0;
 
     /// <summary>
-    /// Builds the per-flow transport over a borrowed association lease: the relay socket is bound
-    /// in the association's family, the configured receive buffer and SIO_UDP_CONNRESET posture are
-    /// applied before bind, and the relay tuple is registered for loop prevention before the first
-    /// datagram. The caller owns the lease and releases it if this throws.
+    /// Builds the per-flow transport over one association the caller owns until this returns: the
+    /// relay socket is bound in the association's relay family, the configured receive buffer and
+    /// SIO_UDP_CONNRESET posture are applied before bind, and the relay tuple is registered for loop
+    /// prevention before the first datagram. The caller owns the association and disposes it if this
+    /// throws; on success the transport owns both the socket and the association.
     /// </summary>
     internal static Socks5UdpTransport Create(
-        UdpAssociationLease lease,
+        Socks5UdpAssociation association,
         SelfTrafficRegistry selfTraffic,
         Func<AddressFamily, Socket>? socketFactory = null,
         Action<Socket>? disableUdpConnectionReset = null,
         int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame,
         int relayReceiveBufferBytes = DefaultRelaySocketReceiveBufferSize)
     {
-        ArgumentNullException.ThrowIfNull(lease);
+        ArgumentNullException.ThrowIfNull(association);
         ArgumentNullException.ThrowIfNull(selfTraffic);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(relayReceiveBufferBytes);
         Socket? socket = null;
         SelfTrafficRegistry.SelfTrafficToken? selfTrafficToken = null;
         try
         {
-            var relayAddressFamily = lease.RelayAddressFamily;
+            var relayAddressFamily = association.RelayAddressFamily;
             socket = (socketFactory ?? (family => new Socket(family, SocketType.Dgram, ProtocolType.Udp)))(relayAddressFamily);
             socket.ReceiveBufferSize = relayReceiveBufferBytes;
             // Applied before bind per the IOCTL's contract (S2): an ICMP-driven reset must never
@@ -206,14 +218,14 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
             socket.Blocking = false;
             var local = (IPEndPoint)socket.LocalEndPoint!;
             var localRelayEndpoint = Endpoint.From(local.Address, checked((ushort)local.Port));
-            var relay = lease.RelayEndpoint;
+            var relay = association.RelayEndpoint;
             // Register the relay transport tuple in the loop-prevention registry so catch-all proxy
             // rules never recursively intercept WinForward's own UDP relay traffic (design §10).
             selfTrafficToken = selfTraffic.Register(new SelfTrafficRegistry.SelfTrafficKey(
                 TransportProtocol.Udp,
                 localRelayEndpoint,
                 Endpoint.From(relay.Address, checked((ushort)relay.Port))));
-            var transport = new Socks5UdpTransport(lease, selfTraffic, socket, localRelayEndpoint, selfTrafficToken, maximumFrameSize);
+            var transport = new Socks5UdpTransport(association, socket, association.RelaySocketAddress, selfTrafficToken, maximumFrameSize);
             socket = null;
             selfTrafficToken = null;
             return transport;
@@ -243,11 +255,11 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
         // otherwise `_sendGate.WaitAsync` would observe the disposed gate. A single volatile read
         // keeps the warm shape allocation-free.
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
-        // I4 fail-closed: an association that died without recovering refuses the datagram before
-        // the gate and before the socket, so the coordinator tears the flow down with the
-        // association-lost reason instead of writing to a relay endpoint that no longer exists.
-        // One volatile field read plus a reference read; the exception itself is cold.
-        if (_lease.IsFaulted) throw new UdpAssociationLostException("The flow's SOCKS5 UDP association was lost; the flow must be re-established.", _lease.Fault);
+        // I4 fail-closed: an association whose control stream ended refuses the datagram before the
+        // gate and before the socket, so the coordinator tears the flow down with the
+        // association-lost reason instead of writing to a relay no one is watching. One volatile
+        // read plus a reference read; the exception itself is cold and already carries the death.
+        if (_association.Fault is { } lost) throw lost;
         var gateWait = _sendGate.WaitAsync(cancellationToken);
         if (!gateWait.IsCompletedSuccessfully)
         {
@@ -267,17 +279,16 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
 
             try
             {
-                _ = _socket.SendTo(_sendBuffer.AsSpan(0, written), SocketFlags.None, CurrentRelaySocketAddress());
+                _ = _socket.SendTo(_sendBuffer.AsSpan(0, written), SocketFlags.None, _relaySocketAddress);
             }
             catch (SocketException)
             {
                 return SendOverlappedAsync(written, cancellationToken);
             }
 
-            // Recorded only after the kernel accepted the datagram, so the capability sampler's
-            // send-side evidence counts datagrams that actually went out (I3: one interlocked
-            // increment, no allocation).
-            _lease.RecordDatagramSent();
+            // Recorded only after the kernel accepted the datagram, so the one-shot retention class
+            // reads sends that actually went out (I3: one interlocked increment, no allocation).
+            RecordDatagramSent();
             _sendGate.Release();
             return ValueTask.CompletedTask;
         }
@@ -298,8 +309,8 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
                 throw new IOException("A SOCKS5 UDP datagram exceeded the relay send buffer.");
             }
 
-            _ = await _socket.SendToAsync(_sendBuffer.AsMemory(0, written), SocketFlags.None, CurrentRelaySocketAddress(), cancellationToken).ConfigureAwait(false);
-            _lease.RecordDatagramSent();
+            _ = await _socket.SendToAsync(_sendBuffer.AsMemory(0, written), SocketFlags.None, _relaySocketAddress, cancellationToken).ConfigureAwait(false);
+            RecordDatagramSent();
         }
         finally
         {
@@ -311,8 +322,8 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
     {
         try
         {
-            _ = await _socket.SendToAsync(_sendBuffer.AsMemory(0, written), SocketFlags.None, CurrentRelaySocketAddress(), cancellationToken).ConfigureAwait(false);
-            _lease.RecordDatagramSent();
+            _ = await _socket.SendToAsync(_sendBuffer.AsMemory(0, written), SocketFlags.None, _relaySocketAddress, cancellationToken).ConfigureAwait(false);
+            RecordDatagramSent();
         }
         finally
         {
@@ -321,39 +332,20 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
     }
 
     /// <summary>
-    /// The relay destination for the next send. The comparison is a reference check against the
-    /// immutable publication the association replaces once per re-association, so the warm path
-    /// stays allocation-free and its rebind reads the endpoint of the very publication it adopted;
-    /// the rebind itself runs inside the send gate, which serializes it, so concurrent senders
-    /// cannot race two registrations.
+    /// Records one datagram this flow sent successfully. One interlocked increment, no allocation —
+    /// this is the whole hot-path accounting addition (I3).
     /// </summary>
-    private SocketAddress CurrentRelaySocketAddress()
-    {
-        var current = _lease.RelayTarget;
-        return ReferenceEquals(current, _relayTarget) ? current.SocketAddress : RebindRelay(current);
-    }
+    private void RecordDatagramSent() => Interlocked.Increment(ref _datagramsSent);
 
     /// <summary>
-    /// Adopts a relay endpoint published by an in-place re-association. The self-traffic tuple is
-    /// keyed by remote endpoint, so the old registration no longer covers this socket's traffic
-    /// and must be replaced, not merely supplemented. Cold by construction: once per re-associated
-    /// flow.
+    /// Records the first relay datagram this flow decoded successfully. A plain volatile read
+    /// short-circuits every later response, so the flag costs one interlocked operation per flow,
+    /// not per datagram.
     /// </summary>
-    private SocketAddress RebindRelay(UdpRelayTarget relay)
+    private void RecordResponseReceived()
     {
-        var registration = _selfTraffic.Register(new SelfTrafficRegistry.SelfTrafficKey(
-            TransportProtocol.Udp,
-            _localRelayEndpoint,
-            Endpoint.From(relay.Endpoint.Address, checked((ushort)relay.Endpoint.Port))));
-        // The destination is adopted only once its tuple is registered, so a failed registration
-        // leaves the rebind to be retried by the next send.
-        Volatile.Write(ref _relayTarget, relay);
-        Interlocked.Exchange(ref _selfTrafficToken, registration)?.Dispose();
-        // Disposal does not take the send gate, so it may have swapped the token out while this
-        // rebind ran; releasing the tuple here keeps a dead transport's registration from outliving
-        // it in the process-wide registry, where a reused local port could match it.
-        if (Volatile.Read(ref _disposed) != 0 && ReferenceEquals(Interlocked.Exchange(ref _selfTrafficToken, value: null), registration)) registration.Dispose();
-        return relay.SocketAddress;
+        if (Volatile.Read(ref _sawResponse) != 0) return;
+        _ = Interlocked.Exchange(ref _sawResponse, 1);
     }
 
     /// <summary>
@@ -378,9 +370,8 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
             return UdpTransportReceiveResult.Skipped(skipReason);
         }
         // Per-datagram anomalies skip one datagram instead of throwing: a single bad relay
-        // datagram must not terminate the session's receive loop (R2). The relay endpoint is read
-        // through the lease so a re-associated flow validates against its current relay.
-        var relay = _lease.RelayEndpoint;
+        // datagram must not terminate the session's receive loop (R2).
+        var relay = _association.RelayEndpoint;
         if (!IsAcceptableRelaySource(result.RemoteEndPoint, relay)) return UdpTransportReceiveResult.Skipped(UdpTransportSkipReason.UnexpectedSource);
         if (IsPossiblyTruncated(result.ReceivedBytes, buffer.Length)) return UdpTransportReceiveResult.Skipped(UdpTransportSkipReason.Oversized);
         // M2: the SOCKS5 UDP wire format carries no interface scope, so propagate the relay
@@ -390,7 +381,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
         if (!Socks5UdpCodec.TryDecode(buffer[..result.ReceivedBytes], out var datagram, scopeId)) return UdpTransportReceiveResult.Skipped(UdpTransportSkipReason.Malformed);
         // Only a datagram that decoded proves this flow's replies come back: a skip is one anomaly,
         // not evidence that the server answered (design §5).
-        _lease.RecordResponseReceived();
+        RecordResponseReceived();
         // Both types are readonly record structs, so this field-for-field mapping is a plain struct
         // copy and adds no allocation to the receive path.
         return UdpTransportReceiveResult.Received(new UdpTransportDatagram(datagram.DestinationAddress, datagram.DestinationDomain, datagram.DestinationPort, datagram.Payload));
@@ -437,10 +428,10 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
         UdpTransportReceiveClassifier.ClassifyFault(exception);
 
     /// <summary>
-    /// Releases the relay socket, its self-traffic tuple, and the association lease — exactly once,
-    /// through every path, even when an earlier release throws. The lease release is what decrements
-    /// the shared association's refcount (and closes a private association), so it must run before
-    /// the send gate is disposed.
+    /// Releases the relay socket, its self-traffic tuple, the flow's association (its control
+    /// connection and its watchdog), and the send gate — exactly once, through every path, even when
+    /// an earlier release throws. The association is disposed before the send gate because its
+    /// watchdog is a scope child whose join must not race the gate's disposal.
     /// </summary>
     public async ValueTask DisposeAsync()
     {
@@ -455,13 +446,13 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
         {
             try
             {
-                Interlocked.Exchange(ref _selfTrafficToken, value: null)?.Dispose();
+                _selfTrafficToken?.Dispose();
             }
             finally
             {
                 try
                 {
-                    await _lease.DisposeAsync().ConfigureAwait(false);
+                    await _association.DisposeAsync().ConfigureAwait(false);
                 }
                 finally
                 {

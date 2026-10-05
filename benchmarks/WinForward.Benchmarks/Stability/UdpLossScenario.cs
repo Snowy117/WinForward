@@ -45,7 +45,7 @@ internal static class UdpLossScenario
         await using var server = new LoopbackSocks5UdpServer(receiver.Endpoint);
         var sink = new CountingUdpResponseSink();
         var productEvents = new CountingRuntimeLogger(CaptureProductEvents);
-        await using var scope = new CoordinatorScope(sink, options.Flows, options.ReuseMode, productEvents);
+        await using var scope = new CoordinatorScope(sink, options.Flows, productEvents);
         var coordinator = scope.Coordinator;
         SenderStats stats;
         try
@@ -168,19 +168,16 @@ internal static class UdpLossScenario
         private readonly NativeBufferPool _setupQueuePool;
         private readonly NativeBufferPool _receiveWindowPool;
         private readonly SetupExecutor _setupExecutor;
-        private readonly UdpAssociationPool _associations;
 
-        public CoordinatorScope(IUdpResponseSink sink, int capacity, UdpAssociationReuseMode reuseMode, IRuntimeLogger logger)
+        public CoordinatorScope(IUdpResponseSink sink, int capacity, IRuntimeLogger logger)
         {
             const int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame;
             _setupQueuePool = new NativeBufferPool(maximumFrameSize);
             _receiveWindowPool = new NativeBufferPool(UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize));
             _setupExecutor = new SetupExecutor();
             var registry = new SelfTrafficRegistry();
-            // The census logger goes to the pool too, because the fallback warn is a pool event.
-            _associations = new UdpAssociationPool(registry, reuseMode, logger: logger);
             Coordinator = new UdpProxyCoordinator(
-                new Socks5UdpTransportFactory(_associations, registry, maximumFrameSize),
+                new Socks5UdpTransportFactory(registry, maximumFrameSize, logger: logger),
                 sink,
                 _setupQueuePool,
                 _receiveWindowPool,
@@ -190,14 +187,14 @@ internal static class UdpLossScenario
 
         public UdpProxyCoordinator Coordinator { get; }
 
-        public async ValueTask DisposeAsync()
+        public ValueTask DisposeAsync()
         {
-            // The coordinator drained every session (and with it every association lease) before
-            // the pool is closed.
-            await _associations.DisposeAsync().ConfigureAwait(false);
+            // The coordinator drained every session (and with it that session's own association)
+            // before the native pools are released.
             _setupExecutor.Dispose();
             _receiveWindowPool.Dispose();
             _setupQueuePool.Dispose();
+            return ValueTask.CompletedTask;
         }
     }
 

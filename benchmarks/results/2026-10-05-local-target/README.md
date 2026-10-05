@@ -1,5 +1,18 @@
 # 2026-10-05 local targets — the local-hop column beside the reuse columns
 
+> **Removed feature, 2026-10-05 (task `10-05-remove-udp-association-sharing`, R6).** This directory's
+> `--reuse auto` column (`churn-auto.jsonl`, `burst-auto.jsonl`) measures UDP association sharing,
+> which no longer exists: the three configuration keys were removed, the pool / lease /
+> control-association / capability machinery was deleted, and a proxy-decided flow now owns its own
+> authenticated association. Its `--reuse off` column measured the placement that **did** ship (one
+> association per flow), but it was recorded through the same knob, so both reuse columns' commands
+> are **historical**: `--reuse` is gone from the harness, and a command line that still passes it
+> fails at parse with the harness's unknown-argument error. The `--target local` column never
+> consulted the pool; its rows and metadata nonetheless carry the then-default `reuseMode: auto` /
+> `reuse: auto` fields, which now name a removed knob. Confirmation series for the surviving columns:
+> [`../2026-10-05-no-association-sharing/`](../2026-10-05-no-association-sharing/README.md).
+> **No number in this directory was edited or deleted** — this note is the only change.
+
 Task `10-05-local-dns-transport` (child of `10-05-udp-association-sharing-correctness`, R7). This
 directory is the measured column for the local transport: the same flows, pacing, sinks, and wave
 shape as the reuse columns, sent through the **product** `UdpTransportFactory` composite to a

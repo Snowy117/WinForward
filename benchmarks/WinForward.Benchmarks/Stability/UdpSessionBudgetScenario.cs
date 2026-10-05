@@ -12,7 +12,8 @@ namespace WinForward.Benchmarks.Stability;
 /// <c>--rate</c> flows/s for <c>--churn-seconds</c>, then a <c>--drain-seconds</c> window with no new
 /// flows, with the coordinator's idle expiry driven on the production sweeper cadence for the
 /// validated 30 s UDP idle retention. Every ~5 s one row reports the live sessions, the proxy's own
-/// descriptors, the estimated kernel receive buffer, the pool's associations/leases, the
+/// descriptors, the estimated kernel receive buffer, the harness SOCKS5 server's live control
+/// connections (the row's <c>associations</c> column), the
 /// accepted/rejected/expired counters, the datagram loss, and the per-session descriptor/byte ratios;
 /// the final row is the run's verdict.
 /// <para>
@@ -22,16 +23,15 @@ namespace WinForward.Benchmarks.Stability;
 /// instead of the cumulative flow count; the estimated kernel receive buffer stays inside the same
 /// ceiling in bytes; the descriptor delta stays inside the per-session budget (one relay socket per
 /// live session plus one control connection per association); and the drain returns to zero sessions,
-/// zero leases, zero associations, and the pre-churn descriptor baseline. While the population fits
-/// the pool's shared budget, the run additionally requires the association count to follow the shared
-/// fan-out — the direct evidence that control connections are reused — and beyond it reports the
-/// saturation the pool's per-flow fallback produces instead.
+/// zero control connections the harness server still holds, and the pre-churn descriptor baseline. The
+/// shipped shape serves every flow from its own association, so the rows' <c>associations</c> column —
+/// the server's own live count — tracks their <c>sessions</c> column from the peer's side instead of
+/// copying it, and the budget's control-connection term is charged per live flow.
 /// </para>
 /// <para>
 /// A churn window whose cumulative flow count does not exceed the ceiling cannot discriminate
 /// retention from accumulation, so the scenario refuses it before the load instead of recording it as
-/// evidence (<see cref="SessionBudgetMath.NonDiscriminatingChurnWindow"/>); <c>--require-pooling</c>
-/// turns the same refusal on the pooling half, which a saturated population would otherwise skip.
+/// evidence (<see cref="SessionBudgetMath.NonDiscriminatingChurnWindow"/>).
 /// </para>
 /// <para>
 /// The run mirrors two production wiring points rather than re-deriving them: the sweep interval comes
@@ -61,6 +61,9 @@ internal static class UdpSessionBudgetScenario
 
     private static readonly TimeSpan s_mainSweepInterval = TimeSpan.FromMinutes(1);
 
+    /// <summary>The warm-up population: one churn-second's worth of arrivals, capped so the warm-up does not dominate a short churn window.</summary>
+    private const int MaximumWarmupFlows = 16;
+
     /// <summary>One key per flow id, in id order: the run sends with these and the sink resolves a reply's sender by indexing them.</summary>
     private static FlowKey[] CreateFlowKeys(int flowCount)
     {
@@ -79,9 +82,9 @@ internal static class UdpSessionBudgetScenario
         // and the 5 s one-shot class, was 15 s under uniform retention).
         var sweepInterval = IdleExpirySweeper.DeriveUdpSweepInterval(s_mainSweepInterval, IdleExpirySweeper.EffectiveUdpRetentionFloor(idleTimeout, oneShotIdleTimeout), udpSweepInterval: null);
         ValidateChurnWindow(options, idleTimeout, sweepInterval);
-        // Warm-up flows: one shared association's worth at the configured fan-out bound, without
-        // dominating a short churn window.
-        var warmupFlows = Math.Min(options.Rate, ConfigurationLoader.DefaultUdpAssociationFlowsPerAssociation);
+        // Warm-up flows: one churn-second's worth of preliminary arrivals, without dominating a
+        // short churn window.
+        var warmupFlows = Math.Min(options.Rate, MaximumWarmupFlows);
         var churnFlows = checked(options.Rate * options.ChurnSeconds);
         var flowCapacity = checked(warmupFlows + churnFlows);
 
@@ -99,16 +102,14 @@ internal static class UdpSessionBudgetScenario
         using var receiveWindowPool = new NativeBufferPool(UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize));
         using var setupExecutor = new SetupExecutor();
         var registry = new SelfTrafficRegistry();
-        // The census logger goes to the pool too, because the fallback warn is a pool event.
-        await using var associations = new UdpAssociationPool(registry, options.ReuseMode, logger: productEvents);
         var coordinator = new UdpProxyCoordinator(
-            new Socks5UdpTransportFactory(associations, registry, maximumFrameSize),
+            new Socks5UdpTransportFactory(registry, maximumFrameSize, logger: productEvents),
             sink,
             setupQueuePool,
             receiveWindowPool,
             setupExecutor,
             new UdpProxyOptions { Capacity = options.Capacity, Logger = productEvents });
-        var run = new UdpSessionBudgetRun(context, options, coordinator, associations, sink, sampler, productEvents, flowKeys, idleTimeout, oneShotIdleTimeout, sweepInterval, warmupFlows, churnFlows);
+        var run = new UdpSessionBudgetRun(context, options, coordinator, sink, sampler, productEvents, flowKeys, idleTimeout, oneShotIdleTimeout, sweepInterval, warmupFlows, churnFlows);
         try
         {
             var controlPort = checked((ushort)(externalServer?.ControlEndpoint.Port ?? server!.ControlEndpoint.Port));

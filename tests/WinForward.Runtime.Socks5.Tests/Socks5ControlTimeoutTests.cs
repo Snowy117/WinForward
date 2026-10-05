@@ -145,24 +145,24 @@ public sealed class Socks5ControlTimeoutTests
         var server = ServeAdvertisedAssociateAsync(tcpListener, advertised, serverCancellation.Token);
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
         var registry = new SelfTrafficRegistry();
-        await using var fixture = await UdpTransportTestFactory.CreateAsync(socksServer, registry);
-        var transport = fixture.Transport;
-        Assert.Equal(advertised, transport.PeerEndpoint);
+        await using (var transport = await UdpTransportTestFactory.CreateAsync(socksServer, registry))
+        {
+            Assert.Equal(advertised, transport.PeerEndpoint);
 
-        using var sender = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-        sender.Bind(new IPEndPoint(IPAddress.Parse("127.0.0.2"), relayEndpoint.Port));
-        var datagram = Socks5UdpDatagrams.Encode(IPAddress.Parse("192.0.2.53"), 53, [0xab]);
-        await sender.SendToAsync(datagram, SocketFlags.None, new IPEndPoint(IPAddress.Loopback, transport.LocalEndpoint.Port), CancellationToken.None);
+            using var sender = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            sender.Bind(new IPEndPoint(IPAddress.Parse("127.0.0.2"), relayEndpoint.Port));
+            var datagram = Socks5UdpDatagrams.Encode(IPAddress.Parse("192.0.2.53"), 53, [0xab]);
+            await sender.SendToAsync(datagram, SocketFlags.None, new IPEndPoint(IPAddress.Loopback, transport.LocalEndpoint.Port), CancellationToken.None);
 
-        var buffer = new byte[65_535];
-        using var receiveBudget = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        var response = await transport.ReceiveAsync(buffer, receiveBudget.Token);
-        Assert.True(response.HasDatagram);
-        Assert.Equal((IPAddressValue?)IPAddress.Parse("192.0.2.53"), response.Datagram.SourceAddress);
-        Assert.Equal(53, response.Datagram.SourcePort);
-        Assert.Equal(new byte[] { 0xab }, response.Datagram.Payload.ToArray());
+            var buffer = new byte[65_535];
+            using var receiveBudget = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var response = await transport.ReceiveAsync(buffer, receiveBudget.Token);
+            Assert.True(response.HasDatagram);
+            Assert.Equal((IPAddressValue?)IPAddress.Parse("192.0.2.53"), response.Datagram.SourceAddress);
+            Assert.Equal(53, response.Datagram.SourcePort);
+            Assert.Equal(new byte[] { 0xab }, response.Datagram.Payload.ToArray());
+        }
 
-        await transport.DisposeAsync();
         await server;
     }
 

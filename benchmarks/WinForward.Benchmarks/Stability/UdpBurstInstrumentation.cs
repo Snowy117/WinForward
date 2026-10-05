@@ -179,10 +179,11 @@ internal sealed class BackgroundSender(
 /// <para>
 /// Both populations are bounded by the <paramref name="flowKeys"/> the scenario sent with, and a
 /// response counts only for the flow it arrived on: the payload carries the sender's flow id, the
-/// <c>originalFlow</c> argument is the flow whose relay socket the reply came in on, and a shared
-/// association's server replies to its last sender. A reply that fails that test is marked against
-/// its sender and returns before the burst branch, so it can never become a first response — and
-/// before the tracker, so a misdelivered warm-up reply is not attributed to an in-flight datagram.
+/// <c>originalFlow</c> argument is the flow whose relay socket the reply came in on, and a server
+/// may answer from another endpoint or write to its last sender. A reply that fails that test is
+/// marked against its sender and returns before the burst branch, so it can never become a first
+/// response — and before the tracker, so a foreign warm-up reply is not attributed to an in-flight
+/// datagram.
 /// </para>
 /// </summary>
 internal sealed class BurstCountingSink(int backgroundFlows, int burstFlows, InFlightTracker tracker, FlowKey[] flowKeys) : IUdpResponseSink

@@ -9,11 +9,11 @@ namespace WinForward.TestSupport;
 
 /// <summary>
 /// A loopback SOCKS5 server that serves the greeting plus UDP ASSOCIATE on every accepted control
-/// connection and then holds it open, so tests can drive many associations through the pool and
-/// observe when the client's control connection ends. Each connection advertises the configured
-/// relay endpoint unless <see cref="AdvertiseNext"/> overrides it for the next one (the
-/// re-association shape), and <see cref="DropControlConnections"/> closes the live connections the
-/// way a restarting SOCKS5 server does.
+/// connection and then holds it open, so tests can drive one association per flow and observe when the
+/// client's control connection ends. Each connection advertises the configured relay endpoint — or the
+/// factory's per-connection one, so a test can tell two associations apart — and
+/// <see cref="DropControlConnections"/> closes the live connections the way a restarting SOCKS5 server
+/// does.
 /// </summary>
 internal sealed class ScriptedSocks5UdpServer : IAsyncDisposable
 {
@@ -22,8 +22,6 @@ internal sealed class ScriptedSocks5UdpServer : IAsyncDisposable
     private readonly TcpListener _listener;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly ConcurrentDictionary<Socket, byte> _controls = new();
-    private readonly Queue<IPEndPoint> _advertised = new();
-    private readonly Lock _gate = new();
     private readonly Task _acceptLoop;
     private int _connections;
     private int _liveConnections;
@@ -89,12 +87,6 @@ internal sealed class ScriptedSocks5UdpServer : IAsyncDisposable
     /// load-bearing: publish the counter, then this hook, then the write.
     /// </summary>
     public Func<CancellationToken, ValueTask>? AssociateReplyWriteGate { get; set; }
-
-    /// <summary>Advertises <paramref name="relayEndpoint"/> on the next control connection only.</summary>
-    public void AdvertiseNext(IPEndPoint relayEndpoint)
-    {
-        lock (_gate) _advertised.Enqueue(relayEndpoint);
-    }
 
     /// <summary>Closes every live control connection without stopping the listener: the peers observe EOF.</summary>
     public void DropControlConnections()
@@ -182,7 +174,7 @@ internal sealed class ScriptedSocks5UdpServer : IAsyncDisposable
                     await stream.ReadExactlyAsync(remainder, token).ConfigureAwait(false);
                 }
 
-                var relay = TakeAdvertised(ordinal);
+                var relay = _relayEndpointFactory?.Invoke(ordinal) ?? _relayEndpoint;
                 var addressBytes = relay.Address.GetAddressBytes();
                 var reply = new byte[4 + addressBytes.Length + 2];
                 reply[0] = 5;
@@ -218,15 +210,5 @@ internal sealed class ScriptedSocks5UdpServer : IAsyncDisposable
             Interlocked.Decrement(ref _liveConnections);
             _controls.TryRemove(socket, out _);
         }
-    }
-
-    private IPEndPoint TakeAdvertised(int ordinal)
-    {
-        lock (_gate)
-        {
-            if (_advertised.Count > 0) return _advertised.Dequeue();
-        }
-
-        return _relayEndpointFactory?.Invoke(ordinal) ?? _relayEndpoint;
     }
 }

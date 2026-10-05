@@ -218,15 +218,15 @@ UDP session setup, or the SOCKS5 benchmark/soak suite.
   comparable. The N=48/D=0 churn wave cell was re-measured at 12,560.3 B/session after the
   09-22-udp-teardown-session-tier-alloc reductions (−688.6; the full wave matrix, sustained shape
   and real probe were not re-run, so those bands stand with additional headroom). Reusing control
-  connections was the only structural lever there — a product/protocol
-  decision whose allocatable share is the ~3.8 KB/session per-flow dial; that lever is now landed
-  (default-on association pooling, see the section below), and the recorded pooled `udp.churn`
-  shape is **7,577.5 B/session** (`auto`) / 7,556.7–7,564.7 (`always`, check–implementer) against
-  the 13,066.5 B/session per-flow Step 1 run in `benchmarks/results/2026-09-28-udp-reuse/`. The
-  anchors in this bullet stay per-flow on purpose: `UdpSessionBenchmarks` and
-  `FrameworkSetupBenchmarks` still construct the pool with `UdpAssociationReuseMode.Off`, so each
-  recorded number keeps comparing against the shape it was measured on instead of silently
-  re-basing. Anchor falsification: a
+  connections was the only structural lever there — a product/protocol decision whose allocatable
+  share is the ~3.8 KB/session per-flow dial. It was landed as association pooling and then removed
+  again (it misdelivers replies at concurrency; see the per-flow section below), so the pooled
+  `udp.churn` shape it recorded — **7,577.5 B/session** (`auto`) / 7,556.7–7,564.7 (`always`,
+  check–implementer) in `benchmarks/results/2026-09-28-udp-reuse/` against the 13,066.5 B/session
+  per-flow Step 1 run — is history, and no anchor is re-based onto it. The anchors in this bullet
+  are per-flow: `UdpSessionBenchmarks` and `FrameworkSetupBenchmarks` build one association per
+  session through the per-flow factory, so each recorded number keeps comparing against the shape it
+  was measured on. Anchor falsification: a
   documented ≥3-run batch above the framework/churn anchors on an unmodified tree, with the
   in-process ratio still ≈10.5×, is product drift to fix (never to relax); if the in-process
   value moves with it, the harness changed and the anchor is re-derived.
@@ -790,26 +790,24 @@ await using var server = await ExternalLoopbackSocks5UdpServer.StartAsync(flows,
 _socks = new Socks5Server("benchmark", "127.0.0.1", (ushort)server.ControlEndpoint.Port, null, null);
 ```
 
-## UDP association pooling: counters, capability-evidence cost, and the re-based churn shape (task 09-28-udp-association-reuse, 2026-09-28)
+## UDP per-flow association: counters, evidence cost, and the recorded anchors (re-scoped 2026-10-05, task 10-05-remove-udp-association-sharing)
 
 ### 1. Scope / Trigger
 
-Trigger: any change to `Socks5UdpTransport`'s established-datagram path, the per-lease capability
-evidence, the UDP association counters, or a recorded UDP framework/churn anchor. The pooling
-contract itself (placement, capability verdict, recovery, retention) is in
+Trigger: any change to `Socks5UdpTransport`'s established-datagram path, the per-flow exchange
+evidence, the UDP association counters, or a recorded UDP framework/churn anchor. The ownership
+contract itself (one flow, one association, one relay socket; death and fail-closed) is in
 [udp-relay.md](./udp-relay.md).
 
 ### 2. Signatures
 
-- `UdpAssociationEvidence` (`UdpProxy/UdpAssociationCapability.cs`): `DatagramsSent` and
-  `SawResponse` (reads), `RecordDatagramSent()` (one `Interlocked.Increment`),
-  `RecordResponseReceived()` (a `Volatile.Read` short-circuit plus a write-once
-  `Interlocked.Exchange`).
-- `UdpAssociationLease.RecordDatagramSent()` / `RecordResponseReceived()` — the transport's only
-  per-datagram calls, and the whole hot-path addition of the pooling change.
-- `RuntimeCounters`: `UdpCapacityRejections`, `UdpSetupFailures`, `UdpAssociationLost`,
-  `UdpAssociationRecovered`, `UdpAssociationFallbacks` (alongside the pre-existing
-  `UdpSetupRejections` / `UdpSetupBudgetRejections`).
+- `Socks5UdpTransport` implements `IUdpExchangeCounters` over its own two fields: `DatagramsSent`
+  (one `Interlocked.Increment` per accepted send), `SawResponse` (a `Volatile.Read` short-circuit
+  plus a write-once `Interlocked.Exchange`).
+- `Socks5UdpTransport.SendSpanAsync` / `ReceiveAsync` call `RecordDatagramSent()` /
+  `RecordResponseReceived()` — the transport's only per-datagram accounting calls.
+- `RuntimeCounters`: `UdpCapacityRejections`, `UdpSetupFailures`, `UdpAssociationLost` (alongside
+  the pre-existing `UdpSetupRejections` / `UdpSetupBudgetRejections`).
 - Transport defaults: `Socks5UdpTransport.DefaultRelaySocketReceiveBufferSize = 64 * 1024`;
   `ConfigurationLoader.DefaultUdpRelayReceiveBufferKb = 64`;
   `ConfigurationLoader.DefaultUdpSessionIdleTimeout = 30 s`, with
@@ -818,31 +816,30 @@ contract itself (placement, capability verdict, recovery, retention) is in
 
 ### 3. Contracts
 
-- **The established-datagram path gains four allocation-free operations.** (1) One volatile read
-  of the lease's fault state (a null check), so an association that died without recovery refuses
-  the datagram before the send gate and before the socket (I4). (2) One reference compare
-  of the cached relay publication against the lease's current one, so an in-place re-association
-  redirects the next send without re-serializing an endpoint or touching the socket. (3) One
-  `Interlocked.Increment` on the lease's evidence, recorded only after the kernel accepted the
-  datagram — every send shape (warm sync `SendTo`, the overlapped async fallback, and the
-  contended-gate tail) calls it exactly once. (4) On the receive side, a write-once response flag:
-  the first successfully decoded relay datagram pays one `Interlocked.Exchange`, and a volatile
-  read short-circuits every later response. No pool interaction, no allocation, no state machine.
+- **The established-datagram path gains three allocation-free operations.** (1) One volatile read
+  of the association's fault state (a null check), so a flow whose control stream ended refuses the
+  datagram before the send gate and before the socket (I4). (2) One `Interlocked.Increment` on the
+  transport's own send counter, recorded only after the kernel accepted the datagram — every send
+  shape (warm sync `SendTo`, the overlapped async fallback, and the contended-gate tail) calls it
+  exactly once. (3) On the receive side, a write-once response flag: the first successfully decoded
+  relay datagram pays one `Interlocked.Exchange`, and a volatile read short-circuits every later
+  response. The relay target is one `SocketAddress` the association serialized once at connect time
+  and the transport cached at construction, so no send re-serializes an endpoint, compares a
+  publication, or rebinds a registration. No allocation, no state machine.
 - **Nothing is recorded per skipped datagram.** `UnexpectedSource`, `Oversized`, `Malformed`, and
   `ConnectionReset` return before `RecordResponseReceived()`, so a skip is an anomaly, never
-  evidence that a server answered — the capability rule depends on that distinction.
+  evidence that a server answered — the one-shot retention class depends on that distinction.
 - **Counter semantics and one-shot events.** `udpCapacityRejections` counts each datagram refused
   at the session-capacity gate (the accompanying `udp.session.capacity-block` warn is rate-limited
   to 5 s); `udpSetupFailures` counts each genuine setup failure — dial, ASSOCIATE, or session
   construction — and is exactly the set that arms the 1 s setup cooldown (shutdown cancellation
   and `UdpAssociationLostException` are deliberately not counted here); `udpAssociationLost`
-  counts each send failure classified as `UdpTeardownReason.AssociationLost`, i.e. once per attached
-  flow that failed its next send after the association faulted (both the ready path and the
-  setup-queue flush map through `UdpProxyCoordinator.TeardownReasonFor`), so one association death
-  increments it up to `udpAssociationFlowsPerAssociation` times; `udpAssociationRecovered` counts each
-  successful in-place re-association (debug `udp.association.recovered`); `udpAssociationFallbacks`
-  counts each server flipped to per-flow associations for the run, at most once per server (the
-  gate-guarded sticky verdict is what makes the warn and the counter one-shot together).
+  counts each send failure classified as `UdpTeardownReason.AssociationLost` — with one flow per
+  association that is one increment for the flow whose next send found its association dead (both
+  the ready path and the setup-queue flush map through
+  `UdpProxyCoordinator.TeardownReasonFor`), while the rate-limited `udp.association.lost` warn
+  reports the death itself. An association that dies while its flow is idle moves no counter:
+  nothing sends, so nothing is classified.
 - **The recorded framework/churn anchors are per-flow shapes and stay comparable.** The default
   relay receive buffer is **64 KiB** per socket (128 KiB through the F6 task's Step 1, a hard-coded
   512 KiB before that) and the session retention is the **two-class** shape: the configured
@@ -854,21 +851,19 @@ contract itself (placement, capability verdict, recovery, retention) is in
   (`benchmarks/results/2026-10-01-udp-session-footprint/`) re-ran the loss/burst/churn anchors on the
   shipped shape and they held (loss 0, burst 48/48 with `establishmentLossRate` 0, churn inside its
   ≤8,200 B/session band), so the numbers below keep their meaning without a re-base. `UdpSessionBenchmarks` and
-  `FrameworkSetupBenchmarks` still construct the pool with `UdpAssociationReuseMode.Off`, so the
-  ≤5,400 B/session Noop probe, the ≤8,200 B/session framework ladder, and the
-  ≤14,500/≤14,300/≤17,500 churn anchors continue to describe the per-flow shape they were recorded
-  on.
-- **Pooling re-bases the control-connection half, not the relay-socket half.** One authenticated
-  control connection plus one ASSOCIATE now serve up to `udpAssociationFlowsPerAssociation` flows,
-  so the per-flow control connect + greeting (~3.8 KB/session of the framework path, plus the
-  per-flow ASSOCIATE) is amortized while each flow keeps its relay socket and its per-flow
-  bookkeeping. Recorded
-  (`benchmarks/results/2026-09-28-udp-reuse/`, 48-flow × 120 s sustained churn, out-of-process
-  SOCKS5 server): **13,066.5 B/session** per-flow at Step 1 → **7,556.7 / 7,564.7** (`always`,
-  check / implementer runs) / **7,577.5** (`auto`, Step 3). The same directory's `udp.sessionBudget` soak records the
-  descriptor ratio: 1.94–1.95 descriptors per live session at 100 new flows/s while the pooled head
-  was saturated at the pool's original 256 flows per server, and 1.06 in the pooled regime (rate 5)
-  — the descriptor floor stays ≈1 per live flow plus one control connection per association.
+  `FrameworkSetupBenchmarks` build one association per session through the per-flow
+  `Socks5UdpTransportFactory`, so the ≤5,400 B/session Noop probe, the ≤8,200 B/session framework
+  ladder, and the ≤14,500/≤14,300/≤17,500 churn anchors continue to describe the per-flow shape they
+  were recorded on.
+- **The pooling series describes a removed feature.** The 2026-09-28 churn series measured
+  **13,066.5 B/session** per-flow at Step 1 → **7,556.7 / 7,564.7** (`always`) / **7,577.5**
+  (`auto`) with up to sixteen flows sharing one authenticated control connection, and the
+  `udp.sessionBudget` soak recorded 1.06–1.95 descriptors per live flow against that shared head.
+  Sharing was removed (it misdelivers replies at concurrency and the misdelivery is undetectable
+  when two flows share a destination), so those numbers are history: the results directory carries
+  the "removed feature" note and no recorded anchor may be re-based onto them. The shipped shape is
+  the recorded `off`/per-flow column — two descriptors per live flow (control connection + relay
+  socket), which `UdpSessionBudgetRun` now reports from the live session count itself.
 - **The counters are observational only** and never influence packet disposition, fail-closed,
   recovery, or shutdown decisions (the `RuntimeCounters` contract).
 
@@ -876,28 +871,25 @@ contract itself (placement, capability verdict, recovery, retention) is in
 
 | Condition | Required result |
 |---|---|
-| Warm sync send accepted by the kernel | one evidence increment, 0 B, no pool interaction |
+| Warm sync send accepted by the kernel | one counter increment, 0 B, no association interaction beyond the fault read |
 | Contended gate / overlapped async send accepted | same one increment on the send tail, still 0 B on the fast path |
 | Relay datagram skipped (source/oversize/malformed/reset) | no evidence recorded |
-| First decoded relay datagram for a lease | write-once response flag set (one `Interlocked.Exchange` per lease) |
+| First decoded relay datagram for a flow | write-once response flag set (one `Interlocked.Exchange` per flow) |
 | Session capacity full | datagram refused, `udpCapacityRejections`++, rate-limited `udp.session.capacity-block` warn |
 | Genuine setup failure | `udpSetupFailures`++, 1 s setup cooldown armed, rate-limited warn |
-| Association faulted, attached flow fails its next send | `udpAssociationLost`++, `AssociationLost` removal, no cooldown |
-| In-place re-association succeeds | `udpAssociationRecovered`++, debug `udp.association.recovered`, no session touched |
-| Server detected as source-port-pinning | `udpAssociationFallbacks`++ and `udp.association.fallback` warn once per server per run |
-| Framework/churn instrument run on the pooled default | forbidden — the instruments stay on `off`, so each anchor keeps its recorded per-flow shape |
+| Flow's association dead, its next send fails | `udpAssociationLost`++, `AssociationLost` removal, no cooldown, one rate-limited `udp.association.lost` warn for the death |
+| Framework/churn instrument run | one association per session through the per-flow factory, so each anchor keeps its recorded per-flow shape |
 
 ### 5. Good/Base/Bad Cases
 
-- Good: a warm pooled datagram is encoded into the transport buffer, sent to the lease's current
-  relay, and costs one interlocked increment; the recorded churn drop to 7,577.5 B/session is the
-  control-connection half of the framework cost, amortized 16 flows to one association.
-- Base: a faulted association's next datagram per attached flow is dropped fail-closed, counted,
-  and re-established through the pool without a cooldown; the relay-socket half of the cost is
-  unchanged from the per-flow shape.
-- Bad: adding a pool interaction, an allocation, or an endpoint materialization to the per-datagram
-  path; recording a response for a skipped datagram (it would let a pinning server look
-  shareable); routing the framework/churn instruments through `auto` and re-basing their anchors.
+- Good: a warm datagram is encoded into the transport buffer, sent to the flow's own relay through
+  the cached `SocketAddress`, and costs one interlocked increment.
+- Base: a flow whose control connection ended has its next datagram dropped fail-closed, counted,
+  and its flow re-established without a cooldown; the relay-socket cost is one socket per live flow,
+  as recorded.
+- Bad: adding an allocation or an endpoint materialization to the per-datagram path; recording a
+  response for a skipped datagram; routing an instrument through a removed pooling mode or re-basing
+  an anchor onto the pooling series.
 
 ### 6. Tests Required
 
@@ -905,34 +897,34 @@ contract itself (placement, capability verdict, recovery, retention) is in
   still pass in isolation (the readiness/thread rules above apply).
 - `Socks5UdpTransportSendTests.WarmSyncSendAllocatesNoManagedBytes` — real relay socket, 0 B on the
   warm shape.
-- `UdpAssociationEvidenceLifetimeTests` / `UdpAssociationCapabilityTests` — evidence is recorded
-  only on successful sends and decoded responses, leaves the live set on release, and the >cap
-  lease case cannot mis-index it.
+- `UdpAssociationLossTests` — the counters move once per flow on a real control-stream death, and no
+  response is recorded for a skipped datagram.
 - `UdpProxyCoordinatorTests` / `UdpSessionSetupTests` — `AssociationLost` counting and the absence
   of a setup cooldown on both the ready path and the flush window, versus a genuine setup failure.
 
 ### 7. Wrong vs Correct
 
 ```csharp
-// Wrong: record the send before the kernel accepted it — the sampler's send-side evidence then
-// counts datagrams that never left the host, and a failing relay looks like a pinning server.
+// Wrong: record the send before the kernel accepted it — the one-shot retention class then counts
+// datagrams that never left the host.
 _ = _socket.SendTo(...);
-_lease.RecordDatagramSent();
+RecordDatagramSent();
 ```
 
 ```csharp
 // Correct: one interlocked increment after acceptance; nothing at all on the skip paths.
-_ = _socket.SendTo(_sendBuffer.AsSpan(0, written), SocketFlags.None, CurrentRelaySocketAddress());
-_lease.RecordDatagramSent();
+_ = _socket.SendTo(_sendBuffer.AsSpan(0, written), SocketFlags.None, _relaySocketAddress);
+RecordDatagramSent();
 ```
 
 ```csharp
-// Wrong: re-basing a recorded per-flow anchor by pointing the framework instrument at the pooled
-// default — the number moves for a harness reason, not a product one.
-await using var associations = new UdpAssociationPool(registry, UdpAssociationReuseMode.Auto);
+// Wrong: look the relay up through a lease on every send — the shape that existed only to follow a
+// re-association that no longer happens.
+var relay = _lease.RelayTarget;
+return ReferenceEquals(relay, _relayTarget) ? relay.SocketAddress : RebindRelay(relay);
 
-// Correct: the instrument keeps the shape its anchor was measured on.
-await using var associations = new UdpAssociationPool(registry, UdpAssociationReuseMode.Off);
+// Correct: the association serialized its own relay once; the transport cached it at construction.
+_ = _socket.SendTo(_sendBuffer.AsSpan(0, written), SocketFlags.None, _relaySocketAddress);
 ```
 
 ## Measurement self-checks (task 09-29-benchmark-coverage-remaining-findings, 2026-09-29)
@@ -973,9 +965,11 @@ because something real slipped through without it.
   sweep past the retention **mass-retires the whole population** and the run measures a sawtooth
   artifact instead of the retention it names. Measured 2026-10-01 (F6): the frozen-clock
   `udp.sessionBudget` read a 4,479-session steady peak before the change and 500 after, and the after
-  run's `poolingCovered` verdict failed because the association high-water mark (60 s warm retention)
-  still reflected the pre-steady transient while the session peak was measured only post-steady; the
-  same tree with the tick mirrored read 4,539 before and 1,014 after, both verdicts green. A verdict
+  run's association term — the pooling-coverage verdict the tree then carried
+  (`verdict.poolingCovered`, removed with association sharing on 2026-10-05) — failed because the
+  association high-water mark (60 s warm retention) still reflected the pre-steady transient while the
+  session peak was measured only post-steady; the same tree with the tick mirrored read 4,539 before
+  and 1,014 after, the surviving `verdict.retentionBounded` green on both arms. A verdict
   that changes when an *instrument* mirror is added is an instrument defect — fix the mirror, never the
   ceiling or the load.
 - **A wall-clock maximum is not an acceptance figure when the host queueing dominates it.**
@@ -1068,14 +1062,13 @@ because something real slipped through without it.
   the per-gate process run in the section below, and the two procedures are not interchangeable.
 - **Gate the tick shape the site actually repeats.** A retiring tick whose teardown `await`s disposal
   outside the gate cannot be byte-exact inside the window (the disposal legitimately allocates and
-  suspends), so the three async sweep legs are gated on a **no-op tick over a populated world** —
+  suspends), so the two async sweep legs are gated on a **no-op tick over a populated world** —
   `TcpRedirectSessionStoreSweepAllocatesNoManagedBytes` (64 registered `Redirecting` sessions + unexpired
-  tombstones), `UdpProxyCoordinatorSweepAllocatesNoManagedBytes` (16 fake-transport sessions) and
-  `UdpAssociationPoolSweepAllocatesNoManagedBytes` (shared associations with outstanding leases, so
-  `CanRetire` is false). The population is the proof that the window is not vacuous: an empty store would
-  green a "skip the scan when empty" fast path. The synchronous tables are gated on their real retiring
-  tick instead. A gate whose driven call can strand a lease must release it **before** asserting (a
-  failing assert that skips the release hangs the pool's drain instead of failing the test).
+  tombstones) and `UdpProxyCoordinatorSweepAllocatesNoManagedBytes` (16 fake-transport sessions). The
+  population is the proof that the window is not vacuous: an empty store would green a "skip the scan when
+  empty" fast path. The synchronous tables are gated on their real retiring tick instead. A gate whose
+  driven call can strand a lease must release it **before** asserting (a failing assert that skips the
+  release hangs the owner's drain instead of failing the test).
 - **The landed shape extends to every exact window in the suite**, not only the two that flaked:
   `CapturePumpReadCallTests.CountingReaderIdleIterationsAllocateNoManagedBytes`,
   `NdisCapturePumpTests.IdlePollIterationsAllocateNoManagedBytes`,

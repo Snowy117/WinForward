@@ -47,7 +47,6 @@ public sealed class LocalTargetDispatchTests
         var adapter = new WindowsAdapter("id-a", "Ethernet", "internal-a", AdapterHandle, 1);
         var slot = FlowBuilders.SlotOf(adapter.StableId, adapter.Generation);
         var targets = new UdpAdapterTargetSource(slots, new UdpAdapterTarget(AdapterHandle, s_hostMac), new Dictionary<ushort, UdpAdapterTarget> { [slot] = new(AdapterHandle, s_hostMac) });
-        await using var associations = new UdpAssociationPool(selfTraffic, configuration.UdpAssociationReuse);
         using var setupExecutor = new SetupExecutor();
         var reinjector = new FakeReinjector();
         var composition = new UdpProxyComposition(
@@ -58,7 +57,6 @@ public sealed class LocalTargetDispatchTests
             TestPools.UdpReceiveWindowPool,
             setupExecutor,
             new Socks5AddressCache(),
-            associations,
             SessionCapacity: configuration.UdpSessionCapacity,
             RelayReceiveBufferBytes: configuration.UdpRelayReceiveBufferBytes);
         await using var coordinator = UdpProxyComposer.Create(reinjector, selfTraffic, logger, healthSignal: null, composition);
@@ -92,11 +90,9 @@ public sealed class LocalTargetDispatchTests
         Assert.Equal(0, reinjector.ToAdapterCount);
 
         // No SOCKS5 control connection and no UDP ASSOCIATE happened: the declared server never saw
-        // this flow, and the pool never placed it.
+        // this flow, and no association was dialed for it.
         Assert.Equal(0, socksServer.ConnectionCount);
         Assert.Equal(0, socksServer.AssociateReplyCount);
-        Assert.Equal(0, associations.AssociationCount);
-        Assert.Equal(0, associations.LeasedFlowCount);
         Assert.Equal(1, RuntimeCounters.Shared.Get(RuntimeCounters.UdpLocalTargetFlows) - localTargetFlowsBefore);
 
         // The trace decides the target kind from the same decision the packet path used.

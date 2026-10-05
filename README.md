@@ -123,9 +123,9 @@ JSON, rejected on any unknown property. The top level is:
   - `protocol`: `tcp` / `udp`. `addressFamily`: `ipv4` / `ipv6`.
   - `remoteCidr`: CIDR prefixes. `remotePort`: decimal ports or inclusive ranges (`10000-20000`).
   - `action`: `proxy` (requires `target`), `pass`, or `block`. `target` names a configured
-    `socks5Servers` entry or a `localTargets` entry; the pre-rename key `proxyServer` is rejected
-    with a diagnostic naming `target`. A rule that names a local target must select exactly `udp`: a
-    rule without a `protocol` selector matches every protocol, TCP included, so it is rejected.
+    `socks5Servers` entry or a `localTargets` entry. A rule that names a local target must select
+    exactly `udp`: a rule without a `protocol` selector matches every protocol, TCP included, so it
+    is rejected.
   - Present match arrays must be non-empty; an omitted field imposes no condition.
 - `host.fallbackAction`: `pass` or `block`, **required**. It decides a host flow that no host rule
   matched. A host fallback proxy requires an explicit catch-all `proxy` rule.
@@ -149,34 +149,15 @@ JSON, rejected on any unknown property. The top level is:
   budget is refused fail-closed with a rate-limited `udp.session.capacity-block` warn and the
   `udpCapacityRejections` counter; the flow retries on its next datagram.
 - `udpRelayReceiveBufferKb`: optional per-relay-socket kernel receive buffer in KiB, `16..1024`,
-  default `128`. It is applied to every relay socket before bind; responses can burst faster than
+  default `64`. It is applied to every relay socket before bind; responses can burst faster than
   one receive loop reinjects them, so the buffer absorbs the burst. Because it is per session, a
   per-session value above `256` combined with a session capacity above `2048` is accepted with a
   validation warning about the aggregate kernel receive buffer.
 - `udpSessionIdleSeconds`: optional idle retention for a UDP session, `5..600`, default `30`
-  seconds — after the last send or receive, the session's relay socket and its association lease
-  are released (a shared association itself stays warm for reuse for another 60 s). The sweeper's
+  seconds — after the last send or receive, the session's relay socket and its own association (its
+  control connection) are released with it; nothing is kept warm for a later flow. The sweeper's
   UDP cadence derives from this value: half the idle timeout, at least 5 s, and never longer than
   the 60 s main sweep interval (15 s at the default).
-- `udpAssociationReuse`: how UDP flows share authenticated SOCKS5 associations — `auto` (default),
-  `always`, or `off` (case-insensitive; any other value is rejected). `auto` shares and passively
-  falls back to per-flow associations for a server observed to pin one client source port per
-  association — sticky for the run and reported once with a warn and the `udpAssociationFallbacks`
-  counter; `always` shares with detection disabled; `off` reproduces the per-flow association
-  behaviour exactly and is the rollback lever.
-- `udpAssociationMaxPerServer`: per-server **ceiling** on shared associations, `1..16384`, default
-  `1024`. It is a bound on connections, not a preallocation: the pool opens only the associations
-  placement needs, and a flow arriving once the ceiling is reached is served from a private
-  per-flow association instead of being refused.
-- `udpAssociationFlowsPerAssociation`: concurrent flows one shared association serves, `1..256`,
-  default `16`. It is simultaneously the blast radius of one association death (every attached flow
-  fails on its next datagram and re-establishes) and the capability sampler's live-evidence set, so
-  raising it trades sharing for recovery fan-out. At the defaults both caps multiply into a shared
-  head of 16,384 flows per server — the default `udpSessionCapacity` — so every admitted flow can be
-  shared. If the two caps multiply to less than `udpSessionCapacity`, validation warns (it does not
-  refuse): the flows beyond that head are served from private per-flow associations, so they each
-  hold their own control connection instead of sharing one, and the excess is invisible in every
-  counter except the descriptor and port counts.
 - `logLevel`: optional runtime verbosity: `error`, `warn`, `info`, `debug`, or `trace`. Values are
   case-insensitive and surrounding whitespace is ignored; omitted `logLevel` defaults to `info`.
   `info` retains concise lifecycle output, `debug` adds flow and proxy lifecycle events, and `trace`
@@ -190,32 +171,33 @@ JSON, rejected on any unknown property. The top level is:
   only when a rule uses a path-based process selector. A host flow's `flow.created` line is written
   when its deferred attribution claim completes, so it can follow the proxy legs that flow produced.
 
-**UDP resource shape.** Association sharing removes the per-flow control connection, not the relay
-socket: every live flow keeps its own local relay socket, because that local port plus the relay
-endpoint is what routes a response back to its flow. The descriptor floor is therefore ≈1 per live
-session plus one shared control connection per association (≈1/16 at the defaults), and the kernel
-receive-buffer estimate stays `live sessions × udpRelayReceiveBufferKb`. The recorded
-`udp.sessionBudget` soak measured 1.94–1.95 descriptors per live session at 100 new flows/s while
-the pooled head was saturated at 256 flows per server (the pool's original 16 × 16 default) and
-1.06 in the pooled regime; the two association caps above raise the default head to the default
-session capacity, so the pooled shape covers the admitted population. Re-measured on those shipped
-caps, the same 100 new flows/s load holds ≈1.06 descriptors per live session and ≈0.063 associations
-per session (≈282 shared control connections for ≈4,500 live flows), with the soak's retention and
-pooling verdict halves both recorded as held.
+**UDP resource shape.** Every live UDP flow owns its own authenticated association: the SOCKS5
+control connection that carried its `UDP ASSOCIATE`, and the relay socket that association
+negotiated. Both are local descriptors, so the floor is two ports per live session, and nothing
+about the association is pooled, leased, or reused by another flow. The kernel receive-buffer
+estimate is unchanged — `live sessions × udpRelayReceiveBufferKb`, one buffer per relay socket,
+one relay socket per flow — and `udpSessionCapacity` therefore bounds live flows at two descriptors
+each: validation warns above `4096` sessions, and separately when a per-session buffer above
+`256` KiB meets more than `2048` sessions (see `udpRelayReceiveBufferKb` above).
 
-**Reply ownership.** Sharing an association also shares its reply path: the server answers on the last
-peer address it saw, so a reply can arrive on a flow other than the one that asked. WinForward counts
-every relay response whose declared source is not the receiving flow's own destination
-(`udpResponseSourceMismatch`; the rate-limited `udp.response.foreign_source` warn carries both addresses,
-the origin kind, and the association generation) and still delivers it, because RFC 1928 does not pin the
-reply source and some protocols legitimately continue from a new endpoint. The comparison is by
-destination address (the IPv6 scope is ignored: it belongs to the receiving interface, not to the peer),
-so it observes **cross-destination** misdelivery only: two flows to the same destination are
-indistinguishable by address, and their misdelivered replies are invisible to it. **A zero count
-therefore does not prove that association sharing is safe for your traffic.**
+**Reply ownership.** A reply's declared source need not be the flow's destination: RFC 1928 does not
+pin the reply source, and a multi-homed or anycast server may legitimately answer from another
+endpoint. WinForward counts every relay response whose declared source is not the receiving flow's
+own destination (`udpResponseSourceMismatch`; the rate-limited `udp.response.foreign_source` warn
+carries both addresses, the origin kind, and the association generation) and still delivers it, with
+that declared source. The comparison is by destination address (the IPv6 scope is ignored: it belongs
+to the receiving interface, not to the peer), so a link-local peer whose scope differs is not counted
+and a genuine foreign endpoint still is.
 
-**Local targets.** A flow selected onto a local target gets its own socket and no SOCKS5 association:
-only that flow's replies arrive on it, so the misdelivery class above cannot occur at that hop. The
+**The guarantee: one flow per association, so the reply-ownership ambiguity a shared association has
+cannot occur.** A flow's relay socket belongs to that flow alone — created, bound, and disposed with
+it — so a reply can only arrive on the socket that sent the request. The observation above is
+therefore about a server answering from an unexpected endpoint, not about a reply reaching the wrong
+flow.
+
+**Local targets — the recommended placement for DNS-shaped flows.** A flow selected onto a local
+target gets its own socket and no SOCKS5 association: only that flow's replies arrive on it, so the
+reply-ownership question above cannot arise at that hop. The
 payload is forwarded verbatim and the transport declares the flow's original destination as the
 reply's source, so the client sees the answer from the address and port it sent to; the session's
 source check, the foreign-source counter, and the reinjector are unchanged, and a datagram from
@@ -225,11 +207,12 @@ relay's other skip classes). `udpLocalTargetFlows` counts flows created over a l
 fault (never the cancellation or disposal that ends a session), and such a flow fails closed and
 re-establishes on its next datagram. The `udp.session.created`
 debug event carries `target=<name>` and `targetKind=local|socks5`.
-`benchmarks/results/2026-10-05-local-target/` measures the placement beside the shared and per-flow
-SOCKS5 columns: the local column answers 48 of 48 flows per wave with zero SOCKS5 control connections
-and zero `UDP ASSOCIATE` replies, at ≈7.5 KB per session against ≈13.4 KB for the shared association
-and ≈91 KB per-flow, with a first-response p50 of 3.1–4.1 ms against 4.2–5.1 ms shared and 156–165 ms
-per-flow.
+`benchmarks/results/2026-10-05-no-association-sharing/` measures the shipped series: both surviving
+columns answer 48 of 48 flows per churn wave and 48 of 48 in the burst, while the local column pays
+**zero SOCKS5 handshakes**, ≈7.0–8.1 KB per session against the per-flow column's ≈84.5–93.7 KB, and
+a first-response p50 of 3.0–4.5 ms against 155.7–164.1 ms. (The per-flow figure is the harness's
+serialized-setup shape — a 50 ms dial delay through the 8-wide setup limiter — not a per-flow network
+cost.)
 
 The configuration is validated fully before interception starts and is kept immutable for the
 lifetime of a run. Configuration hot reload is not supported.
@@ -250,11 +233,10 @@ The operationally relevant ones:
 | `tcp.redirect.unrelatedPeer` | warn | The redirect listener accepted a peer that does not match the expected client tuple. |
 | `udp.reinject.unresolved` | warn | A host UDP response could not resolve its origin adapter and fell back to the host target (rate-limited, counted). |
 | `udp.reinject.drop` | warn | A UDP response was dropped fail-closed (unresolvable origin or missing client MAC; rate-limited, counted). |
-| `udp.response.foreign_source` | warn | A relay response declared a source other than the receiving flow's own destination — a reply the server delivered to a different flow. It is still injected with that declared source (a mismatch is not proof of an invalid reply); counted per reply as `udpResponseSourceMismatch`, rate-limited to one line per 5 s window **per session**. A sustained flood of these lines means the server is delivering another flow's replies to the named flows of one association at a steady rate; the counter, not the line count, is the measurement, and the `udpAssociation` field groups the affected flows. |
+| `udp.response.foreign_source` | warn | A relay response declared a source other than the receiving flow's own destination. It is still injected with that declared source — RFC 1928 does not pin the reply source, and a server may legitimately answer from another endpoint — and counted per reply as `udpResponseSourceMismatch`, rate-limited to one line per 5 s window **per session**. The line carries both addresses, the origin kind, and the flow's `udpAssociation` correlation id; the counter, not the line count, is the measurement. A sustained rate means the server is answering these flows from an unexpected endpoint, not that a reply reached the wrong flow. |
 | `udp.targets.noMac` | warn | The capture scope contains adapters without a usable MAC (forwarded responses to them drop fail-closed); emitted on first occurrence and when the affected adapter set changes, not on every adapter refresh. |
 | `udp.session.capacity-block` | warn | A UDP datagram was refused fail-closed because the session budget is full and its flow has no slot (rate-limited, counted as `udpCapacityRejections`); the flow retries on its next datagram. |
-| `udp.association.fallback` | warn | Passive sampling detected a SOCKS5 server that pins one client source port per association, so that server is served by per-flow associations for the rest of the run. Emitted once per server per run (counted as `udpAssociationFallbacks`). |
-| `udp.association.lost` | warn | A shared SOCKS5 UDP association died without an in-place recovery; its attached flows re-establish on their next datagram (rate-limited; the association-lost removals are counted per affected flow as `udpAssociationLost`). |
+| `udp.association.lost` | warn | A flow's own SOCKS5 UDP association died — its control connection ended or faulted, and there is no in-place recovery — so that flow is failed closed and re-establishes on its next datagram with a fresh association (rate-limited across the composition; the association-lost removals are counted per affected flow as `udpAssociationLost`). |
 | `adapter.addressQuery.failed` | debug | The periodic adapter address-fingerprint query failed (non-fatal; the refresh diff continues without addresses). |
 | `runner.forcedRefresh` | warn | Interception-path failure rates crossed their thresholds, so a forced adapter-view refresh (generation rebuild) was armed. |
 | `runner.forcedRefresh.degraded` | error | Forced refreshes keep triggering without a successful refresh in between; the trigger cadence drops to one per 5 minutes. |

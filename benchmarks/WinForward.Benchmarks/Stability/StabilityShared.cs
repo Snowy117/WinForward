@@ -29,8 +29,8 @@ internal static class StabilityShared
 
     /// <summary>
     /// Product event names surfaced in the result row — per-datagram trace/debug events plus the
-    /// rate-limited or one-shot warn summaries (<c>udp.session.capacity-block</c>,
-    /// <c>udp.association.fallback</c>); absent names count as zero.
+    /// rate-limited or one-shot warn summaries (<c>udp.session.capacity-block</c>); absent names
+    /// count as zero.
     /// </summary>
     private static readonly string[] s_productEventNames =
     [
@@ -39,7 +39,6 @@ internal static class StabilityShared
         "udp.session.capacity-block",
         "udp.setup.failed",
         "udp.setup.cooldown",
-        "udp.association.fallback",
         "udp.packet.sent",
         "udp.session.created",
         "udp.session.closed",
@@ -101,9 +100,9 @@ internal readonly record struct LocalResponderCounters(long DatagramsReceived, l
 /// Both loopback servers' counters at one instant. A row reports the difference between the
 /// observation taken when its run's load started and the one read when the row was written, so "the
 /// local column moved these flows without one SOCKS5 handshake" is a subtraction of two observed
-/// numbers rather than a claim about the wiring. The difference is meant to be cumulative over the
-/// run rather than per window: a shared association is established once and then serves later waves,
-/// so a per-wave zero would be the pool working, not the relay being unused.
+/// numbers rather than a claim about the wiring. The difference is cumulative over the run rather
+/// than per window: read the last row of a run for its totals, and subtract two rows for one wave's
+/// own cost.
 /// </summary>
 [StructLayout(LayoutKind.Auto)]
 internal readonly record struct TransportObservation(Socks5HandshakeCounters? Socks5Handshakes, LocalResponderCounters LocalResponder)
@@ -149,8 +148,8 @@ internal sealed record LatencyDistribution(double Min, double P50, double P95, d
 /// I/O. With <paramref name="includeVerbose"/> false only <see cref="RuntimeLogLevel.Warn"/> is
 /// enabled, so the product's own <c>IsEnabled</c> guards keep the per-datagram trace/debug events out
 /// of the send and receive paths — a distortion-free census of the rate-limited and one-shot warns
-/// (<c>udp.session.capacity-block</c>, <c>udp.association.fallback</c>) that every stability row can
-/// carry. With it true the product also emits its per-datagram trace events
+/// (<c>udp.session.capacity-block</c>, <c>udp.setup.failed</c>, <c>udp.setup.cooldown</c>) that every
+/// stability row can carry. With it true the product also emits its per-datagram trace events
 /// (udp.packet.sent/received), which allocates and slows those paths: rows produced that way localize
 /// loss or establishment failures but are not throughput/latency-comparable with uninstrumented runs.
 /// </summary>

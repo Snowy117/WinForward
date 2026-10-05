@@ -117,40 +117,40 @@ public sealed class UdpReceiveResilienceTests
         var associateRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var server = Socks5TestServer.ServeAssociateOnlyAsync(tcpListener, relayEndpoint, associateRead, serverCancellation.Token);
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
-        await using var fixture = await UdpTransportTestFactory.CreateAsync(socksServer, new SelfTrafficRegistry());
-        var transport = fixture.Transport;
-        var transportEndpoint = new IPEndPoint(IPAddress.Loopback, transport.LocalEndpoint.Port);
-        var buffer = new byte[64];
-        var destination = IPAddress.Parse("192.0.2.53");
+        await using (var transport = await UdpTransportTestFactory.CreateAsync(socksServer, new SelfTrafficRegistry()))
+        {
+            var transportEndpoint = new IPEndPoint(IPAddress.Loopback, transport.LocalEndpoint.Port);
+            var buffer = new byte[64];
+            var destination = IPAddress.Parse("192.0.2.53");
 
-        // Valid datagram from the negotiated relay: delivered.
-        await relaySocket.SendToAsync(Socks5UdpDatagrams.Encode(destination, 53, [1]), SocketFlags.None, transportEndpoint, CancellationToken.None);
-        var valid = await transport.ReceiveAsync(buffer, CancellationToken.None);
-        Assert.True(valid.HasDatagram);
-        Assert.Equal((IPAddressValue?)destination, valid.Datagram.SourceAddress);
+            // Valid datagram from the negotiated relay: delivered.
+            await relaySocket.SendToAsync(Socks5UdpDatagrams.Encode(destination, 53, [1]), SocketFlags.None, transportEndpoint, CancellationToken.None);
+            var valid = await transport.ReceiveAsync(buffer, CancellationToken.None);
+            Assert.True(valid.HasDatagram);
+            Assert.Equal((IPAddressValue?)destination, valid.Datagram.SourceAddress);
 
-        // Unexpected source (same family, different port): skipped, not thrown.
-        await strangerSocket.SendToAsync(Socks5UdpDatagrams.Encode(destination, 53, [2]), SocketFlags.None, transportEndpoint, CancellationToken.None);
-        var unexpected = await transport.ReceiveAsync(buffer, CancellationToken.None);
-        Assert.Equal(UdpTransportSkipReason.UnexpectedSource, unexpected.SkipReason);
+            // Unexpected source (same family, different port): skipped, not thrown.
+            await strangerSocket.SendToAsync(Socks5UdpDatagrams.Encode(destination, 53, [2]), SocketFlags.None, transportEndpoint, CancellationToken.None);
+            var unexpected = await transport.ReceiveAsync(buffer, CancellationToken.None);
+            Assert.Equal(UdpTransportSkipReason.UnexpectedSource, unexpected.SkipReason);
 
-        // Oversized (fills the 64-byte buffer, so it may be truncated): skipped, not thrown.
-        await relaySocket.SendToAsync(new byte[100], SocketFlags.None, transportEndpoint, CancellationToken.None);
-        var oversized = await transport.ReceiveAsync(buffer, CancellationToken.None);
-        Assert.Equal(UdpTransportSkipReason.Oversized, oversized.SkipReason);
+            // Oversized (fills the 64-byte buffer, so it may be truncated): skipped, not thrown.
+            await relaySocket.SendToAsync(new byte[100], SocketFlags.None, transportEndpoint, CancellationToken.None);
+            var oversized = await transport.ReceiveAsync(buffer, CancellationToken.None);
+            Assert.Equal(UdpTransportSkipReason.Oversized, oversized.SkipReason);
 
-        // Malformed (not a SOCKS5 UDP datagram): skipped, not thrown.
-        await relaySocket.SendToAsync(new byte[] { 0xff, 0xff, 0xff }, SocketFlags.None, transportEndpoint, CancellationToken.None);
-        var malformed = await transport.ReceiveAsync(buffer, CancellationToken.None);
-        Assert.Equal(UdpTransportSkipReason.Malformed, malformed.SkipReason);
+            // Malformed (not a SOCKS5 UDP datagram): skipped, not thrown.
+            await relaySocket.SendToAsync(new byte[] { 0xff, 0xff, 0xff }, SocketFlags.None, transportEndpoint, CancellationToken.None);
+            var malformed = await transport.ReceiveAsync(buffer, CancellationToken.None);
+            Assert.Equal(UdpTransportSkipReason.Malformed, malformed.SkipReason);
 
-        // The next valid datagram still flows: the receive path never tore anything down.
-        await relaySocket.SendToAsync(Socks5UdpDatagrams.Encode(destination, 53, [3]), SocketFlags.None, transportEndpoint, CancellationToken.None);
-        var after = await transport.ReceiveAsync(buffer, CancellationToken.None);
-        Assert.True(after.HasDatagram);
-        Assert.Equal(3, Assert.Single(after.Datagram.Payload.ToArray()));
+            // The next valid datagram still flows: the receive path never tore anything down.
+            await relaySocket.SendToAsync(Socks5UdpDatagrams.Encode(destination, 53, [3]), SocketFlags.None, transportEndpoint, CancellationToken.None);
+            var after = await transport.ReceiveAsync(buffer, CancellationToken.None);
+            Assert.True(after.HasDatagram);
+            Assert.Equal(3, Assert.Single(after.Datagram.Payload.ToArray()));
+        }
 
-        await transport.DisposeAsync();
         await serverCancellation.CancelAsync();
         await IgnoreExpectedCancellationAsync(server);
     }
@@ -172,25 +172,31 @@ public sealed class UdpReceiveResilienceTests
         var received = new TaskCompletionSource<List<byte[]>>(TaskCreationOptions.RunContinuationsAsynchronously);
         var server = Socks5TestServer.ServeAssociateAndCollectAsync(tcpListener, relaySocket, relayEndpoint, datagramCount, received, serverCancellation.Token);
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
-        await using var fixture = await UdpTransportTestFactory.CreateAsync(socksServer, new SelfTrafficRegistry());
-        var transport = fixture.Transport;
-        var destination = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
-
-        var payloads = Enumerable.Range(0, datagramCount)
-            .Select(index => Enumerable.Repeat((byte)(0xA0 + index), 1024).ToArray())
-            .ToList();
-        await Task.WhenAll(payloads.Select(payload => transport.SendSpanAsync(destination, payload, CancellationToken.None).AsTask()));
-
-        var datagrams = await received.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.Equal(datagramCount, datagrams.Count);
-        foreach (var datagram in datagrams)
+        await using (var transport = await UdpTransportTestFactory.CreateAsync(socksServer, new SelfTrafficRegistry()))
         {
-            Assert.True(Socks5UdpCodec.TryDecode(datagram, out var decoded), "A received datagram did not decode; the shared send buffer was corrupted by interleaving.");
-            var expectedPayload = payloads.Single(payload => payload.AsSpan().SequenceEqual(decoded.Payload.Span));
-            Assert.NotNull(expectedPayload);
+            var destination = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
+
+            var payloads = Enumerable.Range(0, datagramCount)
+                .Select(index => Enumerable.Repeat((byte)(0xA0 + index), 1024).ToArray())
+                .ToList();
+            var sends = new Task[payloads.Count];
+            for (var index = 0; index < payloads.Count; index++)
+            {
+                sends[index] = transport.SendSpanAsync(destination, payloads[index], CancellationToken.None).AsTask();
+            }
+
+            await Task.WhenAll(sends);
+
+            var datagrams = await received.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(datagramCount, datagrams.Count);
+            foreach (var datagram in datagrams)
+            {
+                Assert.True(Socks5UdpCodec.TryDecode(datagram, out var decoded), "A received datagram did not decode; the shared send buffer was corrupted by interleaving.");
+                var expectedPayload = payloads.Single(payload => payload.AsSpan().SequenceEqual(decoded.Payload.Span));
+                Assert.NotNull(expectedPayload);
+            }
         }
 
-        await transport.DisposeAsync();
         await serverCancellation.CancelAsync();
         await IgnoreExpectedCancellationAsync(server);
     }

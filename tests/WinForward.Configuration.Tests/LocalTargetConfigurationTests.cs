@@ -246,22 +246,6 @@ public sealed class LocalTargetConfigurationTests
         Assert.Contains("configured target", diagnostic.Message, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void TheLegacyProxyServerKeyStillReportsTheRename()
-    {
-        const string json = """
-        {
-          "socks5Servers": [{ "name": "remote", "host": "127.0.0.1", "port": 1080 }],
-          "host": {
-            "fallbackAction": "pass",
-            "rules": [{ "protocol": ["udp"], "action": "proxy", "proxyServer": "remote" }]
-          }
-        }
-        """;
-
-        AssertValidationFails(json, "host.rules[0].proxyServer");
-    }
-
     private static void AssertValidationFails(string json, params string[] expectedPaths)
     {
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out var parseDiagnostics), string.Join("; ", parseDiagnostics));

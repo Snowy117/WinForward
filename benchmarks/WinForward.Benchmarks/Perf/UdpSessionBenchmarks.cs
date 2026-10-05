@@ -78,10 +78,9 @@ public class UdpSessionBenchmarks
         // the relay's forwarded total and the echoed response is the parent-visible flush proof.
         var countingSink = _externalServer is null ? null : new ResponseCountingSink();
         var registry = new SelfTrafficRegistry();
-        // Off keeps this instrument's recorded per-session framework anchor comparable: it measures
-        // one dial + relay socket per session, which is what the anchor was derived from.
-        await using var associations = new UdpAssociationPool(registry, UdpAssociationReuseMode.Off);
-        await using var coordinator = new UdpProxyCoordinator(new Socks5UdpTransportFactory(associations, registry, maximumFrameSize), (IUdpResponseSink?)countingSink ?? NoopUdpResponseSink.Instance, setupQueuePool, receiveWindowPool, setupExecutor, new UdpProxyOptions { Capacity = Sessions });
+        // One dial + ASSOCIATE + relay socket per session is what this instrument's recorded
+        // per-session framework anchor was derived from.
+        await using var coordinator = new UdpProxyCoordinator(new Socks5UdpTransportFactory(registry, maximumFrameSize), (IUdpResponseSink?)countingSink ?? NoopUdpResponseSink.Instance, setupQueuePool, receiveWindowPool, setupExecutor, new UdpProxyOptions { Capacity = Sessions });
         var forwardedBaseline = _server?.RelayForwarded ?? 0;
         for (var index = 0; index < Sessions; index++)
         {
@@ -174,9 +173,9 @@ public class UdpSessionBenchmarks
     /// The out-of-process probe's flush signal: the child owns the relay's forwarded counter, and a
     /// response can only reach this sink after the child forwarded the datagram, so the count of
     /// echoed responses stands in for it. Unused in the in-process shape (its discard destination
-    /// never replies). It runs under <see cref="UdpAssociationReuseMode.Off"/> — one association per
-    /// flow, so every reply reaches the flow that asked — and counts a total rather than a per-flow
-    /// answer, so it carries no response-ownership question.
+    /// never replies). One association per flow means every reply reaches the flow that asked; the
+    /// sink counts a total rather than a per-flow answer, so it carries no response-ownership
+    /// question.
     /// </summary>
     private sealed class ResponseCountingSink : IUdpResponseSink
     {

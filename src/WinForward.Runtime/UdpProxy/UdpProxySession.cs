@@ -55,9 +55,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
     /// (DNS — the UDP majority — is one query and one reply). The reply is counted by
     /// <see cref="IUdpExchangeCounters.SawResponse"/>, not by the send counter, so one is the whole
     /// threshold; a second datagram is positive evidence of a stream and keeps the configured
-    /// retention for the rest of the flow's life. The sampler's
-    /// <c>PinningSuspicionThreshold</c> is deliberately not reused: it answers "three unanswered
-    /// sends", a different question.
+    /// retention for the rest of the flow's life.
     /// </summary>
     private const int OneShotDatagramThreshold = 1;
 

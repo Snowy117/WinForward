@@ -73,15 +73,6 @@ public sealed class RuleDto
     /// <summary>The named target a <c>proxy</c> action selects.</summary>
     [JsonPropertyName("target")]
     public string? Target { get; init; }
-
-    /// <summary>
-    /// Migration-only: the pre-rename spelling of <see cref="Target"/>. It exists so the key is
-    /// recognised rather than rejected as unknown, and so validation can report the rename at its
-    /// own path instead of leaving the operator with an unmapped-field diagnostic. The runtime never
-    /// reads it.
-    /// </summary>
-    [JsonPropertyName("proxyServer")]
-    public string? LegacyProxyServer { get; init; }
 }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
@@ -202,7 +193,6 @@ public static partial class ConfigurationLoader
         var forwardedFallback = ConfigurationRules.ParseDomain(dto.Forwarded, FlowOriginKind.Forwarded, targets, forwardedRules, errors);
 
         ValidateFailureActions(dto, errors);
-        var associationReuse = ParseAssociationReuse(dto.UdpAssociationReuse, errors);
 
         if (errors.Count > 0 || hostFallback is null)
         {
@@ -227,9 +217,6 @@ public static partial class ConfigurationLoader
         {
             Warnings = warnings,
             UdpSessionIdleTimeout = limits.UdpSessionIdleTimeout,
-            UdpAssociationReuse = associationReuse,
-            UdpAssociationMaxPerServer = limits.UdpAssociationMaxPerServer,
-            UdpAssociationFlowsPerAssociation = limits.UdpAssociationFlowsPerAssociation,
         };
         diagnostics = [];
         return true;

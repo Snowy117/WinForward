@@ -64,7 +64,6 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         NativeBufferPool? udpWindowPool = null,
         NativeBufferPool? attributionPool = null,
         SetupExecutor? setupExecutor = null,
-        UdpAssociationPool? udpAssociationPool = null,
         ActivityBucketClock? activityClock = null,
         FlowAttributionWakeRegistry? wakeRegistry = null)
     {
@@ -82,7 +81,6 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         _udpWindowPool = udpWindowPool;
         _attributionPool = attributionPool;
         _setupExecutor = setupExecutor;
-        UdpAssociations = udpAssociationPool;
         WakeRegistry = wakeRegistry;
         ActivityClock = activityClock ?? new ActivityBucketClock();
     }
@@ -113,9 +111,6 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
 
     /// <summary>The durable UDP session coordinator (heartbeat usage source).</summary>
     internal UdpProxyCoordinator Udp { get; }
-
-    /// <summary>The per-server association pool behind every UDP transport (heartbeat usage source).</summary>
-    internal UdpAssociationPool? UdpAssociations { get; }
 
     /// <summary>
     /// The pipeline-owned wake events, one per adapter that registered a driver signal. The capture
@@ -239,18 +234,13 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         // worth of frames without an overflow allocation.
         var attributionPool = new NativeBufferPool(maximumFrameSize, (int)(FlowAttributionPendingIndex.DefaultGlobalByteBudget / maximumFrameSize));
         RegisterPool(counters, AttributionPoolName, attributionPool);
-        // One association pool backs every UDP flow's control connection (Step 2); the bundle owns
-        // it and the coordinator's transports borrow leases from it, so it outlives the coordinator.
-        // The two bounds multiply into the shared head, so both ride the validated configuration.
-        var associationPool = UdpProxyComposer.CreateAssociationPool(configuration, selfTraffic, addressCache, logger);
         UdpProxyCoordinator udpCoordinator;
         try
         {
-            udpCoordinator = UdpProxyComposer.Create(reinjector, selfTraffic, logger, healthSignal, new UdpProxyComposition(udpTargets, adapterSlots, maximumFrameSize, udpDatagramPool, udpWindowPool, setupExecutor, addressCache, associationPool, SessionCapacity: configuration.UdpSessionCapacity, RelayReceiveBufferBytes: configuration.UdpRelayReceiveBufferBytes, ActivityClock: activityClock));
+            udpCoordinator = UdpProxyComposer.Create(reinjector, selfTraffic, logger, healthSignal, new UdpProxyComposition(udpTargets, adapterSlots, maximumFrameSize, udpDatagramPool, udpWindowPool, setupExecutor, addressCache, SessionCapacity: configuration.UdpSessionCapacity, RelayReceiveBufferBytes: configuration.UdpRelayReceiveBufferBytes, ActivityClock: activityClock));
         }
         catch
         {
-            await associationPool.DisposeAsync().ConfigureAwait(false);
             udpDatagramPool.Dispose();
             udpWindowPool.Dispose();
             attributionPool.Dispose();
@@ -258,12 +248,11 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         }
         try
         {
-            return BuildBundle(configuration, reinjector, selfTraffic, logger, healthSignal, udpTargets, adapterSlots, udpCoordinator, tcpCoordinator, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, attributionPool, setupExecutor, associationPool, activityClock);
+            return BuildBundle(configuration, reinjector, selfTraffic, logger, healthSignal, udpTargets, adapterSlots, udpCoordinator, tcpCoordinator, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, attributionPool, setupExecutor, activityClock);
         }
         catch
         {
             await udpCoordinator.DisposeAsync().ConfigureAwait(false);
-            await associationPool.DisposeAsync().ConfigureAwait(false);
             udpDatagramPool.Dispose();
             udpWindowPool.Dispose();
             attributionPool.Dispose();
@@ -287,7 +276,6 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         NativeBufferPool udpWindowPool,
         NativeBufferPool attributionPool,
         SetupExecutor setupExecutor,
-        UdpAssociationPool associationPool,
         ActivityBucketClock activityClock)
     {
         var executor = new NdisPacketActionExecutor(reinjector, logger, tcpCoordinator, udpCoordinator, healthSignal: healthSignal);
@@ -303,7 +291,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         idleExpirySweeper.Start();
         var wakeRegistry = new FlowAttributionWakeRegistry();
         if (dispatcher.Attribution is { } pipeline) pipeline.Wake = wakeRegistry;
-        return new DurableCaptureBundle(dispatcher, executor, udpTargets, idleExpirySweeper, udpCoordinator, tcpCoordinator, logger, adapterSlots, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, attributionPool, setupExecutor, associationPool, activityClock, wakeRegistry);
+        return new DurableCaptureBundle(dispatcher, executor, udpTargets, idleExpirySweeper, udpCoordinator, tcpCoordinator, logger, adapterSlots, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, attributionPool, setupExecutor, activityClock, wakeRegistry);
     }
 
     /// <summary>
@@ -457,42 +445,35 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         {
             try
             {
+                // The coordinator's drain disposes every flow's transport, and with it that flow's
+                // own association and relay socket, so no association outlives this call.
                 await Udp.DisposeAsync().ConfigureAwait(false);
             }
             finally
             {
                 try
                 {
-                    // After the UDP coordinator drained every session (and with it every association
-                    // lease), close the associations: no lease may outlive its pool.
-                    if (UdpAssociations is not null) await UdpAssociations.DisposeAsync().ConfigureAwait(false);
+                    // After the UDP coordinator drained and released every queued setup lease
+                    // and every session receive window.
+                    _udpDatagramPool?.Dispose();
+                    _udpWindowPool?.Dispose();
                 }
                 finally
                 {
                     try
                     {
-                        // After the UDP coordinator drained and released every queued setup lease
-                        // and every session receive window.
-                        _udpDatagramPool?.Dispose();
-                        _udpWindowPool?.Dispose();
+                        await Tcp.DisposeAsync().ConfigureAwait(false);
                     }
                     finally
                     {
-                        try
-                        {
-                            await Tcp.DisposeAsync().ConfigureAwait(false);
-                        }
-                        finally
-                        {
-                            // After the coordinator released every lease it held, drain the syn-copy pool.
-                            _synCopyPool?.Dispose();
-                            _attributionPool?.Dispose();
-                            _relayPool?.Dispose();
-                            // Last of the wake owners: the pipeline that signalled these events is
-                            // already sealed and every pump has stopped, so no waiter can be parked.
-                            WakeRegistry?.Dispose();
-                            _setupExecutor?.Dispose();
-                        }
+                        // After the coordinator released every lease it held, drain the syn-copy pool.
+                        _synCopyPool?.Dispose();
+                        _attributionPool?.Dispose();
+                        _relayPool?.Dispose();
+                        // Last of the wake owners: the pipeline that signalled these events is
+                        // already sealed and every pump has stopped, so no waiter can be parked.
+                        WakeRegistry?.Dispose();
+                        _setupExecutor?.Dispose();
                     }
                 }
             }

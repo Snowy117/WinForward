@@ -56,10 +56,6 @@ internal static class ConfigurationRules
         }
 
         ValidateNonEmpty(dto.Process, $"{path}.process", errors);
-        if (dto.LegacyProxyServer is not null)
-        {
-            errors.Add(new($"{path}.proxyServer", "Key 'proxyServer' was renamed to 'target'; use 'target' instead."));
-        }
 
         // A forwarded flow has no host process owner, so the matcher could never fire. Rejecting it
         // here is what keeps "configured but inert" out of the forwarded domain.

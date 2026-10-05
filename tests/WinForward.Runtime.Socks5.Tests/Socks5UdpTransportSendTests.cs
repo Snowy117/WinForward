@@ -6,7 +6,6 @@ using System.Runtime.CompilerServices;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
-using WinForward.Runtime.UdpProxy;
 using WinForward.TestSupport;
 using Xunit;
 using static WinForward.TestSupport.AsyncTestExtensions;
@@ -35,32 +34,32 @@ public sealed class Socks5UdpTransportSendTests
         var associateRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var server = ServeAssociateOnlyAsync(tcpListener, relayEndpoint, associateRead, serverCancellation.Token);
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
-        await using var fixture = await UdpTransportTestFactory.CreateAsync(socksServer, new SelfTrafficRegistry());
-        var transport = fixture.Transport;
-        var payload = "QRS"u8.ToArray();
-        var destination = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
+        await using (var transport = await UdpTransportTestFactory.CreateAsync(socksServer, new SelfTrafficRegistry()))
+        {
+            var payload = "QRS"u8.ToArray();
+            var destination = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
 
-        await transport.SendSpanAsync(destination, payload, CancellationToken.None);
+            await transport.SendSpanAsync(destination, payload, CancellationToken.None);
 
-        var buffer = new byte[65_535];
-        EndPoint sender = new IPEndPoint(IPAddress.Any, 0);
-        var received = await relaySocket.ReceiveFromAsync(buffer, SocketFlags.None, sender, CancellationToken.None);
-        Assert.True(Socks5UdpCodec.TryDecode(buffer.AsMemory(0, received.ReceivedBytes), out var datagram));
-        Assert.Equal(destination.Address, datagram.DestinationAddress);
-        Assert.Equal(destination.Port, datagram.DestinationPort);
-        Assert.Equal(payload, datagram.Payload.ToArray());
+            var buffer = new byte[65_535];
+            EndPoint sender = new IPEndPoint(IPAddress.Any, 0);
+            var received = await relaySocket.ReceiveFromAsync(buffer, SocketFlags.None, sender, CancellationToken.None);
+            Assert.True(Socks5UdpCodec.TryDecode(buffer.AsMemory(0, received.ReceivedBytes), out var datagram));
+            Assert.Equal(destination.Address, datagram.DestinationAddress);
+            Assert.Equal(destination.Port, datagram.DestinationPort);
+            Assert.Equal(payload, datagram.Payload.ToArray());
 
-        // The echo peer answers from the negotiated relay; the same transport decodes it.
-        await relaySocket.SendToAsync(
-            Socks5UdpDatagrams.Encode(IPAddress.Parse("192.0.2.10"), 53000, payload),
-            SocketFlags.None,
-            transport.LocalEndpoint,
-            CancellationToken.None);
-        var echo = await transport.ReceiveAsync(buffer, CancellationToken.None);
-        Assert.True(echo.HasDatagram);
-        Assert.Equal(payload, echo.Datagram.Payload.ToArray());
+            // The echo peer answers from the negotiated relay; the same transport decodes it.
+            await relaySocket.SendToAsync(
+                Socks5UdpDatagrams.Encode(IPAddress.Parse("192.0.2.10"), 53000, payload),
+                SocketFlags.None,
+                transport.LocalEndpoint,
+                CancellationToken.None);
+            var echo = await transport.ReceiveAsync(buffer, CancellationToken.None);
+            Assert.True(echo.HasDatagram);
+            Assert.Equal(payload, echo.Datagram.Payload.ToArray());
+        }
 
-        await transport.DisposeAsync();
         await serverCancellation.CancelAsync();
         await IgnoreExpectedCancellationAsync(server);
     }
@@ -79,12 +78,11 @@ public sealed class Socks5UdpTransportSendTests
         var server = ServeAssociateOnlyAsync(tcpListener, relayEndpoint, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), serverCancellation.Token);
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
         TrackingSocket? socket = null;
-        await using var fixture = await UdpTransportTestFactory.CreateAsync(socksServer, new SelfTrafficRegistry(), family => socket = new TrackingSocket(family));
-        var transport = fixture.Transport;
+        await using (await UdpTransportTestFactory.CreateAsync(socksServer, new SelfTrafficRegistry(), family => socket = new TrackingSocket(family)))
+        {
+            Assert.False(socket!.Blocking);
+        }
 
-        Assert.False(socket!.Blocking);
-
-        await transport.DisposeAsync();
         await serverCancellation.CancelAsync();
         await IgnoreExpectedCancellationAsync(server);
     }
@@ -104,21 +102,20 @@ public sealed class Socks5UdpTransportSendTests
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
         const int configuredBytes = 256 * 1024;
         TrackingSocket? socket = null;
-        await using var fixture = await UdpTransportTestFactory.CreateAsync(
+        await using (await UdpTransportTestFactory.CreateAsync(
             socksServer,
             new SelfTrafficRegistry(),
             family => socket = new TrackingSocket(family),
-            relayReceiveBufferBytes: configuredBytes);
-        var transport = fixture.Transport;
+            relayReceiveBufferBytes: configuredBytes))
+        {
+            // The configured budget reached the kernel socket. The comparison is tolerant because the
+            // OS owns the applied value (Linux doubles SO_RCVBUF, Windows rounds up), so an applied
+            // buffer below the configured one would mean the setting never took effect. The configured
+            // value is above the platform default here, so this is not a default-value coincidence.
+            var applied = socket!.ReceiveBufferSize;
+            Assert.True(applied >= configuredBytes, string.Create(CultureInfo.InvariantCulture, $"expected an applied relay receive buffer of at least {configuredBytes} bytes, observed {applied}"));
+        }
 
-        // The configured budget reached the kernel socket. The comparison is tolerant because the
-        // OS owns the applied value (Linux doubles SO_RCVBUF, Windows rounds up), so an applied
-        // buffer below the configured one would mean the setting never took effect. The configured
-        // value is above the platform default here, so this is not a default-value coincidence.
-        var applied = socket!.ReceiveBufferSize;
-        Assert.True(applied >= configuredBytes, string.Create(CultureInfo.InvariantCulture, $"expected an applied relay receive buffer of at least {configuredBytes} bytes, observed {applied}"));
-
-        await transport.DisposeAsync();
         await serverCancellation.CancelAsync();
         await IgnoreExpectedCancellationAsync(server);
     }
@@ -138,8 +135,7 @@ public sealed class Socks5UdpTransportSendTests
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
         const int configuredBytes = 256 * 1024;
         var registry = new SelfTrafficRegistry();
-        await using var pool = new UdpAssociationPool(registry, UdpAssociationReuseMode.Off);
-        var factory = new Socks5UdpTransportFactory(pool, registry, UdpFrameBuilder.DefaultMaximumEthernetFrame, relayReceiveBufferBytes: configuredBytes);
+        var factory = new Socks5UdpTransportFactory(registry, UdpFrameBuilder.DefaultMaximumEthernetFrame, relayReceiveBufferBytes: configuredBytes);
 
         // The production factory path — not a direct Socks5UdpTransport.Create call — reaches
         // the real relay socket. The comparison is tolerant for the same reason as the direct test:
@@ -168,21 +164,21 @@ public sealed class Socks5UdpTransportSendTests
         using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var server = ServeAssociateOnlyAsync(tcpListener, relayEndpoint, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), serverCancellation.Token);
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
-        await using var fixture = await UdpTransportTestFactory.CreateAsync(socksServer, new SelfTrafficRegistry(), maximumFrameSize: 9014);
-        var transport = fixture.Transport;
-        var payload = new byte[2000];
+        await using (var transport = await UdpTransportTestFactory.CreateAsync(socksServer, new SelfTrafficRegistry(), maximumFrameSize: 9014))
+        {
+            var payload = new byte[2000];
 
-        await transport.SendSpanAsync(Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), payload, CancellationToken.None);
+            await transport.SendSpanAsync(Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), payload, CancellationToken.None);
 
-        var buffer = new byte[65_535];
-        EndPoint sender = new IPEndPoint(IPAddress.Any, 0);
-        var received = await relaySocket.ReceiveFromAsync(buffer, SocketFlags.None, sender, CancellationToken.None);
-        Assert.Equal(6 + 4 + payload.Length, received.ReceivedBytes);
-        Assert.True(Socks5UdpCodec.TryDecode(buffer.AsMemory(0, received.ReceivedBytes), out var datagram));
-        Assert.Equal(payload.Length, datagram.Payload.Length);
-        Assert.Equal((IPAddressValue?)IPAddress.Parse("192.0.2.53"), datagram.DestinationAddress);
+            var buffer = new byte[65_535];
+            EndPoint sender = new IPEndPoint(IPAddress.Any, 0);
+            var received = await relaySocket.ReceiveFromAsync(buffer, SocketFlags.None, sender, CancellationToken.None);
+            Assert.Equal(6 + 4 + payload.Length, received.ReceivedBytes);
+            Assert.True(Socks5UdpCodec.TryDecode(buffer.AsMemory(0, received.ReceivedBytes), out var datagram));
+            Assert.Equal(payload.Length, datagram.Payload.Length);
+            Assert.Equal((IPAddressValue?)IPAddress.Parse("192.0.2.53"), datagram.DestinationAddress);
+        }
 
-        await transport.DisposeAsync();
         await serverCancellation.CancelAsync();
         await IgnoreExpectedCancellationAsync(server);
     }
@@ -203,14 +199,14 @@ public sealed class Socks5UdpTransportSendTests
         using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var server = ServeAssociateOnlyAsync(tcpListener, relayEndpoint, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), serverCancellation.Token);
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
-        await using var fixture = await UdpTransportTestFactory.CreateAsync(socksServer, new SelfTrafficRegistry());
-        var transport = fixture.Transport;
-        var payload = new byte[2000];
+        await using (var transport = await UdpTransportTestFactory.CreateAsync(socksServer, new SelfTrafficRegistry()))
+        {
+            var payload = new byte[2000];
 
-        await Assert.ThrowsAsync<IOException>(async () =>
-            await transport.SendSpanAsync(Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), payload, CancellationToken.None));
+            await Assert.ThrowsAsync<IOException>(async () =>
+                await transport.SendSpanAsync(Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), payload, CancellationToken.None));
+        }
 
-        await transport.DisposeAsync();
         await serverCancellation.CancelAsync();
         await IgnoreExpectedCancellationAsync(server);
     }
@@ -241,8 +237,7 @@ public sealed class Socks5UdpTransportSendTests
         using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var server = ServeAssociateOnlyAsync(tcpListener, relayEndpoint, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), serverCancellation.Token);
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
-        await using var fixture = await UdpTransportTestFactory.CreateAsync(socksServer, new SelfTrafficRegistry());
-        var transport = fixture.Transport;
+        var transport = await UdpTransportTestFactory.CreateAsync(socksServer, new SelfTrafficRegistry());
         var destination = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
         var payload = "QRS"u8.ToArray();
         try
@@ -291,8 +286,7 @@ public sealed class Socks5UdpTransportSendTests
         using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var server = ServeAssociateOnlyAsync(tcpListener, relayEndpoint, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), serverCancellation.Token);
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
-        await using var fixture = await UdpTransportTestFactory.CreateAsync(socksServer, new SelfTrafficRegistry());
-        var transport = fixture.Transport;
+        var transport = await UdpTransportTestFactory.CreateAsync(socksServer, new SelfTrafficRegistry());
         var destination = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
         var payload = "ABC"u8.ToArray();
 
@@ -322,11 +316,22 @@ public sealed class Socks5UdpTransportSendTests
         using var serverCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var server = ServeAssociateOnlyAsync(tcpListener, relayEndpoint, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), serverCancellation.Token);
         var socksServer = new Socks5Server("test", controlEndpoint.Address.ToString(), checked((ushort)controlEndpoint.Port), Username: null, Password: null);
-        await using var fixture = await UdpTransportTestFactory.CreateAsync(socksServer, new SelfTrafficRegistry());
-        var transport = fixture.Transport;
+        var transport = await UdpTransportTestFactory.CreateAsync(socksServer, new SelfTrafficRegistry());
         var destination = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
         var payload = "XYZ"u8.ToArray();
 
+        var senders = StartSendersRacingDisposal(transport, destination, payload);
+
+        await transport.DisposeAsync();
+        await Task.WhenAll(senders);
+
+        await serverCancellation.CancelAsync();
+        await IgnoreExpectedCancellationAsync(server);
+    }
+
+    /// <summary>Four thread-pool senders that keep sending until the transport refuses them; the test disposes the transport while they run.</summary>
+    private static Task[] StartSendersRacingDisposal(Socks5UdpTransport transport, Endpoint destination, byte[] payload)
+    {
         var senders = new Task[4];
         for (var index = 0; index < senders.Length; index++)
         {
@@ -350,10 +355,6 @@ public sealed class Socks5UdpTransportSendTests
             });
         }
 
-        await transport.DisposeAsync();
-        await Task.WhenAll(senders);
-
-        await serverCancellation.CancelAsync();
-        await IgnoreExpectedCancellationAsync(server);
+        return senders;
     }
 }

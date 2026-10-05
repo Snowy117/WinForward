@@ -13,8 +13,6 @@ namespace WinForward.Runtime;
 /// configured per-session buffer. An estimate only — each relay socket requests that size and the
 /// OS may cap or double it, and a session still in setup holds no relay socket yet.
 /// </param>
-/// <param name="UdpAssociations">The live authenticated SOCKS5 UDP associations (shared and private).</param>
-/// <param name="UdpLeasedFlows">The UDP flows currently holding an association lease; one relay socket each.</param>
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
 public readonly record struct RuntimeHeartbeatUsage(
     int FlowsActive,
@@ -25,9 +23,7 @@ public readonly record struct RuntimeHeartbeatUsage(
     int UdpCapacity,
     int PumpsRunning,
     int PumpsDegraded,
-    long UdpRelayBufferBytes = 0,
-    int UdpAssociations = 0,
-    int UdpLeasedFlows = 0);
+    long UdpRelayBufferBytes = 0);
 
 /// <summary>
 /// A GC observability sample (task 09-18 M0): per-generation collection counts plus the
@@ -168,8 +164,6 @@ public sealed class RuntimeHeartbeat : IAsyncDisposable
             AddPositive(fields, "udpSessions", usage.UdpSessions);
             AddPositive(fields, "udpCapacity", usage.UdpCapacity);
             AddPositive(fields, "udpRelayBufferMB", (int)(usage.UdpRelayBufferBytes / (1024 * 1024)));
-            AddPositive(fields, "udpAssociations", usage.UdpAssociations);
-            AddPositive(fields, "udpLeasedFlows", usage.UdpLeasedFlows);
             AddPositive(fields, "pumpsRunning", usage.PumpsRunning);
             AddPositive(fields, "pumpsDegraded", usage.PumpsDegraded);
             if (_health is not null)

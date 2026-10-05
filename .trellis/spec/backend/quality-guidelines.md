@@ -56,7 +56,7 @@
 ### 2. Signatures
 
 - `UdpProxyCoordinator(transportFactory, responseSink, UdpProxyOptions?)` owns the receive-window bound via `UdpProxyOptions.MaximumFrameSize` (default `UdpFrameBuilder.DefaultMaximumEthernetFrame`).
-- `UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize)` sizes one window (`cap + 22 + 1`) and `UdpProxyCoordinator.ReceiveWindowPoolCapacity(sessionCapacity)` sizes the shared pool: `sessionCapacity + ReceiveWindowRetireHeadroom(sessionCapacity)`, with the allowance `max(4 × udpAssociationFlowsPerAssociation, sessionCapacity / 16)`. `DurableCaptureBundle` passes both, so the pool and the session window can never disagree.
+- `UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize)` sizes one window (`cap + 22 + 1`) and `UdpProxyCoordinator.ReceiveWindowPoolCapacity(sessionCapacity)` sizes the shared pool: `sessionCapacity + ReceiveWindowRetireHeadroom(sessionCapacity)`, with the allowance `max(ReceiveWindowRetireFloor = 64, sessionCapacity / 16)`. `DurableCaptureBundle` passes both, so the pool and the session window can never disagree.
 - `UdpResponseReinjector(..., int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame, ...)` owns the rebuilt-frame bound.
 - `Socks5UdpTransport.ReceiveAsync(Memory<byte> buffer, CancellationToken)` returns a discriminated `UdpTransportReceiveResult` (the transport-neutral seam vocabulary owned by `WinForward.Runtime.UdpProxy`, implemented by the SOCKS5 transport); a receive whose byte count fills the supplied buffer reports the `Oversized` skip instead of a datagram.
 

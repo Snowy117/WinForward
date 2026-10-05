@@ -18,7 +18,6 @@ internal sealed class UdpSessionBudgetRun(
     StabilityContext context,
     SoakOptions options,
     UdpProxyCoordinator coordinator,
-    UdpAssociationPool associations,
     SessionBudgetSink sink,
     ProcessResourceSampler sampler,
     CountingRuntimeLogger productEvents,
@@ -48,8 +47,6 @@ internal sealed class UdpSessionBudgetRun(
         payloadBytes = options.PayloadBytes,
         seed = options.Seed,
         socks5External = options.Socks5External,
-        requirePooling = options.RequirePooling,
-        reuse = options.ReuseMode,
         idleTimeoutSeconds = idleTimeout.TotalSeconds,
         oneShotIdleTimeoutSeconds = oneShotIdleTimeout.TotalSeconds,
         sweepIntervalSeconds = sweepInterval.TotalSeconds,
@@ -66,7 +63,6 @@ internal sealed class UdpSessionBudgetRun(
     private long _baselineManagedBytes;
     private int _churnPeakSessions;
     private int _steadyPeakSessions;
-    private int _steadyPeakAssociations;
     private double? _sessionsZeroAtSeconds;
     private SessionBudgetSample? _final;
 
@@ -94,15 +90,10 @@ internal sealed class UdpSessionBudgetRun(
         }
 
         // Every warm-up flow answering is the per-flow-association shape, and anything short of that
-        // means the instrument is not delivering: under Off each flow owns its association, so its echo
-        // can only come back to it. Under a shared association the server answers its last sender, so
-        // only some of these echoes arrive on the flow that asked — that is the phenomenon this run
-        // measures, and the churn window's own accounting reports it. Zero own echoes in either shape
-        // means nothing is being delivered at all, and the churn measurement would be meaningless.
-        var warmupDelivered = options.ReuseMode == UdpAssociationReuseMode.Off
-            ? sink.WarmupFirstResponses >= warmupFlows
-            : sink.WarmupFirstResponses > 0;
-        if (!warmupDelivered)
+        // means the instrument is not delivering: each flow owns its association, so its echo can
+        // only come back to it. Zero own echoes means nothing is being delivered at all, and the
+        // churn measurement would be meaningless.
+        if (sink.WarmupFirstResponses < warmupFlows)
         {
             throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture, $"Only {sink.WarmupFirstResponses} of {warmupFlows} warm-up flows saw their own echo within {s_warmupTimeout.TotalSeconds:0} s; the proxy path or the harness server is not delivering, so the churn measurement would be meaningless."));
         }
@@ -166,12 +157,10 @@ internal sealed class UdpSessionBudgetRun(
 
             var elapsed = _watch.Elapsed;
             // The peak is read at arrival granularity, before the sweep of this iteration: the 5 s rows
-            // sample the sawtooth and can miss its peak by up to a sample interval of arrivals, while the
-            // association count ratchets with the true peak.
+            // sample the sawtooth and can miss its peak by up to a sample interval of arrivals.
             if (elapsed.TotalSeconds >= steadyThreshold)
             {
                 _steadyPeakSessions = Math.Max(_steadyPeakSessions, coordinator.SessionCount);
-                _steadyPeakAssociations = Math.Max(_steadyPeakAssociations, associations.AssociationCount);
             }
 
             await SweepAsync(elapsed).ConfigureAwait(false);
@@ -188,8 +177,8 @@ internal sealed class UdpSessionBudgetRun(
     /// <summary>
     /// The drain window: no new flows, the sweeper still on its production cadence, and a sample
     /// every <see cref="s_sampleInterval"/>. The tail of the window plus a short settle is what
-    /// the drain assertions read, so a straggling echo, a lease release, or an idle association
-    /// retirement has landed before the final descriptor count is taken.
+    /// the drain assertions read, so a straggling echo, the flow's own association teardown, or an
+    /// idle session retirement has landed before the final descriptor count is taken.
     /// </summary>
     public async Task DrainAsync()
     {
@@ -212,11 +201,8 @@ internal sealed class UdpSessionBudgetRun(
         if (_final.Sessions == 0 && _sessionsZeroAtSeconds is null) _sessionsZeroAtSeconds = _final.ElapsedSeconds;
     }
 
-    /// <summary>
-    /// The run's pacing waits, on the pool's clock and lifetime token: a disposed pool ends a sleep
-    /// instead of stranding it, and the cadence rides the same clock the retention comparison uses.
-    /// </summary>
-    private Task DelayAsync(TimeSpan delay) => Task.Delay(delay, associations.Context.TimeProvider, associations.Token);
+    /// <summary>The run's pacing waits; the windows are sub-second, so each sleep is short and bounded.</summary>
+    private static Task DelayAsync(TimeSpan delay) => Task.Delay(delay, TimeProvider.System);
 
     /// <summary>Drives the coordinator's idle expiry on the production sweeper cadence for the whole run, warm-up included.</summary>
     private async ValueTask SweepAsync(TimeSpan elapsed)
@@ -249,8 +235,9 @@ internal sealed class UdpSessionBudgetRun(
             Index: _samples.Count + 1,
             ElapsedSeconds: _watch.Elapsed.TotalSeconds,
             Sessions: sessions,
-            Associations: associations.AssociationCount,
-            LeasedFlows: associations.LeasedFlowCount,
+            // The server's own view of the flow's association — the control connection it accepted and
+            // has not seen close — so the row reads the peer's side of the 1:1 shape.
+            Associations: resources.HarnessControlConnections,
             FileDescriptors: resources.ProxyFileDescriptors,
             RawFileDescriptors: resources.RawFileDescriptors,
             HarnessServerConnections: resources.HarnessServerConnections,
@@ -287,10 +274,8 @@ internal sealed class UdpSessionBudgetRun(
             options,
             idleTimeout,
             sweepInterval,
-            associations.FlowsPerAssociationLimit,
-            associations.MaxAssociationsPerServerLimit,
             coordinator.RelayReceiveBufferBytes);
-        acceptance.Evaluate(new SessionBudgetOutcome(_samples, FinalSample(), _accepted, _rejected, _churnPeakSessions, _steadyPeakSessions, _steadyPeakAssociations));
+        acceptance.Evaluate(new SessionBudgetOutcome(_samples, FinalSample(), _accepted, _rejected, _churnPeakSessions, _steadyPeakSessions));
         context.WriteResult("udp.sessionBudget", _parameters, BuildSummaryRow(acceptance));
         if (!acceptance.Passed)
         {
@@ -327,8 +312,6 @@ internal sealed class UdpSessionBudgetRun(
             peakChurnSessions = _churnPeakSessions,
             steadyStateSessions = worst is null ? (int?)null : acceptance.SteadyPeakSessions,
             steadyStateSampledSessions = worst?.Sessions,
-            steadyStatePeakAssociations = worst is null ? (int?)null : acceptance.SteadyPeakAssociations,
-            associationsPerSession = worst is null ? (double?)null : acceptance.PeakAssociationsPerSession,
             steadyStateSessionCeiling = acceptance.SessionCeiling,
             steadyStateMargin = acceptance.SteadyStateMargin,
             retentionSeconds = (idleTimeout + sweepInterval).TotalSeconds,
@@ -345,14 +328,12 @@ internal sealed class UdpSessionBudgetRun(
             relayReceiveBufferBytesPerSession = worst?.RelayReceiveBufferBytesPerSession,
             relayReceiveBufferBudget = acceptance.RelayReceiveBufferBudget,
             descriptorBudgetHeadroom = acceptance.DescriptorHeadroom,
-            pooling = BuildPoolingRow(acceptance),
             drain = new
             {
                 seconds = options.DrainSeconds,
                 sessionsZeroAtSeconds = _sessionsZeroAtSeconds,
                 sessions = final.Sessions,
                 associations = final.Associations,
-                leasedFlows = final.LeasedFlows,
                 fileDescriptors = final.FileDescriptors,
                 descriptorDelta = final.FileDescriptors - final.BaselineFileDescriptors,
             },
@@ -361,24 +342,12 @@ internal sealed class UdpSessionBudgetRun(
         };
     }
 
-    /// <summary>The two named verdict halves and the failures behind them, so a failed soak's row already says which half held.</summary>
-    private object BuildVerdictRow(SessionBudgetAcceptance acceptance) => new
+    /// <summary>The verdict term and the failure list it was computed from, so a failed soak's row carries its own reasons.</summary>
+    private static object BuildVerdictRow(SessionBudgetAcceptance acceptance) => new
     {
         passed = acceptance.Passed,
         retentionBounded = acceptance.RetentionBounded,
-        poolingCovered = acceptance.PoolingCovered,
-        requirePooling = options.RequirePooling,
         failures = acceptance.Failures,
-    };
-
-    /// <summary>The pooling block: the shared head, whether the steady population exceeded it, and by how much (both absent when there was no steady-state sample).</summary>
-    private static object BuildPoolingRow(SessionBudgetAcceptance acceptance) => new
-    {
-        sharedFlowBudget = acceptance.SharedFlowBudget,
-        flowsPerAssociation = acceptance.FlowsPerAssociation,
-        maxAssociationsPerServer = acceptance.MaxAssociationsPerServer,
-        saturated = acceptance.PoolingSaturated,
-        sessionsBeyondSharedBudget = acceptance.SessionsBeyondSharedBudget,
     };
 
     private LatencyDistribution BuildFirstResponses()

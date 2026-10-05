@@ -107,7 +107,7 @@ benchmarks/                    # 基准宿主（BenchmarkDotNet 性能基准 + �
   - **≥ 2 个测试文件重复 → 提取到 `tests/WinForward.TestSupport/`**，按类别分组文件（`ChecksumMath`、`FrameBuilders`、`FlowBuilders`、`UdpTransportFakes`、`PacketReinjectorFakes`、`TcpCoordinatorFakes`、`Socks5TestServer`…）。该库是**非测试项目**（显式 `<IsTestProject>false</IsTestProject>`，因为 `xunit.core.props` 会无条件把它设为 true，从而让 `dotnet test` 对库启动测试宿主并以 exit 1 中止整轮），供各测试项目 `ProjectReference`。
   - TestSupport 的文件使用自身 namespace（`WinForward.TestSupport`，与项目名一致，无 `.TestHelpers` 后缀）；fake 从 private nested 提升为 internal。
   - fake 为 internal，因此**每个消费它的测试项目**都需在 `WinForward.TestSupport.csproj` 获得 `InternalsVisibleTo`。该库自行声明 `xunit` 包引用（部分 helper 使用 `Assert`）。
-  - 若 TestSupport 自身需要访问生产代码的 internal 接缝，在对应生产项目声明 `InternalsVisibleTo("WinForward.TestSupport")`；2026-10-01 实测仅 `Runtime`（`UdpAssociationPool`）与 `Windows`（`OwnerTable`/`OwnerTableKind`）有此需要。
+  - 若 TestSupport 自身需要访问生产代码的 internal 接缝，在对应生产项目声明 `InternalsVisibleTo("WinForward.TestSupport")`；2026-10-01 实测仅 `Runtime`（示例：`Socks5UdpTransportFactory`/`Socks5UdpTransport`）与 `Windows`（`OwnerTable`/`OwnerTableKind`）有此需要。
   - 合并重复 fake 时取行为超集（先例：`FakeReinjector` 同时记录 `DeviceFlags` 与 `Flags` 两个 flag 平面；`TrackingSocket` 支持可选 SocketType/ProtocolType）。
 
 ---

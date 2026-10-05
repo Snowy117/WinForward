@@ -128,15 +128,13 @@ internal sealed record SoakOptions
     public int TcpTransferBytes { get; private init; } = 1_048_576;
     public TcpRelayMode TcpRelayMode { get; private init; } = TcpRelayMode.Socks5;
 
-    /// <summary>UDP association reuse (<c>--reuse</c>): the placement mode the scenario's pool is constructed with. Only the stability scenarios follow it — the perf benchmarks keep <see cref="UdpAssociationReuseMode.Off"/>, the baseline their anchors were recorded against.</summary>
-    public UdpAssociationReuseMode ReuseMode { get; private init; } = UdpAssociationReuseMode.Auto;
-
     /// <summary>
     /// UDP flow placement (<c>--target</c>): which transport the establishment scenarios send
-    /// through. <see cref="SoakTargetKind.Socks5"/> is the shipped default (the relay path the
-    /// reuse columns were recorded on); <see cref="SoakTargetKind.Local"/> points the same flows at
-    /// a local endpoint through the product <c>UdpTransportFactory</c> composite, with the loopback
-    /// SOCKS5 server still up so its handshake counters can be read as the column's zeros.
+    /// through. <see cref="SoakTargetKind.Socks5"/> is the shipped default — one association per
+    /// flow, the shape the surviving series measures; <see cref="SoakTargetKind.Local"/> points the
+    /// same flows at a local endpoint through the product <c>UdpTransportFactory</c> composite, with
+    /// the loopback SOCKS5 server still up so its handshake counters can be read as the column's
+    /// zeros.
     /// </summary>
     public SoakTargetKind Target { get; private init; } = SoakTargetKind.Socks5;
 
@@ -177,13 +175,6 @@ internal sealed record SoakOptions
 
     /// <summary>UDP session-budget soak (<c>--drain-seconds</c>): length of the no-new-flows drain window after the churn.</summary>
     public int DrainSeconds { get; private init; } = 120;
-
-    /// <summary>
-    /// UDP session-budget soak (<c>--require-pooling</c>): fail the run unless the pooling coverage
-    /// check was evaluated inside the pool's shared head, so a saturated sample cannot skip the only
-    /// pooling-discriminating assertion while the run still reports a pass.
-    /// </summary>
-    public bool RequirePooling { get; private init; }
 
     /// <summary>Child server mode (<c>--serve-socks5-udp</c>): host the loopback SOCKS5 UDP server for a parent process instead of running a scenario.</summary>
     public bool ServeSocks5Udp { get; private init; }
@@ -281,8 +272,6 @@ internal sealed record SoakOptions
                 return ApplyPopulationArgument(options, args, ref index);
             case "--tcp-relay-mode":
                 return options with { TcpRelayMode = ParseTcpRelayMode(Value(args, ref index)) };
-            case "--reuse":
-                return options with { ReuseMode = ParseReuseMode(Value(args, ref index)) };
             case "--target":
                 return options with { Target = ParseTargetKind(Value(args, ref index)) };
             case "--abort-mix":
@@ -293,8 +282,6 @@ internal sealed record SoakOptions
                 return options with { Capacity = UdpCapacity(Value(args, ref index)) };
             case "--serve-socks5-udp":
                 return options with { ServeSocks5Udp = true };
-            case "--require-pooling":
-                return options with { RequirePooling = true };
             case "--socks5-external":
                 return options with { Socks5External = true };
             case "--seed":
@@ -405,22 +392,8 @@ internal sealed record SoakOptions
     };
 
     /// <summary>
-    /// The three placement modes, spelled as the config key spells them. An unknown value is refused
-    /// rather than falling back to the default, so a typo cannot silently measure <c>auto</c> while
-    /// the row records it as the requested column.
-    /// </summary>
-    private static UdpAssociationReuseMode ParseReuseMode(string raw) => raw.ToLowerInvariant() switch
-    {
-        "auto" => UdpAssociationReuseMode.Auto,
-        "always" => UdpAssociationReuseMode.Always,
-        "off" => UdpAssociationReuseMode.Off,
-        _ => throw new ArgumentException($"Unknown reuse mode '{raw}'; expected off, always, or auto.", nameof(raw)),
-    };
-
-    /// <summary>
-    /// The two flow placements, refused for anything else on the same grounds as
-    /// <see cref="ParseReuseMode"/>: a typo must fail the run rather than record a column it did not
-    /// measure.
+    /// The two flow placements, refused for anything else so a typo must fail the run rather than
+    /// record a column it did not measure.
     /// </summary>
     private static SoakTargetKind ParseTargetKind(string raw) => raw.ToLowerInvariant() switch
     {

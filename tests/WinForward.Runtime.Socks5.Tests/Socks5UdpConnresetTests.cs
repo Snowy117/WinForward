@@ -35,7 +35,7 @@ public sealed class Socks5UdpConnresetTests
         var disableCalls = new List<Socket>();
         bool? boundAtDisableCall = null;
 
-        await using var fixture = await UdpTransportTestFactory.CreateAsync(
+        await using (var transport = await UdpTransportTestFactory.CreateAsync(
             socksServer,
             new SelfTrafficRegistry(),
             family => socket = new TrackingSocket(family),
@@ -43,15 +43,14 @@ public sealed class Socks5UdpConnresetTests
             {
                 boundAtDisableCall = candidate.LocalEndPoint is not null;
                 disableCalls.Add(candidate);
-            });
-        var transport = fixture.Transport;
+            }))
+        {
+            Assert.Single(disableCalls);
+            Assert.Same(socket, disableCalls[0]);
+            Assert.False(boundAtDisableCall ?? true, "SIO_UDP_CONNRESET must be applied before the relay socket binds.");
+            Assert.NotNull(transport.LocalEndpoint);
+        }
 
-        Assert.Single(disableCalls);
-        Assert.Same(socket, disableCalls[0]);
-        Assert.False(boundAtDisableCall ?? true, "SIO_UDP_CONNRESET must be applied before the relay socket binds.");
-        Assert.NotNull(transport.LocalEndpoint);
-
-        await transport.DisposeAsync();
         await serverCancellation.CancelAsync();
         await IgnoreExpectedCancellationAsync(server);
     }

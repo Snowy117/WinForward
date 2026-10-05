@@ -35,11 +35,9 @@ public sealed class UdpReceiveWindowPoolTests
     [Fact]
     public void ReceiveWindowPoolCapacityIsTheSessionCapacityPlusTheRetireAllowance()
     {
-        const int defaultFanOut = ConfigurationLoader.DefaultUdpAssociationFlowsPerAssociation;
-
-        // The floor: four association-wide fault bursts at the default fan-out.
-        Assert.Equal(4 * defaultFanOut, UdpProxyCoordinator.ReceiveWindowRetireHeadroom(CycleSessions));
-        Assert.Equal(CycleSessions + (4 * defaultFanOut), UdpProxyCoordinator.ReceiveWindowPoolCapacity(CycleSessions));
+        // The floor: the fixed concurrent-retirement burst the allowance is sized against.
+        Assert.Equal(UdpProxyCoordinator.ReceiveWindowRetireFloor, UdpProxyCoordinator.ReceiveWindowRetireHeadroom(CycleSessions));
+        Assert.Equal(CycleSessions + UdpProxyCoordinator.ReceiveWindowRetireFloor, UdpProxyCoordinator.ReceiveWindowPoolCapacity(CycleSessions));
         Assert.Equal(364, UdpProxyCoordinator.ReceiveWindowPoolCapacity(CycleSessions));
 
         // The proportional term: a sixteenth of the shipped session capacity dominates the floor there.
@@ -51,7 +49,7 @@ public sealed class UdpReceiveWindowPoolTests
         foreach (var capacity in new[] { 1, CycleSessions, 4_096, shipped })
         {
             Assert.True(UdpProxyCoordinator.ReceiveWindowPoolCapacity(capacity) > capacity);
-            Assert.Equal(capacity + Math.Max(4 * defaultFanOut, capacity / 16), UdpProxyCoordinator.ReceiveWindowPoolCapacity(capacity));
+            Assert.Equal(capacity + Math.Max(UdpProxyCoordinator.ReceiveWindowRetireFloor, capacity / 16), UdpProxyCoordinator.ReceiveWindowPoolCapacity(capacity));
         }
     }
 

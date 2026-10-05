@@ -327,7 +327,7 @@ internal static class ResidencyCensusScenario
         "baseline" => "Zero-flow baseline: no flow table, relay, or UDP session exists yet. Every later per-flow figure is a delta against this sample, and the baseline is taken before any stage pre-sizes a pool.",
         "flowTable" => "Flow table at the production 65,536-state capacity. The delta is the table's own pre-allocated indexes and state pool (A1 item 1a) rather than the live states, so the per-flow figure is capacity-dominated and a larger --flows hardly moves it: run the census twice at different populations to see what the live states themselves add.",
         "tcpRelayWindows" => "One real loopback SOCKS5 relay per flow, held open and idle: two 64 KiB native pump windows per relay (A1 item 2 / A4 item 9). The windows are native, so they are absent from managedBytes and TotalCommittedBytes; on this host PrivateMemorySize64 is /proc/self VmData, which also carries the allocator's per-thread arena reservations and moves by tens of MB when threads appear, so the working-set column is the one that tracks the windows and privateBytes must not be read as per-relay cost.",
-        "udpSessions" => "Coordinator sessions over fake transports: the session, slot, association and lease objects plus the per-session setup-queue and receive-window buffers. The fake transport creates no socket, so the descriptor column here is the harness's own and not the real dial path's 1.070 descriptors per live session measured by the 09-28 series, and the same VmData arena caveat as the relay stage applies to privateBytes.",
+        "udpSessions" => "Coordinator sessions over fake transports: the session, slot and association objects plus the per-session setup-queue and receive-window buffers. The fake transport creates no socket, so the descriptor column here is the harness's own and not the real dial path's 1.070 descriptors per live session measured by the 09-28 series, and the same VmData arena caveat as the relay stage applies to privateBytes.",
         _ => string.Empty,
     };
 
@@ -356,7 +356,7 @@ internal static class ResidencyCensusScenario
     /// The UDP half of the census: <c>--udp-flows</c> coordinator sessions over fake transports, built
     /// with the footprint scenario's populate pattern — offer every key, let the setup-failure cooldown
     /// lapse, and wait for the factory's own created count rather than assuming the first offer worked.
-    /// The fake transport is deliberate: the measured part is the session/slot/lease residency, and a
+    /// The fake transport is deliberate: the measured part is the session/slot/association residency, and a
     /// real dial would put loopback socket work and timeouts into the census loop.
     /// </summary>
     private sealed class UdpCensusStage : IAsyncDisposable

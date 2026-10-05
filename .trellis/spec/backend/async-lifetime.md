@@ -111,15 +111,14 @@ internal struct WorkLease : IDisposable          // mutable; Dispose() => one Ex
   *migrated*: `TcpRedirectSessionStore`, `TcpRedirectSession`, `TcpProxyRelay`, `UdpProxySession`,
   `UdpProxyCoordinator`, `Socks5ControlConnection`, `TransactionalCaptureRuntime`,
   `LayeredCaptureRunner`, `MultiAdapterCaptureLoop`, `IdleExpirySweeper`, `RuntimeHeartbeat`.
-  **Added 2026-09-28 (task `09-28-udp-association-reuse`):** `UdpAssociationPool` and
-  `UdpControlAssociation` are owners of the same shape. The pool owns one scope, holds one lease per
-  outstanding flow lease (so its drain joins every lease holder before it closes any association), and
-  runs its retention/capability maintenance as a `Run` child. Each association owns a scope linked to
-  `pool.Token`, runs its control-stream watchdog and its single-flight dial as `Run` children, and uses
-  the D11 `_disposeStarted` claim; its disposal seals **before** it releases the control connection, so
-  the watchdog cannot read the owner's own teardown as association death. Ownership nests
-  bundle → pool → association → watchdog, and one lock order is fixed: the pool gate is taken before an
-  association's evidence gate, never the reverse. Three
+  **Per-flow UDP association (task `09-28-udp-association-reuse`; re-scoped 2026-10-05 by task
+  `10-05-remove-udp-association-sharing`):** `Socks5UdpAssociation` is an owner of the same shape.
+  It holds one `QuiescenceScope` whose only child is the control-stream watchdog, and it uses the D11
+  `_disposeStarted` claim; its disposal seals **before** it releases the control connection, so the
+  watchdog cannot read the owner's own teardown as association death. The association is owned by its
+  flow's `Socks5UdpTransport`, which disposes it after the relay socket and its self-traffic token
+  and before its send gate, so ownership nests
+  bundle → coordinator → session → transport → association → watchdog. Three
   lifetime handles deliberately stay outside the primitive, and each is already joined by its own
   owner, so I2 holds without them:
   - **`FlowAttributionPipeline`** (F8, 2026-10-01) is an owner of the same shape: it holds one

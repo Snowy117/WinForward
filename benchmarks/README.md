@@ -90,8 +90,8 @@ Count-based reliability metrics under sustained load. One JSONL record per scena
 dotnet run -c Release --project benchmarks/WinForward.Benchmarks -- \
   --stability [--scenario all|udp|udpBurst|udpChurn|udpSessionBudget|tcp|tcpChurn|tcpthroughput|footprint|baseline|residency|retention|scaling|sweep|pump] [--duration 60] [--pps 25000] \
   [--payload-bytes 512] [--flows 256] [--udp-flows 100] [--burst-flows 48] [--dial-delay-ms 0] [--churn-waves 1] \
-  [--rate 20] [--capacity 16384] [--churn-seconds 90] [--drain-seconds 120] [--require-pooling] \
-  [--reuse off|always|auto] [--target socks5|local] \
+  [--rate 20] [--capacity 16384] [--churn-seconds 90] [--drain-seconds 120] \
+  [--target socks5|local] \
   [--tcp-concurrency 64] [--tcp-transfer-bytes 1048576] [--socks5-external] \
   [--attribution-delay-ms 0] [--attribution-delay-percent 5] [--threads 0] [--shared-key-percent 10] \
   [--abort-mix clean=25,clientRst=25,relayCancel=25,upstreamTruncate=25] [--seed 42] \
@@ -104,31 +104,31 @@ own summary enumerates the reason per exclusion (`gc-soak`, `udpSessionBudget`, 
 
 `--quick` = `--duration 15 --pps 10000 --tcp-concurrency 16 --flows 64`.
 
-`--reuse off|always|auto` selects the UDP association placement mode for the run's pool (`auto`, the
-default, shares and passively detects a pinning server; `always` shares with detection disabled; `off`
-is one association per flow). The five stability scenarios that construct a pool follow it, so all
-columns of a sharing comparison come from one binary and one recorded command line; the
-`udpSession`/`FrameworkSetup` perf benchmarks keep `off`, the baseline their per-session anchors were
-recorded against. An unknown value is refused at parse time rather than falling back to `auto`.
+The harness no longer has a UDP association-placement knob: a proxy-decided flow owns its own
+authenticated association (task `10-05-remove-udp-association-sharing`, R6), so there is one shape to
+measure. The `--reuse` flag is gone and an old command line meets the harness's unknown-argument
+error; the historical `off`/`auto`/`always` columns under `results/` are annotated as measurements of
+a removed feature and their commands are historical.
 
 `--target socks5|local` selects the transport the two flow-establishment scenarios send through:
 `socks5` (the default) relays each flow through the loopback SOCKS5 server, `local` points the same
 flows at a loopback endpoint through the **product** `UdpTransportFactory` composite — both factories
 composed as the CLI composes them — which forwards the payload verbatim and attributes the answer to
 the flow's original destination. It is the placement column R7 of `10-05-local-dns-transport` asks
-for; its series is `results/2026-10-05-local-target/`. Only `udp.churn` and `udp.burstEstablishment`
+for; its series is `results/2026-10-05-local-target/`, and the surviving columns' confirmation series
+is `results/2026-10-05-no-association-sharing/`. Only `udp.churn` and `udp.burstEstablishment`
 host the column; every other scenario leaves its relay path unchanged and is refused at parse time
-rather than recording a relay-measured row stamped `local` (a session-budget run, for instance,
-hand-builds a shared association whose pooling verdict has no local-target meaning). The two
+rather than recording a relay-measured row stamped `local` (a session-budget run, for instance, is a
+retention/descriptor soak whose row has no local-target meaning). The two
 scenarios that do host it keep the SOCKS5 server running in every column. Both servers' own
 counters land in every row — `socks5Handshakes` (`controlConnections` / `associateReplies`) and
 `localResponder`
 (`datagramsReceived` / `datagramsReplied`), cumulative from the start of the run's load (the
 unmeasured warmup wave included) — so the local column's zeros are read beside the relay columns'
 non-zeros in the same artifact rather than asserted by construction. Cumulative rather than per
-window is deliberate: a shared association is established once and then serves later waves, so a
-per-wave delta of zero would be the pool working, not the relay being unused. An unknown value is
-refused at parse time like `--reuse`, and `--target local` refuses `--socks5-external` because an
+window is deliberate: each wave's handshakes are only readable as the difference between two rows,
+and the last row of a run is its total. An unknown value is
+refused at parse time, and `--target local` refuses `--socks5-external` because an
 out-of-process server's counters never reach this parent.
 
 Stability runs hold the Windows system timer at 1 ms resolution (`timeBeginPeriod(1)` through the
@@ -192,8 +192,9 @@ teardown tails — are **not comparable** with current rows either.
   `socks5Handshakes` / `localResponder` counters are the run's totals on both sides of the comparison
   (`results/2026-10-05-local-target/`). Read the burst window's duration with its `injected / sent`
   figures: the window closes when the burst's own first responses arrive or the adaptive timeout
-  fires, so a column that answers 48 of 48 closes it in tens of milliseconds while a shared column
-  whose replies land on siblings runs it to the 30 s floor.
+  fires. Both surviving columns answer the burst's flows, so both close it in tens of milliseconds;
+  the historical `auto` column in `results/2026-10-05-udp-reuse-ownership/` ran it to the 30 s floor
+  because only 3 of 48 flows saw their own reply, which is a reading of a removed shape.
 - **`udp.churn`** — session-creation churn: waves of `--burst-flows` short-lived sessions through
   the real dial path, each wave retired through the coordinator's own idle-expiry path
   (`RemoveExpiredAsync` with a zero timeout, i.e. the per-session teardown the periodic sweeper
@@ -210,8 +211,11 @@ teardown tails — are **not comparable** with current rows either.
   after its session expired), and a setup-failure cooldown surfaces as that wave's establishment
   loss. Allocation sampling uses `GC.GetTotalAllocatedBytes(precise: false)`; latency is
   reported as ordinals only. Each row carries the wave's per-flow accounting — `firstResponses`
-  (own), `misdelivered` and `noResponse`, which sum to the wave's flow count — and the `reuse` mode
-  it ran under, so `own + noResponse == flows` is checkable from the row itself. Series re-based
+  (own), `misdelivered` and `noResponse`, the clamped remainder
+  `max(0, flows − own − misdelivered)` — so the wave's flows are accounted for from the row itself:
+  `own + misdelivered + noResponse == flows` against `--burst-flows` (or the sustained row's
+  `sessions`), which is exact unless a flow both received a foreign reply and was later answered by
+  its own and is therefore counted in `own` and `misdelivered` both. Series re-based
   2026-10-05 on per-flow response ownership (see `results/2026-10-05-udp-reuse-ownership/`). Follows
   `--target`: under `local` the same waves go through the product transport composite to a loopback
   responder, and every row carries the two servers' own `socks5Handshakes` / `localResponder`
@@ -220,22 +224,32 @@ teardown tails — are **not comparable** with current rows either.
   (`results/2026-10-05-local-target/`).
 - **`udp.sessionBudget`** — the session-budget soak (PRD acceptance 1): `--rate` new flows/s for
   `--churn-seconds`, then `--drain-seconds` with no new flows, sampling the live sessions, the
-  process's own descriptors, the pool's associations/leases, and the estimated kernel receive buffer
+  harness SOCKS5 server's live control connections (the rows' `associations` column), the process's
+  own descriptors, and the estimated kernel receive buffer
   every 5 s. It asserts no loss or rejection, the retention ceiling
   `rate × (idle + 2 × sweep) + margin` (and the receive-buffer estimate as its byte form), the
-  per-session descriptor budget, the shared-placement ceiling `ceil(sessions / flows) + 16` while the
-  population fits the pool's shared head, and drain-to-zero. A churn window whose cumulative flow
+  per-session descriptor budget, and drain-to-zero (sessions, the harness server's live control
+  connections, and descriptors). A churn
+  window whose cumulative flow
   count does not exceed the ceiling is refused before the load — it could not discriminate retention
-  from accumulation — and `--require-pooling` fails the run unless the pooling half was evaluated
-  (default off; a saturated population otherwise skips it). The verdict row names both halves
-  independently (`verdict.retentionBounded`, `verdict.poolingCovered`). Each row carries
-  `misdelivered` and `noResponse` beside `datagramsReceived` (the own term), so
-  `own + misdelivered + noResponse == accepted` is checkable from the row; under sharing the
-  response-ownership-corrected accounting surfaces as `datagramsLost`, because a flow answered by a
-  sibling's echo is not answered. Note the shipped 20 flows/s rate leaves only one flow in flight at
-  a time, so it cannot exercise the defect — `--rate 500 --churn-seconds 60` is the overlapping
-  variant that does. Series and commands: `results/2026-09-28-udp-reuse/` (per-flow success columns
-  superseded 2026-10-05) and `results/2026-10-05-udp-reuse-ownership/`.
+  from accumulation. The verdict row names the surviving term (`verdict.retentionBounded`) and the
+  failures behind it. Each row carries `misdelivered` and `noResponse` beside `datagramsReceived`
+  (the own term), so
+  `own + misdelivered + noResponse == accepted` is checkable from the row, and its `associations`
+  column is the **harness SOCKS5 server's own live control-connection count** — accepted minus
+  closed, read on the peer side of the dial: the shipped one-association-per-flow shape (task
+  `10-05-remove-udp-association-sharing`, R6) seen from the server, so a control connection that
+  outlives its session is visible in the row and the drain's association term is not the sessions
+  term restated. Under `--socks5-external` the out-of-process server's count never reaches this
+  process, so the column is **omitted** (the writer drops an unobserved field rather than reporting a
+  number nobody read): the drain's association term is then not evaluated, and the descriptor budget
+  charges the shipped one-control-connection-per-session allowance in place of an observation. Note
+  the shipped 20 flows/s rate leaves only one
+  flow in flight at
+  a time; `--rate 500 --churn-seconds 60` is the overlapping-arrival variant. Series and commands:
+  `results/2026-09-28-udp-reuse/` (per-flow success columns
+  superseded 2026-10-05) and `results/2026-10-05-udp-reuse-ownership/`; both measured association
+  placement, which no longer exists.
 - **`tcp.unexpectedEof`** — concurrent one-way transfers through `TcpProxyRelay` with an
   adversarial event fired mid-stream per transfer (weighted mix: clean / client RST / relay
   cancellation / upstream truncation at a random 20–80 % of the transfer). Receiver-side

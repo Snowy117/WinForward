@@ -62,11 +62,11 @@ public readonly record struct UdpTransportReceiveResult(UdpTransportDatagram Dat
 }
 
 /// <summary>
-/// The flow's authenticated UDP association is gone and could not be recovered in place
-/// (association death with a failed or address-family-changing re-association). The transport
-/// refuses further datagrams with this exception before touching its socket, and the
-/// coordinator removes the flow's slot with <c>UdpTeardownReason.AssociationLost</c> without arming
-/// the setup cooldown, so the flow re-establishes on its next datagram.
+/// The flow's authenticated UDP association is gone: its control connection ended and the watchdog
+/// recorded the death. The transport refuses further datagrams with this exception before touching
+/// its socket, and the coordinator removes the flow's slot with
+/// <c>UdpTeardownReason.AssociationLost</c> without arming the setup cooldown, so the flow
+/// re-establishes on its next datagram.
 /// </summary>
 #pragma warning disable RCS1194 // The [SerializationInfo, StreamingContext] constructor is deliberately omitted: binary serialization is obsolete in .NET 8+ (SYSLIB0051) and this exception carries no state beyond its message and inner exception.
 public sealed class UdpAssociationLostException : IOException
@@ -93,8 +93,8 @@ public interface IUdpProxyTransport : IAsyncDisposable
 {
     /// <summary>
     /// The endpoint replies are expected from and the transport's own traffic is keyed on: the SOCKS5
-    /// relay for a relayed flow, the configured local endpoint for a local target. Read per receive so
-    /// an in-place re-association is visible without touching the transport.
+    /// relay for a relayed flow, the configured local endpoint for a local target. Fixed for the
+    /// transport's life: a relayed flow owns the association that negotiated it.
     /// </summary>
     IPEndPoint PeerEndpoint { get; }
 
@@ -159,11 +159,11 @@ internal static class UdpTransportReceiveClassifier
 
 /// <summary>
 /// The per-flow exchange evidence a retention policy reads: the two counters the concrete
-/// transport already maintains (the SOCKS5 transport reads them through its association lease),
-/// exposed on the transport seam because that accounting is private to the implementation. Both
-/// reads are plain volatile loads off the packet path, and a transport that does not implement this
-/// interface is classified as <em>sustained</em> — the retention-safe direction, and what keeps a
-/// foreign or fake transport's sweep behaviour unchanged.
+/// transport maintains itself (the SOCKS5 transport counts its own accepted sends and its first
+/// decoded relay response), exposed on the transport seam because that accounting is private to the
+/// implementation. Both reads are plain volatile loads off the packet path, and a transport that
+/// does not implement this interface is classified as <em>sustained</em> — the retention-safe
+/// direction, and what keeps a foreign or fake transport's sweep behaviour unchanged.
 /// </summary>
 internal interface IUdpExchangeCounters
 {

@@ -198,25 +198,65 @@ public sealed class ConfigurationValidationTests
         ConfigurationAssert.Invalid(json, "socks5Servers[0].port");
     }
 
+    /// <summary>
+    /// The removed association keys left the schema outright, so an old configuration fails closed
+    /// at parse through the loader's unknown-property rule and the diagnostic names the key's JSON
+    /// path. There is no migration property and no removal message.
+    /// </summary>
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void ConfigurationRejectsTheRenamedProxyServerKey(bool alsoDeclaresTarget)
+    [InlineData("\"udpAssociationReuse\": \"auto\"", "udpAssociationReuse")]
+    [InlineData("\"udpAssociationMaxPerServer\": 1024", "udpAssociationMaxPerServer")]
+    [InlineData("\"udpAssociationFlowsPerAssociation\": 16", "udpAssociationFlowsPerAssociation")]
+    public void RemovedAssociationKeysFailClosedAtParseWithTheirJsonPath(string member, string removedKey)
     {
-        var replacement = alsoDeclaresTarget ? ", \"target\": \"Main\"" : string.Empty;
         var json = $$"""
         {
-          "socks5Servers": [ { "name": "Main", "host": "127.0.0.1", "port": 1080 } ],
-          "host": { "fallbackAction": "pass", "rules": [ { "action": "proxy", "proxyServer": "Main"{{replacement}} } ] }
+          "socks5Servers": [],
+          "host": { "fallbackAction": "pass", "rules": [] },
+          {{member}}
         }
         """;
 
-        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
-        Assert.NotNull(dto);
-        Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
-        var renamed = Assert.Single(diagnostics, diagnostic => string.Equals(diagnostic.Path, "host.rules[0].proxyServer", StringComparison.Ordinal));
-        Assert.Contains("'target'", renamed.Message, StringComparison.Ordinal);
-        if (alsoDeclaresTarget) Assert.DoesNotContain(diagnostics, diagnostic => string.Equals(diagnostic.Path, "host.rules[0].target", StringComparison.Ordinal));
+        Assert.False(ConfigurationLoader.TryParse(json, out _, out var diagnostics));
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal($"$.{removedKey}", diagnostic.Path);
+    }
+
+    /// <summary>
+    /// The pre-rename <c>proxyServer</c> spelling is an unknown property like any other: the rename
+    /// is complete, so the old spelling fails at parse rather than at validation with a rename hint.
+    /// </summary>
+    [Fact]
+    public void RemovedProxyServerSpellingFailsClosedAtParseWithItsJsonPath()
+    {
+        const string json = """
+        {
+          "socks5Servers": [ { "name": "Main", "host": "127.0.0.1", "port": 1080 } ],
+          "host": { "fallbackAction": "pass", "rules": [ { "action": "proxy", "proxyServer": "Main" } ] }
+        }
+        """;
+
+        Assert.False(ConfigurationLoader.TryParse(json, out _, out var diagnostics));
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal("$.host.rules[0].proxyServer", diagnostic.Path);
+    }
+
+    [Fact]
+    public void ConfigurationWithoutTheRemovedKeysValidatesAsBefore()
+    {
+        const string json = """
+        {
+          "socks5Servers": [ { "name": "Main", "host": "127.0.0.1", "port": 1080 } ],
+          "host": { "fallbackAction": "pass", "rules": [ { "action": "proxy", "target": "Main" } ] }
+        }
+        """;
+
+        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out var parseDiagnostics), string.Join("; ", parseDiagnostics));
+        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Empty(configuration!.Warnings);
+        Assert.Equal(ConfigurationLoader.DefaultUdpSessionCapacity, configuration.UdpSessionCapacity);
+        Assert.Equal(ConfigurationLoader.DefaultUdpRelayReceiveBufferBytes, configuration.UdpRelayReceiveBufferBytes);
+        Assert.Equal(ConfigurationLoader.DefaultUdpSessionIdleTimeout, configuration.UdpSessionIdleTimeout);
     }
 
     [Fact]

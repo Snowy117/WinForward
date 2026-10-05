@@ -4,7 +4,6 @@ using System.Net.Sockets;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
-using WinForward.Runtime.UdpProxy;
 using WinForward.TestSupport;
 using Xunit;
 using Xunit.Abstractions;
@@ -13,50 +12,46 @@ using static WinForward.TestSupport.AsyncTestExtensions;
 namespace WinForward.Runtime.Socks5.Tests;
 
 /// <summary>
-/// The lease is released exactly once, including every construction-failure path: the factory owns
-/// the lease it rents, so a relay socket that cannot be created, a receive buffer that cannot be
-/// applied, or a bind that fails must still return the association (and close a private one), and
-/// disposing a lease repeatedly must release the association only once.
+/// The factory's ownership contract: it dials the flow's association, and when the relay socket
+/// cannot come into existence — a socket constructor failure, an unappliable receive buffer, a
+/// failed bind — the association it dialed is released (its control connection closed) instead of
+/// being leaked. The transport it returns owns both halves and releases them exactly once.
 /// </summary>
-public sealed class Socks5UdpTransportLeaseTests(ITestOutputHelper output)
+public sealed class Socks5UdpTransportFactoryTests(ITestOutputHelper output)
 {
     [Fact]
-    public async Task FactoryReleasesTheLeaseWhenTheRelaySocketCannotBeCreated()
+    public async Task FactoryReleasesTheAssociationWhenTheRelaySocketCannotBeCreated()
     {
         var registry = new SelfTrafficRegistry();
         await using var server = new ScriptedSocks5UdpServer(RelayEndpoint());
-        await using var pool = new UdpAssociationPool(registry, UdpAssociationReuseMode.Off);
-        var factory = new Socks5UdpTransportFactory(pool, registry, UdpFrameBuilder.DefaultMaximumEthernetFrame, socketFactory: _ => throw new IOException("synthetic socket creation failure"));
+        var factory = new Socks5UdpTransportFactory(registry, UdpFrameBuilder.DefaultMaximumEthernetFrame, socketFactory: _ => throw new IOException("synthetic socket creation failure"));
 
         var exception = await Assert.ThrowsAsync<IOException>(() => factory.CreateAsync(ProxyTarget.FromServer(server.Server), CancellationToken.None).AsTask());
 
         Assert.Equal("synthetic socket creation failure", exception.Message);
-        await AssertLeaseReleasedAsync(pool, server);
+        await AssertAssociationReleasedAsync(server);
     }
 
     [Fact]
-    public async Task FactoryReleasesTheLeaseWhenTheConfiguredReceiveBufferCannotBeApplied()
+    public async Task FactoryReleasesTheAssociationWhenTheConfiguredReceiveBufferCannotBeApplied()
     {
         var registry = new SelfTrafficRegistry();
         await using var server = new ScriptedSocks5UdpServer(RelayEndpoint());
-        await using var pool = new UdpAssociationPool(registry, UdpAssociationReuseMode.Off);
         // An already-disposed socket fails the first construction step that touches it: applying
         // the configured relay receive buffer.
-        var factory = new Socks5UdpTransportFactory(pool, registry, UdpFrameBuilder.DefaultMaximumEthernetFrame, socketFactory: CreateDisposedSocket);
+        var factory = new Socks5UdpTransportFactory(registry, UdpFrameBuilder.DefaultMaximumEthernetFrame, socketFactory: CreateDisposedSocket);
 
         await Assert.ThrowsAsync<ObjectDisposedException>(() => factory.CreateAsync(ProxyTarget.FromServer(server.Server), CancellationToken.None).AsTask());
 
-        await AssertLeaseReleasedAsync(pool, server);
+        await AssertAssociationReleasedAsync(server);
     }
 
     [Fact]
-    public async Task FactoryReleasesTheLeaseWhenTheRelaySocketCannotBeBound()
+    public async Task FactoryReleasesTheAssociationWhenTheRelaySocketCannotBeBound()
     {
         var registry = new SelfTrafficRegistry();
         await using var server = new ScriptedSocks5UdpServer(RelayEndpoint());
-        await using var pool = new UdpAssociationPool(registry, UdpAssociationReuseMode.Off);
         var factory = new Socks5UdpTransportFactory(
-            pool,
             registry,
             UdpFrameBuilder.DefaultMaximumEthernetFrame,
             socketFactory: static family => new Socket(family, SocketType.Dgram, ProtocolType.Udp),
@@ -64,24 +59,23 @@ public sealed class Socks5UdpTransportLeaseTests(ITestOutputHelper output)
 
         await Assert.ThrowsAsync<ObjectDisposedException>(() => factory.CreateAsync(ProxyTarget.FromServer(server.Server), CancellationToken.None).AsTask());
 
-        await AssertLeaseReleasedAsync(pool, server);
+        await AssertAssociationReleasedAsync(server);
     }
 
     [Fact]
-    public async Task CreateReleasesItsRegistrationsAndTheCallerReleasesTheLeaseWhenTheFrameCapIsRejected()
+    public async Task CreateReleasesItsRegistrationsAndTheCallerReleasesTheAssociationWhenTheFrameCapIsRejected()
     {
         var registry = new SelfTrafficRegistry();
         await using var server = new ScriptedSocks5UdpServer(RelayEndpoint());
-        await using var pool = new UdpAssociationPool(registry, UdpAssociationReuseMode.Off);
-        var lease = await pool.RentAsync(server.Server, CancellationToken.None);
+        var association = await Socks5UdpAssociation.ConnectAsync(server.Server, Context(registry), CancellationToken.None);
         // The bound local endpoint is captured while the socket still exists: the transport's
         // self-traffic tuple is keyed by it, and the failure path disposes the socket.
         IPEndPoint? boundLocal = null;
 
         // The transport constructor rejects the cap after the socket and the self-traffic tuple were
-        // acquired; Create releases both, the caller keeps ownership of the lease.
+        // acquired; Create releases both, the caller keeps ownership of the association.
         var rejection = Record.Exception(() => Socks5UdpTransport.Create(
-            lease,
+            association,
             registry,
             socketFactory: family =>
             {
@@ -98,44 +92,44 @@ public sealed class Socks5UdpTransportLeaseTests(ITestOutputHelper output)
         var relayFlow = FlowKey.Create(local, relay, TransportProtocol.Udp, FlowOriginKind.Host);
         var context = FlowBuilders.Context(relayFlow);
         Assert.False(registry.IsOwned(context));
-        Assert.Equal(1, pool.LeasedFlowCount);
-        await lease.DisposeAsync();
-        await AssertLeaseReleasedAsync(pool, server);
+        Assert.Equal(1, server.LiveConnectionCount);
+        await association.DisposeAsync();
+        await AssertAssociationReleasedAsync(server);
     }
 
     [Fact]
-    public async Task LeaseDisposeIsExactlyOnce()
+    public async Task TransportDisposeIsExactlyOnce()
     {
         var registry = new SelfTrafficRegistry();
         await using var server = new ScriptedSocks5UdpServer(RelayEndpoint());
-        await using var pool = new UdpAssociationPool(registry, UdpAssociationReuseMode.Off);
-        var lease = await pool.RentAsync(server.Server, CancellationToken.None);
-        Assert.Equal(1, pool.LeasedFlowCount);
+        var transport = await UdpTransportTestFactory.CreateAsync(server.Server, registry);
+        Assert.Equal(1, server.LiveConnectionCount);
 
-        await lease.DisposeAsync();
-        await lease.DisposeAsync();
-        await lease.DisposeAsync();
+        await transport.DisposeAsync();
+        await transport.DisposeAsync();
+        await transport.DisposeAsync();
 
-        await AssertLeaseReleasedAsync(pool, server);
+        await AssertAssociationReleasedAsync(server);
     }
 
     [Fact]
-    public async Task TransportReportsTheLeaseRelayAndReleasesItOnDispose()
+    public async Task TransportReportsTheAssociationsRelayAndReleasesItOnDispose()
     {
         var registry = new SelfTrafficRegistry();
         var relayEndpoint = RelayEndpoint();
         await using var server = new ScriptedSocks5UdpServer(relayEndpoint);
-        await using var pool = new UdpAssociationPool(registry, UdpAssociationReuseMode.Off);
-        var lease = await pool.RentAsync(server.Server, CancellationToken.None);
         var peerCount = 0;
 
-        var transport = Socks5UdpTransport.Create(lease, registry, disableUdpConnectionReset: _ => peerCount++);
+        var transport = await UdpTransportTestFactory.CreateAsync(
+            server.Server,
+            registry,
+            disableUdpConnectionReset: _ => peerCount++);
 
         Assert.Equal(relayEndpoint, transport.PeerEndpoint);
         Assert.Equal(AddressFamily.InterNetwork, transport.LocalEndpoint.AddressFamily);
         Assert.Equal(1, peerCount);
         await transport.DisposeAsync();
-        await AssertLeaseReleasedAsync(pool, server);
+        await AssertAssociationReleasedAsync(server);
     }
 
     /// <summary>
@@ -152,8 +146,7 @@ public sealed class Socks5UdpTransportLeaseTests(ITestOutputHelper output)
     {
         var registry = new SelfTrafficRegistry();
         await using var server = new ScriptedSocks5UdpServer(RelayEndpoint());
-        await using var pool = new UdpAssociationPool(registry, UdpAssociationReuseMode.Off);
-        var factory = new Socks5UdpTransportFactory(pool, registry, UdpFrameBuilder.DefaultMaximumEthernetFrame, requestedBytes);
+        var factory = new Socks5UdpTransportFactory(registry, UdpFrameBuilder.DefaultMaximumEthernetFrame, requestedBytes);
 
         await using var transport = await factory.CreateAsync(ProxyTarget.FromServer(server.Server), CancellationToken.None);
 
@@ -162,15 +155,16 @@ public sealed class Socks5UdpTransportLeaseTests(ITestOutputHelper output)
         Assert.True(applied >= requestedBytes, string.Create(CultureInfo.InvariantCulture, $"the relay socket applied {applied} bytes for a requested {requestedBytes}"));
     }
 
-    // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local // False positive: both parameters are the assertion's input — the pool's counters are compared by the Assert.* calls below and the server is polled by the wait predicate, which is what makes this the shared exactly-once-release proof of the construction-failure suite.
-    private static async Task AssertLeaseReleasedAsync(UdpAssociationPool pool, ScriptedSocks5UdpServer server)
+    private static Socks5UdpAssociationContext Context(SelfTrafficRegistry registry) =>
+        new(registry, AddressCache: null, CreateControl: null, NullRuntimeLogger.Instance, new RuntimeLogThrottle(TimeSpan.FromSeconds(5)));
+
+    // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local // False positive: the server is polled by the wait predicate, which is what makes this the shared exactly-once-release proof of the construction-failure suite.
+    private static async Task AssertAssociationReleasedAsync(ScriptedSocks5UdpServer server)
     {
-        Assert.Equal(0, pool.LeasedFlowCount);
-        // Off mode: the released lease closed its private association, and with it the control
-        // connection — the strongest available proof that the release was neither skipped nor run twice.
-        Assert.Equal(0, pool.AssociationCount);
-        // The peer observes the close asynchronously; the count settling at zero is the proof.
+        // The released association closed its control connection — the strongest available proof
+        // that the release was neither skipped nor run twice.
         await WaitForAsync(() => server.LiveConnectionCount == 0);
+        Assert.Equal(1, server.ConnectionCount);
     }
 
     private static IPEndPoint RelayEndpoint() => new(IPAddress.Loopback, 43_000);

@@ -1,5 +1,16 @@
 # 2026-10-01 UDP per-session footprint — before/after evidence (F6)
 
+> **Removed feature, 2026-10-05 (task `10-05-remove-udp-association-sharing`, R6).** UDP association
+> sharing no longer exists — the three configuration keys were removed, the pool / lease /
+> control-association / capability machinery was deleted, and a proxy-decided flow now owns its own
+> authenticated association. The `session-budget-*.jsonl` rows below therefore carry columns of the
+> removed feature: `leasedFlows`, `associationsPerSession`, the `pooling` block,
+> `verdict.poolingCovered` / `requirePooling`, and the recorded `udp.association.fallback` product
+> event, while the prose cites the removed `FlowsPerAssociation` fan-out. Their `--require-pooling`
+> commands are **historical**: the flag is gone from the harness, and a command line that still passes
+> it fails at parse with the harness's unknown-argument error. **No number in this directory was
+> edited or deleted** — this note is the only change.
+
 Task `.trellis/tasks/10-01-udp-session-footprint` (finding F6 of the archived
 `09-29-tcp-udp-path-structural-perf` research): the relay socket's per-session kernel receive
 buffer (128 KiB → 64 KiB default), the shared native receive-window pool (default capacity 256 →
