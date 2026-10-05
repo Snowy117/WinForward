@@ -1747,3 +1747,27 @@ Quantified the reply-ownership defect in shared SOCKS5 UDP associations against 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 52: Reply-ownership observability: a count-only counter for misdelivered UDP replies
+<!-- trellis-session: v=2 fp=c6c8cd994df9d665 -->
+
+**Date**: 2026-10-05
+**Task**: Reply-ownership observability: a count-only counter for misdelivered UDP replies
+**Branch**: `master`
+
+### Summary
+
+Made a misdelivered relay reply visible in the shipped product: UdpProxySession now compares a reply's decoded source against Flow.Remote and increments udpResponseSourceMismatch with a per-session rate-limited udp.response.foreign_source warn, then delivers the reply unchanged. Count-only by decision, with two supporting facts: RuntimeCounters documents that counters must never influence packet disposition, and udp-relay.md:11 already refuses exact source equality because RFC 1928 does not pin the reply source. The check-subagent pass caught a real false positive: Endpoint.Equals includes the IPv6 ScopeId, and the decoded reply's scope comes from the relay socket while Flow.Remote's comes from the captured packet, so link-local peers differed by construction; the comparison now uses MatchesPeerIgnoringScope, matching the spec's existing scope-independence call and TcpRedirectAcceptor's wire-vs-socket comparison, with a new positive test and a control test. Recorded the blind spot (same-destination misdelivery is invisible to any address comparison, so a zero does not prove sharing is safe) in README and the spec, and documented the per-session throttle granularity. Gates: build 0 warnings, 1190 tests passing, format empty, inspectcode 0 issues.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fcec029` | feat(udp): count relay replies whose declared source is not the flow's destination (reply-ownership-observability) |
+| `81f4824` | docs(spec): record the reply-ownership counter, its blind spot and the throttle granularity (reply-ownership-observability) |
+| `a843a92` | chore(task): record the reply-ownership observability work (reply-ownership-observability) |
+
+### Status
+
+[OK] **Completed**

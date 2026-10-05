@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 51
+- **Total Sessions**: 52
 - **Last Active**: 2026-10-05
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1749 | Active |
+| `journal-1.md` | ~1773 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 52 | 2026-10-05 | Reply-ownership observability: a count-only counter for misdelivered UDP replies | `fcec029`, `81f4824`, `a843a92` | `master` |
 | 51 | 2026-10-05 | UDP shared-association reply ownership: measured, harness corrected, baseline published | `42c2af1`, `2a14b40`, `d5c9cf0` | `master` |
 | 50 | 2026-10-05 | Host flow creation logging: the deferred attribution pipeline now emits flow.created, so host flows stop vanishing from the log | `ea6e520`, `c61ce16`, `748e309` | `master` |
 | 49 | 2026-10-05 | Host/forwarded rule split: two explicit policy domains, positional rule eligibility, and two pre-existing defects surfaced | `46a167e`, `92c03e6`, `b177533` | `master` |
