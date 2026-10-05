@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/traffic-policy-lifecycle.md", "reason": "The host/forwarded policy-domain contract this task rewrites (rule eligibility, capture scope, non-flow pass)."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "The 400-effective-line limit that forces the ConfigurationRules extraction out of ConfigurationModels.cs."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Test baseline discipline, analyzer suppression policy, and the Release gate commands."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Validation-diagnostic rules (fixed templates, indexed field paths, no raw JSON echo)."}
