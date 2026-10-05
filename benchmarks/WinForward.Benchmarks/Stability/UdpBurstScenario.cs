@@ -46,17 +46,21 @@ internal static class UdpBurstScenario
 
         await using var receiver = new EchoReceiver(backgroundFlows + burstFlows);
         await using var server = new LoopbackSocks5UdpServer(receiver.Endpoint, associateDelay);
+        // One key array covering both flow-id ranges, so the sink can resolve a reply's sender from
+        // the payload's flow id alone.
+        var flowKeys = CreateFlowKeys(0, backgroundFlows + burstFlows);
+        var backgroundKeys = flowKeys[..backgroundFlows];
+        var burstKeys = flowKeys[backgroundFlows..];
         var tracker = new InFlightTracker(Math.Max(1024, options.Pps * 12));
-        var sink = new BurstCountingSink(backgroundFlows, burstFlows, tracker);
+        var sink = new BurstCountingSink(backgroundFlows, burstFlows, tracker, flowKeys);
         var productEvents = new CountingRuntimeLogger(CaptureProductEvents);
         const int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame;
         using var setupQueuePool = new NativeBufferPool(maximumFrameSize);
         using var receiveWindowPool = new NativeBufferPool(UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize));
         using var setupExecutor = new SetupExecutor();
         var registry = new SelfTrafficRegistry();
-        // The acceptance run exercises the production default: share, with passive detection. The
-        // census logger goes to the pool too, because the fallback warn is a pool event.
-        await using var associations = new UdpAssociationPool(registry, UdpAssociationReuseMode.Auto, logger: productEvents);
+        // The census logger goes to the pool too, because the fallback warn is a pool event.
+        await using var associations = new UdpAssociationPool(registry, options.ReuseMode, logger: productEvents);
         var coordinator = new UdpProxyCoordinator(
             new Socks5UdpTransportFactory(associations, registry, maximumFrameSize),
             sink,
@@ -72,8 +76,6 @@ internal static class UdpBurstScenario
         try
         {
             var socksServer = new Socks5Server("soak", "127.0.0.1", checked((ushort)server.ControlEndpoint.Port), Username: null, Password: null);
-            var backgroundKeys = CreateFlowKeys(0, backgroundFlows);
-            var burstKeys = CreateFlowKeys(backgroundFlows, burstFlows);
             outcome = await RunPhasesAsync(coordinator, socksServer, backgroundKeys, burstKeys, sink, tracker, options, burstTimeout)
                 .ConfigureAwait(false);
         }
@@ -82,19 +84,19 @@ internal static class UdpBurstScenario
             await coordinator.DisposeAsync().ConfigureAwait(false);
         }
 
-        context.WriteResult(
-            "udp.burstEstablishment",
-            new
-            {
-                burstFlows = options.BurstFlows,
-                dialDelayMs = options.DialDelayMs,
-                backgroundFlows = options.Flows,
-                backgroundPps = options.Pps,
-                payloadBytes = options.PayloadBytes,
-                seed = options.Seed,
-            },
-            BuildMetrics(outcome, sink, productEvents));
+        context.WriteResult("udp.burstEstablishment", BuildParameters(options), BuildMetrics(outcome, sink, options, productEvents));
     }
+
+    private static object BuildParameters(SoakOptions options) => new
+    {
+        burstFlows = options.BurstFlows,
+        dialDelayMs = options.DialDelayMs,
+        backgroundFlows = options.Flows,
+        backgroundPps = options.Pps,
+        payloadBytes = options.PayloadBytes,
+        seed = options.Seed,
+        reuse = options.ReuseMode,
+    };
 
     /// <summary>
     /// The burst window must outlive the serialized setup chain it measures: with a
@@ -222,16 +224,22 @@ internal static class UdpBurstScenario
             StabilityShared.TicksToMilliseconds(issueEndTicks - issueTimestamps[0]));
     }
 
-    private static object BuildMetrics(PhaseOutcome outcome, BurstCountingSink sink, CountingRuntimeLogger productEvents)
+    private static object BuildMetrics(PhaseOutcome outcome, BurstCountingSink sink, SoakOptions options, CountingRuntimeLogger productEvents)
     {
         var burst = outcome.Burst;
         var sender = outcome.Sender;
         var ticks = outcome.WindowTicks;
+        // The burst population's per-flow accounting: a flow is own when its own echo came back,
+        // misdelivered when its echo arrived on a sibling instead, and noResponse when no echo for it
+        // was observed at all.
+        var misdelivered = sink.MisdeliveredBurstFlows;
         return new
         {
             burstAccepted = burst.BurstAccepted,
             burstRejected = burst.BurstRejected,
             firstResponses = burst.FirstResponses,
+            misdelivered,
+            noResponse = Math.Max(0, options.BurstFlows - burst.FirstResponses - misdelivered),
             establishmentLossRate = burst.EstablishmentLossRate,
             firstResponseMs = burst.FirstResponseMs,
             timeToFirstMs = burst.FirstResponseMs.Min,
@@ -242,12 +250,12 @@ internal static class UdpBurstScenario
                 control = BuildWindowMetrics(sender.SentIn(BackgroundWindow.Control), sink.InjectedIn(BackgroundWindow.Control), sender.SendLatenciesIn(BackgroundWindow.Control), StabilityShared.TicksToSeconds(ticks[1] - ticks[0])),
                 burst = BuildWindowMetrics(sender.SentIn(BackgroundWindow.Burst), sink.InjectedIn(BackgroundWindow.Burst), sender.SendLatenciesIn(BackgroundWindow.Burst), StabilityShared.TicksToSeconds(ticks[2] - ticks[1])),
                 post = BuildWindowMetrics(sender.SentIn(BackgroundWindow.Post), sink.InjectedIn(BackgroundWindow.Post), sender.SendLatenciesIn(BackgroundWindow.Post), StabilityShared.TicksToSeconds(ticks[3] - ticks[2])),
+                misdeliveredFlows = sink.MisdeliveredBackgroundFlows,
             },
             unattributedResponses = sink.UnattributedResponses,
             productEvents = StabilityShared.BuildProductEvents(productEvents),
         };
     }
-
     private static object BuildWindowMetrics(long sent, long injected, IReadOnlyList<double> sendLatencies, double windowSeconds) => new
     {
         sent,

@@ -1,5 +1,16 @@
 # 2026-09-28 UDP association reuse — Step 1 acceptance baseline
 
+> **Superseded in part, 2026-10-05 (task `10-05-harness-response-ownership`).** The **per-flow success
+> columns** of this directory's `udp.churn` and `udpBurstEstablishment` rows — `firstResponses`,
+> `establishmentLossRate`, and the `firstResponseMs` distribution — are not measured per flow: the
+> sinks that produced them chose a first-response timestamp by the payload's own flow id without
+> checking which flow the reply arrived on, and the harness server answers every reply to the last
+> sender of its association. On the same binary, only 7.9 % of the burst's replies arrived on the
+> flow that asked while the rows reported 48/48 with loss 0. The corrected baseline and its
+> commands are in [`../2026-10-05-udp-reuse-ownership/`](../2026-10-05-udp-reuse-ownership/README.md);
+> the *resource* columns here (`bytesPerSession`, sessions, waves, allocations, GC counts) and the
+> `udp.lossRate` row — a forward-direction measurement — **still stand**.
+
 Task `09-28-udp-association-reuse`, Step 1 (budget / retention / observability) — recorded against
 the **uncommitted Step 1 tree**: the three validated config keys (`udpSessionCapacity`,
 `udpRelayReceiveBufferKb`, `udpSessionIdleSeconds`), the 128 KiB relay receive-buffer default

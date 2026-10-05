@@ -45,7 +45,9 @@ internal static class UdpChurnScenario
             : null;
         await using var receiver = externalServer is null ? new EchoReceiver(flows) : null;
         await using var server = receiver is null ? null : new LoopbackSocks5UdpServer(receiver.Endpoint, associateDelay);
-        var sink = new ChurnCountingSink(flows);
+        var flowKeys = new FlowKey[flows];
+        for (var index = 0; index < flowKeys.Length; index++) flowKeys[index] = BenchmarkShared.CreateFlowKey(index);
+        var sink = new ChurnCountingSink(flows, flowKeys);
         // The warn-level census is the run's evidence that detection never flipped the server: its
         // events are rate-limited or one-shot, so it costs nothing in the measured wave windows.
         var productEvents = new CountingRuntimeLogger(includeVerbose: false);
@@ -54,8 +56,7 @@ internal static class UdpChurnScenario
         using var receiveWindowPool = new NativeBufferPool(UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize));
         using var setupExecutor = new SetupExecutor();
         var registry = new SelfTrafficRegistry();
-        // The acceptance run exercises the production default: share, with passive detection.
-        await using var associations = new UdpAssociationPool(registry, UdpAssociationReuseMode.Auto, logger: productEvents);
+        await using var associations = new UdpAssociationPool(registry, options.ReuseMode, logger: productEvents);
         var coordinator = new UdpProxyCoordinator(
             new Socks5UdpTransportFactory(associations, registry, maximumFrameSize),
             sink,
@@ -67,8 +68,6 @@ internal static class UdpChurnScenario
         {
             var controlPort = checked((ushort)(externalServer?.ControlEndpoint.Port ?? server!.ControlEndpoint.Port));
             var target = new ChurnTarget(new Socks5Server("churn", "127.0.0.1", controlPort, Username: null, Password: null), externalServer);
-            var flowKeys = new FlowKey[flows];
-            for (var index = 0; index < flowKeys.Length; index++) flowKeys[index] = BenchmarkShared.CreateFlowKey(index);
             var timeout = ComputeWaveTimeout(flows, associateDelay);
             if (sustained)
             {
@@ -114,7 +113,7 @@ internal static class UdpChurnScenario
             var sample = await RunWaveAsync(coordinator, sink, target, flowKeys, payload, ++sequence, wave, timeout).ConfigureAwait(false);
             context.WriteResult(
                 "udp.churn",
-                new { burstFlows = options.BurstFlows, dialDelayMs = options.DialDelayMs, mode = "waves", wave, waves = waveCount },
+                new { burstFlows = options.BurstFlows, dialDelayMs = options.DialDelayMs, mode = "waves", wave, waves = waveCount, reuse = options.ReuseMode },
                 sample.BuildMetrics(payload.Length, productEvents));
         }
     }
@@ -156,6 +155,9 @@ internal static class UdpChurnScenario
         long accepted = 0;
         long rejected = 0;
         long waveCount = 0;
+        long own = 0;
+        long misdelivered = 0;
+        long noResponse = 0;
         var perWaveBytesPerSession = new List<double>();
         var firstResponseLatencies = new List<double>();
         long gen0Before = GC.CollectionCount(0);
@@ -169,6 +171,9 @@ internal static class UdpChurnScenario
             sessions += flowKeys.Length;
             accepted += sample.Accepted;
             rejected += sample.Rejected;
+            own += sample.Own;
+            misdelivered += sample.Misdelivered;
+            noResponse += sample.NoResponse;
             perWaveBytesPerSession.Add(sample.AllocatedBytes / (double)flowKeys.Length);
             firstResponseLatencies.AddRange(sample.FirstResponseMilliseconds);
         }
@@ -177,13 +182,16 @@ internal static class UdpChurnScenario
         var elapsedSeconds = totalWatch.Elapsed.TotalSeconds;
         context.WriteResult(
             "udp.churn",
-            new { burstFlows = options.BurstFlows, dialDelayMs = options.DialDelayMs, mode = "sustained", durationSeconds = options.DurationSeconds },
+            new { burstFlows = options.BurstFlows, dialDelayMs = options.DialDelayMs, mode = "sustained", durationSeconds = options.DurationSeconds, reuse = options.ReuseMode },
             new
             {
                 waves = waveCount,
                 sessions,
                 accepted,
                 rejected,
+                own,
+                misdelivered,
+                noResponse,
                 establishmentLossRate = sessions == 0 ? 0.0 : Math.Clamp(1.0 - (accepted / (double)sessions), 0.0, 1.0),
                 allocatedBytes,
                 bytesPerSession = sessions == 0 ? 0.0 : allocatedBytes / (double)sessions,
@@ -240,13 +248,16 @@ internal static class UdpChurnScenario
         }
 
         var allocatedBytes = GC.GetTotalAllocatedBytes(precise: false) - allocatedBefore;
-        var firstResponses = latencies.Count;
+        var own = latencies.Count;
+        var misdelivered = sink.Misdelivered;
         return new WaveSample(
             wave,
             accepted,
             rejected,
-            firstResponses,
-            accepted == 0 ? 0.0 : Math.Clamp(1.0 - (firstResponses / (double)accepted), 0.0, 1.0),
+            own,
+            misdelivered,
+            Math.Max(0, flowKeys.Length - own - misdelivered),
+            accepted == 0 ? 0.0 : Math.Clamp(1.0 - (own / (double)accepted), 0.0, 1.0),
             latencies,
             StabilityShared.TicksToMilliseconds(issueEnd - issueTimestamps[0]),
             StabilityShared.TicksToMilliseconds(retireWatch.ElapsedTicks),
@@ -319,12 +330,19 @@ internal static class UdpChurnScenario
     /// </summary>
     private sealed record ChurnTarget(Socks5Server SocksServer, ExternalLoopbackSocks5UdpServer? ExternalServer);
 
-    /// <summary>One wave's measured cycle: admission counts, first-response latencies, retirement, and the allocation/GC deltas of the complete create→retire cycle.</summary>
+    /// <summary>
+    /// One wave's measured cycle: admission counts, first-response latencies, retirement, and the
+    /// allocation/GC deltas of the complete create→retire cycle. <see cref="Own"/>,
+    /// <see cref="Misdelivered"/> and <see cref="NoResponse"/> partition the wave's flows, so the row
+    /// shows whether the wave went unanswered rather than only how many replies were injected.
+    /// </summary>
     private sealed record WaveSample(
         int Wave,
         long Accepted,
         long Rejected,
-        long FirstResponses,
+        long Own,
+        long Misdelivered,
+        long NoResponse,
         double EstablishmentLossRate,
         IReadOnlyList<double> FirstResponseMilliseconds,
         double TimeToIssueMs,
@@ -339,7 +357,9 @@ internal static class UdpChurnScenario
         {
             accepted = Accepted,
             rejected = Rejected,
-            firstResponses = FirstResponses,
+            firstResponses = Own,
+            misdelivered = Misdelivered,
+            noResponse = NoResponse,
             establishmentLossRate = EstablishmentLossRate,
             firstResponseMs = LatencyDistribution.FromMilliseconds(FirstResponseMilliseconds),
             timeToIssueMs = TimeToIssueMs,
@@ -353,55 +373,5 @@ internal static class UdpChurnScenario
             payloadBytes,
             productEvents = StabilityShared.BuildProductEvents(productEvents),
         };
-    }
-
-    /// <summary>
-    /// The wave's first-response sink: records the first response per flow id for the current wave
-    /// only. The payload's sequence is the wave number, so a straggler response from the previous
-    /// wave (arriving after <see cref="BeginWave"/>) is ignored instead of being attributed to this
-    /// wave's latency sample.
-    /// </summary>
-    private sealed class ChurnCountingSink(int flows) : IUdpResponseSink
-    {
-        private long[] _firstResponseTicks = new long[flows];
-        private long[]? _spare;
-        private long _expectedSequence;
-        private long _firstResponses;
-
-        public long FirstResponses => Interlocked.Read(ref _firstResponses);
-
-        public void BeginWave()
-        {
-            // Swap in a cleared array instead of allocating one per wave (the previous array keeps
-            // any straggler's CAS out of this wave's sample; the sequence guard rejects them anyway).
-            var fresh = _spare ?? new long[flows];
-            _spare = _firstResponseTicks;
-            Array.Clear(fresh);
-            _firstResponseTicks = fresh;
-            Interlocked.Increment(ref _expectedSequence);
-            Interlocked.Exchange(ref _firstResponses, 0);
-        }
-
-        /// <summary>The flow's first-response timestamp in the current wave, or null when no response was observed.</summary>
-        public long? TryGetFirstResponseTicks(int flow)
-        {
-            var ticks = Volatile.Read(ref _firstResponseTicks[flow]);
-            return ticks == 0 ? null : ticks;
-        }
-
-        public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, MacAddress clientMac, CancellationToken cancellationToken)
-        {
-            // ReSharper disable DuplicatedSequentialIfBodies // Guard-clause chain: parsing, wave-sequence match and flow-index bounds are independent readiness preconditions and each rejection carries its own diagnostic value; merging them into one condition obscures which precondition rejected the response.
-            if (!DatagramHeader.TryRead(payload.Span, out var sequence, out var flowId)) return ValueTask.CompletedTask;
-            if (sequence != Interlocked.Read(ref _expectedSequence)) return ValueTask.CompletedTask;
-            if ((uint)flowId >= (uint)_firstResponseTicks.Length) return ValueTask.CompletedTask;
-            // ReSharper restore DuplicatedSequentialIfBodies
-            if (Interlocked.CompareExchange(ref _firstResponseTicks[flowId], Stopwatch.GetTimestamp(), 0) == 0)
-            {
-                Interlocked.Increment(ref _firstResponses);
-            }
-
-            return ValueTask.CompletedTask;
-        }
     }
 }

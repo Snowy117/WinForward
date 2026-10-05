@@ -121,6 +121,10 @@ internal sealed record SoakOptions
     public int TcpConcurrency { get; private init; } = 64;
     public int TcpTransferBytes { get; private init; } = 1_048_576;
     public TcpRelayMode TcpRelayMode { get; private init; } = TcpRelayMode.Socks5;
+
+    /// <summary>UDP association reuse (<c>--reuse</c>): the placement mode the scenario's pool is constructed with. Only the stability scenarios follow it — the perf benchmarks keep <see cref="UdpAssociationReuseMode.Off"/>, the baseline their anchors were recorded against.</summary>
+    public UdpAssociationReuseMode ReuseMode { get; private init; } = UdpAssociationReuseMode.Auto;
+
     public AbortMix AbortMix { get; private init; } = AbortMix.Default;
     public int Seed { get; private init; } = 42;
     public string? OutputPath { get; private init; }
@@ -251,6 +255,8 @@ internal sealed record SoakOptions
                 return ApplyPopulationArgument(options, args, ref index);
             case "--tcp-relay-mode":
                 return options with { TcpRelayMode = ParseTcpRelayMode(Value(args, ref index)) };
+            case "--reuse":
+                return options with { ReuseMode = ParseReuseMode(Value(args, ref index)) };
             case "--abort-mix":
                 return options with { AbortMix = AbortMix.Parse(Value(args, ref index)) };
             case "--output":
@@ -368,6 +374,19 @@ internal sealed record SoakOptions
         "socks5" => TcpRelayMode.Socks5,
         "bare" => TcpRelayMode.Bare,
         _ => throw new ArgumentException($"Unknown TCP relay mode '{raw}'; expected socks5 or bare.", nameof(raw)),
+    };
+
+    /// <summary>
+    /// The three placement modes, spelled as the config key spells them. An unknown value is refused
+    /// rather than falling back to the default, so a typo cannot silently measure <c>auto</c> while
+    /// the row records it as the requested column.
+    /// </summary>
+    private static UdpAssociationReuseMode ParseReuseMode(string raw) => raw.ToLowerInvariant() switch
+    {
+        "auto" => UdpAssociationReuseMode.Auto,
+        "always" => UdpAssociationReuseMode.Always,
+        "off" => UdpAssociationReuseMode.Off,
+        _ => throw new ArgumentException($"Unknown reuse mode '{raw}'; expected off, always, or auto.", nameof(raw)),
     };
 
     private static int PositiveInt(string name, string raw) =>

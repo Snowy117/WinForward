@@ -194,28 +194,66 @@ internal sealed class ProcessResourceSampler(LoopbackSocks5UdpServer? inProcessS
 /// The soak's response sink: first-response ticks per flow id, split into the warm-up and churn
 /// populations so the churn accounting can never credit a warm-up echo. One datagram per flow means
 /// the first response is also the only one, so the record doubles as the loss and latency source.
+/// <para>
+/// A response is recorded only for the flow it arrived on: the payload carries its sender's flow id,
+/// the <c>originalFlow</c> argument is the flow whose relay socket the reply came in on, and a shared
+/// association's server replies to its last sender. A foreign reply is marked against its sender and
+/// never advances a timestamp, so a churn flow answered with a sibling's echo stays unanswered.
+/// </para>
 /// </summary>
-internal sealed class SessionBudgetSink(int churnOffset, int flowCapacity) : IUdpResponseSink
+internal sealed class SessionBudgetSink(int churnOffset, int flowCapacity, FlowKey[] flowKeys) : IUdpResponseSink
 {
+    private readonly OwnershipFlowSet _misdeliveredFlows = new(flowCapacity);
     private readonly long[] _firstResponseTicks = new long[flowCapacity];
     private long _warmupFirstResponses;
     private long _churnFirstResponses;
+    private long _warmupMisdeliveredFlows;
+    private long _churnMisdeliveredFlows;
 
     public long WarmupFirstResponses => Interlocked.Read(ref _warmupFirstResponses);
 
     public long ChurnFirstResponses => Interlocked.Read(ref _churnFirstResponses);
+
+    /// <summary>How many flows had their echo delivered to a different flow.</summary>
+    public long Misdelivered => Interlocked.Read(ref _warmupMisdeliveredFlows) + Interlocked.Read(ref _churnMisdeliveredFlows);
+
+    /// <summary>How many of the churn population's flows had their echo delivered to a different flow; never advances a timestamp.</summary>
+    public long ChurnMisdeliveredFlows => Interlocked.Read(ref _churnMisdeliveredFlows);
+
+    /// <summary>
+    /// Opens the churn population: the marks already taken on churn flow ids are cleared and their
+    /// counter reset, so <see cref="ChurnMisdeliveredFlows"/> counts only misdelivery the churn window
+    /// itself observed and the warm-up population's marks stay in <see cref="Misdelivered"/>. A mark
+    /// belongs to the reply's sender, so a churn flow whose echo arrived elsewhere before it had sent
+    /// its own first datagram is not yet evidence about the churn window.
+    /// </summary>
+    public void BeginChurn()
+    {
+        for (var flowId = churnOffset; flowId < _firstResponseTicks.Length; flowId++)
+        {
+            if (_misdeliveredFlows.Unmark(flowId)) Interlocked.Decrement(ref _churnMisdeliveredFlows);
+        }
+    }
 
     /// <summary>The flow's first-response tick, or zero when no echo was observed.</summary>
     public long FirstResponseTicks(int flowId) => Volatile.Read(ref _firstResponseTicks[flowId]);
 
     public ValueTask InjectAsync(FlowKey originalFlow, Endpoint remoteSource, ReadOnlyMemory<byte> payload, MacAddress clientMac, CancellationToken cancellationToken)
     {
-        // The three readiness preconditions are one conjunction: a header this run cannot parse, a
-        // flow id outside this run's capacity, and an echo that already landed are all "not a new
-        // first response", and only the first echo per flow may move a counter.
-        if (DatagramHeader.TryRead(payload.Span, out _, out var flowId)
-            && (uint)flowId < (uint)_firstResponseTicks.Length
-            && Interlocked.CompareExchange(ref _firstResponseTicks[flowId], Stopwatch.GetTimestamp(), 0) == 0)
+        if (!DatagramHeader.TryRead(payload.Span, out _, out var flowId)) return ValueTask.CompletedTask;
+        // The readiness preconditions below are one conjunction: a flow id outside this run's
+        // capacity and an echo that already landed are both "not a new first response", and only the
+        // first echo per flow may move a counter.
+        if ((uint)flowId >= (uint)_firstResponseTicks.Length) return ValueTask.CompletedTask;
+        if (flowKeys[flowId] != originalFlow)
+        {
+            if (!_misdeliveredFlows.Mark(flowId)) return ValueTask.CompletedTask;
+            if (flowId < churnOffset) Interlocked.Increment(ref _warmupMisdeliveredFlows);
+            else Interlocked.Increment(ref _churnMisdeliveredFlows);
+            return ValueTask.CompletedTask;
+        }
+
+        if (Interlocked.CompareExchange(ref _firstResponseTicks[flowId], Stopwatch.GetTimestamp(), 0) == 0)
         {
             if (flowId < churnOffset) Interlocked.Increment(ref _warmupFirstResponses);
             else Interlocked.Increment(ref _churnFirstResponses);
@@ -257,6 +295,7 @@ internal sealed record SessionBudgetSample(
     long DatagramsSent,
     long DatagramsReceived,
     long DatagramsLost,
+    long Misdelivered,
     long CapacityRejections,
     long SetupRejections,
     long SetupFailures)
@@ -270,6 +309,15 @@ internal sealed record SessionBudgetSample(
 
     /// <summary>The estimated kernel receive buffer per live session; equals the configured relay buffer for a non-empty population.</summary>
     public double RelayReceiveBufferBytesPerSession => SessionBudgetMath.Ratio(RelayReceiveBufferBytes, Sessions);
+
+    /// <summary>
+    /// The churn population's per-flow response accounting: <see cref="DatagramsReceived"/> is the
+    /// <c>own</c> term (a response counted only when it arrived on the flow that asked), so
+    /// <c>own + Misdelivered + NoResponse</c> is this run's accepted churn flows. Under sharing a flow
+    /// whose echo arrived on a sibling is the <c>Misdelivered</c> term instead, so no-response is left
+    /// for flows no echo was observed for at all.
+    /// </summary>
+    private long NoResponse => Math.Max(0, Accepted - DatagramsReceived - Misdelivered);
 
     public object ToRow() => new
     {
@@ -296,6 +344,8 @@ internal sealed record SessionBudgetSample(
         expired = Expired,
         datagramsSent = DatagramsSent,
         datagramsReceived = DatagramsReceived,
+        misdelivered = Misdelivered,
+        noResponse = NoResponse,
         datagramsLost = DatagramsLost,
         capacityRejections = CapacityRejections,
         setupRejections = SetupRejections,

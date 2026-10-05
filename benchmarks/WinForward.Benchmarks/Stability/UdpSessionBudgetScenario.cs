@@ -61,6 +61,14 @@ internal static class UdpSessionBudgetScenario
 
     private static readonly TimeSpan s_mainSweepInterval = TimeSpan.FromMinutes(1);
 
+    /// <summary>One key per flow id, in id order: the run sends with these and the sink resolves a reply's sender by indexing them.</summary>
+    private static FlowKey[] CreateFlowKeys(int flowCount)
+    {
+        var keys = new FlowKey[flowCount];
+        for (var index = 0; index < keys.Length; index++) keys[index] = BenchmarkShared.CreateFlowKey(index);
+        return keys;
+    }
+
     public static async Task RunAsync(StabilityContext context, SoakOptions options)
     {
         var idleTimeout = ConfigurationLoader.DefaultUdpSessionIdleTimeout;
@@ -82,7 +90,8 @@ internal static class UdpSessionBudgetScenario
             : null;
         await using var receiver = externalServer is null ? new EchoReceiver(flowCapacity) : null;
         await using var server = receiver is null ? null : new LoopbackSocks5UdpServer(receiver.Endpoint);
-        var sink = new SessionBudgetSink(churnOffset: warmupFlows, flowCapacity: flowCapacity);
+        var flowKeys = CreateFlowKeys(flowCapacity);
+        var sink = new SessionBudgetSink(churnOffset: warmupFlows, flowCapacity: flowCapacity, flowKeys: flowKeys);
         var productEvents = new CountingRuntimeLogger(CaptureProductEvents);
         using var sampler = new ProcessResourceSampler(server);
         const int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame;
@@ -90,9 +99,8 @@ internal static class UdpSessionBudgetScenario
         using var receiveWindowPool = new NativeBufferPool(UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize));
         using var setupExecutor = new SetupExecutor();
         var registry = new SelfTrafficRegistry();
-        // The acceptance run exercises the production default: share, with passive detection. The
-        // census logger goes to the pool too, because the fallback warn is a pool event.
-        await using var associations = new UdpAssociationPool(registry, UdpAssociationReuseMode.Auto, logger: productEvents);
+        // The census logger goes to the pool too, because the fallback warn is a pool event.
+        await using var associations = new UdpAssociationPool(registry, options.ReuseMode, logger: productEvents);
         var coordinator = new UdpProxyCoordinator(
             new Socks5UdpTransportFactory(associations, registry, maximumFrameSize),
             sink,
@@ -100,12 +108,13 @@ internal static class UdpSessionBudgetScenario
             receiveWindowPool,
             setupExecutor,
             new UdpProxyOptions { Capacity = options.Capacity, Logger = productEvents });
-        var run = new UdpSessionBudgetRun(context, options, coordinator, associations, sink, sampler, productEvents, idleTimeout, oneShotIdleTimeout, sweepInterval, warmupFlows, churnFlows);
+        var run = new UdpSessionBudgetRun(context, options, coordinator, associations, sink, sampler, productEvents, flowKeys, idleTimeout, oneShotIdleTimeout, sweepInterval, warmupFlows, churnFlows);
         try
         {
             var controlPort = checked((ushort)(externalServer?.ControlEndpoint.Port ?? server!.ControlEndpoint.Port));
             var socksServer = new Socks5Server("session-budget", "127.0.0.1", controlPort, Username: null, Password: null);
             await run.WarmUpAsync(socksServer).ConfigureAwait(false);
+            sink.BeginChurn();
             await run.ChurnAsync(socksServer).ConfigureAwait(false);
             await run.DrainAsync().ConfigureAwait(false);
         }

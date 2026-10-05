@@ -13,6 +13,15 @@ namespace WinForward.Benchmarks.Stability;
 /// window: warmup first establishes all flows, per-flow sequence markers snapshot at window
 /// start, and the post-window drain still credits in-window stragglers, so flow-establishment
 /// and teardown-tail datagrams are excluded by design.
+/// <para>
+/// The loss rate is a <em>forward-direction</em> figure — the echo receiver's own count of the
+/// datagrams that reached the destination against the datagrams the sender issued — so it never
+/// depended on which flow a relay reply came back on and no response-ownership filter belongs in
+/// this arithmetic. <c>responsesInjected</c> is a total over the same window and is unaffected for
+/// the same reason: nothing here is per-flow. Per-flow success is measured by the three
+/// ownership-aware sinks (<see cref="ChurnCountingSink"/>, <see cref="BurstCountingSink"/>,
+/// <see cref="SessionBudgetSink"/>), not by this row.
+/// </para>
 /// </summary>
 internal static class UdpLossScenario
 {
@@ -36,7 +45,7 @@ internal static class UdpLossScenario
         await using var server = new LoopbackSocks5UdpServer(receiver.Endpoint);
         var sink = new CountingUdpResponseSink();
         var productEvents = new CountingRuntimeLogger(CaptureProductEvents);
-        await using var scope = new CoordinatorScope(sink, options.Flows, productEvents);
+        await using var scope = new CoordinatorScope(sink, options.Flows, options.ReuseMode, productEvents);
         var coordinator = scope.Coordinator;
         SenderStats stats;
         try
@@ -161,16 +170,15 @@ internal static class UdpLossScenario
         private readonly SetupExecutor _setupExecutor;
         private readonly UdpAssociationPool _associations;
 
-        public CoordinatorScope(IUdpResponseSink sink, int capacity, IRuntimeLogger logger)
+        public CoordinatorScope(IUdpResponseSink sink, int capacity, UdpAssociationReuseMode reuseMode, IRuntimeLogger logger)
         {
             const int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame;
             _setupQueuePool = new NativeBufferPool(maximumFrameSize);
             _receiveWindowPool = new NativeBufferPool(UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize));
             _setupExecutor = new SetupExecutor();
             var registry = new SelfTrafficRegistry();
-            // The acceptance run exercises the production default: share, with passive detection.
             // The census logger goes to the pool too, because the fallback warn is a pool event.
-            _associations = new UdpAssociationPool(registry, UdpAssociationReuseMode.Auto, logger: logger);
+            _associations = new UdpAssociationPool(registry, reuseMode, logger: logger);
             Coordinator = new UdpProxyCoordinator(
                 new Socks5UdpTransportFactory(_associations, registry, maximumFrameSize),
                 sink,

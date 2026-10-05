@@ -91,6 +91,7 @@ dotnet run -c Release --project benchmarks/WinForward.Benchmarks -- \
   --stability [--scenario all|udp|udpBurst|udpChurn|udpSessionBudget|tcp|tcpChurn|tcpthroughput|footprint|baseline|residency|retention|scaling|sweep|pump] [--duration 60] [--pps 25000] \
   [--payload-bytes 512] [--flows 256] [--udp-flows 100] [--burst-flows 48] [--dial-delay-ms 0] [--churn-waves 1] \
   [--rate 20] [--capacity 16384] [--churn-seconds 90] [--drain-seconds 120] [--require-pooling] \
+  [--reuse off|always|auto] \
   [--tcp-concurrency 64] [--tcp-transfer-bytes 1048576] [--socks5-external] \
   [--attribution-delay-ms 0] [--attribution-delay-percent 5] [--threads 0] [--shared-key-percent 10] \
   [--abort-mix clean=25,clientRst=25,relayCancel=25,upstreamTruncate=25] [--seed 42] \
@@ -102,6 +103,13 @@ own summary enumerates the reason per exclusion (`gc-soak`, `udpSessionBudget`, 
 ```
 
 `--quick` = `--duration 15 --pps 10000 --tcp-concurrency 16 --flows 64`.
+
+`--reuse off|always|auto` selects the UDP association placement mode for the run's pool (`auto`, the
+default, shares and passively detects a pinning server; `always` shares with detection disabled; `off`
+is one association per flow). The five stability scenarios that construct a pool follow it, so all
+columns of a sharing comparison come from one binary and one recorded command line; the
+`udpSession`/`FrameworkSetup` perf benchmarks keep `off`, the baseline their per-session anchors were
+recorded against. An unknown value is refused at parse time rather than falling back to `auto`.
 
 Stability runs hold the Windows system timer at 1 ms resolution (`timeBeginPeriod(1)` through the
 production `HighResolutionTimerScope`) for the whole run so the 10 ms pacing ticks fire on time;
@@ -126,7 +134,12 @@ teardown tails — are **not comparable** with current rows either.
   2 s drain before teardown still credits in-window stragglers — establishment and teardown-tail
   loss is excluded by design. Reports `sentDatagrams`, `destinationReceived`, `lossRate`,
   `outOfOrder`, `duplicates`, `responsesInjected` (response path through the counting sink),
-  `achievedPps`, `sendLoopOverflows`.
+  `achievedPps`, `sendLoopOverflows`. `lossRate` is a **forward-direction** figure —
+  `destinationReceived / sentDatagrams`, measured at the echo destination — so it does not depend on
+  which flow a relay reply came back on and no response-ownership filter applies to it;
+  `responsesInjected` is a window total for the same reason. Per-flow response ownership is measured
+  by `udp.churn`, `udp.burstEstablishment` and `udp.sessionBudget` (see
+  `results/2026-10-05-udp-reuse-ownership/`).
 - **`udp.rawBaseline`** — the bare OS + runtime loopback UDP ceiling, built from the exact
   `udp.lossRate` socket topology minus all WinForward product code (no coordinator, session, or
   SOCKS5 codec): one paced sender round-robining over per-flow client sockets (512 KiB), one
@@ -150,7 +163,11 @@ teardown tails — are **not comparable** with current rows either.
   the serialization wave (`ceil(N/8) × delay`) becomes visible. Recommended invocation
   `--flows 16 --pps 4000` (stays under the Windows ~4.7k pps loopback ceiling);
   `--duration`/`--quick` do not apply — the scenario has fixed window lengths. Series started
-  2026-09-06; baseline matrix under `results/2026-09-06-udp-burst/`.
+  2026-09-06; baseline matrix under `results/2026-09-06-udp-burst/`. The `firstResponses`,
+  `establishmentLossRate` and `firstResponseMs` fields were re-based on 2026-10-05 to per-flow
+  response ownership — a reply counts only when it arrived on the flow that asked — so rows recorded
+  before that date report a success they did not measure (see
+  `results/2026-10-05-udp-reuse-ownership/`).
 - **`udp.churn`** — session-creation churn: waves of `--burst-flows` short-lived sessions through
   the real dial path, each wave retired through the coordinator's own idle-expiry path
   (`RemoveExpiredAsync` with a zero timeout, i.e. the per-session teardown the periodic sweeper
@@ -166,7 +183,10 @@ teardown tails — are **not comparable** with current rows either.
   bound (≈ 8 / delay). The same flow keys are re-offered every wave (a client tuple re-querying
   after its session expired), and a setup-failure cooldown surfaces as that wave's establishment
   loss. Allocation sampling uses `GC.GetTotalAllocatedBytes(precise: false)`; latency is
-  reported as ordinals only.
+  reported as ordinals only. Each row carries the wave's per-flow accounting — `firstResponses`
+  (own), `misdelivered` and `noResponse`, which sum to the wave's flow count — and the `reuse` mode
+  it ran under, so `own + noResponse == flows` is checkable from the row itself. Series re-based
+  2026-10-05 on per-flow response ownership (see `results/2026-10-05-udp-reuse-ownership/`).
 - **`udp.sessionBudget`** — the session-budget soak (PRD acceptance 1): `--rate` new flows/s for
   `--churn-seconds`, then `--drain-seconds` with no new flows, sampling the live sessions, the
   process's own descriptors, the pool's associations/leases, and the estimated kernel receive buffer
@@ -177,8 +197,14 @@ teardown tails — are **not comparable** with current rows either.
   count does not exceed the ceiling is refused before the load — it could not discriminate retention
   from accumulation — and `--require-pooling` fails the run unless the pooling half was evaluated
   (default off; a saturated population otherwise skips it). The verdict row names both halves
-  independently (`verdict.retentionBounded`, `verdict.poolingCovered`). Series and commands:
-  `results/2026-09-28-udp-reuse/`.
+  independently (`verdict.retentionBounded`, `verdict.poolingCovered`). Each row carries
+  `misdelivered` and `noResponse` beside `datagramsReceived` (the own term), so
+  `own + misdelivered + noResponse == accepted` is checkable from the row; under sharing the
+  response-ownership-corrected accounting surfaces as `datagramsLost`, because a flow answered by a
+  sibling's echo is not answered. Note the shipped 20 flows/s rate leaves only one flow in flight at
+  a time, so it cannot exercise the defect — `--rate 500 --churn-seconds 60` is the overlapping
+  variant that does. Series and commands: `results/2026-09-28-udp-reuse/` (per-flow success columns
+  superseded 2026-10-05) and `results/2026-10-05-udp-reuse-ownership/`.
 - **`tcp.unexpectedEof`** — concurrent one-way transfers through `TcpProxyRelay` with an
   adversarial event fired mid-stream per transfer (weighted mix: clean / client RST / relay
   cancellation / upstream truncation at a random 20–80 % of the transfer). Receiver-side

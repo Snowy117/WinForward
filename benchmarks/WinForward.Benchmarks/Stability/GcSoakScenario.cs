@@ -105,7 +105,7 @@ internal static class GcSoakScenario
         var udpSink = new CountingUdpResponseSink();
         using var setupExecutor = new SetupExecutor();
         var registry = new SelfTrafficRegistry();
-        await using var associations = new UdpAssociationPool(registry, UdpAssociationReuseMode.Auto);
+        await using var associations = new UdpAssociationPool(registry, options.ReuseMode);
         var coordinator = new UdpProxyCoordinator(
             new Socks5UdpTransportFactory(associations, registry, maximumFrameSize),
             udpSink,
@@ -416,6 +416,11 @@ internal static class GcSoakScenario
         int SampleCount,
         long ManagedHeapBytes);
 
+    /// <summary>
+    /// Counts every response the coordinator injected, with no per-flow attribution: the soak's
+    /// subject is the aggregate GC posture of the established shape, and no verdict here is a
+    /// per-flow claim, so a response-ownership filter would change a number nothing concludes from.
+    /// </summary>
     private sealed class CountingUdpResponseSink : IUdpResponseSink
     {
         private long _injected;

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using WinForward.Configuration;
+using WinForward.Core;
 using WinForward.Runtime;
 using WinForward.Runtime.UdpProxy;
 
@@ -21,6 +22,7 @@ internal sealed class UdpSessionBudgetRun(
     SessionBudgetSink sink,
     ProcessResourceSampler sampler,
     CountingRuntimeLogger productEvents,
+    FlowKey[] flowKeys,
     TimeSpan idleTimeout,
     TimeSpan oneShotIdleTimeout,
     TimeSpan sweepInterval,
@@ -47,6 +49,7 @@ internal sealed class UdpSessionBudgetRun(
         seed = options.Seed,
         socks5External = options.Socks5External,
         requirePooling = options.RequirePooling,
+        reuse = options.ReuseMode,
         idleTimeoutSeconds = idleTimeout.TotalSeconds,
         oneShotIdleTimeoutSeconds = oneShotIdleTimeout.TotalSeconds,
         sweepIntervalSeconds = sweepInterval.TotalSeconds,
@@ -80,7 +83,7 @@ internal sealed class UdpSessionBudgetRun(
         {
             TickActivityClock();
             DatagramHeader.Write(payload, flow + 1, flow);
-            _ = await coordinator.TrySendSpanAsync(BenchmarkShared.CreateFlowKey(flow), socksServer, payload, default, CancellationToken.None).ConfigureAwait(false);
+            _ = await coordinator.TrySendSpanAsync(flowKeys[flow], socksServer, payload, default, CancellationToken.None).ConfigureAwait(false);
         }
 
         var watch = Stopwatch.StartNew();
@@ -90,9 +93,18 @@ internal sealed class UdpSessionBudgetRun(
             await DelayAsync(s_warmupPollInterval).ConfigureAwait(false);
         }
 
-        if (sink.WarmupFirstResponses < warmupFlows)
+        // Every warm-up flow answering is the per-flow-association shape, and anything short of that
+        // means the instrument is not delivering: under Off each flow owns its association, so its echo
+        // can only come back to it. Under a shared association the server answers its last sender, so
+        // only some of these echoes arrive on the flow that asked — that is the phenomenon this run
+        // measures, and the churn window's own accounting reports it. Zero own echoes in either shape
+        // means nothing is being delivered at all, and the churn measurement would be meaningless.
+        var warmupDelivered = options.ReuseMode == UdpAssociationReuseMode.Off
+            ? sink.WarmupFirstResponses >= warmupFlows
+            : sink.WarmupFirstResponses > 0;
+        if (!warmupDelivered)
         {
-            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture, $"Only {sink.WarmupFirstResponses} of {warmupFlows} warm-up echoes returned within {s_warmupTimeout.TotalSeconds:0} s; the proxy path or the harness server is not delivering, so the churn measurement would be meaningless."));
+            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture, $"Only {sink.WarmupFirstResponses} of {warmupFlows} warm-up flows saw their own echo within {s_warmupTimeout.TotalSeconds:0} s; the proxy path or the harness server is not delivering, so the churn measurement would be meaningless."));
         }
 
         var retireWatch = Stopwatch.StartNew();
@@ -137,7 +149,7 @@ internal sealed class UdpSessionBudgetRun(
             var flowId = warmupFlows + flow;
             DatagramHeader.Write(payload, flow + 1, flowId);
             _issueTicks[flow] = Stopwatch.GetTimestamp();
-            if (await coordinator.TrySendSpanAsync(BenchmarkShared.CreateFlowKey(flowId), socksServer, payload, default, CancellationToken.None).ConfigureAwait(false))
+            if (await coordinator.TrySendSpanAsync(flowKeys[flowId], socksServer, payload, default, CancellationToken.None).ConfigureAwait(false))
             {
                 _accepted++;
             }
@@ -254,6 +266,7 @@ internal sealed class UdpSessionBudgetRun(
             DatagramsSent: accepted,
             DatagramsReceived: received,
             DatagramsLost: Math.Max(0, accepted - received),
+            Misdelivered: sink.ChurnMisdeliveredFlows,
             CapacityRejections: ProductDelta(RuntimeCounters.UdpCapacityRejections, _capacityRejectionsBefore),
             SetupRejections: ProductDelta(RuntimeCounters.UdpSetupRejections, _setupRejectionsBefore),
             SetupFailures: ProductDelta(RuntimeCounters.UdpSetupFailures, _setupFailuresBefore));
@@ -294,6 +307,7 @@ internal sealed class UdpSessionBudgetRun(
     {
         var final = FinalSample();
         var worst = acceptance.WorstSteady;
+        var misdelivered = sink.ChurnMisdeliveredFlows;
         return new
         {
             phase = "summary",
@@ -307,6 +321,8 @@ internal sealed class UdpSessionBudgetRun(
             datagramsReceived = final.DatagramsReceived,
             datagramsLost = final.DatagramsLost,
             lossRate = final.DatagramsSent == 0 ? 0.0 : final.DatagramsLost / (double)final.DatagramsSent,
+            misdelivered,
+            noResponse = Math.Max(0, _accepted - final.DatagramsReceived - misdelivered),
             firstResponseMs = BuildFirstResponses(),
             peakChurnSessions = _churnPeakSessions,
             steadyStateSessions = worst is null ? (int?)null : acceptance.SteadyPeakSessions,
@@ -341,16 +357,19 @@ internal sealed class UdpSessionBudgetRun(
                 descriptorDelta = final.FileDescriptors - final.BaselineFileDescriptors,
             },
             productEvents = StabilityShared.BuildProductEvents(productEvents),
-            verdict = new
-            {
-                passed = acceptance.Passed,
-                retentionBounded = acceptance.RetentionBounded,
-                poolingCovered = acceptance.PoolingCovered,
-                requirePooling = options.RequirePooling,
-                failures = acceptance.Failures,
-            },
+            verdict = BuildVerdictRow(acceptance),
         };
     }
+
+    /// <summary>The two named verdict halves and the failures behind them, so a failed soak's row already says which half held.</summary>
+    private object BuildVerdictRow(SessionBudgetAcceptance acceptance) => new
+    {
+        passed = acceptance.Passed,
+        retentionBounded = acceptance.RetentionBounded,
+        poolingCovered = acceptance.PoolingCovered,
+        requirePooling = options.RequirePooling,
+        failures = acceptance.Failures,
+    };
 
     /// <summary>The pooling block: the shared head, whether the steady population exceeded it, and by how much (both absent when there was no steady-state sample).</summary>
     private static object BuildPoolingRow(SessionBudgetAcceptance acceptance) => new

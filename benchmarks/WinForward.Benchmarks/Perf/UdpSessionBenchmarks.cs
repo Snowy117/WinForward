@@ -174,7 +174,9 @@ public class UdpSessionBenchmarks
     /// The out-of-process probe's flush signal: the child owns the relay's forwarded counter, and a
     /// response can only reach this sink after the child forwarded the datagram, so the count of
     /// echoed responses stands in for it. Unused in the in-process shape (its discard destination
-    /// never replies).
+    /// never replies). It runs under <see cref="UdpAssociationReuseMode.Off"/> — one association per
+    /// flow, so every reply reaches the flow that asked — and counts a total rather than a per-flow
+    /// answer, so it carries no response-ownership question.
     /// </summary>
     private sealed class ResponseCountingSink : IUdpResponseSink
     {

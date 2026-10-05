@@ -176,9 +176,19 @@ internal sealed class BackgroundSender(
 /// responses are matched against the in-flight stamps for window attribution. Anything
 /// it cannot attribute (overflow-degraded stamps, unexpected flow ids) lands in the
 /// unattributed counter instead of vanishing silently.
+/// <para>
+/// Both populations are bounded by the <paramref name="flowKeys"/> the scenario sent with, and a
+/// response counts only for the flow it arrived on: the payload carries the sender's flow id, the
+/// <c>originalFlow</c> argument is the flow whose relay socket the reply came in on, and a shared
+/// association's server replies to its last sender. A reply that fails that test is marked against
+/// its sender and returns before the burst branch, so it can never become a first response — and
+/// before the tracker, so a misdelivered warm-up reply is not attributed to an in-flight datagram.
+/// </para>
 /// </summary>
-internal sealed class BurstCountingSink(int backgroundFlows, int burstFlows, InFlightTracker tracker) : IUdpResponseSink
+internal sealed class BurstCountingSink(int backgroundFlows, int burstFlows, InFlightTracker tracker, FlowKey[] flowKeys) : IUdpResponseSink
 {
+    private readonly OwnershipFlowSet _misdeliveredBurstFlows = new(burstFlows);
+    private readonly OwnershipFlowSet _misdeliveredBackgroundFlows = new(backgroundFlows);
     private readonly long[] _burstFirstResponseTicks = new long[burstFlows];
     private readonly long[] _injectedPerWindow = new long[3];
     private long _burstFirstResponses;
@@ -191,6 +201,12 @@ internal sealed class BurstCountingSink(int backgroundFlows, int burstFlows, InF
     public long WarmupResponses => Interlocked.Read(ref _warmupResponses);
 
     public long UnattributedResponses => Interlocked.Read(ref _unattributed);
+
+    /// <summary>How many burst flows had their echo delivered to a different flow; never advances a timestamp.</summary>
+    public long MisdeliveredBurstFlows => _misdeliveredBurstFlows.Count();
+
+    /// <summary>How many background flows had their echo delivered to a different flow.</summary>
+    public long MisdeliveredBackgroundFlows => _misdeliveredBackgroundFlows.Count();
 
     public long InjectedIn(BackgroundWindow window) => Volatile.Read(ref _injectedPerWindow[(int)window]);
 
@@ -206,8 +222,19 @@ internal sealed class BurstCountingSink(int backgroundFlows, int burstFlows, InF
         if (!DatagramHeader.TryRead(payload.Span, out var sequence, out var flowId))
         {
             Interlocked.Increment(ref _unattributed);
+            return ValueTask.CompletedTask;
         }
-        else if (flowId >= backgroundFlows && flowId < backgroundFlows + burstFlows)
+
+        // A foreign reply is neither a first response nor an in-flight attribution: it is marked
+        // against its sender's flow and dropped from both measurements before either branch runs.
+        if ((uint)flowId < (uint)flowKeys.Length && flowKeys[flowId] != originalFlow)
+        {
+            if (flowId >= backgroundFlows) _misdeliveredBurstFlows.Mark(flowId - backgroundFlows);
+            else _misdeliveredBackgroundFlows.Mark(flowId);
+            return ValueTask.CompletedTask;
+        }
+
+        if (flowId >= backgroundFlows && flowId < backgroundFlows + burstFlows)
         {
             if (Interlocked.CompareExchange(ref _burstFirstResponseTicks[flowId - backgroundFlows], Stopwatch.GetTimestamp(), 0) == 0)
             {

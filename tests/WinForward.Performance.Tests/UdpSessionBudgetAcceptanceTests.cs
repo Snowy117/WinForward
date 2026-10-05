@@ -348,6 +348,7 @@ public sealed class UdpSessionBudgetAcceptanceTests
         long accepted = 0,
         long rejected = 0,
         long datagramsLost = 0,
+        long misdelivered = 0,
         long capacityRejections = 0,
         long setupRejections = 0,
         long setupFailures = 0)
@@ -372,6 +373,7 @@ public sealed class UdpSessionBudgetAcceptanceTests
             DatagramsSent: accepted,
             DatagramsReceived: accepted - datagramsLost,
             DatagramsLost: datagramsLost,
+            Misdelivered: misdelivered,
             CapacityRejections: capacityRejections,
             SetupRejections: setupRejections,
             SetupFailures: setupFailures);

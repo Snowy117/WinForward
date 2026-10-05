@@ -167,27 +167,85 @@ public sealed class UdpSessionBudgetScenarioTests
     [Fact]
     public async Task ResponseSinkSplitsWarmupFromChurnAndIgnoresDuplicates()
     {
-        var sink = new SessionBudgetSink(churnOffset: 2, flowCapacity: 4);
-        var flow = BenchmarkShared.CreateFlowKey(0);
+        var keys = CreateFlowKeys(4);
+        var sink = new SessionBudgetSink(churnOffset: 2, flowCapacity: 4, flowKeys: keys);
         Assert.Equal(0, sink.WarmupFirstResponses);
         Assert.Equal(0, sink.ChurnFirstResponses);
 
-        await InjectAsync(sink, flow, flowId: 0);
-        await InjectAsync(sink, flow, flowId: 1);
+        await InjectAsync(sink, keys[0], flowId: 0);
+        await InjectAsync(sink, keys[1], flowId: 1);
         Assert.Equal(2, sink.WarmupFirstResponses);
         Assert.Equal(0, sink.ChurnFirstResponses);
 
-        await InjectAsync(sink, flow, flowId: 2);
+        sink.BeginChurn();
+        await InjectAsync(sink, keys[2], flowId: 2);
         Assert.Equal(1, sink.ChurnFirstResponses);
         // A duplicate echo of a flow that already answered must not count twice: the loss
         // accounting is per flow, not per datagram.
-        await InjectAsync(sink, flow, flowId: 2);
+        await InjectAsync(sink, keys[2], flowId: 2);
         Assert.Equal(1, sink.ChurnFirstResponses);
         // Out-of-range flow ids belong to another run and are ignored rather than faulting.
-        await InjectAsync(sink, flow, flowId: 4);
+        await InjectAsync(sink, keys[0], flowId: 4);
         Assert.Equal(1, sink.ChurnFirstResponses);
         Assert.NotEqual(0, sink.FirstResponseTicks(2));
         Assert.Equal(0, sink.FirstResponseTicks(3));
+    }
+
+    [Fact]
+    public async Task ResponseSinkCreditsOnlyTheFlowAReplyArrivedOn()
+    {
+        var keys = CreateFlowKeys(4);
+        var sink = new SessionBudgetSink(churnOffset: 2, flowCapacity: 4, flowKeys: keys);
+
+        // Flow 0's echo arrives on flow 1's relay socket: flow 1 asked for flow 1, and the payload
+        // says flow 0 — the shared association's last-sender write path. Neither flow is answered.
+        await InjectAsync(sink, keys[1], flowId: 0);
+        Assert.Equal(0, sink.WarmupFirstResponses);
+        Assert.Equal(0, sink.FirstResponseTicks(0));
+        Assert.Equal(0, sink.FirstResponseTicks(1));
+
+        // A second foreign echo for the same flow is the same unanswered flow, not a second one.
+        await InjectAsync(sink, keys[1], flowId: 0);
+        Assert.Equal(1, sink.Misdelivered);
+
+        // The flow that received the foreign echo and then its own is answered: the misdelivery mark
+        // counts flows the wave answered with someone else's echo, and this one was answered after all.
+        await InjectAsync(sink, keys[1], flowId: 1);
+        Assert.Equal(1, sink.WarmupFirstResponses);
+        Assert.NotEqual(0, sink.FirstResponseTicks(1));
+    }
+
+    [Fact]
+    public async Task ResponseSinkCountsChurnMisdeliverySeparatelyFromTheWarmup()
+    {
+        var keys = CreateFlowKeys(4);
+        var sink = new SessionBudgetSink(churnOffset: 2, flowCapacity: 4, flowKeys: keys);
+
+        // A churn flow receives a reply belonging to the warm-up population, and the warm-up flow it
+        // belongs to is still waiting: both are unanswered, and the mark is scoped to the population
+        // whose first datagram is still pending.
+        await InjectAsync(sink, keys[2], flowId: 0);
+        await InjectAsync(sink, keys[0], flowId: 2);
+        Assert.Equal(1, sink.ChurnMisdeliveredFlows);
+        Assert.Equal(2, sink.Misdelivered);
+        Assert.Equal(0, sink.WarmupFirstResponses);
+        Assert.Equal(0, sink.ChurnFirstResponses);
+
+        // Opening the churn population clears the marks taken during its own opening window, because
+        // the flows that took them have not sent their first churn datagram yet.
+        sink.BeginChurn();
+        Assert.Equal(0, sink.ChurnMisdeliveredFlows);
+        Assert.Equal(1, sink.Misdelivered);
+
+        await InjectAsync(sink, keys[2], flowId: 2);
+        Assert.Equal(1, sink.ChurnFirstResponses);
+    }
+
+    private static FlowKey[] CreateFlowKeys(int count)
+    {
+        var keys = new FlowKey[count];
+        for (var index = 0; index < keys.Length; index++) keys[index] = BenchmarkShared.CreateFlowKey(index);
+        return keys;
     }
 
     [Fact]
