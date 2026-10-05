@@ -1,3 +1,4 @@
+using WinForward.Core;
 using WinForward.TestSupport;
 using Xunit;
 
@@ -11,16 +12,15 @@ public sealed class ConfigurationValidationTests
         const string json = """
         {
           "socks5Servers": [],
-          "rules": [{ "remotePort": [], "action": "proxy" }],
-          "fallbackAction": "pass"
+          "host": { "fallbackAction": "pass", "rules": [{ "remotePort": [], "action": "proxy" }] }
         }
         """;
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
         Assert.NotNull(dto);
         Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
-        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "rules[0].remotePort", StringComparison.Ordinal));
-        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "rules[0].proxyServer", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "host.rules[0].remotePort", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "host.rules[0].proxyServer", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -29,15 +29,14 @@ public sealed class ConfigurationValidationTests
         const string json = """
         {
           "socks5Servers": [],
-          "rules": [{ "process": ["   "], "action": "pass" }],
-          "fallbackAction": "pass"
+          "host": { "fallbackAction": "pass", "rules": [{ "process": ["   "], "action": "pass" }] }
         }
         """;
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
         Assert.NotNull(dto);
         Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
-        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "rules[0].process[0]", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "host.rules[0].process[0]", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -49,8 +48,7 @@ public sealed class ConfigurationValidationTests
             { "name": "Main", "host": "127.0.0.1", "port": 1080 },
             { "name": "main", "host": "127.0.0.2", "port": 1081 }
           ],
-          "rules": [],
-          "fallbackAction": "pass"
+          "host": { "fallbackAction": "pass", "rules": [] }
         }
         """;
 
@@ -63,12 +61,11 @@ public sealed class ConfigurationValidationTests
         const string json = """
         {
           "socks5Servers": [],
-          "rules": [],
-          "fallbackAction": "proxy"
+          "host": { "fallbackAction": "proxy", "rules": [] }
         }
         """;
 
-        ConfigurationAssert.Invalid(json, "fallbackAction");
+        ConfigurationAssert.Invalid(json, "host.fallbackAction");
     }
 
     [Fact]
@@ -77,8 +74,7 @@ public sealed class ConfigurationValidationTests
         const string json = """
         {
           "socks5Servers": [],
-          "rules": [],
-          "fallbackAction": "pass"
+          "host": { "fallbackAction": "pass", "rules": [] }
         }
         """;
 
@@ -99,8 +95,7 @@ public sealed class ConfigurationValidationTests
         {
           "logLevel": "{{value}}",
           "socks5Servers": [],
-          "rules": [],
-          "fallbackAction": "pass"
+          "host": { "fallbackAction": "pass", "rules": [] }
         }
         """;
 
@@ -119,8 +114,7 @@ public sealed class ConfigurationValidationTests
         {
           "logLevel": {{value}},
           "socks5Servers": [],
-          "rules": [],
-          "fallbackAction": "pass"
+          "host": { "fallbackAction": "pass", "rules": [] }
         }
         """;
 
@@ -134,8 +128,7 @@ public sealed class ConfigurationValidationTests
         {
           "logLevel": 3,
           "socks5Servers": [],
-          "rules": [],
-          "fallbackAction": "pass"
+          "host": { "fallbackAction": "pass", "rules": [] }
         }
         """;
 
@@ -151,8 +144,7 @@ public sealed class ConfigurationValidationTests
         var json = $$"""
         {
           "socks5Servers": [],
-          "rules": [{ "process": ["{{selector}}"], "action": "pass" }],
-          "fallbackAction": "pass"
+          "host": { "fallbackAction": "pass", "rules": [{ "process": ["{{selector}}"], "action": "pass" }] }
         }
         """;
 
@@ -167,8 +159,7 @@ public sealed class ConfigurationValidationTests
         const string json = """
         {
           "socks5Servers": [],
-          "rules": [],
-          "fallbackAction": "pass",
+          "host": { "fallbackAction": "pass", "rules": [] },
           "unexpectedField": true
         }
         """;
@@ -183,8 +174,7 @@ public sealed class ConfigurationValidationTests
         const string json = """
         {
           "socks5Servers": [],
-          "rules": [],
-          "fallbackAction": "pass",
+          "host": { "fallbackAction": "pass", "rules": [] },
           "unexpectedField": "credential-that-must-not-appear"
         }
         """;
@@ -201,8 +191,7 @@ public sealed class ConfigurationValidationTests
         const string json = """
         {
           "socks5Servers": [ { "name": "Main", "host": "127.0.0.1", "port": 0 } ],
-          "rules": [],
-          "fallbackAction": "pass"
+          "host": { "fallbackAction": "pass", "rules": [] }
         }
         """;
 
@@ -215,12 +204,11 @@ public sealed class ConfigurationValidationTests
         const string json = """
         {
           "socks5Servers": [ { "name": "Main", "host": "127.0.0.1", "port": 1080 } ],
-          "rules": [ { "action": "pass", "proxyServer": "Main" } ],
-          "fallbackAction": "pass"
+          "host": { "fallbackAction": "pass", "rules": [ { "action": "pass", "proxyServer": "Main" } ] }
         }
         """;
 
-        ConfigurationAssert.Invalid(json, "rules[0].proxyServer");
+        ConfigurationAssert.Invalid(json, "host.rules[0].proxyServer");
     }
 
     [Fact]
@@ -229,8 +217,7 @@ public sealed class ConfigurationValidationTests
         const string json = """
         {
           "socks5Servers": [],
-          "rules": [],
-          "fallbackAction": "pass",
+          "host": { "fallbackAction": "pass", "rules": [] },
           "proxyUnavailableAction": "pass"
         }
         """;
@@ -244,8 +231,7 @@ public sealed class ConfigurationValidationTests
         const string json = """
         {
           "socks5Servers": [ { "name": "Main", "host": "127.0.0.1", "port": 1080, "username": "user" } ],
-          "rules": [],
-          "fallbackAction": "pass"
+          "host": { "fallbackAction": "pass", "rules": [] }
         }
         """;
 
@@ -259,8 +245,7 @@ public sealed class ConfigurationValidationTests
         var maximumJson = $$"""
         {
           "socks5Servers": [ { "name": "Main", "host": "127.0.0.1", "port": 1080, "username": "user", "password": "{{maximumPassword}}" } ],
-          "rules": [],
-          "fallbackAction": "pass"
+          "host": { "fallbackAction": "pass", "rules": [] }
         }
         """;
 
@@ -272,8 +257,7 @@ public sealed class ConfigurationValidationTests
         var json = $$"""
         {
           "socks5Servers": [ { "name": "Main", "host": "127.0.0.1", "port": 1080, "username": "user", "password": "{{password}}" } ],
-          "rules": [],
-          "fallbackAction": "pass"
+          "host": { "fallbackAction": "pass", "rules": [] }
         }
         """;
 
@@ -291,8 +275,7 @@ public sealed class ConfigurationValidationTests
         const string json = """
         {
           "socks5Servers": [ { "name": "Main", "host": "not a host name!", "port": 1080 } ],
-          "rules": [],
-          "fallbackAction": "pass"
+          "host": { "fallbackAction": "pass", "rules": [] }
         }
         """;
 
@@ -305,19 +288,18 @@ public sealed class ConfigurationValidationTests
         const string json = """
         {
           "socks5Servers": [],
-          "rules": []
+          "host": { "rules": [] }
         }
         """;
 
-        ConfigurationAssert.Invalid(json, "fallbackAction");
+        ConfigurationAssert.Invalid(json, "host.fallbackAction");
 
         const string missingSections = "{}";
         Assert.True(ConfigurationLoader.TryParse(missingSections, out var dto, out _));
         Assert.NotNull(dto);
         Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
         Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "socks5Servers", StringComparison.Ordinal));
-        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "rules", StringComparison.Ordinal));
-        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "fallbackAction", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "host", StringComparison.Ordinal));
     }
 
     [Theory]
@@ -333,27 +315,25 @@ public sealed class ConfigurationValidationTests
         var json = $$"""
         {
           "socks5Servers": [],
-          "rules": [{ "{{field}}": [null], "action": "pass" }],
-          "fallbackAction": "pass"
+          "host": { "fallbackAction": "pass", "rules": [{ "{{field}}": [null], "action": "pass" }] }
         }
         """;
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
         Assert.NotNull(dto);
         Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
-        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, $"rules[0].{field}[0]", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, $"host.rules[0].{field}[0]", StringComparison.Ordinal));
     }
 
     [Theory]
     [InlineData("socks5Servers")]
-    [InlineData("rules")]
+    [InlineData("host.rules")]
     public void ConfigurationRejectsNullSectionEntriesWithoutThrowing(string section)
     {
         var json = $$"""
         {
           "socks5Servers": {{(string.Equals(section, "socks5Servers", StringComparison.Ordinal) ? "[null]" : "[]")}},
-          "rules": {{(string.Equals(section, "rules", StringComparison.Ordinal) ? "[null]" : "[]")}},
-          "fallbackAction": "pass"
+          "host": { "fallbackAction": "pass", "rules": {{(string.Equals(section, "host.rules", StringComparison.Ordinal) ? "[null]" : "[]")}} }
         }
         """;
 
@@ -361,6 +341,107 @@ public sealed class ConfigurationValidationTests
         Assert.NotNull(dto);
         Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
         Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, $"{section}[0]", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ConfigurationAcceptsOmittedForwardedDomainAndDefaultsItsFallbackToPass()
+    {
+        const string json = """
+        {
+          "socks5Servers": [],
+          "host": { "fallbackAction": "pass", "rules": [] }
+        }
+        """;
+
+        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
+        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Empty(configuration!.Policy.ForwardedRules);
+        Assert.Equal(FlowAction.Pass, configuration.Policy.ForwardedFallbackAction);
+    }
+
+    [Fact]
+    public void ConfigurationAcceptsForwardedRulesWithoutAnAdapterSelector()
+    {
+        const string json = """
+        {
+          "socks5Servers": [],
+          "host": { "fallbackAction": "pass", "rules": [] },
+          "forwarded": { "rules": [{ "remoteCidr": ["10.0.0.0/8"], "action": "pass" }] }
+        }
+        """;
+
+        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
+        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        var rule = Assert.Single(configuration!.Policy.ForwardedRules);
+        Assert.Null(rule.Matcher.AdapterIds);
+        Assert.Null(rule.Matcher.AdapterNames);
+    }
+
+    [Fact]
+    public void ConfigurationReadsAConfiguredForwardedFallbackAction()
+    {
+        const string json = """
+        {
+          "socks5Servers": [],
+          "host": { "fallbackAction": "pass", "rules": [] },
+          "forwarded": { "fallbackAction": "block", "rules": [] }
+        }
+        """;
+
+        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
+        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Equal(FlowAction.Block, configuration!.Policy.ForwardedFallbackAction);
+    }
+
+    [Fact]
+    public void ConfigurationRejectsFallbackProxyInTheForwardedDomain()
+    {
+        const string json = """
+        {
+          "socks5Servers": [],
+          "host": { "fallbackAction": "pass", "rules": [] },
+          "forwarded": { "fallbackAction": "proxy", "rules": [] }
+        }
+        """;
+
+        ConfigurationAssert.Invalid(json, "forwarded.fallbackAction");
+    }
+
+    [Fact]
+    public void ConfigurationRejectsProcessSelectorsInTheForwardedDomain()
+    {
+        const string forwarded = """
+        {
+          "socks5Servers": [],
+          "host": { "fallbackAction": "pass", "rules": [] },
+          "forwarded": { "rules": [{ "process": ["browser.exe"], "action": "pass" }] }
+        }
+        """;
+        const string host = """
+        {
+          "socks5Servers": [],
+          "host": { "fallbackAction": "pass", "rules": [{ "process": ["browser.exe"], "action": "pass" }] }
+        }
+        """;
+
+        ConfigurationAssert.Invalid(forwarded, "forwarded.rules[0].process");
+
+        Assert.True(ConfigurationLoader.TryParse(host, out var dto, out _));
+        Assert.True(ConfigurationLoader.TryValidate(dto!, out _, out var diagnostics), string.Join("; ", diagnostics));
+    }
+
+    [Fact]
+    public void ConfigurationQualifiesRuleDiagnosticsWithTheirDomain()
+    {
+        const string json = """
+        {
+          "socks5Servers": [],
+          "host": { "fallbackAction": "pass", "rules": [{ "remotePort": ["nope"], "action": "pass" }] },
+          "forwarded": { "rules": [{ "remotePort": ["nope"], "action": "pass" }] }
+        }
+        """;
+
+        ConfigurationAssert.Invalid(json, "host.rules[0].remotePort[0]", "forwarded.rules[0].remotePort[0]");
     }
 
     /// <summary>
@@ -384,12 +465,11 @@ public sealed class ConfigurationValidationTests
         const string json = """
         {
           "socks5Servers": [],
-          "rules": [{ "remoteCidr": ["192.0.2.0/24", "not-a-cidr"], "action": "pass" }],
-          "fallbackAction": "pass"
+          "host": { "fallbackAction": "pass", "rules": [{ "remoteCidr": ["192.0.2.0/24", "not-a-cidr"], "action": "pass" }] }
         }
         """;
 
-        var diagnostic = SingleInvalidElement(json, "rules[0].remoteCidr[1]");
+        var diagnostic = SingleInvalidElement(json, "host.rules[0].remoteCidr[1]");
         Assert.Equal("Invalid CIDR 'not-a-cidr'.", diagnostic.Message);
     }
 
@@ -399,12 +479,11 @@ public sealed class ConfigurationValidationTests
         const string json = """
         {
           "socks5Servers": [],
-          "rules": [{ "protocol": ["tcp", "sctp"], "action": "pass" }],
-          "fallbackAction": "pass"
+          "host": { "fallbackAction": "pass", "rules": [{ "protocol": ["tcp", "sctp"], "action": "pass" }] }
         }
         """;
 
-        var diagnostic = SingleInvalidElement(json, "rules[0].protocol[1]");
+        var diagnostic = SingleInvalidElement(json, "host.rules[0].protocol[1]");
         Assert.Equal("Unsupported value 'sctp'.", diagnostic.Message);
     }
 
@@ -414,8 +493,7 @@ public sealed class ConfigurationValidationTests
         const string json = """
         {
           "socks5Servers": [],
-          "rules": [{ "remotePort": ["0", "443", "500-100"], "action": "pass" }],
-          "fallbackAction": "pass"
+          "host": { "fallbackAction": "pass", "rules": [{ "remotePort": ["0", "443", "500-100"], "action": "pass" }] }
         }
         """;
 
@@ -423,8 +501,8 @@ public sealed class ConfigurationValidationTests
         Assert.NotNull(dto);
         Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
         Assert.Equal(2, diagnostics.Count);
-        Assert.Equal(new ConfigDiagnostic("rules[0].remotePort[0]", "Invalid port or range '0'."), diagnostics[0]);
-        Assert.Equal(new ConfigDiagnostic("rules[0].remotePort[2]", "Invalid port or range '500-100'."), diagnostics[1]);
+        Assert.Equal(new ConfigDiagnostic("host.rules[0].remotePort[0]", "Invalid port or range '0'."), diagnostics[0]);
+        Assert.Equal(new ConfigDiagnostic("host.rules[0].remotePort[2]", "Invalid port or range '500-100'."), diagnostics[1]);
     }
 
     [Fact]
@@ -433,8 +511,7 @@ public sealed class ConfigurationValidationTests
         const string json = """
         {
           "socks5Servers": [],
-          "rules": [{ "remotePort": ["443", "100-200", "80-150", "201-250", "443"], "action": "pass" }],
-          "fallbackAction": "pass"
+          "host": { "fallbackAction": "pass", "rules": [{ "remotePort": ["443", "100-200", "80-150", "201-250", "443"], "action": "pass" }] }
         }
         """;
 
@@ -442,6 +519,6 @@ public sealed class ConfigurationValidationTests
         Assert.NotNull(dto);
         Assert.True(ConfigurationLoader.TryValidate(dto, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
         Assert.NotNull(configuration);
-        Assert.Equal([(80, 250), (443, 443)], configuration.Policy.Rules[0].Matcher.RemotePorts);
+        Assert.Equal([(80, 250), (443, 443)], configuration.Policy.HostRules[0].Matcher.RemotePorts);
     }
 }

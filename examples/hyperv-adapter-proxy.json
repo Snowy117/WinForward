@@ -6,15 +6,21 @@
       "port": 1080
     }
   ],
-  "rules": [
-    {
-      "adapterName": ["vEthernet (MyVM)"],
-      "protocol": ["tcp", "udp"],
-      "action": "proxy",
-      "proxyServer": "remote"
-    }
-  ],
-  "fallbackAction": "pass",
+  "host": {
+    "fallbackAction": "pass",
+    "rules": []
+  },
+  "forwarded": {
+    "fallbackAction": "pass",
+    "rules": [
+      {
+        "adapterName": ["vEthernet (MyVM)"],
+        "protocol": ["tcp", "udp"],
+        "action": "proxy",
+        "proxyServer": "remote"
+      }
+    ]
+  },
   "proxyUnavailableAction": "block",
   "processingFailureAction": "block"
 }

@@ -9,8 +9,6 @@ public sealed record RuleMatcher(
     IReadOnlyList<IPPrefix>? RemoteNetworks = null,
     IReadOnlyList<(ushort Start, ushort End)>? RemotePorts = null)
 {
-    public bool IsAdapterQualified => AdapterIds is not null || AdapterNames is not null;
-
     public bool IsMatch(FlowContext context)
     {
         if (Processes is not null && !ProcessSelectorMatcher.IsMatch(Processes, context.ProcessName, context.ProcessPath)) return false;
@@ -26,37 +24,57 @@ public sealed record RuleMatcher(
 
 public sealed record PolicyRule(RuleMatcher Matcher, FlowDecision Decision);
 
+/// <summary>
+/// The immutable policy for one run: two ordered rule lists, one per flow origin. A rule's domain is
+/// the list it lives in, so <c>adapterId</c>/<c>adapterName</c> narrow a rule inside its own domain
+/// rather than deciding which domain it belongs to.
+/// </summary>
 public sealed class PolicySnapshot
 {
-    public PolicySnapshot(IReadOnlyList<PolicyRule> rules, FlowAction fallbackAction)
+    public PolicySnapshot(IReadOnlyList<PolicyRule> hostRules, FlowAction hostFallbackAction)
     {
-        Rules = rules;
-        FallbackAction = fallbackAction;
-        RequiresProcessAttribution = rules.Any(static rule => rule.Matcher.Processes is { Count: > 0 });
+        ArgumentNullException.ThrowIfNull(hostRules);
+        HostRules = hostRules;
+        HostFallbackAction = hostFallbackAction;
+        // Host rules only: a forwarded flow has no host process owner, so a process selector in the
+        // forwarded list cannot match (configuration validation refuses one there), and scanning it
+        // would only open the attribution path for a rule that can never fire.
+        RequiresProcessAttribution = hostRules.Any(static rule => rule.Matcher.Processes is { Count: > 0 });
     }
 
-    public IReadOnlyList<PolicyRule> Rules { get; }
-    private FlowAction FallbackAction { get; }
+    public IReadOnlyList<PolicyRule> HostRules { get; }
+
+    public IReadOnlyList<PolicyRule> ForwardedRules { get; init; } = [];
+
+    private FlowAction HostFallbackAction { get; }
+
+    public FlowAction ForwardedFallbackAction { get; init; } = FlowAction.Pass;
+
     public bool RequiresProcessAttribution { get; }
 
-    public FlowDecision Evaluate(FlowContext context)
+    public FlowDecision EvaluateHost(FlowContext context)
     {
-        for (var index = 0; index < Rules.Count; index++)
+        for (var index = 0; index < HostRules.Count; index++)
         {
-            if (Rules[index].Matcher.IsMatch(context)) return Rules[index].Decision with { RuleIndex = index };
+            if (HostRules[index].Matcher.IsMatch(context)) return HostRules[index].Decision with { RuleIndex = index };
         }
 
-        return FlowDecision.Fallback(FallbackAction);
+        return FlowDecision.Fallback(HostFallbackAction);
     }
 
+    /// <summary>
+    /// An adapter selector narrows a rule here; it does not decide eligibility. Rule indices are
+    /// relative to this domain, so a trace's <c>rule</c> field is readable only next to the same
+    /// event's <c>origin</c> field.
+    /// </summary>
     public FlowDecision EvaluateForwarded(FlowContext context)
     {
-        for (var index = 0; index < Rules.Count; index++)
+        for (var index = 0; index < ForwardedRules.Count; index++)
         {
-            var rule = Rules[index];
-            if (rule.Matcher.IsAdapterQualified && rule.Matcher.IsMatch(context)) return rule.Decision with { RuleIndex = index };
+            var rule = ForwardedRules[index];
+            if (rule.Matcher.IsMatch(context)) return rule.Decision with { RuleIndex = index };
         }
 
-        return FlowDecision.Fallback(FlowAction.Pass);
+        return FlowDecision.Fallback(ForwardedFallbackAction);
     }
 }

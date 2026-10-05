@@ -216,15 +216,13 @@ public sealed class UdpAssociationHeadTests
             ? """
             {
               "socks5Servers": [],
-              "rules": [],
-              "fallbackAction": "pass"
+              "host": { "fallbackAction": "pass", "rules": [] }
             }
             """
             : $$"""
             {
               "socks5Servers": [],
-              "rules": [],
-              "fallbackAction": "pass",
+              "host": { "fallbackAction": "pass", "rules": [] },
               {{body}}
             }
             """;

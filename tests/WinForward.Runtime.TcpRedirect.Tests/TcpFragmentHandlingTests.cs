@@ -233,14 +233,15 @@ public sealed class TcpFragmentHandlingTests
             var coordinator = CreateCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, localAddresses, new TcpRedirectOptions { Logger = logger });
             var reinjector = new CountingReinjector();
             var executor = new NdisPacketActionExecutor(reinjector, logger, tcpProxy: coordinator);
-            // Forwarded flows only evaluate adapter-qualified rules, so each shape needs its own
-            // proxy rule; host flows match the catch-all.
+            // Each policy domain owns its rule list, so each shape configures the domain it runs in.
             var matcher = forwarded
                 ? new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "veth-1" })
                 : new RuleMatcher();
             var rules = new[] { new PolicyRule(matcher, new FlowDecision(FlowAction.Proxy, 0, s_server.Name)) };
             var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase) { [s_server.Name] = s_server };
-            var config = new ValidatedConfiguration(servers, new PolicySnapshot(rules, FlowAction.Block));
+            var config = new ValidatedConfiguration(servers, forwarded
+                ? new PolicySnapshot([], FlowAction.Block) { ForwardedRules = rules }
+                : new PolicySnapshot(rules, FlowAction.Block));
             var dispatcher = new FlowDispatcher(config, selfTraffic, executor, reverseHandler: coordinator, fragmentHandler: coordinator.HandleFragmentAsync);
             // The tombstone is keyed by the association's original key, which carries the
             // forwarded origin and its adapter context.

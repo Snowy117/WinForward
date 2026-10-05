@@ -27,6 +27,23 @@ public sealed class AdapterScopeRefreshTests
     }
 
     [Fact]
+    public void RefreshNarrowsAForwardedRulesDisappearedSelectorWithADomainQualifiedWarning()
+    {
+        var freshEnumeration = new[] { new WindowsAdapter("id-a", "Ethernet", "a", 1, 1) };
+        var policy = new PolicySnapshot([], FlowAction.Pass)
+        {
+            ForwardedRules = [new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "veth-gone" }), new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null))],
+        };
+
+        var scope = CaptureAdapterScopeResolver.ResolveForRefresh(freshEnumeration, policy, out var warnings);
+
+        // A forwarded selector that matches nothing contributes nothing, and a scope emptied by
+        // warnings must never widen — so an empty scope here proves the forwarded list was walked.
+        Assert.Empty(scope);
+        Assert.Contains(warnings, warning => warning.StartsWith("forwarded.rules[0]:", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void RefreshRuleWithDisappearedSelectorContributesNothing()
     {
         // A selector that matches nothing invalidates the whole rule's contribution: the surviving

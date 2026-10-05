@@ -6,14 +6,16 @@
       "port": 1080
     }
   ],
-  "rules": [
-    {
-      "process": ["browser.exe"],
-      "action": "proxy",
-      "proxyServer": "remote"
-    }
-  ],
-  "fallbackAction": "pass",
+  "host": {
+    "fallbackAction": "pass",
+    "rules": [
+      {
+        "process": ["browser.exe"],
+        "action": "proxy",
+        "proxyServer": "remote"
+      }
+    ]
+  },
   "proxyUnavailableAction": "block",
   "processingFailureAction": "block"
 }

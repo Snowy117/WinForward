@@ -6,20 +6,22 @@
       "port": 1080
     }
   ],
-  "rules": [
-    {
-      "protocol": ["udp"],
-      "remotePort": ["53"],
-      "action": "proxy",
-      "proxyServer": "remote"
-    },
-    {
-      "protocol": ["tcp"],
-      "remotePort": ["53"],
-      "action": "block"
-    }
-  ],
-  "fallbackAction": "pass",
+  "host": {
+    "fallbackAction": "pass",
+    "rules": [
+      {
+        "protocol": ["udp"],
+        "remotePort": ["53"],
+        "action": "proxy",
+        "proxyServer": "remote"
+      },
+      {
+        "protocol": ["tcp"],
+        "remotePort": ["53"],
+        "action": "block"
+      }
+    ]
+  },
   "proxyUnavailableAction": "block",
   "processingFailureAction": "block"
 }

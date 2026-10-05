@@ -57,10 +57,11 @@ public sealed class FlowDispatcherExecutorTests
         var server = new Socks5Server("primary", "127.0.0.1", 1080, Username: null, Password: null);
         var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase) { [server.Name] = server };
         var config = new ValidatedConfiguration(servers, new PolicySnapshot(
-        [
-            new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Proxy, 0, server.Name)),
-            new(new RuleMatcher(), new FlowDecision(FlowAction.Proxy, 1, server.Name)),
-        ], FlowAction.Block));
+            [new(new RuleMatcher(), new FlowDecision(FlowAction.Proxy, 0, server.Name))],
+            FlowAction.Block)
+        {
+            ForwardedRules = [new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Proxy, 0, server.Name))],
+        });
         var executor = new FakeExecutor();
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor);
 
@@ -72,6 +73,8 @@ public sealed class FlowDispatcherExecutorTests
         await dispatcher.DispatchAsync(forwardedA, CancellationToken.None);
         await dispatcher.DispatchAsync(host, CancellationToken.None);
 
+        // forwardedB falls through the forwarded domain to its own Pass default even though the host
+        // domain's catch-all proxy rule and Block fallback both exist.
         Assert.Equal(PacketDisposition.Pass, forwardedB.Lease.Disposition);
         Assert.Equal(PacketDisposition.ProxyConsumed, forwardedA.Lease.Disposition);
         Assert.Equal(PacketDisposition.ProxyConsumed, host.Lease.Disposition);
@@ -81,12 +84,35 @@ public sealed class FlowDispatcherExecutorTests
     }
 
     [Fact]
+    public async Task DispatcherLogsAForwardedMatchWithItsDomainRelativeRuleIndex()
+    {
+        var logger = new RecordingRuntimeLogger();
+        var config = new ValidatedConfiguration(
+            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new PolicySnapshot([], FlowAction.Pass)
+            {
+                ForwardedRules = [new(new RuleMatcher(RemotePorts: [(443, 443)]), new FlowDecision(FlowAction.Block, 0, ProxyServerName: null))],
+            });
+        var dispatcher = new FlowDispatcher(config, new FakeGuard(), new FakeExecutor(), logger: logger);
+        var packet = FlowPacket(53000, FlowOriginKind.Forwarded, "id-b", "vEthernet B");
+
+        await dispatcher.DispatchAsync(packet, CancellationToken.None);
+
+        var (_, _, fields) = Assert.Single(logger.Events, e => string.Equals(e.Name, "packet.action", StringComparison.Ordinal));
+        Assert.Equal(0, fields.Single(f => string.Equals(f.Key, "rule", StringComparison.Ordinal)).Value);
+        Assert.Equal(FlowOriginKind.Forwarded, fields.Single(f => string.Equals(f.Key, "origin", StringComparison.Ordinal)).Value);
+    }
+
+    [Fact]
     public async Task DispatcherReusesForwardedDecisionAcrossAdapterObservations()
     {
-        var config = CreateConfig(
-            new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }),
-            FlowAction.Block,
-            ruleAction: FlowAction.Block);
+        var matcher = new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" });
+        var config = new ValidatedConfiguration(
+            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new PolicySnapshot([], FlowAction.Block)
+            {
+                ForwardedRules = [new(matcher, new FlowDecision(FlowAction.Block, 0, ProxyServerName: null))],
+            });
         var executor = new FakeExecutor();
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor);
         var first = FlowPacket(53000, FlowOriginKind.Forwarded, "id-a", "vEthernet A");
@@ -102,7 +128,7 @@ public sealed class FlowDispatcherExecutorTests
     }
 
     [Fact]
-    public async Task DispatcherCachesForwardedImplicitPassAcrossOriginsAndFailsClosedAtCapacity()
+    public async Task DispatcherCachesForwardedFallbackPassAcrossOriginsAndFailsClosedAtCapacity()
     {
         var config = new ValidatedConfiguration(
             new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
@@ -147,11 +173,14 @@ public sealed class FlowDispatcherExecutorTests
     {
         var config = new ValidatedConfiguration(
             new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
-            new PolicySnapshot(
-            [
-                new(new RuleMatcher(), new FlowDecision(FlowAction.Block, 0, ProxyServerName: null)),
-                new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Proxy, 1, "proxy")),
-            ], FlowAction.Block));
+            new PolicySnapshot([], FlowAction.Block)
+            {
+                ForwardedRules =
+                [
+                    new(new RuleMatcher(), new FlowDecision(FlowAction.Block, 0, ProxyServerName: null)),
+                    new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Proxy, 1, "proxy")),
+                ],
+            });
         var executor = new FakeExecutor();
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor);
         var adapterA = new WindowsAdapter("id-a", "vEthernet A", "a", 1, 1);

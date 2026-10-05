@@ -13,8 +13,7 @@ public sealed class ConfigurationLimitsTests
         const string json = """
         {
           "socks5Servers": [],
-          "rules": [],
-          "fallbackAction": "pass"
+          "host": { "fallbackAction": "pass", "rules": [] }
         }
         """;
 
@@ -30,8 +29,7 @@ public sealed class ConfigurationLimitsTests
         const string json = """
         {
           "socks5Servers": [],
-          "rules": [],
-          "fallbackAction": "pass",
+          "host": { "fallbackAction": "pass", "rules": [] },
           "tcpFlowCapacity": null
         }
         """;
@@ -50,8 +48,7 @@ public sealed class ConfigurationLimitsTests
         var json = string.Create(CultureInfo.InvariantCulture, $$"""
         {
           "socks5Servers": [],
-          "rules": [],
-          "fallbackAction": "pass",
+          "host": { "fallbackAction": "pass", "rules": [] },
           "tcpFlowCapacity": {{value}}
         }
         """);
@@ -70,8 +67,7 @@ public sealed class ConfigurationLimitsTests
         var json = string.Create(CultureInfo.InvariantCulture, $$"""
         {
           "socks5Servers": [],
-          "rules": [],
-          "fallbackAction": "pass",
+          "host": { "fallbackAction": "pass", "rules": [] },
           "tcpFlowCapacity": {{value}}
         }
         """);
@@ -93,8 +89,7 @@ public sealed class ConfigurationLimitsTests
         var json = string.Create(CultureInfo.InvariantCulture, $$"""
         {
           "socks5Servers": [],
-          "rules": [],
-          "fallbackAction": "pass",
+          "host": { "fallbackAction": "pass", "rules": [] },
           "tcpFlowCapacity": {{value}}
         }
         """);
@@ -110,8 +105,7 @@ public sealed class ConfigurationLimitsTests
         var json = $$"""
         {
           "socks5Servers": [],
-          "rules": [],
-          "fallbackAction": "pass",
+          "host": { "fallbackAction": "pass", "rules": [] },
           "tcpFlowCapacity": {{value}}
         }
         """;
@@ -137,8 +131,7 @@ public sealed class ConfigurationLimitsTests
         const string json = """
         {
           "socks5Servers": [],
-          "rules": [],
-          "fallbackAction": "pass",
+          "host": { "fallbackAction": "pass", "rules": [] },
           "udpSessionCapacity": null,
           "udpRelayReceiveBufferKb": null,
           "udpSessionIdleSeconds": null
@@ -362,15 +355,13 @@ public sealed class ConfigurationLimitsTests
         ? """
         {
           "socks5Servers": [],
-          "rules": [],
-          "fallbackAction": "pass"
+          "host": { "fallbackAction": "pass", "rules": [] }
         }
         """
         : $$"""
         {
           "socks5Servers": [],
-          "rules": [],
-          "fallbackAction": "pass",
+          "host": { "fallbackAction": "pass", "rules": [] },
           {{body}}
         }
         """;
@@ -412,8 +403,9 @@ public sealed class ConfigurationLimitsTests
     {
         // The examples/ directory is published documentation; every example must be a valid
         // configuration so operators can copy them without surprises.
-        var exampleDir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..", "examples");
-        if (!Directory.Exists(exampleDir)) return; // Source tree layout differs in some build hosts.
+        // A missing source tree means nothing was validated, so it is fatal rather than tolerated.
+        var exampleDir = FindRepositoryExamplesDirectory()
+            ?? throw new InvalidOperationException($"No WinForward.slnx was found above {AppContext.BaseDirectory}, so the examples were not validated.");
         var files = Directory.GetFiles(exampleDir, "*.json");
         Assert.NotEmpty(files);
         foreach (var file in files)
@@ -422,5 +414,23 @@ public sealed class ConfigurationLimitsTests
             Assert.True(ConfigurationLoader.TryParse(json, out var dto, out var parseErrors), $"{Path.GetFileName(file)} parse: {string.Join("; ", parseErrors)}");
             Assert.True(ConfigurationLoader.TryValidate(dto!, out _, out var validationErrors), $"{Path.GetFileName(file)} validate: {string.Join("; ", validationErrors)}");
         }
+    }
+
+    /// <summary>
+    /// Locates the repository's examples directory from the test host's own location, walking up to
+    /// the directory that holds the solution file, so the result never depends on how deep this
+    /// project's output directory sits. Null only when no source tree encloses the test host.
+    /// </summary>
+    private static string? FindRepositoryExamplesDirectory()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        {
+            if (!File.Exists(Path.Combine(directory.FullName, "WinForward.slnx"))) continue;
+            var examples = Path.Combine(directory.FullName, "examples");
+            Assert.True(Directory.Exists(examples), $"The repository root at '{directory.FullName}' has no examples directory.");
+            return examples;
+        }
+
+        return null;
     }
 }

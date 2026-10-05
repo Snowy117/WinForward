@@ -14,11 +14,11 @@ public sealed partial class WinForwardConfigDto
     [JsonPropertyName("socks5Servers")]
     public IReadOnlyList<Socks5ServerDto?>? Socks5Servers { get; init; }
 
-    [JsonPropertyName("rules")]
-    public IReadOnlyList<RuleDto?>? Rules { get; init; }
+    [JsonPropertyName("host")]
+    public RuleDomainDto? Host { get; init; }
 
-    [JsonPropertyName("fallbackAction")]
-    public string? FallbackAction { get; init; }
+    [JsonPropertyName("forwarded")]
+    public RuleDomainDto? Forwarded { get; init; }
 
     [JsonPropertyName("proxyUnavailableAction")]
     public string? ProxyUnavailableAction { get; init; }
@@ -31,6 +31,15 @@ public sealed partial class WinForwardConfigDto
 
     [JsonPropertyName("setupWorkerCount")]
     public int? SetupWorkerCount { get; init; }
+}
+
+public sealed class RuleDomainDto
+{
+    [JsonPropertyName("fallbackAction")]
+    public string? FallbackAction { get; init; }
+
+    [JsonPropertyName("rules")]
+    public IReadOnlyList<RuleDto?>? Rules { get; init; }
 }
 
 public sealed class Socks5ServerDto
@@ -140,14 +149,15 @@ public static partial class ConfigurationLoader
 
         ValidateServers(dto, servers, errors);
 
-        var rules = new List<PolicyRule>();
-        ValidateRules(dto, servers, rules, errors);
+        var hostRules = new List<PolicyRule>();
+        var forwardedRules = new List<PolicyRule>();
+        var hostFallback = ConfigurationRules.ParseDomain(dto.Host, FlowOriginKind.Host, servers, hostRules, errors);
+        var forwardedFallback = ConfigurationRules.ParseDomain(dto.Forwarded, FlowOriginKind.Forwarded, servers, forwardedRules, errors);
 
-        var fallback = ParseAction(dto.FallbackAction, "fallbackAction", errors, allowProxy: false);
         ValidateFailureActions(dto, errors);
         var associationReuse = ParseAssociationReuse(dto.UdpAssociationReuse, errors);
 
-        if (errors.Count > 0 || fallback is null)
+        if (errors.Count > 0 || hostFallback is null)
         {
             configuration = null;
             diagnostics = errors;
@@ -156,9 +166,13 @@ public static partial class ConfigurationLoader
 
         configuration = new ValidatedConfiguration(
             servers,
-            new PolicySnapshot(rules, fallback.Value),
+            new PolicySnapshot(hostRules, hostFallback.Value)
+            {
+                ForwardedRules = forwardedRules,
+                ForwardedFallbackAction = forwardedFallback ?? FlowAction.Pass,
+            },
             logLevel,
-            rules.Exists(static rule => rule.Matcher.Processes?.Any(IsPathSelector) == true),
+            ConfigurationRules.AnyProcessSelectorIsAPath(hostRules),
             limits.TcpFlowCapacity,
             limits.SetupWorkerCount,
             limits.UdpSessionCapacity,
@@ -204,8 +218,6 @@ public static partial class ConfigurationLoader
         return RuntimeLogLevel.Info;
     }
 
-    private static bool IsPathSelector(string selector) => selector.IndexOfAny(['/', '\\']) >= 0;
-
     private static void ValidateServers(WinForwardConfigDto dto, Dictionary<string, Socks5Server> servers, List<ConfigDiagnostic> errors)
     {
         if (dto.Socks5Servers is null)
@@ -217,21 +229,6 @@ public static partial class ConfigurationLoader
         for (var index = 0; index < dto.Socks5Servers.Count; index++)
         {
             ValidateServer(dto.Socks5Servers[index], index, servers, errors);
-        }
-    }
-
-    private static void ValidateRules(WinForwardConfigDto dto, Dictionary<string, Socks5Server> servers, List<PolicyRule> rules, List<ConfigDiagnostic> errors)
-    {
-        if (dto.Rules is null)
-        {
-            errors.Add(new("rules", "Field is required."));
-            return;
-        }
-
-        for (var index = 0; index < dto.Rules.Count; index++)
-        {
-            var rule = ParseRule(dto.Rules[index], index, servers, errors);
-            if (rule is not null) rules.Add(rule);
         }
     }
 
@@ -261,61 +258,6 @@ public static partial class ConfigurationLoader
         }
     }
 
-    private static PolicyRule? ParseRule(RuleDto? dto, int index, Dictionary<string, Socks5Server> servers, List<ConfigDiagnostic> errors)
-    {
-        var path = string.Create(CultureInfo.InvariantCulture, $"rules[{index}]");
-        if (dto is null)
-        {
-            errors.Add(new(path, "Rule entry must be an object."));
-            return null;
-        }
-
-        ValidateNonEmpty(dto.Process, $"{path}.process", errors);
-        ValidateNonEmpty(dto.AdapterId, $"{path}.adapterId", errors);
-        ValidateNonEmpty(dto.AdapterName, $"{path}.adapterName", errors);
-        ValidateNonEmpty(dto.Protocol, $"{path}.protocol", errors);
-        ValidateNonEmpty(dto.AddressFamily, $"{path}.addressFamily", errors);
-        ValidateNonEmpty(dto.RemoteCidr, $"{path}.remoteCidr", errors);
-        ValidateNonEmpty(dto.RemotePort, $"{path}.remotePort", errors);
-
-        var action = ParseAction(dto.Action, $"{path}.action", errors, allowProxy: true);
-        if (action is null) return null;
-        var proxyServer = dto.ProxyServer?.Trim();
-        if (action == FlowAction.Proxy && (string.IsNullOrWhiteSpace(proxyServer) || !servers.ContainsKey(proxyServer)))
-        {
-            errors.Add(new($"{path}.proxyServer", "Proxy action requires a configured proxy server."));
-        }
-        if (action != FlowAction.Proxy && dto.ProxyServer is not null) errors.Add(new($"{path}.proxyServer", "Only proxy rules may specify proxyServer."));
-
-        var protocols = ParseSet(dto.Protocol, ParseProtocol, $"{path}.protocol", errors);
-        var families = ParseSet(dto.AddressFamily, ParseFamily, $"{path}.addressFamily", errors);
-        var networks = ParseNetworks(dto.RemoteCidr, $"{path}.remoteCidr", errors);
-        var ports = ParsePorts(dto.RemotePort, $"{path}.remotePort", errors);
-        if (errors.Exists(error => error.Path.Equals(path, StringComparison.Ordinal) || error.Path.StartsWith(path + ".", StringComparison.Ordinal))) return null;
-
-        return new PolicyRule(new RuleMatcher(
-            NormalizeSet(dto.Process), NormalizeSet(dto.AdapterId), NormalizeSet(dto.AdapterName), protocols, families, networks, ports),
-            new FlowDecision(action.Value, index, action == FlowAction.Proxy ? proxyServer : null));
-    }
-
-    private static FlowAction? ParseAction(string? raw, string path, List<ConfigDiagnostic> errors, bool allowProxy)
-    {
-        if (string.IsNullOrWhiteSpace(raw)) { errors.Add(new(path, "Action is required.")); return null; }
-        var action = raw.Trim().ToLowerInvariant() switch
-        {
-            "proxy" when allowProxy => FlowAction.Proxy,
-            "pass" => FlowAction.Pass,
-            "block" => FlowAction.Block,
-            _ => (FlowAction?)null,
-        };
-        if (action is null)
-        {
-            errors.Add(new(path, allowProxy ? "Action must be proxy, pass, or block." : "Action must be pass or block."));
-            return null;
-        }
-        return action.Value;
-    }
-
     private static void ValidateFailureActions(WinForwardConfigDto dto, List<ConfigDiagnostic> errors)
     {
         ValidateFailureAction(dto.ProxyUnavailableAction, "proxyUnavailableAction", errors);
@@ -325,113 +267,6 @@ public static partial class ConfigurationLoader
     private static void ValidateFailureAction(string? raw, string path, List<ConfigDiagnostic> errors)
     {
         if (raw is not null && !string.Equals(raw.Trim(), "block", StringComparison.OrdinalIgnoreCase)) errors.Add(new(path, "Only block is supported in the first release."));
-    }
-
-    private static void ValidateNonEmpty(string?[]? values, string path, List<ConfigDiagnostic> errors)
-    {
-        if (values is null) return;
-        if (values.Length == 0)
-        {
-            errors.Add(new(path, "Array must not be empty."));
-            return;
-        }
-
-        for (var index = 0; index < values.Length; index++)
-        {
-            if (string.IsNullOrWhiteSpace(values[index])) errors.Add(new(string.Create(CultureInfo.InvariantCulture, $"{path}[{index}]"), "Value must not be empty."));
-        }
-    }
-
-    private static HashSet<string>? NormalizeSet(string?[]? values) => values?.Select(static value => value!.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-    private static List<IPPrefix>? ParseNetworks(string?[]? values, string path, List<ConfigDiagnostic> errors)
-    {
-        if (values is null) return null;
-        var result = new List<IPPrefix>();
-        for (var index = 0; index < values.Length; index++)
-        {
-            var value = values[index];
-            if (string.IsNullOrWhiteSpace(value)) continue;
-            if (!IPPrefix.TryParse(value, out var prefix)) errors.Add(new(string.Create(CultureInfo.InvariantCulture, $"{path}[{index}]"), $"Invalid CIDR '{value}'.")); else result.Add(prefix);
-        }
-        return result;
-    }
-
-    private static HashSet<T>? ParseSet<T>(string?[]? values, Func<string, T?> parser, string path, List<ConfigDiagnostic> errors) where T : struct
-    {
-        if (values is null) return null;
-        var result = new HashSet<T>();
-        for (var index = 0; index < values.Length; index++)
-        {
-            var value = values[index];
-            if (string.IsNullOrWhiteSpace(value)) continue;
-            var parsed = parser(value);
-            if (parsed is null) errors.Add(new(string.Create(CultureInfo.InvariantCulture, $"{path}[{index}]"), $"Unsupported value '{value}'.")); else result.Add(parsed.Value);
-        }
-        return result;
-    }
-
-    private static List<(ushort Start, ushort End)>? ParsePorts(string?[]? values, string path, List<ConfigDiagnostic> errors)
-    {
-        if (values is null) return null;
-        var result = new List<(ushort Start, ushort End)>();
-        for (var index = 0; index < values.Length; index++)
-        {
-            var value = values[index];
-            if (string.IsNullOrWhiteSpace(value)) continue;
-            var parts = value.Split('-', StringSplitOptions.TrimEntries);
-            if (parts.Length is < 1 or > 2 || !ushort.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var start) || start == 0)
-            {
-                errors.Add(new(string.Create(CultureInfo.InvariantCulture, $"{path}[{index}]"), $"Invalid port or range '{value}'."));
-                continue;
-            }
-
-            var end = start;
-            if (parts.Length == 2 && (!ushort.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out end) || end == 0 || end < start))
-            {
-                errors.Add(new(string.Create(CultureInfo.InvariantCulture, $"{path}[{index}]"), $"Invalid port or range '{value}'."));
-                continue;
-            }
-
-            result.Add((start, end));
-        }
-
-        result.Sort(static (left, right) => left.Start != right.Start
-            ? left.Start.CompareTo(right.Start)
-            : left.End.CompareTo(right.End));
-        var merged = new List<(ushort Start, ushort End)>(result.Count);
-        foreach (var range in result)
-        {
-            if (merged.Count == 0)
-            {
-                merged.Add(range);
-                continue;
-            }
-
-            var (start, end) = merged[^1];
-            if (range.Start > end + 1U)
-            {
-                merged.Add(range);
-                continue;
-            }
-
-            if (range.End > end) merged[^1] = (start, range.End);
-        }
-
-        return merged;
-    }
-
-    private static TransportProtocol? ParseProtocol(string value)
-    {
-        if (value.Equals("tcp", StringComparison.OrdinalIgnoreCase)) return TransportProtocol.Tcp;
-        if (value.Equals("udp", StringComparison.OrdinalIgnoreCase)) return TransportProtocol.Udp;
-        return null;
-    }
-    private static AddressFamilyKind? ParseFamily(string value)
-    {
-        if (value.Equals("IPv4", StringComparison.OrdinalIgnoreCase) || value.Equals("InterNetwork", StringComparison.OrdinalIgnoreCase)) return AddressFamilyKind.IPv4;
-        if (value.Equals("IPv6", StringComparison.OrdinalIgnoreCase) || value.Equals("InterNetworkV6", StringComparison.OrdinalIgnoreCase)) return AddressFamilyKind.IPv6;
-        return null;
     }
 
     private static bool IsValidHost(string host) => IPAddress.TryParse(host, out _) || Uri.CheckHostName(host) is UriHostNameType.Dns or UriHostNameType.Basic;

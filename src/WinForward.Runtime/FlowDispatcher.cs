@@ -467,7 +467,7 @@ public sealed class FlowDispatcher : IFlowAttributionHost
     }
 
     private FlowDecision EvaluateNewFlow(FlowContext context) =>
-        context.Key.Origin == FlowOriginKind.Forwarded ? _policy.EvaluateForwarded(context) : _policy.Evaluate(context);
+        context.Key.Origin == FlowOriginKind.Forwarded ? _policy.EvaluateForwarded(context) : _policy.EvaluateHost(context);
 
     private async ValueTask ExecuteDecisionAsync(CapturedFlowPacket packet, FlowDecision decision, CancellationToken cancellationToken)
     {

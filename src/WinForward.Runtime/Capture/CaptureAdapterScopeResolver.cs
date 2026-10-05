@@ -8,13 +8,17 @@ namespace WinForward.Runtime.Capture;
 /// Resolves the set of adapters that must be placed in capture tunnel mode for a run. A rule that
 /// constrains by <c>adapterId</c>/<c>adapterName</c> selects its resolved adapter(s); a rule with no
 /// adapter constraint (for example a host-process rule) can match traffic on any adapter, so the
-/// presence of any unconstrained rule widens capture scope to every MSTCP-bound adapter. At startup,
-/// missing or ambiguous selectors fail with an actionable diagnostic rather than silently narrowing
-/// or widening policy (<see cref="TryResolve"/>); on adapter-list refresh, selector failures narrow
-/// scope with warnings instead of stopping the run (<see cref="ResolveForRefresh"/>).
+/// presence of any unconstrained rule <em>in either policy domain</em> widens capture scope to every
+/// MSTCP-bound adapter. At startup, missing or ambiguous selectors fail with an actionable diagnostic
+/// rather than silently narrowing or widening policy (<see cref="TryResolve"/>); on adapter-list
+/// refresh, selector failures narrow scope with warnings instead of stopping the run
+/// (<see cref="ResolveForRefresh"/>).
 /// </summary>
 public static class CaptureAdapterScopeResolver
 {
+    private const string HostRulesPath = "host.rules";
+    private const string ForwardedRulesPath = "forwarded.rules";
+
     public static bool TryResolve(IReadOnlyList<WindowsAdapter> adapters, PolicySnapshot policy, out IReadOnlyList<WindowsAdapter> scope, out IReadOnlyList<string> errors)
     {
         ArgumentNullException.ThrowIfNull(adapters);
@@ -22,19 +26,10 @@ public static class CaptureAdapterScopeResolver
 
         var errorList = new List<string>();
         var scopeSet = new HashSet<WindowsAdapter>();
-        var anyUnconstrainedRule = false;
-
-        for (var ruleIndex = 0; ruleIndex < policy.Rules.Count; ruleIndex++)
-        {
-            var matcher = policy.Rules[ruleIndex].Matcher;
-            if (matcher.AdapterIds is null && matcher.AdapterNames is null)
-            {
-                anyUnconstrainedRule = true;
-                continue;
-            }
-
-            ResolveRuleScope(adapters, matcher, ruleIndex, scopeSet, errorList, fatal: true);
-        }
+        // Both domains are always walked: an unconstrained rule in either one can match traffic on any
+        // adapter, so short-circuiting on the first would silently leave adapters out of the scope.
+        var hostUnconstrained = AccumulateScope(adapters, policy.HostRules, HostRulesPath, scopeSet, errorList, fatal: true);
+        var forwardedUnconstrained = AccumulateScope(adapters, policy.ForwardedRules, ForwardedRulesPath, scopeSet, errorList, fatal: true);
 
         if (errorList.Count > 0)
         {
@@ -45,7 +40,7 @@ public static class CaptureAdapterScopeResolver
 
         // A fallback-only policy (no rules, or only unconstrained rules) can apply to traffic on any
         // adapter, so capture scope widens to every MSTCP-bound adapter.
-        if (anyUnconstrainedRule || scopeSet.Count == 0)
+        if (hostUnconstrained || forwardedUnconstrained || scopeSet.Count == 0)
         {
             foreach (var adapter in adapters) scopeSet.Add(adapter);
         }
@@ -73,21 +68,10 @@ public static class CaptureAdapterScopeResolver
 
         var warningList = new List<string>();
         var scopeSet = new HashSet<WindowsAdapter>();
-        var anyUnconstrainedRule = false;
+        var hostUnconstrained = AccumulateScope(adapters, policy.HostRules, HostRulesPath, scopeSet, warningList, fatal: false);
+        var forwardedUnconstrained = AccumulateScope(adapters, policy.ForwardedRules, ForwardedRulesPath, scopeSet, warningList, fatal: false);
 
-        for (var ruleIndex = 0; ruleIndex < policy.Rules.Count; ruleIndex++)
-        {
-            var matcher = policy.Rules[ruleIndex].Matcher;
-            if (matcher.AdapterIds is null && matcher.AdapterNames is null)
-            {
-                anyUnconstrainedRule = true;
-                continue;
-            }
-
-            ResolveRuleScope(adapters, matcher, ruleIndex, scopeSet, warningList, fatal: false);
-        }
-
-        if (anyUnconstrainedRule || (scopeSet.Count == 0 && warningList.Count == 0))
+        if (hostUnconstrained || forwardedUnconstrained || (scopeSet.Count == 0 && warningList.Count == 0))
         {
             foreach (var adapter in adapters) scopeSet.Add(adapter);
         }
@@ -96,7 +80,25 @@ public static class CaptureAdapterScopeResolver
         return [.. scopeSet.OrderBy(adapter => adapter.StableId, StringComparer.OrdinalIgnoreCase)];
     }
 
-    private static void ResolveRuleScope(IReadOnlyList<WindowsAdapter> adapters, RuleMatcher matcher, int ruleIndex, HashSet<WindowsAdapter> scope, List<string> diagnostics, bool fatal)
+    private static bool AccumulateScope(IReadOnlyList<WindowsAdapter> adapters, IReadOnlyList<PolicyRule> rules, string domainPath, HashSet<WindowsAdapter> scope, List<string> diagnostics, bool fatal)
+    {
+        var anyUnconstrainedRule = false;
+        for (var ruleIndex = 0; ruleIndex < rules.Count; ruleIndex++)
+        {
+            var matcher = rules[ruleIndex].Matcher;
+            if (matcher.AdapterIds is null && matcher.AdapterNames is null)
+            {
+                anyUnconstrainedRule = true;
+                continue;
+            }
+
+            ResolveRuleScope(adapters, matcher, string.Create(CultureInfo.InvariantCulture, $"{domainPath}[{ruleIndex}]"), scope, diagnostics, fatal);
+        }
+
+        return anyUnconstrainedRule;
+    }
+
+    private static void ResolveRuleScope(IReadOnlyList<WindowsAdapter> adapters, RuleMatcher matcher, string rulePath, HashSet<WindowsAdapter> scope, List<string> diagnostics, bool fatal)
     {
         var idMatches = new List<WindowsAdapter>();
         var nameMatches = new List<WindowsAdapter>();
@@ -104,11 +106,11 @@ public static class CaptureAdapterScopeResolver
         var ruleContributesNothing = false;
         if (matcher.AdapterIds is not null)
         {
-            ruleContributesNothing |= ResolveSelectorSet(adapters, matcher.AdapterIds, adapter => adapter.StableId, ruleIndex, idMatches, diagnostics, fatal);
+            ruleContributesNothing |= ResolveSelectorSet(adapters, matcher.AdapterIds, adapter => adapter.StableId, rulePath, idMatches, diagnostics, fatal);
         }
         if (matcher.AdapterNames is not null)
         {
-            ruleContributesNothing |= ResolveSelectorSet(adapters, matcher.AdapterNames, adapter => adapter.FriendlyName, ruleIndex, nameMatches, diagnostics, fatal);
+            ruleContributesNothing |= ResolveSelectorSet(adapters, matcher.AdapterNames, adapter => adapter.FriendlyName, rulePath, nameMatches, diagnostics, fatal);
         }
 
         // Both fields use AND semantics and must resolve to the same adapter; a rule that can
@@ -123,7 +125,7 @@ public static class CaptureAdapterScopeResolver
             var byName = nameMatches.Select(adapter => adapter.StableId).ToHashSet(StringComparer.OrdinalIgnoreCase);
             if (!byId.SetEquals(byName))
             {
-                diagnostics.Add(string.Create(CultureInfo.InvariantCulture, $"rules[{ruleIndex}]: adapterId and adapterName resolve to different adapters; both fields must select the same adapter."));
+                diagnostics.Add($"{rulePath}: adapterId and adapterName resolve to different adapters; both fields must select the same adapter.");
                 if (!fatal) ruleContributesNothing = true;
             }
         }
@@ -138,7 +140,7 @@ public static class CaptureAdapterScopeResolver
         IReadOnlyList<WindowsAdapter> adapters,
         IReadOnlySet<string>? selectors,
         Func<WindowsAdapter, string> valueOf,
-        int ruleIndex,
+        string rulePath,
         List<WindowsAdapter> matches,
         List<string> diagnostics,
         bool fatal)
@@ -151,13 +153,13 @@ public static class CaptureAdapterScopeResolver
             // ReSharper disable once ConvertIfStatementToSwitchStatement // Zero, one, and several matches are discriminated here — the if-else chain states that intent directly, while a length-based switch would obscure it.
             if (found.Length == 0)
             {
-                diagnostics.Add(string.Create(CultureInfo.InvariantCulture, $"rules[{ruleIndex}]: configured adapter selector '{selector}' matches no current adapter."));
+                diagnostics.Add($"{rulePath}: configured adapter selector '{selector}' matches no current adapter.");
                 if (!fatal) ruleContributesNothing = true;
             }
             else if (found.Length > 1)
             {
                 var conflicts = string.Join(", ", found.Select(adapter => adapter.StableId + " (" + adapter.FriendlyName + ")"));
-                diagnostics.Add(string.Create(CultureInfo.InvariantCulture, $"rules[{ruleIndex}]: configured adapter selector '{selector}' is ambiguous; matching adapters: {conflicts}."));
+                diagnostics.Add($"{rulePath}: configured adapter selector '{selector}' is ambiguous; matching adapters: {conflicts}.");
             }
             else
             {

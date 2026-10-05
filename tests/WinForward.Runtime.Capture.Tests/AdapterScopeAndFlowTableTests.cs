@@ -30,6 +30,61 @@ public sealed class AdapterScopeAndFlowTableTests
     }
 
     [Fact]
+    public void AdapterScopeFollowsAForwardedDomainsAdapterConstraint()
+    {
+        var adapters = new[]
+        {
+            new WindowsAdapter("id-a", "Ethernet", "a", 1, 1),
+            new WindowsAdapter("id-b", "vEthernet 1", "b", 2, 1),
+        };
+        var policy = new PolicySnapshot([], FlowAction.Pass)
+        {
+            ForwardedRules = [new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-b" }), new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null))],
+        };
+
+        Assert.True(CaptureAdapterScopeResolver.TryResolve(adapters, policy, out var scope, out _));
+        var single = Assert.Single(scope);
+        Assert.Equal("id-b", single.StableId);
+    }
+
+    [Fact]
+    public void AdapterScopeWidensForAnUnconstrainedForwardedRule()
+    {
+        var adapters = new[]
+        {
+            new WindowsAdapter("id-a", "Ethernet", "a", 1, 1),
+            new WindowsAdapter("id-b", "vEthernet 1", "b", 2, 1),
+        };
+        // The host rule pins the scope non-empty: an empty scope widens on its own, so without it a
+        // resolver that stopped walking ForwardedRules would still return both adapters here.
+        var policy = new PolicySnapshot(
+            [new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null))],
+            FlowAction.Pass)
+        {
+            ForwardedRules = [new(new RuleMatcher(RemotePorts: [(443, 443)]), new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null))],
+        };
+
+        Assert.True(CaptureAdapterScopeResolver.TryResolve(adapters, policy, out var scope, out _));
+        Assert.Equal(2, scope.Count);
+    }
+
+    [Fact]
+    public void AdapterScopeDiagnosticsNameTheRuleDomain()
+    {
+        var adapters = new[] { new WindowsAdapter("id-a", "Ethernet", "a", 1, 1) };
+        var policy = new PolicySnapshot(
+            [new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "host-missing" }), new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null))],
+            FlowAction.Pass)
+        {
+            ForwardedRules = [new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "forwarded-missing" }), new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null))],
+        };
+
+        Assert.False(CaptureAdapterScopeResolver.TryResolve(adapters, policy, out _, out var errors));
+        Assert.Contains(errors, error => error.StartsWith("host.rules[0]:", StringComparison.Ordinal));
+        Assert.Contains(errors, error => error.StartsWith("forwarded.rules[0]:", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void AdapterScopeFailsOnMissingAndAmbiguousSelectors()
     {
         var adapters = new[]

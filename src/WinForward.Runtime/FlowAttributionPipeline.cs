@@ -223,7 +223,7 @@ internal sealed class FlowAttributionPipeline : IAsyncDisposable
     private void SignalWake(PendingFlowAttribution entry) => Wake?.Signal(entry.AdapterHandle);
 
     private FlowDecision Evaluate(FlowContext context) =>
-        context.Key.Origin == FlowOriginKind.Forwarded ? _host.Policy.EvaluateForwarded(context) : _host.Policy.Evaluate(context);
+        context.Key.Origin == FlowOriginKind.Forwarded ? _host.Policy.EvaluateForwarded(context) : _host.Policy.EvaluateHost(context);
 
     private void Deliver(PendingFlowAttribution entry, List<RetainedPacket> batch)
     {
