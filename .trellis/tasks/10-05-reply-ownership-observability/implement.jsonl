@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "The receive-classification contract and the existing refusal of exact source equality the check must stay consistent with."}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "The per-reply budget the comparison and the counter must stay inside."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "The lint/format/inspector gates and suppression policy."}

@@ -47,8 +47,11 @@ whether their association-sharing configuration is safe for their traffic.
 
 - R1 — Count every reply whose declared source does not equal the flow's own destination, in the
   product, under a product-level counter name alongside the existing UDP counters.
-- R2 — Do not change what is delivered. A mismatched reply is still injected, exactly as today; turning
-  the count into a drop is a separate decision that needs its own evidence and its own task.
+- R2 — Do not change what is delivered, and add no configuration key. A mismatched reply is still
+  injected exactly as today. A mismatch is not proof of an invalid reply — the repository already
+  refuses exact source equality on the relay side for the same reason, and TFTP-style endpoint changes
+  would break silently — and `RuntimeCounters` is documented as observational only, never influencing
+  packet disposition. The count is what makes the drop question answerable later with data.
 - R3 — Emit a rate-limited structured warning carrying enough context to act on: the flow's destination,
   the reply's declared source, the association generation, and the origin kind. The counter is
   unconditional; only the log line is throttled.
@@ -82,12 +85,3 @@ whether their association-sharing configuration is safe for their traffic.
       cannot, and that a zero does not prove sharing is safe.
 - [ ] `dotnet build WinForward.slnx -c Release` is zero-warning and
       `dotnet test WinForward.slnx -c Release` stays green.
-
-## Open question
-
-- Should the mismatch also *drop* the reply (behind a configuration key, default off), or stay
-  count-only? **Recommendation: count-only.** A mismatch is not proof of an invalid reply — the
-  repository already refuses exact source equality on the relay side for the same reason, and TFTP-style
-  endpoint changes would break silently. Count-only is zero-risk and is exactly what is needed to decide
-  the drop question later with data; a drop switch would add a configuration key and a delivery-affecting
-  branch to a task whose value is that it changes nothing observable.

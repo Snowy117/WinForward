@@ -19,7 +19,8 @@
   "pr_url": null,
   "subtasks": [],
   "children": [
-    "10-05-harness-response-ownership"
+    "10-05-harness-response-ownership",
+    "10-05-reply-ownership-observability"
   ],
   "parent": null,
   "relatedFiles": [],
