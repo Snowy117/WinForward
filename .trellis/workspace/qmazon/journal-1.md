@@ -1771,3 +1771,30 @@ Made a misdelivered relay reply visible in the shipped product: UdpProxySession 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 53: R3: local targets for proxy-decided UDP flows (local-dns-transport)
+<!-- trellis-session: v=2 fp=d50b4bea02bfe3ce -->
+
+**Date**: 2026-10-05
+**Task**: R3: local targets for proxy-decided UDP flows (local-dns-transport)
+**Branch**: `master`
+
+### Summary
+
+Delivered R3 of 10-05-udp-association-sharing-correctness: a rule's target may name a localTargets entry, served by one socket per flow with the payload forwarded verbatim and the endpoint's replies attributed to the flow's original destination — no SOCKS5 control connection, no UDP ASSOCIATE. Phases: A renamed proxyServer->target across ~98 sites (legacy key rejected with a rename diagnostic); C moved the transport seam from Socks5 to UdpProxy and made it transport-neutral (UdpTransportReceiveResult/SkipReason/Datagram, PeerEndpoint) behind a ProxyTarget union and a composite factory; B+D added the localTargets surface (IP-literal host, one name namespace, TCP-matching rules rejected, non-loopback warning) and LocalUdpTransport; E added the harness --target socks5|local column with a loopback responder and observed per-row handshake counters; F documented the key, the counters, the original-destination fate and the example. Measured (benchmarks/results/2026-10-05-local-target/): 48/48 flows answered per churn wave, zero control connections, zero ASSOCIATE replies, ~7.5 KB/session vs 13.4 KB shared and 91 KB per-flow, p50 3.1-4.1 ms vs 4.2-5.1 and 156-165. An independent check verified all nine acceptance criteria and found one real defect — udpLocalTargetFailures counted normal session teardown and double-counted a failed send — plus one spec statement the task had left false; both fixed and re-verified (the recorded JSONL never carried that counter, so the measurement stands). Four spec files were corrected for drift the refactor created. Gates: Release build 0 warnings, 1240 tests green (13 assemblies), dotnet format empty, jb inspectcode zero issues after clearing 34 findings (2 narrow site suppressions, inventoried in the task dir). Known pre-existing flake: LayeredCaptureRunnerRefreshTests under parallel runs, untouched by this task. Next: the R4/R5 sharing-policy child; its evidence pointer is recorded in the parent PRD.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `69f89d5` | feat(udp): serve proxy-decided UDP flows from local targets (local-dns-transport) |
+| `9d60898` | chore(task): record the local-target work (local-dns-transport) |
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- R4/R5 sharing-policy child: price the remaining SOCKS5 UDP population (short non-DNS flows) using the R1-corrected columns and decide the udpAssociationReuse default

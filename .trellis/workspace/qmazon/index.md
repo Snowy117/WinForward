@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 52
+- **Total Sessions**: 53
 - **Last Active**: 2026-10-05
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1773 | Active |
+| `journal-1.md` | ~1800 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 53 | 2026-10-05 | R3: local targets for proxy-decided UDP flows (local-dns-transport) | `69f89d5`, `9d60898` | `master` |
 | 52 | 2026-10-05 | Reply-ownership observability: a count-only counter for misdelivered UDP replies | `fcec029`, `81f4824`, `a843a92` | `master` |
 | 51 | 2026-10-05 | UDP shared-association reply ownership: measured, harness corrected, baseline published | `42c2af1`, `2a14b40`, `d5c9cf0` | `master` |
 | 50 | 2026-10-05 | Host flow creation logging: the deferred attribution pipeline now emits flow.created, so host flows stop vanishing from the log | `ea6e520`, `c61ce16`, `748e309` | `master` |
