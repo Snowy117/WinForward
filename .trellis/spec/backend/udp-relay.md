@@ -666,3 +666,122 @@ _relay = await _control.UdpAssociateAsync(token);
 var lease = await _pool.RentAsync(server, cancellationToken);
 return Socks5UdpTransport.Create(lease, _selfTraffic, ..., _relayReceiveBufferBytes);
 ```
+
+---
+
+## Reply-ownership observability: the foreign-source counter (wired 2026-10-05, task 10-05-reply-ownership-observability)
+
+### 1. Scope / Trigger
+
+- Trigger: any change to `UdpProxySession.TryGetReceiveSource` / `InjectResponseAsync`, the
+  `udpResponseSourceMismatch` counter, or the `udp.response.foreign_source` event.
+- Pre-change state: the decoded reply source was handed straight to the reinjector as the injected
+  frame's source without ever being compared to `Flow.Remote`, so a reply the server delivered to the
+  wrong flow was injected toward that wrong flow's client as a legitimate frame and nothing recorded it.
+
+### 2. Signatures
+
+- `UdpProxySession.TryGetReceiveSource(Socks5UdpReceiveResult receive, out Endpoint source)` — signature
+  and return contract unchanged; only the observational call below is new.
+- `RuntimeCounters.UdpResponseSourceMismatch = "udpResponseSourceMismatch"`
+  (`src/WinForward.Runtime/RuntimeCounters.cs`) — cumulative, beside `udpOriginUnresolved` /
+  `udpFailClosedDrop`. No registration step exists: `RuntimeCounters.Snapshot()` and the heartbeat pick
+  up any key that has been incremented, and the heartbeat reports it as `udpResponseSourceMismatch=<delta>`
+  in the 60 s `runner.heartbeat` line whenever the delta is non-zero.
+- Event `udp.response.foreign_source` at **warn**, fields `destination` (the flow's own), `source` (the
+  reply's declared source), `origin` (the flow's origin kind) and `udpAssociation` (the association
+  generation).
+
+### 3. Contracts
+
+- **Count, then deliver.** One peer comparison against `Flow.Remote`; on a mismatch the counter is
+  incremented and the warn may be emitted, and the method then returns `true` with that same decoded
+  source. `InjectResponseAsync` and `UdpResponseReinjector` are untouched, so the delivered frame's
+  source is the reply's declared source exactly as before. The observation is **non-dispositional by
+  contract**: `RuntimeCounters` counters "must never influence packet disposition, fail-closed, relay, or
+  shutdown decisions".
+- **The comparison is `MatchesPeerIgnoringScope`, not `Endpoint` equality.** The decoded source's IPv6
+  scope comes from the relay socket's bind address (`Socks5UdpTransport` propagates it into the decode)
+  while the flow's destination scope comes from the captured packet, so the two legitimately differ for
+  one link-local peer; `Endpoint.Equals` compares `IPAddressValue.ScopeId` and would count that as a
+  foreign source. This is the same scope-independence the relay-source validation above already applies,
+  and the same call `TcpRedirectAcceptor` makes when it compares an accepted socket endpoint against a
+  wire-decoded one. A real foreign source differs in address bits and still counts.
+- **A mismatch is not an error.** Relay-source validation is deliberately port + address-family rather
+  than exact `IPEndPoint` (the wiring section above), because RFC 1928 does not pin the reply source and
+  multi-homed/anycast relays answer from a different address; TFTP-style exchanges also continue from a
+  new endpoint by design. So the count is sound and dropping on it is a separate, riskier decision this
+  task does not take — the count is the evidence that would make that decision.
+- **The counter is cumulative; only the warn is windowed.** The throttle is the CAS-on-ticks shape of
+  `MaybeLogSkipSummary` with the same 5 s `s_rateLimitedLogInterval`, but the counter is a lifetime total
+  the log path never drains. Do not route it through `RecordSkippedDatagram` or add a
+  `Socks5UdpReceiveSkipReason` member: that path means "not delivered", and reusing it would silently
+  convert the observation into a drop.
+- **Cost.** One struct `Endpoint` peer comparison (`MatchesPeerIgnoringScope`: port, family and raw
+  address bits — no allocation, no boxing) plus one interlocked increment, which is unconditional; a
+  suppressed window costs one clock read, one interlocked read and a compare, and only a window that
+  actually trips pays the compare-exchange and the event formatting. A domain-typed response
+  (`DestinationAddress == null`) keeps its existing skip path and never reaches the comparison.
+- **The warn is throttled per session, so a fleet of misdelivering sessions is a fleet of lines.**
+  The 5 s window is per `UdpProxySession`, deliberately: each session reports its own evidence, and the
+  first mismatch on a session is never suppressed. With sharing on, N concurrent misdelivering sessions
+  therefore produce up to N warns per window. That volume is the signal rather than a defect to damp —
+  one line per session per window is exactly the evidence that a specific set of flows is receiving
+  another flow's replies — and the cumulative counter, not the line count, is the measurement. Read a
+  flood as "the server delivers replies to the wrong flows of an association at a sustained rate", and
+  use `udpAssociation` plus the address pair in the line to see which flows and which peer are involved.
+  A coarser (global) throttle would lose the per-session attribution this event exists for; do not add
+  one without a replacement for that attribution.
+- **Blind spot (documented, and not fixable by a better address comparison).** Two flows to the same
+  destination are indistinguishable by address: a reply delivered to the wrong one carries the source the
+  receiving flow also expects, so it never reaches the comparison. The counter observes
+  **cross-destination** misdelivery only. **A zero count does not mean association sharing is safe for a
+  given traffic mix.**
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Reply source ≠ `Flow.Remote` | counter++, warn (5 s throttle), reply injected with its declared source, session survives |
+| Reply source = `Flow.Remote` | no counter, no event, reply injected |
+| Reply source = `Flow.Remote` up to the IPv6 scope (link-local peer, relay socket's scope vs captured scope) | not a mismatch: no counter, no event, reply injected |
+| Several mismatches inside one window | every reply counted, exactly one warn for the window per session |
+| N sessions each misdelivering inside one window | up to N warns (per-session throttle), every reply counted |
+| Two flows to one destination, cross-delivered reply | no counter (address-indistinguishable), reply injected as the receiving flow's own |
+| Domain-typed response (`DestinationAddress == null`) | unchanged `RecordSkippedDomainDestination` skip; never the mismatch counter |
+| Counter read while no mismatch ever occurred | key absent from the snapshot; the heartbeat omits zero deltas (an absent field is not evidence of safety) |
+
+### 5. Tests Required
+
+- `UdpResponseSourceMismatchTests`: a foreign-source reply is counted, delivered with its declared source,
+  and the session keeps sending; a matching reply does not move the counter and emits no event; an IPv6
+  reply from the same address bits with a different scope does not move it either (no scope false
+  positive), while the same scope with different address bits does (the control that keeps the scope
+  tolerance from swallowing a real mismatch); a burst inside one window counts every reply and warns once,
+  and the next window warns again; two flows to the same destination with a cross-delivered reply do not
+  move the counter (the blind-spot pin). `RuntimeCounters.Shared` is process-wide, so read it as a
+  before/after delta.
+- `RuntimeCountersTests.SharedInstanceExposesTheStandardVocabulary` pins the key string.
+- `HotPathAllocationGateTests` stays green: the comparison adds no allocation to the UDP path.
+
+### 6. Wrong vs Correct
+
+```csharp
+// Wrong: the observation becomes a filter — the counter's verdict decides delivery, the reply is
+// reported as "not delivered", and a legitimate TFTP-style endpoint change is lost.
+if (source != Flow.Remote)
+{
+    RecordSkippedDatagram(Socks5UdpReceiveSkipReason.UnexpectedSource);
+    return false;
+}
+
+// Correct: count, then fall through to the unchanged return — the reply keeps its declared source
+// and is delivered exactly as before. The peer comparison ignores the scope, which belongs to the
+// receiving interface rather than to the peer.
+if (!source.MatchesPeerIgnoringScope(Flow.Remote))
+{
+    RecordForeignSource(source);
+}
+
+return true;
+```
