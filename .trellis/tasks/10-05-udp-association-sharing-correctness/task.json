@@ -1,0 +1,28 @@
+{
+  "id": "udp-association-sharing-correctness",
+  "name": "udp-association-sharing-correctness",
+  "title": "UDP association sharing: response ownership, routing granularity, and the cost model",
+  "description": "Establish whether a shared SOCKS5 UDP association preserves per-flow semantics at all, and choose the sharing policy from measured cost instead of an assumed benefit.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "qmazon",
+  "assignee": "qmazon",
+  "createdAt": "2026-10-05",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "10-05-harness-response-ownership"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

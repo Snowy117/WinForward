@@ -1,0 +1,116 @@
+# UDP association sharing: response ownership, routing granularity, and the cost model
+
+Child in flight: `10-05-harness-response-ownership`. Further children are listed under Task map.
+
+## Goal
+
+Decide, on measured evidence, how WinForward may share authenticated SOCKS5 UDP associations with a
+connection-oriented server, and land the policy that follows from that evidence.
+
+The current `auto` default assumes a NAT-like server: any flow may join any association, and the server
+routes and answers per datagram. Neither assumption holds for sing-box.
+
+- **Routing granularity.** One association carries exactly one route decision, taken from the first
+  datagram it ever carries, sniffing included; later datagrams are neither re-sniffed nor re-routed
+  (`sing` `protocol/socks/handshake.go` UDP ASSOCIATE branch, sing-box `route/route.go`
+  `routePacketConnection`). A DNS flow sharing an association with a non-DNS flow inherits that flow's
+  outbound and can be forwarded in cleartext to its hardcoded resolver — the reported field symptom,
+  including the `udp.association.recovered … flows=N` churn a hijack-owned association produces when a
+  sibling sends a non-DNS datagram.
+- **Response ownership.** The same server-side socket keeps one peer address, refreshed on every read,
+  and writes every reply to it (`sing` `common/bufio/bind.go:129-176`;
+  `protocol/socks/packet.go:92-100`). Measured against sing-box 1.14.1: two live flows per association →
+  45–50 % of replies reach the flow that asked; eight flows → 9 %; zero packet loss throughout.
+
+WinForward checks neither. `UdpProxySession.TryGetReceiveSource` (`:395-414`) decodes a reply's source
+and `InjectResponseAsync` (`:417-421`) uses it as the injected frame's source without ever comparing it
+to `Flow.Remote`, so a reply that the server delivered to the wrong flow is injected toward that wrong
+flow's client as a legitimate frame.
+
+The measured justification for sharing is real but differently sourced than assumed: first-response p50
+12.513 → 3.246 ms and churn bytes/session −42 % (`benchmarks/results/2026-09-28-udp-reuse/`) come from
+amortizing the control connect (2.46 ms) and ASSOCIATE (4.49 ms total) against a 13.1 µs relay socket —
+not from multiplexing flows onto one association. The harness that produced those numbers cannot see
+either defect (`UdpChurnScenario.cs:392-405` ignores the arriving flow;
+`LoopbackSocks5UdpServer.cs:306-342` reproduces the last-sender write path faithfully).
+
+## Requirements
+
+- R1 — Trustworthy measurement before any policy change. Everything below is priced against it.
+  Child: `10-05-harness-response-ownership`.
+- R2 — Reply-ownership observability in the product: a reply whose decoded source does not match the
+  flow's own destination is counted rather than silently injected as legitimate. Whether such a reply is
+  also dropped is a separate decision, because some protocols legitimately answer from a different
+  endpoint; the counter is not optional.
+- R3 — Take DNS off the SOCKS5 path (`L0`): port-53 flows are served by a local transport bound for the
+  local `dns-in` endpoint, with the flow's original destination spoofed as the reply source. The
+  rationale is stronger than when first proposed — hijacked DNS is the one flow class that is
+  latency-critical, semantics-critical, and exposed to misdelivery whenever it is not hijacked — and it
+  is a net performance win, since it replaces a 7 ms connect + ASSOCIATE per query with a loopback send.
+- R4 — A sharing policy that survives the evidence. Candidates to be chosen on R1's numbers:
+  destination-keyed placement (`L1`), an exclusive-lease warm pool, a per-server `routeScope`
+  declaration, or a more conservative default. Note that `L1` fixes routing inheritance but not reply
+  ownership, and that `L1`'s proposed QUIC clause is **rejected as specified**: it requires payload
+  inspection in a transport-layer component, cannot be made reliable across QUIC versions, and encodes a
+  server-side routing configuration into the client. That knowledge belongs in configuration
+  (`routeScope`) or is made unnecessary by structure (exclusive lease, `L2`).
+- R5 — Record the decision and the condition that would reopen it, including when `L2` (UoT v2 connect,
+  or VLESS + Mux.Cool + XUDP) becomes the right answer: it is the only shape that keeps both routing and
+  reply ownership correct while still sharing a control connection.
+
+## Task map
+
+| Task | Delivers | Status |
+| --- | --- | --- |
+| `10-05-harness-response-ownership` | R1: corrected ownership measurement, reusable columns, re-run baseline | planning |
+| (not yet created) reply-ownership observability | R2 | pending R1 |
+| (not yet created) local DNS transport | R3 | pending R1 |
+| (not yet created) sharing policy | R4, R5 | pending R1 |
+
+Parent/child here is not a dependency system: each child is independently verifiable, and where one must
+wait for another the ordering is written in the child's own PRD.
+
+## Constraints
+
+- WinForward targets Windows for capture, but the benchmark/stability harness is managed-only and must
+  keep running on Linux.
+- Every commit passes the repository quality gate: `dotnet format WinForward.slnx --severity info
+  --verify-no-changes --no-restore` (empty output), `dotnet build -c Release` (zero warnings),
+  `dotnet test -c Release` (green), and `jb inspectcode` with zero `<Issue>` entries.
+- Never commit or publish the user's real configuration: `__RUNTIME_*__` placeholder secrets, personal
+  domains, and LAN addresses must be redacted from any artifact.
+- The rejected `L1` QUIC clause must not be reintroduced as a "small addition" later; if payload
+  inspection is ever proposed again, it needs its own PRD and an explicit decision.
+
+## Acceptance criteria
+
+- [ ] Every policy choice in R4 is justified in this task's artifacts by a number produced under R1, not
+      by an assumed server model.
+- [ ] Each child task's acceptance criteria are verifiable on their own, and the child is archived only
+      with its evidence attached.
+- [ ] The sharing policy that ships states, in `README.md`, what a shared association does and does not
+      guarantee for a connection-oriented server.
+- [ ] Superseded numbers in `benchmarks/results/` are marked as superseded rather than silently replaced.
+- [ ] Final integration review: the shipped default, the documented guarantee, and the measured evidence
+      agree with each other.
+
+## Out of scope
+
+- Changes to sing-box or `sing`; this is a WinForward placement and transport decision triggered by an
+  interaction with a connection-oriented server.
+- Payload inspection for protocol classification (see R4).
+- Re-deriving the routing-granularity mechanism: it is established by the handoff and re-checked in the
+  parent Background above.
+
+## Notes
+
+- Evidence package for planning: `/tmp/findings-socks5-udp-response-ownership.md` plus the reproduction
+  scripts `/tmp/sbtest/exp2.py`…`exp7.py`. These live outside the repository; if they are needed for
+  implementation, they must be re-created under the child task's `research/` directory with the user's
+  real configuration absent.
+- The experiments ran on sing-box 1.14.1 (sing v0.9.4) while the user's box runs the testing channel
+  (sing v0.9.7-0.20260929150544). The SOCKS5 reply path is line-for-line unchanged between the two, but
+  the result has not been reproduced on the exact build in use — the child task should confirm it.
+- Related planning: `09-06-local-mux-transport` R4 asks how a pooled/mux transport slots into
+  `IUdpProxyTransportFactory` composition. R3's selector seam is the same decision point; whichever lands
+  first should own the seam so it is not designed twice.
