@@ -1,0 +1,8 @@
+{"file": ".trellis/tasks/10-05-remove-udp-association-sharing/prd.md", "reason": "The acceptance criteria every check finding must map back to."}
+{"file": ".trellis/tasks/10-05-remove-udp-association-sharing/design.md", "reason": "The design decisions a deviation must be measured against, including the observability disposition table."}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "Basis for judging whether the surviving relay contracts are intact and the removed ones are gone."}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "Basis for judging that a per-flow association's control connection and relay socket are released exactly once under teardown."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Basis for judging fail-closed behaviour and the removal diagnostics."}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Basis for judging that the datagram path kept its allocation and sync fast-path contracts."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "The gates the finished tree must pass, and the standard for accepting or suppressing analyzer findings."}
+{"file": "benchmarks/results/2026-10-05-local-target/README.md", "reason": "Basis for judging the surviving harness columns' comparability and the history annotation."}

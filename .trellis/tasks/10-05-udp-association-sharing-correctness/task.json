@@ -21,7 +21,8 @@
   "children": [
     "10-05-harness-response-ownership",
     "10-05-reply-ownership-observability",
-    "10-05-local-dns-transport"
+    "10-05-local-dns-transport",
+    "10-05-remove-udp-association-sharing"
   ],
   "parent": null,
   "relatedFiles": [],

@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "The relay/association contract this change rewrites: source validation, self-traffic registration, receive classification, and the pooling sections that go."}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "Ownership and disposal: a transport now owns a control connection, and the quiescence-scope rules govern how both are released with the flow."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Fail-closed semantics and the validation-diagnostic style the three removal diagnostics must follow."}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "The send/receive allocation contract the per-flow path must keep; the association setup is cold, the datagram path is not."}
+{"file": ".trellis/spec/backend/traffic-policy-lifecycle.md", "reason": "The alias table, reverse-leg classification, and expiry sweep that survive the deletion."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "The four gates and the suppression policy for anything the deletion surfaces."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Where the per-flow association type lives, and the file-deletion/size discipline."}
+{"file": ".trellis/tasks/10-05-remove-udp-association-sharing/design.md", "reason": "The design this implementation follows: target architecture, disposition table, harness and history treatment, rejected alternatives."}
+{"file": "benchmarks/results/2026-10-05-local-target/README.md", "reason": "The --reuse off column that already prices the post-deletion shape (48/48, 96/144/192 handshakes, ~91 KB/session)."}
+{"file": ".trellis/tasks/archive/2026-10/10-05-local-dns-transport/design.md", "reason": "R3's seam design: the composite factory, the transport-neutral contract, and the vocabulary the L2 readiness note builds on."}

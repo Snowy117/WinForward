@@ -1,6 +1,7 @@
 # UDP association sharing: response ownership, routing granularity, and the cost model
 
-Child in flight: `10-05-local-dns-transport` (R3). Further children are listed under Task map.
+Child in flight: `10-05-remove-udp-association-sharing` (R4, R5). Further children are listed under
+Task map.
 
 ## Goal
 
@@ -65,7 +66,7 @@ either defect (`UdpChurnScenario.cs:392-405` ignores the arriving flow;
 | `10-05-harness-response-ownership` | R1: corrected ownership measurement, reusable columns, re-run baseline | archived |
 | `10-05-reply-ownership-observability` | R2 | archived |
 | `10-05-local-dns-transport` | R3 | archived |
-| (not yet created) sharing policy | R4, R5 | pending R3 |
+| `10-05-remove-udp-association-sharing` | R4, R5 | in review |
 
 Parent/child here is not a dependency system: each child is independently verifiable, and where one must
 wait for another the ordering is written in the child's own PRD.
@@ -94,6 +95,44 @@ Two facts for R4's decision, neither of which chooses a policy here:
   population off the SOCKS5 path wherever it is configured, so R4 must price that remainder
   explicitly instead of inheriting the assumption that concurrent flows per association are free.
 
+## R4/R5 resolution (recorded 2026-10-05, child `10-05-remove-udp-association-sharing`)
+
+**Decision: remove UDP association sharing entirely.** A proxy-decided SOCKS5 UDP flow now owns its own
+authenticated association — its control connection, its `UDP ASSOCIATE`, its relay socket — and that
+association lives and dies with the flow. The three configuration keys, the pool / lease /
+control-association / capability machinery (1,161 lines), and the harness's `--reuse` knob are gone.
+The candidate list under R4 is therefore resolved by rejection rather than by selection:
+
+- **Destination-keyed placement (`L1`)** — rejected: it fixes routing inheritance but leaves reply
+  ownership ambiguous for two flows to one destination, which is precisely the case the R2 counter
+  cannot see.
+- **Exclusive-lease warm pool** — rejected: it removes concurrency but keeps a stale-reply window (a
+  late reply for a finished flow is written to whichever flow has since attached), and closing that
+  window needs the reply-drop decision this PRD defers.
+- **Per-server `routeScope` declaration** — rejected: with the DNS-shaped population served by local
+  targets (R3), the remaining population has no use for concurrent sharing, so the declaration would
+  buy a knob nothing needs.
+- **A more conservative default** — taken to its conclusion: the unsafe path is not reachable at all,
+  rather than reachable-behind-a-configuration-key.
+- **`L1`'s QUIC payload-inspection clause** — permanently rejected (payload inspection in a
+  transport-layer component; not reliable across QUIC versions; encodes server-side routing in the
+  client); it must not return as a "small addition".
+
+**Shipped guarantee** (README): one flow per association, so the reply-ownership ambiguity a shared
+association has cannot occur.
+
+**Reopen condition (R5):** if carrying many flows over one control connection becomes a real
+requirement — a resource need, not a latency one — it is met by an **L2 transport** (UoT v2 `CONNECT`,
+or VLESS + XUDP session ids over one muxed connection) plugged into the seam R3 built
+(`UdpTransportFactory` composite, transport-neutral `PeerEndpoint` / `UdpTransportDatagram`,
+`ProxyTarget` as the union a new kind joins). Association reuse does not return without its own PRD
+and new evidence.
+
+**Evidence:** `benchmarks/results/2026-10-05-no-association-sharing/` (the shipped series: 48/48 per
+churn wave with exactly one control connection and one ASSOCIATE reply per flow; the local column
+48/48 with zero handshakes), the annotated historical series, and the child's
+`research/decision-record.md` plus `research/l2-readiness.md` for the L2 work.
+
 ## Constraints
 
 - WinForward targets Windows for capture, but the benchmark/stability harness is managed-only and must
@@ -113,7 +152,9 @@ Two facts for R4's decision, neither of which chooses a policy here:
 - [ ] Each child task's acceptance criteria are verifiable on their own, and the child is archived only
       with its evidence attached.
 - [ ] The sharing policy that ships states, in `README.md`, what a shared association does and does not
-      guarantee for a connection-oriented server.
+      guarantee for a connection-oriented server. (Resolved in substance by the R4/R5 resolution: no
+      sharing ships, and the README states the guarantee of the shipped one-flow-per-association
+      architecture.)
 - [ ] Superseded numbers in `benchmarks/results/` are marked as superseded rather than silently replaced.
 - [ ] Final integration review: the shipped default, the documented guarantee, and the measured evidence
       agree with each other.
