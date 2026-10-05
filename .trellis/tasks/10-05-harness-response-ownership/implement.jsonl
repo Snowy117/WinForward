@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "The relay semantics and source-validation rules the harness reproduces; the ownership check must not contradict them."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "The lint/format/inspector gates and suppression policy the change must satisfy before commit."}
