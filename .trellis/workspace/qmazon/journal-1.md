@@ -1699,3 +1699,27 @@ The configuration's single rules array became two explicit policy domains - requ
 ### Status
 
 [OK] **Completed**
+
+
+## Session 50: Host flow creation logging: the deferred attribution pipeline now emits flow.created, so host flows stop vanishing from the log
+<!-- trellis-session: v=2 fp=c6fc3cc64bb9caae -->
+
+**Date**: 2026-10-05
+**Task**: Host flow creation logging: the deferred attribution pipeline now emits flow.created, so host flows stop vanishing from the log
+**Branch**: `master`
+
+### Summary
+
+With any process selector in host.rules, every host flow's flow-table entry is created by the deferred attribution pipeline instead of the inline dispatcher, and the pipeline emitted no flow.created event. The field capture that started this (987 lines, debug) showed 34 flow.created lines all with origin=forwarded, zero with origin=host, zero process=/processPath= lines anywhere, a highest flow generation of 665, and the operator's own 1.1.1.1:443 traffic reduced to four proxy-leg lines naming no owner and no rule; host flows that matched a pass rule or were blocked left nothing at all. IFlowAttributionHost gained LogFlowCreated(context, generation, decision), called from FlowAttributionPipeline.Deliver when FlowAttributionPendingIndex.Claim reports Claimed, and Claim now hands the created FlowState.Generation back through an out parameter (0 when nothing was claimed) - which also retired the second, state-mutating _index.Claim call the unreachable default arm used to make inside its interpolated throw. The inline payload construction and the former FlowFields(CapturedFlowPacket, int) collapsed into one LogFlowCreated body, so the event has a single emission point and both creation paths feed an identical ten-field payload; processPath keeps its IncludeProcessPathInLogs gate, which is derived from path-based host selectors. Four new facts pin the behavior: exactly one event per claimed host flow with the full field set (asserted silent before the claim and single across two drains), the processPath policy both revealed and withheld, the forwarded inline path unchanged, and a debug-disabled logger that records nothing while the flow is still claimed and executed. Review pass: the implementer's shared seven-field builder left the three trailing slots duplicated at both call sites - single-sourced at the front, copy-pasted at the back, which is precisely the drift class this task exists to remove - so the reviewer folded the whole payload into LogFlowCreated, deleted the builder, and re-validated. Verification: the check subagent built a scratch worktree (/tmp/wf-verify, the real tree never written to) and injected eight mutations - suppressed emission, doubled emission, decision-time emission before the claim, a 0-generation sentinel, a removed privacy gate, a swapped field, a removed inline emission - each failing exactly the intended fact, which is how the non-vacuity claims were established rather than asserted. It also found the one real gap: deleting the IsEnabled(Debug) early return kept all three original facts green, because every one of them used a default RecordingRuntimeLogger whose IsEnabled is always true, so requirement R6 and acceptance criterion AC4 were unpinned by any test; the fourth fact above closes it and was separately mutation-proven by the orchestrator (removing the gate fails it alone, with the file restored byte-identically under md5). Adjudicated clean in the same pass: generation 0 is unreachable for a claimed flow (++_nextGeneration starts at 1), Claimed-on-resolve cannot duplicate a line because TryResolve and TryClaimResolved share one gate and the only inline creator is gated out for exactly the flows the pipeline admits, AlreadyAttributed silence loses no line because the tuple owns one flow-table row, and the inline-emits-before / deferred-emits-after ordering asymmetry is documented in both README and logging-guidelines.md. Gates on the frozen tree: Release build 0 warnings, 1178 passed across 13 assemblies (baseline 1174 + 4), dotnet format exit 0 with empty output, jb inspectcode 0 issues (empty IssueTypes and Issues elements).
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ea6e520` | feat(runtime): emit flow.created for host flows the attribution pipeline claims |
+| `c61ce16` | docs(logging): record when a host flow's flow.created line is written |
+| `748e309` | chore(task): record the host flow creation logging (host-flow-created-logging) |
+
+### Status
+
+[OK] **Completed**
