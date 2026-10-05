@@ -1675,3 +1675,27 @@ Split tests/WinForward.Core.Tests (151 files, 1141 tests) into twelve layered te
 ### Status
 
 [OK] **Completed**
+
+
+## Session 49: Host/forwarded rule split: two explicit policy domains, positional rule eligibility, and two pre-existing defects surfaced
+<!-- trellis-session: v=2 fp=a77afcd792290b8d -->
+
+**Date**: 2026-10-05
+**Task**: Host/forwarded rule split: two explicit policy domains, positional rule eligibility, and two pre-existing defects surfaced
+**Branch**: `master`
+
+### Summary
+
+The configuration's single rules array became two explicit policy domains - required host and optional forwarded, each owning its own optional rules list and its own fallbackAction - so rule eligibility is positional instead of being derived from RuleMatcher.IsAdapterQualified, which is deleted. PolicySnapshot now holds HostRules/ForwardedRules with EvaluateHost/EvaluateForwarded and a per-domain fallback; process selectors are rejected inside forwarded.rules because a forwarded flow has no host process owner, which is also why RequiresProcessAttribution scans host rules only; CaptureAdapterScopeResolver unions both lists with domain-qualified diagnostics. ConfigurationModels.cs (375 effective lines against the 400 limit) gave up its rule-domain parser to a new ConfigurationRules.cs along the existing ConfigurationLimits seam (now 230 + 179). Two pre-existing defects surfaced and were fixed: ExampleConfigurationsAllValidate resolved examples/ with six '..' segments that landed outside the repo, so Directory.Exists was false and the test had silently validated nothing for its whole life - it now walks up to the directory holding WinForward.slnx and is fatal when no source tree encloses the host - and TcpFragmentHandlingTests' forwarded fixture relied on the retired implicit model. trellis-check (read-only) confirmed all nine acceptance criteria with file:line evidence plus independent dotnet fsi probes against the Release assemblies, token-diffed the extracted parsers as behavior-preserving, and caught one tautological test of ours: AdapterScopeWidensForAnUnconstrainedForwardedRule passed even with a completely empty policy, because the resolver widens an empty scope on its own - its fixture now pins the scope non-empty with an adapter-constrained host rule, and disabling the forwarded walk was shown to fail all four forwarded capture-scope tests. Gates on the frozen tree: Release build 0 warnings, 1174 passed across 13 assemblies (baseline 1161 + 13), dotnet format exit 0 empty, jb inspectcode 0 issues.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `46a167e` | feat(config)!: split the rules list into host and forwarded domains |
+| `92c03e6` | docs(config): document the host and forwarded policy domains |
+| `b177533` | chore(task): record the host/forwarded rule split (host-forwarded-rule-split) |
+
+### Status
+
+[OK] **Completed**
