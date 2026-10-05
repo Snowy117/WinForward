@@ -22,6 +22,9 @@ public sealed class RuntimeCounters
     /// <summary>A UDP response was dropped fail-closed (unresolvable origin/host target); see <c>udp.reinject.drop</c>.</summary>
     public const string UdpFailClosedDrop = "udpFailClosedDrop";
 
+    /// <summary>A UDP relay response declared a source other than the flow's own destination; observes cross-destination misdelivery only — see <c>udp.response.foreign_source</c>.</summary>
+    public const string UdpResponseSourceMismatch = "udpResponseSourceMismatch";
+
     /// <summary>A flow was blocked because the flow table is at capacity; see <c>flow.capacity-block</c>.</summary>
     public const string FlowCapacityBlock = "flowCapacityBlock";
 

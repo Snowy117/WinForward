@@ -80,6 +80,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
     private long _lastActivityBucket;
     private long _lastActivityPropagationBucket = NeverPropagated;
     private long _lastSkipSummaryTicks;
+    private long _lastForeignSourceLogTicks;
     private long _lastInjectionFailureLogTicks;
     private long _skippedUnexpectedSource;
     private long _skippedOversized;
@@ -391,6 +392,13 @@ internal sealed class UdpProxySession : IAsyncDisposable
     /// rebuild the frame from (S6a) and is counted with the other skip-class anomalies, and only a
     /// response with a decodable source yields its endpoint. Both skips are counted here; only
     /// socket-level failures tear the session down.
+    /// <para>
+    /// A decodable source that differs from <see cref="Flow"/>'s own destination is recorded by
+    /// <see cref="RecordForeignSource"/> and then returned unchanged, so the observation never
+    /// reaches the returned endpoint, the reply's delivery, or the session's lifetime. The comparison
+    /// ignores the IPv6 scope: the decoded source carries the relay socket's scope and the flow's
+    /// destination the captured one, so the two legitimately differ for one link-local peer.
+    /// </para>
     /// </summary>
     private bool TryGetReceiveSource(Socks5UdpReceiveResult receive, out Endpoint source)
     {
@@ -410,6 +418,11 @@ internal sealed class UdpProxySession : IAsyncDisposable
         }
 
         source = Endpoint.From(address, response.DestinationPort);
+        if (!source.MatchesPeerIgnoringScope(Flow.Remote))
+        {
+            RecordForeignSource(source);
+        }
+
         return true;
     }
 
@@ -467,6 +480,33 @@ internal sealed class UdpProxySession : IAsyncDisposable
     {
         Interlocked.Increment(ref _skippedDomainDestination);
         MaybeLogSkipSummary();
+    }
+
+    /// <summary>
+    /// Records one relay response whose declared source is not this flow's own destination: the counter
+    /// is unconditional, the warn is throttled, and nothing about the reply's disposition changes (a
+    /// mismatch is not proof of an invalid reply). Same-destination misdelivery is invisible to the
+    /// comparison — see <see cref="RuntimeCounters.UdpResponseSourceMismatch"/>.
+    /// </summary>
+    private void RecordForeignSource(Endpoint source)
+    {
+        _ = RuntimeCounters.Shared.Increment(RuntimeCounters.UdpResponseSourceMismatch);
+        MaybeLogForeignSource(source);
+    }
+
+    /// <summary>The rate-limited warn half of <see cref="RecordForeignSource"/>, CAS-on-ticks like <see cref="MaybeLogSkipSummary"/>; the counter it reports is a lifetime total this path never drains.</summary>
+    private void MaybeLogForeignSource(Endpoint source)
+    {
+        if (!_logger.IsEnabled(RuntimeLogLevel.Warn)) return;
+        var now = _timeProvider.GetUtcNow().UtcTicks;
+        var last = Interlocked.Read(ref _lastForeignSourceLogTicks);
+        if (now - last < s_rateLimitedLogInterval.Ticks) return;
+        if (Interlocked.CompareExchange(ref _lastForeignSourceLogTicks, now, last) != last) return;
+        _logger.Event(RuntimeLogLevel.Warn, "udp.response.foreign_source",
+            new("destination", Flow.Remote),
+            new("source", source),
+            new("origin", Flow.Origin),
+            new("udpAssociation", Association.Generation));
     }
 
     private void MaybeLogSkipSummary()

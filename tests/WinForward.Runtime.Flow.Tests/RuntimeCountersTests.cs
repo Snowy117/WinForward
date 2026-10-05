@@ -76,6 +76,7 @@ public sealed class RuntimeCountersTests
         Assert.Equal("relaySetupFailed", RuntimeCounters.RelaySetupFailed);
         Assert.Equal("udpOriginUnresolved", RuntimeCounters.UdpOriginUnresolved);
         Assert.Equal("udpFailClosedDrop", RuntimeCounters.UdpFailClosedDrop);
+        Assert.Equal("udpResponseSourceMismatch", RuntimeCounters.UdpResponseSourceMismatch);
         Assert.Equal("flowCapacityBlock", RuntimeCounters.FlowCapacityBlock);
         Assert.Equal("attributionMiss", RuntimeCounters.AttributionMiss);
         Assert.Equal("passReinjectFailed", RuntimeCounters.PassReinjectFailed);

@@ -186,6 +186,17 @@ caps, the same 100 new flows/s load holds ≈1.06 descriptors per live session a
 per session (≈282 shared control connections for ≈4,500 live flows), with the soak's retention and
 pooling verdict halves both recorded as held.
 
+**Reply ownership.** Sharing an association also shares its reply path: the server answers on the last
+peer address it saw, so a reply can arrive on a flow other than the one that asked. WinForward counts
+every relay response whose declared source is not the receiving flow's own destination
+(`udpResponseSourceMismatch`; the rate-limited `udp.response.foreign_source` warn carries both addresses,
+the origin kind, and the association generation) and still delivers it, because RFC 1928 does not pin the
+reply source and some protocols legitimately continue from a new endpoint. The comparison is by
+destination address (the IPv6 scope is ignored: it belongs to the receiving interface, not to the peer),
+so it observes **cross-destination** misdelivery only: two flows to the same destination are
+indistinguishable by address, and their misdelivered replies are invisible to it. **A zero count
+therefore does not prove that association sharing is safe for your traffic.**
+
 The configuration is validated fully before interception starts and is kept immutable for the
 lifetime of a run. Configuration hot reload is not supported.
 
@@ -205,6 +216,7 @@ The operationally relevant ones:
 | `tcp.redirect.unrelatedPeer` | warn | The redirect listener accepted a peer that does not match the expected client tuple. |
 | `udp.reinject.unresolved` | warn | A host UDP response could not resolve its origin adapter and fell back to the host target (rate-limited, counted). |
 | `udp.reinject.drop` | warn | A UDP response was dropped fail-closed (unresolvable origin or missing client MAC; rate-limited, counted). |
+| `udp.response.foreign_source` | warn | A relay response declared a source other than the receiving flow's own destination — a reply the server delivered to a different flow. It is still injected with that declared source (a mismatch is not proof of an invalid reply); counted per reply as `udpResponseSourceMismatch`, rate-limited to one line per 5 s window **per session**. A sustained flood of these lines means the server is delivering another flow's replies to the named flows of one association at a steady rate; the counter, not the line count, is the measurement, and the `udpAssociation` field groups the affected flows. |
 | `udp.targets.noMac` | warn | The capture scope contains adapters without a usable MAC (forwarded responses to them drop fail-closed); emitted on first occurrence and when the affected adapter set changes, not on every adapter refresh. |
 | `udp.session.capacity-block` | warn | A UDP datagram was refused fail-closed because the session budget is full and its flow has no slot (rate-limited, counted as `udpCapacityRejections`); the flow retries on its next datagram. |
 | `udp.association.fallback` | warn | Passive sampling detected a SOCKS5 server that pins one client source port per association, so that server is served by per-flow associations for the rest of the run. Emitted once per server per run (counted as `udpAssociationFallbacks`). |
