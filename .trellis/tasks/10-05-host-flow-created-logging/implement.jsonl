@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Layer entry point: which backend guideline applies to the runtime logging change"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Event shape, level thresholds, IsEnabled-before-fields rule, and the process-path privacy contract the new flow.created line must satisfy"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Zero-allocation discipline for the capture-pump path the new hook is called near"}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "Quiescence-scope and delivery contract of the deferred attribution pipeline where the log call is inserted"}
+{"file": ".trellis/spec/backend/traffic-policy-lifecycle.md", "reason": "Host vs forwarded domain semantics and the attribution rules that decide which path creates a flow"}

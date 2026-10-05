@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "The two commit gates, suppression policy, and the audit method the verifier must reproduce"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Verify the emitted event matches the documented line shape, level, and privacy split"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Verify no allocation or extra work landed on the warm/pump path when debug is disabled"}
+{"file": ".trellis/spec/backend/traffic-policy-lifecycle.md", "reason": "Verify host/forwarded behavior and the attribution lifecycle are unchanged apart from the new line"}
