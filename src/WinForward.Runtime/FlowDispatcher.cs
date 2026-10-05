@@ -264,14 +264,7 @@ public sealed class FlowDispatcher : IFlowAttributionHost
 
         packet = packet with { Context = context, FlowGeneration = claimed.Generation };
         if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.flowResolved", packet, new RuntimeLogField("existing", Value: false));
-        if (_logger.IsEnabled(RuntimeLogLevel.Debug))
-        {
-            var fields = FlowFields(packet, 3);
-            fields[^3] = new("action", claimed.Decision.Action);
-            fields[^2] = new("rule", claimed.Decision.RuleIndex);
-            fields[^1] = new("proxy", claimed.Decision.ProxyServerName);
-            _logger.Event(RuntimeLogLevel.Debug, "flow.created", fields);
-        }
+        LogFlowCreated(packet.Context, packet.FlowGeneration, claimed.Decision);
         await ExecuteDecisionAsync(packet, claimed.Decision, cancellationToken).ConfigureAwait(false);
     }
 
@@ -386,6 +379,9 @@ public sealed class FlowDispatcher : IFlowAttributionHost
 
     void IFlowAttributionHost.LogCapacityBlock(FlowContext context) => LogCapacityBlock(context);
 
+    void IFlowAttributionHost.LogFlowCreated(FlowContext context, long generation, FlowDecision decision) =>
+        LogFlowCreated(context, generation, decision);
+
     /// <summary>
     /// The capacity-gate block warn (<c>flow.capacity-block</c>): the flow table is full, so a new
     /// flow is blocked fail-closed; the trace-only record does not surface sustained capacity
@@ -404,6 +400,23 @@ public sealed class FlowDispatcher : IFlowAttributionHost
             new("destination", context.Key.Remote),
             new("tableSize", _flows.Count),
             new("capacity", _flows.Capacity));
+    }
+
+    private void LogFlowCreated(FlowContext context, long generation, FlowDecision decision)
+    {
+        if (!_logger.IsEnabled(RuntimeLogLevel.Debug)) return;
+        var fields = new RuntimeLogField[10];
+        fields[0] = new("flow", generation == 0 ? null : generation);
+        fields[1] = new("protocol", context.Key.Protocol);
+        fields[2] = new("origin", context.Key.Origin);
+        fields[3] = new("source", context.Key.Local);
+        fields[4] = new("destination", context.Key.Remote);
+        fields[5] = new("process", context.ProcessName);
+        fields[6] = new("processPath", _includeProcessPathInLogs ? context.ProcessPath : null);
+        fields[7] = new("action", decision.Action);
+        fields[8] = new("rule", decision.RuleIndex);
+        fields[9] = new("proxy", decision.ProxyServerName);
+        _logger.Event(RuntimeLogLevel.Debug, "flow.created", fields);
     }
 
     /// <summary>
@@ -529,18 +542,5 @@ public sealed class FlowDispatcher : IFlowAttributionHost
         allFields[fields.Length + 6] = new("process", packet.Context.ProcessName);
         allFields[fields.Length + 7] = new("processPath", _includeProcessPathInLogs ? packet.Context.ProcessPath : null);
         _logger.Event(level, eventName, allFields);
-    }
-
-    private RuntimeLogField[] FlowFields(CapturedFlowPacket packet, int additionalFields)
-    {
-        var fields = new RuntimeLogField[7 + additionalFields];
-        fields[0] = new("flow", packet.FlowGeneration == 0 ? null : packet.FlowGeneration);
-        fields[1] = new("protocol", packet.Context.Key.Protocol);
-        fields[2] = new("origin", packet.Context.Key.Origin);
-        fields[3] = new("source", packet.Context.Key.Local);
-        fields[4] = new("destination", packet.Context.Key.Remote);
-        fields[5] = new("process", packet.Context.ProcessName);
-        fields[6] = new("processPath", _includeProcessPathInLogs ? packet.Context.ProcessPath : null);
-        return fields;
     }
 }

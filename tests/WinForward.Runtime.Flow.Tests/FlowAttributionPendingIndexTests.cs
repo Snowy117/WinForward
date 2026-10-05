@@ -115,7 +115,7 @@ public sealed class FlowAttributionPendingIndexTests
         Assert.Equal(AttributionAdmission.Deferred, blocked.Admit(Packet(53092, 1), s_start, out _, out _));
         var blockedEntry = blocked.EntryForDiagnostics(Key(53092)) ?? throw new InvalidOperationException("no entry");
         blocked.MarkDecided(blockedEntry, blockedEntry.Context, new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null));
-        Assert.Equal(AttributionClaim.CapacityBlocked, blocked.Claim(blockedEntry));
+        Assert.Equal(AttributionClaim.CapacityBlocked, blocked.Claim(blockedEntry, out _));
         Assert.Equal(FrameLength, blocked.ChargedBytes);
         Assert.Equal(1, blocked.ActiveCount);
         Assert.Equal(1, blocked.TakeAll(blockedEntry, batch, out _));
@@ -133,9 +133,9 @@ public sealed class FlowAttributionPendingIndexTests
         reAdmitted.MarkDecided(first, first.Context, new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null));
         reAdmitted.MarkDecided(second, second.Context, new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null));
 
-        Assert.Equal(AttributionClaim.Claimed, reAdmitted.Claim(first));
+        Assert.Equal(AttributionClaim.Claimed, reAdmitted.Claim(first, out _));
         Assert.Equal(FrameLength, reAdmitted.ChargedBytes);
-        Assert.Equal(AttributionClaim.AlreadyAttributed, reAdmitted.Claim(second));
+        Assert.Equal(AttributionClaim.AlreadyAttributed, reAdmitted.Claim(second, out _));
         Assert.Equal(0, reAdmitted.ChargedBytes);
     }
 
@@ -201,7 +201,7 @@ public sealed class FlowAttributionPendingIndexTests
         // A worker that finished after the reclaim still calls MarkDecided and the pump still
         // claims: the entry is simply no longer in the map, so nothing is credited twice.
         index.MarkDecided(entry, entry.Context, new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null));
-        Assert.Equal(AttributionClaim.Claimed, index.Claim(entry));
+        Assert.Equal(AttributionClaim.Claimed, index.Claim(entry, out _));
         Assert.Equal(0, index.ChargedBytes);
         FlowAttributionPendingIndex.DisposeReclaimed(reclaimed[0]);
     }
@@ -309,7 +309,7 @@ public sealed class FlowAttributionPendingIndexTests
     private static AttributionClaim Claim(FlowAttributionPendingIndex index, PendingFlowAttribution entry)
     {
         if (entry.Decision is null) index.MarkDecided(entry, entry.Context, new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null));
-        return index.Claim(entry);
+        return index.Claim(entry, out _);
     }
 
     private static CapturedFlowPacket Packet(ushort localPort, byte marker, int length = FrameLength)

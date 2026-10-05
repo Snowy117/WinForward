@@ -444,9 +444,10 @@ internal sealed class FlowAttributionPendingIndex
     /// <summary>
     /// The delivery's final step: claims the flow for the entry's decision in the same critical
     /// section that removes the entry, so no packet can be appended after the claim and no packet
-    /// can bypass the ring and be followed by an older one.
+    /// can bypass the ring and be followed by an older one. <paramref name="generation"/> is the
+    /// claimed flow's generation, or 0 when no flow was claimed.
     /// </summary>
-    public AttributionClaim Claim(PendingFlowAttribution entry)
+    public AttributionClaim Claim(PendingFlowAttribution entry, out long generation)
     {
         lock (_gate)
         {
@@ -455,18 +456,21 @@ internal sealed class FlowAttributionPendingIndex
             // attribution was redundant. The observable outcome is unchanged either way.
             if (_flows.TryResolve(entry.Key, out var existing) && existing is not null)
             {
+                generation = 0;
                 _ = Interlocked.Increment(ref _reAdmissionCount);
                 RuntimeCounters.Shared.Increment(RuntimeCounters.AttributionReAdmission);
                 RemoveUnderGate(entry);
                 return AttributionClaim.AlreadyAttributed;
             }
 
-            if (entry.Decision is { } decision && _flows.TryClaimResolved(entry.Key, decision, out _))
+            if (entry.Decision is { } decision && _flows.TryClaimResolved(entry.Key, decision, out var claimed))
             {
+                generation = claimed?.Generation ?? 0;
                 RemoveUnderGate(entry);
                 return AttributionClaim.Claimed;
             }
 
+            generation = 0;
             entry.ClaimFailed = true;
             _ = Interlocked.Increment(ref _claimFailedCount);
             RuntimeCounters.Shared.Increment(RuntimeCounters.AttributionClaimFailed);

@@ -26,6 +26,9 @@ internal interface IFlowAttributionHost
 
     /// <summary>The dispatcher's capacity-block counter plus its rate-limited warn.</summary>
     void LogCapacityBlock(FlowContext context);
+
+    /// <summary>The dispatcher's debug <c>flow.created</c> line for a flow the pipeline just created.</summary>
+    void LogFlowCreated(FlowContext context, long generation, FlowDecision decision);
 }
 
 /// <summary>
@@ -266,16 +269,20 @@ internal sealed class FlowAttributionPipeline : IAsyncDisposable
             }
         }
 
-        switch (_index.Claim(entry))
+        var claim = _index.Claim(entry, out var generation);
+        switch (claim)
         {
+            case AttributionClaim.Claimed:
+                if (entry.Decision is { } decision) _host.LogFlowCreated(entry.Context, generation, decision);
+                break;
+            case AttributionClaim.AlreadyAttributed:
+                break;
             case AttributionClaim.CapacityBlocked:
                 RuntimeCounters.Shared.Increment(RuntimeCounters.FlowCapacityBlock);
                 _host.LogCapacityBlock(entry.Context);
                 break;
-            case AttributionClaim.Claimed or AttributionClaim.AlreadyAttributed:
-                break;
             default:
-                throw new InvalidOperationException($"Unhandled attribution claim '{_index.Claim(entry)}'.");
+                throw new InvalidOperationException($"Unhandled attribution claim '{claim}'.");
         }
     }
 
