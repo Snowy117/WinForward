@@ -1723,3 +1723,27 @@ With any process selector in host.rules, every host flow's flow-table entry is c
 ### Status
 
 [OK] **Completed**
+
+
+## Session 51: UDP shared-association reply ownership: measured, harness corrected, baseline published
+<!-- trellis-session: v=2 fp=8b0917ce703fd199 -->
+
+**Date**: 2026-10-05
+**Task**: UDP shared-association reply ownership: measured, harness corrected, baseline published
+**Branch**: `master`
+
+### Summary
+
+Quantified the reply-ownership defect in shared SOCKS5 UDP associations against sing-box 1.14.1 (2 live flows per association: 45-50% of replies reach the flow that asked; 16 flows: 6-8%; zero packet loss throughout) and reproduced it in-repo on the pre-change binary (7.9% own, 92.1% foreign, while the row reported firstResponses 48/48 and establishmentLossRate 0). Fixed the harness blind spot in the three per-flow response sinks, added --reuse off|always|auto and own/misdelivered/noResponse row accounting, published benchmarks/results/2026-10-05-udp-reuse-ownership/ and marked the superseded columns in 2026-09-28-udp-reuse. Also recorded that udpAssociationFlowsPerAssociation: 1 is already an exclusive-lease pool at the current release, so the defect has a zero-code configuration mitigation.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `42c2af1` | test(bench): per-flow reply-ownership check, --reuse columns and the corrected UDP baseline (harness-response-ownership) |
+| `2a14b40` | chore(task): record the UDP association sharing review (udp-association-sharing-correctness) |
+| `d5c9cf0` | chore(task): record the harness reply-ownership work (harness-response-ownership) |
+
+### Status
+
+[OK] **Completed**
