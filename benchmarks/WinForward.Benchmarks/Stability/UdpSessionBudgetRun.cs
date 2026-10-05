@@ -83,7 +83,7 @@ internal sealed class UdpSessionBudgetRun(
         {
             TickActivityClock();
             DatagramHeader.Write(payload, flow + 1, flow);
-            _ = await coordinator.TrySendSpanAsync(flowKeys[flow], socksServer, payload, default, CancellationToken.None).ConfigureAwait(false);
+            _ = await coordinator.TrySendSpanAsync(flowKeys[flow], ProxyTarget.FromServer(socksServer), payload, default, CancellationToken.None).ConfigureAwait(false);
         }
 
         var watch = Stopwatch.StartNew();
@@ -149,7 +149,7 @@ internal sealed class UdpSessionBudgetRun(
             var flowId = warmupFlows + flow;
             DatagramHeader.Write(payload, flow + 1, flowId);
             _issueTicks[flow] = Stopwatch.GetTimestamp();
-            if (await coordinator.TrySendSpanAsync(flowKeys[flowId], socksServer, payload, default, CancellationToken.None).ConfigureAwait(false))
+            if (await coordinator.TrySendSpanAsync(flowKeys[flowId], ProxyTarget.FromServer(socksServer), payload, default, CancellationToken.None).ConfigureAwait(false))
             {
                 _accepted++;
             }

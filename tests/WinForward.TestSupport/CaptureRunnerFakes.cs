@@ -133,14 +133,14 @@ internal static class CaptureRunnerFakes
 
     /// <summary>A policy whose process rule constrains nothing, so capture scope widens to every adapter.</summary>
     public static PolicySnapshot UnconstrainedPolicy() => new(
-        [new PolicyRule(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "browser.exe" }), new FlowDecision(FlowAction.Block, 0, ProxyServerName: null))],
+        [new PolicyRule(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "browser.exe" }), new FlowDecision(FlowAction.Block, 0, TargetName: null))],
         FlowAction.Pass);
 
     /// <summary>A policy with one adapter-constrained rule per selector, so scope follows the selectors.</summary>
     public static PolicySnapshot AdapterConstrainedPolicy(params string[] stableIds) => new(
         [.. stableIds.Select((id, index) => new PolicyRule(
             new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { id }),
-            new FlowDecision(FlowAction.Pass, index, ProxyServerName: null)))],
+            new FlowDecision(FlowAction.Pass, index, TargetName: null)))],
         FlowAction.Pass);
 }
 

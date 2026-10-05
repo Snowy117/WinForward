@@ -60,7 +60,7 @@ attribution, socket setup, logging, tests) are exempt.
    the warm shape at 160 B — handler-less benchmarks alone proved nothing while X1 made
    the warm entry dead code in production. Proxy is the product's
    main path (task 08-29-socks5-perf-fullpath C2b), so a resolved proxy decision whose
-   `ProxyServerName` hits `_servers` stays on the warm entry — measured 352 B → 160 B and
+   `TargetName` hits `_servers` stays on the warm entry — measured 352 B → 160 B and
    596 ns → 258 ns per packet; an unresolved server name (fail-closed via slow path) and the
    UDP reverse-of-stored special case keep their slow-path behavior. `FlowAction` has exactly
    the values {Proxy, Pass, Block}, so no defensive "unknown action" gate is needed after the
@@ -339,8 +339,10 @@ branch, and any allocation-gate test that protects a span-vs-memory overload cho
 
 - `UdpProxyCoordinator.TrySendSpanAsync` is the **only** (and **non-async**) warm send entry
   (task 09-19-compat-api-cleanup removed the memory `TrySendAsync`); the cold new-flow work is
-  delegated to `ScheduleSessionSetup(FlowKey, Socks5Server, long, byte[]?, UdpSessionSlot)`
-  (`UdpProxyCoordinator.Send.cs`), which is the only place a `Task.Run(() => ...)` lambda lives.
+  delegated to `ScheduleSessionSetup(FlowKey, ProxyTarget, long, MacAddress, UdpSessionSlot)`
+  (`UdpProxyCoordinator.cs`), which rents a pooled setup work item and enqueues it on the shared
+  `SetupExecutor` — the cold scheduling path is kept out of the warm entries so no setup bookkeeping
+  is charged to an ordinary datagram.
 - `UdpProxyCoordinator` is a `partial class` split into `UdpProxyCoordinator.cs` (admission /
   lifecycle) and `UdpProxyCoordinator.Send.cs` (the span send bridge), keeping each file
   ≤400 effective lines.
@@ -466,10 +468,29 @@ public ValueTask<bool> TrySendSpanAsync(...)
     ...
 }
 
-// Correct: the lambda lives only in a cold helper; the warm entry contains no lambda,
-// so no display class is hoisted and the warm path measures 0 B.
-private void ScheduleSessionSetup(FlowKey flow, Socks5Server server, long flowGeneration, byte[]? capturedClientMac, UdpSessionSlot slot)
-    => slot.Completion = Task.Run(() => _setup.CreateSessionAsync(flow, server, flowGeneration, capturedClientMac, _shutdown.Token, slot));
+// Correct: the cold helper contains no capturing lambda at all — the work item is rented from
+// the shared pool, its fields filled, and enqueued, so no display class is hoisted and the warm
+// path measures 0 B.
+private bool ScheduleSessionSetup(FlowKey flow, ProxyTarget target, long flowGeneration, MacAddress capturedClientMac, UdpSessionSlot slot)
+{
+    var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var item = _setupExecutor.RentItem(_setupHandler);
+    item._completion = completion;
+    item._flow = flow;
+    item._udp._target = target;
+    item._udp._flowGeneration = flowGeneration;
+    item._udp._clientMac = capturedClientMac;
+    item._udp._slot = slot;
+    item._cancellationToken = _scope.Token;
+    if (!_setupExecutor.TryEnqueue(item))
+    {
+        completion.TrySetCanceled(item._cancellationToken);
+        return false;
+    }
+
+    slot.Completion = completion.Task;
+    return true;
+}
 ```
 
 ```csharp

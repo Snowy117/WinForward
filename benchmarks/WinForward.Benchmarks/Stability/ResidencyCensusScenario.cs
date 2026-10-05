@@ -7,7 +7,6 @@ using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
 using WinForward.Runtime;
-using WinForward.Runtime.Socks5;
 using WinForward.Runtime.TcpRedirect;
 using WinForward.Runtime.UdpProxy;
 
@@ -397,7 +396,7 @@ internal static class ResidencyCensusScenario
                 foreach (var key in _keys)
                 {
                     // A false return is the setup-failure cooldown; the next round re-offers the flow.
-                    _ = await _coordinator.TrySendSpanAsync(key, server, s_udpPopulatePayload, default, CancellationToken.None).ConfigureAwait(false);
+                    _ = await _coordinator.TrySendSpanAsync(key, ProxyTarget.FromServer(server), s_udpPopulatePayload, default, CancellationToken.None).ConfigureAwait(false);
                 }
 
                 if (_factory.Created >= Sessions) return;
@@ -422,9 +421,9 @@ internal static class ResidencyCensusScenario
 
         public int Created => Volatile.Read(ref _created);
 
-        public async ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
+        public async ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken)
         {
-            var transport = await inner.CreateAsync(server, cancellationToken).ConfigureAwait(false);
+            var transport = await inner.CreateAsync(target, cancellationToken).ConfigureAwait(false);
             Interlocked.Increment(ref _created);
             return transport;
         }

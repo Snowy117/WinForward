@@ -28,7 +28,7 @@ public sealed class UdpWarmPathGateTests
         time.ThrowOnRead = true;
         var readsAtStart = time.Reads;
 
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [2], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [2], default, CancellationToken.None));
 
         Assert.Equal(entriesAtStart, coordinator.GateEntryCountForDiagnostics);
         Assert.Equal(readsAtStart, time.Reads);
@@ -50,7 +50,7 @@ public sealed class UdpWarmPathGateTests
         var entriesAtStart = session.ActivityGateEntryCountForDiagnostics;
         for (var index = 0; index < 32; index++)
         {
-            Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [(byte)index], default, CancellationToken.None));
+            Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [(byte)index], default, CancellationToken.None));
         }
 
         Assert.Equal(entriesAtStart, session.ActivityGateEntryCountForDiagnostics);
@@ -91,7 +91,7 @@ public sealed class UdpWarmPathGateTests
                 var sent = false;
                 sender = new Thread(() =>
                 {
-                    var pending = coordinator.TrySendSpanAsync(flow, s_server, [9], default, CancellationToken.None);
+                    var pending = coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [9], default, CancellationToken.None);
                     if (pending.IsCompletedSuccessfully) sent = pending.Result;
                 })
                 {
@@ -158,7 +158,7 @@ public sealed class UdpWarmPathGateTests
             var sent = false;
             sender = new Thread(() =>
             {
-                var pending = coordinator.TrySendSpanAsync(flow, s_server, [7], default, CancellationToken.None);
+                var pending = coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [7], default, CancellationToken.None);
                 if (pending.IsCompletedSuccessfully) sent = pending.Result;
             })
             {
@@ -195,7 +195,7 @@ public sealed class UdpWarmPathGateTests
         Assert.Equal(1, await coordinator.RemoveExpiredAsync(DateTimeOffset.UtcNow.AddMinutes(5), TimeSpan.FromMinutes(1)));
         Assert.Equal(0, coordinator.SessionCount);
 
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [2], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [2], default, CancellationToken.None));
         await WaitForAsync(() => factory.Transports.Count == 2);
         Assert.Equal(2, factory.Transports.Count);
     }
@@ -213,7 +213,7 @@ public sealed class UdpWarmPathGateTests
         var secondTransport = factory.Transports[1];
         Assert.Equal(2, coordinator.SessionCount);
 
-        Assert.True(await coordinator.TrySendSpanAsync(first, s_server, [3], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(first, ProxyTarget.FromServer(s_server), [3], default, CancellationToken.None));
 
         Assert.Equal(2, SentOn(firstTransport));
         Assert.Equal(1, SentOn(secondTransport));
@@ -235,7 +235,7 @@ public sealed class UdpWarmPathGateTests
 
         time.Advance(TimeSpan.FromMinutes(2));
         coordinator.ActivityClock.Tick();
-        Assert.True(await coordinator.TrySendSpanAsync(second, s_server, [3], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(second, ProxyTarget.FromServer(s_server), [3], default, CancellationToken.None));
         Assert.Equal(1, await coordinator.RemoveExpiredAsync(time.GetUtcNow(), TimeSpan.FromMinutes(1)));
 
         Assert.Equal(1, coordinator.SessionCount);
@@ -272,7 +272,7 @@ public sealed class UdpWarmPathGateTests
 
     private static async Task EstablishReadySessionAsync(UdpProxyCoordinator coordinator, FlowKey flow)
     {
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [1], default, CancellationToken.None));
         await WaitForAsync(() => coordinator.SessionReadyForDiagnostics(flow));
     }
 }

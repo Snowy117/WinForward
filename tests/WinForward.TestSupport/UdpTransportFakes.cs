@@ -3,8 +3,6 @@ using System.Net.Sockets;
 using System.Threading.Channels;
 using WinForward.Configuration;
 using WinForward.Core;
-using WinForward.Protocols;
-using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
 
 namespace WinForward.TestSupport;
@@ -21,7 +19,7 @@ internal sealed class FakeTransportFactory(AddressFamily addressFamily = Address
 
     public int CreateCalls => Volatile.Read(ref _createCalls);
 
-    public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
+    public ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken)
     {
         // Each transport models a distinct bound UDP socket, so its local port is unique; the
         // relay alias collision guard in UdpProxyCoordinator must not reject distinct flows.
@@ -38,14 +36,14 @@ internal sealed class FakeTransport : IUdpProxyTransport
     {
         var loopback = addressFamily == AddressFamily.InterNetwork ? IPAddress.Loopback : IPAddress.IPv6Loopback;
         LocalEndpoint = new IPEndPoint(loopback, localPort);
-        RelayEndpoint = new IPEndPoint(loopback, 50000);
+        PeerEndpoint = new IPEndPoint(loopback, 50000);
     }
 
-    public IPEndPoint RelayEndpoint { get; }
+    public IPEndPoint PeerEndpoint { get; }
     public IPEndPoint LocalEndpoint { get; }
     public bool IsDisposed { get; private set; }
     public List<(Endpoint Destination, byte[] Payload)> Sent { get; } = [];
-    public Channel<Socks5UdpReceiveResult> Received { get; } = Channel.CreateUnbounded<Socks5UdpReceiveResult>();
+    public Channel<UdpTransportReceiveResult> Received { get; } = Channel.CreateUnbounded<UdpTransportReceiveResult>();
 
     /// <summary>
     /// Opt-in hold for <see cref="SendSpanAsync"/>: when set, the send completes only once the test
@@ -70,10 +68,10 @@ internal sealed class FakeTransport : IUdpProxyTransport
     public Exception? SendFault { get; init; }
 
     /// <summary>Queues a valid decoded relay datagram for the session's receive loop.</summary>
-    public void EnqueueResponse(Socks5UdpDatagram datagram) => Received.Writer.TryWrite(Socks5UdpReceiveResult.Received(datagram));
+    public void EnqueueResponse(UdpTransportDatagram datagram) => Received.Writer.TryWrite(UdpTransportReceiveResult.Received(datagram));
 
     /// <summary>Queues a per-datagram anomaly the real transport would surface as a skip result.</summary>
-    public void EnqueueSkip(Socks5UdpReceiveSkipReason reason) => Received.Writer.TryWrite(Socks5UdpReceiveResult.Skipped(reason));
+    public void EnqueueSkip(UdpTransportSkipReason reason) => Received.Writer.TryWrite(UdpTransportReceiveResult.Skipped(reason));
 
     public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken)
     {
@@ -82,7 +80,7 @@ internal sealed class FakeTransport : IUdpProxyTransport
         return SendGate is not null ? new ValueTask(SendGate.Task) : ValueTask.CompletedTask;
     }
 
-    public ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+    public ValueTask<UdpTransportReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
     {
         // A disposed transport models a closed socket: the pump's pending receive must end
         // promptly instead of blocking forever, mirroring the real socket's throw.
@@ -116,13 +114,43 @@ internal sealed class NoopResponseSink : IUdpResponseSink
         ValueTask.CompletedTask;
 }
 
+/// <summary>
+/// Wraps any factory and records every transport it handed out, in creation order. Facts that need to
+/// observe a transport the coordinator created (its socket shape, its exchange evidence) drive the
+/// production factory through this decorator.
+/// </summary>
+internal sealed class RecordingTransportFactory(IUdpProxyTransportFactory inner) : IUdpProxyTransportFactory
+{
+    private readonly List<IUdpProxyTransport> _transports = [];
+    private readonly Lock _gate = new();
+    private int _createCalls;
+
+    internal int CreateCalls => Volatile.Read(ref _createCalls);
+
+    internal IReadOnlyList<IUdpProxyTransport> Transports
+    {
+        get
+        {
+            lock (_gate) return [.. _transports];
+        }
+    }
+
+    public async ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken)
+    {
+        _ = Interlocked.Increment(ref _createCalls);
+        var transport = await inner.CreateAsync(target, cancellationToken).ConfigureAwait(false);
+        lock (_gate) _transports.Add(transport);
+        return transport;
+    }
+}
+
 /// <summary>Fails the first receive immediately; used to prove session removal fires without another send.</summary>
 internal sealed class ImmediateFaultTransportFactory : IUdpProxyTransportFactory
 {
     private int _calls;
     public List<ImmediateFaultTransport> FaultedTransports { get; } = [];
 
-    public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
+    public ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken)
     {
         if (Interlocked.Increment(ref _calls) == 1)
         {
@@ -141,18 +169,18 @@ internal sealed class ImmediateFaultTransport : IUdpProxyTransport
     {
         var loopback = addressFamily == AddressFamily.InterNetwork ? IPAddress.Loopback : IPAddress.IPv6Loopback;
         LocalEndpoint = new IPEndPoint(loopback, localPort);
-        RelayEndpoint = new IPEndPoint(loopback, 50000);
+        PeerEndpoint = new IPEndPoint(loopback, 50000);
     }
 
-    public IPEndPoint RelayEndpoint { get; }
+    public IPEndPoint PeerEndpoint { get; }
     public IPEndPoint LocalEndpoint { get; }
     public bool IsDisposed { get; private set; }
 
     public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken) =>
         ValueTask.FromException(new IOException("relay receive already failed"));
 
-    public ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken) =>
-        ValueTask.FromException<Socks5UdpReceiveResult>(new IOException("relay receive failed"));
+    public ValueTask<UdpTransportReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken) =>
+        ValueTask.FromException<UdpTransportReceiveResult>(new IOException("relay receive failed"));
 
     public ValueTask DisposeAsync()
     {

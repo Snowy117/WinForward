@@ -43,7 +43,7 @@ public class DispatcherBenchmarks
     public void Setup()
     {
         var passConfiguration = new ValidatedConfiguration(
-            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Pass));
         _executor = new CountingExecutor();
         var logger = new ThresholdOnlyLogger(RuntimeLogLevel.Info);
@@ -51,9 +51,9 @@ public class DispatcherBenchmarks
         _key = BenchmarkShared.CreateFlowKey(0);
 
         var proxyConfiguration = new ValidatedConfiguration(
-            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase)
+            new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase)
             {
-                ["benchmark"] = new("benchmark", "127.0.0.1", 1080, Username: null, Password: null),
+                ["benchmark"] = ProxyTarget.FromServer(new("benchmark", "127.0.0.1", 1080, Username: null, Password: null)),
             },
             new PolicySnapshot(
                 [new PolicyRule(new RuleMatcher(), new FlowDecision(FlowAction.Proxy, 0, "benchmark"))],

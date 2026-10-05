@@ -1,5 +1,3 @@
-using System.Globalization;
-using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using WinForward.Core;
@@ -13,6 +11,9 @@ public sealed partial class WinForwardConfigDto
 
     [JsonPropertyName("socks5Servers")]
     public IReadOnlyList<Socks5ServerDto?>? Socks5Servers { get; init; }
+
+    [JsonPropertyName("localTargets")]
+    public IReadOnlyList<LocalTargetDto?>? LocalTargets { get; init; }
 
     [JsonPropertyName("host")]
     public RuleDomainDto? Host { get; init; }
@@ -51,6 +52,13 @@ public sealed class Socks5ServerDto
     public string? Password { get; init; }
 }
 
+public sealed class LocalTargetDto
+{
+    public string? Name { get; init; }
+    public string? Host { get; init; }
+    public int Port { get; init; }
+}
+
 public sealed class RuleDto
 {
     public string?[]? Process { get; init; }
@@ -61,7 +69,19 @@ public sealed class RuleDto
     public string?[]? RemoteCidr { get; init; }
     public string?[]? RemotePort { get; init; }
     public string? Action { get; init; }
-    public string? ProxyServer { get; init; }
+
+    /// <summary>The named target a <c>proxy</c> action selects.</summary>
+    [JsonPropertyName("target")]
+    public string? Target { get; init; }
+
+    /// <summary>
+    /// Migration-only: the pre-rename spelling of <see cref="Target"/>. It exists so the key is
+    /// recognised rather than rejected as unknown, and so validation can report the rename at its
+    /// own path instead of leaving the operator with an unmapped-field diagnostic. The runtime never
+    /// reads it.
+    /// </summary>
+    [JsonPropertyName("proxyServer")]
+    public string? LegacyProxyServer { get; init; }
 }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
@@ -74,6 +94,33 @@ public sealed record Socks5Server(
     ushort Port,
     string? Username,
     string? Password);
+
+/// <summary>
+/// A named endpoint on this host that terminates a selected flow, declared in the
+/// <c>localTargets</c> list: the flow's payload is forwarded to <see cref="Endpoint"/> verbatim and
+/// the endpoint's replies are attributed to the flow's original destination. Nothing in the packet
+/// path learns what protocol the payload carries.
+/// </summary>
+public sealed record LocalTarget(string Name, Endpoint Endpoint);
+
+/// <summary>
+/// The target a proxy decision resolved to: exactly one of a SOCKS5 server (<see cref="Socks5"/>)
+/// or a local endpoint (<see cref="Local"/>), under the configured <see cref="Name"/> (one
+/// namespace across both kinds). A readonly record struct, so resolving a target stays one
+/// dictionary probe plus a value copy and adds no allocation to the packet path.
+/// </summary>
+public readonly record struct ProxyTarget(string Name, Socks5Server? Socks5, LocalTarget? Local)
+{
+    /// <summary>True when this target is a local endpoint rather than a SOCKS5 server.</summary>
+    public bool IsLocal => Local is not null;
+
+    /// <summary>Wraps a resolved SOCKS5 server as its own target.</summary>
+    public static ProxyTarget FromServer(Socks5Server server)
+    {
+        ArgumentNullException.ThrowIfNull(server);
+        return new ProxyTarget(server.Name, server, Local: null);
+    }
+}
 
 public sealed record ConfigDiagnostic(string Path, string Message)
 {
@@ -90,7 +137,7 @@ public enum RuntimeLogLevel
 }
 
 public sealed partial record ValidatedConfiguration(
-    IReadOnlyDictionary<string, Socks5Server> Servers,
+    IReadOnlyDictionary<string, ProxyTarget> Targets,
     PolicySnapshot Policy,
     RuntimeLogLevel LogLevel = RuntimeLogLevel.Info,
     bool IncludeProcessPathInLogs = false,
@@ -143,16 +190,16 @@ public static partial class ConfigurationLoader
     {
         var errors = new List<ConfigDiagnostic>();
         var warnings = new List<ConfigDiagnostic>();
-        var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase);
+        var targets = new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase);
         var logLevel = ParseLogLevel(dto, errors);
         var limits = ConfigurationLimits.Parse(dto, errors, warnings);
 
-        ValidateServers(dto, servers, errors);
+        ConfigurationTargets.Validate(dto, targets, errors, warnings);
 
         var hostRules = new List<PolicyRule>();
         var forwardedRules = new List<PolicyRule>();
-        var hostFallback = ConfigurationRules.ParseDomain(dto.Host, FlowOriginKind.Host, servers, hostRules, errors);
-        var forwardedFallback = ConfigurationRules.ParseDomain(dto.Forwarded, FlowOriginKind.Forwarded, servers, forwardedRules, errors);
+        var hostFallback = ConfigurationRules.ParseDomain(dto.Host, FlowOriginKind.Host, targets, hostRules, errors);
+        var forwardedFallback = ConfigurationRules.ParseDomain(dto.Forwarded, FlowOriginKind.Forwarded, targets, forwardedRules, errors);
 
         ValidateFailureActions(dto, errors);
         var associationReuse = ParseAssociationReuse(dto.UdpAssociationReuse, errors);
@@ -165,7 +212,7 @@ public static partial class ConfigurationLoader
         }
 
         configuration = new ValidatedConfiguration(
-            servers,
+            targets,
             new PolicySnapshot(hostRules, hostFallback.Value)
             {
                 ForwardedRules = forwardedRules,
@@ -218,46 +265,6 @@ public static partial class ConfigurationLoader
         return RuntimeLogLevel.Info;
     }
 
-    private static void ValidateServers(WinForwardConfigDto dto, Dictionary<string, Socks5Server> servers, List<ConfigDiagnostic> errors)
-    {
-        if (dto.Socks5Servers is null)
-        {
-            errors.Add(new("socks5Servers", "Field is required."));
-            return;
-        }
-
-        for (var index = 0; index < dto.Socks5Servers.Count; index++)
-        {
-            ValidateServer(dto.Socks5Servers[index], index, servers, errors);
-        }
-    }
-
-    private static void ValidateServer(Socks5ServerDto? dto, int index, Dictionary<string, Socks5Server> servers, List<ConfigDiagnostic> errors)
-    {
-        var path = string.Create(CultureInfo.InvariantCulture, $"socks5Servers[{index}]");
-        if (dto is null)
-        {
-            errors.Add(new(path, "Server entry must be an object."));
-            return;
-        }
-
-        var name = dto.Name?.Trim();
-        if (string.IsNullOrEmpty(name)) errors.Add(new($"{path}.name", "Name is required."));
-        else if (servers.ContainsKey(name)) errors.Add(new($"{path}.name", "Name must be unique (case-insensitive)."));
-
-        var host = dto.Host?.Trim();
-        if (string.IsNullOrEmpty(host) || !IsValidHost(host)) errors.Add(new($"{path}.host", "Host must be an IP literal or DNS hostname."));
-        if (dto.Port is < 1 or > 65535) errors.Add(new($"{path}.port", "Port must be in 1..65535."));
-        if ((dto.Username is null) != (dto.Password is null)) errors.Add(new(path, "username and password must be supplied together."));
-        if (dto.Username is not null && (dto.Username.Length == 0 || System.Text.Encoding.UTF8.GetByteCount(dto.Username) > 255)) errors.Add(new($"{path}.username", "Username must be 1..255 UTF-8 bytes."));
-        if (dto.Password is not null && (dto.Password.Length == 0 || System.Text.Encoding.UTF8.GetByteCount(dto.Password) > 255)) errors.Add(new($"{path}.password", "Password must be 1..255 UTF-8 bytes."));
-
-        if (name is not null && host is not null && IsValidHost(host) && dto.Port is >= 1 and <= 65535 && !servers.ContainsKey(name))
-        {
-            servers.Add(name, new Socks5Server(name, host, (ushort)dto.Port, dto.Username, dto.Password));
-        }
-    }
-
     private static void ValidateFailureActions(WinForwardConfigDto dto, List<ConfigDiagnostic> errors)
     {
         ValidateFailureAction(dto.ProxyUnavailableAction, "proxyUnavailableAction", errors);
@@ -268,6 +275,4 @@ public static partial class ConfigurationLoader
     {
         if (raw is not null && !string.Equals(raw.Trim(), "block", StringComparison.OrdinalIgnoreCase)) errors.Add(new(path, "Only block is supported in the first release."));
     }
-
-    private static bool IsValidHost(string host) => IPAddress.TryParse(host, out _) || Uri.CheckHostName(host) is UriHostNameType.Dns or UriHostNameType.Basic;
 }

@@ -238,7 +238,7 @@ public sealed class TcpFragmentHandlingTests
                 ? new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "veth-1" })
                 : new RuleMatcher();
             var rules = new[] { new PolicyRule(matcher, new FlowDecision(FlowAction.Proxy, 0, s_server.Name)) };
-            var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase) { [s_server.Name] = s_server };
+            var servers = new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase) { [s_server.Name] = ProxyTarget.FromServer(s_server) };
             var config = new ValidatedConfiguration(servers, forwarded
                 ? new PolicySnapshot([], FlowAction.Block) { ForwardedRules = rules }
                 : new PolicySnapshot(rules, FlowAction.Block));

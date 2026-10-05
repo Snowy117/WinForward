@@ -95,6 +95,27 @@ public sealed class UdpSessionBudgetScenarioTests
         Assert.DoesNotContain(SoakRunner.SelectScenarios(SoakScenario.All), entry => string.Equals(entry.Name, "udpSessionBudget", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData("udpSessionBudget")]
+    [InlineData("udp")]
+    [InlineData("residency")]
+    [InlineData("all")]
+    public void LocalTargetColumnIsRefusedByTheScenariosThatWouldMisdescribeIt(string scenario)
+    {
+        var exception = Assert.Throws<ArgumentException>(() => SoakOptions.Parse(["--scenario", scenario, "--target", "local"]));
+        Assert.Contains("udpChurn", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("udpBurst", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(SoakTargetKind.Socks5, SoakOptions.Parse(["--scenario", scenario]).Target);
+    }
+
+    [Theory]
+    [InlineData("udpChurn")]
+    [InlineData("udpBurst")]
+    public void LocalTargetColumnIsAcceptedByTheScenariosThatHostIt(string scenario)
+    {
+        Assert.Equal(SoakTargetKind.Local, SoakOptions.Parse(["--scenario", scenario, "--target", "local"]).Target);
+    }
+
     [Fact]
     public void RetentionCeilingFollowsRateIdleAndSweep()
     {

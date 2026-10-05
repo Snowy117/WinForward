@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using WinForward.Configuration;
 using WinForward.Core;
@@ -353,23 +354,19 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         return ValueTask.CompletedTask;
     }
 
-    public async ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
+    public async ValueTask ProxyAsync(CapturedFlowPacket packet, ProxyTarget target, CancellationToken cancellationToken)
     {
         if (_udpProxy is not null && packet.Context.Key.Protocol == TransportProtocol.Udp)
         {
-            await HandleUdpProxyAsync(_udpProxy, packet, server, cancellationToken).ConfigureAwait(false);
+            await HandleUdpProxyAsync(_udpProxy, packet, target, cancellationToken).ConfigureAwait(false);
             return;
         }
 
-        if (_tcpProxy is null)
-        {
-            LogProxyNotInitialized();
-            return;
-        }
+        if (!TryResolveTcpServer(target, out var tcpProxy, out var server)) return;
 
         try
         {
-            var outcome = await _tcpProxy.HandlePacketAsync(packet, server, cancellationToken).ConfigureAwait(false);
+            var outcome = await tcpProxy.HandlePacketAsync(packet, server, cancellationToken).ConfigureAwait(false);
             if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("tcp.packet.handled", packet, new RuntimeLogField("outcome", outcome));
             // ReSharper disable once ConvertIfStatementToSwitchStatement // Per-outcome commentary and awaits: the if/else-if chain keeps each outcome's rationale attached; a switch would also pull in the enum-coverage inspections (default handling) for a hot-path packet handler.
             if (outcome == TcpRedirectOutcome.Dropped)
@@ -417,16 +414,39 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     }
 
     /// <summary>
-    /// Hands a UDP datagram on a proxy-decided UDP flow to the SOCKS5 UDP relay coordinator. The
-    /// datagram is parsed and dispatched from the synchronous frame view
+    /// Resolves the pair a TCP proxy decision needs, or false — with its reason logged — when the
+    /// packet must be dropped: this runtime was composed without a TCP redirect proxy, or the target
+    /// carries no SOCKS5 server (a local target has no TCP path here). The dispatcher has already
+    /// completed the lease as <c>ProxyConsumed</c>, so a false return drops the packet fail-closed
+    /// instead of dereferencing a server that is not there.
+    /// </summary>
+    private bool TryResolveTcpServer(ProxyTarget target, [NotNullWhen(true)] out TcpProxyCoordinator? tcpProxy, [NotNullWhen(true)] out Socks5Server? server)
+    {
+        tcpProxy = _tcpProxy;
+        server = target.Socks5;
+        if (tcpProxy is null)
+        {
+            LogProxyNotInitialized();
+            return false;
+        }
+
+        if (server is not null) return true;
+        LogProxyBlocked("target");
+        return false;
+    }
+
+    /// <summary>
+    /// Hands a UDP datagram on a proxy-decided UDP flow to the UDP proxy coordinator, which routes
+    /// it to the transport of the flow's resolved target. The datagram is parsed and dispatched
+    /// from the synchronous frame view
     /// (<see cref="CapturedFlowPacket.InspectionSpan"/>) — the native capture buffer when the
     /// lease never materialized — so an established flow's datagram allocates nothing (A4): the
     /// coordinator's ready-session path consumes the payload synchronously and only the setup
-    /// window copies it into the bounded queue. The original datagram is consumed (the relay
-    /// transport owns forwarding, including any buffered setup traffic); it is never reinjected. A
+    /// window copies it into the bounded queue. The original datagram is consumed (the transport
+    /// owns forwarding, including any buffered setup traffic); it is never reinjected. A
     /// parse failure or an unsent datagram fails closed without a pass downgrade.
     /// </summary>
-    private async ValueTask HandleUdpProxyAsync(UdpProxyCoordinator udpProxy, CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
+    private async ValueTask HandleUdpProxyAsync(UdpProxyCoordinator udpProxy, CapturedFlowPacket packet, ProxyTarget target, CancellationToken cancellationToken)
     {
         // Every frame read below is synchronous; the spans' last use is the dispatch call, before
         // the first await, so the native capture buffer backing them is free to recycle once the
@@ -447,7 +467,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
 
         try
         {
-            var sent = await udpProxy.TrySendSpanAsync(packet.Context.Key, server, payload, clientMac, cancellationToken, packet.PacketSequence, packet.FlowGeneration).ConfigureAwait(false);
+            var sent = await udpProxy.TrySendSpanAsync(packet.Context.Key, target, payload, clientMac, cancellationToken, packet.PacketSequence, packet.FlowGeneration).ConfigureAwait(false);
             if (!sent)
             {
                 if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("udp.packet.rejected", packet, new RuntimeLogField("reason", "send"));
@@ -491,7 +511,8 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     /// Reports why a proxy-selected flow was blocked (S6c). The reason values mirror the
     /// executor-level trace vocabulary: <c>redirect</c> (the TCP redirect coordinator rejected the
     /// flow — its per-event <c>tcp.redirect.rejected</c> trace carries the specific sub-reason),
-    /// <c>parse</c>, and <c>send</c> match the <c>udp.packet.rejected</c> trace reasons.
+    /// <c>target</c> (a TCP packet whose target carries no SOCKS5 server), and <c>parse</c> and
+    /// <c>send</c>, which match the <c>udp.packet.rejected</c> trace reasons.
     /// </summary>
     private void LogProxyBlocked(string reason)
     {

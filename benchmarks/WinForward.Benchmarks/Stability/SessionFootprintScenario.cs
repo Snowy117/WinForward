@@ -4,7 +4,6 @@ using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
 using WinForward.Runtime;
-using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
 
 namespace WinForward.Benchmarks.Stability;
@@ -101,7 +100,7 @@ internal static class SessionFootprintScenario
             {
                 // A false return is the setup-failure cooldown; the next round re-offers the
                 // flow and WaitUntilCreatedAsync bounds the total populate time.
-                _ = await coordinator.TrySendSpanAsync(flowKey, server, s_populatePayload, default, CancellationToken.None).ConfigureAwait(false);
+                _ = await coordinator.TrySendSpanAsync(flowKey, ProxyTarget.FromServer(server), s_populatePayload, default, CancellationToken.None).ConfigureAwait(false);
             }
 
             await factory.WaitUntilProgressAsync().ConfigureAwait(false);
@@ -116,9 +115,9 @@ internal static class SessionFootprintScenario
 
         public int Created => Volatile.Read(ref _created);
 
-        public async ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
+        public async ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken)
         {
-            var transport = await inner.CreateAsync(server, cancellationToken).ConfigureAwait(false);
+            var transport = await inner.CreateAsync(target, cancellationToken).ConfigureAwait(false);
             Interlocked.Increment(ref _created);
             return transport;
         }

@@ -2,7 +2,6 @@ using System.Globalization;
 using System.Net;
 using WinForward.Configuration;
 using WinForward.Core;
-using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
 using WinForward.TestSupport;
 using Xunit;
@@ -40,12 +39,12 @@ public sealed class IdleExpirySweeperFailureTests
                 Logger = logger,
             });
         var config = new ValidatedConfiguration(
-            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Pass));
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), new FakeExecutor());
         var flow = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
 
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [1], default, CancellationToken.None));
         await WaitForAsync(() => transportFactory.Transport is not null);
 
         await using var sweeper = new IdleExpirySweeper(
@@ -93,12 +92,12 @@ public sealed class IdleExpirySweeperFailureTests
                 Logger = logger,
             });
         var config = new ValidatedConfiguration(
-            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Pass));
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), new FakeExecutor());
         var flow = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
 
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [1], default, CancellationToken.None));
         await WaitForAsync(() => transportFactory.Transport is not null);
 
         var sweeper = new IdleExpirySweeper(
@@ -132,7 +131,7 @@ public sealed class IdleExpirySweeperFailureTests
     {
         var logger = new RecordingRuntimeLogger();
         var config = new ValidatedConfiguration(
-            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Pass));
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), new FakeExecutor());
         var sweeper = new IdleExpirySweeper(
@@ -155,7 +154,7 @@ public sealed class IdleExpirySweeperFailureTests
     {
         public ParkedTransport? Transport { get; private set; }
 
-        public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
+        public ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken)
         {
             var transport = new ParkedTransport();
             Transport = transport;
@@ -165,14 +164,14 @@ public sealed class IdleExpirySweeperFailureTests
 
     private sealed class ParkedTransport : IUdpProxyTransport
     {
-        private readonly TaskCompletionSource<Socks5UdpReceiveResult> _parkedReceive = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<UdpTransportReceiveResult> _parkedReceive = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public IPEndPoint RelayEndpoint { get; } = new(IPAddress.Loopback, 50000);
+        public IPEndPoint PeerEndpoint { get; } = new(IPAddress.Loopback, 50000);
         public IPEndPoint LocalEndpoint { get; } = new(IPAddress.Loopback, 40010);
 
         public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken) => ValueTask.CompletedTask;
 
-        public ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken) => new(_parkedReceive.Task);
+        public ValueTask<UdpTransportReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken) => new(_parkedReceive.Task);
 
         public ValueTask DisposeAsync()
         {

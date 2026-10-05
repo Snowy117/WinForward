@@ -17,7 +17,7 @@
         "adapterName": ["vEthernet (MyVM)"],
         "protocol": ["tcp", "udp"],
         "action": "proxy",
-        "proxyServer": "remote"
+        "target": "remote"
       }
     ]
   },

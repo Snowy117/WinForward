@@ -58,7 +58,7 @@ public sealed class UdpAdaptiveSweepAllocationGateTests
         var start = time.GetUtcNow();
         for (var index = 0; index < Sessions; index++)
         {
-            Assert.True(await coordinator.TrySendSpanAsync(MakeUdpFlow(checked((ushort)(53 + index))), s_server, s_payload, default, CancellationToken.None));
+            Assert.True(await coordinator.TrySendSpanAsync(MakeUdpFlow(checked((ushort)(53 + index))), ProxyTarget.FromServer(s_server), s_payload, default, CancellationToken.None));
         }
 
         // Population proof: the transports exist and every queued datagram was flushed (the flush is

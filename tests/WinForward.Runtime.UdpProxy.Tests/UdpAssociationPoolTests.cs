@@ -268,14 +268,14 @@ public sealed class UdpAssociationPoolTests
         var transports = new List<IUdpProxyTransport>();
         try
         {
-            for (var index = 0; index < flows; index++) transports.Add(await factory.CreateAsync(server.Server, CancellationToken.None));
+            for (var index = 0; index < flows; index++) transports.Add(await factory.CreateAsync(ProxyTarget.FromServer(server.Server), CancellationToken.None));
 
             // One authenticated control connection and one negotiated relay serve every flow…
             Assert.Equal(1, server.ConnectionCount);
             Assert.Equal(1, server.AssociateReplyCount);
             Assert.Equal(1, pool.AssociationCount);
             Assert.Equal(flows, pool.LeasedFlowCount);
-            Assert.Single(transports.Select(static transport => transport.RelayEndpoint.Port).Distinct());
+            Assert.Single(transports.Select(static transport => transport.PeerEndpoint.Port).Distinct());
             // …while each flow keeps its own local relay socket, so reverse routing stays per-flow.
             Assert.Equal(flows, transports.Select(static transport => transport.LocalEndpoint.Port).Distinct().Count());
         }

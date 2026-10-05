@@ -100,7 +100,7 @@ internal static class UdpLossScenario
         {
             sequences[flow]++;
             DatagramHeader.Write(payload, sequences[flow], flow);
-            _ = await coordinator.TrySendSpanAsync(flows[flow], server, payload, default, CancellationToken.None).ConfigureAwait(false);
+            _ = await coordinator.TrySendSpanAsync(flows[flow], ProxyTarget.FromServer(server), payload, default, CancellationToken.None).ConfigureAwait(false);
         }
 
         var stopwatch = Stopwatch.StartNew();
@@ -133,7 +133,7 @@ internal static class UdpLossScenario
                     var flow = nextFlow++ % flows.Length;
                     sequences[flow]++;
                     DatagramHeader.Write(payload, sequences[flow], flow);
-                    if (await coordinator.TrySendSpanAsync(flows[flow], server, payload, default, cancellation.Token).ConfigureAwait(false)) sent++;
+                    if (await coordinator.TrySendSpanAsync(flows[flow], ProxyTarget.FromServer(server), payload, default, cancellation.Token).ConfigureAwait(false)) sent++;
                 }
 
                 nextDeadline += tick;

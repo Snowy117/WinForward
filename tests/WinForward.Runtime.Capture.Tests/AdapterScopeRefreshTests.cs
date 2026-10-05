@@ -15,8 +15,8 @@ public sealed class AdapterScopeRefreshTests
         var freshEnumeration = new[] { new WindowsAdapter("id-a", "Ethernet", "a", 1, 1) };
         var policy = new PolicySnapshot(
         [
-            new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null)),
-            new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-b" }), new FlowDecision(FlowAction.Pass, 1, ProxyServerName: null)),
+            new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Pass, 0, TargetName: null)),
+            new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-b" }), new FlowDecision(FlowAction.Pass, 1, TargetName: null)),
         ], FlowAction.Pass);
 
         var scope = CaptureAdapterScopeResolver.ResolveForRefresh(freshEnumeration, policy, out var warnings);
@@ -32,7 +32,7 @@ public sealed class AdapterScopeRefreshTests
         var freshEnumeration = new[] { new WindowsAdapter("id-a", "Ethernet", "a", 1, 1) };
         var policy = new PolicySnapshot([], FlowAction.Pass)
         {
-            ForwardedRules = [new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "veth-gone" }), new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null))],
+            ForwardedRules = [new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "veth-gone" }), new FlowDecision(FlowAction.Pass, 0, TargetName: null))],
         };
 
         var scope = CaptureAdapterScopeResolver.ResolveForRefresh(freshEnumeration, policy, out var warnings);
@@ -50,7 +50,7 @@ public sealed class AdapterScopeRefreshTests
         // sibling selector does not keep the rule's remaining target in scope.
         var freshEnumeration = new[] { new WindowsAdapter("id-a", "Ethernet", "a", 1, 1) };
         var policy = new PolicySnapshot(
-            [new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a", "id-b" }), new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null))],
+            [new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a", "id-b" }), new FlowDecision(FlowAction.Pass, 0, TargetName: null))],
             FlowAction.Pass);
 
         var scope = CaptureAdapterScopeResolver.ResolveForRefresh(freshEnumeration, policy, out var warnings);
@@ -69,8 +69,8 @@ public sealed class AdapterScopeRefreshTests
         };
         var policy = new PolicySnapshot(
         [
-            new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null)),
-            new(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "browser.exe" }), new FlowDecision(FlowAction.Block, 1, ProxyServerName: null)),
+            new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Pass, 0, TargetName: null)),
+            new(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "browser.exe" }), new FlowDecision(FlowAction.Block, 1, TargetName: null)),
         ], FlowAction.Pass);
 
         var scope = CaptureAdapterScopeResolver.ResolveForRefresh(freshEnumeration, policy, out var warnings);
@@ -88,7 +88,7 @@ public sealed class AdapterScopeRefreshTests
             new WindowsAdapter("id-new", "Wi-Fi", "n", 2, 1),
         };
         var policy = new PolicySnapshot(
-            [new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null))],
+            [new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Pass, 0, TargetName: null))],
             FlowAction.Pass);
 
         var scope = CaptureAdapterScopeResolver.ResolveForRefresh(freshEnumeration, policy, out var warnings);
@@ -108,7 +108,7 @@ public sealed class AdapterScopeRefreshTests
             new WindowsAdapter("id-b", "vEthernet (Shared)", "b", 2, 1),
         };
         var policy = new PolicySnapshot(
-            [new(new RuleMatcher(AdapterNames: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Ethernet" }), new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null))],
+            [new(new RuleMatcher(AdapterNames: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Ethernet" }), new FlowDecision(FlowAction.Pass, 0, TargetName: null))],
             FlowAction.Pass);
 
         var scope = CaptureAdapterScopeResolver.ResolveForRefresh(freshEnumeration, policy, out var warnings);
@@ -128,8 +128,8 @@ public sealed class AdapterScopeRefreshTests
         };
         var policy = new PolicySnapshot(
         [
-            new(new RuleMatcher(AdapterNames: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Ethernet" }), new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null)),
-            new(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "browser.exe" }), new FlowDecision(FlowAction.Block, 1, ProxyServerName: null)),
+            new(new RuleMatcher(AdapterNames: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Ethernet" }), new FlowDecision(FlowAction.Pass, 0, TargetName: null)),
+            new(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "browser.exe" }), new FlowDecision(FlowAction.Block, 1, TargetName: null)),
         ], FlowAction.Pass);
 
         var scope = CaptureAdapterScopeResolver.ResolveForRefresh(freshEnumeration, policy, out var warnings);
@@ -150,7 +150,7 @@ public sealed class AdapterScopeRefreshTests
             [new(new RuleMatcher(
                 AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" },
                 AdapterNames: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "vEthernet 1" }),
-                new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null))],
+                new FlowDecision(FlowAction.Pass, 0, TargetName: null))],
             FlowAction.Pass);
 
         var scope = CaptureAdapterScopeResolver.ResolveForRefresh(freshEnumeration, policy, out var warnings);
@@ -188,9 +188,9 @@ public sealed class AdapterScopeRefreshTests
             new(new RuleMatcher(
                 AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-b" },
                 AdapterNames: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "vEthernet 1" }),
-                new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null)),
-            new(new RuleMatcher(AdapterNames: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Ethernet" }), new FlowDecision(FlowAction.Pass, 1, ProxyServerName: null)),
-            new(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "browser.exe" }), new FlowDecision(FlowAction.Block, 2, ProxyServerName: null)),
+                new FlowDecision(FlowAction.Pass, 0, TargetName: null)),
+            new(new RuleMatcher(AdapterNames: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Ethernet" }), new FlowDecision(FlowAction.Pass, 1, TargetName: null)),
+            new(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "browser.exe" }), new FlowDecision(FlowAction.Block, 2, TargetName: null)),
         ], FlowAction.Pass);
 
         Assert.True(CaptureAdapterScopeResolver.TryResolve(adapters, policy, out var startupScope, out var errors));

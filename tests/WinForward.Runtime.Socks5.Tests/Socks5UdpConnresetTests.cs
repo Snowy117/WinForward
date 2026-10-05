@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using WinForward.Configuration;
+using WinForward.Runtime.UdpProxy;
 using WinForward.TestSupport;
 using Xunit;
 using static WinForward.TestSupport.AsyncTestExtensions;
@@ -58,7 +59,7 @@ public sealed class Socks5UdpConnresetTests
     [Fact]
     public void ReceiveFaultClassificationMapsOnlyConnectionResetToSkip()
     {
-        Assert.Equal(Socks5UdpReceiveSkipReason.ConnectionReset,
+        Assert.Equal(UdpTransportSkipReason.ConnectionReset,
             Socks5UdpTransport.ClassifyReceiveFault(new SocketException((int)SocketError.ConnectionReset)));
         Assert.Null(Socks5UdpTransport.ClassifyReceiveFault(new SocketException((int)SocketError.ConnectionRefused)));
         Assert.Null(Socks5UdpTransport.ClassifyReceiveFault(new SocketException((int)SocketError.SocketError)));

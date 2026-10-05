@@ -29,12 +29,12 @@ public sealed class UdpSetupQueueBudgetTests
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, MaximumFrameSize = 4096, SetupQueueGlobalByteBudget = 4096 });
         var flow = CreateFlow("192.0.2.53");
 
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[3000], default, CancellationToken.None));
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), new byte[3000], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [1], default, CancellationToken.None));
         Assert.Equal(3001, coordinator.Diagnostics.PendingSetupBytes);
 
         // 3001 + 2000 crosses the 4096-byte aggregate: the new datagram is rejected and counted.
-        Assert.False(await coordinator.TrySendSpanAsync(flow, s_server, new byte[2000], default, CancellationToken.None));
+        Assert.False(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), new byte[2000], default, CancellationToken.None));
         Assert.Equal(1, coordinator.Diagnostics.SetupBudgetRejectionCount);
         Assert.Equal(3001, coordinator.Diagnostics.PendingSetupBytes);
 
@@ -53,7 +53,7 @@ public sealed class UdpSetupQueueBudgetTests
 
         // The flush credited both charges back: admission recovers for a brand-new flow.
         Assert.Equal(0, coordinator.Diagnostics.PendingSetupBytes);
-        Assert.True(await coordinator.TrySendSpanAsync(CreateFlow("192.0.2.54"), s_server, "\t"u8, default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(CreateFlow("192.0.2.54"), ProxyTarget.FromServer(s_server), "\t"u8, default, CancellationToken.None));
     }
 
     [Fact]
@@ -66,7 +66,7 @@ public sealed class UdpSetupQueueBudgetTests
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, MaximumFrameSize = 4096, SetupQueueGlobalByteBudget = 4096 }, setupQueuePool: pool);
         var flow = CreateFlow("192.0.2.53");
 
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[3000], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), new byte[3000], default, CancellationToken.None));
         await factory.CreateStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.Equal(3000, coordinator.Diagnostics.PendingSetupBytes);
         Assert.Equal(1, pool.Stats.Outstanding);
@@ -87,7 +87,7 @@ public sealed class UdpSetupQueueBudgetTests
         var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, MaximumFrameSize = 4096, SetupQueueGlobalByteBudget = 4096 }, setupQueuePool: pool);
         var flow = CreateFlow("192.0.2.53");
 
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, new byte[3000], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), new byte[3000], default, CancellationToken.None));
         Assert.Equal(3000, coordinator.Diagnostics.PendingSetupBytes);
         Assert.Equal(1, pool.Stats.Outstanding);
 
@@ -113,16 +113,16 @@ public sealed class UdpSetupQueueBudgetTests
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, TimeProvider = time }, setupQueuePool: pool);
         var flow = CreateFlow("192.0.2.53");
 
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [1], default, CancellationToken.None));
         await WaitForAsync(() => factory.CreateCalls == 1);
         // 40 datagrams overflow the 32-packet per-flow bound: drop-oldest keeps the freshest.
         for (var index = 0; index < 40; index++)
         {
-            Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [(byte)index], default, CancellationToken.None));
+            Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [(byte)index], default, CancellationToken.None));
         }
 
         time.Advance(TimeSpan.FromSeconds(6));
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [0xaa], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [0xaa], default, CancellationToken.None));
 
         gate.TrySetResult();
         await WaitForAsync(() => factory.Transports.Count == 1);
@@ -149,7 +149,7 @@ public sealed class UdpSetupQueueBudgetTests
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(new FakeTransportFactory(), new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, MaximumFrameSize = 64 }, setupQueuePool: pool);
         var flow = CreateFlow("192.0.2.53");
 
-        Assert.False(await coordinator.TrySendSpanAsync(flow, s_server, new byte[100], default, CancellationToken.None));
+        Assert.False(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), new byte[100], default, CancellationToken.None));
 
         Assert.Equal(0, coordinator.Diagnostics.PendingSetupBytes);
         Assert.Equal(0, pool.Stats.Outstanding);

@@ -58,7 +58,7 @@ public sealed class DurableCaptureBundleTests
     {
         var adapterSlots = new AdapterSlotTable();
         var configuration = new ValidatedConfiguration(
-            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Pass));
         var dispatcher = new FlowDispatcher(configuration, new FakeGuard(), new FakeExecutor(), activityClock: activityClock);
         var executor = new NdisPacketActionExecutor(new FakeReinjector());

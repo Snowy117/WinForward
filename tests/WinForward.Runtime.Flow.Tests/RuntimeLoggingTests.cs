@@ -97,7 +97,7 @@ public sealed class RuntimeLoggingTests
         var logger = new ConsoleRuntimeLogger(RuntimeLogLevel.Trace, writer);
         var executor = new RecordingExecutor();
         var configuration = new ValidatedConfiguration(
-            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Pass),
             RuntimeLogLevel.Trace);
         var dispatcher = new FlowDispatcher(configuration, new FakeGuard(), executor, logger: logger);
@@ -126,7 +126,7 @@ public sealed class RuntimeLoggingTests
         var writer = new StringWriter(CultureInfo.InvariantCulture);
         var logger = new ConsoleRuntimeLogger(RuntimeLogLevel.Debug, writer);
         var configuration = new ValidatedConfiguration(
-            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Pass),
             RuntimeLogLevel.Debug,
             IncludeProcessPathInLogs: true);
@@ -144,6 +144,6 @@ public sealed class RuntimeLoggingTests
         public CapturedFlowPacket? LastPacket { get; private set; }
         public ValueTask PassAsync(CapturedFlowPacket packet) { LastPacket = packet; return ValueTask.CompletedTask; }
         public ValueTask BlockAsync(CapturedFlowPacket packet) { LastPacket = packet; return ValueTask.CompletedTask; }
-        public ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken) { LastPacket = packet; return ValueTask.CompletedTask; }
+        public ValueTask ProxyAsync(CapturedFlowPacket packet, ProxyTarget target, CancellationToken cancellationToken) { LastPacket = packet; return ValueTask.CompletedTask; }
     }
 }

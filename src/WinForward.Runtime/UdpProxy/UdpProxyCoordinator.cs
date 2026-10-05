@@ -1,7 +1,6 @@
 using System.Numerics;
 using WinForward.Configuration;
 using WinForward.Core;
-using WinForward.Runtime.Socks5;
 
 namespace WinForward.Runtime.UdpProxy;
 
@@ -264,13 +263,13 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     /// new-flow branch never runs. Routing both entries through this method confines that
     /// allocation to the cold new-flow path.
     /// </summary>
-    private bool ScheduleSessionSetup(FlowKey flow, Socks5Server server, long flowGeneration, MacAddress capturedClientMac, UdpSessionSlot slot)
+    private bool ScheduleSessionSetup(FlowKey flow, ProxyTarget target, long flowGeneration, MacAddress capturedClientMac, UdpSessionSlot slot)
     {
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var item = _setupExecutor.RentItem(_setupHandler);
         item._completion = completion;
         item._flow = flow;
-        item._server = server;
+        item._udp._target = target;
         item._udp._flowGeneration = flowGeneration;
         item._udp._clientMac = capturedClientMac;
         item._udp._slot = slot;
@@ -286,7 +285,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     }
 
     private Task RunSessionSetupAsync(SetupWorkItem item)
-        => _setup.CreateSessionAsync(item._flow, item._server!, item._udp._flowGeneration, item._udp._clientMac, item._udp._slot!, item._cancellationToken);
+        => _setup.CreateSessionAsync(item._flow, item._udp._target, item._udp._flowGeneration, item._udp._clientMac, item._udp._slot!, item._cancellationToken);
 
     /// <summary>
     /// Buffers one datagram while the flow's session is setting up or flushing. The queue is
@@ -551,7 +550,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
         }
         if (slot is null) return;
         if (!await _slotHost.RemoveSlotAsync(session.Flow, slot, UdpTeardownReason.Fault).ConfigureAwait(false)) return;
-        UdpProxyLogging.LogDebug(_logger, "udp.session.closed", session.Flow, session.FlowGeneration, session.Association, serverName: null);
+        UdpProxyLogging.LogDebug(_logger, "udp.session.closed", session.Flow, session.FlowGeneration, session.Association);
     }
 
     /// <summary>

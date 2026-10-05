@@ -68,18 +68,20 @@ internal sealed class TcpSetupWork
 }
 
 /// <summary>
-/// The UDP-only setup payload plane of a <see cref="SetupWorkItem"/>: the flow generation, the
-/// client MAC, and the session slot. Pre-allocated once with the item so the rent/recycle path
-/// stays allocation-free.
+/// The UDP-only setup payload plane of a <see cref="SetupWorkItem"/>: the flow's resolved target,
+/// its generation, the client MAC, and the session slot. Pre-allocated once with the item so the
+/// rent/recycle path stays allocation-free.
 /// </summary>
 internal sealed class UdpSetupWork
 {
+    internal ProxyTarget _target;
     internal long _flowGeneration;
     internal MacAddress _clientMac;
     internal UdpProxyCoordinator.UdpSessionSlot? _slot;
 
     internal void Reset()
     {
+        _target = default;
         _flowGeneration = 0;
         _clientMac = default;
         _slot = null;

@@ -113,8 +113,8 @@ public sealed class TcpReversePrefilterTests
         var executor = new CountingExecutor();
         var table = new TcpRedirectTable();
         var handler = new TablePrefilterReverseHandler(table);
-        var config = new ValidatedConfiguration(new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase), new PolicySnapshot([], FlowAction.Pass));
-        var blockConfig = new ValidatedConfiguration(new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase), new PolicySnapshot([], FlowAction.Block));
+        var config = new ValidatedConfiguration(new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase), new PolicySnapshot([], FlowAction.Pass));
+        var blockConfig = new ValidatedConfiguration(new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase), new PolicySnapshot([], FlowAction.Block));
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor, reverseHandler: handler);
         var blockDispatcher = new FlowDispatcher(blockConfig, new FakeGuard(), executor, reverseHandler: handler);
 
@@ -146,7 +146,7 @@ public sealed class TcpReversePrefilterTests
         var table = new TcpRedirectTable();
         var handler = new TablePrefilterReverseHandler(table);
         Assert.True(TryClaimListener(table, MakeOriginalKey(54000), IPAddress.Loopback, 40000));
-        var config = new ValidatedConfiguration(new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase), new PolicySnapshot([], FlowAction.Pass));
+        var config = new ValidatedConfiguration(new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase), new PolicySnapshot([], FlowAction.Pass));
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor, reverseHandler: handler);
 
         var nonCandidateKey = MakeTcpKey(53000);
@@ -178,7 +178,7 @@ public sealed class TcpReversePrefilterTests
         var table = new TcpRedirectTable();
         var handler = new TablePrefilterReverseHandler(table);
         Assert.True(TryClaimListener(table, MakeOriginalKey(53000), IPAddress.Loopback, 40000));
-        var config = new ValidatedConfiguration(new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase), new PolicySnapshot([], FlowAction.Pass));
+        var config = new ValidatedConfiguration(new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase), new PolicySnapshot([], FlowAction.Pass));
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor, reverseHandler: handler);
 
         var candidateKey = MakeTcpKey(40000);
@@ -238,7 +238,7 @@ public sealed class TcpReversePrefilterTests
         public int BlockCount { get; private set; }
         public ValueTask PassAsync(CapturedFlowPacket packet) { PassCount++; return ValueTask.CompletedTask; }
         public ValueTask BlockAsync(CapturedFlowPacket packet) { BlockCount++; return ValueTask.CompletedTask; }
-        public ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken) => ValueTask.CompletedTask;
+        public ValueTask ProxyAsync(CapturedFlowPacket packet, ProxyTarget target, CancellationToken cancellationToken) => ValueTask.CompletedTask;
     }
 
     /// <summary>

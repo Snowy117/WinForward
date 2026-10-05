@@ -24,7 +24,7 @@ public sealed class CoreFlowStructuresTests
         Assert.True(table.TryClaimResolved(FlowKey.Create(local, dns1, TransportProtocol.Udp, FlowOriginKind.Host), () =>
         {
             decisionCount++;
-            return new FlowDecision(FlowAction.Block, 1, ProxyServerName: null);
+            return new FlowDecision(FlowAction.Block, 1, TargetName: null);
         }, out var second));
         Assert.True(table.TryClaimResolved(FlowKey.Create(local, dns2, TransportProtocol.Udp, FlowOriginKind.Host), () =>
         {

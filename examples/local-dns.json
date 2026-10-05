@@ -1,0 +1,23 @@
+{
+  "socks5Servers": [],
+  "localTargets": [
+    {
+      "name": "dns-in",
+      "host": "127.0.0.1",
+      "port": 53
+    }
+  ],
+  "host": {
+    "fallbackAction": "pass",
+    "rules": [
+      {
+        "protocol": ["udp"],
+        "remotePort": ["53"],
+        "action": "proxy",
+        "target": "dns-in"
+      }
+    ]
+  },
+  "proxyUnavailableAction": "block",
+  "processingFailureAction": "block"
+}

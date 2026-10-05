@@ -31,7 +31,7 @@ public sealed class BatchedPassReinjectionE2eTests
         var reinjector = new FakeReinjector();
         var executor = new NdisPacketActionExecutor(reinjector);
         var configuration = new ValidatedConfiguration(
-            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Pass));
         var dispatcher = new FlowDispatcher(configuration, new FakeGuard(), executor);
         var processor = new CapturePacketProcessor(dispatcher, FlowBuilders.Slots, onBatchCompleted: executor.FlushPendingPasses);

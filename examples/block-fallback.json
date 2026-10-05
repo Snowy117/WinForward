@@ -12,7 +12,7 @@
       {
         "process": ["browser.exe"],
         "action": "proxy",
-        "proxyServer": "remote"
+        "target": "remote"
       }
     ]
   },

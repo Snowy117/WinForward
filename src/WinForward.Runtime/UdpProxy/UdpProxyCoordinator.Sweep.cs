@@ -75,7 +75,7 @@ public sealed partial class UdpProxyCoordinator
                     session.CancelExpiry();
                     continue;
                 }
-                UdpProxyLogging.LogDebug(_logger, "udp.session.expired", session.Flow, session.FlowGeneration, session.Association, serverName: null);
+                UdpProxyLogging.LogDebug(_logger, "udp.session.expired", session.Flow, session.FlowGeneration, session.Association);
                 removed++;
             }
 

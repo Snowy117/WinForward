@@ -24,7 +24,7 @@ public sealed class Socks5UdpAssociateTests
             createControl: static (_, _) => ValueTask.FromException<Socks5ControlConnection>(new IOException("control setup failed")));
         var factory = new Socks5UdpTransportFactory(pool, registry, UdpFrameBuilder.DefaultMaximumEthernetFrame, socketFactory: family => socket = new TrackingSocket(family));
 
-        await Assert.ThrowsAsync<IOException>(() => factory.CreateAsync(new Socks5Server("test", "127.0.0.1", 1080, Username: null, Password: null), CancellationToken.None).AsTask());
+        await Assert.ThrowsAsync<IOException>(() => factory.CreateAsync(ProxyTarget.FromServer(new Socks5Server("test", "127.0.0.1", 1080, Username: null, Password: null)), CancellationToken.None).AsTask());
 
         // The relay socket is only created once the association exists, so a control-setup failure
         // can never leave one behind. The socket factory is wired and would record the socket, so a
@@ -64,7 +64,7 @@ public sealed class Socks5UdpAssociateTests
             FlowOriginKind.Host);
         var payload = new byte[] { 0xde, 0xad, 0xbe, 0xef };
 
-        Assert.True(await coordinator.TrySendSpanAsync(flow, socksServer, payload, default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(socksServer), payload, default, CancellationToken.None));
 
         var request = await associateRequest.Task.WaitAsync(CancellationToken.None);
         Assert.Equal(new byte[] { 5, 3, 0, 1, 0, 0, 0, 0, 0, 0 }, request);
@@ -181,7 +181,7 @@ public sealed class Socks5UdpAssociateTests
         await using var fixture = await UdpTransportTestFactory.CreateAsync(socksServer, registry, family => socket = new TrackingSocket(family));
         var transport = fixture.Transport;
         var local = Endpoint.From(transport.LocalEndpoint.Address, checked((ushort)transport.LocalEndpoint.Port));
-        var relay = Endpoint.From(transport.RelayEndpoint.Address, checked((ushort)transport.RelayEndpoint.Port));
+        var relay = Endpoint.From(transport.PeerEndpoint.Address, checked((ushort)transport.PeerEndpoint.Port));
         var context = FlowBuilders.Context(FlowKey.Create(local, relay, TransportProtocol.Udp, FlowOriginKind.Host));
         socket!.OnDisposing = () => Assert.True(registry.IsOwned(context));
 

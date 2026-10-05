@@ -5,7 +5,6 @@ using WinForward.NdisApi;
 using WinForward.Protocols;
 using WinForward.Runtime;
 using WinForward.Runtime.Capture;
-using WinForward.Runtime.Socks5;
 using WinForward.Runtime.TcpRedirect;
 using WinForward.Runtime.UdpProxy;
 using WinForward.TestSupport;
@@ -144,7 +143,7 @@ public sealed class HotPathAllocationGateTests
 
         // The first datagram arms the background setup (cold, allocates freely); the session is
         // warm once its flush delivers the buffered datagram through the transport.
-        await executor.ProxyAsync(packet, s_server, CancellationToken.None);
+        await executor.ProxyAsync(packet, ProxyTarget.FromServer(s_server), CancellationToken.None);
         await WaitForAsync(() => factory.Transport is not null);
         await WaitForAsync(() => factory.Transport!.Sends >= 1);
 
@@ -157,7 +156,7 @@ public sealed class HotPathAllocationGateTests
         for (var attempt = 0; attempt < 1024 && !admittedDirectly; attempt++)
         {
             var sendsBeforeProbe = factory.Transport!.SpanSends;
-            var probe = coordinator.TrySendSpanAsync(flow, s_server, payload, default, CancellationToken.None);
+            var probe = coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), payload, default, CancellationToken.None);
             admittedDirectly = await probe
                 && factory.Transport!.SpanSends == sendsBeforeProbe + 1
                 && coordinator.Diagnostics.PendingSetupBytes == 0;
@@ -179,7 +178,7 @@ public sealed class HotPathAllocationGateTests
         {
             var probeThreadId = Environment.CurrentManagedThreadId;
             var probeBefore = GC.GetAllocatedBytesForCurrentThread();
-            for (var index = 0; index < count; index++) await executor.ProxyAsync(packet, s_server, CancellationToken.None);
+            for (var index = 0; index < count; index++) await executor.ProxyAsync(packet, ProxyTarget.FromServer(s_server), CancellationToken.None);
             stabilized = Environment.CurrentManagedThreadId == probeThreadId
                 && GC.GetAllocatedBytesForCurrentThread() == probeBefore;
         }
@@ -195,7 +194,7 @@ public sealed class HotPathAllocationGateTests
         var before = GC.GetAllocatedBytesForCurrentThread();
         for (var index = 0; index < count; index++)
         {
-            var pending = executor.ProxyAsync(packet, s_server, CancellationToken.None);
+            var pending = executor.ProxyAsync(packet, ProxyTarget.FromServer(s_server), CancellationToken.None);
             Assert.True(pending.IsCompletedSuccessfully, "the allocation gate relies on the synchronous fast path");
             await pending;
         }
@@ -231,12 +230,12 @@ public sealed class HotPathAllocationGateTests
 
         // The first datagram starts the cold setup; 40 more materialize the Queue<> and reach the
         // 32-packet drop-oldest steady state.
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, payload, default, CancellationToken.None));
-        for (var warm = 0; warm < 40; warm++) Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, payload, default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), payload, default, CancellationToken.None));
+        for (var warm = 0; warm < 40; warm++) Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), payload, default, CancellationToken.None));
 
         var before = GC.GetAllocatedBytesForCurrentThread();
         const int count = 128;
-        for (var index = 0; index < count; index++) Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, payload, default, CancellationToken.None));
+        for (var index = 0; index < count; index++) Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), payload, default, CancellationToken.None));
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
         Assert.Equal(0, allocated);
@@ -356,7 +355,7 @@ public sealed class HotPathAllocationGateTests
         var table = new TcpRedirectTable();
         var handler = new DecliningReverseHandler(table);
         var config = new ValidatedConfiguration(
-            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Pass));
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor, reverseHandler: handler);
 
@@ -463,7 +462,7 @@ public sealed class HotPathAllocationGateTests
 
         return;
 
-        static FlowDecision Decide() => new(FlowAction.Pass, 0, ProxyServerName: null);
+        static FlowDecision Decide() => new(FlowAction.Pass, 0, TargetName: null);
     }
 
     [Fact]
@@ -473,11 +472,11 @@ public sealed class HotPathAllocationGateTests
         var first = FlowKey.Create(Endpoint.From(s_clientIpv4, 53_000), Endpoint.From(s_destIpv4, 53), TransportProtocol.Udp, FlowOriginKind.Host);
         var second = FlowKey.Create(Endpoint.From(s_clientIpv4, 53_001), Endpoint.From(s_destIpv4, 53), TransportProtocol.Udp, FlowOriginKind.Host);
 
-        Assert.True(table.TryClaimResolved(first, () => new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null), out var state));
+        Assert.True(table.TryClaimResolved(first, () => new FlowDecision(FlowAction.Pass, 0, TargetName: null), out var state));
         state!.Touch(DateTimeOffset.UtcNow - TimeSpan.FromMinutes(5));
         Assert.Equal(1, table.RemoveExpired(DateTimeOffset.UtcNow, TimeSpan.FromMinutes(1)));
 
-        Assert.True(table.TryClaimResolved(second, () => new FlowDecision(FlowAction.Block, 1, ProxyServerName: null), out var recycled));
+        Assert.True(table.TryClaimResolved(second, () => new FlowDecision(FlowAction.Block, 1, TargetName: null), out var recycled));
         Assert.Same(state, recycled);
         Assert.Equal(second, recycled!.Key);
         Assert.Equal(FlowAction.Block, recycled.Decision.Action);
@@ -511,7 +510,7 @@ public sealed class HotPathAllocationGateTests
     {
         public CountingTransport? Transport { get; private set; }
 
-        public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
+        public ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken)
         {
             Transport = new CountingTransport();
             return ValueTask.FromResult<IUdpProxyTransport>(Transport);
@@ -521,7 +520,7 @@ public sealed class HotPathAllocationGateTests
     /// <summary>A factory whose setup parks on a gate until released (or cancelled by disposal).</summary>
     private sealed class StalledTransportFactory(Task gate) : IUdpProxyTransportFactory
     {
-        public async ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
+        public async ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken)
         {
             await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             return new CountingTransport();
@@ -530,10 +529,10 @@ public sealed class HotPathAllocationGateTests
 
     private sealed class CountingTransport : IUdpProxyTransport
     {
-        private readonly TaskCompletionSource<Socks5UdpReceiveResult> _parkedReceive = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<UdpTransportReceiveResult> _parkedReceive = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private long _spanSends;
 
-        public IPEndPoint RelayEndpoint { get; } = new(IPAddress.Loopback, 50000);
+        public IPEndPoint PeerEndpoint { get; } = new(IPAddress.Loopback, 50000);
         public IPEndPoint LocalEndpoint { get; } = new(IPAddress.Loopback, 40000);
 
         public long Sends => Interlocked.Read(ref _spanSends);
@@ -546,7 +545,7 @@ public sealed class HotPathAllocationGateTests
             return ValueTask.CompletedTask;
         }
 
-        public ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken) => new(_parkedReceive.Task);
+        public ValueTask<UdpTransportReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken) => new(_parkedReceive.Task);
 
         public ValueTask DisposeAsync()
         {

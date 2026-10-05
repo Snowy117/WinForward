@@ -57,7 +57,7 @@ public sealed class UdpAssociationRecoveryTests
         Assert.Equal(2, server.AssociateReplyCount);
 
         Assert.False(lease.IsFaulted);
-        Assert.Equal(secondEndpoint, transport.RelayEndpoint);
+        Assert.Equal(secondEndpoint, transport.PeerEndpoint);
         // The same transport keeps its socket and session: the next datagram reaches the new relay.
         await transport.SendSpanAsync(destination, payload, CancellationToken.None);
         Assert.Equal(1, await ReceiveCountAsync(secondRelay, CancellationToken.None));
@@ -167,7 +167,7 @@ public sealed class UdpAssociationRecoveryTests
         var serverKey = server.Server;
         try
         {
-            Assert.True(await coordinator.TrySendSpanAsync(flow, serverKey, payload, default, CancellationToken.None));
+            Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(serverKey), payload, default, CancellationToken.None));
             Assert.Equal(1, await ReceiveCountAsync(relay, CancellationToken.None));
             Assert.Equal(1, coordinator.SessionCount);
 
@@ -186,7 +186,7 @@ public sealed class UdpAssociationRecoveryTests
 
             // The flow re-establishes on its next datagram, immediately.
             await using var restarted = await ScriptedSocks5UdpServer.StartOnPortAsync(controlPort, relayEndpoint);
-            Assert.True(await coordinator.TrySendSpanAsync(flow, restarted.Server, payload, default, CancellationToken.None));
+            Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(restarted.Server), payload, default, CancellationToken.None));
             Assert.Equal(1, await ReceiveCountAsync(relay, CancellationToken.None));
         }
         finally
@@ -215,7 +215,7 @@ public sealed class UdpAssociationRecoveryTests
         var recoveredBefore = RuntimeCounters.Shared.Get(RuntimeCounters.UdpAssociationRecovered);
         try
         {
-            Assert.True(await coordinator.TrySendSpanAsync(flow, serverKey, payload, default, CancellationToken.None));
+            Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(serverKey), payload, default, CancellationToken.None));
             Assert.Equal(1, await ReceiveCountAsync(firstRelay, CancellationToken.None));
             Assert.Equal(1, coordinator.SessionCount);
 
@@ -228,7 +228,7 @@ public sealed class UdpAssociationRecoveryTests
             await WaitForAsync(() => RuntimeCounters.Shared.Get(RuntimeCounters.UdpAssociationRecovered) >= recoveredBefore + 1);
             Assert.Equal(1, coordinator.SessionCount);
 
-            Assert.True(await coordinator.TrySendSpanAsync(flow, serverKey, payload, default, CancellationToken.None));
+            Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(serverKey), payload, default, CancellationToken.None));
             Assert.Equal(1, await ReceiveCountAsync(secondRelay, CancellationToken.None));
             // A recovery is not an association loss: the coordinator removes a session only on
             // AssociationLost, so the surviving session (asserted here and above) is the local
@@ -255,7 +255,7 @@ public sealed class UdpAssociationRecoveryTests
 
         // The first datagram is admitted while the association is still setting up, so it waits in
         // the setup queue; the association then dies before that queue is flushed through it.
-        Assert.True(await coordinator.TrySendSpanAsync(flow, server, payload, default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(server), payload, default, CancellationToken.None));
         await factory.FirstCreateStarted.Task.WaitAsync(CancellationToken.None);
         Assert.Equal(1, coordinator.SessionCount);
         factory.LoseAssociationOnFlush();
@@ -268,7 +268,7 @@ public sealed class UdpAssociationRecoveryTests
         Assert.Equal(0, coordinator.Diagnostics.SetupCooldownCount);
 
         // The very next datagram starts a fresh setup instead of being refused by a cooldown.
-        Assert.True(await coordinator.TrySendSpanAsync(flow, server, payload, default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(server), payload, default, CancellationToken.None));
         // Why not an immediate assert: the setup ring runs the dial on a pooled worker, so the second
         // create is asynchronous and a synchronous assert would race the scheduler under load.
         await WaitForAsync(() => factory.CreateCalls == 2);
@@ -347,7 +347,7 @@ public sealed class UdpAssociationRecoveryTests
         {
             try
             {
-                _ = await coordinator.TrySendSpanAsync(flow, server, payload, default, CancellationToken.None);
+                _ = await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(server), payload, default, CancellationToken.None);
             }
             catch (UdpAssociationLostException)
             {
@@ -381,7 +381,7 @@ public sealed class UdpAssociationRecoveryTests
 
         public int CreateCalls => Volatile.Read(ref _calls);
 
-        public async ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
+        public async ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken)
         {
             if (Interlocked.Increment(ref _calls) == 1)
             {

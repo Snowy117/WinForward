@@ -2,7 +2,6 @@ using System.Net.Sockets;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Runtime;
-using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
 
 namespace WinForward.TestSupport;
@@ -42,7 +41,7 @@ internal sealed class GatedTransportFactory : IUdpProxyTransportFactory
     public TaskCompletionSource<bool> CreateFinished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public List<FakeTransport> CreatedTransports { get; } = [];
 
-    public async ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
+    public async ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken)
     {
         if (Interlocked.Increment(ref _calls) != 1)
         {
@@ -79,7 +78,7 @@ internal sealed class DelayedTransportFactory(Task gate, TimeSpan? minimumDelay 
     public int CreateCalls => Volatile.Read(ref _calls);
     public List<FakeTransport> Transports { get; } = [];
 
-    public async ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
+    public async ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _calls);
         // The gate models a stalled SOCKS5 handshake, but coordinator shutdown must still be
@@ -98,7 +97,7 @@ internal sealed class FailingTransportFactory : IUdpProxyTransportFactory
     private int _calls;
     public int CreateCalls => Volatile.Read(ref _calls);
 
-    public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
+    public ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _calls);
         throw new IOException("SOCKS5 server is unreachable (synthetic).");
@@ -109,7 +108,7 @@ internal sealed class CancellationAwareTransportFactory : IUdpProxyTransportFact
 {
     public TaskCompletionSource<bool> CreateStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public async ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
+    public async ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken)
     {
         CreateStarted.TrySetResult(true);
         await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
@@ -121,7 +120,7 @@ internal sealed class CollidingAliasTransportFactory : IUdpProxyTransportFactory
 {
     public List<FakeTransport> Transports { get; } = [];
 
-    public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
+    public ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken)
     {
         var transport = new FakeTransport(AddressFamily.InterNetwork, 40000);
         lock (Transports) Transports.Add(transport);

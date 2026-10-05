@@ -1,6 +1,5 @@
 using WinForward.Configuration;
 using WinForward.Core;
-using WinForward.Runtime.Socks5;
 
 namespace WinForward.Runtime.UdpProxy;
 
@@ -80,7 +79,7 @@ internal sealed class UdpSessionSetup(
         QueueEmpty,
     }
 
-    internal async Task CreateSessionAsync(FlowKey flow, Socks5Server server, long flowGeneration, MacAddress clientMac, UdpProxyCoordinator.UdpSessionSlot slot, CancellationToken cancellationToken)
+    internal async Task CreateSessionAsync(FlowKey flow, ProxyTarget target, long flowGeneration, MacAddress clientMac, UdpProxyCoordinator.UdpSessionSlot slot, CancellationToken cancellationToken)
     {
         // Patient admission: a flash crowd of new flows must queue behind the 8-wide setup
         // gate rather than fail into the setup cooldown, because a failed setup's teardown
@@ -99,10 +98,10 @@ internal sealed class UdpSessionSetup(
             // Dial start: the datagram waited on the setup limiter, not on the network, so its
             // queue is re-stamped before the dial and the TTL below measures dial age.
             RefreshSetupStampsAtDialStart(flow, slot);
-            transport = await transportFactory.CreateAsync(server, cancellationToken).ConfigureAwait(false);
+            transport = await transportFactory.CreateAsync(target, cancellationToken).ConfigureAwait(false);
             var relayAlias = new RelayAlias(FlowKey.Create(
                 Endpoint.From(transport.LocalEndpoint.Address, checked((ushort)transport.LocalEndpoint.Port)),
-                Endpoint.From(transport.RelayEndpoint.Address, checked((ushort)transport.RelayEndpoint.Port)),
+                Endpoint.From(transport.PeerEndpoint.Address, checked((ushort)transport.PeerEndpoint.Port)),
                 TransportProtocol.Udp,
                 flow.Origin));
             if (!associations.TryClaim(flow, relayAlias, timeProvider.GetUtcNow(), out association, out associationCreated) || association is null)
@@ -119,7 +118,7 @@ internal sealed class UdpSessionSetup(
             transport = null;
             host.AttachSession(slot, session);
             session.Start(_receiveFailureHandler);
-            UdpProxyLogging.LogDebug(logger, "udp.session.created", flow, flowGeneration, association, server.Name);
+            UdpProxyLogging.LogDebug(logger, "udp.session.created", flow, flowGeneration, association, target);
             await FlushSetupQueueAsync(flow, slot, session, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception)

@@ -10,13 +10,26 @@ namespace WinForward.Runtime.UdpProxy;
 /// </summary>
 internal static class UdpProxyLogging
 {
-    public static void LogDebug(IRuntimeLogger logger, string eventName, FlowKey flow, long flowGeneration, UdpAssociation association, string? serverName)
+    /// <summary>
+    /// The session-lifecycle debug shape (<c>udp.session.created</c>, <c>.closed</c>,
+    /// <c>.expired</c>). Creation passes the flow's resolved target, so the event carries both the
+    /// target's name and its kind; the teardown events pass none, and both fields are then null.
+    /// </summary>
+    public static void LogDebug(IRuntimeLogger logger, string eventName, FlowKey flow, long flowGeneration, UdpAssociation association, ProxyTarget? target = null)
     {
         if (!logger.IsEnabled(RuntimeLogLevel.Debug)) return;
         logger.Event(RuntimeLogLevel.Debug, eventName,
             new("flow", flowGeneration == 0 ? null : flowGeneration),
             new("udpAssociation", association.Generation), new("protocol", flow.Protocol),
-            new("source", flow.Local), new("destination", flow.Remote), new("proxy", serverName));
+            new("source", flow.Local), new("destination", flow.Remote),
+            new("target", target?.Name), new("targetKind", LocalOrSocks5(target)));
+    }
+
+    /// <summary>The target kind as it appears on the lifecycle events, or null when the event has no target.</summary>
+    private static string? LocalOrSocks5(ProxyTarget? target)
+    {
+        if (target is not { } resolved) return null;
+        return resolved.IsLocal ? "local" : "socks5";
     }
 
     public static void LogTrace(IRuntimeLogger logger, string eventName, FlowKey flow, params RuntimeLogField[] additional)

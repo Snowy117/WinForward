@@ -13,7 +13,7 @@
         "protocol": ["udp"],
         "remotePort": ["53"],
         "action": "proxy",
-        "proxyServer": "primary"
+        "target": "primary"
       }
     ]
   },

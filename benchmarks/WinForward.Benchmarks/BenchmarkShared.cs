@@ -5,7 +5,6 @@ using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
 using WinForward.Runtime;
-using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
 
 namespace WinForward.Benchmarks;
@@ -222,7 +221,7 @@ internal sealed class CountingExecutor : IPacketActionExecutor
         return ValueTask.CompletedTask;
     }
     public ValueTask BlockAsync(CapturedFlowPacket packet) => ValueTask.CompletedTask;
-    public ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
+    public ValueTask ProxyAsync(CapturedFlowPacket packet, ProxyTarget target, CancellationToken cancellationToken)
     {
         ProxyCount++;
         return ValueTask.CompletedTask;
@@ -254,13 +253,13 @@ internal sealed class BenchmarkUdpTransportFactory : IUdpProxyTransportFactory
 
     internal void NoteSend() => Interlocked.Increment(ref _sends);
 
-    public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken) =>
+    public ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken) =>
         ValueTask.FromResult<IUdpProxyTransport>(new BenchmarkUdpTransport(Interlocked.Increment(ref _nextPort), this));
 }
 
 internal sealed class BenchmarkUdpTransport(int localPort, BenchmarkUdpTransportFactory owner) : IUdpProxyTransport
 {
-    public IPEndPoint RelayEndpoint { get; } = new(IPAddress.Loopback, 50_000);
+    public IPEndPoint PeerEndpoint { get; } = new(IPAddress.Loopback, 50_000);
     public IPEndPoint LocalEndpoint { get; } = new(IPAddress.Loopback, localPort);
 
     public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken)
@@ -269,7 +268,7 @@ internal sealed class BenchmarkUdpTransport(int localPort, BenchmarkUdpTransport
         return ValueTask.CompletedTask;
     }
 
-    public async ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+    public async ValueTask<UdpTransportReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
     {
         await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
         throw new InvalidOperationException("The benchmark receive should end through cancellation.");
@@ -288,7 +287,7 @@ internal sealed class BenchmarkExchangeTransport(int localPort) : IUdpProxyTrans
 {
     private int _sent;
 
-    public IPEndPoint RelayEndpoint { get; } = new(IPAddress.Loopback, 50_000);
+    public IPEndPoint PeerEndpoint { get; } = new(IPAddress.Loopback, 50_000);
     public IPEndPoint LocalEndpoint { get; } = new(IPAddress.Loopback, localPort);
 
     /// <summary>The datagrams handed to this transport: the flush proof a scenario waits on.</summary>
@@ -303,7 +302,7 @@ internal sealed class BenchmarkExchangeTransport(int localPort) : IUdpProxyTrans
         return ValueTask.CompletedTask;
     }
 
-    public async ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+    public async ValueTask<UdpTransportReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
     {
         await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
         throw new InvalidOperationException("The benchmark receive should end through cancellation.");
@@ -323,7 +322,7 @@ internal sealed class BenchmarkExchangeTransportFactory : IUdpProxyTransportFact
 
     public List<BenchmarkExchangeTransport> Transports { get; } = [];
 
-    public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
+    public ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken)
     {
         var transport = new BenchmarkExchangeTransport(Interlocked.Increment(ref _nextPort));
         Transports.Add(transport);

@@ -17,7 +17,7 @@ internal interface IFlowAttributionHost
 
     IPacketActionExecutor Executor { get; }
 
-    IReadOnlyDictionary<string, Socks5Server> Servers { get; }
+    IReadOnlyDictionary<string, ProxyTarget> Targets { get; }
 
     PolicySnapshot Policy { get; }
 
@@ -336,13 +336,13 @@ internal sealed class FlowAttributionPipeline : IAsyncDisposable
                     Complete(packet, PacketDisposition.Pass);
                     Run(_host.Executor.PassAsync(packet));
                     break;
-                case FlowAction.Proxy when ResolveServer(decision) is { } server:
+                case FlowAction.Proxy when ResolveTarget(decision) is { } target:
                     Complete(packet, PacketDisposition.ProxyConsumed);
-                    Run(_host.Executor.ProxyAsync(packet, server, CancellationToken.None));
+                    Run(_host.Executor.ProxyAsync(packet, target, CancellationToken.None));
                     break;
                 case FlowAction.Proxy
                     or FlowAction.Block:
-                    // Block, and a proxy decision whose server no longer resolves: both fail closed,
+                    // Block, and a proxy decision whose target no longer resolves: both fail closed,
                     // exactly as the dispatcher's inline path does.
                     Complete(packet, PacketDisposition.Block);
                     Run(_host.Executor.BlockAsync(packet));
@@ -357,9 +357,9 @@ internal sealed class FlowAttributionPipeline : IAsyncDisposable
 
     private static void Complete(CapturedFlowPacket packet, PacketDisposition disposition) => packet.Lease.TryComplete(disposition);
 
-    /// <summary>The named proxy server, or null when the decision names none the configuration still holds.</summary>
-    private Socks5Server? ResolveServer(FlowDecision decision) =>
-        decision.ProxyServerName is not null && _host.Servers.TryGetValue(decision.ProxyServerName, out var server) ? server : null;
+    /// <summary>The named target, or null when the decision names none the configuration still holds. One dictionary probe over the resolved-target table the executor's TCP and UDP branches both consume.</summary>
+    private ProxyTarget? ResolveTarget(FlowDecision decision) =>
+        decision.TargetName is not null && _host.Targets.TryGetValue(decision.TargetName, out var target) ? target : null;
 
     /// <summary>
     /// Waits for one executor call. The delivery runs inside the pump's synchronous per-iteration

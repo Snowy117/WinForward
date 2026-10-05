@@ -39,8 +39,10 @@ internal static class UdpProxyComposer
     internal static async Task PrimeSocks5AddressCacheAsync(ValidatedConfiguration configuration, Socks5AddressCache cache, IRuntimeLogger logger)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        foreach (var server in configuration.Servers.Values)
+        foreach (var target in configuration.Targets.Values)
         {
+            // A local target is already an IP literal, so only SOCKS5 servers have an address to resolve.
+            if (target.Socks5 is not { } server) continue;
             try
             {
                 await cache.ResolveAsync(server.Host, timeout.Token).ConfigureAwait(false);
@@ -78,7 +80,9 @@ internal static class UdpProxyComposer
         IInterceptionHealthSignal? healthSignal,
         UdpProxyComposition composition)
         => new(
-            new Socks5UdpTransportFactory(composition.Associations, selfTraffic, composition.MaximumFrameSize, composition.RelayReceiveBufferBytes),
+            new UdpTransportFactory(
+                new Socks5UdpTransportFactory(composition.Associations, selfTraffic, composition.MaximumFrameSize, composition.RelayReceiveBufferBytes),
+                new LocalUdpTransportFactory(selfTraffic, composition.MaximumFrameSize, composition.RelayReceiveBufferBytes)),
             new UdpResponseReinjector(reinjector, composition.Targets, composition.Slots, maximumFrameSize: composition.MaximumFrameSize, logger: logger, healthSignal: healthSignal),
             composition.SetupQueuePool,
             composition.ReceiveWindowPool,

@@ -131,16 +131,17 @@ public sealed class UdpAssociationEvidenceLifetimeTests
         var silent = CreateFlow("192.0.2.54");
         var payload = new byte[PayloadLength];
         var serverKey = server.Server;
+        var target = ProxyTarget.FromServer(serverKey);
 
         // The answered flow pins the shared association's client port; the flow that joins it is
         // multiplexed onto the same relay from its own port and stays unanswered.
-        Assert.True(await coordinator.TrySendSpanAsync(answered, serverKey, payload, default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(answered, target, payload, default, CancellationToken.None));
         Assert.Equal(1, await pinnedRelay.PumpAsync(1));
         Assert.Equal(answered, await ReceiveResponseAsync(responses));
-        Assert.True(await coordinator.TrySendSpanAsync(silent, serverKey, payload, default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(silent, target, payload, default, CancellationToken.None));
         for (var index = 1; index < UdpAssociationCapabilitySampler.PinningSuspicionThreshold; index++)
         {
-            Assert.True(await coordinator.TrySendSpanAsync(silent, serverKey, payload, default, CancellationToken.None));
+            Assert.True(await coordinator.TrySendSpanAsync(silent, target, payload, default, CancellationToken.None));
         }
 
         Assert.Equal(2, await pinnedRelay.PumpAsync(UdpAssociationCapabilitySampler.PinningSuspicionThreshold));
@@ -155,7 +156,7 @@ public sealed class UdpAssociationEvidenceLifetimeTests
         Assert.Equal(2, coordinator.SessionCount);
         Assert.Equal(UdpSessionState.Active, coordinator.SessionState(answered));
         Assert.Equal(0, coordinator.Diagnostics.SetupCooldownCount);
-        Assert.True(await coordinator.TrySendSpanAsync(answered, serverKey, payload, default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(answered, target, payload, default, CancellationToken.None));
         // The relay's count is cumulative and still two: the answered flow sends from the pinned port.
         Assert.Equal(2, await pinnedRelay.PumpAsync(1));
         Assert.Equal(answered, await ReceiveResponseAsync(responses));
@@ -165,7 +166,7 @@ public sealed class UdpAssociationEvidenceLifetimeTests
         // A flow placed after the flip gets its own association: a second ASSOCIATE, its own relay,
         // and a datagram that is delivered.
         var placed = CreateFlow("192.0.2.55");
-        Assert.True(await coordinator.TrySendSpanAsync(placed, serverKey, payload, default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(placed, target, payload, default, CancellationToken.None));
         Assert.Equal(placed, await ReceiveResponseAsync(responses));
         Assert.Equal(3, coordinator.SessionCount);
         Assert.Equal(3, pool.LeasedFlowCount);

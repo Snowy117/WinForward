@@ -31,7 +31,7 @@ public sealed class UdpSessionSetupTests
         var setup = new UdpSessionSetup(factory, new UdpAssociationTable(), new FakeResponseSink(), time, new ActivityBucketClock(time), NullRuntimeLogger.Instance, receiveWindowPool, ReceiveBufferSize, host);
         var slot = new UdpProxyCoordinator.UdpSessionSlot();
 
-        await setup.CreateSessionAsync(flow, s_server, flowGeneration: 1, MacAddress.Invalid, slot, shutdown.Token);
+        await setup.CreateSessionAsync(flow, ProxyTarget.FromServer(s_server), flowGeneration: 1, MacAddress.Invalid, slot, shutdown.Token);
 
         // The first dequeue step delivered an over-TTL entry: it was dropped without a send, its
         // lease returned to the pool, and the flush then stopped at the not-owner step.
@@ -63,7 +63,7 @@ public sealed class UdpSessionSetupTests
         var setup = new UdpSessionSetup(factory, new UdpAssociationTable(), new FakeResponseSink(), time, new ActivityBucketClock(time), NullRuntimeLogger.Instance, receiveWindowPool, ReceiveBufferSize, host);
         var slot = new UdpProxyCoordinator.UdpSessionSlot();
 
-        await setup.CreateSessionAsync(flow, s_server, flowGeneration: 1, MacAddress.Invalid, slot, shutdown.Token);
+        await setup.CreateSessionAsync(flow, ProxyTarget.FromServer(s_server), flowGeneration: 1, MacAddress.Invalid, slot, shutdown.Token);
 
         // A genuine dial failure is what arms the setup cooldown, so its teardown reason is the
         // only one that must arm it.
@@ -84,7 +84,7 @@ public sealed class UdpSessionSetupTests
         var setup = new UdpSessionSetup(factory, new UdpAssociationTable(), new FakeResponseSink(), time, new ActivityBucketClock(time), NullRuntimeLogger.Instance, receiveWindowPool, ReceiveBufferSize, host);
         var slot = new UdpProxyCoordinator.UdpSessionSlot();
 
-        var pending = setup.CreateSessionAsync(flow, s_server, flowGeneration: 1, MacAddress.Invalid, slot, shutdown.Token);
+        var pending = setup.CreateSessionAsync(flow, ProxyTarget.FromServer(s_server), flowGeneration: 1, MacAddress.Invalid, slot, shutdown.Token);
         await factory.CreateStarted.Task;
         factory.Fail(new OperationCanceledException("setup cancelled (synthetic)."));
         await pending;

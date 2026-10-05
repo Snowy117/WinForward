@@ -117,7 +117,7 @@ internal static class UdpSessionRetentionScenario
             var flow = MakeFlow(flowOffset + index);
             var oneShot = index < SessionsPerClass;
             var expectedCreated = factory.Transports.Count + 1;
-            if (!await coordinator.TrySendSpanAsync(flow, s_server, s_populatePayload, default, CancellationToken.None).ConfigureAwait(false))
+            if (!await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), s_populatePayload, default, CancellationToken.None).ConfigureAwait(false))
             {
                 throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture, $"The retention scenario could not admit flow {flowOffset + index}."));
             }

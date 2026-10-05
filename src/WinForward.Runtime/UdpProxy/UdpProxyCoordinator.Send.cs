@@ -1,7 +1,6 @@
 using System.Runtime.ExceptionServices;
 using WinForward.Configuration;
 using WinForward.Core;
-using WinForward.Runtime.Socks5;
 
 namespace WinForward.Runtime.UdpProxy;
 
@@ -16,9 +15,10 @@ public sealed partial class UdpProxyCoordinator
     /// a synchronous view of the native capture buffer. The ready-session warm shape consumes the
     /// span synchronously (SOCKS5 encode into the transport's reusable buffer) so nothing
     /// materializes, while the setup-window path copies the datagram into the bounded setup queue
-    /// (the queue owns its native leases).
+    /// (the queue owns its native leases). <paramref name="target"/> is read only on the admission
+    /// path: a ready session already owns its transport, so the warm shape never touches it.
     /// </summary>
-    internal ValueTask<bool> TrySendSpanAsync(FlowKey flow, Socks5Server server, ReadOnlySpan<byte> payload, MacAddress clientMac, CancellationToken cancellationToken, long packetSequence = 0, long flowGeneration = 0)
+    internal ValueTask<bool> TrySendSpanAsync(FlowKey flow, ProxyTarget target, ReadOnlySpan<byte> payload, MacAddress clientMac, CancellationToken cancellationToken, long packetSequence = 0, long flowGeneration = 0)
     {
         if (flow.Protocol != TransportProtocol.Udp) throw new ArgumentException("UDP coordinator accepts only UDP flow keys.", nameof(flow));
 
@@ -32,7 +32,7 @@ public sealed partial class UdpProxyCoordinator
             return SendOnReadySessionSpanAsync(flow, cached, session, payload, packetSequence, cancellationToken);
         }
 
-        return SendAdmissionPathSpanAsync(flow, server, payload, clientMac, packetSequence, flowGeneration, cancellationToken);
+        return SendAdmissionPathSpanAsync(flow, target, payload, clientMac, packetSequence, flowGeneration, cancellationToken);
     }
 
     private int SessionCacheSlot(FlowKey flow) => flow.GetHashCode() & (_sessionCache.Length - 1);
@@ -52,7 +52,7 @@ public sealed partial class UdpProxyCoordinator
     /// datagram first read as "not ready" must not be enqueued after the flush already drained the queue
     /// and flipped the slot ready, or it would sit until its TTL.
     /// </summary>
-    private ValueTask<bool> SendAdmissionPathSpanAsync(FlowKey flow, Socks5Server server, ReadOnlySpan<byte> payload, MacAddress clientMac, long packetSequence, long flowGeneration, CancellationToken cancellationToken)
+    private ValueTask<bool> SendAdmissionPathSpanAsync(FlowKey flow, ProxyTarget target, ReadOnlySpan<byte> payload, MacAddress clientMac, long packetSequence, long flowGeneration, CancellationToken cancellationToken)
     {
         UdpSessionSlot? readySlot;
         UdpProxySession? readySession;
@@ -85,7 +85,7 @@ public sealed partial class UdpProxyCoordinator
                 // run) is carried by this gate: the setup pipeline's attach step (which takes this
                 // gate via its delegate) can only be acquired after this critical section
                 // (including the Add below) has released it.
-                if (!ScheduleSessionSetup(flow, server, flowGeneration, clientMac, slot))
+                if (!ScheduleSessionSetup(flow, target, flowGeneration, clientMac, slot))
                 {
                     RuntimeCounters.Shared.Increment(RuntimeCounters.UdpSetupRejections);
                     if (_logger.IsEnabled(RuntimeLogLevel.Trace)) UdpProxyLogging.LogTrace(_logger, "udp.session.rejected", flow, new RuntimeLogField("reason", "setupRing"));

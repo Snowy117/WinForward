@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using WinForward.Configuration;
 using WinForward.Runtime;
 
@@ -55,6 +56,66 @@ internal static class StabilityShared
 
         return snapshot;
     }
+}
+
+/// <summary>
+/// The loopback SOCKS5 server's own handshake counters: control connections accepted and UDP
+/// ASSOCIATE replies written. A relayed flow pays both before its first datagram can move, so flows
+/// that moved without them did not use this server — which is exactly what the local column's row
+/// has to show. <see langword="null"/> means the server ran out of process (<c>--socks5-external</c>)
+/// and the parent holds no counter to read: the field is omitted rather than reported as a zero
+/// nobody observed.
+/// </summary>
+[StructLayout(LayoutKind.Auto)]
+internal readonly record struct Socks5HandshakeCounters(long ControlConnections, long AssociateReplies)
+{
+    /// <summary>The server's counters right now; null when the server ran out of process and the parent holds no counter to read.</summary>
+    internal static Socks5HandshakeCounters? Snapshot(LoopbackSocks5UdpServer? server) =>
+        server is null ? null : new Socks5HandshakeCounters(server.ControlConnections, server.AssociateReplies);
+
+    /// <summary>The handshakes between two snapshots; null when either side is missing.</summary>
+    internal static Socks5HandshakeCounters? Delta(Socks5HandshakeCounters? after, Socks5HandshakeCounters? before) =>
+        after is { } end && before is { } start
+            ? new Socks5HandshakeCounters(end.ControlConnections - start.ControlConnections, end.AssociateReplies - start.AssociateReplies)
+            : null;
+}
+
+/// <summary>
+/// The local responder's counters: the datagrams that arrived on the local endpoint and the answers
+/// it returned. Read beside <see cref="Socks5HandshakeCounters"/>, so one row shows the local
+/// column's zero handshakes next to the traffic the local hop really carried, and the SOCKS5
+/// columns' non-zero handshakes next to a local hop that carried nothing.
+/// </summary>
+[StructLayout(LayoutKind.Auto)]
+internal readonly record struct LocalResponderCounters(long DatagramsReceived, long DatagramsReplied)
+{
+    internal static LocalResponderCounters Snapshot(LoopbackLocalUdpResponder responder) =>
+        new(responder.DatagramsReceived, responder.DatagramsReplied);
+
+    /// <summary>The datagrams handled between two snapshots.</summary>
+    internal static LocalResponderCounters Delta(LocalResponderCounters after, LocalResponderCounters before) =>
+        new(after.DatagramsReceived - before.DatagramsReceived, after.DatagramsReplied - before.DatagramsReplied);
+}
+
+/// <summary>
+/// Both loopback servers' counters at one instant. A row reports the difference between the
+/// observation taken when its run's load started and the one read when the row was written, so "the
+/// local column moved these flows without one SOCKS5 handshake" is a subtraction of two observed
+/// numbers rather than a claim about the wiring. The difference is meant to be cumulative over the
+/// run rather than per window: a shared association is established once and then serves later waves,
+/// so a per-wave zero would be the pool working, not the relay being unused.
+/// </summary>
+[StructLayout(LayoutKind.Auto)]
+internal readonly record struct TransportObservation(Socks5HandshakeCounters? Socks5Handshakes, LocalResponderCounters LocalResponder)
+{
+    internal static TransportObservation Observe(LoopbackSocks5UdpServer? server, LoopbackLocalUdpResponder responder) =>
+        new(Socks5HandshakeCounters.Snapshot(server), LocalResponderCounters.Snapshot(responder));
+
+    /// <summary>What each server did between this observation and now.</summary>
+    internal TransportObservation Since(LoopbackSocks5UdpServer? server, LoopbackLocalUdpResponder responder) =>
+        new(
+            Socks5HandshakeCounters.Delta(Socks5HandshakeCounters.Snapshot(server), Socks5Handshakes),
+            LocalResponderCounters.Delta(LocalResponderCounters.Snapshot(responder), LocalResponder));
 }
 
 /// <summary>min/p50/p95/p99/max/mean over a latency sample; all zeros when the sample is empty.</summary>

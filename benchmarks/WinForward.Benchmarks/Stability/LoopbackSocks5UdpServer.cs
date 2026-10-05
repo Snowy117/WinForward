@@ -35,6 +35,8 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
     private long _relayForwarded;
     private long _relayReplies;
     private long _relaySendFaults;
+    private long _controlConnections;
+    private long _associateReplies;
     private int _connectionCount;
     private int _disposed;
 
@@ -64,6 +66,16 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
 
     /// <summary>Raw total of SocketExceptions caught by the relay loops' forward/reply sends.</summary>
     public long RelaySendFaults => Interlocked.Read(ref _relaySendFaults);
+
+    /// <summary>
+    /// Control (TCP) connections accepted and served. A relayed UDP flow costs one of these before
+    /// its first datagram can move, so the count is the handshake half of the local column's
+    /// evidence: the local column runs with this server listening and reads zero.
+    /// </summary>
+    public long ControlConnections => Interlocked.Read(ref _controlConnections);
+
+    /// <summary>UDP ASSOCIATE success replies written, i.e. completed association handshakes; the other half of the same evidence.</summary>
+    public long AssociateReplies => Interlocked.Read(ref _associateReplies);
 
     /// <summary>
     /// Live control connections; each owns one control socket and one relay socket, so this is the
@@ -115,6 +127,7 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
             }
 
             var connection = new RelayConnection(socket, this, _echoDestination, cancellation);
+            Interlocked.Increment(ref _controlConnections);
             _connections.TryAdd(connection, 0);
             _ = connection.RunAsync().ContinueWith(
                 completed => { _ = completed; _connections.TryRemove(connection, out _); Interlocked.Decrement(ref _connectionCount); },
@@ -244,6 +257,7 @@ internal sealed class LoopbackSocks5UdpServer : IAsyncDisposable
             _ = IPAddress.Loopback.TryWriteBytes(reply.AsSpan(4, 4), out _);
             BinaryPrimitives.WriteUInt16BigEndian(reply.AsSpan(8, 2), checked((ushort)RelayEndpoint.Port));
             await stream.WriteAsync(reply, _shutdown).ConfigureAwait(false);
+            Interlocked.Increment(ref _owner._associateReplies);
         }
 
         private async Task RelayLoopAsync()

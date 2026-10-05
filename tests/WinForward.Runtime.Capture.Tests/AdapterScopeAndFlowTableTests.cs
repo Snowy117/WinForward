@@ -20,8 +20,8 @@ public sealed class AdapterScopeAndFlowTableTests
         };
         var policy = new PolicySnapshot(
         [
-            new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null)),
-            new(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "browser.exe" }), new FlowDecision(FlowAction.Block, 1, ProxyServerName: null)),
+            new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Pass, 0, TargetName: null)),
+            new(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "browser.exe" }), new FlowDecision(FlowAction.Block, 1, TargetName: null)),
         ], FlowAction.Pass);
 
         Assert.True(CaptureAdapterScopeResolver.TryResolve(adapters, policy, out var scope, out _));
@@ -39,7 +39,7 @@ public sealed class AdapterScopeAndFlowTableTests
         };
         var policy = new PolicySnapshot([], FlowAction.Pass)
         {
-            ForwardedRules = [new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-b" }), new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null))],
+            ForwardedRules = [new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-b" }), new FlowDecision(FlowAction.Pass, 0, TargetName: null))],
         };
 
         Assert.True(CaptureAdapterScopeResolver.TryResolve(adapters, policy, out var scope, out _));
@@ -58,10 +58,10 @@ public sealed class AdapterScopeAndFlowTableTests
         // The host rule pins the scope non-empty: an empty scope widens on its own, so without it a
         // resolver that stopped walking ForwardedRules would still return both adapters here.
         var policy = new PolicySnapshot(
-            [new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null))],
+            [new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Pass, 0, TargetName: null))],
             FlowAction.Pass)
         {
-            ForwardedRules = [new(new RuleMatcher(RemotePorts: [(443, 443)]), new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null))],
+            ForwardedRules = [new(new RuleMatcher(RemotePorts: [(443, 443)]), new FlowDecision(FlowAction.Pass, 0, TargetName: null))],
         };
 
         Assert.True(CaptureAdapterScopeResolver.TryResolve(adapters, policy, out var scope, out _));
@@ -73,10 +73,10 @@ public sealed class AdapterScopeAndFlowTableTests
     {
         var adapters = new[] { new WindowsAdapter("id-a", "Ethernet", "a", 1, 1) };
         var policy = new PolicySnapshot(
-            [new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "host-missing" }), new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null))],
+            [new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "host-missing" }), new FlowDecision(FlowAction.Pass, 0, TargetName: null))],
             FlowAction.Pass)
         {
-            ForwardedRules = [new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "forwarded-missing" }), new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null))],
+            ForwardedRules = [new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "forwarded-missing" }), new FlowDecision(FlowAction.Pass, 0, TargetName: null))],
         };
 
         Assert.False(CaptureAdapterScopeResolver.TryResolve(adapters, policy, out _, out var errors));
@@ -93,13 +93,13 @@ public sealed class AdapterScopeAndFlowTableTests
             new WindowsAdapter("id-a2", "Ethernet", "a2", 3, 1),
             new WindowsAdapter("id-b", "vEthernet (Shared)", "b", 2, 1),
         };
-        var missing = new PolicySnapshot([new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "nope" }), new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null))], FlowAction.Pass);
+        var missing = new PolicySnapshot([new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "nope" }), new FlowDecision(FlowAction.Pass, 0, TargetName: null))], FlowAction.Pass);
 
         Assert.False(CaptureAdapterScopeResolver.TryResolve(adapters, missing, out _, out var missingErrors));
         Assert.Contains(missingErrors, error => error.Contains("nope", StringComparison.Ordinal));
 
         var ambiguous = new PolicySnapshot(
-            [new(new RuleMatcher(AdapterNames: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Ethernet" }), new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null))],
+            [new(new RuleMatcher(AdapterNames: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Ethernet" }), new FlowDecision(FlowAction.Pass, 0, TargetName: null))],
             FlowAction.Pass);
         Assert.False(CaptureAdapterScopeResolver.TryResolve(adapters, ambiguous, out _, out var ambiguousErrors));
         Assert.Contains(ambiguousErrors, error => error.Contains("ambiguous", StringComparison.Ordinal));
@@ -120,7 +120,7 @@ public sealed class AdapterScopeAndFlowTableTests
             [new(new RuleMatcher(
                 AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" },
                 AdapterNames: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "vEthernet 1" }),
-                new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null))],
+                new FlowDecision(FlowAction.Pass, 0, TargetName: null))],
             FlowAction.Pass);
 
         Assert.False(CaptureAdapterScopeResolver.TryResolve(adapters, policy, out _, out var errors));
@@ -139,7 +139,7 @@ public sealed class AdapterScopeAndFlowTableTests
             [new(new RuleMatcher(
                 AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-b" },
                 AdapterNames: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "vEthernet 1" }),
-                new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null))],
+                new FlowDecision(FlowAction.Pass, 0, TargetName: null))],
             FlowAction.Pass);
 
         Assert.True(CaptureAdapterScopeResolver.TryResolve(adapters, policy, out var scope, out _));
@@ -170,7 +170,7 @@ public sealed class AdapterScopeAndFlowTableTests
             new WindowsAdapter("id-b", "vEthernet 1", "b", 2, 1),
         };
         var policy = new PolicySnapshot(
-            [new(new RuleMatcher(AdapterNames: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "vEthernet 1" }), new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null))],
+            [new(new RuleMatcher(AdapterNames: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "vEthernet 1" }), new FlowDecision(FlowAction.Pass, 0, TargetName: null))],
             FlowAction.Pass);
 
         Assert.True(CaptureAdapterScopeResolver.TryResolve(adapters, policy, out var scope, out _));
@@ -187,7 +187,7 @@ public sealed class AdapterScopeAndFlowTableTests
         var hostKey = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 443), TransportProtocol.Tcp, FlowOriginKind.Host);
         var decisions = 0;
 
-        Assert.True(table.TryClaimResolved(hostKey, () => { decisions++; return new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null); }, out var claimed));
+        Assert.True(table.TryClaimResolved(hostKey, () => { decisions++; return new FlowDecision(FlowAction.Pass, 0, TargetName: null); }, out var claimed));
         Assert.NotNull(claimed);
         Assert.Equal(1, decisions);
 
@@ -210,7 +210,7 @@ public sealed class AdapterScopeAndFlowTableTests
         var onAdapterA = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 443), TransportProtocol.Tcp, FlowOriginKind.Host, FlowBuilders.SlotOf("a", 1), 1);
         var onAdapterB = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.53"), 443), Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), TransportProtocol.Tcp, FlowOriginKind.Forwarded, FlowBuilders.SlotOf("b", 2), 2);
 
-        Assert.True(table.TryClaimResolved(onAdapterA, () => new FlowDecision(FlowAction.Block, 0, ProxyServerName: null), out var claimed));
+        Assert.True(table.TryClaimResolved(onAdapterA, () => new FlowDecision(FlowAction.Block, 0, TargetName: null), out var claimed));
         Assert.True(table.TryResolve(onAdapterB, out var resolved));
         Assert.Same(claimed, resolved);
     }

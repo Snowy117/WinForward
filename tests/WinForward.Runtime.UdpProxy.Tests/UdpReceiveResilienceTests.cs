@@ -3,7 +3,6 @@ using System.Net.Sockets;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
-using WinForward.Runtime.Socks5;
 using WinForward.TestSupport;
 using Xunit;
 using static WinForward.TestSupport.AsyncTestExtensions;
@@ -31,7 +30,7 @@ public sealed class UdpReceiveResilienceTests
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, sink, new UdpProxyOptions { Logger = logger });
         var flow = CreateFlow("192.0.2.53");
 
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [0], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [0], default, CancellationToken.None));
         await WaitForAsync(() => factory.Transports.Count == 1);
         var transport = Assert.Single(factory.Transports);
         await WaitForAsync(() =>
@@ -40,11 +39,11 @@ public sealed class UdpReceiveResilienceTests
         });
 
         transport.EnqueueResponse(Datagram(1));
-        transport.EnqueueSkip(Socks5UdpReceiveSkipReason.Malformed);
+        transport.EnqueueSkip(UdpTransportSkipReason.Malformed);
         transport.EnqueueResponse(Datagram(2));
-        transport.EnqueueSkip(Socks5UdpReceiveSkipReason.UnexpectedSource);
+        transport.EnqueueSkip(UdpTransportSkipReason.UnexpectedSource);
         transport.EnqueueResponse(Datagram(3));
-        transport.EnqueueSkip(Socks5UdpReceiveSkipReason.Oversized);
+        transport.EnqueueSkip(UdpTransportSkipReason.Oversized);
         transport.EnqueueResponse(Datagram(4));
 
         for (var expected = 1; expected <= 4; expected++)
@@ -56,7 +55,7 @@ public sealed class UdpReceiveResilienceTests
         }
 
         // The session survived: another send flows through the same transport.
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [5], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [5], default, CancellationToken.None));
         await WaitForAsync(() =>
         {
             lock (transport.Sent) return transport.Sent.Count == 2;
@@ -66,7 +65,7 @@ public sealed class UdpReceiveResilienceTests
 
         return;
 
-        static Socks5UdpDatagram Datagram(byte payload) => new(IPAddress.Parse("192.0.2.53"), DestinationDomain: null, 53, new[] { payload });
+        static UdpTransportDatagram Datagram(byte payload) => new(IPAddress.Parse("192.0.2.53"), SourceDomain: null, 53, new[] { payload });
     }
 
     [Fact]
@@ -77,7 +76,7 @@ public sealed class UdpReceiveResilienceTests
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, sink);
         var flow = CreateFlow("192.0.2.53");
 
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [1], default, CancellationToken.None));
         await WaitForAsync(() => factory.Transports.Count == 1);
         var transport = Assert.Single(factory.Transports);
         await WaitForAsync(() =>
@@ -90,7 +89,7 @@ public sealed class UdpReceiveResilienceTests
         await WaitForAsync(() => sink.Injections == 2);
 
         // Both responses were attempted; the session is still usable for sends.
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [3], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [3], default, CancellationToken.None));
         await WaitForAsync(() =>
         {
             lock (transport.Sent) return transport.Sent.Count == 2;
@@ -99,7 +98,7 @@ public sealed class UdpReceiveResilienceTests
 
         return;
 
-        static Socks5UdpDatagram Datagram(byte payload) => new(IPAddress.Parse("192.0.2.53"), DestinationDomain: null, 53, new[] { payload });
+        static UdpTransportDatagram Datagram(byte payload) => new(IPAddress.Parse("192.0.2.53"), SourceDomain: null, 53, new[] { payload });
     }
 
     [Fact]
@@ -128,22 +127,22 @@ public sealed class UdpReceiveResilienceTests
         await relaySocket.SendToAsync(Socks5UdpDatagrams.Encode(destination, 53, [1]), SocketFlags.None, transportEndpoint, CancellationToken.None);
         var valid = await transport.ReceiveAsync(buffer, CancellationToken.None);
         Assert.True(valid.HasDatagram);
-        Assert.Equal((IPAddressValue?)destination, valid.Datagram.DestinationAddress);
+        Assert.Equal((IPAddressValue?)destination, valid.Datagram.SourceAddress);
 
         // Unexpected source (same family, different port): skipped, not thrown.
         await strangerSocket.SendToAsync(Socks5UdpDatagrams.Encode(destination, 53, [2]), SocketFlags.None, transportEndpoint, CancellationToken.None);
         var unexpected = await transport.ReceiveAsync(buffer, CancellationToken.None);
-        Assert.Equal(Socks5UdpReceiveSkipReason.UnexpectedSource, unexpected.SkipReason);
+        Assert.Equal(UdpTransportSkipReason.UnexpectedSource, unexpected.SkipReason);
 
         // Oversized (fills the 64-byte buffer, so it may be truncated): skipped, not thrown.
         await relaySocket.SendToAsync(new byte[100], SocketFlags.None, transportEndpoint, CancellationToken.None);
         var oversized = await transport.ReceiveAsync(buffer, CancellationToken.None);
-        Assert.Equal(Socks5UdpReceiveSkipReason.Oversized, oversized.SkipReason);
+        Assert.Equal(UdpTransportSkipReason.Oversized, oversized.SkipReason);
 
         // Malformed (not a SOCKS5 UDP datagram): skipped, not thrown.
         await relaySocket.SendToAsync(new byte[] { 0xff, 0xff, 0xff }, SocketFlags.None, transportEndpoint, CancellationToken.None);
         var malformed = await transport.ReceiveAsync(buffer, CancellationToken.None);
-        Assert.Equal(Socks5UdpReceiveSkipReason.Malformed, malformed.SkipReason);
+        Assert.Equal(UdpTransportSkipReason.Malformed, malformed.SkipReason);
 
         // The next valid datagram still flows: the receive path never tore anything down.
         await relaySocket.SendToAsync(Socks5UdpDatagrams.Encode(destination, 53, [3]), SocketFlags.None, transportEndpoint, CancellationToken.None);
@@ -208,7 +207,7 @@ public sealed class UdpReceiveResilienceTests
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, sink, new UdpProxyOptions { Logger = logger });
         var flow = CreateFlow("192.0.2.53");
 
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [1], default, CancellationToken.None));
         await WaitForAsync(() => transport.SendCount == 1);
 
         transport.EnqueueResponse(Datagram(1));
@@ -223,14 +222,14 @@ public sealed class UdpReceiveResilienceTests
 
         // The session survived: another send flows through the same transport, and the reset was
         // counted in the skip summary instead of tearing the session down.
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [3], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [3], default, CancellationToken.None));
         await WaitForAsync(() => transport.SendCount == 2);
         Assert.False(transport.IsDisposed);
         Assert.Contains(logger.Lines, line => line.Level == RuntimeLogLevel.Debug && line.Message.Contains("connectionReset=1", StringComparison.Ordinal));
 
         return;
 
-        static Socks5UdpDatagram Datagram(byte payload) => new(IPAddress.Parse("192.0.2.53"), DestinationDomain: null, 53, new[] { payload });
+        static UdpTransportDatagram Datagram(byte payload) => new(IPAddress.Parse("192.0.2.53"), SourceDomain: null, 53, new[] { payload });
     }
 
     [Fact]
@@ -244,7 +243,7 @@ public sealed class UdpReceiveResilienceTests
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, sink, new UdpProxyOptions { Logger = logger });
         var flow = CreateFlow("192.0.2.53");
 
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [1], default, CancellationToken.None));
         await WaitForAsync(() => factory.Transports.Count == 1);
         var transport = Assert.Single(factory.Transports);
         await WaitForAsync(() =>
@@ -252,7 +251,7 @@ public sealed class UdpReceiveResilienceTests
             lock (transport.Sent) return transport.Sent.Count == 1;
         });
 
-        transport.EnqueueResponse(new Socks5UdpDatagram(DestinationAddress: null, "example.com", 53, new byte[] { 0x7f }));
+        transport.EnqueueResponse(new UdpTransportDatagram(SourceAddress: null, "example.com", 53, new byte[] { 0x7f }));
         transport.EnqueueResponse(Datagram(2));
 
         await WaitForAsync(() => logger.Lines.Any(line => line.Level == RuntimeLogLevel.Debug && line.Message.Contains("domainDestination=1", StringComparison.Ordinal)));
@@ -262,7 +261,7 @@ public sealed class UdpReceiveResilienceTests
         Assert.False(sink.Responses.Reader.TryRead(out _), "The domain-typed datagram must never reach the response sink.");
 
         // The session survived: another send flows through the same transport.
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [3], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [3], default, CancellationToken.None));
         await WaitForAsync(() =>
         {
             lock (transport.Sent) return transport.Sent.Count == 2;
@@ -271,13 +270,13 @@ public sealed class UdpReceiveResilienceTests
 
         return;
 
-        static Socks5UdpDatagram Datagram(byte payload) => new(IPAddress.Parse("192.0.2.53"), DestinationDomain: null, 53, new[] { payload });
+        static UdpTransportDatagram Datagram(byte payload) => new(IPAddress.Parse("192.0.2.53"), SourceDomain: null, 53, new[] { payload });
     }
 
     /// <summary>Yields one predetermined transport regardless of how many sessions ask for a relay.</summary>
     private sealed class SingleTransportFactory(IUdpProxyTransport transport) : IUdpProxyTransportFactory
     {
-        public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken) =>
+        public ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken) =>
             ValueTask.FromResult(transport);
     }
 
@@ -291,7 +290,7 @@ public sealed class UdpReceiveResilienceTests
         private readonly FakeTransport _inner = new(AddressFamily.InterNetwork, 40010);
         private int _receiveCalls;
 
-        public IPEndPoint RelayEndpoint => _inner.RelayEndpoint;
+        public IPEndPoint PeerEndpoint => _inner.PeerEndpoint;
         public IPEndPoint LocalEndpoint => _inner.LocalEndpoint;
         public bool IsDisposed => _inner.IsDisposed;
         public int SendCount
@@ -299,12 +298,12 @@ public sealed class UdpReceiveResilienceTests
             get { lock (_inner.Sent) return _inner.Sent.Count; }
         }
 
-        public void EnqueueResponse(Socks5UdpDatagram datagram) => _inner.EnqueueResponse(datagram);
+        public void EnqueueResponse(UdpTransportDatagram datagram) => _inner.EnqueueResponse(datagram);
 
         public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken) =>
             _inner.SendSpanAsync(destination, payload, cancellationToken);
 
-        public async ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+        public async ValueTask<UdpTransportReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
         {
             if (Interlocked.Increment(ref _receiveCalls) == 1) throw new SocketException((int)SocketError.ConnectionReset);
             return await _inner.ReceiveAsync(buffer, cancellationToken);

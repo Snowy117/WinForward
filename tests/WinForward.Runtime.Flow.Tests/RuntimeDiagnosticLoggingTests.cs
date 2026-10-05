@@ -92,7 +92,7 @@ public sealed class RuntimeDiagnosticLoggingTests
     public async Task CapacityBlockWarnCarriesTableStateAndIsThrottled()
     {
         var config = new ValidatedConfiguration(
-            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Pass));
         var logger = new RecordingRuntimeLogger();
         var executor = new FakeExecutor();
@@ -116,10 +116,10 @@ public sealed class RuntimeDiagnosticLoggingTests
     public async Task AttributionMissWarnCarriesAfterRetryAndSuccessStaysSilent()
     {
         var config = new ValidatedConfiguration(
-            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot(
             [
-                new(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "dns.exe" }), new FlowDecision(FlowAction.Block, 0, ProxyServerName: null)),
+                new(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "dns.exe" }), new FlowDecision(FlowAction.Block, 0, TargetName: null)),
             ], FlowAction.Pass));
         var logger = new RecordingRuntimeLogger();
         var missing = new FlowDispatcher(config, new FakeGuard(), new FakeExecutor(), new FakeAttributor(name: null), logger: logger);

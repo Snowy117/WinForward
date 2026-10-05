@@ -45,6 +45,9 @@ internal static class UdpChurnScenario
             : null;
         await using var receiver = externalServer is null ? new EchoReceiver(flows) : null;
         await using var server = receiver is null ? null : new LoopbackSocks5UdpServer(receiver.Endpoint, associateDelay);
+        // Hosted in every column, so the rows of all three carry the local hop's own counters: the
+        // SOCKS5 columns observe zero datagrams arriving on it, the local column observes the wave.
+        await using var localResponder = new LoopbackLocalUdpResponder();
         var flowKeys = new FlowKey[flows];
         for (var index = 0; index < flowKeys.Length; index++) flowKeys[index] = BenchmarkShared.CreateFlowKey(index);
         var sink = new ChurnCountingSink(flows, flowKeys);
@@ -58,7 +61,7 @@ internal static class UdpChurnScenario
         var registry = new SelfTrafficRegistry();
         await using var associations = new UdpAssociationPool(registry, options.ReuseMode, logger: productEvents);
         var coordinator = new UdpProxyCoordinator(
-            new Socks5UdpTransportFactory(associations, registry, maximumFrameSize),
+            CreateTransportFactory(options, associations, registry, maximumFrameSize),
             sink,
             setupQueuePool,
             receiveWindowPool,
@@ -67,7 +70,12 @@ internal static class UdpChurnScenario
         try
         {
             var controlPort = checked((ushort)(externalServer?.ControlEndpoint.Port ?? server!.ControlEndpoint.Port));
-            var target = new ChurnTarget(new Socks5Server("churn", "127.0.0.1", controlPort, Username: null, Password: null), externalServer);
+            var target = new ChurnTarget(
+                ProxyTarget.FromServer(new Socks5Server("churn", "127.0.0.1", controlPort, Username: null, Password: null)),
+                CreateLocalTarget(localResponder),
+                server,
+                localResponder,
+                externalServer);
             var timeout = ComputeWaveTimeout(flows, associateDelay);
             if (sustained)
             {
@@ -82,6 +90,34 @@ internal static class UdpChurnScenario
         {
             await coordinator.DisposeAsync().ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// The transport the column sends through: the product composite with both factories for a local
+    /// target (<c>--target local</c> prices the wiring the CLI composes), the bare relay factory for
+    /// the SOCKS5 columns (the shape the reuse series was recorded with).
+    /// </summary>
+    private static IUdpProxyTransportFactory CreateTransportFactory(
+        SoakOptions options,
+        UdpAssociationPool associations,
+        SelfTrafficRegistry registry,
+        int maximumFrameSize)
+    {
+        var socks5 = new Socks5UdpTransportFactory(associations, registry, maximumFrameSize);
+        return options.Target == SoakTargetKind.Local
+            ? new UdpTransportFactory(socks5, new LocalUdpTransportFactory(registry, maximumFrameSize))
+            : socks5;
+    }
+
+    /// <summary>
+    /// The local column's target: the responder's own endpoint, carried as a <see cref="ProxyTarget"/>
+    /// with no SOCKS5 server behind it — the shape the configuration loader produces for a
+    /// <c>localTargets</c> entry, which is what the composite dispatches on.
+    /// </summary>
+    private static ProxyTarget CreateLocalTarget(LoopbackLocalUdpResponder responder)
+    {
+        var local = new LocalTarget("local", Endpoint.From(responder.Endpoint.Address, checked((ushort)responder.Endpoint.Port)));
+        return new ProxyTarget(local.Name, Socks5: null, Local: local);
     }
 
     /// <summary>
@@ -107,14 +143,17 @@ internal static class UdpChurnScenario
         TimeSpan timeout)
     {
         var payload = new byte[options.PayloadBytes];
-        var sequence = await WarmUpAsync(coordinator, sink, target, flowKeys, payload, timeout).ConfigureAwait(false);
+        // The counters open before the unmeasured warmup wave, so each row's difference covers every
+        // handshake the run made for these flows up to that row — warmup and earlier waves included.
+        var observationStart = TransportObservation.Observe(target.Server, target.Responder);
+        var sequence = await WarmUpAsync(coordinator, sink, target, options, flowKeys, payload, timeout).ConfigureAwait(false);
         for (var wave = 0; wave < waveCount; wave++)
         {
-            var sample = await RunWaveAsync(coordinator, sink, target, flowKeys, payload, ++sequence, wave, timeout).ConfigureAwait(false);
+            var sample = await RunWaveAsync(coordinator, sink, target, options, flowKeys, payload, ++sequence, wave, timeout).ConfigureAwait(false);
             context.WriteResult(
                 "udp.churn",
-                new { burstFlows = options.BurstFlows, dialDelayMs = options.DialDelayMs, mode = "waves", wave, waves = waveCount, reuse = options.ReuseMode },
-                sample.BuildMetrics(payload.Length, productEvents));
+                new { burstFlows = options.BurstFlows, dialDelayMs = options.DialDelayMs, mode = "waves", wave, waves = waveCount, reuse = options.ReuseMode, target = options.Target },
+                sample.BuildMetrics(payload.Length, productEvents, observationStart.Since(target.Server, target.Responder)));
         }
     }
 
@@ -129,11 +168,12 @@ internal static class UdpChurnScenario
         UdpProxyCoordinator coordinator,
         ChurnCountingSink sink,
         ChurnTarget target,
+        SoakOptions options,
         FlowKey[] flowKeys,
         byte[] payload,
         TimeSpan timeout)
     {
-        _ = await RunWaveAsync(coordinator, sink, target, flowKeys, payload, sequence: 1, wave: -1, timeout).ConfigureAwait(false);
+        _ = await RunWaveAsync(coordinator, sink, target, options, flowKeys, payload, sequence: 1, wave: -1, timeout).ConfigureAwait(false);
         return 1;
     }
 
@@ -148,7 +188,8 @@ internal static class UdpChurnScenario
         TimeSpan timeout)
     {
         var payload = new byte[options.PayloadBytes];
-        var sequence = await WarmUpAsync(coordinator, sink, target, flowKeys, payload, timeout).ConfigureAwait(false);
+        var observationStart = TransportObservation.Observe(target.Server, target.Responder);
+        var sequence = await WarmUpAsync(coordinator, sink, target, options, flowKeys, payload, timeout).ConfigureAwait(false);
         var window = TimeSpan.FromSeconds(options.DurationSeconds);
         var totalWatch = Stopwatch.StartNew();
         long sessions = 0;
@@ -160,13 +201,11 @@ internal static class UdpChurnScenario
         long noResponse = 0;
         var perWaveBytesPerSession = new List<double>();
         var firstResponseLatencies = new List<double>();
-        long gen0Before = GC.CollectionCount(0);
-        long gen1Before = GC.CollectionCount(1);
-        long gen2Before = GC.CollectionCount(2);
+        var (gen0Before, gen1Before, gen2Before) = (GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2));
         var allocatedBefore = GC.GetTotalAllocatedBytes(precise: false);
         while (totalWatch.Elapsed < window && waveCount < MaximumSustainedWaves)
         {
-            var sample = await RunWaveAsync(coordinator, sink, target, flowKeys, payload, ++sequence, wave: (int)(waveCount % uint.MaxValue), timeout).ConfigureAwait(false);
+            var sample = await RunWaveAsync(coordinator, sink, target, options, flowKeys, payload, ++sequence, wave: (int)(waveCount % uint.MaxValue), timeout).ConfigureAwait(false);
             waveCount++;
             sessions += flowKeys.Length;
             accepted += sample.Accepted;
@@ -182,7 +221,7 @@ internal static class UdpChurnScenario
         var elapsedSeconds = totalWatch.Elapsed.TotalSeconds;
         context.WriteResult(
             "udp.churn",
-            new { burstFlows = options.BurstFlows, dialDelayMs = options.DialDelayMs, mode = "sustained", durationSeconds = options.DurationSeconds, reuse = options.ReuseMode },
+            new { burstFlows = options.BurstFlows, dialDelayMs = options.DialDelayMs, mode = "sustained", durationSeconds = options.DurationSeconds, reuse = options.ReuseMode, target = options.Target },
             new
             {
                 waves = waveCount,
@@ -203,6 +242,8 @@ internal static class UdpChurnScenario
                 waveBytesPerSession = BuildDistribution(perWaveBytesPerSession),
                 firstResponseMs = LatencyDistribution.FromMilliseconds(firstResponseLatencies),
                 wallSeconds = elapsedSeconds,
+                socks5Handshakes = observationStart.Since(target.Server, target.Responder).Socks5Handshakes,
+                localResponder = observationStart.Since(target.Server, target.Responder).LocalResponder,
                 productEvents = StabilityShared.BuildProductEvents(productEvents),
             });
     }
@@ -212,6 +253,7 @@ internal static class UdpChurnScenario
         UdpProxyCoordinator coordinator,
         ChurnCountingSink sink,
         ChurnTarget target,
+        SoakOptions options,
         FlowKey[] flowKeys,
         byte[] payload,
         long sequence,
@@ -226,7 +268,7 @@ internal static class UdpChurnScenario
         var gen1Before = GC.CollectionCount(1);
         var gen2Before = GC.CollectionCount(2);
         var allocatedBefore = GC.GetTotalAllocatedBytes(precise: false);
-        var (accepted, rejected, issueTimestamps, issueEnd) = await FireWaveAsync(coordinator, target.SocksServer, flowKeys, payload, sequence).ConfigureAwait(false);
+        var (accepted, rejected, issueTimestamps, issueEnd) = await FireWaveAsync(coordinator, target.For(options), flowKeys, payload, sequence).ConfigureAwait(false);
         var responseWatch = Stopwatch.StartNew();
         while (sink.FirstResponses < accepted && responseWatch.Elapsed < timeout)
         {
@@ -271,7 +313,7 @@ internal static class UdpChurnScenario
     /// <summary>Fires each flow's first datagram back-to-back (the serialized pump shape), stamping each issue and counting admission.</summary>
     private static async Task<(long Accepted, long Rejected, long[] IssueTimestamps, long IssueEndTicks)> FireWaveAsync(
         UdpProxyCoordinator coordinator,
-        Socks5Server socksServer,
+        ProxyTarget target,
         FlowKey[] flowKeys,
         byte[] payload,
         long sequence)
@@ -283,7 +325,7 @@ internal static class UdpChurnScenario
         {
             issueTimestamps[flow] = Stopwatch.GetTimestamp();
             DatagramHeader.Write(payload, sequence, flow);
-            if (await coordinator.TrySendSpanAsync(flowKeys[flow], socksServer, payload, default, CancellationToken.None).ConfigureAwait(false))
+            if (await coordinator.TrySendSpanAsync(flowKeys[flow], target, payload, default, CancellationToken.None).ConfigureAwait(false))
             {
                 accepted++;
             }
@@ -323,12 +365,22 @@ internal static class UdpChurnScenario
     }
 
     /// <summary>
-    /// The wave's dial target: the SOCKS5 server handle the client dials, plus — under
-    /// <c>--socks5-external</c> — the child process answering it. The child's death must fail the
-    /// wave (its counters are the only progress signal the response wait has) rather than let the
-    /// wait time out into a silent zero-response row.
+    /// The run's two placements and the loopback servers behind them: the SOCKS5 server handle the
+    /// relayed column dials, the local target the local column sends to, and the server instances
+    /// whose own counters become the row's handshake evidence. Both servers stay up for every
+    /// column, so each row can show what the other transport did with the same flows. The child's
+    /// death must fail the wave (its counters are the only progress signal the response wait has)
+    /// rather than let the wait time out into a silent zero-response row.
     /// </summary>
-    private sealed record ChurnTarget(Socks5Server SocksServer, ExternalLoopbackSocks5UdpServer? ExternalServer);
+    private sealed record ChurnTarget(
+        ProxyTarget Socks5,
+        ProxyTarget Local,
+        LoopbackSocks5UdpServer? Server,
+        LoopbackLocalUdpResponder Responder,
+        ExternalLoopbackSocks5UdpServer? ExternalServer)
+    {
+        public ProxyTarget For(SoakOptions options) => options.Target == SoakTargetKind.Local ? Local : Socks5;
+    }
 
     /// <summary>
     /// One wave's measured cycle: admission counts, first-response latencies, retirement, and the
@@ -353,7 +405,7 @@ internal static class UdpChurnScenario
         long Gen1Collections,
         long Gen2Collections)
     {
-        public object BuildMetrics(int payloadBytes, CountingRuntimeLogger productEvents) => new
+        public object BuildMetrics(int payloadBytes, CountingRuntimeLogger productEvents, TransportObservation observation) => new
         {
             accepted = Accepted,
             rejected = Rejected,
@@ -362,6 +414,8 @@ internal static class UdpChurnScenario
             noResponse = NoResponse,
             establishmentLossRate = EstablishmentLossRate,
             firstResponseMs = LatencyDistribution.FromMilliseconds(FirstResponseMilliseconds),
+            socks5Handshakes = observation.Socks5Handshakes,
+            localResponder = observation.LocalResponder,
             timeToIssueMs = TimeToIssueMs,
             retireMs = RetireMs,
             removed = Removed,

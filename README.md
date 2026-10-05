@@ -57,9 +57,13 @@ JSON, rejected on any unknown property. The top level is:
     { "name": "main", "host": "proxy.example.com", "port": 1080,
       "username": "user", "password": "secret" }
   ],
+  "localTargets": [
+    { "name": "dns-in", "host": "127.0.0.1", "port": 53 }
+  ],
   "host": {
     "fallbackAction": "pass",
     "rules": [
+      { "protocol": ["udp"], "remotePort": ["53"], "action": "proxy", "target": "dns-in" },
       {
         "process": ["browser.exe"],
         "protocol": ["tcp", "udp"],
@@ -67,14 +71,14 @@ JSON, rejected on any unknown property. The top level is:
         "remoteCidr": ["0.0.0.0/0", "::/0"],
         "remotePort": ["80", "443", "10000-20000"],
         "action": "proxy",
-        "proxyServer": "main"
+        "target": "main"
       }
     ]
   },
   "forwarded": {
     "fallbackAction": "pass",
     "rules": [
-      { "adapterName": ["vEthernet (MyVM)"], "action": "proxy", "proxyServer": "main" }
+      { "adapterName": ["vEthernet (MyVM)"], "action": "proxy", "target": "main" }
     ]
   },
   "logLevel": "info",
@@ -88,6 +92,16 @@ JSON, rejected on any unknown property. The top level is:
   `host` is an IPv4/IPv6 literal or DNS hostname. `username`/`password` are both optional or
   both present, and each UTF-8 encoding fits the RFC 1929 255-byte limit. Credentials are
   never logged; protect the configuration file's permissions.
+- `localTargets`: optional named local UDP endpoints. `name` is unique across `socks5Servers` and
+  `localTargets` (case-insensitive, one namespace), `host` must be an IP literal — a hostname would
+  itself need the DNS path it is meant to configure — and `port` is 1..65535. A local target rents
+  no SOCKS5 association and shares no socket: each selected flow gets its own socket, and its
+  payload is forwarded to the endpoint verbatim. The flow's original destination is never sent to
+  the endpoint (the local hop carries no field for it), so the endpoint answers by its own policy;
+  the destination is restored only as the source address and port of the reply the client sees. A
+  `host` that is not a loopback address is accepted with a validation warning naming the address
+  and both consequences: the payload leaves this host in the clear, and the endpoint's replies are
+  attributed to the flow's original destination.
 - `host` / `forwarded`: the two policy domains. `host` is **required** and governs flows the machine
   itself originates; `forwarded` is optional and governs flows observed arriving on another NIC.
   Each domain owns its own ordered `rules` list and its own `fallbackAction`. A rule belongs to the
@@ -108,7 +122,10 @@ JSON, rejected on any unknown property. The top level is:
     forwarded rule without them applies to every forwarded flow.
   - `protocol`: `tcp` / `udp`. `addressFamily`: `ipv4` / `ipv6`.
   - `remoteCidr`: CIDR prefixes. `remotePort`: decimal ports or inclusive ranges (`10000-20000`).
-  - `action`: `proxy` (requires `proxyServer`), `pass`, or `block`.
+  - `action`: `proxy` (requires `target`), `pass`, or `block`. `target` names a configured
+    `socks5Servers` entry or a `localTargets` entry; the pre-rename key `proxyServer` is rejected
+    with a diagnostic naming `target`. A rule that names a local target must select exactly `udp`: a
+    rule without a `protocol` selector matches every protocol, TCP included, so it is rejected.
   - Present match arrays must be non-empty; an omitted field imposes no condition.
 - `host.fallbackAction`: `pass` or `block`, **required**. It decides a host flow that no host rule
   matched. A host fallback proxy requires an explicit catch-all `proxy` rule.
@@ -197,6 +214,23 @@ so it observes **cross-destination** misdelivery only: two flows to the same des
 indistinguishable by address, and their misdelivered replies are invisible to it. **A zero count
 therefore does not prove that association sharing is safe for your traffic.**
 
+**Local targets.** A flow selected onto a local target gets its own socket and no SOCKS5 association:
+only that flow's replies arrive on it, so the misdelivery class above cannot occur at that hop. The
+payload is forwarded verbatim and the transport declares the flow's original destination as the
+reply's source, so the client sees the answer from the address and port it sent to; the session's
+source check, the foreign-source counter, and the reinjector are unchanged, and a datagram from
+anything but the configured endpoint never reaches them (it is skipped at the transport, like the
+relay's other skip classes). `udpLocalTargetFlows` counts flows created over a local target,
+`udpLocalTargetFailures` counts a send the transport could not hand to its socket or a fatal receive
+fault (never the cancellation or disposal that ends a session), and such a flow fails closed and
+re-establishes on its next datagram. The `udp.session.created`
+debug event carries `target=<name>` and `targetKind=local|socks5`.
+`benchmarks/results/2026-10-05-local-target/` measures the placement beside the shared and per-flow
+SOCKS5 columns: the local column answers 48 of 48 flows per wave with zero SOCKS5 control connections
+and zero `UDP ASSOCIATE` replies, at ≈7.5 KB per session against ≈13.4 KB for the shared association
+and ≈91 KB per-flow, with a first-response p50 of 3.1–4.1 ms against 4.2–5.1 ms shared and 156–165 ms
+per-flow.
+
 The configuration is validated fully before interception starts and is kept immutable for the
 lifetime of a run. Configuration hot reload is not supported.
 
@@ -248,7 +282,9 @@ configured. WinForward may detect and diagnose missing prerequisites but never c
 
 - TCP and UDP over IPv4 and IPv6.
 - Proxy flows use SOCKS5 `CONNECT` (TCP) and `UDP ASSOCIATE` (UDP), with NO-AUTH or
-  username/password (RFC 1929).
+  username/password (RFC 1929). A `proxy` rule may instead select a `localTargets` entry for UDP
+  flows, which reach that endpoint on a per-flow socket with no SOCKS5 control connection; TCP always
+  uses a `socks5Servers` entry.
 - UDP setup sends an all-zero `UDP ASSOCIATE` endpoint in the TCP control connection's address
   family, then binds the relay socket in the returned relay address family. The SOCKS5 UDP
   destination `ATYP` and address remain those of the original datagram, so an IPv6 destination can
@@ -268,6 +304,7 @@ See `examples/`:
 - `hyperv-adapter-proxy.json` — proxy flows arriving from a Hyper-V virtual adapter (`forwarded`).
 - `dns-policy.json` — explicit DNS policy (proxy UDP/53, block TCP/53).
 - `dns-proxy.json` — proxy all UDP/53.
+- `local-dns.json` — answer all UDP/53 from a local target instead of a SOCKS5 relay.
 - `pass-fallback.json` — proxy a process, pass everything else.
 - `block-fallback.json` — proxy a process, block everything else (leak prevention).
 

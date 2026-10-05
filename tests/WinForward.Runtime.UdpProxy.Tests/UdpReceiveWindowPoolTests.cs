@@ -2,7 +2,6 @@ using System.Net;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
-using WinForward.Runtime.Socks5;
 using WinForward.TestSupport;
 using Xunit;
 using static WinForward.TestSupport.AsyncTestExtensions;
@@ -181,7 +180,7 @@ public sealed class UdpReceiveWindowPoolTests
         {
             foreach (var flow in flows)
             {
-                _ = await coordinator.TrySendSpanAsync(flow, s_server, s_populatePayload, default, CancellationToken.None);
+                _ = await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), s_populatePayload, default, CancellationToken.None);
             }
 
             await WaitForAsync(() => factory.CreateCalls >= expectedCreated);

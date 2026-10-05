@@ -127,7 +127,7 @@ public class UdpReadyPathContentionBenchmarks
     /// </summary>
     private void SendOne(FlowKey flow)
     {
-        var pending = _coordinator.TrySendSpanAsync(flow, _server, s_payload, default, CancellationToken.None);
+        var pending = _coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(_server), s_payload, default, CancellationToken.None);
         if (pending.IsCompletedSuccessfully)
         {
             // Steady state: the send completed inline, so consuming its result is a plain read.

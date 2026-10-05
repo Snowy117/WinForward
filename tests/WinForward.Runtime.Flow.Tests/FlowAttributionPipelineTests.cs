@@ -463,7 +463,7 @@ public sealed class FlowAttributionPipelineTests
         };
 
         var holderClaimed = false;
-        var holder = new Thread(() => holderClaimed = flows.TryClaimResolved(Key(53310), new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null), out _))
+        var holder = new Thread(() => holderClaimed = flows.TryClaimResolved(Key(53310), new FlowDecision(FlowAction.Pass, 0, TargetName: null), out _))
         {
             IsBackground = true,
             Name = "flow-gate-holder",
@@ -587,9 +587,9 @@ public sealed class FlowAttributionPipelineTests
             var matcher = processRule
                 ? new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "dns.exe" })
                 : new RuleMatcher();
-            var rules = new[] { new PolicyRule(matcher, new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null)) };
+            var rules = new[] { new PolicyRule(matcher, new FlowDecision(FlowAction.Pass, 0, TargetName: null)) };
             var configuration = new ValidatedConfiguration(
-                new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+                new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
                 new PolicySnapshot(rules, FlowAction.Pass),
                 IncludeProcessPathInLogs: includeProcessPath);
             Dispatcher = new FlowDispatcher(configuration, new FakeGuard(), Executor, attributor ?? Attributor, flowCapacity: flowCapacity, logger: logger, attributionPool: Pool, setupExecutor: Setup);

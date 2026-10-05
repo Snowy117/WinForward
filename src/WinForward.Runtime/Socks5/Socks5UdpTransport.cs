@@ -1,115 +1,11 @@
 using System.Net;
 using System.Net.Sockets;
-using System.Runtime.InteropServices;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
 using WinForward.Runtime.UdpProxy;
 
 namespace WinForward.Runtime.Socks5;
-
-/// <summary>
-/// The per-datagram anomaly that made a relay receive undeliverable. Skip reasons are surfaced
-/// as results instead of exceptions so a single bad relay datagram never terminates a session's
-/// receive loop; only socket-level failures keep throwing.
-/// </summary>
-public enum Socks5UdpReceiveSkipReason
-{
-    /// <summary>Not a skip: the datagram was decoded successfully.</summary>
-    None = 0,
-
-    /// <summary>The datagram arrived from an endpoint other than the negotiated relay (port or address-family mismatch).</summary>
-    UnexpectedSource = 1,
-
-    /// <summary>The datagram filled the receive buffer completely and may be truncated.</summary>
-    Oversized = 2,
-
-    /// <summary>The datagram is not a decodable SOCKS5 UDP datagram.</summary>
-    Malformed = 3,
-
-    /// <summary>
-    /// The receive call itself faulted with <see cref="SocketError.ConnectionReset"/>: on Windows an
-    /// ICMP port-unreachable answering one of this socket's sends surfaces this way. Skip-class like
-    /// the datagram anomalies: the session keeps receiving (S2).
-    /// </summary>
-    ConnectionReset = 4,
-}
-
-/// <summary>
-/// The discriminated result of <see cref="IUdpProxyTransport.ReceiveAsync"/>: either a decoded
-/// datagram (<see cref="HasDatagram"/>) or a <see cref="SkipReason"/> that skips exactly one
-/// datagram. A struct result keeps the receive hot path allocation-free.
-/// </summary>
-[StructLayout(LayoutKind.Auto)]
-public readonly record struct Socks5UdpReceiveResult(Socks5UdpDatagram Datagram, Socks5UdpReceiveSkipReason SkipReason)
-{
-    /// <summary>True when <see cref="Datagram"/> carries a decoded relay datagram.</summary>
-    public bool HasDatagram => SkipReason == Socks5UdpReceiveSkipReason.None;
-
-    /// <summary>Wraps a successfully decoded relay datagram.</summary>
-    internal static Socks5UdpReceiveResult Received(Socks5UdpDatagram datagram) => new(datagram, Socks5UdpReceiveSkipReason.None);
-
-    /// <summary>Marks one per-datagram anomaly; the caller must skip the datagram and keep receiving.</summary>
-    internal static Socks5UdpReceiveResult Skipped(Socks5UdpReceiveSkipReason reason) => new(default, reason);
-}
-
-/// <summary>
-/// The flow's authenticated SOCKS5 UDP association is gone and could not be recovered in place
-/// (association death with a failed or address-family-changing re-association). The transport
-/// refuses further datagrams with this exception before touching the relay socket, and the
-/// coordinator removes the flow's slot with <c>UdpTeardownReason.AssociationLost</c> without arming
-/// the setup cooldown, so the flow re-establishes on its next datagram.
-/// </summary>
-#pragma warning disable RCS1194 // The [SerializationInfo, StreamingContext] constructor is deliberately omitted: binary serialization is obsolete in .NET 8+ (SYSLIB0051) and this exception carries no state beyond its message and inner exception.
-public sealed class UdpAssociationLostException : IOException
-{
-    // ReSharper disable once UnusedMember.Global // Conventional exception surface: RCS1194 requires the parameterless and message-only constructors, even though in-tree callers use only the (message, inner) overload.
-    public UdpAssociationLostException() { }
-
-    // ReSharper disable once UnusedMember.Global // Conventional exception surface: RCS1194 requires the parameterless and message-only constructors, even though in-tree callers use only the (message, inner) overload.
-    public UdpAssociationLostException(string message) : base(message) { }
-
-    public UdpAssociationLostException(string message, Exception? innerException) : base(message, innerException) { }
-}
-#pragma warning restore RCS1194
-
-public interface IUdpProxyTransport : IAsyncDisposable
-{
-    IPEndPoint RelayEndpoint { get; }
-    IPEndPoint LocalEndpoint { get; }
-
-    /// <summary>
-    /// Sends one datagram: the destination is encoded as the SOCKS5 UDP header target and the
-    /// datagram is sent to the negotiated relay endpoint. The payload is consumed synchronously
-    /// (encode into the reusable send buffer, then a non-blocking kernel send) before any
-    /// asynchronous socket operation, so a native capture buffer whose span backs it is free to
-    /// recycle once this call returns. Only the contended-gate slow shape cannot keep the span
-    /// across its await and copies it (cold path).
-    /// </summary>
-    ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken);
-    ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken);
-}
-
-public interface IUdpProxyTransportFactory
-{
-    ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken);
-}
-
-/// <summary>
-/// The per-flow exchange evidence a retention policy reads: the two counters the association lease
-/// already maintains for the capability sampler, exposed on the transport seam because the lease is
-/// private to the concrete transport. Both reads are plain volatile loads off the packet path, and a
-/// transport that does not implement this interface is classified as <em>sustained</em> — the
-/// retention-safe direction, and what keeps a foreign or fake transport's sweep behaviour unchanged.
-/// </summary>
-internal interface IUdpExchangeCounters
-{
-    /// <summary>The datagrams this flow sent successfully.</summary>
-    int DatagramsSent { get; }
-
-    /// <summary>Whether this flow ever decoded a relay response.</summary>
-    bool SawResponse { get; }
-}
 
 /// <summary>
 /// Rents one association lease per flow from the pool and wraps it in a relay transport. The
@@ -158,8 +54,15 @@ public sealed class Socks5UdpTransportFactory : IUdpProxyTransportFactory
         _disableUdpConnectionReset = disableUdpConnectionReset;
     }
 
-    public async ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
+    public async ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken)
     {
+        // This factory serves SOCKS5 targets only (a local target has no association to rent), so
+        // the impossible shape fails closed instead of dereferencing a null server.
+        if (target.Socks5 is not { } server)
+        {
+            throw new InvalidOperationException($"The SOCKS5 UDP transport factory was asked for local target '{target.Name}'.");
+        }
+
         var lease = await _pool.RentAsync(server, cancellationToken).ConfigureAwait(false);
         try
         {
@@ -251,7 +154,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
     /// The relay endpoint the flow currently sends to: read through the lease, so an in-place
     /// re-association of the shared association is visible without touching this transport.
     /// </summary>
-    public IPEndPoint RelayEndpoint => _lease.RelayEndpoint;
+    public IPEndPoint PeerEndpoint => _lease.RelayEndpoint;
 
     public IPEndPoint LocalEndpoint => (IPEndPoint)_socket.LocalEndPoint!;
 
@@ -457,12 +360,12 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
     /// Receives one datagram from the relay. <paramref name="buffer"/> is the caller's receive
     /// window — at composition sized cap + 22 + 1 (frame cap, maximum SOCKS5 UDP header, one
     /// oversize sentinel) — so a datagram that fills it reports the
-    /// <see cref="Socks5UdpReceiveSkipReason.Oversized"/> skip: the deliverable response-payload
+    /// <see cref="UdpTransportSkipReason.Oversized"/> skip: the deliverable response-payload
     /// ceiling is cap - 42 (Ethernet + IPv4 + UDP; 1472 bytes at the pinned 1514 ABI), and larger
     /// relay responses surface in the session's rate-limited skip summary. A jumbo-capable ABI
     /// lifts the ceiling end-to-end because the send buffer follows the same cap.
     /// </summary>
-    public async ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+    public async ValueTask<UdpTransportReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
     {
         EndPoint sender = _receiveSenderTemplate;
         SocketReceiveFromResult result;
@@ -472,23 +375,25 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
         }
         catch (Exception fault) when (ClassifyReceiveFault(fault) is { } skipReason)
         {
-            return Socks5UdpReceiveResult.Skipped(skipReason);
+            return UdpTransportReceiveResult.Skipped(skipReason);
         }
         // Per-datagram anomalies skip one datagram instead of throwing: a single bad relay
         // datagram must not terminate the session's receive loop (R2). The relay endpoint is read
         // through the lease so a re-associated flow validates against its current relay.
         var relay = _lease.RelayEndpoint;
-        if (!IsAcceptableRelaySource(result.RemoteEndPoint, relay)) return Socks5UdpReceiveResult.Skipped(Socks5UdpReceiveSkipReason.UnexpectedSource);
-        if (IsPossiblyTruncated(result.ReceivedBytes, buffer.Length)) return Socks5UdpReceiveResult.Skipped(Socks5UdpReceiveSkipReason.Oversized);
+        if (!IsAcceptableRelaySource(result.RemoteEndPoint, relay)) return UdpTransportReceiveResult.Skipped(UdpTransportSkipReason.UnexpectedSource);
+        if (IsPossiblyTruncated(result.ReceivedBytes, buffer.Length)) return UdpTransportReceiveResult.Skipped(UdpTransportSkipReason.Oversized);
         // M2: the SOCKS5 UDP wire format carries no interface scope, so propagate the relay
         // endpoint's IPv6 scope into reconstruction to keep a link-local decoded address routable.
         var scopeId = relay.Address.AddressFamily == AddressFamily.InterNetworkV6 ? relay.Address.ScopeId : 0;
         // ReSharper disable once ConvertIfStatementToReturnStatement // TryDecode decodes into an out parameter (side effect + binding); the early exit on malformed input must stay a separate step (B1 disposition).
-        if (!Socks5UdpCodec.TryDecode(buffer[..result.ReceivedBytes], out var datagram, scopeId)) return Socks5UdpReceiveResult.Skipped(Socks5UdpReceiveSkipReason.Malformed);
+        if (!Socks5UdpCodec.TryDecode(buffer[..result.ReceivedBytes], out var datagram, scopeId)) return UdpTransportReceiveResult.Skipped(UdpTransportSkipReason.Malformed);
         // Only a datagram that decoded proves this flow's replies come back: a skip is one anomaly,
         // not evidence that the server answered (design §5).
         _lease.RecordResponseReceived();
-        return Socks5UdpReceiveResult.Received(datagram);
+        // Both types are readonly record structs, so this field-for-field mapping is a plain struct
+        // copy and adds no allocation to the receive path.
+        return UdpTransportReceiveResult.Received(new UdpTransportDatagram(datagram.DestinationAddress, datagram.DestinationDomain, datagram.DestinationPort, datagram.Payload));
     }
 
     /// <summary>
@@ -504,7 +409,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
     /// A receive that fills the caller's buffer may be truncated, so it is skipped instead of
     /// decoded. The session's receive window is cap + 22 + 1, which makes cap - 42 (Ethernet +
     /// IPv4 + UDP) the deliverable payload ceiling — 1472 bytes at the pinned 1514 ABI; larger
-    /// relay responses skip as <see cref="Socks5UdpReceiveSkipReason.Oversized"/> and surface in
+    /// relay responses skip as <see cref="UdpTransportSkipReason.Oversized"/> and surface in
     /// the session's rate-limited skip summary. A jumbo-capable ABI lifts the ceiling end-to-end
     /// because the send buffer follows the same cap.
     /// </summary>
@@ -524,12 +429,12 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
 
     /// <summary>
     /// Maps a receive-path fault to its skip reason, or null when the fault is socket-level fatal
-    /// and must keep tearing the session down. Only the ICMP-driven reset is skip-class (S2).
+    /// and must keep tearing the session down. Only the ICMP-driven reset is skip-class (S2); the
+    /// adjudication itself is the seam's <see cref="UdpTransportReceiveClassifier"/>, the rule every
+    /// transport implementation shares.
     /// </summary>
-    internal static Socks5UdpReceiveSkipReason? ClassifyReceiveFault(Exception exception) =>
-        exception is SocketException { SocketErrorCode: SocketError.ConnectionReset }
-            ? Socks5UdpReceiveSkipReason.ConnectionReset
-            : null;
+    internal static UdpTransportSkipReason? ClassifyReceiveFault(Exception exception) =>
+        UdpTransportReceiveClassifier.ClassifyFault(exception);
 
     /// <summary>
     /// Releases the relay socket, its self-traffic tuple, and the association lease — exactly once,

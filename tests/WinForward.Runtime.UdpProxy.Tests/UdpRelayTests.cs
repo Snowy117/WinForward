@@ -422,7 +422,7 @@ public sealed class UdpRelayTests
         var flow = FlowKey.Create(Endpoint.From(source, 53000), Endpoint.From(destination, 53), TransportProtocol.Udp, FlowOriginKind.Host);
         var packet = new CapturedFlowPacket(new PacketLease(frame), FlowBuilders.Context(flow), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
 
-        await executor.ProxyAsync(packet, s_server, CancellationToken.None);
+        await executor.ProxyAsync(packet, ProxyTarget.FromServer(s_server), CancellationToken.None);
 
         await WaitForAsync(() => factory.Transports.Count == 1);
         var transport = Assert.Single(factory.Transports);
@@ -447,7 +447,7 @@ public sealed class UdpRelayTests
         var flow = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
         var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 0xff, 0xff, 0xff }), FlowBuilders.Context(flow), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
 
-        await executor.ProxyAsync(packet, s_server, CancellationToken.None);
+        await executor.ProxyAsync(packet, ProxyTarget.FromServer(s_server), CancellationToken.None);
 
         Assert.Empty(factory.Transports);
     }

@@ -199,10 +199,10 @@ internal static class AttributionOffPumpScenario
         {
             new PolicyRule(
                 new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "chrome.exe" }),
-                new FlowDecision(FlowAction.Pass, 0, ProxyServerName: null)),
+                new FlowDecision(FlowAction.Pass, 0, TargetName: null)),
         };
         return new ValidatedConfiguration(
-            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot(rules, FlowAction.Pass));
     }
 
@@ -294,7 +294,7 @@ internal static class AttributionOffPumpScenario
 
         public ValueTask BlockAsync(CapturedFlowPacket packet) => RecordAsync(packet);
 
-        public ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken) => RecordAsync(packet);
+        public ValueTask ProxyAsync(CapturedFlowPacket packet, ProxyTarget target, CancellationToken cancellationToken) => RecordAsync(packet);
 
         private ValueTask RecordAsync(CapturedFlowPacket packet)
         {

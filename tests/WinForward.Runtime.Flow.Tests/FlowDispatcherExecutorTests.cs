@@ -55,7 +55,7 @@ public sealed class FlowDispatcherExecutorTests
     public async Task DispatcherSeparatesForwardedAdaptersFromHostCatchAllPolicy()
     {
         var server = new Socks5Server("primary", "127.0.0.1", 1080, Username: null, Password: null);
-        var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase) { [server.Name] = server };
+        var servers = new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase) { [server.Name] = ProxyTarget.FromServer(server) };
         var config = new ValidatedConfiguration(servers, new PolicySnapshot(
             [new(new RuleMatcher(), new FlowDecision(FlowAction.Proxy, 0, server.Name))],
             FlowAction.Block)
@@ -88,10 +88,10 @@ public sealed class FlowDispatcherExecutorTests
     {
         var logger = new RecordingRuntimeLogger();
         var config = new ValidatedConfiguration(
-            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Pass)
             {
-                ForwardedRules = [new(new RuleMatcher(RemotePorts: [(443, 443)]), new FlowDecision(FlowAction.Block, 0, ProxyServerName: null))],
+                ForwardedRules = [new(new RuleMatcher(RemotePorts: [(443, 443)]), new FlowDecision(FlowAction.Block, 0, TargetName: null))],
             });
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), new FakeExecutor(), logger: logger);
         var packet = FlowPacket(53000, FlowOriginKind.Forwarded, "id-b", "vEthernet B");
@@ -108,10 +108,10 @@ public sealed class FlowDispatcherExecutorTests
     {
         var matcher = new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" });
         var config = new ValidatedConfiguration(
-            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Block)
             {
-                ForwardedRules = [new(matcher, new FlowDecision(FlowAction.Block, 0, ProxyServerName: null))],
+                ForwardedRules = [new(matcher, new FlowDecision(FlowAction.Block, 0, TargetName: null))],
             });
         var executor = new FakeExecutor();
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor);
@@ -131,7 +131,7 @@ public sealed class FlowDispatcherExecutorTests
     public async Task DispatcherCachesForwardedFallbackPassAcrossOriginsAndFailsClosedAtCapacity()
     {
         var config = new ValidatedConfiguration(
-            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Block));
         var executor = new FakeExecutor();
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor, flowCapacity: 1);
@@ -172,12 +172,12 @@ public sealed class FlowDispatcherExecutorTests
     public async Task DispatcherForwardedNonFlowAlwaysPassesRegardlessOfRules()
     {
         var config = new ValidatedConfiguration(
-            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Block)
             {
                 ForwardedRules =
                 [
-                    new(new RuleMatcher(), new FlowDecision(FlowAction.Block, 0, ProxyServerName: null)),
+                    new(new RuleMatcher(), new FlowDecision(FlowAction.Block, 0, TargetName: null)),
                     new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Proxy, 1, "proxy")),
                 ],
             });
@@ -201,12 +201,12 @@ public sealed class FlowDispatcherExecutorTests
     public async Task DispatcherHostNonFlowAlwaysPassesRegardlessOfFallbackAndRules()
     {
         var config = new ValidatedConfiguration(
-            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot(
             [
-                new(new RuleMatcher(Protocols: new HashSet<TransportProtocol> { TransportProtocol.Tcp }), new FlowDecision(FlowAction.Block, 0, ProxyServerName: null)),
+                new(new RuleMatcher(Protocols: new HashSet<TransportProtocol> { TransportProtocol.Tcp }), new FlowDecision(FlowAction.Block, 0, TargetName: null)),
                 new(new RuleMatcher(AdapterIds: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id-a" }), new FlowDecision(FlowAction.Proxy, 1, "proxy")),
-                new(new RuleMatcher(), new FlowDecision(FlowAction.Block, 2, ProxyServerName: null)),
+                new(new RuleMatcher(), new FlowDecision(FlowAction.Block, 2, TargetName: null)),
             ], FlowAction.Block));
         var executor = new FakeExecutor();
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor);
@@ -432,7 +432,7 @@ public sealed class FlowDispatcherExecutorTests
         var packet = new CapturedFlowPacket(new PacketLease(new byte[] { 1 }), FlowContext(FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 1), Endpoint.From(IPAddress.Parse("192.0.2.53"), 2), TransportProtocol.Tcp, FlowOriginKind.Host)), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
 
         await executor.BlockAsync(packet);
-        await executor.ProxyAsync(packet, new Socks5Server("p", "127.0.0.1", 1080, Username: null, Password: null), CancellationToken.None);
+        await executor.ProxyAsync(packet, ProxyTarget.FromServer(new Socks5Server("p", "127.0.0.1", 1080, Username: null, Password: null)), CancellationToken.None);
         executor.FlushPendingPasses(7);
 
         Assert.Equal(0, reinjector.ToAdapterCount);
@@ -452,7 +452,7 @@ public sealed class FlowDispatcherExecutorTests
         var key = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 443), TransportProtocol.Tcp, FlowOriginKind.Host);
         var packet = new CapturedFlowPacket(new PacketLease(FrameBuilders.CreateIpv4TcpFrame()), FlowContext(key), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
 
-        await executor.ProxyAsync(packet, new Socks5Server("p", "127.0.0.1", 1080, Username: null, Password: null), CancellationToken.None);
+        await executor.ProxyAsync(packet, ProxyTarget.FromServer(new Socks5Server("p", "127.0.0.1", 1080, Username: null, Password: null)), CancellationToken.None);
         executor.FlushPendingPasses(7);
 
         Assert.Equal(0, reinjector.ToAdapterCount);
@@ -465,8 +465,8 @@ public sealed class FlowDispatcherExecutorTests
 
     private static ValidatedConfiguration CreateConfig(RuleMatcher matcher, FlowAction fallback, FlowAction ruleAction = FlowAction.Pass, string? server = null)
     {
-        var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase);
-        if (server is not null) servers[server] = new Socks5Server(server, "127.0.0.1", 1080, Username: null, Password: null);
+        var servers = new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase);
+        if (server is not null) servers[server] = ProxyTarget.FromServer(new Socks5Server(server, "127.0.0.1", 1080, Username: null, Password: null));
         var rules = new[] { new PolicyRule(matcher, new FlowDecision(ruleAction, 0, server)) };
         return new ValidatedConfiguration(servers, new PolicySnapshot(rules, fallback));
     }

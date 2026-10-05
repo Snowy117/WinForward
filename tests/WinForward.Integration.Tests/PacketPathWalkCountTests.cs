@@ -210,10 +210,10 @@ public sealed class PacketPathWalkCountTests
             return inner.BlockAsync(packet);
         }
 
-        public ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
+        public ValueTask ProxyAsync(CapturedFlowPacket packet, ProxyTarget target, CancellationToken cancellationToken)
         {
             Layouts.Add(packet.Layout);
-            return inner.ProxyAsync(packet, server, cancellationToken);
+            return inner.ProxyAsync(packet, target, cancellationToken);
         }
     }
 
@@ -268,7 +268,7 @@ public sealed class PacketPathWalkCountTests
             var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, new SelfTrafficRegistry(), new FakeLocalAddressProvider());
             var executor = new NdisPacketActionExecutor(new CountingReinjector(), tcpProxy: coordinator);
             var recorder = new LayoutRecordingExecutor(executor);
-            var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase) { [s_server.Name] = s_server };
+            var servers = new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase) { [s_server.Name] = ProxyTarget.FromServer(s_server) };
             var rules = new[] { new PolicyRule(new RuleMatcher(), new FlowDecision(FlowAction.Proxy, 0, s_server.Name)) };
             var configuration = new ValidatedConfiguration(servers, new PolicySnapshot(rules, FlowAction.Block));
             var dispatcher = new FlowDispatcher(configuration, new SelfTrafficRegistry(), recorder, reverseHandler: coordinator);

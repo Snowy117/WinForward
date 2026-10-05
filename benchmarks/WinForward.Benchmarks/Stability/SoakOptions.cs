@@ -38,6 +38,12 @@ internal enum AbortKind
     UpstreamTruncate,
 }
 
+internal enum SoakTargetKind
+{
+    Socks5,
+    Local,
+}
+
 internal sealed record AbortMix(int Clean, int ClientRst, int RelayCancel, int UpstreamTruncate)
 {
     public static readonly AbortMix Default = new(25, 25, 25, 25);
@@ -124,6 +130,15 @@ internal sealed record SoakOptions
 
     /// <summary>UDP association reuse (<c>--reuse</c>): the placement mode the scenario's pool is constructed with. Only the stability scenarios follow it — the perf benchmarks keep <see cref="UdpAssociationReuseMode.Off"/>, the baseline their anchors were recorded against.</summary>
     public UdpAssociationReuseMode ReuseMode { get; private init; } = UdpAssociationReuseMode.Auto;
+
+    /// <summary>
+    /// UDP flow placement (<c>--target</c>): which transport the establishment scenarios send
+    /// through. <see cref="SoakTargetKind.Socks5"/> is the shipped default (the relay path the
+    /// reuse columns were recorded on); <see cref="SoakTargetKind.Local"/> points the same flows at
+    /// a local endpoint through the product <c>UdpTransportFactory</c> composite, with the loopback
+    /// SOCKS5 server still up so its handshake counters can be read as the column's zeros.
+    /// </summary>
+    public SoakTargetKind Target { get; private init; } = SoakTargetKind.Socks5;
 
     public AbortMix AbortMix { get; private init; } = AbortMix.Default;
     public int Seed { get; private init; } = 42;
@@ -227,6 +242,17 @@ internal sealed record SoakOptions
             throw new ArgumentException("The abort mix must have at least one non-zero weight.", nameof(args));
         }
 
+        // ReSharper disable once ConvertIfStatementToSwitchStatement // Parse-time refusal: a switch over one pattern case adds ceremony without adding a branch — the implicit false path (the argument combination is valid) is the normal flow, and the sibling refusal below keeps the same if/throw shape.
+        if (options is { Target: SoakTargetKind.Local, Socks5External: true })
+        {
+            throw new ArgumentException("--target local cannot be combined with --socks5-external: the local column's zero-handshake evidence is the in-process loopback SOCKS5 server's own counters, which an out-of-process server cannot report to this parent.", nameof(args));
+        }
+
+        if (options is { Target: SoakTargetKind.Local, Scenario: not (SoakScenario.Churn or SoakScenario.Burst) })
+        {
+            throw new ArgumentException($"--target local is only measured by --scenario udpChurn and --scenario udpBurst; scenario '{options.Scenario}' leaves its relay path unchanged and would record target: local while measuring the relay.", nameof(args));
+        }
+
         if (options.Scenario == SoakScenario.GcSoak && !durationSpecified)
         {
             options = options with { DurationSeconds = GcSoakDefaultDurationSeconds };
@@ -257,6 +283,8 @@ internal sealed record SoakOptions
                 return options with { TcpRelayMode = ParseTcpRelayMode(Value(args, ref index)) };
             case "--reuse":
                 return options with { ReuseMode = ParseReuseMode(Value(args, ref index)) };
+            case "--target":
+                return options with { Target = ParseTargetKind(Value(args, ref index)) };
             case "--abort-mix":
                 return options with { AbortMix = AbortMix.Parse(Value(args, ref index)) };
             case "--output":
@@ -387,6 +415,18 @@ internal sealed record SoakOptions
         "always" => UdpAssociationReuseMode.Always,
         "off" => UdpAssociationReuseMode.Off,
         _ => throw new ArgumentException($"Unknown reuse mode '{raw}'; expected off, always, or auto.", nameof(raw)),
+    };
+
+    /// <summary>
+    /// The two flow placements, refused for anything else on the same grounds as
+    /// <see cref="ParseReuseMode"/>: a typo must fail the run rather than record a column it did not
+    /// measure.
+    /// </summary>
+    private static SoakTargetKind ParseTargetKind(string raw) => raw.ToLowerInvariant() switch
+    {
+        "socks5" => SoakTargetKind.Socks5,
+        "local" => SoakTargetKind.Local,
+        _ => throw new ArgumentException($"Unknown target '{raw}'; expected socks5 or local.", nameof(raw)),
     };
 
     private static int PositiveInt(string name, string raw) =>

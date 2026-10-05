@@ -28,7 +28,7 @@ public sealed class Socks5UdpTransportLeaseTests(ITestOutputHelper output)
         await using var pool = new UdpAssociationPool(registry, UdpAssociationReuseMode.Off);
         var factory = new Socks5UdpTransportFactory(pool, registry, UdpFrameBuilder.DefaultMaximumEthernetFrame, socketFactory: _ => throw new IOException("synthetic socket creation failure"));
 
-        var exception = await Assert.ThrowsAsync<IOException>(() => factory.CreateAsync(server.Server, CancellationToken.None).AsTask());
+        var exception = await Assert.ThrowsAsync<IOException>(() => factory.CreateAsync(ProxyTarget.FromServer(server.Server), CancellationToken.None).AsTask());
 
         Assert.Equal("synthetic socket creation failure", exception.Message);
         await AssertLeaseReleasedAsync(pool, server);
@@ -44,7 +44,7 @@ public sealed class Socks5UdpTransportLeaseTests(ITestOutputHelper output)
         // the configured relay receive buffer.
         var factory = new Socks5UdpTransportFactory(pool, registry, UdpFrameBuilder.DefaultMaximumEthernetFrame, socketFactory: CreateDisposedSocket);
 
-        await Assert.ThrowsAsync<ObjectDisposedException>(() => factory.CreateAsync(server.Server, CancellationToken.None).AsTask());
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => factory.CreateAsync(ProxyTarget.FromServer(server.Server), CancellationToken.None).AsTask());
 
         await AssertLeaseReleasedAsync(pool, server);
     }
@@ -62,7 +62,7 @@ public sealed class Socks5UdpTransportLeaseTests(ITestOutputHelper output)
             socketFactory: static family => new Socket(family, SocketType.Dgram, ProtocolType.Udp),
             disableUdpConnectionReset: static socket => socket.Dispose());
 
-        await Assert.ThrowsAsync<ObjectDisposedException>(() => factory.CreateAsync(server.Server, CancellationToken.None).AsTask());
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => factory.CreateAsync(ProxyTarget.FromServer(server.Server), CancellationToken.None).AsTask());
 
         await AssertLeaseReleasedAsync(pool, server);
     }
@@ -131,7 +131,7 @@ public sealed class Socks5UdpTransportLeaseTests(ITestOutputHelper output)
 
         var transport = Socks5UdpTransport.Create(lease, registry, disableUdpConnectionReset: _ => peerCount++);
 
-        Assert.Equal(relayEndpoint, transport.RelayEndpoint);
+        Assert.Equal(relayEndpoint, transport.PeerEndpoint);
         Assert.Equal(AddressFamily.InterNetwork, transport.LocalEndpoint.AddressFamily);
         Assert.Equal(1, peerCount);
         await transport.DisposeAsync();
@@ -155,7 +155,7 @@ public sealed class Socks5UdpTransportLeaseTests(ITestOutputHelper output)
         await using var pool = new UdpAssociationPool(registry, UdpAssociationReuseMode.Off);
         var factory = new Socks5UdpTransportFactory(pool, registry, UdpFrameBuilder.DefaultMaximumEthernetFrame, requestedBytes);
 
-        await using var transport = await factory.CreateAsync(server.Server, CancellationToken.None);
+        await using var transport = await factory.CreateAsync(ProxyTarget.FromServer(server.Server), CancellationToken.None);
 
         var applied = Assert.IsType<Socks5UdpTransport>(transport).AppliedRelayReceiveBufferSize;
         output.WriteLine(string.Create(CultureInfo.InvariantCulture, $"requested={requestedBytes} applied={applied}"));

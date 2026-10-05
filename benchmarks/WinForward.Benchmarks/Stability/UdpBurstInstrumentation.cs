@@ -88,7 +88,7 @@ internal sealed class InFlightTracker(int capacity)
 /// </summary>
 internal sealed class BackgroundSender(
     UdpProxyCoordinator coordinator,
-    Socks5Server socksServer,
+    ProxyTarget target,
     FlowKey[] flows,
     int payloadBytes,
     int pps,
@@ -140,7 +140,7 @@ internal sealed class BackgroundSender(
                     var sendTicks = Stopwatch.GetTimestamp();
                     DatagramHeader.Write(_payload, _sequences[flow], flow);
                     tracker.Stamp(flow, _sequences[flow], (BackgroundWindow)window);
-                    if (await coordinator.TrySendSpanAsync(flows[flow], socksServer, _payload, default, cancellation).ConfigureAwait(false))
+                    if (await coordinator.TrySendSpanAsync(flows[flow], target, _payload, default, cancellation).ConfigureAwait(false))
                     {
                         _sentPerWindow[window]++;
                         _sendLatencies[window].Add(StabilityShared.TicksToMilliseconds(Stopwatch.GetTimestamp() - sendTicks));

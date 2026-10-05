@@ -46,6 +46,13 @@ internal static class UdpBurstScenario
 
         await using var receiver = new EchoReceiver(backgroundFlows + burstFlows);
         await using var server = new LoopbackSocks5UdpServer(receiver.Endpoint, associateDelay);
+        // Hosted in every column, so the rows of all three carry the local hop's own counters: the
+        // SOCKS5 columns observe zero datagrams arriving on it, the local column observes the run.
+        await using var localResponder = new LoopbackLocalUdpResponder();
+        // The counters open before the background flows establish, so the row's totals cover every
+        // handshake this run caused — the background warmup included, not the burst window alone.
+        var handshakesBefore = Socks5HandshakeCounters.Snapshot(server);
+        var responderBefore = LocalResponderCounters.Snapshot(localResponder);
         // One key array covering both flow-id ranges, so the sink can resolve a reply's sender from
         // the payload's flow id alone.
         var flowKeys = CreateFlowKeys(0, backgroundFlows + burstFlows);
@@ -62,21 +69,18 @@ internal static class UdpBurstScenario
         // The census logger goes to the pool too, because the fallback warn is a pool event.
         await using var associations = new UdpAssociationPool(registry, options.ReuseMode, logger: productEvents);
         var coordinator = new UdpProxyCoordinator(
-            new Socks5UdpTransportFactory(associations, registry, maximumFrameSize),
+            CreateTransportFactory(options, associations, registry, maximumFrameSize),
             sink,
             setupQueuePool,
             receiveWindowPool,
             setupExecutor,
-            new UdpProxyOptions
-            {
-                Capacity = backgroundFlows + burstFlows,
-                Logger = productEvents,
-            });
+            new UdpProxyOptions { Capacity = backgroundFlows + burstFlows, Logger = productEvents });
         PhaseOutcome outcome;
         try
         {
             var socksServer = new Socks5Server("soak", "127.0.0.1", checked((ushort)server.ControlEndpoint.Port), Username: null, Password: null);
-            outcome = await RunPhasesAsync(coordinator, socksServer, backgroundKeys, burstKeys, sink, tracker, options, burstTimeout)
+            var target = options.Target == SoakTargetKind.Local ? CreateLocalTarget(localResponder) : ProxyTarget.FromServer(socksServer);
+            outcome = await RunPhasesAsync(coordinator, target, backgroundKeys, burstKeys, sink, tracker, options, burstTimeout)
                 .ConfigureAwait(false);
         }
         finally
@@ -84,7 +88,37 @@ internal static class UdpBurstScenario
             await coordinator.DisposeAsync().ConfigureAwait(false);
         }
 
-        context.WriteResult("udp.burstEstablishment", BuildParameters(options), BuildMetrics(outcome, sink, options, productEvents));
+        var socks5Handshakes = Socks5HandshakeCounters.Delta(Socks5HandshakeCounters.Snapshot(server), handshakesBefore);
+        var responderCounters = LocalResponderCounters.Delta(LocalResponderCounters.Snapshot(localResponder), responderBefore);
+        context.WriteResult("udp.burstEstablishment", BuildParameters(options), BuildMetrics(outcome, sink, options, productEvents, socks5Handshakes, responderCounters));
+    }
+
+    /// <summary>
+    /// The transport the column sends through: the product composite with both factories for a local
+    /// target (<c>--target local</c> prices the wiring the CLI composes), the bare relay factory for
+    /// the SOCKS5 columns (the shape the reuse series was recorded with).
+    /// </summary>
+    private static IUdpProxyTransportFactory CreateTransportFactory(
+        SoakOptions options,
+        UdpAssociationPool associations,
+        SelfTrafficRegistry registry,
+        int maximumFrameSize)
+    {
+        var socks5 = new Socks5UdpTransportFactory(associations, registry, maximumFrameSize);
+        return options.Target == SoakTargetKind.Local
+            ? new UdpTransportFactory(socks5, new LocalUdpTransportFactory(registry, maximumFrameSize))
+            : socks5;
+    }
+
+    /// <summary>
+    /// The local column's target: the responder's own endpoint, carried as a <see cref="ProxyTarget"/>
+    /// with no SOCKS5 server behind it — the shape the configuration loader produces for a
+    /// <c>localTargets</c> entry, which is what the composite dispatches on.
+    /// </summary>
+    private static ProxyTarget CreateLocalTarget(LoopbackLocalUdpResponder responder)
+    {
+        var local = new LocalTarget("local", Endpoint.From(responder.Endpoint.Address, checked((ushort)responder.Endpoint.Port)));
+        return new ProxyTarget(local.Name, Socks5: null, Local: local);
     }
 
     private static object BuildParameters(SoakOptions options) => new
@@ -96,6 +130,7 @@ internal static class UdpBurstScenario
         payloadBytes = options.PayloadBytes,
         seed = options.Seed,
         reuse = options.ReuseMode,
+        target = options.Target,
     };
 
     /// <summary>
@@ -119,7 +154,7 @@ internal static class UdpBurstScenario
     /// <summary>Runs warmup, the three measurement windows, and the drain; disposal stays with the caller.</summary>
     private static async Task<PhaseOutcome> RunPhasesAsync(
         UdpProxyCoordinator coordinator,
-        Socks5Server socksServer,
+        ProxyTarget target,
         FlowKey[] backgroundKeys,
         FlowKey[] burstKeys,
         BurstCountingSink sink,
@@ -131,7 +166,7 @@ internal static class UdpBurstScenario
         for (var flow = 0; flow < backgroundKeys.Length; flow++)
         {
             DatagramHeader.Write(payload, 1, flow);
-            _ = await coordinator.TrySendSpanAsync(backgroundKeys[flow], socksServer, payload, default, CancellationToken.None).ConfigureAwait(false);
+            _ = await coordinator.TrySendSpanAsync(backgroundKeys[flow], target, payload, default, CancellationToken.None).ConfigureAwait(false);
         }
 
         // A flow counts as established once its warmup response has returned through the
@@ -146,14 +181,14 @@ internal static class UdpBurstScenario
         var windowTicks = new long[4];
         windowTicks[0] = Stopwatch.GetTimestamp();
         using var senderCancellation = new CancellationTokenSource();
-        var sender = new BackgroundSender(coordinator, socksServer, backgroundKeys, options.PayloadBytes, options.Pps, tracker);
+        var sender = new BackgroundSender(coordinator, target, backgroundKeys, options.PayloadBytes, options.Pps, tracker);
         // ReSharper disable once AccessToDisposedClosure // The sender loop is cancelled and awaited (CancelAsync + await senderTask) inside the using scope, so the token source is disposed only after the loop has returned.
         var senderTask = Task.Run(() => sender.RunLoopAsync(senderCancellation.Token), senderCancellation.Token);
 
         await Task.Delay(s_controlWindow, senderCancellation.Token).ConfigureAwait(false);
         windowTicks[1] = Stopwatch.GetTimestamp();
         sender.EnterWindow(BackgroundWindow.Burst);
-        var burst = await FireBurstAsync(coordinator, socksServer, burstKeys, backgroundKeys.Length, options.PayloadBytes, burstTimeout, sink).ConfigureAwait(false);
+        var burst = await FireBurstAsync(coordinator, target, burstKeys, backgroundKeys.Length, options.PayloadBytes, burstTimeout, sink).ConfigureAwait(false);
         windowTicks[2] = Stopwatch.GetTimestamp();
         sender.EnterWindow(BackgroundWindow.Post);
         await Task.Delay(s_postWindow, senderCancellation.Token).ConfigureAwait(false);
@@ -172,7 +207,7 @@ internal static class UdpBurstScenario
     /// </summary>
     private static async Task<BurstResult> FireBurstAsync(
         UdpProxyCoordinator coordinator,
-        Socks5Server socksServer,
+        ProxyTarget target,
         FlowKey[] burstKeys,
         int flowIdOffset,
         int payloadBytes,
@@ -187,7 +222,7 @@ internal static class UdpBurstScenario
         {
             issueTimestamps[flow] = Stopwatch.GetTimestamp();
             DatagramHeader.Write(payload, 1, flowIdOffset + flow);
-            if (await coordinator.TrySendSpanAsync(burstKeys[flow], socksServer, payload, default, CancellationToken.None).ConfigureAwait(false))
+            if (await coordinator.TrySendSpanAsync(burstKeys[flow], target, payload, default, CancellationToken.None).ConfigureAwait(false))
             {
                 accepted++;
             }
@@ -224,7 +259,13 @@ internal static class UdpBurstScenario
             StabilityShared.TicksToMilliseconds(issueEndTicks - issueTimestamps[0]));
     }
 
-    private static object BuildMetrics(PhaseOutcome outcome, BurstCountingSink sink, SoakOptions options, CountingRuntimeLogger productEvents)
+    private static object BuildMetrics(
+        PhaseOutcome outcome,
+        BurstCountingSink sink,
+        SoakOptions options,
+        CountingRuntimeLogger productEvents,
+        Socks5HandshakeCounters? socks5Handshakes,
+        LocalResponderCounters localResponder)
     {
         var burst = outcome.Burst;
         var sender = outcome.Sender;
@@ -245,6 +286,8 @@ internal static class UdpBurstScenario
             timeToFirstMs = burst.FirstResponseMs.Min,
             timeToLastMs = burst.FirstResponseMs.Max,
             timeToIssueMs = burst.TimeToIssueMs,
+            socks5Handshakes,
+            localResponder,
             background = new
             {
                 control = BuildWindowMetrics(sender.SentIn(BackgroundWindow.Control), sink.InjectedIn(BackgroundWindow.Control), sender.SendLatenciesIn(BackgroundWindow.Control), StabilityShared.TicksToSeconds(ticks[1] - ticks[0])),

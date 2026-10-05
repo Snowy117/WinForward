@@ -132,7 +132,7 @@ public sealed class MultiAdapterCaptureLoopArrivalSignalTests
     [SupportedOSPlatform("windows")]
     private static ValidatedConfiguration CreatePassConfiguration() =>
         new(
-            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Pass));
 
     private static WindowsAdapter Adapter(string id, nint handle) => new(id, id, $@"\DEVICE\{{{id}}}", handle, 1);

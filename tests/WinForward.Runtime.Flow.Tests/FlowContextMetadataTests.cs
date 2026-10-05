@@ -74,7 +74,7 @@ public sealed class FlowContextMetadataTests
     private static (FlowDispatcher Dispatcher, RecordingExecutor Executor) CreateDispatcher()
     {
         var server = new Socks5Server("primary", "127.0.0.1", 1080, Username: null, Password: null);
-        var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase) { [server.Name] = server };
+        var servers = new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase) { [server.Name] = ProxyTarget.FromServer(server) };
         var rules = new[]
         {
             new PolicyRule(
@@ -95,7 +95,7 @@ public sealed class FlowContextMetadataTests
 
         public ValueTask BlockAsync(CapturedFlowPacket packet) => Record(packet);
 
-        public ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken) => Record(packet);
+        public ValueTask ProxyAsync(CapturedFlowPacket packet, ProxyTarget target, CancellationToken cancellationToken) => Record(packet);
 
         private ValueTask Record(CapturedFlowPacket packet)
         {

@@ -257,7 +257,7 @@ public sealed class CaptureDegradationPlumbingTests
 
     private static ValidatedConfiguration CreatePassConfiguration()
     {
-        var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase) { ["p"] = new("p", "127.0.0.1", 1080, null, null) };
+        var servers = new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase) { ["p"] = ProxyTarget.FromServer(new("p", "127.0.0.1", 1080, null, null)) };
         return new ValidatedConfiguration(servers, new PolicySnapshot([], FlowAction.Pass));
     }
 
@@ -338,7 +338,7 @@ public sealed class CaptureDegradationPlumbingTests
     {
         public ValueTask PassAsync(CapturedFlowPacket packet) => ValueTask.CompletedTask;
         public ValueTask BlockAsync(CapturedFlowPacket packet) => ValueTask.CompletedTask;
-        public ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken) => ValueTask.CompletedTask;
+        public ValueTask ProxyAsync(CapturedFlowPacket packet, ProxyTarget target, CancellationToken cancellationToken) => ValueTask.CompletedTask;
     }
 
     private sealed class FailingRestoreModes : IAdapterModeController

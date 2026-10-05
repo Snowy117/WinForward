@@ -1,7 +1,6 @@
 using System.Net;
 using System.Reflection;
 using WinForward.Core;
-using WinForward.Runtime.Socks5;
 using WinForward.TestSupport;
 using Xunit;
 

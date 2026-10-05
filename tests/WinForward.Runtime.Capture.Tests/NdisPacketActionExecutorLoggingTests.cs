@@ -26,7 +26,7 @@ public sealed class NdisPacketActionExecutorLoggingTests
         var logger = new RecordingRuntimeLogger();
         var executor = new NdisPacketActionExecutor(new FakeReinjector(), logger);
 
-        await executor.ProxyAsync(TcpPacket(), s_server, CancellationToken.None);
+        await executor.ProxyAsync(TcpPacket(), ProxyTarget.FromServer(s_server), CancellationToken.None);
 
         var (_, message) = Assert.Single(logger.Lines, line => line.Level == RuntimeLogLevel.Warn);
         Assert.Contains("not initialized in this build", message, StringComparison.Ordinal);
@@ -50,12 +50,12 @@ public sealed class NdisPacketActionExecutorLoggingTests
         // parse stage: the association-reuse fast path fails closed synchronously (Blocked),
         // and the executor must label it reason=redirect — never "not initialized".
         var syn = MakeSynPacket(s_client, s_destination, 53000, 443);
-        await executor.ProxyAsync(syn, s_server, CancellationToken.None);
+        await executor.ProxyAsync(syn, ProxyTarget.FromServer(s_server), CancellationToken.None);
         await coordinator.DrainPendingSetupsAsync();
 
         var malformed = MakeSynPacket(s_client, s_destination, 53000, 443);
         malformed = malformed with { Lease = new PacketLease(malformed.Lease.Frame[..40]) };
-        await executor.ProxyAsync(malformed, s_server, CancellationToken.None);
+        await executor.ProxyAsync(malformed, ProxyTarget.FromServer(s_server), CancellationToken.None);
 
         var (_, message) = Assert.Single(logger.Lines, line => line.Level == RuntimeLogLevel.Warn && line.Message.Contains("reason=redirect", StringComparison.Ordinal));
         Assert.DoesNotContain("not initialized", message, StringComparison.Ordinal);
@@ -75,7 +75,7 @@ public sealed class NdisPacketActionExecutorLoggingTests
             FlowContext(FlowKey.Create(Endpoint.From(s_client, 53000), Endpoint.From(s_destination, 53), TransportProtocol.Udp, FlowOriginKind.Host)),
             new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
 
-        await executor.ProxyAsync(packet, s_server, CancellationToken.None);
+        await executor.ProxyAsync(packet, ProxyTarget.FromServer(s_server), CancellationToken.None);
 
         Assert.Contains(logger.Lines, line => line.Level == RuntimeLogLevel.Warn && line.Message.Contains("reason=parse", StringComparison.Ordinal));
         Assert.Empty(factory.Transports);
@@ -93,7 +93,7 @@ public sealed class NdisPacketActionExecutorLoggingTests
         // inside one 5 s window, so exactly one warn may escape.
         for (var i = 0; i < 3; i++)
         {
-            await executor.ProxyAsync(UdpPacket(), s_server, CancellationToken.None);
+            await executor.ProxyAsync(UdpPacket(), ProxyTarget.FromServer(s_server), CancellationToken.None);
         }
 
         Assert.Equal(1, logger.Lines.Count(line => line.Level == RuntimeLogLevel.Warn && line.Message.Contains("UDP proxy handling failed", StringComparison.Ordinal)));

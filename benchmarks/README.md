@@ -91,7 +91,7 @@ dotnet run -c Release --project benchmarks/WinForward.Benchmarks -- \
   --stability [--scenario all|udp|udpBurst|udpChurn|udpSessionBudget|tcp|tcpChurn|tcpthroughput|footprint|baseline|residency|retention|scaling|sweep|pump] [--duration 60] [--pps 25000] \
   [--payload-bytes 512] [--flows 256] [--udp-flows 100] [--burst-flows 48] [--dial-delay-ms 0] [--churn-waves 1] \
   [--rate 20] [--capacity 16384] [--churn-seconds 90] [--drain-seconds 120] [--require-pooling] \
-  [--reuse off|always|auto] \
+  [--reuse off|always|auto] [--target socks5|local] \
   [--tcp-concurrency 64] [--tcp-transfer-bytes 1048576] [--socks5-external] \
   [--attribution-delay-ms 0] [--attribution-delay-percent 5] [--threads 0] [--shared-key-percent 10] \
   [--abort-mix clean=25,clientRst=25,relayCancel=25,upstreamTruncate=25] [--seed 42] \
@@ -110,6 +110,26 @@ is one association per flow). The five stability scenarios that construct a pool
 columns of a sharing comparison come from one binary and one recorded command line; the
 `udpSession`/`FrameworkSetup` perf benchmarks keep `off`, the baseline their per-session anchors were
 recorded against. An unknown value is refused at parse time rather than falling back to `auto`.
+
+`--target socks5|local` selects the transport the two flow-establishment scenarios send through:
+`socks5` (the default) relays each flow through the loopback SOCKS5 server, `local` points the same
+flows at a loopback endpoint through the **product** `UdpTransportFactory` composite — both factories
+composed as the CLI composes them — which forwards the payload verbatim and attributes the answer to
+the flow's original destination. It is the placement column R7 of `10-05-local-dns-transport` asks
+for; its series is `results/2026-10-05-local-target/`. Only `udp.churn` and `udp.burstEstablishment`
+host the column; every other scenario leaves its relay path unchanged and is refused at parse time
+rather than recording a relay-measured row stamped `local` (a session-budget run, for instance,
+hand-builds a shared association whose pooling verdict has no local-target meaning). The two
+scenarios that do host it keep the SOCKS5 server running in every column. Both servers' own
+counters land in every row — `socks5Handshakes` (`controlConnections` / `associateReplies`) and
+`localResponder`
+(`datagramsReceived` / `datagramsReplied`), cumulative from the start of the run's load (the
+unmeasured warmup wave included) — so the local column's zeros are read beside the relay columns'
+non-zeros in the same artifact rather than asserted by construction. Cumulative rather than per
+window is deliberate: a shared association is established once and then serves later waves, so a
+per-wave delta of zero would be the pool working, not the relay being unused. An unknown value is
+refused at parse time like `--reuse`, and `--target local` refuses `--socks5-external` because an
+out-of-process server's counters never reach this parent.
 
 Stability runs hold the Windows system timer at 1 ms resolution (`timeBeginPeriod(1)` through the
 production `HighResolutionTimerScope`) for the whole run so the 10 ms pacing ticks fire on time;
@@ -167,7 +187,13 @@ teardown tails — are **not comparable** with current rows either.
   `establishmentLossRate` and `firstResponseMs` fields were re-based on 2026-10-05 to per-flow
   response ownership — a reply counts only when it arrived on the flow that asked — so rows recorded
   before that date report a success they did not measure (see
-  `results/2026-10-05-udp-reuse-ownership/`).
+  `results/2026-10-05-udp-reuse-ownership/`). Follows `--target`: under `local` the burst and the
+  background flows go through the product transport composite to a loopback responder, and the row's
+  `socks5Handshakes` / `localResponder` counters are the run's totals on both sides of the comparison
+  (`results/2026-10-05-local-target/`). Read the burst window's duration with its `injected / sent`
+  figures: the window closes when the burst's own first responses arrive or the adaptive timeout
+  fires, so a column that answers 48 of 48 closes it in tens of milliseconds while a shared column
+  whose replies land on siblings runs it to the 30 s floor.
 - **`udp.churn`** — session-creation churn: waves of `--burst-flows` short-lived sessions through
   the real dial path, each wave retired through the coordinator's own idle-expiry path
   (`RemoveExpiredAsync` with a zero timeout, i.e. the per-session teardown the periodic sweeper
@@ -186,7 +212,12 @@ teardown tails — are **not comparable** with current rows either.
   reported as ordinals only. Each row carries the wave's per-flow accounting — `firstResponses`
   (own), `misdelivered` and `noResponse`, which sum to the wave's flow count — and the `reuse` mode
   it ran under, so `own + noResponse == flows` is checkable from the row itself. Series re-based
-  2026-10-05 on per-flow response ownership (see `results/2026-10-05-udp-reuse-ownership/`).
+  2026-10-05 on per-flow response ownership (see `results/2026-10-05-udp-reuse-ownership/`). Follows
+  `--target`: under `local` the same waves go through the product transport composite to a loopback
+  responder, and every row carries the two servers' own `socks5Handshakes` / `localResponder`
+  counters cumulative up to that row — so the local column's zero handshakes sit beside the relay
+  columns' non-zeros, and the per-flow accounting says which transport answered which flow
+  (`results/2026-10-05-local-target/`).
 - **`udp.sessionBudget`** — the session-budget soak (PRD acceptance 1): `--rate` new flows/s for
   `--churn-seconds`, then `--drain-seconds` with no new flows, sampling the live sessions, the
   process's own descriptors, the pool's associations/leases, and the estimated kernel receive buffer

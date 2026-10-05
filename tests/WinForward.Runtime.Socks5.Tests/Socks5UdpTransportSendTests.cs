@@ -144,7 +144,7 @@ public sealed class Socks5UdpTransportSendTests
         // The production factory path — not a direct Socks5UdpTransport.Create call — reaches
         // the real relay socket. The comparison is tolerant for the same reason as the direct test:
         // the OS owns the applied value (Linux doubles SO_RCVBUF, Windows rounds up).
-        await using var transport = (Socks5UdpTransport)await factory.CreateAsync(socksServer, CancellationToken.None);
+        await using var transport = (Socks5UdpTransport)await factory.CreateAsync(ProxyTarget.FromServer(socksServer), CancellationToken.None);
         var applied = transport.AppliedRelayReceiveBufferSize;
         Assert.True(applied >= configuredBytes, string.Create(CultureInfo.InvariantCulture, $"expected an applied relay receive buffer of at least {configuredBytes} bytes, observed {applied}"));
 

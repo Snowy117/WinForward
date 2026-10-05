@@ -88,7 +88,7 @@ public interface IPacketActionExecutor
 {
     ValueTask PassAsync(CapturedFlowPacket packet);
     ValueTask BlockAsync(CapturedFlowPacket packet);
-    ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken);
+    ValueTask ProxyAsync(CapturedFlowPacket packet, ProxyTarget target, CancellationToken cancellationToken);
 }
 
 public sealed class FlowDispatcher : IFlowAttributionHost
@@ -104,7 +104,7 @@ public sealed class FlowDispatcher : IFlowAttributionHost
     }
 
     private readonly PolicySnapshot _policy;
-    private readonly IReadOnlyDictionary<string, Socks5Server> _servers;
+    private readonly IReadOnlyDictionary<string, ProxyTarget> _targets;
     private readonly FlowTable _flows;
     private readonly ISelfTrafficGuard _selfTraffic;
     private readonly IPacketActionExecutor _executor;
@@ -123,7 +123,7 @@ public sealed class FlowDispatcher : IFlowAttributionHost
         ArgumentNullException.ThrowIfNull(selfTraffic);
         ArgumentNullException.ThrowIfNull(executor);
         _policy = configuration.Policy;
-        _servers = configuration.Servers;
+        _targets = configuration.Targets;
         _flows = new FlowTable(flowCapacity, activityClock: activityClock);
         _selfTraffic = selfTraffic;
         _executor = executor;
@@ -200,12 +200,12 @@ public sealed class FlowDispatcher : IFlowAttributionHost
             // ValueTask is returned directly, allocating nothing when it completes synchronously.
             // An unresolved server name and the UDP reverse-response special case handled by
             // DispatchSlowAsync keep their slow-path behavior.
-            if (decision.ProxyServerName is null || !_servers.TryGetValue(decision.ProxyServerName, out var server)) return DispatchSlowAsync(packet, cancellationToken);
+            if (decision.TargetName is null || !_targets.TryGetValue(decision.TargetName, out var target)) return DispatchSlowAsync(packet, cancellationToken);
             if (packet.Context.Key.Protocol == TransportProtocol.Udp && existing.Key.IsReverseOf(packet.Context.Key)) return DispatchSlowAsync(packet, cancellationToken);
             packet = packet with { FlowGeneration = existing.Generation };
             // ReSharper disable once ConvertIfStatementToReturnStatement // The condition completes the lease (side effect + state transition); folding it into a conditional expression hides the "already consumed" early exit (B1 disposition).
             if (!packet.Lease.TryComplete(PacketDisposition.ProxyConsumed)) return ValueTask.CompletedTask;
-            return _executor.ProxyAsync(packet, server, cancellationToken);
+            return _executor.ProxyAsync(packet, target, cancellationToken);
         }
 
         packet = packet with { FlowGeneration = existing.Generation };
@@ -242,7 +242,7 @@ public sealed class FlowDispatcher : IFlowAttributionHost
             if (existing.Decision.Action == FlowAction.Proxy && packet.Context.Key.Protocol == TransportProtocol.Udp &&
                 existing.Key.IsReverseOf(packet.Context.Key))
             {
-                await CompleteAsync(packet, PacketDisposition.Pass, PacketAction.Pass, server: null, cancellationToken).ConfigureAwait(false);
+                await CompleteAsync(packet, PacketDisposition.Pass, PacketAction.Pass, target: null, cancellationToken).ConfigureAwait(false);
                 return;
             }
             await ExecuteDecisionAsync(packet, existing.Decision, cancellationToken).ConfigureAwait(false);
@@ -258,7 +258,7 @@ public sealed class FlowDispatcher : IFlowAttributionHost
         {
             LogCapacityBlock(context);
             if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.flowResolved", packet, new RuntimeLogField("outcome", "capacity"));
-            await CompleteAsync(packet, PacketDisposition.Block, PacketAction.Block, server: null, cancellationToken).ConfigureAwait(false);
+            await CompleteAsync(packet, PacketDisposition.Block, PacketAction.Block, target: null, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -272,7 +272,7 @@ public sealed class FlowDispatcher : IFlowAttributionHost
     {
         if (!_selfTraffic.IsOwned(packet.Context)) return false;
         if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.selfTraffic", packet, new RuntimeLogField("outcome", "pass"));
-        await CompleteAsync(packet, PacketDisposition.Pass, PacketAction.Pass, server: null, cancellationToken).ConfigureAwait(false);
+        await CompleteAsync(packet, PacketDisposition.Pass, PacketAction.Pass, target: null, cancellationToken).ConfigureAwait(false);
         return true;
     }
 
@@ -286,7 +286,7 @@ public sealed class FlowDispatcher : IFlowAttributionHost
         // mislabel it as a policy drop (packet.dropped reason=policy) in the trace.
         var disposition = outcome == TcpRedirectOutcome.Blocked ? PacketDisposition.Block : PacketDisposition.ProxyConsumed;
         if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.reverseHandled", packet, new RuntimeLogField("outcome", outcome));
-        await CompleteAsync(packet, disposition, disposition == PacketDisposition.Block ? PacketAction.Block : PacketAction.None, server: null, cancellationToken).ConfigureAwait(false);
+        await CompleteAsync(packet, disposition, disposition == PacketDisposition.Block ? PacketAction.Block : PacketAction.None, target: null, cancellationToken).ConfigureAwait(false);
         return true;
     }
 
@@ -336,7 +336,7 @@ public sealed class FlowDispatcher : IFlowAttributionHost
     /// <summary>The refusal arm: the packet is blocked fail-closed and reported as settled.</summary>
     private async ValueTask<bool> BlockFailClosedAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
-        await CompleteAsync(packet, PacketDisposition.Block, PacketAction.Block, server: null, cancellationToken).ConfigureAwait(false);
+        await CompleteAsync(packet, PacketDisposition.Block, PacketAction.Block, target: null, cancellationToken).ConfigureAwait(false);
         return true;
     }
 
@@ -370,7 +370,7 @@ public sealed class FlowDispatcher : IFlowAttributionHost
 
     IPacketActionExecutor IFlowAttributionHost.Executor => _executor;
 
-    IReadOnlyDictionary<string, Socks5Server> IFlowAttributionHost.Servers => _servers;
+    IReadOnlyDictionary<string, ProxyTarget> IFlowAttributionHost.Targets => _targets;
 
     PolicySnapshot IFlowAttributionHost.Policy => _policy;
 
@@ -415,7 +415,7 @@ public sealed class FlowDispatcher : IFlowAttributionHost
         fields[6] = new("processPath", _includeProcessPathInLogs ? context.ProcessPath : null);
         fields[7] = new("action", decision.Action);
         fields[8] = new("rule", decision.RuleIndex);
-        fields[9] = new("proxy", decision.ProxyServerName);
+        fields[9] = new("target", decision.TargetName);
         _logger.Event(RuntimeLogLevel.Debug, "flow.created", fields);
     }
 
@@ -452,7 +452,7 @@ public sealed class FlowDispatcher : IFlowAttributionHost
         if (_selfTraffic.IsOwned(packet.Context))
         {
             if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.selfTraffic", packet, new RuntimeLogField("outcome", "pass"));
-            await CompleteAsync(packet, PacketDisposition.Pass, PacketAction.Pass, server: null, cancellationToken).ConfigureAwait(false);
+            await CompleteAsync(packet, PacketDisposition.Pass, PacketAction.Pass, target: null, cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -462,8 +462,8 @@ public sealed class FlowDispatcher : IFlowAttributionHost
         // (ARP, ND, L2) pays only an ether-type compare.
         if (await TryHandleFragmentAsync(packet, cancellationToken).ConfigureAwait(false)) return;
 
-        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.action", packet, new RuntimeLogField("action", FlowAction.Pass), new RuntimeLogField("rule", Value: null), new RuntimeLogField("proxy", Value: null), new RuntimeLogField("reason", "nonFlow"));
-        await CompleteAsync(packet, PacketDisposition.Pass, PacketAction.Pass, server: null, cancellationToken).ConfigureAwait(false);
+        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.action", packet, new RuntimeLogField("action", FlowAction.Pass), new RuntimeLogField("rule", Value: null), new RuntimeLogField("target", Value: null), new RuntimeLogField("reason", "nonFlow"));
+        await CompleteAsync(packet, PacketDisposition.Pass, PacketAction.Pass, target: null, cancellationToken).ConfigureAwait(false);
     }
 
     private async ValueTask<bool> TryHandleFragmentAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
@@ -475,7 +475,7 @@ public sealed class FlowDispatcher : IFlowAttributionHost
         // Blocked (a disposed-coordinator race) keeps the policy-drop executor path.
         var disposition = outcome == TcpRedirectOutcome.Blocked ? PacketDisposition.Block : PacketDisposition.ProxyConsumed;
         if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.fragmentHandled", packet, new RuntimeLogField("outcome", outcome));
-        await CompleteAsync(packet, disposition, disposition == PacketDisposition.Block ? PacketAction.Block : PacketAction.None, server: null, cancellationToken).ConfigureAwait(false);
+        await CompleteAsync(packet, disposition, disposition == PacketDisposition.Block ? PacketAction.Block : PacketAction.None, target: null, cancellationToken).ConfigureAwait(false);
         return true;
     }
 
@@ -484,25 +484,25 @@ public sealed class FlowDispatcher : IFlowAttributionHost
 
     private async ValueTask ExecuteDecisionAsync(CapturedFlowPacket packet, FlowDecision decision, CancellationToken cancellationToken)
     {
-        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.action", packet, new RuntimeLogField("action", decision.Action), new RuntimeLogField("rule", decision.RuleIndex), new RuntimeLogField("proxy", decision.ProxyServerName));
+        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.action", packet, new RuntimeLogField("action", decision.Action), new RuntimeLogField("rule", decision.RuleIndex), new RuntimeLogField("target", decision.TargetName));
         switch (decision.Action)
         {
             case FlowAction.Pass:
-                await CompleteAsync(packet, PacketDisposition.Pass, PacketAction.Pass, server: null, cancellationToken).ConfigureAwait(false);
+                await CompleteAsync(packet, PacketDisposition.Pass, PacketAction.Pass, target: null, cancellationToken).ConfigureAwait(false);
                 return;
             case FlowAction.Block:
-                await CompleteAsync(packet, PacketDisposition.Block, PacketAction.Block, server: null, cancellationToken).ConfigureAwait(false);
+                await CompleteAsync(packet, PacketDisposition.Block, PacketAction.Block, target: null, cancellationToken).ConfigureAwait(false);
                 return;
-            case FlowAction.Proxy when decision.ProxyServerName is not null && _servers.TryGetValue(decision.ProxyServerName, out var server):
-                await CompleteAsync(packet, PacketDisposition.ProxyConsumed, PacketAction.Proxy, server, cancellationToken).ConfigureAwait(false);
+            case FlowAction.Proxy when decision.TargetName is not null && _targets.TryGetValue(decision.TargetName, out var target):
+                await CompleteAsync(packet, PacketDisposition.ProxyConsumed, PacketAction.Proxy, target, cancellationToken).ConfigureAwait(false);
                 return;
             default:
-                await CompleteAsync(packet, PacketDisposition.Block, PacketAction.Block, server: null, cancellationToken).ConfigureAwait(false);
+                await CompleteAsync(packet, PacketDisposition.Block, PacketAction.Block, target: null, cancellationToken).ConfigureAwait(false);
                 return;
         }
     }
 
-    private async ValueTask CompleteAsync(CapturedFlowPacket packet, PacketDisposition disposition, PacketAction action, Socks5Server? server, CancellationToken cancellationToken)
+    private async ValueTask CompleteAsync(CapturedFlowPacket packet, PacketDisposition disposition, PacketAction action, ProxyTarget? target, CancellationToken cancellationToken)
     {
         if (!packet.Lease.TryComplete(disposition)) return;
         switch (action)
@@ -513,8 +513,8 @@ public sealed class FlowDispatcher : IFlowAttributionHost
             case PacketAction.Block:
                 await _executor.BlockAsync(packet).ConfigureAwait(false);
                 break;
-            case PacketAction.Proxy when server is not null:
-                await _executor.ProxyAsync(packet, server, cancellationToken).ConfigureAwait(false);
+            case PacketAction.Proxy when target is { } resolved:
+                await _executor.ProxyAsync(packet, resolved, cancellationToken).ConfigureAwait(false);
                 break;
             case PacketAction.None:
                 // The caller completed the lease with its own disposition and there is no executor

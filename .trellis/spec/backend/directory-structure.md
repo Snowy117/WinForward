@@ -66,11 +66,11 @@ benchmarks/                    # 基准宿主（BenchmarkDotNet 性能基准 + �
 |---|---|
 | `WinForward.Runtime.Capture` | NDIS 抓包：生命周期、适配器模式控制、包处理、再注入（`IPacketReinjector` 在此） |
 | `WinForward.Runtime.TcpRedirect` | TCP 全链路：redirect 表/会话/监听/注入、relay、frame 改写、`ClientResetInjector`（按类型依赖归 TCP，勿移回根） |
-| `WinForward.Runtime.UdpProxy` | UDP 会话与响应再注入 |
-| `WinForward.Runtime.Socks5` | TCP/UDP 共用的 SOCKS5 拨号与 UDP 传输（编解码仍在 `WinForward.Protocols`） |
+| `WinForward.Runtime.UdpProxy` | UDP 会话、响应再注入，以及传输接缝契约（`UdpTransportContracts.cs`：`IUdpProxyTransport`/工厂/接收结果词汇） |
+| `WinForward.Runtime.Socks5` | TCP/UDP 共用的 SOCKS5 拨号与 UDP 传输实现（编解码仍在 `WinForward.Protocols`） |
 
 - 新文件按域归组；根命名空间只进"所有组都引用的调度词汇"。
-- 跨组引用直接 `using`，允许的既有边：根→TcpRedirect（`TcpRedirectOutcome`）、根/Capture→两个 Coordinator、TcpRedirect/UdpProxy→Capture 的 `IPacketReinjector`、TcpRedirect→Socks5、UdpProxy→Socks5（`IUdpProxyTransport` 工厂/传输接缝及其接收结果类型，镜像 TcpRedirect→Socks5；数据报线上编解码在 `WinForward.Protocols`）。出现新的组间循环时先考虑挪类型再考虑加 using。
+- 跨组引用直接 `using`，允许的既有边：根→TcpRedirect（`TcpRedirectOutcome`）、根/Capture→两个 Coordinator、TcpRedirect/UdpProxy→Capture 的 `IPacketReinjector`、TcpRedirect→Socks5、UdpProxy→Socks5（关联池与控制连接的拨号）、Socks5→UdpProxy（实现传输接缝及其接收结果词汇；契约自 2026-10-05 由 UdpProxy 拥有，传输中性，数据报线上编解码在 `WinForward.Protocols`）。出现新的组间循环时先考虑挪类型再考虑加 using。
 
 ---
 

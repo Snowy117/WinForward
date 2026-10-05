@@ -147,7 +147,7 @@ public sealed class Socks5ControlTimeoutTests
         var registry = new SelfTrafficRegistry();
         await using var fixture = await UdpTransportTestFactory.CreateAsync(socksServer, registry);
         var transport = fixture.Transport;
-        Assert.Equal(advertised, transport.RelayEndpoint);
+        Assert.Equal(advertised, transport.PeerEndpoint);
 
         using var sender = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         sender.Bind(new IPEndPoint(IPAddress.Parse("127.0.0.2"), relayEndpoint.Port));
@@ -158,8 +158,8 @@ public sealed class Socks5ControlTimeoutTests
         using var receiveBudget = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var response = await transport.ReceiveAsync(buffer, receiveBudget.Token);
         Assert.True(response.HasDatagram);
-        Assert.Equal((IPAddressValue?)IPAddress.Parse("192.0.2.53"), response.Datagram.DestinationAddress);
-        Assert.Equal(53, response.Datagram.DestinationPort);
+        Assert.Equal((IPAddressValue?)IPAddress.Parse("192.0.2.53"), response.Datagram.SourceAddress);
+        Assert.Equal(53, response.Datagram.SourcePort);
         Assert.Equal(new byte[] { 0xab }, response.Datagram.Payload.ToArray());
 
         await transport.DisposeAsync();

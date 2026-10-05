@@ -3,7 +3,6 @@ using System.Net;
 using System.Net.Sockets;
 using WinForward.Configuration;
 using WinForward.Core;
-using WinForward.Protocols;
 using WinForward.TestSupport;
 using Xunit;
 using static WinForward.TestSupport.AsyncTestExtensions;
@@ -42,7 +41,7 @@ public sealed class UdpResponseSourceMismatchTests
         var foreign = Endpoint.From(IPAddress.Parse("198.51.100.7"), 53);
         var before = RuntimeCounters.Shared.Get(RuntimeCounters.UdpResponseSourceMismatch);
 
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [1], default, CancellationToken.None));
         await WaitForAsync(() => factory.Transports.Count == 1);
         var transport = Assert.Single(factory.Transports);
         await WaitForAsync(() =>
@@ -50,7 +49,7 @@ public sealed class UdpResponseSourceMismatchTests
             lock (transport.Sent) return transport.Sent.Count == 1;
         });
 
-        transport.EnqueueResponse(new Socks5UdpDatagram(foreign.Address, DestinationDomain: null, foreign.Port, new byte[] { 0x7f }));
+        transport.EnqueueResponse(new UdpTransportDatagram(foreign.Address, SourceDomain: null, foreign.Port, new byte[] { 0x7f }));
 
         using var readTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var (responseFlow, remoteSource, payload, _) = await sink.Responses.Reader.ReadAsync(readTimeout.Token);
@@ -69,7 +68,7 @@ public sealed class UdpResponseSourceMismatchTests
         Assert.Equal("1", Field(warn, "udpAssociation"));
 
         // The session survived the observation: the same relay carries another send.
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [2], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [2], default, CancellationToken.None));
         await WaitForAsync(() =>
         {
             lock (transport.Sent) return transport.Sent.Count == 2;
@@ -87,7 +86,7 @@ public sealed class UdpResponseSourceMismatchTests
         var flow = CreateFlow("192.0.2.53");
         var before = RuntimeCounters.Shared.Get(RuntimeCounters.UdpResponseSourceMismatch);
 
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [1], default, CancellationToken.None));
         await WaitForAsync(() => factory.Transports.Count == 1);
         var transport = Assert.Single(factory.Transports);
         await WaitForAsync(() =>
@@ -95,7 +94,7 @@ public sealed class UdpResponseSourceMismatchTests
             lock (transport.Sent) return transport.Sent.Count == 1;
         });
 
-        transport.EnqueueResponse(new Socks5UdpDatagram(IPAddress.Parse("192.0.2.53"), DestinationDomain: null, 53, new byte[] { 0x11 }));
+        transport.EnqueueResponse(new UdpTransportDatagram(IPAddress.Parse("192.0.2.53"), SourceDomain: null, 53, new byte[] { 0x11 }));
 
         using var readTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var (responseFlow, remoteSource, payload, _) = await sink.Responses.Reader.ReadAsync(readTimeout.Token);
@@ -119,7 +118,7 @@ public sealed class UdpResponseSourceMismatchTests
         var foreign = Endpoint.From(IPAddress.Parse("198.51.100.7"), 53);
         var before = RuntimeCounters.Shared.Get(RuntimeCounters.UdpResponseSourceMismatch);
 
-        Assert.True(await coordinator.TrySendSpanAsync(flow, s_server, [1], default, CancellationToken.None));
+        Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [1], default, CancellationToken.None));
         await WaitForAsync(() => factory.Transports.Count == 1);
         var transport = Assert.Single(factory.Transports);
         await WaitForAsync(() =>
@@ -129,7 +128,7 @@ public sealed class UdpResponseSourceMismatchTests
 
         for (var index = 0; index < burst; index++)
         {
-            transport.EnqueueResponse(new Socks5UdpDatagram(foreign.Address, DestinationDomain: null, foreign.Port, new[] { (byte)index }));
+            transport.EnqueueResponse(new UdpTransportDatagram(foreign.Address, SourceDomain: null, foreign.Port, new[] { (byte)index }));
         }
 
         for (var index = 0; index < burst; index++)
@@ -146,7 +145,7 @@ public sealed class UdpResponseSourceMismatchTests
 
         // The next window logs again while the counter keeps accumulating.
         time.Advance(TimeSpan.FromSeconds(5));
-        transport.EnqueueResponse(new Socks5UdpDatagram(foreign.Address, DestinationDomain: null, foreign.Port, new byte[] { 0x7f }));
+        transport.EnqueueResponse(new UdpTransportDatagram(foreign.Address, SourceDomain: null, foreign.Port, new byte[] { 0x7f }));
         using (var readTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
         {
             var (_, remoteSource, _, _) = await sink.Responses.Reader.ReadAsync(readTimeout.Token);
@@ -177,7 +176,7 @@ public sealed class UdpResponseSourceMismatchTests
         Assert.True(await sessionB.SendSpanAsync(destination, [0xb2], CancellationToken.None));
         var before = RuntimeCounters.Shared.Get(RuntimeCounters.UdpResponseSourceMismatch);
 
-        transportB.EnqueueResponse(new Socks5UdpDatagram(IPAddress.Parse("192.0.2.53"), DestinationDomain: null, 53, new byte[] { 0xc3 }));
+        transportB.EnqueueResponse(new UdpTransportDatagram(IPAddress.Parse("192.0.2.53"), SourceDomain: null, 53, new byte[] { 0xc3 }));
 
         using var readTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var (responseFlow, remoteSource, payload, _) = await sink.Responses.Reader.ReadAsync(readTimeout.Token);
@@ -201,7 +200,7 @@ public sealed class UdpResponseSourceMismatchTests
         Assert.True(await session.SendSpanAsync(destination, [0xa1], CancellationToken.None));
         var before = RuntimeCounters.Shared.Get(RuntimeCounters.UdpResponseSourceMismatch);
 
-        transport.EnqueueResponse(new Socks5UdpDatagram(IPAddress.Parse("fe80::1%9"), DestinationDomain: null, 53, new byte[] { 0xc3 }));
+        transport.EnqueueResponse(new UdpTransportDatagram(IPAddress.Parse("fe80::1%9"), SourceDomain: null, 53, new byte[] { 0xc3 }));
 
         using var readTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var (responseFlow, remoteSource, payload, _) = await sink.Responses.Reader.ReadAsync(readTimeout.Token);
@@ -230,7 +229,7 @@ public sealed class UdpResponseSourceMismatchTests
 
         var otherPeer = Endpoint.From(IPAddress.Parse("fe80::3%7"), 53);
         Assert.NotEqual(destination.Address.Bits, otherPeer.Address.Bits);
-        transport.EnqueueResponse(new Socks5UdpDatagram(otherPeer.Address, DestinationDomain: null, otherPeer.Port, new byte[] { 0xc3 }));
+        transport.EnqueueResponse(new UdpTransportDatagram(otherPeer.Address, SourceDomain: null, otherPeer.Port, new byte[] { 0xc3 }));
 
         using var readTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var (_, remoteSource, _, _) = await sink.Responses.Reader.ReadAsync(readTimeout.Token);

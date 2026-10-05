@@ -297,9 +297,9 @@ internal static class FlowHash
     }
 }
 
-public readonly record struct FlowDecision(FlowAction Action, int? RuleIndex, string? ProxyServerName)
+public readonly record struct FlowDecision(FlowAction Action, int? RuleIndex, string? TargetName)
 {
-    public static FlowDecision Fallback(FlowAction action) => new(action, RuleIndex: null, ProxyServerName: null);
+    public static FlowDecision Fallback(FlowAction action) => new(action, RuleIndex: null, TargetName: null);
 }
 
 /// <summary>

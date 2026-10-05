@@ -39,7 +39,7 @@ public sealed class FlowDispatcherTests
         // evaluated by normal flow/policy (here proxied) and never routed into the reverse handler,
         // whose numeric-port matching could otherwise drop it.
         var server = new Socks5Server("primary", "127.0.0.1", 1080, Username: null, Password: null);
-        var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase) { [server.Name] = server };
+        var servers = new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase) { [server.Name] = ProxyTarget.FromServer(server) };
         const ushort collidingPort = 40001;
         var rules = new[] { new PolicyRule(new RuleMatcher(RemotePorts: [(collidingPort, collidingPort)]), new FlowDecision(FlowAction.Proxy, 0, server.Name)) };
         var config = new ValidatedConfiguration(servers, new PolicySnapshot(rules, FlowAction.Block));
@@ -149,7 +149,7 @@ public sealed class FlowDispatcherTests
     private static ValidatedConfiguration CreateConfig()
     {
         var server = new Socks5Server("primary", "127.0.0.1", 1080, Username: null, Password: null);
-        var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase) { [server.Name] = server };
+        var servers = new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase) { [server.Name] = ProxyTarget.FromServer(server) };
         var rules = new[] { new PolicyRule(new RuleMatcher(RemotePorts: [(53, 53)]), new FlowDecision(FlowAction.Proxy, 0, server.Name)) };
         return new ValidatedConfiguration(servers, new PolicySnapshot(rules, FlowAction.Block));
     }

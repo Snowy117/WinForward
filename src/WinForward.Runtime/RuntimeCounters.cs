@@ -82,6 +82,17 @@ public sealed class RuntimeCounters
     /// <summary>A SOCKS5 server was flipped from shared to per-flow associations because passive sampling detected source-port pinning; see the rate-limited <c>udp.association.fallback</c> warn.</summary>
     public const string UdpAssociationFallbacks = "udpAssociationFallbacks";
 
+    /// <summary>A UDP flow was created over a local target instead of a SOCKS5 association; the trace log names the flow's target on <c>udp.session.created</c>.</summary>
+    public const string UdpLocalTargetFlows = "udpLocalTargetFlows";
+
+    /// <summary>
+    /// A local-target transport could not hand a datagram to its socket (an oversize payload, or a send
+    /// the socket refused) or its receive faulted fatally; the flow fails closed and re-establishes on its
+    /// next datagram. Teardown is not counted: a cancelled receive or send (idle expiry, shutdown) and a
+    /// receive that ends because the socket was closed are the normal end of a session, not failures.
+    /// </summary>
+    public const string UdpLocalTargetFailures = "udpLocalTargetFailures";
+
     /// <summary>
     /// The native-pool diagnostic key prefix (task 09-18 M0): every registered pool records
     /// cumulative rents and returns under <c>pool.&lt;name&gt;.rented</c> / <c>pool.&lt;name&gt;.returned</c>,

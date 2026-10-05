@@ -52,7 +52,7 @@ public sealed class UdpAssociationCapabilityTests
         await third.Transport.SendSpanAsync(destination, payload, CancellationToken.None);
         Assert.Equal(1, pool.AssociationCount);
         Assert.Equal(3, pool.LeasedFlowCount);
-        Assert.Equal(echo.Endpoint.Port, third.Transport.RelayEndpoint.Port);
+        Assert.Equal(echo.Endpoint.Port, third.Transport.PeerEndpoint.Port);
     }
 
     [Fact]
@@ -104,7 +104,7 @@ public sealed class UdpAssociationCapabilityTests
         Assert.Equal(1, await relay.PumpAsync(1));
         Assert.True(await ReceiveDatagramAsync(first.Transport));
         await using var second = CreateTransport(pool, registry, server);
-        Assert.Equal(first.Transport.RelayEndpoint.Port, second.Transport.RelayEndpoint.Port);
+        Assert.Equal(first.Transport.PeerEndpoint.Port, second.Transport.PeerEndpoint.Port);
         for (var index = 0; index < UdpAssociationCapabilitySampler.PinningSuspicionThreshold; index++)
         {
             await second.Transport.SendSpanAsync(destination, payload, CancellationToken.None);
@@ -135,7 +135,7 @@ public sealed class UdpAssociationCapabilityTests
         Assert.Equal(2, pool.LeasedFlowCount);
         Assert.False(first.Lease.IsFaulted);
         Assert.False(second.Lease.IsFaulted);
-        Assert.Equal(first.Transport.RelayEndpoint.Port, second.Transport.RelayEndpoint.Port);
+        Assert.Equal(first.Transport.PeerEndpoint.Port, second.Transport.PeerEndpoint.Port);
         await first.Transport.SendSpanAsync(destination, payload, CancellationToken.None);
         Assert.Equal(2, await relay.PumpAsync(1));
         Assert.True(await ReceiveDatagramAsync(first.Transport));
@@ -239,7 +239,7 @@ public sealed class UdpAssociationCapabilityTests
         Assert.Empty(recorder.Events);
 
         await using var third = CreateTransport(pool, registry, server);
-        Assert.Equal(answering.Transport.RelayEndpoint.Port, third.Transport.RelayEndpoint.Port);
+        Assert.Equal(answering.Transport.PeerEndpoint.Port, third.Transport.PeerEndpoint.Port);
     }
 
     [Fact]

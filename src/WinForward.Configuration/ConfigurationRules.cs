@@ -15,7 +15,7 @@ internal static class ConfigurationRules
     /// <see cref="FlowAction.Pass"/>, which is the posture every configuration had before the
     /// default became addressable.
     /// </summary>
-    internal static FlowAction? ParseDomain(RuleDomainDto? domain, FlowOriginKind origin, Dictionary<string, Socks5Server> servers, List<PolicyRule> parsed, List<ConfigDiagnostic> errors)
+    internal static FlowAction? ParseDomain(RuleDomainDto? domain, FlowOriginKind origin, Dictionary<string, ProxyTarget> targets, List<PolicyRule> parsed, List<ConfigDiagnostic> errors)
     {
         var path = DomainPath(origin);
         if (domain is null)
@@ -28,7 +28,7 @@ internal static class ConfigurationRules
             ? FlowAction.Pass
             : ParseAction(domain.FallbackAction, $"{path}.fallbackAction", errors, allowProxy: false);
 
-        ValidateRules(domain.Rules, path, origin, servers, parsed, errors);
+        ValidateRules(domain.Rules, path, origin, targets, parsed, errors);
         return fallback;
     }
 
@@ -37,17 +37,17 @@ internal static class ConfigurationRules
 
     private static string DomainPath(FlowOriginKind origin) => origin == FlowOriginKind.Host ? "host" : "forwarded";
 
-    private static void ValidateRules(IReadOnlyList<RuleDto?>? dtos, string domainPath, FlowOriginKind origin, Dictionary<string, Socks5Server> servers, List<PolicyRule> parsed, List<ConfigDiagnostic> errors)
+    private static void ValidateRules(IReadOnlyList<RuleDto?>? dtos, string domainPath, FlowOriginKind origin, Dictionary<string, ProxyTarget> targets, List<PolicyRule> parsed, List<ConfigDiagnostic> errors)
     {
         if (dtos is null) return;
         for (var index = 0; index < dtos.Count; index++)
         {
-            var rule = ParseRule(dtos[index], index, string.Create(CultureInfo.InvariantCulture, $"{domainPath}.rules[{index}]"), origin, servers, errors);
+            var rule = ParseRule(dtos[index], index, string.Create(CultureInfo.InvariantCulture, $"{domainPath}.rules[{index}]"), origin, targets, errors);
             if (rule is not null) parsed.Add(rule);
         }
     }
 
-    private static PolicyRule? ParseRule(RuleDto? dto, int index, string path, FlowOriginKind origin, Dictionary<string, Socks5Server> servers, List<ConfigDiagnostic> errors)
+    private static PolicyRule? ParseRule(RuleDto? dto, int index, string path, FlowOriginKind origin, Dictionary<string, ProxyTarget> targets, List<ConfigDiagnostic> errors)
     {
         if (dto is null)
         {
@@ -56,6 +56,11 @@ internal static class ConfigurationRules
         }
 
         ValidateNonEmpty(dto.Process, $"{path}.process", errors);
+        if (dto.LegacyProxyServer is not null)
+        {
+            errors.Add(new($"{path}.proxyServer", "Key 'proxyServer' was renamed to 'target'; use 'target' instead."));
+        }
+
         // A forwarded flow has no host process owner, so the matcher could never fire. Rejecting it
         // here is what keeps "configured but inert" out of the forwarded domain.
         if (origin == FlowOriginKind.Forwarded && dto.Process is not null)
@@ -72,22 +77,28 @@ internal static class ConfigurationRules
 
         var action = ParseAction(dto.Action, $"{path}.action", errors, allowProxy: true);
         if (action is null) return null;
-        var proxyServer = dto.ProxyServer?.Trim();
-        if (action == FlowAction.Proxy && (string.IsNullOrWhiteSpace(proxyServer) || !servers.ContainsKey(proxyServer)))
+        var target = dto.Target?.Trim();
+        var resolved = action == FlowAction.Proxy && target is not null && targets.TryGetValue(target, out var candidate) ? candidate : (ProxyTarget?)null;
+        if (action == FlowAction.Proxy && resolved is null)
         {
-            errors.Add(new($"{path}.proxyServer", "Proxy action requires a configured proxy server."));
+            errors.Add(new($"{path}.target", "Proxy action requires a configured target."));
         }
-        if (action != FlowAction.Proxy && dto.ProxyServer is not null) errors.Add(new($"{path}.proxyServer", "Only proxy rules may specify proxyServer."));
+        if (action != FlowAction.Proxy && dto.Target is not null) errors.Add(new($"{path}.target", "Only proxy rules may specify target."));
 
         var protocols = ParseSet(dto.Protocol, ParseProtocol, $"{path}.protocol", errors);
         var families = ParseSet(dto.AddressFamily, ParseFamily, $"{path}.addressFamily", errors);
         var networks = ParseNetworks(dto.RemoteCidr, $"{path}.remoteCidr", errors);
         var ports = ParsePorts(dto.RemotePort, $"{path}.remotePort", errors);
+        var udpOnly = protocols is { Count: 1 } && protocols.Contains(TransportProtocol.Udp);
+        if (resolved is { IsLocal: true } && !udpOnly)
+        {
+            errors.Add(new($"{path}.target", "A local target requires a protocol selector of exactly udp; a rule without one matches every protocol, TCP included."));
+        }
         if (errors.Exists(error => error.Path.Equals(path, StringComparison.Ordinal) || error.Path.StartsWith(path + ".", StringComparison.Ordinal))) return null;
 
         return new PolicyRule(new RuleMatcher(
             NormalizeSet(dto.Process), NormalizeSet(dto.AdapterId), NormalizeSet(dto.AdapterName), protocols, families, networks, ports),
-            new FlowDecision(action.Value, index, action == FlowAction.Proxy ? proxyServer : null));
+            new FlowDecision(action.Value, index, action == FlowAction.Proxy ? target : null));
     }
 
     private static FlowAction? ParseAction(string? raw, string path, List<ConfigDiagnostic> errors, bool allowProxy)

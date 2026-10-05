@@ -47,7 +47,7 @@ public sealed class IdleExpirySweeperCadenceTests
         var time = new MutableTimeProvider(DateTimeOffset.UtcNow.AddHours(1));
 
         var udpFlow = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
-        Assert.True(await udpCoordinator.TrySendSpanAsync(udpFlow, s_server, [1], default, CancellationToken.None));
+        Assert.True(await udpCoordinator.TrySendSpanAsync(udpFlow, ProxyTarget.FromServer(s_server), [1], default, CancellationToken.None));
         await WaitForAsync(() => udpCoordinator.SessionState(udpFlow) == UdpSessionState.Active);
 
         // A half-open TCP redirect session (its accept is parked on the fake listener) and its flow
@@ -126,7 +126,7 @@ public sealed class IdleExpirySweeperCadenceTests
     private static FlowDispatcher CreateDispatcher()
     {
         var config = new ValidatedConfiguration(
-            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Pass));
         return new FlowDispatcher(config, new FakeGuard(), new FakeExecutor());
     }

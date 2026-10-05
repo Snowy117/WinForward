@@ -20,7 +20,7 @@ public sealed class ConfigurationValidationTests
         Assert.NotNull(dto);
         Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
         Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "host.rules[0].remotePort", StringComparison.Ordinal));
-        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "host.rules[0].proxyServer", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "host.rules[0].target", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -198,17 +198,38 @@ public sealed class ConfigurationValidationTests
         ConfigurationAssert.Invalid(json, "socks5Servers[0].port");
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ConfigurationRejectsTheRenamedProxyServerKey(bool alsoDeclaresTarget)
+    {
+        var replacement = alsoDeclaresTarget ? ", \"target\": \"Main\"" : string.Empty;
+        var json = $$"""
+        {
+          "socks5Servers": [ { "name": "Main", "host": "127.0.0.1", "port": 1080 } ],
+          "host": { "fallbackAction": "pass", "rules": [ { "action": "proxy", "proxyServer": "Main"{{replacement}} } ] }
+        }
+        """;
+
+        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
+        Assert.NotNull(dto);
+        Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
+        var renamed = Assert.Single(diagnostics, diagnostic => string.Equals(diagnostic.Path, "host.rules[0].proxyServer", StringComparison.Ordinal));
+        Assert.Contains("'target'", renamed.Message, StringComparison.Ordinal);
+        if (alsoDeclaresTarget) Assert.DoesNotContain(diagnostics, diagnostic => string.Equals(diagnostic.Path, "host.rules[0].target", StringComparison.Ordinal));
+    }
+
     [Fact]
-    public void ConfigurationRejectsProxyServerOnNonProxyRule()
+    public void ConfigurationRejectsTargetOnNonProxyRule()
     {
         const string json = """
         {
           "socks5Servers": [ { "name": "Main", "host": "127.0.0.1", "port": 1080 } ],
-          "host": { "fallbackAction": "pass", "rules": [ { "action": "pass", "proxyServer": "Main" } ] }
+          "host": { "fallbackAction": "pass", "rules": [ { "action": "pass", "target": "Main" } ] }
         }
         """;
 
-        ConfigurationAssert.Invalid(json, "host.rules[0].proxyServer");
+        ConfigurationAssert.Invalid(json, "host.rules[0].target");
     }
 
     [Fact]

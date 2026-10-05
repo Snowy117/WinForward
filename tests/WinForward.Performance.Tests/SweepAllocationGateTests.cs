@@ -490,7 +490,7 @@ public sealed class SweepAllocationGateTests
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink());
         for (var index = 0; index < sessions; index++)
         {
-            Assert.True(await coordinator.TrySendSpanAsync(MakeUdpFlow(checked((ushort)(53 + index))), s_server, [1], default, CancellationToken.None));
+            Assert.True(await coordinator.TrySendSpanAsync(MakeUdpFlow(checked((ushort)(53 + index))), ProxyTarget.FromServer(s_server), [1], default, CancellationToken.None));
         }
         await WaitForAsync(() => factory.Transports.Count == sessions);
         Assert.Equal(sessions, coordinator.SessionCount);

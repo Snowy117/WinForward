@@ -306,7 +306,7 @@ public sealed class TcpProxyCoordinatorCapacityTests
         var executor = new NdisPacketActionExecutor(reinjector, logger, tcpProxy: coordinator);
         var straggler = MakeForwardTcpPacket(s_clientIpv4, s_destIpv4, 53000, 443, TcpFlagAck);
 
-        await executor.ProxyAsync(straggler, s_server, CancellationToken.None);
+        await executor.ProxyAsync(straggler, ProxyTarget.FromServer(s_server), CancellationToken.None);
 
         Assert.Equal(0, reinjector.SendToAdapterCount);
         Assert.Equal(0, reinjector.SendToMstcpCount);

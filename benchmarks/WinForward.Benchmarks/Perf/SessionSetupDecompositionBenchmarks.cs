@@ -7,7 +7,6 @@ using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
 using WinForward.Runtime;
-using WinForward.Runtime.Socks5;
 using WinForward.Runtime.UdpProxy;
 
 namespace WinForward.Benchmarks.Perf;
@@ -208,7 +207,7 @@ public class SessionSetupDecompositionBenchmarks
             var transport = new CountingFakeTransport(10_000 + index, factory);
             var alias = new RelayAlias(FlowKey.Create(
                 Endpoint.From(transport.LocalEndpoint.Address, checked((ushort)transport.LocalEndpoint.Port)),
-                Endpoint.From(transport.RelayEndpoint.Address, checked((ushort)transport.RelayEndpoint.Port)),
+                Endpoint.From(transport.PeerEndpoint.Address, checked((ushort)transport.PeerEndpoint.Port)),
                 TransportProtocol.Udp,
                 flow.Origin));
             var association = table.Claim(flow, alias, now);
@@ -269,7 +268,7 @@ public class SessionSetupDecompositionBenchmarks
             var transport = new BenignParkTransport(10_000 + index, factory);
             var alias = new RelayAlias(FlowKey.Create(
                 Endpoint.From(transport.LocalEndpoint.Address, checked((ushort)transport.LocalEndpoint.Port)),
-                Endpoint.From(transport.RelayEndpoint.Address, checked((ushort)transport.RelayEndpoint.Port)),
+                Endpoint.From(transport.PeerEndpoint.Address, checked((ushort)transport.PeerEndpoint.Port)),
                 TransportProtocol.Udp,
                 flow.Origin));
             var association = table.Claim(flow, alias, now);
@@ -308,7 +307,7 @@ public class SessionSetupDecompositionBenchmarks
         var factory = new BenchmarkUdpTransportFactory();
         for (var index = 0; index < Sessions; index++)
         {
-            var transport = await factory.CreateAsync(_socks, CancellationToken.None).ConfigureAwait(false);
+            var transport = await factory.CreateAsync(ProxyTarget.FromServer(_socks), CancellationToken.None).ConfigureAwait(false);
             await transport.DisposeAsync().ConfigureAwait(false);
         }
 
@@ -367,7 +366,7 @@ public class SessionSetupDecompositionBenchmarks
             var transport = new CountingFakeTransport(10_000 + index, factory);
             var alias = new RelayAlias(FlowKey.Create(
                 Endpoint.From(transport.LocalEndpoint.Address, checked((ushort)transport.LocalEndpoint.Port)),
-                Endpoint.From(transport.RelayEndpoint.Address, checked((ushort)transport.RelayEndpoint.Port)),
+                Endpoint.From(transport.PeerEndpoint.Address, checked((ushort)transport.PeerEndpoint.Port)),
                 TransportProtocol.Udp,
                 flow.Origin));
             var association = table.Claim(flow, alias, now);
@@ -419,7 +418,7 @@ public class SessionSetupDecompositionBenchmarks
         var table = new UdpAssociationTable(capacity: 1, initialCapacity: 1);
         var association = table.Claim(flow, new RelayAlias(FlowKey.Create(
             Endpoint.From(transport.LocalEndpoint.Address, checked((ushort)transport.LocalEndpoint.Port)),
-            Endpoint.From(transport.RelayEndpoint.Address, checked((ushort)transport.RelayEndpoint.Port)),
+            Endpoint.From(transport.PeerEndpoint.Address, checked((ushort)transport.PeerEndpoint.Port)),
             TransportProtocol.Udp,
             flow.Origin)), TimeProvider.System.GetUtcNow());
         for (var index = 0; index < Sessions; index++)
@@ -463,7 +462,7 @@ public class SessionSetupDecompositionBenchmarks
         var table = new UdpAssociationTable(capacity: 1, initialCapacity: 1);
         var association = table.Claim(flow, new RelayAlias(FlowKey.Create(
             Endpoint.From(transport.LocalEndpoint.Address, checked((ushort)transport.LocalEndpoint.Port)),
-            Endpoint.From(transport.RelayEndpoint.Address, checked((ushort)transport.RelayEndpoint.Port)),
+            Endpoint.From(transport.PeerEndpoint.Address, checked((ushort)transport.PeerEndpoint.Port)),
             TransportProtocol.Udp,
             flow.Origin)), TimeProvider.System.GetUtcNow());
         var observer = new ActivityObserverHolder(table);
@@ -505,7 +504,7 @@ public class SessionSetupDecompositionBenchmarks
             var transport = new CountingFakeTransport(10_000 + index, factory);
             var alias = new RelayAlias(FlowKey.Create(
                 Endpoint.From(transport.LocalEndpoint.Address, checked((ushort)transport.LocalEndpoint.Port)),
-                Endpoint.From(transport.RelayEndpoint.Address, checked((ushort)transport.RelayEndpoint.Port)),
+                Endpoint.From(transport.PeerEndpoint.Address, checked((ushort)transport.PeerEndpoint.Port)),
                 TransportProtocol.Udp,
                 flow.Origin));
             var association = table.Claim(flow, alias, now);
@@ -839,7 +838,7 @@ public class SessionSetupDecompositionBenchmarks
     }
 
     private async ValueTask<bool> TrySendAsync(UdpProxyCoordinator coordinator, int index, byte[] payload) =>
-        await coordinator.TrySendSpanAsync(BenchmarkShared.CreateFlowKey(index), _socks, payload, default, CancellationToken.None).ConfigureAwait(false);
+        await coordinator.TrySendSpanAsync(BenchmarkShared.CreateFlowKey(index), ProxyTarget.FromServer(_socks), payload, default, CancellationToken.None).ConfigureAwait(false);
 
     private static Fixture CreateFixture(IUdpProxyTransportFactory factory, ISetupExecutor executor, int capacity, long? setupQueueBudget = null)
     {
@@ -1108,7 +1107,7 @@ public class SessionSetupDecompositionBenchmarks
 
         public long Entered => Interlocked.Read(ref _entered);
 
-        public async ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
+        public async ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref _entered);
             await _gate.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -1119,12 +1118,12 @@ public class SessionSetupDecompositionBenchmarks
     /// <summary>The C2 probe's transport: the fake's shape plus a receive-entry counter.</summary>
     private sealed class CountingFakeTransport(int localPort, CountingFakeTransportFactory owner) : IUdpProxyTransport
     {
-        public IPEndPoint RelayEndpoint { get; } = new(IPAddress.Loopback, 50_000);
+        public IPEndPoint PeerEndpoint { get; } = new(IPAddress.Loopback, 50_000);
         public IPEndPoint LocalEndpoint { get; } = new(IPAddress.Loopback, localPort);
 
         public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken) => ValueTask.CompletedTask;
 
-        public async ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+        public async ValueTask<UdpTransportReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
         {
             owner.NoteReceiveEntry();
 #pragma warning disable MA0166 // The fake's park must stay shape-identical to BenchmarkUdpTransport's (the recorded harness shape the teardown numbers were calibrated on); a TimeProvider-based timer is a different implementation.
@@ -1148,18 +1147,18 @@ public class SessionSetupDecompositionBenchmarks
     /// <summary>The T5 probe's transport: the C2 fake's shape with a benign park — the receive awaits a completion cell its token registration completes and then returns a skip result that never carries a datagram, so the receive loop exits through its token check instead of a canceled await.</summary>
     private sealed class BenignParkTransport(int localPort, CountingFakeTransportFactory owner) : IUdpProxyTransport
     {
-        public IPEndPoint RelayEndpoint { get; } = new(IPAddress.Loopback, 50_000);
+        public IPEndPoint PeerEndpoint { get; } = new(IPAddress.Loopback, 50_000);
         public IPEndPoint LocalEndpoint { get; } = new(IPAddress.Loopback, localPort);
 
         public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken) => ValueTask.CompletedTask;
 
-        public async ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+        public async ValueTask<UdpTransportReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
         {
             owner.NoteReceiveEntry();
             var park = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             await using var registration = cancellationToken.Register(() => park.TrySetResult());
             await park.Task.ConfigureAwait(false);
-            return Socks5UdpReceiveResult.Skipped(Socks5UdpReceiveSkipReason.UnexpectedSource);
+            return UdpTransportReceiveResult.Skipped(UdpTransportSkipReason.UnexpectedSource);
         }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;

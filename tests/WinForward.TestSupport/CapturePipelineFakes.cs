@@ -44,14 +44,14 @@ internal sealed class FakeExecutor : IPacketActionExecutor
     public int ProxyCount { get; private set; }
     public ValueTask PassAsync(CapturedFlowPacket packet) { PassCount++; return ValueTask.CompletedTask; }
     public ValueTask BlockAsync(CapturedFlowPacket packet) { BlockCount++; return ValueTask.CompletedTask; }
-    public ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken) { ProxyCount++; return ValueTask.CompletedTask; }
+    public ValueTask ProxyAsync(CapturedFlowPacket packet, ProxyTarget target, CancellationToken cancellationToken) { ProxyCount++; return ValueTask.CompletedTask; }
 }
 
 internal sealed class ThrowingPassExecutor : IPacketActionExecutor
 {
     public ValueTask PassAsync(CapturedFlowPacket packet) => throw new InvalidOperationException("injection failed");
     public ValueTask BlockAsync(CapturedFlowPacket packet) => ValueTask.CompletedTask;
-    public ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken) => ValueTask.CompletedTask;
+    public ValueTask ProxyAsync(CapturedFlowPacket packet, ProxyTarget target, CancellationToken cancellationToken) => ValueTask.CompletedTask;
 }
 
 internal sealed class ThrowingRedirectListenerFactory : ITcpRedirectListenerFactory
@@ -188,7 +188,7 @@ internal sealed class RecordingExecutor : IPacketActionExecutor
 
     public ValueTask BlockAsync(CapturedFlowPacket packet) => Record("block", packet);
 
-    public ValueTask ProxyAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken) => Record("proxy", packet);
+    public ValueTask ProxyAsync(CapturedFlowPacket packet, ProxyTarget target, CancellationToken cancellationToken) => Record("proxy", packet);
 
     private ValueTask Record(string action, CapturedFlowPacket packet)
     {

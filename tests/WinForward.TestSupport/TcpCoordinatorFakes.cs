@@ -146,7 +146,7 @@ internal static class TcpCoordinatorFakes
         var coordinator = CreateCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider(), new TcpRedirectOptions { Logger = logger });
 
         var server = new Socks5Server("primary", "127.0.0.1", 1080, Username: null, Password: null);
-        var servers = new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase) { [server.Name] = server };
+        var servers = new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase) { [server.Name] = ProxyTarget.FromServer(server) };
         var rules = new[] { new PolicyRule(new RuleMatcher(), new FlowDecision(FlowAction.Proxy, 0, server.Name)) };
         var config = new ValidatedConfiguration(servers, new PolicySnapshot(rules, FlowAction.Block));
         var executor = new NdisPacketActionExecutor(new CountingReinjector(), logger, tcpProxy: coordinator);

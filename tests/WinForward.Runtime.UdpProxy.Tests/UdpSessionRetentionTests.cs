@@ -2,7 +2,6 @@ using System.Net;
 using WinForward.Benchmarks.Stability;
 using WinForward.Configuration;
 using WinForward.Core;
-using WinForward.Runtime.Socks5;
 using WinForward.TestSupport;
 using Xunit;
 using static WinForward.TestSupport.AsyncTestExtensions;
@@ -234,7 +233,7 @@ public sealed class UdpSessionRetentionTests
             var index = Flows.Count;
             var flow = MakeFlow(index);
             Flows.Add(flow);
-            Assert.True(await Coordinator.TrySendSpanAsync(flow, s_server, s_payload, default, CancellationToken.None));
+            Assert.True(await Coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), s_payload, default, CancellationToken.None));
 
             // The population proof is the transport's creation plus the flush of the queued datagram:
             // the flush is what stamps the session's activity, so advancing the clock before it would
@@ -283,7 +282,7 @@ public sealed class UdpSessionRetentionTests
 
         public List<ExchangeTransport> Transports { get; } = [];
 
-        public ValueTask<IUdpProxyTransport> CreateAsync(Socks5Server server, CancellationToken cancellationToken)
+        public ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken)
         {
             var transport = new ExchangeTransport(Interlocked.Increment(ref _nextLocalPort));
             Transports.Add(transport);
@@ -300,7 +299,7 @@ public sealed class UdpSessionRetentionTests
     {
         private int _sent;
 
-        public IPEndPoint RelayEndpoint { get; } = new(IPAddress.Loopback, 50_000);
+        public IPEndPoint PeerEndpoint { get; } = new(IPAddress.Loopback, 50_000);
 
         public IPEndPoint LocalEndpoint { get; } = new(IPAddress.Loopback, localPort);
 
@@ -317,7 +316,7 @@ public sealed class UdpSessionRetentionTests
             return ValueTask.CompletedTask;
         }
 
-        public async ValueTask<Socks5UdpReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
+        public async ValueTask<UdpTransportReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
         {
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
             throw new InvalidOperationException("the receive loop should end through cancellation");

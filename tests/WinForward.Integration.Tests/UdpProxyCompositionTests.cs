@@ -57,7 +57,7 @@ public sealed class UdpProxyCompositionTests
         // a transposition (a ceiling of 31 associations of 7 flows) is a valid pool shape that no
         // later assertion would catch, so the seam is pinned here as the capacity/buffer seam above.
         var configuration = new ValidatedConfiguration(
-            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Pass))
         {
             UdpAssociationReuse = UdpAssociationReuseMode.Off,

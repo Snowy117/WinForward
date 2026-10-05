@@ -574,7 +574,7 @@ internal static class GcSoakScenario
             {
                 _sequences[index]++;
                 DatagramHeader.Write(_payload, _sequences[index], index);
-                _ = await _coordinator.TrySendSpanAsync(_flows[index], _server, _payload, default, CancellationToken.None).ConfigureAwait(false);
+                _ = await _coordinator.TrySendSpanAsync(_flows[index], ProxyTarget.FromServer(_server), _payload, default, CancellationToken.None).ConfigureAwait(false);
             }
 
             var stopwatch = Stopwatch.StartNew();
@@ -687,7 +687,7 @@ internal static class GcSoakScenario
             // send tail cannot deadlock and the completed shape allocates nothing. The ValueTask is
             // consumed exactly once, immediately.
 #pragma warning disable S5034, VSTHRD002, CA2012
-            var pending = _coordinator.TrySendSpanAsync(_flows[flowIndex], _server, _payload.AsSpan(), default, CancellationToken.None);
+            var pending = _coordinator.TrySendSpanAsync(_flows[flowIndex], ProxyTarget.FromServer(_server), _payload.AsSpan(), default, CancellationToken.None);
             Interlocked.Increment(ref _sends);
             _ = pending.GetAwaiter().GetResult();
 #pragma warning restore S5034, VSTHRD002, CA2012

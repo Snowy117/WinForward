@@ -29,7 +29,7 @@ public class CapturePumpBenchmarks
     {
         // Fresh pipeline state per invocation so the measured pass count matches the packet count.
         var passConfiguration = new ValidatedConfiguration(
-            new Dictionary<string, Socks5Server>(StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Pass));
         var executor = new CountingExecutor();
         var logger = new ThresholdOnlyLogger(RuntimeLogLevel.Info);
