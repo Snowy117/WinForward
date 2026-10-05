@@ -1798,3 +1798,30 @@ Delivered R3 of 10-05-udp-association-sharing-correctness: a rule's target may n
 ### Next Steps
 
 - R4/R5 sharing-policy child: price the remaining SOCKS5 UDP population (short non-DNS flows) using the R1-corrected columns and decide the udpAssociationReuse default
+
+
+## Session 54: R4/R5: remove UDP association sharing (remove-udp-association-sharing)
+<!-- trellis-session: v=2 fp=f8d372f476bec02d -->
+
+**Date**: 2026-10-05
+**Task**: R4/R5: remove UDP association sharing (remove-udp-association-sharing)
+**Branch**: `master`
+
+### Summary
+
+Delivered R4/R5 of 10-05-udp-association-sharing-correctness: association sharing is deleted outright. A proxy-decided SOCKS5 UDP flow now owns its own authenticated association (control connection + UDP ASSOCIATE + relay socket), living and dying with the flow; the three configuration keys, the pool/lease/control-association/capability machinery (1161 lines) and the harness --reuse knob are gone (79 files, +1998/-4627, 11 files deleted). Why: 3-9 of 48 flows answered correctly per churn wave under sharing (41-45 answered by a sibling), 3/48 in the burst with 251/256 background flows misdelivered, and the failure is structurally undetectable for two flows sharing a destination, so no detector could demote a server on it; the DNS-shaped population that motivated sharing now has a strictly better placement (R3 local targets). The exclusive-lease warm pool was rejected for its stale-reply window. New Socks5UdpAssociation dials/ASSOCIATEs/watches the control stream (death = 0-byte read or stream fault; teardown is distinguishable because the scope is sealed before the close); a dead association fails its flow closed with no in-place recovery and the flow re-establishes on its next datagram. Kept because they kept their subject: udpAssociationLost/udp.association.lost, the udpAssociation=generation correlation id, and the reply-ownership counter (a server may legitimately answer from another endpoint). Removed: udpAssociationRecovered/udpAssociationFallbacks and their events, the heartbeat's udpAssociations/udpLeasedFlows. Confirmation run (benchmarks/results/2026-10-05-no-association-sharing/): 48/48 per churn wave with exactly one control connection + one ASSOCIATE per flow (96/144/192), burst 304/304, local column 48/48 with zero handshakes; four historical directories annotated as measuring a removed feature with no number edited. Process: Phases A-D by subagents (config surface, machinery deletion + ownership move, harness/history/re-run, docs + decision record + L2 readiness note), then an independent check that found one real defect (the session-budget soak's associations column was assigned sessions by definition — a tautology documented as evidence; it now reads the harness SOCKS5 server's live control connections and its acceptance term discriminates a stranded connection) plus a missing annotation, a weakly locked teardown reason, dead test API and stale docs, all fixed; the inspector's 30 findings were cleared in code with zero suppressions. Gates: build 0 warnings, 1177 tests green (13 assemblies), format empty, jb inspectcode zero issues with a cold-cache confirmation run. Known pre-existing flake disclosed: UdpSessionRetentionTests.AnUnansweredSingleExchangeIsNotRetiredOnTheShortTtl NREs under a parallel full run through its harness's unsynchronized List Count-then-index read (not introduced here; re-run green). Operator action: any real configuration that sets udpAssociationReuse / udpAssociationMaxPerServer / udpAssociationFlowsPerAssociation now fails closed at parse and the keys must be deleted.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1624431` | refactor(udp): remove UDP association sharing (remove-udp-association-sharing) |
+| `e041ee6` | chore(task): record the association-sharing removal (remove-udp-association-sharing) |
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- UoT v2 / VLESS (L2) transport: start from research/l2-readiness.md — per-flow framing above all, and the alias-uniqueness obstacle it records; decide the fate of the 09-06 local-mux research (its per-flow-ASSOCIATE premise is superseded)
