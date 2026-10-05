@@ -57,20 +57,27 @@ JSON, rejected on any unknown property. The top level is:
     { "name": "main", "host": "proxy.example.com", "port": 1080,
       "username": "user", "password": "secret" }
   ],
-  "rules": [
-    {
-      "process": ["browser.exe"],
-      "protocol": ["tcp", "udp"],
-      "addressFamily": ["ipv4", "ipv6"],
-      "remoteCidr": ["0.0.0.0/0", "::/0"],
-      "remotePort": ["80", "443", "10000-20000"],
-      "action": "proxy",
-      "proxyServer": "main"
-    },
-    { "adapterName": ["vEthernet (MyVM)"], "action": "pass" }
-  ],
+  "host": {
+    "fallbackAction": "pass",
+    "rules": [
+      {
+        "process": ["browser.exe"],
+        "protocol": ["tcp", "udp"],
+        "addressFamily": ["ipv4", "ipv6"],
+        "remoteCidr": ["0.0.0.0/0", "::/0"],
+        "remotePort": ["80", "443", "10000-20000"],
+        "action": "proxy",
+        "proxyServer": "main"
+      }
+    ]
+  },
+  "forwarded": {
+    "fallbackAction": "pass",
+    "rules": [
+      { "adapterName": ["vEthernet (MyVM)"], "action": "proxy", "proxyServer": "main" }
+    ]
+  },
   "logLevel": "info",
-  "fallbackAction": "pass",
   "proxyUnavailableAction": "block",
   "processingFailureAction": "block",
   "tcpFlowCapacity": 4096
@@ -81,24 +88,33 @@ JSON, rejected on any unknown property. The top level is:
   `host` is an IPv4/IPv6 literal or DNS hostname. `username`/`password` are both optional or
   both present, and each UTF-8 encoding fits the RFC 1929 255-byte limit. Credentials are
   never logged; protect the configuration file's permissions.
-- `rules`: evaluated top to bottom; the first matching rule decides. Host-originated traffic
-  considers every rule. New forwarded traffic considers only rules containing `adapterId` and/or
-  `adapterName`; if none match, it passes unchanged. The same split applies to packets that cannot
-  be classified as TCP/UDP flows. Every match field is optional; fields present together use AND
-  semantics, alternatives inside one field use OR.
+- `host` / `forwarded`: the two policy domains. `host` is **required** and governs flows the machine
+  itself originates; `forwarded` is optional and governs flows observed arriving on another NIC.
+  Each domain owns its own ordered `rules` list and its own `fallbackAction`. A rule belongs to the
+  domain whose list it is written in — never to both — so a rule that must apply on both sides is
+  written twice, and an adapter selector narrows a rule inside its domain instead of deciding which
+  domain it belongs to.
+- `rules`: evaluated top to bottom within their domain; the first matching rule decides. Every match
+  field is optional; fields present together use AND semantics, alternatives inside one field use OR.
   - `process`: executable filename (no slash) or path (contains `/` or `\`),
     case-insensitive. A value without a slash matches the filename; a path value matches the
     normalized full path exactly, and also matches every program in that directory or any
     subdirectory below it (e.g. `C:\Program Files\MyApp` matches `MyApp\bin\tool.exe`).
-    No substring/wildcard.
+    No substring/wildcard. Rejected inside `forwarded.rules`: a forwarded flow has no host process
+    owner, so such a rule could never fire.
   - `adapterId` / `adapterName`: stable id / exact friendly name. Both present = AND (must
-    resolve to the same adapter). Name-only is for dynamically recreated adapters.
+    resolve to the same adapter). Name-only is for dynamically recreated adapters. Inside
+    `forwarded.rules` they select the adapter the packet arrived on and are **optional**, so a
+    forwarded rule without them applies to every forwarded flow.
   - `protocol`: `tcp` / `udp`. `addressFamily`: `ipv4` / `ipv6`.
   - `remoteCidr`: CIDR prefixes. `remotePort`: decimal ports or inclusive ranges (`10000-20000`).
   - `action`: `proxy` (requires `proxyServer`), `pass`, or `block`.
   - Present match arrays must be non-empty; an omitted field imposes no condition.
-- `fallbackAction`: `pass` or `block` (required) for host-originated traffic. A host fallback proxy
-  requires an explicit catch-all `proxy` rule. Forwarded traffic does not use this fallback.
+- `host.fallbackAction`: `pass` or `block`, **required**. It decides a host flow that no host rule
+  matched. A host fallback proxy requires an explicit catch-all `proxy` rule.
+- `forwarded.fallbackAction`: `pass` or `block`, optional, defaults to `pass`. It decides a forwarded
+  flow that no forwarded rule matched. `block` drops every unmatched forwarded flow, which for a
+  guest VM means losing connectivity — set it deliberately.
 - `proxyUnavailableAction` / `processingFailureAction`: optional; both default to `block` and
   only `block` is accepted in the first release.
 - `tcpFlowCapacity`: optional concurrent proxied TCP flow budget, `1..8192`, default `4096`.
@@ -236,7 +252,7 @@ uses SOCKS5 UDP fragmentation (`FRAG != 0`), or exceeds the pinned NDISAPI frame
 See `examples/`:
 
 - `process-proxy.json` — proxy specific processes (optionally by port/CIDR).
-- `hyperv-adapter-proxy.json` — proxy flows arriving from a Hyper-V virtual adapter.
+- `hyperv-adapter-proxy.json` — proxy flows arriving from a Hyper-V virtual adapter (`forwarded`).
 - `dns-policy.json` — explicit DNS policy (proxy UDP/53, block TCP/53).
 - `dns-proxy.json` — proxy all UDP/53.
 - `pass-fallback.json` — proxy a process, pass everything else.
@@ -244,13 +260,17 @@ See `examples/`:
 
 ## Notes
 
-- Transparent interception of host-originated flows is selected by owning process; forwarded
-  traffic (e.g. from a Hyper-V guest) is selected by originating adapter. Forwarded traffic
-  requires an adapter-qualified rule and otherwise passes, independently of unqualified rules and
-  `fallbackAction`. It has no host process owner, so process rules do not match it.
+- Host-originated flows are governed by `host.rules` and selected by owning process, by adapter, or
+  by any combination of the match fields. Forwarded flows (e.g. from a Hyper-V guest) are governed
+  by `forwarded.rules` and selected by the adapter they arrived on. A forwarded flow has no host
+  process owner, so `process` is rejected inside `forwarded.rules`; a host rule never applies to
+  forwarded traffic and vice versa.
 - `Forwarded` is currently derived from NDIS receive direction. This includes both traffic Windows
-  may route across adapters and new inbound traffic addressed to a service on this host; both use
-  the adapter-qualified-only policy semantics.
+  may route across adapters and new inbound traffic addressed to a service on this host; both are
+  governed by `forwarded.rules` and `forwarded.fallbackAction`.
+- A trace event's `rule` field is the matched rule's index **within its domain**, so it is meaningful
+  only next to the same event's `origin` field: `rule=0 origin=Forwarded` is
+  `forwarded.rules[0]`.
 - When a proxied TCP connection ends, WinForward keeps a short TIME_WAIT-like grace entry for the
   flow's original tuple: stragglers of the finished handshake (the final ACK, a retransmitted
   FIN/ACK) are silently dropped instead of being forwarded toward the real server, which never saw
