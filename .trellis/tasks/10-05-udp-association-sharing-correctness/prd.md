@@ -1,6 +1,6 @@
 # UDP association sharing: response ownership, routing granularity, and the cost model
 
-Child in flight: `10-05-harness-response-ownership`. Further children are listed under Task map.
+Child in flight: `10-05-local-dns-transport` (R3). Further children are listed under Task map.
 
 ## Goal
 
@@ -62,13 +62,37 @@ either defect (`UdpChurnScenario.cs:392-405` ignores the arriving flow;
 
 | Task | Delivers | Status |
 | --- | --- | --- |
-| `10-05-harness-response-ownership` | R1: corrected ownership measurement, reusable columns, re-run baseline | planning |
-| (not yet created) reply-ownership observability | R2 | pending R1 |
-| (not yet created) local DNS transport | R3 | pending R1 |
-| (not yet created) sharing policy | R4, R5 | pending R1 |
+| `10-05-harness-response-ownership` | R1: corrected ownership measurement, reusable columns, re-run baseline | archived |
+| `10-05-reply-ownership-observability` | R2 | archived |
+| `10-05-local-dns-transport` | R3 | in review |
+| (not yet created) sharing policy | R4, R5 | pending R3 |
 
 Parent/child here is not a dependency system: each child is independently verifiable, and where one must
 wait for another the ordering is written in the child's own PRD.
+
+## R4 evidence pointer (recorded 2026-10-05, from child `10-05-local-dns-transport` R7)
+
+`benchmarks/results/2026-10-05-local-target/` prices a local placement beside the sharing columns
+under R1's corrected accounting, on the same DNS-shaped churn (48 flows per wave, three waves) and
+burst shapes:
+
+| Column | own / misdelivered per wave | SOCKS5 control connections + ASSOCIATE replies | first-response p50 | bytes/session |
+| --- | --- | --- | --- | --- |
+| `--reuse off` | 48 / 0 | 96, 144, 192 | 156–165 ms | ≈91 KB |
+| `--reuse auto` | 4–7 / 41–44 | 3 (pooled during warmup) | 4.2–5.1 ms | ≈13.4 KB |
+| `--target local` | 48 / 0 | 0 / 0 | 3.1–4.1 ms | ≈7.5 KB |
+
+Burst: the local column answers 48/48 with zero handshakes, against `auto`'s 3/48 with 251 of 256
+background flows misdelivered and `off`'s 48/48 at 304 handshakes.
+
+Two facts for R4's decision, neither of which chooses a policy here:
+
+- For the DNS-shaped population the local placement is strictly better than sharing on correctness,
+  latency, and footprint at the same time: the win sharing was introduced for (the handshake
+  amortization) is obtained without the reply-ownership risk.
+- Sharing's remaining sweet spot is short non-DNS request/response flows. R3 takes the DNS
+  population off the SOCKS5 path wherever it is configured, so R4 must price that remainder
+  explicitly instead of inheriting the assumption that concurrent flows per association are free.
 
 ## Constraints
 

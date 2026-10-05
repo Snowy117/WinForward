@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "The relay-side contracts the new transport must match or deliberately differ from: source validation, self-traffic registration before the first datagram, SIO_UDP_CONNRESET posture, one-shot retention — plus the module-boundary paragraph this task updates."}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "The zero-allocation send/receive path and sync fast-path rules the local transport inherits from the relay socket shape."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Fail-closed semantics and the validation-diagnostic style the new configuration checks must follow."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Where the new transport, seam-contract, and test files belong, and the file-size/split discipline."}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Structured-event, log-level, and privacy rules for the new local-target event and its rate limiting."}
+{"file": ".trellis/spec/backend/traffic-policy-lifecycle.md", "reason": "Loop prevention and idle-expiry behaviour the per-flow alias participates in, including the reverse-leg classification a non-loopback target depends on."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "The format/build/test/inspectcode gates and the suppression policy for any analyzer finding the rename or the new transport raises."}
+{"file": "benchmarks/README.md", "reason": "Harness conventions: scenario/knob plumbing, JSONL schema, and the usage block the new --target knob must join."}
+{"file": "benchmarks/results/2026-10-05-udp-reuse-ownership/README.md", "reason": "The corrected baseline the local-target column must be comparable with, and the README/supersession form the new result set must follow."}
+{"file": ".trellis/tasks/10-05-local-dns-transport/design.md", "reason": "The design this implementation follows: target union, seam move, local transport internals, measurement plan, rejected alternatives."}

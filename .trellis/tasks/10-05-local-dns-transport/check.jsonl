@@ -1,0 +1,8 @@
+{"file": ".trellis/tasks/10-05-local-dns-transport/prd.md", "reason": "The acceptance criteria every check finding must map back to."}
+{"file": ".trellis/tasks/10-05-local-dns-transport/design.md", "reason": "The design decisions a deviation must be measured against (target union, seam ownership, no shared socket, transport-neutral vocabulary)."}
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "Basis for judging whether reply classification, source validation, and loop prevention stayed consistent with the relay contracts."}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Basis for judging the per-datagram allocation and sync fast-path claims."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Basis for judging fail-closed behaviour and the validation diagnostics."}
+{"file": ".trellis/spec/backend/traffic-policy-lifecycle.md", "reason": "Basis for judging loop prevention, reverse-leg classification, and idle expiry for the new transport."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "The gates the finished tree must pass, and the standard for accepting or suppressing analyzer findings."}
+{"file": "benchmarks/results/2026-10-05-udp-reuse-ownership/README.md", "reason": "Basis for judging whether the new measurement columns are comparable and whether superseded numbers were marked rather than replaced."}
