@@ -66,7 +66,7 @@ either defect (`UdpChurnScenario.cs:392-405` ignores the arriving flow;
 | `10-05-harness-response-ownership` | R1: corrected ownership measurement, reusable columns, re-run baseline | archived |
 | `10-05-reply-ownership-observability` | R2 | archived |
 | `10-05-local-dns-transport` | R3 | archived |
-| `10-05-remove-udp-association-sharing` | R4, R5 | in review |
+| `10-05-remove-udp-association-sharing` | R4, R5 | archived |
 
 Parent/child here is not a dependency system: each child is independently verifiable, and where one must
 wait for another the ordering is written in the child's own PRD.
