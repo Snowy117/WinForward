@@ -58,6 +58,15 @@ the process-path privacy flag. High-frequency callers must check
   escaped/quoted when unsafe, bracketed for IPv6 endpoints, and omitted when null.
 - Packet diagnostics use the runtime `packet` sequence; flow diagnostics use the `FlowTable`
   generation. TCP/UDP association generations may be additional fields.
+- **Both flow-creation paths owe a `flow.created` line** (2026-10-05, task
+  10-05-host-flow-created-logging). A flow-table entry is created either by the inline dispatcher
+  or by the deferred attribution pipeline, and each one emits the event with the same field set
+  from one shared builder. The deferred path can only log at claim time — the claim is the last
+  step of delivery — so a host flow's line may follow the proxy legs it produced, and the flow's
+  `process`/`processPath`/`rule` fields are still absent until the worker's verdict lands. An
+  entry created with no line at all is a defect, not a log level to raise: before 2026-10-05 a
+  host flow whose entry the pipeline claimed was invisible at every level, which is exactly the
+  "I configured a process rule and my own traffic disappeared from the log" report.
 - Allowed metadata includes endpoints, adapters, process identity, rule/action, stage, reason, and
   byte counts. Full process paths require a path-based process selector.
 

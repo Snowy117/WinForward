@@ -170,7 +170,8 @@ JSON, rejected on any unknown property. The top level is:
   be high volume and is intended for temporary diagnosis. Diagnostic records contain metadata and
   byte counts only: credentials, authentication traffic, payloads, and raw packet bytes are never
   logged. Process names are included when attribution succeeds; full process paths are included
-  only when a rule uses a path-based process selector.
+  only when a rule uses a path-based process selector. A host flow's `flow.created` line is written
+  when its deferred attribution claim completes, so it can follow the proxy legs that flow produced.
 
 **UDP resource shape.** Association sharing removes the per-flow control connection, not the relay
 socket: every live flow keeps its own local relay socket, because that local port plus the relay
