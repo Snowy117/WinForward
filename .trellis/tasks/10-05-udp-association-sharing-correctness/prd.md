@@ -1,7 +1,7 @@
 # UDP association sharing: response ownership, routing granularity, and the cost model
 
-Child in flight: `10-05-remove-udp-association-sharing` (R4, R5). Further children are listed under
-Task map.
+All children archived; nothing in flight. The task map below records the four children and their
+evidence.
 
 ## Goal
 
@@ -147,16 +147,16 @@ churn wave with exactly one control connection and one ASSOCIATE reply per flow;
 
 ## Acceptance criteria
 
-- [ ] Every policy choice in R4 is justified in this task's artifacts by a number produced under R1, not
+- [x] Every policy choice in R4 is justified in this task's artifacts by a number produced under R1, not
       by an assumed server model.
-- [ ] Each child task's acceptance criteria are verifiable on their own, and the child is archived only
+- [x] Each child task's acceptance criteria are verifiable on their own, and the child is archived only
       with its evidence attached.
-- [ ] The sharing policy that ships states, in `README.md`, what a shared association does and does not
+- [x] The sharing policy that ships states, in `README.md`, what a shared association does and does not
       guarantee for a connection-oriented server. (Resolved in substance by the R4/R5 resolution: no
       sharing ships, and the README states the guarantee of the shipped one-flow-per-association
       architecture.)
-- [ ] Superseded numbers in `benchmarks/results/` are marked as superseded rather than silently replaced.
-- [ ] Final integration review: the shipped default, the documented guarantee, and the measured evidence
+- [x] Superseded numbers in `benchmarks/results/` are marked as superseded rather than silently replaced.
+- [x] Final integration review: the shipped default, the documented guarantee, and the measured evidence
       agree with each other.
 
 ## Out of scope
