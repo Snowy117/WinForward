@@ -10,6 +10,14 @@ tcp=31010
 dns=5301
 plan=${1:-}
 
+# The usage check runs before anything is started: a missing plan argument must not leave a target
+# running behind it, and it has to be a non-zero exit so a caller cannot read it as a green run.
+if [ -z "$plan" ]; then
+    echo "usage: $0 <plan.json>" >&2
+    echo "shipped plans: $repo/scripts/plans/*.json and $repo/scripts/plans-short/*.json" >&2
+    exit 2
+fi
+
 mkdir -p "$work"
 
 if [ ! -x "$pub/WinForward.E2E" ]; then
@@ -29,16 +37,15 @@ rm -f "$work/ledger.jsonl"
 target_pid=$!
 sleep 1
 
-if [ -z "$plan" ]; then
-    echo "usage: $0 <plan.json>"
-    echo "available plans:"
-    ls /tmp/wf-bench/deploy/e2e/*.json | sed 's|.*/|  |'
-    exit 0
-fi
-
 rm -rf "$work/out"
+client_status=0
 "$pub/WinForward.E2E" client --target 127.0.0.1 --tcp-port "$tcp" --udp-port "$tcp" --dns-port "$dns" \
-    --plan "$plan" --out "$work/out" --label selftest 2>&1 | tail -20
+    --plan "$plan" --out "$work/out" --label selftest >"$work/client.out" 2>&1 || client_status=$?
+tail -20 "$work/client.out"
+if [ "$client_status" -ne 0 ]; then
+    echo "selftest: the client exited $client_status; its full output is in $work/client.out" >&2
+    exit "$client_status"
+fi
 
 echo
 echo "=== every result record, arm by arm ==="

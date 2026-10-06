@@ -87,6 +87,13 @@ internal static class Program
         {
             return ExitCodes.Success;
         }
+        catch (Exception exception)
+        {
+            // Last resort only: a target-side throw that reaches here is still reported as a runtime
+            // error with a named exception instead of an unhandled crash.
+            await Console.Error.WriteLineAsync($"e2e target: {exception.GetType().Name}: {exception.Message}").ConfigureAwait(false);
+            return ExitCodes.RuntimeError;
+        }
     }
 
     private static async Task<int> RunClientAsync(string[] args, CancellationToken cancellationToken)
@@ -105,6 +112,14 @@ internal static class Program
         catch (OperationCanceledException)
         {
             await Console.Error.WriteLineAsync("e2e client: interrupted before every arm completed.").ConfigureAwait(false);
+            return ExitCodes.RuntimeError;
+        }
+        catch (Exception exception)
+        {
+            // Last resort only: an arm failure is handled inside the arm loop, where the error record
+            // and run.json are still written. What reaches here is a failure of the run itself
+            // (the output directory, the plan reader, the sampler), and it must not be a crash.
+            await Console.Error.WriteLineAsync($"e2e client: {exception.GetType().Name}: {exception.Message}").ConfigureAwait(false);
             return ExitCodes.RuntimeError;
         }
     }

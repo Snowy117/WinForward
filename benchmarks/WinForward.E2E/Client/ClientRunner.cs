@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Net;
-using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -46,6 +45,15 @@ internal static class ClientRunner
         "--dns-port",
         "--inject-corrupt-every",
         "--inject-rewrite-every",
+    ];
+
+    private static readonly string[] s_stringOptions =
+    [
+        "--target",
+        "--plan",
+        "--out",
+        "--label",
+        "--sampler-process",
     ];
 
 #pragma warning disable RCS1239 // Every flag may consume the next argument as its value, so the body advances the index and S127 (error) forbids a for loop here.
@@ -112,12 +120,28 @@ internal static class ClientRunner
     private static bool TryApply(ClientOptions options, string name, string value, out string? error)
     {
         error = null;
+
+        // A string option consumes the next argument when it has no inline value, so a forgotten
+        // value swallows the option that follows it and the run is configured by accident. Numbers
+        // cannot reach this check: a leading '-' already fails their parser.
+        if (value.StartsWith('-') && Array.IndexOf(s_stringOptions, name) >= 0)
+        {
+            error = $"'{name}' value '{value}' starts with '-'; a value that looks like an option usually means its own is missing";
+            return false;
+        }
+
         switch (name)
         {
             case "--target":
                 options.TargetAddress = value;
                 return true;
             case "--plan":
+                if (value.Length == 0)
+                {
+                    error = "--plan needs a path; omit the option to run the built-in plan";
+                    return false;
+                }
+
                 options.PlanPath = value;
                 return true;
             case "--out":
@@ -127,6 +151,12 @@ internal static class ClientRunner
                 options.Label = value;
                 return true;
             case "--sampler-process":
+                if (value.Length == 0)
+                {
+                    error = "--sampler-process needs a process name; a process is matched by name and an empty one matches nothing";
+                    return false;
+                }
+
                 options.SamplerProcesses.Add(value);
                 return true;
             case "--tcp-port":
@@ -196,6 +226,12 @@ internal static class ClientRunner
             return ExitCodes.UsageError;
         }
 
+        if (!TryValidateOutputPaths(options, arms, out var pathError))
+        {
+            await Console.Error.WriteLineAsync($"e2e client: {pathError}").ConfigureAwait(false);
+            return ExitCodes.UsageError;
+        }
+
         Directory.CreateDirectory(options.OutDirectory);
         await using var sampler = new ResourceSampler(options.SamplerProcesses);
 
@@ -228,6 +264,54 @@ internal static class ClientRunner
         return failed ? ExitCodes.RuntimeError : ExitCodes.Success;
     }
 
+    // 255 is the length every target platform allows one path component, and 250 keeps the whole
+    // output path inside the classic Windows MAX_PATH with room left for the file name. Both are
+    // checked before the first file is created, so an over-long path is a usage error with a
+    // message instead of a PathTooLongException out of a FileStream.
+    private const int MaxPathComponentLength = 255;
+    private const int MaxOutputPathLength = 250;
+
+    private static readonly char[] s_pathSeparators = [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar];
+
+    private static bool TryValidateOutputPaths(ClientOptions options, List<ArmSpec> arms, out string? error)
+    {
+        var directory = Path.GetFullPath(options.OutDirectory);
+        if (!TryValidateOutputPath(directory, out error))
+        {
+            return false;
+        }
+
+        foreach (var arm in arms)
+        {
+            if (!TryValidateOutputPath(Path.Combine(directory, $"{PlanFile.SanitizeFileName(arm.Name)}.jsonl"), out error))
+            {
+                return false;
+            }
+        }
+
+        return TryValidateOutputPath(Path.Combine(directory, "run.json"), out error);
+    }
+
+    private static bool TryValidateOutputPath(string path, out string? error)
+    {
+        var components = path.Split(s_pathSeparators);
+        var longest = Array.FindIndex(components, static component => component.Length > MaxPathComponentLength);
+        if (longest >= 0)
+        {
+            error = $"the output path '{path}' has a {components[longest].Length}-character component, above the {MaxPathComponentLength}-character limit";
+            return false;
+        }
+
+        if (path.Length > MaxOutputPathLength)
+        {
+            error = $"the output path '{path}' is {path.Length} characters long, above the conservative {MaxOutputPathLength}-character limit";
+            return false;
+        }
+
+        error = null;
+        return true;
+    }
+
     private static async Task<ArmSummary> RunArmAsync(
         ClientOptions options,
         ArmSpec arm,
@@ -254,33 +338,33 @@ internal static class ClientRunner
         var startedTicks = Clock.Now;
         await Console.Out.WriteLineAsync($"e2e client: arm {arm.Name} ({arm.Kind}) starting").ConfigureAwait(false);
         ArmOutcome? outcome = null;
-        string? failure = null;
+        Exception? failure = null;
+        var cancelled = false;
         try
         {
             outcome = await ArmDispatch.RunAsync(context).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException exception)
         {
-            failure = "cancelled";
+            // A stopped run must leave the same evidence a broken arm leaves, so a cancellation is
+            // booked as a failure; only its message stays the literal "cancelled" rather than the
+            // exception's text, so an interrupted arm reads the same whatever await noticed the
+            // token (D14.12).
+            failure = exception;
+            cancelled = true;
         }
-        catch (SocketException exception)
+        catch (Exception exception)
         {
-            failure = exception.Message;
-        }
-        catch (InvalidOperationException exception)
-        {
-            failure = exception.Message;
-        }
-        catch (IOException exception)
-        {
-            failure = exception.Message;
+            // Every other exception is an arm failure. Letting one escape would abort the process
+            // before run.json is written and take every completed arm's summary down with it (D1/D4/D7).
+            failure = exception;
         }
 
         var endedTicks = Clock.Now;
         var final = outcome ?? new ArmOutcome();
         if (failure is not null)
         {
-            await WriteFailureAsync(sink, arm, failure, startedTicks, endedTicks).ConfigureAwait(false);
+            await WriteFailureAsync(sink, options, arm, failure, cancelled, startedTicks, endedTicks).ConfigureAwait(false);
         }
 
         await WriteResultAsync(sink, options, arm, final, latency, startedTicks, endedTicks).ConfigureAwait(false);
@@ -295,8 +379,21 @@ internal static class ClientRunner
         return new ArmSummary(arm.Name, arm.Kind, fileName, startedTicks, endedTicks, failure is not null);
     }
 
-    private static async ValueTask WriteFailureAsync(JsonlFile sink, ArmSpec arm, string failure, long startedTicks, long endedTicks)
+    private static async ValueTask WriteFailureAsync(
+        JsonlFile sink,
+        ClientOptions options,
+        ArmSpec arm,
+        Exception failure,
+        bool cancelled,
+        long startedTicks,
+        long endedTicks)
     {
+        // A token-driven cancellation surfaces as whichever subtype the await that observed it
+        // raises (TaskCanceledException and friends), so `error` is reported as the base type; a
+        // consumer reads the same name for every way a run can be stopped.
+        var error = cancelled ? nameof(OperationCanceledException) : failure.GetType().Name;
+        var message = cancelled ? "cancelled" : failure.Message;
+        var detail = failure.GetBaseException().GetType().Name;
         await sink.WriteAsync(
             writer =>
             {
@@ -304,7 +401,10 @@ internal static class ClientRunner
                 writer.WriteString("type", "error");
                 writer.WriteString("arm", arm.Name);
                 writer.WriteString("kind", arm.Kind);
-                writer.WriteString("message", failure);
+                writer.WriteString("label", options.Label);
+                writer.WriteString("error", error);
+                writer.WriteString("message", message);
+                writer.WriteString("detail", detail);
                 writer.WriteNumber("startedTicks", startedTicks);
                 writer.WriteNumber("endedTicks", endedTicks);
                 writer.WriteEndObject();
@@ -450,6 +550,10 @@ internal static class ClientRunner
         {
             writer.WriteString("planPath", Path.GetFullPath(options.PlanPath));
         }
+
+        // planPath answers "which file"; planSource answers "was there one at all", which a consumer
+        // needs without treating the null as a missing value.
+        writer.WriteString("planSource", options.PlanPath is null ? "builtin" : "file");
 
         writer.WriteString("outDirectory", Path.GetFullPath(options.OutDirectory));
         writer.WritePropertyName("target");
