@@ -1944,6 +1944,5 @@ Found that the shipped Native AOT build silently compiled out the product vector
 
 ### Next Steps
 
-- Commit the CSV/TXT/HTML BDN artifacts alongside the XLSX if the S3 export is adopted by the T-102 dashboard deliverable, per the open export-format decision
 - Answer Q1 for 10-06-appsettings-config: standard Configuration.Json file provider (+0.49 MB) or the project own parser into an in-memory source (+0.02 MB)
 - Consider raising the tier length threshold if the IPv4-header path ever shows up in a profile; the 20-byte case is below every vector width
