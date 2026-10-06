@@ -15,7 +15,7 @@ internal sealed class FrameStreamReader
 {
     private const int DefaultCapacity = 64 * 1024;
 
-    private readonly Socket _socket;
+    private readonly Func<Memory<byte>, CancellationToken, ValueTask<int>> _read;
     private byte[] _buffer;
     private int _start;
     private int _end;
@@ -23,8 +23,13 @@ internal sealed class FrameStreamReader
     private bool _hasFrame;
 
     internal FrameStreamReader(Socket socket, int capacity = DefaultCapacity)
+        : this((buffer, cancellationToken) => socket.ReceiveAsync(buffer, SocketFlags.None, cancellationToken), capacity)
     {
-        _socket = socket;
+    }
+
+    internal FrameStreamReader(Func<Memory<byte>, CancellationToken, ValueTask<int>> read, int capacity = DefaultCapacity)
+    {
+        _read = read;
         _buffer = new byte[Math.Max(capacity, DefaultCapacity)];
     }
 
@@ -100,7 +105,7 @@ internal sealed class FrameStreamReader
             Array.Resize(ref _buffer, _buffer.Length * 2);
         }
 
-        var received = await _socket.ReceiveAsync(_buffer.AsMemory(_end), SocketFlags.None, cancellationToken).ConfigureAwait(false);
+        var received = await _read(_buffer.AsMemory(_end), cancellationToken).ConfigureAwait(false);
         if (received == 0)
         {
             _endOfStream = true;

@@ -4,4 +4,7 @@
     <AssemblyName>WinForward.E2E</AssemblyName>
     <RootNamespace>WinForward.E2E</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="WinForward.E2E.Tests" />
+  </ItemGroup>
 </Project>

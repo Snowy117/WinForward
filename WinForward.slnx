@@ -10,6 +10,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/WinForward.Configuration.Tests/WinForward.Configuration.Tests.csproj" />
+    <Project Path="tests/WinForward.E2E.Tests/WinForward.E2E.Tests.csproj" />
     <Project Path="tests/WinForward.Integration.Tests/WinForward.Integration.Tests.csproj" />
     <Project Path="tests/WinForward.NdisApi.Tests/WinForward.NdisApi.Tests.csproj" />
     <Project Path="tests/WinForward.Performance.Tests/WinForward.Performance.Tests.csproj" />
