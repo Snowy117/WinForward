@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import sys
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
@@ -47,18 +46,18 @@ class Observation(NamedTuple):
 
 
 def require_python3() -> None:
-    """Fail loudly when no python3 interpreter can be resolved.
+    """Refuse to run on an interpreter older than the one the evidence was produced with.
 
     The baseline recipe is deliberately dependency-free: it runs with the ``python3`` already on
     PATH (direnv provides it) and must never silently fall back to ``nix-shell``, which would
     make the evidence depend on a toolchain the reader cannot reproduce.
     """
-    if sys.executable or shutil.which("python3"):
+    if sys.version_info >= (3, 10):
         return
 
     sys.stderr.write(
-        "jsonl_paths: no python3 interpreter available; this script must run under python3 on PATH "
-        "and does not fall back to nix-shell\n"
+        f"jsonl_paths: python 3.10 or newer is required, this interpreter is {sys.version.split()[0]} "
+        f"({sys.executable}); the baseline recipe does not fall back to nix-shell\n"
     )
     raise SystemExit(2)
 

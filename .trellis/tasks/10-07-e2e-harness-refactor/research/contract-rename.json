@@ -3501,54 +3501,63 @@
     "kind": "renamed",
     "old_path": "metrics/desktops/udpArrived",
     "new_path": "metrics/desktops/udp.arrived",
+    "batch": "B2",
     "reason": "arrived / udpArrived -> arrived; seen in records/MIX.jsonl"
   },
   {
     "kind": "renamed",
     "old_path": "metrics/desktops/udpForeignConnection",
     "new_path": "metrics/desktops/udp.foreignConnection",
+    "batch": "B2",
     "reason": "foreignConnection / udpForeignConnection -> foreignConnection; seen in records/MIX.jsonl"
   },
   {
     "kind": "renamed",
     "old_path": "metrics/desktops/udpSent",
     "new_path": "metrics/desktops/udp.sent",
+    "batch": "B2",
     "reason": "sentOk / sent / udpSent -> sent; seen in records/MIX.jsonl"
   },
   {
     "kind": "renamed",
     "old_path": "metrics/latency/tcp.sentOk",
     "new_path": "metrics/latency/tcp.sent",
+    "batch": "B2",
     "reason": "sentOk / sent / udpSent -> sent; seen in records/BASE.jsonl"
   },
   {
     "kind": "renamed",
     "old_path": "metrics/latency/udp.sentOk",
     "new_path": "metrics/latency/udp.sent",
+    "batch": "B2",
     "reason": "sentOk / sent / udpSent -> sent; seen in records/BASE.jsonl"
   },
   {
     "kind": "renamed",
     "old_path": "metrics/tcp.sentOk",
     "new_path": "metrics/tcp.sent",
+    "batch": "B2",
     "reason": "sentOk / sent / udpSent -> sent; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
   },
   {
     "kind": "renamed",
     "old_path": "metrics/udp.sentOk",
     "new_path": "metrics/udp.sent",
+    "batch": "B2",
     "reason": "sentOk / sent / udpSent -> sent; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
   },
   {
     "kind": "renamed",
     "old_path": "metrics/udpLossRate",
     "new_path": "metrics/udp.lossRate",
+    "batch": "B2",
     "reason": "lossRate / udpLossRate -> lossRate; seen in records/MIX.jsonl"
   },
   {
     "kind": "renamed",
     "old_path": "metrics/udpSent",
     "new_path": "metrics/udp.sent",
+    "batch": "B2",
     "reason": "sentOk / sent / udpSent -> sent; seen in records/DNS.jsonl, records/DNSALT.jsonl, records/MIX.jsonl"
   }
 ]

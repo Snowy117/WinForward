@@ -69,6 +69,10 @@ FAMILY_OF = {
     "udpForeignConnection": "foreignConnection / udpForeignConnection -> foreignConnection",
 }
 
+# The batch that executes the four convergence families. A rename row carries it so the comparison
+# can require the rows of the batch under test to have landed exactly (compare-records.py --batch).
+CONVERGENCE_BATCH = "B2"
+
 
 def groups_of(run: Path) -> dict[str, list[str]]:
     """``{"<group>/<file>": [canonical path, ...]}`` for one run directory.
@@ -169,7 +173,13 @@ def run_rename(args: argparse.Namespace) -> int:
         # A rename is registered here and executed by the batch that migrates its kind: the fresh run
         # legitimately still publishes the old spelling for every kind that has not migrated yet, so
         # an old path under a registered rename is pending, not unexpected.
-        row = {"kind": "renamed", "old_path": path, "new_path": replacement, "reason": reason_for(path, family, baseline)}
+        row = {
+            "kind": "renamed",
+            "old_path": path,
+            "new_path": replacement,
+            "batch": CONVERGENCE_BATCH,
+            "reason": reason_for(path, family, baseline),
+        }
         rows.append(row)
         families.setdefault(family, []).append(row)
         new_paths.add(replacement)
@@ -215,6 +225,7 @@ def run_rename(args: argparse.Namespace) -> int:
         f"- fresh run: `{args.run}`",
         f"- rows: **{len(rows)}** = identical {counts.get('identical', 0)} + renamed {counts.get('renamed', 0)}"
         f" + added {counts.get('added', 0)} + removed {counts.get('removed', 0)}",
+        f"- batch that executes the renames: `{CONVERGENCE_BATCH}`",
         f"- renames landed in the fresh run: **{len(landed)}**; registered but still published under the old"
         f" spelling: **{len(published_old)}** (listed below); not observed at all: **{len(absent)}**",
         f"- declared paths not observed in the fresh run: **{len(unobserved)}** (conditional keys; listed below)",
@@ -224,8 +235,10 @@ def run_rename(args: argparse.Namespace) -> int:
     ]
     if families:
         for family, found in sorted(families.items()):
-            lines += [f"### {family}", "", "| old path | new path | reason |", "|---|---|---|"]
-            lines += [f"| `{row['old_path']}` | `{row['new_path']}` | {row['reason']} |" for row in found]
+            lines += [f"### {family}", "", "| old path | new path | batch | reason |", "|---|---|---|---|"]
+            lines += [
+                f"| `{row['old_path']}` | `{row['new_path']}` | {row['batch']} | {row['reason']} |" for row in found
+            ]
             lines.append("")
     else:
         lines += ["(none)", ""]
@@ -247,7 +260,8 @@ def run_rename(args: argparse.Namespace) -> int:
         "## Notes",
         "",
         "- Only the kinds migrated in the batch that owns a rename execute it; the others keep publishing the",
-        "  old spelling until their batch lands, which is what the section above records.",
+        "  old spelling until their batch lands, which is what the section above records. The batch column is",
+        "  what `compare-records.py --rename-table ... --batch " + CONVERGENCE_BATCH + "` requires to have landed.",
         "- Four families are converged: `sentOk`/`sent`/`udpSent`, `lossRate`/`udpLossRate`,",
         "  `arrived`/`udpArrived`, `foreignConnection`/`udpForeignConnection`. Everything else is `identical`.",
         "- Names that merely resemble a family member are deliberately left alone: `clientSendLossRate` and",

@@ -1,7 +1,7 @@
 {
   "generatedBy": "benchmarks/WinForward.E2E/scripts/contract-inventory.py inventory",
   "alphabet": "jsonl_paths.canonical_path: '/'.join(member names); a dot inside a key never splits",
-  "run": "/tmp/b1b-run",
+  "run": "/tmp/b1c-run",
   "groups": {
     "records/BASE.jsonl": {
       "count": 154,

@@ -7,9 +7,11 @@
 linux/WinForward.E2E.dll  sha256 9d715829c7d4bd31f5e3e827d7156a2936f86b79a6a9f7f3a9878b699346fa94   # A2 完工时
 linux/WinForward.E2E.dll  sha256 05e8ae773fd4191b9b68c32a43188c8c1af928414bed6642ea66b86de87f787d   # check 轮：新增取消的 error 记录
 linux/WinForward.E2E.dll  sha256 03b040afa360e75792a0e799c9e9f705bdd2d69ce42e89ec55509d20428c2012   # check 轮最终树：再加文本键的类型校验
+linux/WinForward.E2E.dll  sha256 9f40a649a032bf6f4f57beee083b6ae388a004e3a6fb418d13d25bf32d0873d6   # B1c 轮：越界数值键的措辞（§6）
 ```
 
-下表的每一行都在 check 轮用最后一个二进制**重跑过**，命令与观测值均未变。
+下表的每一行都在各自的 check 轮用当时的最后一个二进制**重跑过**。B1c 轮改了越界数值键的措辞
+（§6），直接受影响的两行（`dnsPort:99999`、`ratePerSecond:-1`）已按 B1c 二进制的新观测更新，其余行未变。
 
 **判据通道**（DD D14.19）：加载期错误文本在单元层断言（`dotnet test`），**退出码**用发布后的二进制跑最小
 plan 观测，命令与观测值记录在本文件。夹具全部在 `tests/WinForward.E2E.Tests/Fixtures/plans/`。
@@ -35,9 +37,10 @@ plan 观测，命令与观测值记录在本文件。夹具全部在 `tests/WinF
 | 0.5 (D4) | 臂名过长 | `--out out-d4 --plan $F/arm-name-too-long.json` | **2** | `e2e client: arm 'AAAA…/////'(270 字，原样打印) maps to a 270-character file name 'AAAA…_____', above the 128-character limit` |
 | 0.5 | 输出路径总长 | `--out /tmp/a2-final/<240×d>/out` | **2** | `e2e client: the output path '…' is 258 characters long, above the conservative 250-character limit`（数字随 `--out` 前缀长度变化） |
 | 0.5 | 输出路径单组件 | `--out /tmp/a2-final/<260×c>/out` | **2** | `e2e client: the output path '…' has a 260-character component, above the 255-character limit` |
-| 0.6 (D1) | `dnsPort:99999` | `--out out-d1 --plan $F/dns-port-out-of-range.json` | **2** | `e2e client: arm 'DNSBAD' (kind 'dns'): 'dnsPort' is 99999, outside 0..65535` |
+| 0.6 (D1) | `dnsPort:99999` | `--out out-d1 --plan $F/dns-port-out-of-range.json` | **2** | `e2e client: arm 'DNSBAD' (kind 'dns'): 'dnsPort' is 99999, which is outside 0..65535` |
 | 0.6 (D5) | `window:100.5` | `--out out-d5 --plan $F/fractional-window.json` | **2** | `e2e client: arm 'LATFRACTION' (kind 'latency'): 'window' is 100.5, which is not an integer` |
-| 0.6 | 负值 | `--out out-neg --plan $F/negative-rate.json` | **2** | `… arm 'LOSSNEGATIVE' (kind 'loss'): 'ratePerSecond' is -1, outside 0..2147483647` |
+| 0.6 | 负值 | `--out out-neg --plan $F/negative-rate.json` | **2** | `… arm 'LOSSNEGATIVE' (kind 'loss'): 'ratePerSecond' is -1, which is outside 0..2147483647` |
+| 0.6/D15.5 | 越界数值键的措辞（B1c） | `--out out-b1c --plan $F/beyond-int-window.json` | **2** | `e2e client: arm 'LATBEYONDINT' (kind 'latency'): 'window' is 3000000000, which is outside 0..2147483647`（`3000000000` 没有小数部分，不再报 "is not an integer"） |
 | 0.6 | `dnsPort:0` 合法 | `--out … --plan $F/dns-port-zero.json` | 0 | 加载通过（`DnsPort == 0` = 未声明，单元层断言）；不许出现 dnsPort 相关错误 |
 | AC7 | 未知 key | `--out out-ac7 --plan $F/unknown-key.json` | **2** | `e2e client: arm 'LOSS' (kind 'loss'): unknown key 'ratePerSeconds' (expected one of: name, kind, seconds, ratePerSecond, payloadBytes, window, lossWindowMs)` |
 | 0.7 (D6) | 空 `--sampler-process=` | `--out out-d6 --sampler-process= --plan $F/minimal-idle.json` | **2** | `e2e client: --sampler-process needs a process name; a process is matched by name and an empty one matches nothing` |
@@ -86,6 +89,8 @@ plan 观测，命令与观测值记录在本文件。夹具全部在 `tests/WinF
 | `dns-port-zero.json` | 0.6：`dnsPort:0` = 未声明 | 通过 |
 | `fractional-window.json` | D5：`window:100.5` | 拒 |
 | `negative-rate.json` | 0.6：负值 | 拒 |
+| `beyond-int-window.json` | D15 配套清理 5（B1c）：`window:3000000000` | 拒（`which is outside 0..2147483647`） |
+| `integral-double-window.json` | D15 配套清理 5（B1c）：`window:100.0` | 通过（落到 `Window == 100`） |
 | `unknown-key.json` | AC7：`ratePerSeconds` | 拒（含 arm 与 key） |
 | `mode-mix-text-key.json` | 0.2：`modeMix` 文本键 | 通过（reliability） |
 | `protocol-text-key.json` | 0.2：`protocol` 文本键 | 通过（latency） |
@@ -122,14 +127,36 @@ plan 观测，命令与观测值记录在本文件。夹具全部在 `tests/WinF
   判据：`PlanFileValidationTests.ATextKeyOfAnotherTypeIsRefusedWithTheValueAsWritten`（2 条）+
   发布二进制上的两条命令（见 §1 的 0.6 补充行，均 exit 2）。缺席键仍取默认（11 份 shipped plan 与内置
   plan 的 `TryLoad` 全部通过、0 误拒，见 §2 的 `EveryShippedPlanLoads` / `TheBuiltInPlanUsesTheDocumentedDefaults`）。
-- **未新增夹具**：§3 仍是 16 个；边界扫描用 `PlanFileValidationTests.TryLoadJson` 现写一个临时单臂 plan
+- **未新增夹具（E1-A 轮）**：§3 在 E1-A check 轮仍是 16 个；边界扫描用 `PlanFileValidationTests.TryLoadJson` 现写一个临时单臂 plan
   （`Path.GetTempPath()` + GUID，与 `LedgerWriterTests` 同一手法），"at" 与 "over" 两侧因此都不需要文件。
-- **数值键超过 `int` 上限时的措辞**（观察项，未改）：`"window": 3000000000` 走 `TryReadInt` 的非整数分支，
+  （B1c 轮新增 2 个，见 §3 与 §6。）
+- **数值键超过 `int` 上限时的措辞**（E1-A 轮记为观察项）：`"window": 3000000000` 曾走 `TryReadInt` 的非整数分支，
   报 `'window' is 3000000000, which is not an integer`——指名了 arm/key/值，但"not an integer"对一个整数值
-  略失准。D14.14 的取值域判据不受影响（该值确实非法）。
+  略失准。**B1c 已按 D15 配套清理 5 修掉**：见 §6。
 - **`seconds` 没有上界**（D14.14 只要求 `> 0`）：`seconds: 1e18` 的 **loss** 臂仍在加载期被序列上界拒掉
   （`(long)` 转换在本运行时饱和到 `long.MaxValue`，报 `up to 9223372036854775807`）；同一个 `seconds` 的
   **latency** 臂（不受该校验）会加载、0.1 s 内结束，并在 `gates.scheduleTruncated=1`、`gates.laneShortfall=1`
   与配套 note 里披露"整条 schedule 没被提供"，而不是静默成功——`run.json` 仍是 `failed=false`，所以这属于
   E3 的 gate/分析器消费面，不是 Tier 0 的判据。
+
+## 6. B1c 轮补充：越界数值键的措辞（D15 配套清理 5）
+
+`TryReadInt` 把三种情况分开：**Ok** / **NotAnInteger**（JSON 类型不是数字，或有小数部分）/ **OutOfRange**
+（整数值但落在 `int` 之外：先 `TryGetInt64` 判范围，`double` 回退里再判一次）。`100.0` 这类整数值小数仍由
+`double` 回退接受（这条回退不能丢，否则 `100.0` 会变成超范围）。
+
+二进制见文首列表的最后一行（B1c 轮，`linux/WinForward.E2E.dll` sha256 `9f40a649…`）。
+命令：`$PUB client --target 127.0.0.1 --out /tmp/tier0-b1c --label tier0 --plan $F/<夹具>`。
+
+| 夹具 | 观测退出码 | 观测输出（首行，原样） |
+|---|---|---|
+| `dns-port-out-of-range.json` | **2** | `e2e client: arm 'DNSBAD' (kind 'dns'): 'dnsPort' is 99999, which is outside 0..65535` |
+| `negative-rate.json` | **2** | `e2e client: arm 'LOSSNEGATIVE' (kind 'loss'): 'ratePerSecond' is -1, which is outside 0..2147483647` |
+| `beyond-int-window.json` | **2** | `e2e client: arm 'LATBEYONDINT' (kind 'latency'): 'window' is 3000000000, which is outside 0..2147483647` |
+| `fractional-window.json` | **2** | `e2e client: arm 'LATFRACTION' (kind 'latency'): 'window' is 100.5, which is not an integer`（未变） |
+| `integral-double-window.json` | **0** | 加载通过并跑完（`arm LATINTEGRAL (latency) finished in 1.0s`）；result 记录里 `parameters.inFlightWindow = 100`，即 `100.0` 确实落成 100（`InFlightWindow = spec.Window > 0 ? spec.Window : DefaultWindow`） |
+
+单元层：`AnOutOfRangeDnsPortIsRefused`、`ANegativeValueIsRefused` 的断言文本随措辞更新；新增
+`AValuePastIntsBoundsIsRefusedAsOutOfRangeRatherThanAsAFraction` 与 `AnIntegralValueWrittenAsADecimalIsAccepted`。
+（`PlanFileValidationTests` 24 条全绿。）
 
