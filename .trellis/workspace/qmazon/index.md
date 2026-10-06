@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 57
+- **Total Sessions**: 58
 - **Last Active**: 2026-10-06
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1949 | Active |
+| `journal-1.md` | ~1996 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 58 | 2026-10-06 | appsettings.json configuration surface with the standard Logging section | `4083ef3`, `1ef1a57` | `master` |
 | 57 | 2026-10-06 | AOT instruction-set floor: restoring the vectorized checksum and shipping a framework-dependent artifact | `f7bf652`, `5b00109`, `eae25af` | `master` |
 | 56 | 2026-10-06 | Logging migration to Microsoft.Extensions.Logging source-generated events | `c584bc5`, `6b35527` | `master` |
 | 55 | 2026-10-06 | UoT v2 per-flow UDP transport for SOCKS5 targets | `d77f4e8`, `33c47ae`, `323c76e`, `4a66489`, `7ad76f5` | `master` |

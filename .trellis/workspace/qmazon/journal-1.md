@@ -1946,3 +1946,51 @@ Found that the shipped Native AOT build silently compiled out the product vector
 
 - Answer Q1 for 10-06-appsettings-config: standard Configuration.Json file provider (+0.49 MB) or the project own parser into an in-memory source (+0.02 MB)
 - Consider raising the tier length threshold if the IPv4-header path ever shows up in a profile; the 20-byte case is below every vector width
+
+
+## Session 58: appsettings.json configuration surface with the standard Logging section
+<!-- trellis-session: v=2 fp=4484392726e27986 -->
+
+**Date**: 2026-10-06
+**Task**: appsettings.json configuration surface with the standard Logging section
+**Branch**: `master`
+
+### Summary
+
+Replaced config.json with an appsettings.json surface: a WinForward section with 27 PascalCase keys, MEL std Logging section, logFormat deleted, --config demoted to an optional extra layer, strict validation preserved by merging the JSON documents. Four gates green, 1297 tests, independent check passed all 14 acceptance criteria.
+
+### Main Changes
+
+- Configuration is read as layered JSON documents (exe-directory appsettings.json, then --config), merged object-by-object with arrays and scalars replacing, and validated by the existing strict deserializer over the merged WinForward object — so unknown keys, wrongly cased keys and wrongly typed values all stay hard errors naming the key.
+- Deleted logFormat, LogFormat, LogFormatNames, ResolveLogFormat and LogLevelNames; the standard Logging section now drives level, formatter and formatter options, with per-category overrides worth having because categories are fully-qualified type names.
+- The stderr destination, the timestamp default and the automatic formatter rule live in code as PostConfigure actions, so a configuration cannot move a log record to stdout and an absent FormatterName still selects json when stderr is redirected.
+- Pre-flights catch the two mistakes MEL leaves undiagnosed: a LogLevel that is not a level name (MEL throws) and a FormatterName that is not registered (MEL falls back to simple in silence); validate builds the logger factory so a malformed formatter option is reported as exit 1.
+- The build ships appsettings.example.json and never a loaded appsettings.json, so an upgrade cannot overwrite the operator file; the seven examples/ files were migrated and are exercised by the real loader.
+- Documentation: the README configuration section was rewritten and gained a WinSW service section; logging-guidelines.md and error-handling.md were updated.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4083ef3` | feat(config): adopt appsettings.json and the standard Logging section |
+| `1ef1a57` | chore(task): record the appsettings configuration planning and check outcome |
+
+### Testing
+
+- [OK] dotnet build WinForward.slnx -c Release: 0 warnings, 0 errors
+- [OK] dotnet test WinForward.slnx -c Release: 13 projects, 1297 tests, 0 failures (baseline at HEAD measured independently twice: 1268)
+- [OK] dotnet format --severity info --verify-no-changes: exit 0, empty output
+- [OK] jb inspectcode -e=HINT: 0 issues across 393 files
+- [OK] Independent trellis-check passed all 14 acceptance criteria and falsified one over-claim: removing systemd from AcceptedFormatterNames left the suite green, so the drift guard was one-directional; a test pinning the list to the actual console registrations closed it.
+- [OK] The docs agent found that the approved validation mechanism could not bind any valid configuration (IConfiguration stringifies scalars, collapses arrays); the JSON-merge replacement was measured to preserve strictness more strongly, including quoted-number rejection.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- A pre-existing flaky allocation gate: FlowTableSweepWithHoldPredicateAllocatesNoManagedBytes failed once in about six full-solution runs with 64 bytes against an expected 0, passing 6/6 in isolation. A zero-allocation gate that cries wolf under load can equally mask a regression and deserves its own investigation.
+- The generic Invalid JSON configuration. diagnostic collapses unknown-key, casing and type failures. The framework reason was measured and rejected (it points into the re-serialised section, not the operator file), so precision would need a per-member template.
+- The archived 08-11 task still contains a real adapter GUID that is also in public git history; the owner deferred scrubbing it.
+- An extension point for third-party console formatters is deliberately out of scope: MEL resolves formatters from what the process registered, so a CSV formatter still needs its package and one registration line.
