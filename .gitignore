@@ -23,3 +23,6 @@ smoke/
 # direnv local state (shell.nix itself is tracked)
 .direnv/
 .envrc
+
+# Python bytecode caches from the E2E baseline scripts
+__pycache__/
