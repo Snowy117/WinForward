@@ -3,7 +3,9 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using WinForward.E2E.Contracts;
 using WinForward.E2E.Contracts.Json;
+using WinForward.E2E.Contracts.Metrics;
 using WinForward.E2E.Wire;
 
 namespace WinForward.E2E.Client.Arms;
@@ -171,9 +173,6 @@ internal static class LatencyArm
     internal static async Task<ArmOutcome> RunAsync(ArmContext context)
     {
         var plan = new LatencyPlan(context.Spec);
-        var metrics = new DictionaryMetrics();
-        var outcome = new ArmOutcome { Metrics = metrics };
-        plan.WriteParameters(outcome);
 
         var startTicks = Clock.Now;
         var deadlineTicks = context.DeadlineTicks(startTicks);
@@ -186,15 +185,17 @@ internal static class LatencyArm
         var elapsedTicks = Clock.Now - startTicks;
         var tcp = Total(lanes.Tcp, lanes.Probe);
 
-        if (plan.UseTcp)
+        // The metrics value is built after the lanes joined, so a protocol the arm did not run
+        // publishes no block at all instead of a block of zeros that would read as a measurement.
+        var outcome = new ArmOutcome
         {
-            WriteTcpMetrics(metrics, tcp, lanes.Tcp, plan, elapsedTicks);
-        }
-
-        if (plan.UseUdp)
-        {
-            WriteUdpMetrics(metrics, lanes.Udp, plan, elapsedTicks);
-        }
+            Metrics = new LatencyMetrics
+            {
+                Tcp = plan.UseTcp ? TcpMetrics(tcp, lanes.Tcp, plan, elapsedTicks) : null,
+                Udp = plan.UseUdp ? UdpMetrics(lanes.Udp, plan, elapsedTicks) : null,
+            },
+        };
+        plan.WriteParameters(outcome);
 
         var validity = new MeasurementValidity(plan, lanes, tcp, elapsedTicks);
         WriteGates(outcome, lanes, tcp, validity);
@@ -259,7 +260,7 @@ internal static class LatencyArm
     private static string RateText(double? perSecond) =>
         perSecond is { } value ? value.ToString("F3", CultureInfo.InvariantCulture) : "n/a";
 
-    private static void WriteTcpMetrics(DictionaryMetrics metrics, LatencyTcpState state, List<LatencyTcpState> laneStates, LatencyPlan plan, long elapsedTicks)
+    private static LatencyTcpMetrics TcpMetrics(LatencyTcpState state, List<LatencyTcpState> laneStates, LatencyPlan plan, long elapsedTicks)
     {
         var laneSupplied = new long[laneStates.Count];
         var laneSentOk = new long[laneStates.Count];
@@ -269,70 +270,73 @@ internal static class LatencyArm
             laneSentOk[lane] = laneStates[lane]._sentOk;
         }
 
-        metrics["tcp.laneStarted"] = state._started;
-        metrics["tcp.laneSupplied"] = laneSupplied;
-        metrics["tcp.laneSentOk"] = laneSentOk;
-        metrics["tcp.supplied"] = state._supplied;
-        metrics["tcp.sentOk"] = state._sentOk;
-        metrics["tcp.sendWouldBlock"] = state._sendWouldBlock;
-        metrics["tcp.windowOverflow"] = state._windowOverflow;
-        metrics["tcp.backlogDrops"] = state._backlogDrops;
-        metrics["tcp.sendFailures"] = state._sendFailures;
-        metrics["tcp.abandonedAtTeardown"] = Math.Max(0, state._supplied - state._sentOk - state._sendFailures - state._backlogDrops);
-        metrics["tcp.clientSendLoss"] = state.ClientSendLoss;
-        metrics["tcp.received"] = state._received;
-        metrics["tcp.outstandingAtTeardown"] = state._outstanding;
-        metrics["tcp.corrupt"] = state._corrupt;
-        metrics["tcp.protocolErrors"] = state._protocolErrors;
-        metrics["tcp.remoteClosed"] = state._remoteClosed;
-        metrics["tcp.unmatchedReplies"] = state._unmatchedReplies;
-        metrics["tcp.windowCeilingMs"] = InFlightCeilingMs(plan.InFlightWindow, plan.Lanes, state._sentOk, elapsedTicks);
-        metrics["tcp.scheduleTruncated"] = state._scheduleTruncated ? 1L : 0L;
-        metrics["tcp.achievedRate"] = JsonPerSecond.PerSecond(state._sentOk, elapsedTicks, Stopwatch.Frequency);
-        metrics["tcp.connectAttempts"] = state._connectSamples + state._connectFailures;
-        metrics["tcp.connectFailures"] = state._connectFailures;
-        metrics["tcp.meanConnectMs"] = state._connectSamples == 0
-            ? null
-            : NumberFormat.Round(Clock.ToMicroseconds(state._connectTicks) / (double)state._connectSamples / 1000.0);
+        return new LatencyTcpMetrics
+        {
+            LaneStarted = state._started,
+            LaneSupplied = laneSupplied,
+            LaneSentOk = laneSentOk,
+            Supplied = state._supplied,
+            Sent = state._sentOk,
+            SendWouldBlock = state._sendWouldBlock,
+            WindowOverflow = state._windowOverflow,
+            BacklogDrops = state._backlogDrops,
+            SendFailures = state._sendFailures,
+            AbandonedAtTeardown = Math.Max(0, state._supplied - state._sentOk - state._sendFailures - state._backlogDrops),
+            ClientSendLoss = state.ClientSendLoss,
+            Received = state._received,
+            OutstandingAtTeardown = state._outstanding,
+            Corrupt = state._corrupt,
+            ProtocolErrors = state._protocolErrors,
+            RemoteClosed = state._remoteClosed,
+            UnmatchedReplies = state._unmatchedReplies,
+            WindowCeilingMs = InFlightCeilingMs(plan.InFlightWindow, plan.Lanes, state._sentOk, elapsedTicks),
+            ScheduleTruncated = state._scheduleTruncated ? 1L : 0L,
+            AchievedRate = JsonPerSecond.PerSecond(state._sentOk, elapsedTicks, Stopwatch.Frequency),
+            ConnectAttempts = state._connectSamples + state._connectFailures,
+            ConnectFailures = state._connectFailures,
+            MeanConnectMs = state._connectSamples == 0
+                ? null
+                : NumberFormat.Round(Clock.ToMicroseconds(state._connectTicks) / (double)state._connectSamples / 1000.0),
+        };
     }
 
-    private static void WriteUdpMetrics(DictionaryMetrics metrics, UdpLatencyState state, LatencyPlan plan, long elapsedTicks)
+    private static LatencyUdpMetrics UdpMetrics(UdpLatencyState state, LatencyPlan plan, long elapsedTicks) => new()
     {
-        metrics["udp.laneStarted"] = state._started;
-        metrics["udp.supplied"] = state._supplied;
-        metrics["udp.sentOk"] = state._sentOk;
-        metrics["udp.sendWouldBlock"] = state._sendWouldBlock;
-        metrics["udp.windowOverflow"] = state._windowOverflow;
-        metrics["udp.backlogDrops"] = state._backlogDrops;
-        metrics["udp.sendFailures"] = state._sendFailures;
-        metrics["udp.abandonedAtTeardown"] = Math.Max(0, state._supplied - state._sentOk - state._sendFailures - state._backlogDrops);
-        metrics["udp.clientSendLoss"] = state.ClientSendLoss;
-        metrics["udp.received"] = state._received;
-        metrics["udp.corrupt"] = state._corrupt;
-        metrics["udp.protocolErrors"] = state._protocolErrors;
-        metrics["udp.unmatchedReplies"] = state._unmatchedReplies;
-        metrics["udp.foreignConnection"] = state._foreignConnection;
-        metrics["udp.outstandingAtTeardown"] = state._outstanding;
-        metrics["udp.windowCeilingMs"] = InFlightCeilingMs(plan.InFlightWindow, 1, state._sentOk, elapsedTicks);
-        metrics["udp.scheduleTruncated"] = state._scheduleTruncated ? 1L : 0L;
+        LaneStarted = state._started,
+        Supplied = state._supplied,
+        Sent = state._sentOk,
+        SendWouldBlock = state._sendWouldBlock,
+        WindowOverflow = state._windowOverflow,
+        BacklogDrops = state._backlogDrops,
+        SendFailures = state._sendFailures,
+        AbandonedAtTeardown = Math.Max(0, state._supplied - state._sentOk - state._sendFailures - state._backlogDrops),
+        ClientSendLoss = state.ClientSendLoss,
+        Received = state._received,
+        Corrupt = state._corrupt,
+        ProtocolErrors = state._protocolErrors,
+        UnmatchedReplies = state._unmatchedReplies,
+        ForeignConnection = state._foreignConnection,
+        OutstandingAtTeardown = state._outstanding,
+        WindowCeilingMs = InFlightCeilingMs(plan.InFlightWindow, 1, state._sentOk, elapsedTicks),
+        ScheduleTruncated = state._scheduleTruncated ? 1L : 0L,
 
-        // SentOk minus matched arrivals, never SentOk minus Received, which duplicates can exceed.
-        metrics["udp.lossRate"] = JsonRate.Rate(state._sentOk - (state._received - state._unmatchedReplies), state._sentOk);
-        metrics["udp.achievedRate"] = JsonPerSecond.PerSecond(state._sentOk, elapsedTicks, Stopwatch.Frequency);
-    }
+        // Sent minus matched arrivals, never sent minus received, which duplicates can exceed.
+        LossRate = JsonRate.Rate(state._sentOk - (state._received - state._unmatchedReplies), state._sentOk),
+        AchievedRate = JsonPerSecond.PerSecond(state._sentOk, elapsedTicks, Stopwatch.Frequency),
+    };
 
     private static void WriteGates(ArmOutcome outcome, LaneStates lanes, LatencyTcpState tcp, MeasurementValidity validity)
     {
-        outcome.Gates["clientSendLoss"] = tcp.ClientSendLoss + lanes.Udp.ClientSendLoss;
-        outcome.Gates["windowOverflow"] = tcp._windowOverflow + lanes.Udp._windowOverflow;
-        outcome.Gates["backlogDrops"] = tcp._backlogDrops + lanes.Udp._backlogDrops;
-        outcome.Gates["sendFailures"] = tcp._sendFailures + lanes.Udp._sendFailures;
-        outcome.Gates["lanesPlanned"] = validity.PlannedLanes;
-        outcome.Gates["lanesStarted"] = validity.StartedLanes;
-        outcome.Gates["laneShortfall"] = validity.LaneShortfall;
-        outcome.Gates["scheduleTruncated"] = validity.Truncated ? 1L : 0L;
-        outcome.Gates["inFlightCeilingMs"] = TightestCeiling(validity.TcpCeilingMs, validity.UdpCeilingMs);
-        outcome.Gates["windowMs"] = 0L;
+        outcome.Gates[ArmKeys.Common.Gates.ClientSendLoss] = tcp.ClientSendLoss + lanes.Udp.ClientSendLoss;
+        outcome.Gates[ArmKeys.Common.Gates.WindowOverflow] = tcp._windowOverflow + lanes.Udp._windowOverflow;
+        outcome.Gates[ArmKeys.Common.Gates.BacklogDrops] = tcp._backlogDrops + lanes.Udp._backlogDrops;
+        outcome.Gates[ArmKeys.Common.Gates.SendFailures] = tcp._sendFailures + lanes.Udp._sendFailures;
+        outcome.Gates[ArmKeys.Common.Gates.LanesPlanned] = validity.PlannedLanes;
+        outcome.Gates[ArmKeys.Common.Gates.LanesStarted] = validity.StartedLanes;
+        outcome.Gates[ArmKeys.Common.Gates.LaneShortfall] = validity.LaneShortfall;
+        outcome.Gates[ArmKeys.Common.Gates.ScheduleTruncated] = validity.Truncated ? 1L : 0L;
+        outcome.Gates[ArmKeys.Common.Gates.InFlightCeilingMs] = TightestCeiling(validity.TcpCeilingMs, validity.UdpCeilingMs);
+        outcome.Gates[ArmKeys.Common.Gates.WindowMs] = 0L;
     }
 
     private static void WriteNotes(
@@ -919,15 +923,15 @@ internal static class LatencyArm
 
         internal void WriteParameters(ArmOutcome outcome)
         {
-            outcome.Parameters["seconds"] = Seconds;
-            outcome.Parameters["ratePerSecond"] = Rate;
-            outcome.Parameters["payloadBytes"] = PayloadBytes;
-            outcome.Parameters["protocol"] = Protocol;
-            outcome.Parameters["lanes"] = Lanes;
+            outcome.Parameters[ArmKeys.Common.Parameters.Seconds] = Seconds;
+            outcome.Parameters[ArmKeys.Common.Parameters.RatePerSecond] = Rate;
+            outcome.Parameters[ArmKeys.Common.Parameters.PayloadBytes] = PayloadBytes;
+            outcome.Parameters[ArmKeys.Common.Parameters.Protocol] = Protocol;
+            outcome.Parameters[ArmKeys.Common.Parameters.Lanes] = Lanes;
 
             // in-flight requests per lane; the loss arm's window is a millisecond threshold, so the
             // two arms must not publish one bare "window" that means different things.
-            outcome.Parameters["inFlightWindow"] = InFlightWindow;
+            outcome.Parameters[ArmKeys.Common.Parameters.InFlightWindow] = InFlightWindow;
         }
 
         private static int BacklogCapacity(int rate, int window) =>

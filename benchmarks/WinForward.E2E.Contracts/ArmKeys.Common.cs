@@ -54,9 +54,10 @@ public static partial class ArmKeys
 
             public const string Label = "label";
 
-            // S3218 / MemberHidesStaticFromOuterClass: `parameters` and `gates` are the published
-            // member names, and the key set for each of those members carries the same word one
-            // level up. Renaming either side would break the rule this file documents -- a member's
+            // S3218 / MemberHidesStaticFromOuterClass: `parameters`, `gates` and `latency` are the
+            // published member names, and each of them is also the name of a key set one level down
+            // (the `parameters` and `gates` families here, and the latency arm's own shard for
+            // `latency`). Renaming either side would break the rule this file documents -- a member's
             // name is its key's name -- so the shadowing is the contract, not an accident.
 #pragma warning disable S3218
             // ReSharper disable MemberHidesStaticFromOuterClass
@@ -65,10 +66,10 @@ public static partial class ArmKeys
             public const string Metrics = "metrics";
 
             public const string Gates = "gates";
-            // ReSharper restore MemberHidesStaticFromOuterClass
-#pragma warning restore S3218
 
             public const string Latency = "latency";
+            // ReSharper restore MemberHidesStaticFromOuterClass
+#pragma warning restore S3218
 
             public const string Notes = "notes";
 
@@ -178,7 +179,13 @@ public static partial class ArmKeys
 
             public const string Phases = "phases";
 
+            // S3218: the published member name is `latency`, and `ArmKeys.Latency` is the latency
+            // arm's own key shard. The rule this file documents -- a member's name is its key's
+            // name -- makes the collision the contract rather than an accident (D14.17).
+#pragma warning disable S3218
+            // ReSharper disable once MemberHidesStaticFromOuterClass
             public const string Latency = "latency";
+#pragma warning restore S3218
 
             public const string Loss = "loss";
         }

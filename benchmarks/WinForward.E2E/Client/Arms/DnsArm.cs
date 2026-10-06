@@ -4,7 +4,9 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using WinForward.E2E.Contracts;
 using WinForward.E2E.Contracts.Json;
+using WinForward.E2E.Contracts.Metrics;
 using WinForward.E2E.Wire;
 
 namespace WinForward.E2E.Client.Arms;
@@ -57,21 +59,6 @@ internal static class DnsArm
         var dnsPort = spec.DnsPort > 0 ? spec.DnsPort : context.Options.DnsPort;
         var dnsEndPoint = new IPEndPoint(context.TargetAddress, dnsPort);
 
-        var metrics = new DictionaryMetrics();
-        var outcome = new ArmOutcome
-        {
-            Parameters =
-            {
-                ["seconds"] = spec.Seconds,
-                ["ratePerSecond"] = rate,
-                ["tcpPercent"] = tcpPercent,
-                ["cnameEvery"] = cnameEvery,
-                ["dnsPort"] = dnsPort,
-                ["drainWindowMs"] = DrainWindowMilliseconds,
-            },
-            Metrics = metrics,
-        };
-
         var startTicks = Clock.Now;
         var deadlineTicks = context.DeadlineTicks(startTicks);
         using var linked = context.CreateLinkedTokenSource();
@@ -91,9 +78,29 @@ internal static class DnsArm
         }
 
         await Task.WhenAll(tasks).ConfigureAwait(false);
-        WriteMetrics(metrics, udp, tcp, Clock.Now - startTicks);
-        outcome.Gates["clientSendLoss"] = 0;
-        outcome.Gates["windowMs"] = 0;
+
+        // The metrics value is built after both halves joined, so every counter it carries is the
+        // total the run ended with rather than a snapshot taken while a lane was still counting.
+        var outcome = new ArmOutcome
+        {
+            Parameters =
+            {
+                [ArmKeys.Common.Parameters.Seconds] = spec.Seconds,
+                [ArmKeys.Common.Parameters.RatePerSecond] = rate,
+                [ArmKeys.Common.Parameters.TcpPercent] = tcpPercent,
+                [ArmKeys.Common.Parameters.CnameEvery] = cnameEvery,
+                [ArmKeys.Common.Parameters.DnsPort] = dnsPort,
+                [ArmKeys.Common.Parameters.DrainWindowMs] = DrainWindowMilliseconds,
+            },
+            Metrics = MetricsOf(udp, tcp, Clock.Now - startTicks),
+            Gates =
+            {
+                // A dns arm measures queries, not datagrams, so it has no loss of its own to gate.
+                [ArmKeys.Common.Gates.ClientSendLoss] = 0L,
+                [ArmKeys.Common.Gates.WindowMs] = 0L,
+            },
+        };
+
         outcome.Notes.Add("every query written to the socket is terminal in exactly one of answered (rcode 0), servfail (rcode != 0), timeout (still unmatched when the drain window closed) or other (tcp only: a response consumed a queued query but carried a different transaction id); answered + servfail + timeout + other == sent, and unanswered is timeout + other.");
         outcome.Notes.Add("drainWindowMs is not a per-query deadline. Once the send phase ends the arm keeps reading for that long and only then books every query still pending as timeout, so a query answered inside the window counts as answered however long it took, and a response that arrives after the window is closed can only be counted unmatched. cnameEvery > 0 replaces every cnameEvery-th query with a CNAME query, and because the udp path is keyed by transaction id, a udp response whose id matches no outstanding query is unmatched and can never be other.");
         outcome.Notes.Add("unsent counts pacing slots skipped because the in-flight window was full: those queries never reached the socket and are in no outcome, so offered is sent + unsent and neither answerRate nor achievedRate includes them; socketErrors counts socket-level failures (connect, send, receive) that belong to no single query.");
@@ -103,7 +110,7 @@ internal static class DnsArm
         return outcome;
     }
 
-    private static void WriteMetrics(DictionaryMetrics metrics, DnsCounters udp, DnsCounters tcp, long elapsedTicks)
+    private static DnsMetrics MetricsOf(DnsCounters udp, DnsCounters tcp, long elapsedTicks)
     {
         var answered = udp._answered + tcp._answered;
         var servfail = udp._servfail + tcp._servfail;
@@ -112,26 +119,34 @@ internal static class DnsArm
         var sent = udp._sent + tcp._sent;
         var unsent = udp._unsent + tcp._unsent;
 
-        metrics["sent"] = sent;
-        metrics["udpSent"] = udp._sent;
-        metrics["tcpSent"] = tcp._sent;
-        metrics["unsent"] = unsent;
-        metrics["udpUnsent"] = udp._unsent;
-        metrics["tcpUnsent"] = tcp._unsent;
-        metrics["offered"] = sent + unsent;
-        metrics["answered"] = answered;
-        metrics["servfail"] = servfail;
-        metrics["timeout"] = timeout;
-        metrics["other"] = other;
-        metrics["unanswered"] = timeout + other;
-        metrics["socketErrors"] = udp._socketErrors + tcp._socketErrors;
-        metrics["emptyAnswers"] = udp._emptyAnswers + tcp._emptyAnswers;
-        metrics["malformed"] = udp._malformed + tcp._malformed;
-        metrics["unmatched"] = udp._unmatched + tcp._unmatched;
-        metrics["answerRate"] = JsonRate.Rate(answered, sent);
-        metrics["achievedRate"] = JsonPerSecond.PerSecond(sent, elapsedTicks, Stopwatch.Frequency);
+        return new DnsMetrics
+        {
+            Sent = sent,
+            UdpSent = udp._sent,
+            TcpSent = tcp._sent,
+            Unsent = unsent,
+            UdpUnsent = udp._unsent,
+            TcpUnsent = tcp._unsent,
+            Offered = sent + unsent,
+            Answered = answered,
+            Servfail = servfail,
+            Timeout = timeout,
+            Other = other,
+            Unanswered = timeout + other,
+            SocketErrors = udp._socketErrors + tcp._socketErrors,
+            EmptyAnswers = udp._emptyAnswers + tcp._emptyAnswers,
+            Malformed = udp._malformed + tcp._malformed,
+            Unmatched = udp._unmatched + tcp._unmatched,
+            AnswerRate = JsonRate.Rate(answered, sent),
+            AchievedRate = JsonPerSecond.PerSecond(sent, elapsedTicks, Stopwatch.Frequency),
+            Rcodes = BuildRcodes(udp, tcp),
+            QueryTypes = BuildQueryTypes(udp, tcp),
+        };
+    }
 
-        var rcodes = new Dictionary<string, object?>(StringComparer.Ordinal);
+    private static Dictionary<string, long> BuildRcodes(DnsCounters udp, DnsCounters tcp)
+    {
+        var rcodes = new Dictionary<string, long>(StringComparer.Ordinal);
         for (var code = 0; code < udp._rcodes.Length; code++)
         {
             var count = udp._rcodes[code] + tcp._rcodes[code];
@@ -141,13 +156,12 @@ internal static class DnsArm
             }
         }
 
-        metrics["rcodes"] = rcodes;
-        metrics["queryTypes"] = BuildQueryTypes(udp, tcp);
+        return rcodes;
     }
 
-    private static Dictionary<string, object?> BuildQueryTypes(DnsCounters udp, DnsCounters tcp)
+    private static Dictionary<string, long> BuildQueryTypes(DnsCounters udp, DnsCounters tcp)
     {
-        var types = new Dictionary<string, object?>(StringComparer.Ordinal);
+        var types = new Dictionary<string, long>(StringComparer.Ordinal);
         for (var type = 0; type < udp._queryTypes.Length; type++)
         {
             var count = udp._queryTypes[type] + tcp._queryTypes[type];

@@ -31,7 +31,7 @@ public sealed class ContractShapeTests
             var observations = await PublishAsync(contract, ShapeFlags.None);
             var actual = JsonPaths.Under(observations, contract.Metrics.Prefix);
 
-            failures.AddRange(Differences($"{contract.Kind} metrics", contract.Metrics.Declared, actual));
+            failures.AddRange(MetricDifferences(contract, actual));
 
             // Every array of the record is registered with its measured arity: an array's element
             // count is not part of the path alphabet, so it is asserted here instead of being read
@@ -63,7 +63,9 @@ public sealed class ContractShapeTests
         foreach (var contract in ContractRegistry.s_all)
         {
             var observations = await PublishAsync(contract, ShapeFlags.None);
-            var actual = JsonPaths.Under(observations, contract.Metrics.Prefix);
+            var actual = JsonPaths
+                .Under(observations, contract.Metrics.Prefix)
+                .Where(path => !contract.Metrics.Dynamic.Any(container => container.Covers(path)));
 
             Assert.Equal(contract.Metrics.Declared, actual);
         }
@@ -74,13 +76,23 @@ public sealed class ContractShapeTests
     {
         foreach (var contract in ContractRegistry.s_all)
         {
-            Assert.True(
-                contract.Metrics.PropertyCount == contract.Metrics.Declared.Count,
-                $"{contract.Kind}: the metrics record declares {contract.Metrics.PropertyCount} propert(ies) but ArmKeys declares {contract.Metrics.Declared.Count} key(s)");
+            var (kind, _, metrics) = contract;
 
+            // A block-holder property publishes no key of its own: it publishes the keys of the block
+            // it holds, and each block registers its own property count, so the record's own
+            // key-publishing properties are its property count minus one per block.
+            var properties = metrics.PropertyCount - metrics.Blocks.Count + metrics.Blocks.Sum(static block => block.PropertyCount);
             Assert.True(
-                contract.Metrics.NullablePropertyCount == contract.Metrics.Nullable.Count,
-                $"{contract.Kind}: the metrics record declares {contract.Metrics.NullablePropertyCount} nullable propert(ies) but {contract.Metrics.Nullable.Count} null case(s) are registered");
+                properties == metrics.Declared.Count,
+                $"{kind}: the metrics record declares {properties} key-publishing propert(ies) "
+                + $"({metrics.PropertyCount} own, {metrics.Blocks.Count} block holder(s), "
+                + $"{metrics.Blocks.Sum(static block => block.PropertyCount)} block propert(ies)) "
+                + $"but ArmKeys declares {metrics.Declared.Count} key(s)");
+
+            var nullable = metrics.NullablePropertyCount + metrics.Blocks.Sum(static block => block.NullablePropertyCount);
+            Assert.True(
+                nullable == metrics.Nullable.Count,
+                $"{kind}: the metrics record declares {nullable} nullable propert(ies) but {metrics.Nullable.Count} null case(s) are registered");
         }
     }
 
@@ -95,7 +107,7 @@ public sealed class ContractShapeTests
 
             // An unknown value never removes a key: the unknown record has the same paths as the
             // measured one, and every nullable path is present carrying null.
-            failures.AddRange(Differences($"{contract.Kind} unknown readings", contract.Metrics.Declared, actual));
+            failures.AddRange(MetricDifferences(contract, actual));
             foreach (var path in contract.Metrics.Nullable)
             {
                 if (!observations.TryGetValue(path, out var found))
@@ -106,6 +118,74 @@ public sealed class ContractShapeTests
                 {
                     failures.Add($"{contract.Kind} {path}: an unknown reading published as {found[0].Kind}, not null");
                 }
+            }
+        }
+
+        Assert.True(failures.Count == 0, string.Join('\n', failures));
+    }
+
+    /// <summary>
+    /// A conditional block is omitted whole, and only in the flag state that does not run it: that
+    /// state publishes every key of the other blocks, no key of this one, and nothing else is missing.
+    /// The states together account for exactly the paths the contract declares conditional, so a key
+    /// that vanished from both would be a record that can never publish it, which a conditional
+    /// declaration must not hide.
+    /// </summary>
+    [Fact]
+    public async Task AConditionalBlockIsOmittedWholeInItsFlagState()
+    {
+        var failures = new List<string>();
+        foreach (var contract in ContractRegistry.s_all)
+        {
+            var omitted = new List<string>();
+            foreach (var block in contract.Metrics.Blocks.Where(static block => block.OmittedWhen != ShapeFlags.None))
+            {
+                var written = await WrittenMetricsAsync(contract, block.OmittedWhen);
+                var blockPaths = contract.Metrics.Declared
+                    .Where(path => path.StartsWith(block.Prefix, StringComparison.Ordinal))
+                    .ToArray();
+                omitted.AddRange(blockPaths);
+
+                failures.AddRange(blockPaths
+                    .Where(written.Contains)
+                    .Select(path => $"{contract.Kind} {block.OmittedWhen}: {path} is published although the {block.Prefix} block did not run"));
+
+                failures.AddRange(Differences(
+                    $"{contract.Kind} {block.OmittedWhen} (every key of the blocks that ran)",
+                    [.. contract.Metrics.Declared.Except(blockPaths)],
+                    written));
+            }
+
+            failures.AddRange(Differences($"{contract.Kind} conditional keys", contract.Metrics.Conditional, omitted));
+        }
+
+        Assert.True(failures.Count == 0, string.Join('\n', failures));
+    }
+
+    /// <summary>
+    /// The members of a data-driven container are named by the run, so they are checked by shape
+    /// rather than by set equality, and a container that counted nothing is still published as an empty
+    /// object: the key exists, its members do not.
+    /// </summary>
+    [Fact]
+    public async Task DataDrivenContainersAreWrittenByShapeAndStayWhenEmpty()
+    {
+        var failures = new List<string>();
+        foreach (var contract in ContractRegistry.s_all)
+        {
+            var written = await WrittenMetricsAsync(contract, ShapeFlags.EmptyContainers);
+            failures.AddRange(MetricDifferences(contract, written));
+
+            foreach (var container in contract.Metrics.Dynamic)
+            {
+                if (!written.Contains(container.Path))
+                {
+                    failures.Add($"{contract.Kind} {container.Path}: an empty container is still a written key");
+                }
+
+                failures.AddRange(written
+                    .Where(container.Covers)
+                    .Select(path => $"{contract.Kind} {path}: published although the run counted nothing"));
             }
         }
 
@@ -247,6 +327,37 @@ public sealed class ContractShapeTests
         var outcome = contract.Outcome(flags);
         var arm = new ArmSpec { Name = contract.Kind.ToUpperInvariant(), Kind = contract.Kind };
         return JsonPaths.FlattenJsonl(await WriteResultRecordAsync(arm, outcome, latency));
+    }
+
+    /// <summary>The canonical paths a kind published under <c>metrics</c>, in document order.</summary>
+    private static async Task<List<string>> WrittenMetricsAsync(KindContract contract, ShapeFlags flags) =>
+        JsonPaths.Under(await PublishAsync(contract, flags), contract.Metrics.Prefix);
+
+    /// <summary>
+    /// The declared metrics paths against the published ones, in both directions. A member of a
+    /// declared data-driven container is explained by its container and checked by shape rather than by
+    /// set equality; every other published path must be declared, and every declared path published.
+    /// </summary>
+    private static List<string> MetricDifferences(KindContract contract, IReadOnlyList<string> published)
+    {
+        var failures = new List<string>();
+        var members = new List<string>();
+        foreach (var container in contract.Metrics.Dynamic)
+        {
+            var found = published.Where(container.Covers).ToArray();
+            members.AddRange(found);
+            if (!published.Contains(container.Path))
+            {
+                failures.Add($"{contract.Kind} {container.Path}: the declared container is missing from the record");
+            }
+
+            failures.AddRange(found
+                .Where(path => !container.IsMemberName(container.MemberOf(path)))
+                .Select(path => $"{contract.Kind} {path}: not a member name {container.Path} may publish"));
+        }
+
+        failures.AddRange(Differences($"{contract.Kind} metrics", contract.Metrics.Declared, [.. published.Except(members)]));
+        return failures;
     }
 
     private static async Task<Dictionary<string, List<JsonPathObservation>>> PublishAsync(ArmOutcome outcome)
