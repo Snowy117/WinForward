@@ -244,10 +244,13 @@ public sealed class Socks5ControlConnectionDeferredHandshakeTests
 
         await AsTask(control.DisposeAsync()).WaitAsync(s_budget);
 
-        // The quiescence lease made disposal join the parked read, so the fault is settled and
-        // observed here instead of surfacing as an unobserved task exception.
-        Assert.True(completion.IsCompleted, "DisposeAsync must not return while an admitted completion is still parked");
-        var fault = await Record.ExceptionAsync(async () => await completion);
+        // The quiescence lease made disposal join the parked read, so the fault is settled here instead
+        // of surfacing as an unobserved task exception. "Settled" is asserted as a bounded await rather
+        // than an instantaneous IsCompleted: the lease is released in the read's finally, and the async
+        // state machine settles the returned task a step later, so reading IsCompleted the moment
+        // disposal returns races that final step. A disposal that had not joined would leave the read
+        // parked on an unanswered reply, and the bounded await below would time out.
+        var fault = await Record.ExceptionAsync(async () => await AsTask(completion).WaitAsync(s_budget));
         // ReSharper disable once ConditionalAccessQualifierIsNonNullableAccordingToAPIContract // Record.ExceptionAsync (xunit 2.9.3) is declared Task<Exception> but returns null when the delegate throws nothing — verified at runtime — so '?.' is required: without it this message would throw NullReferenceException on that reachable path instead of naming the fault.
         Assert.True(fault is IOException or ObjectDisposedException, $"unexpected completion fault: {fault?.GetType().Name ?? "none"}");
     }
