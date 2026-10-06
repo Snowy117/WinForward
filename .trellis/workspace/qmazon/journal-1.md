@@ -1899,3 +1899,51 @@ Replaced the hand-rolled logger with Microsoft.Extensions.Logging 10.0.12 and 13
 - Adopt the standard Logging configuration section and delete logFormat, so users configure formatters the way they already know and exotic sinks such as CSV become a config choice.
 - Consider folding config.json into appsettings.json once ownership of logLevel between the hand-written validator and IConfiguration is decided.
 - Give each class its own category by threading an ILoggerFactory through the UDP/TCP options records instead of an ILogger.
+
+
+## Session 57: AOT instruction-set floor: restoring the vectorized checksum and shipping a framework-dependent artifact
+<!-- trellis-session: v=2 fp=58e3169c516b7b66 -->
+
+**Date**: 2026-10-06
+**Task**: AOT instruction-set floor: restoring the vectorized checksum and shipping a framework-dependent artifact
+**Branch**: `master`
+
+### Summary
+
+Found that the shipped Native AOT build silently compiled out the product vector paths (IlcInstructionSet defaults to base, so Vector256.IsHardwareAccelerated folds false), rewrote the per-packet checksum in three tiers for a same-harness 960.69 -> 215.67 ns, pinned the floor explicitly, and added a framework-dependent CI artifact carrying the JIT performance.
+
+### Main Changes
+
+- Rewrote PacketChecksums.Sum as a Vector512 tier, a Vector<T> tier gated on span length alone, and a scalar tail folding every 4096 words — the Vector<T> tier is what keeps a vector path where the old Vector256 gate was folded false.
+- Proved the fold bound by re-derivation and measurement: 2 048 blocks puts 4096 words (0x0FFF_F000) in a lane, sixteen lanes reduce to 0xFFFF_0000, and the add peaks at exactly 0xFFFF_FFFF; 13 320 comparisons against an exact fold-per-word reference at four width configurations, 0 mismatches.
+- Pinned IlcInstructionSet=base explicitly with the failure mode of raising it recorded, after verifying base and the implicit default produce identical capability profiles.
+- Added a framework-dependent publish and artifact (WinForward-win-x64-fdd) to the AOT workflow: one 1,817,689-byte WinForward.exe, no runtime files, verified end to end exactly as CI runs it.
+- Documented both artifacts in README with their prerequisites, and rewrote the hot-path.md P2b contract for the three-tier form including the counterfactual that folding per 4096 blocks would wrap the reduction.
+- Corrected three of my own claims after review: the SSSE3 rationale was false on .NET 10 (its x64 baseline already includes SSE4.2/POPCNT), the base-versus-avx2 gap is 4.0x in the clean harness rather than the 1.8x a delegate-wrapped probe suggested, and the recorded results README misread its own 20-byte row.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f7bf652` | chore(task): seed the AOT instruction-set task artifacts |
+| `5b00109` | perf(protocols): restore the vectorized checksum in the AOT artifact |
+| `eae25af` | build(aot): pin the instruction set and publish a framework-dependent artifact |
+
+### Testing
+
+- [OK] dotnet build WinForward.slnx -c Release: 0 warnings, 0 errors
+- [OK] dotnet test WinForward.slnx -c Release: 13 projects, 1268 passed, 0 failed
+- [OK] dotnet format --severity info --verify-no-changes: exit 0, empty output
+- [OK] jb inspectcode -f=Xml -e=HINT: 0 issues
+- [OK] The independent trellis-check re-derived and empirically proved the fold bound, and confirmed the tests assert against the ChecksumMath oracle rather than the implementation
+- [OK] The win-x64 AOT artifact itself stays unverified on this host: cross-OS AOT is unsupported and a linux-x64 AOT build of this Windows-only CLI is vacuously trimmed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Commit the CSV/TXT/HTML BDN artifacts alongside the XLSX if the S3 export is adopted by the T-102 dashboard deliverable, per the open export-format decision
+- Answer Q1 for 10-06-appsettings-config: standard Configuration.Json file provider (+0.49 MB) or the project own parser into an in-memory source (+0.02 MB)
+- Consider raising the tier length threshold if the IPv4-header path ever shows up in a profile; the 20-byte case is below every vector width
