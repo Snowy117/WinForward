@@ -23,6 +23,10 @@
 
     <InvariantGlobalization>true</InvariantGlobalization>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!-- Both legs the release workflow publishes. dotnet restore only produces an assets target
+         for the RIDs listed here, and every publish step runs with the no-restore flag, so a
+         missing entry fails that leg with NETSDK1047 instead of restoring implicitly. -->
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
     <PublishSingleFile>true</PublishSingleFile>
 
     <!-- GC-off posture (task 09-18 M5). The steady-state packet/flow/connection paths allocate
