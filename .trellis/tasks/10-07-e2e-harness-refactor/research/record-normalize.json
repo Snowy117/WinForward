@@ -31,7 +31,16 @@
     "counter by shape and a millisecond measurement by meaning, and it is classified a reading here",
     "rather than by a pattern that happens to match it. A path matching both a contract and a reading",
     "pattern is a configuration error, not a precedence rule; --explain-classes prints the rule that",
-    "classified every observed numeric path."
+    "classified every observed numeric path.",
+    "",
+    "EVERY PATTERN IS A SPELLING THE RUN ACTUALLY PUBLISHES (D16.2). A pattern that matches no path",
+    "declares a shape the artifacts never carry, so the dead ones are gone rather than kept just in",
+    "case: the process gauges are top-level in a sample record (workingSetBytes, threads -- the */",
+    "variants matched nothing because nothing nests them under a slash), metrics/*Bytes already covers",
+    "every echoed or transferred volume (metrics/*bytesEchoed matched none of the echoedBytes forms),",
+    "the ledger's expectedBytes is top-level and has no tcp/ sibling, and the only lane ARRAY is the",
+    "tcp one: the udp half is a single lane whose udp.laneStarted is a scalar, so metrics/udp.lane*",
+    "declared an array arity that cannot vary. The bare sources array is listed and needs no */ form."
   ],
   "version": 3,
   "volatileKeyNames": ["utc", "startedUtc", "endedUtc", "startUtc"],
@@ -61,17 +70,14 @@
     "privateBytes",
     "*/privateBytes",
     "workingSetBytes",
-    "*/workingSetBytes",
     "envWorkingSetBytes",
     "peakWorkingSetBytes",
     "threads",
-    "*/threads",
     "*achievedRate",
     "*goodputBps",
     "*goodputMbps",
     "metrics/*Bytes",
     "metrics/*bytes",
-    "metrics/*bytesEchoed",
     "metrics/*bytesSent",
     "metrics/frames*",
     "metrics/classes/*/frames",
@@ -83,7 +89,6 @@
     "bytesEchoed",
     "tcp/bytesEchoed",
     "expectedBytes",
-    "tcp/expectedBytes",
     "udp/bytes",
     "sources/datagrams"
   ],
@@ -105,7 +110,7 @@
     "metrics/expected/*",
     "metrics/byMode/*"
   ],
-  "volatileArityPatterns": ["sources", "*/sources", "metrics/tcp.lane*", "metrics/udp.lane*", "*/desktops"],
+  "volatileArityPatterns": ["sources", "metrics/tcp.lane*", "*/desktops"],
   "normalizeTargetOutTimestamps": true,
   "normalizeTargetOutPaths": true
 }

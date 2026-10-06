@@ -23,10 +23,13 @@ The D15 classes and their verdicts:
    no global tolerance (a global one would be simultaneously too loose for counters and too tight
    for CPU/memory samples), and ``allowedCountDelta`` defaults to **0** so a record-count drift has
    to be declared in the band file instead of being assumed. Booleans have no band: they must be
-   equal. Without ``--band`` the contract values are measured and tabulated but not checked, which
-   the header line and the summary both say; ``--write-band`` freezes such a measurement into a
-   band file. A band file whose ``paths`` object is missing or empty is refused, because it would
-   enforce nothing.
+   equal. A missing ``--band`` is *not* a licence to skip this class: without it the contract values
+   are judged at **band 0**, and the header line and the summary both say ``band = 0 (not measured)``
+   -- an unmeasured band that silently checked nothing is how real drift passes. ``--write-band`` is
+   the measurement mode: it freezes the very pair under comparison into a band file, so it judges
+   nothing, because judging the values it measures at band 0 would fail the measurement that
+   produces the band. A band file whose ``paths`` object is missing or empty is refused, because it
+   would enforce nothing.
 5. ``reading`` -- the config's ``readingPathPatterns``: clocks, CPU/memory/thread gauges,
    throughput, transfer volumes, latency-histogram readings. These are ``observed movement``:
    reported for information and **never a failure**, because a reading that did not move between
@@ -312,11 +315,16 @@ class Comparison:
         band: dict[str, dict[str, object]],
         declared_base: set[str] | None = None,
         declared_after: set[str] | None = None,
+        measure_only: bool = False,
     ) -> None:
         self.config = config
         self.band = band
         self.declared_base = declared_base or set()
         self.declared_after = declared_after or set()
+        # ``--write-band`` without ``--band`` measures the pair the band is frozen from, so the
+        # contract values are tabulated rather than judged (D16.1); with neither flag they are judged
+        # at band 0, and with a band file they are judged against it.
+        self.measure_only = measure_only
         self.findings: list[Finding] = []
         self.movements: list[Movement] = []
         self.measured: dict[str, dict[str, object]] = {}
@@ -476,15 +484,22 @@ class Comparison:
             return
 
         if recorded is None:
+            if self.measure_only:
+                return
             if self.band:
                 self.findings.append(
                     Finding(COLUMN_CONTRACT, group, path, "no recorded jitter band for this path")
                 )
-            return
+                return
 
-        allowed = float(recorded.get("maxAbsDelta", 0.0))  # type: ignore[arg-type]
-        # A record-count drift is a contract change unless the band file declares a tolerance for it.
-        allowed_count = float(recorded.get("allowedCountDelta", 0.0))  # type: ignore[arg-type]
+            # No band file: the contract value is judged at band 0 rather than waved through.
+            allowed = 0.0
+            allowed_count = 0.0
+        else:
+            allowed = float(recorded.get("maxAbsDelta", 0.0))  # type: ignore[arg-type]
+            # A record-count drift is a contract change unless the band file declares a tolerance for it.
+            allowed_count = float(recorded.get("allowedCountDelta", 0.0))  # type: ignore[arg-type]
+
         for stat, delta in deltas.items():
             tolerance = allowed_count if stat == "count" else allowed
             if abs(delta) > tolerance + 1e-9:
@@ -773,8 +788,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("base_dir", type=Path)
     parser.add_argument("after_dir", type=Path)
     parser.add_argument("--normalize", required=True, type=Path, help="normalization config JSON")
-    parser.add_argument("--band", type=Path, help="recorded per-key jitter band to check against")
-    parser.add_argument("--write-band", type=Path, help="write the jitter band measured from this pair")
+    parser.add_argument("--band", type=Path, help="recorded per-key jitter band; without it the contract values are judged at band 0")
+    parser.add_argument("--write-band", type=Path, help="write the jitter band measured from this pair (measurement mode: the contract values are not judged)")
     parser.add_argument("--json-out", type=Path, help="write the findings as JSON")
     parser.add_argument("--rename-table", type=Path, help="contract-rename.json, checked against the two path sets")
     parser.add_argument("--batch", help="the rename batch that has been executed; its entries must be observed exactly")
@@ -802,10 +817,14 @@ def main(argv: list[str]) -> int:
     base = Side(args.base_dir)
     after = Side(args.after_dir)
 
+    # ``--write-band`` freezes this very pair, so it measures the contract values instead of judging
+    # them; a missing ``--band`` without it means "judge at band 0", never "skip the class" (D16.1).
+    measure_only = args.write_band is not None and args.band is None
+
     table = load_rename_table(args.rename_table) if args.rename_table is not None else []
     declared_base = {str(row["old_path"]) for row in table if row.get("kind") in ("renamed", "removed")}
     declared_after = {str(row["new_path"]) for row in table if row.get("kind") in ("renamed", "added")}
-    comparison = Comparison(config, band, declared_base, declared_after)
+    comparison = Comparison(config, band, declared_base, declared_after, measure_only)
 
     for group in sorted(set(base.groups) | set(after.groups)):
         comparison.compare_group(group, base.groups.get(group, {}), after.groups.get(group, {}))
@@ -844,9 +863,15 @@ def main(argv: list[str]) -> int:
             encoding="utf-8",
         )
 
+    if args.band is not None:
+        band_line = str(args.band)
+    elif measure_only:
+        band_line = "(none: --write-band measures the pair, the contract values are not judged here)"
+    else:
+        band_line = "0 (not measured)"
     print(f"base:  {args.base_dir}")
     print(f"after: {args.after_dir}")
-    print(f"band:  {args.band if args.band is not None else '(measured only, not enforced)'}")
+    print(f"band:  {band_line}")
     print()
     print(render(comparison, banded=args.band is not None, show_bands=args.show_bands, strict=args.strict, explain=args.explain_classes))
 
@@ -861,7 +886,13 @@ def main(argv: list[str]) -> int:
     identity = [f for f in comparison.findings if f.column == COLUMN_IDENTITY]
     contract = [f for f in comparison.findings if f.column == COLUMN_CONTRACT]
     rename = [f for f in comparison.findings if f.column == COLUMN_RENAME]
-    contract_column = f"contract={len(contract)}" + ("" if comparison.band else " (not checked: no --band)")
+    if comparison.band:
+        band_note = ""
+    elif measure_only:
+        band_note = " (measurement mode: --write-band, this column is not judged)"
+    else:
+        band_note = " band = 0 (not measured)"
+    contract_column = f"contract={len(contract)}{band_note}"
     print(
         f"summary: structural={len(structural)} conditional={len(conditional)} identity={len(identity)} "
         f"declared={len(declared)} "

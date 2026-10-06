@@ -541,3 +541,37 @@ E1-A 的实测暴露：两次运行带宽**不足以**覆盖第三次运行的�
 披露 `gates.scheduleTruncated`/`laneShortfall`（不是静默），gate 的分析器消费面属 E3。
 `ClientRunner.cs` 493 有效行 > 400 与 E2E 其余 6 个超标文件的拆分正是 E2 的工作；
 `D13.4` 登记的 `WinForward.Benchmarks/` 3 个文件与本任务无关，二者不要混淆。
+
+---
+
+## D16. E1-B1c 之后的裁定与 B2 批次
+
+### D16.1 比对工具：没有 `--band` 时契约值按**带宽 0** 判（U1）
+`--band` 缺失不再等于"契约不检查"（那种模式会让真实漂移静默通过）。`--write-band` 仍是**测量**模式
+（跑两次基线、写出逐键带宽）；summary 必须显式写出"band = 0（未测量）"，不得只打印 `contract=0`。
+check 已实测：该改动对 `run1↔run1`、`run1↔run2`、`run1↔b1c` 三对 verdict 零影响。
+
+### D16.2 配置里 0 命中的模式（U4）
+`record-normalize.json` 中当前 0 命中的 `readingPathPatterns`/数组模式（`*/workingSetBytes`、`*/threads`、
+`metrics/*bytesEchoed`、`tcp/expectedBytes`、`*/sources`、`metrics/udp.lane*`）**要么改成真实拼写、要么删除并留注释**——
+配置不得声明无效的形状。
+
+### D16.3 登记债（不在 B2 修）
+- `compare-records.py` 有效行 348 → 702（Python 不受 400 行 `.cs` 规则约束，但建议按
+  `Config`/`render`/`rename` 三个现成接缝拆分）；`contract-inventory.py::groups_of()` 有同形的潜在重复（U2/U3）。
+- 二者登记给 **E2 的收尾或 E5 的清理**，不阻塞 B2。
+- `--write-band` 与 `--band` 同时给出时应直接报错（现在会"按旧 band 判再覆写"）——B2b 顺手修。
+
+### D16.5 `D14.20` 的收窄（B2a check 后裁定）
+「Contracts 的类型一律 public」收窄为：**seam 类型（harness、测试、分析器要消费的）必须 public；
+仅在一个类型内部使用的辅助类型允许 `internal`**（当前唯一实例是 `Json/Reading.cs`，harness/测试都不消费它）。
+理由：公共面越小越好，且 `Reading` 改 public 只会改变二进制哈希、不增加任何可测能力。
+
+### D16.4 B2 批次（9 条改名按臂分布决定顺序）
+| 批次 | 内容 |
+|---|---|
+| **B2a** | `LatencyArm` + `DnsArm` 类型化（`ArmKeys.Latency`/`ArmKeys.Dns` 分片）；执行 3 条改名（`metrics/tcp.sentOk`、`metrics/udp.sentOk`、`metrics/udpSent`）；形状测试覆盖这两个 kind；D16.1/D16.2 同批落地 |
+| **B2b** | `MixArm`（`classes.*` + `desktops.*`，5 条改名）+ `BaseArm` → **纯改名** `ControlArm`（`kind:"base"` 不动；执行 `metrics/latency/*.sentOk` 2 条改名）；`ArmKeys.Mix`/`ArmKeys.Control` 分片 |
+| **B2c** | `LossArm`/`ReliabilityArm`/`PersistentArm` 类型化；`JsonValue` 退役；`Dictionary<string, object?>` 清零（AC2/D14.21，含 `ControlArm.ReadCount`/`ReadMilliseconds` 删除）；`parameters` 强类型化；字面量 gate（D14.16）；改名表全量判定（`--batch B2` 9/9 satisfied） |
+
+每批次结束都要跑六条门禁 + 一次 `compare-records.py`（带改名表与批次）并落 `research/baseline/B2x-*.md`。
