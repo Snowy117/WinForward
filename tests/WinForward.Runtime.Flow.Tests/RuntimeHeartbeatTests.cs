@@ -300,9 +300,25 @@ public sealed class RuntimeHeartbeatTests
         heartbeat.Start();
         gc.Current = new(Gen0Collections: 12, Gen1Collections: 2, Gen2Collections: 1, AllocatedBytes: 1_500_000);
 
-        await AsyncTestExtensions.WaitForAsync(() => Heartbeats(logger).Count >= 1).ConfigureAwait(false);
+        // Beat indexes cannot be derived from beat counts under scheduler load: a tick may sample
+        // before the mutation above, so the beat that observed the new collections is found by its
+        // own content rather than assumed to be the first one.
+        RecordedEvent? observed = null;
+        await AsyncTestExtensions.WaitForAsync(() =>
+        {
+            foreach (var beat in Heartbeats(logger))
+            {
+                if (2.Equals(Field(beat.Fields, "GcCollections")))
+                {
+                    observed = beat;
+                    return true;
+                }
+            }
 
-        var fields = Heartbeats(logger)[0].Fields;
+            return false;
+        }).ConfigureAwait(false);
+
+        var fields = observed!.Fields;
         Assert.Equal(2, Field(fields, "GcCollections"));
         Assert.Equal(2, Field(fields, "GcGen0"));
         Assert.Null(Field(fields, "GcGen1"));

@@ -119,7 +119,7 @@ public sealed class UdpProxySessionTests
 
             transport.Received.Writer.TryComplete(new IOException("relay read failed"));
 
-            Assert.Same(session, await handled.Task.WaitAsync(TimeSpan.FromSeconds(2), TimeProvider.System));
+            Assert.Same(session, await handled.Task.WaitAsync(TimeSpan.FromSeconds(10), TimeProvider.System));
             Assert.Equal(UdpSessionState.Faulted, session.State);
             // A faulted session refuses further sends so the caller can fail the datagram closed.
             Assert.False(await session.SendSpanAsync(session.Flow.Remote, [1], CancellationToken.None));

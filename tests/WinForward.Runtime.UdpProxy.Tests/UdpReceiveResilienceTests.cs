@@ -123,31 +123,34 @@ public sealed class UdpReceiveResilienceTests
             var transportEndpoint = new IPEndPoint(IPAddress.Loopback, transport.LocalEndpoint.Port);
             var buffer = new byte[64];
             var destination = IPAddress.Parse("192.0.2.53");
+            // The receive waits are bounded: an undelivered or misclassified datagram must fail this
+            // fact quickly instead of parking the test host forever.
+            using var receiveCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
             // Valid datagram from the negotiated relay: delivered.
             await relaySocket.SendToAsync(Socks5UdpDatagrams.Encode(destination, 53, [1]), SocketFlags.None, transportEndpoint, CancellationToken.None);
-            var valid = await transport.ReceiveAsync(buffer, CancellationToken.None);
+            var valid = await transport.ReceiveAsync(buffer, receiveCancellation.Token);
             Assert.True(valid.HasDatagram);
             Assert.Equal((IPAddressValue?)destination, valid.Datagram.SourceAddress);
 
             // Unexpected source (same family, different port): skipped, not thrown.
             await strangerSocket.SendToAsync(Socks5UdpDatagrams.Encode(destination, 53, [2]), SocketFlags.None, transportEndpoint, CancellationToken.None);
-            var unexpected = await transport.ReceiveAsync(buffer, CancellationToken.None);
+            var unexpected = await transport.ReceiveAsync(buffer, receiveCancellation.Token);
             Assert.Equal(UdpTransportSkipReason.UnexpectedSource, unexpected.SkipReason);
 
             // Oversized (fills the 64-byte buffer, so it may be truncated): skipped, not thrown.
             await relaySocket.SendToAsync(new byte[100], SocketFlags.None, transportEndpoint, CancellationToken.None);
-            var oversized = await transport.ReceiveAsync(buffer, CancellationToken.None);
+            var oversized = await transport.ReceiveAsync(buffer, receiveCancellation.Token);
             Assert.Equal(UdpTransportSkipReason.Oversized, oversized.SkipReason);
 
             // Malformed (not a SOCKS5 UDP datagram): skipped, not thrown.
             await relaySocket.SendToAsync(new byte[] { 0xff, 0xff, 0xff }, SocketFlags.None, transportEndpoint, CancellationToken.None);
-            var malformed = await transport.ReceiveAsync(buffer, CancellationToken.None);
+            var malformed = await transport.ReceiveAsync(buffer, receiveCancellation.Token);
             Assert.Equal(UdpTransportSkipReason.Malformed, malformed.SkipReason);
 
             // The next valid datagram still flows: the receive path never tore anything down.
             await relaySocket.SendToAsync(Socks5UdpDatagrams.Encode(destination, 53, [3]), SocketFlags.None, transportEndpoint, CancellationToken.None);
-            var after = await transport.ReceiveAsync(buffer, CancellationToken.None);
+            var after = await transport.ReceiveAsync(buffer, receiveCancellation.Token);
             Assert.True(after.HasDatagram);
             Assert.Equal(3, Assert.Single(after.Datagram.Payload.ToArray()));
         }

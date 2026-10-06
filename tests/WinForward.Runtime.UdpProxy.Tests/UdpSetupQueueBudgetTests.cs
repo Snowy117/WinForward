@@ -67,7 +67,7 @@ public sealed class UdpSetupQueueBudgetTests
         var flow = CreateFlow("192.0.2.53");
 
         Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), new byte[3000], default, CancellationToken.None));
-        await factory.CreateStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await factory.CreateStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Equal(3000, coordinator.Diagnostics.PendingSetupBytes);
         Assert.Equal(1, pool.Stats.Outstanding);
 

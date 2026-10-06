@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Net;
 using Microsoft.Extensions.Logging;
 using WinForward.Configuration;
@@ -59,15 +58,14 @@ public sealed class IdleExpirySweeperFailureTests
             logger: logger);
         sweeper.Start();
 
-        // The idle session makes every sweep tick fail; several ticks prove the loop survives the
-        // failures, while the 5 s window admits exactly one warn.
-        await WaitForAsync(() => Volatile.Read(ref sweepFailures) >= 4);
-        await Task.Delay(250);
+        // The idle session makes every sweep tick fail; further failing ticks prove the loop survives
+        // the failures, and the wait for them is a poll rather than a sleep-then-hope: a starved
+        // continuation can leave a fixed delay short of the ticks it was meant to admit.
+        await WaitForAsync(() => Volatile.Read(ref sweepFailures) >= 5);
 
         var (_, message) = Assert.Single(logger.Lines, line => line.Level == LogLevel.Warning && line.Message.Contains("Idle-expiry sweep failed", StringComparison.Ordinal));
         Assert.Contains("IOException", message, StringComparison.Ordinal);
         Assert.Contains("synthetic sweep failure", message, StringComparison.Ordinal);
-        Assert.True(Volatile.Read(ref sweepFailures) >= 5, string.Create(CultureInfo.InvariantCulture, $"The sweeper must keep sweeping across failures (observed {Volatile.Read(ref sweepFailures)} failing ticks)."));
 
         await coordinator.DisposeAsync();
     }

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Globalization;
 using WinForward.Configuration;
 using WinForward.Core;
@@ -33,11 +32,12 @@ public sealed class UdpSetupQueueTests
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink());
         var flow = CreateFlow("192.0.2.53");
 
-        var stopwatch = Stopwatch.StartNew();
         Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [1], default, CancellationToken.None));
         Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [2], default, CancellationToken.None));
-        stopwatch.Stop();
-        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(3), $"TrySendSpanAsync awaited the setup ({stopwatch.Elapsed}).");
+        // The dispatch contract is a state, not a duration: the stall gate is still closed, so no
+        // transport can exist yet however long this thread took to reach this line, while both sends
+        // already returned accepted. A wall-clock bound here would gate the host's scheduling.
+        Assert.Empty(factory.Transports);
 
         gate.TrySetResult();
         await WaitForAsync(() => factory.Transports.Count == 1, timeoutMs: 10_000);
