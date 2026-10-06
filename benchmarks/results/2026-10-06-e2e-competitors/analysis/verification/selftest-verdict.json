@@ -1,0 +1,1043 @@
+{
+  "generated_by": "benchmarks/results/2026-10-06-e2e-competitors/analysis/analyze.py",
+  "raw": "/tmp/wf-bench/selftest/out",
+  "flat_mode": true,
+  "passes": [
+    "flat"
+  ],
+  "rows": [
+    "out"
+  ],
+  "row_profiles": {
+    "wf-aot-opt": {
+      "product": "WinForward AOT",
+      "configuration": "UDP-over-TCP v2 on, DNS local target on (reference configuration)",
+      "plan": "full",
+      "plan_arms": [
+        "IDLE",
+        "LAT",
+        "LATLOAD",
+        "DNS",
+        "DNSALT",
+        "LOSS",
+        "REL",
+        "THRU",
+        "MIX",
+        "PERSIST"
+      ],
+      "dual_phase": true,
+      "udp53_carriage": "direct-local-target",
+      "udp53_label": "direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy)",
+      "udp_carriage": "proxied-utcp",
+      "udp_label": "proxied (UDP-over-TCP v2)",
+      "udp_capable": true
+    },
+    "wf-fdd-opt": {
+      "product": "WinForward framework-dependent",
+      "configuration": "same configuration as wf-aot-opt",
+      "plan": "full",
+      "plan_arms": [
+        "IDLE",
+        "LAT",
+        "LATLOAD",
+        "DNS",
+        "DNSALT",
+        "LOSS",
+        "REL",
+        "THRU",
+        "MIX",
+        "PERSIST"
+      ],
+      "dual_phase": true,
+      "udp53_carriage": "direct-local-target",
+      "udp53_label": "direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy)",
+      "udp_carriage": "proxied-utcp",
+      "udp_label": "proxied (UDP-over-TCP v2)",
+      "udp_capable": true
+    },
+    "wf-aot-nativeudp": {
+      "product": "WinForward AOT",
+      "configuration": "UDP-over-TCP off, everything else identical to wf-aot-opt",
+      "plan": "udp only",
+      "plan_arms": [
+        "LAT",
+        "LATLOAD",
+        "LOSS"
+      ],
+      "dual_phase": false,
+      "udp53_carriage": "direct-local-target",
+      "udp53_label": "direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy)",
+      "udp_carriage": "proxied-native",
+      "udp_label": "proxied (native UDP relay)",
+      "udp_capable": true
+    },
+    "wf-aot-dnsrelay": {
+      "product": "WinForward AOT",
+      "configuration": "DNS local target off, everything else identical to wf-aot-opt",
+      "plan": "dns only",
+      "plan_arms": [
+        "DNS",
+        "DNSALT"
+      ],
+      "dual_phase": false,
+      "udp53_carriage": "relayed",
+      "udp53_label": "relayed through the proxy",
+      "udp_carriage": "proxied-utcp",
+      "udp_label": "proxied (UDP-over-TCP v2)",
+      "udp_capable": true
+    },
+    "proxifyre": {
+      "product": "ProxiFyre 2.6.1",
+      "configuration": "SOCKS5 rule for the client, supportedProtocols TCP+UDP",
+      "plan": "full",
+      "plan_arms": [
+        "IDLE",
+        "LAT",
+        "LATLOAD",
+        "DNS",
+        "DNSALT",
+        "LOSS",
+        "REL",
+        "THRU",
+        "MIX",
+        "PERSIST"
+      ],
+      "dual_phase": true,
+      "udp53_carriage": "direct-hardcoded-bypass",
+      "udp53_label": "direct via the product's hardcoded port-53 pass-through",
+      "udp_carriage": "proxied-native",
+      "udp_label": "proxied (native UDP relay)",
+      "udp_capable": true
+    },
+    "proxifier": {
+      "product": "Proxifier 4.14",
+      "configuration": "SOCKS5 profile, process rules (no UDP support in the product)",
+      "plan": "full",
+      "plan_arms": [
+        "IDLE",
+        "LAT",
+        "LATLOAD",
+        "DNS",
+        "DNSALT",
+        "LOSS",
+        "REL",
+        "THRU",
+        "MIX",
+        "PERSIST"
+      ],
+      "dual_phase": true,
+      "udp53_carriage": "direct-not-carried",
+      "udp53_label": "direct (the product cannot carry UDP at all)",
+      "udp_carriage": "not-carried",
+      "udp_label": "not carried (UDP bypassed)",
+      "udp_capable": false
+    },
+    "proxybridge": {
+      "product": "ProxyBridge 4.0.0",
+      "configuration": "PROXY rule for the client, DIRECT rule for sing-box",
+      "plan": "full",
+      "plan_arms": [
+        "IDLE",
+        "LAT",
+        "LATLOAD",
+        "DNS",
+        "DNSALT",
+        "LOSS",
+        "REL",
+        "THRU",
+        "MIX",
+        "PERSIST"
+      ],
+      "dual_phase": true,
+      "udp53_carriage": "relayed",
+      "udp53_label": "relayed through the proxy",
+      "udp_carriage": "proxied-native",
+      "udp_label": "proxied (native UDP relay)",
+      "udp_capable": true
+    },
+    "control-pre": {
+      "product": "none (control block before the product block)",
+      "configuration": "no product loaded",
+      "plan": "BASE only",
+      "plan_arms": [
+        "BASE"
+      ],
+      "dual_phase": false,
+      "udp53_carriage": "n/a",
+      "udp53_label": "n/a (no product loaded: the direct path is the only path)",
+      "udp_carriage": "n/a",
+      "udp_label": "n/a (no product loaded)",
+      "udp_capable": true
+    },
+    "control-post": {
+      "product": "none (control block after the product block)",
+      "configuration": "no product loaded",
+      "plan": "BASE only",
+      "plan_arms": [
+        "BASE"
+      ],
+      "dual_phase": false,
+      "udp53_carriage": "n/a",
+      "udp53_label": "n/a (no product loaded: the direct path is the only path)",
+      "udp_carriage": "n/a",
+      "udp_label": "n/a (no product loaded)",
+      "udp_capable": true
+    }
+  },
+  "bootstrap": {
+    "resamples": 10000,
+    "seed": 20261006,
+    "resampling_unit": "passes (never samples)",
+    "method": "percentile bootstrap over per-pass values, 95 % CI",
+    "min_passes": 3
+  },
+  "thresholds": {
+    "latency": "5 %",
+    "cpu": "10 %",
+    "memory": "10 %",
+    "udp-loss": "0.5 percentage points",
+    "tcp-unexpected": "0.1 percentage points",
+    "note": "A pair is 'different' only when the bootstrap CI excludes both zero and the threshold band, and 'same' only when the CI lies wholly inside the band; anything else is 'inconclusive'. Holm\u2013Bonferroni is applied across each metric's family of *comparable* pairwise comparisons: a pair whose other side never ran the arm, or does not carry UDP, or measured a different port-53 path, makes no claim and is reported as 'n/a (not comparable)' outside the family. The adjusted verdict requires the adjusted p-value of the claim actually made to be below 0.05 (the no-difference p-value for 'different', the bootstrap TOST equivalence p-value for 'same'). A metric with no pre-declared threshold (throughput, event counts) reports its CI as 'no-threshold-declared' instead of guessing."
+  },
+  "findings": [
+    {
+      "severity": "informational",
+      "kind": "dns-arm-port",
+      "scope": "flat/out DNS",
+      "detail": "the port-53 arm ran on port 5301, not 53: the products' hardcoded port-53 and local-target special cases are declared for port 53, so the carriage label for this arm is reported as declared but the port is stated"
+    },
+    {
+      "severity": "measurement-caveat",
+      "kind": "control-block-missing",
+      "scope": "flat",
+      "detail": "the pass has neither control block; both control blocks are needed to bracket the product block"
+    }
+  ],
+  "findings_by_severity": {
+    "correctness-failure": 0,
+    "path-interference": 0,
+    "harness-error": 0,
+    "measurement-caveat": 1,
+    "informational": 1
+  },
+  "control_blocks": {
+    "available": false,
+    "comparisons": [],
+    "per_pass": [
+      {
+        "pass": "flat",
+        "pre_present": false,
+        "post_present": false,
+        "ordering": null
+      }
+    ]
+  },
+  "dual_phase": {
+    "rows": []
+  },
+  "ledger": {
+    "available": true,
+    "passes": {
+      "flat": {
+        "paths": [
+          "/tmp/wf-bench/selftest/ledger.jsonl"
+        ],
+        "records": 258,
+        "types": {
+          "targetSummary": 1,
+          "tcp": 157,
+          "udpSummary": 97,
+          "tcpSummary": 1,
+          "dnsSummary": 2
+        },
+        "labels": {
+          "selftest": 258
+        },
+        "bad_lines": 0,
+        "attribution": "1 ledger(s); the arm's UTC window only, because the ledger carries one label, so a record's own label cannot select a row"
+      }
+    },
+    "dns_ports": {
+      "5301": {
+        "ledger_udp": 329.0,
+        "ledger_tcp": 81.0,
+        "client_udp": 329.0,
+        "client_tcp": 81.0,
+        "duration_seconds": 10.034190136807887,
+        "summaries": 1,
+        "ledger_paths": [
+          "/tmp/wf-bench/selftest/ledger.jsonl"
+        ]
+      },
+      "5302": {
+        "ledger_udp": 321.0,
+        "ledger_tcp": 81.0,
+        "client_udp": 321.0,
+        "client_tcp": 81.0,
+        "duration_seconds": 8.00243767079846,
+        "summaries": 1,
+        "ledger_paths": [
+          "/tmp/wf-bench/selftest/ledger.jsonl"
+        ]
+      }
+    }
+  },
+  "metrics": {
+    "lat.tcp_rtt.p50": {
+      "label": "LAT tcp-rtt p50",
+      "unit": "us",
+      "family": "latency",
+      "threshold": {
+        "kind": "ratio",
+        "value": 0.05,
+        "text": "5 % latency"
+      },
+      "definition": "LAT arm, latency.tcp-rtt.p50Us",
+      "arm": "LAT",
+      "udp_path": null,
+      "dns53": false,
+      "rows": {
+        "out": {
+          "unit": "us",
+          "passes": 1,
+          "per_pass": {
+            "flat": 585.215
+          },
+          "unavailable_passes": {},
+          "null_passes": 0,
+          "median": 585.215,
+          "iqr": [
+            585.215,
+            585.215
+          ],
+          "status": "ok",
+          "status_reason": null,
+          "comparable": true
+        }
+      },
+      "holm_family_size": 0,
+      "not_comparable_pairs": 0,
+      "pairs": []
+    },
+    "lat.tcp_rtt.p99": {
+      "label": "LAT tcp-rtt p99",
+      "unit": "us",
+      "family": "latency",
+      "threshold": {
+        "kind": "ratio",
+        "value": 0.05,
+        "text": "5 % latency"
+      },
+      "definition": "LAT arm, latency.tcp-rtt.p99Us",
+      "arm": "LAT",
+      "udp_path": null,
+      "dns53": false,
+      "rows": {
+        "out": {
+          "unit": "us",
+          "passes": 1,
+          "per_pass": {
+            "flat": 9945.087
+          },
+          "unavailable_passes": {},
+          "null_passes": 0,
+          "median": 9945.087,
+          "iqr": [
+            9945.087,
+            9945.087
+          ],
+          "status": "ok",
+          "status_reason": null,
+          "comparable": true
+        }
+      },
+      "holm_family_size": 0,
+      "not_comparable_pairs": 0,
+      "pairs": []
+    },
+    "lat.udp_rtt.p50": {
+      "label": "LAT udp-rtt p50",
+      "unit": "us",
+      "family": "latency",
+      "threshold": {
+        "kind": "ratio",
+        "value": 0.05,
+        "text": "5 % latency"
+      },
+      "definition": "LAT arm UDP lane, latency.udp-rtt.p50Us (proxied only where the row carries UDP)",
+      "arm": "LAT",
+      "udp_path": "udp",
+      "dns53": false,
+      "rows": {
+        "out": {
+          "unit": "us",
+          "passes": 1,
+          "per_pass": {
+            "flat": 612.095
+          },
+          "unavailable_passes": {},
+          "null_passes": 0,
+          "median": 612.095,
+          "iqr": [
+            612.095,
+            612.095
+          ],
+          "status": "ok",
+          "status_reason": null,
+          "comparable": true
+        }
+      },
+      "holm_family_size": 0,
+      "not_comparable_pairs": 0,
+      "pairs": []
+    },
+    "lat.udp_lossRate": {
+      "label": "LAT udp lossRate",
+      "unit": "pp",
+      "family": "udp-loss",
+      "threshold": {
+        "kind": "diff",
+        "value": 0.5,
+        "text": "0.5 pp UDP loss"
+      },
+      "definition": "LAT arm UDP lane, metrics.udp.lossRate (percentage points of udp.sentOk)",
+      "arm": "LAT",
+      "udp_path": "udp",
+      "dns53": false,
+      "rows": {
+        "out": {
+          "unit": "pp",
+          "passes": 1,
+          "per_pass": {
+            "flat": 0.0
+          },
+          "unavailable_passes": {},
+          "null_passes": 0,
+          "median": 0.0,
+          "iqr": [
+            0.0,
+            0.0
+          ],
+          "status": "ok",
+          "status_reason": null,
+          "comparable": true
+        }
+      },
+      "holm_family_size": 0,
+      "not_comparable_pairs": 0,
+      "pairs": []
+    },
+    "latload.tcp_rtt.p50": {
+      "label": "LATLOAD tcp-rtt p50",
+      "unit": "us",
+      "family": "latency",
+      "threshold": {
+        "kind": "ratio",
+        "value": 0.05,
+        "text": "5 % latency"
+      },
+      "definition": "LATLOAD arm, latency.tcp-rtt.p50Us",
+      "arm": "LATLOAD",
+      "udp_path": null,
+      "dns53": false,
+      "rows": {
+        "out": {
+          "unit": "us",
+          "passes": 1,
+          "per_pass": {
+            "flat": 460.671
+          },
+          "unavailable_passes": {},
+          "null_passes": 0,
+          "median": 460.671,
+          "iqr": [
+            460.671,
+            460.671
+          ],
+          "status": "ok",
+          "status_reason": null,
+          "comparable": true
+        }
+      },
+      "holm_family_size": 0,
+      "not_comparable_pairs": 0,
+      "pairs": []
+    },
+    "latload.tcp_rtt.p99": {
+      "label": "LATLOAD tcp-rtt p99",
+      "unit": "us",
+      "family": "latency",
+      "threshold": {
+        "kind": "ratio",
+        "value": 0.05,
+        "text": "5 % latency"
+      },
+      "definition": "LATLOAD arm, latency.tcp-rtt.p99Us",
+      "arm": "LATLOAD",
+      "udp_path": null,
+      "dns53": false,
+      "rows": {
+        "out": {
+          "unit": "us",
+          "passes": 1,
+          "per_pass": {
+            "flat": 727.807
+          },
+          "unavailable_passes": {},
+          "null_passes": 0,
+          "median": 727.807,
+          "iqr": [
+            727.807,
+            727.807
+          ],
+          "status": "ok",
+          "status_reason": null,
+          "comparable": true
+        }
+      },
+      "holm_family_size": 0,
+      "not_comparable_pairs": 0,
+      "pairs": []
+    },
+    "loss.lossRate": {
+      "label": "LOSS lossRate",
+      "unit": "pp",
+      "family": "udp-loss",
+      "threshold": {
+        "kind": "diff",
+        "value": 0.5,
+        "text": "0.5 pp UDP loss"
+      },
+      "definition": "LOSS arm, metrics.lossRate = (late + never) / sent (percentage points)",
+      "arm": "LOSS",
+      "udp_path": "udp",
+      "dns53": false,
+      "rows": {
+        "out": {
+          "unit": "pp",
+          "passes": 1,
+          "per_pass": {
+            "flat": 0.0
+          },
+          "unavailable_passes": {},
+          "null_passes": 0,
+          "median": 0.0,
+          "iqr": [
+            0.0,
+            0.0
+          ],
+          "status": "ok",
+          "status_reason": null,
+          "comparable": true
+        }
+      },
+      "holm_family_size": 0,
+      "not_comparable_pairs": 0,
+      "pairs": []
+    },
+    "loss.corruptRate": {
+      "label": "LOSS corruptRate",
+      "unit": "pp",
+      "family": "udp-loss",
+      "threshold": {
+        "kind": "diff",
+        "value": 0.5,
+        "text": "0.5 pp UDP loss"
+      },
+      "definition": "LOSS arm, metrics.corruptRate (percentage points)",
+      "arm": "LOSS",
+      "udp_path": "udp",
+      "dns53": false,
+      "rows": {
+        "out": {
+          "unit": "pp",
+          "passes": 1,
+          "per_pass": {
+            "flat": 0.0
+          },
+          "unavailable_passes": {},
+          "null_passes": 0,
+          "median": 0.0,
+          "iqr": [
+            0.0,
+            0.0
+          ],
+          "status": "ok",
+          "status_reason": null,
+          "comparable": true
+        }
+      },
+      "holm_family_size": 0,
+      "not_comparable_pairs": 0,
+      "pairs": []
+    },
+    "loss.foreignConnection": {
+      "label": "LOSS foreignConnection",
+      "unit": "count",
+      "family": "none",
+      "threshold": {
+        "kind": "ratio",
+        "value": null,
+        "text": "no pre-declared threshold"
+      },
+      "definition": "LOSS arm, metrics.foreignConnection: datagrams delivered into a different flow",
+      "arm": "LOSS",
+      "udp_path": "udp",
+      "dns53": false,
+      "rows": {
+        "out": {
+          "unit": "count",
+          "passes": 1,
+          "per_pass": {
+            "flat": 0.0
+          },
+          "unavailable_passes": {},
+          "null_passes": 0,
+          "median": 0.0,
+          "iqr": [
+            0.0,
+            0.0
+          ],
+          "status": "ok",
+          "status_reason": null,
+          "comparable": true
+        }
+      },
+      "holm_family_size": 0,
+      "not_comparable_pairs": 0,
+      "pairs": []
+    },
+    "rel.unexpectedEofRate": {
+      "label": "REL unexpectedEofRate",
+      "unit": "pp",
+      "family": "tcp-unexpected",
+      "threshold": {
+        "kind": "diff",
+        "value": 0.1,
+        "text": "0.1 pp TCP unexpected rate"
+      },
+      "definition": "REL metrics.unexpectedEof / metrics.connectAttempts (percentage points)",
+      "arm": "REL",
+      "udp_path": null,
+      "dns53": false,
+      "rows": {
+        "out": {
+          "unit": "pp",
+          "passes": 1,
+          "per_pass": {
+            "flat": 0.0
+          },
+          "unavailable_passes": {},
+          "null_passes": 0,
+          "median": 0.0,
+          "iqr": [
+            0.0,
+            0.0
+          ],
+          "status": "ok",
+          "status_reason": null,
+          "comparable": true
+        }
+      },
+      "holm_family_size": 0,
+      "not_comparable_pairs": 0,
+      "pairs": []
+    },
+    "rel.fidelityRate": {
+      "label": "REL fidelityRate",
+      "unit": "pp",
+      "family": "tcp-unexpected",
+      "threshold": {
+        "kind": "diff",
+        "value": 0.1,
+        "text": "0.1 pp TCP unexpected rate"
+      },
+      "definition": "REL metrics.fidelityMismatch / metrics.connectAttempts (percentage points)",
+      "arm": "REL",
+      "udp_path": null,
+      "dns53": false,
+      "rows": {
+        "out": {
+          "unit": "pp",
+          "passes": 1,
+          "per_pass": {
+            "flat": 0.0
+          },
+          "unavailable_passes": {},
+          "null_passes": 0,
+          "median": 0.0,
+          "iqr": [
+            0.0,
+            0.0
+          ],
+          "status": "ok",
+          "status_reason": null,
+          "comparable": true
+        }
+      },
+      "holm_family_size": 0,
+      "not_comparable_pairs": 0,
+      "pairs": []
+    },
+    "dns.answerRate": {
+      "label": "DNS(53) answerRate",
+      "unit": "pp",
+      "family": "udp-loss",
+      "threshold": {
+        "kind": "diff",
+        "value": 0.5,
+        "text": "0.5 pp UDP loss"
+      },
+      "definition": "port-53 DNS arm, metrics.answerRate (percentage points); carriage differs per row",
+      "arm": "DNS",
+      "udp_path": "dns",
+      "dns53": true,
+      "rows": {
+        "out": {
+          "unit": "pp",
+          "passes": 1,
+          "per_pass": {
+            "flat": 100.0
+          },
+          "unavailable_passes": {},
+          "null_passes": 0,
+          "median": 100.0,
+          "iqr": [
+            100.0,
+            100.0
+          ],
+          "status": "ok",
+          "status_reason": null,
+          "comparable": true
+        }
+      },
+      "holm_family_size": 0,
+      "not_comparable_pairs": 0,
+      "pairs": []
+    },
+    "dns.rtt.p50": {
+      "label": "DNS(53) dns-rtt p50",
+      "unit": "us",
+      "family": "latency",
+      "threshold": {
+        "kind": "ratio",
+        "value": 0.05,
+        "text": "5 % latency"
+      },
+      "definition": "port-53 DNS arm, latency.dns-rtt.p50Us; carriage differs per row",
+      "arm": "DNS",
+      "udp_path": "dns",
+      "dns53": true,
+      "rows": {
+        "out": {
+          "unit": "us",
+          "passes": 1,
+          "per_pass": {
+            "flat": 667.903
+          },
+          "unavailable_passes": {},
+          "null_passes": 0,
+          "median": 667.903,
+          "iqr": [
+            667.903,
+            667.903
+          ],
+          "status": "ok",
+          "status_reason": null,
+          "comparable": true
+        }
+      },
+      "holm_family_size": 0,
+      "not_comparable_pairs": 0,
+      "pairs": []
+    },
+    "dnsalt.answerRate": {
+      "label": "DNSALT answerRate",
+      "unit": "pp",
+      "family": "udp-loss",
+      "threshold": {
+        "kind": "diff",
+        "value": 0.5,
+        "text": "0.5 pp UDP loss"
+      },
+      "definition": "DNSALT arm (a port no product special-cases), metrics.answerRate (percentage points)",
+      "arm": "DNSALT",
+      "udp_path": "dns",
+      "dns53": false,
+      "rows": {
+        "out": {
+          "unit": "pp",
+          "passes": 1,
+          "per_pass": {
+            "flat": 100.0
+          },
+          "unavailable_passes": {},
+          "null_passes": 0,
+          "median": 100.0,
+          "iqr": [
+            100.0,
+            100.0
+          ],
+          "status": "ok",
+          "status_reason": null,
+          "comparable": true
+        }
+      },
+      "holm_family_size": 0,
+      "not_comparable_pairs": 0,
+      "pairs": []
+    },
+    "dnsalt.rtt.p50": {
+      "label": "DNSALT dns-rtt p50",
+      "unit": "us",
+      "family": "latency",
+      "threshold": {
+        "kind": "ratio",
+        "value": 0.05,
+        "text": "5 % latency"
+      },
+      "definition": "DNSALT arm (a port no product special-cases), latency.dns-rtt.p50Us",
+      "arm": "DNSALT",
+      "udp_path": "dns",
+      "dns53": false,
+      "rows": {
+        "out": {
+          "unit": "us",
+          "passes": 1,
+          "per_pass": {
+            "flat": 621.823
+          },
+          "unavailable_passes": {},
+          "null_passes": 0,
+          "median": 621.823,
+          "iqr": [
+            621.823,
+            621.823
+          ],
+          "status": "ok",
+          "status_reason": null,
+          "comparable": true
+        }
+      },
+      "holm_family_size": 0,
+      "not_comparable_pairs": 0,
+      "pairs": []
+    },
+    "thru.goodputMbps": {
+      "label": "THRU goodputMbps",
+      "unit": "Mbps",
+      "family": "none",
+      "threshold": {
+        "kind": "ratio",
+        "value": null,
+        "text": "no pre-declared threshold"
+      },
+      "definition": "THRU metrics.goodputMbps",
+      "arm": "THRU",
+      "udp_path": null,
+      "dns53": false,
+      "rows": {
+        "out": {
+          "unit": "Mbps",
+          "passes": 1,
+          "per_pass": {
+            "flat": 159.905
+          },
+          "unavailable_passes": {},
+          "null_passes": 0,
+          "median": 159.905,
+          "iqr": [
+            159.905,
+            159.905
+          ],
+          "status": "ok",
+          "status_reason": null,
+          "comparable": true
+        }
+      },
+      "holm_family_size": 0,
+      "not_comparable_pairs": 0,
+      "pairs": []
+    },
+    "mix.udpLossRate": {
+      "label": "MIX udpLossRate",
+      "unit": "pp",
+      "family": "udp-loss",
+      "threshold": {
+        "kind": "diff",
+        "value": 0.5,
+        "text": "0.5 pp UDP loss"
+      },
+      "definition": "MIX metrics.classes.udp.lossRate (percentage points)",
+      "arm": "MIX",
+      "udp_path": "udp",
+      "dns53": false,
+      "rows": {
+        "out": {
+          "unit": "pp",
+          "passes": 1,
+          "per_pass": {
+            "flat": 0.0
+          },
+          "unavailable_passes": {},
+          "null_passes": 0,
+          "median": 0.0,
+          "iqr": [
+            0.0,
+            0.0
+          ],
+          "status": "ok",
+          "status_reason": null,
+          "comparable": true
+        }
+      },
+      "holm_family_size": 0,
+      "not_comparable_pairs": 0,
+      "pairs": []
+    },
+    "persist.responseRate": {
+      "label": "PERSIST responseRate",
+      "unit": "pp",
+      "family": "tcp-unexpected",
+      "threshold": {
+        "kind": "diff",
+        "value": 0.1,
+        "text": "0.1 pp TCP unexpected rate"
+      },
+      "definition": "PERSIST metrics.responseRate = responses / requests (percentage points)",
+      "arm": "PERSIST",
+      "udp_path": null,
+      "dns53": false,
+      "rows": {
+        "out": {
+          "unit": "pp",
+          "passes": 1,
+          "per_pass": {
+            "flat": 100.0
+          },
+          "unavailable_passes": {},
+          "null_passes": 0,
+          "median": 100.0,
+          "iqr": [
+            100.0,
+            100.0
+          ],
+          "status": "ok",
+          "status_reason": null,
+          "comparable": true
+        }
+      },
+      "holm_family_size": 0,
+      "not_comparable_pairs": 0,
+      "pairs": []
+    },
+    "persist.reconnects": {
+      "label": "PERSIST reconnects",
+      "unit": "count",
+      "family": "none",
+      "threshold": {
+        "kind": "ratio",
+        "value": null,
+        "text": "no pre-declared threshold"
+      },
+      "definition": "PERSIST metrics.reconnects: a long-lived connection that had to be replaced",
+      "arm": "PERSIST",
+      "udp_path": null,
+      "dns53": false,
+      "rows": {
+        "out": {
+          "unit": "count",
+          "passes": 1,
+          "per_pass": {
+            "flat": 0.0
+          },
+          "unavailable_passes": {},
+          "null_passes": 0,
+          "median": 0.0,
+          "iqr": [
+            0.0,
+            0.0
+          ],
+          "status": "ok",
+          "status_reason": null,
+          "comparable": true
+        }
+      },
+      "holm_family_size": 0,
+      "not_comparable_pairs": 0,
+      "pairs": []
+    },
+    "mem.privateBytes.p50": {
+      "label": "steady-state private bytes",
+      "unit": "MiB",
+      "family": "memory",
+      "threshold": {
+        "kind": "ratio",
+        "value": 0.1,
+        "text": "10 % memory"
+      },
+      "definition": "per-pass p50 of the product's steady-state privateBytes, then median across passes",
+      "arm": null,
+      "udp_path": null,
+      "dns53": false,
+      "rows": {
+        "out": {
+          "unit": "MiB",
+          "passes": 0,
+          "per_pass": {},
+          "unavailable_passes": {
+            "flat": "no product process was sampled (run.json samplerProcesses is empty)"
+          },
+          "null_passes": 0,
+          "median": null,
+          "iqr": [
+            null,
+            null
+          ],
+          "status": "ok",
+          "status_reason": null,
+          "comparable": false
+        }
+      },
+      "holm_family_size": 0,
+      "not_comparable_pairs": 0,
+      "pairs": []
+    },
+    "cpu.proxy.vcpuPct": {
+      "label": "proxy CPU",
+      "unit": "%vcpu",
+      "family": "cpu",
+      "threshold": {
+        "kind": "ratio",
+        "value": 0.1,
+        "text": "10 % CPU"
+      },
+      "definition": "row proxy CPU over the loaded arms (IDLE excluded), percent of one vCPU",
+      "arm": null,
+      "udp_path": null,
+      "dns53": false,
+      "rows": {
+        "out": {
+          "unit": "%vcpu",
+          "passes": 0,
+          "per_pass": {},
+          "unavailable_passes": {
+            "flat": "no product process was sampled (run.json samplerProcesses is empty)"
+          },
+          "null_passes": 0,
+          "median": null,
+          "iqr": [
+            null,
+            null
+          ],
+          "status": "ok",
+          "status_reason": null,
+          "comparable": false
+        }
+      },
+      "holm_family_size": 0,
+      "not_comparable_pairs": 0,
+      "pairs": []
+    }
+  }
+}
