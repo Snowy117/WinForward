@@ -13,19 +13,14 @@ using static WinForward.TestSupport.TcpCoordinatorFakes;
 
 namespace WinForward.Runtime.TcpRedirect.Tests;
 
-/// <summary>
-/// R1/D1: a relay that ends stalled or faulted mid-flow must surface the end to the client as an
-/// in-window RST|ACK injected before session teardown (while the association still holds the SYN
-/// template and sequence trackers); a clean end already propagated FINs and must not reset. The
-/// end-kind derivation itself is pinned on the real relay through all three terminal paths.
-/// </summary>
-public sealed class TcpRelayEndResetTests
+public sealed class TcpRelayEndCloseTests
 {
     private static readonly IPAddress s_clientIpv4 = IPAddress.Parse("192.0.2.10");
     private static readonly IPAddress s_destIpv4 = IPAddress.Parse("192.0.2.53");
     private static readonly NativeBufferPool s_synCopyPool = new(NdisApiAbi.MaximumEthernetFrame);
-    private static readonly string[] s_resetThenTeardownOrder = ["reset", "teardown"];
+    private static readonly string[] s_injectThenTeardownOrder = ["inject", "teardown"];
     private static readonly string[] s_teardownOnlyOrder = ["teardown"];
+    private const uint RelayServerStreamBytes = 5;
 
     [Fact]
     public async Task FaultedRelayEndInjectsInWindowClientResetBeforeTeardown()
@@ -39,7 +34,7 @@ public sealed class TcpRelayEndResetTests
         await WaitForAsync(() => order.Count == 2);
 
         AssertResetFromTrackers(injector);
-        Assert.Equal(s_resetThenTeardownOrder, order);
+        Assert.Equal(s_injectThenTeardownOrder, order);
         session.Retire();
         await acceptLoop;
     }
@@ -56,16 +51,33 @@ public sealed class TcpRelayEndResetTests
         await WaitForAsync(() => order.Count == 2);
 
         AssertResetFromTrackers(injector);
-        Assert.Equal(s_resetThenTeardownOrder, order);
+        Assert.Equal(s_injectThenTeardownOrder, order);
         session.Retire();
         await acceptLoop;
     }
 
     [Fact]
-    public async Task CleanRelayEndDoesNotInjectClientReset()
+    public async Task CleanRelayEndInjectsClientFinBeforeTeardown()
+    {
+        var relay = new EndKindRelay { EndKind = RelayEndKind.CleanEnded, ServerStreamBytes = RelayServerStreamBytes };
+        var (acceptor, injector, order, session, listener) = CreateAcceptor(relay);
+        await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(session.Association.AcceptedPeerEndpoint), CancellationToken.None);
+        var acceptLoop = acceptor.RunAcceptLoopAsync(session);
+
+        relay.Complete();
+        await WaitForAsync(() => order.Count == 2);
+
+        AssertFin(injector, session.Association.ServerInitialSeq!.Value + 1 + RelayServerStreamBytes);
+        Assert.Equal(s_injectThenTeardownOrder, order);
+        session.Retire();
+        await acceptLoop;
+    }
+
+    [Fact]
+    public async Task CleanRelayEndWithoutObservedSequencesInjectsNothing()
     {
         var relay = new EndKindRelay { EndKind = RelayEndKind.CleanEnded };
-        var (acceptor, injector, order, session, listener) = CreateAcceptor(relay);
+        var (acceptor, injector, order, session, listener) = CreateAcceptor(relay, observedSequences: false);
         await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(session.Association.AcceptedPeerEndpoint), CancellationToken.None);
         var acceptLoop = acceptor.RunAcceptLoopAsync(session);
 
@@ -87,10 +99,10 @@ public sealed class TcpRelayEndResetTests
         var acceptLoop = acceptor.RunAcceptLoopAsync(session);
 
         relay.Fault(new IOException("legacy relay fault"));
-        await WaitForAsync(() => order.Count == 1);
+        await WaitForAsync(() => order.Count == 2);
 
-        Assert.Empty(injector.Frames);
-        Assert.Equal(s_teardownOnlyOrder, order);
+        AssertFinFromTrackers(injector);
+        Assert.Equal(s_injectThenTeardownOrder, order);
         session.Retire();
         await acceptLoop;
     }
@@ -157,9 +169,28 @@ public sealed class TcpRelayEndResetTests
         Assert.Equal(0x14, frame[47]);
     }
 
-    private static (TcpRedirectAcceptor Acceptor, OrderingInjector Injector, List<string> Order, TcpRedirectSession Session, FakeListener Listener) CreateAcceptor(ITcpRelay relay)
+    /// <summary>
+    /// Asserts the crafted FIN|ACK: same endpoints and close direction as the reset, the given
+    /// server sequence and the tracked client ack.
+    /// </summary>
+    private static void AssertFin(OrderingInjector injector, uint expectedServerSequence)
     {
-        var session = CreateSessionWithObservedSequences(out var listener);
+        var (frame, towardMstcp, _) = Assert.Single(injector.Frames);
+        Assert.True(towardMstcp);
+        Assert.Equal(s_destIpv4, new IPAddress(frame.AsSpan(26, 4).ToArray()));
+        Assert.Equal(443u, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(34, 2)));
+        Assert.Equal(s_clientIpv4, new IPAddress(frame.AsSpan(30, 4).ToArray()));
+        Assert.Equal(53000u, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(36, 2)));
+        Assert.Equal(expectedServerSequence, BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(38, 4)));
+        Assert.Equal(7u, BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(42, 4)));
+        Assert.Equal(0x11, frame[47]);
+    }
+
+    private static void AssertFinFromTrackers(OrderingInjector injector) => AssertFin(injector, 10u);
+
+    private static (TcpRedirectAcceptor Acceptor, OrderingInjector Injector, List<string> Order, TcpRedirectSession Session, FakeListener Listener) CreateAcceptor(ITcpRelay relay, bool observedSequences = true)
+    {
+        var session = CreateSession(out var listener, observedSequences);
         var order = new List<string>();
         var injector = new OrderingInjector(order);
         var logger = new RecordingLogger();
@@ -177,28 +208,32 @@ public sealed class TcpRelayEndResetTests
     }
 
     /// <summary>
-    /// A host-shape session whose association carries the full reset inputs: the original SYN
-    /// template plus both ISNs, and trackers advanced past data (client next seq 7, server next
-    /// seq 10) so the reset must use the tracked values, not the ISN+1 fallbacks.
+    /// A host-shape session. With <paramref name="observedSequences"/> the association carries the
+    /// full close inputs: the original SYN template plus both ISNs, and trackers advanced past data
+    /// (client next seq 7, server next seq 10) so a crafted close must use the tracked values, not
+    /// the ISN+1 fallbacks. Without them the injector has nothing to build from.
     /// </summary>
-    private static TcpRedirectSession CreateSessionWithObservedSequences(out FakeListener listener)
+    private static TcpRedirectSession CreateSession(out FakeListener listener, bool observedSequences)
     {
         var key = FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
         var association = new TcpRedirectAssociation(key, key.Remote, 0x1234, Endpoint.From(IPAddress.Loopback, 40000), forwardLocalAddress: null, 1, DateTimeOffset.UtcNow);
 
-        TcpSequenceObservation.RecordClientSyn(BuildIpv4TcpSyn(s_clientIpv4, s_destIpv4, 53000, 443), association, s_synCopyPool);
-        var synAck = BuildIpv4TcpSyn(s_destIpv4, s_clientIpv4, 443, 53000);
-        synAck[47] = 0x12;
-        TcpSequenceObservation.RecordServerSynAck(synAck, association);
+        if (observedSequences)
+        {
+            TcpSequenceObservation.RecordClientSyn(BuildIpv4TcpSyn(s_clientIpv4, s_destIpv4, 53000, 443), association, s_synCopyPool);
+            var synAck = BuildIpv4TcpSyn(s_destIpv4, s_clientIpv4, 443, 53000);
+            synAck[47] = 0x12;
+            TcpSequenceObservation.RecordServerSynAck(synAck, association);
 
-        var clientData = BuildIpv4TcpSyn(s_clientIpv4, s_destIpv4, 53000, 443, [1, 2, 3, 4, 5]);
-        clientData[47] = TcpFlagAck;
-        BinaryPrimitives.WriteUInt32BigEndian(clientData.AsSpan(38, 4), 2);
-        TcpSequenceObservation.TrackClientSequence(clientData, association);
-        var serverData = BuildIpv4TcpSyn(s_destIpv4, s_clientIpv4, 443, 53000, [1, 2, 3, 4, 5, 6, 7, 8]);
-        serverData[47] = TcpFlagAck;
-        BinaryPrimitives.WriteUInt32BigEndian(serverData.AsSpan(38, 4), 2);
-        TcpSequenceObservation.TrackServerSequence(serverData, association);
+            var clientData = BuildIpv4TcpSyn(s_clientIpv4, s_destIpv4, 53000, 443, [1, 2, 3, 4, 5]);
+            clientData[47] = TcpFlagAck;
+            BinaryPrimitives.WriteUInt32BigEndian(clientData.AsSpan(38, 4), 2);
+            TcpSequenceObservation.TrackClientSequence(clientData, association);
+            var serverData = BuildIpv4TcpSyn(s_destIpv4, s_clientIpv4, 443, 53000, [1, 2, 3, 4, 5, 6, 7, 8]);
+            serverData[47] = TcpFlagAck;
+            BinaryPrimitives.WriteUInt32BigEndian(serverData.AsSpan(38, 4), 2);
+            TcpSequenceObservation.TrackServerSequence(serverData, association);
+        }
 
         listener = new FakeListener(association.TranslatedListenerTuple);
         var token = new SelfTrafficRegistry().Register(new SelfTrafficRegistry.SelfTrafficKey(TransportProtocol.Tcp, association.TranslatedListenerTuple, association.TranslatedListenerTuple));
@@ -239,6 +274,7 @@ public sealed class TcpRelayEndResetTests
 
         public Task Completion => _completion.Task;
         public RelayEndKind EndKind { get; init; }
+        public long ServerStreamBytes { get; init; }
 
         public void Complete() => _completion.TrySetResult();
         public void Fault(Exception exception) => _completion.TrySetException(exception);
@@ -264,14 +300,14 @@ public sealed class TcpRelayEndResetTests
         public ValueTask InjectAsync(ReadOnlyMemory<byte> rewrittenFrame, bool towardMstcp, nint adapterHandle, CancellationToken cancellationToken)
         {
             lock (Frames) Frames.Add((rewrittenFrame.ToArray(), towardMstcp, adapterHandle));
-            order.Add("reset");
+            order.Add("inject");
             return ValueTask.CompletedTask;
         }
 
         public void Inject(NdisPacketBuffer stagedFrame, bool towardMstcp, nint adapterHandle, CancellationToken cancellationToken)
         {
             lock (Frames) Frames.Add((stagedFrame.GetFrame().ToArray(), towardMstcp, adapterHandle));
-            order.Add("reset");
+            order.Add("inject");
         }
 
         /// <summary>Appends a batch's frames in order, marking each one as an injection like the single-send overloads.</summary>

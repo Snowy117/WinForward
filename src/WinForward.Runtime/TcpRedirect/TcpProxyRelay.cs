@@ -85,6 +85,10 @@ internal interface ITcpRelayEndInfo
 {
     /// <summary>Why the relay ended; meaningful only after <see cref="ITcpRelay.Completion"/> completes.</summary>
     RelayEndKind EndKind { get; }
+
+    /// <summary>Server-to-client stream bytes written to the client-facing socket; meaningful only
+    /// after <see cref="ITcpRelay.Completion"/> completes.</summary>
+    long ServerStreamBytes { get; }
 }
 
 [SupportedOSPlatform("windows")]
@@ -119,6 +123,7 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
     // closed, which is what forces a pump the stall fast-exit abandoned to return (D-C3-3).
     private readonly QuiescenceScope _scope = new();
     private int _teardownStarted;
+    private long _serverStreamBytes;
 
     public TcpProxyRelay(Socket localSocket, Stream upstream, IAsyncDisposable control, ILogger? logger = null, NativeBufferPool? pumpBufferPool = null)
     {
@@ -140,12 +145,14 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
     // both pumps verifiably completed.
     public RelayEndKind EndKind { get; private set; } = RelayEndKind.Faulted;
 
+    public long ServerStreamBytes => Volatile.Read(ref _serverStreamBytes);
+
     private async Task RunPumpAsync(Stream upstream)
     {
         await using var localStream = new NetworkStream(_localSocket, ownsSocket: true);
         var token = _scope.Token;
-        var localToUpstream = PumpAsync(localStream, upstream, _pumpBufferPool, token);
-        var upstreamToLocal = PumpAsync(upstream, localStream, _pumpBufferPool, token);
+        var localToUpstream = PumpAsync(localStream, upstream, _pumpBufferPool, countsServerStream: false, token);
+        var upstreamToLocal = PumpAsync(upstream, localStream, _pumpBufferPool, countsServerStream: true, token);
 
         var first = await Task.WhenAny(localToUpstream, upstreamToLocal).ConfigureAwait(false);
         var firstResult = await first.ConfigureAwait(false);
@@ -237,7 +244,7 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
     internal static bool IsRearmDue(long lastArmTicks, long nowTicks)
         => lastArmTicks == 0 || nowTicks - lastArmTicks > s_armThrottleTicks;
 
-    private async Task<PumpResult> PumpAsync(Stream source, Stream destination, NativeBufferPool pumpBufferPool, CancellationToken cancellationToken)
+    private async Task<PumpResult> PumpAsync(Stream source, Stream destination, NativeBufferPool pumpBufferPool, bool countsServerStream, CancellationToken cancellationToken)
     {
         // A sealed scope means disposal already began and this pump never ran: reporting a clean end
         // rather than a stall keeps an ordinary teardown from looking like a stall timeout, which
@@ -249,6 +256,7 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
         // syscall/memcpy cost. The lease's Memory view (allocation-free, backed by the
         // per-allocation MemoryManager) feeds the async stream APIs.
         var lease = pumpBufferPool.Rent();
+        long serverStreamBytes = 0;
         try
         {
             using var stall = new StallWindow(cancellationToken);
@@ -259,10 +267,6 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
                 {
                     stall.Arm();
                     read = await source.ReadAsync(lease.Memory, stall.Token).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    return PumpResult.Stalled;
                 }
                 catch (OperationCanceledException)
                 {
@@ -276,10 +280,7 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
                 {
                     stall.Arm();
                     await destination.WriteAsync(lease.Memory[..read], stall.Token).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    return PumpResult.Stalled;
+                    if (countsServerStream) serverStreamBytes += read;
                 }
                 catch (OperationCanceledException)
                 {
@@ -294,6 +295,7 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
         }
         finally
         {
+            if (countsServerStream) Volatile.Write(ref _serverStreamBytes, serverStreamBytes);
             lease.Dispose();
             workLease.Dispose();
         }

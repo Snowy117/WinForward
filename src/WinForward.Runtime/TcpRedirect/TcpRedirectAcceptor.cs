@@ -216,22 +216,12 @@ internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IL
             {
                 // A relay that errored or ended removes the flow so a future SYN re-arms setup.
             }
-            // A relay that stalled or faulted mid-flow blackholes the client's established
-            // connection — the teardown tombstone would eat every subsequent retransmission — so
-            // the end is surfaced client-visibly while the association still holds the SYN
-            // template and sequence trackers. A clean end already propagated FINs and must not
-            // be reset.
-            if (relay is ITcpRelayEndInfo { EndKind: not RelayEndKind.CleanEnded })
-            {
-                try
-                {
-                    await clientReset.TryInjectClientResetAsync(session.Association, CancellationToken.None).ConfigureAwait(false);
-                }
-                catch (Exception exception)
-                {
-                    TcpRedirectLog.TcpRedirectRelayEndResetFailed(logger, exception);
-                }
-            }
+            // Every end is surfaced client-visibly before the teardown, while the association still
+            // holds the SYN template and the sequence trackers: RST|ACK for a stalled or faulted
+            // relay, FIN|ACK for a clean end.
+            var endKind = relay is ITcpRelayEndInfo endInfo ? endInfo.EndKind : RelayEndKind.CleanEnded;
+            await InjectClientVisibleCloseAsync(relay, session, endKind).ConfigureAwait(false);
+            var endKindName = EndKindName(endKind);
             TcpRedirectLog.TcpRelayEnded(
                 logger,
                 session.FlowGeneration == 0 ? null : session.FlowGeneration,
@@ -240,7 +230,7 @@ internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IL
                 session.Association.OriginalKey.Remote,
                 session.Association.TranslatedListenerTuple,
                 session.Server.Name,
-                "completed");
+                endKindName);
             await tearDownSession(session).ConfigureAwait(false);
         }
         catch (Exception exception)
@@ -248,4 +238,38 @@ internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IL
             TcpRedirectLog.TcpRedirectRelayCompletionFailed(logger, exception);
         }
     }
+
+    private async ValueTask InjectClientVisibleCloseAsync(ITcpRelay relay, TcpRedirectSession session, RelayEndKind endKind)
+    {
+        try
+        {
+            if (endKind != RelayEndKind.CleanEnded)
+            {
+                await clientReset.TryInjectClientResetAsync(session.Association, CancellationToken.None).ConfigureAwait(false);
+            }
+            else
+            {
+                var serverStreamBytes = relay is ITcpRelayEndInfo byteInfo ? byteInfo.ServerStreamBytes : (long?)null;
+                await clientReset.TryInjectClientCloseAsync(session.Association, serverStreamBytes, CancellationToken.None).ConfigureAwait(false);
+            }
+        }
+        catch (Exception exception)
+        {
+            if (endKind != RelayEndKind.CleanEnded)
+            {
+                TcpRedirectLog.TcpRedirectRelayEndResetFailed(logger, exception);
+            }
+            else
+            {
+                TcpRedirectLog.TcpRedirectRelayEndCloseFailed(logger, exception);
+            }
+        }
+    }
+
+    private static string EndKindName(RelayEndKind endKind) => endKind switch
+    {
+        RelayEndKind.CleanEnded => "cleanEnded",
+        RelayEndKind.Stalled => "stalled",
+        _ => "faulted",
+    };
 }

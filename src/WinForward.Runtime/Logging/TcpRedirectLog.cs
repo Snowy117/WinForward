@@ -42,6 +42,9 @@ internal static partial class TcpRedirectLog
     [LoggerMessage(Level = LogLevel.Debug, EventName = "tcp.redirect.clientReset", Message = "Client reset injected for {Source} -> {Destination}, association {TcpAssociation} ({Outcome}).")]
     public static partial void TcpRedirectClientReset(ILogger logger, long tcpAssociation, Endpoint source, Endpoint destination, string outcome);
 
+    [LoggerMessage(Level = LogLevel.Debug, EventName = "tcp.redirect.clientClose", Message = "Client-visible close injected for {Source} -> {Destination}, association {TcpAssociation} ({Outcome}).")]
+    public static partial void TcpRedirectClientClose(ILogger logger, long tcpAssociation, Endpoint source, Endpoint destination, string outcome);
+
     [LoggerMessage(Level = LogLevel.Debug, EventName = "tcp.redirect.capacityReset", Message = "Capacity-rejection reset injected for {Source} -> {Destination} ({Outcome}).")]
     public static partial void TcpRedirectCapacityReset(ILogger logger, Endpoint source, Endpoint destination, string outcome);
 
@@ -78,6 +81,9 @@ internal static partial class TcpRedirectLog
     [LoggerMessage(Level = LogLevel.Warning, Message = "The TCP redirect client reset injection failed: {Error}.")]
     public static partial void TcpRedirectClientResetInjectionFailed(ILogger logger, string error);
 
+    [LoggerMessage(Level = LogLevel.Warning, Message = "The TCP redirect client-visible close injection failed: {Error}.")]
+    public static partial void TcpRedirectClientCloseInjectionFailed(ILogger logger, string error);
+
     [LoggerMessage(Level = LogLevel.Warning, Message = "The TCP redirect capacity reset injection failed: {Error}.")]
     public static partial void TcpRedirectCapacityResetInjectionFailed(ILogger logger, string error);
 
@@ -110,6 +116,9 @@ internal static partial class TcpRedirectLog
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "The TCP redirect relay-end client reset failed.")]
     public static partial void TcpRedirectRelayEndResetFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "The TCP redirect relay-end client-visible close failed.")]
+    public static partial void TcpRedirectRelayEndCloseFailed(ILogger logger, Exception exception);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "TCP redirect relay completion handling failed.")]
     public static partial void TcpRedirectRelayCompletionFailed(ILogger logger, Exception exception);

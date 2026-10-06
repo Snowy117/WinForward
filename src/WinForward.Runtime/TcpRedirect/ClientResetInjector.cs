@@ -10,14 +10,14 @@ using WinForward.Runtime.Logging;
 namespace WinForward.Runtime.TcpRedirect;
 
 /// <summary>
-/// The client-visible failure surface of the TCP redirect data path. When an upstream relay
-/// cannot be established or a rewritten frame cannot be injected, this module surfaces the
-/// failure to the client as a protocol-correct RST|ACK from the original server endpoint instead
-/// of leaving its established connection hanging. The reset is crafted from the recorded SYN
-/// template and the tracked next-expected sequences (degrading to the initial sequence numbers
-/// when no data was observed), so it stays valid even though the redirect-table alias is torn
-/// down right after. Degrades to plain teardown when either initial sequence number was never
-/// observed.
+/// The client-visible close surface of the TCP redirect data path. When an upstream relay cannot
+/// be established or a rewritten frame cannot be injected, this module surfaces the failure to the
+/// client as a protocol-correct RST|ACK from the original server endpoint instead of leaving its
+/// established connection hanging; a relay that ends cleanly uses the same path for the FIN|ACK
+/// that closes the connection. Both are crafted from the recorded SYN template and the tracked
+/// next-expected sequences (degrading to the initial sequence numbers when no data was observed),
+/// so they stay valid even though the redirect-table alias is torn down right after. Degrades to
+/// plain teardown when either initial sequence number was never observed.
 /// </summary>
 internal sealed class ClientResetInjector(ITcpRedirectInjector injector, ILogger logger, Func<TcpRedirectSession, ValueTask> tearDownSession, Func<TcpRedirectAssociation, ValueTask> failAssociation, int? capacity = null, IInterceptionHealthSignal? healthSignal = null, NdisPacketBufferPool? bufferPool = null, TimeProvider? timeProvider = null)
 {
@@ -39,35 +39,63 @@ internal sealed class ClientResetInjector(ITcpRedirectInjector injector, ILogger
     /// <summary>The association-level core, usable from teardown paths that hold no session
     /// (e.g. an injection failure on the data path).</summary>
     public ValueTask TryInjectClientResetAsync(TcpRedirectAssociation association, CancellationToken cancellationToken)
+        => TryInjectClientCloseCoreAsync(association, reset: true, serverStreamBytes: null, cancellationToken);
+
+    public ValueTask TryInjectClientCloseAsync(TcpRedirectAssociation association, long? serverStreamBytes, CancellationToken cancellationToken)
+        => TryInjectClientCloseCoreAsync(association, reset: false, serverStreamBytes, cancellationToken);
+
+    private ValueTask TryInjectClientCloseCoreAsync(TcpRedirectAssociation association, bool reset, long? serverStreamBytes, CancellationToken cancellationToken)
     {
         if (!association.HasOriginalSynTemplate || association.ClientInitialSeq is not { } clientInitialSeq || association.ServerInitialSeq is not { } serverInitialSeq) return ValueTask.CompletedTask;
         var synTemplate = association.OriginalSynTemplate;
-        // The tracked advancement covers data the client already sent, so the reset's ack stays in
-        // its window instead of being dropped as out-of-window (RFC 5961) after a slow relay setup.
-        var serverSequenceNext = association.ServerNextSeq ?? serverInitialSeq + 1;
+        // The tracked advancement covers data the client already sent, so the close frame's ack stays
+        // in its window instead of being dropped as out-of-window (RFC 5961) after a slow relay setup.
+        // The delivered byte count wins for the sequence: the tracker can lag the capture pipeline and
+        // can already have counted the client-facing socket's own FIN.
+        var serverSequenceNext = serverStreamBytes is { } delivered
+            ? (uint)(serverInitialSeq + 1 + delivered)
+            : association.ServerNextSeq ?? serverInitialSeq + 1;
         var clientSequenceNext = association.ClientNextSeq ?? clientInitialSeq + 1;
         var towardMstcp = association.OriginalKey.Origin != FlowOriginKind.Forwarded;
         try
         {
             using var buffer = _bufferPool.Rent();
-            if (!TcpResetBuilder.TryBuildReset(synTemplate, association.OriginalDestination.Address, association.OriginalDestination.Port,
-                association.OriginalKey.Local.Address, association.OriginalKey.Local.Port, serverSequenceNext, clientSequenceNext, buffer.GetFrameStorage(), out var written))
+            var built = reset
+                ? TcpResetBuilder.TryBuildReset(synTemplate, association.OriginalDestination.Address, association.OriginalDestination.Port,
+                    association.OriginalKey.Local.Address, association.OriginalKey.Local.Port, serverSequenceNext, clientSequenceNext, buffer.GetFrameStorage(), out var written)
+                : TcpResetBuilder.TryBuildFin(synTemplate, association.OriginalDestination.Address, association.OriginalDestination.Port,
+                    association.OriginalKey.Local.Address, association.OriginalKey.Local.Port, serverSequenceNext, clientSequenceNext, buffer.GetFrameStorage(), out written);
+            if (!built)
             {
                 return ValueTask.CompletedTask;
             }
 
             buffer.CompleteFrame(written, towardMstcp ? NdisApiAbi.PacketFlagOnReceive : NdisApiAbi.PacketFlagOnSend, association.OriginAdapterHandle);
             injector.Inject(buffer, towardMstcp, association.OriginAdapterHandle, cancellationToken);
-            TcpRedirectLog.TcpRedirectClientReset(logger, association.Generation, association.OriginalKey.Local, association.OriginalKey.Remote, "injected");
+            if (reset)
+            {
+                TcpRedirectLog.TcpRedirectClientReset(logger, association.Generation, association.OriginalKey.Local, association.OriginalKey.Remote, "injected");
+            }
+            else
+            {
+                TcpRedirectLog.TcpRedirectClientClose(logger, association.Generation, association.OriginalKey.Local, association.OriginalKey.Remote, "injected");
+            }
         }
         catch (OperationCanceledException)
         {
-            // Shutdown or session teardown cancelled the best-effort reset.
+            // Shutdown or session teardown cancelled the best-effort close.
         }
         catch (Exception exception)
         {
             var error = exception.GetType().Name;
-            TcpRedirectLog.TcpRedirectClientResetInjectionFailed(logger, error);
+            if (reset)
+            {
+                TcpRedirectLog.TcpRedirectClientResetInjectionFailed(logger, error);
+            }
+            else
+            {
+                TcpRedirectLog.TcpRedirectClientCloseInjectionFailed(logger, error);
+            }
         }
         return ValueTask.CompletedTask;
     }

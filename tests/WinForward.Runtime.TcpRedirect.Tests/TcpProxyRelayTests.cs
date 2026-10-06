@@ -79,6 +79,24 @@ public sealed class TcpProxyRelayTests
     }
 
     [Fact]
+    public async Task RelayReportsTheServerStreamBytesItWroteToTheClient()
+    {
+        var (localPeer, relayLocal) = await CreateSocketPairAsync();
+        var (upstreamPeer, relayUpstream) = await CreateSocketPairAsync();
+        using var local = localPeer;
+        using var upstream = upstreamPeer;
+        await using var relayUpstreamStream = new NetworkStream(relayUpstream, ownsSocket: true);
+        await using var relay = new TcpProxyRelay(relayLocal, relayUpstreamStream, new NoopAsyncDisposable());
+
+        await upstream.SendAsync(new byte[] { 1, 2, 3, 4, 5 }, SocketFlags.None);
+        upstream.Shutdown(SocketShutdown.Send);
+        local.Shutdown(SocketShutdown.Send);
+        await relay.Completion.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal(5, relay.ServerStreamBytes);
+    }
+
+    [Fact]
     public async Task OneSidedRelayFailureCancelsSiblingPumpImmediately()
     {
         var (localPeer, relayLocal) = await CreateSocketPairAsync();

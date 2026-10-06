@@ -4,12 +4,12 @@ using WinForward.Core;
 namespace WinForward.Protocols;
 
 /// <summary>
-/// Builds a standalone TCP RST|ACK frame that aborts one connection on behalf of its original
-/// server endpoint. Used to surface a failed upstream relay to the client as an immediate,
-/// protocol-correct reset instead of a silent hang. The Ethernet header is mirrored from the
-/// recorded client SYN (addresses swapped) so the frame is deliverable on the same L2 segment;
-/// everything at L3/L4 is constructed fresh with its own checksums, so the result never depends
-/// on parser or rewrite state.
+/// Builds the standalone close frames one connection's original server endpoint sends when
+/// WinForward ends it itself: a TCP RST|ACK that aborts, and a TCP FIN|ACK that closes cleanly.
+/// Used to surface a failed upstream relay to the client as an immediate, protocol-correct close
+/// instead of a silent hang. The Ethernet header is mirrored from the recorded client SYN
+/// (addresses swapped) so the frame is deliverable on the same L2 segment; everything at L3/L4 is
+/// constructed fresh with its own checksums, so the result never depends on parser or rewrite state.
 /// </summary>
 public static class TcpResetBuilder
 {
@@ -19,6 +19,7 @@ public static class TcpResetBuilder
     private const int TcpHeaderLength = 20;
     private const byte TcpFlagsOffset = 13;
     private const byte TcpResetAck = 0x14;
+    private const byte TcpFinAck = 0x11;
 
     /// <summary>The largest reset frame the builder can produce (IPv6: 14 + 40 + 20 = 74).</summary>
     public const int MaxResetFrameLength = EthernetHeaderLength + Ipv6HeaderLength + TcpHeaderLength;
@@ -42,6 +43,31 @@ public static class TcpResetBuilder
         uint clientSequenceNext,
         Span<byte> destination,
         out int written)
+        => TryBuild(originalSynFrame, serverAddress, serverPort, clientAddress, clientPort, serverSequenceNext, clientSequenceNext, TcpResetAck, destination, out written);
+
+    public static bool TryBuildFin(
+        ReadOnlySpan<byte> originalSynFrame,
+        IPAddressValue serverAddress,
+        ushort serverPort,
+        IPAddressValue clientAddress,
+        ushort clientPort,
+        uint serverSequenceNext,
+        uint clientSequenceNext,
+        Span<byte> destination,
+        out int written)
+        => TryBuild(originalSynFrame, serverAddress, serverPort, clientAddress, clientPort, serverSequenceNext, clientSequenceNext, TcpFinAck, destination, out written);
+
+    private static bool TryBuild(
+        ReadOnlySpan<byte> originalSynFrame,
+        IPAddressValue serverAddress,
+        ushort serverPort,
+        IPAddressValue clientAddress,
+        ushort clientPort,
+        uint serverSequenceNext,
+        uint clientSequenceNext,
+        byte tcpFlags,
+        Span<byte> destination,
+        out int written)
     {
         written = 0;
         if (originalSynFrame.Length < EthernetHeaderLength) return false;
@@ -51,7 +77,7 @@ public static class TcpResetBuilder
         {
             const int required = EthernetHeaderLength + Ipv4HeaderLength + TcpHeaderLength;
             if (destination.Length < required) return false;
-            BuildIpv4(originalSynFrame, serverAddress, serverPort, clientAddress, clientPort, serverSequenceNext, clientSequenceNext, destination);
+            BuildIpv4(originalSynFrame, serverAddress, serverPort, clientAddress, clientPort, serverSequenceNext, clientSequenceNext, tcpFlags, destination);
             written = required;
             return true;
         }
@@ -59,7 +85,7 @@ public static class TcpResetBuilder
         {
             const int required = EthernetHeaderLength + Ipv6HeaderLength + TcpHeaderLength;
             if (destination.Length < required) return false;
-            BuildIpv6(originalSynFrame, serverAddress, serverPort, clientAddress, clientPort, serverSequenceNext, clientSequenceNext, destination);
+            BuildIpv6(originalSynFrame, serverAddress, serverPort, clientAddress, clientPort, serverSequenceNext, clientSequenceNext, tcpFlags, destination);
             written = required;
             return true;
         }
@@ -95,7 +121,7 @@ public static class TcpResetBuilder
         return TryBuildReset(synFrame, serverAddress, serverPort, clientAddress, clientPort, serverSequenceNext: 0, clientSequenceNext: clientInitialSeq + 1, destination, out written);
     }
 
-    private static void BuildIpv4(ReadOnlySpan<byte> synTemplate, IPAddressValue serverAddress, ushort serverPort, IPAddressValue clientAddress, ushort clientPort, uint serverSequenceNext, uint clientSequenceNext, Span<byte> frame)
+    private static void BuildIpv4(ReadOnlySpan<byte> synTemplate, IPAddressValue serverAddress, ushort serverPort, IPAddressValue clientAddress, ushort clientPort, uint serverSequenceNext, uint clientSequenceNext, byte tcpFlags, Span<byte> frame)
     {
         WriteEthernetHeader(frame, synTemplate, 0x0800);
 
@@ -110,11 +136,11 @@ public static class TcpResetBuilder
         BinaryPrimitives.WriteUInt16BigEndian(ip.Slice(10, 2), PacketChecksums.InternetChecksum(ip));
 
         var tcp = frame.Slice(EthernetHeaderLength + Ipv4HeaderLength, TcpHeaderLength);
-        WriteTcpHeader(tcp, serverPort, clientPort, serverSequenceNext, clientSequenceNext);
+        WriteTcpHeader(tcp, serverPort, clientPort, serverSequenceNext, clientSequenceNext, tcpFlags);
         PacketChecksums.WriteTcpChecksum(frame, EthernetHeaderLength + Ipv4HeaderLength, TcpHeaderLength, ip.Slice(12, 4), ip.Slice(16, 4), isIpv6: false);
     }
 
-    private static void BuildIpv6(ReadOnlySpan<byte> synTemplate, IPAddressValue serverAddress, ushort serverPort, IPAddressValue clientAddress, ushort clientPort, uint serverSequenceNext, uint clientSequenceNext, Span<byte> frame)
+    private static void BuildIpv6(ReadOnlySpan<byte> synTemplate, IPAddressValue serverAddress, ushort serverPort, IPAddressValue clientAddress, ushort clientPort, uint serverSequenceNext, uint clientSequenceNext, byte tcpFlags, Span<byte> frame)
     {
         WriteEthernetHeader(frame, synTemplate, 0x86dd);
 
@@ -127,7 +153,7 @@ public static class TcpResetBuilder
         clientAddress.TryWrite(ip.Slice(24, 16), out _);
 
         var tcp = frame.Slice(EthernetHeaderLength + Ipv6HeaderLength, TcpHeaderLength);
-        WriteTcpHeader(tcp, serverPort, clientPort, serverSequenceNext, clientSequenceNext);
+        WriteTcpHeader(tcp, serverPort, clientPort, serverSequenceNext, clientSequenceNext, tcpFlags);
         PacketChecksums.WriteTcpChecksum(frame, EthernetHeaderLength + Ipv6HeaderLength, TcpHeaderLength, ip.Slice(8, 16), ip.Slice(24, 16), isIpv6: true);
     }
 
@@ -140,13 +166,13 @@ public static class TcpResetBuilder
         BinaryPrimitives.WriteUInt16BigEndian(frame.Slice(12, 2), etherType);
     }
 
-    private static void WriteTcpHeader(Span<byte> tcp, ushort serverPort, ushort clientPort, uint serverSequenceNext, uint clientSequenceNext)
+    private static void WriteTcpHeader(Span<byte> tcp, ushort serverPort, ushort clientPort, uint serverSequenceNext, uint clientSequenceNext, byte tcpFlags)
     {
         BinaryPrimitives.WriteUInt16BigEndian(tcp[..2], serverPort);
         BinaryPrimitives.WriteUInt16BigEndian(tcp.Slice(2, 2), clientPort);
         BinaryPrimitives.WriteUInt32BigEndian(tcp.Slice(4, 4), serverSequenceNext);
         BinaryPrimitives.WriteUInt32BigEndian(tcp.Slice(8, 4), clientSequenceNext);
         tcp[12] = 5 << 4;
-        tcp[TcpFlagsOffset] = TcpResetAck;
+        tcp[TcpFlagsOffset] = tcpFlags;
     }
 }
