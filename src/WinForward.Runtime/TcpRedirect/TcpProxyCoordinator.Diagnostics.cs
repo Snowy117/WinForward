@@ -1,4 +1,4 @@
-using WinForward.Configuration;
+using WinForward.Runtime.Logging;
 
 namespace WinForward.Runtime.TcpRedirect;
 
@@ -40,13 +40,9 @@ public sealed partial class TcpProxyCoordinator
     /// </summary>
     internal void LogCapacitySummary()
     {
-        if (!_logger.IsEnabled(RuntimeLogLevel.Info)) return;
         var total = Interlocked.Read(ref _capacityRejectionCount);
         var previouslyReported = Interlocked.Exchange(ref _reportedCapacityRejectionCount, total);
         if (total == previouslyReported) return;
-        _logger.Event(RuntimeLogLevel.Info, "tcp.redirect.capacity",
-            new("budget", Capacity),
-            new("rejectedTotal", total),
-            new("rejectedSinceLastSummary", total - previouslyReported));
+        TcpRedirectLog.TcpRedirectCapacity(_logger, Capacity, total, total - previouslyReported);
     }
 }

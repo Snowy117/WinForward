@@ -24,7 +24,7 @@ public sealed class LayeredCaptureRunnerQuiescenceTests
             generations,
             changeSource,
             CaptureRunnerFakes.UnconstrainedPolicy(),
-            new RecordingRuntimeLogger(),
+            new RecordingLogger(),
             _ => ValueTask.CompletedTask);
 
         var runTask = runner.RunAsync(cancel.Token);

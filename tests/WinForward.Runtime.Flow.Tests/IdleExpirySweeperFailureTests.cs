@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net;
+using Microsoft.Extensions.Logging;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Runtime.UdpProxy;
@@ -21,7 +22,7 @@ public sealed class IdleExpirySweeperFailureTests
     [Fact]
     public async Task SweepFailureLogsRateLimitedWarnAndKeepsSweeping()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var transportFactory = new ParkedTransportFactory();
         var sweepFailures = 0;
         var coordinator = UdpCoordinatorFakes.CreateCoordinator(
@@ -63,7 +64,7 @@ public sealed class IdleExpirySweeperFailureTests
         await WaitForAsync(() => Volatile.Read(ref sweepFailures) >= 4);
         await Task.Delay(250);
 
-        var (_, message) = Assert.Single(logger.Lines, line => line.Level == RuntimeLogLevel.Warn && line.Message.Contains("Idle-expiry sweep failed", StringComparison.Ordinal));
+        var (_, message) = Assert.Single(logger.Lines, line => line.Level == LogLevel.Warning && line.Message.Contains("Idle-expiry sweep failed", StringComparison.Ordinal));
         Assert.Contains("IOException", message, StringComparison.Ordinal);
         Assert.Contains("synthetic sweep failure", message, StringComparison.Ordinal);
         Assert.True(Volatile.Read(ref sweepFailures) >= 5, string.Create(CultureInfo.InvariantCulture, $"The sweeper must keep sweeping across failures (observed {Volatile.Read(ref sweepFailures)} failing ticks)."));
@@ -74,7 +75,7 @@ public sealed class IdleExpirySweeperFailureTests
     [Fact]
     public async Task DisposeAsyncJoinsAnInFlightTick()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var tickEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var transportFactory = new ParkedTransportFactory();
@@ -129,7 +130,7 @@ public sealed class IdleExpirySweeperFailureTests
     [Fact]
     public async Task SecondDisposeAsyncJoinsInsteadOfThrowing()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var config = new ValidatedConfiguration(
             new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Pass));

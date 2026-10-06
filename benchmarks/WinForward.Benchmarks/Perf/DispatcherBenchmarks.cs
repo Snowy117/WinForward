@@ -1,5 +1,6 @@
 using System.Net;
 using BenchmarkDotNet.Attributes;
+using Microsoft.Extensions.Logging;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Runtime;
@@ -46,7 +47,7 @@ public class DispatcherBenchmarks
             new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Pass));
         _executor = new CountingExecutor();
-        var logger = new ThresholdOnlyLogger(RuntimeLogLevel.Info);
+        var logger = new ThresholdOnlyLogger(LogLevel.Information);
         _dispatcher = new FlowDispatcher(passConfiguration, new NeverOwnedGuard(), _executor, logger: logger);
         _key = BenchmarkShared.CreateFlowKey(0);
 

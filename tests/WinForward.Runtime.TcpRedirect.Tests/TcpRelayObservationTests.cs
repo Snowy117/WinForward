@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.Versioning;
+using Microsoft.Extensions.Logging;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.TestSupport;
@@ -20,7 +21,7 @@ public sealed class TcpRelayObservationTests
     [Fact]
     public async Task AttachFailureDisposesTheDiscardedRelay()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var relay = new FaultableRelay();
         var session = CreateSession(out var listener);
         var acceptor = new TcpRedirectAcceptor(
@@ -47,7 +48,7 @@ public sealed class TcpRelayObservationTests
         // deleted external observer, it moved into the pump's own catch.
         var (localPeer, relayLocal) = await CreateSocketPairAsync();
         using var local = localPeer;
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var pumpFault = new IOException("relay write failed");
         var relay = new TcpProxyRelay(relayLocal, new FaultingUpstreamStream(pumpFault), new NoopDisposable(), logger);
 
@@ -100,7 +101,7 @@ public sealed class TcpRelayObservationTests
     {
         var (localPeer, relayLocal) = await CreateSocketPairAsync();
         using var local = localPeer;
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var relay = new TcpProxyRelay(relayLocal, new FaultingUpstreamStream(pumpFault), new NoopDisposable(), logger);
 
         await local.SendAsync(new byte[] { 1 }, SocketFlags.None);
@@ -119,7 +120,7 @@ public sealed class TcpRelayObservationTests
         using var local = localPeer;
         using var upstream = upstreamPeer;
         await using var upstreamStream = new NetworkStream(relayUpstream, ownsSocket: true);
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var relay = new TcpProxyRelay(relayLocal, upstreamStream, new NoopDisposable(), logger);
 
         local.Shutdown(SocketShutdown.Send);
@@ -139,7 +140,7 @@ public sealed class TcpRelayObservationTests
         // produces no event.
         var (localPeer, relayLocal) = await CreateSocketPairAsync();
         using var local = localPeer;
-        var logger = new RecordingRuntimeLogger(level => level != RuntimeLogLevel.Debug);
+        var logger = new RecordingLogger(level => level != LogLevel.Debug);
         var relay = new TcpProxyRelay(relayLocal, new FaultingUpstreamStream(new IOException("relay write failed")), new NoopDisposable(), logger);
 
         await local.SendAsync(new byte[] { 1 }, SocketFlags.None);
@@ -150,9 +151,9 @@ public sealed class TcpRelayObservationTests
         await relay.DisposeAsync();
     }
 
-    private static void AssertExactlyOneFaultedEvent(RecordingRuntimeLogger logger) =>
+    private static void AssertExactlyOneFaultedEvent(RecordingLogger logger) =>
         Assert.Equal(1, logger.Events.Count(e => string.Equals(e.Name, "tcp.relay.faulted", StringComparison.Ordinal)
-            && e.Fields.Any(field => string.Equals(field.Key, "error", StringComparison.Ordinal))));
+            && e.Fields.Any(field => string.Equals(field.Key, "Error", StringComparison.Ordinal))));
 
     private static TcpRedirectSession CreateSession(out FakeListener listener)
     {

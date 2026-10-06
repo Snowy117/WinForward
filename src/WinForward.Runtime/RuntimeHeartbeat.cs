@@ -1,4 +1,6 @@
-using WinForward.Configuration;
+using System.Globalization;
+using Microsoft.Extensions.Logging;
+using WinForward.Runtime.Logging;
 
 namespace WinForward.Runtime;
 
@@ -53,7 +55,7 @@ public sealed class RuntimeHeartbeat : IAsyncDisposable
 {
     /// <summary>The default heartbeat interval; <see cref="TimeSpan.Zero"/>-like values are rejected (use disposal to stop).</summary>
     private static readonly TimeSpan s_defaultInterval = TimeSpan.FromSeconds(60);
-    private readonly IRuntimeLogger _logger;
+    private readonly ILogger _logger;
     private readonly Func<RuntimeHeartbeatUsage>? _usage;
     private readonly RuntimeCounters _counters;
     private readonly InterceptionHealthMonitor? _health;
@@ -68,7 +70,7 @@ public sealed class RuntimeHeartbeat : IAsyncDisposable
     private int _started;
 
     public RuntimeHeartbeat(
-        IRuntimeLogger logger,
+        ILogger logger,
         Func<RuntimeHeartbeatUsage>? usage = null,
         RuntimeCounters? counters = null,
         InterceptionHealthMonitor? health = null,
@@ -84,7 +86,7 @@ public sealed class RuntimeHeartbeat : IAsyncDisposable
     /// Production reads the process GC counters through the default provider.
     /// </summary>
     internal RuntimeHeartbeat(
-        IRuntimeLogger logger,
+        ILogger logger,
         Func<RuntimeGcSnapshot>? gcSnapshotProvider,
         Func<RuntimeHeartbeatUsage>? usage = null,
         RuntimeCounters? counters = null,
@@ -132,7 +134,8 @@ public sealed class RuntimeHeartbeat : IAsyncDisposable
                 {
                     // Usage sources (coordinators, the runner) may be mid-teardown; the heartbeat
                     // retries on the next tick and never takes anything down with it.
-                    _logger.Warn($"Runtime heartbeat summary failed: {exception.GetType().Name}: {exception.Message}");
+                    var error = exception.GetType().Name;
+                    RuntimeLog.HeartbeatSummaryFailed(_logger, error, exception.Message);
                 }
             }
         }
@@ -144,78 +147,77 @@ public sealed class RuntimeHeartbeat : IAsyncDisposable
 
     private void Emit()
     {
-        var current = _counters.Snapshot();
         var gc = ReadGcSnapshot();
         var intervalGen0 = gc.Gen0Collections - _lastGcSnapshot.Gen0Collections;
         var intervalGen1 = gc.Gen1Collections - _lastGcSnapshot.Gen1Collections;
         var intervalGen2 = gc.Gen2Collections - _lastGcSnapshot.Gen2Collections;
-        if (_logger.IsEnabled(RuntimeLogLevel.Info))
-        {
-            var now = _time.GetUtcNow();
-            var usage = _usage?.Invoke() ?? default;
-            var fields = new List<RuntimeLogField>(15 + current.Count)
-            {
-                new("uptimeSeconds", (long)(now - _startedUtc).TotalSeconds),
-            };
-            AddPositive(fields, "flows", usage.FlowsActive);
-            AddPositive(fields, "flowCapacity", usage.FlowCapacity);
-            AddPositive(fields, "tcpSessions", usage.TcpSessions);
-            AddPositive(fields, "tcpCapacity", usage.TcpCapacity);
-            AddPositive(fields, "udpSessions", usage.UdpSessions);
-            AddPositive(fields, "udpCapacity", usage.UdpCapacity);
-            AddPositive(fields, "udpRelayBufferMB", (int)(usage.UdpRelayBufferBytes / (1024 * 1024)));
-            AddPositive(fields, "pumpsRunning", usage.PumpsRunning);
-            AddPositive(fields, "pumpsDegraded", usage.PumpsDegraded);
-            if (_health is not null)
-            {
-                if (_health.IsDegraded) fields.Add(new("degraded", "true"));
-                AddPositive(fields, "consecutiveForced", _health.ConsecutiveForcedTriggers);
-                var cooldown = _health.CooldownRemaining;
-                if (cooldown > TimeSpan.Zero) fields.Add(new("cooldownSeconds", (long)cooldown.TotalSeconds));
-            }
-            AddGcAndPoolFields(fields, gc);
-            foreach (var pair in current.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
-            {
-                var delta = pair.Value - _lastCounters.GetValueOrDefault(pair.Key);
-                if (delta != 0) fields.Add(new RuntimeLogField(pair.Key, delta));
-            }
-            _logger.Event(RuntimeLogLevel.Info, "runner.heartbeat", [.. fields]);
-        }
+        // The heartbeat's argument list is the one place in the runtime where a tick does real work
+        // the level may discard: it calls the usage delegate and builds the pool and counter-delta
+        // blocks. The tick is timer-driven rather than event-driven, so unlike every other call site
+        // that work would happen even on a tick that logs nothing. The guard covers only the
+        // heartbeat; the warn-level GC alarm below is independent of it.
+        if (_logger.IsEnabled(LogLevel.Information)) EmitHeartbeat(gc);
         if (intervalGen0 > 0 || intervalGen1 > 0 || intervalGen2 > 0)
         {
             WarnGcCollected(gc, intervalGen0, intervalGen1, intervalGen2);
         }
         _lastGcSnapshot = gc;
-        _lastCounters = current;
     }
 
-    /// <summary>
-    /// Appends the GC-posture fields (deltas against the startup mark; zero deltas are omitted,
-    /// so an idle GC-off runtime stays compact) and the aggregate native-pool occupancy fields
-    /// (omitted entirely while no pool is registered).
-    /// </summary>
-    private void AddGcAndPoolFields(List<RuntimeLogField> fields, RuntimeGcSnapshot gc)
+    private void EmitHeartbeat(RuntimeGcSnapshot gc)
     {
+        var current = _counters.Snapshot();
+        var now = _time.GetUtcNow();
+        var usage = _usage?.Invoke() ?? default;
+        var cooldown = _health?.CooldownRemaining ?? TimeSpan.Zero;
         var gcGen0 = gc.Gen0Collections - _gcStartupMark.Gen0Collections;
         var gcGen1 = gc.Gen1Collections - _gcStartupMark.Gen1Collections;
         var gcGen2 = gc.Gen2Collections - _gcStartupMark.Gen2Collections;
         var gcCollections = gcGen0 + gcGen1 + gcGen2;
-        if (gcCollections > 0)
-        {
-            fields.Add(new("gcCollections", gcCollections));
-            AddPositive(fields, "gcGen0", gcGen0);
-            AddPositive(fields, "gcGen1", gcGen1);
-            AddPositive(fields, "gcGen2", gcGen2);
-        }
         var gcAllocatedBytes = gc.AllocatedBytes - _gcStartupMark.AllocatedBytes;
-        if (gcAllocatedBytes > 0) fields.Add(new("gcAllocatedBytes", gcAllocatedBytes));
         var pools = _counters.GetRegisteredPools();
-        if (pools.Count > 0)
+        var poolOccupancy = _counters.GetTotalPoolOccupancy();
+        var deltas = DescribeDeltas(current);
+        RuntimeLog.RunnerHeartbeat(
+            _logger,
+            (long)(now - _startedUtc).TotalSeconds,
+            usage.FlowsActive > 0 ? usage.FlowsActive : null,
+            usage.FlowCapacity > 0 ? usage.FlowCapacity : null,
+            usage.TcpSessions > 0 ? usage.TcpSessions : null,
+            usage.TcpCapacity > 0 ? usage.TcpCapacity : null,
+            usage.UdpSessions > 0 ? usage.UdpSessions : null,
+            usage.UdpCapacity > 0 ? usage.UdpCapacity : null,
+            usage.UdpRelayBufferBytes >= 1024 * 1024 ? (int)(usage.UdpRelayBufferBytes / (1024 * 1024)) : null,
+            usage.PumpsRunning > 0 ? usage.PumpsRunning : null,
+            usage.PumpsDegraded > 0 ? usage.PumpsDegraded : null,
+            _health is { IsDegraded: true } ? "true" : null,
+            _health is { ConsecutiveForcedTriggers: > 0 and var forced } ? forced : null,
+            cooldown > TimeSpan.Zero ? (long)cooldown.TotalSeconds : null,
+            gcCollections > 0 ? gcCollections : null,
+            gcGen0 > 0 ? gcGen0 : null,
+            gcGen1 > 0 ? gcGen1 : null,
+            gcGen2 > 0 ? gcGen2 : null,
+            gcAllocatedBytes > 0 ? gcAllocatedBytes : null,
+            pools.Count > 0 ? pools.Count : null,
+            poolOccupancy != 0 ? poolOccupancy : null,
+            deltas);
+        _lastCounters = current;
+    }
+
+    /// <summary>
+    /// The heartbeat's counter-delta block: one <c>key=delta</c> token per counter that moved since
+    /// the previous heartbeat, in ordinal key order, and null when nothing moved.
+    /// </summary>
+    private string? DescribeDeltas(IReadOnlyDictionary<string, long> current)
+    {
+        var deltas = new List<string>();
+        foreach (var pair in current.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
         {
-            fields.Add(new("pools", pools.Count));
-            var poolOccupancy = _counters.GetTotalPoolOccupancy();
-            if (poolOccupancy != 0) fields.Add(new("poolOccupancy", poolOccupancy));
+            var delta = pair.Value - _lastCounters.GetValueOrDefault(pair.Key);
+            if (delta != 0) deltas.Add(string.Create(CultureInfo.InvariantCulture, $"{pair.Key}={delta}"));
         }
+
+        return deltas.Count == 0 ? null : string.Join(' ', deltas);
     }
 
     /// <summary>
@@ -237,21 +239,15 @@ public sealed class RuntimeHeartbeat : IAsyncDisposable
     /// </summary>
     private void WarnGcCollected(RuntimeGcSnapshot gc, int intervalGen0, int intervalGen1, int intervalGen2)
     {
-        if (!_logger.IsEnabled(RuntimeLogLevel.Warn)) return;
-        var fields = new List<RuntimeLogField>(4);
-        if (intervalGen0 > 0) fields.Add(new("gen0", intervalGen0));
-        if (intervalGen1 > 0) fields.Add(new("gen1", intervalGen1));
-        if (intervalGen2 > 0) fields.Add(new("gen2", intervalGen2));
         var sinceStart = (gc.Gen0Collections - _gcStartupMark.Gen0Collections)
             + (gc.Gen1Collections - _gcStartupMark.Gen1Collections)
             + (gc.Gen2Collections - _gcStartupMark.Gen2Collections);
-        fields.Add(new("sinceStart", sinceStart));
-        _logger.Event(RuntimeLogLevel.Warn, "gc.collected", [.. fields]);
-    }
-
-    private static void AddPositive(List<RuntimeLogField> fields, string key, int value)
-    {
-        if (value > 0) fields.Add(new RuntimeLogField(key, value));
+        RuntimeLog.GcCollected(
+            _logger,
+            intervalGen0 > 0 ? intervalGen0 : null,
+            intervalGen1 > 0 ? intervalGen1 : null,
+            intervalGen2 > 0 ? intervalGen2 : null,
+            sinceStart);
     }
 
     // The drain is the whole teardown for this owner — seal, cancel (unwinding the timer wait),

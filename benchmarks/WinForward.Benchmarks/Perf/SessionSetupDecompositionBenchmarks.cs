@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using BenchmarkDotNet.Attributes;
+using Microsoft.Extensions.Logging.Abstractions;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
@@ -220,7 +221,7 @@ public class SessionSetupDecompositionBenchmarks
                 ClientMac: default,
                 TimeProvider.System,
                 static (_, _) => { },
-                NullRuntimeLogger.Instance,
+                NullLogger.Instance,
                 receiveWindowPool,
                 UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize),
                 shutdown.Token));
@@ -281,7 +282,7 @@ public class SessionSetupDecompositionBenchmarks
                 ClientMac: default,
                 TimeProvider.System,
                 static (_, _) => { },
-                NullRuntimeLogger.Instance,
+                NullLogger.Instance,
                 receiveWindowPool,
                 UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize),
                 shutdown.Token));
@@ -379,7 +380,7 @@ public class SessionSetupDecompositionBenchmarks
                 ClientMac: default,
                 TimeProvider.System,
                 static (_, _) => { },
-                NullRuntimeLogger.Instance,
+                NullLogger.Instance,
                 receiveWindowPool,
                 UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize),
                 shutdown.Token));
@@ -432,7 +433,7 @@ public class SessionSetupDecompositionBenchmarks
                 ClientMac: default,
                 TimeProvider.System,
                 static (_, _) => { },
-                NullRuntimeLogger.Instance,
+                NullLogger.Instance,
                 receiveWindowPool,
                 UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize),
                 shutdown.Token);
@@ -477,7 +478,7 @@ public class SessionSetupDecompositionBenchmarks
                 ClientMac: default,
                 TimeProvider.System,
                 observer.OnSessionActivity,
-                NullRuntimeLogger.Instance,
+                NullLogger.Instance,
                 receiveWindowPool,
                 UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize),
                 shutdown.Token);
@@ -517,7 +518,7 @@ public class SessionSetupDecompositionBenchmarks
                 ClientMac: default,
                 TimeProvider.System,
                 static (_, _) => { },
-                NullRuntimeLogger.Instance,
+                NullLogger.Instance,
                 receiveWindowPool,
                 UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize),
                 shutdown.Token)));
@@ -735,7 +736,7 @@ public class SessionSetupDecompositionBenchmarks
     public void ComponentA7_EnqueueCycle()
     {
         var pool = new NativeBufferPool(UdpFrameBuilder.DefaultMaximumEthernetFrame);
-        var budget = new UdpSetupQueueBudget(UdpSetupQueueBudget.SetupQueueGlobalByteBudget, NullRuntimeLogger.Instance, TimeProvider.System);
+        var budget = new UdpSetupQueueBudget(UdpSetupQueueBudget.SetupQueueGlobalByteBudget, NullLogger.Instance, TimeProvider.System);
         var queue = new BoundedSetupQueue(32, 32_768);
         var now = TimeProvider.System.GetUtcNow();
         ReadOnlySpan<byte> payload = s_payload;

@@ -1,23 +1,48 @@
-using WinForward.Configuration;
-using WinForward.Runtime;
+using Microsoft.Extensions.Logging;
 
 namespace WinForward.TestSupport;
 
-/// <summary>
-/// Captures every structured event and plain-text line with its level; <see cref="WarnCount"/>
-/// derives from the recorded lines so sink tests can assert the rate-limited warning fired.
-/// Recording is lock-guarded and <see cref="Lines"/>/<see cref="Events"/> return snapshots, so a
-/// test may enumerate while a background capture/proxy thread is still logging. The optional
-/// <c>isEnabled</c> predicate lets a test model a threshold (the production default disables
-/// debug), while recording itself stays unconditional.
-/// </summary>
-internal sealed class RecordingRuntimeLogger(Func<RuntimeLogLevel, bool>? isEnabled = null) : IRuntimeLogger
+internal sealed record RecordedEvent(
+    LogLevel Level,
+    EventId EventId,
+    string Category,
+    IReadOnlyList<KeyValuePair<string, object?>> Fields,
+    string Message,
+    Exception? Exception)
+{
+    public string Name => EventId.Name ?? string.Empty;
+
+    public void Deconstruct(out LogLevel level, out IReadOnlyList<KeyValuePair<string, object?>> fields)
+    {
+        level = Level;
+        fields = Fields;
+    }
+
+    public void Deconstruct(out LogLevel level, out string name, out IReadOnlyList<KeyValuePair<string, object?>> fields)
+    {
+        level = Level;
+        name = Name;
+        fields = Fields;
+    }
+
+    public object? Field(string key)
+    {
+        foreach (var field in Fields)
+        {
+            if (string.Equals(field.Key, key, StringComparison.Ordinal)) return field.Value;
+        }
+
+        return null;
+    }
+}
+
+internal sealed class RecordingLogger(Func<LogLevel, bool>? isEnabled = null, string category = "test") : ILogger
 {
     private readonly Lock _gate = new();
-    private readonly List<(RuntimeLogLevel Level, string Name, RuntimeLogField[] Fields)> _events = [];
-    private readonly List<(RuntimeLogLevel Level, string Message)> _lines = [];
+    private readonly List<RecordedEvent> _events = [];
+    private readonly List<(LogLevel Level, string Message)> _lines = [];
 
-    public IReadOnlyList<(RuntimeLogLevel Level, string Name, RuntimeLogField[] Fields)> Events
+    public IReadOnlyList<RecordedEvent> Events
     {
         get
         {
@@ -25,7 +50,7 @@ internal sealed class RecordingRuntimeLogger(Func<RuntimeLogLevel, bool>? isEnab
         }
     }
 
-    public IReadOnlyList<(RuntimeLogLevel Level, string Message)> Lines
+    public IReadOnlyList<(LogLevel Level, string Message)> Lines
     {
         get
         {
@@ -33,27 +58,43 @@ internal sealed class RecordingRuntimeLogger(Func<RuntimeLogLevel, bool>? isEnab
         }
     }
 
-    public int WarnCount => Lines.Count(line => line.Level == RuntimeLogLevel.Warn);
+    public int WarnCount => Lines.Count(line => line.Level == LogLevel.Warning);
 
-    public bool IsEnabled(RuntimeLogLevel level) => isEnabled?.Invoke(level) ?? true;
+    public IDisposable? BeginScope<TState>(TState state)
+        where TState : notnull => null;
 
-    public void Trace(string message) => Add(RuntimeLogLevel.Trace, message);
+    public bool IsEnabled(LogLevel logLevel) => logLevel != LogLevel.None && (isEnabled?.Invoke(logLevel) ?? true);
 
-    public void Debug(string message) => Add(RuntimeLogLevel.Debug, message);
-
-    public void Info(string message) => Add(RuntimeLogLevel.Info, message);
-
-    public void Warn(string message) => Add(RuntimeLogLevel.Warn, message);
-
-    public void Error(string message) => Add(RuntimeLogLevel.Error, message);
-
-    public void Event(RuntimeLogLevel level, string eventName, params RuntimeLogField[] fields)
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
     {
-        lock (_gate) _events.Add((level, eventName, fields));
+        var message = formatter(state, exception);
+        var fields = SelectFields(state);
+        lock (_gate)
+        {
+            _lines.Add((logLevel, message));
+            _events.Add(new RecordedEvent(logLevel, eventId, category, fields, message, exception));
+        }
     }
 
-    private void Add(RuntimeLogLevel level, string message)
+    private static List<KeyValuePair<string, object?>> SelectFields<TState>(TState state)
     {
-        lock (_gate) _lines.Add((level, message));
+        var selected = new List<KeyValuePair<string, object?>>();
+        if (state is not IReadOnlyList<KeyValuePair<string, object?>> pairs) return selected;
+        foreach (var pair in pairs)
+        {
+            if (string.Equals(pair.Key, "{OriginalFormat}", StringComparison.Ordinal)) continue;
+            selected.Add(pair);
+        }
+
+        return selected;
+    }
+}
+
+internal sealed class RecordingLoggerProvider(RecordingLogger logger) : ILoggerProvider
+{
+    public ILogger CreateLogger(string categoryName) => logger;
+
+    public void Dispose()
+    {
     }
 }

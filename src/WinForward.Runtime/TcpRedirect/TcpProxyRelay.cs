@@ -2,14 +2,17 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.Versioning;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using WinForward.Configuration;
 using WinForward.Core;
+using WinForward.Runtime.Logging;
 using WinForward.Runtime.Socks5;
 
 namespace WinForward.Runtime.TcpRedirect;
 
 [SupportedOSPlatform("windows")]
-public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic, IRuntimeLogger? logger = null, NativeBufferPool? pumpBufferPool = null, Socks5AddressCache? addressCache = null) : ITcpProxyRelayFactory
+public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic, ILogger? logger = null, NativeBufferPool? pumpBufferPool = null, Socks5AddressCache? addressCache = null) : ITcpProxyRelayFactory
 {
     // The redirect leg completes the client's TCP handshake in tens of milliseconds, so the relay's
     // upstream connect budget bounds how long an unreachable/black-holed SOCKS5 server delays the
@@ -109,7 +112,7 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
 
     private readonly Socket _localSocket;
     private readonly IAsyncDisposable _control;
-    private readonly IRuntimeLogger _logger;
+    private readonly ILogger _logger;
     private readonly NativeBufferPool _pumpBufferPool;
     // Owns the pumps' lifetime token (D7) in place of the former per-relay linked source, and joins
     // the pumps when the relay is disposed. It is sealed and drained only after the local socket is
@@ -117,14 +120,14 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
     private readonly QuiescenceScope _scope = new();
     private int _teardownStarted;
 
-    public TcpProxyRelay(Socket localSocket, Stream upstream, IAsyncDisposable control, IRuntimeLogger? logger = null, NativeBufferPool? pumpBufferPool = null)
+    public TcpProxyRelay(Socket localSocket, Stream upstream, IAsyncDisposable control, ILogger? logger = null, NativeBufferPool? pumpBufferPool = null)
     {
         ArgumentNullException.ThrowIfNull(localSocket);
         ArgumentNullException.ThrowIfNull(upstream);
         ArgumentNullException.ThrowIfNull(control);
         _localSocket = localSocket;
         _control = control;
-        _logger = logger ?? NullRuntimeLogger.Instance;
+        _logger = logger ?? NullLogger.Instance;
         _pumpBufferPool = pumpBufferPool ?? s_sharedPumpBufferPool;
         Completion = RunPumpAsync(upstream);
     }
@@ -304,8 +307,8 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
     private void RecordPumpFault(Exception exception)
     {
         _scope.RecordFault(exception, "tcp.relay.pump");
-        if (!_logger.IsEnabled(RuntimeLogLevel.Debug)) return;
-        _logger.Event(RuntimeLogLevel.Debug, "tcp.relay.faulted", new RuntimeLogField("error", exception.GetType().Name));
+        var error = exception.GetType().Name;
+        TcpRedirectLog.TcpRelayFaulted(_logger, error);
     }
 
     private static void ShutdownSend(Socket socket)

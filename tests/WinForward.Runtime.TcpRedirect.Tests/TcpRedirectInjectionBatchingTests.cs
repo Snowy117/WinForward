@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Globalization;
 using System.Net;
 using System.Runtime.Versioning;
+using Microsoft.Extensions.Logging;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
@@ -222,7 +223,7 @@ public sealed class TcpRedirectInjectionBatchingTests
         // the first frame's: its tail aborted at the injected warn, before the fail-closed write.
         Assert.Equal(3, harness.Injector.SingleCalls.Count(call => call.Failed));
         Assert.Equal(1, harness.Logger.Events.Count(entry => string.Equals(entry.Name, "tcp.redirect.deferred-failed", StringComparison.Ordinal)));
-        Assert.Contains(harness.Logger.Lines, line => line.Level == RuntimeLogLevel.Warn && line.Message.Contains("keeps draining", StringComparison.Ordinal));
+        Assert.Contains(harness.Logger.Lines, line => line.Level == LogLevel.Warning && line.Message.Contains("keeps draining", StringComparison.Ordinal));
         Assert.Equal(1, harness.Table.Count);
         Assert.Equal(0, harness.Coordinator.Diagnostics.RedirectPendingCount);
         var stats = pool.Stats;
@@ -387,7 +388,7 @@ public sealed class TcpRedirectInjectionBatchingTests
             int? capacity = null,
             NdisPacketBufferPool? pool = null)
         {
-            Logger = new RecordingRuntimeLogger();
+            Logger = new RecordingLogger();
             Injector = new RecordingRedirectInjector { ThrowOnBatch = throwOnBatch, FailingSingleFrameLength = failDataFrameSends ? DataFrameLength : null };
             Table = new TcpRedirectTable();
             Pool = pool ?? new NdisPacketBufferPool(8);
@@ -412,7 +413,7 @@ public sealed class TcpRedirectInjectionBatchingTests
 
         public TcpRedirectTable Table { get; }
 
-        public RecordingRuntimeLogger Logger { get; }
+        public RecordingLogger Logger { get; }
 
         private NdisPacketBufferPool Pool { get; }
 
@@ -600,24 +601,17 @@ public sealed class TcpRedirectInjectionBatchingTests
     /// recording, modelling a fault inside a frame's failure tail: the tail must be contained per
     /// frame. Plain-text lines never throw, so the containment warn stays observable.
     /// </summary>
-    private sealed class FaultingFailureTailLogger(RecordingRuntimeLogger inner) : IRuntimeLogger
+    private sealed class FaultingFailureTailLogger(RecordingLogger inner) : ILogger
     {
-        public bool IsEnabled(RuntimeLogLevel level) => inner.IsEnabled(level);
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => inner.BeginScope(state);
 
-        public void Trace(string message) => inner.Trace(message);
+        public bool IsEnabled(LogLevel logLevel) => inner.IsEnabled(logLevel);
 
-        public void Debug(string message) => inner.Debug(message);
-
-        public void Info(string message) => inner.Info(message);
-
-        public void Warn(string message) => inner.Warn(message);
-
-        public void Error(string message) => inner.Error(message);
-
-        public void Event(RuntimeLogLevel level, string eventName, params RuntimeLogField[] fields)
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
         {
-            inner.Event(level, eventName, fields);
-            if (string.Equals(eventName, "tcp.redirect.deferred-failed", StringComparison.Ordinal)) throw new InvalidOperationException("failure tail fault");
+            inner.Log(logLevel, eventId, state, exception, formatter);
+            if (string.Equals(eventId.Name, "tcp.redirect.deferred-failed", StringComparison.Ordinal)) throw new InvalidOperationException("failure tail fault");
         }
     }
 }

@@ -1,7 +1,9 @@
 using System.ComponentModel;
 using System.Runtime.Versioning;
-using WinForward.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using WinForward.NdisApi;
+using WinForward.Runtime.Logging;
 using WinForward.Windows;
 
 namespace WinForward.Runtime.Capture;
@@ -49,14 +51,14 @@ public sealed class NdisAdapterEnumerationProvider : IAdapterEnumerationProvider
     private static readonly IReadOnlyDictionary<string, string> s_emptyFingerprints = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
     private readonly NdisApiDriver _driver;
-    private readonly IRuntimeLogger? _logger;
+    private readonly ILogger _logger;
     private int _addressQueryFailureLogged;
 
-    public NdisAdapterEnumerationProvider(NdisApiDriver driver, IRuntimeLogger? logger = null)
+    public NdisAdapterEnumerationProvider(NdisApiDriver driver, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(driver);
         _driver = driver;
-        _logger = logger;
+        _logger = logger ?? NullLogger.Instance;
     }
 
     public IReadOnlyList<AdapterEnumerationItem> Enumerate()
@@ -92,10 +94,9 @@ public sealed class NdisAdapterEnumerationProvider : IAdapterEnumerationProvider
         }
         catch (Exception exception) when (exception is Win32Exception or InvalidOperationException or ArgumentException)
         {
-            if (Interlocked.Exchange(ref _addressQueryFailureLogged, 1) == 0 && _logger is not null)
+            if (Interlocked.Exchange(ref _addressQueryFailureLogged, 1) == 0)
             {
-                _logger.Event(RuntimeLogLevel.Debug, "adapter.addressQuery.failed",
-                    new RuntimeLogField("error", exception.Message));
+                CaptureLog.AdapterAddressQueryFailed(_logger, exception.Message);
             }
             return s_emptyFingerprints;
         }

@@ -1,6 +1,6 @@
 using System.ComponentModel;
 using System.Globalization;
-using WinForward.Configuration;
+using Microsoft.Extensions.Logging;
 using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.TestSupport;
@@ -100,7 +100,7 @@ public sealed class LayeredCaptureRunnerRefreshTests
         await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
 
         Assert.Equal([202], harness.Generation(1).Scope.Select(item => item.Adapter.RuntimeHandle).ToArray());
-        Assert.Contains("id-a", CaptureRunnerHarness.FieldValue(harness.RefreshEvents[^1], "changed"), StringComparison.Ordinal);
+        Assert.Contains("id-a", CaptureRunnerHarness.FieldValue(harness.RefreshEvents[^1], "Changed"), StringComparison.Ordinal);
         Assert.Equal(1, harness.Generation(0).DisposeCount);
         Assert.Equal(0, harness.Generation(1).DisposeCount);
         Assert.Equal(0, harness.DurableDisposeCount);
@@ -133,8 +133,8 @@ public sealed class LayeredCaptureRunnerRefreshTests
         await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
 
         Assert.Equal(["id-a"], [.. harness.Generation(1).Scope.Select(item => item.StableId)]);
-        Assert.Contains(harness.Logger.Lines, line => line.Level == RuntimeLogLevel.Warn && line.Message.Contains("id-b", StringComparison.Ordinal));
-        Assert.Contains("id-b", CaptureRunnerHarness.FieldValue(harness.RefreshEvents[^1], "removed"), StringComparison.Ordinal);
+        Assert.Contains(harness.Logger.Lines, line => line.Level == LogLevel.Warning && line.Message.Contains("id-b", StringComparison.Ordinal));
+        Assert.Contains("id-b", CaptureRunnerHarness.FieldValue(harness.RefreshEvents[^1], "Removed"), StringComparison.Ordinal);
         Assert.Equal(0, harness.DurableDisposeCount);
         Assert.False(harness.RunTask.IsCompleted);
     }
@@ -153,7 +153,7 @@ public sealed class LayeredCaptureRunnerRefreshTests
         await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
 
         Assert.Equal(["id-a", "id-new"], [.. harness.Generation(1).Scope.Select(item => item.StableId)]);
-        Assert.Contains("id-new", CaptureRunnerHarness.FieldValue(harness.RefreshEvents[^1], "added"), StringComparison.Ordinal);
+        Assert.Contains("id-new", CaptureRunnerHarness.FieldValue(harness.RefreshEvents[^1], "Added"), StringComparison.Ordinal);
         Assert.False(harness.RunTask.IsCompleted);
     }
 
@@ -199,7 +199,7 @@ public sealed class LayeredCaptureRunnerRefreshTests
         await AsyncTestExtensions.WaitForAsync(
             () => harness.Logger.Lines.Any(line => line.Message.Contains("paused", StringComparison.Ordinal))).ConfigureAwait(false);
         Assert.Contains(harness.Logger.Lines, line => line.Message.Contains("paused", StringComparison.Ordinal));
-        Assert.Contains("id-a", CaptureRunnerHarness.FieldValue(harness.RefreshEvents[^1], "removed"), StringComparison.Ordinal);
+        Assert.Contains("id-a", CaptureRunnerHarness.FieldValue(harness.RefreshEvents[^1], "Removed"), StringComparison.Ordinal);
 
         await Task.Delay(50).ConfigureAwait(false);
         Assert.Single(harness.Generations.Generations);
@@ -245,8 +245,8 @@ public sealed class LayeredCaptureRunnerRefreshTests
         Assert.Equal(0, harness.Generation(1).DisposeCount);
         Assert.Equal(0, harness.DurableDisposeCount);
         var refresh = harness.RefreshEvents[^1];
-        Assert.Equal("true", CaptureRunnerHarness.FieldValue(refresh, "forced"));
-        Assert.Null(CaptureRunnerHarness.FieldValue(refresh, "noop"));
+        Assert.Equal("true", CaptureRunnerHarness.FieldValue(refresh, "Forced"));
+        Assert.Null(CaptureRunnerHarness.FieldValue(refresh, "Noop"));
     }
 
     [Fact]
@@ -271,12 +271,11 @@ public sealed class LayeredCaptureRunnerRefreshTests
         Assert.Equal(1, harness.Generation(0).DisposeCount);
         Assert.Equal(0, harness.DurableDisposeCount);
         var refresh = harness.RefreshEvents[^1];
-        Assert.Equal("true", CaptureRunnerHarness.FieldValue(refresh, "forced"));
-        Assert.Null(CaptureRunnerHarness.FieldValue(refresh, "noop"));
+        Assert.Equal("true", CaptureRunnerHarness.FieldValue(refresh, "Forced"));
+        Assert.Null(CaptureRunnerHarness.FieldValue(refresh, "Noop"));
         Assert.Single(harness.Logger.Events, entry =>
-            string.Equals(entry.Name, "generation.startup-fault", StringComparison.Ordinal)
-            && entry.Level == RuntimeLogLevel.Warn
-            && string.Equals(CaptureRunnerHarness.FieldValue(entry.Fields, "attempt"), "1/3", StringComparison.Ordinal));
+            IsAbsorbedStartupFault(entry)
+            && string.Equals(CaptureRunnerHarness.FieldValue(entry.Fields, "Attempt"), "1/3", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -297,14 +296,17 @@ public sealed class LayeredCaptureRunnerRefreshTests
         Assert.All(harness.Generations.Generations, generation => Assert.Equal(1, generation.DisposeCount));
         Assert.Equal(1, harness.DurableDisposeCount);
         var faultEvents = harness.Logger.Events
-            .Where(entry => string.Equals(entry.Name, "generation.startup-fault", StringComparison.Ordinal))
+            .Where(IsStartupFaultEvent)
             .ToArray();
         Assert.Equal(
-            [RuntimeLogLevel.Warn, RuntimeLogLevel.Warn, RuntimeLogLevel.Warn, RuntimeLogLevel.Error],
+            [LogLevel.Warning, LogLevel.Warning, LogLevel.Warning, LogLevel.Error],
             faultEvents.Select(entry => entry.Level).ToArray());
+        Assert.Equal(
+            ["generation.startup-fault", "generation.startup-fault", "generation.startup-fault", "generation.startup-fault.exhausted"],
+            [.. faultEvents.Select(entry => entry.Name)]);
         Assert.Equal("1/3,2/3,3/3,4/3", string.Join(',',
-            faultEvents.Select(entry => CaptureRunnerHarness.FieldValue(entry.Fields, "attempt"))));
-        Assert.All(faultEvents, entry => Assert.Equal("87", CaptureRunnerHarness.FieldValue(entry.Fields, "nativeError")));
+            faultEvents.Select(entry => CaptureRunnerHarness.FieldValue(entry.Fields, "Attempt"))));
+        Assert.All(faultEvents, entry => Assert.Equal("87", CaptureRunnerHarness.FieldValue(entry.Fields, "NativeError")));
     }
 
     [Fact]
@@ -323,7 +325,7 @@ public sealed class LayeredCaptureRunnerRefreshTests
         Assert.Single(harness.Generations.Generations);
         Assert.Equal(1, harness.Generation(0).DisposeCount);
         Assert.Equal(1, harness.DurableDisposeCount);
-        Assert.DoesNotContain(harness.Logger.Events, entry => string.Equals(entry.Name, "generation.startup-fault", StringComparison.Ordinal));
+        Assert.DoesNotContain(harness.Logger.Events, IsStartupFaultEvent);
     }
 
     [Fact]
@@ -341,7 +343,7 @@ public sealed class LayeredCaptureRunnerRefreshTests
         Assert.Equal(87, thrown.NativeErrorCode);
         Assert.Equal(1, harness.Generation(0).DisposeCount);
         Assert.Equal(1, harness.DurableDisposeCount);
-        Assert.DoesNotContain(harness.Logger.Events, entry => string.Equals(entry.Name, "generation.startup-fault", StringComparison.Ordinal));
+        Assert.DoesNotContain(harness.Logger.Events, IsStartupFaultEvent);
     }
 
     [Fact]
@@ -375,11 +377,11 @@ public sealed class LayeredCaptureRunnerRefreshTests
         Assert.Equal(1, harness.Generation(0).DisposeCount);
         Assert.Equal(0, harness.DurableDisposeCount);
         var refresh = harness.RefreshEvents[^1];
-        Assert.Null(CaptureRunnerHarness.FieldValue(refresh, "forced"));
-        Assert.Equal("id-a=true", CaptureRunnerHarness.FieldValue(refresh, "degraded"));
+        Assert.Null(CaptureRunnerHarness.FieldValue(refresh, "Forced"));
+        Assert.Equal("id-a=true", CaptureRunnerHarness.FieldValue(refresh, "Degraded"));
         Assert.Single(harness.Logger.Events, entry =>
-            string.Equals(entry.Name, "generation.startup-fault", StringComparison.Ordinal)
-            && string.Equals(CaptureRunnerHarness.FieldValue(entry.Fields, "attempt"), "1/3", StringComparison.Ordinal));
+            IsAbsorbedStartupFault(entry)
+            && string.Equals(CaptureRunnerHarness.FieldValue(entry.Fields, "Attempt"), "1/3", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -410,9 +412,15 @@ public sealed class LayeredCaptureRunnerRefreshTests
         Assert.Equal(0, harness.DurableDisposeCount);
         Assert.Equal("1/3,1/3", string.Join(',',
             harness.Logger.Events
-                .Where(entry => string.Equals(entry.Name, "generation.startup-fault", StringComparison.Ordinal))
-                .Select(entry => CaptureRunnerHarness.FieldValue(entry.Fields, "attempt"))));
+                .Where(IsAbsorbedStartupFault)
+                .Select(entry => CaptureRunnerHarness.FieldValue(entry.Fields, "Attempt"))));
     }
+
+    private static bool IsStartupFaultEvent(RecordedEvent entry) =>
+        entry.Name.StartsWith("generation.startup-fault", StringComparison.Ordinal);
+
+    private static bool IsAbsorbedStartupFault(RecordedEvent entry) =>
+        string.Equals(entry.Name, "generation.startup-fault", StringComparison.Ordinal) && entry.Level == LogLevel.Warning;
 
     /// <summary>A materialized pass packet for one (adapter handle, direction) — the shape a pump hands the executor after a rewrite consumer materialized the lease.</summary>
     private static CapturedFlowPacket PassPacket(nint adapterHandle, bool isOnSend)

@@ -1,9 +1,9 @@
 using System.ComponentModel;
 using System.Diagnostics;
-using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Protocols;
+using WinForward.Runtime.Logging;
 
 namespace WinForward.Runtime.TcpRedirect;
 
@@ -85,7 +85,7 @@ public sealed partial class TcpProxyCoordinator
         if (!inPlace && !deferred) buffer.Dispose();
     }
 
-    private bool TryDeferRedirectFrame(CapturedFlowPacket packet, NdisPacketBuffer buffer, bool rented, TcpRedirectAssociation association, bool towardMstcp, nint adapterHandle, string injectedEventName)
+    private bool TryDeferRedirectFrame(CapturedFlowPacket packet, NdisPacketBuffer buffer, bool rented, TcpRedirectAssociation association, bool towardMstcp, nint adapterHandle)
     {
         if (!IsPumpOwned(packet)) return false;
         // A lane is only ever drained by the pump it is keyed on, so a cross-adapter target (a
@@ -99,9 +99,18 @@ public sealed partial class TcpProxyCoordinator
             LogRedirectOverflow(adapterHandle, towardMstcp);
             return false;
         }
-        TcpRedirectLogging.LogTrace(_logger, injectedEventName, packet, association, "batched");
         return true;
     }
+
+    private void LogRedirectFrameInjected(CapturedFlowPacket packet, TcpRedirectAssociation association, string? reason) =>
+        TcpRedirectLog.TcpRedirectInjected(
+            _logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration,
+            association.Generation, packet.Context.Key.Local, packet.Context.Key.Remote, reason);
+
+    private void LogReverseFrameInjected(CapturedFlowPacket packet, TcpRedirectAssociation association, string? reason) =>
+        TcpRedirectLog.TcpReverseInjected(
+            _logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration,
+            association.Generation, packet.Context.Key.Local, packet.Context.Key.Remote, reason);
 
     /// <summary>
     /// The lane-overflow warn: a frame fell back to the immediate single send because the lane
@@ -112,13 +121,11 @@ public sealed partial class TcpProxyCoordinator
     /// </summary>
     private void LogRedirectOverflow(nint adapterHandle, bool towardMstcp)
     {
-        if (!_redirectOverflowWarn.ShouldEmit() || !_logger.IsEnabled(RuntimeLogLevel.Warn)) return;
-        _logger.Event(RuntimeLogLevel.Warn, "tcp.redirect.deferred-overflow",
-            new("reason", "laneCap"),
-            new("adapterHandle", (long)adapterHandle),
-            new("direction", towardMstcp ? "mstcp" : "adapter"),
-            new("laneCapacity", RedirectInjectionLanes.LaneTableCapacity),
-            new("framesPerLane", RedirectInjectionLanes.LaneFrameCapacity));
+        if (!_redirectOverflowWarn.ShouldEmit()) return;
+        var direction = towardMstcp ? "mstcp" : "adapter";
+        var laneCapacity = RedirectInjectionLanes.LaneTableCapacity;
+        var framesPerLane = RedirectInjectionLanes.LaneFrameCapacity;
+        TcpRedirectLog.TcpRedirectDeferredOverflow(_logger, "laneCap", adapterHandle, direction, laneCapacity, framesPerLane);
     }
 
     /// <summary>
@@ -201,16 +208,11 @@ public sealed partial class TcpProxyCoordinator
     {
         try
         {
-            if (_redirectDeferredFailedWarn.ShouldEmit() && _logger.IsEnabled(RuntimeLogLevel.Warn))
+            if (_redirectDeferredFailedWarn.ShouldEmit())
             {
-                _logger.Event(RuntimeLogLevel.Warn, "tcp.redirect.deferred-failed",
-                    new("reason", "injectionFailure"),
-                    new("nativeError", (exception as Win32Exception)?.NativeErrorCode),
-                    new("error", exception.GetType().Name),
-                    new("adapterHandle", (long)adapterHandle),
-                    new("towardMstcp", towardMstcp),
-                    new("source", association.OriginalKey.Local),
-                    new("destination", association.OriginalKey.Remote));
+                var nativeError = (exception as Win32Exception)?.NativeErrorCode;
+                var error = exception.GetType().Name;
+                TcpRedirectLog.TcpRedirectDeferredFailed(_logger, "injectionFailure", nativeError, error, adapterHandle, towardMstcp, association.OriginalKey.Local, association.OriginalKey.Remote);
             }
 #pragma warning disable VSTHRD002, CA2012 // Deliberate: this flush runs on the pump thread, which already blocks on a pending handler the same way (NdisCapturePump.InvokeHandler); the ValueTask is produced by an async method (task-backed) and is consumed exactly once here, so blocking on it is the documented safe shape and the lane must not release its rentals before the cold teardown tail completes.
             _clientReset.HandleInjectionFailureAsync(association, adapterHandle, towardMstcp, exception).GetAwaiter().GetResult();
@@ -218,7 +220,9 @@ public sealed partial class TcpProxyCoordinator
         }
         catch (Exception tailException)
         {
-            _logger.Warn($"TCP redirect deferred-injection failure handling faulted ({tailException.GetType().Name}: {tailException.Message}); the lane keeps draining.");
+            var error = tailException.GetType().Name;
+            var detail = tailException.Message;
+            TcpRedirectLog.TcpRedirectDeferredFailureTailFaulted(_logger, error, detail);
         }
     }
 
@@ -230,14 +234,11 @@ public sealed partial class TcpProxyCoordinator
     /// </summary>
     private void LogRedirectBatchFailed(nint adapterHandle, bool towardMstcp, int frames, Exception exception)
     {
-        if (!_redirectBatchFailedWarn.ShouldEmit() || !_logger.IsEnabled(RuntimeLogLevel.Warn)) return;
-        _logger.Event(RuntimeLogLevel.Warn, "tcp.redirect.batch-failed",
-            new("reason", "batchSend"),
-            new("nativeError", (exception as Win32Exception)?.NativeErrorCode),
-            new("error", exception.GetType().Name),
-            new("adapterHandle", (long)adapterHandle),
-            new("direction", towardMstcp ? "mstcp" : "adapter"),
-            new("frames", frames));
+        if (!_redirectBatchFailedWarn.ShouldEmit()) return;
+        var direction = towardMstcp ? "mstcp" : "adapter";
+        var nativeError = (exception as Win32Exception)?.NativeErrorCode;
+        var error = exception.GetType().Name;
+        TcpRedirectLog.TcpRedirectBatchFailed(_logger, "batchSend", nativeError, error, adapterHandle, direction, frames);
     }
 
 #pragma warning disable RCS1229 // Deliberate non-async warm entry (hot-path.md #3): the per-packet path must not pay an async state machine; synchronous failures before the returned ValueTask are part of the warm contract (cold tails live in async helpers).
@@ -261,8 +262,12 @@ public sealed partial class TcpProxyCoordinator
                 return FailAssociationAndBlockAsync(association);
             }
             buffer.CompleteFrame(frame.Length, NdisApiAbi.PacketFlagOnReceive, adapterHandle);
-            deferred = TryDeferRedirectFrame(packet, buffer, rented: !inPlace, association, towardMstcp: true, adapterHandle, "tcp.redirect.injected");
-            if (deferred) return ValueTask.FromResult(TcpRedirectOutcome.Injected);
+            deferred = TryDeferRedirectFrame(packet, buffer, rented: !inPlace, association, towardMstcp: true, adapterHandle);
+            if (deferred)
+            {
+                LogRedirectFrameInjected(packet, association, "batched");
+                return ValueTask.FromResult(TcpRedirectOutcome.Injected);
+            }
             try
             {
                 _injector.Inject(buffer, towardMstcp: true, adapterHandle, cancellationToken);
@@ -280,7 +285,7 @@ public sealed partial class TcpProxyCoordinator
             {
                 return HandleInjectionFailureAndBlockAsync(association, adapterHandle, towardMstcp: true, exception);
             }
-            TcpRedirectLogging.LogTrace(_logger, "tcp.redirect.injected", packet, association);
+            LogRedirectFrameInjected(packet, association, reason: null);
             return ValueTask.FromResult(TcpRedirectOutcome.Injected);
         }
         finally
@@ -333,10 +338,13 @@ public sealed partial class TcpProxyCoordinator
             // origin handle would otherwise be committed to a lane and fail only at flush time.
             if (!towardMstcp && targetHandle == 0) return FailAssociationAndBlockAsync(association);
             buffer.CompleteFrame(frame.Length, directionFlags, targetHandle);
-            deferred = TryDeferRedirectFrame(packet, buffer, rented: !inPlace, association, towardMstcp, targetHandle, "tcp.reverse.injected");
-            return deferred
-                ? ValueTask.FromResult(TcpRedirectOutcome.Injected)
-                : InjectReverseFrameAsync(packet, association, buffer, towardMstcp, targetHandle, cancellationToken);
+            deferred = TryDeferRedirectFrame(packet, buffer, rented: !inPlace, association, towardMstcp, targetHandle);
+            if (deferred)
+            {
+                LogReverseFrameInjected(packet, association, "batched");
+                return ValueTask.FromResult(TcpRedirectOutcome.Injected);
+            }
+            return InjectReverseFrameAsync(packet, association, buffer, towardMstcp, targetHandle, cancellationToken);
         }
         finally
         {
@@ -373,7 +381,7 @@ public sealed partial class TcpProxyCoordinator
             return HandleInjectionFailureAndBlockAsync(association, targetHandle, towardMstcp, exception);
         }
 
-        TcpRedirectLogging.LogTrace(_logger, "tcp.reverse.injected", packet, association);
+        LogReverseFrameInjected(packet, association, reason: null);
         return ValueTask.FromResult(TcpRedirectOutcome.Injected);
     }
 }

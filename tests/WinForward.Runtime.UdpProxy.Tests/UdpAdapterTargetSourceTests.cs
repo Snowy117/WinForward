@@ -1,6 +1,6 @@
 using System.Net;
 using System.Runtime.Versioning;
-using WinForward.Configuration;
+using Microsoft.Extensions.Logging;
 using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.TestSupport;
@@ -120,7 +120,7 @@ public sealed class UdpAdapterTargetSourceTests
     public async Task ForwardedFlowDropsFailClosedWhenAdapterLeavesTheSnapshot()
     {
         var reinjector = new FakeReinjector();
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var source = new UdpAdapterTargetSource(
             FlowBuilders.Slots,
             new UdpAdapterTarget(7, s_macA),
@@ -135,7 +135,7 @@ public sealed class UdpAdapterTargetSourceTests
 
         Assert.Equal(0, reinjector.ToMstcpCount);
         Assert.Equal(0, reinjector.ToAdapterCount);
-        Assert.Single(logger.Events, e => e.Level == RuntimeLogLevel.Warn && string.Equals(e.Name, "udp.reinject.drop", StringComparison.Ordinal));
+        Assert.Single(logger.Events, e => e.Level == LogLevel.Warning && string.Equals(e.Name, "udp.reinject.drop", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -143,7 +143,7 @@ public sealed class UdpAdapterTargetSourceTests
     public async Task HostFlowWithoutHostTargetIsDroppedFailClosed()
     {
         var reinjector = new FakeReinjector();
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var sink = new UdpResponseReinjector(reinjector, new UdpAdapterTargetSource(), logger: logger);
         var client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000);
         var server = Endpoint.From(IPAddress.Parse("192.0.2.53"), 53);
@@ -154,7 +154,7 @@ public sealed class UdpAdapterTargetSourceTests
 
         Assert.Equal(0, reinjector.ToMstcpCount);
         Assert.Equal(0, reinjector.ToAdapterCount);
-        Assert.Single(logger.Events, e => e.Level == RuntimeLogLevel.Warn && string.Equals(e.Name, "udp.reinject.drop", StringComparison.Ordinal));
+        Assert.Single(logger.Events, e => e.Level == LogLevel.Warning && string.Equals(e.Name, "udp.reinject.drop", StringComparison.Ordinal));
     }
 
     [Fact]

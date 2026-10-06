@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Net;
 using System.Runtime.Versioning;
+using Microsoft.Extensions.Logging;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
@@ -249,7 +250,7 @@ public sealed class UdpRelayTests
     public async Task HostFlowWithUnresolvedOriginAdapterUsesFallbackAndWarns()
     {
         var reinjector = new FakeReinjector();
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         const nint fallbackHandle = 7;
         var sink = new UdpResponseReinjector(reinjector, new UdpAdapterTargetSource(FlowBuilders.Slots, new UdpAdapterTarget(fallbackHandle, s_macA)), logger: logger);
         var adapterSlot = FlowBuilders.SlotOf("missing-wlan", 3);
@@ -265,8 +266,8 @@ public sealed class UdpRelayTests
         Assert.Equal(fallbackHandle, reinjector.LastAdapterHandle);
         Assert.True(reinjector.LastFrame!.AsSpan(0, 6).SequenceEqual(s_macA));
         Assert.True(reinjector.LastFrame!.AsSpan(6, 6).SequenceEqual(s_macA));
-        var (_, _, fields) = Assert.Single(logger.Events, e => e.Level == RuntimeLogLevel.Warn && string.Equals(e.Name, "udp.reinject.unresolved", StringComparison.Ordinal));
-        Assert.Contains(fields, field => string.Equals(field.Key, "mapAdapters", StringComparison.Ordinal));
+        var (_, _, fields) = Assert.Single(logger.Events, e => e.Level == LogLevel.Warning && string.Equals(e.Name, "udp.reinject.unresolved", StringComparison.Ordinal));
+        Assert.Contains(fields, field => string.Equals(field.Key, "MapAdapters", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -312,7 +313,7 @@ public sealed class UdpRelayTests
         // (host) adapter where the VM could never receive it.
         var reinjector = new FakeReinjector();
         // Map intentionally omits "veth-1" so the origin adapter cannot be resolved.
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var sink = new UdpResponseReinjector(reinjector, new UdpAdapterTargetSource(FlowBuilders.Slots, new UdpAdapterTarget(7, s_macA)), logger: logger);
         var adapterSlot = FlowBuilders.SlotOf("veth-1", 3);
         var client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000);
@@ -325,8 +326,8 @@ public sealed class UdpRelayTests
         // missing-origin is surfaced via a log rather than silently dropped (H2).
         Assert.Equal(0, reinjector.ToMstcpCount);
         Assert.Equal(0, reinjector.ToAdapterCount);
-        var (_, _, fields) = Assert.Single(logger.Events, e => e.Level == RuntimeLogLevel.Warn && string.Equals(e.Name, "udp.reinject.drop", StringComparison.Ordinal));
-        Assert.Contains(fields, field => string.Equals(field.Key, "originKind", StringComparison.Ordinal) && Equals(field.Value, FlowOriginKind.Forwarded));
+        var (_, _, fields) = Assert.Single(logger.Events, e => e.Level == LogLevel.Warning && string.Equals(e.Name, "udp.reinject.drop", StringComparison.Ordinal));
+        Assert.Contains(fields, field => string.Equals(field.Key, "OriginKind", StringComparison.Ordinal) && Equals(field.Value, FlowOriginKind.Forwarded));
     }
 
     [Theory]
@@ -344,7 +345,7 @@ public sealed class UdpRelayTests
         {
             [FlowBuilders.SlotOf("veth-1", 3)] = new(originHandle, s_macB),
         };
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var sink = new UdpResponseReinjector(reinjector, new UdpAdapterTargetSource(FlowBuilders.Slots, new UdpAdapterTarget(7, s_macA), adapters), logger: logger);
         var adapterSlot = FlowBuilders.SlotOf("veth-1", 3);
         var client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000);

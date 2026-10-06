@@ -1,6 +1,7 @@
 using System.Runtime.ExceptionServices;
 using WinForward.Configuration;
 using WinForward.Core;
+using WinForward.Runtime.Logging;
 
 namespace WinForward.Runtime.UdpProxy;
 
@@ -63,7 +64,7 @@ public sealed partial class UdpProxyCoordinator
             var now = _timeProvider.GetUtcNow();
             if (_cooldowns.TryHit(flow, now))
             {
-                if (_logger.IsEnabled(RuntimeLogLevel.Trace)) UdpProxyLogging.LogTrace(_logger, "udp.setup.cooldown", flow, new RuntimeLogField("reason", "cooldown"));
+                UdpProxyLog.UdpSetupCooldown(_logger, flow.Protocol, flow.Local, flow.Remote, "cooldown");
                 return ValueTask.FromResult(false);
             }
 
@@ -72,8 +73,8 @@ public sealed partial class UdpProxyCoordinator
                 if (_sessions.Count >= Capacity)
                 {
                     RuntimeCounters.Shared.Increment(RuntimeCounters.UdpCapacityRejections);
-                    if (_logger.IsEnabled(RuntimeLogLevel.Trace)) UdpProxyLogging.LogTrace(_logger, "udp.session.rejected", flow, new RuntimeLogField("reason", "capacity"));
-                    if (_capacityRejectionLog.ShouldEmit()) UdpProxyLogging.LogCapacityRejection(_logger, flow, Capacity);
+                    UdpProxyLog.UdpSessionRejected(_logger, flow.Protocol, flow.Local, flow.Remote, "capacity");
+                    if (_capacityRejectionLog.ShouldEmit()) UdpProxyLog.UdpSessionCapacityBlock(_logger, flow.Protocol, flow.Local, flow.Remote, "capacity", Capacity);
                     return ValueTask.FromResult(false);
                 }
 
@@ -88,7 +89,7 @@ public sealed partial class UdpProxyCoordinator
                 if (!ScheduleSessionSetup(flow, target, flowGeneration, clientMac, slot))
                 {
                     RuntimeCounters.Shared.Increment(RuntimeCounters.UdpSetupRejections);
-                    if (_logger.IsEnabled(RuntimeLogLevel.Trace)) UdpProxyLogging.LogTrace(_logger, "udp.session.rejected", flow, new RuntimeLogField("reason", "setupRing"));
+                    UdpProxyLog.UdpSessionRejected(_logger, flow.Protocol, flow.Local, flow.Remote, "setupRing");
                     return ValueTask.FromResult(false);
                 }
                 _sessions.Add(flow, slot);
@@ -184,7 +185,7 @@ public sealed partial class UdpProxyCoordinator
     private bool DropSessionUnavailable(FlowKey flow)
     {
         RuntimeCounters.Shared.Increment(RuntimeCounters.UdpFailClosedDrop);
-        if (_sessionUnavailableDropLog.ShouldEmit()) UdpProxyLogging.LogSessionUnavailableDrop(_logger, flow);
+        if (_sessionUnavailableDropLog.ShouldEmit()) UdpProxyLog.UdpSendDropped(_logger, flow.Protocol, flow.Local, flow.Remote, "sessionUnavailable");
         return false;
     }
 
@@ -221,7 +222,14 @@ public sealed partial class UdpProxyCoordinator
 
     private void LogSpanDatagramSent(FlowKey flow, UdpProxySession session, long packetSequence, int bytes)
     {
-        if (!_logger.IsEnabled(RuntimeLogLevel.Trace)) return;
-        UdpProxyLogging.LogTrace(_logger, "udp.packet.sent", flow, new RuntimeLogField("packet", packetSequence == 0 ? null : packetSequence), new RuntimeLogField("flow", session.FlowGeneration == 0 ? null : session.FlowGeneration), new RuntimeLogField("bytes", bytes), new RuntimeLogField("udpAssociation", session.Association.Generation));
+        UdpProxyLog.UdpPacketSent(
+            _logger,
+            flow.Protocol,
+            flow.Local,
+            flow.Remote,
+            packetSequence == 0 ? null : packetSequence,
+            session.FlowGeneration == 0 ? null : session.FlowGeneration,
+            bytes,
+            session.Association.Generation);
     }
 }

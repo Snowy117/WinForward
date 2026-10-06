@@ -1,5 +1,6 @@
 using System.Net;
 using System.Reflection;
+using Microsoft.Extensions.Logging.Abstractions;
 using WinForward.Core;
 using WinForward.TestSupport;
 using Xunit;
@@ -207,7 +208,7 @@ public sealed class UdpProxySessionTests
             MacAddress.Invalid,
             time,
             (_, now) => propagationStamps.Add(now),
-            NullRuntimeLogger.Instance,
+            NullLogger.Instance,
             s_receiveWindowPool,
             1537,
             CancellationToken.None,

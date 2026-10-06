@@ -1,6 +1,9 @@
 using System.Numerics;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using WinForward.Configuration;
 using WinForward.Core;
+using WinForward.Runtime.Logging;
 
 namespace WinForward.Runtime.UdpProxy;
 
@@ -42,7 +45,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     private readonly QuiescenceScope _scope = new();
     private readonly TimeProvider _timeProvider;
     private readonly Func<ValueTask>? _beforeExpiryRecheck;
-    private readonly IRuntimeLogger _logger;
+    private readonly ILogger _logger;
     private int _disposeStarted;
 
     /// <summary>Rate limit for the deprecated-session send drop diagnostic (one line per window).</summary>
@@ -89,7 +92,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
         _timeProvider = timeProvider;
         ActivityClock = options.ActivityClock ?? new ActivityBucketClock(timeProvider);
         _beforeExpiryRecheck = options.BeforeExpiryRecheck;
-        _logger = options.Logger ?? NullRuntimeLogger.Instance;
+        _logger = options.Logger ?? NullLogger.Instance;
         _budget = new UdpSetupQueueBudget(setupQueueGlobalByteBudget, _logger, _timeProvider);
         _setupQueuePool = setupQueuePool;
         _setupExecutor = setupExecutor;
@@ -542,7 +545,9 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
         {
             // Run records the child's fault but cannot log this domain-specific warning (D-C3-9)
             // the record keeps the child observed either way.
-            _logger.Warn($"UDP receive-failure teardown faulted: {exception.GetType().Name}: {exception.Message}");
+            var error = exception.GetType().Name;
+            var detail = exception.Message;
+            UdpProxyLog.UdpReceiveFailureTeardownFaulted(_logger, error, detail);
             throw;
         }
     }
@@ -573,7 +578,8 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
         // unconditional removal keeps the generic reason if it ever did.
         var reason = session.RecordedFault is { } fault ? TeardownReasonFor(fault) : UdpTeardownReason.Fault;
         if (!await _slotHost.RemoveSlotAsync(session.Flow, slot, reason).ConfigureAwait(false)) return;
-        UdpProxyLogging.LogDebug(_logger, "udp.session.closed", session.Flow, session.FlowGeneration, session.Association);
+        var flow = session.Flow;
+        UdpProxyLog.UdpSessionClosed(_logger, session.FlowGeneration == 0 ? null : session.FlowGeneration, session.Association.Generation, flow.Protocol, flow.Local, flow.Remote);
     }
 
     /// <summary>

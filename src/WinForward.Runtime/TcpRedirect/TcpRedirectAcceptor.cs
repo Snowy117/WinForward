@@ -1,4 +1,5 @@
-using WinForward.Configuration;
+using Microsoft.Extensions.Logging;
+using WinForward.Runtime.Logging;
 
 namespace WinForward.Runtime.TcpRedirect;
 
@@ -9,7 +10,7 @@ namespace WinForward.Runtime.TcpRedirect;
 /// from retransmitted SYNs are drained and closed instead of starting a second relay. Transient
 /// accept errors are retried with a bounded delay so a failing loop never spins flat-out.
 /// </summary>
-internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IRuntimeLogger logger, ClientResetInjector clientReset, Func<TcpRedirectSession, ITcpRelay, bool> tryAttachRelay, Func<TcpRedirectSession, ValueTask> tearDownSession)
+internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, ILogger logger, ClientResetInjector clientReset, Func<TcpRedirectSession, ITcpRelay, bool> tryAttachRelay, Func<TcpRedirectSession, ValueTask> tearDownSession)
 {
 
     /// <summary>A short bounded back-off between retries of a transient accept error (L3).</summary>
@@ -40,7 +41,8 @@ internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IR
                 {
                     // L3: a transient accept error is retried after a bounded delay, never a tight
                     // busy-loop. Cancellation and a disposed listener already break out above.
-                    logger.Warn($"TCP redirect accept failed ({acceptEx.GetType().Name}); retrying after a bounded delay.");
+                    var error = acceptEx.GetType().Name;
+                    TcpRedirectLog.TcpRedirectAcceptFailed(logger, error);
                     await BoundedRetryDelayAsync(token).ConfigureAwait(false);
                     continue;
                 }
@@ -72,13 +74,7 @@ internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IR
         {
             if (!accepted.RemoteEndPoint.MatchesPeerIgnoringScope(session.Association.AcceptedPeerEndpoint))
             {
-                if (logger.IsEnabled(RuntimeLogLevel.Warn))
-                {
-                    logger.Event(RuntimeLogLevel.Warn, "tcp.redirect.unrelatedPeer",
-                        new("listener", session.Listener.TranslatedTuple),
-                        new("expected", session.Association.AcceptedPeerEndpoint),
-                        new("actual", accepted.RemoteEndPoint));
-                }
+                TcpRedirectLog.TcpRedirectUnrelatedPeer(logger, session.Listener.TranslatedTuple, session.Association.AcceptedPeerEndpoint, accepted.RemoteEndPoint);
                 await accepted.DisposeAsync().ConfigureAwait(false);
                 return true;
             }
@@ -89,7 +85,15 @@ internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IR
             }
             else
             {
-                TcpRedirectLogging.LogDebug(logger, "tcp.relay.started", session, "established");
+                TcpRedirectLog.TcpRelayStarted(
+                    logger,
+                    session.FlowGeneration == 0 ? null : session.FlowGeneration,
+                    session.Association.Generation,
+                    session.Association.OriginalKey.Local,
+                    session.Association.OriginalKey.Remote,
+                    session.Association.TranslatedListenerTuple,
+                    session.Server.Name,
+                    "established");
                 // Both terminal drains own the session's remaining lifetime: the relay-completion
                 // observer runs the teardown, the redundant-accept drain spans until that teardown
                 // disposes the listener. Awaiting both (no discarded tasks) makes session.AcceptLoop
@@ -134,7 +138,7 @@ internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IR
         }
         catch (Exception exception)
         {
-            logger.Warn($"TCP redirect relay disposal after a failed attach failed ({exception.GetType().Name}).");
+            TcpRedirectLog.TcpRedirectRelayDisposalAfterFailedAttach(logger, exception);
         }
 
         try
@@ -143,7 +147,7 @@ internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IR
         }
         catch (Exception exception)
         {
-            logger.Warn($"TCP redirect accepted-connection disposal after a failed attach failed ({exception.GetType().Name}).");
+            TcpRedirectLog.TcpRedirectAcceptedConnectionDisposalFailed(logger, exception);
         }
     }
 
@@ -225,15 +229,23 @@ internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IR
                 }
                 catch (Exception exception)
                 {
-                    logger.Warn($"TCP redirect relay-end client reset failed ({exception.GetType().Name}).");
+                    TcpRedirectLog.TcpRedirectRelayEndResetFailed(logger, exception);
                 }
             }
-            TcpRedirectLogging.LogDebug(logger, "tcp.relay.ended", session, "completed");
+            TcpRedirectLog.TcpRelayEnded(
+                logger,
+                session.FlowGeneration == 0 ? null : session.FlowGeneration,
+                session.Association.Generation,
+                session.Association.OriginalKey.Local,
+                session.Association.OriginalKey.Remote,
+                session.Association.TranslatedListenerTuple,
+                session.Server.Name,
+                "completed");
             await tearDownSession(session).ConfigureAwait(false);
         }
         catch (Exception exception)
         {
-            logger.Warn($"TCP redirect relay completion handling failed ({exception.GetType().Name}).");
+            TcpRedirectLog.TcpRedirectRelayCompletionFailed(logger, exception);
         }
     }
 }

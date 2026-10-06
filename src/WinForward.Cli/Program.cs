@@ -1,10 +1,13 @@
 using System.Globalization;
 using System.Runtime.Versioning;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using WinForward.Cli.Logging;
 using WinForward.Configuration;
 using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.Capture;
+using WinForward.Runtime.Logging;
 using WinForward.Windows;
 
 namespace WinForward.Cli;
@@ -57,7 +60,7 @@ internal static class Program
                 }
                 return 2;
             }
-            return await RunCaptureAsync(configuration!).ConfigureAwait(false);
+            return await RunCaptureAsync(configuration!, configPath).ConfigureAwait(false);
         }
 
         await Console.Error.WriteLineAsync($"Unknown command '{args[0]}'.").ConfigureAwait(false);
@@ -114,49 +117,85 @@ internal static class Program
     }
 
     [SupportedOSPlatform("windows")]
-    private static async Task<int> RunCaptureAsync(ValidatedConfiguration configuration)
+    private static async Task<int> RunCaptureAsync(ValidatedConfiguration configuration, string configPath)
     {
-        var logger = new ConsoleRuntimeLogger(configuration.LogLevel);
+        using var loggerFactory = RuntimeLogging.CreateLoggerFactory(configuration.LogLevel, configuration.LogFormat);
+        var logger = loggerFactory.CreateLogger(typeof(Program).FullName!);
         try
         {
-            logger.Info($"Runtime log level: {configuration.LogLevel.ToString().ToLowerInvariant()}.");
-            foreach (var warning in configuration.Warnings)
-            {
-                logger.Warn($"Configuration warning: {warning}");
-            }
-            return await RunInterceptionAsync(configuration, logger).ConfigureAwait(false);
+            ReportResolvedRun(configuration, configPath, logger);
+            foreach (var warning in configuration.Warnings) StartupLog.ConfigurationWarning(logger, warning.ToString());
+            return await RunInterceptionAsync(configuration, loggerFactory, logger).ConfigureAwait(false);
         }
         catch (DllNotFoundException)
         {
-            logger.Error("NDISAPI unavailable: ndisapi.dll was not found in the application directory.");
+            StartupLog.NdisApiLibraryMissing(logger);
             return 1;
         }
         catch (EntryPointNotFoundException)
         {
-            logger.Error("NDISAPI unavailable: ndisapi.dll is missing a required export.");
+            StartupLog.NdisApiExportMissing(logger);
             return 1;
         }
         catch (TypeLoadException)
         {
-            logger.Error("NDISAPI ABI mismatch: the native library is incompatible with this build.");
+            StartupLog.NdisApiAbiMismatch(logger);
             return 1;
         }
         catch (System.ComponentModel.Win32Exception exception)
         {
-            logger.Error($"NDISAPI driver error: {exception.Message}");
+            StartupLog.NdisApiDriverError(logger, exception.Message);
             return 1;
         }
         catch (Exception exception)
         {
-            logger.Error($"Startup failed: {exception.Message}");
+            StartupLog.StartupFailed(logger, exception);
             return 3;
         }
     }
 
+    private static void ReportResolvedRun(ValidatedConfiguration configuration, string configPath, ILogger logger)
+    {
+        var logLevel = LogLevelNames.ToConfigToken(configuration.LogLevel);
+        var logFormat = LogFormatNames.ToConfigToken(RuntimeLogging.ResolveLogFormat(configuration.LogFormat, Console.IsErrorRedirected));
+        var hostRules = configuration.Policy.HostRules.Count;
+        var forwardedRules = configuration.Policy.ForwardedRules.Count;
+        var relayBufferKiB = configuration.UdpRelayReceiveBufferBytes / 1024;
+        var idleSeconds = (int)configuration.UdpSessionIdleTimeout.TotalSeconds;
+        var processPaths = configuration.IncludeProcessPathInLogs ? "included" : "withheld";
+        StartupLog.RunResolved(
+            logger,
+            configPath,
+            logLevel,
+            logFormat,
+            configuration.Targets.Count,
+            hostRules,
+            forwardedRules,
+            configuration.TcpFlowCapacity,
+            configuration.UdpSessionCapacity,
+            relayBufferKiB,
+            idleSeconds,
+            processPaths);
+
+        foreach (var target in configuration.Targets.Values.OrderBy(static target => target.Name, StringComparer.Ordinal))
+        {
+            if (target.Socks5 is { } server)
+            {
+                var endpoint = $"{server.Host}:{server.Port}";
+                var udpTransport = server.UdpOverTcp ? "UDP-over-TCP" : "the native relay";
+                var authentication = server.Username is null ? "none" : "configured";
+                StartupLog.Socks5TargetAvailable(logger, server.Name, endpoint, udpTransport, authentication);
+            }
+            else if (target.Local is { } local)
+            {
+                var endpoint = local.Endpoint.ToString();
+                StartupLog.LocalTargetAvailable(logger, local.Name, endpoint);
+            }
+        }
+    }
+
     [SupportedOSPlatform("windows")]
-#pragma warning disable CA1859 // The private composition chain deliberately types its logger as IRuntimeLogger (the composition seam); narrowing this entry helper cascades through RunCaptureLoopAsync / generation-factory / bundle factories for immeasurable devirtualization gain on cold startup and failure-logging paths.
-    private static async Task<int> RunInterceptionAsync(ValidatedConfiguration configuration, IRuntimeLogger logger)
-#pragma warning restore CA1859
+    private static async Task<int> RunInterceptionAsync(ValidatedConfiguration configuration, ILoggerFactory loggerFactory, ILogger logger)
     {
         using var driver = NdisApiDriver.Open();
         // Startup pre-flight for the exit-code surface (exit 1 selector errors, exit 3 empty
@@ -165,24 +204,24 @@ internal static class Program
         var adapters = EnumerateAdapters(driver);
         if (adapters.Count == 0)
         {
-            logger.Error("No MSTCP-bound adapters are available to capture.");
+            StartupLog.NoCaptureAdapters(logger);
             return 3;
         }
         if (!CaptureAdapterScopeResolver.TryResolve(adapters, configuration.Policy, out var scope, out var scopeErrors))
         {
-            foreach (var error in scopeErrors) logger.Error(error);
+            foreach (var error in scopeErrors) StartupLog.CaptureScopeResolutionFailed(logger, error);
             return 1;
         }
-        logger.Info($"Capture scope: {scope.Count} adapter(s) in tunnel mode.");
+        StartupLog.CaptureScopePreflightResolved(logger, scope.Count);
 
         // Shared by the durable bundle (its failure-reporting sites) and the capture runner
         // (its forced-refresh trigger) — task 09-17 R1-B.
-        var healthMonitor = new InterceptionHealthMonitor(logger);
-        return await RunCaptureLoopAsync(configuration, driver, logger, healthMonitor).ConfigureAwait(false);
+        var healthMonitor = new InterceptionHealthMonitor(loggerFactory.CreateLogger<InterceptionHealthMonitor>());
+        return await RunCaptureLoopAsync(configuration, driver, loggerFactory, logger, healthMonitor).ConfigureAwait(false);
     }
 
     [SupportedOSPlatform("windows")]
-    private static async Task<int> RunCaptureLoopAsync(ValidatedConfiguration configuration, NdisApiDriver driver, IRuntimeLogger logger, InterceptionHealthMonitor healthMonitor)
+    private static async Task<int> RunCaptureLoopAsync(ValidatedConfiguration configuration, NdisApiDriver driver, ILoggerFactory loggerFactory, ILogger logger, InterceptionHealthMonitor healthMonitor)
     {
         var selfTraffic = new SelfTrafficRegistry();
         var reinjector = new NdisPacketReinjector(driver);
@@ -194,7 +233,7 @@ internal static class Program
             using var timerScope = new HighResolutionTimerScope();
             if (!timerScope.IsEnabled)
             {
-                logger.Warn("High-resolution timer resolution was not applied; the empty-queue poll granularity stays at about 15.6 ms instead of about 1 ms.");
+                StartupLog.HighResolutionTimerUnavailable(logger);
             }
 
             WireFramePoolDiagnostics();
@@ -202,7 +241,7 @@ internal static class Program
             // The durable layer survives every adapter-list refresh; the runner disposes it exactly
             // once after the final generation (design §3.6). The local finally only covers failures
             // around the runner itself — bundle disposal is single-flight, so it never runs twice.
-            var bundle = await DurableCaptureBundle.CreateAsync(configuration, reinjector, selfTraffic, logger, healthSignal: healthMonitor).ConfigureAwait(false);
+            var bundle = await DurableCaptureBundle.CreateAsync(configuration, reinjector, selfTraffic, loggerFactory, healthSignal: healthMonitor).ConfigureAwait(false);
             try
             {
                 // The degraded forwarder feeds error 87 into the runner's refresh channel (R3); the
@@ -211,7 +250,7 @@ internal static class Program
                 LayeredCaptureRunner? runnerRef = null;
                 using var watcher = new NdisAdapterListWatcher(driver);
                 var runner = CreateCaptureRunner(
-                    configuration, driver, bundle, logger, healthMonitor, watcher,
+                    configuration, driver, bundle, loggerFactory.CreateLogger<LayeredCaptureRunner>(), healthMonitor, watcher,
                     (adapter, nativeError) =>
                     {
                         // ReSharper disable once AccessToModifiedClosure // One-shot wiring: runnerRef is assigned before RunAsync starts, and the callback can fire only from a generation created inside RunAsync, so every read already sees the assigned runner.
@@ -222,7 +261,7 @@ internal static class Program
 
                 // Observational periodic summary (task 09-17 R2.3); the using disposes it before
                 // the bundle's finally, so its last ticks never observe coordinator teardown.
-                await using var heartbeat = StartHeartbeat(bundle, runner, healthMonitor, logger);
+                await using var heartbeat = StartHeartbeat(bundle, runner, healthMonitor, loggerFactory.CreateLogger<RuntimeHeartbeat>());
 
                 return await RunUntilCancelledAsync(runner, logger).ConfigureAwait(false);
             }
@@ -271,7 +310,7 @@ internal static class Program
         ValidatedConfiguration configuration,
         NdisApiDriver driver,
         DurableCaptureBundle bundle,
-        IRuntimeLogger logger,
+        ILogger logger,
         InterceptionHealthMonitor healthMonitor,
         NdisAdapterListWatcher watcher,
         Func<WindowsAdapter, int, ValueTask> onAdapterDegraded)
@@ -304,7 +343,7 @@ internal static class Program
     /// gathering usage is logged and retried on the next tick.
     /// </summary>
     [SupportedOSPlatform("windows")]
-    private static RuntimeHeartbeat StartHeartbeat(DurableCaptureBundle bundle, LayeredCaptureRunner runner, InterceptionHealthMonitor healthMonitor, IRuntimeLogger logger)
+    private static RuntimeHeartbeat StartHeartbeat(DurableCaptureBundle bundle, LayeredCaptureRunner runner, InterceptionHealthMonitor healthMonitor, ILogger logger)
     {
         var heartbeat = new RuntimeHeartbeat(
             logger,
@@ -320,7 +359,7 @@ internal static class Program
     }
 
     [SupportedOSPlatform("windows")]
-    private static async Task<int> RunUntilCancelledAsync(LayeredCaptureRunner runner, IRuntimeLogger logger)
+    private static async Task<int> RunUntilCancelledAsync(LayeredCaptureRunner runner, ILogger logger)
     {
         using var shutdown = new CancellationTokenSource();
         void OnCancel(object? sender, ConsoleCancelEventArgs eventArgs)
@@ -333,19 +372,19 @@ internal static class Program
         Console.CancelKeyPress += OnCancel;
         try
         {
-            logger.Info("Interception started. Press Ctrl+C to stop.");
+            StartupLog.InterceptionStarted(logger);
             await runner.RunAsync(shutdown.Token).ConfigureAwait(false);
-            logger.Info("WinForward stopped cleanly.");
+            StartupLog.StoppedCleanly(logger);
             return 0;
         }
         catch (OperationCanceledException)
         {
-            logger.Info("Shutdown requested; restoring adapter modes.");
+            StartupLog.ShutdownRequested(logger);
             return 0;
         }
         catch (Exception exception)
         {
-            logger.Error($"Runtime failure: {exception.Message}");
+            StartupLog.RuntimeFailed(logger, exception);
             return 3;
         }
         finally

@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using Microsoft.Extensions.Logging;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Runtime;
@@ -36,7 +37,7 @@ internal static class TcpRedirectComposer
         ValidatedConfiguration configuration,
         IPacketReinjector reinjector,
         SelfTrafficRegistry selfTraffic,
-        IRuntimeLogger logger,
+        ILogger logger,
         IInterceptionHealthSignal? healthSignal,
         TcpRedirectComposition composition)
         => new(

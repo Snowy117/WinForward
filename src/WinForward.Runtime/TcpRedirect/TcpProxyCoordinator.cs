@@ -1,8 +1,11 @@
 using System.Runtime.ExceptionServices;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Protocols;
+using WinForward.Runtime.Logging;
 using WinForward.Windows;
 
 namespace WinForward.Runtime.TcpRedirect;
@@ -30,7 +33,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
     private readonly NativeBufferPool _synCopyPool;
     private readonly ISetupExecutor _setupExecutor;
     private readonly Func<SetupWorkItem, Task> _setupHandler;
-    private readonly IRuntimeLogger _logger;
+    private readonly ILogger _logger;
     private readonly TimeProvider _timeProvider;
     private readonly ActivityBucketClock _activityClock;
     private readonly TcpRedirectSessionStore _store;
@@ -78,7 +81,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
         _synCopyPool = synCopyPool;
         _setupExecutor = setupExecutor;
         _setupHandler = SetupPendingAsync;
-        _logger = options.Logger ?? NullRuntimeLogger.Instance;
+        _logger = options.Logger ?? NullLogger.Instance;
         Capacity = capacity;
         _timeProvider = options.TimeProvider;
         _activityClock = options.ActivityClock ?? new ActivityBucketClock(_timeProvider);
@@ -110,11 +113,14 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
             throw new ArgumentException("TCP coordinator accepts only TCP flow keys.", nameof(packet));
         }
 
+        long? packetSequence = packet.PacketSequence == 0 ? null : packet.PacketSequence;
+        long? flowGeneration = packet.FlowGeneration == 0 ? null : packet.FlowGeneration;
+
         // A flow already claimed by a prior SYN reuses its decision: touch the association and
         // re-inject the rewritten SYN toward the listener. Policy is evaluated exactly once.
         if (Table.TryResolveByOriginal(key, _timeProvider.GetUtcNow(), out var existing) && existing is not null)
         {
-            TcpRedirectLogging.LogTrace(_logger, "tcp.redirect.reused", packet, existing);
+            TcpRedirectLog.TcpRedirectReused(_logger, packetSequence, flowGeneration, existing.Generation, key.Local, key.Remote, reason: null);
             return await ReinjectExistingFlowDataAsync(packet, existing, cancellationToken).ConfigureAwait(false);
         }
 
@@ -131,7 +137,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
         // at the client's retransmission rate.
         if (_pendingSyn.IsInSetupCooldown(key, _timeProvider.GetUtcNow()))
         {
-            TcpRedirectLogging.LogTrace(_logger, "tcp.setup.cooldown", packet, association: null, "cooldown");
+            TcpRedirectLog.TcpSetupCooldown(_logger, packetSequence, flowGeneration, tcpAssociation: null, key.Local, key.Remote, "cooldown");
             return TcpRedirectOutcome.Dropped;
         }
 
@@ -141,7 +147,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
         if (_store.SessionCount + _pendingSyn.ActiveCount >= Capacity)
         {
             Interlocked.Increment(ref _capacityRejectionCount);
-            TcpRedirectLogging.LogTrace(_logger, "tcp.redirect.rejected", packet, association: null, "capacity");
+            TcpRedirectLog.TcpRedirectRejected(_logger, packetSequence, flowGeneration, tcpAssociation: null, key.Local, key.Remote, "capacity");
             // The client is still in SYN_SENT: an immediate RST|ACK fails its connect fast
             // (ECONNREFUSED) instead of a 20-60s retransmission timeout, and the per-tuple
             // cooldown keeps the guard amplification-free (S4).
@@ -175,7 +181,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
             // retransmission once the window clears.
             lease.Dispose();
             Interlocked.Increment(ref _capacityRejectionCount);
-            TcpRedirectLogging.LogTrace(_logger, "tcp.setup.pending.dropped", packet, association: null, "pendingBudget");
+            TcpRedirectLog.TcpSetupPendingDropped(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, tcpAssociation: null, key.Local, key.Remote, "pendingBudget");
             return TcpRedirectOutcome.Blocked;
         }
 
@@ -217,7 +223,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
         {
             entry.SetupCompletionSource.TrySetCanceled(item._cancellationToken);
             _pendingSyn.Complete(key, entry, writeCooldown: false, _timeProvider.GetUtcNow());
-            _logger.Warn("TCP setup executor ring is full; blocking the redirect flow.");
+            TcpRedirectLog.TcpSetupExecutorRingFull(_logger);
             return false;
         }
 
@@ -288,8 +294,17 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
                 return false;
             }
 
-            setup.Session.AcceptLoop = _acceptor.RunAcceptLoopAsync(setup.Session);
-            TcpRedirectLogging.LogDebug(_logger, "tcp.redirect.created", setup.Session, "created");
+            var session = setup.Session;
+            session.AcceptLoop = _acceptor.RunAcceptLoopAsync(session);
+            TcpRedirectLog.TcpRedirectCreated(
+                _logger,
+                session.FlowGeneration == 0 ? null : session.FlowGeneration,
+                session.Association.Generation,
+                session.Association.OriginalKey.Local,
+                session.Association.OriginalKey.Remote,
+                session.Association.TranslatedListenerTuple,
+                session.Server.Name,
+                "created");
             return false;
         }
         catch (OperationCanceledException)
@@ -300,7 +315,9 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
         }
         catch (Exception exception)
         {
-            _logger.Warn($"TCP redirect setup failed: {exception.GetType().Name}: {exception.Message}");
+            var error = exception.GetType().Name;
+            var detail = exception.Message;
+            TcpRedirectLog.TcpRedirectSetupFailed(_logger, error, detail);
             return !_store.ShutdownToken.IsCancellationRequested;
         }
     }
@@ -456,7 +473,14 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
         if (!IPFragment.TryReadAddressPair(packet.InspectionSpan, out var source, out var destination)) return TcpRedirectOutcome.NotRelevant;
         if (!Table.TryResolveByAddressPair(source, destination, _timeProvider.GetUtcNow(), out var association) || association is null) return TcpRedirectOutcome.NotRelevant;
 
-        TcpRedirectLogging.LogTrace(_logger, "tcp.redirect.fragment", packet, association, "fragment");
+        TcpRedirectLog.TcpRedirectFragment(
+            _logger,
+            packet.PacketSequence == 0 ? null : packet.PacketSequence,
+            packet.FlowGeneration == 0 ? null : packet.FlowGeneration,
+            association.Generation,
+            packet.Context.Key.Local,
+            packet.Context.Key.Remote,
+            "fragment");
         await _clientReset.HandleFragmentTeardownAsync(association).ConfigureAwait(false);
         return TcpRedirectOutcome.Dropped;
     }

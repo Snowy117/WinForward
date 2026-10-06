@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using WinForward.Core;
 using WinForward.TestSupport;
 using Xunit;
@@ -124,16 +125,16 @@ public sealed class ConfigurationValidationTests
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
         Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
-        Assert.Equal(RuntimeLogLevel.Info, configuration!.LogLevel);
+        Assert.Equal(LogLevel.Information, configuration!.LogLevel);
     }
 
     [Theory]
-    [InlineData("error", RuntimeLogLevel.Error)]
-    [InlineData("WARN", RuntimeLogLevel.Warn)]
-    [InlineData(" Info ", RuntimeLogLevel.Info)]
-    [InlineData("DeBuG", RuntimeLogLevel.Debug)]
-    [InlineData(" trace ", RuntimeLogLevel.Trace)]
-    public void ConfigurationNormalizesLogLevel(string value, RuntimeLogLevel expected)
+    [InlineData("error", LogLevel.Error)]
+    [InlineData("WARN", LogLevel.Warning)]
+    [InlineData(" Info ", LogLevel.Information)]
+    [InlineData("DeBuG", LogLevel.Debug)]
+    [InlineData(" trace ", LogLevel.Trace)]
+    public void ConfigurationNormalizesLogLevel(string value, LogLevel expected)
     {
         var json = $$"""
         {
@@ -178,6 +179,73 @@ public sealed class ConfigurationValidationTests
 
         Assert.False(ConfigurationLoader.TryParse(json, out _, out var diagnostics));
         Assert.Contains(diagnostics, diagnostic => diagnostic.Path.Contains("logLevel", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ConfigurationDefaultsLogFormatToAuto()
+    {
+        const string json = """
+        {
+          "socks5Servers": [],
+          "host": { "fallbackAction": "pass", "rules": [] }
+        }
+        """;
+
+        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
+        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Equal(LogFormat.Auto, configuration!.LogFormat);
+    }
+
+    [Theory]
+    [InlineData("auto", LogFormat.Auto)]
+    [InlineData("SIMPLE", LogFormat.Simple)]
+    [InlineData(" Json ", LogFormat.Json)]
+    public void ConfigurationNormalizesLogFormat(string value, LogFormat expected)
+    {
+        var json = $$"""
+        {
+          "logFormat": "{{value}}",
+          "socks5Servers": [],
+          "host": { "fallbackAction": "pass", "rules": [] }
+        }
+        """;
+
+        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
+        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Equal(expected, configuration!.LogFormat);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("\"\"")]
+    [InlineData("\"colored\"")]
+    [InlineData("\"systemd\"")]
+    public void ConfigurationRejectsInvalidLogFormat(string value)
+    {
+        var json = $$"""
+        {
+          "logFormat": {{value}},
+          "socks5Servers": [],
+          "host": { "fallbackAction": "pass", "rules": [] }
+        }
+        """;
+
+        ConfigurationAssert.Invalid(json, "logFormat");
+    }
+
+    [Fact]
+    public void ConfigurationRejectsWrongLogFormatJsonTypeAtFieldPath()
+    {
+        const string json = """
+        {
+          "logFormat": 3,
+          "socks5Servers": [],
+          "host": { "fallbackAction": "pass", "rules": [] }
+        }
+        """;
+
+        Assert.False(ConfigurationLoader.TryParse(json, out _, out var diagnostics));
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Path.Contains("logFormat", StringComparison.Ordinal));
     }
 
     [Theory]

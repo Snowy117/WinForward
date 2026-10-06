@@ -1,5 +1,7 @@
+using Microsoft.Extensions.Logging;
 using WinForward.Configuration;
 using WinForward.Core;
+using WinForward.Runtime.Logging;
 
 namespace WinForward.Runtime.UdpProxy;
 
@@ -20,7 +22,7 @@ internal sealed class UdpSessionSetup(
     IUdpResponseSink responseSink,
     TimeProvider timeProvider,
     ActivityBucketClock activityClock,
-    IRuntimeLogger logger,
+    ILogger logger,
     NativeBufferPool receiveWindowPool,
     int receiveBufferSize,
     IUdpSessionSlotHost host)
@@ -118,7 +120,9 @@ internal sealed class UdpSessionSetup(
             transport = null;
             host.AttachSession(slot, session);
             session.Start(_receiveFailureHandler);
-            UdpProxyLogging.LogDebug(logger, "udp.session.created", flow, flowGeneration, association, target);
+            var targetKind = TargetKindOf(target);
+            var udpTransport = UdpTransportOf(target);
+            UdpProxyLog.UdpSessionCreated(logger, flowGeneration == 0 ? null : flowGeneration, association.Generation, flow.Protocol, flow.Local, flow.Remote, target.Name, targetKind, udpTransport);
             await FlushSetupQueueAsync(flow, slot, session, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception)
@@ -151,7 +155,8 @@ internal sealed class UdpSessionSetup(
     /// </summary>
     private async Task HandleSetupFailureAsync(FlowKey flow, UdpProxyCoordinator.UdpSessionSlot slot, Exception exception)
     {
-        UdpProxyLogging.LogSetupFailure(logger, flow, exception);
+        var error = exception.GetType().Name;
+        UdpProxyLog.UdpSetupFailed(logger, flow.Protocol, flow.Local, flow.Remote, error);
         var reason = exception switch
         {
             OperationCanceledException => UdpTeardownReason.Shutdown,
@@ -161,9 +166,27 @@ internal sealed class UdpSessionSetup(
         if (reason == UdpTeardownReason.SetupFailure)
         {
             RuntimeCounters.Shared.Increment(RuntimeCounters.UdpSetupFailures);
-            if (_setupFailureLog.ShouldEmit()) UdpProxyLogging.LogSetupFailureWarning(logger, flow, exception);
+            if (_setupFailureLog.ShouldEmit())
+            {
+                var detail = exception.Message;
+                UdpProxyLog.UdpSetupFailureWarning(logger, flow.Local, flow.Remote, error, detail);
+            }
         }
         await host.RemoveSlotAsync(flow, slot, reason).ConfigureAwait(false);
+    }
+
+    /// <summary>The target kind as it appears on the session-lifecycle events.</summary>
+    private static string TargetKindOf(ProxyTarget target) => target.IsLocal ? "local" : "socks5";
+
+    /// <summary>
+    /// The UDP carriage as it appears on the session-lifecycle events, or null for a local target.
+    /// UoT stays a mode of the <c>socks5</c> kind rather than a third kind, so this field is what
+    /// distinguishes it from the native relay.
+    /// </summary>
+    private static string? UdpTransportOf(ProxyTarget target)
+    {
+        if (target.Socks5 is not { } server) return null;
+        return server.UdpOverTcp ? "uot" : "native";
     }
 
     /// <summary>

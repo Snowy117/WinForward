@@ -82,6 +82,7 @@ JSON, rejected on any unknown property. The top level is:
     ]
   },
   "logLevel": "info",
+  "logFormat": "auto",
   "proxyUnavailableAction": "block",
   "processingFailureAction": "block",
   "tcpFlowCapacity": 4096
@@ -165,15 +166,38 @@ JSON, rejected on any unknown property. The top level is:
 - `logLevel`: optional runtime verbosity: `error`, `warn`, `info`, `debug`, or `trace`. Values are
   case-insensitive and surrounding whitespace is ignored; omitted `logLevel` defaults to `info`.
   `info` retains concise lifecycle output, `debug` adds flow and proxy lifecycle events, and `trace`
-  adds per-packet classification, policy, proxy, reinjection, drop, and terminal events. Events are
-  single-line records written to stderr, each prefixed with the local wall-clock timestamp
-  (`yyyy-MM-dd HH:mm:ss.fff`) so field logs can be correlated with external events, such as
-  `2026-08-27 14:03:21.517 [trace] packet.completed packet=42 flow=7 disposition=pass`. Trace can
-  be high volume and is intended for temporary diagnosis. Diagnostic records contain metadata and
-  byte counts only: credentials, authentication traffic, payloads, and raw packet bytes are never
-  logged. Process names are included when attribution succeeds; full process paths are included
-  only when a rule uses a path-based process selector. A host flow's `flow.created` line is written
-  when its deferred attribution claim completes, so it can follow the proxy legs that flow produced.
+  adds per-packet classification, policy, proxy, reinjection, drop, and terminal events. Trace can
+  be high volume and is intended for temporary diagnosis.
+- `logFormat`: optional console record shape: `auto`, `simple`, or `json`. Values are
+  case-insensitive and surrounding whitespace is ignored; omitted `logFormat` defaults to `auto`.
+  `auto` selects `simple` when stderr is an interactive terminal and `json` when it is redirected,
+  so a watched console stays readable while a captured log keeps every structured field. `simple`
+  and `json` force that shape. Runtime logging always goes to **stderr**; stdout carries the
+  `adapters` table and the `validate` confirmation.
+
+  Both formats come from `Microsoft.Extensions.Logging.Console` and every record carries a local
+  wall-clock timestamp with its UTC offset (`+08:00 yyyy-MM-dd HH:mm:ss.fff`), so a log line can be
+  correlated with an external capture. `simple` renders one record as a level abbreviation, the
+  category, the numeric event id, and the message, with an exception's stack trace on the following
+  lines:
+
+  ```
+  +08:00 2026-08-27 14:03:21.517 dbug: WinForward.Runtime.UdpProxy.UdpProxyCoordinator[1518028212]
+        UDP session created for 10.0.0.5:5353 -> 8.8.8.8:53 via main (socks5/uot), association 7.
+  ```
+
+  `json` renders one JSON object per line and keeps the message template's fields under `State`,
+  which is the shape to use when a log is captured for later analysis:
+
+  ```json
+  {"Timestamp":"+08:00 2026-08-27 14:03:21.517","EventId":1518028212,"LogLevel":"Debug","Category":"udp","Message":"UDP session created for 10.0.0.5:5353 -> 8.8.8.8:53 via main (socks5/uot), association 7.","State":{"source":"10.0.0.5:5353","destination":"8.8.8.8:53","target":"main","udpTransport":"uot","udpAssociation":7}}
+  ```
+
+  Diagnostic records contain metadata and byte counts only: credentials, authentication traffic,
+  payloads, and raw packet bytes are never logged. Process names are included when attribution
+  succeeds; full process paths are included only when a rule uses a path-based process selector. A
+  host flow's `flow.created` record is written when its deferred attribution claim completes, so it
+  can follow the proxy legs that flow produced.
 
 **UDP resource shape.** Every live UDP flow owns its own authenticated association: the SOCKS5
 control connection that carried its `UDP ASSOCIATE`, and the relay socket that association

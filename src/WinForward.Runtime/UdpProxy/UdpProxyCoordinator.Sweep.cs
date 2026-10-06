@@ -1,4 +1,5 @@
 using WinForward.Core;
+using WinForward.Runtime.Logging;
 
 namespace WinForward.Runtime.UdpProxy;
 
@@ -75,7 +76,8 @@ public sealed partial class UdpProxyCoordinator
                     session.CancelExpiry();
                     continue;
                 }
-                UdpProxyLogging.LogDebug(_logger, "udp.session.expired", session.Flow, session.FlowGeneration, session.Association);
+                var flow = session.Flow;
+                UdpProxyLog.UdpSessionExpired(_logger, session.FlowGeneration == 0 ? null : session.FlowGeneration, session.Association.Generation, flow.Protocol, flow.Local, flow.Remote);
                 removed++;
             }
 

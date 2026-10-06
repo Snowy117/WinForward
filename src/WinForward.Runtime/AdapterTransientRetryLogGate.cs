@@ -1,4 +1,5 @@
-using WinForward.Configuration;
+using Microsoft.Extensions.Logging;
+using WinForward.Runtime.Logging;
 
 namespace WinForward.Runtime;
 
@@ -11,7 +12,7 @@ namespace WinForward.Runtime;
 /// without real time.
 /// </summary>
 #pragma warning disable MA0182 // Consumed by WinForward.Cli through InternalsVisibleTo (Program.cs wires it into the pump's retry logging) and by AdapterTransientRetryLogGateTests; the analyzer only sees usages inside this assembly and cannot see IVT consumers.
-internal sealed class AdapterTransientRetryLogGate(IRuntimeLogger logger, TimeProvider? timeProvider = null)
+internal sealed class AdapterTransientRetryLogGate(ILogger logger, TimeProvider? timeProvider = null)
 {
     private static readonly long s_windowTicks = TimeSpan.FromSeconds(5).Ticks;
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
@@ -23,11 +24,7 @@ internal sealed class AdapterTransientRetryLogGate(IRuntimeLogger logger, TimePr
         var last = Interlocked.Read(ref _lastLogTicks);
         if (now - last < s_windowTicks) return;
         if (Interlocked.CompareExchange(ref _lastLogTicks, now, last) != last) return;
-        logger.Event(RuntimeLogLevel.Warn, "adapter.retry",
-            new RuntimeLogField("adapter", adapterStableId),
-            new RuntimeLogField("name", adapterFriendlyName),
-            new RuntimeLogField("nativeError", nativeError),
-            new RuntimeLogField("attempt", attempt));
+        RuntimeLog.AdapterRetry(logger, adapterStableId, adapterFriendlyName, nativeError, attempt);
     }
 }
 #pragma warning restore MA0182

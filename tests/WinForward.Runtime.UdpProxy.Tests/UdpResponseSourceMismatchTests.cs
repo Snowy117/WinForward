@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.TestSupport;
@@ -27,8 +29,8 @@ public sealed class UdpResponseSourceMismatchTests
     private static readonly NativeBufferPool s_receiveWindowPool = new(1537);
 
     /// <summary>The shipped default verbosity: the warn is enabled, the trace per-packet event is not.</summary>
-    private static RecordingRuntimeLogger CreateInfoLevelLogger() =>
-        new(static level => level <= RuntimeLogLevel.Info);
+    private static RecordingLogger CreateInfoLevelLogger() =>
+        new(static level => level >= LogLevel.Information);
 
     [Fact]
     public async Task ForeignSourceReplyIsCountedDeliveredAndKeepsTheSessionAlive()
@@ -61,11 +63,11 @@ public sealed class UdpResponseSourceMismatchTests
 
         var warn = Assert.Single(logger.Events);
         Assert.Equal(ForeignSourceEvent, warn.Name);
-        Assert.Equal(RuntimeLogLevel.Warn, warn.Level);
-        Assert.Equal(foreign.ToString(), Field(warn, "source"));
-        Assert.Equal(flow.Remote.ToString(), Field(warn, "destination"));
-        Assert.Equal(nameof(FlowOriginKind.Host), Field(warn, "origin"));
-        Assert.Equal("1", Field(warn, "udpAssociation"));
+        Assert.Equal(LogLevel.Warning, warn.Level);
+        Assert.Equal(foreign.ToString(), Field(warn, "Source"));
+        Assert.Equal(flow.Remote.ToString(), Field(warn, "Destination"));
+        Assert.Equal(nameof(FlowOriginKind.Host), Field(warn, "Origin"));
+        Assert.Equal("1", Field(warn, "UdpAssociation"));
 
         // The session survived the observation: the same relay carries another send.
         Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [2], default, CancellationToken.None));
@@ -237,7 +239,7 @@ public sealed class UdpResponseSourceMismatchTests
         Assert.Equal(1, RuntimeCounters.Shared.Get(RuntimeCounters.UdpResponseSourceMismatch) - before);
     }
 
-    private static UdpProxySession CreateSession(FlowKey flow, FakeTransport transport, IUdpResponseSink sink, IRuntimeLogger? logger = null)
+    private static UdpProxySession CreateSession(FlowKey flow, FakeTransport transport, IUdpResponseSink sink, ILogger? logger = null)
     {
         var loopback = flow.Local.AddressFamily == AddressFamilyKind.IPv4 ? IPAddress.Loopback : IPAddress.IPv6Loopback;
         return new(new UdpProxySessionContext(
@@ -257,13 +259,13 @@ public sealed class UdpResponseSourceMismatchTests
             MacAddress.Invalid,
             TimeProvider.System,
             static (_, _) => { },
-            logger ?? NullRuntimeLogger.Instance,
+            logger ?? NullLogger.Instance,
             s_receiveWindowPool,
             1537,
             CancellationToken.None));
     }
 
-    private static string? Field((RuntimeLogLevel Level, string Name, RuntimeLogField[] Fields) recorded, string key)
+    private static string? Field(RecordedEvent recorded, string key)
     {
         foreach (var field in recorded.Fields)
         {

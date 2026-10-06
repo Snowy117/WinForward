@@ -7,6 +7,12 @@
     <EnableAotAnalyzer>false</EnableAotAnalyzer>
   </PropertyGroup>
   <ItemGroup>
+    <!-- The benchmarks only implement and pass ILogger (the counting probes in BenchmarkShared /
+         StabilityShared); no benchmark builds a LoggerFactory or a console formatter, so the
+         console provider package is not referenced here. -->
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="BenchmarkDotNet" />
   </ItemGroup>
   <ItemGroup>

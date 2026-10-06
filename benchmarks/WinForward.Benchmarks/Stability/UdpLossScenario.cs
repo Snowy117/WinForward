@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
@@ -169,7 +170,7 @@ internal static class UdpLossScenario
         private readonly NativeBufferPool _receiveWindowPool;
         private readonly SetupExecutor _setupExecutor;
 
-        public CoordinatorScope(IUdpResponseSink sink, int capacity, IRuntimeLogger logger)
+        public CoordinatorScope(IUdpResponseSink sink, int capacity, ILogger logger)
         {
             const int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame;
             _setupQueuePool = new NativeBufferPool(maximumFrameSize);

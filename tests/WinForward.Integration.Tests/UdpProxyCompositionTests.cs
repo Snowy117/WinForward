@@ -1,5 +1,6 @@
 using System.Net;
 using System.Runtime.Versioning;
+using Microsoft.Extensions.Logging.Abstractions;
 using WinForward.Cli;
 using WinForward.Configuration;
 using WinForward.Core;
@@ -43,7 +44,7 @@ public sealed class UdpProxyCompositionTests
         await using var coordinator = UdpProxyComposer.Create(
             new FakeReinjector(),
             new SelfTrafficRegistry(),
-            NullRuntimeLogger.Instance,
+            NullLogger.Instance,
             healthSignal: null,
             composition);
 
@@ -70,7 +71,7 @@ public sealed class UdpProxyCompositionTests
         await using var coordinator = UdpProxyComposer.Create(
             new FakeReinjector(),
             new SelfTrafficRegistry(),
-            NullRuntimeLogger.Instance,
+            NullLogger.Instance,
             healthSignal: null,
             composition);
         var target = ProxyTarget.FromServer(server.Server);

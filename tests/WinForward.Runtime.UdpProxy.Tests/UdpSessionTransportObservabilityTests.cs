@@ -24,7 +24,7 @@ public sealed class UdpSessionTransportObservabilityTests
     [Fact]
     public async Task AUotTargetsSessionCreatedEventNamesTheUotCarriageEndToEnd()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var server = new ScriptedSocks5UotServer();
         await using var coordinator = CreateCoordinator(new NoopResponseSink(), logger);
         var flow = CreateFlow("192.0.2.53");
@@ -32,16 +32,16 @@ public sealed class UdpSessionTransportObservabilityTests
         Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(server.Server), [1], default, CancellationToken.None));
 
         var created = await NextSessionCreatedAsync(logger);
-        Assert.Equal("scripted", Field(created, "target"));
-        Assert.Equal("socks5", Field(created, "targetKind"));
-        Assert.Equal("uot", Field(created, "udpTransport"));
+        Assert.Equal("scripted", Field(created, "Target"));
+        Assert.Equal("socks5", Field(created, "TargetKind"));
+        Assert.Equal("uot", Field(created, "UdpTransport"));
     }
 
     [Fact]
     public async Task ANativeTargetsSessionCreatedEventStillNamesTheNativeCarriage()
     {
         using var relay = NewRelaySocket();
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var server = new ScriptedSocks5UdpServer((IPEndPoint)relay.LocalEndPoint!);
         await using var coordinator = CreateCoordinator(new NoopResponseSink(), logger);
         var flow = CreateFlow("192.0.2.53");
@@ -49,18 +49,18 @@ public sealed class UdpSessionTransportObservabilityTests
         Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(server.Server), [1], default, CancellationToken.None));
 
         var created = await NextSessionCreatedAsync(logger);
-        Assert.Equal("scripted", Field(created, "target"));
-        Assert.Equal("socks5", Field(created, "targetKind"));
-        Assert.Equal("native", Field(created, "udpTransport"));
+        Assert.Equal("scripted", Field(created, "Target"));
+        Assert.Equal("socks5", Field(created, "TargetKind"));
+        Assert.Equal("native", Field(created, "UdpTransport"));
     }
 
-    private static UdpProxyCoordinator CreateCoordinator(IUdpResponseSink sink, RecordingRuntimeLogger logger) =>
+    private static UdpProxyCoordinator CreateCoordinator(IUdpResponseSink sink, RecordingLogger logger) =>
         UdpCoordinatorFakes.CreateCoordinator(
             new Socks5UdpTransportFactory(new SelfTrafficRegistry(), UdpFrameBuilder.DefaultMaximumEthernetFrame, logger: logger),
             sink,
             new UdpProxyOptions { Capacity = 16, Logger = logger });
 
-    private static async Task<(RuntimeLogLevel Level, string Name, RuntimeLogField[] Fields)> NextSessionCreatedAsync(RecordingRuntimeLogger logger)
+    private static async Task<RecordedEvent> NextSessionCreatedAsync(RecordingLogger logger)
     {
         await WaitForAsync(() => logger.Events.Any(recorded => string.Equals(recorded.Name, "udp.session.created", StringComparison.Ordinal)));
         return Assert.Single(logger.Events, recorded => string.Equals(recorded.Name, "udp.session.created", StringComparison.Ordinal));
@@ -73,7 +73,7 @@ public sealed class UdpSessionTransportObservabilityTests
         return socket;
     }
 
-    private static string? Field((RuntimeLogLevel Level, string Name, RuntimeLogField[] Fields) recorded, string key)
+    private static string? Field(RecordedEvent recorded, string key)
     {
         foreach (var field in recorded.Fields)
         {

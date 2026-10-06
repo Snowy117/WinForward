@@ -41,7 +41,7 @@ public sealed class LocalTargetDispatchTests
         await using var responder = new LoopbackUdpResponder(static payload => [payload.Span[0], 0x7f]);
         await using var socksServer = new ScriptedSocks5UdpServer(new IPEndPoint(IPAddress.Loopback, 0));
         var configuration = Load(responder.Endpoint, socksServer.ControlEndpoint);
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var selfTraffic = new SelfTrafficRegistry();
         var slots = FlowBuilders.Slots;
         var adapter = new WindowsAdapter("id-a", "Ethernet", "internal-a", AdapterHandle, 1);
@@ -97,8 +97,8 @@ public sealed class LocalTargetDispatchTests
 
         // The trace decides the target kind from the same decision the packet path used.
         var created = Assert.Single(logger.Events, recorded => string.Equals(recorded.Name, "udp.session.created", StringComparison.Ordinal));
-        Assert.Equal("dns-in", Field(created, "target"));
-        Assert.Equal("local", Field(created, "targetKind"));
+        Assert.Equal("dns-in", Field(created, "Target"));
+        Assert.Equal("local", Field(created, "TargetKind"));
     }
 
     [Fact]
@@ -147,7 +147,7 @@ public sealed class LocalTargetDispatchTests
         return configuration;
     }
 
-    private static string? Field((RuntimeLogLevel Level, string Name, RuntimeLogField[] Fields) recorded, string key)
+    private static string? Field(RecordedEvent recorded, string key)
     {
         foreach (var field in recorded.Fields)
         {

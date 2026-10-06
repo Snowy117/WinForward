@@ -134,13 +134,13 @@ public sealed class WindowsAdapterInventoryTests
             [
                 new IPAdapterInfo(guid, "First", [6, 5, 4, 3, 2, 1]),
                 new IPAdapterInfo(guid, "Second", [9, 8, 7, 6, 5, 4]),
-                new IPAdapterInfo("mac-match", "Fallback", mac),
+                new IPAdapterInfo("mac-match", "fallback", mac),
             ]);
 
         var adapter = Assert.Single(inventory.GetCurrentAdapters());
 
         Assert.Equal("mac-match", adapter.StableId);
-        Assert.Equal("Fallback", adapter.FriendlyName);
+        Assert.Equal("fallback", adapter.FriendlyName);
     }
 
     [Fact]

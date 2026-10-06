@@ -1,8 +1,8 @@
 using System.Globalization;
 using System.Net;
+using Microsoft.Extensions.Logging.Abstractions;
 using WinForward.Configuration;
 using WinForward.Core;
-using WinForward.Runtime;
 using WinForward.Runtime.TcpRedirect;
 using WinForward.Runtime.UdpProxy;
 using WinForward.TestSupport;
@@ -445,7 +445,7 @@ public sealed class SweepAllocationGateTests
     private static TcpRedirectSessionStore BuildPopulatedSessionStore(int sessions, DateTimeOffset now)
     {
         var table = new TcpRedirectTable(capacity: sessions + 16);
-        var store = new TcpRedirectSessionStore(table, NullRuntimeLogger.Instance, sessions + 16, TimeProvider.System);
+        var store = new TcpRedirectSessionStore(table, NullLogger.Instance, sessions + 16, TimeProvider.System);
         foreach (var association in BuildClaimedRedirects(table, sessions, now))
         {
             var session = CreateSession(association, new FakeListener(association.TranslatedListenerTuple));

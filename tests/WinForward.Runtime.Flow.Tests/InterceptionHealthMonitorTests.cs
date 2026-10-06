@@ -1,4 +1,4 @@
-using WinForward.Configuration;
+using Microsoft.Extensions.Logging;
 using WinForward.TestSupport;
 using Xunit;
 
@@ -14,7 +14,7 @@ public sealed class InterceptionHealthMonitorTests
 {
     private const string Counter = RuntimeCounters.RelaySetupFailed;
 
-    private sealed record Harness(InterceptionHealthMonitor Monitor, MutableTimeProvider Time, RecordingRuntimeLogger Logger, List<string> Triggers)
+    private sealed record Harness(InterceptionHealthMonitor Monitor, MutableTimeProvider Time, RecordingLogger Logger, List<string> Triggers)
     {
         public int TriggerCount
         {
@@ -26,7 +26,7 @@ public sealed class InterceptionHealthMonitorTests
     {
         var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
         var triggers = new List<string>();
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var monitor = new InterceptionHealthMonitor(
             logger,
             trigger => { lock (triggers) triggers.Add(trigger.Counter); },
@@ -103,8 +103,8 @@ public sealed class InterceptionHealthMonitorTests
         Assert.True(harness.Monitor.IsDegraded);
         var (level, _, fields) = Assert.Single(harness.Logger.Events,
             entry => string.Equals(entry.Name, "runner.forcedRefresh.degraded", StringComparison.Ordinal));
-        Assert.Equal(RuntimeLogLevel.Error, level);
-        Assert.Equal("3", CaptureRunnerHarness.FieldValue(fields, "consecutive"));
+        Assert.Equal(LogLevel.Error, level);
+        Assert.Equal("3", CaptureRunnerHarness.FieldValue(fields, "Consecutive"));
 
         // Degraded spacing replaces the 60 s cooldown: a fresh cluster one minute later stays
         // silent, the same cluster past the 5-minute mark triggers again — with no second error.

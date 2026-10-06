@@ -157,7 +157,7 @@ public sealed class TcpFragmentHandlingTests
         // point), the relay and listener are released, and the flow key hits the grace tombstone.
         // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local // False positive: the lambda parameter is the xUnit assertion predicate's input (it inspects the recorded event name and fields), not a guard — ReSharper models assertion predicates as precondition checks.
         Assert.Contains(harness.Logger.Events, e => string.Equals(e.Name, "tcp.redirect.fragment", StringComparison.Ordinal)
-            && e.Fields.Any(field => string.Equals(field.Key, "reason", StringComparison.Ordinal) && field.Value is "fragment"));
+            && e.Fields.Any(field => string.Equals(field.Key, "Reason", StringComparison.Ordinal) && field.Value is "fragment"));
         Assert.Equal(0, harness.Table.Count);
         Assert.True(harness.RelayFactory.Relay!.IsDisposed);
         Assert.True(harness.ListenerFactory.Listeners[0].IsDisposed);
@@ -197,7 +197,7 @@ public sealed class TcpFragmentHandlingTests
         FakeInjector injector,
         CountingReinjector reinjector,
         NdisPacketActionExecutor executor,
-        RecordingRuntimeLogger logger,
+        RecordingLogger logger,
         FlowDispatcher dispatcher,
         bool forwarded,
         FlowKey hostFlowKey)
@@ -206,7 +206,7 @@ public sealed class TcpFragmentHandlingTests
         public CountingReinjector Reinjector => reinjector;
         public NdisPacketActionExecutor Executor => executor;
         public FakeInjector Injector => injector;
-        public RecordingRuntimeLogger Logger => logger;
+        public RecordingLogger Logger => logger;
         public TcpRedirectTable Table => coordinator.Table;
         public TcpProxyCoordinator Coordinator => coordinator;
         public FakeListenerFactory ListenerFactory => listenerFactory;
@@ -229,7 +229,7 @@ public sealed class TcpFragmentHandlingTests
             var localAddresses = forwarded
                 ? new FakeLocalAddressProvider(s_forwardLocal)
                 : new FakeLocalAddressProvider();
-            var logger = new RecordingRuntimeLogger();
+            var logger = new RecordingLogger();
             var coordinator = CreateCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, localAddresses, new TcpRedirectOptions { Logger = logger });
             var reinjector = new CountingReinjector();
             var executor = new NdisPacketActionExecutor(reinjector, logger, tcpProxy: coordinator);

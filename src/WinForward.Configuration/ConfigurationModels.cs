@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Logging;
 using WinForward.Core;
 
 namespace WinForward.Configuration;
@@ -8,6 +9,9 @@ public sealed partial class WinForwardConfigDto
 {
     [JsonPropertyName("logLevel")]
     public JsonElement LogLevel { get; init; }
+
+    [JsonPropertyName("logFormat")]
+    public JsonElement LogFormat { get; init; }
 
     [JsonPropertyName("socks5Servers")]
     public IReadOnlyList<Socks5ServerDto?>? Socks5Servers { get; init; }
@@ -124,20 +128,19 @@ public sealed record ConfigDiagnostic(string Path, string Message)
     public override string ToString() => $"{Path}: {Message}";
 }
 
-public enum RuntimeLogLevel
+public enum LogFormat
 {
-    Error,
-    Warn,
-    Info,
-    Debug,
-    Trace,
+    Auto,
+    Simple,
+    Json,
 }
 
 public sealed partial record ValidatedConfiguration(
     IReadOnlyDictionary<string, ProxyTarget> Targets,
     PolicySnapshot Policy,
-    RuntimeLogLevel LogLevel = RuntimeLogLevel.Info,
+    LogLevel LogLevel = LogLevel.Information,
     bool IncludeProcessPathInLogs = false,
+    LogFormat LogFormat = LogFormat.Auto,
     int TcpFlowCapacity = ConfigurationLoader.DefaultTcpFlowCapacity,
     int SetupWorkerCount = 0,
     int UdpSessionCapacity = ConfigurationLoader.DefaultUdpSessionCapacity,
@@ -168,6 +171,10 @@ public static partial class ConfigurationLoader
             {
                 diagnostics = [new ConfigDiagnostic("logLevel", "Log level must be a string.")];
             }
+            else if (dto.LogFormat.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.String or JsonValueKind.Null))
+            {
+                diagnostics = [new ConfigDiagnostic("logFormat", "Log format must be a string.")];
+            }
             else
             {
                 diagnostics = [];
@@ -189,6 +196,7 @@ public static partial class ConfigurationLoader
         var warnings = new List<ConfigDiagnostic>();
         var targets = new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase);
         var logLevel = ParseLogLevel(dto, errors);
+        var logFormat = ParseLogFormat(dto, errors);
         var limits = ConfigurationLimits.Parse(dto, errors, warnings);
 
         ConfigurationTargets.Validate(dto, targets, errors, warnings);
@@ -216,6 +224,7 @@ public static partial class ConfigurationLoader
             },
             logLevel,
             ConfigurationRules.AnyProcessSelectorIsAPath(hostRules),
+            logFormat,
             limits.TcpFlowCapacity,
             limits.SetupWorkerCount,
             limits.UdpSessionCapacity,
@@ -228,34 +237,26 @@ public static partial class ConfigurationLoader
         return true;
     }
 
-    private static RuntimeLogLevel ParseLogLevel(WinForwardConfigDto dto, List<ConfigDiagnostic> errors)
+    private static LogLevel ParseLogLevel(WinForwardConfigDto dto, List<ConfigDiagnostic> errors)
     {
-        if (dto.LogLevel.ValueKind == JsonValueKind.Undefined) return RuntimeLogLevel.Info;
-        if (dto.LogLevel.ValueKind != JsonValueKind.String)
-        {
-            errors.Add(new("logLevel", "Log level must be error, warn, info, debug, or trace."));
-            return RuntimeLogLevel.Info;
-        }
-
-        var value = dto.LogLevel.GetString();
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            errors.Add(new("logLevel", "Log level must be error, warn, info, debug, or trace."));
-            return RuntimeLogLevel.Info;
-        }
-
-        var level = value.Trim().ToLowerInvariant() switch
-        {
-            "error" => RuntimeLogLevel.Error,
-            "warn" => RuntimeLogLevel.Warn,
-            "info" => RuntimeLogLevel.Info,
-            "debug" => RuntimeLogLevel.Debug,
-            "trace" => RuntimeLogLevel.Trace,
-            _ => (RuntimeLogLevel?)null,
-        };
-        if (level is not null) return level.Value;
+        if (dto.LogLevel.ValueKind == JsonValueKind.Undefined) return LogLevel.Information;
+        if (LogLevelNames.TryParse(dto.LogLevel.ValueKind == JsonValueKind.String ? dto.LogLevel.GetString() : null, out var level)) return level;
         errors.Add(new("logLevel", "Log level must be error, warn, info, debug, or trace."));
-        return RuntimeLogLevel.Info;
+        return LogLevel.Information;
+    }
+
+    private static LogFormat ParseLogFormat(WinForwardConfigDto dto, List<ConfigDiagnostic> errors)
+    {
+        if (dto.LogFormat.ValueKind == JsonValueKind.Undefined) return LogFormat.Auto;
+        if (LogFormatNames.TryParse(
+            dto.LogFormat.ValueKind == JsonValueKind.String ? dto.LogFormat.GetString() : null,
+            out var format))
+        {
+            return format;
+        }
+
+        errors.Add(new("logFormat", "Log format must be auto, simple, or json."));
+        return LogFormat.Auto;
     }
 
     private static void ValidateFailureActions(WinForwardConfigDto dto, List<ConfigDiagnostic> errors)

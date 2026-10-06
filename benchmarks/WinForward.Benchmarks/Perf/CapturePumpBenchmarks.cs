@@ -2,6 +2,7 @@
 using System.Buffers.Binary;
 using System.Globalization;
 using BenchmarkDotNet.Attributes;
+using Microsoft.Extensions.Logging;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
@@ -32,7 +33,7 @@ public class CapturePumpBenchmarks
             new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Pass));
         var executor = new CountingExecutor();
-        var logger = new ThresholdOnlyLogger(RuntimeLogLevel.Info);
+        var logger = new ThresholdOnlyLogger(LogLevel.Information);
         var dispatcher = new FlowDispatcher(passConfiguration, new NeverOwnedGuard(), executor, logger: logger);
         var processor = new CapturePacketProcessor(dispatcher, new AdapterSlotTable(), logger);
         var adapter = new WindowsAdapter("bench-adapter", "Benchmark Adapter", @"\DEVICE\{00000000-B3NCH-4ARK-0000-000000000000}", 0x55, 1);

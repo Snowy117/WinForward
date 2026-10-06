@@ -21,7 +21,7 @@ public sealed class TcpRedirectSetupTests
     {
         var table = new TcpRedirectTable();
         var selfTraffic = new SelfTrafficRegistry();
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var store = new TcpRedirectSessionStore(table, logger, capacity: 8, TimeProvider.System);
         var listenerFactory = new FakeListenerFactory();
         var setup = new TcpRedirectSetup(

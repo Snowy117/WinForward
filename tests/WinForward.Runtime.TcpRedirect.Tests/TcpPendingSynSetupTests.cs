@@ -267,7 +267,7 @@ public sealed class TcpPendingSynSetupTests
     public async Task CoordinatorCapRejectionFailsClosedWithTrace()
     {
         var listenerFactory = new CancellableGatedListenerFactory();
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var table = new TcpRedirectTable();
         using var setupExecutor = new SetupExecutor();
         await using var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), new FakeInjector(), table, new SelfTrafficRegistry(), new FakeLocalAddressProvider(), new TcpRedirectOptions { Logger = logger }, setupExecutor: setupExecutor);
@@ -283,7 +283,7 @@ public sealed class TcpPendingSynSetupTests
 
         Assert.Equal(TcpRedirectOutcome.Blocked, rejected);
         Assert.Contains(logger.Events, e => string.Equals(e.Name, "tcp.setup.pending.dropped", StringComparison.Ordinal)
-            && e.Fields.Any(field => string.Equals(field.Key, "reason", StringComparison.Ordinal) && field.Value is "pendingBudget"));
+            && e.Fields.Any(field => string.Equals(field.Key, "Reason", StringComparison.Ordinal) && field.Value is "pendingBudget"));
         Assert.Equal(TcpPendingSynSetupIndex.DefaultCapacity, coordinator.Diagnostics.PendingSetupActiveCount);
         // ReSharper disable once DisposeOnUsingVariable // The explicit DisposeAsync is the act under test: teardown must release every pending setup (active count and charged bytes drop to zero, asserted right after it); the await using disposal only backstops assertion-failure paths.
         await coordinator.DisposeAsync();

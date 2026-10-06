@@ -1,4 +1,6 @@
-using WinForward.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using WinForward.Runtime.Logging;
 
 namespace WinForward.Runtime;
 
@@ -44,7 +46,7 @@ public readonly record struct ForcedRefreshTrigger(string Counter, int Consecuti
 /// within the window", while <see cref="RuntimeCounters"/> keeps the true aggregates.
 /// </summary>
 public sealed class InterceptionHealthMonitor(
-    IRuntimeLogger? logger = null,
+    ILogger? logger = null,
     Action<ForcedRefreshTrigger>? onTrigger = null,
     TimeProvider? timeProvider = null,
     IReadOnlyDictionary<string, int>? thresholds = null) : IInterceptionHealthSignal
@@ -69,7 +71,7 @@ public sealed class InterceptionHealthMonitor(
     private readonly Lock _gate = new();
     private readonly Dictionary<string, CounterWindow> _windows = new(StringComparer.Ordinal);
     private readonly IReadOnlyDictionary<string, int> _thresholds = thresholds ?? DefaultThresholds;
-    private readonly IRuntimeLogger _logger = logger ?? NullRuntimeLogger.Instance;
+    private readonly ILogger _logger = logger ?? NullLogger.Instance;
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
     private Action<ForcedRefreshTrigger>? _onTrigger = onTrigger;
     private DateTimeOffset _nextTriggerUtc;
@@ -187,10 +189,7 @@ public sealed class InterceptionHealthMonitor(
 
     private void LogDegraded(int consecutive)
     {
-        if (!_logger.IsEnabled(RuntimeLogLevel.Error)) return;
-        _logger.Event(RuntimeLogLevel.Error, "runner.forcedRefresh.degraded",
-            new("consecutive", consecutive),
-            new("spacingSeconds", (long)s_degradedTriggerSpacing.TotalSeconds));
+        CaptureLog.RunnerForcedRefreshDegraded(_logger, consecutive, (long)s_degradedTriggerSpacing.TotalSeconds);
     }
 
     private CounterWindow GetOrAddWindow(string counter, int threshold)

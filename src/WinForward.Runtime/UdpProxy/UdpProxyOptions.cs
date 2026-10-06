@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using WinForward.Core;
 using WinForward.Protocols;
 using WinForward.Runtime.Socks5;
@@ -14,8 +15,8 @@ namespace WinForward.Runtime.UdpProxy;
 /// </summary>
 public sealed record UdpProxyOptions
 {
-    /// <summary>Receives lifecycle events; null falls back to the no-op runtime logger.</summary>
-    public IRuntimeLogger? Logger { get; init; }
+    /// <summary>Receives lifecycle events; null falls back to the no-op logger.</summary>
+    public ILogger? Logger { get; init; }
 
     /// <summary>The session budget (also the bound on the setup-cooldown index).</summary>
     public int Capacity { get; init; } = 16_384;

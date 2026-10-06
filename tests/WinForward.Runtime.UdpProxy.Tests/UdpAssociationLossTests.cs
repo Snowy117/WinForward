@@ -32,7 +32,7 @@ public sealed class UdpAssociationLossTests
         var server = new ScriptedSocks5UdpServer(relayEndpoint);
         var registry = new SelfTrafficRegistry();
         var controlPort = server.ControlEndpoint.Port;
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(
             new Socks5UdpTransportFactory(registry, UdpFrameBuilder.DefaultMaximumEthernetFrame, logger: logger),
             new NoopResponseSink(),

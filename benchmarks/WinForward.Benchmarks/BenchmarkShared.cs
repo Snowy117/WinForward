@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Globalization;
 using System.Net;
+using Microsoft.Extensions.Logging;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
@@ -228,12 +229,16 @@ internal sealed class CountingExecutor : IPacketActionExecutor
     }
 }
 
-internal sealed class ThresholdOnlyLogger(RuntimeLogLevel threshold) : IRuntimeLogger
+internal sealed class ThresholdOnlyLogger(LogLevel threshold) : ILogger
 {
-    public bool IsEnabled(RuntimeLogLevel level) => level <= threshold;
-    public void Info(string message) { }
-    public void Warn(string message) { }
-    public void Error(string message) { }
+    public bool IsEnabled(LogLevel logLevel) => logLevel != LogLevel.None && logLevel >= threshold;
+
+    public IDisposable? BeginScope<TState>(TState state)
+        where TState : notnull => null;
+
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+    {
+    }
 }
 
 internal sealed class NoopAsyncDisposable : IAsyncDisposable

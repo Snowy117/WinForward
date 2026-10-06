@@ -2,10 +2,13 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Protocols;
+using WinForward.Runtime.Logging;
 using WinForward.Runtime.TcpRedirect;
 using WinForward.Runtime.UdpProxy;
 
@@ -46,7 +49,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     private readonly IPacketReinjector _reinjector;
     private readonly TcpProxyCoordinator? _tcpProxy;
     private readonly UdpProxyCoordinator? _udpProxy;
-    private readonly IRuntimeLogger _logger;
+    private readonly ILogger _logger;
     private readonly IInterceptionHealthSignal _healthSignal;
     private readonly NdisPacketBufferPool _bufferPool;
     private readonly Lock _pendingLaneLock = new();
@@ -58,13 +61,13 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     private long _lastLaneRetireLogTicks;
     private long _immediateSendLaneOverflowCount;
 
-    public NdisPacketActionExecutor(IPacketReinjector reinjector, IRuntimeLogger? logger = null, TcpProxyCoordinator? tcpProxy = null, UdpProxyCoordinator? udpProxy = null, NdisPacketBufferPool? bufferPool = null, IInterceptionHealthSignal? healthSignal = null)
+    public NdisPacketActionExecutor(IPacketReinjector reinjector, ILogger? logger = null, TcpProxyCoordinator? tcpProxy = null, UdpProxyCoordinator? udpProxy = null, NdisPacketBufferPool? bufferPool = null, IInterceptionHealthSignal? healthSignal = null)
     {
         ArgumentNullException.ThrowIfNull(reinjector);
         _reinjector = reinjector;
         _tcpProxy = tcpProxy;
         _udpProxy = udpProxy;
-        _logger = logger ?? NullRuntimeLogger.Instance;
+        _logger = logger ?? NullLogger.Instance;
         _bufferPool = bufferPool ?? NdisPacketBufferPool.Shared;
         _healthSignal = healthSignal ?? InterceptionHealthMonitor.Noop;
     }
@@ -93,7 +96,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
             buffer.SetFrame(packet.Lease.Frame.Span, metadata.DeviceFlags, metadata.AdapterHandle, metadata.Flags);
             AppendPass(packet, buffer, rented: true);
         }
-        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("packet.reinjected", packet, new RuntimeLogField("target", metadata.IsOnSend ? "adapter" : "mstcp"));
+        CaptureLog.PacketReinjected(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, packet.Context.Key.Protocol, metadata.IsOnSend ? "adapter" : "mstcp");
         return ValueTask.CompletedTask;
     }
 
@@ -111,7 +114,9 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
             // rate-limited for operators.
             Interlocked.Increment(ref _immediateSendLaneOverflowCount);
             if (ShouldWarn(ref _lastLaneOverflowLogTicks))
-                _logger.Warn($"Pass batching is degraded to immediate single sends because more than {Volatile.Read(ref _pendingLanes).Length} concurrent (adapter, direction) lanes are active.");
+            {
+                CaptureLog.PassBatchingDegraded(_logger, Volatile.Read(ref _pendingLanes).Length);
+            }
             try
             {
                 if (isOnSend) _reinjector.SendToAdapter(adapterHandle, buffer);
@@ -275,7 +280,12 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
                 lane.Count = 0;
                 if (stale == 0) continue;
                 if (ShouldWarn(ref _lastLaneRetireLogTicks))
-                    _logger.Warn(string.Create(CultureInfo.InvariantCulture, $"A pass lane retired for adapter 0x{lane.AdapterHandle:X} still held {stale} frame(s); the frames are dropped and their rented buffers returned because the iteration-end flush contract was breached."));
+                {
+                    CaptureLog.PassLaneRetiredWithPendingFrames(
+                        _logger,
+                        string.Create(CultureInfo.InvariantCulture, $"0x{lane.AdapterHandle:X}"),
+                        stale);
+                }
                 ReleaseLaneBuffers(lane, stale);
             }
             Volatile.Write(ref _pendingLanes, next);
@@ -350,7 +360,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     public ValueTask BlockAsync(CapturedFlowPacket packet)
     {
         // Consumed: the lease is already completed by the dispatcher; no reinjection occurs.
-        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("packet.dropped", packet, new RuntimeLogField("reason", "policy"));
+        CaptureLog.PacketDropped(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, packet.Context.Key.Protocol, "policy");
         return ValueTask.CompletedTask;
     }
 
@@ -367,7 +377,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         try
         {
             var outcome = await tcpProxy.HandlePacketAsync(packet, server, cancellationToken).ConfigureAwait(false);
-            if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("tcp.packet.handled", packet, new RuntimeLogField("outcome", outcome));
+            CaptureLog.TcpPacketHandled(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, packet.Context.Key.Protocol, outcome);
             // ReSharper disable once ConvertIfStatementToSwitchStatement // Per-outcome commentary and awaits: the if/else-if chain keeps each outcome's rationale attached; a switch would also pull in the enum-coverage inspections (default handling) for a hot-path packet handler.
             if (outcome == TcpRedirectOutcome.Dropped)
             {
@@ -378,7 +388,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
                 // already completed by the dispatcher. The trace follows the packet.dropped family
                 // (BlockAsync logs reason=policy); packet.completed belongs to the dispatcher, which
                 // emits it exactly once per packet.
-                if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("packet.dropped", packet, new RuntimeLogField("reason", "grace"));
+                CaptureLog.PacketDropped(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, packet.Context.Key.Protocol, "grace");
             }
             else if (outcome == TcpRedirectOutcome.SetupPending)
             {
@@ -386,7 +396,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
                 // the background; nothing was injected now and nothing failed. Consume silently
                 // (same family as the grace drop — no pass, no block warning): the background
                 // setup injects the rewritten SYN from the retained copy.
-                if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("packet.dropped", packet, new RuntimeLogField("reason", "setupPending"));
+                CaptureLog.PacketDropped(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, packet.Context.Key.Protocol, "setupPending");
             }
             else if (outcome == TcpRedirectOutcome.NotRelevant)
             {
@@ -409,7 +419,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         }
         catch (Exception ex)
         {
-            _logger.Warn($"TCP proxy handling failed: {ex.GetType().Name}: {ex.Message}");
+            CaptureLog.TcpProxyHandlingFailed(_logger, ex.GetType().Name, ex.Message);
         }
     }
 
@@ -454,7 +464,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         var frame = packet.InspectionSpan;
         if (!IPUdpPacket.TryParseSpan(frame, out var datagram))
         {
-            if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("udp.packet.rejected", packet, new RuntimeLogField("reason", "parse"));
+            CaptureLog.UdpPacketRejected(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, packet.Context.Key.Protocol, "parse");
             LogProxyBlocked("parse");
             return;
         }
@@ -470,7 +480,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
             var sent = await udpProxy.TrySendSpanAsync(packet.Context.Key, target, payload, clientMac, cancellationToken, packet.PacketSequence, packet.FlowGeneration).ConfigureAwait(false);
             if (!sent)
             {
-                if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacket("udp.packet.rejected", packet, new RuntimeLogField("reason", "send"));
+                CaptureLog.UdpPacketRejected(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, packet.Context.Key.Protocol, "send");
                 LogProxyBlocked("send");
             }
         }
@@ -484,18 +494,6 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
         }
     }
 
-    private void LogPacket(string eventName, CapturedFlowPacket packet, params RuntimeLogField[] additional)
-    {
-        if (!_logger.IsEnabled(RuntimeLogLevel.Trace)) return;
-        var fields = new RuntimeLogField[additional.Length + 4];
-        fields[0] = new("packet", packet.PacketSequence == 0 ? null : packet.PacketSequence);
-        fields[1] = new("flow", packet.FlowGeneration == 0 ? null : packet.FlowGeneration);
-        fields[2] = new("protocol", packet.Context.Key.Protocol);
-        fields[3] = new("stage", eventName);
-        additional.CopyTo(fields, 4);
-        _logger.Event(RuntimeLogLevel.Trace, eventName, fields);
-    }
-
     /// <summary>
     /// The genuinely-uninitialized case: no proxy coordinator was wired, so no relay could ever
     /// exist. Every other blocked path reports its own reason through <see cref="LogProxyBlocked"/>
@@ -504,7 +502,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     private void LogProxyNotInitialized()
     {
         if (!ShouldWarn(ref _lastProxyUnavailableLogTicks)) return;
-        _logger.Warn("A proxy-selected flow was blocked because proxy relay support is not initialized in this build.");
+        CaptureLog.ProxyRelayNotInitialized(_logger);
     }
 
     /// <summary>
@@ -517,13 +515,13 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     private void LogProxyBlocked(string reason)
     {
         if (!ShouldWarn(ref _lastProxyUnavailableLogTicks)) return;
-        _logger.Warn($"A proxy-selected flow was blocked: reason={reason}.");
+        CaptureLog.ProxyFlowBlocked(_logger, reason);
     }
 
     private void LogUdpFailureRateLimited(Exception exception)
     {
         if (!ShouldWarn(ref _lastUdpFailureLogTicks)) return;
-        _logger.Warn($"UDP proxy handling failed: {exception.GetType().Name}: {exception.Message}");
+        CaptureLog.UdpProxyHandlingFailed(_logger, exception.GetType().Name, exception.Message);
     }
 
     /// <summary>
@@ -538,17 +536,18 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     {
         RuntimeCounters.Shared.Increment(RuntimeCounters.PassReinjectFailed);
         _healthSignal.ReportFailure(RuntimeCounters.PassReinjectFailed);
-        if (!_passFailedWarn.ShouldEmit() || !_logger.IsEnabled(RuntimeLogLevel.Warn)) return;
-        _logger.Event(RuntimeLogLevel.Warn, "reinject.pass-failed",
-            new("nativeError", (exception as Win32Exception)?.NativeErrorCode),
-            new("error", exception.GetType().Name),
-            new("adapter", adapterStableId),
-            new("adapterHandle", (long)adapterHandle),
-            new("direction", toAdapter ? "adapter" : "mstcp"),
-            new("frames", frames),
-            new("source", flowKey?.Local),
-            new("destination", flowKey?.Remote),
-            new("protocol", flowKey?.Protocol));
+        if (!_passFailedWarn.ShouldEmit()) return;
+        CaptureLog.ReinjectPassFailed(
+            _logger,
+            (exception as Win32Exception)?.NativeErrorCode,
+            exception.GetType().Name,
+            adapterStableId,
+            adapterHandle,
+            toAdapter ? "adapter" : "mstcp",
+            frames,
+            flowKey?.Local,
+            flowKey?.Remote,
+            flowKey?.Protocol);
     }
 
     /// <summary>

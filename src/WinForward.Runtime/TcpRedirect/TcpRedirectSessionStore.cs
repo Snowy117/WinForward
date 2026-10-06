@@ -1,4 +1,6 @@
+using Microsoft.Extensions.Logging;
 using WinForward.Core;
+using WinForward.Runtime.Logging;
 
 namespace WinForward.Runtime.TcpRedirect;
 
@@ -27,7 +29,7 @@ internal sealed record RetiredSession(TcpRedirectSession Session, ITcpRelay? Rel
 /// sections are synchronous and non-blocking, so nesting them under the store gate is safe.
 /// The coordinator and setup pipeline reach the session set only through this module's methods.
 /// </summary>
-internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLogger logger, int capacity, TimeProvider timeProvider)
+internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, ILogger logger, int capacity, TimeProvider timeProvider)
 {
     private readonly Dictionary<FlowKey, TcpRedirectSession> _sessions = [];
     private readonly Lock _gate = new();
@@ -190,7 +192,7 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
             }
             catch (Exception exception)
             {
-                logger.Warn($"TCP redirect session release failed ({exception.GetType().Name}).");
+                TcpRedirectLog.TcpRedirectSessionReleaseFailed(logger, exception);
             }
         }
 
@@ -275,7 +277,15 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
     private async ValueTask ReleaseRetiredAsync((TcpRedirectSession Session, ITcpRelay? Relay) retired)
     {
         var session = retired.Session;
-        TcpRedirectLogging.LogDebug(logger, "tcp.redirect.closed", session, "closed");
+        TcpRedirectLog.TcpRedirectClosed(
+            logger,
+            session.FlowGeneration == 0 ? null : session.FlowGeneration,
+            session.Association.Generation,
+            session.Association.OriginalKey.Local,
+            session.Association.OriginalKey.Remote,
+            session.Association.TranslatedListenerTuple,
+            session.Server.Name,
+            "closed");
         try
         {
             // The retire critical section already removed the table alias and armed the
@@ -284,12 +294,12 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, IRuntimeLo
         }
         catch (Exception exception)
         {
-            logger.Warn($"TCP redirect listener disposal failed ({exception.GetType().Name}).");
+            TcpRedirectLog.TcpRedirectListenerDisposalFailed(logger, exception);
         }
         if (retired.Relay is not null)
         {
             try { await retired.Relay.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception exception) { logger.Warn($"TCP redirect relay disposal failed ({exception.GetType().Name})."); }
+            catch (Exception exception) { TcpRedirectLog.TcpRedirectRelayDisposalFailed(logger, exception); }
         }
         // The lifetime CTS is disposed by the accept loop once it ends (it is the only reader of
         // session.Token), so a retire can never pull the CTS out from under a concurrent Token

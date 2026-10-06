@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using Microsoft.Extensions.Logging;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
@@ -100,7 +101,7 @@ internal static class UdpChurnScenario
         SoakOptions options,
         SelfTrafficRegistry registry,
         int maximumFrameSize,
-        IRuntimeLogger logger)
+        ILogger logger)
     {
         var socks5 = new Socks5UdpTransportFactory(registry, maximumFrameSize, logger: logger);
         return options.Target == SoakTargetKind.Local

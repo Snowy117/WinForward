@@ -23,7 +23,7 @@ public sealed class UdpSetupCooldownTests
     {
         var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
         var factory = new FailingTransportFactory();
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, TimeProvider = time, Logger = logger });
         var flow = CreateFlow("192.0.2.53");
 
@@ -84,7 +84,7 @@ public sealed class UdpSetupCooldownTests
         // it into the cooldown tombstone (whose teardown drops the buffered datagram).
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new DelayedTransportFactory(gate.Task);
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, Logger = logger });
         const int cappedFlows = 8;
         var flows = Enumerable.Range(0, cappedFlows + 1).Select(index => CreateFlow(string.Create(CultureInfo.InvariantCulture, $"192.0.2.{index + 1}"))).ToArray();
@@ -128,7 +128,7 @@ public sealed class UdpSetupCooldownTests
         const int concurrentSetupCap = 8;
         var barrier = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new BarrierTransportFactory(barrier, concurrentSetupCap);
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = flowCount, Logger = logger });
         var flows = Enumerable.Range(0, flowCount).Select(index => CreateFlow(string.Create(CultureInfo.InvariantCulture, $"198.51.100.{index + 1}"))).ToArray();
 

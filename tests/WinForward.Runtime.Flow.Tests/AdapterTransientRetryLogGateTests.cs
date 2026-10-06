@@ -1,4 +1,4 @@
-using WinForward.Configuration;
+using Microsoft.Extensions.Logging;
 using WinForward.TestSupport;
 using Xunit;
 
@@ -23,9 +23,9 @@ public sealed class AdapterTransientRetryLogGateTests
         public void AdvanceTo(long ticks) => _ticks = ticks;
     }
 
-    private static (AdapterTransientRetryLogGate Gate, ScriptedClock Clock, RecordingRuntimeLogger Logger) CreateGate()
+    private static (AdapterTransientRetryLogGate Gate, ScriptedClock Clock, RecordingLogger Logger) CreateGate()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var clock = new ScriptedClock();
         return (new AdapterTransientRetryLogGate(logger, clock), clock, logger);
     }
@@ -38,12 +38,12 @@ public sealed class AdapterTransientRetryLogGateTests
         gate.Log("eth0", "Ethernet", 21, 1);
 
         var (level, name, fields) = Assert.Single(logger.Events);
-        Assert.Equal(RuntimeLogLevel.Warn, level);
+        Assert.Equal(LogLevel.Warning, level);
         Assert.Equal("adapter.retry", name);
-        Assert.Equal("eth0", fields.Single(field => string.Equals(field.Key, "adapter", StringComparison.Ordinal)).Value);
-        Assert.Equal("Ethernet", fields.Single(field => string.Equals(field.Key, "name", StringComparison.Ordinal)).Value);
-        Assert.Equal(21, fields.Single(field => string.Equals(field.Key, "nativeError", StringComparison.Ordinal)).Value);
-        Assert.Equal(1, fields.Single(field => string.Equals(field.Key, "attempt", StringComparison.Ordinal)).Value);
+        Assert.Equal("eth0", fields.Single(field => string.Equals(field.Key, "Adapter", StringComparison.Ordinal)).Value);
+        Assert.Equal("Ethernet", fields.Single(field => string.Equals(field.Key, "Name", StringComparison.Ordinal)).Value);
+        Assert.Equal(21, fields.Single(field => string.Equals(field.Key, "NativeError", StringComparison.Ordinal)).Value);
+        Assert.Equal(1, fields.Single(field => string.Equals(field.Key, "Attempt", StringComparison.Ordinal)).Value);
     }
 
     [Fact]
@@ -73,7 +73,7 @@ public sealed class AdapterTransientRetryLogGateTests
         gate.Log("eth0", "Ethernet", 21, 2);
 
         Assert.Equal(2, logger.Events.Count);
-        Assert.Equal(2, logger.Events[1].Fields.Single(field => string.Equals(field.Key, "attempt", StringComparison.Ordinal)).Value);
+        Assert.Equal(2, logger.Events[1].Fields.Single(field => string.Equals(field.Key, "Attempt", StringComparison.Ordinal)).Value);
     }
 
     [Fact]

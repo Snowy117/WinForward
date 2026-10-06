@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using Microsoft.Extensions.Logging.Abstractions;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
@@ -156,7 +157,7 @@ public sealed class Socks5UdpTransportFactoryTests(ITestOutputHelper output)
     }
 
     private static Socks5UdpAssociationContext Context(SelfTrafficRegistry registry) =>
-        new(registry, AddressCache: null, CreateControl: null, NullRuntimeLogger.Instance, new RuntimeLogThrottle(TimeSpan.FromSeconds(5)));
+        new(registry, AddressCache: null, CreateControl: null, NullLogger.Instance, new RuntimeLogThrottle(TimeSpan.FromSeconds(5)));
 
     // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local // False positive: the server is polled by the wait predicate, which is what makes this the shared exactly-once-release proof of the construction-failure suite.
     private static async Task AssertAssociationReleasedAsync(ScriptedSocks5UdpServer server)

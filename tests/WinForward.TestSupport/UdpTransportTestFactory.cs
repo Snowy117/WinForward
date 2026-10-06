@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using Microsoft.Extensions.Logging;
 using WinForward.Configuration;
 using WinForward.Protocols;
 using WinForward.Runtime;
@@ -23,7 +24,7 @@ internal static class UdpTransportTestFactory
         int relayReceiveBufferBytes = Socks5UdpTransport.DefaultRelaySocketReceiveBufferSize,
         Func<Socks5Server, CancellationToken, ValueTask<Socks5ControlConnection>>? createControl = null,
         Socks5AddressCache? addressCache = null,
-        IRuntimeLogger? logger = null,
+        ILogger? logger = null,
         CancellationToken cancellationToken = default)
     {
         var factory = new Socks5UdpTransportFactory(

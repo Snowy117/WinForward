@@ -1,8 +1,9 @@
 using System.Collections.Concurrent;
 using System.Runtime.Versioning;
-using WinForward.Configuration;
+using Microsoft.Extensions.Logging;
 using WinForward.Core;
 using WinForward.NdisApi;
+using WinForward.Runtime.Logging;
 using WinForward.Windows;
 
 namespace WinForward.Runtime.Capture;
@@ -73,7 +74,7 @@ public sealed class NdisCaptureGenerationFactory : ICaptureGenerationFactory
     private readonly NdisApiDriver _driver;
     private readonly CapturePacketProcessor _processor;
     private readonly AdapterSlotTable _slots;
-    private readonly IRuntimeLogger _logger;
+    private readonly ILogger _logger;
     private readonly Func<WindowsAdapter, int, ValueTask>? _onAdapterDegraded;
     private readonly Action<WindowsAdapter, int, int>? _onAdapterTransientRetry;
     private readonly TimeSpan? _pollDelay;
@@ -88,7 +89,7 @@ public sealed class NdisCaptureGenerationFactory : ICaptureGenerationFactory
         NdisApiDriver driver,
         CapturePacketProcessor processor,
         AdapterSlotTable slots,
-        IRuntimeLogger logger,
+        ILogger logger,
         Func<WindowsAdapter, int, ValueTask>? onAdapterDegraded = null,
         Action<WindowsAdapter, int, int>? onAdapterTransientRetry = null,
         TimeSpan? pollDelay = null)
@@ -132,15 +133,12 @@ public sealed class NdisCaptureGenerationFactory : ICaptureGenerationFactory
 
             if (_slotExhaustedWarn.ShouldEmit())
             {
-                _logger.Event(RuntimeLogLevel.Error, "adapter.slot-exhausted",
-                    new RuntimeLogField("adapter", adapter.StableId),
-                    new RuntimeLogField("name", adapter.FriendlyName),
-                    new RuntimeLogField("slots", _slots.CountForDiagnostics));
+                CaptureLog.AdapterSlotExhausted(_logger, adapter.StableId, adapter.FriendlyName, _slots.CountForDiagnostics);
             }
         }
 
         var adapters = bindings.Select(binding => binding.Adapter).ToArray();
-        // The read-shape guard's only evidence channel: the driver cannot log (IRuntimeLogger lives
+        // The read-shape guard's only evidence channel: the driver cannot log (ILogger lives
         // above it in the dependency order), so the composition resolves the handle back to the
         // adapter identity of the generation that registered it.
         _driver.ReadShapeMismatchSink = mismatch => ReportReadShapeMismatch(bindings, mismatch);
@@ -187,10 +185,7 @@ public sealed class NdisCaptureGenerationFactory : ICaptureGenerationFactory
             if (registered) continue;
             if (_packetEventUnavailableWarn.ShouldEmit())
             {
-                _logger.Event(RuntimeLogLevel.Warn, "capture.packetEvent.unavailable",
-                    new RuntimeLogField("adapter", binding.Adapter.StableId),
-                    new RuntimeLogField("name", binding.Adapter.FriendlyName),
-                    new RuntimeLogField("nativeError", nativeError));
+                CaptureLog.CapturePacketEventUnavailable(_logger, binding.Adapter.StableId, binding.Adapter.FriendlyName, nativeError);
             }
         }
 
@@ -206,12 +201,13 @@ public sealed class NdisCaptureGenerationFactory : ICaptureGenerationFactory
     {
         if (!_readShapeMismatchWarns.GetOrAdd(mismatch.AdapterHandle, static _ => new RuntimeLogThrottle(TimeSpan.FromMinutes(1))).ShouldEmit()) return;
         var adapter = FindAdapterByHandle(bindings, mismatch.AdapterHandle);
-        _logger.Event(RuntimeLogLevel.Warn, "adapter.readShape.mismatch",
-            new RuntimeLogField("adapter", adapter?.StableId ?? "unknown"),
-            new RuntimeLogField("name", adapter?.FriendlyName ?? "unknown"),
-            new RuntimeLogField("requested", mismatch.RequestedCount),
-            new RuntimeLogField("queued", mismatch.QueuedPacketCount),
-            new RuntimeLogField("nativeError", mismatch.NativeError));
+        CaptureLog.AdapterReadShapeMismatch(
+            _logger,
+            adapter?.StableId ?? "unknown",
+            adapter?.FriendlyName ?? "unknown",
+            mismatch.RequestedCount,
+            mismatch.QueuedPacketCount,
+            mismatch.NativeError);
     }
 
     private static WindowsAdapter? FindAdapterByHandle(IReadOnlyList<AdapterCaptureBinding> bindings, nint adapterHandle)
@@ -226,10 +222,7 @@ public sealed class NdisCaptureGenerationFactory : ICaptureGenerationFactory
 
     private async ValueTask HandleDegradedAsync(TransactionalCaptureRuntime runtime, WindowsAdapter adapter, int nativeError)
     {
-        _logger.Event(RuntimeLogLevel.Error, "adapter.degraded",
-            new RuntimeLogField("adapter", adapter.StableId),
-            new RuntimeLogField("name", adapter.FriendlyName),
-            new RuntimeLogField("nativeError", nativeError));
+        CaptureLog.AdapterDegraded(_logger, adapter.StableId, adapter.FriendlyName, nativeError);
         await runtime.MarkAdapterDegradedAsync(adapter.StableId).ConfigureAwait(false);
         if (_onAdapterDegraded is not null)
         {

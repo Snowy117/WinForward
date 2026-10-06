@@ -190,7 +190,7 @@ internal sealed class CaptureRunnerHarness : IAsyncDisposable
     public FakeAdapterEnumerationProvider Enumeration { get; }
     public FakeCaptureGenerationFactory Generations { get; } = new();
     public FakeAdapterListChangeSource ChangeSource { get; } = new();
-    public RecordingRuntimeLogger Logger { get; } = new();
+    public RecordingLogger Logger { get; } = new();
     public List<IReadOnlyList<AdapterEnumerationItem>> InstalledScopes { get; } = [];
     public CancellationTokenSource Cancel { get; } = new();
     public LayeredCaptureRunner Runner { get; }
@@ -206,10 +206,10 @@ internal sealed class CaptureRunnerHarness : IAsyncDisposable
         }
     }
 
-    public IReadOnlyList<IReadOnlyList<Runtime.RuntimeLogField>> RefreshEvents =>
+    public IReadOnlyList<IReadOnlyList<KeyValuePair<string, object?>>> RefreshEvents =>
         [.. Logger.Events.Where(entry => string.Equals(entry.Name, "adapter.refresh", StringComparison.Ordinal)).Select(entry => entry.Fields)];
 
-    public static string? FieldValue(IReadOnlyList<Runtime.RuntimeLogField> fields, string key) =>
+    public static string? FieldValue(IReadOnlyList<KeyValuePair<string, object?>> fields, string key) =>
         fields.FirstOrDefault(field => string.Equals(field.Key, key, StringComparison.Ordinal)).Value?.ToString();
 
     public void Start() => RunTask = Runner.RunAsync(Cancel.Token);

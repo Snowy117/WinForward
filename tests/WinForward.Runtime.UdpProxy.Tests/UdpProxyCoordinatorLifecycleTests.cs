@@ -1,5 +1,6 @@
 using System.Net;
 using System.Reflection;
+using Microsoft.Extensions.Logging;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.TestSupport;
@@ -166,7 +167,7 @@ public sealed class UdpProxyCoordinatorLifecycleTests
         // D-C3-9/D4: Run records and swallows a teardown fault, so the body itself must log the
         // owner's domain-specific warning — and the swallowed fault must not surface as an
         // unobserved task exception nor fail the coordinator's own disposal.
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var factory = new FakeTransportFactory();
         var coordinator = UdpCoordinatorFakes.CreateCoordinator(
             factory,
@@ -189,7 +190,7 @@ public sealed class UdpProxyCoordinatorLifecycleTests
             transport.Received.Writer.TryComplete(new IOException("relay read failed"));
 
             await WaitForAsync(() => logger.WarnCount >= 1);
-            Assert.Contains(logger.Lines, line => line.Level == RuntimeLogLevel.Warn && line.Message.Contains("receive-failure teardown faulted", StringComparison.Ordinal));
+            Assert.Contains(logger.Lines, line => line.Level == LogLevel.Warning && line.Message.Contains("receive-failure teardown faulted", StringComparison.Ordinal));
 
             UnobservedExceptionProbe.ForceFinalization();
             Assert.Equal(0, probe.Count);

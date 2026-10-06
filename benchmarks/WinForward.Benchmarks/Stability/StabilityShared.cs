@@ -1,8 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using WinForward.Configuration;
-using WinForward.Runtime;
+using Microsoft.Extensions.Logging;
 
 namespace WinForward.Benchmarks.Stability;
 
@@ -176,29 +175,27 @@ internal sealed record LatencyDistribution(double Min, double P50, double P95, d
 }
 
 /// <summary>
-/// Diagnostic-only product-event census: counts every Event() call by name with no formatting or
-/// I/O. With <paramref name="includeVerbose"/> false only <see cref="RuntimeLogLevel.Warn"/> is
-/// enabled, so the product's own <c>IsEnabled</c> guards keep the per-datagram trace/debug events out
-/// of the send and receive paths — a distortion-free census of the rate-limited and one-shot warns
-/// (<c>udp.session.capacity-block</c>, <c>udp.setup.failed</c>, <c>udp.setup.cooldown</c>) that every
-/// stability row can carry. With it true the product also emits its per-datagram trace events
-/// (udp.packet.sent/received), which allocates and slows those paths: rows produced that way localize
-/// loss or establishment failures but are not throughput/latency-comparable with uninstrumented runs.
+/// Diagnostic-only product-event census: counts every structured log call by event name with no
+/// formatting or I/O. With <paramref name="includeVerbose"/> false only
+/// <see cref="LogLevel.Warning"/> is enabled, so the generated level checks keep the per-datagram
+/// trace/debug events out of the send and receive paths — a distortion-free census of the
+/// rate-limited and one-shot warns (<c>udp.session.capacity-block</c>, <c>udp.setup.failed</c>,
+/// <c>udp.setup.cooldown</c>) that every stability row can carry. With it true the product also
+/// emits its per-datagram trace events (udp.packet.sent/received), which allocates and slows those
+/// paths: rows produced that way localize loss or establishment failures but are not
+/// throughput/latency-comparable with uninstrumented runs.
 /// </summary>
-internal sealed class CountingRuntimeLogger(bool includeVerbose = true) : IRuntimeLogger
+internal sealed class CountingRuntimeLogger(bool includeVerbose = true) : ILogger
 {
     private readonly ConcurrentDictionary<string, long> _events = new(StringComparer.Ordinal);
 
     public IReadOnlyDictionary<string, long> Events => _events;
 
-    public bool IsEnabled(RuntimeLogLevel level) => includeVerbose || level == RuntimeLogLevel.Warn;
+    public bool IsEnabled(LogLevel logLevel) => logLevel != LogLevel.None && (includeVerbose || logLevel == LogLevel.Warning);
 
-    public void Info(string message) { }
+    public IDisposable? BeginScope<TState>(TState state)
+        where TState : notnull => null;
 
-    public void Warn(string message) { }
-
-    public void Error(string message) { }
-
-    public void Event(RuntimeLogLevel level, string eventName, params RuntimeLogField[] fields)
-        => _events.AddOrUpdate(eventName, 1, static (_, count) => count + 1);
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        => _events.AddOrUpdate(eventId.Name ?? string.Empty, 1, static (_, count) => count + 1);
 }

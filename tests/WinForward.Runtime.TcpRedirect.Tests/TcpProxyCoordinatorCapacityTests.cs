@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Net;
+using Microsoft.Extensions.Logging;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
@@ -46,7 +47,7 @@ public sealed class TcpProxyCoordinatorCapacityTests
         var injector = new FakeInjector();
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable(capacity: 1);
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider(), new TcpRedirectOptions { Logger = logger, Capacity = 1 });
 
         await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
@@ -54,14 +55,14 @@ public sealed class TcpProxyCoordinatorCapacityTests
 
         Assert.Equal(1, coordinator.Diagnostics.CapacityRejectionCount);
         var (_, _, fields) = Assert.Single(logger.Events, item => string.Equals(item.Name, "tcp.redirect.rejected", StringComparison.Ordinal));
-        Assert.Contains(fields, field => string.Equals(field.Key, "reason", StringComparison.Ordinal) && field.Value is "capacity");
+        Assert.Contains(fields, field => string.Equals(field.Key, "Reason", StringComparison.Ordinal) && field.Value is "capacity");
 
         coordinator.LogCapacitySummary();
         var (summaryLevel, _, summaryFields) = Assert.Single(logger.Events, item => string.Equals(item.Name, "tcp.redirect.capacity", StringComparison.Ordinal));
-        Assert.Equal(RuntimeLogLevel.Info, summaryLevel);
-        Assert.Contains(summaryFields, field => string.Equals(field.Key, "budget", StringComparison.Ordinal) && field.Value is 1);
-        Assert.Contains(summaryFields, field => string.Equals(field.Key, "rejectedTotal", StringComparison.Ordinal) && field.Value is 1L);
-        Assert.Contains(summaryFields, field => string.Equals(field.Key, "rejectedSinceLastSummary", StringComparison.Ordinal) && field.Value is 1L);
+        Assert.Equal(LogLevel.Information, summaryLevel);
+        Assert.Contains(summaryFields, field => string.Equals(field.Key, "Budget", StringComparison.Ordinal) && field.Value is 1);
+        Assert.Contains(summaryFields, field => string.Equals(field.Key, "RejectedTotal", StringComparison.Ordinal) && field.Value is 1L);
+        Assert.Contains(summaryFields, field => string.Equals(field.Key, "RejectedSinceLastSummary", StringComparison.Ordinal) && field.Value is 1L);
 
         // The summary repeats only when further rejections arrived.
         var eventsAfterSummary = logger.Events.Count;
@@ -91,7 +92,7 @@ public sealed class TcpProxyCoordinatorCapacityTests
         var injector = new FakeInjector(throwOnCall: 2, exception: new Win32Exception(87));
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable();
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider(), new TcpRedirectOptions { Logger = logger });
 
         var syn = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
@@ -102,13 +103,13 @@ public sealed class TcpProxyCoordinatorCapacityTests
         Assert.Equal(TcpRedirectOutcome.Blocked, await HandleReverseAsync(coordinator, table, synAck, CancellationToken.None));
 
         var (level, _, fields) = Assert.Single(logger.Events, item => string.Equals(item.Name, "tcp.redirect.failed", StringComparison.Ordinal));
-        Assert.Equal(RuntimeLogLevel.Warn, level);
-        Assert.Contains(fields, field => string.Equals(field.Key, "reason", StringComparison.Ordinal) && field.Value is "injectionFailure");
-        Assert.Contains(fields, field => string.Equals(field.Key, "nativeError", StringComparison.Ordinal) && field.Value is 87);
-        Assert.Contains(fields, field => string.Equals(field.Key, "error", StringComparison.Ordinal) && field.Value is "Win32Exception");
-        Assert.Contains(fields, field => string.Equals(field.Key, "adapterHandle", StringComparison.Ordinal) && field.Value is 0x1234L);
-        Assert.Contains(fields, field => string.Equals(field.Key, "source", StringComparison.Ordinal) && field.Value is Endpoint source && source.Equals(Endpoint.From(s_clientIpv4, 53000)));
-        Assert.Contains(fields, field => string.Equals(field.Key, "destination", StringComparison.Ordinal) && field.Value is Endpoint destination && destination.Equals(Endpoint.From(s_destIpv4, 443)));
+        Assert.Equal(LogLevel.Warning, level);
+        Assert.Contains(fields, field => string.Equals(field.Key, "Reason", StringComparison.Ordinal) && field.Value is "injectionFailure");
+        Assert.Contains(fields, field => string.Equals(field.Key, "NativeError", StringComparison.Ordinal) && field.Value is 87);
+        Assert.Contains(fields, field => string.Equals(field.Key, "Error", StringComparison.Ordinal) && field.Value is "Win32Exception");
+        Assert.Contains(fields, field => string.Equals(field.Key, "AdapterHandle", StringComparison.Ordinal) && field.Value is 0x1234L);
+        Assert.Contains(fields, field => string.Equals(field.Key, "Source", StringComparison.Ordinal) && field.Value is Endpoint source && source.Equals(Endpoint.From(s_clientIpv4, 53000)));
+        Assert.Contains(fields, field => string.Equals(field.Key, "Destination", StringComparison.Ordinal) && field.Value is Endpoint destination && destination.Equals(Endpoint.From(s_destIpv4, 443)));
 
         // The sequence recorders ran before the failed injection, so the best-effort reset was
         // still crafted: injected frames are exactly the SYN and the RST.
@@ -133,17 +134,17 @@ public sealed class TcpProxyCoordinatorCapacityTests
         var injector = new FakeInjector(throwOnCall: 1, exception: new Win32Exception(87));
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable();
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider(), new TcpRedirectOptions { Logger = logger });
 
         Assert.Equal(TcpRedirectOutcome.SetupPending, await coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server, CancellationToken.None));
         await coordinator.DrainPendingSetupsAsync();
 
         var (level, _, fields) = Assert.Single(logger.Events, item => string.Equals(item.Name, "tcp.redirect.failed", StringComparison.Ordinal));
-        Assert.Equal(RuntimeLogLevel.Warn, level);
-        Assert.Contains(fields, field => string.Equals(field.Key, "reason", StringComparison.Ordinal) && field.Value is "injectionFailure");
-        Assert.Contains(fields, field => string.Equals(field.Key, "nativeError", StringComparison.Ordinal) && field.Value is 87);
-        Assert.Contains(fields, field => string.Equals(field.Key, "adapterHandle", StringComparison.Ordinal) && field.Value is 0x1234L);
+        Assert.Equal(LogLevel.Warning, level);
+        Assert.Contains(fields, field => string.Equals(field.Key, "Reason", StringComparison.Ordinal) && field.Value is "injectionFailure");
+        Assert.Contains(fields, field => string.Equals(field.Key, "NativeError", StringComparison.Ordinal) && field.Value is 87);
+        Assert.Contains(fields, field => string.Equals(field.Key, "AdapterHandle", StringComparison.Ordinal) && field.Value is 0x1234L);
 
         Assert.Empty(injector.InjectedFrames);
         Assert.Equal(0, table.Count);
@@ -230,9 +231,9 @@ public sealed class TcpProxyCoordinatorCapacityTests
         Assert.Equal(PacketDisposition.ProxyConsumed, straggler.Lease.Disposition);
         Assert.Empty(harness.Injector.InjectedFrames);
         Assert.Contains(harness.Logger.Events, e => string.Equals(e.Name, "packet.reverseHandled", StringComparison.Ordinal)
-            && e.Fields.Any(field => string.Equals(field.Key, "outcome", StringComparison.Ordinal) && field.Value is TcpRedirectOutcome.Dropped));
+            && e.Fields.Any(field => string.Equals(field.Key, "Outcome", StringComparison.Ordinal) && field.Value is TcpRedirectOutcome.Dropped));
         Assert.DoesNotContain(harness.Logger.Events, e => string.Equals(e.Name, "packet.dropped", StringComparison.Ordinal)
-            && e.Fields.Any(field => string.Equals(field.Key, "reason", StringComparison.Ordinal) && field.Value is "policy"));
+            && e.Fields.Any(field => string.Equals(field.Key, "Reason", StringComparison.Ordinal) && field.Value is "policy"));
     }
 
     [Fact]
@@ -289,7 +290,7 @@ public sealed class TcpProxyCoordinatorCapacityTests
         var listenerFactory = new FakeListenerFactory();
         var injector = new FakeInjector();
         var relayFactory = new CompletableRelayFactory();
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable();
         await using var coordinator = CreateCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider(), new TcpRedirectOptions { Logger = logger });
@@ -311,13 +312,13 @@ public sealed class TcpProxyCoordinatorCapacityTests
         Assert.Equal(0, reinjector.SendToAdapterCount);
         Assert.Equal(0, reinjector.SendToMstcpCount);
         Assert.Contains(logger.Events, e => string.Equals(e.Name, "tcp.packet.handled", StringComparison.Ordinal)
-            && e.Fields.Any(field => string.Equals(field.Key, "outcome", StringComparison.Ordinal) && field.Value is TcpRedirectOutcome.Dropped));
+            && e.Fields.Any(field => string.Equals(field.Key, "Outcome", StringComparison.Ordinal) && field.Value is TcpRedirectOutcome.Dropped));
         Assert.Contains(logger.Events, e => string.Equals(e.Name, "packet.dropped", StringComparison.Ordinal)
-            && e.Fields.Any(field => string.Equals(field.Key, "reason", StringComparison.Ordinal) && field.Value is "grace"));
+            && e.Fields.Any(field => string.Equals(field.Key, "Reason", StringComparison.Ordinal) && field.Value is "grace"));
         // The grace drop must not emit its own packet.completed: the dispatcher owns that event and
         // logs it exactly once per packet after the disposition executes.
         Assert.DoesNotContain(logger.Events, e => string.Equals(e.Name, "packet.completed", StringComparison.Ordinal)
-            && e.Fields.Any(field => string.Equals(field.Key, "outcome", StringComparison.Ordinal)));
+            && e.Fields.Any(field => string.Equals(field.Key, "Outcome", StringComparison.Ordinal)));
         // Dropped must not trip the rate-limited proxy-unavailable warning (Blocked's side effect).
         Assert.DoesNotContain(logger.Lines, line => line.Message.Contains("proxy relay support", StringComparison.Ordinal));
     }
@@ -410,7 +411,7 @@ public sealed class TcpProxyCoordinatorCapacityTests
         var listenerFactory = new FakeListenerFactory();
         var injector = new FakeInjector();
         var selfTraffic = new SelfTrafficRegistry();
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var table = new TcpRedirectTable(capacity: 1);
         await using var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider(), new TcpRedirectOptions { Logger = logger, Capacity = 1 });
 
@@ -443,7 +444,7 @@ public sealed class TcpProxyCoordinatorCapacityTests
         // The rejection accounting is unchanged.
         Assert.Equal(3, coordinator.Diagnostics.CapacityRejectionCount);
         Assert.Contains(logger.Events, e => string.Equals(e.Name, "tcp.redirect.rejected", StringComparison.Ordinal)
-            && e.Fields.Any(field => string.Equals(field.Key, "reason", StringComparison.Ordinal) && field.Value is "capacity"));
+            && e.Fields.Any(field => string.Equals(field.Key, "Reason", StringComparison.Ordinal) && field.Value is "capacity"));
     }
 
     [Fact]
@@ -480,7 +481,7 @@ public sealed class TcpProxyCoordinatorCapacityTests
         var listenerFactory = new FakeListenerFactory();
         var injector = new FakeInjector(throwOnCall: 2, exception: new Win32Exception(87));
         var selfTraffic = new SelfTrafficRegistry();
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var table = new TcpRedirectTable(capacity: 1);
         await using var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider(), new TcpRedirectOptions { Logger = logger, Capacity = 1 });
 

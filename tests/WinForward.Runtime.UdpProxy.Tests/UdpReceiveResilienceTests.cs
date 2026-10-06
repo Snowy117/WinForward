@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using Microsoft.Extensions.Logging;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
@@ -26,7 +27,7 @@ public sealed class UdpReceiveResilienceTests
         // session survives all three skip reasons.
         var factory = new FakeTransportFactory();
         var sink = new FakeResponseSink();
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, sink, new UdpProxyOptions { Logger = logger });
         var flow = CreateFlow("192.0.2.53");
 
@@ -61,7 +62,7 @@ public sealed class UdpReceiveResilienceTests
             lock (transport.Sent) return transport.Sent.Count == 2;
         });
         Assert.False(transport.IsDisposed);
-        Assert.Contains(logger.Lines, line => line.Level == RuntimeLogLevel.Debug && line.Message.Contains("skipped", StringComparison.Ordinal));
+        Assert.Contains(logger.Lines, line => line.Level == LogLevel.Debug && line.Message.Contains("skipped", StringComparison.Ordinal));
 
         return;
 
@@ -209,7 +210,7 @@ public sealed class UdpReceiveResilienceTests
         var transport = new ConnectionResetOnceTransport();
         var factory = new SingleTransportFactory(transport);
         var sink = new FakeResponseSink();
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, sink, new UdpProxyOptions { Logger = logger });
         var flow = CreateFlow("192.0.2.53");
 
@@ -231,7 +232,7 @@ public sealed class UdpReceiveResilienceTests
         Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [3], default, CancellationToken.None));
         await WaitForAsync(() => transport.SendCount == 2);
         Assert.False(transport.IsDisposed);
-        Assert.Contains(logger.Lines, line => line.Level == RuntimeLogLevel.Debug && line.Message.Contains("connectionReset=1", StringComparison.Ordinal));
+        Assert.Contains(logger.Lines, line => line.Level == LogLevel.Debug && line.Message.Contains("connectionReset=1", StringComparison.Ordinal));
 
         return;
 
@@ -245,7 +246,7 @@ public sealed class UdpReceiveResilienceTests
         // frame from); it is counted in the skip summary while address-typed responses flow on.
         var factory = new FakeTransportFactory();
         var sink = new FakeResponseSink();
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, sink, new UdpProxyOptions { Logger = logger });
         var flow = CreateFlow("192.0.2.53");
 
@@ -260,7 +261,7 @@ public sealed class UdpReceiveResilienceTests
         transport.EnqueueResponse(new UdpTransportDatagram(SourceAddress: null, "example.com", 53, new byte[] { 0x7f }));
         transport.EnqueueResponse(Datagram(2));
 
-        await WaitForAsync(() => logger.Lines.Any(line => line.Level == RuntimeLogLevel.Debug && line.Message.Contains("domainDestination=1", StringComparison.Ordinal)));
+        await WaitForAsync(() => logger.Lines.Any(line => line.Level == LogLevel.Debug && line.Message.Contains("domainDestination=1", StringComparison.Ordinal)));
         using var readTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var (_, _, payload, _) = await sink.Responses.Reader.ReadAsync(readTimeout.Token);
         Assert.Equal(2, Assert.Single(payload));

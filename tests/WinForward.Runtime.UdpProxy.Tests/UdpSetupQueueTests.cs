@@ -58,7 +58,7 @@ public sealed class UdpSetupQueueTests
     {
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new DelayedTransportFactory(gate.Task);
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Logger = logger });
         var flow = CreateFlow("192.0.2.53");
 

@@ -1,5 +1,5 @@
 using System.Net;
-using WinForward.Configuration;
+using Microsoft.Extensions.Logging;
 using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.TestSupport;
@@ -178,7 +178,7 @@ public sealed class NdisPacketActionExecutorBatchingTests
         // pooled copy must still return exactly once — the release used to sit after the
         // catch-rethrow, where a throw made it unreachable and leaked the native buffer.
         var reinjector = new ThrowingSingleReinjector();
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var pool = new NdisPacketBufferPool(4);
         var executor = new NdisPacketActionExecutor(reinjector, logger, bufferPool: pool);
 
@@ -246,7 +246,7 @@ public sealed class NdisPacketActionExecutorBatchingTests
     public async Task LaneOverflowIsCountedAndWarnedOncePerWindow()
     {
         var reinjector = new FakeReinjector();
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var executor = new NdisPacketActionExecutor(reinjector, logger);
 
         // Fill the pre-install lane capacity (8) with four adapters × two directions; no scope
@@ -269,7 +269,7 @@ public sealed class NdisPacketActionExecutorBatchingTests
         await executor.PassAsync(MaterializedPass([0x43], 5, isOnSend: false));
         Assert.Equal(2L, executor.ImmediateSendLaneOverflowCount);
         Assert.Equal(2, reinjector.ToAdapterCount + reinjector.ToMstcpCount);
-        Assert.Equal(1, logger.Lines.Count(line => line.Level == RuntimeLogLevel.Warn && line.Message.Contains("degraded", StringComparison.Ordinal)));
+        Assert.Equal(1, logger.Lines.Count(line => line.Level == LogLevel.Warning && line.Message.Contains("degraded", StringComparison.Ordinal)));
     }
 
     [Fact]
@@ -384,7 +384,7 @@ public sealed class NdisPacketActionExecutorBatchingTests
     public async Task RetiringALaneWithPendingFramesWarnsAndReturnsRentedBuffersExactlyOnce()
     {
         var reinjector = new FakeReinjector();
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var pool = new NdisPacketBufferPool(4);
         var executor = new NdisPacketActionExecutor(reinjector, logger, bufferPool: pool);
         using var inPlace = new NdisPacketBuffer();
@@ -406,7 +406,7 @@ public sealed class NdisPacketActionExecutorBatchingTests
         Assert.Equal(1, pool.Count);
         Assert.Equal(0, executor.PendingPassCount);
         Assert.Equal("p"u8.ToArray(), inPlace.GetFrame().ToArray());
-        Assert.Contains(logger.Lines, line => line.Level == RuntimeLogLevel.Warn && line.Message.Contains("pass lane retired", StringComparison.Ordinal));
+        Assert.Contains(logger.Lines, line => line.Level == LogLevel.Warning && line.Message.Contains("pass lane retired", StringComparison.Ordinal));
 
         // A repeated retire finds no lane and must not double-return anything.
         executor.RetireLanesExcept([8]);

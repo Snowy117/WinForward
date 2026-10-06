@@ -2,8 +2,9 @@ using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.ExceptionServices;
-using WinForward.Configuration;
+using Microsoft.Extensions.Logging;
 using WinForward.Core;
+using WinForward.Runtime.Logging;
 using WinForward.Windows;
 
 namespace WinForward.Runtime.Capture;
@@ -45,7 +46,7 @@ public sealed class LayeredCaptureRunner
     private readonly IAdapterEnumerationProvider _enumerationProvider;
     private readonly ICaptureGenerationFactory _generationFactory;
     private readonly PolicySnapshot _policy;
-    private readonly IRuntimeLogger _logger;
+    private readonly ILogger _logger;
     private readonly Func<CancellationToken, ValueTask> _disposeDurableAsync;
     private readonly Action<IReadOnlyList<AdapterEnumerationItem>>? _onScopeInstalled;
     private readonly TimeSpan _minimumRefreshInterval;
@@ -72,7 +73,7 @@ public sealed class LayeredCaptureRunner
         ICaptureGenerationFactory generationFactory,
         IAdapterListChangeSource changeSource,
         PolicySnapshot policy,
-        IRuntimeLogger logger,
+        ILogger logger,
         Func<CancellationToken, ValueTask> disposeDurableAsync,
         Action<IReadOnlyList<AdapterEnumerationItem>>? onScopeInstalled = null,
         TimeSpan? minimumRefreshInterval = null,
@@ -152,16 +153,19 @@ public sealed class LayeredCaptureRunner
             var initial = _enumerationProvider.Enumerate();
             if (!CaptureAdapterScopeResolver.TryResolve(AdaptersOf(initial), _policy, out var startupScope, out var errors))
             {
-                foreach (var error in errors) _logger.Error(error);
+                foreach (var error in errors) CaptureLog.ScopeResolutionError(_logger, error);
                 throw new InvalidOperationException("Capture scope resolution failed; the run cannot start.");
             }
             if (startupScope.Count == 0)
             {
-                _logger.Error("No MSTCP-bound adapters are available to capture.");
+                CaptureLog.NoCaptureAdapters(_logger);
                 throw new InvalidOperationException("No MSTCP-bound adapters are available to capture.");
             }
 
-            await InstallGenerationAsync(ScopeItemsOf(initial, startupScope), cancellationToken).ConfigureAwait(false);
+            var startupItems = ScopeItemsOf(initial, startupScope);
+            var startupScopeDescription = DescribeScope(startupItems);
+            CaptureLog.CaptureScopeResolved(_logger, startupItems.Count, startupScopeDescription);
+            await InstallGenerationAsync(startupItems, cancellationToken).ConfigureAwait(false);
 
             while (true)
             {
@@ -214,7 +218,7 @@ public sealed class LayeredCaptureRunner
             return RefreshDemandOutcome.Continue;
         }
 
-        foreach (var warning in warnings) _logger.Warn(warning);
+        foreach (var warning in warnings) CaptureLog.ScopeResolutionWarning(_logger, warning);
         _lastRebuildUtc = _time.GetUtcNow();
         await StopGenerationAsync().ConfigureAwait(false);
         LogRefresh(diff, degraded, fresh, forced);
@@ -223,7 +227,7 @@ public sealed class LayeredCaptureRunner
         {
             _currentScope = nextItems;
             _onScopeInstalled?.Invoke(nextItems);
-            _logger.Warn("Every capture-scope adapter disappeared; interception is paused until an adapter returns.");
+            CaptureLog.CaptureScopeEmpty(_logger);
             return RefreshDemandOutcome.Continue;
         }
         await InstallGenerationAsync(nextItems, cancellationToken).ConfigureAwait(false);
@@ -252,19 +256,14 @@ public sealed class LayeredCaptureRunner
     {
         _forceRebuild = true;
         _demandGate.Signal();
-        if (!_logger.IsEnabled(RuntimeLogLevel.Warn)) return;
-        var fields = new List<RuntimeLogField>(4 + trigger.WindowCounts.Count)
-        {
-            new("reason", trigger.Counter),
-            new("consecutive", trigger.Consecutive),
-            new("cooldownSeconds", (long)trigger.CooldownRemaining.TotalSeconds),
-        };
-        if (trigger.Degraded) fields.Add(new("degraded", "true"));
-        foreach (var pair in trigger.WindowCounts.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
-        {
-            fields.Add(new RuntimeLogField(pair.Key, pair.Value));
-        }
-        _logger.Event(RuntimeLogLevel.Warn, "runner.forcedRefresh", [.. fields]);
+        var windows = DescribeWindows(trigger.WindowCounts);
+        CaptureLog.RunnerForcedRefresh(
+            _logger,
+            trigger.Counter,
+            trigger.Consecutive,
+            (long)trigger.CooldownRemaining.TotalSeconds,
+            trigger.Degraded ? "true" : null,
+            windows);
     }
 
     /// <summary>
@@ -272,7 +271,9 @@ public sealed class LayeredCaptureRunner
     /// forced rebuild — including one armed mid-demand by an absorbed startup fault, whose
     /// in-flight replacement install follows the stop — so the force flag clears here.
     /// </summary>
+#pragma warning disable CA1859 // The parameter stays IReadOnlyList: the generation factory it feeds takes IReadOnlyList, and narrowing a once-per-generation install to List<T> buys an unmeasurable devirtualization at the cost of the method's contract.
     private async ValueTask InstallGenerationAsync(IReadOnlyList<AdapterEnumerationItem> scope, CancellationToken cancellationToken)
+#pragma warning restore CA1859
     {
         var generation = _generationFactory.Create(scope);
         var refreshCancellation = new CancellationTokenSource();
@@ -294,6 +295,8 @@ public sealed class LayeredCaptureRunner
         _currentScope = scope;
         _lastRebuildUtc = _time.GetUtcNow();
         _forceRebuild = false;
+        var scopeDescription = DescribeScope(scope);
+        CaptureLog.CaptureGenerationStarted(_logger, scope.Count, scopeDescription);
         _onScopeInstalled?.Invoke(scope);
     }
 
@@ -346,7 +349,7 @@ public sealed class LayeredCaptureRunner
             return;
         }
         if (generation.ReachedPumpRun) _startupFaultStreak = 0;
-        _logger.Info("The capture generation ended; stopping the run.");
+        CaptureLog.CaptureGenerationEnded(_logger);
     }
 
     /// <summary>
@@ -369,16 +372,18 @@ public sealed class LayeredCaptureRunner
     {
         if (_startupFaultStreak >= MaxConsecutiveStartupRecoveries)
         {
-            _logger.Event(RuntimeLogLevel.Error, "generation.startup-fault",
-                new RuntimeLogField("nativeError", fault.NativeErrorCode),
-                new RuntimeLogField("attempt", string.Create(CultureInfo.InvariantCulture, $"{_startupFaultStreak + 1}/{MaxConsecutiveStartupRecoveries}")));
+            CaptureLog.GenerationStartupFaultExhausted(
+                _logger,
+                fault.NativeErrorCode,
+                string.Create(CultureInfo.InvariantCulture, $"{_startupFaultStreak + 1}/{MaxConsecutiveStartupRecoveries}"));
             return false;
         }
         _startupFaultStreak++;
         _forceRebuild = true;
-        _logger.Event(RuntimeLogLevel.Warn, "generation.startup-fault",
-            new RuntimeLogField("nativeError", fault.NativeErrorCode),
-            new RuntimeLogField("attempt", string.Create(CultureInfo.InvariantCulture, $"{_startupFaultStreak}/{MaxConsecutiveStartupRecoveries}")));
+        CaptureLog.GenerationStartupFaultAbsorbed(
+            _logger,
+            fault.NativeErrorCode,
+            string.Create(CultureInfo.InvariantCulture, $"{_startupFaultStreak}/{MaxConsecutiveStartupRecoveries}"));
         return true;
     }
 
@@ -427,7 +432,7 @@ public sealed class LayeredCaptureRunner
         }
         catch (Exception exception) when (stopFault is not null)
         {
-            _logger.Error($"Durable-layer disposal failed during shutdown: {exception.Message}");
+            CaptureLog.DurableDisposalFailed(_logger, exception.Message);
         }
         if (stopFault is not null) ExceptionDispatchInfo.Capture(stopFault).Throw();
     }
@@ -441,15 +446,26 @@ public sealed class LayeredCaptureRunner
 
     private void LogRefresh(AdapterScopeDiff diff, IReadOnlyList<string> degraded, IReadOnlyList<AdapterEnumerationItem> fresh, bool forced = false)
     {
-        var fields = new List<RuntimeLogField>(5);
-        if (diff.IsEmpty && !forced) fields.Add(new("noop", "true"));
-        if (forced) fields.Add(new("forced", "true"));
-        AddScopeList(fields, "added", diff.Added);
-        AddScopeList(fields, "removed", diff.Removed);
-        AddScopeList(fields, "changed", diff.Changed);
+        var added = DescribeScopeList(diff.Added);
+        var removed = DescribeScopeList(diff.Removed);
+        var changed = DescribeScopeList(diff.Changed);
         var degradedText = DescribeDegradedPresence(degraded, fresh);
-        if (degradedText is not null) fields.Add(new("degraded", degradedText));
-        _logger.Event(RuntimeLogLevel.Info, "adapter.refresh", [.. fields]);
+        CaptureLog.AdapterRefresh(
+            _logger,
+            added,
+            removed,
+            changed,
+            degradedText,
+            diff.IsEmpty && !forced ? "true" : null,
+            forced ? "true" : null);
+    }
+
+    /// <summary>One <c>key=count</c> token per tracked counter window, in ordinal key order.</summary>
+    private static string? DescribeWindows(IReadOnlyDictionary<string, int> windows)
+    {
+        if (windows.Count == 0) return null;
+        return string.Join(", ", windows.OrderBy(static pair => pair.Key, StringComparer.Ordinal)
+            .Select(static pair => $"{pair.Key}={pair.Value.ToString(CultureInfo.InvariantCulture)}"));
     }
 
     /// <summary>One <c>stableId=present</c> token per degraded adapter, resolved against the fresh enumeration.</summary>
@@ -460,11 +476,11 @@ public sealed class LayeredCaptureRunner
             $"{stableId}={(fresh.Any(item => string.Equals(item.StableId, stableId, StringComparison.OrdinalIgnoreCase)) ? "true" : "false")}"));
     }
 
-    private static void AddScopeList(List<RuntimeLogField> fields, string key, IReadOnlyList<AdapterEnumerationItem> items)
-    {
-        if (items.Count == 0) return;
-        fields.Add(new RuntimeLogField(key, string.Join("; ", items.Select(item => $"{item.Adapter.FriendlyName}({item.StableId})"))));
-    }
+    private static string? DescribeScopeList(IReadOnlyList<AdapterEnumerationItem> items) =>
+        items.Count == 0 ? null : DescribeScope(items);
+
+    private static string DescribeScope(IReadOnlyList<AdapterEnumerationItem> items) =>
+        string.Join("; ", items.Select(item => $"{item.Adapter.FriendlyName}({item.StableId})"));
 
     private static IReadOnlyList<WindowsAdapter> AdaptersOf(IReadOnlyList<AdapterEnumerationItem> items) =>
         [.. items.Select(item => item.Adapter)];

@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Protocols;
@@ -47,7 +49,7 @@ public sealed class Socks5UdpTransportFactory : IUdpProxyTransportFactory
         int maximumFrameSize,
         int relayReceiveBufferBytes = Socks5UdpTransport.DefaultRelaySocketReceiveBufferSize,
         Socks5AddressCache? addressCache = null,
-        IRuntimeLogger? logger = null,
+        ILogger? logger = null,
         Func<Socks5Server, CancellationToken, ValueTask<Socks5ControlConnection>>? createControl = null,
         Func<AddressFamily, Socket>? socketFactory = null,
         Action<Socket>? disableUdpConnectionReset = null)
@@ -59,7 +61,7 @@ public sealed class Socks5UdpTransportFactory : IUdpProxyTransportFactory
             selfTraffic,
             addressCache,
             createControl,
-            logger ?? NullRuntimeLogger.Instance,
+            logger ?? NullLogger.Instance,
             new RuntimeLogThrottle(s_lostLogInterval));
         _maximumFrameSize = maximumFrameSize;
         _relayReceiveBufferBytes = relayReceiveBufferBytes;

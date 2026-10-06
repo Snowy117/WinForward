@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Runtime.Socks5;
@@ -153,14 +155,14 @@ public sealed class LocalUdpTransportTests
         // it went through the receive path and was skipped — the responder is the configured endpoint,
         // so only the missing destination can skip it — and nothing reached the sink.
         var sink = new FakeResponseSink();
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var flow = CreateFlow("192.0.2.53");
         await using var session = CreateSession(flow, transport, sink, logger);
         session.Start(static _ => { });
         var mismatchBefore = RuntimeCounters.Shared.Get(RuntimeCounters.UdpResponseSourceMismatch);
         await responder.SendToAsync(transport.LocalEndpoint, [0xaa, 0xbb], sendTimeout.Token);
 
-        await WaitForAsync(() => logger.Lines.Any(line => line.Level == RuntimeLogLevel.Debug && line.Message.Contains("unexpectedSource=1", StringComparison.Ordinal)));
+        await WaitForAsync(() => logger.Lines.Any(line => line.Level == LogLevel.Debug && line.Message.Contains("unexpectedSource=1", StringComparison.Ordinal)));
         Assert.False(sink.Responses.Reader.TryRead(out _));
 
         // The session's own exchange is the only thing that reaches the sink: the unsolicited datagram
@@ -245,7 +247,7 @@ public sealed class LocalUdpTransportTests
         var registry = new SelfTrafficRegistry();
         var factory = new RecordingTransportFactory(new LocalUdpTransportFactory(registry, MaximumFrameSize));
         var sink = new FakeResponseSink();
-        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, sink, new UdpProxyOptions { Capacity = 16, Logger = new RecordingRuntimeLogger() });
+        await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, sink, new UdpProxyOptions { Capacity = 16, Logger = new RecordingLogger() });
         var firstFlow = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53_000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
         var secondFlow = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.11"), 53_000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 53), TransportProtocol.Udp, FlowOriginKind.Host);
 
@@ -639,7 +641,7 @@ public sealed class LocalUdpTransportTests
             TransportProtocol.Udp,
             FlowOriginKind.Host);
 
-    private static UdpProxySession CreateSession(FlowKey flow, IUdpProxyTransport transport, IUdpResponseSink sink, IRuntimeLogger? logger = null) =>
+    private static UdpProxySession CreateSession(FlowKey flow, IUdpProxyTransport transport, IUdpResponseSink sink, ILogger? logger = null) =>
         new(new UdpProxySessionContext(
             flow,
             1,
@@ -657,7 +659,7 @@ public sealed class LocalUdpTransportTests
             MacAddress.Invalid,
             TimeProvider.System,
             static (_, _) => { },
-            logger ?? NullRuntimeLogger.Instance,
+            logger ?? NullLogger.Instance,
             s_receiveWindowPool,
             UdpProxyCoordinator.ReceiveWindowSize(MaximumFrameSize),
             CancellationToken.None));

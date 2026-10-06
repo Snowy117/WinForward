@@ -1,9 +1,11 @@
 using System.Runtime.Versioning;
-using WinForward.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Protocols;
 using WinForward.Runtime.Capture;
+using WinForward.Runtime.Logging;
 
 namespace WinForward.Runtime.UdpProxy;
 
@@ -44,7 +46,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
     private readonly AdapterSlotTable _slots;
     private readonly NdisPacketBufferPool _bufferPool;
     private readonly int _maximumFrameSize;
-    private readonly IRuntimeLogger _logger;
+    private readonly ILogger _logger;
     private readonly IInterceptionHealthSignal _healthSignal;
     private readonly RuntimeLogThrottle _originUnresolvedWarn = new(s_structuredReinjectLogInterval);
     private readonly RuntimeLogThrottle _failClosedDropWarn = new(s_structuredReinjectLogInterval);
@@ -67,7 +69,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         IUdpAdapterTargetSource adapterTargets,
         AdapterSlotTable? slots = null,
         int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame,
-        IRuntimeLogger? logger = null,
+        ILogger? logger = null,
         NdisPacketBufferPool? bufferPool = null,
         IInterceptionHealthSignal? healthSignal = null)
     {
@@ -78,7 +80,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         _reinjector = reinjector;
         _adapterTargets = adapterTargets;
         _maximumFrameSize = maximumFrameSize;
-        _logger = logger ?? NullRuntimeLogger.Instance;
+        _logger = logger ?? NullLogger.Instance;
         _bufferPool = bufferPool ?? NdisPacketBufferPool.Shared;
         _healthSignal = healthSignal ?? InterceptionHealthMonitor.Noop;
     }
@@ -97,11 +99,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
             // per response on the steady path.
             if (!TryBuildResponseFrame(originalFlow, remoteSource, payload, target, towardMstcp, clientMac, buffer.GetFrameStorage(), out var frameLength))
             {
-                if (_logger.IsEnabled(RuntimeLogLevel.Trace))
-                {
-                    LogTrace("udp.response.dropped", originalFlow,
-                        new RuntimeLogField("reason", "frameBuild"), new RuntimeLogField("bytes", payload.Length));
-                }
+                UdpProxyLog.UdpResponseDropped(_logger, originalFlow.Protocol, originalFlow.Origin, originalFlow.Local, originalFlow.Remote, "frameBuild", payload.Length);
                 LogFrameBuildFailure();
                 return ValueTask.CompletedTask;
             }
@@ -118,12 +116,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
             {
                 _reinjector.SendToAdapter(target.Handle, buffer);
             }
-            if (_logger.IsEnabled(RuntimeLogLevel.Trace))
-            {
-                LogTrace("udp.response.reinjected", originalFlow,
-                    new RuntimeLogField("target", towardMstcp ? "mstcp" : "adapter"),
-                    new RuntimeLogField("bytes", payload.Length));
-            }
+            UdpProxyLog.UdpResponseReinjected(_logger, originalFlow.Protocol, originalFlow.Origin, originalFlow.Local, originalFlow.Remote, towardMstcp ? "mstcp" : "adapter", payload.Length);
             return ValueTask.CompletedTask;
         }
         finally
@@ -184,7 +177,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
                 return true;
             }
             target = default;
-            if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogTrace("udp.response.dropped", originalFlow, new RuntimeLogField("reason", "missingHostTarget"));
+            UdpProxyLog.UdpResponseDropped(_logger, originalFlow.Protocol, originalFlow.Origin, originalFlow.Local, originalFlow.Remote, "missingHostTarget", bytes: null);
             LogMissingHostTarget(originalFlow);
             return false;
         }
@@ -192,7 +185,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         if (originalFlow.OriginAdapterSlot == AdapterSlotTable.NoSlot || _adapterTargets.Resolve(originalFlow.OriginAdapterSlot) is not { } originAdapter)
         {
             target = default;
-            if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogTrace("udp.response.dropped", originalFlow, new RuntimeLogField("reason", "missingOriginAdapter"));
+            UdpProxyLog.UdpResponseDropped(_logger, originalFlow.Protocol, originalFlow.Origin, originalFlow.Local, originalFlow.Remote, "missingOriginAdapter", bytes: null);
             LogMissingOriginAdapter(originalFlow);
             return false;
         }
@@ -200,23 +193,11 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         towardMstcp = false;
         if (!clientMac.IsValid)
         {
-            if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogTrace("udp.response.dropped", originalFlow, new RuntimeLogField("reason", "missingClientMac"));
+            UdpProxyLog.UdpResponseDropped(_logger, originalFlow.Protocol, originalFlow.Origin, originalFlow.Local, originalFlow.Remote, "missingClientMac", bytes: null);
             LogMissingClientMac();
             return false;
         }
         return true;
-    }
-
-    private void LogTrace(string eventName, FlowKey flow, params RuntimeLogField[] fields)
-    {
-        if (!_logger.IsEnabled(RuntimeLogLevel.Trace)) return;
-        var allFields = new RuntimeLogField[fields.Length + 4];
-        allFields[0] = new("protocol", flow.Protocol);
-        allFields[1] = new("origin", flow.Origin);
-        allFields[2] = new("source", flow.Local);
-        allFields[3] = new("destination", flow.Remote);
-        fields.CopyTo(allFields, 4);
-        _logger.Event(RuntimeLogLevel.Trace, eventName, allFields);
     }
 
     private void LogFrameBuildFailure()
@@ -225,7 +206,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         var last = Interlocked.Read(ref _lastFrameBuildFailureLogTicks);
         if (now - last >= s_missingOriginLogInterval.Ticks && Interlocked.CompareExchange(ref _lastFrameBuildFailureLogTicks, now, last) == last)
         {
-            _logger.Warn("UDP response frame build failed; dropping the response (fail-closed).");
+            UdpProxyLog.UdpResponseFrameBuildFailed(_logger);
         }
     }
 
@@ -240,7 +221,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         var last = Interlocked.Read(ref _lastMissingClientMacLogTicks);
         if (now - last >= s_missingOriginLogInterval.Ticks && Interlocked.CompareExchange(ref _lastMissingClientMacLogTicks, now, last) == last)
         {
-            _logger.Warn("Forwarded UDP response dropped fail-closed: the flow's client MAC was not recorded.");
+            UdpProxyLog.UdpClientMacMissingDrop(_logger);
         }
     }
 
@@ -251,13 +232,10 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
     {
         RuntimeCounters.Shared.Increment(RuntimeCounters.UdpOriginUnresolved);
         _healthSignal.ReportFailure(RuntimeCounters.UdpOriginUnresolved);
-        if (!_originUnresolvedWarn.ShouldEmit() || !_logger.IsEnabled(RuntimeLogLevel.Warn)) return;
-        _logger.Event(RuntimeLogLevel.Warn, "udp.reinject.unresolved",
-            new("source", originalFlow.Local),
-            new("destination", originalFlow.Remote),
-            new("originAdapter", ResolveAdapterId(originalFlow.OriginAdapterSlot)),
-            new("mapAdapters", string.Join(',', _adapterTargets.AdapterIds)),
-            new("fallback", "host"));
+        if (!_originUnresolvedWarn.ShouldEmit()) return;
+        var originAdapter = ResolveAdapterId(originalFlow.OriginAdapterSlot);
+        var mapAdapters = string.Join(',', _adapterTargets.AdapterIds);
+        UdpProxyLog.UdpReinjectUnresolved(_logger, originalFlow.Local, originalFlow.Remote, originAdapter, mapAdapters, "host");
     }
 
     private void LogMissingHostTarget(FlowKey originalFlow)
@@ -274,12 +252,8 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
     {
         RuntimeCounters.Shared.Increment(RuntimeCounters.UdpFailClosedDrop);
         _healthSignal.ReportFailure(RuntimeCounters.UdpFailClosedDrop);
-        if (!_failClosedDropWarn.ShouldEmit() || !_logger.IsEnabled(RuntimeLogLevel.Warn)) return;
-        _logger.Event(RuntimeLogLevel.Warn, "udp.reinject.drop",
-            new("source", originalFlow.Local),
-            new("destination", originalFlow.Remote),
-            new("originKind", originalFlow.Origin),
-            new("originAdapter", ResolveAdapterId(originalFlow.OriginAdapterSlot)),
-            new("reason", reason));
+        if (!_failClosedDropWarn.ShouldEmit()) return;
+        var originAdapter = ResolveAdapterId(originalFlow.OriginAdapterSlot);
+        UdpProxyLog.UdpReinjectDrop(_logger, originalFlow.Local, originalFlow.Remote, originalFlow.Origin, originAdapter, reason);
     }
 }

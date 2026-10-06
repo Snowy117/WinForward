@@ -1,6 +1,9 @@
 using System.Runtime.ExceptionServices;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using WinForward.Configuration;
 using WinForward.Core;
+using WinForward.Runtime.Logging;
 
 namespace WinForward.Runtime;
 
@@ -52,7 +55,7 @@ internal sealed class FlowAttributionPipeline : IAsyncDisposable
     private readonly RuntimeLogThrottle _pendingRejectedWarn = new(TimeSpan.FromSeconds(5));
     private readonly RuntimeLogThrottle _flowFullTrace = new(TimeSpan.FromSeconds(5));
     private readonly List<PendingFlowAttribution> _sweepScratch = [];
-    private readonly IRuntimeLogger _logger;
+    private readonly ILogger _logger;
     private long _admissions;
     private long _attributions;
     private long _blockedPackets;
@@ -60,12 +63,12 @@ internal sealed class FlowAttributionPipeline : IAsyncDisposable
     private long _retainedPackets;
     private int _disposed;
 
-    public FlowAttributionPipeline(NativeBufferPool pool, IFlowAttributionHost host, IRuntimeLogger? logger = null)
+    public FlowAttributionPipeline(NativeBufferPool pool, IFlowAttributionHost host, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(pool);
         ArgumentNullException.ThrowIfNull(host);
         _host = host;
-        _logger = logger ?? NullRuntimeLogger.Instance;
+        _logger = logger ?? NullLogger.Instance;
         _index = new FlowAttributionPendingIndex(pool, host.Flows);
     }
 
@@ -414,22 +417,16 @@ internal sealed class FlowAttributionPipeline : IAsyncDisposable
     {
         // Two independently throttled arms with their own levels and events.
         // ReSharper disable once ConvertIfStatementToSwitchStatement // A switch would have to enumerate all seven outcomes for two logging arms.
-        if (outcome == AttributionAdmission.BlockedPending && _pendingRejectedWarn.ShouldEmit() && _logger.IsEnabled(RuntimeLogLevel.Warn))
+        if (outcome == AttributionAdmission.BlockedPending && _pendingRejectedWarn.ShouldEmit())
         {
-            _logger.Event(RuntimeLogLevel.Warn, "flow.attribution.pending-rejected",
-                new("protocol", context.Key.Protocol),
-                new("origin", context.Key.Origin),
-                new("source", context.Key.Local),
-                new("destination", context.Key.Remote),
-                new("pending", _index.ActiveCount));
+            var key = context.Key;
+            FlowLog.FlowAttributionPendingRejected(_logger, key.Protocol, key.Origin, key.Local, key.Remote, _index.ActiveCount);
         }
 
-        if (outcome == AttributionAdmission.BlockedFlowFull && _flowFullTrace.ShouldEmit() && _logger.IsEnabled(RuntimeLogLevel.Trace))
+        if (outcome == AttributionAdmission.BlockedFlowFull && _flowFullTrace.ShouldEmit())
         {
-            _logger.Event(RuntimeLogLevel.Trace, "flow.attribution.flow-full",
-                new("protocol", context.Key.Protocol),
-                new("source", context.Key.Local),
-                new("destination", context.Key.Remote));
+            var key = context.Key;
+            FlowLog.FlowAttributionFlowFull(_logger, key.Protocol, key.Local, key.Remote);
         }
     }
 

@@ -18,7 +18,7 @@ public sealed class TcpRedirectAcceptorTests
     public async Task UnattachableRelayIsDiscardedAndTheSessionIsTornDown()
     {
         var table = new TcpRedirectTable();
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var store = new TcpRedirectSessionStore(table, logger, capacity: 8, TimeProvider.System);
         var listener = new FakeListener(Endpoint.From(IPAddress.Loopback, 40_000));
         var association = CreateHostAssociation(listener.TranslatedTuple);
@@ -50,7 +50,7 @@ public sealed class TcpRedirectAcceptorTests
         var listener = new FakeListener(Endpoint.From(IPAddress.IPv6Any, 42_000));
         var association = CreateLinkLocalHostAssociation(listener.TranslatedTuple);
         var session = CreateSession(association, listener);
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var relayFactory = new CompletableRelayFactory();
         var acceptor = new TcpRedirectAcceptor(
             relayFactory,

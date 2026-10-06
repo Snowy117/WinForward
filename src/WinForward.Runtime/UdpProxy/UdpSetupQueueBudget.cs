@@ -1,6 +1,6 @@
-using System.Globalization;
-using WinForward.Configuration;
+using Microsoft.Extensions.Logging;
 using WinForward.Core;
+using WinForward.Runtime.Logging;
 
 namespace WinForward.Runtime.UdpProxy;
 
@@ -13,7 +13,7 @@ namespace WinForward.Runtime.UdpProxy;
 /// slot-state transitions stays exactly the coordinator's. Also owns the setup-drop bookkeeping:
 /// the per-drop trace, the running total, and a rate-limited debug summary.
 /// </summary>
-internal sealed class UdpSetupQueueBudget(long byteBudget, IRuntimeLogger logger, TimeProvider timeProvider)
+internal sealed class UdpSetupQueueBudget(long byteBudget, ILogger logger, TimeProvider timeProvider)
 {
     /// <summary>
     /// The default cross-flow bound on aggregate setup-queue memory (~250 full 32 KiB queues;
@@ -65,12 +65,13 @@ internal sealed class UdpSetupQueueBudget(long byteBudget, IRuntimeLogger logger
     {
         if (dropped <= 0) return;
         Interlocked.Add(ref _droppedTotal, dropped);
-        if (logger.IsEnabled(RuntimeLogLevel.Trace)) UdpProxyLogging.LogTrace(logger, "udp.setupqueue.dropped", flow, new RuntimeLogField("dropped", dropped));
+        UdpProxyLog.UdpSetupQueueDropped(logger, flow.Protocol, flow.Local, flow.Remote, dropped);
         var now = timeProvider.GetUtcNow().UtcTicks;
         var last = Interlocked.Read(ref _lastDropLogTicks);
         if (now - last >= s_dropLogInterval.Ticks && Interlocked.CompareExchange(ref _lastDropLogTicks, now, last) == last)
         {
-            logger.Debug(string.Create(CultureInfo.InvariantCulture, $"UDP session setup queues dropped {Interlocked.Read(ref _droppedTotal)} datagram(s) total (drop-oldest)."));
+            var droppedTotal = Interlocked.Read(ref _droppedTotal);
+            UdpProxyLog.UdpSetupQueueDroppedTotal(logger, droppedTotal);
         }
     }
 

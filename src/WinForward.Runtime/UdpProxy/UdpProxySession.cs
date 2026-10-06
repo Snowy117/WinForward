@@ -1,7 +1,7 @@
-using System.Globalization;
 using System.Net.Sockets;
-using WinForward.Configuration;
+using Microsoft.Extensions.Logging;
 using WinForward.Core;
+using WinForward.Runtime.Logging;
 
 namespace WinForward.Runtime.UdpProxy;
 
@@ -24,7 +24,7 @@ internal readonly record struct UdpProxySessionContext(
     MacAddress ClientMac,
     TimeProvider TimeProvider,
     Action<UdpAssociation, DateTimeOffset> ActivityObserver,
-    IRuntimeLogger Logger,
+    ILogger Logger,
     NativeBufferPool ReceiveWindowPool,
     int ReceiveBufferSize,
     CancellationToken Shutdown,
@@ -66,7 +66,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
     private readonly TimeProvider _timeProvider;
     private readonly ActivityBucketClock _activityClock;
     private readonly Action<UdpAssociation, DateTimeOffset> _activityObserver;
-    private readonly IRuntimeLogger _logger;
+    private readonly ILogger _logger;
     private readonly NativeBufferPool _receiveWindowPool;
     private readonly int _receiveBufferSize;
     private readonly Lock _activityGate = new();
@@ -449,13 +449,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
             LogInjectionFailureRateLimited(exception);
         }
 
-        if (_logger.IsEnabled(RuntimeLogLevel.Trace))
-        {
-            _logger.Event(RuntimeLogLevel.Trace, "udp.packet.received",
-                new("flow", FlowGeneration == 0 ? null : FlowGeneration),
-                new("udpAssociation", Association.Generation), new("source", source),
-                new("destination", Flow.Local), new("bytes", response.Payload.Length));
-        }
+        UdpProxyLog.UdpPacketReceived(_logger, FlowGeneration == 0 ? null : FlowGeneration, Association.Generation, source, Flow.Local, response.Payload.Length);
     }
 
     private void RecordSkippedDatagram(UdpTransportSkipReason reason)
@@ -503,16 +497,11 @@ internal sealed class UdpProxySession : IAsyncDisposable
     /// <summary>The rate-limited warn half of <see cref="RecordForeignSource"/>, CAS-on-ticks like <see cref="MaybeLogSkipSummary"/>; the counter it reports is a lifetime total this path never drains.</summary>
     private void MaybeLogForeignSource(Endpoint source)
     {
-        if (!_logger.IsEnabled(RuntimeLogLevel.Warn)) return;
         var now = _timeProvider.GetUtcNow().UtcTicks;
         var last = Interlocked.Read(ref _lastForeignSourceLogTicks);
         if (now - last < s_rateLimitedLogInterval.Ticks) return;
         if (Interlocked.CompareExchange(ref _lastForeignSourceLogTicks, now, last) != last) return;
-        _logger.Event(RuntimeLogLevel.Warn, "udp.response.foreign_source",
-            new("destination", Flow.Remote),
-            new("source", source),
-            new("origin", Flow.Origin),
-            new("udpAssociation", Association.Generation));
+        UdpProxyLog.UdpResponseForeignSource(_logger, Flow.Remote, source, Flow.Origin, Association.Generation);
     }
 
     private void MaybeLogSkipSummary()
@@ -527,7 +516,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
         var connectionReset = Interlocked.Exchange(ref _skippedConnectionReset, 0);
         var domainDestination = Interlocked.Exchange(ref _skippedDomainDestination, 0);
         if (unexpected + oversized + malformed + connectionReset + domainDestination == 0) return;
-        _logger.Debug(string.Create(CultureInfo.InvariantCulture, $"UDP transport skipped datagrams in the last window: unexpectedSource={unexpected} oversized={oversized} malformed={malformed} connectionReset={connectionReset} domainDestination={domainDestination}."));
+        UdpProxyLog.UdpTransportSkippedSummary(_logger, unexpected, oversized, malformed, connectionReset, domainDestination);
     }
 
     private void LogInjectionFailureRateLimited(Exception exception)
@@ -536,7 +525,9 @@ internal sealed class UdpProxySession : IAsyncDisposable
         var last = Interlocked.Read(ref _lastInjectionFailureLogTicks);
         if (now - last < s_rateLimitedLogInterval.Ticks) return;
         if (Interlocked.CompareExchange(ref _lastInjectionFailureLogTicks, now, last) != last) return;
-        _logger.Warn($"UDP response reinjection failed; the response was skipped: {exception.GetType().Name}: {exception.Message}");
+        var error = exception.GetType().Name;
+        var detail = exception.Message;
+        UdpProxyLog.UdpInjectionFailed(_logger, error, detail);
     }
 
     private void TouchActivity()

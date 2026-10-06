@@ -1,4 +1,4 @@
-using WinForward.Configuration;
+using Microsoft.Extensions.Logging;
 using WinForward.TestSupport;
 using Xunit;
 
@@ -36,16 +36,16 @@ public sealed class LayeredCaptureRunnerHealthSignalTests
 
         Assert.False(harness.RunTask.IsCompleted);
         var refresh = harness.RefreshEvents[^1];
-        Assert.Equal("true", CaptureRunnerHarness.FieldValue(refresh, "forced"));
-        Assert.Null(CaptureRunnerHarness.FieldValue(refresh, "noop"));
+        Assert.Equal("true", CaptureRunnerHarness.FieldValue(refresh, "Forced"));
+        Assert.Null(CaptureRunnerHarness.FieldValue(refresh, "Noop"));
         Assert.Equal([101], harness.Generation(1).Scope.Select(item => item.Adapter.RuntimeHandle).ToArray());
         Assert.Equal(1, harness.Generation(0).DisposeCount);
         Assert.Equal(0, harness.DurableDisposeCount);
         var (level, _, fields) = Assert.Single(harness.Logger.Events, entry =>
             string.Equals(entry.Name, "runner.forcedRefresh", StringComparison.Ordinal));
-        Assert.Equal(RuntimeLogLevel.Warn, level);
-        Assert.Equal(RuntimeCounters.RelaySetupFailed, CaptureRunnerHarness.FieldValue(fields, "reason"));
-        Assert.Equal("1", CaptureRunnerHarness.FieldValue(fields, "consecutive"));
+        Assert.Equal(LogLevel.Warning, level);
+        Assert.Equal(RuntimeCounters.RelaySetupFailed, CaptureRunnerHarness.FieldValue(fields, "Reason"));
+        Assert.Equal("1", CaptureRunnerHarness.FieldValue(fields, "Consecutive"));
 
         // The forced install completed, so the demand-processing success hook resets the
         // monitor's consecutive streak. The hook runs after the install returns, while the waits

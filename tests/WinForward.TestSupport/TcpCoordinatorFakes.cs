@@ -140,7 +140,7 @@ internal static class TcpCoordinatorFakes
         var listenerFactory = new FakeListenerFactory();
         var injector = new FakeInjector();
         var relayFactory = new CompletableRelayFactory();
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var selfTraffic = new SelfTrafficRegistry();
         var table = new TcpRedirectTable();
         var coordinator = CreateCoordinator(listenerFactory, relayFactory, injector, table, selfTraffic, new FakeLocalAddressProvider(), new TcpRedirectOptions { Logger = logger });
@@ -203,7 +203,7 @@ internal sealed record DispatcherHarness(
     CompletableRelayFactory RelayFactory,
     TcpRedirectTable Table,
     FlowDispatcher Dispatcher,
-    RecordingRuntimeLogger Logger);
+    RecordingLogger Logger);
 
 // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local // Deliberate failure-injection seam: the flag makes listener creation throw so the coordinator's listener-allocation failure path is exercised deterministically.
 internal sealed class FakeListenerFactory(Endpoint? fixedTuple = null, bool throwOnCreate = false) : ITcpRedirectListenerFactory

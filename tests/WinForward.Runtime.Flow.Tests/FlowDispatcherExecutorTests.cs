@@ -86,7 +86,7 @@ public sealed class FlowDispatcherExecutorTests
     [Fact]
     public async Task DispatcherLogsAForwardedMatchWithItsDomainRelativeRuleIndex()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var config = new ValidatedConfiguration(
             new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Pass)
@@ -98,9 +98,9 @@ public sealed class FlowDispatcherExecutorTests
 
         await dispatcher.DispatchAsync(packet, CancellationToken.None);
 
-        var (_, _, fields) = Assert.Single(logger.Events, e => string.Equals(e.Name, "packet.action", StringComparison.Ordinal));
-        Assert.Equal(0, fields.Single(f => string.Equals(f.Key, "rule", StringComparison.Ordinal)).Value);
-        Assert.Equal(FlowOriginKind.Forwarded, fields.Single(f => string.Equals(f.Key, "origin", StringComparison.Ordinal)).Value);
+        var (_, fields) = Assert.Single(logger.Events, e => string.Equals(e.Name, "packet.action", StringComparison.Ordinal));
+        Assert.Equal(0, fields.Single(f => string.Equals(f.Key, "Rule", StringComparison.Ordinal)).Value);
+        Assert.Equal(FlowOriginKind.Forwarded, fields.Single(f => string.Equals(f.Key, "Origin", StringComparison.Ordinal)).Value);
     }
 
     [Fact]

@@ -23,7 +23,7 @@ public sealed class LayeredCaptureRunnerPeriodicRefreshTests
         await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 2, timeoutMs: 5000).ConfigureAwait(false);
         await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
 
-        Assert.Contains("id-a", CaptureRunnerHarness.FieldValue(harness.RefreshEvents[^1], "changed"), StringComparison.Ordinal);
+        Assert.Contains("id-a", CaptureRunnerHarness.FieldValue(harness.RefreshEvents[^1], "Changed"), StringComparison.Ordinal);
         Assert.Equal(1, harness.Generation(0).DisposeCount);
         Assert.Equal(0, harness.Generation(1).DisposeCount);
         Assert.Equal(0, harness.DurableDisposeCount);
@@ -47,7 +47,7 @@ public sealed class LayeredCaptureRunnerPeriodicRefreshTests
 
         // Multiple ticks processed, every one of them the no-op skip: the running generation is
         // never touched and keeps running.
-        Assert.All(harness.RefreshEvents, fields => Assert.Equal("true", CaptureRunnerHarness.FieldValue(fields, "noop")));
+        Assert.All(harness.RefreshEvents, fields => Assert.Equal("true", CaptureRunnerHarness.FieldValue(fields, "Noop")));
         Assert.Single(harness.Generations.Generations);
         Assert.Equal(0, harness.Generation(0).DisposeCount);
         Assert.True(harness.Enumeration.EnumerationCount > 1);
@@ -75,7 +75,7 @@ public sealed class LayeredCaptureRunnerPeriodicRefreshTests
         // ReSharper disable AccessToDisposedClosure // The predicate is polled by this WaitForAsync inside the test scope; the harness is disposed only after the awaited call returns, with its run already drained.
         await AsyncTestExtensions.WaitForAsync(
             () => harness.RefreshEvents.Count >= 2 && harness.RefreshEvents.Skip(1).Any(
-                fields => string.Equals(CaptureRunnerHarness.FieldValue(fields, "noop"), "true", StringComparison.Ordinal)),
+                fields => string.Equals(CaptureRunnerHarness.FieldValue(fields, "Noop"), "true", StringComparison.Ordinal)),
             timeoutMs: 5000).ConfigureAwait(false);
         // ReSharper restore AccessToDisposedClosure
         await Task.Delay(400).ConfigureAwait(false);
@@ -115,7 +115,7 @@ public sealed class LayeredCaptureRunnerPeriodicRefreshTests
             new FakeCaptureGenerationFactory(),
             new FakeAdapterListChangeSource(),
             CaptureRunnerFakes.UnconstrainedPolicy(),
-            new RecordingRuntimeLogger(),
+            new RecordingLogger(),
             _ => ValueTask.CompletedTask,
             periodicRefreshInterval: TimeSpan.FromSeconds(-1)));
         Assert.Equal("periodicRefreshInterval", fault.ParamName);

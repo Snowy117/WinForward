@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Net;
+using Microsoft.Extensions.Logging;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
@@ -28,7 +29,7 @@ public sealed class RuntimeDiagnosticLoggingTests
     [Fact]
     public async Task RelaySetupFailureWarnCarriesDiagnostics()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var listenerFactory = new FakeListenerFactory();
         await using var coordinator = CreateCoordinator(
             listenerFactory,
@@ -46,18 +47,18 @@ public sealed class RuntimeDiagnosticLoggingTests
         await WaitForAsync(() => logger.Events.Any(e => string.Equals(e.Name, "tcp.redirect.relaySetupFailed", StringComparison.Ordinal)));
 
         var (level, _, fields) = Assert.Single(logger.Events, e => string.Equals(e.Name, "tcp.redirect.relaySetupFailed", StringComparison.Ordinal));
-        Assert.Equal(RuntimeLogLevel.Warn, level);
-        Assert.Equal("IOException", fields.Single(f => string.Equals(f.Key, "error", StringComparison.Ordinal)).Value);
-        Assert.Equal("127.0.0.1:1080", fields.Single(f => string.Equals(f.Key, "upstream", StringComparison.Ordinal)).Value);
-        Assert.Equal(2, fields.Single(f => string.Equals(f.Key, "attempts", StringComparison.Ordinal)).Value);
-        Assert.Equal("test", fields.Single(f => string.Equals(f.Key, "proxy", StringComparison.Ordinal)).Value);
-        Assert.IsType<Endpoint>(fields.Single(f => string.Equals(f.Key, "destination", StringComparison.Ordinal)).Value);
+        Assert.Equal(LogLevel.Warning, level);
+        Assert.Equal("IOException", fields.Single(f => string.Equals(f.Key, "Error", StringComparison.Ordinal)).Value);
+        Assert.Equal("127.0.0.1:1080", fields.Single(f => string.Equals(f.Key, "Upstream", StringComparison.Ordinal)).Value);
+        Assert.Equal(2, fields.Single(f => string.Equals(f.Key, "Attempts", StringComparison.Ordinal)).Value);
+        Assert.Equal("test", fields.Single(f => string.Equals(f.Key, "Proxy", StringComparison.Ordinal)).Value);
+        Assert.IsType<Endpoint>(fields.Single(f => string.Equals(f.Key, "Destination", StringComparison.Ordinal)).Value);
     }
 
     [Fact]
     public async Task UnrelatedPeerWarnCarriesEndpoints()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var listenerFactory = new FakeListenerFactory();
         await using var coordinator = CreateCoordinator(
             listenerFactory,
@@ -82,10 +83,10 @@ public sealed class RuntimeDiagnosticLoggingTests
         await WaitForAsync(() => unrelated.IsDisposed, timeoutMs: 15_000);
 
         var (level, _, fields) = Assert.Single(logger.Events, e => string.Equals(e.Name, "tcp.redirect.unrelatedPeer", StringComparison.Ordinal));
-        Assert.Equal(RuntimeLogLevel.Warn, level);
-        Assert.IsType<Endpoint>(fields.Single(f => string.Equals(f.Key, "listener", StringComparison.Ordinal)).Value);
-        Assert.Equal(Endpoint.From(s_destination, 53000), fields.Single(f => string.Equals(f.Key, "expected", StringComparison.Ordinal)).Value);
-        Assert.Equal(Endpoint.From(s_destination, 53999), fields.Single(f => string.Equals(f.Key, "actual", StringComparison.Ordinal)).Value);
+        Assert.Equal(LogLevel.Warning, level);
+        Assert.IsType<Endpoint>(fields.Single(f => string.Equals(f.Key, "Listener", StringComparison.Ordinal)).Value);
+        Assert.Equal(Endpoint.From(s_destination, 53000), fields.Single(f => string.Equals(f.Key, "Expected", StringComparison.Ordinal)).Value);
+        Assert.Equal(Endpoint.From(s_destination, 53999), fields.Single(f => string.Equals(f.Key, "Actual", StringComparison.Ordinal)).Value);
     }
 
     [Fact]
@@ -94,7 +95,7 @@ public sealed class RuntimeDiagnosticLoggingTests
         var config = new ValidatedConfiguration(
             new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase),
             new PolicySnapshot([], FlowAction.Pass));
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var executor = new FakeExecutor();
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor, flowCapacity: 1, logger: logger);
 
@@ -106,10 +107,10 @@ public sealed class RuntimeDiagnosticLoggingTests
 
         Assert.Equal(2, executor.BlockCount);
         var (level, _, fields) = Assert.Single(logger.Events, e => string.Equals(e.Name, "flow.capacity-block", StringComparison.Ordinal));
-        Assert.Equal(RuntimeLogLevel.Warn, level);
-        Assert.Equal(1, fields.Single(f => string.Equals(f.Key, "tableSize", StringComparison.Ordinal)).Value);
-        Assert.Equal(1, fields.Single(f => string.Equals(f.Key, "capacity", StringComparison.Ordinal)).Value);
-        Assert.Equal(TransportProtocol.Udp, fields.Single(f => string.Equals(f.Key, "protocol", StringComparison.Ordinal)).Value);
+        Assert.Equal(LogLevel.Warning, level);
+        Assert.Equal(1, fields.Single(f => string.Equals(f.Key, "TableSize", StringComparison.Ordinal)).Value);
+        Assert.Equal(1, fields.Single(f => string.Equals(f.Key, "Capacity", StringComparison.Ordinal)).Value);
+        Assert.Equal(TransportProtocol.Udp, fields.Single(f => string.Equals(f.Key, "Protocol", StringComparison.Ordinal)).Value);
     }
 
     [Fact]
@@ -121,18 +122,18 @@ public sealed class RuntimeDiagnosticLoggingTests
             [
                 new(new RuleMatcher(Processes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "dns.exe" }), new FlowDecision(FlowAction.Block, 0, TargetName: null)),
             ], FlowAction.Pass));
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var missing = new FlowDispatcher(config, new FakeGuard(), new FakeExecutor(), new FakeAttributor(name: null), logger: logger);
 
         await missing.DispatchAsync(HostUdpPacket(53000), CancellationToken.None);
         await missing.DispatchAsync(HostUdpPacket(53001), CancellationToken.None);
 
         var (level, _, fields) = Assert.Single(logger.Events, e => string.Equals(e.Name, "flow.attribution-miss", StringComparison.Ordinal));
-        Assert.Equal(RuntimeLogLevel.Warn, level);
-        Assert.True((bool)fields.Single(f => string.Equals(f.Key, "afterRetry", StringComparison.Ordinal)).Value!);
-        Assert.IsType<Endpoint>(fields.Single(f => string.Equals(f.Key, "local", StringComparison.Ordinal)).Value);
+        Assert.Equal(LogLevel.Warning, level);
+        Assert.True((bool)fields.Single(f => string.Equals(f.Key, "AfterRetry", StringComparison.Ordinal)).Value!);
+        Assert.IsType<Endpoint>(fields.Single(f => string.Equals(f.Key, "Local", StringComparison.Ordinal)).Value);
 
-        var successLogger = new RecordingRuntimeLogger();
+        var successLogger = new RecordingLogger();
         var resolving = new FlowDispatcher(config, new FakeGuard(), new FakeExecutor(), new FakeAttributor("dns.exe"), logger: successLogger);
         await resolving.DispatchAsync(HostUdpPacket(53000), CancellationToken.None);
         Assert.DoesNotContain(successLogger.Events, e => string.Equals(e.Name, "flow.attribution-miss", StringComparison.Ordinal));
@@ -141,18 +142,18 @@ public sealed class RuntimeDiagnosticLoggingTests
     [Fact]
     public async Task PassFlushFailureWarnsAndPropagates()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var executor = new NdisPacketActionExecutor(new ThrowingBatchReinjector(), logger);
 
         await executor.PassAsync(PassPacket());
         Assert.Throws<Win32Exception>(() => executor.FlushPendingPasses(7));
 
         var (level, _, fields) = Assert.Single(logger.Events, e => string.Equals(e.Name, "reinject.pass-failed", StringComparison.Ordinal));
-        Assert.Equal(RuntimeLogLevel.Warn, level);
-        Assert.Equal(87, fields.Single(f => string.Equals(f.Key, "nativeError", StringComparison.Ordinal)).Value);
-        Assert.Equal("Win32Exception", fields.Single(f => string.Equals(f.Key, "error", StringComparison.Ordinal)).Value);
-        Assert.Equal(1, fields.Single(f => string.Equals(f.Key, "frames", StringComparison.Ordinal)).Value);
-        Assert.Null(fields.Single(f => string.Equals(f.Key, "source", StringComparison.Ordinal)).Value);
+        Assert.Equal(LogLevel.Warning, level);
+        Assert.Equal(87, fields.Single(f => string.Equals(f.Key, "NativeError", StringComparison.Ordinal)).Value);
+        Assert.Equal("Win32Exception", fields.Single(f => string.Equals(f.Key, "Error", StringComparison.Ordinal)).Value);
+        Assert.Equal(1, fields.Single(f => string.Equals(f.Key, "Frames", StringComparison.Ordinal)).Value);
+        Assert.Null(fields.Single(f => string.Equals(f.Key, "Source", StringComparison.Ordinal)).Value);
 
         // A second failing flush inside the throttle window still propagates but stays silent.
         await executor.PassAsync(PassPacket());
@@ -163,7 +164,7 @@ public sealed class RuntimeDiagnosticLoggingTests
     [Fact]
     public async Task OverflowImmediateSendFailureWarnsWithFlowKeyAndAdapter()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var executor = new NdisPacketActionExecutor(new ThrowingBatchReinjector(singleSendsToo: true), logger);
         // An empty scope installs the zero-capacity lane table, so the next pass takes the
         // immediate single-send backstop that carries the flow key and adapter stable ID.
@@ -172,10 +173,10 @@ public sealed class RuntimeDiagnosticLoggingTests
         await Assert.ThrowsAsync<Win32Exception>(() => executor.PassAsync(PassPacket()).AsTask());
 
         var (level, _, fields) = Assert.Single(logger.Events, e => string.Equals(e.Name, "reinject.pass-failed", StringComparison.Ordinal));
-        Assert.Equal(RuntimeLogLevel.Warn, level);
-        Assert.Equal(87, fields.Single(f => string.Equals(f.Key, "nativeError", StringComparison.Ordinal)).Value);
-        Assert.Equal("wlan-1", fields.Single(f => string.Equals(f.Key, "adapter", StringComparison.Ordinal)).Value);
-        Assert.IsType<Endpoint>(fields.Single(f => string.Equals(f.Key, "source", StringComparison.Ordinal)).Value);
+        Assert.Equal(LogLevel.Warning, level);
+        Assert.Equal(87, fields.Single(f => string.Equals(f.Key, "NativeError", StringComparison.Ordinal)).Value);
+        Assert.Equal("wlan-1", fields.Single(f => string.Equals(f.Key, "Adapter", StringComparison.Ordinal)).Value);
+        Assert.IsType<Endpoint>(fields.Single(f => string.Equals(f.Key, "Source", StringComparison.Ordinal)).Value);
     }
 
     private static CapturedFlowPacket HostUdpPacket(ushort clientPort) =>

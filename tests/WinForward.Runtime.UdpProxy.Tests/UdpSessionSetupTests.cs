@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.TestSupport;
@@ -28,7 +29,7 @@ public sealed class UdpSessionSetupTests
         using var setupQueuePool = new NativeBufferPool(64, capacity: 4);
         var host = new TtlExpiredDequeueHost(setupQueuePool, time.GetUtcNow() - TimeSpan.FromSeconds(6));
         using var shutdown = new CancellationTokenSource();
-        var setup = new UdpSessionSetup(factory, new UdpAssociationTable(), new FakeResponseSink(), time, new ActivityBucketClock(time), NullRuntimeLogger.Instance, receiveWindowPool, ReceiveBufferSize, host);
+        var setup = new UdpSessionSetup(factory, new UdpAssociationTable(), new FakeResponseSink(), time, new ActivityBucketClock(time), NullLogger.Instance, receiveWindowPool, ReceiveBufferSize, host);
         var slot = new UdpProxyCoordinator.UdpSessionSlot();
 
         await setup.CreateSessionAsync(flow, ProxyTarget.FromServer(s_server), flowGeneration: 1, MacAddress.Invalid, slot, shutdown.Token);
@@ -60,7 +61,7 @@ public sealed class UdpSessionSetupTests
         using var setupQueuePool = new NativeBufferPool(64, capacity: 4);
         var host = new TtlExpiredDequeueHost(setupQueuePool, time.GetUtcNow());
         using var shutdown = new CancellationTokenSource();
-        var setup = new UdpSessionSetup(factory, new UdpAssociationTable(), new FakeResponseSink(), time, new ActivityBucketClock(time), NullRuntimeLogger.Instance, receiveWindowPool, ReceiveBufferSize, host);
+        var setup = new UdpSessionSetup(factory, new UdpAssociationTable(), new FakeResponseSink(), time, new ActivityBucketClock(time), NullLogger.Instance, receiveWindowPool, ReceiveBufferSize, host);
         var slot = new UdpProxyCoordinator.UdpSessionSlot();
 
         await setup.CreateSessionAsync(flow, ProxyTarget.FromServer(s_server), flowGeneration: 1, MacAddress.Invalid, slot, shutdown.Token);
@@ -81,7 +82,7 @@ public sealed class UdpSessionSetupTests
         using var setupQueuePool = new NativeBufferPool(64, capacity: 4);
         var host = new TtlExpiredDequeueHost(setupQueuePool, time.GetUtcNow());
         using var shutdown = new CancellationTokenSource();
-        var setup = new UdpSessionSetup(factory, new UdpAssociationTable(), new FakeResponseSink(), time, new ActivityBucketClock(time), NullRuntimeLogger.Instance, receiveWindowPool, ReceiveBufferSize, host);
+        var setup = new UdpSessionSetup(factory, new UdpAssociationTable(), new FakeResponseSink(), time, new ActivityBucketClock(time), NullLogger.Instance, receiveWindowPool, ReceiveBufferSize, host);
         var slot = new UdpProxyCoordinator.UdpSessionSlot();
 
         var pending = setup.CreateSessionAsync(flow, ProxyTarget.FromServer(s_server), flowGeneration: 1, MacAddress.Invalid, slot, shutdown.Token);

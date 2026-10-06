@@ -1,4 +1,7 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using WinForward.Core;
+using WinForward.Runtime.Logging;
 using WinForward.Runtime.TcpRedirect;
 using WinForward.Runtime.UdpProxy;
 
@@ -36,7 +39,7 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
     // Cached per-tick hold predicate: an instance-method-group conversion in the tick would build a new
     // Func<FlowKey,bool> on every main-leg sweep.
     private readonly Func<FlowKey, bool>? _holdsFlow;
-    private readonly IRuntimeLogger _logger;
+    private readonly ILogger _logger;
     private readonly TimeProvider _timeProvider;
     private long _lastSweepFailureLogTicks;
     private int _started;
@@ -49,7 +52,7 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
         TimeSpan? flowIdleTimeout = null,
         TimeSpan? redirectIdleTimeout = null,
         TimeSpan? relayIdleTimeout = null,
-        IRuntimeLogger? logger = null,
+        ILogger? logger = null,
         TimeProvider? timeProvider = null,
         TimeSpan? udpSweepInterval = null,
         Func<DateTimeOffset, int>? attributionSweep = null,
@@ -67,7 +70,7 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
         _udpOneShotIdleTimeout = udpOneShotIdleTimeout;
         _udpSweepInterval = DeriveUdpSweepInterval(_interval, EffectiveUdpRetentionFloor(_relayIdleTimeout, udpOneShotIdleTimeout), udpSweepInterval);
         _holdsFlow = tcp is null ? null : tcp.HoldsFlow;
-        _logger = logger ?? NullRuntimeLogger.Instance;
+        _logger = logger ?? NullLogger.Instance;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
@@ -202,9 +205,8 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
     /// <summary>The per-tick <c>runtime.expired</c> aggregate, emitted only when a leg expired something.</summary>
     private void LogExpired(int tcpCount, int flowCount, int udpCount, int attributionCount)
     {
-        if (!_logger.IsEnabled(Configuration.RuntimeLogLevel.Debug) || (flowCount == 0 && tcpCount == 0 && udpCount == 0 && attributionCount == 0)) return;
-        _logger.Event(Configuration.RuntimeLogLevel.Debug, "runtime.expired",
-            new("flows", flowCount), new("tcpRedirects", tcpCount), new("udpSessions", udpCount), new("attributionPending", attributionCount));
+        if (flowCount == 0 && tcpCount == 0 && udpCount == 0 && attributionCount == 0) return;
+        RuntimeLog.RuntimeExpired(_logger, flowCount, tcpCount, udpCount, attributionCount);
     }
 
     private void LogSweepFailureRateLimited(Exception exception)
@@ -213,7 +215,8 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
         var last = Interlocked.Read(ref _lastSweepFailureLogTicks);
         if (now - last < s_sweepFailureLogInterval.Ticks) return;
         if (Interlocked.CompareExchange(ref _lastSweepFailureLogTicks, now, last) != last) return;
-        _logger.Warn($"Idle-expiry sweep failed and will retry on the next tick: {exception.GetType().Name}: {exception.Message}");
+        var error = exception.GetType().Name;
+        RuntimeLog.IdleExpirySweepFailed(_logger, error, exception.Message);
     }
 
     // The drain is the whole teardown for this owner — seal, cancel (unwinding the timer wait),

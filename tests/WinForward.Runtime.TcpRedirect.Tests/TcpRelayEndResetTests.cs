@@ -162,7 +162,7 @@ public sealed class TcpRelayEndResetTests
         var session = CreateSessionWithObservedSequences(out var listener);
         var order = new List<string>();
         var injector = new OrderingInjector(order);
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var acceptor = new TcpRedirectAcceptor(
             new InlineRelayFactory(relay),
             logger,

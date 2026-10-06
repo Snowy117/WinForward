@@ -1,9 +1,12 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Protocols;
+using WinForward.Runtime.Logging;
 using WinForward.Runtime.TcpRedirect;
 using WinForward.Windows;
 
@@ -112,12 +115,12 @@ public sealed class FlowDispatcher : IFlowAttributionHost
     private readonly ISetupExecutor? _setupExecutor;
     private readonly ITcpReverseHandler? _reverseHandler;
     private readonly Func<CapturedFlowPacket, CancellationToken, ValueTask<TcpRedirectOutcome>>? _fragmentHandler;
-    private readonly IRuntimeLogger _logger;
+    private readonly ILogger _logger;
     private readonly bool _includeProcessPathInLogs;
     private readonly RuntimeLogThrottle _capacityBlockWarn = new(TimeSpan.FromSeconds(5));
     private readonly RuntimeLogThrottle _attributionMissWarn = new(TimeSpan.FromSeconds(5));
 
-    public FlowDispatcher(ValidatedConfiguration configuration, ISelfTrafficGuard selfTraffic, IPacketActionExecutor executor, IProcessAttributor? attributor = null, int flowCapacity = 65_536, ITcpReverseHandler? reverseHandler = null, Func<CapturedFlowPacket, CancellationToken, ValueTask<TcpRedirectOutcome>>? fragmentHandler = null, IRuntimeLogger? logger = null, ActivityBucketClock? activityClock = null, NativeBufferPool? attributionPool = null, ISetupExecutor? setupExecutor = null)
+    public FlowDispatcher(ValidatedConfiguration configuration, ISelfTrafficGuard selfTraffic, IPacketActionExecutor executor, IProcessAttributor? attributor = null, int flowCapacity = 65_536, ITcpReverseHandler? reverseHandler = null, Func<CapturedFlowPacket, CancellationToken, ValueTask<TcpRedirectOutcome>>? fragmentHandler = null, ILogger? logger = null, ActivityBucketClock? activityClock = null, NativeBufferPool? attributionPool = null, ISetupExecutor? setupExecutor = null)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(selfTraffic);
@@ -131,7 +134,7 @@ public sealed class FlowDispatcher : IFlowAttributionHost
         _setupExecutor = setupExecutor;
         _reverseHandler = reverseHandler;
         _fragmentHandler = fragmentHandler;
-        _logger = logger ?? NullRuntimeLogger.Instance;
+        _logger = logger ?? NullLogger.Instance;
         _includeProcessPathInLogs = configuration.IncludeProcessPathInLogs;
         // The deferred pipeline exists only where attribution can actually run: without a process
         // selector, an attributor, or an executor to run its work items, every eligible shape keeps
@@ -140,6 +143,7 @@ public sealed class FlowDispatcher : IFlowAttributionHost
         {
             Attribution = new FlowAttributionPipeline(attributionPool, this, _logger);
         }
+        FlowLog.FlowTableInitialized(_logger, _flows.Capacity, configuration.SetupWorkerCount);
     }
 
     /// <summary>
@@ -183,7 +187,7 @@ public sealed class FlowDispatcher : IFlowAttributionHost
         // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease; CapturedFlowPacketGuards.ThrowLeaseRequired reports the null member (quality-guidelines.md).
         if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
 
-        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) return DispatchSlowAsync(packet, cancellationToken);
+        if (_logger.IsEnabled(LogLevel.Trace)) return DispatchSlowAsync(packet, cancellationToken);
         // X1: only packets the reverse handler itself claims can be reverse candidates divert;
         // a miss falls through here, and when the flow table also misses, the slow path still
         // runs the full handler — so tombstone stragglers keep their grace-drop behavior.
@@ -220,7 +224,8 @@ public sealed class FlowDispatcher : IFlowAttributionHost
     {
         // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease; CapturedFlowPacketGuards.ThrowLeaseRequired reports the null member (quality-guidelines.md).
         if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
-        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.classified", packet, new RuntimeLogField("kind", "flow"));
+        var key = packet.Context.Key;
+        FlowLog.PacketClassified(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, "flow", key.Protocol, key.Origin, key.Local, key.Remote, packet.Context.ProcessName, _includeProcessPathInLogs ? packet.Context.ProcessPath : null);
         if (await TryHandleSelfTrafficAsync(packet, cancellationToken).ConfigureAwait(false)) return;
 
         // A packet on an active TCP redirect leg (a port matches a proxy listener port) must be
@@ -233,7 +238,8 @@ public sealed class FlowDispatcher : IFlowAttributionHost
         if (_flows.TryResolve(packet.Context.Key, out var existing) && existing is not null)
         {
             packet = packet with { FlowGeneration = existing.Generation };
-            if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.flowResolved", packet, new RuntimeLogField("existing", Value: true));
+            var resolvedKey = packet.Context.Key;
+            FlowLog.PacketFlowResolved(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, existing: true, outcome: null, resolvedKey.Protocol, resolvedKey.Origin, resolvedKey.Local, resolvedKey.Remote, packet.Context.ProcessName, _includeProcessPathInLogs ? packet.Context.ProcessPath : null);
             // A UDP proxy response (server -> client on an actively proxied flow) is injected by
             // UdpResponseReinjector toward the local stack; when the capture path observes it again
             // it must be delivered to the client, not re-proxied back to the relay. Detect by
@@ -257,13 +263,15 @@ public sealed class FlowDispatcher : IFlowAttributionHost
         if (!_flows.TryClaimResolved(context.Key, () => EvaluateNewFlow(context), out var claimed) || claimed is null)
         {
             LogCapacityBlock(context);
-            if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.flowResolved", packet, new RuntimeLogField("outcome", "capacity"));
+            var capacityKey = packet.Context.Key;
+            FlowLog.PacketFlowResolved(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, existing: null, outcome: "capacity", capacityKey.Protocol, capacityKey.Origin, capacityKey.Local, capacityKey.Remote, packet.Context.ProcessName, _includeProcessPathInLogs ? packet.Context.ProcessPath : null);
             await CompleteAsync(packet, PacketDisposition.Block, PacketAction.Block, target: null, cancellationToken).ConfigureAwait(false);
             return;
         }
 
         packet = packet with { Context = context, FlowGeneration = claimed.Generation };
-        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.flowResolved", packet, new RuntimeLogField("existing", Value: false));
+        var claimedKey = packet.Context.Key;
+        FlowLog.PacketFlowResolved(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, existing: false, outcome: null, claimedKey.Protocol, claimedKey.Origin, claimedKey.Local, claimedKey.Remote, packet.Context.ProcessName, _includeProcessPathInLogs ? packet.Context.ProcessPath : null);
         LogFlowCreated(packet.Context, packet.FlowGeneration, claimed.Decision);
         await ExecuteDecisionAsync(packet, claimed.Decision, cancellationToken).ConfigureAwait(false);
     }
@@ -271,7 +279,8 @@ public sealed class FlowDispatcher : IFlowAttributionHost
     private async ValueTask<bool> TryHandleSelfTrafficAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
         if (!_selfTraffic.IsOwned(packet.Context)) return false;
-        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.selfTraffic", packet, new RuntimeLogField("outcome", "pass"));
+        var key = packet.Context.Key;
+        FlowLog.PacketSelfTraffic(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, "pass", key.Protocol, key.Origin, key.Local, key.Remote, packet.Context.ProcessName, _includeProcessPathInLogs ? packet.Context.ProcessPath : null);
         await CompleteAsync(packet, PacketDisposition.Pass, PacketAction.Pass, target: null, cancellationToken).ConfigureAwait(false);
         return true;
     }
@@ -285,7 +294,8 @@ public sealed class FlowDispatcher : IFlowAttributionHost
         // Block is reserved for outcome Blocked: routing a grace drop through BlockAsync would
         // mislabel it as a policy drop (packet.dropped reason=policy) in the trace.
         var disposition = outcome == TcpRedirectOutcome.Blocked ? PacketDisposition.Block : PacketDisposition.ProxyConsumed;
-        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.reverseHandled", packet, new RuntimeLogField("outcome", outcome));
+        var reverseKey = packet.Context.Key;
+        FlowLog.PacketReverseHandled(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, outcome, reverseKey.Protocol, reverseKey.Origin, reverseKey.Local, reverseKey.Remote, packet.Context.ProcessName, _includeProcessPathInLogs ? packet.Context.ProcessPath : null);
         await CompleteAsync(packet, disposition, disposition == PacketDisposition.Block ? PacketAction.Block : PacketAction.None, target: null, cancellationToken).ConfigureAwait(false);
         return true;
     }
@@ -392,31 +402,15 @@ public sealed class FlowDispatcher : IFlowAttributionHost
     private void LogCapacityBlock(FlowContext context)
     {
         RuntimeCounters.Shared.Increment(RuntimeCounters.FlowCapacityBlock);
-        if (!_capacityBlockWarn.ShouldEmit() || !_logger.IsEnabled(RuntimeLogLevel.Warn)) return;
-        _logger.Event(RuntimeLogLevel.Warn, "flow.capacity-block",
-            new("protocol", context.Key.Protocol),
-            new("origin", context.Key.Origin),
-            new("source", context.Key.Local),
-            new("destination", context.Key.Remote),
-            new("tableSize", _flows.Count),
-            new("capacity", _flows.Capacity));
+        if (!_capacityBlockWarn.ShouldEmit()) return;
+        var key = context.Key;
+        FlowLog.FlowCapacityBlock(_logger, key.Protocol, key.Origin, key.Local, key.Remote, _flows.Count, _flows.Capacity);
     }
 
     private void LogFlowCreated(FlowContext context, long generation, FlowDecision decision)
     {
-        if (!_logger.IsEnabled(RuntimeLogLevel.Debug)) return;
-        var fields = new RuntimeLogField[10];
-        fields[0] = new("flow", generation == 0 ? null : generation);
-        fields[1] = new("protocol", context.Key.Protocol);
-        fields[2] = new("origin", context.Key.Origin);
-        fields[3] = new("source", context.Key.Local);
-        fields[4] = new("destination", context.Key.Remote);
-        fields[5] = new("process", context.ProcessName);
-        fields[6] = new("processPath", _includeProcessPathInLogs ? context.ProcessPath : null);
-        fields[7] = new("action", decision.Action);
-        fields[8] = new("rule", decision.RuleIndex);
-        fields[9] = new("target", decision.TargetName);
-        _logger.Event(RuntimeLogLevel.Debug, "flow.created", fields);
+        var key = context.Key;
+        FlowLog.FlowCreated(_logger, generation == 0 ? null : generation, key.Protocol, key.Origin, key.Local, key.Remote, context.ProcessName, _includeProcessPathInLogs ? context.ProcessPath : null, decision.Action, decision.RuleIndex, decision.TargetName);
     }
 
     /// <summary>
@@ -429,12 +423,9 @@ public sealed class FlowDispatcher : IFlowAttributionHost
     private void LogAttributionMiss(FlowContext context)
     {
         RuntimeCounters.Shared.Increment(RuntimeCounters.AttributionMiss);
-        if (!_attributionMissWarn.ShouldEmit() || !_logger.IsEnabled(RuntimeLogLevel.Warn)) return;
-        _logger.Event(RuntimeLogLevel.Warn, "flow.attribution-miss",
-            new("protocol", context.Key.Protocol),
-            new("local", context.Key.Local),
-            new("remote", context.Key.Remote),
-            new("afterRetry", Value: true));
+        if (!_attributionMissWarn.ShouldEmit()) return;
+        var key = context.Key;
+        FlowLog.FlowAttributionMiss(_logger, key.Protocol, key.Local, key.Remote, afterRetry: true);
     }
 
     /// <summary>
@@ -448,10 +439,11 @@ public sealed class FlowDispatcher : IFlowAttributionHost
     {
         // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease; CapturedFlowPacketGuards.ThrowLeaseRequired reports the null member (quality-guidelines.md).
         if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
-        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.classified", packet, new RuntimeLogField("kind", "nonFlow"));
+        var nonFlowKey = packet.Context.Key;
+        FlowLog.PacketClassified(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, "nonFlow", nonFlowKey.Protocol, nonFlowKey.Origin, nonFlowKey.Local, nonFlowKey.Remote, packet.Context.ProcessName, _includeProcessPathInLogs ? packet.Context.ProcessPath : null);
         if (_selfTraffic.IsOwned(packet.Context))
         {
-            if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.selfTraffic", packet, new RuntimeLogField("outcome", "pass"));
+            FlowLog.PacketSelfTraffic(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, "pass", nonFlowKey.Protocol, nonFlowKey.Origin, nonFlowKey.Local, nonFlowKey.Remote, packet.Context.ProcessName, _includeProcessPathInLogs ? packet.Context.ProcessPath : null);
             await CompleteAsync(packet, PacketDisposition.Pass, PacketAction.Pass, target: null, cancellationToken).ConfigureAwait(false);
             return;
         }
@@ -462,7 +454,8 @@ public sealed class FlowDispatcher : IFlowAttributionHost
         // (ARP, ND, L2) pays only an ether-type compare.
         if (await TryHandleFragmentAsync(packet, cancellationToken).ConfigureAwait(false)) return;
 
-        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.action", packet, new RuntimeLogField("action", FlowAction.Pass), new RuntimeLogField("rule", Value: null), new RuntimeLogField("target", Value: null), new RuntimeLogField("reason", "nonFlow"));
+        var actionKey = packet.Context.Key;
+        FlowLog.PacketAction(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, action: FlowAction.Pass, rule: null, target: null, reason: "nonFlow", actionKey.Protocol, actionKey.Origin, actionKey.Local, actionKey.Remote, packet.Context.ProcessName, _includeProcessPathInLogs ? packet.Context.ProcessPath : null);
         await CompleteAsync(packet, PacketDisposition.Pass, PacketAction.Pass, target: null, cancellationToken).ConfigureAwait(false);
     }
 
@@ -474,7 +467,8 @@ public sealed class FlowDispatcher : IFlowAttributionHost
         // Dropped is an attributed fragment consumed by the proxy layer, like a grace drop;
         // Blocked (a disposed-coordinator race) keeps the policy-drop executor path.
         var disposition = outcome == TcpRedirectOutcome.Blocked ? PacketDisposition.Block : PacketDisposition.ProxyConsumed;
-        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.fragmentHandled", packet, new RuntimeLogField("outcome", outcome));
+        var fragmentKey = packet.Context.Key;
+        FlowLog.PacketFragmentHandled(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, outcome, fragmentKey.Protocol, fragmentKey.Origin, fragmentKey.Local, fragmentKey.Remote, packet.Context.ProcessName, _includeProcessPathInLogs ? packet.Context.ProcessPath : null);
         await CompleteAsync(packet, disposition, disposition == PacketDisposition.Block ? PacketAction.Block : PacketAction.None, target: null, cancellationToken).ConfigureAwait(false);
         return true;
     }
@@ -484,7 +478,8 @@ public sealed class FlowDispatcher : IFlowAttributionHost
 
     private async ValueTask ExecuteDecisionAsync(CapturedFlowPacket packet, FlowDecision decision, CancellationToken cancellationToken)
     {
-        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.action", packet, new RuntimeLogField("action", decision.Action), new RuntimeLogField("rule", decision.RuleIndex), new RuntimeLogField("target", decision.TargetName));
+        var key = packet.Context.Key;
+        FlowLog.PacketAction(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, decision.Action, decision.RuleIndex, decision.TargetName, reason: null, key.Protocol, key.Origin, key.Local, key.Remote, packet.Context.ProcessName, _includeProcessPathInLogs ? packet.Context.ProcessPath : null);
         switch (decision.Action)
         {
             case FlowAction.Pass:
@@ -525,22 +520,7 @@ public sealed class FlowDispatcher : IFlowAttributionHost
                 // asked for an action the dispatcher cannot complete — fail loudly, not silently.
                 throw new InvalidOperationException($"Unhandled packet action '{action}'.");
         }
-        if (_logger.IsEnabled(RuntimeLogLevel.Trace)) LogPacketStage(RuntimeLogLevel.Trace, "packet.completed", packet, new RuntimeLogField("disposition", disposition));
-    }
-
-    private void LogPacketStage(RuntimeLogLevel level, string eventName, CapturedFlowPacket packet, params RuntimeLogField[] fields)
-    {
-        if (!_logger.IsEnabled(level)) return;
-        var allFields = new RuntimeLogField[fields.Length + 8];
-        allFields[0] = new("packet", packet.PacketSequence == 0 ? null : packet.PacketSequence);
-        allFields[1] = new("flow", packet.FlowGeneration == 0 ? null : packet.FlowGeneration);
-        fields.CopyTo(allFields, 2);
-        allFields[fields.Length + 2] = new("protocol", packet.Context.Key.Protocol);
-        allFields[fields.Length + 3] = new("origin", packet.Context.Key.Origin);
-        allFields[fields.Length + 4] = new("source", packet.Context.Key.Local);
-        allFields[fields.Length + 5] = new("destination", packet.Context.Key.Remote);
-        allFields[fields.Length + 6] = new("process", packet.Context.ProcessName);
-        allFields[fields.Length + 7] = new("processPath", _includeProcessPathInLogs ? packet.Context.ProcessPath : null);
-        _logger.Event(level, eventName, allFields);
+        var completedKey = packet.Context.Key;
+        FlowLog.PacketCompleted(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, disposition, completedKey.Protocol, completedKey.Origin, completedKey.Local, completedKey.Remote, packet.Context.ProcessName, _includeProcessPathInLogs ? packet.Context.ProcessPath : null);
     }
 }

@@ -1,8 +1,10 @@
 using System.Runtime.Versioning;
-using WinForward.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Protocols;
+using WinForward.Runtime.Logging;
 using WinForward.Windows;
 
 namespace WinForward.Runtime.Capture;
@@ -22,16 +24,16 @@ public sealed class CapturePacketProcessor
 {
     private readonly FlowDispatcher _dispatcher;
     private readonly AdapterSlotTable _adapterSlots;
-    private readonly IRuntimeLogger _logger;
+    private readonly ILogger _logger;
     private long _nextPacketSequence;
 
-    public CapturePacketProcessor(FlowDispatcher dispatcher, AdapterSlotTable adapterSlots, IRuntimeLogger? logger = null, Action<nint>? onBatchCompleted = null)
+    public CapturePacketProcessor(FlowDispatcher dispatcher, AdapterSlotTable adapterSlots, ILogger? logger = null, Action<nint>? onBatchCompleted = null)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
         ArgumentNullException.ThrowIfNull(adapterSlots);
         _dispatcher = dispatcher;
         _adapterSlots = adapterSlots;
-        _logger = logger ?? NullRuntimeLogger.Instance;
+        _logger = logger ?? NullLogger.Instance;
         OnBatchCompleted = onBatchCompleted;
     }
 
@@ -64,13 +66,15 @@ public sealed class CapturePacketProcessor
         var frameLength = frameSpan.Length;
         var isOnSend = (packet.DeviceFlags & NdisApiAbi.PacketFlagOnSend) != 0;
         var sequence = Interlocked.Increment(ref _nextPacketSequence);
-        if (_logger.IsEnabled(RuntimeLogLevel.Trace))
-        {
-            _logger.Event(RuntimeLogLevel.Trace, "packet.captured",
-                new("packet", sequence), new("bytes", frameLength), new("adapter", adapter.StableId),
-                new("adapterName", adapter.FriendlyName), new("adapterHandle", adapter.RuntimeHandle),
-                new("direction", isOnSend ? "send" : "receive"), new("flags", packet.Flags));
-        }
+        CaptureLog.PacketCaptured(
+            _logger,
+            sequence,
+            frameLength,
+            adapter.StableId,
+            adapter.FriendlyName,
+            adapter.RuntimeHandle,
+            isOnSend ? "send" : "receive",
+            packet.Flags);
         try
         {
             if (!IPTcpUdpPacket.TryParse(frameSpan, out var view))
@@ -85,22 +89,14 @@ public sealed class CapturePacketProcessor
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            if (_logger.IsEnabled(RuntimeLogLevel.Trace))
-            {
-                _logger.Event(RuntimeLogLevel.Trace, "packet.failed",
-                    new("packet", sequence), new("bytes", frameLength), new("reason", "canceled"));
-            }
+            CaptureLog.PacketFailed(_logger, sequence, frameLength, "canceled");
             lease.Dispose();
             throw;
         }
         catch (Exception exception)
         {
-            if (_logger.IsEnabled(RuntimeLogLevel.Trace))
-            {
-                _logger.Event(RuntimeLogLevel.Trace, "packet.failed",
-                    new("packet", sequence), new("bytes", frameLength),
-                    new("reason", exception.GetType().Name));
-            }
+            var reason = exception.GetType().Name;
+            CaptureLog.PacketFailed(_logger, sequence, frameLength, reason);
             lease.Dispose();
             throw;
         }

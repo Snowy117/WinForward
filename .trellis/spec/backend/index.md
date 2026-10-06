@@ -11,7 +11,7 @@
 | [Directory Structure](./directory-structure.md) | File layout, size limits, split discipline, TestHelpers organization, Runtime sub-namespaces | Active |
 | [Error Handling](./error-handling.md) | Fail-closed semantics, bounded exemptions, validation diagnostics | Active |
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns, testing requirements | Active |
-| [Logging Guidelines](./logging-guidelines.md) | `IRuntimeLogger` structured logging, log levels, privacy rules | Active |
+| [Logging Guidelines](./logging-guidelines.md) | `Microsoft.Extensions.Logging` `[LoggerMessage]` logging, levels, formats, privacy rules | Active |
 | [Windows NDISAPI Interop](./windows-ndisapi.md) | Adapter identity (GUID-primary), enumeration vs captured handles, native-call gates, batched capture ABI & pooling | Active |
 | [TCP Local Redirect](./tcp-local-redirect.md) | WinpkFilter local_redirect transform, forwarded DNAT shape, client-reset lifecycle, teardown grace | Active |
 | [UDP Relay](./udp-relay.md) | SOCKS5 UDP relay wiring, response reinjection, cross-family setup | Active |

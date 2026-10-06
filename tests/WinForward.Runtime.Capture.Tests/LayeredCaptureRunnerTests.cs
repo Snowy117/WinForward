@@ -1,4 +1,4 @@
-using WinForward.Configuration;
+using Microsoft.Extensions.Logging;
 using WinForward.TestSupport;
 using WinForward.Windows;
 using Xunit;
@@ -15,7 +15,7 @@ public sealed class LayeredCaptureRunnerTests
         var fault = await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Runner.RunAsync(harness.Cancel.Token)).ConfigureAwait(false);
 
         Assert.Contains("resolution failed", fault.Message, StringComparison.Ordinal);
-        Assert.Contains(harness.Logger.Lines, line => line.Level == RuntimeLogLevel.Error && line.Message.Contains("id-missing", StringComparison.Ordinal));
+        Assert.Contains(harness.Logger.Lines, line => line.Level == LogLevel.Error && line.Message.Contains("id-missing", StringComparison.Ordinal));
         Assert.Equal(1, harness.DurableDisposeCount);
         Assert.Empty(harness.Generations.Generations);
     }
@@ -102,8 +102,8 @@ public sealed class LayeredCaptureRunnerTests
         await AsyncTestExtensions.WaitForAsync(() => harness.RefreshEvents.Count > 0).ConfigureAwait(false);
 
         var refresh = harness.RefreshEvents[^1];
-        Assert.Equal("true", CaptureRunnerHarness.FieldValue(refresh, "noop"));
-        Assert.Equal("id-a=true", CaptureRunnerHarness.FieldValue(refresh, "degraded"));
+        Assert.Equal("true", CaptureRunnerHarness.FieldValue(refresh, "Noop"));
+        Assert.Equal("id-a=true", CaptureRunnerHarness.FieldValue(refresh, "Degraded"));
         Assert.Single(harness.Generations.Generations);
         Assert.Equal(0, harness.Generation(0).DisposeCount);
         Assert.False(harness.RunTask.IsCompleted);
@@ -130,9 +130,9 @@ public sealed class LayeredCaptureRunnerTests
         await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 2).ConfigureAwait(false);
 
         var refresh = harness.RefreshEvents[^1];
-        Assert.Null(CaptureRunnerHarness.FieldValue(refresh, "noop"));
-        Assert.Contains("id-b", CaptureRunnerHarness.FieldValue(refresh, "removed"), StringComparison.Ordinal);
-        Assert.Equal("id-b=false", CaptureRunnerHarness.FieldValue(refresh, "degraded"));
+        Assert.Null(CaptureRunnerHarness.FieldValue(refresh, "Noop"));
+        Assert.Contains("id-b", CaptureRunnerHarness.FieldValue(refresh, "Removed"), StringComparison.Ordinal);
+        Assert.Equal("id-b=false", CaptureRunnerHarness.FieldValue(refresh, "Degraded"));
         await harness.WaitForGenerationStartedAsync(1).ConfigureAwait(false);
         Assert.Equal(["id-a"], [.. harness.Generation(1).Scope.Select(item => item.StableId)]);
         Assert.Equal(0, harness.DurableDisposeCount);
@@ -151,11 +151,11 @@ public sealed class LayeredCaptureRunnerTests
         await AsyncTestExtensions.WaitForAsync(() => harness.RefreshEvents.Count > 0).ConfigureAwait(false);
 
         var refresh = harness.RefreshEvents[^1];
-        Assert.Equal("true", CaptureRunnerHarness.FieldValue(refresh, "noop"));
-        Assert.Null(CaptureRunnerHarness.FieldValue(refresh, "degraded"));
-        Assert.Null(CaptureRunnerHarness.FieldValue(refresh, "added"));
-        Assert.Null(CaptureRunnerHarness.FieldValue(refresh, "removed"));
-        Assert.Null(CaptureRunnerHarness.FieldValue(refresh, "changed"));
+        Assert.Equal("true", CaptureRunnerHarness.FieldValue(refresh, "Noop"));
+        Assert.Null(CaptureRunnerHarness.FieldValue(refresh, "Degraded"));
+        Assert.Null(CaptureRunnerHarness.FieldValue(refresh, "Added"));
+        Assert.Null(CaptureRunnerHarness.FieldValue(refresh, "Removed"));
+        Assert.Null(CaptureRunnerHarness.FieldValue(refresh, "Changed"));
         Assert.Single(harness.Generations.Generations);
         Assert.Equal(0, harness.Generation(0).DisposeCount);
         Assert.False(harness.RunTask.IsCompleted);

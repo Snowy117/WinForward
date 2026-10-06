@@ -1,9 +1,11 @@
 using System.Runtime.Versioning;
+using Microsoft.Extensions.Logging;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
 using WinForward.Runtime;
 using WinForward.Runtime.Capture;
+using WinForward.Runtime.Logging;
 using WinForward.Runtime.Socks5;
 using WinForward.Runtime.TcpRedirect;
 using WinForward.Runtime.UdpProxy;
@@ -31,7 +33,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
     private readonly NativeBufferPool? _udpWindowPool;
     private readonly NativeBufferPool? _attributionPool;
     private readonly SetupExecutor? _setupExecutor;
-    private readonly IRuntimeLogger _logger;
+    private readonly ILogger _logger;
     private readonly Lock _gate = new();
     private Task? _disposeTask;
 
@@ -56,7 +58,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         IdleExpirySweeper sweeper,
         UdpProxyCoordinator udp,
         TcpProxyCoordinator tcp,
-        IRuntimeLogger logger,
+        ILogger logger,
         AdapterSlotTable? adapterSlots = null,
         NativeBufferPool? synCopyPool = null,
         NativeBufferPool? relayPool = null,
@@ -130,7 +132,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         ValidatedConfiguration configuration,
         IPacketReinjector reinjector,
         SelfTrafficRegistry selfTraffic,
-        IRuntimeLogger logger,
+        ILoggerFactory loggerFactory,
         IInterceptionHealthSignal? healthSignal = null,
         RuntimeCounters? counters = null)
     {
@@ -161,7 +163,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         TcpProxyCoordinator tcpCoordinator;
         try
         {
-            tcpCoordinator = TcpRedirectComposer.Create(configuration, reinjector, selfTraffic, logger, healthSignal, new TcpRedirectComposition(redirectTable, adapterSlots, synCopyPool, relayPool, setupExecutor, addressCache, activityClock));
+            tcpCoordinator = TcpRedirectComposer.Create(configuration, reinjector, selfTraffic, loggerFactory.CreateLogger<TcpProxyCoordinator>(), healthSignal, new TcpRedirectComposition(redirectTable, adapterSlots, synCopyPool, relayPool, setupExecutor, addressCache, activityClock));
         }
         catch
         {
@@ -172,7 +174,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         }
         try
         {
-            return await BuildWithUdpAsync(configuration, reinjector, selfTraffic, logger, healthSignal, runtimeCounters, tcpCoordinator, adapterSlots, synCopyPool, relayPool, setupExecutor, addressCache, activityClock).ConfigureAwait(false);
+            return await BuildWithUdpAsync(configuration, reinjector, selfTraffic, loggerFactory, healthSignal, runtimeCounters, tcpCoordinator, adapterSlots, synCopyPool, relayPool, setupExecutor, addressCache, activityClock).ConfigureAwait(false);
         }
         catch
         {
@@ -201,7 +203,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         ValidatedConfiguration configuration,
         IPacketReinjector reinjector,
         SelfTrafficRegistry selfTraffic,
-        IRuntimeLogger logger,
+        ILoggerFactory loggerFactory,
         IInterceptionHealthSignal? healthSignal,
         RuntimeCounters counters,
         TcpProxyCoordinator tcpCoordinator,
@@ -218,7 +220,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         // should ever change; every component follows it from here.
         const int maximumFrameSize = NdisApiAbi.MaximumEthernetFrame;
         var udpTargets = new UdpAdapterTargetSource(adapterSlots);
-        await UdpProxyComposer.PrimeSocks5AddressCacheAsync(configuration, addressCache, logger).ConfigureAwait(false);
+        await UdpProxyComposer.PrimeSocks5AddressCacheAsync(configuration, addressCache, loggerFactory.CreateLogger(typeof(Program).FullName!)).ConfigureAwait(false);
         // One native pool backs every queued setup datagram (B4); the bundle owns it and the
         // coordinator borrows it, so it is disposed here after release.
         var udpDatagramPool = new NativeBufferPool(maximumFrameSize);
@@ -237,7 +239,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         UdpProxyCoordinator udpCoordinator;
         try
         {
-            udpCoordinator = UdpProxyComposer.Create(reinjector, selfTraffic, logger, healthSignal, new UdpProxyComposition(udpTargets, adapterSlots, maximumFrameSize, udpDatagramPool, udpWindowPool, setupExecutor, addressCache, SessionCapacity: configuration.UdpSessionCapacity, RelayReceiveBufferBytes: configuration.UdpRelayReceiveBufferBytes, ActivityClock: activityClock));
+            udpCoordinator = UdpProxyComposer.Create(reinjector, selfTraffic, loggerFactory.CreateLogger<UdpProxyCoordinator>(), healthSignal, new UdpProxyComposition(udpTargets, adapterSlots, maximumFrameSize, udpDatagramPool, udpWindowPool, setupExecutor, addressCache, SessionCapacity: configuration.UdpSessionCapacity, RelayReceiveBufferBytes: configuration.UdpRelayReceiveBufferBytes, ActivityClock: activityClock));
         }
         catch
         {
@@ -248,7 +250,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         }
         try
         {
-            return BuildBundle(configuration, reinjector, selfTraffic, logger, healthSignal, udpTargets, adapterSlots, udpCoordinator, tcpCoordinator, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, attributionPool, setupExecutor, activityClock);
+            return BuildBundle(configuration, reinjector, selfTraffic, loggerFactory, healthSignal, udpTargets, adapterSlots, udpCoordinator, tcpCoordinator, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, attributionPool, setupExecutor, activityClock);
         }
         catch
         {
@@ -264,7 +266,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         ValidatedConfiguration configuration,
         IPacketReinjector reinjector,
         SelfTrafficRegistry selfTraffic,
-        IRuntimeLogger logger,
+        ILoggerFactory loggerFactory,
         IInterceptionHealthSignal? healthSignal,
         UdpAdapterTargetSource udpTargets,
         AdapterSlotTable adapterSlots,
@@ -278,20 +280,20 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         SetupExecutor setupExecutor,
         ActivityBucketClock activityClock)
     {
-        var executor = new NdisPacketActionExecutor(reinjector, logger, tcpCoordinator, udpCoordinator, healthSignal: healthSignal);
+        var executor = new NdisPacketActionExecutor(reinjector, loggerFactory.CreateLogger<NdisPacketActionExecutor>(), tcpCoordinator, udpCoordinator, healthSignal: healthSignal);
         var dispatcher = new FlowDispatcher(
             configuration, selfTraffic, executor, new WindowsProcessAttributor(),
             reverseHandler: tcpCoordinator,
             fragmentHandler: tcpCoordinator.HandleFragmentAsync,
-            logger: logger,
+            logger: loggerFactory.CreateLogger<FlowDispatcher>(),
             activityClock: activityClock,
             attributionPool: attributionPool,
             setupExecutor: setupExecutor);
-        var idleExpirySweeper = new IdleExpirySweeper(dispatcher, tcpCoordinator, udpCoordinator, relayIdleTimeout: configuration.UdpSessionIdleTimeout, logger: logger, attributionSweep: dispatcher.Attribution is { } attributionPipeline ? attributionPipeline.RemoveExpired : null, udpOneShotIdleTimeout: UdpProxyCoordinator.OneShotIdleTimeout);
+        var idleExpirySweeper = new IdleExpirySweeper(dispatcher, tcpCoordinator, udpCoordinator, relayIdleTimeout: configuration.UdpSessionIdleTimeout, logger: loggerFactory.CreateLogger<IdleExpirySweeper>(), attributionSweep: dispatcher.Attribution is { } attributionPipeline ? attributionPipeline.RemoveExpired : null, udpOneShotIdleTimeout: UdpProxyCoordinator.OneShotIdleTimeout);
         idleExpirySweeper.Start();
         var wakeRegistry = new FlowAttributionWakeRegistry();
         if (dispatcher.Attribution is { } pipeline) pipeline.Wake = wakeRegistry;
-        return new DurableCaptureBundle(dispatcher, executor, udpTargets, idleExpirySweeper, udpCoordinator, tcpCoordinator, logger, adapterSlots, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, attributionPool, setupExecutor, activityClock, wakeRegistry);
+        return new DurableCaptureBundle(dispatcher, executor, udpTargets, idleExpirySweeper, udpCoordinator, tcpCoordinator, loggerFactory.CreateLogger<DurableCaptureBundle>(), adapterSlots, synCopyPool, relayPool, udpDatagramPool, udpWindowPool, attributionPool, setupExecutor, activityClock, wakeRegistry);
     }
 
     /// <summary>
@@ -322,10 +324,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         {
             if (!string.Equals(_lastZeroMacHostId, host.StableId, StringComparison.OrdinalIgnoreCase))
             {
-                _logger.Event(RuntimeLogLevel.Warn, "udp.targets.noMac",
-                    new("kind", "hostFallback"),
-                    new("host", host.StableId),
-                    new("name", host.Adapter.FriendlyName));
+                UdpProxyLog.UdpTargetsNoMacHostFallback(_logger, host.StableId, host.Adapter.FriendlyName);
             }
             _lastZeroMacHostId = host.StableId;
             hostMac = new byte[NdisApiAbi.EthernetAddressLength];
@@ -374,10 +373,8 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         }
         if (_lastNoMacAdapters is { } previous && previous.SetEquals(current)) return;
         _lastNoMacAdapters = current;
-        _logger.Event(RuntimeLogLevel.Warn, "udp.targets.noMac",
-            new("kind", "adapters"),
-            new("adapters", string.Join("; ", noMacAdapters.Select(static adapter => $"{adapter.Adapter.FriendlyName}({adapter.StableId})"))),
-            new("count", (long)noMacAdapters.Count));
+        var adapterList = string.Join("; ", noMacAdapters.Select(static adapter => $"{adapter.Adapter.FriendlyName}({adapter.StableId})"));
+        UdpProxyLog.UdpTargetsNoMacAdapters(_logger, adapterList, noMacAdapters.Count);
     }
 
     /// <summary>

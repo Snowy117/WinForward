@@ -28,7 +28,7 @@ public sealed class UdpReceiveFaultClassificationTests
     {
         var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
         var factory = new ScriptedFaultTransportFactory();
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, TimeProvider = time, Logger = logger });
         var flow = CreateFlow("192.0.2.53");
         Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(s_server), [1], default, CancellationToken.None));

@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.Extensions.Logging;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
@@ -23,19 +24,19 @@ public sealed class NdisPacketActionExecutorLoggingTests
     [Fact]
     public async Task UninitializedTcpProxyWarnKeepsNotInitializedText()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var executor = new NdisPacketActionExecutor(new FakeReinjector(), logger);
 
         await executor.ProxyAsync(TcpPacket(), ProxyTarget.FromServer(s_server), CancellationToken.None);
 
-        var (_, message) = Assert.Single(logger.Lines, line => line.Level == RuntimeLogLevel.Warn);
+        var (_, message) = Assert.Single(logger.Lines, line => line.Level == LogLevel.Warning);
         Assert.Contains("not initialized in this build", message, StringComparison.Ordinal);
     }
 
     [Fact]
     public async Task CoordinatorBlockedWarnCarriesRedirectReasonInsteadOfUninitializedText()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var coordinator = CreateCoordinator(
             new FakeListenerFactory(),
             new FakeRelayFactory(),
@@ -57,14 +58,15 @@ public sealed class NdisPacketActionExecutorLoggingTests
         malformed = malformed with { Lease = new PacketLease(malformed.Lease.Frame[..40]) };
         await executor.ProxyAsync(malformed, ProxyTarget.FromServer(s_server), CancellationToken.None);
 
-        var (_, message) = Assert.Single(logger.Lines, line => line.Level == RuntimeLogLevel.Warn && line.Message.Contains("reason=redirect", StringComparison.Ordinal));
-        Assert.DoesNotContain("not initialized", message, StringComparison.Ordinal);
+        var blocked = Assert.Single(logger.Events, entry =>
+            entry.Level == LogLevel.Warning && string.Equals(entry.Field("Reason") as string, "redirect", StringComparison.Ordinal));
+        Assert.DoesNotContain("not initialized", blocked.Message, StringComparison.Ordinal);
     }
 
     [Fact]
     public async Task UdpParseFailureWarnCarriesParseReason()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var factory = new FakeTransportFactory();
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink());
         var executor = new NdisPacketActionExecutor(new FakeReinjector(), logger, udpProxy: coordinator);
@@ -77,14 +79,15 @@ public sealed class NdisPacketActionExecutorLoggingTests
 
         await executor.ProxyAsync(packet, ProxyTarget.FromServer(s_server), CancellationToken.None);
 
-        Assert.Contains(logger.Lines, line => line.Level == RuntimeLogLevel.Warn && line.Message.Contains("reason=parse", StringComparison.Ordinal));
+        Assert.Contains(logger.Events, entry =>
+            entry.Level == LogLevel.Warning && string.Equals(entry.Field("Reason") as string, "parse", StringComparison.Ordinal));
         Assert.Empty(factory.Transports);
     }
 
     [Fact]
     public async Task UdpHandlingFailureWarnIsRateLimitedPerWindow()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var coordinator = UdpCoordinatorFakes.CreateCoordinator(new FakeTransportFactory(), new FakeResponseSink());
         await coordinator.DisposeAsync();
         var executor = new NdisPacketActionExecutor(new FakeReinjector(), logger, udpProxy: coordinator);
@@ -96,7 +99,7 @@ public sealed class NdisPacketActionExecutorLoggingTests
             await executor.ProxyAsync(UdpPacket(), ProxyTarget.FromServer(s_server), CancellationToken.None);
         }
 
-        Assert.Equal(1, logger.Lines.Count(line => line.Level == RuntimeLogLevel.Warn && line.Message.Contains("UDP proxy handling failed", StringComparison.Ordinal)));
+        Assert.Equal(1, logger.Lines.Count(line => line.Level == LogLevel.Warning && line.Message.Contains("UDP proxy handling failed", StringComparison.Ordinal)));
     }
 
     private static CapturedFlowPacket TcpPacket() =>

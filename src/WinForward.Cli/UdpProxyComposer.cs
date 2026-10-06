@@ -1,4 +1,6 @@
 using System.Runtime.Versioning;
+using Microsoft.Extensions.Logging;
+using WinForward.Cli.Logging;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.Runtime;
@@ -36,7 +38,7 @@ internal sealed record UdpProxyComposition(
 [SupportedOSPlatform("windows")]
 internal static class UdpProxyComposer
 {
-    internal static async Task PrimeSocks5AddressCacheAsync(ValidatedConfiguration configuration, Socks5AddressCache cache, IRuntimeLogger logger)
+    internal static async Task PrimeSocks5AddressCacheAsync(ValidatedConfiguration configuration, Socks5AddressCache cache, ILogger logger)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         foreach (var target in configuration.Targets.Values)
@@ -49,7 +51,8 @@ internal static class UdpProxyComposer
             }
             catch (Exception exception)
             {
-                logger.Warn($"SOCKS5 address pre-resolution failed for '{server.Name}': {exception.GetType().Name}: {exception.Message}");
+                var detail = $"{exception.GetType().Name}: {exception.Message}";
+                StartupLog.Socks5AddressResolutionFailed(logger, server.Name, detail);
             }
         }
     }
@@ -62,7 +65,7 @@ internal static class UdpProxyComposer
     internal static UdpProxyCoordinator Create(
         IPacketReinjector reinjector,
         SelfTrafficRegistry selfTraffic,
-        IRuntimeLogger logger,
+        ILogger logger,
         IInterceptionHealthSignal? healthSignal,
         UdpProxyComposition composition)
         => new(

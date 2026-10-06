@@ -16,7 +16,7 @@ public sealed class TcpRedirectSessionStoreTests
     public async Task DisposeIsSingleFlightAndLateTeardownNeverReEnters()
     {
         var table = new TcpRedirectTable(capacity: 8);
-        var store = new TcpRedirectSessionStore(table, new RecordingRuntimeLogger(), capacity: 8, TimeProvider.System);
+        var store = new TcpRedirectSessionStore(table, new RecordingLogger(), capacity: 8, TimeProvider.System);
         var association = ClaimAssociation(table);
         var listener = new FakeListener(association.TranslatedListenerTuple);
         var session = TcpCoordinatorFakes.CreateSession(association, listener);
@@ -51,7 +51,7 @@ public sealed class TcpRedirectSessionStoreTests
         // was being prepared (its table alias is already claimed). TryRegister must retire it, and
         // the caller's ReleaseAssociationAsync must still consume the alias and the token.
         var table = new TcpRedirectTable(capacity: 8);
-        var store = new TcpRedirectSessionStore(table, new RecordingRuntimeLogger(), capacity: 8, TimeProvider.System);
+        var store = new TcpRedirectSessionStore(table, new RecordingLogger(), capacity: 8, TimeProvider.System);
         var association = ClaimAssociation(table);
         var listener = new FakeListener(association.TranslatedListenerTuple);
         var session = TcpCoordinatorFakes.CreateSession(association, listener);
@@ -70,7 +70,7 @@ public sealed class TcpRedirectSessionStoreTests
     public async Task DisposeWaitsForTheRegisteredSetupLease()
     {
         var table = new TcpRedirectTable(capacity: 8);
-        var store = new TcpRedirectSessionStore(table, new RecordingRuntimeLogger(), capacity: 8, TimeProvider.System);
+        var store = new TcpRedirectSessionStore(table, new RecordingLogger(), capacity: 8, TimeProvider.System);
         Assert.True(store.TryEnterSetup(out var lease));
 
         var dispose = store.DisposeAsync();
@@ -85,7 +85,7 @@ public sealed class TcpRedirectSessionStoreTests
     public async Task TryEnterSetupIsRefusedOnceDisposed()
     {
         var table = new TcpRedirectTable(capacity: 8);
-        var store = new TcpRedirectSessionStore(table, new RecordingRuntimeLogger(), capacity: 8, TimeProvider.System);
+        var store = new TcpRedirectSessionStore(table, new RecordingLogger(), capacity: 8, TimeProvider.System);
 
         await store.DisposeAsync();
 
@@ -100,7 +100,7 @@ public sealed class TcpRedirectSessionStoreTests
         // must already be cancelled (Retire) when the relay is disposed, so that wait unwinds as a
         // cancellation rather than as a stall verdict — and a stall verdict injects a client reset.
         var table = new TcpRedirectTable(capacity: 8);
-        var store = new TcpRedirectSessionStore(table, new RecordingRuntimeLogger(), capacity: 8, TimeProvider.System);
+        var store = new TcpRedirectSessionStore(table, new RecordingLogger(), capacity: 8, TimeProvider.System);
         var association = ClaimAssociation(table);
         var listener = new FakeListener(association.TranslatedListenerTuple);
         var session = TcpCoordinatorFakes.CreateSession(association, listener);

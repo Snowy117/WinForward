@@ -54,7 +54,7 @@ public sealed class DurableCaptureBundleTests
         return slot;
     }
 
-    private static DurableCaptureBundle CreateBundle(RecordingRuntimeLogger logger, ActivityBucketClock? activityClock = null)
+    private static DurableCaptureBundle CreateBundle(RecordingLogger logger, ActivityBucketClock? activityClock = null)
     {
         var adapterSlots = new AdapterSlotTable();
         var configuration = new ValidatedConfiguration(
@@ -85,7 +85,7 @@ public sealed class DurableCaptureBundleTests
     [Fact]
     public async Task ActivityBucketClockTicksExactlyOncePerPumpIteration()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var clock = new ActivityBucketClock();
         var ticks = 0;
         clock.TickProbe = () => Interlocked.Increment(ref ticks);
@@ -103,17 +103,19 @@ public sealed class DurableCaptureBundleTests
 
     private static byte[] MacOf(UdpAdapterTarget? target) => target!.Value.Mac;
 
-    /// <summary>The structured <c>udp.targets.noMac</c> warns recorded so far, both kinds included.</summary>
-    private static List<RuntimeLogField[]> NoMacEvents(RecordingRuntimeLogger logger) =>
-        [.. logger.Events.Where(entry => string.Equals(entry.Name, "udp.targets.noMac", StringComparison.Ordinal)).Select(entry => entry.Fields)];
+    private const string NoMacHostFallbackEvent = "udp.targets.noMac";
+    private const string NoMacAdaptersEvent = "udp.targets.noMac.adapters";
 
-    private static object? Field(RuntimeLogField[] fields, string key) =>
-        fields.FirstOrDefault(field => string.Equals(field.Key, key, StringComparison.Ordinal)).Value;
+    private static List<RecordedEvent> NoMacEvents(RecordingLogger logger) =>
+        [.. logger.Events.Where(entry => entry.Name.StartsWith("udp.targets.noMac", StringComparison.Ordinal))];
+
+    private static object? Field(RecordedEvent entry, string key) =>
+        entry.Fields.FirstOrDefault(field => string.Equals(field.Key, key, StringComparison.Ordinal)).Value;
 
     [Fact]
     public async Task ScopeHeadBecomesHostFallbackAndEachAdapterResolves()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var bundle = CreateBundle(logger);
 
         Install(bundle, [Item("a", 0x10, s_macA), Item("b", 0x11, s_macB)]);
@@ -138,7 +140,7 @@ public sealed class DurableCaptureBundleTests
     [Fact]
     public async Task ZeroMacAdaptersAreFilteredOutOfThePerAdapterMapWithWarn()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var bundle = CreateBundle(logger);
 
         Install(bundle, [Item("a", 0x10, s_macA), Item("b", 0x11, s_zeroMac)]);
@@ -147,15 +149,15 @@ public sealed class DurableCaptureBundleTests
         Assert.Null(bundle.UdpTargets.Resolve(Slot(bundle, "b")));
         Assert.NotNull(bundle.UdpTargets.Resolve(Slot(bundle, "a")));
         var warn = Assert.Single(NoMacEvents(logger));
-        Assert.Equal("adapters", Field(warn, "kind"));
-        Assert.Contains("b(b)", (string)Field(warn, "adapters")!, StringComparison.Ordinal);
-        Assert.Equal(1L, Field(warn, "count"));
+        Assert.Equal(NoMacAdaptersEvent, warn.Name);
+        Assert.Contains("b(b)", (string)Field(warn, "Adapters")!, StringComparison.Ordinal);
+        Assert.Equal(1L, Field(warn, "Count"));
     }
 
     [Fact]
     public async Task ZeroMacScopeHeadKeepsZeroPlaceholderHostFallbackWithWarn()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var bundle = CreateBundle(logger);
 
         Install(bundle, [Item("a", 0x10, s_zeroMac), Item("b", 0x11, s_macB)]);
@@ -169,14 +171,14 @@ public sealed class DurableCaptureBundleTests
         // its own per-adapter fail-closed skip.
         var events = NoMacEvents(logger);
         Assert.Equal(2, events.Count);
-        Assert.Contains(events, fields => Equals(Field(fields, "kind"), "hostFallback") && Equals(Field(fields, "host"), "a"));
-        Assert.Contains(events, fields => Equals(Field(fields, "kind"), "adapters") && ((string)Field(fields, "adapters")!).Contains("a(a)", StringComparison.Ordinal));
+        Assert.Contains(events, entry => string.Equals(entry.Name, NoMacHostFallbackEvent, StringComparison.Ordinal) && Equals(Field(entry, "Host"), "a"));
+        Assert.Contains(events, entry => string.Equals(entry.Name, NoMacAdaptersEvent, StringComparison.Ordinal) && ((string)Field(entry, "Adapters")!).Contains("a(a)", StringComparison.Ordinal));
     }
 
     [Fact]
     public async Task EmptyScopeClearsHostFallbackAndAdapterMap()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var bundle = CreateBundle(logger);
         Install(bundle, [Item("a", 0x10, s_macA)]);
 
@@ -189,7 +191,7 @@ public sealed class DurableCaptureBundleTests
     [Fact]
     public async Task NewScopeSwapsTheSnapshotWholesale()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var bundle = CreateBundle(logger);
         Install(bundle, [Item("a", 0x10, s_macA)]);
 
@@ -204,7 +206,7 @@ public sealed class DurableCaptureBundleTests
     [Fact]
     public async Task NoMacGroupWarnFiresOnceForAnUnchangedAdapterSet()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var bundle = CreateBundle(logger);
         var scope = new[] { Item("a", 0x10, s_macA), Item("b", 0x11, s_zeroMac) };
 
@@ -212,57 +214,57 @@ public sealed class DurableCaptureBundleTests
         bundle.UpdateUdpTargets(scope);
         bundle.UpdateUdpTargets(scope);
 
-        Assert.Single(NoMacEvents(logger), fields => Equals(Field(fields, "kind"), "adapters"));
+        Assert.Single(NoMacEvents(logger), entry => string.Equals(entry.Name, NoMacAdaptersEvent, StringComparison.Ordinal));
     }
 
     [Fact]
     public async Task NoMacGroupWarnRefiresWhenTheAdapterSetChanges()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var bundle = CreateBundle(logger);
 
         Install(bundle, [Item("a", 0x10, s_macA), Item("b", 0x11, s_zeroMac)]);
         Install(bundle, [Item("a", 0x10, s_macA), Item("b", 0x11, s_zeroMac), Item("c", 0x12, s_zeroMac)]);
 
-        var groupWarns = NoMacEvents(logger).Where(fields => Equals(Field(fields, "kind"), "adapters")).ToArray();
+        var groupWarns = NoMacEvents(logger).Where(entry => string.Equals(entry.Name, NoMacAdaptersEvent, StringComparison.Ordinal)).ToArray();
         Assert.Equal(2, groupWarns.Length);
-        Assert.Contains("b(b)", (string)Field(groupWarns[0], "adapters")!, StringComparison.Ordinal);
-        Assert.DoesNotContain("c(c)", (string)Field(groupWarns[0], "adapters")!, StringComparison.Ordinal);
-        Assert.Contains("b(b)", (string)Field(groupWarns[1], "adapters")!, StringComparison.Ordinal);
-        Assert.Contains("c(c)", (string)Field(groupWarns[1], "adapters")!, StringComparison.Ordinal);
+        Assert.Contains("b(b)", (string)Field(groupWarns[0], "Adapters")!, StringComparison.Ordinal);
+        Assert.DoesNotContain("c(c)", (string)Field(groupWarns[0], "Adapters")!, StringComparison.Ordinal);
+        Assert.Contains("b(b)", (string)Field(groupWarns[1], "Adapters")!, StringComparison.Ordinal);
+        Assert.Contains("c(c)", (string)Field(groupWarns[1], "Adapters")!, StringComparison.Ordinal);
     }
 
     [Fact]
     public async Task NoMacGroupWarnResetsAfterAnAllMacScope()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var bundle = CreateBundle(logger);
 
         Install(bundle, [Item("a", 0x10, s_macA), Item("b", 0x11, s_zeroMac)]);
         Install(bundle, [Item("a", 0x10, s_macA), Item("b", 0x11, s_macB)]);
         Install(bundle, [Item("a", 0x10, s_macA), Item("b", 0x11, s_zeroMac)]);
 
-        var groupWarns = NoMacEvents(logger).Where(fields => Equals(Field(fields, "kind"), "adapters")).ToArray();
+        var groupWarns = NoMacEvents(logger).Where(entry => string.Equals(entry.Name, NoMacAdaptersEvent, StringComparison.Ordinal)).ToArray();
         Assert.Equal(2, groupWarns.Length);
     }
 
     [Fact]
     public async Task NoMacGroupWarnResetsAfterAnEmptyScope()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var bundle = CreateBundle(logger);
 
         Install(bundle, [Item("b", 0x11, s_zeroMac)]);
         Install(bundle, []);
         Install(bundle, [Item("b", 0x11, s_zeroMac)]);
 
-        Assert.Equal(2, NoMacEvents(logger).Count(fields => Equals(Field(fields, "kind"), "adapters")));
+        Assert.Equal(2, NoMacEvents(logger).Count(entry => string.Equals(entry.Name, NoMacAdaptersEvent, StringComparison.Ordinal)));
     }
 
     [Fact]
     public async Task ZeroMacHostWarnFiresOncePerDistinctHostAdapter()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var bundle = CreateBundle(logger);
 
         Install(bundle, [Item("a", 0x10, s_zeroMac), Item("b", 0x11, s_macB)]);
@@ -271,12 +273,12 @@ public sealed class DurableCaptureBundleTests
         Install(bundle, [Item("a", 0x10, s_macA), Item("b", 0x11, s_zeroMac)]);
         Install(bundle, [Item("a", 0x10, s_zeroMac), Item("b", 0x11, s_macB)]);
 
-        var hostWarns = NoMacEvents(logger).Where(fields => Equals(Field(fields, "kind"), "hostFallback")).ToArray();
+        var hostWarns = NoMacEvents(logger).Where(entry => string.Equals(entry.Name, NoMacHostFallbackEvent, StringComparison.Ordinal)).ToArray();
         // First occurrence on 'a', the host change to 'c', and the return to a zero-MAC host
         // after 'a' recovered — but never a repeat of the same unchanged host.
         Assert.Equal(3, hostWarns.Length);
-        Assert.Equal("a", Field(hostWarns[0], "host"));
-        Assert.Equal("c", Field(hostWarns[1], "host"));
-        Assert.Equal("a", Field(hostWarns[2], "host"));
+        Assert.Equal("a", Field(hostWarns[0], "Host"));
+        Assert.Equal("c", Field(hostWarns[1], "Host"));
+        Assert.Equal("a", Field(hostWarns[2], "Host"));
     }
 }

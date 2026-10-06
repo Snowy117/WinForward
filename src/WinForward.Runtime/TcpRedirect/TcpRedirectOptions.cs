@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using WinForward.Core;
 using WinForward.NdisApi;
 
@@ -12,7 +13,7 @@ namespace WinForward.Runtime.TcpRedirect;
 public sealed record TcpRedirectOptions
 {
     /// <summary>Receives lifecycle events; null falls back to the no-op runtime logger.</summary>
-    public IRuntimeLogger? Logger { get; init; }
+    public ILogger? Logger { get; init; }
 
     /// <summary>The concurrent proxied-flow budget; null keeps the historical default (16,384).</summary>
     public int? Capacity { get; init; }

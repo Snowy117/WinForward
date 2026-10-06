@@ -43,7 +43,7 @@ public sealed class UdpUotFlowLifecycleTests
     public async Task ARefusedConnectReplyIsASetupFailureThatArmsTheCooldown()
     {
         var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var server = new ScriptedSocks5UotServer(connectReplyStatus: 5);
         var target = server.Server;
         await using var coordinator = CreateCoordinator(new NoopResponseSink(), new UdpProxyOptions { Capacity = 16, TimeProvider = time, Logger = logger }, logger);
@@ -72,7 +72,7 @@ public sealed class UdpUotFlowLifecycleTests
     public async Task ARefusedCredentialExchangeIsASetupFailureThatArmsTheCooldown()
     {
         var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var server = new ScriptedSocks5UotServer(username: "user", password: "secret");
         var target = new Socks5Server("scripted", "127.0.0.1", checked((ushort)server.ControlEndpoint.Port), "user", "wrong", UdpOverTcp: true);
         await using var coordinator = CreateCoordinator(new NoopResponseSink(), new UdpProxyOptions { Capacity = 16, TimeProvider = time, Logger = logger }, logger);
@@ -95,7 +95,7 @@ public sealed class UdpUotFlowLifecycleTests
     [Fact]
     public async Task AMidFlowConnectionDeathIsAnAssociationLossThatReestablishesOnTheNextDatagram()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var sink = new FakeResponseSink();
         await using var server = new ScriptedSocks5UotServer();
         await using var coordinator = CreateCoordinator(sink, new UdpProxyOptions { Capacity = 16, Logger = logger }, logger);
@@ -138,7 +138,7 @@ public sealed class UdpUotFlowLifecycleTests
     public async Task TwoConcurrentUotFlowsOwnTwoConnectionsAndBothAliasClaimsSucceed()
     {
         await using var server = new ScriptedSocks5UotServer();
-        await using var coordinator = CreateCoordinator(new NoopResponseSink(), new UdpProxyOptions { Capacity = 16 }, new RecordingRuntimeLogger());
+        await using var coordinator = CreateCoordinator(new NoopResponseSink(), new UdpProxyOptions { Capacity = 16 }, new RecordingLogger());
         var target = ProxyTarget.FromServer(server.Server);
         var first = CreateFlow("192.0.2.53");
         var second = CreateFlow("192.0.2.54");
@@ -178,7 +178,7 @@ public sealed class UdpUotFlowLifecycleTests
     [Fact]
     public async Task AConnectionResetTearsTheFlowDownInsteadOfSpinningOnSkipClassResets()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         var sink = new FakeResponseSink();
         await using var server = new ScriptedSocks5UotServer();
         await using var coordinator = CreateCoordinator(sink, new UdpProxyOptions { Capacity = 16, Logger = logger }, logger);
@@ -215,7 +215,7 @@ public sealed class UdpUotFlowLifecycleTests
         Socks5Server target,
         ScriptedSocks5UotServer server,
         MutableTimeProvider time,
-        RecordingRuntimeLogger logger)
+        RecordingLogger logger)
     {
         Assert.Equal(1, coordinator.Diagnostics.SetupCooldownCount);
         Assert.False(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(target), new byte[PayloadLength], default, CancellationToken.None));
@@ -258,7 +258,7 @@ public sealed class UdpUotFlowLifecycleTests
         return session;
     }
 
-    private static UdpProxyCoordinator CreateCoordinator(IUdpResponseSink sink, UdpProxyOptions options, RecordingRuntimeLogger logger) =>
+    private static UdpProxyCoordinator CreateCoordinator(IUdpResponseSink sink, UdpProxyOptions options, RecordingLogger logger) =>
         UdpCoordinatorFakes.CreateCoordinator(
             new Socks5UdpTransportFactory(new SelfTrafficRegistry(), UdpFrameBuilder.DefaultMaximumEthernetFrame, logger: logger),
             sink,

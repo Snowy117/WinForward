@@ -1,7 +1,9 @@
 using System.Net;
 using System.Net.Sockets;
+using Microsoft.Extensions.Logging;
 using WinForward.Configuration;
 using WinForward.Core;
+using WinForward.Runtime.Logging;
 using WinForward.Runtime.UdpProxy;
 
 namespace WinForward.Runtime.Socks5;
@@ -17,7 +19,7 @@ internal readonly record struct Socks5UdpAssociationContext(
     SelfTrafficRegistry SelfTraffic,
     Socks5AddressCache? AddressCache,
     Func<Socks5Server, CancellationToken, ValueTask<Socks5ControlConnection>>? CreateControl,
-    IRuntimeLogger Logger,
+    ILogger Logger,
     RuntimeLogThrottle LostLog);
 
 /// <summary>
@@ -234,12 +236,10 @@ internal sealed class Socks5UdpAssociation : IAsyncDisposable
         Volatile.Write(ref _fault, lost);
         // One line per window across every association of this factory: a server that drops a
         // whole population at once is one incident, and the cumulative counter is the measurement.
-        if (_context.Logger.IsEnabled(RuntimeLogLevel.Warn) && _context.LostLog.ShouldEmit())
+        if (_context.LostLog.ShouldEmit())
         {
-            _context.Logger.Event(RuntimeLogLevel.Warn, "udp.association.lost",
-                new("proxy", Server.Name),
-                new("relay", RelayEndpoint),
-                new("reason", death.GetType().Name));
+            var reason = death.GetType().Name;
+            UdpProxyLog.UdpAssociationLost(_context.Logger, Server.Name, RelayEndpoint, reason);
         }
 
         var control = Volatile.Read(ref _control);

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net;
+using Microsoft.Extensions.Logging;
 using WinForward.Configuration;
 using WinForward.Core;
 using WinForward.NdisApi;
@@ -114,7 +115,7 @@ public sealed class FlowAttributionPipelineTests
     [Fact]
     public async Task AClaimedHostFlowEmitsExactlyOneFlowCreatedEvent()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var harness = new Harness(logger: logger);
         for (byte marker = 1; marker <= 3; marker++) await DispatchAsync(harness, 53330, marker);
 
@@ -127,15 +128,15 @@ public sealed class FlowAttributionPipelineTests
         harness.Pipeline.DeliverDecided(AdapterHandle);
 
         var (level, _, fields) = Assert.Single(FlowCreated(logger));
-        Assert.Equal(RuntimeLogLevel.Debug, level);
-        Assert.Equal(1L, Field(fields, "flow"));
-        Assert.Equal(TransportProtocol.Tcp, Field(fields, "protocol"));
-        Assert.Equal(FlowOriginKind.Host, Field(fields, "origin"));
-        Assert.NotNull(Field(fields, "source"));
-        Assert.NotNull(Field(fields, "destination"));
-        Assert.Equal("dns.exe", Field(fields, "process"));
-        Assert.Equal(FlowAction.Pass, Field(fields, "action"));
-        Assert.Equal(0, Field(fields, "rule"));
+        Assert.Equal(LogLevel.Debug, level);
+        Assert.Equal(1L, Field(fields, "Flow"));
+        Assert.Equal(TransportProtocol.Tcp, Field(fields, "Protocol"));
+        Assert.Equal(FlowOriginKind.Host, Field(fields, "Origin"));
+        Assert.NotNull(Field(fields, "Source"));
+        Assert.NotNull(Field(fields, "Destination"));
+        Assert.Equal("dns.exe", Field(fields, "Process"));
+        Assert.Equal(FlowAction.Pass, Field(fields, "Action"));
+        Assert.Equal(0, Field(fields, "Rule"));
         Assert.Equal(3, harness.Executor.PassCount);
         Assert.Equal(1, harness.Dispatcher.FlowCount);
     }
@@ -143,7 +144,7 @@ public sealed class FlowAttributionPipelineTests
     [Fact]
     public async Task AClaimedHostFlowsProcessPathFollowsThePathPolicy()
     {
-        var revealed = new RecordingRuntimeLogger();
+        var revealed = new RecordingLogger();
         await using (var harness = new Harness(includeProcessPath: true, logger: revealed, attributor: new PathAttributor()))
         {
             await DispatchAsync(harness, 53340);
@@ -152,10 +153,10 @@ public sealed class FlowAttributionPipelineTests
         }
 
         var (_, _, revealedFields) = Assert.Single(FlowCreated(revealed));
-        Assert.Equal("dns.exe", Field(revealedFields, "process"));
-        Assert.Equal(@"C:\Apps\dns.exe", Field(revealedFields, "processPath"));
+        Assert.Equal("dns.exe", Field(revealedFields, "Process"));
+        Assert.Equal(@"C:\Apps\dns.exe", Field(revealedFields, "ProcessPath"));
 
-        var withheld = new RecordingRuntimeLogger();
+        var withheld = new RecordingLogger();
         await using (var harness = new Harness(logger: withheld, attributor: new PathAttributor()))
         {
             await DispatchAsync(harness, 53341);
@@ -164,14 +165,14 @@ public sealed class FlowAttributionPipelineTests
         }
 
         var (_, _, withheldFields) = Assert.Single(FlowCreated(withheld));
-        Assert.Equal("dns.exe", Field(withheldFields, "process"));
-        Assert.Null(Field(withheldFields, "processPath"));
+        Assert.Equal("dns.exe", Field(withheldFields, "Process"));
+        Assert.Null(Field(withheldFields, "ProcessPath"));
     }
 
     [Fact]
     public async Task ADebugDisabledLoggerIsNeverAskedForTheFlowCreatedLine()
     {
-        var logger = new RecordingRuntimeLogger(level => level < RuntimeLogLevel.Debug);
+        var logger = new RecordingLogger(level => level >= LogLevel.Information);
         await using var harness = new Harness(logger: logger);
 
         await DispatchAsync(harness, 53360);
@@ -186,14 +187,14 @@ public sealed class FlowAttributionPipelineTests
     [Fact]
     public async Task AForwardedFlowStillEmitsTheInlineFlowCreatedEvent()
     {
-        var logger = new RecordingRuntimeLogger();
+        var logger = new RecordingLogger();
         await using var harness = new Harness(logger: logger);
 
         await DispatchAsync(harness, 53350, origin: FlowOriginKind.Forwarded);
 
         var (_, _, fields) = Assert.Single(FlowCreated(logger));
-        Assert.Equal(FlowOriginKind.Forwarded, Field(fields, "origin"));
-        Assert.Null(Field(fields, "process"));
+        Assert.Equal(FlowOriginKind.Forwarded, Field(fields, "Origin"));
+        Assert.Null(Field(fields, "Process"));
         Assert.Equal(0, harness.Attributor.Calls);
         Assert.Equal(0, harness.Pipeline.PendingCount);
         Assert.Equal(1, harness.Executor.PassCount);
@@ -563,10 +564,10 @@ public sealed class FlowAttributionPipelineTests
         }
     }
 
-    private static List<(RuntimeLogLevel Level, string Name, RuntimeLogField[] Fields)> FlowCreated(RecordingRuntimeLogger logger) =>
+    private static List<RecordedEvent> FlowCreated(RecordingLogger logger) =>
         [.. logger.Events.Where(entry => string.Equals(entry.Name, "flow.created", StringComparison.Ordinal))];
 
-    private static object? Field(RuntimeLogField[] fields, string key) =>
+    private static object? Field(IReadOnlyList<KeyValuePair<string, object?>> fields, string key) =>
         fields.FirstOrDefault(field => string.Equals(field.Key, key, StringComparison.Ordinal)).Value;
 
     /// <summary>An attributor whose hit carries a full path, so the processPath gate has something to reveal.</summary>
@@ -578,7 +579,7 @@ public sealed class FlowAttributionPipelineTests
 
     private sealed class Harness : IAsyncDisposable
     {
-        public Harness(bool parks = false, Exception? failure = null, int flowCapacity = 65_536, bool processRule = true, bool includeProcessPath = false, RecordingRuntimeLogger? logger = null, IProcessAttributor? attributor = null)
+        public Harness(bool parks = false, Exception? failure = null, int flowCapacity = 65_536, bool processRule = true, bool includeProcessPath = false, RecordingLogger? logger = null, IProcessAttributor? attributor = null)
         {
             Pool = new NativeBufferPool(1514, 64);
             Setup = new SetupExecutor(workerCount: 2, ringCapacity: 64);
