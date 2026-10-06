@@ -1,86 +1,117 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Microsoft.Extensions.Logging;
 using WinForward.Core;
 
 namespace WinForward.Configuration;
 
 public sealed partial class WinForwardConfigDto
 {
-    [JsonPropertyName("logLevel")]
-    public JsonElement LogLevel { get; init; }
-
-    [JsonPropertyName("logFormat")]
-    public JsonElement LogFormat { get; init; }
-
-    [JsonPropertyName("socks5Servers")]
+    [JsonPropertyName("Socks5Servers")]
     public IReadOnlyList<Socks5ServerDto?>? Socks5Servers { get; init; }
 
-    [JsonPropertyName("localTargets")]
+    [JsonPropertyName("LocalTargets")]
     public IReadOnlyList<LocalTargetDto?>? LocalTargets { get; init; }
 
-    [JsonPropertyName("host")]
+    [JsonPropertyName("Host")]
     public RuleDomainDto? Host { get; init; }
 
-    [JsonPropertyName("forwarded")]
+    [JsonPropertyName("Forwarded")]
     public RuleDomainDto? Forwarded { get; init; }
 
-    [JsonPropertyName("proxyUnavailableAction")]
+    [JsonPropertyName("ProxyUnavailableAction")]
     public string? ProxyUnavailableAction { get; init; }
 
-    [JsonPropertyName("processingFailureAction")]
+    [JsonPropertyName("ProcessingFailureAction")]
     public string? ProcessingFailureAction { get; init; }
 
-    [JsonPropertyName("tcpFlowCapacity")]
+    [JsonPropertyName("TcpFlowCapacity")]
     public int? TcpFlowCapacity { get; init; }
 
-    [JsonPropertyName("setupWorkerCount")]
+    [JsonPropertyName("SetupWorkerCount")]
     public int? SetupWorkerCount { get; init; }
 }
 
 public sealed class RuleDomainDto
 {
-    [JsonPropertyName("fallbackAction")]
+    [JsonPropertyName("FallbackAction")]
     public string? FallbackAction { get; init; }
 
-    [JsonPropertyName("rules")]
+    [JsonPropertyName("Rules")]
     public IReadOnlyList<RuleDto?>? Rules { get; init; }
 }
 
 public sealed class Socks5ServerDto
 {
+    [JsonPropertyName("Name")]
     public string? Name { get; init; }
+
+    [JsonPropertyName("Host")]
     public string? Host { get; init; }
+
+    [JsonPropertyName("Port")]
     public int Port { get; init; }
+
+    [JsonPropertyName("Username")]
     public string? Username { get; init; }
+
+    [JsonPropertyName("Password")]
     public string? Password { get; init; }
+
+    [JsonPropertyName("UdpOverTcp")]
     public bool? UdpOverTcp { get; init; }
 }
 
 public sealed class LocalTargetDto
 {
+    [JsonPropertyName("Name")]
     public string? Name { get; init; }
+
+    [JsonPropertyName("Host")]
     public string? Host { get; init; }
+
+    [JsonPropertyName("Port")]
     public int Port { get; init; }
 }
 
 public sealed class RuleDto
 {
+    [JsonPropertyName("Process")]
     public string?[]? Process { get; init; }
+
+    [JsonPropertyName("AdapterId")]
     public string?[]? AdapterId { get; init; }
+
+    [JsonPropertyName("AdapterName")]
     public string?[]? AdapterName { get; init; }
+
+    [JsonPropertyName("Protocol")]
     public string?[]? Protocol { get; init; }
+
+    [JsonPropertyName("AddressFamily")]
     public string?[]? AddressFamily { get; init; }
+
+    [JsonPropertyName("RemoteCidr")]
     public string?[]? RemoteCidr { get; init; }
+
+    [JsonPropertyName("RemotePort")]
     public string?[]? RemotePort { get; init; }
+
+    [JsonPropertyName("Action")]
     public string? Action { get; init; }
 
     /// <summary>The named target a <c>proxy</c> action selects.</summary>
-    [JsonPropertyName("target")]
+    [JsonPropertyName("Target")]
     public string? Target { get; init; }
 }
 
-[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
+/// <summary>
+/// The strict reader for the <c>WinForward</c> section. Every member names its own key — no naming
+/// policy infers one — and an unknown or wrongly cased key is an unmapped member, so the two
+/// failures that <c>IConfiguration</c>'s case-insensitive, key-ignoring store would swallow stay
+/// hard errors here.
+/// </summary>
+[JsonSourceGenerationOptions(UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
 [JsonSerializable(typeof(WinForwardConfigDto))]
 public partial class ConfigurationJsonContext : JsonSerializerContext;
 
@@ -98,7 +129,7 @@ public sealed record Socks5Server(
 
 /// <summary>
 /// A named endpoint on this host that terminates a selected flow, declared in the
-/// <c>localTargets</c> list: the flow's payload is forwarded to <see cref="Endpoint"/> verbatim and
+/// <c>LocalTargets</c> list: the flow's payload is forwarded to <see cref="Endpoint"/> verbatim and
 /// the endpoint's replies are attributed to the flow's original destination. Nothing in the packet
 /// path learns what protocol the payload carries.
 /// </summary>
@@ -128,19 +159,10 @@ public sealed record ConfigDiagnostic(string Path, string Message)
     public override string ToString() => $"{Path}: {Message}";
 }
 
-public enum LogFormat
-{
-    Auto,
-    Simple,
-    Json,
-}
-
 public sealed partial record ValidatedConfiguration(
     IReadOnlyDictionary<string, ProxyTarget> Targets,
     PolicySnapshot Policy,
-    LogLevel LogLevel = LogLevel.Information,
     bool IncludeProcessPathInLogs = false,
-    LogFormat LogFormat = LogFormat.Auto,
     int TcpFlowCapacity = ConfigurationLoader.DefaultTcpFlowCapacity,
     int SetupWorkerCount = 0,
     int UdpSessionCapacity = ConfigurationLoader.DefaultUdpSessionCapacity,
@@ -155,48 +177,33 @@ public sealed partial record ValidatedConfiguration(
 
 public static partial class ConfigurationLoader
 {
+    /// <summary>The one top-level section WinForward's own settings live under, beside <c>Logging</c>.</summary>
+    public const string SectionName = "WinForward";
+
     /// <summary>The default concurrent proxied TCP flow budget: 16,384 ephemeral ports x 50% headroom / 2 ports per flow.</summary>
     public const int DefaultTcpFlowCapacity = 4_096;
 
-    public static bool TryParse(string json, out WinForwardConfigDto? dto, out IReadOnlyList<ConfigDiagnostic> diagnostics)
+    public static bool TryParse(string json, [NotNullWhen(true)] out WinForwardConfigDto? dto, out IReadOnlyList<ConfigDiagnostic> diagnostics)
     {
         try
         {
             dto = JsonSerializer.Deserialize(json, ConfigurationJsonContext.Default.WinForwardConfigDto);
-            if (dto is null)
-            {
-                diagnostics = [new ConfigDiagnostic("$", "Configuration must be a JSON object.")];
-            }
-            else if (dto.LogLevel.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.String or JsonValueKind.Null))
-            {
-                diagnostics = [new ConfigDiagnostic("logLevel", "Log level must be a string.")];
-            }
-            else if (dto.LogFormat.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.String or JsonValueKind.Null))
-            {
-                diagnostics = [new ConfigDiagnostic("logFormat", "Log format must be a string.")];
-            }
-            else
-            {
-                diagnostics = [];
-            }
+            diagnostics = dto is null ? [new ConfigDiagnostic(SectionName, "Configuration must be a JSON object.")] : [];
             return diagnostics.Count == 0;
         }
         catch (JsonException exception)
         {
             dto = null;
-            var path = string.IsNullOrWhiteSpace(exception.Path) ? "$" : exception.Path!;
-            diagnostics = [new ConfigDiagnostic(path, "Invalid JSON configuration.")];
+            diagnostics = [new ConfigDiagnostic(RootedPath(exception.Path), "Invalid JSON configuration.")];
             return false;
         }
     }
 
-    public static bool TryValidate(WinForwardConfigDto dto, out ValidatedConfiguration? configuration, out IReadOnlyList<ConfigDiagnostic> diagnostics)
+    public static bool TryValidate(WinForwardConfigDto dto, [NotNullWhen(true)] out ValidatedConfiguration? configuration, out IReadOnlyList<ConfigDiagnostic> diagnostics)
     {
         var errors = new List<ConfigDiagnostic>();
         var warnings = new List<ConfigDiagnostic>();
         var targets = new Dictionary<string, ProxyTarget>(StringComparer.OrdinalIgnoreCase);
-        var logLevel = ParseLogLevel(dto, errors);
-        var logFormat = ParseLogFormat(dto, errors);
         var limits = ConfigurationLimits.Parse(dto, errors, warnings);
 
         ConfigurationTargets.Validate(dto, targets, errors, warnings);
@@ -222,9 +229,7 @@ public static partial class ConfigurationLoader
                 ForwardedRules = forwardedRules,
                 ForwardedFallbackAction = forwardedFallback ?? FlowAction.Pass,
             },
-            logLevel,
             ConfigurationRules.AnyProcessSelectorIsAPath(hostRules),
-            logFormat,
             limits.TcpFlowCapacity,
             limits.SetupWorkerCount,
             limits.UdpSessionCapacity,
@@ -237,32 +242,20 @@ public static partial class ConfigurationLoader
         return true;
     }
 
-    private static LogLevel ParseLogLevel(WinForwardConfigDto dto, List<ConfigDiagnostic> errors)
+    /// <summary>
+    /// Re-roots a JSON path from the deserialised document at the section the document was
+    /// materialised from, so every diagnostic names a location in the operator's file.
+    /// </summary>
+    private static string RootedPath(string? jsonPath) => jsonPath switch
     {
-        if (dto.LogLevel.ValueKind == JsonValueKind.Undefined) return LogLevel.Information;
-        if (LogLevelNames.TryParse(dto.LogLevel.ValueKind == JsonValueKind.String ? dto.LogLevel.GetString() : null, out var level)) return level;
-        errors.Add(new("logLevel", "Log level must be error, warn, info, debug, or trace."));
-        return LogLevel.Information;
-    }
-
-    private static LogFormat ParseLogFormat(WinForwardConfigDto dto, List<ConfigDiagnostic> errors)
-    {
-        if (dto.LogFormat.ValueKind == JsonValueKind.Undefined) return LogFormat.Auto;
-        if (LogFormatNames.TryParse(
-            dto.LogFormat.ValueKind == JsonValueKind.String ? dto.LogFormat.GetString() : null,
-            out var format))
-        {
-            return format;
-        }
-
-        errors.Add(new("logFormat", "Log format must be auto, simple, or json."));
-        return LogFormat.Auto;
-    }
+        null or "$" => SectionName,
+        _ => SectionName + jsonPath[1..],
+    };
 
     private static void ValidateFailureActions(WinForwardConfigDto dto, List<ConfigDiagnostic> errors)
     {
-        ValidateFailureAction(dto.ProxyUnavailableAction, "proxyUnavailableAction", errors);
-        ValidateFailureAction(dto.ProcessingFailureAction, "processingFailureAction", errors);
+        ValidateFailureAction(dto.ProxyUnavailableAction, "WinForward.ProxyUnavailableAction", errors);
+        ValidateFailureAction(dto.ProcessingFailureAction, "WinForward.ProcessingFailureAction", errors);
     }
 
     private static void ValidateFailureAction(string? raw, string path, List<ConfigDiagnostic> errors)

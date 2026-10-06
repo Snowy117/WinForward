@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Logging;
 using WinForward.Core;
 using WinForward.TestSupport;
 using Xunit;
@@ -12,16 +11,16 @@ public sealed class ConfigurationValidationTests
     {
         const string json = """
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [{ "remotePort": [], "action": "proxy" }] }
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [{ "RemotePort": [], "Action": "proxy" }] }
         }
         """;
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
         Assert.NotNull(dto);
         Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
-        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "host.rules[0].remotePort", StringComparison.Ordinal));
-        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "host.rules[0].target", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "WinForward.Host.Rules[0].RemotePort", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "WinForward.Host.Rules[0].Target", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -29,15 +28,15 @@ public sealed class ConfigurationValidationTests
     {
         const string json = """
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [{ "process": ["   "], "action": "pass" }] }
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [{ "Process": ["   "], "Action": "pass" }] }
         }
         """;
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
         Assert.NotNull(dto);
         Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
-        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "host.rules[0].process[0]", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "WinForward.Host.Rules[0].Process[0]", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -45,27 +44,27 @@ public sealed class ConfigurationValidationTests
     {
         const string json = """
         {
-          "socks5Servers": [
-            { "name": "Main", "host": "127.0.0.1", "port": 1080 },
-            { "name": "main", "host": "127.0.0.2", "port": 1081 }
+          "Socks5Servers": [
+            { "Name": "Main", "Host": "127.0.0.1", "Port": 1080 },
+            { "Name": "main", "Host": "127.0.0.2", "Port": 1081 }
           ],
-          "host": { "fallbackAction": "pass", "rules": [] }
+          "Host": { "FallbackAction": "pass", "Rules": [] }
         }
         """;
 
-        ConfigurationAssert.Invalid(json, "socks5Servers[1].name");
+        ConfigurationAssert.Invalid(json, "WinForward.Socks5Servers[1].Name");
     }
 
     [Theory]
-    [InlineData(", \"udpOverTcp\": true", true)]
-    [InlineData(", \"udpOverTcp\": false", false)]
+    [InlineData(", \"UdpOverTcp\": true", true)]
+    [InlineData(", \"UdpOverTcp\": false", false)]
     [InlineData("", false)]
     public void Socks5ServerUdpOverTcpFlagDefaultsOffAndReachesTheTarget(string member, bool expected)
     {
         var json = $$"""
         {
-          "socks5Servers": [ { "name": "Main", "host": "127.0.0.1", "port": 1080{{member}} } ],
-          "host": { "fallbackAction": "pass", "rules": [] }
+          "Socks5Servers": [ { "Name": "Main", "Host": "127.0.0.1", "Port": 1080{{member}} } ],
+          "Host": { "FallbackAction": "pass", "Rules": [] }
         }
         """;
 
@@ -90,14 +89,14 @@ public sealed class ConfigurationValidationTests
     {
         var json = $$"""
         {
-          "socks5Servers": [ { "name": "Main", "host": "127.0.0.1", "port": 1080, "{{misspelled}}": true } ],
-          "host": { "fallbackAction": "pass", "rules": [] }
+          "Socks5Servers": [ { "Name": "Main", "Host": "127.0.0.1", "Port": 1080, "{{misspelled}}": true } ],
+          "Host": { "FallbackAction": "pass", "Rules": [] }
         }
         """;
 
         Assert.False(ConfigurationLoader.TryParse(json, out _, out var diagnostics));
         var diagnostic = Assert.Single(diagnostics);
-        Assert.Equal($"$.socks5Servers[0].{misspelled}", diagnostic.Path);
+        Assert.Equal($"WinForward.Socks5Servers[0].{misspelled}", diagnostic.Path);
     }
 
     [Fact]
@@ -105,147 +104,35 @@ public sealed class ConfigurationValidationTests
     {
         const string json = """
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "proxy", "rules": [] }
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "proxy", "Rules": [] }
         }
         """;
 
-        ConfigurationAssert.Invalid(json, "host.fallbackAction");
+        ConfigurationAssert.Invalid(json, "WinForward.Host.FallbackAction");
     }
 
-    [Fact]
-    public void ConfigurationDefaultsLogLevelToInfo()
-    {
-        const string json = """
-        {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] }
-        }
-        """;
-
-        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
-        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
-        Assert.Equal(LogLevel.Information, configuration!.LogLevel);
-    }
-
+    /// <summary>
+    /// The retired <c>logLevel</c> and <c>logFormat</c> keys are unknown members: the vocabulary
+    /// moved into the standard <c>Logging</c> section, so a pre-migration file fails closed at
+    /// parse with the key's JSON path instead of half-applying.
+    /// </summary>
     [Theory]
-    [InlineData("error", LogLevel.Error)]
-    [InlineData("WARN", LogLevel.Warning)]
-    [InlineData(" Info ", LogLevel.Information)]
-    [InlineData("DeBuG", LogLevel.Debug)]
-    [InlineData(" trace ", LogLevel.Trace)]
-    public void ConfigurationNormalizesLogLevel(string value, LogLevel expected)
+    [InlineData("\"logLevel\": \"info\"", "logLevel")]
+    [InlineData("\"logFormat\": \"json\"", "logFormat")]
+    public void RetiredLoggingKeysFailClosedAtParseWithTheirJsonPath(string member, string retiredKey)
     {
         var json = $$"""
         {
-          "logLevel": "{{value}}",
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] }
-        }
-        """;
-
-        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
-        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
-        Assert.Equal(expected, configuration!.LogLevel);
-    }
-
-    [Theory]
-    [InlineData("null")]
-    [InlineData("\"\"")]
-    [InlineData("\"verbose\"")]
-    public void ConfigurationRejectsInvalidLogLevel(string value)
-    {
-        var json = $$"""
-        {
-          "logLevel": {{value}},
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] }
-        }
-        """;
-
-        ConfigurationAssert.Invalid(json, "logLevel");
-    }
-
-    [Fact]
-    public void ConfigurationRejectsWrongLogLevelJsonTypeAtFieldPath()
-    {
-        const string json = """
-        {
-          "logLevel": 3,
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] }
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [] },
+          {{member}}
         }
         """;
 
         Assert.False(ConfigurationLoader.TryParse(json, out _, out var diagnostics));
-        Assert.Contains(diagnostics, diagnostic => diagnostic.Path.Contains("logLevel", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void ConfigurationDefaultsLogFormatToAuto()
-    {
-        const string json = """
-        {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] }
-        }
-        """;
-
-        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
-        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
-        Assert.Equal(LogFormat.Auto, configuration!.LogFormat);
-    }
-
-    [Theory]
-    [InlineData("auto", LogFormat.Auto)]
-    [InlineData("SIMPLE", LogFormat.Simple)]
-    [InlineData(" Json ", LogFormat.Json)]
-    public void ConfigurationNormalizesLogFormat(string value, LogFormat expected)
-    {
-        var json = $$"""
-        {
-          "logFormat": "{{value}}",
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] }
-        }
-        """;
-
-        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
-        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
-        Assert.Equal(expected, configuration!.LogFormat);
-    }
-
-    [Theory]
-    [InlineData("null")]
-    [InlineData("\"\"")]
-    [InlineData("\"colored\"")]
-    [InlineData("\"systemd\"")]
-    public void ConfigurationRejectsInvalidLogFormat(string value)
-    {
-        var json = $$"""
-        {
-          "logFormat": {{value}},
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] }
-        }
-        """;
-
-        ConfigurationAssert.Invalid(json, "logFormat");
-    }
-
-    [Fact]
-    public void ConfigurationRejectsWrongLogFormatJsonTypeAtFieldPath()
-    {
-        const string json = """
-        {
-          "logFormat": 3,
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] }
-        }
-        """;
-
-        Assert.False(ConfigurationLoader.TryParse(json, out _, out var diagnostics));
-        Assert.Contains(diagnostics, diagnostic => diagnostic.Path.Contains("logFormat", StringComparison.Ordinal));
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal($"WinForward.{retiredKey}", diagnostic.Path);
     }
 
     [Theory]
@@ -255,14 +142,14 @@ public sealed class ConfigurationValidationTests
     {
         var json = $$"""
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [{ "process": ["{{selector}}"], "action": "pass" }] }
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [{ "Process": ["{{selector}}"], "Action": "pass" }] }
         }
         """;
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
-        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
-        Assert.Equal(expected, configuration!.IncludeProcessPathInLogs);
+        Assert.True(ConfigurationLoader.TryValidate(dto, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Equal(expected, configuration.IncludeProcessPathInLogs);
     }
 
     [Fact]
@@ -270,8 +157,8 @@ public sealed class ConfigurationValidationTests
     {
         const string json = """
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] },
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [] },
           "unexpectedField": true
         }
         """;
@@ -285,8 +172,8 @@ public sealed class ConfigurationValidationTests
     {
         const string json = """
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] },
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [] },
           "unexpectedField": "credential-that-must-not-appear"
         }
         """;
@@ -302,12 +189,12 @@ public sealed class ConfigurationValidationTests
     {
         const string json = """
         {
-          "socks5Servers": [ { "name": "Main", "host": "127.0.0.1", "port": 0 } ],
-          "host": { "fallbackAction": "pass", "rules": [] }
+          "Socks5Servers": [ { "Name": "Main", "Host": "127.0.0.1", "Port": 0 } ],
+          "Host": { "FallbackAction": "pass", "Rules": [] }
         }
         """;
 
-        ConfigurationAssert.Invalid(json, "socks5Servers[0].port");
+        ConfigurationAssert.Invalid(json, "WinForward.Socks5Servers[0].Port");
     }
 
     /// <summary>
@@ -323,15 +210,15 @@ public sealed class ConfigurationValidationTests
     {
         var json = $$"""
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] },
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [] },
           {{member}}
         }
         """;
 
         Assert.False(ConfigurationLoader.TryParse(json, out _, out var diagnostics));
         var diagnostic = Assert.Single(diagnostics);
-        Assert.Equal($"$.{removedKey}", diagnostic.Path);
+        Assert.Equal($"WinForward.{removedKey}", diagnostic.Path);
     }
 
     /// <summary>
@@ -343,14 +230,14 @@ public sealed class ConfigurationValidationTests
     {
         const string json = """
         {
-          "socks5Servers": [ { "name": "Main", "host": "127.0.0.1", "port": 1080 } ],
-          "host": { "fallbackAction": "pass", "rules": [ { "action": "proxy", "proxyServer": "Main" } ] }
+          "Socks5Servers": [ { "Name": "Main", "Host": "127.0.0.1", "Port": 1080 } ],
+          "Host": { "FallbackAction": "pass", "Rules": [ { "Action": "proxy", "proxyServer": "Main" } ] }
         }
         """;
 
         Assert.False(ConfigurationLoader.TryParse(json, out _, out var diagnostics));
         var diagnostic = Assert.Single(diagnostics);
-        Assert.Equal("$.host.rules[0].proxyServer", diagnostic.Path);
+        Assert.Equal("WinForward.Host.Rules[0].proxyServer", diagnostic.Path);
     }
 
     [Fact]
@@ -358,14 +245,14 @@ public sealed class ConfigurationValidationTests
     {
         const string json = """
         {
-          "socks5Servers": [ { "name": "Main", "host": "127.0.0.1", "port": 1080 } ],
-          "host": { "fallbackAction": "pass", "rules": [ { "action": "proxy", "target": "Main" } ] }
+          "Socks5Servers": [ { "Name": "Main", "Host": "127.0.0.1", "Port": 1080 } ],
+          "Host": { "FallbackAction": "pass", "Rules": [ { "Action": "proxy", "Target": "Main" } ] }
         }
         """;
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out var parseDiagnostics), string.Join("; ", parseDiagnostics));
-        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
-        Assert.Empty(configuration!.Warnings);
+        Assert.True(ConfigurationLoader.TryValidate(dto, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Empty(configuration.Warnings);
         Assert.Equal(ConfigurationLoader.DefaultUdpSessionCapacity, configuration.UdpSessionCapacity);
         Assert.Equal(ConfigurationLoader.DefaultUdpRelayReceiveBufferBytes, configuration.UdpRelayReceiveBufferBytes);
         Assert.Equal(ConfigurationLoader.DefaultUdpSessionIdleTimeout, configuration.UdpSessionIdleTimeout);
@@ -376,12 +263,12 @@ public sealed class ConfigurationValidationTests
     {
         const string json = """
         {
-          "socks5Servers": [ { "name": "Main", "host": "127.0.0.1", "port": 1080 } ],
-          "host": { "fallbackAction": "pass", "rules": [ { "action": "pass", "target": "Main" } ] }
+          "Socks5Servers": [ { "Name": "Main", "Host": "127.0.0.1", "Port": 1080 } ],
+          "Host": { "FallbackAction": "pass", "Rules": [ { "Action": "pass", "Target": "Main" } ] }
         }
         """;
 
-        ConfigurationAssert.Invalid(json, "host.rules[0].target");
+        ConfigurationAssert.Invalid(json, "WinForward.Host.Rules[0].Target");
     }
 
     [Fact]
@@ -389,13 +276,13 @@ public sealed class ConfigurationValidationTests
     {
         const string json = """
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] },
-          "proxyUnavailableAction": "pass"
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [] },
+          "ProxyUnavailableAction": "pass"
         }
         """;
 
-        ConfigurationAssert.Invalid(json, "proxyUnavailableAction");
+        ConfigurationAssert.Invalid(json, "WinForward.ProxyUnavailableAction");
     }
 
     [Fact]
@@ -403,12 +290,12 @@ public sealed class ConfigurationValidationTests
     {
         const string json = """
         {
-          "socks5Servers": [ { "name": "Main", "host": "127.0.0.1", "port": 1080, "username": "user" } ],
-          "host": { "fallbackAction": "pass", "rules": [] }
+          "Socks5Servers": [ { "Name": "Main", "Host": "127.0.0.1", "Port": 1080, "Username": "user" } ],
+          "Host": { "FallbackAction": "pass", "Rules": [] }
         }
         """;
 
-        ConfigurationAssert.Invalid(json, "socks5Servers[0]");
+        ConfigurationAssert.Invalid(json, "WinForward.Socks5Servers[0]");
     }
 
     [Fact]
@@ -417,8 +304,8 @@ public sealed class ConfigurationValidationTests
         var maximumPassword = new string('a', 255);
         var maximumJson = $$"""
         {
-          "socks5Servers": [ { "name": "Main", "host": "127.0.0.1", "port": 1080, "username": "user", "password": "{{maximumPassword}}" } ],
-          "host": { "fallbackAction": "pass", "rules": [] }
+          "Socks5Servers": [ { "Name": "Main", "Host": "127.0.0.1", "Port": 1080, "Username": "user", "Password": "{{maximumPassword}}" } ],
+          "Host": { "FallbackAction": "pass", "Rules": [] }
         }
         """;
 
@@ -429,8 +316,8 @@ public sealed class ConfigurationValidationTests
         var password = new string('\u00e9', 128);
         var json = $$"""
         {
-          "socks5Servers": [ { "name": "Main", "host": "127.0.0.1", "port": 1080, "username": "user", "password": "{{password}}" } ],
-          "host": { "fallbackAction": "pass", "rules": [] }
+          "Socks5Servers": [ { "Name": "Main", "Host": "127.0.0.1", "Port": 1080, "Username": "user", "Password": "{{password}}" } ],
+          "Host": { "FallbackAction": "pass", "Rules": [] }
         }
         """;
 
@@ -438,7 +325,7 @@ public sealed class ConfigurationValidationTests
         Assert.NotNull(dto);
         Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
         var diagnostic = Assert.Single(diagnostics);
-        Assert.Equal("socks5Servers[0].password", diagnostic.Path);
+        Assert.Equal("WinForward.Socks5Servers[0].Password", diagnostic.Path);
         Assert.DoesNotContain(password, diagnostic.ToString(), StringComparison.Ordinal);
     }
 
@@ -447,12 +334,12 @@ public sealed class ConfigurationValidationTests
     {
         const string json = """
         {
-          "socks5Servers": [ { "name": "Main", "host": "not a host name!", "port": 1080 } ],
-          "host": { "fallbackAction": "pass", "rules": [] }
+          "Socks5Servers": [ { "Name": "Main", "Host": "not a host name!", "Port": 1080 } ],
+          "Host": { "FallbackAction": "pass", "Rules": [] }
         }
         """;
 
-        ConfigurationAssert.Invalid(json, "socks5Servers[0].host");
+        ConfigurationAssert.Invalid(json, "WinForward.Socks5Servers[0].Host");
     }
 
     [Fact]
@@ -460,53 +347,53 @@ public sealed class ConfigurationValidationTests
     {
         const string json = """
         {
-          "socks5Servers": [],
-          "host": { "rules": [] }
+          "Socks5Servers": [],
+          "Host": { "Rules": [] }
         }
         """;
 
-        ConfigurationAssert.Invalid(json, "host.fallbackAction");
+        ConfigurationAssert.Invalid(json, "WinForward.Host.FallbackAction");
 
         const string missingSections = "{}";
         Assert.True(ConfigurationLoader.TryParse(missingSections, out var dto, out _));
         Assert.NotNull(dto);
         Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
-        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "socks5Servers", StringComparison.Ordinal));
-        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "host", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "WinForward.Socks5Servers", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "WinForward.Host", StringComparison.Ordinal));
     }
 
     [Theory]
-    [InlineData("process")]
-    [InlineData("adapterId")]
-    [InlineData("adapterName")]
-    [InlineData("protocol")]
-    [InlineData("addressFamily")]
-    [InlineData("remoteCidr")]
-    [InlineData("remotePort")]
+    [InlineData("Process")]
+    [InlineData("AdapterId")]
+    [InlineData("AdapterName")]
+    [InlineData("Protocol")]
+    [InlineData("AddressFamily")]
+    [InlineData("RemoteCidr")]
+    [InlineData("RemotePort")]
     public void ConfigurationRejectsNullRuleMatchValuesWithoutThrowing(string field)
     {
         var json = $$"""
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [{ "{{field}}": [null], "action": "pass" }] }
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [{ "{{field}}": [null], "Action": "pass" }] }
         }
         """;
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
         Assert.NotNull(dto);
         Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
-        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, $"host.rules[0].{field}[0]", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, $"WinForward.Host.Rules[0].{field}[0]", StringComparison.Ordinal));
     }
 
     [Theory]
-    [InlineData("socks5Servers")]
-    [InlineData("host.rules")]
+    [InlineData("WinForward.Socks5Servers")]
+    [InlineData("WinForward.Host.Rules")]
     public void ConfigurationRejectsNullSectionEntriesWithoutThrowing(string section)
     {
         var json = $$"""
         {
-          "socks5Servers": {{(string.Equals(section, "socks5Servers", StringComparison.Ordinal) ? "[null]" : "[]")}},
-          "host": { "fallbackAction": "pass", "rules": {{(string.Equals(section, "host.rules", StringComparison.Ordinal) ? "[null]" : "[]")}} }
+          "Socks5Servers": {{(string.Equals(section, "WinForward.Socks5Servers", StringComparison.Ordinal) ? "[null]" : "[]")}},
+          "Host": { "FallbackAction": "pass", "Rules": {{(string.Equals(section, "WinForward.Host.Rules", StringComparison.Ordinal) ? "[null]" : "[]")}} }
         }
         """;
 
@@ -521,14 +408,14 @@ public sealed class ConfigurationValidationTests
     {
         const string json = """
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] }
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [] }
         }
         """;
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
-        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
-        Assert.Empty(configuration!.Policy.ForwardedRules);
+        Assert.True(ConfigurationLoader.TryValidate(dto, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Empty(configuration.Policy.ForwardedRules);
         Assert.Equal(FlowAction.Pass, configuration.Policy.ForwardedFallbackAction);
     }
 
@@ -537,15 +424,15 @@ public sealed class ConfigurationValidationTests
     {
         const string json = """
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] },
-          "forwarded": { "rules": [{ "remoteCidr": ["10.0.0.0/8"], "action": "pass" }] }
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [] },
+          "Forwarded": { "Rules": [{ "RemoteCidr": ["10.0.0.0/8"], "Action": "pass" }] }
         }
         """;
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
-        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
-        var rule = Assert.Single(configuration!.Policy.ForwardedRules);
+        Assert.True(ConfigurationLoader.TryValidate(dto, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        var rule = Assert.Single(configuration.Policy.ForwardedRules);
         Assert.Null(rule.Matcher.AdapterIds);
         Assert.Null(rule.Matcher.AdapterNames);
     }
@@ -555,15 +442,15 @@ public sealed class ConfigurationValidationTests
     {
         const string json = """
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] },
-          "forwarded": { "fallbackAction": "block", "rules": [] }
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [] },
+          "Forwarded": { "FallbackAction": "block", "Rules": [] }
         }
         """;
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
-        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
-        Assert.Equal(FlowAction.Block, configuration!.Policy.ForwardedFallbackAction);
+        Assert.True(ConfigurationLoader.TryValidate(dto, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Equal(FlowAction.Block, configuration.Policy.ForwardedFallbackAction);
     }
 
     [Fact]
@@ -571,13 +458,13 @@ public sealed class ConfigurationValidationTests
     {
         const string json = """
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] },
-          "forwarded": { "fallbackAction": "proxy", "rules": [] }
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [] },
+          "Forwarded": { "FallbackAction": "proxy", "Rules": [] }
         }
         """;
 
-        ConfigurationAssert.Invalid(json, "forwarded.fallbackAction");
+        ConfigurationAssert.Invalid(json, "WinForward.Forwarded.FallbackAction");
     }
 
     [Fact]
@@ -585,22 +472,22 @@ public sealed class ConfigurationValidationTests
     {
         const string forwarded = """
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] },
-          "forwarded": { "rules": [{ "process": ["browser.exe"], "action": "pass" }] }
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [] },
+          "Forwarded": { "Rules": [{ "Process": ["browser.exe"], "Action": "pass" }] }
         }
         """;
         const string host = """
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [{ "process": ["browser.exe"], "action": "pass" }] }
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [{ "Process": ["browser.exe"], "Action": "pass" }] }
         }
         """;
 
-        ConfigurationAssert.Invalid(forwarded, "forwarded.rules[0].process");
+        ConfigurationAssert.Invalid(forwarded, "WinForward.Forwarded.Rules[0].Process");
 
         Assert.True(ConfigurationLoader.TryParse(host, out var dto, out _));
-        Assert.True(ConfigurationLoader.TryValidate(dto!, out _, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.True(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics), string.Join("; ", diagnostics));
     }
 
     [Fact]
@@ -608,13 +495,13 @@ public sealed class ConfigurationValidationTests
     {
         const string json = """
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [{ "remotePort": ["nope"], "action": "pass" }] },
-          "forwarded": { "rules": [{ "remotePort": ["nope"], "action": "pass" }] }
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [{ "RemotePort": ["nope"], "Action": "pass" }] },
+          "Forwarded": { "Rules": [{ "RemotePort": ["nope"], "Action": "pass" }] }
         }
         """;
 
-        ConfigurationAssert.Invalid(json, "host.rules[0].remotePort[0]", "forwarded.rules[0].remotePort[0]");
+        ConfigurationAssert.Invalid(json, "WinForward.Host.Rules[0].RemotePort[0]", "WinForward.Forwarded.Rules[0].RemotePort[0]");
     }
 
     /// <summary>
@@ -637,12 +524,12 @@ public sealed class ConfigurationValidationTests
     {
         const string json = """
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [{ "remoteCidr": ["192.0.2.0/24", "not-a-cidr"], "action": "pass" }] }
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [{ "RemoteCidr": ["192.0.2.0/24", "not-a-cidr"], "Action": "pass" }] }
         }
         """;
 
-        var diagnostic = SingleInvalidElement(json, "host.rules[0].remoteCidr[1]");
+        var diagnostic = SingleInvalidElement(json, "WinForward.Host.Rules[0].RemoteCidr[1]");
         Assert.Equal("Invalid CIDR 'not-a-cidr'.", diagnostic.Message);
     }
 
@@ -651,12 +538,12 @@ public sealed class ConfigurationValidationTests
     {
         const string json = """
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [{ "protocol": ["tcp", "sctp"], "action": "pass" }] }
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [{ "Protocol": ["tcp", "sctp"], "Action": "pass" }] }
         }
         """;
 
-        var diagnostic = SingleInvalidElement(json, "host.rules[0].protocol[1]");
+        var diagnostic = SingleInvalidElement(json, "WinForward.Host.Rules[0].Protocol[1]");
         Assert.Equal("Unsupported value 'sctp'.", diagnostic.Message);
     }
 
@@ -665,8 +552,8 @@ public sealed class ConfigurationValidationTests
     {
         const string json = """
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [{ "remotePort": ["0", "443", "500-100"], "action": "pass" }] }
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [{ "RemotePort": ["0", "443", "500-100"], "Action": "pass" }] }
         }
         """;
 
@@ -674,8 +561,8 @@ public sealed class ConfigurationValidationTests
         Assert.NotNull(dto);
         Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
         Assert.Equal(2, diagnostics.Count);
-        Assert.Equal(new ConfigDiagnostic("host.rules[0].remotePort[0]", "Invalid port or range '0'."), diagnostics[0]);
-        Assert.Equal(new ConfigDiagnostic("host.rules[0].remotePort[2]", "Invalid port or range '500-100'."), diagnostics[1]);
+        Assert.Equal(new ConfigDiagnostic("WinForward.Host.Rules[0].RemotePort[0]", "Invalid port or range '0'."), diagnostics[0]);
+        Assert.Equal(new ConfigDiagnostic("WinForward.Host.Rules[0].RemotePort[2]", "Invalid port or range '500-100'."), diagnostics[1]);
     }
 
     [Fact]
@@ -683,8 +570,8 @@ public sealed class ConfigurationValidationTests
     {
         const string json = """
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [{ "remotePort": ["443", "100-200", "80-150", "201-250", "443"], "action": "pass" }] }
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [{ "RemotePort": ["443", "100-200", "80-150", "201-250", "443"], "Action": "pass" }] }
         }
         """;
 

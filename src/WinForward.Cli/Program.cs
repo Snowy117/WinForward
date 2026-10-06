@@ -1,6 +1,6 @@
 using System.Globalization;
 using System.Runtime.Versioning;
-using System.Text.Json;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using WinForward.Cli.Logging;
 using WinForward.Configuration;
@@ -24,7 +24,7 @@ internal static class Program
     {
         if (args.Length == 0 || args[0] is "--help" or "-h")
         {
-            await Console.Out.WriteLineAsync("WinForward commands: validate --config <path>, adapters, run --config <path>").ConfigureAwait(false);
+            await Console.Out.WriteLineAsync("WinForward commands: validate [--config <path>], adapters, run [--config <path>]").ConfigureAwait(false);
             return 0;
         }
 
@@ -41,12 +41,8 @@ internal static class Program
         if (args[0].Equals("run", StringComparison.OrdinalIgnoreCase))
         {
             var configPath = FindOption(args, "--config");
-            if (configPath is null)
-            {
-                await Console.Error.WriteLineAsync("run requires --config <path>.").ConfigureAwait(false);
-                return 2;
-            }
-            if (!TryLoadConfig(configPath, out var configuration)) return 1;
+            var exitCode = TryLoadConfiguration("run", configPath, out var loaded);
+            if (exitCode != 0) return exitCode;
             if (!OperatingSystem.IsWindows())
             {
                 await Console.Error.WriteLineAsync("run requires Windows 10 22H2 or later.").ConfigureAwait(false);
@@ -60,34 +56,64 @@ internal static class Program
                 }
                 return 2;
             }
-            return await RunCaptureAsync(configuration!, configPath).ConfigureAwait(false);
+            using var loggerFactory = TryCreateLoggerFactory(loaded!.Configuration, out var loggingError);
+            if (loggerFactory is null)
+            {
+                await Console.Error.WriteLineAsync(loggingError).ConfigureAwait(false);
+                return 1;
+            }
+            return await RunCaptureAsync(loaded, loggerFactory).ConfigureAwait(false);
         }
 
         await Console.Error.WriteLineAsync($"Unknown command '{args[0]}'.").ConfigureAwait(false);
         return 2;
     }
 
-    private static bool TryLoadConfig(string path, out ValidatedConfiguration? configuration)
+    /// <summary>
+    /// Loads the effective configuration for one command, reporting its own diagnostics. A missing
+    /// source is the command's usage error; everything else is a configuration error.
+    /// </summary>
+    private static int TryLoadConfiguration(string command, string? configPath, out LoadedConfiguration? loaded)
     {
-        configuration = null;
+        var outcome = ConfigurationLoader.TryLoad(AppContext.BaseDirectory, configPath, out loaded, out var diagnostics);
+        return outcome switch
+        {
+            ConfigurationLoadOutcome.NoSource => MissingSource(command),
+            ConfigurationLoadOutcome.Invalid => InvalidConfiguration(diagnostics),
+            _ => RuntimeLogging.TryValidate(loaded!.Configuration, out var loggingDiagnostics) ? 0 : InvalidConfiguration(loggingDiagnostics),
+        };
+    }
+
+    /// <summary>A missing source is a usage error: the command cannot run unconfigured.</summary>
+    private static int MissingSource(string command)
+    {
+        Console.Error.WriteLine($"{command} requires {ConfigurationLoader.AppSettingsFileName} beside the executable or --config <path>.");
+        return 2;
+    }
+
+    /// <summary>Diagnostics go to stderr, and the command reports one configuration error.</summary>
+    private static int InvalidConfiguration(IReadOnlyList<ConfigDiagnostic> diagnostics)
+    {
+        PrintDiagnostics(diagnostics);
+        return 1;
+    }
+
+    /// <summary>
+    /// Builds the logger factory a run would build. The logging section is bound by the framework,
+    /// so a value it cannot apply — an unknown log level, a malformed formatter option — surfaces
+    /// here rather than as an unhandled exception, and <c>validate</c> can report it before a run.
+    /// </summary>
+    private static ILoggerFactory? TryCreateLoggerFactory(IConfiguration configuration, out string? error)
+    {
         try
         {
-            if (!ConfigurationLoader.TryParse(File.ReadAllText(path), out var dto, out var parseErrors) || dto is null)
-            {
-                PrintDiagnostics(parseErrors);
-                return false;
-            }
-            if (!ConfigurationLoader.TryValidate(dto, out configuration, out var validationErrors))
-            {
-                PrintDiagnostics(validationErrors);
-                return false;
-            }
-            return true;
+            error = null;
+            return RuntimeLogging.CreateLoggerFactory(configuration);
         }
-        catch (IOException exception)
+        catch (InvalidOperationException exception)
         {
-            Console.Error.WriteLine($"Cannot read configuration: {exception.Message}");
-            return false;
+            error = exception.Message;
+            return null;
         }
     }
 
@@ -117,15 +143,14 @@ internal static class Program
     }
 
     [SupportedOSPlatform("windows")]
-    private static async Task<int> RunCaptureAsync(ValidatedConfiguration configuration, string configPath)
+    private static async Task<int> RunCaptureAsync(LoadedConfiguration loaded, ILoggerFactory loggerFactory)
     {
-        using var loggerFactory = RuntimeLogging.CreateLoggerFactory(configuration.LogLevel, configuration.LogFormat);
         var logger = loggerFactory.CreateLogger(typeof(Program).FullName!);
         try
         {
-            ReportResolvedRun(configuration, configPath, logger);
-            foreach (var warning in configuration.Warnings) StartupLog.ConfigurationWarning(logger, warning.ToString());
-            return await RunInterceptionAsync(configuration, loggerFactory, logger).ConfigureAwait(false);
+            ReportResolvedRun(loaded, logger);
+            foreach (var warning in loaded.Validated.Warnings) StartupLog.ConfigurationWarning(logger, warning.ToString());
+            return await RunInterceptionAsync(loaded.Validated, loggerFactory, logger).ConfigureAwait(false);
         }
         catch (DllNotFoundException)
         {
@@ -154,10 +179,12 @@ internal static class Program
         }
     }
 
-    private static void ReportResolvedRun(ValidatedConfiguration configuration, string configPath, ILogger logger)
+    private static void ReportResolvedRun(LoadedConfiguration loaded, ILogger logger)
     {
-        var logLevel = LogLevelNames.ToConfigToken(configuration.LogLevel);
-        var logFormat = LogFormatNames.ToConfigToken(RuntimeLogging.ResolveLogFormat(configuration.LogFormat, Console.IsErrorRedirected));
+        var configuration = loaded.Validated;
+        var logLevel = RuntimeLogging.ResolveLogLevel(loaded.Configuration).ToString();
+        var formatter = RuntimeLogging.ResolveFormatterName(loaded.Configuration, Console.IsErrorRedirected);
+        var sources = DescribeSources(loaded.Sources);
         var hostRules = configuration.Policy.HostRules.Count;
         var forwardedRules = configuration.Policy.ForwardedRules.Count;
         var relayBufferKiB = configuration.UdpRelayReceiveBufferBytes / 1024;
@@ -165,9 +192,9 @@ internal static class Program
         var processPaths = configuration.IncludeProcessPathInLogs ? "included" : "withheld";
         StartupLog.RunResolved(
             logger,
-            configPath,
+            sources,
             logLevel,
-            logFormat,
+            formatter,
             configuration.Targets.Count,
             hostRules,
             forwardedRules,
@@ -402,34 +429,41 @@ internal static class Program
 
     private static int Validate(string[] args)
     {
-        var path = FindOption(args, "--config");
-        if (path is null)
-        {
-            Console.Error.WriteLine("validate requires --config <path>.");
-            return 2;
-        }
+        var exitCode = TryLoadConfiguration("validate", FindOption(args, "--config"), out var loaded);
+        if (exitCode != 0) return exitCode;
 
-        try
+        // The logging section is applied by the framework, so the only way to report a value it
+        // cannot apply is to build the factory a run would build. Nothing is written: no record is
+        // logged, so stdout keeps its confirmation line and stderr its warnings.
+        using var loggerFactory = TryCreateLoggerFactory(loaded!.Configuration, out var loggingError);
+        if (loggerFactory is null)
         {
-            if (!TryLoadConfig(path, out var configuration)) return 1;
-            Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"Configuration is valid. tcpFlowCapacity: {configuration!.TcpFlowCapacity}"));
-            foreach (var warning in configuration.Warnings)
-            {
-                Console.Error.WriteLine($"warning {warning}");
-            }
-            return 0;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
-        {
-            Console.Error.WriteLine($"Cannot read configuration: {exception.Message}");
+            Console.Error.WriteLine(loggingError);
             return 1;
         }
+
+        PrintSources(loaded.Sources);
+        Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"Configuration is valid. tcpFlowCapacity: {loaded.Validated.TcpFlowCapacity}"));
+        foreach (var warning in loaded.Validated.Warnings)
+        {
+            Console.Error.WriteLine($"warning {warning}");
+        }
+        return 0;
     }
+
+    private static void PrintSources(IReadOnlyList<ConfigurationSource> sources)
+    {
+        Console.WriteLine("Configuration sources (applied in order, later wins):");
+        foreach (var source in sources) Console.WriteLine($"  {source.Name}: {source.Path}");
+    }
+
+    private static string DescribeSources(IReadOnlyList<ConfigurationSource> sources) =>
+        string.Join(" -> ", sources.Select(static source => $"{source.Name} ({source.Path})"));
 
     private static string? FindOption(string[] args, string option)
     {
         var index = Array.FindIndex(args, arg => arg.Equals(option, StringComparison.OrdinalIgnoreCase));
-        return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
+        return index >= 0 && index + 1 < args.Length && args[index + 1].Length > 0 ? args[index + 1] : null;
     }
 
     private static void PrintDiagnostics(IEnumerable<ConfigDiagnostic> diagnostics)

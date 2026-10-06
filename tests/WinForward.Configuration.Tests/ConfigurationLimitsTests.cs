@@ -12,14 +12,14 @@ public sealed class ConfigurationLimitsTests
     {
         const string json = """
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] }
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [] }
         }
         """;
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
-        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
-        Assert.Equal(ConfigurationLoader.DefaultTcpFlowCapacity, configuration!.TcpFlowCapacity);
+        Assert.True(ConfigurationLoader.TryValidate(dto, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Equal(ConfigurationLoader.DefaultTcpFlowCapacity, configuration.TcpFlowCapacity);
         Assert.Empty(configuration.Warnings);
     }
 
@@ -28,15 +28,15 @@ public sealed class ConfigurationLimitsTests
     {
         const string json = """
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] },
-          "tcpFlowCapacity": null
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [] },
+          "TcpFlowCapacity": null
         }
         """;
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
-        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
-        Assert.Equal(ConfigurationLoader.DefaultTcpFlowCapacity, configuration!.TcpFlowCapacity);
+        Assert.True(ConfigurationLoader.TryValidate(dto, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Equal(ConfigurationLoader.DefaultTcpFlowCapacity, configuration.TcpFlowCapacity);
         Assert.Empty(configuration.Warnings);
     }
 
@@ -47,15 +47,15 @@ public sealed class ConfigurationLimitsTests
     {
         var json = string.Create(CultureInfo.InvariantCulture, $$"""
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] },
-          "tcpFlowCapacity": {{value}}
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [] },
+          "TcpFlowCapacity": {{value}}
         }
         """);
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
-        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
-        Assert.Equal(value, configuration!.TcpFlowCapacity);
+        Assert.True(ConfigurationLoader.TryValidate(dto, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Equal(value, configuration.TcpFlowCapacity);
         Assert.Empty(configuration.Warnings);
     }
 
@@ -66,18 +66,18 @@ public sealed class ConfigurationLimitsTests
     {
         var json = string.Create(CultureInfo.InvariantCulture, $$"""
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] },
-          "tcpFlowCapacity": {{value}}
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [] },
+          "TcpFlowCapacity": {{value}}
         }
         """);
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
-        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
-        Assert.Equal(value, configuration!.TcpFlowCapacity);
+        Assert.True(ConfigurationLoader.TryValidate(dto, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Equal(value, configuration.TcpFlowCapacity);
         Assert.Empty(diagnostics);
         var warning = Assert.Single(configuration.Warnings);
-        Assert.Equal("tcpFlowCapacity", warning.Path);
+        Assert.Equal("WinForward.TcpFlowCapacity", warning.Path);
     }
 
     [Theory]
@@ -88,13 +88,13 @@ public sealed class ConfigurationLimitsTests
     {
         var json = string.Create(CultureInfo.InvariantCulture, $$"""
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] },
-          "tcpFlowCapacity": {{value}}
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [] },
+          "TcpFlowCapacity": {{value}}
         }
         """);
 
-        ConfigurationAssert.Invalid(json, "tcpFlowCapacity");
+        ConfigurationAssert.Invalid(json, "WinForward.TcpFlowCapacity");
     }
 
     [Theory]
@@ -104,22 +104,22 @@ public sealed class ConfigurationLimitsTests
     {
         var json = $$"""
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] },
-          "tcpFlowCapacity": {{value}}
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [] },
+          "TcpFlowCapacity": {{value}}
         }
         """;
 
         Assert.False(ConfigurationLoader.TryParse(json, out _, out var diagnostics));
-        Assert.Contains(diagnostics, diagnostic => diagnostic.Path.Contains("tcpFlowCapacity", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic => diagnostic.Path.Contains("WinForward.TcpFlowCapacity", StringComparison.Ordinal));
     }
 
     [Fact]
     public void ConfigurationDefaultsUdpBudgetWhenOmitted()
     {
         Assert.True(ConfigurationLoader.TryParse(Config(""), out var dto, out _));
-        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
-        Assert.Equal(ConfigurationLoader.DefaultUdpSessionCapacity, configuration!.UdpSessionCapacity);
+        Assert.True(ConfigurationLoader.TryValidate(dto, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Equal(ConfigurationLoader.DefaultUdpSessionCapacity, configuration.UdpSessionCapacity);
         Assert.Equal(ConfigurationLoader.DefaultUdpRelayReceiveBufferBytes, configuration.UdpRelayReceiveBufferBytes);
         Assert.Equal(ConfigurationLoader.DefaultUdpSessionIdleTimeout, configuration.UdpSessionIdleTimeout);
         Assert.Empty(configuration.Warnings);
@@ -130,17 +130,17 @@ public sealed class ConfigurationLimitsTests
     {
         const string json = """
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] },
-          "udpSessionCapacity": null,
-          "udpRelayReceiveBufferKb": null,
-          "udpSessionIdleSeconds": null
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [] },
+          "UdpSessionCapacity": null,
+          "UdpRelayReceiveBufferKb": null,
+          "UdpSessionIdleSeconds": null
         }
         """;
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
-        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
-        Assert.Equal(ConfigurationLoader.DefaultUdpSessionCapacity, configuration!.UdpSessionCapacity);
+        Assert.True(ConfigurationLoader.TryValidate(dto, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Equal(ConfigurationLoader.DefaultUdpSessionCapacity, configuration.UdpSessionCapacity);
         Assert.Equal(ConfigurationLoader.DefaultUdpRelayReceiveBufferBytes, configuration.UdpRelayReceiveBufferBytes);
         Assert.Equal(ConfigurationLoader.DefaultUdpSessionIdleTimeout, configuration.UdpSessionIdleTimeout);
         Assert.Empty(configuration.Warnings);
@@ -150,14 +150,14 @@ public sealed class ConfigurationLimitsTests
     public void ConfigurationParsesUdpBudgetValues()
     {
         var json = Config("""
-          "udpSessionCapacity": 512,
-          "udpRelayReceiveBufferKb": 512,
-          "udpSessionIdleSeconds": 45
+          "UdpSessionCapacity": 512,
+          "UdpRelayReceiveBufferKb": 512,
+          "UdpSessionIdleSeconds": 45
         """);
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
-        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
-        Assert.Equal(512, configuration!.UdpSessionCapacity);
+        Assert.True(ConfigurationLoader.TryValidate(dto, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Equal(512, configuration.UdpSessionCapacity);
         Assert.Equal(512 * 1024, configuration.UdpRelayReceiveBufferBytes);
         Assert.Equal(TimeSpan.FromSeconds(45), configuration.UdpSessionIdleTimeout);
         Assert.Empty(configuration.Warnings);
@@ -168,11 +168,11 @@ public sealed class ConfigurationLimitsTests
     {
         // The configuration key is the documented way back to the historical 128 KiB per-session
         // relay buffer; the default itself is asserted by ConfigurationDefaultsUdpBudgetWhenOmitted.
-        var json = Config("\"udpRelayReceiveBufferKb\": 128");
+        var json = Config("\"UdpRelayReceiveBufferKb\": 128");
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
-        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
-        Assert.Equal(128 * 1024, configuration!.UdpRelayReceiveBufferBytes);
+        Assert.True(ConfigurationLoader.TryValidate(dto, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Equal(128 * 1024, configuration.UdpRelayReceiveBufferBytes);
         Assert.Empty(configuration.Warnings);
     }
 
@@ -191,14 +191,14 @@ public sealed class ConfigurationLimitsTests
     [InlineData(16384, 1_024)]
     public void ConfigurationWarnsAboveDefaultUdpSessionCapacityWithoutBlocking(int value, int aggregateMiB)
     {
-        var json = Config(string.Create(CultureInfo.InvariantCulture, $"\"udpSessionCapacity\": {value}"));
+        var json = Config(string.Create(CultureInfo.InvariantCulture, $"\"UdpSessionCapacity\": {value}"));
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
-        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
-        Assert.Equal(value, configuration!.UdpSessionCapacity);
+        Assert.True(ConfigurationLoader.TryValidate(dto, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Equal(value, configuration.UdpSessionCapacity);
         Assert.Empty(diagnostics);
         var warning = Assert.Single(configuration.Warnings);
-        Assert.Equal("udpSessionCapacity", warning.Path);
+        Assert.Equal("WinForward.UdpSessionCapacity", warning.Path);
         // The sentence names the aggregate kernel receive buffer the validated per-session default
         // multiplies into, so a raised capacity running the default buffer is not silent. The
         // expected MiB below are derived from that default and move with it.
@@ -211,11 +211,11 @@ public sealed class ConfigurationLimitsTests
     [Fact]
     public void ConfigurationAcceptsUdpSessionCapacityAtTheWarningBoundary()
     {
-        var json = Config("\"udpSessionCapacity\": 4096");
+        var json = Config("\"UdpSessionCapacity\": 4096");
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
-        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
-        Assert.Equal(4096, configuration!.UdpSessionCapacity);
+        Assert.True(ConfigurationLoader.TryValidate(dto, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Equal(4096, configuration.UdpSessionCapacity);
         Assert.Empty(configuration.Warnings);
     }
 
@@ -228,15 +228,15 @@ public sealed class ConfigurationLimitsTests
         // The warning is an aggregate one: the per-session buffer only matters multiplied by the
         // session budget, so it fires exactly when BOTH thresholds are crossed (>256 KiB and
         // >2048 sessions).
-        var json = Config(string.Create(CultureInfo.InvariantCulture, $"\"udpSessionCapacity\": {capacity}, \"udpRelayReceiveBufferKb\": {bufferKb}"));
+        var json = Config(string.Create(CultureInfo.InvariantCulture, $"\"UdpSessionCapacity\": {capacity}, \"UdpRelayReceiveBufferKb\": {bufferKb}"));
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
-        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
-        Assert.Equal(bufferKb * 1024, configuration!.UdpRelayReceiveBufferBytes);
+        Assert.True(ConfigurationLoader.TryValidate(dto, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.Equal(bufferKb * 1024, configuration.UdpRelayReceiveBufferBytes);
         if (warns)
         {
             var warning = Assert.Single(configuration.Warnings);
-            Assert.Equal("udpRelayReceiveBufferKb", warning.Path);
+            Assert.Equal("WinForward.UdpRelayReceiveBufferKb", warning.Path);
         }
         else
         {
@@ -245,33 +245,33 @@ public sealed class ConfigurationLimitsTests
     }
 
     [Theory]
-    [InlineData("udpSessionCapacity", 1)]
-    [InlineData("udpSessionCapacity", 16384)]
-    [InlineData("udpRelayReceiveBufferKb", 16)]
-    [InlineData("udpRelayReceiveBufferKb", 1024)]
-    [InlineData("udpSessionIdleSeconds", 5)]
-    [InlineData("udpSessionIdleSeconds", 600)]
+    [InlineData("UdpSessionCapacity", 1)]
+    [InlineData("UdpSessionCapacity", 16384)]
+    [InlineData("UdpRelayReceiveBufferKb", 16)]
+    [InlineData("UdpRelayReceiveBufferKb", 1024)]
+    [InlineData("UdpSessionIdleSeconds", 5)]
+    [InlineData("UdpSessionIdleSeconds", 600)]
     public void ConfigurationAcceptsUdpBudgetAtTheSupportedRangeBoundaries(string key, int value)
     {
         var json = Config(string.Create(CultureInfo.InvariantCulture, $"\"{key}\": {value}"));
 
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
-        Assert.True(ConfigurationLoader.TryValidate(dto!, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.True(ConfigurationLoader.TryValidate(dto, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
         Assert.Equal(value, key switch
         {
-            "udpSessionCapacity" => configuration!.UdpSessionCapacity,
-            "udpRelayReceiveBufferKb" => configuration!.UdpRelayReceiveBufferBytes / 1024,
-            _ => (int)configuration!.UdpSessionIdleTimeout.TotalSeconds,
+            "UdpSessionCapacity" => configuration.UdpSessionCapacity,
+            "UdpRelayReceiveBufferKb" => configuration.UdpRelayReceiveBufferBytes / 1024,
+            _ => (int)configuration.UdpSessionIdleTimeout.TotalSeconds,
         });
     }
 
     [Theory]
-    [InlineData("udpSessionCapacity", 0)]
-    [InlineData("udpSessionCapacity", 16385)]
-    [InlineData("udpRelayReceiveBufferKb", 15)]
-    [InlineData("udpRelayReceiveBufferKb", 1025)]
-    [InlineData("udpSessionIdleSeconds", 4)]
-    [InlineData("udpSessionIdleSeconds", 601)]
+    [InlineData("UdpSessionCapacity", 0)]
+    [InlineData("UdpSessionCapacity", 16385)]
+    [InlineData("UdpRelayReceiveBufferKb", 15)]
+    [InlineData("UdpRelayReceiveBufferKb", 1025)]
+    [InlineData("UdpSessionIdleSeconds", 4)]
+    [InlineData("UdpSessionIdleSeconds", 601)]
     public void ConfigurationRejectsUdpBudgetOutsideSupportedRange(string key, int value)
     {
         // The parsers fall back to their defaults internally, but an out-of-range value is an
@@ -279,13 +279,13 @@ public sealed class ConfigurationLimitsTests
         // caller never observes a partially applied budget. The diagnostic path is the contract.
         var json = Config(string.Create(CultureInfo.InvariantCulture, $"\"{key}\": {value}"));
 
-        ConfigurationAssert.Invalid(json, key);
+        ConfigurationAssert.Invalid(json, $"WinForward.{key}");
     }
 
     [Theory]
-    [InlineData("udpSessionCapacity", "\"4096\"")]
-    [InlineData("udpRelayReceiveBufferKb", "128.5")]
-    [InlineData("udpSessionIdleSeconds", "\"30\"")]
+    [InlineData("UdpSessionCapacity", "\"4096\"")]
+    [InlineData("UdpRelayReceiveBufferKb", "128.5")]
+    [InlineData("UdpSessionIdleSeconds", "\"30\"")]
     public void ConfigurationRejectsNonIntegerUdpBudgetAtParseTime(string key, string value)
     {
         var json = Config($"\"{key}\": {value}");
@@ -298,14 +298,14 @@ public sealed class ConfigurationLimitsTests
     private static string Config(string body) => string.IsNullOrEmpty(body)
         ? """
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] }
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [] }
         }
         """
         : $$"""
         {
-          "socks5Servers": [],
-          "host": { "fallbackAction": "pass", "rules": [] },
+          "Socks5Servers": [],
+          "Host": { "FallbackAction": "pass", "Rules": [] },
           {{body}}
         }
         """;
@@ -313,8 +313,9 @@ public sealed class ConfigurationLimitsTests
     [Fact]
     public void ExampleConfigurationsAllValidate()
     {
-        // The examples/ directory is published documentation; every example must be a valid
-        // configuration so operators can copy them without surprises.
+        // The examples/ directory is published documentation; every example must be a complete
+        // configuration an operator can copy without surprises, so it is loaded exactly as a run
+        // loads it — wrapper section, layering and strict validation included.
         // A missing source tree means nothing was validated, so it is fatal rather than tolerated.
         var exampleDir = FindRepositoryExamplesDirectory()
             ?? throw new InvalidOperationException($"No WinForward.slnx was found above {AppContext.BaseDirectory}, so the examples were not validated.");
@@ -322,9 +323,9 @@ public sealed class ConfigurationLimitsTests
         Assert.NotEmpty(files);
         foreach (var file in files)
         {
-            var json = File.ReadAllText(file);
-            Assert.True(ConfigurationLoader.TryParse(json, out var dto, out var parseErrors), $"{Path.GetFileName(file)} parse: {string.Join("; ", parseErrors)}");
-            Assert.True(ConfigurationLoader.TryValidate(dto!, out _, out var validationErrors), $"{Path.GetFileName(file)} validate: {string.Join("; ", validationErrors)}");
+            var outcome = ConfigurationLoader.TryLoad(exampleDir, file, out var loaded, out var diagnostics);
+            Assert.True(outcome == ConfigurationLoadOutcome.Loaded, $"{Path.GetFileName(file)}: {outcome}: {string.Join("; ", diagnostics)}");
+            Assert.Empty(loaded!.Validated.Warnings);
         }
     }
 

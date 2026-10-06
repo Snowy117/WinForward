@@ -4,8 +4,8 @@ namespace WinForward.Cli.Logging;
 
 internal static partial class StartupLog
 {
-    [LoggerMessage(Level = LogLevel.Information, EventName = "cli.run.resolved", Message = "Configuration {ConfigPath} loaded: log level {LogLevel}, log format {LogFormat}, {Targets} target(s), {HostRules} host and {ForwardedRules} forwarded rule(s), TCP flow capacity {TcpFlowCapacity}, UDP session capacity {UdpSessionCapacity} with a {UdpRelayReceiveBufferKiB} KiB relay buffer each and {UdpSessionIdleSeconds}s idle retention, process paths {ProcessPathDisclosure}.")]
-    public static partial void RunResolved(ILogger logger, string configPath, string logLevel, string logFormat, int targets, int hostRules, int forwardedRules, int tcpFlowCapacity, int udpSessionCapacity, int udpRelayReceiveBufferKiB, int udpSessionIdleSeconds, string processPathDisclosure);
+    [LoggerMessage(Level = LogLevel.Information, EventName = "cli.run.resolved", Message = "Configuration loaded from {Sources}: log level {LogLevel}, formatter {Formatter}, {Targets} target(s), {HostRules} host and {ForwardedRules} forwarded rule(s), TCP flow capacity {TcpFlowCapacity}, UDP session capacity {UdpSessionCapacity} with a {UdpRelayReceiveBufferKiB} KiB relay buffer each and {UdpSessionIdleSeconds}s idle retention, process paths {ProcessPathDisclosure}.")]
+    public static partial void RunResolved(ILogger logger, string sources, string logLevel, string formatter, int targets, int hostRules, int forwardedRules, int tcpFlowCapacity, int udpSessionCapacity, int udpRelayReceiveBufferKiB, int udpSessionIdleSeconds, string processPathDisclosure);
 
     [LoggerMessage(Level = LogLevel.Information, EventName = "cli.target.socks5", Message = "SOCKS5 target {Target} is available at {Endpoint} over {UdpTransport} UDP, authentication {Authentication}.")]
     public static partial void Socks5TargetAvailable(ILogger logger, string target, string endpoint, string udpTransport, string authentication);

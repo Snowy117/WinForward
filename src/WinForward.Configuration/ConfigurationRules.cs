@@ -26,7 +26,7 @@ internal static class ConfigurationRules
 
         var fallback = domain.FallbackAction is null && origin == FlowOriginKind.Forwarded
             ? FlowAction.Pass
-            : ParseAction(domain.FallbackAction, $"{path}.fallbackAction", errors, allowProxy: false);
+            : ParseAction(domain.FallbackAction, $"{path}.FallbackAction", errors, allowProxy: false);
 
         ValidateRules(domain.Rules, path, origin, targets, parsed, errors);
         return fallback;
@@ -35,14 +35,14 @@ internal static class ConfigurationRules
     /// <summary>Whether any rule logs full process paths, which is the disclosure switch the runtime reads.</summary>
     internal static bool AnyProcessSelectorIsAPath(List<PolicyRule> rules) => rules.Exists(static rule => rule.Matcher.Processes?.Any(IsPathSelector) == true);
 
-    private static string DomainPath(FlowOriginKind origin) => origin == FlowOriginKind.Host ? "host" : "forwarded";
+    private static string DomainPath(FlowOriginKind origin) => origin == FlowOriginKind.Host ? "WinForward.Host" : "WinForward.Forwarded";
 
     private static void ValidateRules(IReadOnlyList<RuleDto?>? dtos, string domainPath, FlowOriginKind origin, Dictionary<string, ProxyTarget> targets, List<PolicyRule> parsed, List<ConfigDiagnostic> errors)
     {
         if (dtos is null) return;
         for (var index = 0; index < dtos.Count; index++)
         {
-            var rule = ParseRule(dtos[index], index, string.Create(CultureInfo.InvariantCulture, $"{domainPath}.rules[{index}]"), origin, targets, errors);
+            var rule = ParseRule(dtos[index], index, string.Create(CultureInfo.InvariantCulture, $"{domainPath}.Rules[{index}]"), origin, targets, errors);
             if (rule is not null) parsed.Add(rule);
         }
     }
@@ -55,40 +55,40 @@ internal static class ConfigurationRules
             return null;
         }
 
-        ValidateNonEmpty(dto.Process, $"{path}.process", errors);
+        ValidateNonEmpty(dto.Process, $"{path}.Process", errors);
 
         // A forwarded flow has no host process owner, so the matcher could never fire. Rejecting it
         // here is what keeps "configured but inert" out of the forwarded domain.
         if (origin == FlowOriginKind.Forwarded && dto.Process is not null)
         {
-            errors.Add(new($"{path}.process", "A forwarded flow has no host process owner, so a process selector cannot match; process rules belong in host.rules."));
+            errors.Add(new($"{path}.Process", "A forwarded flow has no host process owner, so a process selector cannot match; process rules belong in WinForward.Host.Rules."));
         }
 
-        ValidateNonEmpty(dto.AdapterId, $"{path}.adapterId", errors);
-        ValidateNonEmpty(dto.AdapterName, $"{path}.adapterName", errors);
-        ValidateNonEmpty(dto.Protocol, $"{path}.protocol", errors);
-        ValidateNonEmpty(dto.AddressFamily, $"{path}.addressFamily", errors);
-        ValidateNonEmpty(dto.RemoteCidr, $"{path}.remoteCidr", errors);
-        ValidateNonEmpty(dto.RemotePort, $"{path}.remotePort", errors);
+        ValidateNonEmpty(dto.AdapterId, $"{path}.AdapterId", errors);
+        ValidateNonEmpty(dto.AdapterName, $"{path}.AdapterName", errors);
+        ValidateNonEmpty(dto.Protocol, $"{path}.Protocol", errors);
+        ValidateNonEmpty(dto.AddressFamily, $"{path}.AddressFamily", errors);
+        ValidateNonEmpty(dto.RemoteCidr, $"{path}.RemoteCidr", errors);
+        ValidateNonEmpty(dto.RemotePort, $"{path}.RemotePort", errors);
 
-        var action = ParseAction(dto.Action, $"{path}.action", errors, allowProxy: true);
+        var action = ParseAction(dto.Action, $"{path}.Action", errors, allowProxy: true);
         if (action is null) return null;
         var target = dto.Target?.Trim();
         var resolved = action == FlowAction.Proxy && target is not null && targets.TryGetValue(target, out var candidate) ? candidate : (ProxyTarget?)null;
         if (action == FlowAction.Proxy && resolved is null)
         {
-            errors.Add(new($"{path}.target", "Proxy action requires a configured target."));
+            errors.Add(new($"{path}.Target", "Proxy action requires a configured target."));
         }
-        if (action != FlowAction.Proxy && dto.Target is not null) errors.Add(new($"{path}.target", "Only proxy rules may specify target."));
+        if (action != FlowAction.Proxy && dto.Target is not null) errors.Add(new($"{path}.Target", "Only proxy rules may specify target."));
 
-        var protocols = ParseSet(dto.Protocol, ParseProtocol, $"{path}.protocol", errors);
-        var families = ParseSet(dto.AddressFamily, ParseFamily, $"{path}.addressFamily", errors);
-        var networks = ParseNetworks(dto.RemoteCidr, $"{path}.remoteCidr", errors);
-        var ports = ParsePorts(dto.RemotePort, $"{path}.remotePort", errors);
+        var protocols = ParseSet(dto.Protocol, ParseProtocol, $"{path}.Protocol", errors);
+        var families = ParseSet(dto.AddressFamily, ParseFamily, $"{path}.AddressFamily", errors);
+        var networks = ParseNetworks(dto.RemoteCidr, $"{path}.RemoteCidr", errors);
+        var ports = ParsePorts(dto.RemotePort, $"{path}.RemotePort", errors);
         var udpOnly = protocols is { Count: 1 } && protocols.Contains(TransportProtocol.Udp);
         if (resolved is { IsLocal: true } && !udpOnly)
         {
-            errors.Add(new($"{path}.target", "A local target requires a protocol selector of exactly udp; a rule without one matches every protocol, TCP included."));
+            errors.Add(new($"{path}.Target", "A local target requires a protocol selector of exactly udp; a rule without one matches every protocol, TCP included."));
         }
         if (errors.Exists(error => error.Path.Equals(path, StringComparison.Ordinal) || error.Path.StartsWith(path + ".", StringComparison.Ordinal))) return null;
 

@@ -1,22 +1,24 @@
 {
-  "socks5Servers": [
-    {
-      "name": "primary",
-      "host": "127.0.0.1",
-      "port": 1080
-    }
-  ],
-  "host": {
-    "fallbackAction": "pass",
-    "rules": [
+  "WinForward": {
+    "Socks5Servers": [
       {
-        "protocol": ["udp"],
-        "remotePort": ["53"],
-        "action": "proxy",
-        "target": "primary"
+        "Name": "primary",
+        "Host": "127.0.0.1",
+        "Port": 1080
       }
-    ]
-  },
-  "proxyUnavailableAction": "block",
-  "processingFailureAction": "block"
+    ],
+    "Host": {
+      "FallbackAction": "pass",
+      "Rules": [
+        {
+          "Protocol": ["udp"],
+          "RemotePort": ["53"],
+          "Action": "proxy",
+          "Target": "primary"
+        }
+      ]
+    },
+    "ProxyUnavailableAction": "block",
+    "ProcessingFailureAction": "block"
+  }
 }

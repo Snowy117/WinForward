@@ -109,11 +109,11 @@ public sealed class LocalTargetDispatchTests
         // local target in hand.
         const string json = """
         {
-          "socks5Servers": [],
-          "localTargets": [{ "name": "dns-in", "host": "127.0.0.1", "port": 5353 }],
-          "host": {
-            "fallbackAction": "pass",
-            "rules": [{ "protocol": ["tcp"], "remotePort": ["53"], "action": "proxy", "target": "dns-in" }]
+          "Socks5Servers": [],
+          "LocalTargets": [{ "Name": "dns-in", "Host": "127.0.0.1", "Port": 5353 }],
+          "Host": {
+            "FallbackAction": "pass",
+            "Rules": [{ "Protocol": ["tcp"], "RemotePort": ["53"], "Action": "proxy", "Target": "dns-in" }]
           }
         }
         """;
@@ -121,7 +121,7 @@ public sealed class LocalTargetDispatchTests
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
         Assert.NotNull(dto);
         Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
-        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "host.rules[0].target", StringComparison.Ordinal));
+        Assert.Contains(diagnostics, diagnostic => string.Equals(diagnostic.Path, "WinForward.Host.Rules[0].Target", StringComparison.Ordinal));
     }
 
     private static ValidatedConfiguration Load(Endpoint localEndpoint, IPEndPoint controlEndpoint)
@@ -130,11 +130,11 @@ public sealed class LocalTargetDispatchTests
         // the numeric fields are formatted identically on every host locale.
         var json = string.Create(CultureInfo.InvariantCulture, $$"""
         {
-          "socks5Servers": [{ "name": "remote", "host": "127.0.0.1", "port": {{controlEndpoint.Port}} }],
-          "localTargets": [{ "name": "dns-in", "host": "{{localEndpoint.Address}}", "port": {{localEndpoint.Port}} }],
-          "host": {
-            "fallbackAction": "pass",
-            "rules": [{ "protocol": ["udp"], "remotePort": ["53"], "action": "proxy", "target": "dns-in" }]
+          "Socks5Servers": [{ "Name": "remote", "Host": "127.0.0.1", "Port": {{controlEndpoint.Port}} }],
+          "LocalTargets": [{ "Name": "dns-in", "Host": "{{localEndpoint.Address}}", "Port": {{localEndpoint.Port}} }],
+          "Host": {
+            "FallbackAction": "pass",
+            "Rules": [{ "Protocol": ["udp"], "RemotePort": ["53"], "Action": "proxy", "Target": "dns-in" }]
           }
         }
         """);

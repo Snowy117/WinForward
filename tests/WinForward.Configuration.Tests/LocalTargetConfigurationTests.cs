@@ -6,27 +6,27 @@ using Xunit;
 namespace WinForward.Configuration.Tests;
 
 /// <summary>
-/// The <c>localTargets</c> declaration surface: a local endpoint is an IP literal in its own list,
-/// shares one name namespace with <c>socks5Servers</c>, and can only be selected by a rule whose
+/// The <c>LocalTargets</c> declaration surface: a local endpoint is an IP literal in its own list,
+/// shares one name namespace with <c>Socks5Servers</c>, and can only be selected by a rule whose
 /// protocol selector is exactly <c>udp</c> (a rule with no selector matches every protocol, TCP
 /// included). A non-loopback address is accepted and warned about, never rejected.
 /// </summary>
 public sealed class LocalTargetConfigurationTests
 {
-    private const string HostFallbackOnly = "\"host\": { \"fallbackAction\": \"pass\", \"rules\": [] }";
+    private const string HostFallbackOnly = "\"Host\": { \"FallbackAction\": \"pass\", \"Rules\": [] }";
 
     [Fact]
     public void ALocalTargetNameCollidingWithASocks5ServerIsRejected()
     {
         const string json = $$"""
         {
-          "socks5Servers": [{ "name": "Main", "host": "127.0.0.1", "port": 1080 }],
-          "localTargets": [{ "name": "main", "host": "127.0.0.1", "port": 5353 }],
+          "Socks5Servers": [{ "Name": "Main", "Host": "127.0.0.1", "Port": 1080 }],
+          "LocalTargets": [{ "Name": "main", "Host": "127.0.0.1", "Port": 5353 }],
           {{HostFallbackOnly}}
         }
         """;
 
-        AssertValidationFails(json, "localTargets[0].name");
+        AssertValidationFails(json, "WinForward.LocalTargets[0].Name");
     }
 
     [Fact]
@@ -34,16 +34,16 @@ public sealed class LocalTargetConfigurationTests
     {
         const string json = $$"""
         {
-          "socks5Servers": [],
-          "localTargets": [
-            { "name": "dns-in", "host": "127.0.0.1", "port": 5353 },
-            { "name": "DNS-IN", "host": "127.0.0.1", "port": 5354 }
+          "Socks5Servers": [],
+          "LocalTargets": [
+            { "Name": "dns-in", "Host": "127.0.0.1", "Port": 5353 },
+            { "Name": "DNS-IN", "Host": "127.0.0.1", "Port": 5354 }
           ],
           {{HostFallbackOnly}}
         }
         """;
 
-        AssertValidationFails(json, "localTargets[1].name");
+        AssertValidationFails(json, "WinForward.LocalTargets[1].Name");
     }
 
     [Theory]
@@ -53,13 +53,13 @@ public sealed class LocalTargetConfigurationTests
     {
         var json = $$"""
         {
-          "socks5Servers": [],
-          "localTargets": [{ "name": "dns-in", "host": "{{host}}", "port": 5353 }],
+          "Socks5Servers": [],
+          "LocalTargets": [{ "Name": "dns-in", "Host": "{{host}}", "Port": 5353 }],
           {{HostFallbackOnly}}
         }
         """;
 
-        AssertValidationFails(json, "localTargets[0].host");
+        AssertValidationFails(json, "WinForward.LocalTargets[0].Host");
     }
 
     [Theory]
@@ -69,13 +69,13 @@ public sealed class LocalTargetConfigurationTests
     {
         var json = $$"""
         {
-          "socks5Servers": [],
-          "localTargets": [{ "name": "dns-in", "host": "127.0.0.1", "port": {{port.ToString(CultureInfo.InvariantCulture)}} }],
+          "Socks5Servers": [],
+          "LocalTargets": [{ "Name": "dns-in", "Host": "127.0.0.1", "Port": {{port.ToString(CultureInfo.InvariantCulture)}} }],
           {{HostFallbackOnly}}
         }
         """;
 
-        AssertValidationFails(json, "localTargets[0].port");
+        AssertValidationFails(json, "WinForward.LocalTargets[0].Port");
     }
 
     [Fact]
@@ -83,16 +83,16 @@ public sealed class LocalTargetConfigurationTests
     {
         const string json = """
         {
-          "socks5Servers": [],
-          "localTargets": [{ "name": "dns-in", "host": "127.0.0.1", "port": 5353 }],
-          "host": {
-            "fallbackAction": "pass",
-            "rules": [{ "protocol": ["tcp"], "remotePort": ["53"], "action": "proxy", "target": "dns-in" }]
+          "Socks5Servers": [],
+          "LocalTargets": [{ "Name": "dns-in", "Host": "127.0.0.1", "Port": 5353 }],
+          "Host": {
+            "FallbackAction": "pass",
+            "Rules": [{ "Protocol": ["tcp"], "RemotePort": ["53"], "Action": "proxy", "Target": "dns-in" }]
           }
         }
         """;
 
-        AssertValidationFails(json, "host.rules[0].target");
+        AssertValidationFails(json, "WinForward.Host.Rules[0].Target");
     }
 
     [Fact]
@@ -102,16 +102,16 @@ public sealed class LocalTargetConfigurationTests
         // same diagnostic a tcp-listed rule gets.
         const string json = """
         {
-          "socks5Servers": [],
-          "localTargets": [{ "name": "dns-in", "host": "127.0.0.1", "port": 5353 }],
-          "host": {
-            "fallbackAction": "pass",
-            "rules": [{ "remotePort": ["53"], "action": "proxy", "target": "dns-in" }]
+          "Socks5Servers": [],
+          "LocalTargets": [{ "Name": "dns-in", "Host": "127.0.0.1", "Port": 5353 }],
+          "Host": {
+            "FallbackAction": "pass",
+            "Rules": [{ "RemotePort": ["53"], "Action": "proxy", "Target": "dns-in" }]
           }
         }
         """;
 
-        AssertValidationFails(json, "host.rules[0].target");
+        AssertValidationFails(json, "WinForward.Host.Rules[0].Target");
     }
 
     [Fact]
@@ -119,16 +119,16 @@ public sealed class LocalTargetConfigurationTests
     {
         const string json = """
         {
-          "socks5Servers": [],
-          "localTargets": [{ "name": "dns-in", "host": "127.0.0.1", "port": 5353 }],
-          "host": {
-            "fallbackAction": "pass",
-            "rules": [{ "protocol": ["udp", "tcp"], "remotePort": ["53"], "action": "proxy", "target": "dns-in" }]
+          "Socks5Servers": [],
+          "LocalTargets": [{ "Name": "dns-in", "Host": "127.0.0.1", "Port": 5353 }],
+          "Host": {
+            "FallbackAction": "pass",
+            "Rules": [{ "Protocol": ["udp", "tcp"], "RemotePort": ["53"], "Action": "proxy", "Target": "dns-in" }]
           }
         }
         """;
 
-        AssertValidationFails(json, "host.rules[0].target");
+        AssertValidationFails(json, "WinForward.Host.Rules[0].Target");
     }
 
     [Fact]
@@ -136,11 +136,11 @@ public sealed class LocalTargetConfigurationTests
     {
         const string json = """
         {
-          "socks5Servers": [{ "name": "remote", "host": "127.0.0.1", "port": 1080 }],
-          "localTargets": [{ "name": "dns-in", "host": "127.0.0.1", "port": 5353 }],
-          "host": {
-            "fallbackAction": "pass",
-            "rules": [{ "protocol": ["udp"], "remotePort": ["53"], "action": "proxy", "target": "dns-in" }]
+          "Socks5Servers": [{ "Name": "remote", "Host": "127.0.0.1", "Port": 1080 }],
+          "LocalTargets": [{ "Name": "dns-in", "Host": "127.0.0.1", "Port": 5353 }],
+          "Host": {
+            "FallbackAction": "pass",
+            "Rules": [{ "Protocol": ["udp"], "RemotePort": ["53"], "Action": "proxy", "Target": "dns-in" }]
           }
         }
         """;
@@ -169,10 +169,10 @@ public sealed class LocalTargetConfigurationTests
     {
         const string json = """
         {
-          "socks5Servers": [{ "name": "remote", "host": "127.0.0.1", "port": 1080 }],
-          "host": {
-            "fallbackAction": "pass",
-            "rules": [{ "remotePort": ["53"], "action": "proxy", "target": "remote" }]
+          "Socks5Servers": [{ "Name": "remote", "Host": "127.0.0.1", "Port": 1080 }],
+          "Host": {
+            "FallbackAction": "pass",
+            "Rules": [{ "RemotePort": ["53"], "Action": "proxy", "Target": "remote" }]
           }
         }
         """;
@@ -187,8 +187,8 @@ public sealed class LocalTargetConfigurationTests
     {
         const string json = $$"""
         {
-          "socks5Servers": [],
-          "localTargets": [{ "name": "resolver", "host": "192.0.2.53", "port": 53 }],
+          "Socks5Servers": [],
+          "LocalTargets": [{ "Name": "resolver", "Host": "192.0.2.53", "Port": 53 }],
           {{HostFallbackOnly}}
         }
         """;
@@ -196,7 +196,7 @@ public sealed class LocalTargetConfigurationTests
         var configuration = Validate(json);
 
         var warning = Assert.Single(configuration.Warnings);
-        Assert.Equal("localTargets[0].host", warning.Path);
+        Assert.Equal("WinForward.LocalTargets[0].Host", warning.Path);
         Assert.Contains("192.0.2.53", warning.Message, StringComparison.Ordinal);
         Assert.Contains("in the clear", warning.Message, StringComparison.Ordinal);
         Assert.Contains("original destination", warning.Message, StringComparison.Ordinal);
@@ -212,8 +212,8 @@ public sealed class LocalTargetConfigurationTests
     {
         var json = $$"""
         {
-          "socks5Servers": [],
-          "localTargets": [{ "name": "dns-in", "host": "{{host}}", "port": 5353 }],
+          "Socks5Servers": [],
+          "LocalTargets": [{ "Name": "dns-in", "Host": "{{host}}", "Port": 5353 }],
           {{HostFallbackOnly}}
         }
         """;
@@ -230,11 +230,11 @@ public sealed class LocalTargetConfigurationTests
     {
         const string json = """
         {
-          "socks5Servers": [{ "name": "remote", "host": "127.0.0.1", "port": 1080 }],
-          "localTargets": [{ "name": "dns-in", "host": "127.0.0.1", "port": 5353 }],
-          "host": {
-            "fallbackAction": "pass",
-            "rules": [{ "protocol": ["udp"], "action": "proxy", "target": "missing" }]
+          "Socks5Servers": [{ "Name": "remote", "Host": "127.0.0.1", "Port": 1080 }],
+          "LocalTargets": [{ "Name": "dns-in", "Host": "127.0.0.1", "Port": 5353 }],
+          "Host": {
+            "FallbackAction": "pass",
+            "Rules": [{ "Protocol": ["udp"], "Action": "proxy", "Target": "missing" }]
           }
         }
         """;
@@ -242,7 +242,7 @@ public sealed class LocalTargetConfigurationTests
         Assert.True(ConfigurationLoader.TryParse(json, out var dto, out _));
         Assert.NotNull(dto);
         Assert.False(ConfigurationLoader.TryValidate(dto, out _, out var diagnostics));
-        var diagnostic = Assert.Single(diagnostics, entry => string.Equals(entry.Path, "host.rules[0].target", StringComparison.Ordinal));
+        var diagnostic = Assert.Single(diagnostics, entry => string.Equals(entry.Path, "WinForward.Host.Rules[0].Target", StringComparison.Ordinal));
         Assert.Contains("configured target", diagnostic.Message, StringComparison.Ordinal);
     }
 

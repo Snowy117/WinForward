@@ -1,28 +1,34 @@
 {
-  "logLevel": "info",
-  "socks5Servers": [
-    {
-      "name": "main",
-      "host": "proxy.example.com",
-      "port": 1080,
-      "username": "user",
-      "password": "secret"
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information"
     }
-  ],
-  "host": {
-    "fallbackAction": "pass",
-    "rules": [
-      {
-        "process": ["browser.exe", "curl.exe"],
-        "protocol": ["tcp", "udp"],
-        "addressFamily": ["ipv4", "ipv6"],
-        "remoteCidr": ["0.0.0.0/0", "::/0"],
-        "remotePort": ["80", "443", "10000-20000"],
-        "action": "proxy",
-        "target": "main"
-      }
-    ]
   },
-  "proxyUnavailableAction": "block",
-  "processingFailureAction": "block"
+  "WinForward": {
+    "Socks5Servers": [
+      {
+        "Name": "main",
+        "Host": "proxy.example.com",
+        "Port": 1080,
+        "Username": "user",
+        "Password": "secret"
+      }
+    ],
+    "Host": {
+      "FallbackAction": "pass",
+      "Rules": [
+        {
+          "Process": ["browser.exe", "curl.exe"],
+          "Protocol": ["tcp", "udp"],
+          "AddressFamily": ["ipv4", "ipv6"],
+          "RemoteCidr": ["0.0.0.0/0", "::/0"],
+          "RemotePort": ["80", "443", "10000-20000"],
+          "Action": "proxy",
+          "Target": "main"
+        }
+      ]
+    },
+    "ProxyUnavailableAction": "block",
+    "ProcessingFailureAction": "block"
+  }
 }

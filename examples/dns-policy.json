@@ -1,27 +1,29 @@
 {
-  "socks5Servers": [
-    {
-      "name": "remote",
-      "host": "proxy.example.com",
-      "port": 1080
-    }
-  ],
-  "host": {
-    "fallbackAction": "pass",
-    "rules": [
+  "WinForward": {
+    "Socks5Servers": [
       {
-        "protocol": ["udp"],
-        "remotePort": ["53"],
-        "action": "proxy",
-        "target": "remote"
-      },
-      {
-        "protocol": ["tcp"],
-        "remotePort": ["53"],
-        "action": "block"
+        "Name": "remote",
+        "Host": "proxy.example.com",
+        "Port": 1080
       }
-    ]
-  },
-  "proxyUnavailableAction": "block",
-  "processingFailureAction": "block"
+    ],
+    "Host": {
+      "FallbackAction": "pass",
+      "Rules": [
+        {
+          "Protocol": ["udp"],
+          "RemotePort": ["53"],
+          "Action": "proxy",
+          "Target": "remote"
+        },
+        {
+          "Protocol": ["tcp"],
+          "RemotePort": ["53"],
+          "Action": "block"
+        }
+      ]
+    },
+    "ProxyUnavailableAction": "block",
+    "ProcessingFailureAction": "block"
+  }
 }

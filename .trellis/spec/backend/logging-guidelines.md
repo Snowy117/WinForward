@@ -5,18 +5,32 @@
 Runtime logging uses `Microsoft.Extensions.Logging`. Every log statement is a `[LoggerMessage]`
 source-generated method, so the level check lives in generated code and no call site hand-writes
 `IsEnabled`. The console sink is `Microsoft.Extensions.Logging.Console`; the project owns no
-formatter and no logger interface.
+formatter and no logger interface. Its configuration is the standard `Logging` section of the
+operator's `appsettings.json`, and the project adds no logging key of its own.
 
 Logging is observational and must never participate in packet disposition, fail-closed, relay, or
 shutdown decisions.
 
 ## Composition
 
-- `src/WinForward.Runtime/Logging/RuntimeLogging.cs` builds the one `ILoggerFactory`:
-  the configured threshold, `AddConsole` with `LogToStandardErrorThreshold = LogLevel.Trace`, and
-  either `AddSimpleConsole` or `AddJsonConsole`.
-- Runtime logging goes to **stderr only**. `WinForward adapters` writes a TSV table on stdout and
-  `validate` writes its confirmation there; a log line must never share that stream.
+- `src/WinForward.Runtime/Logging/RuntimeLogging.cs` builds the one `ILoggerFactory` from the
+  `Logging` section the composition root hands it: `AddConfiguration(section)` then `AddConsole()`,
+  plus **one** `PostConfigure<ConsoleLoggerOptions>` action that owns every project default. It
+  forces `LogToStandardErrorThreshold = LogLevel.Trace` unconditionally and supplies the timestamp
+  format and the formatter name **only where the configuration is silent**.
+  `IPostConfigureOptions<T>` runs after every `IConfigureOptions<T>`, so the invariant and the
+  defaults are order-independent and an explicit operator value still wins.
+- The same type owns `RuntimeLogging.TryValidate`, the pre-flight **both `run` and `validate`** run
+  over the merged `Logging` section before the factory is built. It reports the two values MEL
+  leaves undiagnosed — an unparseable `LogLevel` entry and an unregistered `FormatterName` — as
+  `ConfigDiagnostic`s, which the CLI prints to stderr with exit code 1. `validate` also builds the
+  factory a run would build, so a malformed formatter option (a value MEL's binder throws on)
+  surfaces as that command's error rather than as an unhandled exception mid-run.
+- Runtime logging goes to **stderr only**, and that destination is an **invariant rather than a
+  setting**. `WinForward adapters` writes a TSV table on stdout, and `validate` writes its source
+  list and its confirmation there; a log line must never share that stream. No configuration value
+  can move a record to stdout — the post-configure action above fixes the threshold after the
+  framework has read the file.
 - The CLI holds the factory in a `using`, because `ConsoleLogger` writes through a background
   queue that `Dispose` drains.
 - Components receive a pre-categorised `ILogger` from the composition root, and the category is
@@ -32,32 +46,63 @@ shutdown decisions.
 
 ## Log Levels
 
-The `config.json` vocabulary is unchanged and ordered from most severe to most verbose:
-`error`, `warn`, `info`, `debug`, `trace`, case-insensitive with surrounding whitespace ignored,
-defaulting to `info`. `ParseLogLevel` maps them onto `LogLevel.Error`, `.Warning`,
-`.Information`, `.Debug`, `.Trace`; `critical` and `none` stay rejected with the `logLevel`
-diagnostic. Threshold ordering is MEL's `Trace < Debug < Information < Warning < Error`, and the
-configured threshold includes itself and every more-severe level.
+The vocabulary is MEL's and lives in the standard section: `Logging:LogLevel:Default` and
+`Logging:LogLevel:<fully-qualified category>` take `Trace`, `Debug`, `Information`, `Warning`,
+`Error`, `Critical`, or `None`. The names are matched case-insensitively, so an operator may write
+either casing; the canonical spelling is the one listed, and an omitted `Default` means MEL's own
+`Information`. Threshold ordering is `Trace < Debug < Information < Warning < Error < Critical`, and
+the configured threshold includes itself and every more-severe level; `None` is not a severity in
+that chain, it disables the category it is set on. The project emits `Trace` through `Error`;
+`Critical` is the framework's level above `Error`.
 
-`info` is concise operational lifecycle output; `debug` records logical flow and proxy lifecycle;
-`trace` records per-packet processing stages and terminal outcomes. Never raise a level to make a
-line more visible.
+**The names are full names, and the retired short tokens are not level names.** `info`, `warn`,
+`INFO`, and `Verbose` are not accepted in any position: MEL's own filter parsing throws
+`InvalidOperationException` ("Configuration value 'info' is not supported.") rather than defaulting,
+so the mistake would surface as a framework exception instead of a diagnostic.
+`RuntimeLogging.TryValidate` therefore pre-checks every `Logging:LogLevel:<category>` value and
+reports an unparseable one as a `Logging.LogLevel.<category>` diagnostic, so `validate` and `run`
+fail with exit code 1 and an actionable message instead. The pre-check is the migration's safety net,
+because `"logLevel": "info"` is the value most likely to be carried across.
 
-## Log Format
+`Information` is concise operational lifecycle output; `Debug` records logical flow and proxy
+lifecycle; `Trace` records per-packet processing stages and terminal outcomes. Never raise a level
+to make a line more visible.
 
-`config.json`'s `logFormat` accepts `auto`, `simple`, or `json`, case-insensitive with surrounding
-whitespace ignored, defaulting to `auto`.
+## Console Format
 
-- `auto` resolves to `json` when stderr is redirected and to `simple` when stderr is an
-  interactive terminal.
+Choosing a formatter is `Logging:Console:FormatterName`, which names the formatters MEL registers:
+`simple`, `json`, and `systemd`. The project has no format key of its own: the old `logFormat` key,
+its `LogFormat` enumeration and the resolver that mapped them were deleted with the move to the
+standard section, so `FormatterName` plus the auto rule below is the whole surface. When the operator
+configures nothing, the post-configure action supplies the auto rule: `json` when stderr is
+redirected, and `simple` when stderr is an interactive terminal.
+
+An unregistered name is a `Logging.Console.FormatterName` diagnostic from the same
+`RuntimeLogging.TryValidate` pre-check, not a fallback: given a name it cannot resolve, MEL selects
+`simple` in silence and reports nothing, which reads to an operator as their formatter setting being
+ignored. The accepted list is MEL's three stock names, so a formatter this project does not register
+is rejected rather than selected — a build that adds one must extend that list with it.
+
 - `simple` abbreviates the level (`trce`, `dbug`, `info`, `warn`, `fail`), then the category, the
   numeric `EventId`, and the message; an exception's stack trace follows on continuation lines.
 - `json` writes one JSON object per line: `Timestamp`, `EventId`, `LogLevel`, `Category`,
   `Message`, `Exception`, and `State` (the message template's fields plus `{OriginalFormat}`).
+  `FormatterOptions:JsonWriterOptions:Indented` breaks that one-record-per-line shape deliberately.
 
-Both formats are configured with a local wall-clock timestamp carrying its UTC offset
-(`zzz yyyy-MM-dd HH:mm:ss.fff`). `singleLine` stays at MEL's default of `false` so an exception
-keeps its stack trace.
+Every default lives in code: the auto rule above, a local wall-clock timestamp carrying its UTC
+offset (`zzz yyyy-MM-dd HH:mm:ss.fff`, with a trailing space in `simple`), `SingleLine` at MEL's
+`false` so an exception keeps its stack trace, and the stderr destination from Composition. The
+timestamp default reaches the two formatters whose records carry one; `systemd` renders journald's
+own shape, which has no timestamp unless `FormatterOptions:TimestampFormat` is set, because journald
+stamps the record itself. The
+shipped `appsettings.example.json` documents those defaults and is **never loaded** — an upgrade
+must not be able to overwrite the operator's own `appsettings.json` — and a test keeps the example's
+`Logging` values in sync with the code constants they document.
+
+`FormatterOptions` is the operator's surface here: `TimestampFormat` (the code default above applies
+when it is absent and the selected formatter has one), `SingleLine`, `ColorBehavior`,
+`IncludeScopes`, and `JsonWriterOptions:*` such as `Indented`. They are MEL's own options, bound by
+the framework.
 
 **Consequences of owning no formatter.** A record is no longer guaranteed to be one physical line,
 a value containing CR/LF is no longer escaped, and a console write failure is no longer swallowed
@@ -137,21 +182,29 @@ configuration contains a path-based process selector; process names remain permi
 
 ### Scope / Signatures
 
-This contract applies to `config.json` logging, the `ILoggerFactory` built by
-`RuntimeLogging.CreateLoggerFactory`, every `[LoggerMessage]` method, packet dispatch, and proxy
-coordinators. `ConfigurationLoader.TryParse` rejects a non-string `logLevel` at path `logLevel`
-and a non-string `logFormat` at path `logFormat`; `ConfigurationLoader.TryValidate` normalizes
-both into `ValidatedConfiguration.LogLevel` and `ValidatedConfiguration.LogFormat` and derives the
-process-path privacy flag. `LogLevelNames` owns the string vocabulary in both directions.
+This contract applies to the `Logging` configuration section, the `ILoggerFactory` built by
+`RuntimeLogging.CreateLoggerFactory` from that section, every `[LoggerMessage]` method, packet
+dispatch, and proxy coordinators. The level vocabulary is MEL's, so no project type owns it and
+`ValidatedConfiguration` carries no logging fields; the configuration loader merges the sources at
+the JSON level and validates the merged `WinForward` object alone, while the `Logging` section
+reaches MEL unchanged. The process-path privacy flag is still derived from the validated policy
+rules (`ConfigurationRules.AnyProcessSelectorIsAPath`).
 
 ### Boundary Contracts
 
-- Accepted levels are `error`, `warn`, `info`, `debug`, and `trace`; accepted formats are `auto`,
-  `simple`, and `json`. Case-insensitive, surrounding whitespace ignored. Omission means `info`
-  and `auto`.
-- Threshold ordering is `error < warn < info < debug < trace`; a threshold includes itself and all
-  more-severe levels. Filtering is `LoggerFilterOptions`' job; the disabled path is short-circuited
-  by the generated method before it builds any state.
+- Accepted levels are MEL's full names `Trace`, `Debug`, `Information`, `Warning`, `Error`,
+  `Critical`, and `None`, parsed case-insensitively; an omitted `Logging:LogLevel:Default` means
+  `Information`. The retired short tokens (`info`, `warn`, …) are not level names, and
+  `RuntimeLogging.TryValidate` rejects them with a diagnostic rather than letting MEL throw.
+- The console formatter is `Logging:Console:FormatterName`; absent means the auto rule from Console
+  Format. Only MEL's three registered names are accepted (`simple`, `json`, `systemd`); any other
+  name is a diagnostic, because MEL would otherwise fall back to `simple` in silence.
+  `Logging:Console:LogToStandardErrorThreshold` is not part of the surface: the post-configure action
+  forces it, so configuring it has no effect.
+- Threshold ordering is `Trace < Debug < Information < Warning < Error < Critical`; a threshold
+  includes itself and all more-severe levels, and `None` sits outside that chain as the value that
+  disables the category it is set on. Filtering is `LoggerFilterOptions`' job; the disabled path is
+  short-circuited by the generated method before it builds any state.
 - Records use `yyyy-MM-dd HH:mm:ss.fff` with a `zzz` UTC offset on stderr.
 - Packet diagnostics use the runtime `packet` sequence; flow diagnostics use the `FlowTable`
   generation. TCP/UDP association generations may be additional fields.
@@ -171,10 +224,14 @@ process-path privacy flag. `LogLevelNames` owns the string vocabulary in both di
 
 | Condition | Required result |
 | --- | --- |
-| `logLevel` omitted | Validate successfully with `info` |
-| `logFormat` omitted | Validate successfully with `auto` |
-| Valid level or format string | Normalize and store the matching enum |
-| Null, blank, unknown, or wrong type | Fail with a `logLevel` / `logFormat` diagnostic without echoing raw input |
+| `Logging:LogLevel:Default` omitted | MEL's own `Information` |
+| An accepted level, formatter, or formatter-option value | Bound by MEL and in effect; the code default applies only where the key is absent |
+| A `LogLevel` value that is not a level name (`info`, `warn`, `Verbose`) | Fail with the `Logging.LogLevel.<category>` diagnostic and exit code 1 — never a silent fallback to `Information` |
+| A `FormatterName` that is not a registered formatter | Fail with the `Logging.Console.FormatterName` diagnostic and exit code 1 — MEL alone would fall back to `simple` in silence |
+| A formatter option MEL's binder cannot apply | Reported by `run`/`validate` through the factory build, not as an unhandled exception |
+| An unknown key under `Logging` (any other name) | Ignored by the framework; not a WinForward diagnostic |
+| A `WinForward` key that is missing, unknown, wrongly cased, or wrongly typed — a quoted number where a number belongs included | Fail with the path diagnostic (`WinForward.Host.Rules[6].RemoteCidr[0]`-shaped) without echoing raw input |
+| `Logging:Console:LogToStandardErrorThreshold` configured | Ignored: the post-configure action forces `Trace`, so no record reaches stdout |
 | Entry below the threshold | The generated method returns before constructing state; no formatting, no output |
 | Console writer failure | Not swallowed by project code (MEL owns the sink) |
 | Classification/dispatch failure | Emit trace `packet.failed` when possible, dispose the lease, and rethrow |
@@ -182,19 +239,27 @@ process-path privacy flag. `LogLevelNames` owns the string vocabulary in both di
 
 ### Good / Base / Bad Cases
 
-- Good: `"logLevel": " Trace ", "logFormat": "json"` produces one JSON object per record whose
-  `Message` reads
+- Good: `"Logging": { "LogLevel": { "Default": "Trace" }, "Console": { "FormatterName": "json" } }`
+  produces one JSON object per record whose `Message` reads
   `UDP session created for 10.0.0.5:5353 -> 8.8.8.8:53 via main (socks5/uot), association 7.`
   and whose `State` carries `source`, `destination`, `target`, `udpTransport`, `udpAssociation`.
-- Base: omitted `logLevel` and `logFormat` preserve concise lifecycle output on a terminal and
-  structured JSON in a redirected log, without per-packet work.
+- Base: an omitted `Logging` section preserves concise lifecycle output on a terminal and
+  structured JSON in a redirected log, with the code's timestamp default and no per-packet work.
 - Bad: passing a SOCKS5 password, packet span, UDP payload, authentication frame, relay buffer, or
   raw configuration JSON to a `[LoggerMessage]` method.
 
 ### Required Tests
 
-- Configuration tests cover defaulting, all five levels and all three formats, case/whitespace
-  normalization, wrong types, blank/unknown values, and both diagnostic paths.
+- Configuration tests cover the two layers, the PascalCase schema, the three strictness properties
+  (unknown, wrongly cased, wrongly typed), and the new `WinForward`-rooted diagnostic paths.
+- Logging-configuration tests cover the level filter at `Default` and per category, an explicit
+  `FormatterName`, and the auto rule when it is absent — including a hostile configuration that sets
+  `LogToStandardErrorThreshold` and still writes nothing to stdout.
+- `RuntimeLogging.TryValidate` tests cover both of its checks: every retired short token and every
+  other unparseable level is reported per category, an unregistered `FormatterName` is reported with
+  its key, and absent values are not errors (absence selects the defaults).
+- A test keeps `appsettings.example.json` in sync with the code defaults: it parses under the strict
+  validator, and its `Logging` values match the constants they document.
 - Logger tests cover the threshold contract through `LoggerFactory` for every level: an entry at
   or above the threshold reaches the provider, an entry below it does not.
 - Runtime tests cover packet/flow correlation, terminal completion/failure, process-path privacy,

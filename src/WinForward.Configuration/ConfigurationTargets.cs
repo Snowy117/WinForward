@@ -5,8 +5,8 @@ using WinForward.Core;
 namespace WinForward.Configuration;
 
 /// <summary>
-/// The target-declaration half of configuration validation: it parses <c>socks5Servers</c> and
-/// <c>localTargets</c> into the single name-keyed <see cref="ProxyTarget"/> table a rule's target
+/// The target-declaration half of configuration validation: it parses <c>Socks5Servers</c> and
+/// <c>LocalTargets</c> into the single name-keyed <see cref="ProxyTarget"/> table a rule's target
 /// resolves against, and it raises the non-blocking warnings those declarations carry. The loader
 /// keeps the public defaults and the object graph; this collaborator owns the checks that normalize
 /// each declaration — the seam <see cref="ConfigurationRules"/> occupies for rule parsing.
@@ -16,7 +16,7 @@ internal static class ConfigurationTargets
     /// <summary>
     /// Validates both declaration lists into one table. The order is load-bearing: SOCKS5 entries are
     /// added first, so a name declared in both lists is always reported against the
-    /// <c>localTargets</c> entry (the second declaration of an already-taken name).
+    /// <c>LocalTargets</c> entry (the second declaration of an already-taken name).
     /// </summary>
     internal static void Validate(WinForwardConfigDto dto, Dictionary<string, ProxyTarget> targets, List<ConfigDiagnostic> errors, List<ConfigDiagnostic> warnings)
     {
@@ -28,7 +28,7 @@ internal static class ConfigurationTargets
     {
         if (dto.Socks5Servers is null)
         {
-            errors.Add(new("socks5Servers", "Field is required."));
+            errors.Add(new("WinForward.Socks5Servers", "Field is required."));
             return;
         }
 
@@ -40,7 +40,7 @@ internal static class ConfigurationTargets
 
     private static void ValidateServer(Socks5ServerDto? dto, int index, Dictionary<string, ProxyTarget> targets, List<ConfigDiagnostic> errors)
     {
-        var path = string.Create(CultureInfo.InvariantCulture, $"socks5Servers[{index}]");
+        var path = string.Create(CultureInfo.InvariantCulture, $"WinForward.Socks5Servers[{index}]");
         if (dto is null)
         {
             errors.Add(new(path, "Server entry must be an object."));
@@ -48,15 +48,15 @@ internal static class ConfigurationTargets
         }
 
         var name = dto.Name?.Trim();
-        if (string.IsNullOrEmpty(name)) errors.Add(new($"{path}.name", "Name is required."));
-        else if (targets.ContainsKey(name)) errors.Add(new($"{path}.name", "Name must be unique (case-insensitive)."));
+        if (string.IsNullOrEmpty(name)) errors.Add(new($"{path}.Name", "Name is required."));
+        else if (targets.ContainsKey(name)) errors.Add(new($"{path}.Name", "Name must be unique (case-insensitive)."));
 
         var host = dto.Host?.Trim();
-        if (string.IsNullOrEmpty(host) || !IsValidHost(host)) errors.Add(new($"{path}.host", "Host must be an IP literal or DNS hostname."));
-        if (dto.Port is < 1 or > 65535) errors.Add(new($"{path}.port", "Port must be in 1..65535."));
-        if ((dto.Username is null) != (dto.Password is null)) errors.Add(new(path, "username and password must be supplied together."));
-        if (dto.Username is not null && (dto.Username.Length == 0 || System.Text.Encoding.UTF8.GetByteCount(dto.Username) > 255)) errors.Add(new($"{path}.username", "Username must be 1..255 UTF-8 bytes."));
-        if (dto.Password is not null && (dto.Password.Length == 0 || System.Text.Encoding.UTF8.GetByteCount(dto.Password) > 255)) errors.Add(new($"{path}.password", "Password must be 1..255 UTF-8 bytes."));
+        if (string.IsNullOrEmpty(host) || !IsValidHost(host)) errors.Add(new($"{path}.Host", "Host must be an IP literal or DNS hostname."));
+        if (dto.Port is < 1 or > 65535) errors.Add(new($"{path}.Port", "Port must be in 1..65535."));
+        if ((dto.Username is null) != (dto.Password is null)) errors.Add(new(path, "Username and Password must be supplied together."));
+        if (dto.Username is not null && (dto.Username.Length == 0 || System.Text.Encoding.UTF8.GetByteCount(dto.Username) > 255)) errors.Add(new($"{path}.Username", "Username must be 1..255 UTF-8 bytes."));
+        if (dto.Password is not null && (dto.Password.Length == 0 || System.Text.Encoding.UTF8.GetByteCount(dto.Password) > 255)) errors.Add(new($"{path}.Password", "Password must be 1..255 UTF-8 bytes."));
 
         if (name is not null && host is not null && IsValidHost(host) && dto.Port is >= 1 and <= 65535 && !targets.ContainsKey(name))
         {
@@ -74,15 +74,15 @@ internal static class ConfigurationTargets
     }
 
     /// <summary>
-    /// Validates one <c>localTargets</c> entry. A local target's <c>host</c> must be an IP literal
+    /// Validates one <c>LocalTargets</c> entry. A local target's <c>Host</c> must be an IP literal
     /// (<see cref="IPAddress.TryParse(string, out IPAddress)"/>, not the hostname-admitting <see cref="IsValidHost"/>): a
     /// hostname here would need DNS to configure the very endpoint the DNS path is being pointed at,
-    /// so it fails closed instead. Names share one namespace with <c>socks5Servers</c>, and an
+    /// so it fails closed instead. Names share one namespace with <c>Socks5Servers</c>, and an
     /// accepted non-loopback address collects the endpoint-locality warning below.
     /// </summary>
     private static void ValidateLocalTarget(LocalTargetDto? dto, int index, Dictionary<string, ProxyTarget> targets, List<ConfigDiagnostic> errors, List<ConfigDiagnostic> warnings)
     {
-        var path = string.Create(CultureInfo.InvariantCulture, $"localTargets[{index}]");
+        var path = string.Create(CultureInfo.InvariantCulture, $"WinForward.LocalTargets[{index}]");
         if (dto is null)
         {
             errors.Add(new(path, "Local target entry must be an object."));
@@ -90,21 +90,21 @@ internal static class ConfigurationTargets
         }
 
         var name = dto.Name?.Trim();
-        if (string.IsNullOrEmpty(name)) errors.Add(new($"{path}.name", "Name is required."));
-        else if (targets.ContainsKey(name)) errors.Add(new($"{path}.name", "Name must be unique across socks5Servers and localTargets (case-insensitive)."));
+        if (string.IsNullOrEmpty(name)) errors.Add(new($"{path}.Name", "Name is required."));
+        else if (targets.ContainsKey(name)) errors.Add(new($"{path}.Name", "Name must be unique across Socks5Servers and LocalTargets (case-insensitive)."));
 
         var host = dto.Host?.Trim();
         if (string.IsNullOrEmpty(host) || !IPAddress.TryParse(host, out var address))
         {
-            errors.Add(new($"{path}.host", "Host must be an IP literal; a hostname would itself need DNS to be reachable."));
+            errors.Add(new($"{path}.Host", "Host must be an IP literal; a hostname would itself need DNS to be reachable."));
             return;
         }
 
-        if (dto.Port is < 1 or > 65535) errors.Add(new($"{path}.port", "Port must be in 1..65535."));
+        if (dto.Port is < 1 or > 65535) errors.Add(new($"{path}.Port", "Port must be in 1..65535."));
         if (name is null || targets.ContainsKey(name) || dto.Port is < 1 or > 65535) return;
 
         targets.Add(name, new ProxyTarget(name, Socks5: null, new LocalTarget(name, Endpoint.From(address, (ushort)dto.Port))));
-        WarnOnNonLoopbackLocalTarget(name, address, $"{path}.host", warnings);
+        WarnOnNonLoopbackLocalTarget(name, address, $"{path}.Host", warnings);
     }
 
     /// <summary>

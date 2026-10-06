@@ -50,10 +50,14 @@ wrong architecture, inaccessible driver, and incompatible version separately at 
 ## Commands
 
 ```
-WinForward validate --config <path>     Validate a configuration file (no driver needed).
-WinForward adapters                      List MSTCP-bound adapters (stable ID + friendly name).
-WinForward run --config <path>           Intercept and proxy according to the configuration.
+WinForward validate [--config <path>]    Validate the effective configuration (no driver needed).
+WinForward adapters                       List MSTCP-bound adapters (stable ID + friendly name).
+WinForward run [--config <path>]          Intercept and proxy according to the configuration.
 ```
+
+`--config` is optional for `run` and `validate`: both also read `appsettings.json` from the directory
+that holds the executable, and neither needs a flag when that file is there. A `--config` path that
+is given must exist. `adapters` needs no configuration. See **Configuration** below.
 
 Exit codes: `0` clean success, `1` configuration/validation/adapter/driver error,
 `2` usage or unsupported platform, `3` fatal runtime failure (adapter modes restored first).
@@ -64,96 +68,169 @@ the original adapter modes are restored exactly.
 
 ## Configuration
 
-JSON, rejected on any unknown property. The top level is:
+WinForward reads `appsettings.json`, the configuration file format every .NET developer already
+knows, from the directory that holds `WinForward.exe`. The file is an appsettings document with two
+top-level sections: `WinForward`, which holds the settings this project defines, and the optional
+`Logging` for the standard `Microsoft.Extensions.Logging` section. The wrapper is part of the format:
+settings live under `WinForward`, and a misspelled section name can never be read as a flat
+configuration — the effective document must contain a `WinForward` object, and one that does not
+fails with a diagnostic naming it. Inside `WinForward` every key name is exact and every value is
+type-checked: an unknown key, a wrongly cased key, or a value of the wrong type — a number written as
+a JSON string, say — is an error that names the offending path, never a setting that is quietly
+ignored. The project ships no `appsettings.json` of its own — the file belongs to the operator, and
+**The example file** below explains what ships instead.
+
+### Configuration sources
+
+Two sources are applied in order, the later one winning:
+
+1. `appsettings.json` beside the executable. A normal service install uses this file and nothing else.
+2. `--config <path>`, when given.
+
+`--config` is optional, and it layers over the first file rather than replacing it, so it can carry
+only the settings that differ — for example to run a second instance from one install with its own
+rule set. The layering is a JSON merge: objects are merged key by key, while an array or a scalar in
+the later file replaces the earlier value outright. A `--config` file is an appsettings document
+like any other, so it carries the same `WinForward` wrapper and may add `Logging` keys of its own:
 
 ```json
 {
-  "socks5Servers": [
-    { "name": "main", "host": "proxy.example.com", "port": 1080,
-      "username": "user", "password": "secret" }
-  ],
-  "localTargets": [
-    { "name": "dns-in", "host": "127.0.0.1", "port": 53 }
-  ],
-  "host": {
-    "fallbackAction": "pass",
-    "rules": [
-      { "protocol": ["udp"], "remotePort": ["53"], "action": "proxy", "target": "dns-in" },
-      {
-        "process": ["browser.exe"],
-        "protocol": ["tcp", "udp"],
-        "addressFamily": ["ipv4", "ipv6"],
-        "remoteCidr": ["0.0.0.0/0", "::/0"],
-        "remotePort": ["80", "443", "10000-20000"],
-        "action": "proxy",
-        "target": "main"
-      }
-    ]
-  },
-  "forwarded": {
-    "fallbackAction": "pass",
-    "rules": [
-      { "adapterName": ["vEthernet (MyVM)"], "action": "proxy", "target": "main" }
-    ]
-  },
-  "logLevel": "info",
-  "logFormat": "auto",
-  "proxyUnavailableAction": "block",
-  "processingFailureAction": "block",
-  "tcpFlowCapacity": 4096
+  "WinForward": {
+    "Host": {
+      "Rules": [
+        { "Protocol": ["tcp"], "RemoteCidr": ["203.0.113.0/24"], "Action": "block" }
+      ]
+    }
+  }
 }
 ```
 
-- `socks5Servers`: named servers. `name` is unique (case-insensitive), `port` is 1..65535,
-  `host` is an IPv4/IPv6 literal or DNS hostname. `username`/`password` are both optional or
+Layered over the `appsettings.json` example in **The `WinForward` section** below, that file replaces
+`Host.Rules` with its single rule, while the settings it does not mention — `Host.FallbackAction` and
+`TcpFlowCapacity` among them — keep the value the first file gave them. A `--config` file listing
+three rules therefore means exactly three rules, never the first three of the other file's list. An
+explicit `null` is an ordinary value in the merge too: it replaces the earlier one, returning a
+nullable setting to its default and failing validation for a required one.
+
+`appsettings.json` is the layer that may simply be absent, and nothing is reported when it is. A
+`--config` path that the operator names is different: if the file cannot be found or read, the
+command fails with a configuration error naming it (exit `1`) instead of continuing without it, so
+the source list both commands print can never quietly omit a file that was asked for. The usage
+error (exit `2`) is what remains for the case where no source exists at all — no `appsettings.json`
+and no `--config`.
+
+Both commands print the sources they loaded, in order, and `run`'s startup summary reports the
+effective log level and formatter, so a setting that is not applying can be traced to the file that
+was actually read. `appsettings.{Environment}.json`, user secrets, and environment variables are
+deliberately not read: every source is explicit and printable, and nothing implicit can override the
+file an operator wrote. Configuration hot reload is not supported — the configuration is validated
+fully before interception starts and kept immutable for the lifetime of a run.
+
+### The `WinForward` section
+
+```json
+{
+  "WinForward": {
+    "Socks5Servers": [
+      { "Name": "main", "Host": "proxy.example.com", "Port": 1080,
+        "Username": "user", "Password": "secret" }
+    ],
+    "LocalTargets": [
+      { "Name": "dns-in", "Host": "127.0.0.1", "Port": 53 }
+    ],
+    "Host": {
+      "FallbackAction": "pass",
+      "Rules": [
+        { "Protocol": ["udp"], "RemotePort": ["53"], "Action": "proxy", "Target": "dns-in" },
+        {
+          "Process": ["browser.exe"],
+          "Protocol": ["tcp", "udp"],
+          "AddressFamily": ["ipv4", "ipv6"],
+          "RemoteCidr": ["0.0.0.0/0", "::/0"],
+          "RemotePort": ["80", "443", "10000-20000"],
+          "Action": "proxy",
+          "Target": "main"
+        }
+      ]
+    },
+    "Forwarded": {
+      "FallbackAction": "pass",
+      "Rules": [
+        { "AdapterName": ["vEthernet (MyVM)"], "Action": "proxy", "Target": "main" }
+      ]
+    },
+    "ProxyUnavailableAction": "block",
+    "ProcessingFailureAction": "block",
+    "TcpFlowCapacity": 4096
+  }
+}
+```
+
+The section holds 27 key names across five objects; `Host`, `Name`, and `Port` are each used by more
+than one of them:
+
+| Object | Keys |
+| --- | --- |
+| `WinForward` (11) | `Socks5Servers`, `LocalTargets`, `Host`, `Forwarded`, `ProxyUnavailableAction`, `ProcessingFailureAction`, `TcpFlowCapacity`, `SetupWorkerCount`, `UdpSessionCapacity`, `UdpRelayReceiveBufferKb`, `UdpSessionIdleSeconds` |
+| a `Host` or `Forwarded` domain (2) | `FallbackAction`, `Rules` |
+| a `Socks5Servers` entry (6) | `Name`, `Host`, `Port`, `Username`, `Password`, `UdpOverTcp` |
+| a `LocalTargets` entry (3) | `Name`, `Host`, `Port` |
+| a rule (9) | `Process`, `AdapterId`, `AdapterName`, `Protocol`, `AddressFamily`, `RemoteCidr`, `RemotePort`, `Action`, `Target` |
+
+Rule **values** keep their spelling — `"pass"`, `"proxy"`, `"udp"`, `"ipv4"`, CIDR prefixes, port
+ranges — only key names changed case.
+
+- `Socks5Servers`: **required**, and it may be an empty array when no rule names a SOCKS5 target.
+  Named servers. `Name` is unique (case-insensitive); `Host` is an IPv4/IPv6 literal or DNS
+  hostname; `Port` is 1..65535 — all three are required. `Username`/`Password` are both optional or
   both present, and each UTF-8 encoding fits the RFC 1929 255-byte limit. Credentials are
-  never logged; protect the configuration file's permissions. `udpOverTcp` is optional and
+  never logged; protect the configuration file's permissions. `UdpOverTcp` is optional and
   defaults to `false`; it selects the UDP-over-TCP (UoT v2, connect mode) carriage for this
   server's UDP flows instead of the native per-flow `UDP ASSOCIATE` relay — see **UDP over TCP**
   below for what it does and what it costs.
-- `localTargets`: optional named local UDP endpoints. `name` is unique across `socks5Servers` and
-  `localTargets` (case-insensitive, one namespace), `host` must be an IP literal — a hostname would
-  itself need the DNS path it is meant to configure — and `port` is 1..65535. A local target rents
+- `LocalTargets`: optional named local UDP endpoints. `Name` is unique across `Socks5Servers` and
+  `LocalTargets` (case-insensitive, one namespace), `Host` must be an IP literal — a hostname would
+  itself need the DNS path it is meant to configure — and `Port` is 1..65535. A local target rents
   no SOCKS5 association and shares no socket: each selected flow gets its own socket, and its
   payload is forwarded to the endpoint verbatim. The flow's original destination is never sent to
   the endpoint (the local hop carries no field for it), so the endpoint answers by its own policy;
   the destination is restored only as the source address and port of the reply the client sees. A
-  `host` that is not a loopback address is accepted with a validation warning naming the address
+  `Host` that is not a loopback address is accepted with a validation warning naming the address
   and both consequences: the payload leaves this host in the clear, and the endpoint's replies are
   attributed to the flow's original destination.
-- `host` / `forwarded`: the two policy domains. `host` is **required** and governs flows the machine
-  itself originates; `forwarded` is optional and governs flows observed arriving on another NIC.
-  Each domain owns its own ordered `rules` list and its own `fallbackAction`. A rule belongs to the
+- `Host` / `Forwarded`: the two policy domains. `Host` is **required** and governs flows the machine
+  itself originates; `Forwarded` is optional and governs flows observed arriving on another NIC.
+  Each domain owns its own ordered `Rules` list and its own `FallbackAction`. A rule belongs to the
   domain whose list it is written in — never to both — so a rule that must apply on both sides is
   written twice, and an adapter selector narrows a rule inside its domain instead of deciding which
   domain it belongs to.
-- `rules`: evaluated top to bottom within their domain; the first matching rule decides. Every match
+- `Rules`: evaluated top to bottom within their domain; the first matching rule decides. Every match
   field is optional; fields present together use AND semantics, alternatives inside one field use OR.
-  - `process`: executable filename (no slash) or path (contains `/` or `\`),
+  - `Process`: executable filename (no slash) or path (contains `/` or `\`),
     case-insensitive. A value without a slash matches the filename; a path value matches the
     normalized full path exactly, and also matches every program in that directory or any
     subdirectory below it (e.g. `C:\Program Files\MyApp` matches `MyApp\bin\tool.exe`).
-    No substring/wildcard. Rejected inside `forwarded.rules`: a forwarded flow has no host process
+    No substring/wildcard. Rejected inside `Forwarded.Rules`: a forwarded flow has no host process
     owner, so such a rule could never fire.
-  - `adapterId` / `adapterName`: stable id / exact friendly name. Both present = AND (must
+  - `AdapterId` / `AdapterName`: stable id / exact friendly name. Both present = AND (must
     resolve to the same adapter). Name-only is for dynamically recreated adapters. Inside
-    `forwarded.rules` they select the adapter the packet arrived on and are **optional**, so a
+    `Forwarded.Rules` they select the adapter the packet arrived on and are **optional**, so a
     forwarded rule without them applies to every forwarded flow.
-  - `protocol`: `tcp` / `udp`. `addressFamily`: `ipv4` / `ipv6`.
-  - `remoteCidr`: CIDR prefixes. `remotePort`: decimal ports or inclusive ranges (`10000-20000`).
-  - `action`: `proxy` (requires `target`), `pass`, or `block`. `target` names a configured
-    `socks5Servers` entry or a `localTargets` entry. A rule that names a local target must select
-    exactly `udp`: a rule without a `protocol` selector matches every protocol, TCP included, so it
+  - `Protocol`: `tcp` / `udp`. `AddressFamily`: `ipv4` / `ipv6`.
+  - `RemoteCidr`: CIDR prefixes. `RemotePort`: decimal ports or inclusive ranges (`10000-20000`).
+  - `Action`: `proxy` (requires `Target`), `pass`, or `block`. `Target` names a configured
+    `Socks5Servers` entry or a `LocalTargets` entry. A rule that names a local target must select
+    exactly `udp`: a rule without a `Protocol` selector matches every protocol, TCP included, so it
     is rejected.
   - Present match arrays must be non-empty; an omitted field imposes no condition.
-- `host.fallbackAction`: `pass` or `block`, **required**. It decides a host flow that no host rule
+- `Host.FallbackAction`: `pass` or `block`, **required**. It decides a host flow that no host rule
   matched. A host fallback proxy requires an explicit catch-all `proxy` rule.
-- `forwarded.fallbackAction`: `pass` or `block`, optional, defaults to `pass`. It decides a forwarded
+- `Forwarded.FallbackAction`: `pass` or `block`, optional, defaults to `pass`. It decides a forwarded
   flow that no forwarded rule matched. `block` drops every unmatched forwarded flow, which for a
   guest VM means losing connectivity — set it deliberately.
-- `proxyUnavailableAction` / `processingFailureAction`: optional; both default to `block` and
+- `ProxyUnavailableAction` / `ProcessingFailureAction`: optional; both default to `block` and
   only `block` is accepted in the first release.
-- `tcpFlowCapacity`: optional concurrent proxied TCP flow budget, `1..8192`, default `4096`.
+- `TcpFlowCapacity`: optional concurrent proxied TCP flow budget, `1..8192`, default `4096`.
   Each proxied TCP flow consumes two local ephemeral ports (redirect listener + SOCKS5 control),
   so the budget keeps WinForward's consumption at a safe fraction of the default Windows dynamic
   port range (~16K) including TIME_WAIT churn. New flows above the budget are blocked
@@ -161,69 +238,40 @@ JSON, rejected on any unknown property. The top level is:
   `4096` are accepted with a validation warning about port-pool pressure. Omitting the field
   deliberately tightens the limit from the previous implicit 16,384 sessions; configure a higher
   value explicitly (max 8192) if more concurrent flows are required.
-- `udpSessionCapacity`: optional concurrent proxied UDP session budget, `1..16384`, default
+- `SetupWorkerCount`: optional setup worker count, `1..256`; omitted means automatic. It bounds the
+  threads that drain new-flow setup — TCP handshake completion, deferred process attribution, and
+  UDP session setup — so it is worth raising only when setup queueing is the measured bottleneck.
+  The automatic value is twice the logical processor count with a floor of 16, which keeps the
+  queue drainable on small hosts; every worker is a dedicated thread, so a value near the maximum
+  costs more than it drains.
+- `UdpSessionCapacity`: optional concurrent proxied UDP session budget, `1..16384`, default
   `16384`. Like a proxied TCP flow, each UDP session consumes two local ports on the native relay
-  path (SOCKS5 control connection + relay socket) and one on a `udpOverTcp` server (the flow's
+  path (SOCKS5 control connection + relay socket) and one on a `UdpOverTcp` server (the flow's
   stream connection), so values above `4096` are accepted with a validation warning that
   also names the aggregate kernel receive buffer at that capacity. A datagram for a flow above the
   budget is refused fail-closed with a rate-limited `udp.session.capacity-block` warn and the
   `udpCapacityRejections` counter; the flow retries on its next datagram.
-- `udpRelayReceiveBufferKb`: optional per-relay-socket kernel receive buffer in KiB, `16..1024`,
+- `UdpRelayReceiveBufferKb`: optional per-relay-socket kernel receive buffer in KiB, `16..1024`,
   default `64`. It is applied to every relay socket before bind; responses can burst faster than
   one receive loop reinjects them, so the buffer absorbs the burst. Because it is per session, a
   per-session value above `256` combined with a session capacity above `2048` is accepted with a
   validation warning about the aggregate kernel receive buffer.
-- `udpSessionIdleSeconds`: optional idle retention for a UDP session, `5..600`, default `30`
+- `UdpSessionIdleSeconds`: optional idle retention for a UDP session, `5..600`, default `30`
   seconds — after the last send or receive, the session's relay socket and its own association (its
   control connection) are released with it; nothing is kept warm for a later flow. The sweeper's
   UDP cadence derives from this value: half the idle timeout, at least 5 s, and never longer than
   the 60 s main sweep interval (15 s at the default).
-- `logLevel`: optional runtime verbosity: `error`, `warn`, `info`, `debug`, or `trace`. Values are
-  case-insensitive and surrounding whitespace is ignored; omitted `logLevel` defaults to `info`.
-  `info` retains concise lifecycle output, `debug` adds flow and proxy lifecycle events, and `trace`
-  adds per-packet classification, policy, proxy, reinjection, drop, and terminal events. Trace can
-  be high volume and is intended for temporary diagnosis.
-- `logFormat`: optional console record shape: `auto`, `simple`, or `json`. Values are
-  case-insensitive and surrounding whitespace is ignored; omitted `logFormat` defaults to `auto`.
-  `auto` selects `simple` when stderr is an interactive terminal and `json` when it is redirected,
-  so a watched console stays readable while a captured log keeps every structured field. `simple`
-  and `json` force that shape. Runtime logging always goes to **stderr**; stdout carries the
-  `adapters` table and the `validate` confirmation.
-
-  Both formats come from `Microsoft.Extensions.Logging.Console` and every record carries a local
-  wall-clock timestamp with its UTC offset (`+08:00 yyyy-MM-dd HH:mm:ss.fff`), so a log line can be
-  correlated with an external capture. `simple` renders one record as a level abbreviation, the
-  category, the numeric event id, and the message, with an exception's stack trace on the following
-  lines:
-
-  ```
-  +08:00 2026-08-27 14:03:21.517 dbug: WinForward.Runtime.UdpProxy.UdpProxyCoordinator[1518028212]
-        UDP session created for 10.0.0.5:5353 -> 8.8.8.8:53 via main (socks5/uot), association 7.
-  ```
-
-  `json` renders one JSON object per line and keeps the message template's fields under `State`,
-  which is the shape to use when a log is captured for later analysis:
-
-  ```json
-  {"Timestamp":"+08:00 2026-08-27 14:03:21.517","EventId":1518028212,"LogLevel":"Debug","Category":"udp","Message":"UDP session created for 10.0.0.5:5353 -> 8.8.8.8:53 via main (socks5/uot), association 7.","State":{"source":"10.0.0.5:5353","destination":"8.8.8.8:53","target":"main","udpTransport":"uot","udpAssociation":7}}
-  ```
-
-  Diagnostic records contain metadata and byte counts only: credentials, authentication traffic,
-  payloads, and raw packet bytes are never logged. Process names are included when attribution
-  succeeds; full process paths are included only when a rule uses a path-based process selector. A
-  host flow's `flow.created` record is written when its deferred attribution claim completes, so it
-  can follow the proxy legs that flow produced.
 
 **UDP resource shape.** Every live UDP flow owns its own authenticated association: the SOCKS5
 control connection that carried its `UDP ASSOCIATE`, and the relay socket that association
 negotiated. Both are local descriptors, so the floor is two ports per live native session, and
 nothing about the association is pooled, leased, or reused by another flow. The kernel receive-buffer
-estimate is unchanged — `live sessions × udpRelayReceiveBufferKb`, one buffer per relay socket,
-one relay socket per flow — and `udpSessionCapacity` therefore bounds live flows at two descriptors
+estimate is unchanged — `live sessions × UdpRelayReceiveBufferKb`, one buffer per relay socket,
+one relay socket per flow — and `UdpSessionCapacity` therefore bounds live flows at two descriptors
 each: validation warns above `4096` sessions, and separately when a per-session buffer above
-`256` KiB meets more than `2048` sessions (see `udpRelayReceiveBufferKb` above). A `udpOverTcp`
+`256` KiB meets more than `2048` sessions (see `UdpRelayReceiveBufferKb` above). A `UdpOverTcp`
 flow keeps the same one-flow-per-owner shape with **one** descriptor: its stream connection replaces
-both the control connection and the relay socket, and `udpRelayReceiveBufferKb` does not apply to it
+both the control connection and the relay socket, and `UdpRelayReceiveBufferKb` does not apply to it
 (there is no relay socket; the stream socket keeps the operating system's own buffers).
 
 **Reply ownership.** A reply's declared source need not be the flow's destination: RFC 1928 does not
@@ -239,14 +287,14 @@ and a genuine foreign endpoint still is.
 cannot occur.** A flow's relay socket belongs to that flow alone — created, bound, and disposed with
 it — so a reply can only arrive on the socket that sent the request. The observation above is
 therefore about a server answering from an unexpected endpoint, not about a reply reaching the wrong
-flow. **A `udpOverTcp` flow extends the same guarantee to one flow per connection**: its stream
+flow. **A `UdpOverTcp` flow extends the same guarantee to one flow per connection**: its stream
 connection is dialed, owned, and disposed with the flow, and is never shared or pooled. UoT connect
 mode carries no reply source on the wire at all, so the transport declares the flow's own destination
 as every reply's source; a reply from a foreign endpoint cannot even be expressed on that path, and
 the counter above cannot fire there by structure rather than by suppression.
 
-**UDP over TCP — the opt-in per-flow carriage (`udpOverTcp`).** A `socks5Servers` entry may set
-`"udpOverTcp": true` (default off) to serve its UDP flows over UoT v2 in connect mode instead of the
+**UDP over TCP — the opt-in per-flow carriage (`UdpOverTcp`).** A `Socks5Servers` entry may set
+`"UdpOverTcp": true` (default off) to serve its UDP flows over UoT v2 in connect mode instead of the
 native per-flow `UDP ASSOCIATE` relay. The flow then owns one authenticated TCP connection: the
 client `CONNECT`s to the magic address `sp.v2.udp-over-tcp.arpa`, sends the UoT request header
 naming the flow's single destination, and carries every datagram as a `u16be length | payload` frame
@@ -264,7 +312,7 @@ and a QUIC flow carried inside stacks its congestion control on TCP's instead of
 The native per-flow relay therefore stays the recommendation on lossy or high-RTT legs. The mode is
 aimed at short, non-DNS request/response flows against a nearby or trusted proxy — the population
 whose cost is the setup round trip rather than the carriage — and it is a per-server opt-in: a server
-that does not set `udpOverTcp` is served exactly as before.
+that does not set `UdpOverTcp` is served exactly as before.
 
 **Local targets — the recommended placement for DNS-shaped flows.** A flow selected onto a local
 target gets its own socket and no SOCKS5 association: only that flow's replies arrive on it, so the
@@ -287,8 +335,157 @@ a first-response p50 of 3.0–4.5 ms against 155.7–164.1 ms. (The per-flow fig
 serialized-setup shape — a 50 ms dial delay through the 8-wide setup limiter — not a per-flow network
 cost.)
 
-The configuration is validated fully before interception starts and is kept immutable for the
-lifetime of a run. Configuration hot reload is not supported.
+### The `Logging` section
+
+`Logging` is MEL's standard section, and WinForward hands it to the framework unchanged. This is the
+whole surface an operator controls here:
+
+| Key | Value | Default |
+| --- | --- | --- |
+| `Logging:LogLevel:Default` | a level name: `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, or `None` | `Information` |
+| `Logging:LogLevel:<category>` | one of those names, for one logger category | the `Default` level |
+| `Logging:Console:FormatterName` | `simple`, `json`, or `systemd` | absent: chosen automatically |
+| `Logging:Console:FormatterOptions:TimestampFormat` | a .NET date and time format string | `zzz yyyy-MM-dd HH:mm:ss.fff` on `simple` and `json`; none on `systemd` |
+| `Logging:Console:FormatterOptions:SingleLine` | `true` or `false` | `false` |
+| `Logging:Console:FormatterOptions:ColorBehavior` | `Default`, `Disabled`, or `Enabled` | `Default` |
+| `Logging:Console:FormatterOptions:IncludeScopes` | `true` or `false` | `false` |
+| `Logging:Console:FormatterOptions:JsonWriterOptions:*` | the JSON writer's own options; `Indented` makes one record span several lines | the framework's defaults |
+
+Level names are MEL's own, written in full and matched case-insensitively: `Information` or
+`information`, never `info`; `Warning`, never `warn`. The short tokens belong to the previous
+configuration format and are not level names: `validate` reports them and exits `1`, so a stale
+value cannot quietly change what is logged. The project emits the first five of those names;
+`Critical` sits above `Error`, and `None` silences every category. A category is the
+**fully-qualified name of the type that owns the logger** (for example
+`WinForward.Runtime.UdpProxy.UdpProxyCoordinator`), which is what makes a per-category override
+useful. Quieting one noisy subsystem is one entry in the `LogLevel` object beside the `WinForward`
+object:
+
+```json
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "WinForward.Runtime.UdpProxy.UdpProxyCoordinator": "Warning"
+    }
+  }
+}
+```
+
+**When `FormatterName` is absent the formatter is chosen automatically**: `json` when stderr is
+redirected — a captured log keeps every structured field — and the human-readable `simple` format
+when stderr is an interactive terminal. Naming one forces that shape. The names that work are the
+three formatters MEL registers — `simple`, `json`, and `systemd`, its journald shape — and any other
+name is a configuration error that names the key and lists them. That check earns its place because
+of the framework's own behaviour: given a name it does not know, MEL falls back to `simple` in
+silence, which surfaces as "my formatter setting is ignored" rather than as an error.
+
+Both formats come from `Microsoft.Extensions.Logging.Console`, and every record carries a local
+wall-clock timestamp with its UTC offset (`+08:00 yyyy-MM-dd HH:mm:ss.fff`), so a log line can be
+correlated with an external capture; the format string above is the code default and is
+overridable. `systemd` is the exception: it renders journald's own shape, which carries no
+timestamp unless `FormatterOptions:TimestampFormat` is set, because journald stamps the record
+itself. `simple` renders one record as a level abbreviation, the category, the numeric event
+id, and the message, with an exception's stack trace on the following lines:
+
+```
++08:00 2026-08-27 14:03:21.517 dbug: WinForward.Runtime.UdpProxy.UdpProxyCoordinator[1518028212]
+      UDP session created for 10.0.0.5:5353 -> 8.8.8.8:53 via main (socks5/uot), association 7.
+```
+
+`json` renders one JSON object per line and keeps the message template's fields under `State`, which
+is the shape to use when a log is captured for later analysis:
+
+```json
+{"Timestamp":"+08:00 2026-08-27 14:03:21.517","EventId":1518028212,"LogLevel":"Debug","Category":"WinForward.Runtime.UdpProxy.UdpProxyCoordinator","Message":"UDP session created for 10.0.0.5:5353 -> 8.8.8.8:53 via main (socks5/uot), association 7.","State":{"source":"10.0.0.5:5353","destination":"8.8.8.8:53","target":"main","udpTransport":"uot","udpAssociation":7}}
+```
+
+**Runtime logging always goes to stderr, and that destination is not configurable.**
+`Logging:Console:LogToStandardErrorThreshold` is fixed at `Trace` while the logger factory is
+composed, so setting it changes nothing: stdout carries the `adapters` TSV table, `validate`'s
+source list, and `validate`'s confirmation, and a runtime log line must never be mixed into a stream
+a script parses. The option exists in MEL for applications that want the opposite arrangement, and
+this one does not.
+
+Diagnostic records contain metadata and byte counts only: credentials, authentication traffic,
+payloads, and raw packet bytes are never logged. Process names are included when attribution
+succeeds; full process paths are included only when a rule uses a path-based process selector. A host
+flow's `flow.created` record is written when its deferred attribution claim completes, so it can
+follow the proxy legs that flow produced.
+
+### What `validate` checks
+
+`validate` loads the sources, merges them into one effective `WinForward` object, and runs the same
+strict validator and logging checks `run` uses, so what it reports is what a run would use. It
+catches a source set with no `WinForward` object, a missing required field, an unknown or wrongly
+cased key inside `WinForward`, a value of the wrong type — a quoted number where a number belongs, an
+array where an object belongs — an out-of-range limit, every cross-field rule above, and the two
+`Logging` values the framework leaves undiagnosed: a `LogLevel` entry that is not a level name, and a
+`FormatterName` that is not a formatter this build registers. It also builds the logger factory a run
+would build, so a formatter option MEL cannot apply is reported instead of becoming an unhandled
+exception. Each diagnostic names its path (`WinForward.Host.Rules[6].RemoteCidr[0]`,
+`Logging.Console.FormatterName`), and warnings are printed without failing the command.
+
+It cannot catch what no schema covers. `Logging` is not a schema: the framework binds the keys it
+knows and ignores everything else, so a misspelled key under `Logging` is silent rather than fatal,
+and a key outside `WinForward` and `Logging` is not read at all. `validate` also never opens the
+driver or the network: it does not prove that `ndisapi.dll` loads, that the adapters a rule names
+exist on this machine, that a `Process` path exists, or that a SOCKS5 server answers. Those are
+checked at run time.
+
+### Migrating an existing configuration
+
+The previous `config.json` format is gone. WinForward's settings now live under a top-level
+`WinForward` object instead of at the top level of the file; key names are PascalCase; the five
+lowercase `logLevel` tokens (`error`, `warn`, `info`, `debug`, `trace`) are replaced by MEL's
+`Trace`, `Debug`, `Information`, `Warning`, and `Error` under `Logging:LogLevel`; and the `logFormat`
+key is gone, with the formatter chosen by `Logging:Console:FormatterName`. Rule **values** are
+unchanged, as are every limit, default, and diagnostic.
+
+**Spell the level out.** Carrying `"info"` or `"warn"` across is the likeliest mistake in this
+migration, and the old spelling is not a level name: the level must be a full name — `Information`,
+not `info`; `Warning`, not `warn`; `Debug` and `Trace` as themselves. The full names are matched
+case-insensitively, so `information` or `INFORMATION` is fine. `validate` reports an old token as a
+`LogLevel` value that is not a level name and exits `1`, so the mistake is caught before a run rather
+than quietly changing what is logged.
+
+The first thing an operator migrating an older file will see is the missing wrapper: a legacy
+`config.json` has no `WinForward` object, so it fails with a diagnostic naming that convention rather
+than any of its own keys. Layered beside an `appsettings.json` such a file contributes nothing at
+all, because keys outside `WinForward` are never read. Once the settings are moved under the wrapper
+the strictness does the rest of the work: a key that is wrongly cased, or that no longer exists, is
+an unknown key and fails with its own path. There is no compatibility shim and no fallback to the old
+names; running `validate` against the migrated file is the migration tool.
+
+### The example file
+
+The build copies `appsettings.example.json` beside `WinForward.exe`, and it is the only
+configuration file the build puts there: no `appsettings.json` is ever produced, so the file at that
+path is the operator's alone. **Nothing ever loads the example** — pointing `--config` at it is the
+only way it can become a source — and every default lives in code rather than in a shipped file.
+
+The example is written so that copying it changes nothing: every value it does state is exactly the
+default the code applies without it, and three tests keep it honest. One loads it through the strict
+reader — it must validate with no warnings, and it must be the only source the loader reports; one
+compares the values it writes against the code constants; and one pins the logging posture:
+`Logging:LogLevel:Default` is `Information`, and the absent `FormatterName` resolves to `json` when
+stderr is redirected and `simple` on a terminal, exactly as the automatic rule says.
+
+Two spellings in it are deliberate and easy to misread:
+
+- `"SetupWorkerCount": null` and `"UdpSessionCapacity": null` mean **keep the code default**, which
+  is the only way to write those two down. `SetupWorkerCount` uses `0` internally as its automatic
+  sentinel, and `0` is rejected when it is written out; the literal `16384` for `UdpSessionCapacity`
+  would trip the configuration's own warning above `4096`. An explicit `null` says "the default"
+  without either problem.
+- `FormatterName` and `TimestampFormat` are omitted rather than written, because their defaults
+  depend on which formatter is selected: writing one would pin one formatter's default onto the
+  other.
+
+Shipping a file that is read would be the other option, and it is the wrong one: the executable's
+directory is where the operator's `appsettings.json` lives, so an upgrade that wrote its defaults
+there would overwrite the operator's own configuration. An example that nothing reads cannot
+overwrite anything.
 
 ### Runtime diagnostic events
 
@@ -333,13 +530,67 @@ not select routes, enable Windows IP forwarding, or create NAT rules. For forwar
 VM traffic, the operator must already have the required Windows forwarding/routing/NAT
 configured. WinForward may detect and diagnose missing prerequisites but never changes them.
 
+## Running as a Windows Service (WinSW)
+
+WinForward is a foreground console process and has no native service support (see **Notes**). The
+supported way to run it as a service is [WinSW](https://github.com/winsw/winsw), the wrapper that
+turns any console program into one. Put a renamed WinSW executable, `WinForwardService.exe`, beside
+`WinForward.exe`, `ndisapi.dll`, and `appsettings.json`, and give it a configuration file with the
+same base name, `WinForwardService.xml`:
+
+```xml
+<service>
+  <id>WinForward</id>
+  <name>WinForward</name>
+  <description>Transparent TCP/UDP proxy.</description>
+  <executable>%BASE%\WinForward.exe</executable>
+  <arguments>run</arguments>
+  <workingdirectory>%BASE%</workingdirectory>
+  <logpath>%BASE%\logs</logpath>
+  <log mode="roll-by-time">
+    <pattern>yyyy-MM-dd</pattern>
+  </log>
+</service>
+```
+
+`%BASE%` is WinSW's own name for the directory that holds the wrapper. The arguments are just `run`:
+`appsettings.json` sits beside the executable, which is the first place WinForward looks, so no path
+has to be repeated in the service definition. Add `--config "%BASE%\second.json"` only to layer a
+second file over it. From an elevated prompt, `WinForwardService.exe install` installs the service
+and `start` starts it, while `stop` and `uninstall` undo those. WinSW installs the service as
+`LocalSystem` by default, which is the elevated account WinForward's driver access needs.
+
+**Which file the log lands in.** WinSW captures the child's stdout and stderr into two different
+files, `WinForwardService.out.log` and `WinForwardService.err.log`, named after the wrapper; the date
+pattern above rolls them into names like `logs\WinForwardService.2026-10-06.err.log`. `run` writes
+nothing to stdout (stdout is where `adapters`' TSV table and `validate`'s confirmation go), so the
+runtime log is the `.err.log` family and the `.out.log` file stays empty. Because stderr is a
+redirected file, the automatic formatter rule selects **JSON**: a service installed with no logging
+configuration at all writes one JSON object per line. A stop request reaches the process as console
+termination, which is the graceful shutdown path described under **Commands**.
+
+An operator who would rather read the human format in that log adds this to `appsettings.json`,
+beside the `WinForward` object:
+
+```json
+{
+  "Logging": {
+    "Console": {
+      "FormatterName": "simple"
+    }
+  }
+}
+```
+
+WinSW owns log rolling, and that is why WinForward ships no file sink of its own and rotates nothing.
+
 ## Supported traffic
 
 - TCP and UDP over IPv4 and IPv6.
 - Proxy flows use SOCKS5 `CONNECT` (TCP) and `UDP ASSOCIATE` (UDP), with NO-AUTH or
-  username/password (RFC 1929). A `proxy` rule may instead select a `localTargets` entry for UDP
+  username/password (RFC 1929). A `proxy` rule may instead select a `LocalTargets` entry for UDP
   flows, which reach that endpoint on a per-flow socket with no SOCKS5 control connection; TCP always
-  uses a `socks5Servers` entry. A UDP flow through a `socks5Servers` entry with `udpOverTcp` uses a
+  uses a `Socks5Servers` entry. A UDP flow through a `Socks5Servers` entry with `UdpOverTcp` uses a
   SOCKS5 `CONNECT` to the UoT magic address instead of `UDP ASSOCIATE`, and carries its datagrams as
   length-prefixed frames on that connection.
 - UDP setup sends an all-zero `UDP ASSOCIATE` endpoint in the TCP control connection's address
@@ -358,7 +609,7 @@ uses SOCKS5 UDP fragmentation (`FRAG != 0`), or exceeds the pinned NDISAPI frame
 See `examples/`:
 
 - `process-proxy.json` — proxy specific processes (optionally by port/CIDR).
-- `hyperv-adapter-proxy.json` — proxy flows arriving from a Hyper-V virtual adapter (`forwarded`).
+- `hyperv-adapter-proxy.json` — proxy flows arriving from a Hyper-V virtual adapter (`Forwarded`).
 - `dns-policy.json` — explicit DNS policy (proxy UDP/53, block TCP/53).
 - `dns-proxy.json` — proxy all UDP/53.
 - `local-dns.json` — answer all UDP/53 from a local target instead of a SOCKS5 relay.
@@ -367,20 +618,21 @@ See `examples/`:
 
 ## Notes
 
-- Host-originated flows are governed by `host.rules` and selected by owning process, by adapter, or
+- Host-originated flows are governed by `Host.Rules` and selected by owning process, by adapter, or
   by any combination of the match fields. Forwarded flows (e.g. from a Hyper-V guest) are governed
-  by `forwarded.rules` and selected by the adapter they arrived on. A forwarded flow has no host
-  process owner, so `process` is rejected inside `forwarded.rules`; a host rule never applies to
+  by `Forwarded.Rules` and selected by the adapter they arrived on. A forwarded flow has no host
+  process owner, so `Process` is rejected inside `Forwarded.Rules`; a host rule never applies to
   forwarded traffic and vice versa.
 - `Forwarded` is currently derived from NDIS receive direction. This includes both traffic Windows
   may route across adapters and new inbound traffic addressed to a service on this host; both are
-  governed by `forwarded.rules` and `forwarded.fallbackAction`.
+  governed by `Forwarded.Rules` and `Forwarded.FallbackAction`.
 - A trace event's `rule` field is the matched rule's index **within its domain**, so it is meaningful
   only next to the same event's `origin` field: `rule=0 origin=Forwarded` is
-  `forwarded.rules[0]`.
+  `Forwarded.Rules[0]`.
 - When a proxied TCP connection ends, WinForward keeps a short TIME_WAIT-like grace entry for the
   flow's original tuple: stragglers of the finished handshake (the final ACK, a retransmitted
   FIN/ACK) are silently dropped instead of being forwarded toward the real server, which never saw
   the proxied connection and would answer the unknown tuple with a stray RST.
-- The first release is a foreground console process; native Windows Service installation is
-  deferred.
+- The first release is a foreground console process, and native Windows Service installation stays
+  out of scope: it cannot install itself as a service. Deployments that need a service wrap it with
+  WinSW — see **Running as a Windows Service (WinSW)** above.

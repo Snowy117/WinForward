@@ -1,23 +1,25 @@
 {
-  "socks5Servers": [],
-  "localTargets": [
-    {
-      "name": "dns-in",
-      "host": "127.0.0.1",
-      "port": 53
-    }
-  ],
-  "host": {
-    "fallbackAction": "pass",
-    "rules": [
+  "WinForward": {
+    "Socks5Servers": [],
+    "LocalTargets": [
       {
-        "protocol": ["udp"],
-        "remotePort": ["53"],
-        "action": "proxy",
-        "target": "dns-in"
+        "Name": "dns-in",
+        "Host": "127.0.0.1",
+        "Port": 53
       }
-    ]
-  },
-  "proxyUnavailableAction": "block",
-  "processingFailureAction": "block"
+    ],
+    "Host": {
+      "FallbackAction": "pass",
+      "Rules": [
+        {
+          "Protocol": ["udp"],
+          "RemotePort": ["53"],
+          "Action": "proxy",
+          "Target": "dns-in"
+        }
+      ]
+    },
+    "ProxyUnavailableAction": "block",
+    "ProcessingFailureAction": "block"
+  }
 }

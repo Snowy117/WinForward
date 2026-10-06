@@ -1,21 +1,23 @@
 {
-  "socks5Servers": [
-    {
-      "name": "remote",
-      "host": "proxy.example.com",
-      "port": 1080
-    }
-  ],
-  "host": {
-    "fallbackAction": "pass",
-    "rules": [
+  "WinForward": {
+    "Socks5Servers": [
       {
-        "process": ["browser.exe"],
-        "action": "proxy",
-        "target": "remote"
+        "Name": "remote",
+        "Host": "proxy.example.com",
+        "Port": 1080
       }
-    ]
-  },
-  "proxyUnavailableAction": "block",
-  "processingFailureAction": "block"
+    ],
+    "Host": {
+      "FallbackAction": "pass",
+      "Rules": [
+        {
+          "Process": ["browser.exe"],
+          "Action": "proxy",
+          "Target": "remote"
+        }
+      ]
+    },
+    "ProxyUnavailableAction": "block",
+    "ProcessingFailureAction": "block"
+  }
 }

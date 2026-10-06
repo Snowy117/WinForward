@@ -4,13 +4,13 @@ namespace WinForward.Configuration;
 
 public sealed partial class WinForwardConfigDto
 {
-    [JsonPropertyName("udpSessionCapacity")]
+    [JsonPropertyName("UdpSessionCapacity")]
     public int? UdpSessionCapacity { get; init; }
 
-    [JsonPropertyName("udpRelayReceiveBufferKb")]
+    [JsonPropertyName("UdpRelayReceiveBufferKb")]
     public int? UdpRelayReceiveBufferKb { get; init; }
 
-    [JsonPropertyName("udpSessionIdleSeconds")]
+    [JsonPropertyName("UdpSessionIdleSeconds")]
     public int? UdpSessionIdleSeconds { get; init; }
 }
 
