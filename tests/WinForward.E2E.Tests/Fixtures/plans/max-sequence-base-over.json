@@ -1,0 +1,10 @@
+{
+  "arms": [
+    {
+      "name": "BASEPAST",
+      "kind": "base",
+      "seconds": 1,
+      "ratePerSecond": 262144
+    }
+  ]
+}

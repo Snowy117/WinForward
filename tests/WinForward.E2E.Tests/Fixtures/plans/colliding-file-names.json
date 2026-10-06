@@ -1,0 +1,14 @@
+{
+  "arms": [
+    {
+      "name": "A/B",
+      "kind": "idle",
+      "seconds": 1
+    },
+    {
+      "name": "A_B",
+      "kind": "idle",
+      "seconds": 1
+    }
+  ]
+}

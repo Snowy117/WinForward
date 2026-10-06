@@ -1,14 +1,14 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using WinForward.E2E.Client.Arms;
 using WinForward.E2E.Wire;
 
 namespace WinForward.E2E.Client;
 
 /// <summary>
 /// The plan schema and its loader. A plan is <c>{"arms": [...]}</c>; every arm needs <c>name</c> and
-/// <c>kind</c>, and the remaining keys are parsed for every arm but read only by the arms that know
-/// them:
+/// <c>kind</c>, and may declare only the keys its kind reads (see <see cref="ArmKind"/>):
 /// <list type="bullet">
 /// <item><c>seconds</c> -- every arm (default 60).</item>
 /// <item><c>protocol</c> ("tcp", "udp" or "tcp+udp") -- latency, and the base latency phase; the
@@ -32,6 +32,19 @@ namespace WinForward.E2E.Client;
 /// </summary>
 internal static class PlanFile
 {
+    /// <summary>
+    /// An arm name becomes an output file name, and the file name has to survive a path component on
+    /// every platform the harness runs on. The limit applies to the sanitized name, without the
+    /// <c>.jsonl</c> suffix.
+    /// </summary>
+    private const int MaxArmFileNameLength = 128;
+
+    /// <summary>
+    /// How far a JSON number may sit from an integer and still name one. Only floating point noise
+    /// should land inside it: <c>100.5</c> on an integer key is a load error, not a rounding.
+    /// </summary>
+    private const double IntegerTolerance = 1e-9;
+
     private const string DefaultPlanJson = """
         {
           "arms": [
@@ -47,17 +60,29 @@ internal static class PlanFile
         }
         """;
 
-    private static readonly string[] s_knownKinds =
+    private readonly record struct NumberKey(string Name, int Minimum, int Maximum, Action<ArmSpec, int> Assign);
+
+    // D14.14: zero means "not declared" for every numeric key, so the lower bound is zero throughout
+    // and a declared negative value is a load error instead of a silent clamp; only dnsPort and
+    // tcpPercent have a real ceiling. The arms keep their own Math.Max/Math.Clamp as a defence in
+    // depth: those calls are not what makes an illegal value legal.
+    private static readonly NumberKey[] s_numberKeys =
     [
-        "latency",
-        "loss",
-        "reliability",
-        "throughput",
-        "dns",
-        "mix",
-        "idle",
-        "persistent",
-        "base",
+        new("ratePerSecond", 0, int.MaxValue, static (spec, value) => spec.RatePerSecond = value),
+        new("payloadBytes", 0, int.MaxValue, static (spec, value) => spec.PayloadBytes = value),
+        new("connectionsPerSecond", 0, int.MaxValue, static (spec, value) => spec.ConnectionsPerSecond = value),
+        new("streams", 0, int.MaxValue, static (spec, value) => spec.Streams = value),
+        new("tcpPercent", 0, 100, static (spec, value) => spec.TcpPercent = value),
+        new("cnameEvery", 0, int.MaxValue, static (spec, value) => spec.CnameEvery = value),
+        new("desktops", 0, int.MaxValue, static (spec, value) => spec.Desktops = value),
+        new("window", 0, int.MaxValue, static (spec, value) => spec.Window = value),
+        new("lossWindowMs", 0, int.MaxValue, static (spec, value) => spec.LossWindowMs = value),
+        new("dnsPort", 0, 65535, static (spec, value) => spec.DnsPort = value),
+        new("lanes", 0, int.MaxValue, static (spec, value) => spec.Lanes = value),
+        new("intervalMs", 0, int.MaxValue, static (spec, value) => spec.IntervalMs = value),
+        new("idleSeconds", 0, int.MaxValue, static (spec, value) => spec.IdleSeconds = value),
+        new("expectedBytes", 0, int.MaxValue, static (spec, value) => spec.ExpectedBytes = value),
+        new("targetBytesPerSecond", 0, int.MaxValue, static (spec, value) => spec.TargetBytesPerSecond = value),
     ];
 
     internal static bool TryLoad(string? path, out List<ArmSpec> arms, out byte[] planBytes, out string? error)
@@ -92,28 +117,52 @@ internal static class PlanFile
                 return false;
             }
 
-            var names = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var element in armElements.EnumerateArray())
+            return TryReadArms(armElements, out arms, out error);
+        }
+    }
+
+    private static bool TryReadArms(JsonElement armElements, out List<ArmSpec> arms, out string? error)
+    {
+        arms = [];
+        error = null;
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        var files = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var element in armElements.EnumerateArray())
+        {
+            if (!TryReadArm(element, out var spec, out error))
             {
-                if (!TryReadArm(element, out var spec, out error))
-                {
-                    return false;
-                }
-
-                if (!names.Add(spec.Name))
-                {
-                    error = $"duplicate arm name '{spec.Name}'";
-                    return false;
-                }
-
-                arms.Add(spec);
-            }
-
-            if (arms.Count == 0)
-            {
-                error = "plan contains no arms";
                 return false;
             }
+
+            if (!names.Add(spec.Name))
+            {
+                error = $"duplicate arm name '{spec.Name}'";
+                return false;
+            }
+
+            // Two arm names can differ while their output file names collide, and the second arm
+            // would truncate the first one's records: the check has to run on the name the file
+            // is actually built from.
+            var fileName = SanitizeFileName(spec.Name);
+            if (fileName.Length > MaxArmFileNameLength)
+            {
+                error = $"arm '{spec.Name}' maps to a {fileName.Length}-character file name '{fileName}', above the {MaxArmFileNameLength}-character limit";
+                return false;
+            }
+
+            if (!files.TryAdd(fileName, spec.Name))
+            {
+                error = $"arm names '{files[fileName]}' and '{spec.Name}' both map to the output file '{fileName}.jsonl'";
+                return false;
+            }
+
+            arms.Add(spec);
+        }
+
+        if (arms.Count == 0)
+        {
+            error = "plan contains no arms";
+            return false;
         }
 
         return true;
@@ -122,7 +171,10 @@ internal static class PlanFile
     private static bool TryReadPlanBytes(string? path, out byte[] planBytes, out string? error)
     {
         error = null;
-        if (string.IsNullOrEmpty(path))
+
+        // A missing path is the one way to ask for the built-in plan; an empty one is rejected by the
+        // command line before it gets here (D14.1), so it never reaches this method.
+        if (path is null)
         {
             planBytes = Encoding.UTF8.GetBytes(DefaultPlanJson);
             return true;
@@ -231,60 +283,145 @@ internal static class PlanFile
             return false;
         }
 
-        if (!TryReadText(element, "kind", out var kind) || Array.IndexOf(s_knownKinds, kind) < 0)
+        if (!TryReadText(element, "kind", out var kindName))
         {
-            error = $"arm '{name}' has an unknown 'kind'";
+            error = $"arm '{name}' needs a 'kind' of {ArmKind.KnownNames()}";
+            return false;
+        }
+
+        if (ArmKind.Find(kindName) is not { } kind)
+        {
+            error = $"arm '{name}' has an unknown 'kind' '{kindName}' (expected one of: {ArmKind.KnownNames()})";
             return false;
         }
 
         spec.Name = name;
-        spec.Kind = kind;
+        spec.Kind = kind.Name;
 
-        if (element.TryGetProperty("seconds", out _))
+        if (FindUnknownKey(element, kind) is { } unknownKey)
+        {
+            error = $"{Prefix(name, kind.Name)}unknown key '{unknownKey}' (expected one of: {string.Join(", ", kind.Keys)})";
+            return false;
+        }
+
+        return TryReadArmBody(element, kind, spec, out error);
+    }
+
+    private static bool TryReadArmBody(JsonElement element, ArmKind kind, ArmSpec spec, out string? error)
+    {
+        error = null;
+
+        if (element.TryGetProperty("seconds", out var secondsElement))
         {
             if (!TryReadNumber(element, "seconds", out var seconds) || seconds <= 0)
             {
-                error = $"arm '{name}' has an invalid 'seconds'";
+                error = $"{Prefix(spec.Name, kind.Name)}'seconds' is {secondsElement.GetRawText()}, which is not a positive number";
                 return false;
             }
 
             spec.Seconds = seconds;
         }
 
-        ReadArmNumbers(element, spec);
-        spec.Protocol = TryReadText(element, "protocol", out var protocol) ? protocol : "tcp";
-        spec.ModeMix = TryReadText(element, "modeMix", out var modeMix) ? modeMix : ArmSpec.DefaultModeMix;
+        if (!TryReadArmNumbers(element, kind, spec, out error))
+        {
+            return false;
+        }
+
+        var prefix = Prefix(spec.Name, kind.Name);
+        if (!TryReadOptionalText(element, prefix, "protocol", "tcp", out var protocol, out error)
+            || !TryReadOptionalText(element, prefix, "modeMix", ArmSpec.DefaultModeMix, out var modeMix, out error))
+        {
+            return false;
+        }
+
+        spec.Protocol = protocol;
+        spec.ModeMix = modeMix;
 
         if (spec.Protocol is not ("tcp" or "udp" or "tcp+udp"))
         {
-            error = $"arm '{name}' has protocol '{spec.Protocol}' (expected tcp, udp or tcp+udp)";
+            error = $"{prefix}protocol '{spec.Protocol}' is not one of tcp, udp or tcp+udp";
+            return false;
+        }
+
+        if (kind.Validate(spec) is { } validationError)
+        {
+            error = prefix + validationError;
             return false;
         }
 
         return true;
     }
 
-    private static void ReadArmNumbers(JsonElement element, ArmSpec spec)
+    /// <summary>
+    /// Reads a key that may be absent: absent takes <paramref name="fallback"/>, present must be a
+    /// string. Another JSON type is a load error rather than the fallback, for the same reason a
+    /// fractional <c>window</c> is one: the plan declared a value, and reading it as the default
+    /// would publish a run the plan never asked for.
+    /// </summary>
+    private static bool TryReadOptionalText(
+        JsonElement element,
+        string prefix,
+        string name,
+        string fallback,
+        out string value,
+        out string? error)
     {
-        spec.RatePerSecond = ReadInt(element, "ratePerSecond", 0);
-        spec.PayloadBytes = ReadInt(element, "payloadBytes", 0);
-        spec.ConnectionsPerSecond = ReadInt(element, "connectionsPerSecond", 0);
-        spec.Streams = ReadInt(element, "streams", 0);
-        spec.TcpPercent = ReadInt(element, "tcpPercent", 0);
-        spec.CnameEvery = ReadInt(element, "cnameEvery", 0);
-        spec.Desktops = ReadInt(element, "desktops", 0);
-        spec.Window = ReadInt(element, "window", 0);
-        spec.LossWindowMs = ReadInt(element, "lossWindowMs", 0);
-        spec.DnsPort = ReadInt(element, "dnsPort", 0);
-        spec.Lanes = ReadInt(element, "lanes", 0);
-        spec.IntervalMs = ReadInt(element, "intervalMs", 0);
-        spec.IdleSeconds = ReadInt(element, "idleSeconds", 0);
-        spec.ExpectedBytes = ReadInt(element, "expectedBytes", 0);
-        spec.TargetBytesPerSecond = ReadInt(element, "targetBytesPerSecond", 0);
+        error = null;
+        value = fallback;
+        if (!element.TryGetProperty(name, out var property))
+        {
+            return true;
+        }
+
+        if (property.ValueKind != JsonValueKind.String)
+        {
+            error = $"{prefix}'{name}' is {property.GetRawText()}, which is not a string";
+            return false;
+        }
+
+        value = property.GetString() ?? string.Empty;
+        return true;
     }
 
-    private static int ReadInt(JsonElement element, string name, int fallback) =>
-        TryReadInt(element, name, out var value) ? value : fallback;
+    private static string Prefix(string name, string kind) => $"arm '{name}' (kind '{kind}'): ";
+
+    private static string? FindUnknownKey(JsonElement element, ArmKind kind) =>
+        element.EnumerateObject()
+            .Select(static property => property.Name)
+            .FirstOrDefault(name => Array.IndexOf(kind.Keys, name) < 0);
+
+    private static bool TryReadArmNumbers(JsonElement element, ArmKind kind, ArmSpec spec, out string? error)
+    {
+        error = null;
+        foreach (var key in s_numberKeys)
+        {
+            // A key the kind does not read is already an unknown key, but the whole table is checked
+            // against the element anyway: the descriptor says what the value must be, the whitelist
+            // says whether the kind may declare it.
+            if (!element.TryGetProperty(key.Name, out var property))
+            {
+                continue;
+            }
+
+            if (!TryReadInt(element, key.Name, out var value))
+            {
+                error = $"{Prefix(spec.Name, kind.Name)}'{key.Name}' is {property.GetRawText()}, which is not an integer";
+                return false;
+            }
+
+            if (value < key.Minimum || value > key.Maximum)
+            {
+                error = Prefix(spec.Name, kind.Name) + string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"'{key.Name}' is {value}, outside {key.Minimum}..{key.Maximum}");
+                return false;
+            }
+
+            key.Assign(spec, value);
+        }
+
+        return true;
+    }
 
     private static bool TryReadText(JsonElement element, string name, out string value)
     {
@@ -311,7 +448,11 @@ internal static class PlanFile
             return true;
         }
 
-        if (!property.TryGetDouble(out var asDouble) || Math.Abs(asDouble - Math.Round(asDouble, MidpointRounding.ToEven)) > 1e-9)
+        // TryGetInt32 already refused anything outside int's range, so the only numbers left are
+        // integral doubles just past the bounds: casting them would be undefined without this check.
+        if (!property.TryGetDouble(out var asDouble)
+            || asDouble is < int.MinValue or > int.MaxValue
+            || Math.Abs(asDouble - Math.Round(asDouble, MidpointRounding.ToEven)) > IntegerTolerance)
         {
             return false;
         }

@@ -135,6 +135,26 @@ public sealed class UdpReliabilityTrackerTests
         Assert.Equal(0, counts.CorruptDatagrams);
     }
 
+    // The sending-side contract (D7): a sequence outside the bounded space is refused, never
+    // indexed. Ensure does not grow the parallel arrays past MaxSequence + 1 elements, so "the
+    // call returned" is itself the evidence that neither array was written; reading the private
+    // fields back would test the test rather than the contract.
+    [Fact]
+    public void ASendPastTheBoundedSequenceSpaceIsRefusedWithoutTouchingTheArrays()
+    {
+        var tracker = new UdpReliabilityTracker();
+
+        tracker.MarkSent(UdpReliabilityTracker.MaxSequence + 1, sendTicks: 0);
+
+        Assert.Equal(1, tracker.OutOfRange);
+        Assert.Equal(0, tracker.SentOk);
+        Assert.Equal(0, tracker.Outstanding);
+        Assert.Equal(0, tracker.Supplied);
+
+        var counts = tracker.Classify(s_windowTicks, observationEndTicks: 0);
+        Assert.Equal(0, counts.Arrived + counts.Late + counts.Never + counts.Undetermined + counts.CorruptDatagrams);
+    }
+
     [Fact]
     public void AnArrivalNamingAnImpossibleSequenceIsRefusedAndCounted()
     {

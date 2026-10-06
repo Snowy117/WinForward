@@ -1,0 +1,10 @@
+{
+  "arms": [
+    {
+      "name": "LOSSOVERRUN",
+      "kind": "loss",
+      "seconds": 20,
+      "ratePerSecond": 20000
+    }
+  ]
+}

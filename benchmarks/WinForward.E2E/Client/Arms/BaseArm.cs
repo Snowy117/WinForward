@@ -8,7 +8,7 @@ internal static class BaseArm
     // phase keeps its own default load; a plan parameter the BASE entry declares overrides both.
     private const int DefaultLatencyRatePerSecond = 20;
     private const int DefaultLatencyPayloadBytes = 120;
-    private const int DefaultLossRatePerSecond = 500;
+    internal const int DefaultLossRatePerSecond = 500;
     private const int DefaultLossPayloadBytes = 200;
 
     private static readonly string[] s_phases = ["latency", "loss"];

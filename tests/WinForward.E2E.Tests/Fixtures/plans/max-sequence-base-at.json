@@ -1,0 +1,10 @@
+{
+  "arms": [
+    {
+      "name": "BASEBOUND",
+      "kind": "base",
+      "seconds": 1,
+      "ratePerSecond": 262143
+    }
+  ]
+}

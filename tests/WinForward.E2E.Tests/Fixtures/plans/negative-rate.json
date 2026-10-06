@@ -1,0 +1,10 @@
+{
+  "arms": [
+    {
+      "name": "LOSSNEGATIVE",
+      "kind": "loss",
+      "seconds": 1,
+      "ratePerSecond": -1
+    }
+  ]
+}

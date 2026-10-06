@@ -1,0 +1,10 @@
+{
+  "arms": [
+    {
+      "name": "LOSSBOUND",
+      "kind": "loss",
+      "seconds": 1,
+      "ratePerSecond": 262143
+    }
+  ]
+}

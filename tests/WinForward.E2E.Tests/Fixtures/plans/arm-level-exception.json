@@ -1,0 +1,5 @@
+{
+  "arms": [
+    { "name": "IDLEOVERFLOW", "kind": "idle", "seconds": 1e18 }
+  ]
+}

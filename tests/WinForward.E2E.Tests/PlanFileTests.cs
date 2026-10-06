@@ -21,10 +21,7 @@ public sealed class PlanFileTests
     [Fact]
     public void EveryShippedPlanLoads()
     {
-        var plans = Directory.GetFiles(RepoPaths.PlansDirectory, "*.json")
-            .Concat(Directory.GetFiles(RepoPaths.ShortPlansDirectory, "*.json"))
-            .Order(StringComparer.Ordinal)
-            .ToArray();
+        var plans = ShippedPlanPaths();
 
         Assert.Equal(11, plans.Length);
         foreach (var plan in plans)
@@ -33,6 +30,22 @@ public sealed class PlanFileTests
             Assert.Null(error);
             Assert.NotEmpty(planBytes);
             Assert.NotEmpty(arms);
+        }
+    }
+
+    // #6: a loss or mix arm classifies arrivals against a loss window W, and a plan that declares
+    // none silently measures against the 200 ms default instead. base passes W through from its own
+    // entry and dns has no such arm, so only these two kinds are held to declaring it (D14.2).
+    [Fact]
+    public void EveryLossAndMixArmDeclaresItsLossWindow()
+    {
+        foreach (var plan in ShippedPlanPaths())
+        {
+            Assert.True(PlanFile.TryLoad(plan, out var arms, out _, out var error), $"{plan}: {error}");
+            foreach (var arm in arms.Where(arm => arm.Kind is "loss" or "mix"))
+            {
+                Assert.True(arm.LossWindowMs > 0, $"{plan}: arm '{arm.Name}' (kind '{arm.Kind}') does not declare lossWindowMs");
+            }
         }
     }
 
@@ -70,4 +83,9 @@ public sealed class PlanFileTests
         Assert.Equal("BASE", arms[0].Name);
         Assert.True(planBytes.Length > 0);
     }
+
+    private static string[] ShippedPlanPaths() =>
+        [.. Directory.GetFiles(RepoPaths.PlansDirectory, "*.json")
+            .Concat(Directory.GetFiles(RepoPaths.ShortPlansDirectory, "*.json"))
+            .Order(StringComparer.Ordinal)];
 }

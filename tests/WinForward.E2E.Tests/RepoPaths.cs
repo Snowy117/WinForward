@@ -12,6 +12,15 @@ internal static class RepoPaths
 
     internal static string ShortPlansDirectory => Path.Combine(Root, "benchmarks", "WinForward.E2E", "scripts", "plans-short");
 
+    /// <summary>
+    /// The minimal plans that reproduce the Tier 0 defects (D1-D7). They live with the tests, not in
+    /// <c>scripts/plans/</c>: every one of them is either rejected at load time or would need a live
+    /// target, so shipping them next to the campaign plans would invite running them.
+    /// </summary>
+    private static string Tier0PlansDirectory => Path.Combine(Root, "tests", "WinForward.E2E.Tests", "Fixtures", "plans");
+
+    internal static string Tier0Plan(string name) => Path.Combine(Tier0PlansDirectory, name);
+
     private static string FindRoot()
     {
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)

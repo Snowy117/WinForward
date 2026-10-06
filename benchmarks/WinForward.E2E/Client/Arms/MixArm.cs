@@ -108,7 +108,9 @@ internal static class MixArm
     private const long BulkBitsPerSecond = 5_000_000;
     private const int BulkPayloadBytes = 32 * 1024;
     private const int DnsQueriesPerPage = 4;
-    private const int UdpPacketsPerSecond = 30;
+    // Published per desktop as udpPacketsPerSecondPerDesktop; mix's UDP rate is not a plan key, so
+    // this is also the rate the plan loader checks the offered schedule against.
+    internal const int UdpPacketsPerSecond = 30;
     private const int UdpPayloadBytes = 120;
     private static readonly TimeSpan s_pageInterval = TimeSpan.FromSeconds(20);
 

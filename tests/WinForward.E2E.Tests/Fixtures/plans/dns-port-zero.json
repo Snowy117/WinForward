@@ -1,0 +1,11 @@
+{
+  "arms": [
+    {
+      "name": "DNSZERO",
+      "kind": "dns",
+      "seconds": 1,
+      "ratePerSecond": 1,
+      "dnsPort": 0
+    }
+  ]
+}

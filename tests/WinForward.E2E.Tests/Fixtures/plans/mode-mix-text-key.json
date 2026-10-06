@@ -1,0 +1,12 @@
+{
+  "arms": [
+    {
+      "name": "RELMIX",
+      "kind": "reliability",
+      "seconds": 1,
+      "connectionsPerSecond": 1,
+      "modeMix": "clean=1,stall=1",
+      "expectedBytes": 64
+    }
+  ]
+}

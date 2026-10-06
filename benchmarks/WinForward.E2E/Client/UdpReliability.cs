@@ -124,9 +124,11 @@ internal readonly struct LossCounts
 /// </summary>
 internal sealed class UdpReliabilityTracker
 {
-    // The heaviest planned arm offers 500 datagrams a second for two minutes, so a ceiling of a
-    // quarter million sequences is far above any legitimate index and still bounds what a corrupt
-    // one can allocate.
+    // The tracker books sequences in [0, MaxSequence] and nothing outside it, so this bound is what
+    // sizes every sequence-indexed array. A plan whose offered schedule would run past it is
+    // refused where the plan is loaded (PlanFile's per-kind validation); a sequence past it that
+    // still reaches the tracker is counted in OutOfRange and never allocated for, so the published
+    // classification discloses that it covers fewer datagrams than the schedule offered.
     internal const long MaxSequence = (1L << 18) - 1;
 
     private readonly SequenceBitmap _sent = new();
@@ -195,6 +197,15 @@ internal sealed class UdpReliabilityTracker
     /// </summary>
     internal void MarkSent(long sequence, long sendTicks)
     {
+        // The guard has to come first: Ensure refuses to grow the two arrays below past
+        // MaxSequence + 1 elements, so a sequence outside the space would be indexed straight out
+        // of bounds (D7). The bitmap still books the refusal, so it lands in OutOfRange.
+        if (sequence is < 0 or > MaxSequence)
+        {
+            _sent.TrySet(sequence);
+            return;
+        }
+
         Ensure(sequence);
         _sent.TrySet(sequence);
         _sendTicks[sequence] = sendTicks;

@@ -1,0 +1,9 @@
+{
+  "arms": [
+    {
+      "name": "IDLE",
+      "kind": "idle",
+      "seconds": 1
+    }
+  ]
+}

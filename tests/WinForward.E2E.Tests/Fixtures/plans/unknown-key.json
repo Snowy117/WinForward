@@ -1,0 +1,10 @@
+{
+  "arms": [
+    {
+      "name": "LOSS",
+      "kind": "loss",
+      "seconds": 1,
+      "ratePerSeconds": 10
+    }
+  ]
+}

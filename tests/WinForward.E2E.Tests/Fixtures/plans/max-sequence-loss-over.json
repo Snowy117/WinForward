@@ -1,0 +1,10 @@
+{
+  "arms": [
+    {
+      "name": "LOSSPAST",
+      "kind": "loss",
+      "seconds": 1,
+      "ratePerSecond": 262144
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "arms": [
+    {
+      "name": "LATUDP",
+      "kind": "latency",
+      "seconds": 1,
+      "protocol": "udp"
+    }
+  ]
+}
