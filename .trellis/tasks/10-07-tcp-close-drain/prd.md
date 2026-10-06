@@ -9,8 +9,8 @@ retransmit at exactly the moment the client-visible close is needed.
 
 ## Background
 
-Parent task: `../10-06-tcp-half-close-fidelity` (archived 2026-10-06). Its `research/verification/`
-holds the full evidence; the short version:
+Parent task: `../archive/2026-10/10-06-tcp-half-close-fidelity` (archived 2026-10-06). Its
+`research/verification/` holds the full evidence; the short version:
 
 - Baseline (AOT artifact behind the symptom report): 545 of 601 half-closing attempts hang, no FIN,
   no RST, no truncation (`timeout=556` of 1201 in the four-mode arm).
