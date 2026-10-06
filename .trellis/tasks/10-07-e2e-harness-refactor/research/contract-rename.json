@@ -1,0 +1,3554 @@
+[
+  {
+    "kind": "added",
+    "old_path": null,
+    "new_path": "detail",
+    "reason": "error record field: the innermost exception type name (D14.12)"
+  },
+  {
+    "kind": "added",
+    "old_path": null,
+    "new_path": "error",
+    "reason": "error record field: the exception family name (D14.12)"
+  },
+  {
+    "kind": "added",
+    "old_path": null,
+    "new_path": "planSource",
+    "reason": "run.json top-level key: 'builtin' when no plan file was given (D14.23)"
+  },
+  {
+    "kind": "identical",
+    "old_path": "arm",
+    "new_path": "arm",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "arms",
+    "new_path": "arms",
+    "reason": "unchanged; structure kept; seen in records/run.json"
+  },
+  {
+    "kind": "identical",
+    "old_path": "arms/endedTicks",
+    "new_path": "arms/endedTicks",
+    "reason": "unchanged; structure kept; seen in records/run.json"
+  },
+  {
+    "kind": "identical",
+    "old_path": "arms/failed",
+    "new_path": "arms/failed",
+    "reason": "unchanged; structure kept; seen in records/run.json"
+  },
+  {
+    "kind": "identical",
+    "old_path": "arms/file",
+    "new_path": "arms/file",
+    "reason": "unchanged; structure kept; seen in records/run.json"
+  },
+  {
+    "kind": "identical",
+    "old_path": "arms/kind",
+    "new_path": "arms/kind",
+    "reason": "unchanged; structure kept; seen in records/run.json"
+  },
+  {
+    "kind": "identical",
+    "old_path": "arms/name",
+    "new_path": "arms/name",
+    "reason": "unchanged; structure kept; seen in records/run.json"
+  },
+  {
+    "kind": "identical",
+    "old_path": "arms/startedTicks",
+    "new_path": "arms/startedTicks",
+    "reason": "unchanged; structure kept; seen in records/run.json"
+  },
+  {
+    "kind": "identical",
+    "old_path": "bytes",
+    "new_path": "bytes",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "bytesEchoed",
+    "new_path": "bytesEchoed",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "clientVersion",
+    "new_path": "clientVersion",
+    "reason": "unchanged; structure kept; seen in records/run.json"
+  },
+  {
+    "kind": "identical",
+    "old_path": "connectTicks",
+    "new_path": "connectTicks",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "connectionId",
+    "new_path": "connectionId",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl, ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "connections",
+    "new_path": "connections",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "cpuSeconds",
+    "new_path": "cpuSeconds",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dns",
+    "new_path": "dns",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dns/port",
+    "new_path": "dns/port",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dns/tcpAborted",
+    "new_path": "dns/tcpAborted",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dns/tcpAnswers",
+    "new_path": "dns/tcpAnswers",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dns/tcpConnections",
+    "new_path": "dns/tcpConnections",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dns/tcpEmptyAnswers",
+    "new_path": "dns/tcpEmptyAnswers",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dns/tcpMalformed",
+    "new_path": "dns/tcpMalformed",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dns/tcpQueries",
+    "new_path": "dns/tcpQueries",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dns/udpAnswers",
+    "new_path": "dns/udpAnswers",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dns/udpEmptyAnswers",
+    "new_path": "dns/udpEmptyAnswers",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dns/udpMalformed",
+    "new_path": "dns/udpMalformed",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dns/udpQueries",
+    "new_path": "dns/udpQueries",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dns/udpSendErrors",
+    "new_path": "dns/udpSendErrors",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dnsAlt",
+    "new_path": "dnsAlt",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dnsAlt/port",
+    "new_path": "dnsAlt/port",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dnsAlt/tcpAborted",
+    "new_path": "dnsAlt/tcpAborted",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dnsAlt/tcpAnswers",
+    "new_path": "dnsAlt/tcpAnswers",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dnsAlt/tcpConnections",
+    "new_path": "dnsAlt/tcpConnections",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dnsAlt/tcpEmptyAnswers",
+    "new_path": "dnsAlt/tcpEmptyAnswers",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dnsAlt/tcpMalformed",
+    "new_path": "dnsAlt/tcpMalformed",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dnsAlt/tcpQueries",
+    "new_path": "dnsAlt/tcpQueries",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dnsAlt/udpAnswers",
+    "new_path": "dnsAlt/udpAnswers",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dnsAlt/udpEmptyAnswers",
+    "new_path": "dnsAlt/udpEmptyAnswers",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dnsAlt/udpMalformed",
+    "new_path": "dnsAlt/udpMalformed",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dnsAlt/udpQueries",
+    "new_path": "dnsAlt/udpQueries",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "dnsAlt/udpSendErrors",
+    "new_path": "dnsAlt/udpSendErrors",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "echoedBytes",
+    "new_path": "echoedBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "endedTicks",
+    "new_path": "endedTicks",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl, records/run.json, ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "endedUtc",
+    "new_path": "endedUtc",
+    "reason": "unchanged; structure kept; seen in records/run.json"
+  },
+  {
+    "kind": "identical",
+    "old_path": "envWorkingSetBytes",
+    "new_path": "envWorkingSetBytes",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "eof",
+    "new_path": "eof",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "expected",
+    "new_path": "expected",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "expectedBytes",
+    "new_path": "expectedBytes",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "failed",
+    "new_path": "failed",
+    "reason": "unchanged; structure kept; seen in records/run.json"
+  },
+  {
+    "kind": "identical",
+    "old_path": "frameworkDescription",
+    "new_path": "frameworkDescription",
+    "reason": "unchanged; structure kept; seen in records/run.json"
+  },
+  {
+    "kind": "identical",
+    "old_path": "gates",
+    "new_path": "gates",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "gates/backlogDrops",
+    "new_path": "gates/backlogDrops",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "gates/clientSendLoss",
+    "new_path": "gates/clientSendLoss",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "gates/idleLanes",
+    "new_path": "gates/idleLanes",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "gates/inFlightCeilingMs",
+    "new_path": "gates/inFlightCeilingMs",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "gates/laneShortfall",
+    "new_path": "gates/laneShortfall",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "gates/lanesPlanned",
+    "new_path": "gates/lanesPlanned",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "gates/lanesStarted",
+    "new_path": "gates/lanesStarted",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "gates/scheduleTruncated",
+    "new_path": "gates/scheduleTruncated",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "gates/sendFailures",
+    "new_path": "gates/sendFailures",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "gates/windowMs",
+    "new_path": "gates/windowMs",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "gates/windowOverflow",
+    "new_path": "gates/windowOverflow",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "generatorCpuSeconds",
+    "new_path": "generatorCpuSeconds",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "handles",
+    "new_path": "handles",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "kind",
+    "new_path": "kind",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "label",
+    "new_path": "label",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl, records/run.json, ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency",
+    "new_path": "latency",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/dns-rtt",
+    "new_path": "latency/dns-rtt",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl, records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/dns-rtt/count",
+    "new_path": "latency/dns-rtt/count",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl, records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/dns-rtt/maxUs",
+    "new_path": "latency/dns-rtt/maxUs",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl, records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/dns-rtt/meanUs",
+    "new_path": "latency/dns-rtt/meanUs",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl, records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/dns-rtt/minUs",
+    "new_path": "latency/dns-rtt/minUs",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl, records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/dns-rtt/p50Us",
+    "new_path": "latency/dns-rtt/p50Us",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl, records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/dns-rtt/p90Us",
+    "new_path": "latency/dns-rtt/p90Us",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl, records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/dns-rtt/p999Us",
+    "new_path": "latency/dns-rtt/p999Us",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl, records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/dns-rtt/p99Us",
+    "new_path": "latency/dns-rtt/p99Us",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl, records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/tcp-connect",
+    "new_path": "latency/tcp-connect",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl, records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/tcp-connect/count",
+    "new_path": "latency/tcp-connect/count",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl, records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/tcp-connect/maxUs",
+    "new_path": "latency/tcp-connect/maxUs",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl, records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/tcp-connect/meanUs",
+    "new_path": "latency/tcp-connect/meanUs",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl, records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/tcp-connect/minUs",
+    "new_path": "latency/tcp-connect/minUs",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl, records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/tcp-connect/p50Us",
+    "new_path": "latency/tcp-connect/p50Us",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl, records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/tcp-connect/p90Us",
+    "new_path": "latency/tcp-connect/p90Us",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl, records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/tcp-connect/p999Us",
+    "new_path": "latency/tcp-connect/p999Us",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl, records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/tcp-connect/p99Us",
+    "new_path": "latency/tcp-connect/p99Us",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl, records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/tcp-rtt",
+    "new_path": "latency/tcp-rtt",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl, records/PERSIST.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/tcp-rtt/count",
+    "new_path": "latency/tcp-rtt/count",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl, records/PERSIST.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/tcp-rtt/maxUs",
+    "new_path": "latency/tcp-rtt/maxUs",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl, records/PERSIST.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/tcp-rtt/meanUs",
+    "new_path": "latency/tcp-rtt/meanUs",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl, records/PERSIST.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/tcp-rtt/minUs",
+    "new_path": "latency/tcp-rtt/minUs",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl, records/PERSIST.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/tcp-rtt/p50Us",
+    "new_path": "latency/tcp-rtt/p50Us",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl, records/PERSIST.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/tcp-rtt/p90Us",
+    "new_path": "latency/tcp-rtt/p90Us",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl, records/PERSIST.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/tcp-rtt/p999Us",
+    "new_path": "latency/tcp-rtt/p999Us",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl, records/PERSIST.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/tcp-rtt/p99Us",
+    "new_path": "latency/tcp-rtt/p99Us",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl, records/PERSIST.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/udp-rtt",
+    "new_path": "latency/udp-rtt",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/udp-rtt/count",
+    "new_path": "latency/udp-rtt/count",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/udp-rtt/maxUs",
+    "new_path": "latency/udp-rtt/maxUs",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/udp-rtt/meanUs",
+    "new_path": "latency/udp-rtt/meanUs",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/udp-rtt/minUs",
+    "new_path": "latency/udp-rtt/minUs",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/udp-rtt/p50Us",
+    "new_path": "latency/udp-rtt/p50Us",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/udp-rtt/p90Us",
+    "new_path": "latency/udp-rtt/p90Us",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/udp-rtt/p999Us",
+    "new_path": "latency/udp-rtt/p999Us",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "latency/udp-rtt/p99Us",
+    "new_path": "latency/udp-rtt/p99Us",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "ledgerWriteErrors",
+    "new_path": "ledgerWriteErrors",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "logicalProcessors",
+    "new_path": "logicalProcessors",
+    "reason": "unchanged; structure kept; seen in records/run.json"
+  },
+  {
+    "kind": "identical",
+    "old_path": "matched",
+    "new_path": "matched",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics",
+    "new_path": "metrics",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/abandonedAtTeardown",
+    "new_path": "metrics/abandonedAtTeardown",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/achievedRate",
+    "new_path": "metrics/achievedRate",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl, records/LOSS.jsonl, records/PERSIST.jsonl, records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/answerRate",
+    "new_path": "metrics/answerRate",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/answered",
+    "new_path": "metrics/answered",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/arrived",
+    "new_path": "metrics/arrived",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/attemptRecords",
+    "new_path": "metrics/attemptRecords",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/attemptRecordsOmitted",
+    "new_path": "metrics/attemptRecordsOmitted",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/budgetBytes",
+    "new_path": "metrics/budgetBytes",
+    "reason": "unchanged; structure kept; seen in records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/budgetReached",
+    "new_path": "metrics/budgetReached",
+    "reason": "unchanged; structure kept; seen in records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/budgetRemainingBytes",
+    "new_path": "metrics/budgetRemainingBytes",
+    "reason": "unchanged; structure kept; seen in records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/bulkBytes",
+    "new_path": "metrics/bulkBytes",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode",
+    "new_path": "metrics/byMode",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/clean",
+    "new_path": "metrics/byMode/clean",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/clean/attempts",
+    "new_path": "metrics/byMode/clean/attempts",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/clean/echoedBytes",
+    "new_path": "metrics/byMode/clean/echoedBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/clean/maxEchoedBytes",
+    "new_path": "metrics/byMode/clean/maxEchoedBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/clean/maxTrailerBytes",
+    "new_path": "metrics/byMode/clean/maxTrailerBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/clean/minEchoedBytes",
+    "new_path": "metrics/byMode/clean/minEchoedBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/clean/minTrailerBytes",
+    "new_path": "metrics/byMode/clean/minTrailerBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/clean/observed",
+    "new_path": "metrics/byMode/clean/observed",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/clean/observed/clean",
+    "new_path": "metrics/byMode/clean/observed/clean",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/clean/observed/connectFail",
+    "new_path": "metrics/byMode/clean/observed/connectFail",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/clean/observed/halfCloseViolation",
+    "new_path": "metrics/byMode/clean/observed/halfCloseViolation",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/clean/observed/otherError",
+    "new_path": "metrics/byMode/clean/observed/otherError",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/clean/observed/reset",
+    "new_path": "metrics/byMode/clean/observed/reset",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/clean/observed/timeout",
+    "new_path": "metrics/byMode/clean/observed/timeout",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/clean/observed/unexpectedEof",
+    "new_path": "metrics/byMode/clean/observed/unexpectedEof",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/clean/trailerBytes",
+    "new_path": "metrics/byMode/clean/trailerBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/clean/truncated",
+    "new_path": "metrics/byMode/clean/truncated",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/halfClose",
+    "new_path": "metrics/byMode/halfClose",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/halfClose/attempts",
+    "new_path": "metrics/byMode/halfClose/attempts",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/halfClose/echoedBytes",
+    "new_path": "metrics/byMode/halfClose/echoedBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/halfClose/maxEchoedBytes",
+    "new_path": "metrics/byMode/halfClose/maxEchoedBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/halfClose/maxTrailerBytes",
+    "new_path": "metrics/byMode/halfClose/maxTrailerBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/halfClose/minEchoedBytes",
+    "new_path": "metrics/byMode/halfClose/minEchoedBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/halfClose/minTrailerBytes",
+    "new_path": "metrics/byMode/halfClose/minTrailerBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/halfClose/observed",
+    "new_path": "metrics/byMode/halfClose/observed",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/halfClose/observed/clean",
+    "new_path": "metrics/byMode/halfClose/observed/clean",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/halfClose/observed/connectFail",
+    "new_path": "metrics/byMode/halfClose/observed/connectFail",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/halfClose/observed/halfCloseViolation",
+    "new_path": "metrics/byMode/halfClose/observed/halfCloseViolation",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/halfClose/observed/otherError",
+    "new_path": "metrics/byMode/halfClose/observed/otherError",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/halfClose/observed/reset",
+    "new_path": "metrics/byMode/halfClose/observed/reset",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/halfClose/observed/timeout",
+    "new_path": "metrics/byMode/halfClose/observed/timeout",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/halfClose/observed/unexpectedEof",
+    "new_path": "metrics/byMode/halfClose/observed/unexpectedEof",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/halfClose/trailerBytes",
+    "new_path": "metrics/byMode/halfClose/trailerBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/halfClose/truncated",
+    "new_path": "metrics/byMode/halfClose/truncated",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/partialFin",
+    "new_path": "metrics/byMode/partialFin",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/partialFin/attempts",
+    "new_path": "metrics/byMode/partialFin/attempts",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/partialFin/echoedBytes",
+    "new_path": "metrics/byMode/partialFin/echoedBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/partialFin/maxEchoedBytes",
+    "new_path": "metrics/byMode/partialFin/maxEchoedBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/partialFin/maxTrailerBytes",
+    "new_path": "metrics/byMode/partialFin/maxTrailerBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/partialFin/minEchoedBytes",
+    "new_path": "metrics/byMode/partialFin/minEchoedBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/partialFin/minTrailerBytes",
+    "new_path": "metrics/byMode/partialFin/minTrailerBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/partialFin/observed",
+    "new_path": "metrics/byMode/partialFin/observed",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/partialFin/observed/clean",
+    "new_path": "metrics/byMode/partialFin/observed/clean",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/partialFin/observed/connectFail",
+    "new_path": "metrics/byMode/partialFin/observed/connectFail",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/partialFin/observed/halfCloseViolation",
+    "new_path": "metrics/byMode/partialFin/observed/halfCloseViolation",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/partialFin/observed/otherError",
+    "new_path": "metrics/byMode/partialFin/observed/otherError",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/partialFin/observed/reset",
+    "new_path": "metrics/byMode/partialFin/observed/reset",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/partialFin/observed/timeout",
+    "new_path": "metrics/byMode/partialFin/observed/timeout",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/partialFin/observed/unexpectedEof",
+    "new_path": "metrics/byMode/partialFin/observed/unexpectedEof",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/partialFin/trailerBytes",
+    "new_path": "metrics/byMode/partialFin/trailerBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/partialFin/truncated",
+    "new_path": "metrics/byMode/partialFin/truncated",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/resetAfterN",
+    "new_path": "metrics/byMode/resetAfterN",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/resetAfterN/attempts",
+    "new_path": "metrics/byMode/resetAfterN/attempts",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/resetAfterN/echoedBytes",
+    "new_path": "metrics/byMode/resetAfterN/echoedBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/resetAfterN/maxEchoedBytes",
+    "new_path": "metrics/byMode/resetAfterN/maxEchoedBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/resetAfterN/maxTrailerBytes",
+    "new_path": "metrics/byMode/resetAfterN/maxTrailerBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/resetAfterN/minEchoedBytes",
+    "new_path": "metrics/byMode/resetAfterN/minEchoedBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/resetAfterN/minTrailerBytes",
+    "new_path": "metrics/byMode/resetAfterN/minTrailerBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/resetAfterN/observed",
+    "new_path": "metrics/byMode/resetAfterN/observed",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/resetAfterN/observed/clean",
+    "new_path": "metrics/byMode/resetAfterN/observed/clean",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/resetAfterN/observed/connectFail",
+    "new_path": "metrics/byMode/resetAfterN/observed/connectFail",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/resetAfterN/observed/halfCloseViolation",
+    "new_path": "metrics/byMode/resetAfterN/observed/halfCloseViolation",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/resetAfterN/observed/otherError",
+    "new_path": "metrics/byMode/resetAfterN/observed/otherError",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/resetAfterN/observed/reset",
+    "new_path": "metrics/byMode/resetAfterN/observed/reset",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/resetAfterN/observed/timeout",
+    "new_path": "metrics/byMode/resetAfterN/observed/timeout",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/resetAfterN/observed/unexpectedEof",
+    "new_path": "metrics/byMode/resetAfterN/observed/unexpectedEof",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/resetAfterN/trailerBytes",
+    "new_path": "metrics/byMode/resetAfterN/trailerBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/byMode/resetAfterN/truncated",
+    "new_path": "metrics/byMode/resetAfterN/truncated",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/bytes",
+    "new_path": "metrics/bytes",
+    "reason": "unchanged; structure kept; seen in records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/bytesSent",
+    "new_path": "metrics/bytesSent",
+    "reason": "unchanged; structure kept; seen in records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes",
+    "new_path": "metrics/classes",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/bulk",
+    "new_path": "metrics/classes/bulk",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/bulk/bytes",
+    "new_path": "metrics/classes/bulk/bytes",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/bulk/bytesSent",
+    "new_path": "metrics/classes/bulk/bytesSent",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/bulk/errors",
+    "new_path": "metrics/classes/bulk/errors",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/bulk/frames",
+    "new_path": "metrics/classes/bulk/frames",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/bulk/goodputBps",
+    "new_path": "metrics/classes/bulk/goodputBps",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/dns",
+    "new_path": "metrics/classes/dns",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/dns/answered",
+    "new_path": "metrics/classes/dns/answered",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/dns/other",
+    "new_path": "metrics/classes/dns/other",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/dns/sent",
+    "new_path": "metrics/classes/dns/sent",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/dns/servfail",
+    "new_path": "metrics/classes/dns/servfail",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/dns/timeout",
+    "new_path": "metrics/classes/dns/timeout",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/page",
+    "new_path": "metrics/classes/page",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/page/bytes",
+    "new_path": "metrics/classes/page/bytes",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/page/bytesPerPage",
+    "new_path": "metrics/classes/page/bytesPerPage",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/page/connections",
+    "new_path": "metrics/classes/page/connections",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/page/errors",
+    "new_path": "metrics/classes/page/errors",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/page/messages",
+    "new_path": "metrics/classes/page/messages",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/page/pages",
+    "new_path": "metrics/classes/page/pages",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/udp",
+    "new_path": "metrics/classes/udp",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/udp/abandonedAtTeardown",
+    "new_path": "metrics/classes/udp/abandonedAtTeardown",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/udp/arrived",
+    "new_path": "metrics/classes/udp/arrived",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/udp/bytes",
+    "new_path": "metrics/classes/udp/bytes",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/udp/clientSendLoss",
+    "new_path": "metrics/classes/udp/clientSendLoss",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/udp/corrupt",
+    "new_path": "metrics/classes/udp/corrupt",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/udp/corruptDatagrams",
+    "new_path": "metrics/classes/udp/corruptDatagrams",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/udp/duplicate",
+    "new_path": "metrics/classes/udp/duplicate",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/udp/foreignConnection",
+    "new_path": "metrics/classes/udp/foreignConnection",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/udp/late",
+    "new_path": "metrics/classes/udp/late",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/udp/lossRate",
+    "new_path": "metrics/classes/udp/lossRate",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/udp/never",
+    "new_path": "metrics/classes/udp/never",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/udp/outOfRangeSequences",
+    "new_path": "metrics/classes/udp/outOfRangeSequences",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/udp/reordered",
+    "new_path": "metrics/classes/udp/reordered",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/udp/sendFailures",
+    "new_path": "metrics/classes/udp/sendFailures",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/udp/sent",
+    "new_path": "metrics/classes/udp/sent",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/udp/sentPerDesktop",
+    "new_path": "metrics/classes/udp/sentPerDesktop",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/udp/unmatchedReplies",
+    "new_path": "metrics/classes/udp/unmatchedReplies",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/udp/window",
+    "new_path": "metrics/classes/udp/window",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/classes/udp/windowOverflow",
+    "new_path": "metrics/classes/udp/windowOverflow",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/clientSendLoss",
+    "new_path": "metrics/clientSendLoss",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl, records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/clientSendLossRate",
+    "new_path": "metrics/clientSendLossRate",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/connectAttempts",
+    "new_path": "metrics/connectAttempts",
+    "reason": "unchanged; structure kept; seen in records/PERSIST.jsonl, records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/connectFail",
+    "new_path": "metrics/connectFail",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/connectFailures",
+    "new_path": "metrics/connectFailures",
+    "reason": "unchanged; structure kept; seen in records/PERSIST.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/corrupt",
+    "new_path": "metrics/corrupt",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl, records/PERSIST.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/corruptDatagrams",
+    "new_path": "metrics/corruptDatagrams",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/corruptRate",
+    "new_path": "metrics/corruptRate",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/desktops",
+    "new_path": "metrics/desktops",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/desktops/bulkFrames",
+    "new_path": "metrics/desktops/bulkFrames",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/desktops/desktop",
+    "new_path": "metrics/desktops/desktop",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/desktops/dnsSent",
+    "new_path": "metrics/desktops/dnsSent",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/desktops/pageConnections",
+    "new_path": "metrics/desktops/pageConnections",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/desktops/udpNever",
+    "new_path": "metrics/desktops/udpNever",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/dnsSent",
+    "new_path": "metrics/dnsSent",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/duplicate",
+    "new_path": "metrics/duplicate",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/duplicateRate",
+    "new_path": "metrics/duplicateRate",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/echoedBytes",
+    "new_path": "metrics/echoedBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/effectiveModeMix",
+    "new_path": "metrics/effectiveModeMix",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/elapsedSeconds",
+    "new_path": "metrics/elapsedSeconds",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/IDLE.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/emptyAnswers",
+    "new_path": "metrics/emptyAnswers",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/expected",
+    "new_path": "metrics/expected",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/expected/clean",
+    "new_path": "metrics/expected/clean",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/expected/connectFail",
+    "new_path": "metrics/expected/connectFail",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/expected/halfCloseViolation",
+    "new_path": "metrics/expected/halfCloseViolation",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/expected/otherError",
+    "new_path": "metrics/expected/otherError",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/expected/reset",
+    "new_path": "metrics/expected/reset",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/expected/timeout",
+    "new_path": "metrics/expected/timeout",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/expected/unexpectedEof",
+    "new_path": "metrics/expected/unexpectedEof",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/expectedBytes",
+    "new_path": "metrics/expectedBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/expectedEarlyEof",
+    "new_path": "metrics/expectedEarlyEof",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/fidelityMismatch",
+    "new_path": "metrics/fidelityMismatch",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/fidelityRate",
+    "new_path": "metrics/fidelityRate",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/foreignConnection",
+    "new_path": "metrics/foreignConnection",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/frames",
+    "new_path": "metrics/frames",
+    "reason": "unchanged; structure kept; seen in records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/framesEchoed",
+    "new_path": "metrics/framesEchoed",
+    "reason": "unchanged; structure kept; seen in records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/framesSent",
+    "new_path": "metrics/framesSent",
+    "reason": "unchanged; structure kept; seen in records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/goodputBps",
+    "new_path": "metrics/goodputBps",
+    "reason": "unchanged; structure kept; seen in records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/goodputMbps",
+    "new_path": "metrics/goodputMbps",
+    "reason": "unchanged; structure kept; seen in records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/idleSecondsObserved",
+    "new_path": "metrics/idleSecondsObserved",
+    "reason": "unchanged; structure kept; seen in records/PERSIST.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/idleSecondsScheduled",
+    "new_path": "metrics/idleSecondsScheduled",
+    "reason": "unchanged; structure kept; seen in records/PERSIST.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/late",
+    "new_path": "metrics/late",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/lateRate",
+    "new_path": "metrics/lateRate",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency",
+    "new_path": "metrics/latency",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/tcp.abandonedAtTeardown",
+    "new_path": "metrics/latency/tcp.abandonedAtTeardown",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/tcp.achievedRate",
+    "new_path": "metrics/latency/tcp.achievedRate",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/tcp.backlogDrops",
+    "new_path": "metrics/latency/tcp.backlogDrops",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/tcp.clientSendLoss",
+    "new_path": "metrics/latency/tcp.clientSendLoss",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/tcp.connectAttempts",
+    "new_path": "metrics/latency/tcp.connectAttempts",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/tcp.connectFailures",
+    "new_path": "metrics/latency/tcp.connectFailures",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/tcp.corrupt",
+    "new_path": "metrics/latency/tcp.corrupt",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/tcp.laneSentOk",
+    "new_path": "metrics/latency/tcp.laneSentOk",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/tcp.laneStarted",
+    "new_path": "metrics/latency/tcp.laneStarted",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/tcp.laneSupplied",
+    "new_path": "metrics/latency/tcp.laneSupplied",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/tcp.meanConnectMs",
+    "new_path": "metrics/latency/tcp.meanConnectMs",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/tcp.outstandingAtTeardown",
+    "new_path": "metrics/latency/tcp.outstandingAtTeardown",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/tcp.protocolErrors",
+    "new_path": "metrics/latency/tcp.protocolErrors",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/tcp.received",
+    "new_path": "metrics/latency/tcp.received",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/tcp.remoteClosed",
+    "new_path": "metrics/latency/tcp.remoteClosed",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/tcp.scheduleTruncated",
+    "new_path": "metrics/latency/tcp.scheduleTruncated",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/tcp.sendFailures",
+    "new_path": "metrics/latency/tcp.sendFailures",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/tcp.sendWouldBlock",
+    "new_path": "metrics/latency/tcp.sendWouldBlock",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/tcp.supplied",
+    "new_path": "metrics/latency/tcp.supplied",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/tcp.unmatchedReplies",
+    "new_path": "metrics/latency/tcp.unmatchedReplies",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/tcp.windowCeilingMs",
+    "new_path": "metrics/latency/tcp.windowCeilingMs",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/tcp.windowOverflow",
+    "new_path": "metrics/latency/tcp.windowOverflow",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/udp.abandonedAtTeardown",
+    "new_path": "metrics/latency/udp.abandonedAtTeardown",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/udp.achievedRate",
+    "new_path": "metrics/latency/udp.achievedRate",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/udp.backlogDrops",
+    "new_path": "metrics/latency/udp.backlogDrops",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/udp.clientSendLoss",
+    "new_path": "metrics/latency/udp.clientSendLoss",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/udp.corrupt",
+    "new_path": "metrics/latency/udp.corrupt",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/udp.foreignConnection",
+    "new_path": "metrics/latency/udp.foreignConnection",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/udp.laneStarted",
+    "new_path": "metrics/latency/udp.laneStarted",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/udp.lossRate",
+    "new_path": "metrics/latency/udp.lossRate",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/udp.outstandingAtTeardown",
+    "new_path": "metrics/latency/udp.outstandingAtTeardown",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/udp.protocolErrors",
+    "new_path": "metrics/latency/udp.protocolErrors",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/udp.received",
+    "new_path": "metrics/latency/udp.received",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/udp.scheduleTruncated",
+    "new_path": "metrics/latency/udp.scheduleTruncated",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/udp.sendFailures",
+    "new_path": "metrics/latency/udp.sendFailures",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/udp.sendWouldBlock",
+    "new_path": "metrics/latency/udp.sendWouldBlock",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/udp.supplied",
+    "new_path": "metrics/latency/udp.supplied",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/udp.unmatchedReplies",
+    "new_path": "metrics/latency/udp.unmatchedReplies",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/udp.windowCeilingMs",
+    "new_path": "metrics/latency/udp.windowCeilingMs",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/latency/udp.windowOverflow",
+    "new_path": "metrics/latency/udp.windowOverflow",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss",
+    "new_path": "metrics/loss",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/abandonedAtTeardown",
+    "new_path": "metrics/loss/abandonedAtTeardown",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/achievedRate",
+    "new_path": "metrics/loss/achievedRate",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/arrived",
+    "new_path": "metrics/loss/arrived",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/clientSendLoss",
+    "new_path": "metrics/loss/clientSendLoss",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/clientSendLossRate",
+    "new_path": "metrics/loss/clientSendLossRate",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/corrupt",
+    "new_path": "metrics/loss/corrupt",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/corruptDatagrams",
+    "new_path": "metrics/loss/corruptDatagrams",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/corruptRate",
+    "new_path": "metrics/loss/corruptRate",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/duplicate",
+    "new_path": "metrics/loss/duplicate",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/duplicateRate",
+    "new_path": "metrics/loss/duplicateRate",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/foreignConnection",
+    "new_path": "metrics/loss/foreignConnection",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/late",
+    "new_path": "metrics/loss/late",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/lateRate",
+    "new_path": "metrics/loss/lateRate",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/lossRate",
+    "new_path": "metrics/loss/lossRate",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/never",
+    "new_path": "metrics/loss/never",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/outOfRangeSequences",
+    "new_path": "metrics/loss/outOfRangeSequences",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/receivedBytes",
+    "new_path": "metrics/loss/receivedBytes",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/receivedDatagrams",
+    "new_path": "metrics/loss/receivedDatagrams",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/reorderRate",
+    "new_path": "metrics/loss/reorderRate",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/reordered",
+    "new_path": "metrics/loss/reordered",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/sendFailures",
+    "new_path": "metrics/loss/sendFailures",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/sendWouldBlock",
+    "new_path": "metrics/loss/sendWouldBlock",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/sent",
+    "new_path": "metrics/loss/sent",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/strictLossRate",
+    "new_path": "metrics/loss/strictLossRate",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/supplied",
+    "new_path": "metrics/loss/supplied",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/unmatchedReplies",
+    "new_path": "metrics/loss/unmatchedReplies",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/window",
+    "new_path": "metrics/loss/window",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/loss/windowOverflow",
+    "new_path": "metrics/loss/windowOverflow",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/lossRate",
+    "new_path": "metrics/lossRate",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/malformed",
+    "new_path": "metrics/malformed",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/meanConnectMs",
+    "new_path": "metrics/meanConnectMs",
+    "reason": "unchanged; structure kept; seen in records/PERSIST.jsonl, records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/meanTransferMs",
+    "new_path": "metrics/meanTransferMs",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/modeSchedule",
+    "new_path": "metrics/modeSchedule",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/never",
+    "new_path": "metrics/never",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/offered",
+    "new_path": "metrics/offered",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/other",
+    "new_path": "metrics/other",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/outOfRangeSequences",
+    "new_path": "metrics/outOfRangeSequences",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/outcomes",
+    "new_path": "metrics/outcomes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/outcomes/clean",
+    "new_path": "metrics/outcomes/clean",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/outcomes/connectFail",
+    "new_path": "metrics/outcomes/connectFail",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/outcomes/halfCloseViolation",
+    "new_path": "metrics/outcomes/halfCloseViolation",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/outcomes/otherError",
+    "new_path": "metrics/outcomes/otherError",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/outcomes/reset",
+    "new_path": "metrics/outcomes/reset",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/outcomes/timeout",
+    "new_path": "metrics/outcomes/timeout",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/outcomes/unexpectedEof",
+    "new_path": "metrics/outcomes/unexpectedEof",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/pageBytes",
+    "new_path": "metrics/pageBytes",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/pageConnections",
+    "new_path": "metrics/pageConnections",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/pages",
+    "new_path": "metrics/pages",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/perStreamMaxBytes",
+    "new_path": "metrics/perStreamMaxBytes",
+    "reason": "unchanged; structure kept; seen in records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/perStreamMinBytes",
+    "new_path": "metrics/perStreamMinBytes",
+    "reason": "unchanged; structure kept; seen in records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/protocolErrors",
+    "new_path": "metrics/protocolErrors",
+    "reason": "unchanged; structure kept; seen in records/PERSIST.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/queryTypes",
+    "new_path": "metrics/queryTypes",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/queryTypes/A",
+    "new_path": "metrics/queryTypes/A",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/queryTypes/AAAA",
+    "new_path": "metrics/queryTypes/AAAA",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/queryTypes/HTTPS",
+    "new_path": "metrics/queryTypes/HTTPS",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/queryTypes/TXT",
+    "new_path": "metrics/queryTypes/TXT",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/rcodes",
+    "new_path": "metrics/rcodes",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/rcodes/0",
+    "new_path": "metrics/rcodes/0",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/receivedBytes",
+    "new_path": "metrics/receivedBytes",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/receivedDatagrams",
+    "new_path": "metrics/receivedDatagrams",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/reconnects",
+    "new_path": "metrics/reconnects",
+    "reason": "unchanged; structure kept; seen in records/PERSIST.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/remoteClosed",
+    "new_path": "metrics/remoteClosed",
+    "reason": "unchanged; structure kept; seen in records/PERSIST.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/reorderRate",
+    "new_path": "metrics/reorderRate",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/reordered",
+    "new_path": "metrics/reordered",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/requests",
+    "new_path": "metrics/requests",
+    "reason": "unchanged; structure kept; seen in records/PERSIST.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/responseRate",
+    "new_path": "metrics/responseRate",
+    "reason": "unchanged; structure kept; seen in records/PERSIST.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/responses",
+    "new_path": "metrics/responses",
+    "reason": "unchanged; structure kept; seen in records/PERSIST.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/scheduledAttempts",
+    "new_path": "metrics/scheduledAttempts",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/sendFailures",
+    "new_path": "metrics/sendFailures",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl, records/PERSIST.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/sendWouldBlock",
+    "new_path": "metrics/sendWouldBlock",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl, records/PERSIST.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/sent",
+    "new_path": "metrics/sent",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl, records/LOSS.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/servfail",
+    "new_path": "metrics/servfail",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/socketErrors",
+    "new_path": "metrics/socketErrors",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/streamConnects",
+    "new_path": "metrics/streamConnects",
+    "reason": "unchanged; structure kept; seen in records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/strictLossRate",
+    "new_path": "metrics/strictLossRate",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/supplied",
+    "new_path": "metrics/supplied",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/survivedIdle",
+    "new_path": "metrics/survivedIdle",
+    "reason": "unchanged; structure kept; seen in records/PERSIST.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/targetBytesPerSecond",
+    "new_path": "metrics/targetBytesPerSecond",
+    "reason": "unchanged; structure kept; seen in records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/tcp.abandonedAtTeardown",
+    "new_path": "metrics/tcp.abandonedAtTeardown",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/tcp.achievedRate",
+    "new_path": "metrics/tcp.achievedRate",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/tcp.backlogDrops",
+    "new_path": "metrics/tcp.backlogDrops",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/tcp.clientSendLoss",
+    "new_path": "metrics/tcp.clientSendLoss",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/tcp.connectAttempts",
+    "new_path": "metrics/tcp.connectAttempts",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/tcp.connectFailures",
+    "new_path": "metrics/tcp.connectFailures",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/tcp.corrupt",
+    "new_path": "metrics/tcp.corrupt",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/tcp.laneSentOk",
+    "new_path": "metrics/tcp.laneSentOk",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/tcp.laneStarted",
+    "new_path": "metrics/tcp.laneStarted",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/tcp.laneSupplied",
+    "new_path": "metrics/tcp.laneSupplied",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/tcp.meanConnectMs",
+    "new_path": "metrics/tcp.meanConnectMs",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/tcp.outstandingAtTeardown",
+    "new_path": "metrics/tcp.outstandingAtTeardown",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/tcp.protocolErrors",
+    "new_path": "metrics/tcp.protocolErrors",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/tcp.received",
+    "new_path": "metrics/tcp.received",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/tcp.remoteClosed",
+    "new_path": "metrics/tcp.remoteClosed",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/tcp.scheduleTruncated",
+    "new_path": "metrics/tcp.scheduleTruncated",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/tcp.sendFailures",
+    "new_path": "metrics/tcp.sendFailures",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/tcp.sendWouldBlock",
+    "new_path": "metrics/tcp.sendWouldBlock",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/tcp.supplied",
+    "new_path": "metrics/tcp.supplied",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/tcp.unmatchedReplies",
+    "new_path": "metrics/tcp.unmatchedReplies",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/tcp.windowCeilingMs",
+    "new_path": "metrics/tcp.windowCeilingMs",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/tcp.windowOverflow",
+    "new_path": "metrics/tcp.windowOverflow",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/tcpSent",
+    "new_path": "metrics/tcpSent",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/tcpUnsent",
+    "new_path": "metrics/tcpUnsent",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/timeout",
+    "new_path": "metrics/timeout",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/timeouts",
+    "new_path": "metrics/timeouts",
+    "reason": "unchanged; structure kept; seen in records/PERSIST.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/trailerBytes",
+    "new_path": "metrics/trailerBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/truncated",
+    "new_path": "metrics/truncated",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/udp.abandonedAtTeardown",
+    "new_path": "metrics/udp.abandonedAtTeardown",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/udp.achievedRate",
+    "new_path": "metrics/udp.achievedRate",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/udp.backlogDrops",
+    "new_path": "metrics/udp.backlogDrops",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/udp.clientSendLoss",
+    "new_path": "metrics/udp.clientSendLoss",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/udp.corrupt",
+    "new_path": "metrics/udp.corrupt",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/udp.foreignConnection",
+    "new_path": "metrics/udp.foreignConnection",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/udp.laneStarted",
+    "new_path": "metrics/udp.laneStarted",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/udp.lossRate",
+    "new_path": "metrics/udp.lossRate",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/udp.outstandingAtTeardown",
+    "new_path": "metrics/udp.outstandingAtTeardown",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/udp.protocolErrors",
+    "new_path": "metrics/udp.protocolErrors",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/udp.received",
+    "new_path": "metrics/udp.received",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/udp.scheduleTruncated",
+    "new_path": "metrics/udp.scheduleTruncated",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/udp.sendFailures",
+    "new_path": "metrics/udp.sendFailures",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/udp.sendWouldBlock",
+    "new_path": "metrics/udp.sendWouldBlock",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/udp.supplied",
+    "new_path": "metrics/udp.supplied",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/udp.unmatchedReplies",
+    "new_path": "metrics/udp.unmatchedReplies",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/udp.windowCeilingMs",
+    "new_path": "metrics/udp.windowCeilingMs",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/udp.windowOverflow",
+    "new_path": "metrics/udp.windowOverflow",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/udpUnsent",
+    "new_path": "metrics/udpUnsent",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/unanswered",
+    "new_path": "metrics/unanswered",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/unexpectedEof",
+    "new_path": "metrics/unexpectedEof",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/unmatched",
+    "new_path": "metrics/unmatched",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/unmatchedReplies",
+    "new_path": "metrics/unmatchedReplies",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl, records/PERSIST.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/unsent",
+    "new_path": "metrics/unsent",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/window",
+    "new_path": "metrics/window",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "metrics/windowOverflow",
+    "new_path": "metrics/windowOverflow",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "mode",
+    "new_path": "mode",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl, ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "notes",
+    "new_path": "notes",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "observed",
+    "new_path": "observed",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "osDescription",
+    "new_path": "osDescription",
+    "reason": "unchanged; structure kept; seen in records/run.json"
+  },
+  {
+    "kind": "identical",
+    "old_path": "otherError",
+    "new_path": "otherError",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "outDirectory",
+    "new_path": "outDirectory",
+    "reason": "unchanged; structure kept; seen in records/run.json"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters",
+    "new_path": "parameters",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/bulkBitsPerSecondPerDesktop",
+    "new_path": "parameters/bulkBitsPerSecondPerDesktop",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/cnameEvery",
+    "new_path": "parameters/cnameEvery",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/connectionsPerSecond",
+    "new_path": "parameters/connectionsPerSecond",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/desktops",
+    "new_path": "parameters/desktops",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/dnsPort",
+    "new_path": "parameters/dnsPort",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/dnsQueriesPerPage",
+    "new_path": "parameters/dnsQueriesPerPage",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/drainWindowMs",
+    "new_path": "parameters/drainWindowMs",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/expectedBytes",
+    "new_path": "parameters/expectedBytes",
+    "reason": "unchanged; structure kept; seen in records/PERSIST.jsonl, records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/framePayloadBytes",
+    "new_path": "parameters/framePayloadBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/idleSeconds",
+    "new_path": "parameters/idleSeconds",
+    "reason": "unchanged; structure kept; seen in records/PERSIST.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/inFlightWindow",
+    "new_path": "parameters/inFlightWindow",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/intervalMs",
+    "new_path": "parameters/intervalMs",
+    "reason": "unchanged; structure kept; seen in records/PERSIST.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/lanes",
+    "new_path": "parameters/lanes",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/latency",
+    "new_path": "parameters/latency",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/latency/inFlightWindow",
+    "new_path": "parameters/latency/inFlightWindow",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/latency/lanes",
+    "new_path": "parameters/latency/lanes",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/latency/payloadBytes",
+    "new_path": "parameters/latency/payloadBytes",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/latency/protocol",
+    "new_path": "parameters/latency/protocol",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/latency/ratePerSecond",
+    "new_path": "parameters/latency/ratePerSecond",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/latency/seconds",
+    "new_path": "parameters/latency/seconds",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/loss",
+    "new_path": "parameters/loss",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/loss/lossWindowMs",
+    "new_path": "parameters/loss/lossWindowMs",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/loss/payloadBytes",
+    "new_path": "parameters/loss/payloadBytes",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/loss/ratePerSecond",
+    "new_path": "parameters/loss/ratePerSecond",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/loss/seconds",
+    "new_path": "parameters/loss/seconds",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/lossWindowMs",
+    "new_path": "parameters/lossWindowMs",
+    "reason": "unchanged; structure kept; seen in records/LOSS.jsonl, records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/modeMix",
+    "new_path": "parameters/modeMix",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/pageConnections",
+    "new_path": "parameters/pageConnections",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/pageIntervalSeconds",
+    "new_path": "parameters/pageIntervalSeconds",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/pageMessageBytes",
+    "new_path": "parameters/pageMessageBytes",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/pageRequestsTotal",
+    "new_path": "parameters/pageRequestsTotal",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/payloadBytes",
+    "new_path": "parameters/payloadBytes",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/PERSIST.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/phaseSeconds",
+    "new_path": "parameters/phaseSeconds",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/phases",
+    "new_path": "parameters/phases",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/protocol",
+    "new_path": "parameters/protocol",
+    "reason": "unchanged; structure kept; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/ratePerSecond",
+    "new_path": "parameters/ratePerSecond",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/responseTimeoutMs",
+    "new_path": "parameters/responseTimeoutMs",
+    "reason": "unchanged; structure kept; seen in records/PERSIST.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/seconds",
+    "new_path": "parameters/seconds",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/streams",
+    "new_path": "parameters/streams",
+    "reason": "unchanged; structure kept; seen in records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/targetBytesPerSecond",
+    "new_path": "parameters/targetBytesPerSecond",
+    "reason": "unchanged; structure kept; seen in records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/tcpPercent",
+    "new_path": "parameters/tcpPercent",
+    "reason": "unchanged; structure kept; seen in records/DNS.jsonl, records/DNSALT.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/traffic",
+    "new_path": "parameters/traffic",
+    "reason": "unchanged; structure kept; seen in records/IDLE.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/udpPacketsPerSecondPerDesktop",
+    "new_path": "parameters/udpPacketsPerSecondPerDesktop",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "parameters/udpPayloadBytes",
+    "new_path": "parameters/udpPayloadBytes",
+    "reason": "unchanged; structure kept; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "peakWorkingSetBytes",
+    "new_path": "peakWorkingSetBytes",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "peer",
+    "new_path": "peer",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "planHash",
+    "new_path": "planHash",
+    "reason": "unchanged; structure kept; seen in records/run.json"
+  },
+  {
+    "kind": "identical",
+    "old_path": "planPath",
+    "new_path": "planPath",
+    "reason": "unchanged; structure kept; seen in records/run.json"
+  },
+  {
+    "kind": "identical",
+    "old_path": "port",
+    "new_path": "port",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "privateBytes",
+    "new_path": "privateBytes",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "process",
+    "new_path": "process",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "processes",
+    "new_path": "processes",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "processes/countersRead",
+    "new_path": "processes/countersRead",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "processes/cpuSeconds",
+    "new_path": "processes/cpuSeconds",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "processes/pid",
+    "new_path": "processes/pid",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "processes/privateBytes",
+    "new_path": "processes/privateBytes",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "processes/startUtc",
+    "new_path": "processes/startUtc",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "protocolError",
+    "new_path": "protocolError",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "protocolErrors",
+    "new_path": "protocolErrors",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "readErrors",
+    "new_path": "readErrors",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "received",
+    "new_path": "received",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "reset",
+    "new_path": "reset",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "resultFile",
+    "new_path": "resultFile",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "samplerProcesses",
+    "new_path": "samplerProcesses",
+    "reason": "unchanged; structure kept; seen in records/run.json"
+  },
+  {
+    "kind": "identical",
+    "old_path": "self",
+    "new_path": "self",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "sourceOverflow",
+    "new_path": "sourceOverflow",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "sources",
+    "new_path": "sources",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "sources/address",
+    "new_path": "sources/address",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "sources/datagrams",
+    "new_path": "sources/datagrams",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "sources/port",
+    "new_path": "sources/port",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "startedTicks",
+    "new_path": "startedTicks",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl, records/run.json, ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "startedUtc",
+    "new_path": "startedUtc",
+    "reason": "unchanged; structure kept; seen in records/run.json"
+  },
+  {
+    "kind": "identical",
+    "old_path": "status",
+    "new_path": "status",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "target",
+    "new_path": "target",
+    "reason": "unchanged; structure kept; seen in records/run.json"
+  },
+  {
+    "kind": "identical",
+    "old_path": "target/address",
+    "new_path": "target/address",
+    "reason": "unchanged; structure kept; seen in records/run.json"
+  },
+  {
+    "kind": "identical",
+    "old_path": "target/dnsPort",
+    "new_path": "target/dnsPort",
+    "reason": "unchanged; structure kept; seen in records/run.json"
+  },
+  {
+    "kind": "identical",
+    "old_path": "target/tcpPort",
+    "new_path": "target/tcpPort",
+    "reason": "unchanged; structure kept; seen in records/run.json"
+  },
+  {
+    "kind": "identical",
+    "old_path": "target/udpPort",
+    "new_path": "target/udpPort",
+    "reason": "unchanged; structure kept; seen in records/run.json"
+  },
+  {
+    "kind": "identical",
+    "old_path": "tcp",
+    "new_path": "tcp",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "tcp/bytesEchoed",
+    "new_path": "tcp/bytesEchoed",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "tcp/connections",
+    "new_path": "tcp/connections",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "tcp/protocolErrors",
+    "new_path": "tcp/protocolErrors",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "tcp/verdicts",
+    "new_path": "tcp/verdicts",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "tcp/verdicts/clean",
+    "new_path": "tcp/verdicts/clean",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "tcp/verdicts/clientClosedEarly",
+    "new_path": "tcp/verdicts/clientClosedEarly",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "tcp/verdicts/error",
+    "new_path": "tcp/verdicts/error",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "tcp/verdicts/halfClose",
+    "new_path": "tcp/verdicts/halfClose",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "tcp/verdicts/partialFin",
+    "new_path": "tcp/verdicts/partialFin",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "tcp/verdicts/protocolError",
+    "new_path": "tcp/verdicts/protocolError",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "tcp/verdicts/reset",
+    "new_path": "tcp/verdicts/reset",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "tcp/verdicts/stall",
+    "new_path": "tcp/verdicts/stall",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "tcpAborted",
+    "new_path": "tcpAborted",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "tcpAnswers",
+    "new_path": "tcpAnswers",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "tcpConnections",
+    "new_path": "tcpConnections",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "tcpEmptyAnswers",
+    "new_path": "tcpEmptyAnswers",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "tcpMalformed",
+    "new_path": "tcpMalformed",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "tcpQueries",
+    "new_path": "tcpQueries",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "threads",
+    "new_path": "threads",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "ticks",
+    "new_path": "ticks",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl, ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "trailerBytes",
+    "new_path": "trailerBytes",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "transferTicks",
+    "new_path": "transferTicks",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "truncated",
+    "new_path": "truncated",
+    "reason": "unchanged; structure kept; seen in records/REL.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "type",
+    "new_path": "type",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl, records/run.json, ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "udp",
+    "new_path": "udp",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "udp/bytes",
+    "new_path": "udp/bytes",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "udp/received",
+    "new_path": "udp/received",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "udp/sendErrors",
+    "new_path": "udp/sendErrors",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "udp/undecodable",
+    "new_path": "udp/undecodable",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "udpAnswers",
+    "new_path": "udpAnswers",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "udpEmptyAnswers",
+    "new_path": "udpEmptyAnswers",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "udpMalformed",
+    "new_path": "udpMalformed",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "udpQueries",
+    "new_path": "udpQueries",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "udpSendErrors",
+    "new_path": "udpSendErrors",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "undecodable",
+    "new_path": "undecodable",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "utc",
+    "new_path": "utc",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "verdict",
+    "new_path": "verdict",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "verdicts",
+    "new_path": "verdicts",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "verdicts/clean",
+    "new_path": "verdicts/clean",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "verdicts/clientClosedEarly",
+    "new_path": "verdicts/clientClosedEarly",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "verdicts/error",
+    "new_path": "verdicts/error",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "verdicts/halfClose",
+    "new_path": "verdicts/halfClose",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "verdicts/partialFin",
+    "new_path": "verdicts/partialFin",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "verdicts/protocolError",
+    "new_path": "verdicts/protocolError",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "verdicts/reset",
+    "new_path": "verdicts/reset",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "verdicts/stall",
+    "new_path": "verdicts/stall",
+    "reason": "unchanged; structure kept; seen in ledger/ledger.jsonl"
+  },
+  {
+    "kind": "identical",
+    "old_path": "wallSeconds",
+    "new_path": "wallSeconds",
+    "reason": "unchanged; structure kept; seen in records/run.json"
+  },
+  {
+    "kind": "identical",
+    "old_path": "workingSetBytes",
+    "new_path": "workingSetBytes",
+    "reason": "unchanged; structure kept; seen in records/BASE.jsonl, records/DNS.jsonl, records/DNSALT.jsonl, records/IDLE.jsonl, records/LAT.jsonl, records/LATLOAD.jsonl, records/LOSS.jsonl, records/MIX.jsonl, records/PERSIST.jsonl, records/REL.jsonl, records/THRU.jsonl"
+  },
+  {
+    "kind": "renamed",
+    "old_path": "metrics/desktops/udpArrived",
+    "new_path": "metrics/desktops/udp.arrived",
+    "reason": "arrived / udpArrived -> arrived; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "renamed",
+    "old_path": "metrics/desktops/udpForeignConnection",
+    "new_path": "metrics/desktops/udp.foreignConnection",
+    "reason": "foreignConnection / udpForeignConnection -> foreignConnection; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "renamed",
+    "old_path": "metrics/desktops/udpSent",
+    "new_path": "metrics/desktops/udp.sent",
+    "reason": "sentOk / sent / udpSent -> sent; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "renamed",
+    "old_path": "metrics/latency/tcp.sentOk",
+    "new_path": "metrics/latency/tcp.sent",
+    "reason": "sentOk / sent / udpSent -> sent; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "renamed",
+    "old_path": "metrics/latency/udp.sentOk",
+    "new_path": "metrics/latency/udp.sent",
+    "reason": "sentOk / sent / udpSent -> sent; seen in records/BASE.jsonl"
+  },
+  {
+    "kind": "renamed",
+    "old_path": "metrics/tcp.sentOk",
+    "new_path": "metrics/tcp.sent",
+    "reason": "sentOk / sent / udpSent -> sent; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "renamed",
+    "old_path": "metrics/udp.sentOk",
+    "new_path": "metrics/udp.sent",
+    "reason": "sentOk / sent / udpSent -> sent; seen in records/LAT.jsonl, records/LATLOAD.jsonl"
+  },
+  {
+    "kind": "renamed",
+    "old_path": "metrics/udpLossRate",
+    "new_path": "metrics/udp.lossRate",
+    "reason": "lossRate / udpLossRate -> lossRate; seen in records/MIX.jsonl"
+  },
+  {
+    "kind": "renamed",
+    "old_path": "metrics/udpSent",
+    "new_path": "metrics/udp.sent",
+    "reason": "sentOk / sent / udpSent -> sent; seen in records/DNS.jsonl, records/DNSALT.jsonl, records/MIX.jsonl"
+  }
+]
