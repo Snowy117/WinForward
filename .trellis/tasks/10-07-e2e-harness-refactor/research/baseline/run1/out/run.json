@@ -1,0 +1,114 @@
+{
+  "type": "run",
+  "label": "selftest",
+  "clientVersion": "1.0.0.0",
+  "osDescription": "NixOS 26.11 (Zokor)",
+  "frameworkDescription": ".NET 10.0.12",
+  "logicalProcessors": 32,
+  "planHash": "38f8d03504ea6984",
+  "planPath": "/home/paff/Projects/WinForward/benchmarks/WinForward.E2E/scripts/plans/selftest-plan.json",
+  "outDirectory": "/tmp/wf-bench/selftest/out",
+  "target": {
+    "address": "127.0.0.1",
+    "tcpPort": 31010,
+    "udpPort": 31010,
+    "dnsPort": 5301
+  },
+  "samplerProcesses": [],
+  "startedUtc": "2026-10-06T17:34:47.1247325\u002B00:00",
+  "endedUtc": "2026-10-06T17:36:22.6929207\u002B00:00",
+  "startedTicks": 19808074756754,
+  "endedTicks": 19903638602947,
+  "wallSeconds": 95.564,
+  "arms": [
+    {
+      "name": "IDLE",
+      "kind": "idle",
+      "file": "IDLE.jsonl",
+      "startedTicks": 19808087528824,
+      "endedTicks": 19813090910466,
+      "failed": false
+    },
+    {
+      "name": "LAT",
+      "kind": "latency",
+      "file": "LAT.jsonl",
+      "startedTicks": 19813104601773,
+      "endedTicks": 19821124201909,
+      "failed": false
+    },
+    {
+      "name": "LATLOAD",
+      "kind": "latency",
+      "file": "LATLOAD.jsonl",
+      "startedTicks": 19821127864816,
+      "endedTicks": 19829131326293,
+      "failed": false
+    },
+    {
+      "name": "DNS",
+      "kind": "dns",
+      "file": "DNS.jsonl",
+      "startedTicks": 19829132970043,
+      "endedTicks": 19837140799451,
+      "failed": false
+    },
+    {
+      "name": "DNSALT",
+      "kind": "dns",
+      "file": "DNSALT.jsonl",
+      "startedTicks": 19837141737662,
+      "endedTicks": 19845144048198,
+      "failed": false
+    },
+    {
+      "name": "LOSS",
+      "kind": "loss",
+      "file": "LOSS.jsonl",
+      "startedTicks": 19845144868721,
+      "endedTicks": 19855351622813,
+      "failed": false
+    },
+    {
+      "name": "REL",
+      "kind": "reliability",
+      "file": "REL.jsonl",
+      "startedTicks": 19855353814287,
+      "endedTicks": 19865370374336,
+      "failed": false
+    },
+    {
+      "name": "THRU",
+      "kind": "throughput",
+      "file": "THRU.jsonl",
+      "startedTicks": 19865372764667,
+      "endedTicks": 19873376979400,
+      "failed": false
+    },
+    {
+      "name": "MIX",
+      "kind": "mix",
+      "file": "MIX.jsonl",
+      "startedTicks": 19873381254613,
+      "endedTicks": 19883412412525,
+      "failed": false
+    },
+    {
+      "name": "PERSIST",
+      "kind": "persistent",
+      "file": "PERSIST.jsonl",
+      "startedTicks": 19883413967423,
+      "endedTicks": 19893426988361,
+      "failed": false
+    },
+    {
+      "name": "BASE",
+      "kind": "base",
+      "file": "BASE.jsonl",
+      "startedTicks": 19893428511904,
+      "endedTicks": 19903637426333,
+      "failed": false
+    }
+  ],
+  "failed": false
+}

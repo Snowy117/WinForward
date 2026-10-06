@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Quality Check 清单入口"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "三条门禁命令与零诊断要求"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "新项目/新文件的放置与 400 有效行约束"}
+{"file": ".trellis/spec/backend/test-stability.md", "reason": "核对新增测试是否违反时间/端口/顺序稳定性约定"}
+{"file": ".trellis/tasks/10-07-e2e-harness-refactor/design-decisions.md", "reason": "核对实现是否落在裁定口径上（尤其 D2/D5/D7/D10）"}
+{"file": ".trellis/tasks/10-07-e2e-harness-refactor/research/client-infrastructure-code-quality-audit.md", "reason": "Tier 0 每条缺陷的判据与实测复现方式"}

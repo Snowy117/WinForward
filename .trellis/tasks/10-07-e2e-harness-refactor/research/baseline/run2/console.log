@@ -1,0 +1,370 @@
+e2e client: arm LAT finished in 8.0s
+e2e client: arm LATLOAD (latency) starting
+e2e client: arm LATLOAD finished in 8.0s
+e2e client: arm DNS (dns) starting
+e2e client: arm DNS finished in 8.0s
+e2e client: arm DNSALT (dns) starting
+e2e client: arm DNSALT finished in 8.0s
+e2e client: arm LOSS (loss) starting
+e2e client: arm LOSS finished in 10.2s
+e2e client: arm REL (reliability) starting
+e2e client: arm REL finished in 10.0s
+e2e client: arm THRU (throughput) starting
+e2e client: arm THRU finished in 8.0s
+e2e client: arm MIX (mix) starting
+e2e client: arm MIX finished in 10.0s
+e2e client: arm PERSIST (persistent) starting
+e2e client: arm PERSIST finished in 10.0s
+e2e client: arm BASE (base) starting
+e2e client: arm BASE finished in 10.2s
+e2e client: 11 arm(s) written to /tmp/wf-bench/selftest/out
+
+=== every result record, arm by arm ===
+--- BASE (base) ---
+    elapsedSeconds                     10.2049
+    latency                            tcp.abandonedAtTeardown=0, tcp.achievedRate=20.19, tcp.backlogDrops=0, tcp.clientSendLoss=0, tcp.connectAttempts=6, tcp.connectFailures=0, tcp.corrupt
+    loss                               abandonedAtTeardown=0, achievedRate=480.844, arrived=2501, clientSendLoss=0, clientSendLossRate=0, corrupt=0, corruptDatagrams=0, corruptRate=0, dupli
+    [tcp-connect   ] n=5        p50=238.399    p99=1346.047
+    [tcp-rtt       ] n=101      p50=529.151    p99=762.879
+    [udp-rtt       ] n=101      p50=545.791    p99=784.639
+    note: base runs the latency arm and then the loss arm back to back inside one record, with no proxifier loaded: it is the harness floor.
+    note: base is two 5 s phases, so parameters.seconds is their sum and parameters.latency/parameters.loss carry the effective per-phase parameters; metrics.elapsedSeconds is the measured wall time.
+    note: both phases take every load parameter the plan's BASE entry declares and fall back per phase only where it declares none.
+    note: the latency phase runs the plan's protocol (tcp+udp) and the loss phase always runs udp, so a BASE entry that wants a udp latency floor has to declare protocol.
+    note: latency is measured from each request's intended send instant, never from the actual send instant.
+    note: sendWouldBlock counts sends the kernel did not accept synchronously; those sends still complete, so they are reported but not folded into clientSendLoss.
+    note: a reply carrying another flow's connection id validates against that flow's own filler, so it is rejected by connection id before the filler check and booked as foreignConnection; only a reply that carries this socket's own id and fails its filler is booked as corrupt.
+    note: tcp.connectAttempts counts every TCP connect the arm made -- the per-lane lane connects plus the 1 Hz connect probe -- and tcp.connectFailures counts the attempts in that same population that failed, so tcp.meanConnectMs is the mean connect duration over its successful attempts and is null when there were none; latency.tcp-connect separately holds the probe's own samples, measured from each probe's intended instant.
+    note: a request offered at a full in-flight window is deferred, not dropped: it goes out as soon as a reply frees a slot, still stamped with its original intended instant, so a stalled product is published as an inflated sample instead of a missing one; windowOverflow counts those deferrals.
+    note: the deferred queue holds at most 256 request(s) per lane, i.e. 10 s of the offered rate capped at 1048576; a request that bound discards is counted in backlogDrops and folded into gates.clientSendLoss, so an arm that censors its own tail cannot publish a clean gate.
+    note: sendFailures counts individual sends that threw; the offer loop continues after one, so a transient error costs that request's sample instead of the rest of the schedule, and that sample is folded into gates.clientSendLoss.
+    note: each lane drains its receive side for up to 1 s after the offer loop so the cohort still in flight is sampled rather than discarded; outstandingAtTeardown counts what was still unanswered, plus any deferred request that never got a slot, when the bound expired.
+    note: tcp and udp counters are summed only after every lane has joined, so sentOk cannot exceed supplied however many lanes a plan asks for.
+    note: in-flight ceiling (tcp): 1 lane(s) at 20.190 requests/s aggregate achieved with inFlightWindow 64 per lane put the measurable direct-latency ceiling at 3169.9 ms; slower requests are measured through the deferred queue, and the ceiling was not reached (windowOverflow = 0).
+    note: in-flight ceiling (udp): 1 lane at 20.190 requests/s achieved with inFlightWindow 64 put the measurable direct-latency ceiling at 3169.9 ms; slower requests are measured through the deferred queue, and the ceiling was not reached (windowOverflow = 0).
+    note: lanes actually run: tcp 1 of 1, udp 1 of 1; per-lane supplied and sent counts are published as tcp.laneSupplied and tcp.laneSentOk.
+    note: W is the plan's lossWindowMs, 200 ms when the plan does not declare one: it is declared and published as metrics.window rather than derived, so every row's arrived/late/never split is reproducible from the record alone (RFC 2680 style, a datagram is lost if it has not arrived W after its intended send instant).
+    note: a slot leaves the in-flight window W after its intended send instant even without an arrival, so a datagram the path drops cannot wedge the offer loop and stop the client sending.
+    note: every sent datagram is classified exactly once, so arrived + late + never + abandonedAtTeardown + corruptDatagrams == sent by construction; corruptDatagrams counts the sent datagrams booked corrupt, while corrupt counts corrupt arrivals and so also counts replay of a frame already booked corrupt.
+    note: the drain runs until W after the last real send, so no datagram is called lost before its whole W has passed; a drain cut short leaves the datagrams still inside their window in abandonedAtTeardown rather than in never, and they are excluded from lossRate.
+    note: reordered counts arrivals that follow the arrival of a higher sequence, the RFC 4737 definition; arriving after a higher sequence was merely sent does not count.
+    note: corrupt frames whose header decoded are removed from the never bucket; the strict-loss rate adds corrupt back on top of loss, as RFC 2680 requires.
+    note: a reply carrying another flow's connection id validates against that flow's own filler, so it is rejected by connection id before the filler check and booked as foreignConnection; a reply for a sequence this socket never sent is booked as unmatchedReplies.
+    note: sendWouldBlock counts sends the kernel did not accept synchronously; a send that failed synchronously is counted in sendFailures only, because it completes rather than blocks and never enters the sent population.
+    note: outOfRangeSequences counts sequences the tracker refused as outside its bounded sequence space; a non-zero value means part of the offered schedule was never tracked, so this record's classification covers fewer datagrams than sent and must not be read as a complete loss measurement.
+    note: the offer phase and the drain phase share one socket, so a reply is never delivered to a socket nobody reads.
+    note: a rate or ratio whose denominator is zero is written as null rather than 0: nothing was sent, so there is no rate to report.
+--- DNS (dns) ---
+    achievedRate                       50.225
+    answerRate                         1
+    answered                           402
+    emptyAnswers                       70
+    malformed                          0
+    offered                            402
+    other                              0
+    queryTypes                         A=236, AAAA=96, HTTPS=64, TXT=6
+    rcodes                             0=402
+    sent                               402
+    servfail                           0
+    socketErrors                       0
+    tcpSent                            81
+    tcpUnsent                          0
+    timeout                            0
+    udpSent                            321
+    udpUnsent                          0
+    unanswered                         0
+    unmatched                          0
+    unsent                             0
+    [dns-rtt       ] n=402      p50=593.151    p99=952.063
+    note: every query written to the socket is terminal in exactly one of answered (rcode 0), servfail (rcode != 0), timeout (still unmatched when the drain window closed) or other (tcp only: a response consumed a queued query but carried a different transaction id); answered + servfail + timeout + other == sent, and unanswered is timeout + other.
+    note: drainWindowMs is not a per-query deadline. Once the send phase ends the arm keeps reading for that long and only then books every query still pending as timeout, so a query answered inside the window counts as answered however long it took, and a response that arrives after the window is closed can only be counted unmatched. cnameEvery > 0 replaces every cnameEvery-th query with a CNAME query, and because the udp path is keyed by transaction id, a udp response whose id matches no outstanding query is unmatched and can never be other.
+    note: unsent counts pacing slots skipped because the in-flight window was full: those queries never reached the socket and are in no outcome, so offered is sent + unsent and neither answerRate nor achievedRate includes them; socketErrors counts socket-level failures (connect, send, receive) that belong to no single query.
+    note: answerRate is answered / sent and achievedRate is sent per elapsed second; both divide the sent population, not the offered one.
+    note: queryTypes counts the queries actually written to the socket, per DNS type, so the mix is measured from QueryTypeFor rather than declared: a plan interleaving CNAME queries shows them here instead of hiding them.
+    note: transaction ids are reused on wraparound; a response matching no outstanding query is counted as unmatched, never as answered, and on TCP the response is matched against the id queued with the query it is credited to.
+--- DNSALT (dns) ---
+    achievedRate                       50.236
+    answerRate                         1
+    answered                           402
+    emptyAnswers                       70
+    malformed                          0
+    offered                            402
+    other                              0
+    queryTypes                         A=236, AAAA=96, HTTPS=64, TXT=6
+    rcodes                             0=402
+    sent                               402
+    servfail                           0
+    socketErrors                       0
+    tcpSent                            81
+    tcpUnsent                          0
+    timeout                            0
+    udpSent                            321
+    udpUnsent                          0
+    unanswered                         0
+    unmatched                          0
+    unsent                             0
+    [dns-rtt       ] n=402      p50=547.583    p99=724.735
+    note: every query written to the socket is terminal in exactly one of answered (rcode 0), servfail (rcode != 0), timeout (still unmatched when the drain window closed) or other (tcp only: a response consumed a queued query but carried a different transaction id); answered + servfail + timeout + other == sent, and unanswered is timeout + other.
+    note: drainWindowMs is not a per-query deadline. Once the send phase ends the arm keeps reading for that long and only then books every query still pending as timeout, so a query answered inside the window counts as answered however long it took, and a response that arrives after the window is closed can only be counted unmatched. cnameEvery > 0 replaces every cnameEvery-th query with a CNAME query, and because the udp path is keyed by transaction id, a udp response whose id matches no outstanding query is unmatched and can never be other.
+    note: unsent counts pacing slots skipped because the in-flight window was full: those queries never reached the socket and are in no outcome, so offered is sent + unsent and neither answerRate nor achievedRate includes them; socketErrors counts socket-level failures (connect, send, receive) that belong to no single query.
+    note: answerRate is answered / sent and achievedRate is sent per elapsed second; both divide the sent population, not the offered one.
+    note: queryTypes counts the queries actually written to the socket, per DNS type, so the mix is measured from QueryTypeFor rather than declared: a plan interleaving CNAME queries shows them here instead of hiding them.
+    note: transaction ids are reused on wraparound; a response matching no outstanding query is counted as unmatched, never as answered, and on TCP the response is matched against the id queued with the query it is credited to.
+--- IDLE (idle) ---
+    elapsedSeconds                     5.001
+    note: no traffic is generated; only the 1 Hz resource samples attached to this arm carry information.
+--- LAT (latency) ---
+    tcp.abandonedAtTeardown            0
+    tcp.achievedRate                   40.189
+    tcp.backlogDrops                   0
+    tcp.clientSendLoss                 0
+    tcp.connectAttempts                10
+    tcp.connectFailures                0
+    tcp.corrupt                        0
+    tcp.laneSentOk                     [161, 161]
+    tcp.laneStarted                    2
+    tcp.laneSupplied                   [161, 161]
+    tcp.meanConnectMs                  3.327
+    tcp.outstandingAtTeardown          0
+    tcp.protocolErrors                 0
+    tcp.received                       322
+    tcp.remoteClosed                   0
+    tcp.scheduleTruncated              0
+    tcp.sendFailures                   0
+    tcp.sendWouldBlock                 0
+    tcp.sentOk                         322
+    tcp.supplied                       322
+    tcp.unmatchedReplies               0
+    tcp.windowCeilingMs                203836.871
+    tcp.windowOverflow                 0
+    udp.abandonedAtTeardown            0
+    udp.achievedRate                   20.094
+    udp.backlogDrops                   0
+    udp.clientSendLoss                 0
+    udp.corrupt                        0
+    udp.foreignConnection              0
+    udp.laneStarted                    1
+    udp.lossRate                       0
+    udp.outstandingAtTeardown          0
+    udp.protocolErrors                 0
+    udp.received                       161
+    udp.scheduleTruncated              0
+    udp.sendFailures                   0
+    udp.sendWouldBlock                 0
+    udp.sentOk                         161
+    udp.supplied                       161
+    udp.unmatchedReplies               0
+    udp.windowCeilingMs                203841.943
+    udp.windowOverflow                 0
+    [tcp-connect   ] n=8        p50=388.479    p99=25526.271
+    [tcp-rtt       ] n=322      p50=527.359    p99=4792.319
+    [udp-rtt       ] n=161      p50=555.007    p99=2739.199
+    note: latency is measured from each request's intended send instant, never from the actual send instant.
+    note: sendWouldBlock counts sends the kernel did not accept synchronously; those sends still complete, so they are reported but not folded into clientSendLoss.
+    note: a reply carrying another flow's connection id validates against that flow's own filler, so it is rejected by connection id before the filler check and booked as foreignConnection; only a reply that carries this socket's own id and fails its filler is booked as corrupt.
+    note: tcp.connectAttempts counts every TCP connect the arm made -- the per-lane lane connects plus the 1 Hz connect probe -- and tcp.connectFailures counts the attempts in that same population that failed, so tcp.meanConnectMs is the mean connect duration over its successful attempts and is null when there were none; latency.tcp-connect separately holds the probe's own samples, measured from each probe's intended instant.
+    note: a request offered at a full in-flight window is deferred, not dropped: it goes out as soon as a reply frees a slot, still stamped with its original intended instant, so a stalled product is published as an inflated sample instead of a missing one; windowOverflow counts those deferrals.
+    note: the deferred queue holds at most 16384 request(s) per lane, i.e. 10 s of the offered rate capped at 1048576; a request that bound discards is counted in backlogDrops and folded into gates.clientSendLoss, so an arm that censors its own tail cannot publish a clean gate.
+    note: sendFailures counts individual sends that threw; the offer loop continues after one, so a transient error costs that request's sample instead of the rest of the schedule, and that sample is folded into gates.clientSendLoss.
+    note: each lane drains its receive side for up to 1 s after the offer loop so the cohort still in flight is sampled rather than discarded; outstandingAtTeardown counts what was still unanswered, plus any deferred request that never got a slot, when the bound expired.
+    note: tcp and udp counters are summed only after every lane has joined, so sentOk cannot exceed supplied however many lanes a plan asks for.
+    note: in-flight ceiling (tcp): 2 lane(s) at 40.189 requests/s aggregate achieved with inFlightWindow 4096 per lane put the measurable direct-latency ceiling at 203836.9 ms; slower requests are measured through the deferred queue, and the ceiling was not reached (windowOverflow = 0).
+    note: in-flight ceiling (udp): 1 lane at 20.094 requests/s achieved with inFlightWindow 4096 put the measurable direct-latency ceiling at 203841.9 ms; slower requests are measured through the deferred queue, and the ceiling was not reached (windowOverflow = 0).
+    note: lanes actually run: tcp 2 of 2, udp 1 of 1; per-lane supplied and sent counts are published as tcp.laneSupplied and tcp.laneSentOk.
+--- LATLOAD (latency) ---
+    tcp.abandonedAtTeardown            0
+    tcp.achievedRate                   200.051
+    tcp.backlogDrops                   0
+    tcp.clientSendLoss                 0
+    tcp.connectAttempts                9
+    tcp.connectFailures                0
+    tcp.corrupt                        0
+    tcp.laneSentOk                     [1601]
+    tcp.laneStarted                    1
+    tcp.laneSupplied                   [1601]
+    tcp.meanConnectMs                  0.366
+    tcp.outstandingAtTeardown          0
+    tcp.protocolErrors                 0
+    tcp.received                       1601
+    tcp.remoteClosed                   0
+    tcp.scheduleTruncated              0
+    tcp.sendFailures                   0
+    tcp.sendWouldBlock                 0
+    tcp.sentOk                         1601
+    tcp.supplied                       1601
+    tcp.unmatchedReplies               0
+    tcp.windowCeilingMs                20474.779
+    tcp.windowOverflow                 0
+    udp.abandonedAtTeardown            0
+    udp.achievedRate                   200.051
+    udp.backlogDrops                   0
+    udp.clientSendLoss                 0
+    udp.corrupt                        0
+    udp.foreignConnection              0
+    udp.laneStarted                    1
+    udp.lossRate                       0
+    udp.outstandingAtTeardown          0
+    udp.protocolErrors                 0
+    udp.received                       1601
+    udp.scheduleTruncated              0
+    udp.sendFailures                   0
+    udp.sendWouldBlock                 0
+    udp.sentOk                         1601
+    udp.supplied                       1601
+    udp.unmatchedReplies               0
+    udp.windowCeilingMs                20474.779
+    udp.windowOverflow                 0
+    [tcp-connect   ] n=8        p50=371.711    p99=1445.375
+    [tcp-rtt       ] n=1601     p50=423.679    p99=690.175
+    [udp-rtt       ] n=1601     p50=440.191    p99=779.519
+    note: latency is measured from each request's intended send instant, never from the actual send instant.
+    note: sendWouldBlock counts sends the kernel did not accept synchronously; those sends still complete, so they are reported but not folded into clientSendLoss.
+    note: a reply carrying another flow's connection id validates against that flow's own filler, so it is rejected by connection id before the filler check and booked as foreignConnection; only a reply that carries this socket's own id and fails its filler is booked as corrupt.
+    note: tcp.connectAttempts counts every TCP connect the arm made -- the per-lane lane connects plus the 1 Hz connect probe -- and tcp.connectFailures counts the attempts in that same population that failed, so tcp.meanConnectMs is the mean connect duration over its successful attempts and is null when there were none; latency.tcp-connect separately holds the probe's own samples, measured from each probe's intended instant.
+    note: a request offered at a full in-flight window is deferred, not dropped: it goes out as soon as a reply frees a slot, still stamped with its original intended instant, so a stalled product is published as an inflated sample instead of a missing one; windowOverflow counts those deferrals.
+    note: the deferred queue holds at most 16384 request(s) per lane, i.e. 10 s of the offered rate capped at 1048576; a request that bound discards is counted in backlogDrops and folded into gates.clientSendLoss, so an arm that censors its own tail cannot publish a clean gate.
+    note: sendFailures counts individual sends that threw; the offer loop continues after one, so a transient error costs that request's sample instead of the rest of the schedule, and that sample is folded into gates.clientSendLoss.
+    note: each lane drains its receive side for up to 1 s after the offer loop so the cohort still in flight is sampled rather than discarded; outstandingAtTeardown counts what was still unanswered, plus any deferred request that never got a slot, when the bound expired.
+    note: tcp and udp counters are summed only after every lane has joined, so sentOk cannot exceed supplied however many lanes a plan asks for.
+    note: in-flight ceiling (tcp): 1 lane(s) at 200.051 requests/s aggregate achieved with inFlightWindow 4096 per lane put the measurable direct-latency ceiling at 20474.8 ms; slower requests are measured through the deferred queue, and the ceiling was not reached (windowOverflow = 0).
+    note: in-flight ceiling (udp): 1 lane at 200.051 requests/s achieved with inFlightWindow 4096 put the measurable direct-latency ceiling at 20474.8 ms; slower requests are measured through the deferred queue, and the ceiling was not reached (windowOverflow = 0).
+    note: lanes actually run: tcp 1 of 1, udp 1 of 1; per-lane supplied and sent counts are published as tcp.laneSupplied and tcp.laneSentOk.
+--- LOSS (loss) ---
+    abandonedAtTeardown                0
+    achievedRate                       196.096
+    arrived                            2001
+    clientSendLoss                     0
+    clientSendLossRate                 0
+    corrupt                            0
+    corruptDatagrams                   0
+    corruptRate                        0
+    duplicate                          0
+    duplicateRate                      0
+    foreignConnection                  0
+    late                               0
+    lateRate                           0
+    lossRate                           0
+    never                              0
+    outOfRangeSequences                0
+    receivedBytes                      400200
+    receivedDatagrams                  2001
+    reorderRate                        0
+    reordered                          0
+    sendFailures                       0
+    sendWouldBlock                     0
+    sent                               2001
+    strictLossRate                     0
+    supplied                           2001
+    unmatchedReplies                   0
+    window                             200
+    windowOverflow                     0
+    note: W is the plan's lossWindowMs, 200 ms when the plan does not declare one: it is declared and published as metrics.window rather than derived, so every row's arrived/late/never split is reproducible from the record alone (RFC 2680 style, a datagram is lost if it has not arrived W after its intended send instant).
+    note: a slot leaves the in-flight window W after its intended send instant even without an arrival, so a datagram the path drops cannot wedge the offer loop and stop the client sending.
+    note: every sent datagram is classified exactly once, so arrived + late + never + abandonedAtTeardown + corruptDatagrams == sent by construction; corruptDatagrams counts the sent datagrams booked corrupt, while corrupt counts corrupt arrivals and so also counts replay of a frame already booked corrupt.
+    note: the drain runs until W after the last real send, so no datagram is called lost before its whole W has passed; a drain cut short leaves the datagrams still inside their window in abandonedAtTeardown rather than in never, and they are excluded from lossRate.
+    note: reordered counts arrivals that follow the arrival of a higher sequence, the RFC 4737 definition; arriving after a higher sequence was merely sent does not count.
+    note: corrupt frames whose header decoded are removed from the never bucket; the strict-loss rate adds corrupt back on top of loss, as RFC 2680 requires.
+    note: a reply carrying another flow's connection id validates against that flow's own filler, so it is rejected by connection id before the filler check and booked as foreignConnection; a reply for a sequence this socket never sent is booked as unmatchedReplies.
+    note: sendWouldBlock counts sends the kernel did not accept synchronously; a send that failed synchronously is counted in sendFailures only, because it completes rather than blocks and never enters the sent population.
+    note: outOfRangeSequences counts sequences the tracker refused as outside its bounded sequence space; a non-zero value means part of the offered schedule was never tracked, so this record's classification covers fewer datagrams than sent and must not be read as a complete loss measurement.
+    note: the offer phase and the drain phase share one socket, so a reply is never delivered to a socket nobody reads.
+    note: a rate or ratio whose denominator is zero is written as null rather than 0: nothing was sent, so there is no rate to report.
+--- MIX (mix) ---
+    bulkBytes                          12529600
+    classes                            bulk={'bytes': 12529600, 'bytesSent': 12529600, 'frames': 382, 'errors': 0, 'goodputBps': 1249692.055}, dns={'sent': 8, 'answered': 8, 'servfail': 0, 
+    clientSendLoss                     0
+    desktops                           [{'desktop': 0, 'udpSent': 301, 'udpArrived': 301, 'udpNever': 0, 'udpForeignConnection': 0, 'pageConnections': 13, 'bulkFrames': 191, 'dnsSent': 4}, {'desktop': 1, 'udpSent': 301, 'udpArrived': 301, 'udpNever': 0, 'udpForeignConnection': 0, 'pageConnections': 13, 'bulkFrames': 191, 'dnsSent': 4}]
+    dnsSent                            8
+    pageBytes                          5552672
+    pageConnections                    26
+    pages                              2
+    udpLossRate                        0
+    udpSent                            602
+    [dns-rtt       ] n=8        p50=1233.919   p99=4200.447
+    [tcp-connect   ] n=26       p50=9527.295   p99=10563.583
+    [tcp-rtt       ] n=146      p50=759.807    p99=4857.855
+    [udp-rtt       ] n=602      p50=509.951    p99=723.967
+    note: W is the plan's lossWindowMs, 200 ms when the plan does not declare one: it is declared and published as classes.udp.window rather than derived, so every row's arrived/late/never split is reproducible from the record alone (RFC 2680 style).
+    note: every desktop's UDP drain runs until W after that desktop's last real send, so no datagram is called lost before its whole W has passed; datagrams still inside their window when a drain is cut short are counted in classes.udp.abandonedAtTeardown and in clientSendLoss, never in never, and they stay out of lossRate.
+    note: every sent datagram is classified exactly once, so arrived + late + never + abandonedAtTeardown + corruptDatagrams == sent by construction, exactly as in LOSS, and classes.udp.clientSendLoss is classes.udp.abandonedAtTeardown + classes.udp.sendFailures + classes.udp.windowOverflow with all three terms published beside it; corruptDatagrams counts the sent datagrams booked corrupt while corrupt counts corrupt arrivals, windowOverflow is structurally zero because the MIX UDP class has no in-flight window, and sendFailures counts datagrams the socket refused, which is why a refused datagram is client loss and never path loss.
+    note: sentPerDesktop and desktops carry one witness per flow class per desktop, and gates.idleLanes counts the witnesses that stayed at zero: a lane that never ran is a harness failure, not a smaller aggregate.
+    note: reordered counts arrivals that follow the arrival of a higher sequence, the RFC 4737 definition; foreignConnection counts replies carrying another flow's connection id, so a non-zero value means the product mixed datagrams between flows. classes.udp.outOfRangeSequences counts sequences the tracker refused as outside its bounded sequence space: a non-zero value means part of the offered schedule was never tracked, so the classification covers fewer datagrams than sent.
+    note: every flow class carries the shared frame layout, so the per-class byte and latency numbers come from the same measurement path as the dedicated arms.
+    note: a rate whose denominator is zero is written as null rather than 0: nothing was sent, so there is no rate to report.
+--- PERSIST (persistent) ---
+    achievedRate                       1.5
+    connectAttempts                    1
+    connectFailures                    0
+    corrupt                            0
+    idleSecondsObserved                3
+    idleSecondsScheduled               3
+    meanConnectMs                      2.826
+    protocolErrors                     0
+    reconnects                         0
+    remoteClosed                       0
+    requests                           15
+    responseRate                       1
+    responses                          15
+    sendFailures                       0
+    sendWouldBlock                     0
+    survivedIdle                       True
+    timeouts                           0
+    unmatchedReplies                   0
+    [tcp-rtt       ] n=15       p50=486.143    p99=6537.215
+    note: requests counts paced exchanges attempted and responses counts the echoes that completed them, each timed from its request's intended send instant; the difference is explained by connectFailures, sendFailures, timeouts, remoteClosed and protocolErrors.
+    note: a request that finds its connection dead opens a replacement connection first and is counted as a reconnect: it records no tcp-rtt sample, so the latency histograms exclude both the reconnect and the round it carries, while responses and responseRate still count that round when it echoes.
+    note: survivedIdle is the connection live when the idle window opened completing the first request after it; it is false when that request had to reconnect, when it failed, and when no idle window fitted inside the arm.
+    note: idleSecondsScheduled is the whole number of pacing intervals the requested idle period was rounded to, shortened to what the arm can hold; idleSecondsObserved is the silence between the last request sent before the window and the first sent after it, so it includes any reconnect the first post-idle request needed.
+    note: sendWouldBlock counts sends the kernel did not accept synchronously, and meanConnectMs is null when the arm never completed a connect rather than a zero that would read as an instantaneous one.
+--- REL (reliability) ---
+    achievedRate                       10.096
+    attemptRecords                     6
+    attemptRecordsOmitted              0
+    byMode                             clean={'attempts': 26, 'observed': {'clean': 26, 'reset': 0, 'unexpectedEof': 0, 'timeout': 0, 'connectFail': 0, 'halfCloseViolation': 0, 'otherError'
+    connectAttempts                    101
+    connectFail                        0
+    echoedBytes                        827392
+    effectiveModeMix                   clean=25,resetAfterN=25,partialFin=25,halfClose=25
+    expected                           clean=51, connectFail=0, halfCloseViolation=0, otherError=0, reset=25, timeout=0, unexpectedEof=25
+    expectedBytes                      8192
+    expectedEarlyEof                   25
+    fidelityMismatch                   0
+    fidelityRate                       0
+    meanConnectMs                      0.441
+    meanTransferMs                     0.332
+    modeSchedule                       clean,resetAfterN,partialFin,halfClose
+    outcomes                           clean=51, connectFail=0, halfCloseViolation=0, otherError=0, reset=25, timeout=0, unexpectedEof=25
+    scheduledAttempts                  101
+    trailerBytes                       19200
+    truncated                          0
+    unexpectedEof                      0
+    [tcp-connect   ] n=101      p50=441.983    p99=1261.567
+    note: outcome values are what the client observed; 'expected' is what the requested mode calls for, and fidelityMismatch counts any divergence plus truncated echoes.
+    note: partialFin is expected to end as unexpectedEof: the server closes its send side while the client has deliberately not half-closed.
+    note: echoedBytes and trailerBytes are kept for every attempt whatever its outcome, so an attempt that timed out or reset still carries the echo and trailer evidence the verdict alone cannot; trailerBytes counts the bytes read after expectedBytes of echo, and the trailer the target writes is TrailerProtocol.TotalBytes.
+    note: byMode is the joint mode x observed distribution: outcomes gives the marginals, and only byMode says which mode produced them. Each mode also carries its truncated count and its echoed/trailer byte totals and extremes, so an outcome that is not uniform across the schedule is visible without guessing.
+    note: the arm writes one 'attempt' record per disconfirming attempt (observed != expected, or truncated) and one in every 16 of the ordinary ones, capped at 4096 records for the whole arm: the records carry connectionId, mode, observed and the echo/trailer evidence so a client observation can be joined 1:1 with the target ledger's verdict, and attemptRecordsOmitted counts the qualifying attempts that did not fit the cap.
+--- THRU (throughput) ---
+    budgetBytes                        160000000
+    budgetReached                      True
+    budgetRemainingBytes               1600
+    bytes                              159932800
+    bytesSent                          159998400
+    connectFailures                    0
+    corrupt                            0
+    elapsedSeconds                     8.0009
+    frames                             4876
+    framesEchoed                       4876
+    framesSent                         4878
+    goodputBps                         19989332.343
+    goodputMbps                        159.9147
+    perStreamMaxBytes                  79966400
+    perStreamMinBytes                  79966400
+    protocolErrors                     0
+    sendFailures                       0
+    streamConnects                     2
+    targetBytesPerSecond               20000000
+    note: bytes counts echoed frame bytes that the client read back; the echo path is the measured transfer, so ingress and egress are both exercised.
+    note: the aggregate send rate is paced to targetBytesPerSecond so per-stream counters stay comparable across proxifiers.
+    note: streamConnects, connectFailures and sendFailures are the stream counters behind bytesSent and bytes: a run where no stream connected publishes framesSent = 0 with connectFailures = streams, so an arm that transferred nothing says which end failed instead of reading as an arm that offered nothing.
+    note: budgetReached is true only when a stream was refused a frame because fewer than framePayloadBytes remained of budgetBytes, i.e. the run ended because the budget was spent rather than because seconds elapsed; a frame is never part-budgeted, so bytesSent stays below budgetBytes and budgetRemainingBytes is that unused remainder.

@@ -1,0 +1,29 @@
+base:  /home/paff/Projects/WinForward/.trellis/tasks/10-07-e2e-harness-refactor/research/baseline/run1
+after: /home/paff/Projects/WinForward/.trellis/tasks/10-07-e2e-harness-refactor/research/baseline/run2
+band:  (measured only, not enforced)
+
+== 1. structural (key set / kind / arity / string values) ==
+  (none)
+
+== 2. conditional keys (UseTcp / UseUdp / non-empty histogram) ==
+  (none)
+
+== 3. numeric (per-key jitter band) ==
+  (none)
+
+== 3b. measured per-key jitter bands (freeze with --write-band) ==
+  903 numeric paths measured: 607 identical in both runs, 296 moved between them (per-key bands, no global tolerance)
+  path                                                                         n                 base range                after range  maxAbsDelta
+  ledger/ledger.jsonl::ticks                                               97/97 [1.98081e+13, 1.99037e+13] [1.99073e+13, 2.00029e+13]  9.91671e+10
+  ledger/ledger.jsonl::startedTicks                                      158/158 [1.98071e+13, 1.98974e+13] [1.99062e+13, 1.99966e+13]  9.91657e+10
+  records/DNS.jsonl::ticks                                                   8/8 [1.98301e+13, 1.98371e+13] [1.99292e+13, 1.99362e+13]  9.91596e+10
+  records/THRU.jsonl::ticks                                                  8/8 [1.98661e+13, 1.98731e+13] [1.99652e+13, 1.99722e+13]  9.91594e+10
+  records/BASE.jsonl::ticks                                                10/10 [1.98941e+13, 1.99031e+13] [1.99932e+13, 2.00022e+13]  9.91594e+10
+  records/LATLOAD.jsonl::ticks                                               8/8 [1.98221e+13, 1.98291e+13] [1.99212e+13, 1.99282e+13]  9.91593e+10
+  records/LOSS.jsonl::ticks                                                10/10 [1.98461e+13, 1.98551e+13] [1.99452e+13, 1.99542e+13]  9.91593e+10
+  records/MIX.jsonl::ticks                                                 10/10 [1.98741e+13, 1.98831e+13] [1.99732e+13, 1.99822e+13]  9.91592e+10
+  records/PERSIST.jsonl::ticks                                             10/10 [1.98841e+13, 1.98931e+13] [1.99832e+13, 1.99922e+13]   9.9159e+10
+  records/LAT.jsonl::ticks                                                   8/8 [1.98141e+13, 1.98211e+13] [1.99132e+13, 1.99202e+13]  9.91589e+10
+  ... 893 more (rerun with --show-bands for the full table)
+
+summary: structural=0 conditional=0 numeric=0 measured=903

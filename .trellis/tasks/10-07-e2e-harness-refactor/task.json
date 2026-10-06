@@ -1,0 +1,32 @@
+{
+  "id": "e2e-harness-refactor",
+  "name": "e2e-harness-refactor",
+  "title": "Refactor the WinForward.E2E harness",
+  "description": "Deep refactor of benchmarks/WinForward.E2E: split the 7 over-limit files, extract the TCP/UDP lane seam, type the result model, unify the JSON contract spellings, and add unit tests.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "qmazon",
+  "assignee": "qmazon",
+  "createdAt": "2026-10-07",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "10-07-e2e-e1-contracts",
+    "10-07-e2e-e2-structure",
+    "10-07-e2e-e3-semantics",
+    "10-07-e2e-e4-analyzer",
+    "10-07-e2e-e5-docs"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

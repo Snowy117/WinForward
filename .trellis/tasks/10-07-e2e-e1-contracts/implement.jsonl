@@ -1,0 +1,9 @@
+{"file": ".trellis/tasks/10-07-e2e-harness-refactor/design-decisions.md", "reason": "E1 的权威裁定：D2(D7 记账口径)、D5(契约机制)、D7(基线判据)、D10(JsonlSink)、D11(其它默认裁定)"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "400 有效行规范与拆分纪律；新项目目录布局"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "三条质量门禁、分析器抑制策略、命名与注释规范"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "顶层兜底与错误记录语义"}
+{"file": ".trellis/spec/backend/test-stability.md", "reason": "单测不得依赖网络与真实时钟；端口/时间处理约定"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "发包路径零额外分配与 ValueTask 复用手法"}
+{"file": ".trellis/tasks/10-07-e2e-harness-refactor/research/client-infrastructure-code-quality-audit.md", "reason": "Tier 0 缺陷的实测复现与 §10.5 归一化比对配方；§11 不要动清单"}
+{"file": ".trellis/tasks/10-06-e2e-competitor-benchmark/research/harness-audit.md", "reason": "语义缺陷原始叙事（其 §二多数条目已被 DD D0 修正为已实现，仅作对照）"}
+{"file": "benchmarks/WinForward.E2E/README.md", "reason": "契约表(:303-353)、Non-obvious properties(:490-534)、Verification(:536-560) 是 E1 改名与新增字段的既有口径"}

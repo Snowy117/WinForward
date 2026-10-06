@@ -1,0 +1,14 @@
+base:  /home/paff/Projects/WinForward/.trellis/tasks/10-07-e2e-harness-refactor/research/baseline/run1
+after: /home/paff/Projects/WinForward/.trellis/tasks/10-07-e2e-harness-refactor/research/baseline/run1
+band:  /home/paff/Projects/WinForward/.trellis/tasks/10-07-e2e-harness-refactor/research/baseline/jitter-band.json
+
+== 1. structural (key set / kind / arity / string values) ==
+  (none)
+
+== 2. conditional keys (UseTcp / UseUdp / non-empty histogram) ==
+  (none)
+
+== 3. numeric (per-key jitter band) ==
+  (none)
+
+summary: structural=0 conditional=0 numeric=0 measured=903
