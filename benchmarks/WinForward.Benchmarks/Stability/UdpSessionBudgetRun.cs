@@ -22,6 +22,7 @@ internal sealed class UdpSessionBudgetRun(
     ProcessResourceSampler sampler,
     CountingRuntimeLogger productEvents,
     FlowKey[] flowKeys,
+    LoopbackSocks5UotServer? uotServer,
     TimeSpan idleTimeout,
     TimeSpan oneShotIdleTimeout,
     TimeSpan sweepInterval,
@@ -256,7 +257,8 @@ internal sealed class UdpSessionBudgetRun(
             Misdelivered: sink.ChurnMisdeliveredFlows,
             CapacityRejections: ProductDelta(RuntimeCounters.UdpCapacityRejections, _capacityRejectionsBefore),
             SetupRejections: ProductDelta(RuntimeCounters.UdpSetupRejections, _setupRejectionsBefore),
-            SetupFailures: ProductDelta(RuntimeCounters.UdpSetupFailures, _setupFailuresBefore));
+            SetupFailures: ProductDelta(RuntimeCounters.UdpSetupFailures, _setupFailuresBefore),
+            UotHandshakes: UotHandshakeCounters.Snapshot(uotServer));
         _samples.Add(sample);
         context.WriteResult("udp.sessionBudget", _parameters, sample.ToRow());
         return sample;
@@ -328,6 +330,7 @@ internal sealed class UdpSessionBudgetRun(
             relayReceiveBufferBytesPerSession = worst?.RelayReceiveBufferBytesPerSession,
             relayReceiveBufferBudget = acceptance.RelayReceiveBufferBudget,
             descriptorBudgetHeadroom = acceptance.DescriptorHeadroom,
+            uotHandshakes = UotHandshakeCounters.Snapshot(uotServer),
             drain = new
             {
                 seconds = options.DrainSeconds,

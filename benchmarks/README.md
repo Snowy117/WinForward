@@ -91,7 +91,7 @@ dotnet run -c Release --project benchmarks/WinForward.Benchmarks -- \
   --stability [--scenario all|udp|udpBurst|udpChurn|udpSessionBudget|tcp|tcpChurn|tcpthroughput|footprint|baseline|residency|retention|scaling|sweep|pump] [--duration 60] [--pps 25000] \
   [--payload-bytes 512] [--flows 256] [--udp-flows 100] [--burst-flows 48] [--dial-delay-ms 0] [--churn-waves 1] \
   [--rate 20] [--capacity 16384] [--churn-seconds 90] [--drain-seconds 120] \
-  [--target socks5|local] \
+  [--target socks5|local|uot] \
   [--tcp-concurrency 64] [--tcp-transfer-bytes 1048576] [--socks5-external] \
   [--attribution-delay-ms 0] [--attribution-delay-percent 5] [--threads 0] [--shared-key-percent 10] \
   [--abort-mix clean=25,clientRst=25,relayCancel=25,upstreamTruncate=25] [--seed 42] \
@@ -110,26 +110,44 @@ measure. The `--reuse` flag is gone and an old command line meets the harness's 
 error; the historical `off`/`auto`/`always` columns under `results/` are annotated as measurements of
 a removed feature and their commands are historical.
 
-`--target socks5|local` selects the transport the two flow-establishment scenarios send through:
+`--target socks5|local|uot` selects the transport the flow-establishment scenarios send through:
 `socks5` (the default) relays each flow through the loopback SOCKS5 server, `local` points the same
 flows at a loopback endpoint through the **product** `UdpTransportFactory` composite — both factories
 composed as the CLI composes them — which forwards the payload verbatim and attributes the answer to
-the flow's original destination. It is the placement column R7 of `10-05-local-dns-transport` asks
-for; its series is `results/2026-10-05-local-target/`, and the surviving columns' confirmation series
-is `results/2026-10-05-no-association-sharing/`. Only `udp.churn` and `udp.burstEstablishment`
-host the column; every other scenario leaves its relay path unchanged and is refused at parse time
-rather than recording a relay-measured row stamped `local` (a session-budget run, for instance, is a
-retention/descriptor soak whose row has no local-target meaning). The two
-scenarios that do host it keep the SOCKS5 server running in every column. Both servers' own
-counters land in every row — `socks5Handshakes` (`controlConnections` / `associateReplies`) and
-`localResponder`
+the flow's original destination, and `uot` dials a loopback **UoT v2** (UDP-over-TCP, connect mode)
+server through the *same* `Socks5UdpTransportFactory` with `udpOverTcp` set on the target: UoT is a
+mode of the SOCKS5 target, not a third kind, so the harness needs no factory of its own and the
+native SOCKS5 server stays up in that column so its handshakes read zero beside the UoT server's
+own. `local` is the placement column R7 of `10-05-local-dns-transport` asks for; its series is
+`results/2026-10-05-local-target/`, the surviving columns' confirmation series is
+`results/2026-10-05-no-association-sharing/`, and the UoT column's series is
+`results/2026-10-06-uot-per-flow/`. `udp.churn`, `udp.burstEstablishment` and `udp.sessionBudget`
+host a column; every other scenario leaves its relay path unchanged and is refused at parse time
+rather than recording a relay-measured row stamped `local` or `uot` (a session-budget run, for
+instance, is a retention/descriptor soak whose row has no local-target meaning — but it is exactly
+where the UoT mode's per-flow descriptor claim is priced, so that scenario hosts `uot` and not
+`local`). The two scenarios that host `local` keep the SOCKS5 server running in every column. Both
+servers' own counters land in every row — `socks5Handshakes`
+(`controlConnections` / `associateReplies`) and `localResponder`
 (`datagramsReceived` / `datagramsReplied`), cumulative from the start of the run's load (the
 unmeasured warmup wave included) — so the local column's zeros are read beside the relay columns'
 non-zeros in the same artifact rather than asserted by construction. Cumulative rather than per
 window is deliberate: each wave's handshakes are only readable as the difference between two rows,
 and the last row of a run is its total. An unknown value is
 refused at parse time, and `--target local` refuses `--socks5-external` because an
-out-of-process server's counters never reach this parent.
+out-of-process server's counters never reach this parent (`--target uot` refuses it for the same
+reason).
+
+A `uot` column carries its fixture's own counters in a `uotHandshakes` block —
+`connections` / `connectReplies` / `framesReceived` / `framesReplied` / `protocolViolations`,
+cumulative like the others — and the fixture asserts the wire sequence it is the evidence for (the
+domain-typed `CONNECT` to `sp.v2.udp-over-tcp.arpa`, the connect-mode UoT request header): a flow
+whose flight the fixture refused is counted there instead of reading as a silent zero. The block is
+present only in the rows of a column that dialled the fixture, so the `socks5` and `local` rows keep
+exactly the fields they had. `udp.sessionBudget`'s `associations` column is the same observation on
+either server: the accepted-and-still-open connection count the harness server is serving, which is
+one control connection per flow for `socks5` and one stream connection per flow for `uot`, and its
+descriptor reading subtracts the two sockets each such connection costs the in-process server.
 
 Stability runs hold the Windows system timer at 1 ms resolution (`timeBeginPeriod(1)` through the
 production `HighResolutionTimerScope`) for the whole run so the 10 ms pacing ticks fire on time;
@@ -190,8 +208,11 @@ teardown tails — are **not comparable** with current rows either.
   `results/2026-10-05-udp-reuse-ownership/`). Follows `--target`: under `local` the burst and the
   background flows go through the product transport composite to a loopback responder, and the row's
   `socks5Handshakes` / `localResponder` counters are the run's totals on both sides of the comparison
-  (`results/2026-10-05-local-target/`). Read the burst window's duration with its `injected / sent`
-  figures: the window closes when the burst's own first responses arrive or the adaptive timeout
+  (`results/2026-10-05-local-target/`); under `uot` the same flows dial the loopback UoT fixture with
+  `udpOverTcp` on the target, the row adds that fixture's `uotHandshakes` block, and `--dial-delay-ms`
+  moves to the deferred CONNECT reply — the mode's one round trip — where the first datagram's flight
+  overlaps it (`results/2026-10-06-uot-per-flow/`). Read the burst window's duration with its
+  `injected / sent` figures: the window closes when the burst's own first responses arrive or the adaptive timeout
   fires. Both surviving columns answer the burst's flows, so both close it in tens of milliseconds;
   the historical `auto` column in `results/2026-10-05-udp-reuse-ownership/` ran it to the 30 s floor
   because only 3 of 48 flows saw their own reply, which is a reading of a removed shape.
@@ -201,7 +222,9 @@ teardown tails — are **not comparable** with current rows either.
   would drive), with per-wave `allocatedBytes` / `bytesPerSession` / `gen0`–`gen2` deltas sampled
   around the full create→respond→retire cycle. Every process first fires one unmeasured warmup
   wave (first-call JIT, worker-thread creation, and socket-stack warmup would otherwise dominate a
-  short wave row). `--churn-waves K` (K ≥ 1) fires K consecutive
+  short wave row); a `uot` column fires a second one, because its fixture is a second in-process
+  server implementation (a connection task and a reply loop per flow) whose first-call cost the
+  native columns' single wave does not have to absorb. `--churn-waves K` (K ≥ 1) fires K consecutive
   waves and emits one row per wave (parameters carry the wave index); `--churn-waves 0` cycles
   waves back-to-back for `--duration` seconds and emits one aggregate row (`bytesPerSession`,
   `bytesPerSecond`, `achievedSessionsPerSecond`, per-wave bytes/session min/p50/p95/max, and the
@@ -221,10 +244,13 @@ teardown tails — are **not comparable** with current rows either.
   responder, and every row carries the two servers' own `socks5Handshakes` / `localResponder`
   counters cumulative up to that row — so the local column's zero handshakes sit beside the relay
   columns' non-zeros, and the per-flow accounting says which transport answered which flow
-  (`results/2026-10-05-local-target/`).
+  (`results/2026-10-05-local-target/`); under `uot` the same waves dial the UoT fixture, every row
+  carries its `uotHandshakes` block cumulative up to that row, and the native server stays up to
+  read zero beside it (`results/2026-10-06-uot-per-flow/`).
 - **`udp.sessionBudget`** — the session-budget soak (PRD acceptance 1): `--rate` new flows/s for
   `--churn-seconds`, then `--drain-seconds` with no new flows, sampling the live sessions, the
-  harness SOCKS5 server's live control connections (the rows' `associations` column), the process's
+  harness server's live connection count (the rows' `associations` column — control connections for
+  `socks5`, per-flow stream connections for `uot`), the process's
   own descriptors, and the estimated kernel receive buffer
   every 5 s. It asserts no loss or rejection, the retention ceiling
   `rate × (idle + 2 × sweep) + margin` (and the receive-buffer estimate as its byte form), the
@@ -236,20 +262,24 @@ teardown tails — are **not comparable** with current rows either.
   failures behind it. Each row carries `misdelivered` and `noResponse` beside `datagramsReceived`
   (the own term), so
   `own + misdelivered + noResponse == accepted` is checkable from the row, and its `associations`
-  column is the **harness SOCKS5 server's own live control-connection count** — accepted minus
-  closed, read on the peer side of the dial: the shipped one-association-per-flow shape (task
-  `10-05-remove-udp-association-sharing`, R6) seen from the server, so a control connection that
+  column is the **harness server's own live connection count** — accepted minus closed, read on the
+  peer side of the dial: the shipped one-association-per-flow shape (task
+  `10-05-remove-udp-association-sharing`, R6) seen from the server, and the one-connection-per-flow
+  shape under `--target uot`, so a connection that
   outlives its session is visible in the row and the drain's association term is not the sessions
   term restated. Under `--socks5-external` the out-of-process server's count never reaches this
   process, so the column is **omitted** (the writer drops an unobserved field rather than reporting a
   number nobody read): the drain's association term is then not evaluated, and the descriptor budget
-  charges the shipped one-control-connection-per-session allowance in place of an observation. Note
+  charges the shipped one-control-connection-per-session allowance in place of an observation. A
+  `uot` column carries the fixture's `uotHandshakes` block in every row, so the same row that prices
+  the descriptor delta also proves the connections it priced. Note
   the shipped 20 flows/s rate leaves only one
   flow in flight at
   a time; `--rate 500 --churn-seconds 60` is the overlapping-arrival variant. Series and commands:
   `results/2026-09-28-udp-reuse/` (per-flow success columns
-  superseded 2026-10-05) and `results/2026-10-05-udp-reuse-ownership/`; both measured association
-  placement, which no longer exists.
+  superseded 2026-10-05), `results/2026-10-05-udp-reuse-ownership/`; both measured association
+  placement, which no longer exists; the UoT mode's per-flow descriptor figure is
+  `results/2026-10-06-uot-per-flow/`.
 - **`tcp.unexpectedEof`** — concurrent one-way transfers through `TcpProxyRelay` with an
   adversarial event fired mid-stream per transfer (weighted mix: clean / client RST / relay
   cancellation / upstream truncation at a random 20–80 % of the transfer). Receiver-side

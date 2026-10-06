@@ -93,10 +93,16 @@ internal static class UdpSessionBudgetScenario
             : null;
         await using var receiver = externalServer is null ? new EchoReceiver(flowCapacity) : null;
         await using var server = receiver is null ? null : new LoopbackSocks5UdpServer(receiver.Endpoint);
+        // Hosted only for its own column: the UoT fixture's counters are that column's row evidence,
+        // and its live connections are the sampler's association reading, so a column that did not
+        // dial it omits the fields rather than reporting a zero nobody observed.
+        await using var uotServer = options.Target == SoakTargetKind.Uot && receiver is not null
+            ? new LoopbackSocks5UotServer(receiver.Endpoint)
+            : null;
         var flowKeys = CreateFlowKeys(flowCapacity);
         var sink = new SessionBudgetSink(churnOffset: warmupFlows, flowCapacity: flowCapacity, flowKeys: flowKeys);
         var productEvents = new CountingRuntimeLogger(CaptureProductEvents);
-        using var sampler = new ProcessResourceSampler(server);
+        using var sampler = new ProcessResourceSampler(server, uotServer);
         const int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame;
         using var setupQueuePool = new NativeBufferPool(maximumFrameSize);
         using var receiveWindowPool = new NativeBufferPool(UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize));
@@ -109,11 +115,13 @@ internal static class UdpSessionBudgetScenario
             receiveWindowPool,
             setupExecutor,
             new UdpProxyOptions { Capacity = options.Capacity, Logger = productEvents });
-        var run = new UdpSessionBudgetRun(context, options, coordinator, sink, sampler, productEvents, flowKeys, idleTimeout, oneShotIdleTimeout, sweepInterval, warmupFlows, churnFlows);
+        var run = new UdpSessionBudgetRun(context, options, coordinator, sink, sampler, productEvents, flowKeys, uotServer, idleTimeout, oneShotIdleTimeout, sweepInterval, warmupFlows, churnFlows);
         try
         {
-            var controlPort = checked((ushort)(externalServer?.ControlEndpoint.Port ?? server!.ControlEndpoint.Port));
-            var socksServer = new Socks5Server("session-budget", "127.0.0.1", controlPort, Username: null, Password: null);
+            var controlPort = options.Target == SoakTargetKind.Uot && uotServer is not null
+                ? checked((ushort)uotServer.ControlEndpoint.Port)
+                : checked((ushort)(externalServer?.ControlEndpoint.Port ?? server!.ControlEndpoint.Port));
+            var socksServer = new Socks5Server("session-budget", "127.0.0.1", controlPort, Username: null, Password: null, UdpOverTcp: options.Target == SoakTargetKind.Uot);
             await run.WarmUpAsync(socksServer).ConfigureAwait(false);
             sink.BeginChurn();
             await run.ChurnAsync(socksServer).ConfigureAwait(false);

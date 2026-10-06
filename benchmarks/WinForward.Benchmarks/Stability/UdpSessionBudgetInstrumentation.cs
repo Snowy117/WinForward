@@ -138,14 +138,16 @@ internal readonly record struct ResourceSample(int ProxyFileDescriptors, int Raw
 /// <summary>
 /// Samples the process's descriptor and memory footprint for the session-budget series.
 /// Descriptors are read from <c>/proc/self/fd</c> on Linux — the soak host, where every socket is a
-/// descriptor — with <see cref="Process.HandleCount"/> as the Windows fallback. When the harness
-/// SOCKS5 server runs inside this process, the two sockets it owns per accepted control connection
-/// (<see cref="LoopbackSocks5UdpServer.ConnectionCount"/>) are subtracted from the raw count: the
-/// acceptance is about the proxy's own sockets, and <c>--socks5-external</c> removes the harness's
-/// from the process entirely. The same read is what the session-budget rows record as their
-/// <c>associations</c> column, so the observation is taken once per sample.
+/// descriptor — with <see cref="Process.HandleCount"/> as the Windows fallback. When a harness
+/// server runs inside this process, the two sockets it owns per live connection
+/// (<see cref="LoopbackSocks5UdpServer.ConnectionCount"/>'s control socket and relay socket,
+/// <see cref="LoopbackSocks5UotServer.ConnectionCount"/>'s accepted stream socket and upstream UDP
+/// socket) are subtracted from the raw count: the acceptance is about the proxy's own sockets, and
+/// <c>--socks5-external</c> removes the harness's from the process entirely. The same read is what
+/// the session-budget rows record as their <c>associations</c> column, so the observation is taken
+/// once per sample; it is null only when neither server was hosted.
 /// </summary>
-internal sealed class ProcessResourceSampler(LoopbackSocks5UdpServer? inProcessServer) : IDisposable
+internal sealed class ProcessResourceSampler(LoopbackSocks5UdpServer? inProcessServer, LoopbackSocks5UotServer? inProcessUotServer = null) : IDisposable
 {
     private readonly Process _process = Process.GetCurrentProcess();
 
@@ -153,7 +155,9 @@ internal sealed class ProcessResourceSampler(LoopbackSocks5UdpServer? inProcessS
     {
         _process.Refresh();
         var raw = OpenFileDescriptors();
-        var liveControls = inProcessServer?.ConnectionCount;
+        var liveControls = inProcessServer is null && inProcessUotServer is null
+            ? (int?)null
+            : (inProcessServer?.ConnectionCount ?? 0) + (inProcessUotServer?.ConnectionCount ?? 0);
         var harness = liveControls is { } controls ? 2 * controls : 0;
         return new ResourceSample(raw - harness, raw, harness, liveControls, GC.GetTotalMemory(forceFullCollection: false), _process.WorkingSet64);
     }
@@ -251,11 +255,14 @@ internal sealed class SessionBudgetSink(int churnOffset, int flowCapacity, FlowK
 /// <summary>
 /// One row of the session-budget series: the live session/control-connection shape, the proxy's own
 /// descriptor count, the estimated kernel receive buffer, the churn counters, and the derived
-/// ratios. <see cref="Associations"/> is the harness SOCKS5 server's own count of the control
-/// connections it is serving — accepted minus closed, read on the peer side of the dial rather than
-/// copied from the coordinator — so a connection that outlives its session is visible in the row; it
-/// is null when the server ran out of process and nobody in this process observed it, and the JSONL
-/// writer then omits the field rather than reporting an unread count. Both per-session
+/// ratios. <see cref="Associations"/> is the harness server's own count of the connections it is
+/// serving — the native server's control connections, or the UoT server's per-flow stream
+/// connections, accepted minus closed, read on the peer side of the dial rather than copied from the
+/// coordinator — so a connection that outlives its session is visible in the row; it is null when
+/// the server ran out of process and nobody in this process observed it, and the JSONL writer then
+/// omits the field rather than reporting an unread count. <see cref="UotHandshakes"/> is the UoT
+/// server's own counters in the same shape the flow-establishment rows carry them, and is null for
+/// every column that did not host that fixture. Both per-session
 /// measurements are deltas against the run's post-warm-up baseline
 /// (<see cref="BaselineFileDescriptors"/>, <see cref="BaselineManagedBytes"/>), which every row
 /// carries so either ratio is recomputable from the row alone: the raw managed total is a process-wide
@@ -284,7 +291,8 @@ internal sealed record SessionBudgetSample(
     long Misdelivered,
     long CapacityRejections,
     long SetupRejections,
-    long SetupFailures)
+    long SetupFailures,
+    UotHandshakeCounters? UotHandshakes = null)
 {
     public double FileDescriptorsPerSession => SessionBudgetMath.Ratio(FileDescriptors - BaselineFileDescriptors, Sessions);
 
@@ -339,5 +347,6 @@ internal sealed record SessionBudgetSample(
         capacityRejections = CapacityRejections,
         setupRejections = SetupRejections,
         setupFailures = SetupFailures,
+        uotHandshakes = UotHandshakes,
     };
 }

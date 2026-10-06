@@ -46,6 +46,11 @@ internal static class UdpBurstScenario
 
         await using var receiver = new EchoReceiver(backgroundFlows + burstFlows);
         await using var server = new LoopbackSocks5UdpServer(receiver.Endpoint, associateDelay);
+        // Hosted only for its own column: the UoT fixture's counters are that column's evidence, so a
+        // column that did not dial it omits the field rather than reporting a zero nobody observed.
+        await using var uotServer = options.Target == SoakTargetKind.Uot
+            ? new LoopbackSocks5UotServer(receiver.Endpoint, associateDelay)
+            : null;
         // Hosted in every column, so the rows of all three carry the local hop's own counters: the
         // SOCKS5 columns observe zero datagrams arriving on it, the local column observes the run.
         await using var localResponder = new LoopbackLocalUdpResponder();
@@ -53,6 +58,7 @@ internal static class UdpBurstScenario
         // handshake this run caused — the background warmup included, not the burst window alone.
         var handshakesBefore = Socks5HandshakeCounters.Snapshot(server);
         var responderBefore = LocalResponderCounters.Snapshot(localResponder);
+        var uotBefore = UotHandshakeCounters.Snapshot(uotServer);
         // One key array covering both flow-id ranges, so the sink can resolve a reply's sender from
         // the payload's flow id alone.
         var flowKeys = CreateFlowKeys(0, backgroundFlows + burstFlows);
@@ -76,8 +82,7 @@ internal static class UdpBurstScenario
         PhaseOutcome outcome;
         try
         {
-            var socksServer = new Socks5Server("soak", "127.0.0.1", checked((ushort)server.ControlEndpoint.Port), Username: null, Password: null);
-            var target = options.Target == SoakTargetKind.Local ? CreateLocalTarget(localResponder) : ProxyTarget.FromServer(socksServer);
+            var target = ResolveTarget(options, server, uotServer, localResponder);
             outcome = await RunPhasesAsync(coordinator, target, backgroundKeys, burstKeys, sink, tracker, options, burstTimeout)
                 .ConfigureAwait(false);
         }
@@ -88,13 +93,15 @@ internal static class UdpBurstScenario
 
         var socks5Handshakes = Socks5HandshakeCounters.Delta(Socks5HandshakeCounters.Snapshot(server), handshakesBefore);
         var responderCounters = LocalResponderCounters.Delta(LocalResponderCounters.Snapshot(localResponder), responderBefore);
-        context.WriteResult("udp.burstEstablishment", BuildParameters(options), BuildMetrics(outcome, sink, options, productEvents, socks5Handshakes, responderCounters));
+        var uotHandshakes = UotHandshakeCounters.Delta(UotHandshakeCounters.Snapshot(uotServer), uotBefore);
+        context.WriteResult("udp.burstEstablishment", BuildParameters(options), BuildMetrics(outcome, sink, options, productEvents, socks5Handshakes, uotHandshakes, responderCounters));
     }
 
     /// <summary>
     /// The transport the column sends through: the product composite with both factories for a local
     /// target (<c>--target local</c> prices the wiring the CLI composes), the bare relay factory for
-    /// the SOCKS5 columns.
+    /// the SOCKS5 columns — the UoT mode rides the target's own field, so it needs no composition of
+    /// its own.
     /// </summary>
     private static IUdpProxyTransportFactory CreateTransportFactory(
         SoakOptions options,
@@ -106,6 +113,39 @@ internal static class UdpBurstScenario
         return options.Target == SoakTargetKind.Local
             ? new UdpTransportFactory(socks5, new LocalUdpTransportFactory(registry, maximumFrameSize))
             : socks5;
+    }
+
+    /// <summary>
+    /// The column's placement: the native server's target for the relay column, the UoT fixture's
+    /// listener with the mode's field set for the uot column, and the responder's endpoint for the
+    /// local column.
+    /// </summary>
+    private static ProxyTarget ResolveTarget(
+        SoakOptions options,
+        LoopbackSocks5UdpServer server,
+        LoopbackSocks5UotServer? uotServer,
+        LoopbackLocalUdpResponder localResponder) => options.Target switch
+        {
+            SoakTargetKind.Local => CreateLocalTarget(localResponder),
+            SoakTargetKind.Uot => CreateUotTarget(uotServer),
+            _ => CreateSocks5Target(server),
+        };
+
+    /// <summary>
+    /// The relay column's target: the loopback SOCKS5 server's listener with the native UDP carriage
+    /// the shipped default measures.
+    /// </summary>
+    private static ProxyTarget CreateSocks5Target(LoopbackSocks5UdpServer server) =>
+        ProxyTarget.FromServer(new Socks5Server("soak", "127.0.0.1", checked((ushort)server.ControlEndpoint.Port), Username: null, Password: null));
+
+    /// <summary>
+    /// The uot column's target: the UoT fixture's listener with the mode's field set, which is what
+    /// routes the flow through <c>Socks5UotTransport</c> instead of the native carriage.
+    /// </summary>
+    private static ProxyTarget CreateUotTarget(LoopbackSocks5UotServer? uotServer)
+    {
+        var uot = uotServer ?? throw new InvalidOperationException("The uot column has no UoT target; the fixture was not started.");
+        return ProxyTarget.FromServer(new Socks5Server("soak", "127.0.0.1", checked((ushort)uot.ControlEndpoint.Port), Username: null, Password: null, UdpOverTcp: true));
     }
 
     /// <summary>
@@ -262,6 +302,7 @@ internal static class UdpBurstScenario
         SoakOptions options,
         CountingRuntimeLogger productEvents,
         Socks5HandshakeCounters? socks5Handshakes,
+        UotHandshakeCounters? uotHandshakes,
         LocalResponderCounters localResponder)
     {
         var burst = outcome.Burst;
@@ -284,6 +325,7 @@ internal static class UdpBurstScenario
             timeToLastMs = burst.FirstResponseMs.Max,
             timeToIssueMs = burst.TimeToIssueMs,
             socks5Handshakes,
+            uotHandshakes,
             localResponder,
             background = new
             {

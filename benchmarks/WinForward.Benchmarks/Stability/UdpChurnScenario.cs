@@ -45,6 +45,11 @@ internal static class UdpChurnScenario
             : null;
         await using var receiver = externalServer is null ? new EchoReceiver(flows) : null;
         await using var server = receiver is null ? null : new LoopbackSocks5UdpServer(receiver.Endpoint, associateDelay);
+        // Hosted only for its own column: the UoT fixture's counters are that column's evidence, so a
+        // column that did not dial it omits the field rather than reporting a zero nobody observed.
+        await using var uotServer = options.Target == SoakTargetKind.Uot && receiver is not null
+            ? new LoopbackSocks5UotServer(receiver.Endpoint, associateDelay)
+            : null;
         // Hosted in every column, so the rows of all three carry the local hop's own counters: the
         // SOCKS5 columns observe zero datagrams arriving on it, the local column observes the wave.
         await using var localResponder = new LoopbackLocalUdpResponder();
@@ -68,13 +73,7 @@ internal static class UdpChurnScenario
             new UdpProxyOptions { Capacity = flows, Logger = productEvents });
         try
         {
-            var controlPort = checked((ushort)(externalServer?.ControlEndpoint.Port ?? server!.ControlEndpoint.Port));
-            var target = new ChurnTarget(
-                ProxyTarget.FromServer(new Socks5Server("churn", "127.0.0.1", controlPort, Username: null, Password: null)),
-                CreateLocalTarget(localResponder),
-                server,
-                localResponder,
-                externalServer);
+            var target = CreateTarget(server, uotServer, localResponder, externalServer);
             var timeout = ComputeWaveTimeout(flows, associateDelay);
             if (sustained)
             {
@@ -94,7 +93,8 @@ internal static class UdpChurnScenario
     /// <summary>
     /// The transport the column sends through: the product composite with both factories for a local
     /// target (<c>--target local</c> prices the wiring the CLI composes), the bare relay factory for
-    /// the SOCKS5 columns.
+    /// the SOCKS5 columns — the UoT mode rides the target's own field, so it needs no composition of
+    /// its own.
     /// </summary>
     private static IUdpProxyTransportFactory CreateTransportFactory(
         SoakOptions options,
@@ -106,6 +106,25 @@ internal static class UdpChurnScenario
         return options.Target == SoakTargetKind.Local
             ? new UdpTransportFactory(socks5, new LocalUdpTransportFactory(registry, maximumFrameSize))
             : socks5;
+    }
+
+    /// <summary>
+    /// The column's placements: the native server's target for the relay column, the UoT fixture's
+    /// listener with the mode's field set for the uot column, and the responder's endpoint for the
+    /// local column.
+    /// </summary>
+    private static ChurnTarget CreateTarget(
+        LoopbackSocks5UdpServer? server,
+        LoopbackSocks5UotServer? uotServer,
+        LoopbackLocalUdpResponder localResponder,
+        ExternalLoopbackSocks5UdpServer? externalServer)
+    {
+        var controlPort = checked((ushort)(externalServer?.ControlEndpoint.Port ?? server!.ControlEndpoint.Port));
+        var socks5 = ProxyTarget.FromServer(new Socks5Server("churn", "127.0.0.1", controlPort, Username: null, Password: null));
+        ProxyTarget? uot = uotServer is null
+            ? null
+            : ProxyTarget.FromServer(new Socks5Server("churn", "127.0.0.1", checked((ushort)uotServer.ControlEndpoint.Port), Username: null, Password: null, UdpOverTcp: true));
+        return new ChurnTarget(socks5, uot, CreateLocalTarget(localResponder), server, uotServer, localResponder, externalServer);
     }
 
     /// <summary>
@@ -144,7 +163,7 @@ internal static class UdpChurnScenario
         var payload = new byte[options.PayloadBytes];
         // The counters open before the unmeasured warmup wave, so each row's difference covers every
         // handshake the run made for these flows up to that row — warmup and earlier waves included.
-        var observationStart = TransportObservation.Observe(target.Server, target.Responder);
+        var observationStart = TransportObservation.Observe(target.Server, target.UotServer, target.Responder);
         var sequence = await WarmUpAsync(coordinator, sink, target, options, flowKeys, payload, timeout).ConfigureAwait(false);
         for (var wave = 0; wave < waveCount; wave++)
         {
@@ -152,16 +171,20 @@ internal static class UdpChurnScenario
             context.WriteResult(
                 "udp.churn",
                 new { burstFlows = options.BurstFlows, dialDelayMs = options.DialDelayMs, mode = "waves", wave, waves = waveCount, target = options.Target },
-                sample.BuildMetrics(payload.Length, productEvents, observationStart.Since(target.Server, target.Responder)));
+                sample.BuildMetrics(payload.Length, productEvents, observationStart.Since(target.Server, target.UotServer, target.Responder)));
         }
     }
 
     /// <summary>
-    /// Fires and retires one unmeasured wave before any sampling: the first wave of a process pays
-    /// first-call JIT/tiering, the executor's worker-thread creation, and socket-stack warmup
-    /// (measured ~2x the steady-state per-session allocation), so it would otherwise dominate a
-    /// short wave-mode row. The same warmup discipline the burst scenario uses for its background
-    /// flows. Returns the payload sequence consumed by the warmup wave.
+    /// Fires and retires two unmeasured waves for the uot column and one for every other: the first
+    /// wave of a process pays first-call JIT/tiering, the executor's worker-thread creation, and
+    /// socket-stack warmup (measured ~2x the steady-state per-session allocation), so it would
+    /// otherwise dominate a short wave-mode row. The uot column needs the second because its fixture
+    /// is a second in-process server implementation — a connection task and a reply loop per flow,
+    /// which the native fixture's single relay loop does not have — and that cost lands in the
+    /// column's first <em>measured</em> row when it is left in the warm-up's shadow. The same warmup
+    /// discipline the burst scenario gets from its pre-established background flows. Returns the
+    /// payload sequence the warm-up consumed.
     /// </summary>
     private static async Task<long> WarmUpAsync(
         UdpProxyCoordinator coordinator,
@@ -172,8 +195,24 @@ internal static class UdpChurnScenario
         byte[] payload,
         TimeSpan timeout)
     {
-        _ = await RunWaveAsync(coordinator, sink, target, options, flowKeys, payload, sequence: 1, wave: -1, timeout).ConfigureAwait(false);
-        return 1;
+        var sequence = await RunWarmUpWaveAsync(coordinator, sink, target, options, flowKeys, payload, sequence: 1, timeout).ConfigureAwait(false);
+        return target.UotServer is null
+            ? sequence
+            : await RunWarmUpWaveAsync(coordinator, sink, target, options, flowKeys, payload, sequence + 1, timeout).ConfigureAwait(false);
+    }
+
+    private static async Task<long> RunWarmUpWaveAsync(
+        UdpProxyCoordinator coordinator,
+        ChurnCountingSink sink,
+        ChurnTarget target,
+        SoakOptions options,
+        FlowKey[] flowKeys,
+        byte[] payload,
+        long sequence,
+        TimeSpan timeout)
+    {
+        _ = await RunWaveAsync(coordinator, sink, target, options, flowKeys, payload, sequence, wave: -1, timeout).ConfigureAwait(false);
+        return sequence;
     }
 
     private static async Task RunSustainedAsync(
@@ -187,7 +226,7 @@ internal static class UdpChurnScenario
         TimeSpan timeout)
     {
         var payload = new byte[options.PayloadBytes];
-        var observationStart = TransportObservation.Observe(target.Server, target.Responder);
+        var observationStart = TransportObservation.Observe(target.Server, target.UotServer, target.Responder);
         var sequence = await WarmUpAsync(coordinator, sink, target, options, flowKeys, payload, timeout).ConfigureAwait(false);
         var window = TimeSpan.FromSeconds(options.DurationSeconds);
         var totalWatch = Stopwatch.StartNew();
@@ -218,34 +257,53 @@ internal static class UdpChurnScenario
 
         var allocatedBytes = GC.GetTotalAllocatedBytes(precise: false) - allocatedBefore;
         var elapsedSeconds = totalWatch.Elapsed.TotalSeconds;
+        var totals = new SustainedSample(
+            Waves: waveCount,
+            Sessions: sessions,
+            Accepted: accepted,
+            Rejected: rejected,
+            Own: own,
+            Misdelivered: misdelivered,
+            NoResponse: noResponse,
+            AllocatedBytes: allocatedBytes,
+            ElapsedSeconds: elapsedSeconds,
+            Gen0Collections: GC.CollectionCount(0) - gen0Before,
+            Gen1Collections: GC.CollectionCount(1) - gen1Before,
+            Gen2Collections: GC.CollectionCount(2) - gen2Before,
+            WaveBytesPerSession: perWaveBytesPerSession,
+            FirstResponseLatencies: firstResponseLatencies);
         context.WriteResult(
             "udp.churn",
             new { burstFlows = options.BurstFlows, dialDelayMs = options.DialDelayMs, mode = "sustained", durationSeconds = options.DurationSeconds, target = options.Target },
-            new
-            {
-                waves = waveCount,
-                sessions,
-                accepted,
-                rejected,
-                own,
-                misdelivered,
-                noResponse,
-                establishmentLossRate = sessions == 0 ? 0.0 : Math.Clamp(1.0 - (accepted / (double)sessions), 0.0, 1.0),
-                allocatedBytes,
-                bytesPerSession = sessions == 0 ? 0.0 : allocatedBytes / (double)sessions,
-                bytesPerSecond = elapsedSeconds <= 0 ? 0.0 : allocatedBytes / elapsedSeconds,
-                achievedSessionsPerSecond = elapsedSeconds <= 0 ? 0.0 : sessions / elapsedSeconds,
-                gen0Collections = GC.CollectionCount(0) - gen0Before,
-                gen1Collections = GC.CollectionCount(1) - gen1Before,
-                gen2Collections = GC.CollectionCount(2) - gen2Before,
-                waveBytesPerSession = BuildDistribution(perWaveBytesPerSession),
-                firstResponseMs = LatencyDistribution.FromMilliseconds(firstResponseLatencies),
-                wallSeconds = elapsedSeconds,
-                socks5Handshakes = observationStart.Since(target.Server, target.Responder).Socks5Handshakes,
-                localResponder = observationStart.Since(target.Server, target.Responder).LocalResponder,
-                productEvents = StabilityShared.BuildProductEvents(productEvents),
-            });
+            BuildSustainedMetrics(totals, observationStart.Since(target.Server, target.UotServer, target.Responder), productEvents));
     }
+
+    /// <summary>The sustained window's aggregate row: the wave totals folded over the window, with the same per-flow accounting and counter blocks a wave row carries.</summary>
+    private static object BuildSustainedMetrics(SustainedSample totals, TransportObservation observation, CountingRuntimeLogger productEvents) => new
+    {
+        waves = totals.Waves,
+        sessions = totals.Sessions,
+        accepted = totals.Accepted,
+        rejected = totals.Rejected,
+        own = totals.Own,
+        misdelivered = totals.Misdelivered,
+        noResponse = totals.NoResponse,
+        establishmentLossRate = totals.Sessions == 0 ? 0.0 : Math.Clamp(1.0 - (totals.Accepted / (double)totals.Sessions), 0.0, 1.0),
+        allocatedBytes = totals.AllocatedBytes,
+        bytesPerSession = totals.Sessions == 0 ? 0.0 : totals.AllocatedBytes / (double)totals.Sessions,
+        bytesPerSecond = totals.ElapsedSeconds <= 0 ? 0.0 : totals.AllocatedBytes / totals.ElapsedSeconds,
+        achievedSessionsPerSecond = totals.ElapsedSeconds <= 0 ? 0.0 : totals.Sessions / totals.ElapsedSeconds,
+        gen0Collections = totals.Gen0Collections,
+        gen1Collections = totals.Gen1Collections,
+        gen2Collections = totals.Gen2Collections,
+        waveBytesPerSession = BuildDistribution(totals.WaveBytesPerSession),
+        firstResponseMs = LatencyDistribution.FromMilliseconds(totals.FirstResponseLatencies),
+        wallSeconds = totals.ElapsedSeconds,
+        socks5Handshakes = observation.Socks5Handshakes,
+        uotHandshakes = observation.UotHandshakes,
+        localResponder = observation.LocalResponder,
+        productEvents = StabilityShared.BuildProductEvents(productEvents),
+    };
 
     /// <summary>Fires one wave, waits for its first responses, samples allocation/GC around the full cycle (fire → responses → retire), then retires every session through the expiry path.</summary>
     private static async Task<WaveSample> RunWaveAsync(
@@ -351,7 +409,7 @@ internal static class UdpChurnScenario
         return latencies;
     }
 
-    private static object BuildDistribution(List<double> samples)
+    private static object BuildDistribution(IReadOnlyList<double> samples)
     {
         if (samples.Count == 0) return new { min = 0.0, p50 = 0.0, p95 = 0.0, max = 0.0 };
         return new
@@ -364,22 +422,52 @@ internal static class UdpChurnScenario
     }
 
     /// <summary>
-    /// The run's two placements and the loopback servers behind them: the SOCKS5 server handle the
-    /// relayed column dials, the local target the local column sends to, and the server instances
-    /// whose own counters become the row's handshake evidence. Both servers stay up for every
-    /// column, so each row can show what the other transport did with the same flows. The child's
-    /// death must fail the wave (its counters are the only progress signal the response wait has)
-    /// rather than let the wait time out into a silent zero-response row.
+    /// The run's placements and the loopback servers behind them: the SOCKS5 server handle the
+    /// relayed column dials, the UoT server the uot column dials with the mode set on its target, the
+    /// local target the local column sends to, and the server instances whose own counters become the
+    /// row's handshake evidence. The SOCKS5 server and the local responder stay up for every column,
+    /// so each row can show what the other transports did with the same flows; the UoT fixture is
+    /// hosted only by its own column, so its field is omitted elsewhere. The child's death must fail
+    /// the wave (its counters are the only progress signal the response wait has) rather than let the
+    /// wait time out into a silent zero-response row.
     /// </summary>
     private sealed record ChurnTarget(
         ProxyTarget Socks5,
+        ProxyTarget? Uot,
         ProxyTarget Local,
         LoopbackSocks5UdpServer? Server,
+        LoopbackSocks5UotServer? UotServer,
         LoopbackLocalUdpResponder Responder,
         ExternalLoopbackSocks5UdpServer? ExternalServer)
     {
-        public ProxyTarget For(SoakOptions options) => options.Target == SoakTargetKind.Local ? Local : Socks5;
+        public ProxyTarget For(SoakOptions options) => options.Target switch
+        {
+            SoakTargetKind.Local => Local,
+            SoakTargetKind.Uot => Uot ?? throw new InvalidOperationException("The uot column has no UoT target; the fixture was not started."),
+            _ => Socks5,
+        };
     }
+
+    /// <summary>
+    /// The sustained window's totals: the per-wave quantities folded over the whole window, plus the
+    /// allocation and GC deltas of the window. <see cref="Own"/>, <see cref="Misdelivered"/> and
+    /// <see cref="NoResponse"/> partition the window's flows exactly as the wave record's do.
+    /// </summary>
+    private sealed record SustainedSample(
+        long Waves,
+        long Sessions,
+        long Accepted,
+        long Rejected,
+        long Own,
+        long Misdelivered,
+        long NoResponse,
+        long AllocatedBytes,
+        double ElapsedSeconds,
+        long Gen0Collections,
+        long Gen1Collections,
+        long Gen2Collections,
+        IReadOnlyList<double> WaveBytesPerSession,
+        IReadOnlyList<double> FirstResponseLatencies);
 
     /// <summary>
     /// One wave's measured cycle: admission counts, first-response latencies, retirement, and the
@@ -414,6 +502,7 @@ internal static class UdpChurnScenario
             establishmentLossRate = EstablishmentLossRate,
             firstResponseMs = LatencyDistribution.FromMilliseconds(FirstResponseMilliseconds),
             socks5Handshakes = observation.Socks5Handshakes,
+            uotHandshakes = observation.UotHandshakes,
             localResponder = observation.LocalResponder,
             timeToIssueMs = TimeToIssueMs,
             retireMs = RetireMs,

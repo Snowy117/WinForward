@@ -97,23 +97,55 @@ internal readonly record struct LocalResponderCounters(long DatagramsReceived, l
 }
 
 /// <summary>
-/// Both loopback servers' counters at one instant. A row reports the difference between the
+/// The loopback UoT server's own counters: the TCP connections it accepted (one per flow is the
+/// shape the UoT column measures), the CONNECT replies it wrote for them, the datagram frames it
+/// read off those connections, the framed echoes it wrote back, and the wire sequences it refused as
+/// protocol violations. The first two are the direct analogue of
+/// <see cref="Socks5HandshakeCounters"/>'s control connections and ASSOCIATE replies; the frame pair
+/// is the traffic half, read beside <see cref="LocalResponderCounters"/> so the column's own
+/// transport is visible rather than inferred. <see langword="null"/> means the column did not host
+/// the fixture, and the field is then omitted rather than reported as a zero nobody observed.
+/// </summary>
+[StructLayout(LayoutKind.Auto)]
+internal readonly record struct UotHandshakeCounters(long Connections, long ConnectReplies, long FramesReceived, long FramesReplied, long ProtocolViolations)
+{
+    /// <summary>The server's counters right now; null when the column did not host the fixture.</summary>
+    internal static UotHandshakeCounters? Snapshot(LoopbackSocks5UotServer? server) =>
+        server is null
+            ? null
+            : new UotHandshakeCounters(server.ControlConnections, server.ConnectReplies, server.FramesReceived, server.FramesReplied, server.ProtocolViolations);
+
+    /// <summary>The counters between two snapshots; null when either side is missing.</summary>
+    internal static UotHandshakeCounters? Delta(UotHandshakeCounters? after, UotHandshakeCounters? before) =>
+        after is { } end && before is { } start
+            ? new UotHandshakeCounters(
+                end.Connections - start.Connections,
+                end.ConnectReplies - start.ConnectReplies,
+                end.FramesReceived - start.FramesReceived,
+                end.FramesReplied - start.FramesReplied,
+                end.ProtocolViolations - start.ProtocolViolations)
+            : null;
+}
+
+/// <summary>
+/// Every loopback server's counters at one instant. A row reports the difference between the
 /// observation taken when its run's load started and the one read when the row was written, so "the
 /// local column moved these flows without one SOCKS5 handshake" is a subtraction of two observed
 /// numbers rather than a claim about the wiring. The difference is cumulative over the run rather
 /// than per window: read the last row of a run for its totals, and subtract two rows for one wave's
-/// own cost.
+/// own cost. A server the column did not host contributes null, so its field is omitted.
 /// </summary>
 [StructLayout(LayoutKind.Auto)]
-internal readonly record struct TransportObservation(Socks5HandshakeCounters? Socks5Handshakes, LocalResponderCounters LocalResponder)
+internal readonly record struct TransportObservation(Socks5HandshakeCounters? Socks5Handshakes, UotHandshakeCounters? UotHandshakes, LocalResponderCounters LocalResponder)
 {
-    internal static TransportObservation Observe(LoopbackSocks5UdpServer? server, LoopbackLocalUdpResponder responder) =>
-        new(Socks5HandshakeCounters.Snapshot(server), LocalResponderCounters.Snapshot(responder));
+    internal static TransportObservation Observe(LoopbackSocks5UdpServer? server, LoopbackSocks5UotServer? uotServer, LoopbackLocalUdpResponder responder) =>
+        new(Socks5HandshakeCounters.Snapshot(server), UotHandshakeCounters.Snapshot(uotServer), LocalResponderCounters.Snapshot(responder));
 
     /// <summary>What each server did between this observation and now.</summary>
-    internal TransportObservation Since(LoopbackSocks5UdpServer? server, LoopbackLocalUdpResponder responder) =>
+    internal TransportObservation Since(LoopbackSocks5UdpServer? server, LoopbackSocks5UotServer? uotServer, LoopbackLocalUdpResponder responder) =>
         new(
             Socks5HandshakeCounters.Delta(Socks5HandshakeCounters.Snapshot(server), Socks5Handshakes),
+            UotHandshakeCounters.Delta(UotHandshakeCounters.Snapshot(uotServer), UotHandshakes),
             LocalResponderCounters.Delta(LocalResponderCounters.Snapshot(responder), LocalResponder));
 }
 

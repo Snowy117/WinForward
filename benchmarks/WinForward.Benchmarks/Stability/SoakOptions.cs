@@ -42,6 +42,7 @@ internal enum SoakTargetKind
 {
     Socks5,
     Local,
+    Uot,
 }
 
 internal sealed record AbortMix(int Clean, int ClientRst, int RelayCancel, int UpstreamTruncate)
@@ -134,7 +135,9 @@ internal sealed record SoakOptions
     /// flow, the shape the surviving series measures; <see cref="SoakTargetKind.Local"/> points the
     /// same flows at a local endpoint through the product <c>UdpTransportFactory</c> composite, with
     /// the loopback SOCKS5 server still up so its handshake counters can be read as the column's
-    /// zeros.
+    /// zeros; <see cref="SoakTargetKind.Uot"/> sends the same flows through the
+    /// <c>Socks5UdpTransportFactory</c> to a loopback UoT v2 server, the mode being carried by the
+    /// target's <c>udpOverTcp</c> field.
     /// </summary>
     public SoakTargetKind Target { get; private init; } = SoakTargetKind.Socks5;
 
@@ -233,15 +236,25 @@ internal sealed record SoakOptions
             throw new ArgumentException("The abort mix must have at least one non-zero weight.", nameof(args));
         }
 
-        // ReSharper disable once ConvertIfStatementToSwitchStatement // Parse-time refusal: a switch over one pattern case adds ceremony without adding a branch — the implicit false path (the argument combination is valid) is the normal flow, and the sibling refusal below keeps the same if/throw shape.
+        // ReSharper disable once ConvertIfStatementToSwitchStatement // Parse-time refusal: a switch over one pattern case adds ceremony without adding a branch — the implicit false path (the argument combination is valid) is the normal flow, and the sibling refusals below keep the same if/throw shape.
         if (options is { Target: SoakTargetKind.Local, Socks5External: true })
         {
             throw new ArgumentException("--target local cannot be combined with --socks5-external: the local column's zero-handshake evidence is the in-process loopback SOCKS5 server's own counters, which an out-of-process server cannot report to this parent.", nameof(args));
         }
 
+        if (options is { Target: SoakTargetKind.Uot, Socks5External: true })
+        {
+            throw new ArgumentException("--target uot cannot be combined with --socks5-external: the UoT column's handshake evidence is the in-process loopback UoT server's own counters, which an out-of-process server cannot report to this parent.", nameof(args));
+        }
+
         if (options is { Target: SoakTargetKind.Local, Scenario: not (SoakScenario.Churn or SoakScenario.Burst) })
         {
             throw new ArgumentException($"--target local is only measured by --scenario udpChurn and --scenario udpBurst; scenario '{options.Scenario}' leaves its relay path unchanged and would record target: local while measuring the relay.", nameof(args));
+        }
+
+        if (options is { Target: SoakTargetKind.Uot, Scenario: not (SoakScenario.Churn or SoakScenario.Burst or SoakScenario.SessionBudget) })
+        {
+            throw new ArgumentException($"--target uot is only measured by --scenario udpChurn, --scenario udpBurst and --scenario udpSessionBudget; scenario '{options.Scenario}' leaves its relay path unchanged and would record target: uot while measuring the relay.", nameof(args));
         }
 
         if (options.Scenario == SoakScenario.GcSoak && !durationSpecified)
@@ -392,14 +405,15 @@ internal sealed record SoakOptions
     };
 
     /// <summary>
-    /// The two flow placements, refused for anything else so a typo must fail the run rather than
+    /// The three flow placements, refused for anything else so a typo must fail the run rather than
     /// record a column it did not measure.
     /// </summary>
     private static SoakTargetKind ParseTargetKind(string raw) => raw.ToLowerInvariant() switch
     {
         "socks5" => SoakTargetKind.Socks5,
         "local" => SoakTargetKind.Local,
-        _ => throw new ArgumentException($"Unknown target '{raw}'; expected socks5 or local.", nameof(raw)),
+        "uot" => SoakTargetKind.Uot,
+        _ => throw new ArgumentException($"Unknown target '{raw}'; expected socks5, local, or uot.", nameof(raw)),
     };
 
     private static int PositiveInt(string name, string raw) =>
