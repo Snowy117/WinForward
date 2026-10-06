@@ -1825,3 +1825,29 @@ Delivered R4/R5 of 10-05-udp-association-sharing-correctness: association sharin
 ### Next Steps
 
 - UoT v2 / VLESS (L2) transport: start from research/l2-readiness.md — per-flow framing above all, and the alias-uniqueness obstacle it records; decide the fate of the 09-06 local-mux research (its per-flow-ASSOCIATE premise is superseded)
+
+
+## Session 55: UoT v2 per-flow UDP transport for SOCKS5 targets
+<!-- trellis-session: v=2 fp=4780e64f29fe746a -->
+
+**Date**: 2026-10-06
+**Task**: UoT v2 per-flow UDP transport for SOCKS5 targets
+**Branch**: `master`
+
+### Summary
+
+Landed task 10-06-uot-per-flow-transport: an opt-in udpOverTcp mode on SOCKS5 targets carries each UDP flow over one TCP connection with the greeting/auth/CONNECT/UoT-header/first-datagram written as a single pipelined flight, so no handshake reply is awaited before the first datagram (the ASSOCIATE round-trip dependency disappears). New UdpTransportHandshakeRejectedException classifies a late-discovered rejection as SetupFailure (cooldown armed) while a mid-flow connection death stays AssociationLost. Measured on the new --target uot harness column: burst first-response p50 155-162 -> 56 ms (p95 306-313 -> 57-58 ms), churn p50 ~155-165 -> ~56-65 ms, descriptors per live session 2.00 -> 1.00, both session verdicts passed/retentionBounded, zero misdelivery and zero loss. R7 verification against the pinned sing-box/testing + sing source caught a wrong UoT request-header ATYP encoding (0x00/0x01 instead of the SOCKS set), fixed with a shared-constant encoding, an independent-decoder guard test and fixture decoders that read the server's mapping; a follow-up teardown hang (SemaphoreSlim disposed while senders were parked on the gate) was found by the new bounded racing-disposal test and fixed in all three transports (UoT, native SOCKS5, local) with the guard's post-wait half plus racing tests. Gates on the final tree: Release build 0 warnings, 1256 tests green across 13 assemblies, dotnet format empty, jb inspectcode 0 issues; six harness columns re-run after the teardown fix with counter identities exact.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d77f4e8` | feat(udp): add the UoT v2 per-flow transport for SOCKS5 targets |
+| `33c47ae` | test(udp): pin the UoT transport, fault classification and retention facts |
+| `323c76e` | feat(bench): add the uot target column and record the series |
+| `4a66489` | docs(udp): document the UoT mode, its caveats and the server verification |
+| `7ad76f5` | chore(task): seed the UoT transport task artifacts |
+
+### Status
+
+[OK] **Completed**
