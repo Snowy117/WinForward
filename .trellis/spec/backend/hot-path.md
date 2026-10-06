@@ -1408,6 +1408,39 @@ done
 // The gates keep the exact zero; only the proof procedure and what it proves changed.
 ```
 
+### 6. Addendum (2026-10-06 flaky sweep): more victim gates, more sizes, and a ruled-out mechanism
+
+A loaded soak (two or three concurrent `dotnet test WinForward.slnx -c Release` streams — the condition
+that reproduces the event) re-observed the residual on the same shape-compliant, fully synchronous
+gates and produced three pieces of new evidence. **No gate assertion or window changed.**
+
+- **The victim list is longer than the four recorded signatures.** Measured deltas on the 2026-10-06
+  tree: `SweepAllocationGateTests.FlowTableSweepAllocatesNoManagedBytes` **520 B**,
+  `SweepAllocationGateTests.FlowTableSweepWithHoldPredicateAllocatesNoManagedBytes` **1,552 B** (the
+  fact the 10-06 appsettings record saw at 64 B), and
+  `SweepAllocationGateTests.TcpRedirectTableSweepAllocatesNoManagedBytes` **3,512 B** and **5,256 B**.
+  Only 5,216 of the whole set is a recorded signature, so **the size predicate in §2 is incomplete**:
+  a nonzero delta in a shape-compliant gate cannot be classified by size alone. Every victim still ran
+  its own probe preflight successfully, kept its thread id, and had no `await` in its window (`void`
+  window bodies), so none of these is a window-shape defect.
+- **A peer thread's GC does not move the per-thread counter — measured, not argued.** Two console-host
+  experiments (`TieredCompilation=false`, public counter API only): (a) 20,000,000 empty windows with a
+  peer allocator driving **87 Gen0 collections** → **0** nonzero deltas; (b) 200,000 windows each
+  preceded by a 4,096-object batch (the `SeedRedirects` shape, so the measuring thread holds a freshly
+  refilled allocation context) with **9,378 Gen0 collections** → **0** nonzero deltas. The residual is
+  therefore **not** "a GC refreshes the thread's allocation context"; that family joins the §2
+  "ruled out" list alongside idle-thread collections and the diagnostics server.
+- **A co-resident census probe found nothing in ~30 loaded suite runs.** A temporary 500,000-window
+  probe (`GC.GetAllocatedBytesForCurrentThread()` bracketing an empty window, classifying every hit
+  against `GC.GetTotalAllocatedBytes(precise: false)` and the GC counts) ran inside the
+  `WinForward.Performance.Tests` host, alongside the gates, while the soak ran; it recorded **zero**
+  hits and was deleted. That is consistent with the recorded "at most once per suite process" property
+  — the probe's 500,000 windows did not absorb an event the ~150 gate windows carried in ~7 % of runs.
+- **Rate under a loaded soak:** 4 residual failures in ~60 full-suite runs (≈7 %), the same order as
+  the recorded single-stream 10 % (Wilson intervals overlap). Disposition unchanged: **accepted host
+  property, per-gate proof, no threshold relaxation**, and the gates' exact zero plus their call-count
+  backstops stay in place.
+
 ## Warm-path lock-free resolve, the activity bucket and the self-traffic split (task 09-30-warm-path-lock-chain, 2026-09-30)
 
 ### 1. Scope / Trigger
