@@ -567,6 +567,23 @@ check 已实测：该改动对 `run1↔run1`、`run1↔run2`、`run1↔b1c` 三�
 仅在一个类型内部使用的辅助类型允许 `internal`**（当前唯一实例是 `Json/Reading.cs`，harness/测试都不消费它）。
 理由：公共面越小越好，且 `Reading` 改 public 只会改变二进制哈希、不增加任何可测能力。
 
+---
+
+## D17. 零宽带宽与测量统计的裁定（B2b check 后）
+
+**现象**：`LATLOAD` 的 `latency/tcp-rtt/count`、`metrics/tcp.outstandingAtTeardown`、
+`metrics/tcp.unmatchedReplies` 在冻结带宽里是零宽（两次基线恰好相同），宿主争用时第三次运行会越带——
+同一二进制再跑一次即回到基线的值。这不是回归。
+
+**裁定**：
+1. **延迟直方图的统计量（`latency/*` 的 `count`/`minUs`/`maxUs`/`meanUs`/各百分位）归"测量读数"类**——
+   它们是样本聚合，和已经归读数的 `p99Us` 同类，不该用契约带宽判。
+2. 其余契约计数（`metrics/*`、`gates/*`）保持硬判据；**零宽带宽路径的越带**必须在报告里显式标注
+   `zero-width band (unmeasured spread)`，并在证据文档里附一次**同二进制确认运行**的结论
+   （B2b check 即照此办理）。工具不得因此自动放行。
+3. 工具改进（登记，E2/E5）：带宽测量从"两次运行"扩到 **N 次（≥3）**，对零宽路径给出
+   `observedSpread` 与建议重测标记；`--write-band` 支持多目录。当前两次基线仍是 B2c 的判据基线。
+
 ### D16.4 B2 批次（9 条改名按臂分布决定顺序）
 | 批次 | 内容 |
 |---|---|
