@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "What the check agent verifies against: the gates, the suppression policy, and the forbidden patterns."}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "The contract the check agent must confirm survived: one name per event and level, fully-qualified categories, and the stderr-only destination."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Validation semantics to check against: diagnostics must still name the offending setting and the strictness properties must still fail loudly."}
+{"file": ".trellis/tasks/10-06-appsettings-config/research/mel-config-probe.md", "reason": "The evidence behind the design's load-bearing claims; the check agent should confirm the implementation matches these measurements rather than re-deriving them."}

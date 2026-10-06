@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Spec index for the backend layer; routes to the guideline files this task touches and states which are authoritative."}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "The logging contract being rewired: the factory as the single composition point, the fully-qualified category convention, the formatter shapes, and the stderr-only invariant this task must not regress."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Fail-closed semantics and the validation-diagnostic rules that the configuration rewrite must preserve while diagnostic paths gain the WinForward: prefix."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "The two quality gates, the report format, and the suppression policy (narrow and reasoned, never a global severity=none)."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Where the new configuration-loader files belong, file size limits and split discipline."}
+{"file": ".trellis/tasks/10-06-appsettings-config/research/mel-config-probe.md", "reason": "Measured behaviour of the Logging configuration surface: the exact AddConfiguration + AddConsole + PostConfigure shape, the hostile-configuration result that makes the stderr invariant order-independent, and the two facts the probe corrected."}
