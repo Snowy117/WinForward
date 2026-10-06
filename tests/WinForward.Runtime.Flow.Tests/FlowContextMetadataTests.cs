@@ -19,6 +19,15 @@ public sealed class FlowContextMetadataTests
     private static readonly IPAddress s_destination = IPAddress.Parse("192.0.2.53");
     private const nint AdapterHandle = 0x1234;
 
+    /// <summary>
+    /// This class owns its adapter's stable ID. The interning table is process-lived and
+    /// <see cref="AdapterSlotTable.TryIntern"/> republishes the friendly name on every call, so two
+    /// parallel classes that intern the same ID under different names race on what the slot resolves
+    /// to — observed as AdapterName "id-a" where this class expects "Ethernet". A shared well-known ID
+    /// is only safe for a class that asserts on the slot's identity, never on its metadata.
+    /// </summary>
+    private const string AdapterStableId = "flow-context-metadata-adapter";
+
     [Fact]
     public async Task ClaimedFlowCarriesTheInternedAdapterAndProcessMetadata()
     {
@@ -29,7 +38,7 @@ public sealed class FlowContextMetadataTests
         await dispatcher.DispatchAsync(new CapturedFlowPacket(new PacketLease(new byte[] { 1, 2, 3, 4 }), context), CancellationToken.None);
 
         var claimed = Assert.Single(executor.Packets);
-        Assert.Equal("id-a", claimed.Context.AdapterId);
+        Assert.Equal(AdapterStableId, claimed.Context.AdapterId);
         Assert.Equal("Ethernet", claimed.Context.AdapterName);
         Assert.Equal("dns.exe", claimed.Context.ProcessName);
         Assert.NotNull(claimed.Context.Process);
@@ -48,7 +57,7 @@ public sealed class FlowContextMetadataTests
 
         Assert.Equal(2, executor.Packets.Count);
         var warm = executor.Packets[1];
-        Assert.Equal("id-a", warm.Context.AdapterId);
+        Assert.Equal(AdapterStableId, warm.Context.AdapterId);
         Assert.Equal("Ethernet", warm.Context.AdapterName);
         Assert.Null(warm.Context.Process);
         Assert.Null(warm.Context.ProcessName);
@@ -57,7 +66,7 @@ public sealed class FlowContextMetadataTests
 
     private static FlowContext Classify()
     {
-        var adapter = new WindowsAdapter("id-a", "Ethernet", "internal-a", AdapterHandle, 7);
+        var adapter = new WindowsAdapter(AdapterStableId, "Ethernet", "internal-a", AdapterHandle, 7);
         var view = new PacketView(
             PacketTransport.Udp,
             IPAddressValue.From(s_client),
