@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "the UDP relay contract this transport joins (ownership, retention, observability)"}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "transport ownership, disposal order and release-chain rules"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "packet-path discipline: send gate shape, allocation gates"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "analyzer suppression policy and the pre-commit gate"}
+{"file": ".trellis/tasks/10-06-uot-per-flow-transport/research/uot-v2-protocol.md", "reason": "UoT v2 wire facts with sources and analysis"}
+{"file": ".trellis/tasks/archive/2026-10/10-05-remove-udp-association-sharing/research/l2-readiness.md", "reason": "the L2 seam obligations this transport must meet"}

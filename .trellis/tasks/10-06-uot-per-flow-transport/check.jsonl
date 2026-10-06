@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/udp-relay.md", "reason": "verify the relay contract against the change"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "verify the gates and suppression policy"}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "verify ownership/disposal"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "verify packet-path discipline"}
+{"file": ".trellis/tasks/10-06-uot-per-flow-transport/research/uot-v2-protocol.md", "reason": "verify the wire facts the implementation relies on"}
