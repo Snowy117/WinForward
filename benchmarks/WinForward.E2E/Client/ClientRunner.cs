@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using WinForward.E2E.Cli;
 using WinForward.E2E.Client.Arms;
+using WinForward.E2E.Contracts.Json;
 
 namespace WinForward.E2E.Client;
 
@@ -321,7 +322,7 @@ internal static class ClientRunner
     {
         var fileName = $"{PlanFile.SanitizeFileName(arm.Name)}.jsonl";
         var path = Path.Combine(options.OutDirectory, fileName);
-        await using var sink = new JsonlFile(path);
+        await using var sink = new JsonlSink(path, JsonlPolicy.Propagate, envelope: null);
         sampler.SetTarget(sink, arm.Name);
 
         var latency = new LatencySet();
@@ -337,40 +338,10 @@ internal static class ClientRunner
 
         var startedTicks = Clock.Now;
         await Console.Out.WriteLineAsync($"e2e client: arm {arm.Name} ({arm.Kind}) starting").ConfigureAwait(false);
-        ArmOutcome? outcome = null;
-        Exception? failure = null;
-        var cancelled = false;
-        try
-        {
-            outcome = await ArmDispatch.RunAsync(context).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException exception)
-        {
-            // A stopped run must leave the same evidence a broken arm leaves, so a cancellation is
-            // booked as a failure; only its message stays the literal "cancelled" rather than the
-            // exception's text, so an interrupted arm reads the same whatever await noticed the
-            // token (D14.12).
-            failure = exception;
-            cancelled = true;
-        }
-        catch (Exception exception)
-        {
-            // Every other exception is an arm failure. Letting one escape would abort the process
-            // before run.json is written and take every completed arm's summary down with it (D1/D4/D7).
-            failure = exception;
-        }
+        var (outcome, failure, cancelled) = await RunGuardedAsync(context).ConfigureAwait(false);
 
         var endedTicks = Clock.Now;
-        var final = outcome ?? new ArmOutcome();
-        if (failure is not null)
-        {
-            await WriteFailureAsync(sink, options, arm, failure, cancelled, startedTicks, endedTicks).ConfigureAwait(false);
-        }
-
-        await WriteResultAsync(sink, options, arm, final, latency, startedTicks, endedTicks).ConfigureAwait(false);
-        await WriteArmSummaryAsync(sink, options, arm, final, startedTicks, endedTicks, fileName).ConfigureAwait(false);
-        await sink.FlushAsync(CancellationToken.None).ConfigureAwait(false);
-        await sampler.ClearTargetAsync().ConfigureAwait(false);
+        failure = await WriteArmRecordsAsync(sink, sampler, options, arm, outcome ?? new ArmOutcome(), latency, fileName, failure, cancelled, startedTicks, endedTicks).ConfigureAwait(false);
 
         await Console.Out.WriteLineAsync(string.Create(
             CultureInfo.InvariantCulture,
@@ -379,8 +350,124 @@ internal static class ClientRunner
         return new ArmSummary(arm.Name, arm.Kind, fileName, startedTicks, endedTicks, failure is not null);
     }
 
+    /// <summary>
+    /// Runs one arm and books whatever it threw as that arm's failure. A stopped run must leave the
+    /// same evidence a broken arm leaves, so a cancellation is a failure too, and only its message
+    /// stays the literal "cancelled" so an interrupted arm reads the same whatever await noticed the
+    /// token (D14.12). Every other exception is an arm failure: letting one escape would abort the
+    /// process before run.json is written and take every completed arm's summary down with it
+    /// (D1/D4/D7).
+    /// </summary>
+    private static async Task<(ArmOutcome? Outcome, Exception? Failure, bool Cancelled)> RunGuardedAsync(ArmContext context)
+    {
+        try
+        {
+            return (await ArmDispatch.RunAsync(context).ConfigureAwait(false), null, false);
+        }
+        catch (OperationCanceledException exception)
+        {
+            return (null, exception, true);
+        }
+        catch (Exception exception)
+        {
+            return (null, exception, false);
+        }
+    }
+
+    /// <summary>
+    /// Writes the arm's records and releases its sink, all inside the arm's failure boundary: a
+    /// record that cannot be written, or a file that cannot be drained, fails the arm here — where
+    /// run.json.failed and an `error` record follow — instead of escaping RunArmAsync and taking the
+    /// remaining arms and run.json with it (D1/D4/D7, D14.7). Returns the failure the arm ends with.
+    /// </summary>
+    private static async ValueTask<Exception?> WriteArmRecordsAsync(
+        JsonlSink sink,
+        ResourceSampler sampler,
+        ClientOptions options,
+        ArmSpec arm,
+        ArmOutcome outcome,
+        LatencySet latency,
+        string fileName,
+        Exception? failure,
+        bool cancelled,
+        long startedTicks,
+        long endedTicks)
+    {
+        var failureAttempted = false;
+        try
+        {
+            if (failure is not null)
+            {
+                failureAttempted = true;
+                await WriteFailureAsync(sink, options, arm, failure, cancelled, startedTicks, endedTicks).ConfigureAwait(false);
+            }
+
+            await WriteResultAsync(sink, options, arm, outcome, latency, startedTicks, endedTicks).ConfigureAwait(false);
+            await WriteArmSummaryAsync(sink, options, arm, outcome, startedTicks, endedTicks, fileName).ConfigureAwait(false);
+
+            // A record the file never took fails this arm, and the check runs while the sink is still
+            // open, so the `error` record the failure owes its reader can still be written.
+            if (sink.WriteErrors > 0 && !failureAttempted)
+            {
+                failure = LostRecords(sink);
+                failureAttempted = true;
+                await WriteFailureAsync(sink, options, arm, failure, cancelled, startedTicks, endedTicks).ConfigureAwait(false);
+            }
+
+            // The sampler holds a reference to this sink and must stop writing before it closes: a
+            // tick that landed on a closed sink would be counted as another lost record of this arm.
+            await sampler.ClearTargetAsync().ConfigureAwait(false);
+
+            // The release belongs to this arm's boundary too: a file that cannot be drained fails the
+            // arm. That failure cannot be written into the file it is about, so it is read back from
+            // the count — run.json still carries the arm's `failed` flag and the sink reports it to
+            // stderr; the `await using` above remains the non-throwing backstop (D14.7).
+            await sink.CompleteAsync().ConfigureAwait(false);
+            failure ??= sink.WriteErrors > 0 ? LostRecords(sink) : null;
+            return failure;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            failure ??= exception;
+            if (!failureAttempted)
+            {
+                await TryWriteFailureAsync(sink, options, arm, failure, cancelled, startedTicks, endedTicks).ConfigureAwait(false);
+            }
+
+            return failure;
+        }
+    }
+
+    private static IOException LostRecords(JsonlSink sink) =>
+        new($"the arm's record file could not be written: {sink.WriteErrors.ToString(CultureInfo.InvariantCulture)} record(s) lost");
+
+    /// <summary>
+    /// Writes the `error` record for an arm whose records could not be written at all. The sink is
+    /// the thing that failed, so this last attempt cannot end the run: the failure is reported to
+    /// stderr instead, and run.json still carries the arm's `failed` flag.
+    /// </summary>
+    private static async ValueTask TryWriteFailureAsync(
+        JsonlSink sink,
+        ClientOptions options,
+        ArmSpec arm,
+        Exception failure,
+        bool cancelled,
+        long startedTicks,
+        long endedTicks)
+    {
+        try
+        {
+            await WriteFailureAsync(sink, options, arm, failure, cancelled, startedTicks, endedTicks).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            await Console.Error.WriteLineAsync(
+                $"e2e client: arm {arm.Name} failed and its error record could not be written: {exception.GetType().Name}: {exception.Message}").ConfigureAwait(false);
+        }
+    }
+
     private static async ValueTask WriteFailureAsync(
-        JsonlFile sink,
+        JsonlSink sink,
         ClientOptions options,
         ArmSpec arm,
         Exception failure,
@@ -397,7 +484,6 @@ internal static class ClientRunner
         await sink.WriteAsync(
             writer =>
             {
-                writer.WriteStartObject();
                 writer.WriteString("type", "error");
                 writer.WriteString("arm", arm.Name);
                 writer.WriteString("kind", arm.Kind);
@@ -407,13 +493,12 @@ internal static class ClientRunner
                 writer.WriteString("detail", detail);
                 writer.WriteNumber("startedTicks", startedTicks);
                 writer.WriteNumber("endedTicks", endedTicks);
-                writer.WriteEndObject();
             },
             CancellationToken.None).ConfigureAwait(false);
     }
 
     private static async ValueTask WriteResultAsync(
-        JsonlFile sink,
+        JsonlSink sink,
         ClientOptions options,
         ArmSpec arm,
         ArmOutcome outcome,
@@ -424,7 +509,6 @@ internal static class ClientRunner
         await sink.WriteAsync(
             writer =>
             {
-                writer.WriteStartObject();
                 writer.WriteString("type", "result");
                 writer.WriteString("arm", arm.Name);
                 writer.WriteString("kind", arm.Kind);
@@ -452,13 +536,12 @@ internal static class ClientRunner
                 writer.WriteEndArray();
                 writer.WriteNumber("startedTicks", startedTicks);
                 writer.WriteNumber("endedTicks", endedTicks);
-                writer.WriteEndObject();
             },
             CancellationToken.None).ConfigureAwait(false);
     }
 
     private static async ValueTask WriteArmSummaryAsync(
-        JsonlFile sink,
+        JsonlSink sink,
         ClientOptions options,
         ArmSpec arm,
         ArmOutcome outcome,
@@ -469,7 +552,6 @@ internal static class ClientRunner
         await sink.WriteAsync(
             writer =>
             {
-                writer.WriteStartObject();
                 writer.WriteString("type", "armSummary");
                 writer.WriteString("arm", arm.Name);
                 writer.WriteString("kind", arm.Kind);
@@ -485,7 +567,6 @@ internal static class ClientRunner
                 writer.WriteString("resultFile", fileName);
                 writer.WriteNumber("startedTicks", startedTicks);
                 writer.WriteNumber("endedTicks", endedTicks);
-                writer.WriteEndObject();
             },
             CancellationToken.None).ConfigureAwait(false);
     }
@@ -511,7 +592,7 @@ internal static class ClientRunner
             writer.WriteString("endedUtc", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
             writer.WriteNumber("startedTicks", startTicks);
             writer.WriteNumber("endedTicks", endTicks);
-            writer.WriteNumber("wallSeconds", JsonValue.Round(Clock.ToSeconds(endTicks - startTicks)));
+            writer.WriteNumber("wallSeconds", NumberFormat.Round(Clock.ToSeconds(endTicks - startTicks)));
             writer.WritePropertyName("arms");
             writer.WriteStartArray();
             foreach (var summary in summaries)

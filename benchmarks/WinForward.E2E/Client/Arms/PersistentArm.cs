@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using WinForward.E2E.Contracts.Json;
 using WinForward.E2E.Wire;
 
 namespace WinForward.E2E.Client.Arms;
@@ -190,8 +191,8 @@ internal static class PersistentArm
         outcome.Metrics["responses"] = state._responses;
         outcome.Metrics["reconnects"] = state._reconnects;
         outcome.Metrics["survivedIdle"] = state._survivedIdle;
-        outcome.Metrics["idleSecondsScheduled"] = JsonValue.Round(Clock.ToSeconds(schedule.ScheduledIdleTicks));
-        outcome.Metrics["idleSecondsObserved"] = JsonValue.Round(Clock.ToSeconds(idleTicks));
+        outcome.Metrics["idleSecondsScheduled"] = NumberFormat.Round(Clock.ToSeconds(schedule.ScheduledIdleTicks));
+        outcome.Metrics["idleSecondsObserved"] = NumberFormat.Round(Clock.ToSeconds(idleTicks));
         outcome.Metrics["sendWouldBlock"] = state._sendWouldBlock;
         outcome.Metrics["sendFailures"] = state._sendFailures;
         outcome.Metrics["timeouts"] = state._timeouts;
@@ -203,9 +204,9 @@ internal static class PersistentArm
         outcome.Metrics["connectFailures"] = state._connectFailures;
         outcome.Metrics["meanConnectMs"] = state._connectSamples == 0
             ? null
-            : JsonValue.Round(Clock.ToMicroseconds(state._connectTicks) / (double)state._connectSamples / 1000.0);
-        outcome.Metrics["responseRate"] = JsonValue.Ratio(state._responses, state._requests);
-        outcome.Metrics["achievedRate"] = JsonValue.PerSecond(state._responses, elapsedTicks, Stopwatch.Frequency);
+            : NumberFormat.Round(Clock.ToMicroseconds(state._connectTicks) / (double)state._connectSamples / 1000.0);
+        outcome.Metrics["responseRate"] = JsonRate.Rate(state._responses, state._requests);
+        outcome.Metrics["achievedRate"] = JsonPerSecond.PerSecond(state._responses, elapsedTicks, Stopwatch.Frequency);
     }
 
     private static PersistentSchedule BuildSchedule(long startTicks, long deadlineTicks, PersistentPlan plan)

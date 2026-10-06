@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using WinForward.E2E.Contracts.Json;
 using WinForward.E2E.Wire;
 
 namespace WinForward.E2E.Client.Arms;
@@ -86,15 +87,15 @@ internal static class LossArm
         outcome.Metrics["windowOverflow"] = tracker.WindowOverflow;
         outcome.Metrics["abandonedAtTeardown"] = counts.Undetermined;
         outcome.Metrics["window"] = (double)windowMs;
-        outcome.Metrics["lossRate"] = JsonValue.Ratio(loss, tracker.SentOk);
-        outcome.Metrics["strictLossRate"] = JsonValue.Ratio(loss + counts.Corrupt, tracker.SentOk);
-        outcome.Metrics["lateRate"] = JsonValue.Ratio(counts.Late, tracker.SentOk);
-        outcome.Metrics["corruptRate"] = JsonValue.Ratio(counts.Corrupt, tracker.SentOk);
-        outcome.Metrics["duplicateRate"] = JsonValue.Ratio(counts.Duplicate, tracker.SentOk);
-        outcome.Metrics["reorderRate"] = JsonValue.Ratio(counts.Reordered, tracker.SentOk);
-        outcome.Metrics["clientSendLossRate"] = JsonValue.Ratio(clientSendLoss, tracker.Supplied);
+        outcome.Metrics["lossRate"] = JsonRate.Rate(loss, tracker.SentOk);
+        outcome.Metrics["strictLossRate"] = JsonRate.Rate(loss + counts.Corrupt, tracker.SentOk);
+        outcome.Metrics["lateRate"] = JsonRate.Rate(counts.Late, tracker.SentOk);
+        outcome.Metrics["corruptRate"] = JsonRate.Rate(counts.Corrupt, tracker.SentOk);
+        outcome.Metrics["duplicateRate"] = JsonRate.Rate(counts.Duplicate, tracker.SentOk);
+        outcome.Metrics["reorderRate"] = JsonRate.Rate(counts.Reordered, tracker.SentOk);
+        outcome.Metrics["clientSendLossRate"] = JsonRate.Rate(clientSendLoss, tracker.Supplied);
         outcome.Metrics["outOfRangeSequences"] = tracker.OutOfRange;
-        outcome.Metrics["achievedRate"] = JsonValue.PerSecond(tracker.SentOk, elapsedTicks, System.Diagnostics.Stopwatch.Frequency);
+        outcome.Metrics["achievedRate"] = JsonPerSecond.PerSecond(tracker.SentOk, elapsedTicks, System.Diagnostics.Stopwatch.Frequency);
     }
 
     private static int ApplyFaultInjection(ClientOptions options, FrameBuffer frame, int payloadBytes, long index, int length)

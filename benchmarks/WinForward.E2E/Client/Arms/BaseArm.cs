@@ -1,4 +1,5 @@
 using System.Globalization;
+using WinForward.E2E.Contracts.Json;
 
 namespace WinForward.E2E.Client.Arms;
 
@@ -40,7 +41,7 @@ internal static class BaseArm
             },
             Metrics =
             {
-                ["elapsedSeconds"] = JsonValue.Round(Clock.ToSeconds(elapsedTicks), 4),
+                ["elapsedSeconds"] = NumberFormat.Round(Clock.ToSeconds(elapsedTicks), 4),
                 ["latency"] = latency.Metrics,
                 ["loss"] = loss.Metrics,
             },

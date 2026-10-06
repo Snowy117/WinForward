@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using WinForward.E2E.Contracts.Json;
 
 namespace WinForward.E2E.Client;
 
@@ -138,7 +139,7 @@ internal sealed class ArmContext
 
     internal required IPAddress TargetAddress { get; init; }
 
-    internal required JsonlFile Sink { get; init; }
+    internal required JsonlSink Sink { get; init; }
 
     internal required LatencySet Latency { get; init; }
 

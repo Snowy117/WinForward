@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
+using WinForward.E2E.Contracts.Json;
 using WinForward.E2E.Wire;
 
 namespace WinForward.E2E.Target;
@@ -12,7 +13,7 @@ internal sealed class DnsServer : IAsyncDisposable
 
     private readonly Socket _udp;
     private readonly Socket _tcp;
-    private readonly LedgerWriter _ledger;
+    private readonly JsonlSink _ledger;
     private readonly int _workerCount;
     private readonly int _port;
     private readonly EndPoint _sourceTemplate;
@@ -29,7 +30,7 @@ internal sealed class DnsServer : IAsyncDisposable
     private long _tcpConnectionsAccepted;
     private long _tcpAborted;
 
-    internal DnsServer(IPEndPoint endPoint, LedgerWriter ledger, int workerCount)
+    internal DnsServer(IPEndPoint endPoint, JsonlSink ledger, int workerCount)
     {
         _ledger = ledger;
         _workerCount = workerCount;

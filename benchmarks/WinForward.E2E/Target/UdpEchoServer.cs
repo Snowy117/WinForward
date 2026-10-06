@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using WinForward.E2E.Contracts.Json;
 using WinForward.E2E.Wire;
 
 namespace WinForward.E2E.Target;
@@ -15,7 +16,7 @@ internal sealed class UdpEchoServer : IAsyncDisposable
     private static readonly TimeSpan s_summaryInterval = TimeSpan.FromSeconds(1);
 
     private readonly Socket _socket;
-    private readonly LedgerWriter _ledger;
+    private readonly JsonlSink _ledger;
     private readonly int _receiverCount;
     private readonly EndPoint _sourceTemplate;
     private readonly SourceCensus[] _censuses;
@@ -24,7 +25,7 @@ internal sealed class UdpEchoServer : IAsyncDisposable
     private long _bytes;
     private long _sendErrors;
 
-    internal UdpEchoServer(EndPoint endPoint, LedgerWriter ledger, int receiverCount)
+    internal UdpEchoServer(EndPoint endPoint, JsonlSink ledger, int receiverCount)
     {
         _ledger = ledger;
         _receiverCount = receiverCount;

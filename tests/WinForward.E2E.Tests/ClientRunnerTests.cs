@@ -57,6 +57,9 @@ public sealed class ClientRunnerTests
 
             var errorIndex = Array.IndexOf(types, "error");
             Assert.True(errorIndex >= 0, "the arm file carries no error record");
+            // One per arm, whichever step of the failure boundary raised it (D14.7): a second record
+            // would mean the arm's failure was booked twice.
+            Assert.Equal(1, types.Count(static type => type == "error"));
             Assert.True(errorIndex < Array.IndexOf(types, "result"), "the error record must precede the arm's result record");
 
             using var first = JsonDocument.Parse(lines[errorIndex]);

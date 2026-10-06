@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk" TreatAsLocalProperty="AssemblyName">
+  <!-- scripts/publish.sh builds the direct-lane client image from the harness project with
+       -p:AssemblyName=WinForward.E2E.Direct. A global property would rename this library too and make
+       the restore graph ambiguous ("Ambiguous project name 'WinForward.E2E.Direct'"), so the library's
+       identity stays local to this project: the rename belongs to the client image alone. -->
+  <PropertyGroup>
+    <AssemblyName>WinForward.E2E.Contracts</AssemblyName>
+    <RootNamespace>WinForward.E2E.Contracts</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="WinForward.E2E.Tests" />
+  </ItemGroup>
+</Project>

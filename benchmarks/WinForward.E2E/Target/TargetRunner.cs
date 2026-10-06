@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Net;
+using System.Text.Json;
 using WinForward.E2E.Cli;
+using WinForward.E2E.Contracts.Json;
 
 namespace WinForward.E2E.Target;
 
@@ -16,7 +18,7 @@ internal static class TargetRunner
         }
 
         var workers = Math.Clamp(Environment.ProcessorCount / 2, 2, 8);
-        await using var ledger = new LedgerWriter(options.LedgerPath, options.Label);
+        await using var ledger = new JsonlSink(options.LedgerPath, JsonlPolicy.SwallowAndCount, WriteLedgerEnvelope(options.Label));
         await using var tcp = new TcpTargetServer(new IPEndPoint(bindAddress, options.TcpPort), ledger);
         await using var udp = new UdpEchoServer(new IPEndPoint(bindAddress, options.UdpPort), ledger, workers);
         await using var dns = new DnsServer(new IPEndPoint(bindAddress, options.DnsPort), ledger, workers);
@@ -40,6 +42,18 @@ internal static class TargetRunner
         return ExitCodes.Success;
     }
 
+    /// <summary>
+    /// Every ledger record starts with the absolute time and the label the target was started with:
+    /// the target's own stopwatch cannot be aligned with the client's clock without the first, and a
+    /// row cannot be attributed to an arm without the second.
+    /// </summary>
+    internal static Action<Utf8JsonWriter> WriteLedgerEnvelope(string label) =>
+        writer =>
+        {
+            writer.WriteString("utc", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+            writer.WriteString("label", label);
+        };
+
     private static async ValueTask AnnounceAsync(TargetOptions options, IPAddress bindAddress, bool hasDnsAlt)
     {
         await Console.Out.WriteLineAsync(string.Create(
@@ -54,7 +68,7 @@ internal static class TargetRunner
     }
 
     private static async ValueTask WriteSummariesAsync(
-        LedgerWriter ledger,
+        JsonlSink ledger,
         TcpTargetServer tcp,
         UdpEchoServer udp,
         DnsServer dns,
@@ -62,15 +76,19 @@ internal static class TargetRunner
         long startedTicks,
         long endedTicks)
     {
-        await udp.WriteSummaryAsync(CancellationToken.None).ConfigureAwait(false);
-        await dns.WriteSummaryAsync(CancellationToken.None).ConfigureAwait(false);
+        // Every summary, including the targetSummary that names the failure count, is written
+        // through the guard: the ledger's own policy already swallows an I/O failure, and this is
+        // the second line of defence that keeps one failed summary from skipping the rest and keeps
+        // any of them from escaping TargetRunner (D14.7 item 2).
+        await WriteSummaryAsync(ledger, "udpSummary", () => udp.WriteSummaryAsync(CancellationToken.None)).ConfigureAwait(false);
+        await WriteSummaryAsync(ledger, "dnsSummary", () => dns.WriteSummaryAsync(CancellationToken.None)).ConfigureAwait(false);
         if (dnsAlt is not null)
         {
-            await dnsAlt.WriteSummaryAsync(CancellationToken.None).ConfigureAwait(false);
+            await WriteSummaryAsync(ledger, "dnsSummary", () => dnsAlt.WriteSummaryAsync(CancellationToken.None)).ConfigureAwait(false);
         }
 
-        await tcp.WriteSummaryAsync(CancellationToken.None).ConfigureAwait(false);
-        await ledger.WriteAsync(
+        await WriteSummaryAsync(ledger, "tcpSummary", () => tcp.WriteSummaryAsync(CancellationToken.None)).ConfigureAwait(false);
+        await WriteSummaryAsync(ledger, "targetSummary", () => ledger.WriteAsync(
             writer =>
             {
                 writer.WriteString("type", "targetSummary");
@@ -97,7 +115,21 @@ internal static class TargetRunner
                     writer.WriteEndObject();
                 }
             },
-            CancellationToken.None).ConfigureAwait(false);
+            CancellationToken.None)).ConfigureAwait(false);
+    }
+
+    private static async ValueTask WriteSummaryAsync(JsonlSink ledger, string name, Func<ValueTask> write)
+    {
+        try
+        {
+            await write().ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            await TargetLog.ReportAsync(string.Create(
+                CultureInfo.InvariantCulture,
+                $"e2e target: the {name} record could not be written ({ledger.WriteErrors} ledger write error(s) so far): {exception.GetType().Name}: {exception.Message}")).ConfigureAwait(false);
+        }
     }
 
 #pragma warning disable RCS1239 // Every flag may consume the next argument as its value, so the body advances the index and S127 (error) forbids a for loop here.

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using WinForward.E2E.Contracts.Json;
 using WinForward.E2E.Wire;
 
 namespace WinForward.E2E.Client.Arms;
@@ -241,13 +242,13 @@ internal static class ReliabilityArm
     /// </summary>
     private sealed class AttemptEvidence
     {
-        private readonly JsonlFile _sink;
+        private readonly JsonlSink _sink;
         private long _seen;
         private long _claimed;
         private long _written;
         private long _omitted;
 
-        internal AttemptEvidence(JsonlFile sink)
+        internal AttemptEvidence(JsonlSink sink)
         {
             _sink = sink;
         }
@@ -277,7 +278,6 @@ internal static class ReliabilityArm
             await _sink.WriteAsync(
                 writer =>
                 {
-                    writer.WriteStartObject();
                     writer.WriteString("type", "attempt");
                     writer.WriteNumber("connectionId", attempt.ConnectionId);
                     writer.WriteString("mode", TcpCommand.Name(attempt.Mode));
@@ -293,7 +293,6 @@ internal static class ReliabilityArm
                     writer.WriteBoolean("otherError", attempt.OtherError);
                     writer.WriteNumber("connectTicks", attempt.ConnectTicks);
                     writer.WriteNumber("transferTicks", attempt.TransferTicks);
-                    writer.WriteEndObject();
                 },
                 cancellationToken).ConfigureAwait(false);
         }
@@ -338,7 +337,7 @@ internal static class ReliabilityArm
         outcome.Metrics["expectedEarlyEof"] = expectedEarlyEof;
         outcome.Metrics["truncated"] = truncated;
         outcome.Metrics["fidelityMismatch"] = mismatches;
-        outcome.Metrics["fidelityRate"] = JsonValue.Ratio(mismatches, attempts.Length);
+        outcome.Metrics["fidelityRate"] = JsonRate.Rate(mismatches, attempts.Length);
         outcome.Metrics["connectFail"] = connectFailures;
         outcome.Metrics["expectedBytes"] = expectedBytes;
         outcome.Metrics["modeSchedule"] = string.Join(',', schedule.ConvertAll(TcpCommand.Name));
@@ -349,14 +348,14 @@ internal static class ReliabilityArm
         outcome.Metrics["attemptRecordsOmitted"] = evidence.Omitted;
         outcome.Metrics["meanConnectMs"] = connectSamples == 0
             ? null
-            : JsonValue.Round(Clock.ToMicroseconds(connectTicks) / (double)connectSamples / 1000.0);
+            : NumberFormat.Round(Clock.ToMicroseconds(connectTicks) / (double)connectSamples / 1000.0);
 
         // Over the attempts that completed a request send, never over every attempt: an attempt that
         // never connected has no send to average, and letting it in as a zero deflates the mean.
         outcome.Metrics["meanTransferMs"] = transferSamples == 0
             ? null
-            : JsonValue.Round(Clock.ToMicroseconds(transferTicks) / (double)transferSamples / 1000.0);
-        outcome.Metrics["achievedRate"] = JsonValue.PerSecond(attempts.Length, elapsedTicks, System.Diagnostics.Stopwatch.Frequency);
+            : NumberFormat.Round(Clock.ToMicroseconds(transferTicks) / (double)transferSamples / 1000.0);
+        outcome.Metrics["achievedRate"] = JsonPerSecond.PerSecond(attempts.Length, elapsedTicks, System.Diagnostics.Stopwatch.Frequency);
         outcome.Metrics["effectiveModeMix"] = mixText;
     }
 

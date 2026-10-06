@@ -7,4 +7,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="WinForward.E2E.Tests" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../WinForward.E2E.Contracts/WinForward.E2E.Contracts.csproj" />
+  </ItemGroup>
 </Project>

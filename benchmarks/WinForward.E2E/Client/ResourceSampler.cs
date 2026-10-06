@@ -3,10 +3,11 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using WinForward.E2E.Contracts.Json;
 
 namespace WinForward.E2E.Client;
 
-internal sealed record SamplerTarget(JsonlFile Sink, string Arm);
+internal sealed record SamplerTarget(JsonlSink Sink, string Arm);
 
 [StructLayout(LayoutKind.Auto)]
 internal readonly struct ProcessCounters
@@ -101,7 +102,7 @@ internal sealed class ResourceSampler : IAsyncDisposable
         _loop = LoopAsync(_shutdown.Token);
     }
 
-    internal void SetTarget(JsonlFile sink, string arm) => _target = new SamplerTarget(sink, arm);
+    internal void SetTarget(JsonlSink sink, string arm) => _target = new SamplerTarget(sink, arm);
 
     internal async Task ClearTargetAsync()
     {
@@ -274,7 +275,7 @@ internal sealed class ResourceSampler : IAsyncDisposable
 
     private static void WriteCounters(Utf8JsonWriter writer, in ProcessCounters counters)
     {
-        writer.WriteNumber("cpuSeconds", JsonValue.Round(counters.CpuSeconds, 4));
+        writer.WriteNumber("cpuSeconds", NumberFormat.Round(counters.CpuSeconds, 4));
         writer.WriteNumber("privateBytes", counters.PrivateBytes);
         writer.WriteNumber("workingSetBytes", counters.WorkingSet);
         writer.WriteNumber("peakWorkingSetBytes", counters.PeakWorkingSet);
@@ -305,7 +306,7 @@ internal sealed class ResourceSampler : IAsyncDisposable
             writer.WriteBoolean("countersRead", process.CountersRead);
             if (process.CountersRead)
             {
-                writer.WriteNumber("cpuSeconds", JsonValue.Round(process.CpuSeconds, 4));
+                writer.WriteNumber("cpuSeconds", NumberFormat.Round(process.CpuSeconds, 4));
                 writer.WriteNumber("privateBytes", process.PrivateBytes);
             }
             else
@@ -389,14 +390,12 @@ internal sealed class ResourceSampler : IAsyncDisposable
             await target.Sink.WriteAsync(
                 writer =>
                 {
-                    writer.WriteStartObject();
                     writer.WriteString("type", "samplerError");
                     writer.WriteNumber("ticks", Stopwatch.GetTimestamp());
                     writer.WriteString("arm", target.Arm);
                     writer.WriteString("process", process);
                     writer.WriteString("error", exception.GetType().Name);
                     writer.WriteString("message", exception.Message);
-                    writer.WriteEndObject();
                 },
                 cancellationToken).ConfigureAwait(false);
         }
@@ -426,7 +425,6 @@ internal sealed class ResourceSampler : IAsyncDisposable
         await target.Sink.WriteAsync(
             writer =>
             {
-                writer.WriteStartObject();
                 writer.WriteString("type", "sample");
                 writer.WriteNumber("ticks", ticks);
                 writer.WriteString("arm", target.Arm);
@@ -444,9 +442,8 @@ internal sealed class ResourceSampler : IAsyncDisposable
                 }
 
                 WriteProcesses(writer, [identity]);
-                writer.WriteNumber("generatorCpuSeconds", JsonValue.Round(counters.CpuSeconds, 4));
+                writer.WriteNumber("generatorCpuSeconds", NumberFormat.Round(counters.CpuSeconds, 4));
                 writer.WriteNumber("envWorkingSetBytes", environmentWorkingSet);
-                writer.WriteEndObject();
             },
             cancellationToken).ConfigureAwait(false);
     }
@@ -507,7 +504,6 @@ internal sealed class ResourceSampler : IAsyncDisposable
         await target.Sink.WriteAsync(
             writer =>
             {
-                writer.WriteStartObject();
                 writer.WriteString("type", "sample");
                 writer.WriteNumber("ticks", ticks);
                 writer.WriteString("arm", target.Arm);
@@ -539,7 +535,6 @@ internal sealed class ResourceSampler : IAsyncDisposable
                 }
 
                 WriteProcesses(writer, totals.Processes);
-                writer.WriteEndObject();
             },
             cancellationToken).ConfigureAwait(false);
     }

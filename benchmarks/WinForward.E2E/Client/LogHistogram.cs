@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using WinForward.E2E.Contracts.Json;
 
 namespace WinForward.E2E.Client;
 
@@ -40,13 +41,13 @@ internal readonly struct HistogramSnapshot
         writer.WritePropertyName(propertyName);
         writer.WriteStartObject();
         writer.WriteNumber("count", Count);
-        writer.WriteNumber("minUs", JsonValue.Microseconds(Min));
-        writer.WriteNumber("maxUs", JsonValue.Microseconds(Max));
-        writer.WriteNumber("meanUs", JsonValue.Microseconds((long)Mean));
-        writer.WriteNumber("p50Us", JsonValue.Microseconds(P50));
-        writer.WriteNumber("p90Us", JsonValue.Microseconds(P90));
-        writer.WriteNumber("p99Us", JsonValue.Microseconds(P99));
-        writer.WriteNumber("p999Us", JsonValue.Microseconds(P999));
+        writer.WriteNumber("minUs", NumberFormat.Microseconds(Min));
+        writer.WriteNumber("maxUs", NumberFormat.Microseconds(Max));
+        writer.WriteNumber("meanUs", NumberFormat.Microseconds((long)Mean));
+        writer.WriteNumber("p50Us", NumberFormat.Microseconds(P50));
+        writer.WriteNumber("p90Us", NumberFormat.Microseconds(P90));
+        writer.WriteNumber("p99Us", NumberFormat.Microseconds(P99));
+        writer.WriteNumber("p999Us", NumberFormat.Microseconds(P999));
         writer.WriteEndObject();
     }
 }

@@ -8,5 +8,6 @@
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
     <ProjectReference Include="../../benchmarks/WinForward.E2E/WinForward.E2E.csproj" />
+    <ProjectReference Include="../../benchmarks/WinForward.E2E.Contracts/WinForward.E2E.Contracts.csproj" />
   </ItemGroup>
 </Project>

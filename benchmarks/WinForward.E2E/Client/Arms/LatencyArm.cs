@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using WinForward.E2E.Contracts.Json;
 using WinForward.E2E.Wire;
 
 namespace WinForward.E2E.Client.Arms;
@@ -238,9 +239,24 @@ internal static class LatencyArm
     /// </summary>
     private static double InFlightCeilingMs(int window, int lanes, long sentOk, long elapsedTicks)
     {
-        var achievedPerSecond = JsonValue.PerSecond(sentOk, elapsedTicks, Stopwatch.Frequency);
-        return achievedPerSecond <= 0 ? 0 : JsonValue.Round(1000.0 * window * lanes / achievedPerSecond);
+        var achievedPerSecond = JsonPerSecond.PerSecond(sentOk, elapsedTicks, Stopwatch.Frequency);
+        if (achievedPerSecond is not > 0)
+        {
+            // No elapsed time, or nothing sent: the ceiling is undefined, and it stays the 0 the
+            // pre-change arithmetic published rather than taking the record's null convention,
+            // because this value is a floor on a measurable latency and not a rate.
+            return 0;
+        }
+
+        return NumberFormat.Round(1000.0 * window * lanes / achievedPerSecond.GetValueOrDefault());
     }
+
+    /// <summary>
+    /// Renders a rate for a note. A note is prose, so an undefined rate says so instead of leaving
+    /// the hole an interpolated null leaves between two spaces.
+    /// </summary>
+    private static string RateText(double? perSecond) =>
+        perSecond is { } value ? value.ToString("F3", CultureInfo.InvariantCulture) : "n/a";
 
     private static void WriteTcpMetrics(ArmOutcome outcome, LatencyTcpState state, List<LatencyTcpState> laneStates, LatencyPlan plan, long elapsedTicks)
     {
@@ -271,12 +287,12 @@ internal static class LatencyArm
         outcome.Metrics["tcp.unmatchedReplies"] = state._unmatchedReplies;
         outcome.Metrics["tcp.windowCeilingMs"] = InFlightCeilingMs(plan.InFlightWindow, plan.Lanes, state._sentOk, elapsedTicks);
         outcome.Metrics["tcp.scheduleTruncated"] = state._scheduleTruncated ? 1L : 0L;
-        outcome.Metrics["tcp.achievedRate"] = JsonValue.PerSecond(state._sentOk, elapsedTicks, Stopwatch.Frequency);
+        outcome.Metrics["tcp.achievedRate"] = JsonPerSecond.PerSecond(state._sentOk, elapsedTicks, Stopwatch.Frequency);
         outcome.Metrics["tcp.connectAttempts"] = state._connectSamples + state._connectFailures;
         outcome.Metrics["tcp.connectFailures"] = state._connectFailures;
         outcome.Metrics["tcp.meanConnectMs"] = state._connectSamples == 0
             ? null
-            : JsonValue.Round(Clock.ToMicroseconds(state._connectTicks) / (double)state._connectSamples / 1000.0);
+            : NumberFormat.Round(Clock.ToMicroseconds(state._connectTicks) / (double)state._connectSamples / 1000.0);
     }
 
     private static void WriteUdpMetrics(ArmOutcome outcome, UdpLatencyState state, LatencyPlan plan, long elapsedTicks)
@@ -300,8 +316,8 @@ internal static class LatencyArm
         outcome.Metrics["udp.scheduleTruncated"] = state._scheduleTruncated ? 1L : 0L;
 
         // SentOk minus matched arrivals, never SentOk minus Received, which duplicates can exceed.
-        outcome.Metrics["udp.lossRate"] = JsonValue.Ratio(state._sentOk - (state._received - state._unmatchedReplies), state._sentOk);
-        outcome.Metrics["udp.achievedRate"] = JsonValue.PerSecond(state._sentOk, elapsedTicks, Stopwatch.Frequency);
+        outcome.Metrics["udp.lossRate"] = JsonRate.Rate(state._sentOk - (state._received - state._unmatchedReplies), state._sentOk);
+        outcome.Metrics["udp.achievedRate"] = JsonPerSecond.PerSecond(state._sentOk, elapsedTicks, Stopwatch.Frequency);
     }
 
     private static void WriteGates(ArmOutcome outcome, LaneStates lanes, LatencyTcpState tcp, MeasurementValidity validity)
@@ -346,14 +362,14 @@ internal static class LatencyArm
         {
             outcome.Notes.Add(string.Create(
                 CultureInfo.InvariantCulture,
-                $"in-flight ceiling (tcp): {plan.Lanes} lane(s) at {JsonValue.PerSecond(tcp._sentOk, elapsedTicks, Stopwatch.Frequency):F3} requests/s aggregate achieved with inFlightWindow {plan.InFlightWindow} per lane put the measurable direct-latency ceiling at {validity.TcpCeilingMs:F1} ms; slower requests are measured through the deferred queue, and the ceiling was {(tcp._windowOverflow > 0 ? "reached" : "not reached")} (windowOverflow = {tcp._windowOverflow})."));
+                $"in-flight ceiling (tcp): {plan.Lanes} lane(s) at {RateText(JsonPerSecond.PerSecond(tcp._sentOk, elapsedTicks, Stopwatch.Frequency))} requests/s aggregate achieved with inFlightWindow {plan.InFlightWindow} per lane put the measurable direct-latency ceiling at {validity.TcpCeilingMs:F1} ms; slower requests are measured through the deferred queue, and the ceiling was {(tcp._windowOverflow > 0 ? "reached" : "not reached")} (windowOverflow = {tcp._windowOverflow})."));
         }
 
         if (plan.UseUdp)
         {
             outcome.Notes.Add(string.Create(
                 CultureInfo.InvariantCulture,
-                $"in-flight ceiling (udp): 1 lane at {JsonValue.PerSecond(lanes.Udp._sentOk, elapsedTicks, Stopwatch.Frequency):F3} requests/s achieved with inFlightWindow {plan.InFlightWindow} put the measurable direct-latency ceiling at {validity.UdpCeilingMs:F1} ms; slower requests are measured through the deferred queue, and the ceiling was {(lanes.Udp._windowOverflow > 0 ? "reached" : "not reached")} (windowOverflow = {lanes.Udp._windowOverflow})."));
+                $"in-flight ceiling (udp): 1 lane at {RateText(JsonPerSecond.PerSecond(lanes.Udp._sentOk, elapsedTicks, Stopwatch.Frequency))} requests/s achieved with inFlightWindow {plan.InFlightWindow} put the measurable direct-latency ceiling at {validity.UdpCeilingMs:F1} ms; slower requests are measured through the deferred queue, and the ceiling was {(lanes.Udp._windowOverflow > 0 ? "reached" : "not reached")} (windowOverflow = {lanes.Udp._windowOverflow})."));
         }
 
         outcome.Notes.Add(string.Concat(

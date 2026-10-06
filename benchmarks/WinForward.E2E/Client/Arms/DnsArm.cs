@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using WinForward.E2E.Contracts.Json;
 using WinForward.E2E.Wire;
 
 namespace WinForward.E2E.Client.Arms;
@@ -125,8 +126,8 @@ internal static class DnsArm
         outcome.Metrics["emptyAnswers"] = udp._emptyAnswers + tcp._emptyAnswers;
         outcome.Metrics["malformed"] = udp._malformed + tcp._malformed;
         outcome.Metrics["unmatched"] = udp._unmatched + tcp._unmatched;
-        outcome.Metrics["answerRate"] = JsonValue.Ratio(answered, sent);
-        outcome.Metrics["achievedRate"] = JsonValue.PerSecond(sent, elapsedTicks, Stopwatch.Frequency);
+        outcome.Metrics["answerRate"] = JsonRate.Rate(answered, sent);
+        outcome.Metrics["achievedRate"] = JsonPerSecond.PerSecond(sent, elapsedTicks, Stopwatch.Frequency);
 
         var rcodes = new Dictionary<string, object?>(StringComparer.Ordinal);
         for (var code = 0; code < udp._rcodes.Length; code++)

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net.Sockets;
+using WinForward.E2E.Contracts.Json;
 using WinForward.E2E.Wire;
 
 namespace WinForward.E2E.Client.Arms;
@@ -152,9 +153,9 @@ internal static class ThroughputArm
         outcome.Metrics["budgetBytes"] = budget;
         outcome.Metrics["budgetReached"] = budgetExhausted;
         outcome.Metrics["budgetRemainingBytes"] = Math.Max(0, budget - totals._bytesSent);
-        outcome.Metrics["elapsedSeconds"] = JsonValue.Round(elapsedSeconds, 4);
-        outcome.Metrics["goodputBps"] = JsonValue.Round(totals._bytesEchoed / elapsedSeconds);
-        outcome.Metrics["goodputMbps"] = JsonValue.Round(totals._bytesEchoed * 8.0 / elapsedSeconds / 1_000_000.0, 4);
+        outcome.Metrics["elapsedSeconds"] = NumberFormat.Round(elapsedSeconds, 4);
+        outcome.Metrics["goodputBps"] = NumberFormat.Round(totals._bytesEchoed / elapsedSeconds);
+        outcome.Metrics["goodputMbps"] = NumberFormat.Round(totals._bytesEchoed * 8.0 / elapsedSeconds / 1_000_000.0, 4);
         outcome.Metrics["perStreamMinBytes"] = totals._minEchoed == long.MaxValue ? 0 : totals._minEchoed;
         outcome.Metrics["perStreamMaxBytes"] = totals._maxEchoed;
         outcome.Metrics["corrupt"] = totals._corrupt;

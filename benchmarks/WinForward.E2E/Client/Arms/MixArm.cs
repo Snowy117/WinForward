@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using WinForward.E2E.Contracts.Json;
 using WinForward.E2E.Wire;
 
 namespace WinForward.E2E.Client.Arms;
@@ -199,7 +200,7 @@ internal static class MixArm
         outcome.Metrics["bulkBytes"] = counters._bulkBytes;
         outcome.Metrics["dnsSent"] = counters.DnsSent;
         outcome.Metrics["udpSent"] = udp._sent;
-        outcome.Metrics["udpLossRate"] = JsonValue.Ratio(udp.Loss, udp._sent);
+        outcome.Metrics["udpLossRate"] = JsonRate.Rate(udp.Loss, udp._sent);
         outcome.Metrics["clientSendLoss"] = udp._clientSendLoss;
         outcome.Metrics["desktops"] = BuildDesktopLanes(counters, trackers, counts, sentPerDesktop);
         return (udp._clientSendLoss, CountIdleLanes(counters, sentPerDesktop));
@@ -243,7 +244,7 @@ internal static class MixArm
         ["outOfRangeSequences"] = totals._outOfRange,
         ["bytes"] = counters._udpBytes,
         ["clientSendLoss"] = totals._clientSendLoss,
-        ["lossRate"] = JsonValue.Ratio(totals.Loss, totals._sent),
+        ["lossRate"] = JsonRate.Rate(totals.Loss, totals._sent),
         ["window"] = (double)windowMs,
         ["sentPerDesktop"] = sentPerDesktop,
     };
@@ -299,7 +300,7 @@ internal static class MixArm
         ["bytesSent"] = counters._bulkBytesSent,
         ["frames"] = counters.BulkFrames,
         ["errors"] = counters._bulkErrors,
-        ["goodputBps"] = JsonValue.Round(counters._bulkBytes / Clock.ToSeconds(elapsedTicks)),
+        ["goodputBps"] = NumberFormat.Round(counters._bulkBytes / Clock.ToSeconds(elapsedTicks)),
     };
 
     private static Dictionary<string, object?> BuildDnsClass(MixCounters counters) => new(StringComparer.Ordinal)

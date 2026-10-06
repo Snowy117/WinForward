@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using WinForward.E2E.Contracts.Json;
 using WinForward.E2E.Wire;
 
 namespace WinForward.E2E.Target;
@@ -47,14 +48,15 @@ internal readonly struct CommandOutcome
 
 internal sealed class TcpTargetServer : IAsyncDisposable
 {
-    // Sized from the enum, never from a literal: a ninth verdict would otherwise index past the
-    // end of the tally array inside the ledger writer, which swallows the throw, and every
-    // connection verdict in the run would go missing without a word.
+    // Sized from the enum, never from a literal: WriteTotals indexes the tally array by verdict, so
+    // a ninth verdict would throw inside a ledger record. The sink books that as one failed record
+    // instead of taking the target down, but the summary would still be missing from the ledger,
+    // which is why the sizing is the fix and the call-site guard is only the backstop.
     private static readonly int s_verdictCount = Enum.GetValues<TcpVerdict>().Length;
     private static readonly TimeSpan s_stallDelay = TimeSpan.FromSeconds(2);
 
     private readonly Socket _listener;
-    private readonly LedgerWriter _ledger;
+    private readonly JsonlSink _ledger;
     private readonly CancellationTokenSource _shutdown = new();
     private readonly List<Task> _connections = [];
     private readonly long[] _verdicts = new long[s_verdictCount];
@@ -62,7 +64,7 @@ internal sealed class TcpTargetServer : IAsyncDisposable
     private long _bytesEchoed;
     private long _protocolErrors;
 
-    internal TcpTargetServer(EndPoint endPoint, LedgerWriter ledger)
+    internal TcpTargetServer(EndPoint endPoint, JsonlSink ledger)
     {
         _ledger = ledger;
         _listener = new Socket(endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
@@ -184,7 +186,23 @@ internal sealed class TcpTargetServer : IAsyncDisposable
             Interlocked.Add(ref _bytesEchoed, command.Outcome.BytesEchoed);
             Interlocked.Add(ref _protocolErrors, command.Outcome.ProtocolErrors);
             Interlocked.Increment(ref _verdicts[(int)command.Outcome.Verdict]);
-            await WriteConnectionAsync(reader.Header.ConnectionId, command, peer, startedTicks, endedTicks).ConfigureAwait(false);
+
+            // The ledger's policy swallows and counts an I/O failure on its own; this guard is what
+            // covers a body the sink was asked to propagate, and it keeps the fire-and-forget task
+            // from faulting into the shutdown join. The connection is reset so an unrecorded
+            // attempt is visible to its peer rather than indistinguishable from a recorded one, and
+            // the listener keeps serving (D14.7 item 1).
+            try
+            {
+                await WriteConnectionAsync(reader.Header.ConnectionId, command, peer, startedTicks, endedTicks).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                await TargetLog.ReportAsync(string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"e2e target: connection {reader.Header.ConnectionId} could not be recorded ({_ledger.WriteErrors} ledger write error(s) so far): {exception.GetType().Name}: {exception.Message}")).ConfigureAwait(false);
+                socket.LingerState = new LingerOption(enable: true, 0);
+            }
         }
     }
 
