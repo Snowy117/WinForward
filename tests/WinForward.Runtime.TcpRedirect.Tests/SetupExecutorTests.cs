@@ -53,8 +53,13 @@ public sealed class SetupExecutorTests
         Assert.Same(rejected, executor.RentItem(static _ => Task.CompletedTask));
         Assert.Equal(overflowBefore, executor.OverflowAllocations);
 
+        // Releasing the gate wakes a worker whose finally block nulls _completion, so the field is
+        // only readable while the gate is still closed; the reference captured here is the test's own
+        // and awaiting it asserts that the worker settled the item rather than racing its cleanup
+        // (observed as a NullReferenceException on the re-read under a loaded full-suite run).
+        var blockerCompletion = blocker._completion!;
         gate.TrySetResult();
-        blocker._completion.TrySetResult();
+        await blockerCompletion.Task.WaitAsync(TimeSpan.FromSeconds(10));
         await WaitForAsync(() => executor.FreeCount > 0);
         Assert.Equal(0, executor.PendingCount);
     }
