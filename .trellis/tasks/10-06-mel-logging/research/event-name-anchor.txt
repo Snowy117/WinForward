@@ -1,0 +1,103 @@
+# Structured event names present at git HEAD before the migration (71).
+# Every one must still exist as a LoggerMessageAttribute EventName literal when step 6 completes.
+#
+# Extraction (line-context, not function-name regex — two earlier attempts under-reported):
+#   git grep -h -n -E '"[a-z][a-zA-Z0-9_-]*(\.[a-zA-Z][a-zA-Z0-9_-]*)+"' HEAD -- 'src/*.cs' 'src/**/*.cs' \
+#     | rg 'Event\(|LogDebug\(|LogTrace\(|LogPacket\(|LogPacketStage\(|logEventName|EventName' \
+#     | rg -o '"[a-z][a-zA-Z0-9_-]*(\.[a-zA-Z][a-zA-Z0-9_-]*)+"' | tr -d '"' | sort -u
+# History: attempt 1 dropped every name containing an underscore (bad character class, 66 names);
+# attempt 2 recovered udp.response.foreign_source (67) but still missed the four packet.* names a
+# FlowDispatcher dynamic helper emits. The lesson is that a verification tool which silently
+# under-reports is worse than none, so the count is asserted below and the step 6 check is
+# bidirectional.
+#
+# Names ADDED during the migration (not at HEAD; expected to appear, and to keep appearing):
+#   capture.scope.resolved           Information milestone (capture)
+#   capture.generation.started       Information milestone (capture)
+#   flow.table.initialized           Information milestone (flow)
+#   cli.run.resolved                 Information milestone (CLI, resolved-run summary)
+#   cli.target.socks5                Information milestone (CLI, one per SOCKS5 target)
+#   cli.target.local                 Information milestone (CLI, one per local target)
+#   udp.targets.noMac.adapters
+#       The group half of `udp.targets.noMac`. SYSLIB1015 requires every [LoggerMessage] parameter
+#       to appear in the message template, so the two shapes could not share one method with a
+#       union of nullable fields; and they are two situations anyway (one zero-MAC host-fallback
+#       adapter vs. a set of scope adapters), so they follow the same split as the pair below.
+#   generation.startup-fault.exhausted
+#       The error half of the one same-name/different-level pair in the codebase. MEL's SYSLIB1025
+#       refuses two [LoggerMessage] methods sharing an EventName in one class, which is the framework
+#       stating that the level is part of an event's identity. Rather than work around it with a
+#       second partial class, the fail-closed half got its own name; the warn half keeps
+#       `generation.startup-fault` unchanged, so an existing filter still catches the frequent case
+#       and a prefix search catches both.
+adapter.addressQuery.failed
+adapter.degraded
+adapter.readShape.mismatch
+adapter.refresh
+adapter.retry
+adapter.slot-exhausted
+capture.packetEvent.unavailable
+flow.attribution.flow-full
+flow.attribution-miss
+flow.attribution.pending-rejected
+flow.capacity-block
+flow.created
+gc.collected
+generation.startup-fault
+packet.action
+packet.captured
+packet.classified
+packet.completed
+packet.dropped
+packet.failed
+packet.flowResolved
+packet.fragmentHandled
+packet.reinjected
+packet.reverseHandled
+packet.selfTraffic
+reinject.pass-failed
+runner.forcedRefresh
+runner.forcedRefresh.degraded
+runner.heartbeat
+runtime.expired
+tcp.packet.handled
+tcp.redirect.batch-failed
+tcp.redirect.capacity
+tcp.redirect.capacityReset
+tcp.redirect.clientReset
+tcp.redirect.closed
+tcp.redirect.created
+tcp.redirect.deferred-failed
+tcp.redirect.deferred-overflow
+tcp.redirect.failed
+tcp.redirect.fragment
+tcp.redirect.injected
+tcp.redirect.rejected
+tcp.redirect.relaySetupFailed
+tcp.redirect.reused
+tcp.redirect.unrelatedPeer
+tcp.relay.ended
+tcp.relay.faulted
+tcp.relay.started
+tcp.reverse.injected
+tcp.setup.cooldown
+tcp.setup.pending.dropped
+udp.association.lost
+udp.packet.received
+udp.packet.rejected
+udp.packet.sent
+udp.reinject.drop
+udp.reinject.unresolved
+udp.response.dropped
+udp.response.foreign_source
+udp.response.reinjected
+udp.send.dropped
+udp.session.capacity-block
+udp.session.closed
+udp.session.created
+udp.session.expired
+udp.session.rejected
+udp.setup.cooldown
+udp.setup.failed
+udp.setupqueue.dropped
+udp.targets.noMac
