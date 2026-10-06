@@ -365,8 +365,26 @@ public sealed class LayeredCaptureRunnerRefreshTests
         await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 1).ConfigureAwait(false);
 
         harness.Enumeration.SetAdapters(CaptureRunnerFakes.AdapterItem("id-a", 202));
+        var refreshRead = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        harness.Enumeration.NextEnumerationGate = refreshRead;
         harness.Runner.SignalDegraded(new WindowsAdapter("id-a", "id-a", "id-a", 101, 0), 87);
-        release.TrySetResult();
+
+        // The racing interleaving is staged, not hoped for: the refresh demand is consumed first, and
+        // the runner parks inside its enumeration read — after the storm guard, before the outgoing
+        // generation is stopped — which is where the startup fault is landed. The stop therefore always
+        // awaits a generation that already faulted, and the absorbed-fault path is what runs whatever
+        // the host's scheduling does. Both gates are released from the finally so a poll that times out
+        // cannot strand the runner's parked read and hang the harness's disposal.
+        // ReSharper disable once AccessToDisposedClosure // Polls the live enumeration count while the harness is live; disposal follows after the awaited polls return and the run is drained.
+        try
+        {
+            await AsyncTestExtensions.WaitForAsync(() => harness.Enumeration.EnumerationCount >= 2, timeoutMs: 5000).ConfigureAwait(false);
+        }
+        finally
+        {
+            release.TrySetResult();
+            refreshRead.TrySetResult();
+        }
 
         // ReSharper disable once AccessToDisposedClosure // WaitForAsync polls Generations.Generations.Count (Count == 2) on this test's own thread; the await using scope disposes the harness only after the poll returns, with its run drained.
         await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 2).ConfigureAwait(false);
@@ -402,10 +420,13 @@ public sealed class LayeredCaptureRunnerRefreshTests
 
         harness.Enumeration.SetAdapters(CaptureRunnerFakes.AdapterItem("id-a", 202));
         harness.ChangeSource.Trigger();
-        // ReSharper disable once AccessToDisposedClosure // Chained poll for the third generation (Generations.Generations.Count == 3) while the harness is live; disposal follows after the awaited poll returns and the run is drained.
-        await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 3).ConfigureAwait(false);
-        // ReSharper disable once AccessToDisposedClosure // Chained poll for the fourth generation (Generations.Generations.Count == 4) while the harness is live; disposal follows after the awaited poll returns and the run is drained.
-        await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count == 4).ConfigureAwait(false);
+        // Monotonic staging predicates: the generation count only ever grows, so an equality poll can
+        // miss a transient value (the storm guard spaces consecutive generations by the minimum
+        // refresh interval, and a starved continuation can observe the count after it already moved on).
+        // ReSharper disable once AccessToDisposedClosure // Chained poll for the third generation while the harness is live; disposal follows after the awaited poll returns and the run is drained.
+        await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count >= 3).ConfigureAwait(false);
+        // ReSharper disable once AccessToDisposedClosure // Chained poll for the fourth generation while the harness is live; disposal follows after the awaited poll returns and the run is drained.
+        await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count >= 4).ConfigureAwait(false);
         await harness.WaitForGenerationStartedAsync(3).ConfigureAwait(false);
 
         Assert.False(harness.RunTask.IsCompleted);

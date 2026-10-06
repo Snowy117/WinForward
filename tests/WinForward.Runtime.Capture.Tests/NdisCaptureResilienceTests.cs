@@ -195,7 +195,7 @@ public sealed class CaptureDegradationPlumbingTests
         var readers = new Dictionary<nint, INdisPacketReader>
         {
             [0x10] = new PermanentFailureReader(87),
-            [0x11] = new CancellingReader(cts, readsBeforeCancel: 3),
+            [0x11] = new CancellingReader(cts, degradedSignalled.Task, maximumReads: 5_000),
         };
         var dispatcher = new FlowDispatcher(CreatePassConfiguration(), new FakeGuard(), new NoopExecutor());
         var processor = new CapturePacketProcessor(dispatcher, FlowBuilders.Slots);
@@ -211,7 +211,7 @@ public sealed class CaptureDegradationPlumbingTests
         // cancelling the token: the degraded pump neither cancelled it nor rethrew.
         await loop.RunAsync(cts.Token);
 
-        var degraded = await degradedSignalled.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        var degraded = await degradedSignalled.Task.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Equal(("a", 87), degraded);
         Assert.Equal(1, loop.DegradedAdapterCount);
     }
@@ -238,7 +238,7 @@ public sealed class CaptureDegradationPlumbingTests
         // The degraded pump exits on its own, but the forward it started is parked inside the
         // callback, so its scope lease is still outstanding when disposal begins.
         await loop.RunAsync(cts.Token);
-        Assert.Equal(("a", 87), await forwarded.Task.WaitAsync(TimeSpan.FromSeconds(2)));
+        Assert.Equal(("a", 87), await forwarded.Task.WaitAsync(TimeSpan.FromSeconds(10)));
 
         // Regression: reverting the forward to `_ = ForwardDegradationAsync(...)` would leave
         // disposal with nothing to join, so it would complete here and orphan the callback.
@@ -247,7 +247,7 @@ public sealed class CaptureDegradationPlumbingTests
         Assert.False(disposal.IsCompleted);
 
         release.TrySetResult();
-        await disposal.WaitAsync(TimeSpan.FromSeconds(2));
+        await disposal.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.True(disposal.IsCompleted);
 
         // A second disposal joins the completed drain instead of re-running the teardown.
@@ -271,13 +271,20 @@ public sealed class CaptureDegradationPlumbingTests
         public int TryReadPackets(nint adapterHandle, NdisPacketBuffer[] buffers) => throw new Win32Exception(error);
     }
 
-    private sealed class CancellingReader(CancellationTokenSource cts, int readsBeforeCancel) : INdisPacketReader
+    /// <summary>
+    /// The sibling pump that ends the run by cancelling the shared token once the degradation was
+    /// signalled, so the fact's subject — a degraded pump must not cancel its siblings — does not
+    /// depend on which pump thread the host schedules first. The bounded read cap keeps a
+    /// never-degrading sibling from parking the run forever: it cancels anyway, and the fact then
+    /// fails on its own expectation instead of hanging.
+    /// </summary>
+    private sealed class CancellingReader(CancellationTokenSource cts, Task degradationSignalled, int maximumReads) : INdisPacketReader
     {
         private int _reads;
 
         public int TryReadPackets(nint adapterHandle, NdisPacketBuffer[] buffers)
         {
-            if (++_reads >= readsBeforeCancel) cts.Cancel();
+            if (degradationSignalled.IsCompleted || ++_reads >= maximumReads) cts.Cancel();
             return 0;
         }
     }

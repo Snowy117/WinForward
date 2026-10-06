@@ -13,8 +13,17 @@ internal sealed class FakeAdapterEnumerationProvider(IReadOnlyList<AdapterEnumer
 {
     private readonly Lock _gate = new();
     private IReadOnlyList<AdapterEnumerationItem> _current = initial;
+    private int _enumerationCount;
 
-    public int EnumerationCount { get; private set; }
+    public int EnumerationCount => Volatile.Read(ref _enumerationCount);
+
+    /// <summary>
+    /// Opt-in hold for the next <see cref="Enumerate"/> call. The runner re-reads the enumeration inside
+    /// its refresh demand path, after the storm guard and immediately before it stops the outgoing
+    /// generation, so parking here lets a fact stage state that the stop is then guaranteed to observe
+    /// instead of hoping the fact wins a scheduling race against the stop's cancellation.
+    /// </summary>
+    public TaskCompletionSource? NextEnumerationGate { get; set; }
 
     public void SetAdapters(params AdapterEnumerationItem[] items)
     {
@@ -23,11 +32,18 @@ internal sealed class FakeAdapterEnumerationProvider(IReadOnlyList<AdapterEnumer
 
     public IReadOnlyList<AdapterEnumerationItem> Enumerate()
     {
+        TaskCompletionSource? hold;
+        IReadOnlyList<AdapterEnumerationItem> current;
         lock (_gate)
         {
-            EnumerationCount++;
-            return _current;
+            Interlocked.Increment(ref _enumerationCount);
+            current = _current;
+            hold = NextEnumerationGate;
+            NextEnumerationGate = null;
         }
+
+        hold?.Task.GetAwaiter().GetResult();
+        return current;
     }
 }
 
@@ -57,9 +73,13 @@ internal sealed class FakeCaptureGeneration(int index, IReadOnlyList<AdapterEnum
     public Exception? FaultAtStartupWith { get; set; }
 
     /// <summary>
-    /// When set, a pending <see cref="FaultAtStartupWith"/> is held until this source completes
-    /// (or the run is cancelled), so a test can stage a racing refresh demand before the fault
-    /// lands and the demand deterministically wins the runner's wait.
+    /// When set, a pending <see cref="FaultAtStartupWith"/> is held until this source completes, so a
+    /// test can stage a racing refresh demand before the fault lands. Once the source has completed the
+    /// fault is authoritative: a stop that cancels at the same instant must not convert it into a
+    /// silent cancellation, because <see cref="Task.WaitAsync(CancellationToken)"/> races the source's
+    /// completion against the token and the token's callback can win even when the source completed
+    /// first. Cancellation still breaks the wait while the source is pending, so a failing fact cannot
+    /// hang its harness's teardown.
     /// </summary>
     public TaskCompletionSource? StartupFaultRelease { get; set; }
 
@@ -67,7 +87,20 @@ internal sealed class FakeCaptureGeneration(int index, IReadOnlyList<AdapterEnum
     {
         if (FaultAtStartupWith is { } startupFault)
         {
-            if (StartupFaultRelease is { } release) await release.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            if (StartupFaultRelease is { } release)
+            {
+                try
+                {
+                    await release.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (release.Task.IsCompleted)
+                {
+                    // The release landed, so the scripted fault is the outcome: a stop that cancels in
+                    // the same instant must not convert it into a silent cancellation. Control falls
+                    // through to the throw below.
+                }
+            }
+
             throw startupFault;
         }
         ReachedPumpRun = true;
@@ -154,6 +187,7 @@ internal sealed class CaptureRunnerHarness : IAsyncDisposable
     private readonly Lock _eventGate = new();
     private readonly List<string> _events = [];
     private int _durableDisposeCount;
+    private int _installedScopes;
 
     public CaptureRunnerHarness(IReadOnlyList<AdapterEnumerationItem> initialAdapters, PolicySnapshot policy, TimeSpan? minimumRefreshInterval = null, Action<IReadOnlyList<AdapterEnumerationItem>>? onScopeInstalled = null, TimeSpan? periodicRefreshInterval = null)
     {
@@ -180,8 +214,11 @@ internal sealed class CaptureRunnerHarness : IAsyncDisposable
                 lock (InstalledScopes) InstalledScopes.Add(scope);
                 AddEvent($"scope-installed({scope.Count})");
                 // Composed after the harness's own bookkeeping, mirroring how the production
-                // bundle's scope-installed callback composes its durable-layer updates.
+                // bundle's scope-installed callback composes its durable-layer updates. The install
+                // counter is published last so a waiter that observes it also observes every side
+                // effect of the install, including the composed callback's own.
                 onScopeInstalled?.Invoke(scope);
+                Interlocked.Increment(ref _installedScopes);
             },
             minimumRefreshInterval: minimumRefreshInterval,
             periodicRefreshInterval: periodicRefreshInterval);
@@ -214,8 +251,18 @@ internal sealed class CaptureRunnerHarness : IAsyncDisposable
 
     public void Start() => RunTask = Runner.RunAsync(Cancel.Token);
 
-    public async Task WaitForGenerationStartedAsync(int index) =>
+    /// <summary>
+    /// Waits until generation <paramref name="index"/> has started <em>and</em> its capture scope has
+    /// been installed. Started is latched at the top of the generation's run, before
+    /// <c>InstallGenerationAsync</c> publishes the scope through the composed onScopeInstalled
+    /// callback, so a caller that asserts on InstalledScopes or on the recorded event timeline needs
+    /// the install as its synchronization point — not the start.
+    /// </summary>
+    public async Task WaitForGenerationStartedAsync(int index)
+    {
         await AsyncTestExtensions.WaitForAsync(() => Generations.Generations.Count > index && Generations.Generations[index].Started.Task.IsCompleted).ConfigureAwait(false);
+        await AsyncTestExtensions.WaitForAsync(() => Volatile.Read(ref _installedScopes) > index).ConfigureAwait(false);
+    }
 
     public FakeCaptureGeneration Generation(int index) => Generations.Generations[index];
 

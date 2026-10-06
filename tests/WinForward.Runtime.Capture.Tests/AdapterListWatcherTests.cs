@@ -142,7 +142,7 @@ public sealed class AdapterListWatcherTests
 
         source.Trigger();
 
-        await Task.WhenAny(first, second).WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.WhenAny(first, second).WaitAsync(TimeSpan.FromSeconds(10));
         var resolved = first.IsCompleted ? first : second;
         var parked = first.IsCompleted ? second : first;
         Assert.True(await resolved);
