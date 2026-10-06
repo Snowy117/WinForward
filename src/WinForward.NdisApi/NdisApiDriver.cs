@@ -53,7 +53,7 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
 
     public static NdisApiDriver Open()
     {
-        NdisApiAbi.AssertManagedX64Layout();
+        NdisApiAbi.AssertManagedLayout();
         var rawHandle = NdisApiNative.OpenFilterDriver("NDISRD");
         var openError = Marshal.GetLastWin32Error();
         if (!NdisNativeCallStatus.HasValidNativeHandle(rawHandle)) NdisNativeCallStatus.ThrowIfOpenFailed(rawHandle, isDriverLoaded: false, openError);

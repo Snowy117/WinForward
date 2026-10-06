@@ -23,9 +23,9 @@ public static class NdisApiAbi
     public const uint SentTunnel = 0x00000001;
     public const uint ReceiveTunnel = 0x00000002;
 
-    public static void AssertManagedX64Layout()
+    public static void AssertManagedLayout()
     {
-        if (IntPtr.Size != 8) throw new PlatformNotSupportedException("WinForward supports only x64 NDISAPI ABI in the first release.");
+        if (IntPtr.Size != 8) throw new PlatformNotSupportedException("WinForward supports only the 64-bit NDISAPI ABI: the managed mirrors below are pinned to the LP64 layout that the x64 and ARM64 builds of ndisapi.h both use.");
         AssertSize<TcpAdapterList>(8836);
         AssertSize<IntermediateBuffer>(1566);
         AssertSize<NdisrdEthernetPacket>(8);
@@ -75,7 +75,7 @@ public static class NdisApiAbi
 public unsafe struct TcpAdapterList
 {
     public uint AdapterCount;
-#pragma warning disable MA0189 // These fixed buffers mirror the ndisapi.h TCP_ADAPTER_LIST declaration byte-for-byte (size and every offset pinned by AssertManagedX64Layout); InlineArray would replace the native declaration mirror with generated buffer types for no runtime gain.
+#pragma warning disable MA0189 // These fixed buffers mirror the ndisapi.h TCP_ADAPTER_LIST declaration byte-for-byte (size and every offset pinned by AssertManagedLayout); InlineArray would replace the native declaration mirror with generated buffer types for no runtime gain.
     public fixed byte AdapterNames[NdisApiAbi.AdapterListSize * NdisApiAbi.AdapterNameSize];
     public fixed long AdapterHandles[NdisApiAbi.AdapterListSize];
     public fixed uint AdapterMediums[NdisApiAbi.AdapterListSize];
@@ -94,7 +94,7 @@ public unsafe struct IntermediateBuffer
     [FieldOffset(24)] public uint Flags;
     [FieldOffset(28)] public uint Ieee8021q;
     [FieldOffset(32)] public uint FilterId;
-#pragma warning disable MA0189 // Fixed buffers mirror the ndisapi.h INTERMEDIATE_BUFFER declaration (size 1566 and the Reserved/Buffer offsets pinned by AssertManagedX64Layout); callers build spans from the fixed pointers, which InlineArray would force through MemoryMarshal rewrites for no runtime gain.
+#pragma warning disable MA0189 // Fixed buffers mirror the ndisapi.h INTERMEDIATE_BUFFER declaration (size 1566 and the Reserved/Buffer offsets pinned by AssertManagedLayout); callers build spans from the fixed pointers, which InlineArray would force through MemoryMarshal rewrites for no runtime gain.
     [FieldOffset(36)] public fixed uint Reserved[4];
     [FieldOffset(52)] public fixed byte Buffer[NdisApiAbi.MaximumEthernetFrame];
 #pragma warning restore MA0189

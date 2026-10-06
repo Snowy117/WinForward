@@ -9,7 +9,7 @@ public sealed class NdisApiAbiTests
     [Fact]
     public void PinnedX64LayoutMatchesV362NonJumboHeader()
     {
-        NdisApiAbi.AssertManagedX64Layout();
+        NdisApiAbi.AssertManagedLayout();
     }
 
     [Fact]

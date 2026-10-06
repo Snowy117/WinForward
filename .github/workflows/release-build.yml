@@ -45,3 +45,27 @@ jobs:
           name: WinForward-win-x64-fdd
           path: src/WinForward.Cli/bin/Release/net10.0/win-x64/fdd/
           if-no-files-found: error
+
+      # The ARM64 legs. Windows Packet Filter ships an ARM64 kernel driver and ndisapi.dll
+      # (Windows.Packet.Filter.3.6.2.1.ARM64.msi), which is what makes this build runnable at all:
+      # the driver is kernel-mode and cannot be emulated, so an x64 artifact is unusable on ARM64
+      # Windows regardless of WOW64. The RID keeps each architecture in its own output directory.
+      - name: Publish AOT (ARM64)
+        run: dotnet publish src/WinForward.Cli/WinForward.Cli.csproj -c Release --no-restore -r win-arm64
+
+      - name: Upload ARM64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WinForward-win-arm64
+          path: src/WinForward.Cli/bin/Release/net10.0/win-arm64/publish/
+          if-no-files-found: error
+
+      - name: Publish framework-dependent (ARM64)
+        run: dotnet publish src/WinForward.Cli/WinForward.Cli.csproj -c Release --no-restore -r win-arm64 -p:PublishAot=false --self-contained false -p:PublishDir=bin/Release/net10.0/win-arm64/fdd/
+
+      - name: Upload ARM64 framework-dependent artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WinForward-win-arm64-fdd
+          path: src/WinForward.Cli/bin/Release/net10.0/win-arm64/fdd/
+          if-no-files-found: error

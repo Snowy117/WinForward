@@ -8,9 +8,13 @@ through a selected network adapter (for example a Hyper-V virtual adapter).
 
 ## Requirements
 
-- Windows 10 22H2 x64, Windows 11 x64, or Windows Server 2022 or later x64.
+- Windows 10 22H2, Windows 11, or Windows Server 2022 or later, on **x64 or ARM64**. The driver is
+  kernel-mode, so the architecture has to match the operating system: ARM64 Windows needs the ARM64
+  package and cannot use the x64 one, because kernel drivers are not emulated.
 - The WinpkFilter driver (`ndisrd.sys`) must be installed and running.
-- A matching `ndisapi.dll` (x64) sidecar next to the executable (the pinned release is
+- A matching `ndisapi.dll` sidecar next to the executable, taken from the Windows Packet Filter
+  package for the same architecture (`Windows.Packet.Filter.3.6.2.1.{x64,ARM64}.msi`, which also
+  installs the kernel driver). The pinned release is
   recorded in `src/WinForward.NdisApi/NdisApiAbi.cs`).
 - An elevated (Administrator) token is required. WinForward detects a non-elevated launch
   before opening the driver and exits with an actionable diagnostic.
@@ -35,6 +39,7 @@ same matching `ndisapi.dll` (x64) sidecar:
 | --- | --- | --- | --- | --- |
 | `WinForward-win-x64` | A single native AOT executable, with no managed runtime dependency. | ≈5.2 MB | Not required. | The lowest startup latency and idle memory (≈11 ms and ≈7 MiB, against ≈184 ms and ≈34 MiB), and hosts where the runtime will not be installed. |
 | `WinForward-win-x64-fdd` | The same program as a framework-dependent executable, run by the shared .NET 10 runtime instead of a native image. | ≈1.73 MiB | **Required, and it must be installed before the first run.** | The JIT's throughput — runtime instruction-set dispatch and dynamic PGO, worth 1.2–2.6x on the dispatch, flow-table and frame-rewrite paths — in the smaller download. |
+| `WinForward-win-arm64`, `WinForward-win-arm64-fdd` | The same two artifacts for ARM64 Windows. | as above | as above | ARM64 Windows, with the ARM64 driver package. The x64 artifacts cannot serve it: the kernel driver is not emulated. |
 
 The framework-dependent artifact is not self-contained: on a machine without the .NET 10 runtime
 installed it fails at process start with the host's own error rather than a WinForward diagnostic,

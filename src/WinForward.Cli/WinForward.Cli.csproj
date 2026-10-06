@@ -10,7 +10,10 @@
          possible because every ISA check in the image is folded to a constant at compile time.
          base is the lowest level ilc accepts, so it adds no requirement beyond the one the .NET 10
          runtime already imposes; avx2 would add one it does not, and VMs commonly mask AVX2 behind
-         an EVC baseline. The cost of staying at base is narrower vector code: the
+         an EVC baseline. Unverified for the ARM64 leg: whether arm64's `base` includes NEON, which
+         is what gates the Vector<T> tier — ilc lists `neon` separately, and no ARM64 host was
+         available to check; if it excludes NEON the checksum falls back to scalar there.
+         The cost of staying at base is narrower vector code: the
          PacketChecksums.Sum vector path runs at 128 bits where the JIT's runs at 256 or 512
          depending on the host, measured at 3.5-4x on a 1 514-byte checksum and priced in
          benchmarks/results/2026-10-06-aot-instruction-set/; the framework-dependent artifact is
