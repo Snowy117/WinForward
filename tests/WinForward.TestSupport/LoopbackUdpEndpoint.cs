@@ -68,8 +68,10 @@ internal sealed class LoopbackUdpResponder : IAsyncDisposable
                 return;
             }
 
-            Interlocked.Increment(ref _received);
+            // The payload is published before the count: a fact that waits for ReceivedCount and then
+            // reads LastPayload would otherwise be able to observe the count with the payload unset.
             lock (_gate) _lastPayload = buffer.AsSpan(0, result.ReceivedBytes).ToArray();
+            Interlocked.Increment(ref _received);
 
             try
             {
