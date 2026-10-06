@@ -10,6 +10,7 @@ using static WinForward.TestSupport.FlowBuilders;
 
 namespace WinForward.Runtime.UdpProxy.Tests;
 
+[Collection(UdpCapacityRejectionCounterCollection.Name)]
 public sealed class UdpProxyCoordinatorTests
 {
     private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, Username: null, Password: null);

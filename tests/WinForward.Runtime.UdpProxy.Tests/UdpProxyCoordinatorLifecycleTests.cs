@@ -10,6 +10,7 @@ using static WinForward.TestSupport.FlowBuilders;
 
 namespace WinForward.Runtime.UdpProxy.Tests;
 
+[Collection(UdpCapacityRejectionCounterCollection.Name)]
 public sealed class UdpProxyCoordinatorLifecycleTests
 {
     private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, Username: null, Password: null);
@@ -144,14 +145,14 @@ public sealed class UdpProxyCoordinatorLifecycleTests
         // The teardown child removed the slot and is now parked in the session's transport
         // disposal; the session's own receive loop already signalled and returned (if the signal
         // were awaited inline, the loop would deadlock behind this teardown and the join below).
-        await transport.DisposeStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await transport.DisposeStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         var dispose = coordinator.DisposeAsync().AsTask();
         await Task.Delay(50);
         Assert.False(dispose.IsCompleted);
 
         disposeGate.SetResult();
-        await dispose.WaitAsync(TimeSpan.FromSeconds(5));
+        await dispose.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.True(transport.IsDisposed);
         await Assert.ThrowsAsync<ObjectDisposedException>(async () =>
             await coordinator.TrySendSpanAsync(CreateFlow("192.0.2.54"), ProxyTarget.FromServer(s_server), [2], default, CancellationToken.None));
@@ -182,10 +183,13 @@ public sealed class UdpProxyCoordinatorLifecycleTests
 
         var teardownFault = new IOException("transport dispose failed");
         var probe = new UnobservedExceptionProbe();
+        // Track first: the scheduler event is process-global, and the probe counts any unobserved fault
+        // while its target is unset, so subscribing before the target exists would let a sibling test's
+        // task fail this fact.
+        probe.Track(teardownFault);
         TaskScheduler.UnobservedTaskException += probe.OnUnobserved;
         try
         {
-            probe.Track(teardownFault);
             transport.DisposeFault = teardownFault;
             transport.Received.Writer.TryComplete(new IOException("relay read failed"));
 
@@ -201,7 +205,7 @@ public sealed class UdpProxyCoordinatorLifecycleTests
         }
 
         // The fault is a child fault, so the owner's disposal still completes without throwing.
-        await coordinator.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        await coordinator.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
     }
 
     [Fact]
@@ -387,10 +391,13 @@ public sealed class UdpProxyCoordinatorLifecycleTests
 
         snapshotTaken = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         resumeSweep = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        // Bounded steps: an unbounded wait turns a product defect into a hung test host instead of a
+        // fast failure, and the budget matches AsyncTestExtensions.WaitForAsync's default.
+        using var stepCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var sweep = coordinator.RemoveExpiredAsync(time.GetUtcNow(), TimeSpan.FromMinutes(1)).AsTask();
-        await snapshotTaken.Task.WaitAsync(CancellationToken.None);
+        await snapshotTaken.Task.WaitAsync(stepCancellation.Token);
         transport.EnqueueResponse(new UdpTransportDatagram(IPAddress.Parse("192.0.2.53"), SourceDomain: null, 53, new byte[] { 2 }));
-        _ = await sink.Responses.Reader.ReadAsync(CancellationToken.None);
+        _ = await sink.Responses.Reader.ReadAsync(stepCancellation.Token);
         resumeSweep.TrySetResult(true);
 
         Assert.Equal(0, await sweep);
@@ -399,7 +406,7 @@ public sealed class UdpProxyCoordinatorLifecycleTests
 
     private static async Task<bool> WaitUntilTrueAsync(Func<Task<bool>> condition)
     {
-        for (var attempt = 0; attempt < 200; attempt++)
+        for (var attempt = 0; attempt < 1_000; attempt++)
         {
             if (await condition().ConfigureAwait(false)) return true;
             await Task.Delay(10).ConfigureAwait(false);

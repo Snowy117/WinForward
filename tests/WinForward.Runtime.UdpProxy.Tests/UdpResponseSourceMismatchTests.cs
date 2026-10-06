@@ -21,6 +21,7 @@ namespace WinForward.Runtime.UdpProxy.Tests;
 /// are indistinguishable by address, so a cross-delivered reply never advances it, and a zero count does
 /// not mean association sharing is safe.
 /// </summary>
+[Collection(UdpProcessCounterCollection.Name)]
 public sealed class UdpResponseSourceMismatchTests
 {
     private const string ForeignSourceEvent = "udp.response.foreign_source";

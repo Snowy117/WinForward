@@ -11,10 +11,10 @@ namespace WinForward.Runtime.UdpProxy.Tests;
 /// Retention over the real local transport: the exchange evidence a completed one-shot flow needs
 /// (<see cref="IUdpExchangeCounters"/>) is produced by real datagrams rather than a fake's counters,
 /// so a local-target DNS session retires at the one-shot class instead of holding a socket for the
-/// configured retention. The class joins <see cref="UdpLocalTargetCounterCollection"/> because the
+/// configured retention. The class joins <see cref="UdpProcessCounterCollection"/> because the
 /// expiry fact below asserts an exact <c>udpLocalTargetFailures</c> delta.
 /// </summary>
-[Collection(UdpLocalTargetCounterCollection.Name)]
+[Collection(UdpProcessCounterCollection.Name)]
 public sealed class LocalUdpTransportRetentionTests
 {
     private const int MaximumFrameSize = 1_514;

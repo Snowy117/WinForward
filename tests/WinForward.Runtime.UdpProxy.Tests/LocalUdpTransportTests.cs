@@ -19,10 +19,10 @@ namespace WinForward.Runtime.UdpProxy.Tests;
 /// socket path runs against real loopback sockets, because the properties under test (a distinct
 /// local endpoint per flow, a reply visible only to its own flow's socket, an applied SIO posture)
 /// are socket-level facts a fake cannot show. The class joins
-/// <see cref="UdpLocalTargetCounterCollection"/> because several of its facts assert exact
-/// <c>udpLocalTargetFailures</c> deltas.
+/// <see cref="UdpProcessCounterCollection"/> because several of its facts assert exact
+/// <c>udpLocalTargetFailures</c> and <c>udpResponseSourceMismatch</c> deltas.
 /// </summary>
-[Collection(UdpLocalTargetCounterCollection.Name)]
+[Collection(UdpProcessCounterCollection.Name)]
 public sealed class LocalUdpTransportTests
 {
     private static readonly IPAddress s_flowDestination = IPAddress.Parse("192.0.2.53");
