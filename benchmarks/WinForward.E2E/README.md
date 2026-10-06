@@ -108,13 +108,15 @@ scripts/selftest.sh scripts/plans/selftest-plan.json
 on `127.0.0.1` (`--tcp-port 31010 --udp-port 31010 --dns-port 5301 --dns-alt-port 5302`, ledger
 `/tmp/wf-bench/selftest/ledger.jsonl`), waits one second, and runs the client against the same
 address and ports with the plan given as the first argument and `--out /tmp/wf-bench/selftest/out`.
-On exit it prints, arm by arm, every metric, every latency histogram that recorded a sample and every
-note the arm wrote. The ports are deliberately unusual so the self-test can run while a campaign
-target is up.
+The client's complete output is kept in `/tmp/wf-bench/selftest/client.out`, with its last 20 lines
+repeated on the console. On exit the script prints, arm by arm, every metric, every latency histogram
+that recorded a sample and every note the arm wrote. The ports are deliberately unusual so the
+self-test can run while a campaign target is up.
 
-The plan path is the only argument. With no argument the script prints usage and lists the plans it
-finds in the machine-specific deploy directory, which a fresh checkout does not have; pass a path
-under `scripts/plans/` instead. The work directory is fixed at `/tmp/wf-bench/selftest`.
+The plan path is the only argument. With no argument the script prints usage and exits `2` before it
+starts anything, so a missing argument can neither be read as a green run nor leave a target behind;
+pass a path under `scripts/plans/` or `scripts/plans-short/`. The work directory is fixed at
+`/tmp/wf-bench/selftest`.
 
 The client also runs against any plan directly, which is how the campaign drives it:
 
@@ -128,18 +130,25 @@ WinForward.E2E client --target <ip> --plan <plan.json> --out <dir> [--label <nam
 | Client flag | Meaning |
 |---|---|
 | `--target <ip>` | target host, required, IP literal only |
-| `--plan <path>` | plan to run; omitted, the client runs a built-in eight-arm default plan |
-| `--out <dir>` | output directory, required; `<arm>.jsonl`, `run.json` |
+| `--plan <path>` | plan to run; omitted, the client runs a built-in eight-arm default plan; an empty value (`--plan=` or `--plan ""`) is a usage error rather than a silent fallback to the built-in plan |
+| `--out <dir>` | output directory, required; `<arm>.jsonl`, `run.json`. Its path is checked before the run: no component over 255 characters and no whole path over 250 |
 | `--label <name>` | free-form label copied into every result and into `run.json` |
 | `--tcp-port`, `--udp-port`, `--dns-port` | the target ports; defaults 30010, 30010 and 53 |
-| `--sampler-process <name>` | process name to sample at 1 Hz, repeatable, no `.exe` suffix |
+| `--sampler-process <name>` | process name to sample at 1 Hz, repeatable, no `.exe` suffix; an empty name is a usage error |
 | `--inject-corrupt-every <n>` | flip one payload byte of every n-th UDP datagram without recomputing its CRC: the target drops the frame as undecodable, so the client can only report it as path loss |
 | `--inject-rewrite-every <n>` | flip one payload byte and recompute the CRC, so the target echoes it and the client books it corrupt |
 
 Both injection flags are read by the loss arm, so they apply to `LOSS` and to `BASE`'s loss phase.
 
+The value of a string option (`--target`, `--plan`, `--out`, `--label`, `--sampler-process`) must not
+start with `-`: an option consumes the next argument as its value, so `--label --out x` would have
+taken `--out` as the label and left the run without an output directory. It is a usage error
+naming the option and the value. Values of the numeric options cannot start with `-` either, since
+they fail their own parsers.
+
 Exit codes: `0` when every requested arm completed, `1` when an arm failed, `2` on a usage error. The
 target exits `0` on a clean shutdown (Ctrl+C or SIGTERM), `1` on a socket error, `2` on a usage error.
+A plan the loader rejects is a usage error too, and the message names the arm and the value.
 
 ### Run the target
 
@@ -168,32 +177,54 @@ ports it uses are the orchestrator's defaults.
 ### Plan schema
 
 A plan is `{"arms": [...]}`. Every arm needs a non-empty `name` and a `kind`, names must be unique,
-the array must not be empty, and `seconds` must be greater than zero. Unknown keys inside an arm are
-ignored; an unknown `kind`, an unknown `protocol` or a bad `seconds` is a hard load error.
+the array must not be empty, and `seconds` must be greater than zero. An arm may declare only the
+keys its kind reads: an unknown key is a hard load error naming the arm and the key, as are an
+unknown `kind`, an unknown `protocol`, a bad `seconds`, a value outside a key's domain and a value of
+the wrong JSON type (`"protocol": 5` is refused rather than quietly read as `tcp`). Nothing in a plan
+is silently ignored or silently clamped.
+
+Arm names also have to survive becoming file names. Two names whose output files would be identical
+(`A/B` and `A_B`) are refused rather than letting the second arm truncate the first arm's records,
+and a name whose sanitized form is longer than 128 characters is refused before any file is created.
 
 Kinds: `latency`, `loss`, `reliability`, `throughput`, `dns`, `mix`, `idle`, `persistent`, `base`.
 
-| Key | Read by | Defaults, in the order listed |
-|---|---|---|
-| `seconds` | every arm | 60 |
-| `ratePerSecond` | latency, loss, dns, and both BASE phases | 20 / 500 / 200 / 20 and 500 |
-| `payloadBytes` | latency, loss, persistent, both BASE phases | 120 / 200 / 120 / 120 and 200 |
-| `protocol` | latency, and BASE's latency phase (BASE's loss phase always runs udp) | `"tcp"`; `tcp`, `udp` or `tcp+udp` |
-| `window` | in-flight requests per lane: latency, loss, both BASE phases | 64 / 4096 / 64 and 4096 |
-| `lanes` | latency, both BASE phases | 1 |
-| `lossWindowMs` | loss, mix, BASE's loss phase — the UDP loss threshold W in milliseconds | 200 |
-| `modeMix` | reliability, as `<mode>=<weight>` pairs | `clean=25,resetAfterN=25,partialFin=25,halfClose=25` |
-| `connectionsPerSecond` | reliability | 20 |
-| `expectedBytes` | reliability; persistent, which announces it to the target | 8192 / 0 |
-| `streams` | throughput | 4 |
-| `targetBytesPerSecond` | throughput | 25 000 000 |
-| `tcpPercent`, `cnameEvery`, `dnsPort` | dns: the TCP share of queries, the CNAME substitution interval, and an override of the run's DNS port | 0 / 0 / the run's `--dns-port` |
-| `desktops` | mix | 4 |
-| `intervalMs`, `idleSeconds` | persistent: the pacing interval and the idle window | 1000 / 20 |
+| Key | Read by | Defaults, in the order listed | Accepted values |
+|---|---|---|---|
+| `seconds` | every arm | 60 | greater than 0 |
+| `ratePerSecond` | latency, loss, dns, and both BASE phases | 20 / 500 / 200 / 20 and 500 | 0 or more |
+| `payloadBytes` | latency, loss, persistent, both BASE phases | 120 / 200 / 120 / 120 and 200 | 0 or more |
+| `protocol` | latency, and BASE's latency phase (BASE's loss phase always runs udp) | `"tcp"` | `tcp`, `udp` or `tcp+udp` |
+| `window` | in-flight requests per lane: latency, loss, both BASE phases | 64 / 4096 / 64 and 4096 | 0 or more |
+| `lanes` | latency, both BASE phases | 1 | 0 or more |
+| `lossWindowMs` | loss, mix, BASE's loss phase — the UDP loss threshold W in milliseconds | 200 | 0 or more |
+| `modeMix` | reliability, as `<mode>=<weight>` pairs | `clean=25,resetAfterN=25,partialFin=25,halfClose=25` | at least one pair with a positive total weight |
+| `connectionsPerSecond` | reliability | 20 | 0 or more |
+| `expectedBytes` | reliability; persistent, which announces it to the target | 8192 / 0 | 0 or more |
+| `streams` | throughput | 4 | 0 or more |
+| `targetBytesPerSecond` | throughput | 25 000 000 | 0 or more |
+| `tcpPercent`, `cnameEvery`, `dnsPort` | dns: the TCP share of queries, the CNAME substitution interval, and an override of the run's DNS port | 0 / 0 / the run's `--dns-port` | 0..100 / 0 or more / 0..65535 |
+| `desktops` | mix | 4 | 0 or more |
+| `intervalMs`, `idleSeconds` | persistent: the pacing interval and the idle window | 1000 / 20 | 0 or more |
+
+Every numeric key is an integer, and `0` means "not declared": the arm then uses the default in the
+table rather than the zero. A fractional value on an integer key (`"window": 100.5`) is a load error
+instead of a silent fall back to the default, and so is any value outside the accepted range. The
+one exception to "0 = not declared" is `dnsPort`, where 0 is the same "use the run's `--dns-port`"
+the table documents, not port 0.
 
 `window` is a count, `lossWindowMs` is a duration; the two are different keys because the latency
-arm's window is a number of requests and the loss arm's is a millisecond threshold. The plan's
-SHA-256 (first 16 hex digits) is recorded as `planHash` in `run.json`.
+arm's window is a number of requests and the loss arm's is a millisecond threshold.
+
+The plan's SHA-256 (first 16 hex digits) is recorded as `planHash` in `run.json`, which also records
+where the plan came from: `planPath` is the absolute path and `planSource` is `"file"`, or `planPath`
+is `null` and `planSource` is `"builtin"` when the run used the built-in default plan.
+
+A `loss`, `mix` or `base` arm is refused when the schedule it declares cannot fit the tracker's
+bounded sequence space: `ceil(ratePerSecond × seconds)` above 2¹⁸ − 1 (262143), with `base` using the
+rate its entry declares and falling back to its loss phase's own 500/s when it declares none, and
+`mix` checked as `ceil(30 × seconds)` because its UDP rate is a per-desktop constant rather than a
+key. The other kinds index no array by sequence, so they have no such limit.
 
 ### The orchestrator
 
@@ -235,9 +266,9 @@ One client run writes one directory. Every JSONL file is one JSON object per lin
 | | `armSummary` | the same `parameters` and `gates`, the `resultFile` name and the arm's tick window |
 | | `sample` | one 1 Hz resource sample: `process`, `self`, `matched`, the summed counters and the per-process block |
 | | `samplerError` | one sampling failure: `process`, `error` (the exception type), `message` |
-| | `error` | an arm that threw: `message` and the tick window |
+| | `error` | an arm that threw: `arm`, `kind`, `label`, `error` (the exception type), `message`, `detail` (the innermost exception type, `GetBaseException()`), and the tick window |
 | | `attempt` | the reliability arm's per-attempt evidence: `connectionId`, `mode`, `status`, `observed`, `expected`, `truncated`, `echoedBytes`, `trailerBytes`, `eof`, `reset`, `protocolError`, `otherError`, `connectTicks`, `transferTicks` |
-| `run.json` | one object | the run's identity and environment, its plan hash and per-arm tick windows, and whether any arm failed |
+| `run.json` | one object | the run's identity and environment, its plan hash, path and source, its per-arm tick windows, and whether any arm failed |
 | target ledger | `tcp` | one finished TCP connection: `connectionId`, `mode`, `expectedBytes`, `bytesEchoed`, `verdict`, `peer`, tick window |
 | | `udpSummary` | once a second while the target runs and once at shutdown: running totals (`received`, `undecodable`, `bytes`) and the source endpoints seen in that interval |
 | | `dnsSummary` | once per listener at shutdown: UDP and TCP query, answer, empty-answer, malformed, send-error and connection totals |
@@ -250,6 +281,11 @@ One client run writes one directory. Every JSONL file is one JSON object per lin
 
 Every ledger record also carries `utc` (absolute wall clock) and `label`; every client record carries
 `type`, and every record written into an arm file except `attempt` carries `arm`.
+
+An arm the operator interrupts is booked as a failure like any other: it gets the same `error` record,
+`run.json` is written with `failed: true` and the client exits `1`. Its `error` is
+`OperationCanceledException` and its `message` is the literal `cancelled`, so an interrupted arm is
+distinguishable from a broken one without reading the text.
 
 The envelope of a `result` is what the analysis reads:
 
@@ -528,10 +564,14 @@ standard library only, and matplotlib is imported lazily and only for the plots.
 - **Latency is measured from each request's intended instant, never from the instant it was actually
   sent.** A request deferred by a full in-flight window or a stalled product is published as an
   inflated sample, not a missing one, and the percentile includes the pacing lateness.
-- **The UDP sequence space is bounded at 2¹⁸ − 1.** A sequence outside it is refused by the tracker:
-  a non-zero `metrics.outOfRangeSequences` (published by `LOSS` and by the MIX UDP class) means part
-  of the offered schedule was never tracked, so the classification covers fewer datagrams than `sent`
-  claims.
+- **The UDP sequence space is bounded at 2¹⁸ − 1.** A plan whose offered schedule would run past it
+  is refused where it is loaded, so reaching the bound means the schedule outran the space it
+  declared. The tracker then refuses each such sequence and counts it in `metrics.outOfRangeSequences`
+  (published by `LOSS` and by the MIX UDP class): the datagram was offered and handed to the socket,
+  but it is not booked as sent, so it lands in no classification bucket, it is not part of the
+  published `clientSendLoss`, and `sent` is smaller than `supplied`. A non-zero value therefore means
+  the classification covers fewer datagrams than the schedule offered and the record is not a
+  complete loss measurement.
 
 ## Verification
 

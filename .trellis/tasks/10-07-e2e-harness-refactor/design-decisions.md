@@ -435,6 +435,10 @@ E5 仍负责契约表 / Non-obvious / Verification / Layout / 线格式交叉引
 `{type, arm, kind, label, error, message, detail, startedTicks, endedTicks}`；`error` = 异常类型名，
 `detail` = 最内层异常类型名（`GetBaseException().GetType().Name`）。**不**新增 `run.json` 数组，
 `run.json` 保持 `arms[].failed` + 顶层 `failed`。
+**取消的记账（E1-A check 后的裁定）**：`OperationCanceledException` **恢复改前行为**——写一条 `error` 记录，
+`error = "OperationCanceledException"`（异常**族**，与真错误区分）、`message = "cancelled"`（改前文案）、
+`detail` 仍按上面的公式（因此 `Task.Delay` 触发的取消会得到 `detail = "TaskCanceledException"`——
+`error` 记族、`detail` 记具体类型，这是有意的分工，不是不一致）。臂仍 `failed:true`、退出码 1。
 
 ### D14.13 `Sample` 记录归 E2
 E1 不动 `ResourceSampler`；sample 的字段常量与强类型化随 E2 的 ResourceSampler 拆分一起做。
@@ -529,4 +533,11 @@ E1-A 的实测暴露：两次运行带宽**不足以**覆盖第三次运行的�
 1. `volatileKeyNames`/`volatileKeySuffixes` 里对数值无效的条目**删掉**——配置不得声明与行为不符的语义；
 2. `Side()` 自动识别 `out/`（被指到 `runN/out` 时不再静默跳过 ledger/target.out）；
 3. `allowedCountDelta` 默认 **0**：记录数漂移必须由配置显式声明，否则算结构差异；
-4. `require_python3()` 改为真实检查（`sys.version_info >= (3, 10)`）或删除。
+4. `require_python3()` 改为真实检查（`sys.version_info >= (3, 10)`）或删除；
+5. 越界数值键的错误文本区分"非整数"与"超范围"（现状 `"window":3000000000` 报 "is not an integer"，略失准）；
+6. `gates/inFlightCeilingMs` 是四类里的跨类键（`gates.*` vs `*Ms`）——B1 实现四类时必须显式处理，按测量读数归类。
+
+**登记、不在 E1/E2 修**：`seconds` 无上界（D14.14 只要求 `> 0`）——`latency` 臂给 `seconds:1e18` 会立即结束并
+披露 `gates.scheduleTruncated`/`laneShortfall`（不是静默），gate 的分析器消费面属 E3。
+`ClientRunner.cs` 493 有效行 > 400 与 E2E 其余 6 个超标文件的拆分正是 E2 的工作；
+`D13.4` 登记的 `WinForward.Benchmarks/` 3 个文件与本任务无关，二者不要混淆。
