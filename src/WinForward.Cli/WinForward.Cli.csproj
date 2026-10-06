@@ -4,6 +4,20 @@
     <AssemblyName>WinForward</AssemblyName>
     <RootNamespace>WinForward.Cli</RootNamespace>
     <PublishAot>true</PublishAot>
+
+    <!-- Do not raise this. The executable is compiled for one instruction set for its whole lifetime
+         and executes illegal instructions at process start on anything older, with no runtime guard
+         possible because every ISA check in the image is folded to a constant at compile time.
+         base is the lowest level ilc accepts, so it adds no requirement beyond the one the .NET 10
+         runtime already imposes; avx2 would add one it does not, and VMs commonly mask AVX2 behind
+         an EVC baseline. The cost of staying at base is narrower vector code: the
+         PacketChecksums.Sum vector path runs at 128 bits where the JIT's runs at 256 or 512
+         depending on the host, measured at 3.5-4x on a 1 514-byte checksum and priced in
+         benchmarks/results/2026-10-06-aot-instruction-set/; the framework-dependent artifact is
+         the way around it. The valid values are the ones ilc reports in its help output; x64 is not one
+         of them. -->
+    <IlcInstructionSet>base</IlcInstructionSet>
+
     <InvariantGlobalization>true</InvariantGlobalization>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <PublishSingleFile>true</PublishSingleFile>

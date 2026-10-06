@@ -32,3 +32,16 @@ jobs:
           name: WinForward-win-x64
           path: src/WinForward.Cli/bin/Release/net10.0/win-x64/publish/
           if-no-files-found: error
+
+      # Both publishes write to the same output directory, so this one overwrites the AOT files.
+      # Each upload must therefore stay immediately after its own publish; otherwise give this
+      # publish its own output path via -p:PublishDir=.
+      - name: Publish framework-dependent
+        run: dotnet publish src/WinForward.Cli/WinForward.Cli.csproj -c Release --no-restore -r win-x64 -p:PublishAot=false --self-contained false
+
+      - name: Upload framework-dependent artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WinForward-win-x64-fdd
+          path: src/WinForward.Cli/bin/Release/net10.0/win-x64/publish/
+          if-no-files-found: error

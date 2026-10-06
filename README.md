@@ -26,11 +26,21 @@ dotnet test -c Release
 dotnet publish src/WinForward.Cli/WinForward.Cli.csproj -c Release -r win-x64
 ```
 
-The publish output is a single native AOT executable (`WinForward.exe`, no managed runtime
-dependency). Copy the matching `ndisapi.dll` (x64) next to it. WinForward loads the DLL from
-its own application directory only (not an uncontrolled PATH/current-directory search) and
-diagnoses missing DLL, missing export, wrong architecture, inaccessible driver, and
-incompatible version separately at startup.
+The `dotnet publish` command above produces the AOT artifact; add `-p:PublishAot=false
+--self-contained false` for the framework-dependent one. CI publishes both (see
+`.github/workflows/aot-build.yml`), and both are a single `WinForward.exe` to drop next to the
+same matching `ndisapi.dll` (x64) sidecar:
+
+| Artifact | What it is | Size | .NET 10 runtime | Pick it for |
+| --- | --- | --- | --- | --- |
+| `WinForward-win-x64` | A single native AOT executable, with no managed runtime dependency. | ≈5.2 MB | Not required. | The lowest startup latency and idle memory (≈11 ms and ≈7 MiB, against ≈184 ms and ≈34 MiB), and hosts where the runtime will not be installed. |
+| `WinForward-win-x64-fdd` | The same program as a framework-dependent executable, run by the shared .NET 10 runtime instead of a native image. | ≈1.73 MiB | **Required, and it must be installed before the first run.** | The JIT's throughput — runtime instruction-set dispatch and dynamic PGO, worth 1.2–2.6x on the dispatch, flow-table and frame-rewrite paths — in the smaller download. |
+
+The framework-dependent artifact is not self-contained: on a machine without the .NET 10 runtime
+installed it fails at process start with the host's own error rather than a WinForward diagnostic,
+so install the runtime first. WinForward loads the DLL from its own application directory only
+(not an uncontrolled PATH/current-directory search) and diagnoses missing DLL, missing export,
+wrong architecture, inaccessible driver, and incompatible version separately at startup.
 
 ## Commands
 
