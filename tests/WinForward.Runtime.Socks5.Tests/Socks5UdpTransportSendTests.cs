@@ -323,7 +323,8 @@ public sealed class Socks5UdpTransportSendTests
         var senders = StartSendersRacingDisposal(transport, destination, payload);
 
         await transport.DisposeAsync();
-        await Task.WhenAll(senders);
+        // Bounded: a stranded parked sender must fail here rather than hang the run.
+        await Task.WhenAll(senders).WaitAsync(TimeSpan.FromSeconds(30));
 
         await serverCancellation.CancelAsync();
         await IgnoreExpectedCancellationAsync(server);

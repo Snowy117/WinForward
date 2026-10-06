@@ -581,6 +581,49 @@ public sealed class LocalUdpTransportTests
         }
     }
 
+    /// <summary>
+    /// The post-wait guard both SOCKS5 transports pin, on the local transport: the send gate is
+    /// deliberately not disposed, so racing sends against disposal must terminate — a sender stranded
+    /// on the gate would hold its caller's work lease — and must never surface the semaphore's own
+    /// exception.
+    /// </summary>
+    [Fact]
+    public async Task SendsRacingDisposalNeverStrandOnTheGate()
+    {
+        await using var responder = new LoopbackUdpResponder();
+        var transport = await CreateTransportAsync(responder.Endpoint, new SelfTrafficRegistry());
+        var destination = Endpoint.From(s_flowDestination, 53);
+        var payload = "XYZ"u8.ToArray();
+
+        var senders = new Task[4];
+        for (var index = 0; index < senders.Length; index++)
+        {
+            senders[index] = Task.Run(async () =>
+            {
+                for (var attempt = 0; attempt < 50; attempt++)
+                {
+                    try
+                    {
+                        await transport.SendSpanAsync(destination, payload, CancellationToken.None);
+                    }
+                    catch (ObjectDisposedException exception)
+                    {
+                        Assert.DoesNotContain("SemaphoreSlim", exception.ObjectName, StringComparison.Ordinal);
+                    }
+                    catch (Exception exception) when (exception is IOException or SocketException)
+                    {
+                        // Disposing the socket faults an in-flight or late send; that is not the gate race.
+                        GC.KeepAlive(exception);
+                    }
+                }
+            });
+        }
+
+        await transport.DisposeAsync();
+        // Bounded: a stranded parked sender must fail here rather than hang the run.
+        await Task.WhenAll(senders).WaitAsync(TimeSpan.FromSeconds(30));
+    }
+
     private static ProxyTarget Local(string name, Endpoint endpoint) => new(name, Socks5: null, new LocalTarget(name, endpoint));
 
     private static async ValueTask<LocalUdpTransport> CreateTransportAsync(Endpoint target, SelfTrafficRegistry registry)

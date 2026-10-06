@@ -19,6 +19,7 @@ namespace WinForward.Runtime.UdpProxy.Tests;
 /// re-establishes on its next datagram. Nothing is passed as a fallback, and a lost association is
 /// never counted or reported as a setup failure.
 /// </summary>
+[Collection(UdpAssociationLostCounterCollection.Name)]
 public sealed class UdpAssociationLossTests
 {
     private const int PayloadLength = 16;

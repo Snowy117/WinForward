@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using WinForward.Configuration;
+using WinForward.Core;
 using WinForward.Protocols;
 using WinForward.TestSupport;
 using Xunit;
@@ -36,6 +37,182 @@ public sealed class Socks5ProtocolTests
         var request = scratch[..length].ToArray();
 
         Assert.Equal(new byte[] { 5, 3, 0, 1, 192, 0, 2, 53, 0x14, 0xe9 }, request);
+    }
+
+    [Fact]
+    public void Socks5DomainRequestCarriesAtyp3LengthPrefixedNameAndPort()
+    {
+        const string magic = "sp.v2.udp-over-tcp.arpa";
+        Span<byte> scratch = stackalloc byte[Socks5Messages.RequestLength(magic)];
+        var length = Socks5Messages.WriteRequest(Socks5Command.Connect, magic, 0, scratch);
+        var request = scratch[..length].ToArray();
+
+        Assert.Equal(30, length);
+        Assert.Equal(new byte[] { 5, 1, 0, 3, 23 }, request[..5]);
+        Assert.Equal("sp.v2.udp-over-tcp.arpa"u8.ToArray(), request[5..28]);
+        // ReSharper disable once UseUtf8StringLiteral // The expectation is two literal zero bytes (the request's port); a UTF-8 literal would spell the same expectation as escape sequences.
+        Assert.Equal(new byte[] { 0, 0 }, request[28..]);
+    }
+
+    [Fact]
+    public void Socks5DomainRequestLengthAgreesWithTheWrittenBytes()
+    {
+        const string host = "example.com";
+        Span<byte> scratch = stackalloc byte[Socks5Messages.RequestLength(host)];
+        var length = Socks5Messages.WriteRequest(Socks5Command.UdpAssociate, host, 5353, scratch);
+        var request = scratch[..length].ToArray();
+
+        Assert.Equal(Socks5Messages.RequestLength(host), length);
+        Assert.Equal(new byte[] { 5, 3, 0, 3, 11 }, request[..5]);
+        Assert.Equal("example.com"u8.ToArray(), request[5..16]);
+        Assert.Equal(new byte[] { 0x14, 0xe9 }, request[16..]);
+    }
+
+    [Fact]
+    public void Socks5DomainRequestGuardsTheNameLengthAndTheDestinationSpan()
+    {
+        // RFC 1928 carries the name length in one byte: 255 is the largest legal name, and an empty
+        // name is malformed rather than a zero-length request.
+        Assert.Equal(4 + 1 + 255 + 2, Socks5Messages.RequestLength(new string('a', 255)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Socks5Messages.RequestLength(string.Empty));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Socks5Messages.RequestLength(new string('a', 256)));
+        Assert.Throws<ArgumentException>(() =>
+        {
+            Span<byte> tooSmall = stackalloc byte[Socks5Messages.RequestLength("example.com") - 1];
+            _ = Socks5Messages.WriteRequest(Socks5Command.Connect, "example.com", 0, tooSmall);
+        });
+    }
+
+    [Fact]
+    public void UotRequestHeaderUsesTheSocksAddressTypesForBothIpFamilies()
+    {
+        // UoT v2's request destination is an ordinary SOCKS address (the intercepting server reads it
+        // with its SOCKS address serializer), so the address types are RFC 1928's 1/4 — the same ones
+        // this repository's SOCKS5 encoder writes — and not the per-datagram 0x00/0x01 of protocol
+        // version 1's stream format.
+        Span<byte> scratch = stackalloc byte[UotCodec.MaximumRequestHeaderLength];
+        var ipv4 = IPAddressValue.From(IPAddress.Parse("192.0.2.53"));
+
+        Assert.True(UotCodec.TryWriteRequestHeader(isConnect: true, ipv4, 5353, scratch, out var ipv4Written));
+        Assert.Equal(UotCodec.RequestHeaderLength(AddressFamilyKind.IPv4), ipv4Written);
+        Assert.Equal(new byte[] { 1, 1, 192, 0, 2, 53, 0x14, 0xe9 }, scratch[..ipv4Written].ToArray());
+        Assert.Equal(Socks5Messages.AddressTypeIPv4, scratch[1]);
+
+        // The isConnect byte is the request's mode, and connect mode is the only mode this codec
+        // frames: a non-connect request asks for the v1 per-datagram stream format, so it is refused
+        // instead of written with types this codec does not carry.
+        scratch.Clear();
+        Assert.False(UotCodec.TryWriteRequestHeader(isConnect: false, ipv4, 5353, scratch, out var notConnectWritten));
+        Assert.Equal(0, notConnectWritten);
+        Assert.Equal(new byte[UotCodec.MaximumRequestHeaderLength], scratch.ToArray());
+
+        var ipv6 = IPAddressValue.From(IPAddress.Parse("2001:db8::53"));
+        Assert.True(UotCodec.TryWriteRequestHeader(isConnect: true, ipv6, 5353, scratch, out var ipv6Written));
+        Assert.Equal(UotCodec.RequestHeaderLength(AddressFamilyKind.IPv6), ipv6Written);
+        Assert.Equal(20, ipv6Written);
+        Assert.Equal(
+            new byte[]
+            {
+                1, 4,
+                0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x53,
+                0x14, 0xe9,
+            },
+            scratch[..ipv6Written].ToArray());
+        Assert.Equal(Socks5Messages.AddressTypeIPv6, scratch[1]);
+    }
+
+    [Fact]
+    public void UotRequestHeaderDestinationDecodesThroughTheSocksReplyParser()
+    {
+        // The structural guard against a second ATYP divergence: the header is decoded by
+        // Socks5Messages.TryParseReply — an independent SOCKS5 decoder, not UotCodec's own reader.
+        // The written destination is wrapped as a success reply (VER 5 | REP 0 | RSV 0 | ATYP |
+        // address | port), so only an RFC 1928 address type can pass: the per-datagram format's
+        // 0x00 IPv4 is an unknown family (Invalid), and its 0x01 IPv6 makes the parser read the IPv6
+        // address as a four-byte IPv4 address and the next two address bytes as the port, failing the
+        // address and port assertions below.
+        Span<byte> scratch = stackalloc byte[UotCodec.MaximumRequestHeaderLength];
+        Span<byte> reply = stackalloc byte[3 + UotCodec.MaximumRequestHeaderLength - 1];
+        foreach (var (address, addressType) in new[]
+        {
+            (IPAddress.Parse("192.0.2.53"), Socks5Messages.AddressTypeIPv4),
+            (IPAddress.Parse("2001:db8::53"), Socks5Messages.AddressTypeIPv6),
+        })
+        {
+            Assert.True(UotCodec.TryWriteRequestHeader(isConnect: true, IPAddressValue.From(address), 5353, scratch, out var written));
+            var header = scratch[..written];
+            Assert.Equal((byte)1, header[0]);
+
+            reply[0] = 5;
+            reply[1] = 0;
+            reply[2] = 0;
+            header[1..].CopyTo(reply[3..]);
+            var framed = reply[..(3 + header.Length - 1)];
+
+            Assert.Equal(Socks5ReplyKind.Success, Socks5Messages.TryParseReply(framed, out var status, out var parsedType, out var port));
+            Assert.Equal((byte)0, status);
+            Assert.Equal(addressType, parsedType);
+            Assert.Equal((ushort)5353, port);
+            Assert.Equal(address.GetAddressBytes(), framed.Slice(4, addressType == Socks5Messages.AddressTypeIPv4 ? 4 : 16).ToArray());
+            Assert.Equal(2 + (addressType == Socks5Messages.AddressTypeIPv4 ? 4 : 16) + 2, written);
+        }
+    }
+
+    [Fact]
+    public void UotRequestHeaderWriterFailsClosedOnATooSmallDestination()
+    {
+        Assert.Equal(UotCodec.MaximumRequestHeaderLength, UotCodec.RequestHeaderLength(AddressFamilyKind.IPv6));
+        var ipv6 = IPAddressValue.From(IPAddress.Parse("2001:db8::53"));
+
+        Span<byte> oneByteShort = stackalloc byte[UotCodec.MaximumRequestHeaderLength - 1];
+        Assert.False(UotCodec.TryWriteRequestHeader(isConnect: true, ipv6, 0, oneByteShort, out var written));
+        Assert.Equal(0, written);
+
+        Span<byte> exact = stackalloc byte[UotCodec.MaximumRequestHeaderLength];
+        Assert.True(UotCodec.TryWriteRequestHeader(isConnect: true, ipv6, 0, exact, out written));
+        Assert.Equal(exact.Length, written);
+
+        // The IPv4 header fits where the IPv6 header does not.
+        Assert.True(UotCodec.TryWriteRequestHeader(isConnect: true, IPAddressValue.From(IPAddress.Parse("192.0.2.53")), 0, oneByteShort, out written));
+        Assert.Equal(UotCodec.RequestHeaderLength(AddressFamilyKind.IPv4), written);
+    }
+
+    [Fact]
+    public void UotFramePrefixIsThePayloadLengthInNetworkOrder()
+    {
+        Assert.Equal(2, UotCodec.FrameHeaderSize);
+        Span<byte> scratch = stackalloc byte[UotCodec.FrameHeaderSize];
+
+        Assert.True(UotCodec.TryWriteFrameHeader(0x0201, scratch, out var written));
+        Assert.Equal(UotCodec.FrameHeaderSize, written);
+        Assert.Equal(new byte[] { 0x02, 0x01 }, scratch.ToArray());
+
+        Assert.True(UotCodec.TryWriteFrameHeader(ushort.MaxValue, scratch, out written));
+        Assert.Equal(new byte[] { 0xff, 0xff }, scratch.ToArray());
+
+        // A zero-length frame is a legal empty datagram, not a terminator.
+        Assert.True(UotCodec.TryWriteFrameHeader(0, scratch, out written));
+        // ReSharper disable once UseUtf8StringLiteral // The expectation is two literal zero bytes (the frame's length prefix); a UTF-8 literal would spell the same expectation as escape sequences.
+        Assert.Equal(new byte[] { 0, 0 }, scratch.ToArray());
+    }
+
+    [Fact]
+    public void UotFrameHeaderWriterFailsClosedOnATooSmallDestination()
+    {
+        Span<byte> oneByteShort = stackalloc byte[UotCodec.FrameHeaderSize - 1];
+        Assert.False(UotCodec.TryWriteFrameHeader(1, oneByteShort, out var written));
+        Assert.Equal(0, written);
+    }
+
+    [Fact]
+    public void UotMagicAddressIsTheV2ArpaName()
+    {
+        // The server dispatches UoT on this exact FQDN and the protocol version lives in its "v2"
+        // segment: a typo falls through to a plain CONNECT to a name that does not resolve.
+        Assert.Equal("sp.v2.udp-over-tcp.arpa", UotCodec.MagicAddress);
+        Assert.Equal(2, UotCodec.Version);
+        Assert.Contains("v2", UotCodec.MagicAddress, StringComparison.Ordinal);
     }
 
     [Fact]

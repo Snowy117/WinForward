@@ -55,6 +55,50 @@ public sealed class ConfigurationValidationTests
         ConfigurationAssert.Invalid(json, "socks5Servers[1].name");
     }
 
+    [Theory]
+    [InlineData(", \"udpOverTcp\": true", true)]
+    [InlineData(", \"udpOverTcp\": false", false)]
+    [InlineData("", false)]
+    public void Socks5ServerUdpOverTcpFlagDefaultsOffAndReachesTheTarget(string member, bool expected)
+    {
+        var json = $$"""
+        {
+          "socks5Servers": [ { "name": "Main", "host": "127.0.0.1", "port": 1080{{member}} } ],
+          "host": { "fallbackAction": "pass", "rules": [] }
+        }
+        """;
+
+        Assert.True(ConfigurationLoader.TryParse(json, out var dto, out var parseDiagnostics), string.Join("; ", parseDiagnostics));
+        Assert.NotNull(dto);
+        Assert.True(ConfigurationLoader.TryValidate(dto, out var configuration, out var diagnostics), string.Join("; ", diagnostics));
+        Assert.NotNull(configuration);
+        Assert.True(configuration.Targets.TryGetValue("Main", out var target));
+        Assert.Equal("Main", target.Name);
+        Assert.Equal(expected, target.Socks5!.UdpOverTcp);
+    }
+
+    /// <summary>
+    /// The opt-in key is spelled exactly <c>udpOverTcp</c>: a different casing is an unknown property
+    /// and keeps failing closed at parse with its JSON path.
+    /// </summary>
+    [Theory]
+    [InlineData("udpOverTCP")]
+    [InlineData("udp_over_tcp")]
+    [InlineData("udp-over-tcp")]
+    public void MisspelledUdpOverTcpKeyFailsClosedAtParse(string misspelled)
+    {
+        var json = $$"""
+        {
+          "socks5Servers": [ { "name": "Main", "host": "127.0.0.1", "port": 1080, "{{misspelled}}": true } ],
+          "host": { "fallbackAction": "pass", "rules": [] }
+        }
+        """;
+
+        Assert.False(ConfigurationLoader.TryParse(json, out _, out var diagnostics));
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal($"$.socks5Servers[0].{misspelled}", diagnostic.Path);
+    }
+
     [Fact]
     public void ConfigurationRejectsFallbackProxyAction()
     {
