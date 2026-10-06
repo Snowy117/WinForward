@@ -1,4 +1,4 @@
-name: AOT Build
+name: Release Build
 
 on:
   push:

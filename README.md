@@ -28,7 +28,7 @@ dotnet publish src/WinForward.Cli/WinForward.Cli.csproj -c Release -r win-x64
 
 The `dotnet publish` command above produces the AOT artifact; add `-p:PublishAot=false
 --self-contained false` for the framework-dependent one. CI publishes both (see
-`.github/workflows/aot-build.yml`), and both are a single `WinForward.exe` to drop next to the
+`.github/workflows/release-build.yml`), and both are a single `WinForward.exe` to drop next to the
 same matching `ndisapi.dll` (x64) sidecar:
 
 | Artifact | What it is | Size | .NET 10 runtime | Pick it for |
