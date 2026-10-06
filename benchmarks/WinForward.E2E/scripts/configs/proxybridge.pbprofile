@@ -1,0 +1,44 @@
+{
+  "Version": "1.0",
+  "LocalhostViaProxy": false,
+  "IsTrafficLoggingEnabled": false,
+  "ProxyConfigs": [
+    {
+      "Id": 1,
+      "Type": "socks5",
+      "Host": "127.0.0.1",
+      "Port": "1080",
+      "Username": "",
+      "Password": ""
+    }
+  ],
+  "ProxyRules": [
+    {
+      "ProcessName": "sing-box.exe",
+      "TargetHosts": "*",
+      "TargetPorts": "*",
+      "Protocol": "BOTH",
+      "Action": "DIRECT",
+      "IsEnabled": true,
+      "ProxyConfigId": 0
+    },
+    {
+      "ProcessName": "WinForward.E2E.Direct.exe",
+      "TargetHosts": "*",
+      "TargetPorts": "*",
+      "Protocol": "BOTH",
+      "Action": "DIRECT",
+      "IsEnabled": true,
+      "ProxyConfigId": 0
+    },
+    {
+      "ProcessName": "WinForward.E2E.exe",
+      "TargetHosts": "*",
+      "TargetPorts": "*",
+      "Protocol": "BOTH",
+      "Action": "PROXY",
+      "IsEnabled": true,
+      "ProxyConfigId": 1
+    }
+  ]
+}

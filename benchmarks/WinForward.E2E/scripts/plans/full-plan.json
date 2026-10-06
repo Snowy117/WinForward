@@ -1,0 +1,80 @@
+{
+  "arms": [
+    {
+      "name": "IDLE",
+      "kind": "idle",
+      "seconds": 60
+    },
+    {
+      "name": "LAT",
+      "kind": "latency",
+      "seconds": 60,
+      "ratePerSecond": 20,
+      "protocol": "tcp+udp",
+      "payloadBytes": 120,
+      "window": 4096
+    },
+    {
+      "name": "LATLOAD",
+      "kind": "latency",
+      "seconds": 60,
+      "ratePerSecond": 500,
+      "protocol": "tcp+udp",
+      "payloadBytes": 120,
+      "window": 4096
+    },
+    {
+      "name": "DNS",
+      "kind": "dns",
+      "seconds": 90,
+      "ratePerSecond": 200,
+      "tcpPercent": 2,
+      "dnsPort": 53
+    },
+    {
+      "name": "DNSALT",
+      "kind": "dns",
+      "seconds": 90,
+      "ratePerSecond": 200,
+      "tcpPercent": 2,
+      "dnsPort": 40053
+    },
+    {
+      "name": "LOSS",
+      "kind": "loss",
+      "seconds": 120,
+      "ratePerSecond": 500,
+      "payloadBytes": 200,
+      "lossWindowMs": 200
+    },
+    {
+      "name": "REL",
+      "kind": "reliability",
+      "seconds": 120,
+      "connectionsPerSecond": 20,
+      "modeMix": "clean=25,resetAfterN=25,partialFin=25,halfClose=25"
+    },
+    {
+      "name": "THRU",
+      "kind": "throughput",
+      "seconds": 60,
+      "streams": 4,
+      "targetBytesPerSecond": 60000000
+    },
+    {
+      "name": "MIX",
+      "kind": "mix",
+      "seconds": 120,
+      "desktops": 4,
+      "lossWindowMs": 200
+    },
+    {
+      "name": "PERSIST",
+      "kind": "persistent",
+      "seconds": 90,
+      "intervalMs": 1000,
+      "idleSeconds": 25,
+      "payloadBytes": 200
+    }
+  ]
+}

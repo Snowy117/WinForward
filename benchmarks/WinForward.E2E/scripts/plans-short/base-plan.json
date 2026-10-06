@@ -1,0 +1,11 @@
+{
+  "arms": [
+    {
+      "kind": "base",
+      "name": "BASE",
+      "seconds": 12,
+      "protocol": "tcp+udp",
+      "window": 4096
+    }
+  ]
+}

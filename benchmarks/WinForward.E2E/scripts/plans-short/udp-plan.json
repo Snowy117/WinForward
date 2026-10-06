@@ -1,0 +1,30 @@
+{
+  "arms": [
+    {
+      "name": "LAT",
+      "kind": "latency",
+      "seconds": 12,
+      "ratePerSecond": 20,
+      "protocol": "udp",
+      "payloadBytes": 120,
+      "window": 4096
+    },
+    {
+      "name": "LATLOAD",
+      "kind": "latency",
+      "seconds": 12,
+      "ratePerSecond": 250,
+      "protocol": "udp",
+      "payloadBytes": 120,
+      "window": 4096
+    },
+    {
+      "name": "LOSS",
+      "kind": "loss",
+      "seconds": 24,
+      "ratePerSecond": 250,
+      "payloadBytes": 200,
+      "lossWindowMs": 200
+    }
+  ]
+}

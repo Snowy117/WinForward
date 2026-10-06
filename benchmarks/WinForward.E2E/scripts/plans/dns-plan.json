@@ -1,0 +1,20 @@
+{
+  "arms": [
+    {
+      "name": "DNS",
+      "kind": "dns",
+      "seconds": 90,
+      "ratePerSecond": 200,
+      "tcpPercent": 2,
+      "dnsPort": 53
+    },
+    {
+      "name": "DNSALT",
+      "kind": "dns",
+      "seconds": 90,
+      "ratePerSecond": 200,
+      "tcpPercent": 2,
+      "dnsPort": 40053
+    }
+  ]
+}

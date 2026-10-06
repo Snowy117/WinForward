@@ -1,0 +1,11 @@
+# This machine's glue: how to reach the VM, where its files live, and what the host's addresses are.
+# The plans, the product configurations and the orchestrator are committed; these are not, because
+# they describe one particular pair of machines rather than the experiment.
+scripts/wf.sh
+scripts/deploy-campaign.sh
+scripts/start-targets.sh
+scripts/publish-campaign.sh
+
+# Build output and the working directories a run leaves behind.
+bin/
+obj/

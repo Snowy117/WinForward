@@ -15,6 +15,7 @@ BenchmarkDotNet.Artifacts/
 .repograph/
 dist/
 evil_winrm_py.log
+AGENTS.local.md
 
 # Local smoke-test artifacts
 smoke/

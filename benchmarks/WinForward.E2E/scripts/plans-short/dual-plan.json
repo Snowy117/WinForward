@@ -1,0 +1,28 @@
+{
+  "arms": [
+    {
+      "name": "LAT",
+      "kind": "latency",
+      "seconds": 8,
+      "ratePerSecond": 20,
+      "protocol": "tcp+udp",
+      "payloadBytes": 120,
+      "window": 4096
+    },
+    {
+      "name": "MIX",
+      "kind": "mix",
+      "seconds": 8,
+      "desktops": 2,
+      "lossWindowMs": 200
+    },
+    {
+      "name": "LOSS",
+      "kind": "loss",
+      "seconds": 8,
+      "ratePerSecond": 150,
+      "payloadBytes": 200,
+      "lossWindowMs": 200
+    }
+  ]
+}

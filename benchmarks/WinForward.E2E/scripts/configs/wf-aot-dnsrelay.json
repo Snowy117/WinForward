@@ -1,0 +1,43 @@
+{
+  "socks5Servers": [
+    {
+      "name": "main",
+      "host": "127.0.0.1",
+      "port": 1080,
+      "udpOverTcp": true
+    }
+  ],
+  "host": {
+    "fallbackAction": "pass",
+    "rules": [
+      {
+        "process": [
+          "sing-box.exe"
+        ],
+        "action": "pass"
+      },
+      {
+        "process": [
+          "WinForward.E2E.Direct.exe"
+        ],
+        "protocol": [
+          "tcp",
+          "udp"
+        ],
+        "action": "pass"
+      },
+      {
+        "process": [
+          "WinForward.E2E.exe"
+        ],
+        "protocol": [
+          "tcp",
+          "udp"
+        ],
+        "action": "proxy",
+        "target": "main"
+      }
+    ]
+  },
+  "logLevel": "info"
+}

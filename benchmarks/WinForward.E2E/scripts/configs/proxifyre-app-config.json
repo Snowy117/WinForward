@@ -1,0 +1,25 @@
+{
+  "logLevel": "Info",
+  "bypassLan": false,
+  "proxies": [
+    {
+      "appNames": [
+        "WinForward.E2E"
+      ],
+      "socks5ProxyEndpoint": "127.0.0.1:1080",
+      "supportedProtocols": [
+        "TCP",
+        "UDP"
+      ],
+      "supportedAddressFamilies": [
+        "IPv4"
+      ]
+    }
+  ],
+  "excludes": [
+    "sing-box",
+    "ProxiFyre",
+    "ProxiFyreUI",
+    "WinForward.E2E.Direct"
+  ]
+}

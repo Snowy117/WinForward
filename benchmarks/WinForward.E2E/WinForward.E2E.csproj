@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>WinForward.E2E</AssemblyName>
+    <RootNamespace>WinForward.E2E</RootNamespace>
+  </PropertyGroup>
+</Project>
