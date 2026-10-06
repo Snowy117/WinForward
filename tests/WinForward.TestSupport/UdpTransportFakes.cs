@@ -13,9 +13,19 @@ namespace WinForward.TestSupport;
 /// </summary>
 internal sealed class FakeTransportFactory(AddressFamily addressFamily = AddressFamily.InterNetwork) : IUdpProxyTransportFactory
 {
-    public List<FakeTransport> Transports { get; } = [];
+    private readonly Lock _gate = new();
+    private readonly List<FakeTransport> _transports = [];
     private int _nextLocalPort = 40000;
     private int _createCalls;
+
+    /// <summary>Snapshot taken under the writer's lock: the setup worker publishes from its own thread, and <see cref="List{T}.Add"/> makes a count visible before its element.</summary>
+    public IReadOnlyList<FakeTransport> Transports
+    {
+        get
+        {
+            lock (_gate) return [.. _transports];
+        }
+    }
 
     public int CreateCalls => Volatile.Read(ref _createCalls);
 
@@ -25,7 +35,7 @@ internal sealed class FakeTransportFactory(AddressFamily addressFamily = Address
         // relay alias collision guard in UdpProxyCoordinator must not reject distinct flows.
         Interlocked.Increment(ref _createCalls);
         var transport = new FakeTransport(addressFamily, Interlocked.Increment(ref _nextLocalPort));
-        lock (Transports) Transports.Add(transport);
+        lock (_gate) _transports.Add(transport);
         return ValueTask.FromResult<IUdpProxyTransport>(transport);
     }
 }
@@ -147,15 +157,25 @@ internal sealed class RecordingTransportFactory(IUdpProxyTransportFactory inner)
 /// <summary>Fails the first receive immediately; used to prove session removal fires without another send.</summary>
 internal sealed class ImmediateFaultTransportFactory : IUdpProxyTransportFactory
 {
+    private readonly Lock _gate = new();
+    private readonly List<ImmediateFaultTransport> _faulted = [];
     private int _calls;
-    public List<ImmediateFaultTransport> FaultedTransports { get; } = [];
+
+    /// <summary>Snapshot of the faulted transports, taken under the writer's lock (see <see cref="FakeTransportFactory.Transports"/>).</summary>
+    public IReadOnlyList<ImmediateFaultTransport> FaultedTransports
+    {
+        get
+        {
+            lock (_gate) return [.. _faulted];
+        }
+    }
 
     public ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken)
     {
         if (Interlocked.Increment(ref _calls) == 1)
         {
             var transport = new ImmediateFaultTransport(AddressFamily.InterNetwork, 40000);
-            FaultedTransports.Add(transport);
+            lock (_gate) _faulted.Add(transport);
             return ValueTask.FromResult<IUdpProxyTransport>(transport);
         }
 

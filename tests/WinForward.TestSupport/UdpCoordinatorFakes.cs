@@ -36,17 +36,27 @@ internal static class UdpCoordinatorFakes
 internal sealed class GatedTransportFactory : IUdpProxyTransportFactory
 {
     private readonly TaskCompletionSource<IUdpProxyTransport> _create = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly Lock _gate = new();
+    private readonly List<FakeTransport> _created = [];
     private int _calls;
     public TaskCompletionSource<bool> CreateStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public TaskCompletionSource<bool> CreateFinished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    public List<FakeTransport> CreatedTransports { get; } = [];
+
+    /// <summary>Snapshot taken under the writer's lock: the setup worker publishes from its own thread, and <see cref="List{T}.Add"/> makes a count visible before its element.</summary>
+    public IReadOnlyList<FakeTransport> CreatedTransports
+    {
+        get
+        {
+            lock (_gate) return [.. _created];
+        }
+    }
 
     public async ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken)
     {
         if (Interlocked.Increment(ref _calls) != 1)
         {
             var transport = new FakeTransport(AddressFamily.InterNetwork, 40001);
-            CreatedTransports.Add(transport);
+            lock (_gate) _created.Add(transport);
             return transport;
         }
 
@@ -71,12 +81,22 @@ internal sealed class GatedTransportFactory : IUdpProxyTransportFactory
 /// </summary>
 internal sealed class DelayedTransportFactory(Task gate, TimeSpan? minimumDelay = null) : IUdpProxyTransportFactory
 {
+    private readonly Lock _gate = new();
+    private readonly List<FakeTransport> _transports = [];
     private int _nextLocalPort = 41000;
     private int _calls;
 
     /// <summary>Counts CreateAsync attempts from method entry, so in-flight (gated) setups are visible.</summary>
     public int CreateCalls => Volatile.Read(ref _calls);
-    public List<FakeTransport> Transports { get; } = [];
+
+    /// <summary>Snapshot taken under the writer's lock: the setup worker publishes from its own thread, and <see cref="List{T}.Add"/> makes a count visible before its element.</summary>
+    public IReadOnlyList<FakeTransport> Transports
+    {
+        get
+        {
+            lock (_gate) return [.. _transports];
+        }
+    }
 
     public async ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken)
     {
@@ -86,7 +106,7 @@ internal sealed class DelayedTransportFactory(Task gate, TimeSpan? minimumDelay 
         await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         if (minimumDelay is { } delay) await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
         var transport = new FakeTransport(AddressFamily.InterNetwork, Interlocked.Increment(ref _nextLocalPort));
-        lock (Transports) Transports.Add(transport);
+        lock (_gate) _transports.Add(transport);
         return transport;
     }
 }
@@ -118,12 +138,22 @@ internal sealed class CancellationAwareTransportFactory : IUdpProxyTransportFact
 
 internal sealed class CollidingAliasTransportFactory : IUdpProxyTransportFactory
 {
-    public List<FakeTransport> Transports { get; } = [];
+    private readonly Lock _gate = new();
+    private readonly List<FakeTransport> _transports = [];
+
+    /// <summary>Snapshot taken under the writer's lock: the setup worker publishes from its own thread, and <see cref="List{T}.Add"/> makes a count visible before its element.</summary>
+    public IReadOnlyList<FakeTransport> Transports
+    {
+        get
+        {
+            lock (_gate) return [.. _transports];
+        }
+    }
 
     public ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken)
     {
         var transport = new FakeTransport(AddressFamily.InterNetwork, 40000);
-        lock (Transports) Transports.Add(transport);
+        lock (_gate) _transports.Add(transport);
         return ValueTask.FromResult<IUdpProxyTransport>(transport);
     }
 }

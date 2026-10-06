@@ -100,18 +100,10 @@ public sealed class UdpSetupCooldownTests
         gate.TrySetResult();
         // The ninth setup runs once a slot frees and its buffered datagram is forwarded.
         await WaitForAsync(() => factory.Transports.Count == cappedFlows + 1);
-        await WaitForAsync(() =>
+        await WaitForAsync(() => factory.Transports.Any(transport =>
         {
-            // Transports is appended under its own lock by CreateAsync; enumerate under it too,
-            // or a concurrent append fails the enumeration with "collection was modified".
-            lock (factory.Transports)
-            {
-                return factory.Transports.Exists(transport =>
-                {
-                    lock (transport.Sent) return transport.Sent.Count == 1 && Assert.Single(transport.Sent[0].Payload) == cappedFlows;
-                });
-            }
-        });
+            lock (transport.Sent) return transport.Sent.Count == 1 && Assert.Single(transport.Sent[0].Payload) == cappedFlows;
+        }));
         Assert.DoesNotContain(logger.Events, item => string.Equals(item.Name, "udp.setup.failed", StringComparison.Ordinal));
         Assert.DoesNotContain(logger.Events, item => string.Equals(item.Name, "udp.setupqueue.dropped", StringComparison.Ordinal));
     }

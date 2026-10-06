@@ -63,7 +63,7 @@ public sealed class UdpAdaptiveSweepAllocationGateTests
 
         // Population proof: the transports exist and every queued datagram was flushed (the flush is
         // what stamps each session's activity), so the sweep below scans a live world.
-        await WaitForAsync(() => factory.Transports.Count == Sessions && factory.Transports.TrueForAll(static transport => SentCount(transport) >= 1));
+        await WaitForAsync(() => factory.Transports.Count == Sessions && factory.Transports.All(static transport => SentCount(transport) >= 1));
         Assert.Equal(Sessions, coordinator.SessionCount);
 
         // Between the two cutoffs: past the short class's pre-filter cutoff, inside the long class's.

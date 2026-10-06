@@ -277,15 +277,28 @@ public sealed class UdpSessionRetentionTests
 
     private sealed class ExchangeTransportFactory : IUdpProxyTransportFactory
     {
+        private readonly Lock _gate = new();
+        private readonly List<ExchangeTransport> _transports = [];
         private int _nextLocalPort = 40_000;
         private int _created;
 
-        public List<ExchangeTransport> Transports { get; } = [];
+        /// <summary>
+        /// Snapshot taken under the writer's lock. The setup worker calls <see cref="CreateAsync"/> from
+        /// its own thread and <see cref="List{T}.Add"/> makes its count visible before its element, so a
+        /// count-then-index read from the harness could otherwise dereference an unwritten slot.
+        /// </summary>
+        public IReadOnlyList<ExchangeTransport> Transports
+        {
+            get
+            {
+                lock (_gate) return [.. _transports];
+            }
+        }
 
         public ValueTask<IUdpProxyTransport> CreateAsync(ProxyTarget target, CancellationToken cancellationToken)
         {
             var transport = new ExchangeTransport(Interlocked.Increment(ref _nextLocalPort));
-            Transports.Add(transport);
+            lock (_gate) _transports.Add(transport);
             Interlocked.Increment(ref _created);
             return ValueTask.FromResult<IUdpProxyTransport>(transport);
         }
