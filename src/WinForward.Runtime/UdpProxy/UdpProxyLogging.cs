@@ -13,7 +13,8 @@ internal static class UdpProxyLogging
     /// <summary>
     /// The session-lifecycle debug shape (<c>udp.session.created</c>, <c>.closed</c>,
     /// <c>.expired</c>). Creation passes the flow's resolved target, so the event carries both the
-    /// target's name and its kind; the teardown events pass none, and both fields are then null.
+    /// target's name and its kind; the teardown events pass none, and both fields are then null. The
+    /// creation event also carries the UDP carriage the target selects (<c>udpTransport</c>).
     /// </summary>
     public static void LogDebug(IRuntimeLogger logger, string eventName, FlowKey flow, long flowGeneration, UdpAssociation association, ProxyTarget? target = null)
     {
@@ -22,7 +23,8 @@ internal static class UdpProxyLogging
             new("flow", flowGeneration == 0 ? null : flowGeneration),
             new("udpAssociation", association.Generation), new("protocol", flow.Protocol),
             new("source", flow.Local), new("destination", flow.Remote),
-            new("target", target?.Name), new("targetKind", LocalOrSocks5(target)));
+            new("target", target?.Name), new("targetKind", LocalOrSocks5(target)),
+            new("udpTransport", UdpTransportOf(target)));
     }
 
     /// <summary>The target kind as it appears on the lifecycle events, or null when the event has no target.</summary>
@@ -30,6 +32,17 @@ internal static class UdpProxyLogging
     {
         if (target is not { } resolved) return null;
         return resolved.IsLocal ? "local" : "socks5";
+    }
+
+    /// <summary>
+    /// The UDP carriage as it appears on the lifecycle events, or null when the event has no target or
+    /// the target is local. UoT stays a mode of the <c>socks5</c> kind rather than a third kind, so
+    /// this field is what distinguishes it from the native relay.
+    /// </summary>
+    private static string? UdpTransportOf(ProxyTarget? target)
+    {
+        if (target is not { Socks5: { } server }) return null;
+        return server.UdpOverTcp ? "uot" : "native";
     }
 
     public static void LogTrace(IRuntimeLogger logger, string eventName, FlowKey flow, params RuntimeLogField[] additional)

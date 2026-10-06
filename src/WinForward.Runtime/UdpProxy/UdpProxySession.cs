@@ -173,6 +173,16 @@ internal sealed class UdpProxySession : IAsyncDisposable
     /// delivers them to the client instead of the host stack.
     /// </summary>
     private MacAddress ClientMac { get; }
+
+    /// <summary>
+    /// The genuine fault this session's receive loop recorded, or null while it is healthy. The loop
+    /// records only the failures that are not normal teardown (cancellation and socket disposal are
+    /// filtered out before the record), which is what makes this value the right input for the
+    /// coordinator's teardown-reason classification; the fault itself stays the scope's, so no second
+    /// representation exists to drift from it.
+    /// </summary>
+    internal Exception? RecordedFault => _scope.Fault;
+
     public void Start(Action<UdpProxySession> receiveFailureHandler)
     {
         ArgumentNullException.ThrowIfNull(receiveFailureHandler);

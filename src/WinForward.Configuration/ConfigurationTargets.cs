@@ -60,7 +60,7 @@ internal static class ConfigurationTargets
 
         if (name is not null && host is not null && IsValidHost(host) && dto.Port is >= 1 and <= 65535 && !targets.ContainsKey(name))
         {
-            targets.Add(name, ProxyTarget.FromServer(new Socks5Server(name, host, (ushort)dto.Port, dto.Username, dto.Password)));
+            targets.Add(name, ProxyTarget.FromServer(new Socks5Server(name, host, (ushort)dto.Port, dto.Username, dto.Password, dto.UdpOverTcp ?? false)));
         }
     }
 

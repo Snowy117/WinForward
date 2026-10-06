@@ -82,6 +82,28 @@ public sealed class UdpAssociationLostException : IOException
 #pragma warning restore RCS1194
 
 /// <summary>
+/// The relay handshake was rejected and the rejection was discovered after the transport's setup
+/// call returned: a transport whose handshake completes lazily on the receive path cannot observe a
+/// refused setup reply from the call that created it, so the refusal surfaces here instead. The
+/// coordinator removes the flow's slot with <c>UdpTeardownReason.SetupFailure</c>, arming the setup
+/// cooldown, exactly as a refused <c>UDP ASSOCIATE</c> does on the native path — so a server that
+/// systematically rejects the exchange is re-dialed once per cooldown instead of once per client
+/// retransmit.
+/// </summary>
+#pragma warning disable RCS1194 // The [SerializationInfo, StreamingContext] constructor is deliberately omitted: binary serialization is obsolete in .NET 8+ (SYSLIB0051) and this exception carries no state beyond its message and inner exception.
+public sealed class UdpTransportHandshakeRejectedException : IOException
+{
+    // ReSharper disable once UnusedMember.Global // Conventional exception surface: RCS1194 requires the parameterless and message-only constructors, even though in-tree callers use only the (message, inner) overload.
+    public UdpTransportHandshakeRejectedException() { }
+
+    // ReSharper disable once UnusedMember.Global // Conventional exception surface: RCS1194 requires the parameterless and message-only constructors, even though in-tree callers use only the (message, inner) overload.
+    public UdpTransportHandshakeRejectedException(string message) : base(message) { }
+
+    public UdpTransportHandshakeRejectedException(string message, Exception? innerException) : base(message, innerException) { }
+}
+#pragma warning restore RCS1194
+
+/// <summary>
 /// The per-flow UDP transport seam: one instance per flow, owned by <c>UdpProxySession</c>, which
 /// sends the flow's datagrams and reports replies as
 /// <see cref="UdpTransportReceiveResult"/>. The contract is transport-neutral and knows nothing

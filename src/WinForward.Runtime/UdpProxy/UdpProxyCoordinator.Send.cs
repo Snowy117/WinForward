@@ -196,14 +196,24 @@ public sealed partial class UdpProxyCoordinator
     }
 
     /// <summary>
-    /// The teardown reason a send failure carries: an association that died without recovering is
+    /// The teardown reason a fault carries, the single decision point shared by every removal path:
+    /// a relay handshake rejected after the transport's setup call returned is
+    /// <see cref="UdpTeardownReason.SetupFailure"/> — the reason that arms the setup cooldown (and
+    /// that the setup pipeline counts as a genuine setup failure), exactly as a refused
+    /// <c>UDP ASSOCIATE</c> is on the native path, so a systematically rejecting server is re-dialed
+    /// once per cooldown; an association that died without recovering is
     /// <see cref="UdpTeardownReason.AssociationLost"/> (counted, and deliberately without the setup
     /// cooldown — recovery is the flow's next datagram); everything else stays a generic
-    /// <see cref="UdpTeardownReason.Fault"/>. Shared with the setup pipeline, whose flush window is
-    /// the same send path: an association lost while the setup queue drains is not a setup failure.
+    /// <see cref="UdpTeardownReason.Fault"/>. Only the association-lost branch counts here, so a
+    /// rejection is never counted as an association loss.
+    /// <para>
+    /// Shared with the setup pipeline, whose flush window is the same send path: an association lost
+    /// while the setup queue drains is not a setup failure.
+    /// </para>
     /// </summary>
     internal static UdpTeardownReason TeardownReasonFor(Exception exception)
     {
+        if (exception is UdpTransportHandshakeRejectedException) return UdpTeardownReason.SetupFailure;
         if (exception is not UdpAssociationLostException) return UdpTeardownReason.Fault;
         RuntimeCounters.Shared.Increment(RuntimeCounters.UdpAssociationLost);
         return UdpTeardownReason.AssociationLost;

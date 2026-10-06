@@ -76,6 +76,24 @@ public sealed class Socks5UdpTransportFactory : IUdpProxyTransportFactory
             throw new InvalidOperationException($"The SOCKS5 UDP transport factory was asked for local target '{target.Name}'.");
         }
 
+        // UoT is a mode of the SOCKS5 target, not a third kind (design §1): the opt-in flag picks
+        // the per-flow connection whose stream carries the flow's datagrams, and every other SOCKS5
+        // server keeps the native per-flow association and relay socket path below unchanged.
+        if (server.UdpOverTcp)
+        {
+            var control = await Socks5UotTransport.DialAsync(server, _associations, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                return Socks5UotTransport.Create(control, _maximumFrameSize);
+            }
+            catch
+            {
+                // A transport that never came into existence must not leave its control connection open.
+                await control.DisposeAsync().ConfigureAwait(false);
+                throw;
+            }
+        }
+
         var association = await Socks5UdpAssociation.ConnectAsync(server, _associations, cancellationToken).ConfigureAwait(false);
         try
         {
@@ -304,6 +322,11 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
         await gateWait.ConfigureAwait(false);
         try
         {
+            // Post-wait half of the warm entry's guard: a sender that waited through teardown is
+            // refused here rather than sending to a closed relay socket.
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+            if (_association.Fault is { } lost) throw lost;
+
             if (!Socks5UdpCodec.TryEncode(destination.Address, destination.Port, payload.Span, _sendBuffer, out var written))
             {
                 throw new IOException("A SOCKS5 UDP datagram exceeded the relay send buffer.");
@@ -428,16 +451,20 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
         UdpTransportReceiveClassifier.ClassifyFault(exception);
 
     /// <summary>
-    /// Releases the relay socket, its self-traffic tuple, the flow's association (its control
-    /// connection and its watchdog), and the send gate — exactly once, through every path, even when
-    /// an earlier release throws. The association is disposed before the send gate because its
-    /// watchdog is a scope child whose join must not race the gate's disposal.
+    /// Releases the relay socket, its self-traffic tuple, and the flow's association (its control
+    /// connection and its watchdog) — exactly once, through every path, even when an earlier release
+    /// throws. The send gate is deliberately left undisposed; the body says why.
     /// </summary>
     public async ValueTask DisposeAsync()
     {
         // A repeat dispose returns without re-running the teardown; the first caller owns it.
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
+        // The send gate is deliberately left undisposed. SemaphoreSlim.Dispose only frees the lazily
+        // created WaitHandle (never requested here), while disposing it with waiters parked strands
+        // those waits forever — and a stranded sender holds its caller's work lease, so a teardown
+        // drain would wait on it. The guard refuses new senders; a parked sender is released by the
+        // disposed socket's faulted send and refused by SendAfterGateAsync's post-wait re-check.
         try
         {
             _socket.Dispose();
@@ -450,16 +477,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
             }
             finally
             {
-                try
-                {
-                    await _association.DisposeAsync().ConfigureAwait(false);
-                }
-                finally
-                {
-                    // Disposed last: in-flight senders release the gate from their finally blocks
-                    // as the disposed socket faults their pending sends.
-                    _sendGate.Dispose();
-                }
+                await _association.DisposeAsync().ConfigureAwait(false);
             }
         }
     }

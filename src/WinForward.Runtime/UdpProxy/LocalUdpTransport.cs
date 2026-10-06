@@ -274,6 +274,10 @@ public sealed class LocalUdpTransport : IUdpProxyTransport, IUdpExchangeCounters
         await gateWait.ConfigureAwait(false);
         try
         {
+            // Post-wait half of the warm entry's guard: a sender that waited through teardown is
+            // refused here rather than sending to a closed socket.
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+
             if (payload.Length > _sendBuffer.Length)
             {
                 throw new IOException("A local-target datagram exceeded the transport send buffer.");
@@ -424,28 +428,25 @@ public sealed class LocalUdpTransport : IUdpProxyTransport, IUdpExchangeCounters
         || cancellationToken.IsCancellationRequested;
 
     /// <summary>
-    /// Releases the socket, its self-traffic tuple, and the send gate — exactly once, through every
-    /// path, even when an earlier release throws. The gate is disposed last: in-flight senders release
-    /// it from their finally blocks as the disposed socket faults their pending sends.
+    /// Releases the socket and its self-traffic tuple — exactly once, through every path, even when an
+    /// earlier release throws. The send gate is deliberately left undisposed; the body says why.
     /// </summary>
     public ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return ValueTask.CompletedTask;
 
+        // The send gate is deliberately left undisposed. SemaphoreSlim.Dispose only frees the lazily
+        // created WaitHandle (never requested here), while disposing it with waiters parked strands
+        // those waits forever — and a stranded sender holds its caller's work lease, so a teardown
+        // drain would wait on it. The guard refuses new senders; a parked sender is released by the
+        // disposed socket's faulted send and refused by SendAfterGateAsync's post-wait re-check.
         try
         {
             _socket.Dispose();
         }
         finally
         {
-            try
-            {
-                Interlocked.Exchange(ref _selfTrafficToken, value: null)?.Dispose();
-            }
-            finally
-            {
-                _sendGate.Dispose();
-            }
+            Interlocked.Exchange(ref _selfTrafficToken, value: null)?.Dispose();
         }
 
         return ValueTask.CompletedTask;

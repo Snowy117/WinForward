@@ -547,6 +547,19 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
         }
     }
 
+    /// <summary>
+    /// Removes the slot of a session whose receive loop recorded a fault, classifying that fault
+    /// through the same <see cref="TeardownReasonFor"/> every other removal path uses: a rejected
+    /// relay handshake discovered on the receive path tears the flow down as
+    /// <see cref="UdpTeardownReason.SetupFailure"/> (the setup cooldown is armed), an association
+    /// death as <see cref="UdpTeardownReason.AssociationLost"/>, and every other fault as the generic
+    /// <see cref="UdpTeardownReason.Fault"/>.
+    /// <para>
+    /// The removal is also the classification's owner check: a fault whose slot is already gone — a
+    /// send-path failure removed it first — returns before reaching the classifier, so one fault is
+    /// never classified (or counted) twice across the two paths.
+    /// </para>
+    /// </summary>
     private async Task RemoveReceiveFailedSessionCoreAsync(UdpProxySession session)
     {
         UdpSessionSlot? slot = null;
@@ -556,7 +569,10 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
             if (_sessions.TryGetValue(session.Flow, out var current) && ReferenceEquals(current.Session, session)) slot = current;
         }
         if (slot is null) return;
-        if (!await _slotHost.RemoveSlotAsync(session.Flow, slot, UdpTeardownReason.Fault).ConfigureAwait(false)) return;
+        // A null fault cannot reach here (the receive loop signals only after it recorded one); the
+        // unconditional removal keeps the generic reason if it ever did.
+        var reason = session.RecordedFault is { } fault ? TeardownReasonFor(fault) : UdpTeardownReason.Fault;
+        if (!await _slotHost.RemoveSlotAsync(session.Flow, slot, reason).ConfigureAwait(false)) return;
         UdpProxyLogging.LogDebug(_logger, "udp.session.closed", session.Flow, session.FlowGeneration, session.Association);
     }
 

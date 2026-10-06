@@ -25,6 +25,32 @@ public enum Socks5ReplyKind
 
 public static class Socks5Messages
 {
+    /// <summary>The RFC 1928 address type (ATYP) of an IPv4 destination.</summary>
+    public const byte AddressTypeIPv4 = 0x01;
+
+    /// <summary>The RFC 1928 address type (ATYP) of a domain-name destination.</summary>
+    public const byte AddressTypeDomain = 0x03;
+
+    /// <summary>The RFC 1928 address type (ATYP) of an IPv6 destination.</summary>
+    public const byte AddressTypeIPv6 = 0x04;
+
+    /// <summary>
+    /// The number of address bytes a SOCKS address type carries: 4 for IPv4, 16 for IPv6, and 0 for
+    /// the domain form, whose name is length-prefixed by the message itself. A negative result is an
+    /// address family no SOCKS implementation defines — the exact condition the pinned UoT server
+    /// rejects with <c>unknown address family: &lt;byte&gt;</c>, so decoders in this tree fail closed
+    /// the same way. This is the one mapping the SOCKS5 writers, the UoT request header
+    /// (<see cref="UotCodec"/>) and every loopback server share, so an address type cannot mean two
+    /// things in this tree.
+    /// </summary>
+    public static int AddressFieldLength(byte addressType) => addressType switch
+    {
+        AddressTypeIPv4 => 4,
+        AddressTypeIPv6 => 16,
+        AddressTypeDomain => 0,
+        _ => -1,
+    };
+
     /// <summary>
     /// The process-lifetime constant greeting frames: <c>[5,1,0]</c> (no authentication offered)
     /// and <c>[5,2,0,2]</c> (username/password). Built once; callers never copy or mutate them.
@@ -64,6 +90,15 @@ public static class Socks5Messages
     public static int RequestLength(IPAddress address) =>
         4 + (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? 4 : 16) + 2;
 
+    /// <summary>The byte length of the SOCKS5 request for the domain name <paramref name="domain"/>.</summary>
+    public static int RequestLength(string domain)
+    {
+        var domainLength = System.Text.Encoding.ASCII.GetByteCount(domain);
+        // RFC 1928 carries the domain length in one byte and requires a non-empty name.
+        if (domainLength is 0 or > 255) throw new ArgumentOutOfRangeException(nameof(domain));
+        return 4 + 1 + domainLength + 2;
+    }
+
     /// <summary>
     /// Writes a SOCKS5 request (RFC 1928 section 4) into <paramref name="destination"/> and
     /// returns its length; the reserved byte is written explicitly because the caller's scratch
@@ -77,12 +112,33 @@ public static class Socks5Messages
         destination[0] = 5;
         destination[1] = (byte)command;
         destination[2] = 0;
-        destination[3] = addressLength == 4 ? (byte)1 : (byte)4;
+        destination[3] = addressLength == 4 ? AddressTypeIPv4 : AddressTypeIPv6;
         if (!address.TryWriteBytes(destination.Slice(4, addressLength), out var written) || written != addressLength)
         {
             throw new ArgumentException("The address does not have a writable network-order form.", nameof(address));
         }
         BinaryPrimitives.WriteUInt16BigEndian(destination.Slice(4 + addressLength, 2), port);
+        return length;
+    }
+
+    /// <summary>
+    /// Writes a SOCKS5 request (RFC 1928 section 4) whose destination is the domain name
+    /// <paramref name="domain"/> into <paramref name="destination"/> and returns its length; the
+    /// reserved byte and the one-byte domain length are written explicitly because the caller's
+    /// scratch span is reused.
+    /// </summary>
+    public static int WriteRequest(Socks5Command command, string domain, ushort port, Span<byte> destination)
+    {
+        var length = RequestLength(domain);
+        if (destination.Length < length) throw new ArgumentException("The destination span is too small for the request.", nameof(destination));
+        var domainLength = System.Text.Encoding.ASCII.GetByteCount(domain);
+        destination[0] = 5;
+        destination[1] = (byte)command;
+        destination[2] = 0;
+        destination[3] = AddressTypeDomain;
+        destination[4] = (byte)domainLength;
+        System.Text.Encoding.ASCII.GetBytes(domain.AsSpan(), destination.Slice(5, domainLength));
+        BinaryPrimitives.WriteUInt16BigEndian(destination.Slice(5 + domainLength, 2), port);
         return length;
     }
 

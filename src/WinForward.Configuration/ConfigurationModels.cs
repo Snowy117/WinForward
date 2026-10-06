@@ -50,6 +50,7 @@ public sealed class Socks5ServerDto
     public int Port { get; init; }
     public string? Username { get; init; }
     public string? Password { get; init; }
+    public bool? UdpOverTcp { get; init; }
 }
 
 public sealed class LocalTargetDto
@@ -79,12 +80,17 @@ public sealed class RuleDto
 [JsonSerializable(typeof(WinForwardConfigDto))]
 public partial class ConfigurationJsonContext : JsonSerializerContext;
 
+/// <summary>
+/// A configured SOCKS5 server. <see cref="UdpOverTcp"/> selects the opt-in UoT v2 connect-mode
+/// carriage for the UDP flows this server serves; the native SOCKS5 UDP relay remains the default.
+/// </summary>
 public sealed record Socks5Server(
     string Name,
     string Host,
     ushort Port,
     string? Username,
-    string? Password);
+    string? Password,
+    bool UdpOverTcp = false);
 
 /// <summary>
 /// A named endpoint on this host that terminates a selected flow, declared in the
