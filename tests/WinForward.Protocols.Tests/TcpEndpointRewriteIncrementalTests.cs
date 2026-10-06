@@ -134,6 +134,58 @@ public sealed class TcpEndpointRewriteIncrementalTests
         }
     }
 
+    [Fact]
+    public void InternetChecksumMatchesChecksumMathAcrossEveryLengthAndFoldBoundary()
+    {
+        // ChecksumMath accumulates in u32 without folding, so 0xff spans above 131 074 B
+        // (65 537 words == 0xFFFF_FFFF) are outside the oracle; the audit test owns those.
+        const int walkLength = 1_600;
+        int[] boundaryLengths = [32_767, 32_768, 32_769, 65_535, 65_536, 65_537, 131_071, 131_072, 131_073, 131_074];
+        var patterns = new[]
+        {
+            new byte[boundaryLengths[^1]],
+            Filled(boundaryLengths[^1], 0xff),
+            Alternating(boundaryLengths[^1]),
+            Incrementing(boundaryLengths[^1]),
+        };
+
+        foreach (var pattern in patterns)
+        {
+            for (var length = 0; length <= walkLength; length++)
+            {
+                var data = pattern.AsSpan(0, length);
+                Assert.Equal(Finish(Sum(data)), PacketChecksums.InternetChecksum(data));
+            }
+
+            foreach (var length in boundaryLengths)
+            {
+                var data = pattern.AsSpan(0, length);
+                Assert.Equal(Finish(Sum(data)), PacketChecksums.InternetChecksum(data));
+            }
+        }
+    }
+
+    private static byte[] Filled(int length, byte value)
+    {
+        var data = new byte[length];
+        Array.Fill(data, value);
+        return data;
+    }
+
+    private static byte[] Alternating(int length)
+    {
+        var data = new byte[length];
+        for (var index = 0; index < length; index += 2) data[index] = 0xff;
+        return data;
+    }
+
+    private static byte[] Incrementing(int length)
+    {
+        var data = new byte[length];
+        for (var index = 0; index < length; index++) data[index] = (byte)index;
+        return data;
+    }
+
     private static ushort IndependentScalarChecksum(byte[] data)
     {
         uint sum = 0;

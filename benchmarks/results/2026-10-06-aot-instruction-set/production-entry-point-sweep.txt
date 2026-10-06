@@ -1,0 +1,21 @@
+# Raw stderr of the production-entry-point sweep recorded in README.md.
+# PacketChecksums.InternetChecksum called directly in a loop, no delegate; 20M warm + 20M measured.
+# Host: AMD Ryzen 9 9955HX (AVX-512), .NET 10.0.12, clang 21.1.8. linux-x64; cross-OS AOT is unsupported.
+
+## JIT (the framework-dependent artifact's configuration)
+checksum  20 =    13.72 ns/op  (sink 4046155776)
+checksum 512 =    18.43 ns/op  (sink 1540007424)
+checksum1514 =    62.20 ns/op  (sink 3221907968)
+
+## NativeAOT, IlcInstructionSet=base
+checksum  20 =     8.05 ns/op  (sink 4046155776)
+checksum 512 =    71.28 ns/op  (sink 1540007424)
+checksum1514 =   216.63 ns/op  (sink 3221907968)
+
+## NativeAOT, IlcInstructionSet=avx2
+checksum  20 =    13.63 ns/op  (sink 4046155776)
+checksum 512 =    21.15 ns/op  (sink 1540007424)
+checksum1514 =    55.66 ns/op  (sink 3221907968)
+
+## Pre-rewrite baseline (same harness, old Vector256 implementation, AOT default ISA)
+checksum1514 =   960.69 ns/op

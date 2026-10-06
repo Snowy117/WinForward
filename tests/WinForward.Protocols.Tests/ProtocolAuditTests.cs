@@ -87,10 +87,21 @@ public sealed class ProtocolAuditTests
     [Fact]
     public void InternetChecksumFoldsLargeGenericInputWithoutOverflow()
     {
-        var data = new byte[131_076];
-        Array.Fill(data, byte.MaxValue);
+        // All-0xffff words are 0 mod 65 535, so an even length leaves a zero residue (folding to
+        // 0x0000) while the odd length's trailing 0xff00 high octet complements to 0x00ff. The
+        // periodic fold is what keeps 131 076 B and above wrap-free: 65 538 words of 0xffff
+        // already exceed u32, and 2^32 == 1 mod 65 535.
+        var auditShape = new byte[131_076];
+        Array.Fill(auditShape, byte.MaxValue);
+        Assert.Equal((ushort)0, PacketChecksums.InternetChecksum(auditShape));
 
-        Assert.Equal((ushort)0, PacketChecksums.InternetChecksum(data));
+        var multiInterval = new byte[393_216];
+        Array.Fill(multiInterval, byte.MaxValue);
+        Assert.Equal((ushort)0, PacketChecksums.InternetChecksum(multiInterval));
+
+        var oddMultiInterval = new byte[393_217];
+        Array.Fill(oddMultiInterval, byte.MaxValue);
+        Assert.Equal((ushort)0x00ff, PacketChecksums.InternetChecksum(oddMultiInterval));
     }
 
     [Fact]

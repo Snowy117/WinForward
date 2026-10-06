@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Net;
+using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using WinForward.Core;
@@ -8,16 +9,6 @@ namespace WinForward.Protocols;
 
 public static class PacketChecksums
 {
-    // Vectorized one's-complement accumulation (P2b): big-endian word pairs are byte-swapped
-    // via shuffle and widened into independent u32 lanes, folded into the scalar sum every
-    // 4 096 blocks so the accumulation cannot wrap uint at any span length — bit-identical to
-    // the scalar fold-while-adding (both compute the same mod-65535 class, and only an
-    // all-zero span yields the exact-zero representative). Hosts without hardware vectors
-    // keep the fold-while-adding scalar loop below.
-    private static readonly Vector256<byte> s_swapAdjacentBytes = Vector256.Create(
-        (byte)1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12, 15, 14,
-        17, 16, 19, 18, 21, 20, 23, 22, 25, 24, 27, 26, 29, 28, 31, 30);
-
     public static ushort InternetChecksum(ReadOnlySpan<byte> data) => Finish(Sum(data));
 
     /// <summary>
@@ -323,44 +314,84 @@ public static class PacketChecksums
         BinaryPrimitives.WriteUInt16BigEndian(frame.Slice(udpOffset + 6, 2), checksum == 0 ? ushort.MaxValue : checksum);
     }
 
+    // One's-complement accumulation invariants (P2b): uint wrap is NOT one's-complement neutral
+    // (2^32 == 1 mod 65 535) and this method is size-public, so no tier may accumulate a span
+    // without folding. A vector block adds two words per lane, so 2 048 blocks put at most
+    // 4 096 words = 0x0FFF_F000 in a lane; the widest tier's sixteen lanes reduce to at most
+    // 65 536 words = 0xFFFF_0000, and with the scalar sum folded to at most 0xFFFF first the
+    // accumulator peaks at exactly 0xFFFF_FFFF. The tail folds on the same 4 096-word cadence.
+    //
+    // The Vector<T> tier must stay gated on span length alone: Native AOT at the base instruction
+    // set folds Vector256.IsHardwareAccelerated to false, which leaves such a build with no vector
+    // path at all. Its byte swap must stay two shifts: Vector256.Shuffle reintroduces exactly that
+    // AVX2 gate, and Vector<T> offers no shuffle whose width stays build-chosen.
+    //
+    // The fold interval has no headroom: at 2 048 blocks a lane's 0x0FFF_F000 and the sixteen-lane
+    // reduction's 0xFFFF_0000 are what make the peak exactly 0xFFFF_FFFF. Raising the interval or
+    // widening Vector<T> past 512 bits breaks the checksum on generic input without failing to
+    // compile, so both need the bound re-derived rather than assumed.
     private static uint Sum(ReadOnlySpan<byte> data)
     {
-        // Every 4 096 blocks (128 KiB) the u32 lanes are folded into the scalar sum and the sum
-        // is folded fully to 16 bits. A lane holds two words per block, so one interval's eight
-        // lanes sum to at most 65 536 words of 0xFFFF = 0xFFFF_0000; with the residual kept at
-        // or below 0xFFFF the accumulation can never reach 2^32 — and uint wrap would NOT be
-        // one's-complement-neutral (2^32 ≡ 1 mod 65 535). Generic checksum consumers exceed
-        // the 64 KiB IP maximum, hence the periodic fold; the scalar fallback folds per word
-        // for the same reason on hosts without hardware vectors.
-        const int foldBlockInterval = 4_096;
+        const int foldBlockInterval = 2_048;
+        const int foldWordInterval = 4_096;
+        var words = MemoryMarshal.Cast<byte, ushort>(data);
+        ref var start = ref MemoryMarshal.GetReference(words);
         uint sum = 0;
-        var index = 0;
-        if (Vector256.IsHardwareAccelerated && data.Length >= Vector256<byte>.Count)
+        var wordOffset = 0;
+        if (Vector512.IsHardwareAccelerated && words.Length >= Vector512<ushort>.Count)
         {
-            var accumulator = Vector256<uint>.Zero;
-            ref var start = ref MemoryMarshal.GetReference(data);
-            for (var blocks = 0; index + Vector256<byte>.Count <= data.Length; index += Vector256<byte>.Count)
+            var accumulator = Vector512<uint>.Zero;
+            for (var blocks = 0; wordOffset + Vector512<ushort>.Count <= words.Length; wordOffset += Vector512<ushort>.Count)
             {
-                var block = Vector256.LoadUnsafe(ref start, (nuint)index);
-                var swapped = Vector256.Shuffle(block, s_swapAdjacentBytes);
-                var (lo, hi) = Vector256.Widen(swapped.AsUInt16());
+                var loaded = Vector512.LoadUnsafe(ref start, (nuint)wordOffset);
+                var (lo, hi) = Vector512.Widen((loaded >> 8) | (loaded << 8));
                 accumulator += lo + hi;
                 if (++blocks == foldBlockInterval)
                 {
-                    sum += Vector256.Sum(accumulator);
-                    while (sum >> 16 != 0) sum = (sum & 0xffff) + (sum >> 16);
-                    accumulator = Vector256<uint>.Zero;
+                    sum = Fold(sum + Vector512.Sum(accumulator));
+                    accumulator = Vector512<uint>.Zero;
                     blocks = 0;
                 }
             }
-            sum += Vector256.Sum(accumulator);
+
+            sum = Fold(sum + Vector512.Sum(accumulator));
         }
+        else if (words.Length >= Vector<ushort>.Count)
+        {
+            var accumulator = Vector<uint>.Zero;
+            for (var blocks = 0; wordOffset + Vector<ushort>.Count <= words.Length; wordOffset += Vector<ushort>.Count)
+            {
+                var loaded = Vector.LoadUnsafe(ref start, (nuint)wordOffset);
+                Vector.Widen((loaded >> 8) | (loaded << 8), out var lo, out var hi);
+                accumulator += lo + hi;
+                if (++blocks == foldBlockInterval)
+                {
+                    sum = Fold(sum + Vector.Sum(accumulator));
+                    accumulator = Vector<uint>.Zero;
+                    blocks = 0;
+                }
+            }
+
+            sum = Fold(sum + Vector.Sum(accumulator));
+        }
+
+        var index = wordOffset * 2;
+        var wordsSinceFold = 0;
         for (; index + 1 < data.Length; index += 2)
         {
             sum += BinaryPrimitives.ReadUInt16BigEndian(data.Slice(index, 2));
-            sum = (sum & 0xffff) + (sum >> 16);
+            if (++wordsSinceFold != foldWordInterval) continue;
+            sum = Fold(sum);
+            wordsSinceFold = 0;
         }
+
         if (index < data.Length) sum += (uint)data[index] << 8;
+        return sum;
+    }
+
+    private static uint Fold(uint sum)
+    {
+        while (sum >> 16 != 0) sum = (sum & 0xffff) + (sum >> 16);
         return sum;
     }
 
