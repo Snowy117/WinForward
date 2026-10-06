@@ -74,27 +74,70 @@ public sealed class ContractShapeTests
     [Fact]
     public void TheKeySetAndTheRecordDeclareTheSameMembers()
     {
+        var failures = new List<string>();
         foreach (var contract in ContractRegistry.s_all)
         {
-            var (kind, _, metrics) = contract;
+            var (kind, _, metrics, _) = contract;
+            CountDifferences(failures, kind, metrics);
+        }
 
-            // A block-holder property publishes no key of its own: it publishes the keys of the block
-            // it holds, and each block registers its own property count, so the record's own
-            // key-publishing properties are its property count minus one per block.
-            var properties = metrics.PropertyCount - metrics.Blocks.Count + metrics.Blocks.Sum(static block => block.PropertyCount);
-            Assert.True(
-                properties == metrics.Declared.Count,
-                $"{kind}: the metrics record declares {properties} key-publishing propert(ies) "
-                + $"({metrics.PropertyCount} own, {metrics.Blocks.Count} block holder(s), "
-                + $"{metrics.Blocks.Sum(static block => block.PropertyCount)} block propert(ies)) "
-                + $"but ArmKeys declares {metrics.Declared.Count} key(s)");
+        Assert.True(failures.Count == 0, string.Join('\n', failures));
+    }
 
-            var nullable = metrics.NullablePropertyCount + metrics.Blocks.Sum(static block => block.NullablePropertyCount);
-            Assert.True(
-                nullable == metrics.Nullable.Count,
-                $"{kind}: the metrics record declares {nullable} nullable propert(ies) but {metrics.Nullable.Count} null case(s) are registered");
+    /// <summary>
+    /// Walks the metrics tree and asserts, at every record in it, that the keys the record declares are
+    /// exactly the keys it publishes: the paths directly under the record's own location, one per
+    /// property, plus one property for every block it holds whose members are dotted into the object the
+    /// record opened (that block publishes no key of its own, unlike a block that arrives as an object
+    /// and writes its container key). The nullable count pairs the record's nullable properties with the
+    /// registered null cases the same way.
+    /// </summary>
+    private static void CountDifferences(List<string> failures, string kind, MetricsContract metrics) =>
+        CountDifferences(failures, kind, metrics.Prefix, metrics.PropertyCount, metrics.NullablePropertyCount, metrics.Declared, metrics.Nullable, metrics.Blocks);
+
+    private static void CountDifferences(
+        List<string> failures,
+        string kind,
+        string prefix,
+        int propertyCount,
+        int nullablePropertyCount,
+        IReadOnlyList<string> declared,
+        IReadOnlyList<string> nullable,
+        IReadOnlyList<MetricsBlock> blocks)
+    {
+        var own = declared.Where(path => path.StartsWith(prefix, StringComparison.Ordinal)).ToArray();
+        var nested = Nested(blocks, own);
+        var properties = own.Count(path => !nested.Contains(path))
+            + blocks.Count(static block => !block.PublishesContainerKey);
+        if (properties != propertyCount)
+        {
+            failures.Add(
+                $"{kind} {prefix}: the record declares {propertyCount} key-publishing propert(ies) "
+                + $"({blocks.Count} block holder(s), {blocks.Count(static block => !block.PublishesContainerKey)} of them publishing no container key) "
+                + $"but ArmKeys declares {properties} key(s) directly under it");
+        }
+
+        var ownNullable = nullable.Where(path => path.StartsWith(prefix, StringComparison.Ordinal)).ToArray();
+        var nestedNullable = Nested(blocks, ownNullable);
+        var nullables = ownNullable.Count(path => !nestedNullable.Contains(path));
+        if (nullables != nullablePropertyCount)
+        {
+            failures.Add(
+                $"{kind} {prefix}: the record declares {nullablePropertyCount} nullable propert(ies) "
+                + $"but {nullables} null case(s) are registered directly under it");
+        }
+
+        foreach (var block in blocks)
+        {
+            CountDifferences(failures, kind, block.Prefix, block.PropertyCount, block.NullablePropertyCount, declared, nullable, block.Blocks);
         }
     }
+
+    /// <summary>The paths of <paramref name="paths"/> that belong to one of the nested blocks.</summary>
+    private static HashSet<string> Nested(IReadOnlyList<MetricsBlock> blocks, IReadOnlyList<string> paths) =>
+        blocks
+            .SelectMany(block => paths.Where(path => path.StartsWith(block.Prefix, StringComparison.Ordinal)))
+            .ToHashSet(StringComparer.Ordinal);
 
     [Fact]
     public async Task AnUnknownReadingIsNullAndNeverAMissingKey()
@@ -138,12 +181,10 @@ public sealed class ContractShapeTests
         foreach (var contract in ContractRegistry.s_all)
         {
             var omitted = new List<string>();
-            foreach (var block in contract.Metrics.Blocks.Where(static block => block.OmittedWhen != ShapeFlags.None))
+            foreach (var block in contract.Metrics.AllBlocks().Where(static block => block.OmittedWhen != ShapeFlags.None))
             {
                 var written = await WrittenMetricsAsync(contract, block.OmittedWhen);
-                var blockPaths = contract.Metrics.Declared
-                    .Where(path => path.StartsWith(block.Prefix, StringComparison.Ordinal))
-                    .ToArray();
+                var blockPaths = contract.Metrics.Under(block.Prefix).ToArray();
                 omitted.AddRange(blockPaths);
 
                 failures.AddRange(blockPaths
@@ -265,11 +306,14 @@ public sealed class ContractShapeTests
                 JsonPaths.TopLevel(observations)));
 
             // Which gates and parameters an arm publishes is the arm's business; that every one of
-            // them is declared is the contract.
+            // them is declared is the contract. A kind whose parameters nest another arm's parameters
+            // (the control's two phases) declares those paths in its own contract.
+            var parameterPaths = new List<string>(RecordContract.Parameters);
+            parameterPaths.AddRange(contract.Parameters);
             foreach (var (group, declared) in new[]
             {
                 (ArmKeys.Common.Record.Gates, RecordContract.Gates),
-                (ArmKeys.Common.Record.Parameters, RecordContract.Parameters),
+                (ArmKeys.Common.Record.Parameters, parameterPaths),
             })
             {
                 var published = JsonPaths.Under(observations, group);

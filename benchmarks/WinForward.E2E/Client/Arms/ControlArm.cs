@@ -1,9 +1,16 @@
 using System.Globalization;
+using WinForward.E2E.Contracts;
 using WinForward.E2E.Contracts.Json;
+using WinForward.E2E.Contracts.Metrics;
 
 namespace WinForward.E2E.Client.Arms;
 
-internal static class BaseArm
+/// <summary>
+/// The <c>"base"</c> kind: the no-product control, which runs the latency arm and then the loss arm back
+/// to back inside one record. The type is named for the record it produces -- the control -- while the
+/// plan kind keeps the name its plans and records publish.
+/// </summary>
+internal static class ControlArm
 {
     // BASE is the no-product control: a latency phase and then a loss phase, back to back. Each
     // phase keeps its own default load; a plan parameter the BASE entry declares overrides both.
@@ -33,28 +40,31 @@ internal static class BaseArm
         {
             Parameters =
             {
-                ["seconds"] = phaseSeconds * 2,
-                ["phaseSeconds"] = phaseSeconds,
-                ["phases"] = s_phases,
-                ["latency"] = latency.Parameters,
-                ["loss"] = loss.Parameters,
+                [ArmKeys.Common.Parameters.Seconds] = phaseSeconds * 2,
+                [ArmKeys.Common.Parameters.PhaseSeconds] = phaseSeconds,
+                [ArmKeys.Common.Parameters.Phases] = s_phases,
+                [ArmKeys.Common.Parameters.Latency] = latency.Parameters,
+                [ArmKeys.Common.Parameters.Loss] = loss.Parameters,
             },
-            Metrics = new DictionaryMetrics
+            Metrics = new ControlMetrics
             {
-                ["elapsedSeconds"] = NumberFormat.Round(Clock.ToSeconds(elapsedTicks), 4),
-                ["latency"] = latency.Metrics,
-                ["loss"] = loss.Metrics,
+                ElapsedSeconds = NumberFormat.Round(Clock.ToSeconds(elapsedTicks), 4),
+
+                // LatencyArm always publishes the shared typed record, so the phase contract is the
+                // narrowing rather than a check.
+                Latency = (LatencyMetrics)latency.Metrics,
+                Loss = loss.Metrics,
             },
             Gates =
             {
-                ["clientSendLoss"] = ReadCount(latency.Gates, "clientSendLoss") + ReadCount(loss.Gates, "clientSendLoss"),
-                ["windowOverflow"] = ReadCount(latency.Gates, "windowOverflow") + ReadCount(loss.Gates, "windowOverflow"),
-                ["backlogDrops"] = ReadCount(latency.Gates, "backlogDrops") + ReadCount(loss.Gates, "backlogDrops"),
-                ["sendFailures"] = ReadCount(latency.Gates, "sendFailures") + ReadCount(loss.Gates, "sendFailures"),
-                ["laneShortfall"] = ReadCount(latency.Gates, "laneShortfall") + ReadCount(loss.Gates, "laneShortfall"),
-                ["scheduleTruncated"] = Math.Max(ReadCount(latency.Gates, "scheduleTruncated"), ReadCount(loss.Gates, "scheduleTruncated")),
-                ["inFlightCeilingMs"] = Math.Max(ReadMilliseconds(latency.Gates, "inFlightCeilingMs"), ReadMilliseconds(loss.Gates, "inFlightCeilingMs")),
-                ["windowMs"] = ReadMilliseconds(loss.Gates, "windowMs"),
+                [ArmKeys.Common.Gates.ClientSendLoss] = ReadCount(latency.Gates, ArmKeys.Common.Gates.ClientSendLoss) + ReadCount(loss.Gates, ArmKeys.Common.Gates.ClientSendLoss),
+                [ArmKeys.Common.Gates.WindowOverflow] = ReadCount(latency.Gates, ArmKeys.Common.Gates.WindowOverflow) + ReadCount(loss.Gates, ArmKeys.Common.Gates.WindowOverflow),
+                [ArmKeys.Common.Gates.BacklogDrops] = ReadCount(latency.Gates, ArmKeys.Common.Gates.BacklogDrops) + ReadCount(loss.Gates, ArmKeys.Common.Gates.BacklogDrops),
+                [ArmKeys.Common.Gates.SendFailures] = ReadCount(latency.Gates, ArmKeys.Common.Gates.SendFailures) + ReadCount(loss.Gates, ArmKeys.Common.Gates.SendFailures),
+                [ArmKeys.Common.Gates.LaneShortfall] = ReadCount(latency.Gates, ArmKeys.Common.Gates.LaneShortfall) + ReadCount(loss.Gates, ArmKeys.Common.Gates.LaneShortfall),
+                [ArmKeys.Common.Gates.ScheduleTruncated] = Math.Max(ReadCount(latency.Gates, ArmKeys.Common.Gates.ScheduleTruncated), ReadCount(loss.Gates, ArmKeys.Common.Gates.ScheduleTruncated)),
+                [ArmKeys.Common.Gates.InFlightCeilingMs] = Math.Max(ReadMilliseconds(latency.Gates, ArmKeys.Common.Gates.InFlightCeilingMs), ReadMilliseconds(loss.Gates, ArmKeys.Common.Gates.InFlightCeilingMs)),
+                [ArmKeys.Common.Gates.WindowMs] = ReadMilliseconds(loss.Gates, ArmKeys.Common.Gates.WindowMs),
             },
         };
         outcome.Notes.Add("base runs the latency arm and then the loss arm back to back inside one record, with no proxifier loaded: it is the harness floor.");

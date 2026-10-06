@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using WinForward.E2E.Contracts;
 using WinForward.E2E.Contracts.Json;
+using WinForward.E2E.Contracts.Metrics;
 using WinForward.E2E.Wire;
 
 namespace WinForward.E2E.Client.Arms;
@@ -120,26 +122,6 @@ internal static class MixArm
         var desktops = context.Spec.Desktops > 0 ? context.Spec.Desktops : DefaultDesktops;
         var windowMs = context.Spec.LossWindowMs > 0 ? context.Spec.LossWindowMs : UdpLossMath.DefaultWindowMilliseconds;
         var windowTicks = UdpLossMath.WindowTicks(windowMs);
-        var metrics = new DictionaryMetrics();
-        var outcome = new ArmOutcome
-        {
-            Parameters =
-            {
-                ["seconds"] = context.Spec.Seconds,
-                ["desktops"] = desktops,
-                ["pageIntervalSeconds"] = s_pageInterval.TotalSeconds,
-                ["pageConnections"] = PageConnections,
-                ["pageRequestsTotal"] = PageTotalRequests,
-                ["pageMessageBytes"] = PageMessageBytes,
-                ["bulkBitsPerSecondPerDesktop"] = BulkBitsPerSecond,
-                ["dnsQueriesPerPage"] = DnsQueriesPerPage,
-                ["udpPacketsPerSecondPerDesktop"] = UdpPacketsPerSecond,
-                ["udpPayloadBytes"] = UdpPayloadBytes,
-                ["lossWindowMs"] = windowMs,
-            },
-            Metrics = metrics,
-        };
-
         var counters = new MixCounters(desktops);
         var trackers = new UdpReliabilityTracker[desktops];
         var observationEnds = new long[desktops];
@@ -162,10 +144,31 @@ internal static class MixArm
 
         await Task.WhenAll(tasks).ConfigureAwait(false);
 
-        var (clientSendLoss, idleLanes) = WriteMetrics(metrics, counters, trackers, observationEnds, windowMs, windowTicks, Clock.Now - startTicks);
-        outcome.Gates["clientSendLoss"] = clientSendLoss;
-        outcome.Gates["idleLanes"] = idleLanes;
-        outcome.Gates["windowMs"] = (double)windowMs;
+        var (metrics, clientSendLoss, idleLanes) = WriteMetrics(counters, trackers, observationEnds, windowMs, windowTicks, Clock.Now - startTicks);
+        var outcome = new ArmOutcome
+        {
+            Parameters =
+            {
+                [ArmKeys.Common.Parameters.Seconds] = context.Spec.Seconds,
+                [ArmKeys.Common.Parameters.Desktops] = desktops,
+                [ArmKeys.Common.Parameters.PageIntervalSeconds] = s_pageInterval.TotalSeconds,
+                [ArmKeys.Common.Parameters.PageConnections] = PageConnections,
+                [ArmKeys.Common.Parameters.PageRequestsTotal] = PageTotalRequests,
+                [ArmKeys.Common.Parameters.PageMessageBytes] = PageMessageBytes,
+                [ArmKeys.Common.Parameters.BulkBitsPerSecondPerDesktop] = BulkBitsPerSecond,
+                [ArmKeys.Common.Parameters.DnsQueriesPerPage] = DnsQueriesPerPage,
+                [ArmKeys.Common.Parameters.UdpPacketsPerSecondPerDesktop] = UdpPacketsPerSecond,
+                [ArmKeys.Common.Parameters.UdpPayloadBytes] = UdpPayloadBytes,
+                [ArmKeys.Common.Parameters.LossWindowMs] = windowMs,
+            },
+            Metrics = metrics,
+            Gates =
+            {
+                [ArmKeys.Common.Gates.ClientSendLoss] = clientSendLoss,
+                [ArmKeys.Common.Gates.IdleLanes] = idleLanes,
+                [ArmKeys.Common.Gates.WindowMs] = (double)windowMs,
+            },
+        };
         outcome.Notes.Add("W is the plan's lossWindowMs, 200 ms when the plan does not declare one: it is declared and published as classes.udp.window rather than derived, so every row's arrived/late/never split is reproducible from the record alone (RFC 2680 style).");
         outcome.Notes.Add("every desktop's UDP drain runs until W after that desktop's last real send, so no datagram is called lost before its whole W has passed; datagrams still inside their window when a drain is cut short are counted in classes.udp.abandonedAtTeardown and in clientSendLoss, never in never, and they stay out of lossRate.");
         outcome.Notes.Add("every sent datagram is classified exactly once, so arrived + late + never + abandonedAtTeardown + corruptDatagrams == sent by construction, exactly as in LOSS, and classes.udp.clientSendLoss is classes.udp.abandonedAtTeardown + classes.udp.sendFailures + classes.udp.windowOverflow with all three terms published beside it; corruptDatagrams counts the sent datagrams booked corrupt while corrupt counts corrupt arrivals, windowOverflow is structurally zero because the MIX UDP class has no in-flight window, and sendFailures counts datagrams the socket refused, which is why a refused datagram is client loss and never path loss.");
@@ -176,8 +179,7 @@ internal static class MixArm
         return outcome;
     }
 
-    private static (long ClientSendLoss, int IdleLanes) WriteMetrics(
-        DictionaryMetrics metrics,
+    private static (MixMetrics Metrics, long ClientSendLoss, int IdleLanes) WriteMetrics(
         MixCounters counters,
         UdpReliabilityTracker[] trackers,
         long[] observationEnds,
@@ -189,23 +191,26 @@ internal static class MixArm
         var sentPerDesktop = new long[trackers.Length];
         var udp = ClassifyDesktops(trackers, observationEnds, windowTicks, counts, sentPerDesktop);
 
-        metrics["classes"] = new Dictionary<string, object?>(StringComparer.Ordinal)
+        var metrics = new MixMetrics
         {
-            ["page"] = BuildPageClass(counters),
-            ["bulk"] = BuildBulkClass(counters, elapsedTicks),
-            ["dns"] = BuildDnsClass(counters),
-            ["udp"] = BuildUdpClass(counters, udp, sentPerDesktop, windowMs),
+            Classes = new MixClassesMetrics
+            {
+                Page = BuildPageClass(counters),
+                Bulk = BuildBulkClass(counters, elapsedTicks),
+                Dns = BuildDnsClass(counters),
+                Udp = BuildUdpClass(counters, udp, sentPerDesktop, windowMs),
+            },
+            Pages = counters._pages,
+            PageConnections = counters.PageConnections,
+            PageBytes = counters._pageBytes,
+            BulkBytes = counters._bulkBytes,
+            DnsSent = counters.DnsSent,
+            UdpSent = udp._sent,
+            UdpLossRate = JsonRate.Rate(udp.Loss, udp._sent),
+            ClientSendLoss = udp._clientSendLoss,
+            Desktops = BuildDesktopLanes(counters, trackers, counts, sentPerDesktop),
         };
-        metrics["pages"] = counters._pages;
-        metrics["pageConnections"] = counters.PageConnections;
-        metrics["pageBytes"] = counters._pageBytes;
-        metrics["bulkBytes"] = counters._bulkBytes;
-        metrics["dnsSent"] = counters.DnsSent;
-        metrics["udpSent"] = udp._sent;
-        metrics["udpLossRate"] = JsonRate.Rate(udp.Loss, udp._sent);
-        metrics["clientSendLoss"] = udp._clientSendLoss;
-        metrics["desktops"] = BuildDesktopLanes(counters, trackers, counts, sentPerDesktop);
-        return (udp._clientSendLoss, CountIdleLanes(counters, sentPerDesktop));
+        return (metrics, udp._clientSendLoss, CountIdleLanes(counters, sentPerDesktop));
     }
 
     private static UdpTotals ClassifyDesktops(
@@ -228,27 +233,27 @@ internal static class MixArm
         return totals;
     }
 
-    private static Dictionary<string, object?> BuildUdpClass(MixCounters counters, UdpTotals totals, long[] sentPerDesktop, int windowMs) => new(StringComparer.Ordinal)
+    private static MixUdpClassMetrics BuildUdpClass(MixCounters counters, UdpTotals totals, long[] sentPerDesktop, int windowMs) => new()
     {
-        ["sent"] = totals._sent,
-        ["arrived"] = totals._arrived,
-        ["late"] = totals._late,
-        ["never"] = totals._never,
-        ["corrupt"] = totals._corrupt,
-        ["corruptDatagrams"] = totals._corruptDatagrams,
-        ["duplicate"] = totals._duplicate,
-        ["reordered"] = totals._reordered,
-        ["unmatchedReplies"] = totals._unmatched,
-        ["foreignConnection"] = totals._foreign,
-        ["abandonedAtTeardown"] = totals._undetermined,
-        ["sendFailures"] = totals._sendFailures,
-        ["windowOverflow"] = totals._windowOverflow,
-        ["outOfRangeSequences"] = totals._outOfRange,
-        ["bytes"] = counters._udpBytes,
-        ["clientSendLoss"] = totals._clientSendLoss,
-        ["lossRate"] = JsonRate.Rate(totals.Loss, totals._sent),
-        ["window"] = (double)windowMs,
-        ["sentPerDesktop"] = sentPerDesktop,
+        Sent = totals._sent,
+        Arrived = totals._arrived,
+        Late = totals._late,
+        Never = totals._never,
+        Corrupt = totals._corrupt,
+        CorruptDatagrams = totals._corruptDatagrams,
+        Duplicate = totals._duplicate,
+        Reordered = totals._reordered,
+        UnmatchedReplies = totals._unmatched,
+        ForeignConnection = totals._foreign,
+        AbandonedAtTeardown = totals._undetermined,
+        SendFailures = totals._sendFailures,
+        WindowOverflow = totals._windowOverflow,
+        OutOfRangeSequences = totals._outOfRange,
+        Bytes = counters._udpBytes,
+        ClientSendLoss = totals._clientSendLoss,
+        LossRate = JsonRate.Rate(totals.Loss, totals._sent),
+        Window = windowMs,
+        SentPerDesktop = sentPerDesktop,
     };
 
     private static int CountIdleLanes(MixCounters counters, long[] sentPerDesktop)
@@ -265,53 +270,53 @@ internal static class MixArm
         return idle;
     }
 
-    private static List<object?> BuildDesktopLanes(MixCounters counters, UdpReliabilityTracker[] trackers, LossCounts[] counts, long[] sentPerDesktop)
+    private static MixDesktopMetrics[] BuildDesktopLanes(MixCounters counters, UdpReliabilityTracker[] trackers, LossCounts[] counts, long[] sentPerDesktop)
     {
-        var lanes = new List<object?>(trackers.Length);
+        var lanes = new MixDesktopMetrics[trackers.Length];
         for (var desktop = 0; desktop < trackers.Length; desktop++)
         {
-            lanes.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+            lanes[desktop] = new MixDesktopMetrics
             {
-                ["desktop"] = desktop,
-                ["udpSent"] = sentPerDesktop[desktop],
-                ["udpArrived"] = counts[desktop].Arrived,
-                ["udpNever"] = counts[desktop].Never,
-                ["udpForeignConnection"] = trackers[desktop].ForeignConnection,
-                ["pageConnections"] = counters.PageConnectionsPerDesktop[desktop],
-                ["bulkFrames"] = counters.BulkFramesPerDesktop[desktop],
-                ["dnsSent"] = counters.DnsSentPerDesktop[desktop],
-            });
+                Desktop = desktop,
+                UdpSent = sentPerDesktop[desktop],
+                UdpArrived = counts[desktop].Arrived,
+                UdpNever = counts[desktop].Never,
+                UdpForeignConnection = trackers[desktop].ForeignConnection,
+                PageConnections = counters.PageConnectionsPerDesktop[desktop],
+                BulkFrames = counters.BulkFramesPerDesktop[desktop],
+                DnsSent = counters.DnsSentPerDesktop[desktop],
+            };
         }
 
         return lanes;
     }
 
-    private static Dictionary<string, object?> BuildPageClass(MixCounters counters) => new(StringComparer.Ordinal)
+    private static MixPageClassMetrics BuildPageClass(MixCounters counters) => new()
     {
-        ["pages"] = counters._pages,
-        ["connections"] = counters.PageConnections,
-        ["messages"] = counters._pageMessages,
-        ["bytes"] = counters._pageBytes,
-        ["errors"] = counters._pageErrors,
-        ["bytesPerPage"] = counters._pages == 0 ? null : counters._pageBytes / counters._pages,
+        Pages = counters._pages,
+        Connections = counters.PageConnections,
+        Messages = counters._pageMessages,
+        Bytes = counters._pageBytes,
+        Errors = counters._pageErrors,
+        BytesPerPage = counters._pages == 0 ? null : counters._pageBytes / counters._pages,
     };
 
-    private static Dictionary<string, object?> BuildBulkClass(MixCounters counters, long elapsedTicks) => new(StringComparer.Ordinal)
+    private static MixBulkClassMetrics BuildBulkClass(MixCounters counters, long elapsedTicks) => new()
     {
-        ["bytes"] = counters._bulkBytes,
-        ["bytesSent"] = counters._bulkBytesSent,
-        ["frames"] = counters.BulkFrames,
-        ["errors"] = counters._bulkErrors,
-        ["goodputBps"] = NumberFormat.Round(counters._bulkBytes / Clock.ToSeconds(elapsedTicks)),
+        Bytes = counters._bulkBytes,
+        BytesSent = counters._bulkBytesSent,
+        Frames = counters.BulkFrames,
+        Errors = counters._bulkErrors,
+        GoodputBps = NumberFormat.Round(counters._bulkBytes / Clock.ToSeconds(elapsedTicks)),
     };
 
-    private static Dictionary<string, object?> BuildDnsClass(MixCounters counters) => new(StringComparer.Ordinal)
+    private static MixDnsClassMetrics BuildDnsClass(MixCounters counters) => new()
     {
-        ["sent"] = counters.DnsSent,
-        ["answered"] = counters._dnsAnswered,
-        ["servfail"] = counters._dnsServfail,
-        ["timeout"] = counters._dnsTimeout,
-        ["other"] = counters._dnsOther,
+        Sent = counters.DnsSent,
+        Answered = counters._dnsAnswered,
+        Servfail = counters._dnsServfail,
+        Timeout = counters._dnsTimeout,
+        Other = counters._dnsOther,
     };
 
     private static async Task RunDesktopAsync(

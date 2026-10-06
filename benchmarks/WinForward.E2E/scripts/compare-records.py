@@ -29,7 +29,8 @@ The D15 classes and their verdicts:
    the measurement mode: it freezes the very pair under comparison into a band file, so it judges
    nothing, because judging the values it measures at band 0 would fail the measurement that
    produces the band. A band file whose ``paths`` object is missing or empty is refused, because it
-   would enforce nothing.
+   would enforce nothing. ``--band`` and ``--write-band`` together are refused as well: judging this
+   pair against the band that is about to be overwritten is neither a verdict nor a measurement.
 5. ``reading`` -- the config's ``readingPathPatterns``: clocks, CPU/memory/thread gauges,
    throughput, transfer volumes, latency-histogram readings. These are ``observed movement``:
    reported for information and **never a failure**, because a reading that did not move between
@@ -788,8 +789,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("base_dir", type=Path)
     parser.add_argument("after_dir", type=Path)
     parser.add_argument("--normalize", required=True, type=Path, help="normalization config JSON")
-    parser.add_argument("--band", type=Path, help="recorded per-key jitter band; without it the contract values are judged at band 0")
-    parser.add_argument("--write-band", type=Path, help="write the jitter band measured from this pair (measurement mode: the contract values are not judged)")
+    parser.add_argument("--band", type=Path, help="recorded per-key jitter band; without it the contract values are judged at band 0 (mutually exclusive with --write-band)")
+    parser.add_argument("--write-band", type=Path, help="write the jitter band measured from this pair (measurement mode: the contract values are not judged; mutually exclusive with --band)")
     parser.add_argument("--json-out", type=Path, help="write the findings as JSON")
     parser.add_argument("--rename-table", type=Path, help="contract-rename.json, checked against the two path sets")
     parser.add_argument("--batch", help="the rename batch that has been executed; its entries must be observed exactly")
@@ -800,6 +801,16 @@ def main(argv: list[str]) -> int:
 
     if args.batch is not None and args.rename_table is None:
         parser.error("--batch only means something together with --rename-table")
+
+    # The two modes contradict each other: --band judges this pair against a frozen band, while
+    # --write-band measures this pair and writes the band. Accepting both would judge with the band
+    # that is about to be overwritten, which is neither a verdict nor a measurement.
+    if args.band is not None and args.write_band is not None:
+        parser.error(
+            "--band and --write-band are mutually exclusive: --band judges this pair against a "
+            "frozen band, --write-band measures this pair and writes the band (drop --band to "
+            "measure, or drop --write-band to judge)"
+        )
 
     config = Config(json.loads(args.normalize.read_text(encoding="utf-8")))
     band: dict[str, dict[str, object]] = {}

@@ -49,7 +49,7 @@ internal sealed class ArmKind
         new(
             "base",
             [.. s_identityKeys, "ratePerSecond", "payloadBytes", "protocol", "window", "lanes", "lossWindowMs"],
-            BaseArm.RunAsync,
+            ControlArm.RunAsync,
             ValidateBase),
     ];
 
@@ -106,7 +106,7 @@ internal sealed class ArmKind
     private static string? ValidateMix(ArmSpec spec) => ValidateOfferedSequences(MixArm.UdpPacketsPerSecond, spec.Seconds);
 
     private static string? ValidateBase(ArmSpec spec) =>
-        ValidateOfferedSequences(spec.RatePerSecond > 0 ? spec.RatePerSecond : BaseArm.DefaultLossRatePerSecond, spec.Seconds);
+        ValidateOfferedSequences(spec.RatePerSecond > 0 ? spec.RatePerSecond : ControlArm.DefaultLossRatePerSecond, spec.Seconds);
 
     /// <summary>
     /// D14.4: the schedule of the three kinds that hold a <see cref="UdpReliabilityTracker"/> must fit
