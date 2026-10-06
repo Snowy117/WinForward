@@ -1,0 +1,10 @@
+{
+  "arms": [
+    {
+      "name": "LATINTEGRAL",
+      "kind": "latency",
+      "seconds": 1,
+      "window": 100.0
+    }
+  ]
+}

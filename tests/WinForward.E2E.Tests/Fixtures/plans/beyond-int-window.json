@@ -1,0 +1,10 @@
+{
+  "arms": [
+    {
+      "name": "LATBEYONDINT",
+      "kind": "latency",
+      "seconds": 1,
+      "window": 3000000000
+    }
+  ]
+}

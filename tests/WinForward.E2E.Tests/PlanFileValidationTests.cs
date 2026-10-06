@@ -113,7 +113,7 @@ public sealed class PlanFileValidationTests
         Assert.False(TryLoadFixture("dns-port-out-of-range.json", out var error));
 
         Assert.Contains("DNSBAD", error, StringComparison.Ordinal);
-        Assert.Contains("'dnsPort' is 99999, outside 0..65535", error, StringComparison.Ordinal);
+        Assert.Contains("'dnsPort' is 99999, which is outside 0..65535", error, StringComparison.Ordinal);
     }
 
     // D5: a fractional value on an integer key is refused with the value as written, rather than
@@ -127,13 +127,34 @@ public sealed class PlanFileValidationTests
         Assert.Contains("'window' is 100.5, which is not an integer", error, StringComparison.Ordinal);
     }
 
+    // An integral value written with a decimal point stays an integer: the range check happens after
+    // the fraction check, and 100.0 has no fraction to refuse.
+    [Fact]
+    public void AnIntegralValueWrittenAsADecimalIsAccepted()
+    {
+        Assert.True(PlanFile.TryLoad(RepoPaths.Tier0Plan("integral-double-window.json"), out var arms, out _, out var error), error);
+
+        Assert.Equal(100, arms[0].Window);
+    }
+
+    // A value past int's bounds has no fractional part, so it must be reported as out of range:
+    // "3000000000 is not an integer" would name the wrong defect.
+    [Fact]
+    public void AValuePastIntsBoundsIsRefusedAsOutOfRangeRatherThanAsAFraction()
+    {
+        Assert.False(TryLoadFixture("beyond-int-window.json", out var error));
+
+        Assert.Contains("LATBEYONDINT", error, StringComparison.Ordinal);
+        Assert.Contains("'window' is 3000000000, which is outside 0..2147483647", error, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ANegativeValueIsRefused()
     {
         Assert.False(TryLoadFixture("negative-rate.json", out var error));
 
         Assert.Contains("LOSSNEGATIVE", error, StringComparison.Ordinal);
-        Assert.Contains("'ratePerSecond' is -1, outside 0..", error, StringComparison.Ordinal);
+        Assert.Contains("'ratePerSecond' is -1, which is outside 0..", error, StringComparison.Ordinal);
     }
 
     // Zero is "not declared" rather than "port zero": the arm then uses the run's --dns-port, which is

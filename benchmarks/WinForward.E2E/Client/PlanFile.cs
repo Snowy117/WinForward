@@ -62,6 +62,13 @@ internal static class PlanFile
 
     private readonly record struct NumberKey(string Name, int Minimum, int Maximum, Action<ArmSpec, int> Assign);
 
+    private enum IntReadOutcome
+    {
+        Ok,
+        NotAnInteger,
+        OutOfRange,
+    }
+
     // D14.14: zero means "not declared" for every numeric key, so the lower bound is zero throughout
     // and a declared negative value is a load error instead of a silent clamp; only dnsPort and
     // tcpPercent have a real ceiling. The arms keep their own Math.Max/Math.Clamp as a defence in
@@ -403,17 +410,18 @@ internal static class PlanFile
                 continue;
             }
 
-            if (!TryReadInt(element, key.Name, out var value))
+            var read = TryReadInt(element, key.Name, out var value);
+            if (read == IntReadOutcome.NotAnInteger)
             {
                 error = $"{Prefix(spec.Name, kind.Name)}'{key.Name}' is {property.GetRawText()}, which is not an integer";
                 return false;
             }
 
-            if (value < key.Minimum || value > key.Maximum)
+            if (read == IntReadOutcome.OutOfRange || value < key.Minimum || value > key.Maximum)
             {
                 error = Prefix(spec.Name, kind.Name) + string.Create(
                     CultureInfo.InvariantCulture,
-                    $"'{key.Name}' is {value}, outside {key.Minimum}..{key.Maximum}");
+                    $"'{key.Name}' is {property.GetRawText()}, which is outside {key.Minimum}..{key.Maximum}");
                 return false;
             }
 
@@ -435,30 +443,53 @@ internal static class PlanFile
         return true;
     }
 
-    private static bool TryReadInt(JsonElement element, string name, out int value)
+    /// <summary>
+    /// Reads one integer key, telling "this is not an integer" apart from "this integer is out of
+    /// range": a value past <see cref="int"/>'s bounds such as 3000000000 has no fractional part, so
+    /// reporting it as "not an integer" would send the reader looking for one that is not there.
+    /// </summary>
+    private static IntReadOutcome TryReadInt(JsonElement element, string name, out int value)
     {
         value = 0;
         if (!element.TryGetProperty(name, out var property) || property.ValueKind != JsonValueKind.Number)
         {
-            return false;
+            return IntReadOutcome.NotAnInteger;
         }
 
         if (property.TryGetInt32(out value))
         {
-            return true;
+            return IntReadOutcome.Ok;
         }
 
-        // TryGetInt32 already refused anything outside int's range, so the only numbers left are
-        // integral doubles just past the bounds: casting them would be undefined without this check.
-        if (!property.TryGetDouble(out var asDouble)
-            || asDouble is < int.MinValue or > int.MaxValue
-            || Math.Abs(asDouble - Math.Round(asDouble, MidpointRounding.ToEven)) > IntegerTolerance)
+        if (property.TryGetInt64(out var asLong))
         {
-            return false;
+            if (asLong is >= int.MinValue and <= int.MaxValue)
+            {
+                value = (int)asLong;
+                return IntReadOutcome.Ok;
+            }
+
+            return IntReadOutcome.OutOfRange;
+        }
+
+        if (!property.TryGetDouble(out var asDouble))
+        {
+            // Past a double as well, so no fractional part can even be represented: out of range.
+            return IntReadOutcome.OutOfRange;
+        }
+
+        if (Math.Abs(asDouble - Math.Round(asDouble, MidpointRounding.ToEven)) > IntegerTolerance)
+        {
+            return IntReadOutcome.NotAnInteger;
+        }
+
+        if (asDouble is < int.MinValue or > int.MaxValue)
+        {
+            return IntReadOutcome.OutOfRange;
         }
 
         value = (int)asDouble;
-        return true;
+        return IntReadOutcome.Ok;
     }
 
     private static bool TryReadNumber(JsonElement element, string name, out double value)
