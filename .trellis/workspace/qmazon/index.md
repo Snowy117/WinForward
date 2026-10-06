@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 55
+- **Total Sessions**: 56
 - **Last Active**: 2026-10-06
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1853 | Active |
+| `journal-1.md` | ~1901 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 56 | 2026-10-06 | Logging migration to Microsoft.Extensions.Logging source-generated events | `c584bc5`, `6b35527` | `master` |
 | 55 | 2026-10-06 | UoT v2 per-flow UDP transport for SOCKS5 targets | `d77f4e8`, `33c47ae`, `323c76e`, `4a66489`, `7ad76f5` | `master` |
 | 54 | 2026-10-05 | R4/R5: remove UDP association sharing (remove-udp-association-sharing) | `1624431`, `e041ee6` | `master` |
 | 53 | 2026-10-05 | R3: local targets for proxy-decided UDP flows (local-dns-transport) | `69f89d5`, `9d60898` | `master` |

@@ -1851,3 +1851,51 @@ Landed task 10-06-uot-per-flow-transport: an opt-in udpOverTcp mode on SOCKS5 ta
 ### Status
 
 [OK] **Completed**
+
+
+## Session 56: Logging migration to Microsoft.Extensions.Logging source-generated events
+<!-- trellis-session: v=2 fp=a5fd075145bdf82b -->
+
+**Date**: 2026-10-06
+**Task**: Logging migration to Microsoft.Extensions.Logging source-generated events
+**Branch**: `master`
+
+### Summary
+
+Replaced the hand-rolled logger with Microsoft.Extensions.Logging 10.0.12 and 134 [LoggerMessage] methods, added a logFormat knob, and moved to PascalCase placeholders and fully-qualified category names. Both quality gates and all 1267 tests green.
+
+### Main Changes
+
+- Deleted IRuntimeLogger/ConsoleRuntimeLogger/RuntimeLogLevel and the three per-area logging helpers; 134 [LoggerMessage] methods across six classes carry all 71 pre-migration event names plus 8 documented new ones.
+- Added logFormat (auto/simple/json) with an auto rule that follows Console.IsErrorRedirected, and made the startup summary report the effective shape instead of the literal auto.
+- Added six information milestones (capture scope, capture generation, flow table, run summary, one line per target) as the info-level coverage the task asked for.
+- Renamed every placeholder to PascalCase, MEL documented recommendation, after verifying placeholders bind to parameters case-insensitively so C# parameters stay camelCase.
+- Replaced the six short log categories with fully-qualified owning-type names via CreateLogger<Owner>().
+- Rewrote .trellis/spec/backend/logging-guidelines.md (+155/-69): one-name-one-level, the SYSLIB1015 consequence, the null-rendering split, the IsEnabled boundary and the dynamic-key collapse.
+- Recorded two pre-existing failures, verified against HEAD by stashing the whole task, so they are not attributed to this migration.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c584bc5` | feat(logging): migrate to Microsoft.Extensions.Logging source-generated logging |
+| `6b35527` | chore(task): seed the MEL logging task artifacts |
+
+### Testing
+
+- [OK] dotnet build WinForward.slnx -c Release: 0 warnings, 0 errors
+- [OK] dotnet test WinForward.slnx -c Release: 13 projects, 1267 tests, 0 failures
+- [OK] dotnet format --severity info --verify-no-changes: exit 0, empty output
+- [OK] jb inspectcode -f=Xml -e=HINT: 0 issues
+- [OK] Independent trellis-check sub-agent re-derived the 71-name anchor from HEAD and confirmed per-event call-site parity and no lost distinguishers; its 7 findings were all resolved.
+- [OK] Native AOT and a real Windows run stay unverified on this Linux box; the linux-x64 trim publish was measured to be a vacuous pass and is documented as such.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Adopt the standard Logging configuration section and delete logFormat, so users configure formatters the way they already know and exotic sinks such as CSV become a config choice.
+- Consider folding config.json into appsettings.json once ownership of logLevel between the hand-written validator and IConfiguration is decided.
+- Give each class its own category by threading an ILoggerFactory through the UDP/TCP options records instead of an ILogger.
