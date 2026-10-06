@@ -589,7 +589,7 @@ receiveFailureHandler(this);   // Action: returns immediately; _scope.Run(...) o
 - **The association owns the control connection, its relay publication, and the watchdog.** The relay endpoint is published once before the transport is handed the association and is never replaced, so `PeerEndpoint` is fixed for the transport's life and the send path uses the `SocketAddress` the association serialized once at connect time (no per-send rebind, no reference compare). The watchdog blocks on the control stream; a 0-byte read (EOF), a stream fault, or an `IOException`/`SocketException` on that read is the association's death. RFC 1928 defines no control-connection traffic after ASSOCIATE, so any received byte is not death and the read continues.
 - **Death is fail-closed and explicit (R5).** The watchdog records one `UdpAssociationLostException` (the control-stream death as its inner exception), emits the rate-limited `udp.association.lost` warn with `proxy`/`relay`/`reason`, and closes the dead control connection. The transport refuses every later datagram with that stored exception *before* its socket and *before* its send gate, so a dead association can never write to a relay no one is watching. There is no in-place recovery and no address-family follow: the flow's next datagram establishes a new association.
 - **Association loss is not a setup failure (I5).** The coordinator maps the exception to `UdpTeardownReason.AssociationLost`, counts `udpAssociationLost` once per send failure classified as association-lost, and arms **no** setup cooldown, so the flow re-establishes on its next datagram with a fresh association. The same mapping covers the setup-queue flush window, which rides the same send path. A failed dial/ASSOCIATE is a setup failure: counted `udpSetupFailures` with the 1 s cooldown armed.
-- **Ownership and disposal ordering (`async-lifetime.md`).** Each association is an owner: one `QuiescenceScope` whose only child is the watchdog, and an explicit one-shot teardown. `Socks5UdpTransport.DisposeAsync` releases, in order, the relay socket → its self-traffic token → the association (sealing the scope **before** closing the control connection, so the watchdog's faulted read is a teardown rather than a death) → the send gate, and continues through later releases when an earlier one throws. `DurableCaptureBundle` disposes sweeper → UDP coordinator → UDP native pools → TCP: the coordinator's drain disposes every session's transport, and with it every flow's own association, so nothing association-shaped is released separately.
+- **Ownership and disposal ordering (`async-lifetime.md`).** Each association is an owner: one `QuiescenceScope` whose only child is the watchdog, and an explicit one-shot teardown. `Socks5UdpTransport.DisposeAsync` releases, in order, the relay socket → its self-traffic token → the association (sealing the scope **before** closing the control connection, so the watchdog's faulted read is a teardown rather than a death), and continues through later releases when an earlier one throws. The send gate is deliberately left undisposed: disposing a `SemaphoreSlim` with waiters parked strands those waits forever, and a stranded sender would hold its caller's work lease (see [hot-path.md](./hot-path.md), "The UDP transport's disposal guard is outside the warm shape"). `DurableCaptureBundle` disposes sweeper → UDP coordinator → UDP native pools → TCP: the coordinator's drain disposes every session's transport, and with it every flow's own association, so nothing association-shaped is released separately.
 - **Setup failure releases what it acquired.** A relay socket that cannot be created, an unappliable receive buffer, or a failed bind releases the association the factory just dialed (closing its control connection); a control dial or ASSOCIATE failure releases the half-built association. No path leaves a control connection behind.
 - **The flow's own exchange counters stay on the transport (I3).** `IUdpExchangeCounters` is implemented by `Socks5UdpTransport` over its own two fields: one `Interlocked` increment after the kernel accepted a send, and a write-once flag for the first successfully decoded relay response. Skipped relay datagrams (unexpected source, oversized, malformed, connection reset) record nothing. The one-shot retirement class and the sweep allocation gates are unchanged; a transport that does not implement the interface is classified *sustained*.
 - **Hot path unchanged (R6/I3).** No association interaction per datagram beyond one volatile fault read for fail-closed: the only additions on the established path are the send counter, the write-once response flag, and the cached `SocketAddress` handed to `SendTo`.
@@ -804,4 +804,226 @@ if (!source.MatchesPeerIgnoringScope(Flow.Remote))
 }
 
 return true;
+```
+
+---
+
+## UDP over TCP per flow: one flow, one stream connection (wired 2026-10-06, task 10-06-uot-per-flow-transport)
+
+> The opt-in second carriage for a SOCKS5 target, and the extension of the ownership section above
+> from **one flow per association** to **one flow per connection**. UoT v2 connect mode puts a flow's
+> datagrams on a TCP stream bound to the flow's single destination, so the flow's descriptor floor
+> drops from two to one, the setup round trip the native path serializes behind `UDP ASSOCIATE`
+> disappears from the first datagram's path, and the reply-source question disappears with the wire
+> field that carried it. The native relay stays the default: this is one `udpOverTcp` field on a
+> `Socks5Server`, off unless set.
+
+### 1. Scope / Trigger
+
+- Trigger: any change to `Socks5UotTransport`, the `UdpOverTcp` branch of
+  `Socks5UdpTransportFactory.CreateAsync`, `UotCodec` or `Socks5Messages`' domain `WriteRequest`
+  overload, `UdpProxyLogging.UdpTransportOf`, or the two typed transport exceptions in
+  `UdpProxy/UdpTransportContracts.cs`.
+- Composition is unchanged: UoT is a **mode of the `socks5` target kind**, not a third kind. The
+  `UdpTransportFactory` composite, `UdpProxySession`, the coordinator's send/admission path, the
+  response reinjector, the alias table, and the two-class retention are untouched.
+- The native path is untouched by construction: `Socks5UdpTransportFactory.CreateAsync` branches on
+  `server.UdpOverTcp` and every other server keeps the association + relay-socket path of the
+  ownership section above.
+
+### 2. Signatures
+
+- `Socks5UotTransport : IUdpProxyTransport, IUdpExchangeCounters`
+  (`src/WinForward.Runtime/Socks5/Socks5UotTransport.cs`). `PeerEndpoint` is the SOCKS5 server
+  endpoint (the connection's remote) and `LocalEndpoint` the connection's local socket endpoint:
+  both are per-flow because the connection is, so `UdpSessionSetup`'s alias claim
+  (`UdpSessionSetup.cs:102-110`) is unchanged and unique by construction.
+- `Socks5UotTransport.DialAsync(server, context, ct)` dials
+  `Socks5ControlConnection.ConnectDeferredHandshakeAsync` — the same attempt loop, address cache and
+  before-the-SYN self-traffic registration as the native association, but the dial writes the
+  greeting (and the RFC 1929 message when credentials are configured) and returns **without reading
+  a reply**. `Create(control, maximumFrameSize)` takes the stream and socket, sets
+  `socket.Blocking = false` for the warm send path, and sizes its send buffer
+  `30 + UotCodec.MaximumRequestHeaderLength + UotCodec.FrameHeaderSize + maximumFrameSize` =
+  `52 + maximumFrameSize`: the 30-byte magic `CONNECT`, the longest UoT request header (IPv6,
+  20 bytes) and the 2-byte frame prefix, then the payload.
+- `UotCodec` (`src/WinForward.Protocols/UotCodec.cs`): `MagicAddress = "sp.v2.udp-over-tcp.arpa"`,
+  `Version = 2`, `RequestHeaderLength(AddressFamilyKind)`, `TryWriteRequestHeader(bool isConnect,
+  IPAddressValue, ushort, Span<byte>, out int)`, `FrameHeaderSize = 2`, `TryWriteFrameHeader`. The
+  request destination carries the **shared SOCKS address types**
+  (`Socks5Messages.AddressTypeIPv4`/`AddressTypeIPv6`, with `Socks5Messages.AddressFieldLength` the
+  one decode mapping the fixtures share); `isConnect: false` is refused, because the per-datagram
+  `0x00`/`0x01`/`0x02` form of protocol version 1 is not implemented by this codec.
+- `UdpTransportHandshakeRejectedException : IOException` beside `UdpAssociationLostException`
+  (`UdpProxy/UdpTransportContracts.cs`); `UdpProxyCoordinator.TeardownReasonFor`
+  (`UdpProxyCoordinator.Send.cs:214-220`) classifies both, and
+  `RemoveReceiveFailedSessionCoreAsync` (`UdpProxyCoordinator.cs:563-575`) classifies the session's
+  recorded fault through the same helper instead of hard-coding `Fault`.
+- `UdpProxyLogging.UdpTransportOf` (`UdpProxyLogging.cs:42-46`): `"uot"` for a `Socks5Server` with
+  `UdpOverTcp`, `"native"` for any other SOCKS5 server, null for a local target or a targetless
+  event.
+
+### 3. Contracts
+
+- **One flow, one connection, owned and disposed with it (R1).** The transport owns the control
+  connection for the flow's whole life; nothing is pooled, leased, or reused across flows, and
+  `DisposeAsync` releases the connection (which owns the socket, the stream, and the self-traffic
+  tuple), exactly once, through every path; the send gate is deliberately left undisposed so a parked
+  sender is never stranded (same rule and rationale as the native transport, [hot-path.md](./hot-path.md)).
+  A connection whose construction failed is released by the factory's catch, mirroring the native
+  association path.
+- **Pipelined establishment (R2).** The dial writes the greeting `[+ credential message]` and never
+  reads; the first send writes one buffer — the domain-typed `CONNECT` to `UotCodec.MagicAddress`,
+  the UoT request header with `isConnect = 1`, and the first `u16be length | payload` frame — and
+  does not await the `CONNECT` reply. Reply validation moves to the receive path, whose first call
+  consumes, in the order the server wrote them, the method selection, `[+ the credential reply]`,
+  and the `CONNECT` reply status before the first frame. No handshake reply is on the first
+  datagram's critical path.
+- **Framing (R3).** Datagrams are `u16be length | payload` on the stream. The receive loop reads the
+  2-byte prefix and the payload separately (`ReadExactlyAsync`), so a frame split across segments is
+  reassembled rather than dropped; a zero-length frame is a legal empty datagram; a frame longer than
+  the caller's buffer is **consumed** to keep the stream aligned and reported
+  `UdpTransportSkipReason.Oversized`. One writer gate per transport serializes frames — two
+  concurrent sends must never interleave the 2-byte prefixes — and the payload is encoded into the
+  transport's reusable send buffer before any await, so a capture buffer's span lifetime stays legal
+  (the contended-gate path is the only one that copies).
+- **Fail-closed guards.** A later send whose destination differs from the one the first send
+  captured, a payload above `ushort.MaxValue`, and a payload above the transport's frame ceiling all
+  throw rather than mis-frame the stream. Connect mode binds the stream to one destination for its
+  life; silently framing a second destination is the one unacceptable outcome.
+- **Typed faults, and never a raw stream fault (R4).**
+
+  | Observed | Recorded and thrown | Classified as |
+  |---|---|---|
+  | A non-success `CONNECT` reply, EOF before it, or the setup window elapsing | `UdpTransportHandshakeRejectedException` | `UdpTeardownReason.SetupFailure` — the setup cooldown is armed (1 s), exactly as a refused `UDP ASSOCIATE` |
+  | EOF / RST / any stream fault after establishment | `UdpAssociationLostException` | `UdpTeardownReason.AssociationLost` — counted as `udpAssociationLost`, **no** cooldown, the flow re-establishes on its next datagram |
+
+  The transport records the first fault and rethrows the same instance from every later send and
+  receive, so a dead stream refuses datagrams before the socket. **A stream fault must never surface
+  as the datagram-level `ConnectionReset` skip**: `UdpProxySession`'s receive loop treats that code as
+  a one-datagram anomaly and continues (`UdpProxySession.cs:353-359`) — correct for an ICMP
+  port-unreachable answering a UDP send, an infinite spin on a dead stream. Every `IOException` /
+  `SocketException` observed on a live, non-cancelled transport is translated into one of the two
+  types above before it leaves. The `CONNECT` reply read is additionally bounded by the transport's
+  own setup window (30 s), so a server that accepts the exchange and never answers fails the flow's
+  setup instead of parking its receive loop until idle expiry.
+- **The descriptor budget is one per live flow.** The flow's stream connection replaces both the
+  native path's descriptors (the `UDP ASSOCIATE` control connection **and** the relay socket), so the
+  floor is one local descriptor per live UoT flow against two per live native flow. The kernel
+  receive-buffer estimate changes with it: `udpRelayReceiveBufferKb` is applied to a relay socket,
+  and a UoT flow has none.
+- **Reply source is synthesized, and a foreign source is structurally impossible.** Connect mode
+  carries no on-wire source, so `ReceiveAsync` declares the flow's captured destination as every
+  reply's `SourceAddress` (and therefore as the reinjected frame's source). The
+  `udpResponseSourceMismatch` counter and its `udp.response.foreign_source` warn cannot fire on this
+  path: the observation is impossible by structure, not suppressed by policy. A frame that no send
+  ever framed (no captured destination) is `UdpTransportSkipReason.UnexpectedSource` instead of a
+  default source the session would count as foreign.
+- **Retention is the transport's own evidence (I3/R5).** `IUdpExchangeCounters` is implemented from
+  the transport's own observations: one increment after the kernel accepted a whole frame, and a
+  write-once flag on the first successfully decoded frame (a skip records nothing), so the completed
+  one-shot 5 s retirement class is preserved on this path exactly as it is for the native transport.
+- **Observability.** `targetKind` stays `local|socks5` — UoT is a mode, not a third kind — and the
+  session-lifecycle debug event gains `udpTransport=uot|native` beside it, so a column or a product
+  event can attribute the carriage without a new event name and without changing `targetKind`.
+- **Carried residuals, documented rather than fixed.**
+  1. **The magic `CONNECT` request is 30 bytes, not 29**, because the FQDN `sp.v2.udp-over-tcp.arpa`
+     is 23 bytes: `4 (VER 5 | CMD 1 | RSV 0 | ATYP 3) + 1 (length) + 23 + 2 (port)`. The send buffer
+     follows from that (`52 + maximumFrameSize`); an earlier estimate assumed a 22-byte FQDN.
+  2. **A rejection discovered on the receive path arms the cooldown without incrementing
+     `udpSetupFailures` and without emitting `udp.setup.failed`.** Those two live in the setup
+     pipeline's failure sink (`UdpSessionSetup.HandleSetupFailureAsync`, `UdpSessionSetup.cs:152-167`),
+     which the receive path never calls: `RemoveReceiveFailedSessionCoreAsync` classifies the fault and
+     removes the slot (`UdpProxyCoordinator.cs:563-575`), and only `RemoveSlotAsync`'s
+     `SetupFailure` branch arms the cooldown (`UdpProxyCoordinator.cs:515-518`). The flow's next
+     datagram still traces `udp.setup.cooldown` (`UdpProxyCoordinator.Send.cs:66`) and re-establishes
+     after 1 s. Consequence for diagnosis: a systematically rejecting UoT server shows as cooldown
+     churn on the trace, **not** as `udpSetupFailures` growth or as `udp.setup.failed` events — read
+     the cooldown trace, not the counter. The setup/flush window is the one path that does count it
+     (the same send path, reached through the setup pipeline).
+- **Interop status.** [to confirm] The wire facts this section describes are pinned against the
+  server in the task's `research/r7-server-verification.md` (sing-box `testing`
+  @`2ff3985c`, sing @`6f21f24`). The encoding now matches that pin: the UoT request header's
+  destination uses the ordinary SOCKS address types (`Socks5Messages.AddressTypeIPv4`/
+  `AddressTypeIPv6`, shared with the SOCKS5 encoder), and both loopback fixtures decode it with the
+  server's own mapping and refuse an undefined family as `unknown address family: <byte>`. What
+  remains open is the runtime half: the memo's on-box probe has not run, so treat this section's
+  wire claims as source-pinned rather than as verified interop. The R8 columns are
+  internal-consistency evidence — the fixture is not the pinned server — not interop evidence.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|---|---|
+| Flow created on a server with `UdpOverTcp` | one deferred-handshake dial; greeting `[+ auth]` written, no reply read; endpoints published; queued datagram flushes |
+| First send | one buffer: `CONNECT`(magic) + UoT request header + first frame; destination captured; no reply awaited |
+| `CONNECT` reply after establishment | consumed before the first frame, in server order (method, `[+ credential reply]`, `CONNECT`) |
+| Later send to a different destination | fail-closed throw (connect mode binds one destination) |
+| Payload above `ushort.MaxValue` or the transport's frame ceiling | fail-closed throw |
+| Frame split across TCP segments | reassembled by the prefix-then-payload reads |
+| Frame longer than the receive buffer | consumed to keep the stream aligned, reported `Oversized` |
+| Zero-length frame | delivered as a legal empty datagram |
+| Frame on a flow that never sent | `UnexpectedSource` skip (no synthesized source) |
+| Non-success `CONNECT` reply / EOF before it / setup window elapsed | `UdpTransportHandshakeRejectedException` → slot removed as `SetupFailure`, cooldown armed |
+| Stream fault after establishment | `UdpAssociationLostException` → slot removed as `AssociationLost`, counted, no cooldown |
+| Any raw `ConnectionReset` on a live transport | never escapes; translated to the established-phase type above |
+| Transport disposed | connection released (socket, stream, self-traffic tuple), once; the send gate is never disposed, so a parked sender completes and is refused by the post-wait guard; a repeat dispose returns |
+| Transport construction fails | the factory releases the control connection it just dialed |
+
+### 5. Tests Required
+
+- `Socks5UotTransportTests`: the frame-before-`CONNECT`-reply observation (a scripted server that
+  reads the datagram before writing the reply), echo round trip, split-frame reassembly, oversized
+  frame consumed and reported, zero-length frame, destination mismatch and oversized payload both
+  fail closed, concurrent sends never interleave, zero managed allocations on the warm send, dispose
+  releases the connection exactly once, self-traffic tuple registered before the SYN.
+- `UdpUotFlowLifecycleTests`: `CONNECT` refusal → `SetupFailure` with the cooldown armed;
+  mid-flow connection death → `AssociationLost` with no cooldown and a successful re-establishment
+  on the next datagram; the flow's own `IUdpExchangeCounters` put a completed one-shot in the 5 s
+  class.
+- `UdpProxyLoggingTests`: `udpTransport` is `uot` for a `UdpOverTcp` server, `native` for every
+  other SOCKS5 server, null elsewhere, with `targetKind` unchanged beside it.
+- The native suites (`Socks5UdpAssociationOwnershipTests`, `UdpAssociationLossTests`,
+  `UdpReceiveResilienceTests`, `Socks5UdpConnresetTests`, the retention and sweep gates) stay green
+  unchanged — the mode's branch must not move the native path's behaviour.
+
+### 6. Measured evidence
+
+`benchmarks/results/2026-10-06-uot-per-flow/` carries the mode's column beside the native per-flow
+column on one binary, one target field apart:
+`fileDescriptorsPerSession` **2.00 → 1.00**, burst-establishment first-response p50
+**156.87 → 57.12 ms** and p95 **307.89 → 58.11 ms**, churn p50 **155.5–165.2 → 57.7–64.8 ms**, with
+zero misdelivery and zero loss in both columns and exactly one connection per flow in the counters
+(`304 = 256 background + 48 burst`; `1816 = 1816` flows in the session-budget run). The same
+directory states the limits of that evidence: loopback RTT and zero loss make the TCP-carriage cost
+invisible, so the native relay stays the recommendation on lossy legs, and the mode remains
+off-by-default whichever way the numbers read.
+
+### 7. Wrong vs Correct
+
+```csharp
+// Wrong: let the stream's socket fault escape. The session's receive loop classifies a
+// SocketError.ConnectionReset as a one-datagram skip (correct for an ICMP unreachable on a UDP
+// send) and would spin on a dead stream instead of tearing the flow down.
+catch (SocketException exception) { throw; }
+
+// Correct: translate every fault observed on a live, non-cancelled transport into the flow's typed
+// vocabulary, once, and rethrow the same recorded exception from every later send and receive.
+catch (Exception fault) when (IsConnectionFault(fault, cancellationToken))
+{
+    throw RecordFault(new UdpAssociationLostException("... the flow must be re-established.", fault));
+}
+```
+
+```csharp
+// Wrong: treat the UoT stream like the native relay socket and register a relay tuple after the
+// connection exists — the tuple must be in the registry before the SYN, or a catch-all proxy rule
+// re-intercepts WinForward's own connection.
+var control = await Socks5ControlConnection.ConnectDeferredHandshakeAsync(server, ct, ...);
+selfTraffic.Register(...);
+
+// Correct: register through the dial's onSocketReady callback, exactly as the native association
+// does; the transport owns the connection's disposal, which releases the token.
+await Socks5ControlConnection.ConnectDeferredHandshakeAsync(server, ct,
+    (local, remote) => selfTraffic.Register(new SelfTrafficRegistry.SelfTrafficKey(...)));
 ```

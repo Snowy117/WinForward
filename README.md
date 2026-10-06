@@ -91,7 +91,10 @@ JSON, rejected on any unknown property. The top level is:
 - `socks5Servers`: named servers. `name` is unique (case-insensitive), `port` is 1..65535,
   `host` is an IPv4/IPv6 literal or DNS hostname. `username`/`password` are both optional or
   both present, and each UTF-8 encoding fits the RFC 1929 255-byte limit. Credentials are
-  never logged; protect the configuration file's permissions.
+  never logged; protect the configuration file's permissions. `udpOverTcp` is optional and
+  defaults to `false`; it selects the UDP-over-TCP (UoT v2, connect mode) carriage for this
+  server's UDP flows instead of the native per-flow `UDP ASSOCIATE` relay — see **UDP over TCP**
+  below for what it does and what it costs.
 - `localTargets`: optional named local UDP endpoints. `name` is unique across `socks5Servers` and
   `localTargets` (case-insensitive, one namespace), `host` must be an IP literal — a hostname would
   itself need the DNS path it is meant to configure — and `port` is 1..65535. A local target rents
@@ -143,8 +146,9 @@ JSON, rejected on any unknown property. The top level is:
   deliberately tightens the limit from the previous implicit 16,384 sessions; configure a higher
   value explicitly (max 8192) if more concurrent flows are required.
 - `udpSessionCapacity`: optional concurrent proxied UDP session budget, `1..16384`, default
-  `16384`. Like a proxied TCP flow, each UDP session consumes two local ports (SOCKS5 control
-  connection + relay socket), so values above `4096` are accepted with a validation warning that
+  `16384`. Like a proxied TCP flow, each UDP session consumes two local ports on the native relay
+  path (SOCKS5 control connection + relay socket) and one on a `udpOverTcp` server (the flow's
+  stream connection), so values above `4096` are accepted with a validation warning that
   also names the aggregate kernel receive buffer at that capacity. A datagram for a flow above the
   budget is refused fail-closed with a rate-limited `udp.session.capacity-block` warn and the
   `udpCapacityRejections` counter; the flow retries on its next datagram.
@@ -173,12 +177,15 @@ JSON, rejected on any unknown property. The top level is:
 
 **UDP resource shape.** Every live UDP flow owns its own authenticated association: the SOCKS5
 control connection that carried its `UDP ASSOCIATE`, and the relay socket that association
-negotiated. Both are local descriptors, so the floor is two ports per live session, and nothing
-about the association is pooled, leased, or reused by another flow. The kernel receive-buffer
+negotiated. Both are local descriptors, so the floor is two ports per live native session, and
+nothing about the association is pooled, leased, or reused by another flow. The kernel receive-buffer
 estimate is unchanged — `live sessions × udpRelayReceiveBufferKb`, one buffer per relay socket,
 one relay socket per flow — and `udpSessionCapacity` therefore bounds live flows at two descriptors
 each: validation warns above `4096` sessions, and separately when a per-session buffer above
-`256` KiB meets more than `2048` sessions (see `udpRelayReceiveBufferKb` above).
+`256` KiB meets more than `2048` sessions (see `udpRelayReceiveBufferKb` above). A `udpOverTcp`
+flow keeps the same one-flow-per-owner shape with **one** descriptor: its stream connection replaces
+both the control connection and the relay socket, and `udpRelayReceiveBufferKb` does not apply to it
+(there is no relay socket; the stream socket keeps the operating system's own buffers).
 
 **Reply ownership.** A reply's declared source need not be the flow's destination: RFC 1928 does not
 pin the reply source, and a multi-homed or anycast server may legitimately answer from another
@@ -193,7 +200,32 @@ and a genuine foreign endpoint still is.
 cannot occur.** A flow's relay socket belongs to that flow alone — created, bound, and disposed with
 it — so a reply can only arrive on the socket that sent the request. The observation above is
 therefore about a server answering from an unexpected endpoint, not about a reply reaching the wrong
-flow.
+flow. **A `udpOverTcp` flow extends the same guarantee to one flow per connection**: its stream
+connection is dialed, owned, and disposed with the flow, and is never shared or pooled. UoT connect
+mode carries no reply source on the wire at all, so the transport declares the flow's own destination
+as every reply's source; a reply from a foreign endpoint cannot even be expressed on that path, and
+the counter above cannot fire there by structure rather than by suppression.
+
+**UDP over TCP — the opt-in per-flow carriage (`udpOverTcp`).** A `socks5Servers` entry may set
+`"udpOverTcp": true` (default off) to serve its UDP flows over UoT v2 in connect mode instead of the
+native per-flow `UDP ASSOCIATE` relay. The flow then owns one authenticated TCP connection: the
+client `CONNECT`s to the magic address `sp.v2.udp-over-tcp.arpa`, sends the UoT request header
+naming the flow's single destination, and carries every datagram as a `u16be length | payload` frame
+on that stream. Establishment is pipelined: the greeting (and the RFC 1929 credential message when
+credentials are configured) is written without waiting for a reply, and the flow's first datagram is
+written in the same flight as the `CONNECT` request and the UoT header — so it no longer waits out
+the `UDP ASSOCIATE` round trip (and the relay endpoint it returns) before it can leave. The mode's
+measured effect against the native per-flow column, including its first-response distribution and
+its descriptor count, is in `benchmarks/results/2026-10-06-uot-per-flow/`.
+
+**The mode's honest caveat: the datagrams now ride TCP.** Everything a stream does to carriage
+applies to the flow's own datagrams. A lost segment delays every later datagram of that flow, so a
+flow's own loss is its own head-of-line cost (never a sibling flow's — the connection is not shared),
+and a QUIC flow carried inside stacks its congestion control on TCP's instead of running end to end.
+The native per-flow relay therefore stays the recommendation on lossy or high-RTT legs. The mode is
+aimed at short, non-DNS request/response flows against a nearby or trusted proxy — the population
+whose cost is the setup round trip rather than the carriage — and it is a per-server opt-in: a server
+that does not set `udpOverTcp` is served exactly as before.
 
 **Local targets — the recommended placement for DNS-shaped flows.** A flow selected onto a local
 target gets its own socket and no SOCKS5 association: only that flow's replies arrive on it, so the
@@ -206,7 +238,9 @@ relay's other skip classes). `udpLocalTargetFlows` counts flows created over a l
 `udpLocalTargetFailures` counts a send the transport could not hand to its socket or a fatal receive
 fault (never the cancellation or disposal that ends a session), and such a flow fails closed and
 re-establishes on its next datagram. The `udp.session.created`
-debug event carries `target=<name>` and `targetKind=local|socks5`.
+debug event carries `target=<name>`, `targetKind=local|socks5`, and `udpTransport=uot|native`
+(the third field is present for a SOCKS5 target and null for a local target or for the teardown
+events, which carry no target).
 `benchmarks/results/2026-10-05-no-association-sharing/` measures the shipped series: both surviving
 columns answer 48 of 48 flows per churn wave and 48 of 48 in the burst, while the local column pays
 **zero SOCKS5 handshakes**, ≈7.0–8.1 KB per session against the per-flow column's ≈84.5–93.7 KB, and
@@ -266,7 +300,9 @@ configured. WinForward may detect and diagnose missing prerequisites but never c
 - Proxy flows use SOCKS5 `CONNECT` (TCP) and `UDP ASSOCIATE` (UDP), with NO-AUTH or
   username/password (RFC 1929). A `proxy` rule may instead select a `localTargets` entry for UDP
   flows, which reach that endpoint on a per-flow socket with no SOCKS5 control connection; TCP always
-  uses a `socks5Servers` entry.
+  uses a `socks5Servers` entry. A UDP flow through a `socks5Servers` entry with `udpOverTcp` uses a
+  SOCKS5 `CONNECT` to the UoT magic address instead of `UDP ASSOCIATE`, and carries its datagrams as
+  length-prefixed frames on that connection.
 - UDP setup sends an all-zero `UDP ASSOCIATE` endpoint in the TCP control connection's address
   family, then binds the relay socket in the returned relay address family. The SOCKS5 UDP
   destination `ATYP` and address remain those of the original datagram, so an IPv6 destination can

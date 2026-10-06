@@ -420,11 +420,20 @@ branch, and any allocation-gate test that protects a span-vs-memory overload cho
   `Socks5UdpTransport.DisposeAsync` claims a one-shot `int` (`Interlocked.Exchange`) and sets it
   **before** `_socket.Dispose()`; `SendSpanAsync` refuses with `ObjectDisposedException` on a plain
   `Volatile.Read(ref _disposed) != 0` taken *before* `_sendGate.WaitAsync`. That is one volatile read
-  plus one branch — 0 B, no CTS, no closure, no `Run`, no state machine — and the "`_sendGate` disposed
-  last" order is unchanged, which is what keeps `WarmSyncSendAllocatesNoManagedBytes`,
-  `SendSpanAsyncWarmPathRunsNoAsyncStateMachine` and `EstablishedUdpDatagramPathAllocatesNoManagedBytes`
-  green. Its residual window (a sender preempted between the read and `WaitAsync` can still reach a
-  disposed gate) is accepted: closing it absolutely would require a lease on the per-datagram path.
+  plus one branch — 0 B, no CTS, no closure, no `Run`, no state machine — which is what keeps
+  `WarmSyncSendAllocatesNoManagedBytes`, `SendSpanAsyncWarmPathRunsNoAsyncStateMachine` and
+  `EstablishedUdpDatagramPathAllocatesNoManagedBytes` green.
+  **The send gate is deliberately not disposed** (task 10-06-uot-per-flow-transport, 2026-10-06).
+  `SemaphoreSlim.Dispose` frees only the lazily created `WaitHandle` (never requested here) and sets the
+  disposed flag; disposing it while waiters are parked leaves those waits permanently incomplete, so a
+  sender preempted between the guard read and `WaitAsync` would hang forever holding its caller's work
+  lease, and the session's teardown drain would then wait on it. The guard's post-wait half closes the
+  window this note used to accept: a sender that acquires the gate after teardown is refused there
+  (`ObjectDisposedException`, or the transport's recorded typed fault) instead of writing to a closed
+  socket. All three transports (`Socks5UdpTransport`, `Socks5UotTransport`, `LocalUdpTransport`) share
+  the contract; each carries a racing-disposal test with a bounded wait (`…NeverObserveTheDisposedGate`
+  for the two SOCKS5 transports, `…NeverStrandOnTheGate` for the local one) so a regression fails
+  instead of hanging the run.
 - **The capture refresh and demand machinery is off the packet path** (C4, 2026-09-21).
   `LayeredCaptureRunner`'s monitor thread, its periodic tick, and the extracted
   `CaptureRefreshWorkers` type allocate (a `Run` child's delegate + state machine, one OS thread) per
