@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "The layer being changed: redirect transform, client-reset lifecycle, atomic retire and teardown grace — the invariant the fix must respect."}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "Quiescence-scope and pump lifetime contracts around TcpProxyRelay.RunPumpAsync and relay disposal."}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Zero-allocation packet pipeline rules: the fix must add no per-packet allocation or delegate (R5)."}
+{"file": ".trellis/spec/backend/test-stability.md", "reason": "Flake-proof test contracts for the new discriminating relay test (real synchronization points, no wall-clock assertions)."}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Structured [LoggerMessage] event rules for the relay end-kind logging change (R4)."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Build/test/format/JB gates and the narrow suppression policy."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Packet capture -> relay -> reverse-leg rewrite layering, where this defect sits."}
+{"file": ".trellis/tasks/10-06-tcp-half-close-fidelity/research/evidence-notes.md", "reason": "Diagnosis: what the measurement proves, the fault localisation, the candidate mechanism and its falsification."}
+{"file": ".trellis/tasks/10-06-tcp-half-close-fidelity/research/repro.md", "reason": "Exact single-mode and REL reproduction commands used for the acceptance runs."}

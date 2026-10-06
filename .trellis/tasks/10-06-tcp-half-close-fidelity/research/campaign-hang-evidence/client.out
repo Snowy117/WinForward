@@ -1,0 +1,15 @@
+e2e client: arm IDLE (idle) starting
+e2e client: arm IDLE finished in 60.0s
+e2e client: arm LAT (latency) starting
+e2e client: arm LAT finished in 61.0s
+e2e client: arm LATLOAD (latency) starting
+e2e client: arm LATLOAD finished in 61.0s
+e2e client: arm DNS (dns) starting
+e2e client: arm DNS finished in 91.0s
+e2e client: arm LOSS (loss) starting
+e2e client: arm LOSS finished in 120.0s
+e2e client: arm REL (reliability) starting
+e2e client: arm REL finished in 129.9s
+e2e client: arm THRU (throughput) starting
+e2e client: arm THRU finished in 2.1s
+e2e client: arm MIX (mix) starting

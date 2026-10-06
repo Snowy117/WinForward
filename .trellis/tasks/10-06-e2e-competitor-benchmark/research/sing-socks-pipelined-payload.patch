@@ -1,0 +1,201 @@
+From 86d9785218ab516062e1dc1e8d71fae96607adf6 Mon Sep 17 00:00:00 2001
+From: qmazon <qmazon@users.noreply.github.com>
+Date: Tue, 6 Oct 2026 19:17:59 +0800
+Subject: [PATCH] socks: keep the payload a client pipelines behind its request
+
+HandleConnectionEx parses the handshake through a *bufio.Reader, and
+bufio fills its whole buffer on every fill. A client that writes its
+first payload bytes in the same segment as the SOCKS5 request -- legal
+on a byte stream, and what clients that avoid a round trip on every
+flow do -- therefore leaves those bytes sitting in the reader by the
+time the handler is called. The handler was handed the raw connection,
+so it never saw them: it read whatever the peer sent next, or blocked.
+
+Wrap the connection handed to the handler so reads drain the reader's
+buffer first. This is what a UDP-over-TCP v2 client hits immediately:
+it writes CONNECT to sp.v2.udp-over-tcp.arpa, the UoT request header
+and its first datagram as one buffer, and without this the request
+header is swallowed and the UoT router parses the datagram's length
+prefix as an address type ("unknown address family: 152").
+
+Applies to the SOCKS4 and SOCKS5 CONNECT paths.
+
+TestPipelinedRequestPayloadReachesHandler fails before this change with
+"handler received \"\", want \"PIPELINED\"" and passes after it.
+---
+ protocol/socks/handshake.go      | 55 ++++++++++++++++++++-
+ protocol/socks/pipelined_test.go | 82 ++++++++++++++++++++++++++++++++
+ 2 files changed, 135 insertions(+), 2 deletions(-)
+ create mode 100644 protocol/socks/pipelined_test.go
+
+diff --git a/protocol/socks/handshake.go b/protocol/socks/handshake.go
+index c6970ea..7277d7d 100644
+--- a/protocol/socks/handshake.go
++++ b/protocol/socks/handshake.go
+@@ -123,6 +123,57 @@ func ClientHandshake5(conn io.ReadWriter, command byte, destination M.Socksaddr,
+ 	return response, err
+ }
+ 
++// handshakeConn carries the bytes a SOCKS handshake's buffered reader already pulled past the
++// request. bufio.Reader fills up to its whole buffer on every fill, so a client that pipelines its
++// first payload bytes behind the request -- which is legal on a byte stream, and which UDP-over-TCP
++// v2 clients do to save a round trip -- would otherwise have those bytes swallowed by the handshake
++// and never reach the handler. Reads drain the reader first, then fall through to the socket.
++type handshakeConn struct {
++	net.Conn
++	reader *std_bufio.Reader
++}
++
++func newHandshakeConn(conn net.Conn, reader *std_bufio.Reader) net.Conn {
++	if reader.Buffered() == 0 {
++		return conn
++	}
++	return &handshakeConn{Conn: conn, reader: reader}
++}
++
++func (c *handshakeConn) Read(p []byte) (n int, err error) {
++	if c.reader.Buffered() > 0 {
++		return c.reader.Read(p)
++	}
++	return c.Conn.Read(p)
++}
++
++func (c *handshakeConn) WriteTo(w io.Writer) (n int64, err error) {
++	if buffered := c.reader.Buffered(); buffered > 0 {
++		var written int64
++		written, err = io.CopyN(w, c.reader, int64(buffered))
++		n += written
++		if err != nil {
++			return
++		}
++	}
++	var written int64
++	written, err = io.Copy(w, c.Conn)
++	n += written
++	return
++}
++
++func (c *handshakeConn) ReaderReplaceable() bool {
++	return c.reader.Buffered() == 0
++}
++
++func (c *handshakeConn) WriterReplaceable() bool {
++	return true
++}
++
++func (c *handshakeConn) Upstream() any {
++	return c.Conn
++}
++
+ func HandleConnectionEx(
+ 	ctx context.Context, conn net.Conn, reader *std_bufio.Reader,
+ 	authenticator *auth.Authenticator,
+@@ -155,7 +206,7 @@ func HandleConnectionEx(
+ 				}
+ 				return E.New("socks4: authentication failed, username=", request.Username)
+ 			}
+-			handler.NewConnectionEx(auth.ContextWithUser(ctx, request.Username), NewLazyConn(conn, version), source, request.Destination, onClose)
++			handler.NewConnectionEx(auth.ContextWithUser(ctx, request.Username), NewLazyConn(newHandshakeConn(conn, reader), version), source, request.Destination, onClose)
+ 			return nil
+ 		/*case CommandTorResolve, CommandTorResolvePTR:
+ 		if resolver == nil {
+@@ -225,7 +276,7 @@ func HandleConnectionEx(
+ 		}
+ 		switch request.Command {
+ 		case socks5.CommandConnect:
+-			handler.NewConnectionEx(ctx, NewLazyConn(conn, version), source, request.Destination, onClose)
++			handler.NewConnectionEx(ctx, NewLazyConn(newHandshakeConn(conn, reader), version), source, request.Destination, onClose)
+ 			return nil
+ 		case socks5.CommandUDPAssociate:
+ 			var (
+diff --git a/protocol/socks/pipelined_test.go b/protocol/socks/pipelined_test.go
+new file mode 100644
+index 0000000..da88e9e
+--- /dev/null
++++ b/protocol/socks/pipelined_test.go
+@@ -0,0 +1,82 @@
++package socks
++
++import (
++	"bufio"
++	"context"
++	"net"
++	"testing"
++	"time"
++
++	M "github.com/sagernet/sing/common/metadata"
++	N "github.com/sagernet/sing/common/network"
++)
++
++type pipelinedHandler struct {
++	received chan []byte
++}
++
++func (h *pipelinedHandler) NewConnectionEx(ctx context.Context, conn net.Conn, source M.Socksaddr, destination M.Socksaddr, onClose N.CloseHandlerFunc) {
++	payload := make([]byte, len(pipelinedPayload))
++	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
++	n, err := conn.Read(payload)
++	if err != nil && n == 0 {
++		h.received <- nil
++		return
++	}
++	h.received <- payload[:n]
++}
++
++func (h *pipelinedHandler) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, source M.Socksaddr, destination M.Socksaddr, onClose N.CloseHandlerFunc) {
++}
++
++const pipelinedPayload = "PIPELINED"
++
++func TestPipelinedRequestPayloadReachesHandler(t *testing.T) {
++	t.Parallel()
++
++	client, server := net.Pipe()
++	defer client.Close()
++	defer server.Close()
++
++	go func() {
++		buffer := make([]byte, 256)
++		for {
++			if _, err := client.Read(buffer); err != nil {
++				return
++			}
++		}
++	}()
++
++	handler := &pipelinedHandler{received: make(chan []byte, 1)}
++	go func() {
++		_ = HandleConnectionEx(
++			context.Background(),
++			server,
++			bufio.NewReader(server),
++			nil,
++			handler,
++			nil,
++			0,
++			M.Socksaddr{},
++			nil,
++		)
++	}()
++
++	greeting := []byte{0x05, 0x01, 0x00}
++	connect := []byte{0x05, 0x01, 0x00, 0x01, 192, 168, 77, 4, 0x75, 0x3a}
++	request := append(append(greeting, connect...), pipelinedPayload...)
++	go func() {
++		if _, err := client.Write(request); err != nil {
++			t.Error("write request:", err)
++		}
++	}()
++
++	select {
++	case got := <-handler.received:
++		if string(got) != pipelinedPayload {
++			t.Fatalf("handler received %q, want %q: the handshake reader swallowed the pipelined payload", got, pipelinedPayload)
++		}
++	case <-time.After(3 * time.Second):
++		t.Fatal("handler was never called")
++	}
++}
+-- 
+2.55.0
+

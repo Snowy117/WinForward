@@ -1,0 +1,8 @@
+2026-10-06 07:05:02 heartbeat stale by 1,546s -> emergency teardown
+2026-10-06 07:05:02 stopped service ProxiFyreService
+2026-10-06 07:05:02 stopped service ProxifierService
+2026-10-06 07:05:02 killed WinForward pid 7296
+2026-10-06 07:05:05 firewall restored: Domain
+2026-10-06 07:05:05 firewall restored: Private
+2026-10-06 07:05:05 firewall restored: Public
+2026-10-06 07:05:05 teardown complete

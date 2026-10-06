@@ -1,0 +1,36 @@
+2026-10-06 05:48:58 === preflight ===
+2026-10-06 05:48:59   firewall profiles disabled: Domain=False Private=False Public=False
+2026-10-06 05:49:00   target reachable at 192.168.77.4:30010
+2026-10-06 05:49:00   env: Microsoft Windows 11 IoT Enterprise LTSC build 26100, 16 cpus, 3952 MB visible
+2026-10-06 05:49:00 === pass 1/4 ===
+2026-10-06 05:49:00   order: wf-fdd-native -> wf-aot-utcp -> wf-aot-native -> proxifier -> proxybridge -> proxifyre -> wf-fdd-utcp
+2026-10-06 05:49:00   --- control (no product) ---
+2026-10-06 05:51:01   --- wf-fdd-native ---
+2026-10-06 06:02:52   proxy truth: tcp=2610 udp=4 uot=0
+2026-10-06 06:02:57   --- wf-aot-utcp ---
+2026-10-06 06:14:47   proxy truth: tcp=2610 udp=0 uot=4
+2026-10-06 06:14:53   --- wf-aot-native ---
+2026-10-06 06:19:30   proxy truth: tcp=123 udp=2 uot=0
+2026-10-06 06:19:35   --- proxifier ---
+2026-10-06 06:24:50   proxy truth: tcp=1324 udp=0 uot=1
+2026-10-06 06:24:55   --- proxybridge ---
+2026-10-06 06:28:17   proxy truth: tcp=1286 udp=0 uot=2
+2026-10-06 06:28:22   --- proxifyre ---
+2026-10-06 06:39:08   proxy truth: tcp=0 udp=0 uot=0
+2026-10-06 06:39:15   --- wf-fdd-utcp ---
+2026-10-06 07:33:54   proxy truth: tcp=0 udp=3 uot=0
+2026-10-06 07:34:00 === pass 1 done ===
+2026-10-06 07:34:00 === pass 2/4 ===
+2026-10-06 07:34:00   order: wf-aot-utcp -> wf-fdd-utcp -> proxifyre -> proxybridge -> proxifier -> wf-aot-native -> wf-fdd-native
+2026-10-06 07:34:00   --- control (no product) ---
+2026-10-06 07:40:29   --- wf-aot-utcp ---
+2026-10-06 07:41:34   proxy truth: tcp=0 udp=0 uot=0
+2026-10-06 07:41:39   --- wf-fdd-utcp ---
+2026-10-06 07:42:57   proxy truth: tcp=0 udp=0 uot=0
+2026-10-06 07:43:03   --- proxifyre ---
+2026-10-06 07:43:47   proxy truth: tcp=0 udp=0 uot=0
+2026-10-06 07:43:53   --- proxybridge ---
+2026-10-06 07:46:05   proxy truth: tcp=0 udp=0 uot=0
+2026-10-06 07:46:11   --- proxifier ---
+2026-10-06 07:47:16   proxy truth: tcp=301 udp=0 uot=0
+2026-10-06 07:47:22   --- wf-aot-native ---

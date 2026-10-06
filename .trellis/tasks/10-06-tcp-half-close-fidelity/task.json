@@ -1,0 +1,28 @@
+{
+  "id": "tcp-half-close-fidelity",
+  "name": "tcp-half-close-fidelity",
+  "title": "TCP half-close fidelity: deliver the upstream close and trailing data to a client that half-closes",
+  "description": "A client that half-closes its connection (shutdown(SD_SEND)) must still receive the target's trailing frames and then the server close. The 2026-10-06 REL arm shows 545 of 601 half-closing attempts hanging to the 10 s client timeout (observed clean=56 vs expected 601) while the target ledger proves the FIN arrived and the trailers were sent.",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "qmazon",
+  "assignee": "qmazon",
+  "createdAt": "2026-10-06",
+  "completedAt": null,
+  "branch": "master",
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "10-07-tcp-close-drain"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Final gates: zero-warning build, Release tests, format-verify, JB inspectcode."}
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "Verify the close-before-retire invariant and that no teardown path bypasses the tombstone write point."}
+{"file": ".trellis/spec/backend/test-stability.md", "reason": "Verify the new regression test is deterministic and asserts state, not wall clock."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify the client-visible close path end to end: relay -> local socket -> reverse rewrite -> client."}
+{"file": ".trellis/tasks/10-06-tcp-half-close-fidelity/research/evidence-notes.md", "reason": "Verify the measured acceptance numbers against the recorded baseline and the harness caveats."}
+{"file": ".trellis/tasks/10-06-tcp-half-close-fidelity/research/symptom-report.md", "reason": "Verify every claimed symptom is actually closed by the delivered evidence."}
