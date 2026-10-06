@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Net.Sockets;
+using WinForward.E2E.Contracts;
 using WinForward.E2E.Contracts.Json;
+using WinForward.E2E.Contracts.Metrics;
 using WinForward.E2E.Wire;
 
 namespace WinForward.E2E.Client.Arms;
@@ -87,17 +89,6 @@ internal static class ThroughputArm
         const int frameLength = FrameCodec.HeaderSize + FramePayloadBytes + FrameCodec.TrailerSize;
         var budget = (long)(targetBytesPerSecond * spec.Seconds);
 
-        var outcome = new ArmOutcome
-        {
-            Parameters =
-            {
-                ["seconds"] = spec.Seconds,
-                ["streams"] = streams,
-                ["targetBytesPerSecond"] = targetBytesPerSecond,
-                ["framePayloadBytes"] = FramePayloadBytes,
-            },
-        };
-
         var startTicks = Clock.Now;
         var deadlineTicks = context.DeadlineTicks(startTicks);
         using var linked = context.CreateLinkedTokenSource();
@@ -116,18 +107,32 @@ internal static class ThroughputArm
         await Task.WhenAll(tasks).ConfigureAwait(false);
 
         var elapsedTicks = Clock.Now - startTicks;
-        WriteMetrics(outcome, states, elapsedTicks, budget, targetBytesPerSecond, frameLength, limiter.BudgetExhausted);
-        outcome.Gates["clientSendLoss"] = 0;
-        outcome.Gates["windowMs"] = 0;
-        outcome.Notes.Add("bytes counts echoed frame bytes that the client read back; the echo path is the measured transfer, so ingress and egress are both exercised.");
-        outcome.Notes.Add("the aggregate send rate is paced to targetBytesPerSecond so per-stream counters stay comparable across proxifiers.");
-        outcome.Notes.Add("streamConnects, connectFailures and sendFailures are the stream counters behind bytesSent and bytes: a run where no stream connected publishes framesSent = 0 with connectFailures = streams, so an arm that transferred nothing says which end failed instead of reading as an arm that offered nothing.");
-        outcome.Notes.Add("budgetReached is true only when a stream was refused a frame because fewer than framePayloadBytes remained of budgetBytes, i.e. the run ended because the budget was spent rather than because seconds elapsed; a frame is never part-budgeted, so bytesSent stays below budgetBytes and budgetRemainingBytes is that unused remainder.");
-        return outcome;
+        return new ArmOutcome
+        {
+            Parameters =
+            {
+                [ArmKeys.Common.Parameters.Seconds] = spec.Seconds,
+                [ArmKeys.Common.Parameters.Streams] = streams,
+                [ArmKeys.Common.Parameters.TargetBytesPerSecond] = targetBytesPerSecond,
+                [ArmKeys.Common.Parameters.FramePayloadBytes] = FramePayloadBytes,
+            },
+            Metrics = BuildMetrics(states, elapsedTicks, budget, targetBytesPerSecond, frameLength, limiter.BudgetExhausted),
+            Gates =
+            {
+                [ArmKeys.Common.Gates.ClientSendLoss] = 0L,
+                [ArmKeys.Common.Gates.WindowMs] = 0L,
+            },
+            Notes =
+            {
+                "bytes counts echoed frame bytes that the client read back; the echo path is the measured transfer, so ingress and egress are both exercised.",
+                "the aggregate send rate is paced to targetBytesPerSecond so per-stream counters stay comparable across proxifiers.",
+                "streamConnects, connectFailures and sendFailures are the stream counters behind bytesSent and bytes: a run where no stream connected publishes framesSent = 0 with connectFailures = streams, so an arm that transferred nothing says which end failed instead of reading as an arm that offered nothing.",
+                "budgetReached is true only when a stream was refused a frame because fewer than framePayloadBytes remained of budgetBytes, i.e. the run ended because the budget was spent rather than because seconds elapsed; a frame is never part-budgeted, so bytesSent stays below budgetBytes and budgetRemainingBytes is that unused remainder.",
+            },
+        };
     }
 
-    private static void WriteMetrics(
-        ArmOutcome outcome,
+    private static ThroughputMetrics BuildMetrics(
         ThroughputStreamState[] states,
         long elapsedTicks,
         long budget,
@@ -142,25 +147,28 @@ internal static class ThroughputArm
         }
 
         var elapsedSeconds = Clock.ToSeconds(elapsedTicks);
-        outcome.Metrics["bytes"] = totals._bytesEchoed;
-        outcome.Metrics["bytesSent"] = totals._bytesSent;
-        outcome.Metrics["frames"] = frameLength == 0 ? 0 : totals._bytesEchoed / frameLength;
-        outcome.Metrics["framesSent"] = totals._framesSent;
-        outcome.Metrics["framesEchoed"] = totals._framesEchoed;
-        outcome.Metrics["streamConnects"] = states.Length - totals._connectFailures;
-        outcome.Metrics["connectFailures"] = totals._connectFailures;
-        outcome.Metrics["sendFailures"] = totals._sendFailures;
-        outcome.Metrics["budgetBytes"] = budget;
-        outcome.Metrics["budgetReached"] = budgetExhausted;
-        outcome.Metrics["budgetRemainingBytes"] = Math.Max(0, budget - totals._bytesSent);
-        outcome.Metrics["elapsedSeconds"] = NumberFormat.Round(elapsedSeconds, 4);
-        outcome.Metrics["goodputBps"] = NumberFormat.Round(totals._bytesEchoed / elapsedSeconds);
-        outcome.Metrics["goodputMbps"] = NumberFormat.Round(totals._bytesEchoed * 8.0 / elapsedSeconds / 1_000_000.0, 4);
-        outcome.Metrics["perStreamMinBytes"] = totals._minEchoed == long.MaxValue ? 0 : totals._minEchoed;
-        outcome.Metrics["perStreamMaxBytes"] = totals._maxEchoed;
-        outcome.Metrics["corrupt"] = totals._corrupt;
-        outcome.Metrics["protocolErrors"] = totals._protocolErrors;
-        outcome.Metrics["targetBytesPerSecond"] = targetBytesPerSecond;
+        return new ThroughputMetrics
+        {
+            Bytes = totals._bytesEchoed,
+            BytesSent = totals._bytesSent,
+            Frames = frameLength == 0 ? 0 : totals._bytesEchoed / frameLength,
+            FramesSent = totals._framesSent,
+            FramesEchoed = totals._framesEchoed,
+            StreamConnects = states.Length - totals._connectFailures,
+            ConnectFailures = totals._connectFailures,
+            SendFailures = totals._sendFailures,
+            BudgetBytes = budget,
+            BudgetReached = budgetExhausted,
+            BudgetRemainingBytes = Math.Max(0, budget - totals._bytesSent),
+            ElapsedSeconds = NumberFormat.Round(elapsedSeconds, 4),
+            GoodputBps = NumberFormat.Round(totals._bytesEchoed / elapsedSeconds),
+            GoodputMbps = NumberFormat.Round(totals._bytesEchoed * 8.0 / elapsedSeconds / 1_000_000.0, 4),
+            PerStreamMinBytes = totals._minEchoed == long.MaxValue ? 0 : totals._minEchoed,
+            PerStreamMaxBytes = totals._maxEchoed,
+            Corrupt = totals._corrupt,
+            ProtocolErrors = totals._protocolErrors,
+            TargetBytesPerSecond = targetBytesPerSecond,
+        };
     }
 
     /// <summary>Arm-wide stream totals, folded in one pass so a total and the per-stream counters cannot drift.</summary>

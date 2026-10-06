@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using WinForward.E2E.Contracts;
 using WinForward.E2E.Contracts.Json;
 
 namespace WinForward.E2E.Client;
@@ -40,14 +41,14 @@ internal readonly struct HistogramSnapshot
     {
         writer.WritePropertyName(propertyName);
         writer.WriteStartObject();
-        writer.WriteNumber("count", Count);
-        writer.WriteNumber("minUs", NumberFormat.Microseconds(Min));
-        writer.WriteNumber("maxUs", NumberFormat.Microseconds(Max));
-        writer.WriteNumber("meanUs", NumberFormat.Microseconds((long)Mean));
-        writer.WriteNumber("p50Us", NumberFormat.Microseconds(P50));
-        writer.WriteNumber("p90Us", NumberFormat.Microseconds(P90));
-        writer.WriteNumber("p99Us", NumberFormat.Microseconds(P99));
-        writer.WriteNumber("p999Us", NumberFormat.Microseconds(P999));
+        writer.WriteNumber(ArmKeys.Common.LatencyRecord.Histogram.Count, Count);
+        writer.WriteNumber(ArmKeys.Common.LatencyRecord.Histogram.MinUs, NumberFormat.Microseconds(Min));
+        writer.WriteNumber(ArmKeys.Common.LatencyRecord.Histogram.MaxUs, NumberFormat.Microseconds(Max));
+        writer.WriteNumber(ArmKeys.Common.LatencyRecord.Histogram.MeanUs, NumberFormat.Microseconds((long)Mean));
+        writer.WriteNumber(ArmKeys.Common.LatencyRecord.Histogram.P50Us, NumberFormat.Microseconds(P50));
+        writer.WriteNumber(ArmKeys.Common.LatencyRecord.Histogram.P90Us, NumberFormat.Microseconds(P90));
+        writer.WriteNumber(ArmKeys.Common.LatencyRecord.Histogram.P99Us, NumberFormat.Microseconds(P99));
+        writer.WriteNumber(ArmKeys.Common.LatencyRecord.Histogram.P999Us, NumberFormat.Microseconds(P999));
         writer.WriteEndObject();
     }
 }

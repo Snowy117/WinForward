@@ -39,7 +39,7 @@ internal static class BaseArm
                 ["latency"] = latency.Parameters,
                 ["loss"] = loss.Parameters,
             },
-            Metrics =
+            Metrics = new DictionaryMetrics
             {
                 ["elapsedSeconds"] = NumberFormat.Round(Clock.ToSeconds(elapsedTicks), 4),
                 ["latency"] = latency.Metrics,

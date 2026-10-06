@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Globalization;
 using System.Text.Json;
+using WinForward.E2E.Contracts.Json;
 
 namespace WinForward.E2E.Client;
 
@@ -36,6 +37,9 @@ internal static class JsonValue
                 break;
             case string text:
                 writer.WriteStringValue(text);
+                break;
+            case IJsonWritable writable:
+                writable.WriteTo(writer);
                 break;
             case IReadOnlyDictionary<string, object?> map:
                 writer.WriteStartObject();

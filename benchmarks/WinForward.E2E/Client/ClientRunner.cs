@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using WinForward.E2E.Cli;
 using WinForward.E2E.Client.Arms;
+using WinForward.E2E.Contracts;
 using WinForward.E2E.Contracts.Json;
 
 namespace WinForward.E2E.Client;
@@ -341,7 +342,9 @@ internal static class ClientRunner
         var (outcome, failure, cancelled) = await RunGuardedAsync(context).ConfigureAwait(false);
 
         var endedTicks = Clock.Now;
-        failure = await WriteArmRecordsAsync(sink, sampler, options, arm, outcome ?? new ArmOutcome(), latency, fileName, failure, cancelled, startedTicks, endedTicks).ConfigureAwait(false);
+        // An arm that threw before it built metrics still publishes an empty metrics object, the same
+        // shape a run that reached the record writer with nothing measured always had.
+        failure = await WriteArmRecordsAsync(sink, sampler, options, arm, outcome ?? EmptyOutcome(), latency, fileName, failure, cancelled, startedTicks, endedTicks).ConfigureAwait(false);
 
         await Console.Out.WriteLineAsync(string.Create(
             CultureInfo.InvariantCulture,
@@ -497,7 +500,13 @@ internal static class ClientRunner
             CancellationToken.None).ConfigureAwait(false);
     }
 
-    private static async ValueTask WriteResultAsync(
+    /// <summary>
+    /// Writes the arm's <c>result</c> record: the one place a record's skeleton and its
+    /// <c>metrics</c> object meet. Every arm reaches this writer with an <see cref="IJsonWritable"/>
+    /// for its metrics, so the shape of the published file is decided by the metrics type rather than
+    /// by a dictionary the writer has to interpret (D14.15).
+    /// </summary>
+    internal static async ValueTask WriteResultAsync(
         JsonlSink sink,
         ClientOptions options,
         ArmSpec arm,
@@ -509,24 +518,22 @@ internal static class ClientRunner
         await sink.WriteAsync(
             writer =>
             {
-                writer.WriteString("type", "result");
-                writer.WriteString("arm", arm.Name);
-                writer.WriteString("kind", arm.Kind);
-                writer.WriteString("label", options.Label);
-                writer.WritePropertyName("parameters");
+                writer.WriteString(ArmKeys.Common.Record.Type, "result");
+                writer.WriteString(ArmKeys.Common.Record.Arm, arm.Name);
+                writer.WriteString(ArmKeys.Common.Record.Kind, arm.Kind);
+                writer.WriteString(ArmKeys.Common.Record.Label, options.Label);
+                writer.WritePropertyName(ArmKeys.Common.Record.Parameters);
                 writer.WriteStartObject();
                 JsonValue.WriteProperties(writer, outcome.Parameters);
                 writer.WriteEndObject();
-                writer.WritePropertyName("metrics");
-                writer.WriteStartObject();
-                JsonValue.WriteProperties(writer, outcome.Metrics);
-                writer.WriteEndObject();
+                writer.WritePropertyName(ArmKeys.Common.Record.Metrics);
+                outcome.Metrics.WriteTo(writer);
                 latency.WriteTo(writer);
-                writer.WritePropertyName("gates");
+                writer.WritePropertyName(ArmKeys.Common.Record.Gates);
                 writer.WriteStartObject();
                 JsonValue.WriteProperties(writer, outcome.Gates);
                 writer.WriteEndObject();
-                writer.WritePropertyName("notes");
+                writer.WritePropertyName(ArmKeys.Common.Record.Notes);
                 writer.WriteStartArray();
                 foreach (var note in outcome.Notes)
                 {
@@ -534,11 +541,14 @@ internal static class ClientRunner
                 }
 
                 writer.WriteEndArray();
-                writer.WriteNumber("startedTicks", startedTicks);
-                writer.WriteNumber("endedTicks", endedTicks);
+                writer.WriteNumber(ArmKeys.Common.Record.StartedTicks, startedTicks);
+                writer.WriteNumber(ArmKeys.Common.Record.EndedTicks, endedTicks);
             },
             CancellationToken.None).ConfigureAwait(false);
     }
+
+    /// <summary>The outcome an arm that failed before building one still gets a record for.</summary>
+    private static ArmOutcome EmptyOutcome() => new() { Metrics = new DictionaryMetrics() };
 
     private static async ValueTask WriteArmSummaryAsync(
         JsonlSink sink,

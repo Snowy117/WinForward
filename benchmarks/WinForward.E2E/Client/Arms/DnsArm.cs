@@ -57,6 +57,7 @@ internal static class DnsArm
         var dnsPort = spec.DnsPort > 0 ? spec.DnsPort : context.Options.DnsPort;
         var dnsEndPoint = new IPEndPoint(context.TargetAddress, dnsPort);
 
+        var metrics = new DictionaryMetrics();
         var outcome = new ArmOutcome
         {
             Parameters =
@@ -68,6 +69,7 @@ internal static class DnsArm
                 ["dnsPort"] = dnsPort,
                 ["drainWindowMs"] = DrainWindowMilliseconds,
             },
+            Metrics = metrics,
         };
 
         var startTicks = Clock.Now;
@@ -89,7 +91,7 @@ internal static class DnsArm
         }
 
         await Task.WhenAll(tasks).ConfigureAwait(false);
-        WriteMetrics(outcome, udp, tcp, Clock.Now - startTicks);
+        WriteMetrics(metrics, udp, tcp, Clock.Now - startTicks);
         outcome.Gates["clientSendLoss"] = 0;
         outcome.Gates["windowMs"] = 0;
         outcome.Notes.Add("every query written to the socket is terminal in exactly one of answered (rcode 0), servfail (rcode != 0), timeout (still unmatched when the drain window closed) or other (tcp only: a response consumed a queued query but carried a different transaction id); answered + servfail + timeout + other == sent, and unanswered is timeout + other.");
@@ -101,7 +103,7 @@ internal static class DnsArm
         return outcome;
     }
 
-    private static void WriteMetrics(ArmOutcome outcome, DnsCounters udp, DnsCounters tcp, long elapsedTicks)
+    private static void WriteMetrics(DictionaryMetrics metrics, DnsCounters udp, DnsCounters tcp, long elapsedTicks)
     {
         var answered = udp._answered + tcp._answered;
         var servfail = udp._servfail + tcp._servfail;
@@ -110,24 +112,24 @@ internal static class DnsArm
         var sent = udp._sent + tcp._sent;
         var unsent = udp._unsent + tcp._unsent;
 
-        outcome.Metrics["sent"] = sent;
-        outcome.Metrics["udpSent"] = udp._sent;
-        outcome.Metrics["tcpSent"] = tcp._sent;
-        outcome.Metrics["unsent"] = unsent;
-        outcome.Metrics["udpUnsent"] = udp._unsent;
-        outcome.Metrics["tcpUnsent"] = tcp._unsent;
-        outcome.Metrics["offered"] = sent + unsent;
-        outcome.Metrics["answered"] = answered;
-        outcome.Metrics["servfail"] = servfail;
-        outcome.Metrics["timeout"] = timeout;
-        outcome.Metrics["other"] = other;
-        outcome.Metrics["unanswered"] = timeout + other;
-        outcome.Metrics["socketErrors"] = udp._socketErrors + tcp._socketErrors;
-        outcome.Metrics["emptyAnswers"] = udp._emptyAnswers + tcp._emptyAnswers;
-        outcome.Metrics["malformed"] = udp._malformed + tcp._malformed;
-        outcome.Metrics["unmatched"] = udp._unmatched + tcp._unmatched;
-        outcome.Metrics["answerRate"] = JsonRate.Rate(answered, sent);
-        outcome.Metrics["achievedRate"] = JsonPerSecond.PerSecond(sent, elapsedTicks, Stopwatch.Frequency);
+        metrics["sent"] = sent;
+        metrics["udpSent"] = udp._sent;
+        metrics["tcpSent"] = tcp._sent;
+        metrics["unsent"] = unsent;
+        metrics["udpUnsent"] = udp._unsent;
+        metrics["tcpUnsent"] = tcp._unsent;
+        metrics["offered"] = sent + unsent;
+        metrics["answered"] = answered;
+        metrics["servfail"] = servfail;
+        metrics["timeout"] = timeout;
+        metrics["other"] = other;
+        metrics["unanswered"] = timeout + other;
+        metrics["socketErrors"] = udp._socketErrors + tcp._socketErrors;
+        metrics["emptyAnswers"] = udp._emptyAnswers + tcp._emptyAnswers;
+        metrics["malformed"] = udp._malformed + tcp._malformed;
+        metrics["unmatched"] = udp._unmatched + tcp._unmatched;
+        metrics["answerRate"] = JsonRate.Rate(answered, sent);
+        metrics["achievedRate"] = JsonPerSecond.PerSecond(sent, elapsedTicks, Stopwatch.Frequency);
 
         var rcodes = new Dictionary<string, object?>(StringComparer.Ordinal);
         for (var code = 0; code < udp._rcodes.Length; code++)
@@ -139,8 +141,8 @@ internal static class DnsArm
             }
         }
 
-        outcome.Metrics["rcodes"] = rcodes;
-        outcome.Metrics["queryTypes"] = BuildQueryTypes(udp, tcp);
+        metrics["rcodes"] = rcodes;
+        metrics["queryTypes"] = BuildQueryTypes(udp, tcp);
     }
 
     private static Dictionary<string, object?> BuildQueryTypes(DnsCounters udp, DnsCounters tcp)

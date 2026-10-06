@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using WinForward.E2E.Contracts;
 using WinForward.E2E.Contracts.Json;
 
 namespace WinForward.E2E.Client;
@@ -103,11 +104,11 @@ internal sealed class LatencySet
 
     internal void WriteTo(Utf8JsonWriter writer)
     {
-        writer.WriteStartObject("latency");
-        Write(writer, "tcp-connect", TcpConnect);
-        Write(writer, "tcp-rtt", TcpRtt);
-        Write(writer, "udp-rtt", UdpRtt);
-        Write(writer, "dns-rtt", DnsRtt);
+        writer.WriteStartObject(ArmKeys.Common.Record.Latency);
+        Write(writer, ArmKeys.Common.LatencyRecord.TcpConnect, TcpConnect);
+        Write(writer, ArmKeys.Common.LatencyRecord.TcpRtt, TcpRtt);
+        Write(writer, ArmKeys.Common.LatencyRecord.UdpRtt, UdpRtt);
+        Write(writer, ArmKeys.Common.LatencyRecord.DnsRtt, DnsRtt);
         writer.WriteEndObject();
     }
 
@@ -124,7 +125,12 @@ internal sealed class ArmOutcome
 {
     internal Dictionary<string, object?> Parameters { get; } = new(StringComparer.Ordinal);
 
-    internal Dictionary<string, object?> Metrics { get; } = new(StringComparer.Ordinal);
+    /// <summary>
+    /// The arm's <c>metrics</c> object. It is carried as an <see cref="IJsonWritable"/> rather than a
+    /// dictionary so the record writer has one call for every arm, and it is required so an arm
+    /// cannot reach the record with no metrics at all.
+    /// </summary>
+    internal required IJsonWritable Metrics { get; init; }
 
     internal Dictionary<string, object?> Gates { get; } = new(StringComparer.Ordinal);
 

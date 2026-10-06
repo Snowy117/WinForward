@@ -147,6 +147,7 @@ internal static class PersistentArm
         // answer, and it may not be shorter than the pacing interval it has to report within.
         var responseTimeoutMilliseconds = Math.Max(DefaultResponseTimeoutMilliseconds, intervalMilliseconds);
 
+        var metrics = new DictionaryMetrics();
         var outcome = new ArmOutcome
         {
             Parameters =
@@ -158,6 +159,7 @@ internal static class PersistentArm
                 ["expectedBytes"] = spec.ExpectedBytes,
                 ["responseTimeoutMs"] = responseTimeoutMilliseconds,
             },
+            Metrics = metrics,
         };
 
         var plan = new PersistentPlan(intervalMilliseconds, idleSeconds, payloadBytes, expectedBytes, Clock.FromSeconds(responseTimeoutMilliseconds / 1000.0));
@@ -166,7 +168,7 @@ internal static class PersistentArm
         var state = new PersistentCounters();
         var schedule = await Dedicated.RunOnOwnThreadAsync(() => RunPersistentAsync(context, state, plan, cancellationToken)).ConfigureAwait(false);
 
-        WriteMetrics(outcome, state, schedule, Clock.Now);
+        WriteMetrics(metrics, state, schedule, Clock.Now);
         outcome.Gates["clientSendLoss"] = state._connectFailures + state._sendFailures;
         outcome.Gates["windowMs"] = 0;
         outcome.Notes.Add("requests counts paced exchanges attempted and responses counts the echoes that completed them, each timed from its request's intended send instant; the difference is explained by connectFailures, sendFailures, timeouts, remoteClosed and protocolErrors.");
@@ -177,7 +179,7 @@ internal static class PersistentArm
         return outcome;
     }
 
-    private static void WriteMetrics(ArmOutcome outcome, PersistentCounters state, PersistentSchedule schedule, long endTicks)
+    private static void WriteMetrics(DictionaryMetrics metrics, PersistentCounters state, PersistentSchedule schedule, long endTicks)
     {
         var elapsedTicks = Math.Max(0, endTicks - schedule.StartTicks);
         var idleTicks = 0L;
@@ -187,26 +189,26 @@ internal static class PersistentArm
             idleTicks = Math.Max(0, idleEndTicks - state._idleBeginTicks);
         }
 
-        outcome.Metrics["requests"] = state._requests;
-        outcome.Metrics["responses"] = state._responses;
-        outcome.Metrics["reconnects"] = state._reconnects;
-        outcome.Metrics["survivedIdle"] = state._survivedIdle;
-        outcome.Metrics["idleSecondsScheduled"] = NumberFormat.Round(Clock.ToSeconds(schedule.ScheduledIdleTicks));
-        outcome.Metrics["idleSecondsObserved"] = NumberFormat.Round(Clock.ToSeconds(idleTicks));
-        outcome.Metrics["sendWouldBlock"] = state._sendWouldBlock;
-        outcome.Metrics["sendFailures"] = state._sendFailures;
-        outcome.Metrics["timeouts"] = state._timeouts;
-        outcome.Metrics["remoteClosed"] = state._remoteClosed;
-        outcome.Metrics["protocolErrors"] = state._protocolErrors;
-        outcome.Metrics["corrupt"] = state._corrupt;
-        outcome.Metrics["unmatchedReplies"] = state._unmatchedReplies;
-        outcome.Metrics["connectAttempts"] = state._connectSamples + state._connectFailures;
-        outcome.Metrics["connectFailures"] = state._connectFailures;
-        outcome.Metrics["meanConnectMs"] = state._connectSamples == 0
+        metrics["requests"] = state._requests;
+        metrics["responses"] = state._responses;
+        metrics["reconnects"] = state._reconnects;
+        metrics["survivedIdle"] = state._survivedIdle;
+        metrics["idleSecondsScheduled"] = NumberFormat.Round(Clock.ToSeconds(schedule.ScheduledIdleTicks));
+        metrics["idleSecondsObserved"] = NumberFormat.Round(Clock.ToSeconds(idleTicks));
+        metrics["sendWouldBlock"] = state._sendWouldBlock;
+        metrics["sendFailures"] = state._sendFailures;
+        metrics["timeouts"] = state._timeouts;
+        metrics["remoteClosed"] = state._remoteClosed;
+        metrics["protocolErrors"] = state._protocolErrors;
+        metrics["corrupt"] = state._corrupt;
+        metrics["unmatchedReplies"] = state._unmatchedReplies;
+        metrics["connectAttempts"] = state._connectSamples + state._connectFailures;
+        metrics["connectFailures"] = state._connectFailures;
+        metrics["meanConnectMs"] = state._connectSamples == 0
             ? null
             : NumberFormat.Round(Clock.ToMicroseconds(state._connectTicks) / (double)state._connectSamples / 1000.0);
-        outcome.Metrics["responseRate"] = JsonRate.Rate(state._responses, state._requests);
-        outcome.Metrics["achievedRate"] = JsonPerSecond.PerSecond(state._responses, elapsedTicks, Stopwatch.Frequency);
+        metrics["responseRate"] = JsonRate.Rate(state._responses, state._requests);
+        metrics["achievedRate"] = JsonPerSecond.PerSecond(state._responses, elapsedTicks, Stopwatch.Frequency);
     }
 
     private static PersistentSchedule BuildSchedule(long startTicks, long deadlineTicks, PersistentPlan plan)

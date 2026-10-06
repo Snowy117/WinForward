@@ -135,6 +135,7 @@ internal static class ReliabilityArm
         var expectedBytes = spec.ExpectedBytes > 0 ? spec.ExpectedBytes : DefaultExpectedBytes;
         var mixText = string.IsNullOrEmpty(spec.ModeMix) ? ArmSpec.DefaultModeMix : spec.ModeMix;
 
+        var metrics = new DictionaryMetrics();
         var outcome = new ArmOutcome
         {
             Parameters =
@@ -145,6 +146,7 @@ internal static class ReliabilityArm
                 ["modeMix"] = mixText,
                 ["framePayloadBytes"] = FramePayloadBytes,
             },
+            Metrics = metrics,
         };
 
         if (!PlanFile.TryParseModeMix(mixText, out var weights, out var error))
@@ -162,7 +164,7 @@ internal static class ReliabilityArm
 
         var scheduled = await Dedicated.RunOnOwnThreadAsync(() => PumpAsync(context, schedule, expectedBytes, rate, startTicks, deadlineTicks, results, evidence, cancellationToken)).ConfigureAwait(false);
 
-        WriteMetrics(outcome, [.. results], schedule, mixText, expectedBytes, Clock.Now - startTicks, scheduled, evidence);
+        WriteMetrics(metrics, [.. results], schedule, mixText, expectedBytes, Clock.Now - startTicks, scheduled, evidence);
         outcome.Gates["clientSendLoss"] = 0;
         outcome.Gates["windowMs"] = 0;
         outcome.Notes.Add("outcome values are what the client observed; 'expected' is what the requested mode calls for, and fidelityMismatch counts any divergence plus truncated echoes.");
@@ -307,7 +309,7 @@ internal static class ReliabilityArm
     }
 
     private static void WriteMetrics(
-        ArmOutcome outcome,
+        DictionaryMetrics metrics,
         ReliabilityAttempt[] attempts,
         List<TcpMode> schedule,
         string mixText,
@@ -329,34 +331,34 @@ internal static class ReliabilityArm
         var transferTicks = tally._transferTicks;
         var transferSamples = tally._transferSamples;
 
-        outcome.Metrics["connectAttempts"] = attempts.Length;
-        outcome.Metrics["scheduledAttempts"] = scheduled;
-        outcome.Metrics["outcomes"] = Zip(s_outcomeNames, observed);
-        outcome.Metrics["expected"] = Zip(s_outcomeNames, expected);
-        outcome.Metrics["unexpectedEof"] = unexpectedEof;
-        outcome.Metrics["expectedEarlyEof"] = expectedEarlyEof;
-        outcome.Metrics["truncated"] = truncated;
-        outcome.Metrics["fidelityMismatch"] = mismatches;
-        outcome.Metrics["fidelityRate"] = JsonRate.Rate(mismatches, attempts.Length);
-        outcome.Metrics["connectFail"] = connectFailures;
-        outcome.Metrics["expectedBytes"] = expectedBytes;
-        outcome.Metrics["modeSchedule"] = string.Join(',', schedule.ConvertAll(TcpCommand.Name));
-        outcome.Metrics["echoedBytes"] = tally._echoed;
-        outcome.Metrics["trailerBytes"] = tally._trailerBytes;
-        outcome.Metrics["byMode"] = BuildModeBreakdown(attempts, schedule);
-        outcome.Metrics["attemptRecords"] = evidence.Written;
-        outcome.Metrics["attemptRecordsOmitted"] = evidence.Omitted;
-        outcome.Metrics["meanConnectMs"] = connectSamples == 0
+        metrics["connectAttempts"] = attempts.Length;
+        metrics["scheduledAttempts"] = scheduled;
+        metrics["outcomes"] = Zip(s_outcomeNames, observed);
+        metrics["expected"] = Zip(s_outcomeNames, expected);
+        metrics["unexpectedEof"] = unexpectedEof;
+        metrics["expectedEarlyEof"] = expectedEarlyEof;
+        metrics["truncated"] = truncated;
+        metrics["fidelityMismatch"] = mismatches;
+        metrics["fidelityRate"] = JsonRate.Rate(mismatches, attempts.Length);
+        metrics["connectFail"] = connectFailures;
+        metrics["expectedBytes"] = expectedBytes;
+        metrics["modeSchedule"] = string.Join(',', schedule.ConvertAll(TcpCommand.Name));
+        metrics["echoedBytes"] = tally._echoed;
+        metrics["trailerBytes"] = tally._trailerBytes;
+        metrics["byMode"] = BuildModeBreakdown(attempts, schedule);
+        metrics["attemptRecords"] = evidence.Written;
+        metrics["attemptRecordsOmitted"] = evidence.Omitted;
+        metrics["meanConnectMs"] = connectSamples == 0
             ? null
             : NumberFormat.Round(Clock.ToMicroseconds(connectTicks) / (double)connectSamples / 1000.0);
 
         // Over the attempts that completed a request send, never over every attempt: an attempt that
         // never connected has no send to average, and letting it in as a zero deflates the mean.
-        outcome.Metrics["meanTransferMs"] = transferSamples == 0
+        metrics["meanTransferMs"] = transferSamples == 0
             ? null
             : NumberFormat.Round(Clock.ToMicroseconds(transferTicks) / (double)transferSamples / 1000.0);
-        outcome.Metrics["achievedRate"] = JsonPerSecond.PerSecond(attempts.Length, elapsedTicks, System.Diagnostics.Stopwatch.Frequency);
-        outcome.Metrics["effectiveModeMix"] = mixText;
+        metrics["achievedRate"] = JsonPerSecond.PerSecond(attempts.Length, elapsedTicks, System.Diagnostics.Stopwatch.Frequency);
+        metrics["effectiveModeMix"] = mixText;
     }
 
     /// <summary>
