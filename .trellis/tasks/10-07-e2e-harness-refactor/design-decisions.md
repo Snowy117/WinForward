@@ -583,6 +583,14 @@ check 已实测：该改动对 `run1↔run1`、`run1↔run2`、`run1↔b1c` 三�
    （B2b check 即照此办理）。工具不得因此自动放行。
 3. 工具改进（登记，E2/E5）：带宽测量从"两次运行"扩到 **N 次（≥3）**，对零宽路径给出
    `observedSpread` 与建议重测标记；`--write-band` 支持多目录。当前两次基线仍是 B2c 的判据基线。
+4. **读数敏感性的流程补充**（B2c check 实测：把 `latency/tcp-rtt/*` 全部 ×2，工具仍 exit 0、
+   默认汇总读数计数不变，只有 `--strict` 可见）：**默认 summary 必须增加一行"越带读数计数"**；
+   **凡是声称"行为等价"的批次，证据文档必须附 `--strict` 的读数移动摘要，并对超出带宽的路径逐条解释**
+   （工具改动归 E2/E5，流程要求立即生效）。
+5. `gates` 的值类型是 `Dictionary<string, double>`（D5 第 5 条原写 `long`）：
+   `gates/inFlightCeilingMs` 是真小数，`long` 会改契约值；整数值 double 序列化成同一文本（B2c 已验证字节等价）。
+6. `parameters` 的键序在强类型化后按 `ArmKeys.Common.Parameters` 的声明序（MIX/PERSIST/REL 的文档序因此变化，
+   集合不变、工具按路径集合判）；`byMode` 的成员集跟随 plan 的 `modeMix`，形状契约钉每块 schema + 模式名绑定。
 
 ### D16.4 B2 批次（9 条改名按臂分布决定顺序）
 | 批次 | 内容 |

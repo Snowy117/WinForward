@@ -25,6 +25,9 @@
     "gauges, throughput, transfer volumes and latency-histogram readings. Their movement is reported",
     "for information and never fails. Everything else numeric is a contract value that must land",
     "inside its per-key jitter band, so a counter cannot be silenced by omission (fail-closed).",
+    "latency/* is listed as a reading outright (D17.1): the histogram subtree is a sample aggregate,",
+    "and every statistic under it -- count included, which no *Us pattern matches -- moves with the",
+    "host rather than with the contract.",
     "contractPathPatterns pins the declared plan inputs: parameters/* is what the plan asked for, not",
     "a measurement, so a change there is a contract change even when the name ends in Bytes.",
     "classOverrides carries the D15 item 6 cross-class key: gates/inFlightCeilingMs is a gates.*",
@@ -59,6 +62,7 @@
   ],
   "contractPathPatterns": ["parameters/*"],
   "readingPathPatterns": [
+    "latency/*",
     "*ticks",
     "*Ticks",
     "wallSeconds",

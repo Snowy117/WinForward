@@ -37,8 +37,8 @@ directly, and a transparent proxy rewrites the path beneath it.
 | `Client/LogHistogram.cs` | the client's latency histogram: logarithmic buckets and the percentile snapshot |
 | `Client/UdpReliability.cs` | the UDP sequence bookkeeping and the arrived/late/never classification |
 | `Client/ResourceSampler.cs` | the 1 Hz process sampler (`sample` and `samplerError` records) |
-| `Client/JsonValue.cs`, `Client/FrameBuffer.cs` | JSON value writer for the arm dictionaries, frame buffer and socket helpers |
-| `../WinForward.E2E.Contracts/Json/` | what both verbs share: the JSONL sink, its failure policy, and the number formats the records publish |
+| `Client/FrameBuffer.cs` | the frame buffer an arm builds its requests in, and the socket helpers the lanes share |
+| `../WinForward.E2E.Contracts/` | what both verbs share: the record key constants, the typed metrics and parameters value objects, the JSONL sink, its failure policy, and the number formats the records publish |
 | `Target/` | the target: TCP echo/command server, UDP echo server, DNS responder, the ledger summaries, the target log and the runner |
 | `Wire/` | the protocol both verbs share: frame codec, stream reader, CRC32C, command payload, half-close trailer, DNS wire subset, payload filler |
 | `scripts/plans/` | the committed plans: `full-plan`, `udp-plan`, `dns-plan`, `dual-plan`, `base-plan`, `selftest-plan` |
