@@ -7,7 +7,8 @@ public sealed class TcpCommandTests
 {
     // Regression guard (green today by construction): the arm publishes Name(mode) as a metric and
     // the analyzer keys on those strings, so a new enum member that shares a name, or a defined
-    // member that falls through to the "unknown" literal, would silently merge two rows.
+    // member without a name of its own, would silently merge two rows. An unnamed member cannot reach
+    // a published record at all: Name throws instead of returning a fallback literal.
     [Fact]
     public void EveryDefinedModeHasItsOwnName()
     {
@@ -25,11 +26,18 @@ public sealed class TcpCommandTests
         var names = verdicts.Select(TcpCommand.Name).ToArray();
 
         Assert.Equal(verdicts.Length, names.Distinct(StringComparer.Ordinal).Count());
-        // TcpVerdict.Error is the one member whose published name is the fallback literal ("error"),
-        // so it is excluded; every other member reaching the fallback would mean an unnamed verdict
-        // is being published as "error".
+        // TcpVerdict.Error is the one member whose published name is the literal "error", so it is
+        // excluded; every other member reaching "error" would mean two verdicts share a ledger key.
         Assert.DoesNotContain("error", verdicts.Where(verdict => verdict != TcpVerdict.Error).Select(TcpCommand.Name));
     }
+
+    [Fact]
+    public void AnUndefinedModeHasNoPublishedName() =>
+        Assert.Throws<ArgumentOutOfRangeException>(() => TcpCommand.Name((TcpMode)255));
+
+    [Fact]
+    public void AnUndefinedVerdictHasNoPublishedName() =>
+        Assert.Throws<ArgumentOutOfRangeException>(() => TcpCommand.Name((TcpVerdict)255));
 
     [Fact]
     public void ACleanCommandRoundTripsThroughTheParser() => AssertRoundTrip(TcpMode.Clean, 0u);

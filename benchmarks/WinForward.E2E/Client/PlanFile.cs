@@ -70,13 +70,15 @@ internal static class PlanFile
     }
 
     // D14.14: zero means "not declared" for every numeric key, so the lower bound is zero throughout
-    // and a declared negative value is a load error instead of a silent clamp; only dnsPort and
-    // tcpPercent have a real ceiling. The arms keep their own Math.Max/Math.Clamp as a defence in
-    // depth: those calls are not what makes an illegal value legal.
+    // and a declared negative value is a load error instead of a silent clamp; only dnsPort,
+    // tcpPercent and payloadBytes have a real ceiling. The arms keep their own Math.Max/Math.Clamp as
+    // a defence in depth: those calls are not what makes an illegal value legal.
     private static readonly NumberKey[] s_numberKeys =
     [
         new("ratePerSecond", 0, int.MaxValue, static (spec, value) => spec.RatePerSecond = value),
-        new("payloadBytes", 0, int.MaxValue, static (spec, value) => spec.PayloadBytes = value),
+        // The codec's own bound: a frame above it is refused on decode, so a plan that declared one
+        // could only measure a run where every frame is malformed (D18.4).
+        new("payloadBytes", 0, (int)FrameCodec.MaxPayloadLength, static (spec, value) => spec.PayloadBytes = value),
         new("connectionsPerSecond", 0, int.MaxValue, static (spec, value) => spec.ConnectionsPerSecond = value),
         new("streams", 0, int.MaxValue, static (spec, value) => spec.Streams = value),
         new("tcpPercent", 0, 100, static (spec, value) => spec.TcpPercent = value),

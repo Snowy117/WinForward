@@ -36,7 +36,14 @@ internal static class FrameCodec
     private const uint Magic = 0x57464531u;
     internal const int HeaderSize = 28;
     internal const int TrailerSize = 4;
-    private const uint MaxPayloadLength = 4u * 1024u * 1024u;
+
+    /// <summary>
+    /// The largest payload a frame may declare. The decoder refuses anything above it, so it is also
+    /// the ceiling a plan's <c>payloadBytes</c> is loaded against: a plan above the bound could only
+    /// ask for frames this codec rejects (D18.4).
+    /// </summary>
+    internal const uint MaxPayloadLength = 4u * 1024u * 1024u;
+
     internal const ulong CommandSequence = 0;
 
     private const int OffsetConnectionId = 4;

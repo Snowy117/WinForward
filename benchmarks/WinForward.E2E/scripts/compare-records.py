@@ -37,7 +37,14 @@ The D15 classes and their verdicts:
    two runs is the exception, not the contract. ``--strict`` lists every reading that moved; without
    it only the census is printed. D17.1 puts the whole ``latency/*`` histogram subtree here: it is a
    sample aggregate, so its ``count`` beside its ``minUs``/``maxUs``/``meanUs``/percentile readings
-   moves with the host that ran the measurement, never with the contract.
+   moves with the host that ran the measurement, never with the contract. A reading is additionally
+   reported as **out of band** when a band was recorded for it and its movement exceeds it
+   (D17.4): a reading frozen in the band file is the one place where "it moved" and "it moved more
+   than the host explains" can be told apart, and the default summary counts them, because a
+   reading scaled by a factor of two moved the census by nothing while only ``--strict`` showed it.
+   Readings without a recorded band cannot be judged that way and are counted apart, never as
+   out-of-band: the band file holds per-key bands for the paths that were contract values when it
+   was frozen, and a band of zero for the rest would report every clock and gauge as out of band.
 
 ``gates/inFlightCeilingMs`` is the cross-class key D15 item 6 names: it is a ``gates.*`` counter by
 shape and a millisecond measurement by meaning. It is classified by an explicit ``classOverrides``
@@ -113,7 +120,11 @@ class Finding(NamedTuple):
 
 
 class Movement(NamedTuple):
-    """One reading that moved between the two runs; informational, never a failure."""
+    """One reading that moved between the two runs; informational, never a failure.
+
+    ``out_of_band`` is true when a band was recorded for the path and a statistic moved past it. It
+    is reported, never judged: the reading class stays informational either way (D17.4).
+    """
 
     where: str
     max_abs_delta: float
@@ -122,6 +133,7 @@ class Movement(NamedTuple):
     n_after: float
     base_mean: float
     after_mean: float
+    out_of_band: bool
 
 
 def resolve_run(root: Path) -> tuple[Path, Path]:
@@ -333,6 +345,11 @@ class Comparison:
         self.measured: dict[str, dict[str, object]] = {}
         self.census: Counter[str] = Counter()
         self.reading_paths = 0
+        # Readings are never judged, but the ones whose band was frozen are counted when they move
+        # past it; the rest have no band to move past and are counted apart (D17.4).
+        self.banded_reading_paths = 0
+        self.out_of_band_readings = 0
+        self.bandless_movements = 0
         self.compared = 0
         self.class_rules: dict[str, str] = {}
         self.numeric_paths: set[str] = set()
@@ -469,6 +486,17 @@ class Comparison:
 
         if reading_class == CLASS_READING:
             self.reading_paths += 1
+            out_of_band = False
+            if recorded is not None:
+                self.banded_reading_paths += 1
+                allowed_count = float(recorded.get("allowedCountDelta", 0.0))  # type: ignore[arg-type]
+                out_of_band = any(
+                    abs(delta) > (allowed_count if stat == "count" else band_value) + 1e-9  # type: ignore[operator]
+                    for stat, delta in deltas.items()
+                )
+                if out_of_band:
+                    self.out_of_band_readings += 1
+
             if max_abs_delta != 0.0 or deltas["count"] != 0.0:
                 self.movements.append(
                     Movement(
@@ -479,8 +507,11 @@ class Comparison:
                         after_stats["count"],
                         base_stats["mean"],
                         after_stats["mean"],
+                        out_of_band,
                     )
                 )
+                if band_value is None:
+                    self.bandless_movements += 1
             return
 
         if reading_class != CLASS_CONTRACT:
@@ -722,12 +753,20 @@ def render(comparison: Comparison, banded: bool, show_bands: bool, strict: bool,
         lines.append(
             f"  {len(readings)} of {comparison.reading_paths} measured reading paths moved between the runs"
         )
+        # The census alone cannot tell a host-noise wobble from a measurement that doubled, so the
+        # banded readings are counted against the band frozen for them (D17.4).
+        lines.append(
+            f"  {comparison.out_of_band_readings} of the {comparison.banded_reading_paths} reading paths "
+            f"with a recorded band moved past it; {comparison.bandless_movements} moved with no recorded band"
+        )
         if not readings:
             lines.append("  (no reading moved at all)")
         elif strict:
             lines.append("  every movement, largest first:")
             for movement in readings:
                 band = "no band" if movement.band is None else f"band {movement.band:g}"
+                if movement.out_of_band:
+                    band += ", out of band"
                 lines.append(
                     f"    {movement.where}: mean {movement.base_mean:g} -> {movement.after_mean:g}, "
                     f"max |delta| {movement.max_abs_delta:g} ({band}), n {movement.n_base:g}/{movement.n_after:g}"
@@ -910,9 +949,15 @@ def main(argv: list[str]) -> int:
         f"summary: structural={len(structural)} conditional={len(conditional)} identity={len(identity)} "
         f"declared={len(declared)} "
         f"{contract_column} rename={len(rename)} readings={len(comparison.movements)}"
-        f"/{comparison.reading_paths} compared={comparison.compared} measured={len(comparison.measured)} "
+        f"/{comparison.reading_paths} readingsOutOfBand={comparison.out_of_band_readings}"
+        f"/{comparison.banded_reading_paths} compared={comparison.compared} measured={len(comparison.measured)} "
         f"classes(contract={comparison.census[CLASS_CONTRACT]} reading={comparison.census[CLASS_READING]} "
         f"identity={comparison.census[CLASS_IDENTITY]})"
+    )
+    print(
+        f"readings out of band: {comparison.out_of_band_readings} of {comparison.banded_reading_paths} reading "
+        f"paths with a recorded band moved past it; {comparison.bandless_movements} moved with no recorded "
+        f"band (informational either way: a reading never fails the comparison)"
     )
 
     if args.json_out is not None:

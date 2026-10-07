@@ -35,13 +35,9 @@ internal sealed class UdpEchoServer : IAsyncDisposable
             _censuses[index] = new SourceCensus();
         }
 
-        _sourceTemplate = endPoint.AddressFamily == AddressFamily.InterNetworkV6
-            ? new IPEndPoint(IPAddress.IPv6Any, 0)
-            : new IPEndPoint(IPAddress.Any, 0);
+        _sourceTemplate = Sockets.SourceTemplate(endPoint);
 
-        _socket = new Socket(endPoint.AddressFamily, SocketType.Dgram, ProtocolType.Udp);
-        _socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, optionValue: true);
-        _socket.Bind(endPoint);
+        _socket = Sockets.BindUdp(endPoint);
     }
 
     internal async Task RunAsync(CancellationToken cancellationToken)

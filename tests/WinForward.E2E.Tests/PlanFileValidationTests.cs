@@ -116,6 +116,32 @@ public sealed class PlanFileValidationTests
         Assert.Contains("'dnsPort' is 99999, which is outside 0..65535", error, StringComparison.Ordinal);
     }
 
+    // The codec refuses a frame above its own bound, so a plan declaring a larger payload could only
+    // measure a run in which every frame is malformed. The bound is asserted as the literal the codec
+    // publishes rather than through the constant, so widening it in one place cannot pass here.
+    [Theory]
+    [InlineData("LATPAYLOADAT", 4194304, true)]
+    [InlineData("LATPAYLOADOVER", 4194305, false)]
+    public void ThePayloadBoundIsTheFrameCodecs(string name, int payloadBytes, bool loads)
+    {
+        Assert.Equal(loads, TryLoadJson(name, $""" "kind":"latency","payloadBytes":{payloadBytes}""", out var error));
+        if (loads)
+        {
+            return;
+        }
+
+        Assert.Contains($"'{name}'", error, StringComparison.Ordinal);
+        Assert.Contains($"'payloadBytes' is {payloadBytes}, which is outside 0..4194304", error, StringComparison.Ordinal);
+    }
+
+    // Zero stays "not declared" for the payload key too, which is what a plan that never names it
+    // gets: the bound above is a ceiling, not a minimum.
+    [Fact]
+    public void APayloadOfZeroMeansUndeclared()
+    {
+        Assert.True(TryLoadJson("LATNOPAYLOAD", """ "kind":"latency","payloadBytes":0""", out var error), error);
+    }
+
     // D5: a fractional value on an integer key is refused with the value as written, rather than
     // falling back to the arm's default and publishing a number the plan never declared.
     [Fact]

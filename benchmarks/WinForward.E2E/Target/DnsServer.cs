@@ -35,18 +35,10 @@ internal sealed class DnsServer : IAsyncDisposable
         _ledger = ledger;
         _workerCount = workerCount;
         _port = endPoint.Port;
-        _sourceTemplate = endPoint.AddressFamily == AddressFamily.InterNetworkV6
-            ? new IPEndPoint(IPAddress.IPv6Any, 0)
-            : new IPEndPoint(IPAddress.Any, 0);
+        _sourceTemplate = Sockets.SourceTemplate(endPoint);
 
-        _udp = new Socket(endPoint.AddressFamily, SocketType.Dgram, ProtocolType.Udp);
-        _udp.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, optionValue: true);
-        _udp.Bind(endPoint);
-
-        _tcp = new Socket(endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
-        _tcp.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, optionValue: true);
-        _tcp.Bind(endPoint);
-        _tcp.Listen(512);
+        _udp = Sockets.BindUdp(endPoint);
+        _tcp = Sockets.BindTcpListener(endPoint);
     }
 
     public ValueTask DisposeAsync()

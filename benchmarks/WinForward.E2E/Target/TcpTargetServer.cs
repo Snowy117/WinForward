@@ -67,10 +67,7 @@ internal sealed class TcpTargetServer : IAsyncDisposable
     internal TcpTargetServer(EndPoint endPoint, JsonlSink ledger)
     {
         _ledger = ledger;
-        _listener = new Socket(endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
-        _listener.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, optionValue: true);
-        _listener.Bind(endPoint);
-        _listener.Listen(512);
+        _listener = Sockets.BindTcpListener(endPoint);
     }
 
     internal async Task RunAsync(CancellationToken cancellationToken)

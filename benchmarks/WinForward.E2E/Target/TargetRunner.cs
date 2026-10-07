@@ -171,9 +171,34 @@ internal static class TargetRunner
             index++;
         }
 
+        return ValidatePorts(options, out error);
+    }
+#pragma warning restore RCS1239
+
+    /// <summary>
+    /// The port checks, which run once every option has been read: a collision can only be seen after
+    /// the whole command line is in, and a port out of range has to be refused before any of them is
+    /// compared.
+    /// </summary>
+    private static bool ValidatePorts(TargetOptions options, out string? error)
+    {
+        error = null;
+
         if (options.TcpPort is < 1 or > 65535 || options.UdpPort is < 1 or > 65535 || options.DnsPort is < 1 or > 65535)
         {
             error = "ports must be in the range 1..65535";
+            return false;
+        }
+
+        // The dns responder binds its port on tcp and udp at once, so a colliding dns port would put
+        // two listeners of the same protocol on one port. Both options are named in the message: the
+        // two numbers are equal by definition, so the option names are what tell the two ports apart.
+        if (options.DnsPort == options.TcpPort || options.DnsPort == options.UdpPort)
+        {
+            var collided = options.DnsPort == options.TcpPort ? "tcp" : "udp";
+            error = string.Create(
+                CultureInfo.InvariantCulture,
+                $"the dns port must differ from the tcp and udp ports: --dns-port {options.DnsPort} collides with --{collided}-port {options.DnsPort}");
             return false;
         }
 
@@ -194,7 +219,6 @@ internal static class TargetRunner
 
         return true;
     }
-#pragma warning restore RCS1239
 
     private static bool Apply(TargetOptions options, string name, string value, out string? error)
     {
