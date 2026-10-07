@@ -44,7 +44,7 @@ public sealed class ContractShapeTests
                 .Where(pair => pair.Value[0].Kind == JsonPaths.KindArray)
                 .Select(pair => pair.Key)
                 .ToArray();
-            failures.AddRange(Differences(
+            failures.AddRange(DeclaredKeys.Differences(
                 $"{contract.Kind} arrays",
                 [.. contract.Metrics.Arrays.Select(array => array.Path)],
                 arrays));
@@ -195,13 +195,13 @@ public sealed class ContractShapeTests
                     .Where(written.Contains)
                     .Select(path => $"{contract.Kind} {block.OmittedWhen}: {path} is published although the {block.Prefix} block did not run"));
 
-                failures.AddRange(Differences(
+                failures.AddRange(DeclaredKeys.Differences(
                     $"{contract.Kind} {block.OmittedWhen} (every key of the blocks that ran)",
                     [.. contract.Metrics.Declared.Except(blockPaths)],
                     written));
             }
 
-            failures.AddRange(Differences($"{contract.Kind} conditional keys", contract.Metrics.Conditional, omitted));
+            failures.AddRange(DeclaredKeys.Differences($"{contract.Kind} conditional keys", contract.Metrics.Conditional, omitted));
         }
 
         Assert.True(failures.Count == 0, string.Join('\n', failures));
@@ -260,14 +260,14 @@ public sealed class ContractShapeTests
         var declared = RecordContract.Histograms(
             ArmKeys.Common.LatencyRecord.TcpConnect,
             ArmKeys.Common.LatencyRecord.TcpRtt);
-        var failures = Differences(
+        var failures = DeclaredKeys.Differences(
             "latency histograms",
             declared,
             JsonPaths.Under(withTcp, ArmKeys.Common.Record.Latency)).ToList();
 
         // The other two histograms are declared by ArmKeys and absent from the record: that is the
         // conditional omission, and it is asserted rather than assumed.
-        failures.AddRange(Differences(
+        failures.AddRange(DeclaredKeys.Differences(
             "empty histograms",
             [],
             [.. RecordContract
@@ -304,7 +304,7 @@ public sealed class ContractShapeTests
         {
             var observations = await PublishAsync(contract, ShapeFlags.None);
 
-            failures.AddRange(Differences(
+            failures.AddRange(DeclaredKeys.Differences(
                 $"{contract.Kind} record root",
                 RecordContract.Skeleton,
                 JsonPaths.TopLevel(observations)));
@@ -322,7 +322,7 @@ public sealed class ContractShapeTests
             // set, so the set the kind publishes and the set its contract declares must be equal in
             // both directions -- a parameter that started being published without being declared, and
             // one that stopped being published, both fail here.
-            failures.AddRange(Differences(
+            failures.AddRange(DeclaredKeys.Differences(
                 $"{contract.Kind} parameters",
                 contract.Parameters,
                 JsonPaths.Under(observations, ArmKeys.Common.Record.Parameters)));
@@ -469,7 +469,7 @@ public sealed class ContractShapeTests
                 .Select(path => $"{contract.Kind} {path}: not a member name {container.Path} may publish"));
         }
 
-        failures.AddRange(Differences($"{contract.Kind} metrics", contract.Metrics.Declared, [.. published.Except(members)]));
+        failures.AddRange(DeclaredKeys.Differences($"{contract.Kind} metrics", contract.Metrics.Declared, [.. published.Except(members)]));
         return failures;
     }
 
@@ -495,20 +495,4 @@ public sealed class ContractShapeTests
         return record;
     }
 
-    private static IEnumerable<string> Differences(string what, IReadOnlyCollection<string> declared, IReadOnlyCollection<string> actual)
-    {
-        var missing = declared.Except(actual).Order(StringComparer.Ordinal).ToArray();
-        var extra = actual.Except(declared).Order(StringComparer.Ordinal).ToArray();
-        if (missing.Length == 0 && extra.Length == 0)
-        {
-            return [];
-        }
-
-        return
-        [
-            $"{what}: {declared.Count} declared path(s), {actual.Count} written",
-            $"  declared but not written: {string.Join(", ", missing)}",
-            $"  written but not declared: {string.Join(", ", extra)}",
-        ];
-    }
 }

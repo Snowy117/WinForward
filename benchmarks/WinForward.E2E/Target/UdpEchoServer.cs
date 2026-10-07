@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
+using WinForward.E2E.Contracts;
 using WinForward.E2E.Contracts.Json;
 using WinForward.E2E.Wire;
 
@@ -58,10 +59,10 @@ internal sealed class UdpEchoServer : IAsyncDisposable
 
     internal void WriteTotals(Utf8JsonWriter writer)
     {
-        writer.WriteNumber("received", _received);
-        writer.WriteNumber("undecodable", _undecodable);
-        writer.WriteNumber("bytes", _bytes);
-        writer.WriteNumber("sendErrors", _sendErrors);
+        writer.WriteNumber(ArmKeys.Ledger.TargetSummary.UdpTotals.Received, _received);
+        writer.WriteNumber(ArmKeys.Ledger.TargetSummary.UdpTotals.Undecodable, _undecodable);
+        writer.WriteNumber(ArmKeys.Ledger.TargetSummary.UdpTotals.Bytes, _bytes);
+        writer.WriteNumber(ArmKeys.Ledger.TargetSummary.UdpTotals.SendErrors, _sendErrors);
     }
 
     internal async ValueTask WriteSummaryAsync(CancellationToken cancellationToken)
@@ -90,23 +91,23 @@ internal sealed class UdpEchoServer : IAsyncDisposable
         await _ledger.WriteAsync(
             writer =>
             {
-                writer.WriteString("type", "udpSummary");
-                writer.WriteNumber("received", _received);
-                writer.WriteNumber("undecodable", _undecodable);
-                writer.WriteNumber("bytes", _bytes);
-                writer.WriteNumber("ticks", Stopwatch.GetTimestamp());
-                writer.WriteStartArray("sources");
+                writer.WriteString(ArmKeys.Common.Record.Type, "udpSummary");
+                writer.WriteNumber(ArmKeys.Ledger.UdpSummary.Received, _received);
+                writer.WriteNumber(ArmKeys.Ledger.UdpSummary.Undecodable, _undecodable);
+                writer.WriteNumber(ArmKeys.Ledger.UdpSummary.Bytes, _bytes);
+                writer.WriteNumber(ArmKeys.Ledger.UdpSummary.Ticks, Stopwatch.GetTimestamp());
+                writer.WriteStartArray(ArmKeys.Ledger.UdpSummary.Sources);
                 foreach (var pair in ordered)
                 {
                     writer.WriteStartObject();
-                    writer.WriteString("address", SourceCensus.ToAddress(pair.Key).ToString());
-                    writer.WriteNumber("port", pair.Key.Port);
-                    writer.WriteNumber("datagrams", pair.Value);
+                    writer.WriteString(ArmKeys.Ledger.UdpSummary.SourceEntry.Address, SourceCensus.ToAddress(pair.Key).ToString());
+                    writer.WriteNumber(ArmKeys.Ledger.UdpSummary.SourceEntry.Port, pair.Key.Port);
+                    writer.WriteNumber(ArmKeys.Ledger.UdpSummary.SourceEntry.Datagrams, pair.Value);
                     writer.WriteEndObject();
                 }
 
                 writer.WriteEndArray();
-                writer.WriteNumber("sourceOverflow", overflow);
+                writer.WriteNumber(ArmKeys.Ledger.UdpSummary.SourceOverflow, overflow);
             },
             cancellationToken).ConfigureAwait(false);
     }

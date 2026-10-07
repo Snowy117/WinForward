@@ -58,4 +58,27 @@ internal static class DeclaredKeys
     internal static int NullablePropertyCount(
         [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type metricsType) =>
         metricsType.GetProperties().Count(static property => Nullable.GetUnderlyingType(property.PropertyType) is not null);
+
+    /// <summary>
+    /// The declared paths against the published ones, in both directions, as the lines a failing
+    /// assertion prints: a path that is declared but never written and a path that is written but
+    /// never declared are different defects, so they are reported apart rather than as one set
+    /// difference.
+    /// </summary>
+    internal static IEnumerable<string> Differences(string what, IReadOnlyCollection<string> declared, IReadOnlyCollection<string> actual)
+    {
+        var missing = declared.Except(actual).Order(StringComparer.Ordinal).ToArray();
+        var extra = actual.Except(declared).Order(StringComparer.Ordinal).ToArray();
+        if (missing.Length == 0 && extra.Length == 0)
+        {
+            return [];
+        }
+
+        return
+        [
+            $"{what}: {declared.Count} declared path(s), {actual.Count} written",
+            $"  declared but not written: {string.Join(", ", missing)}",
+            $"  written but not declared: {string.Join(", ", extra)}",
+        ];
+    }
 }

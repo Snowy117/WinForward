@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using WinForward.E2E.Cli;
+using WinForward.E2E.Contracts;
 using WinForward.E2E.Contracts.Json;
 
 namespace WinForward.E2E.Target;
@@ -50,8 +51,8 @@ internal static class TargetRunner
     internal static Action<Utf8JsonWriter> WriteLedgerEnvelope(string label) =>
         writer =>
         {
-            writer.WriteString("utc", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
-            writer.WriteString("label", label);
+            writer.WriteString(ArmKeys.Ledger.Envelope.Utc, DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+            writer.WriteString(ArmKeys.Ledger.Envelope.Label, label);
         };
 
     private static async ValueTask AnnounceAsync(TargetOptions options, IPAddress bindAddress, bool hasDnsAlt)
@@ -67,7 +68,13 @@ internal static class TargetRunner
         }
     }
 
-    private static async ValueTask WriteSummariesAsync(
+    /// <summary>
+    /// Writes the run's four summaries in the order a reader expects them, the last of them naming the
+    /// ledger's own failure count. Internal rather than private because every record of the family is
+    /// published through this composition: the shape test drives it whole instead of rebuilding the
+    /// record, which is the only way the conditional <c>dnsAlt</c> container is covered downstream.
+    /// </summary>
+    internal static async ValueTask WriteSummariesAsync(
         JsonlSink ledger,
         TcpTargetServer tcp,
         UdpEchoServer udp,
@@ -91,27 +98,27 @@ internal static class TargetRunner
         await WriteSummaryAsync(ledger, "targetSummary", () => ledger.WriteAsync(
             writer =>
             {
-                writer.WriteString("type", "targetSummary");
-                writer.WriteNumber("startedTicks", startedTicks);
-                writer.WriteNumber("endedTicks", endedTicks);
-                writer.WriteNumber("ledgerWriteErrors", ledger.WriteErrors);
-                writer.WritePropertyName("tcp");
+                writer.WriteString(ArmKeys.Common.Record.Type, "targetSummary");
+                writer.WriteNumber(ArmKeys.Ledger.TargetSummary.StartedTicks, startedTicks);
+                writer.WriteNumber(ArmKeys.Ledger.TargetSummary.EndedTicks, endedTicks);
+                writer.WriteNumber(ArmKeys.Ledger.TargetSummary.LedgerWriteErrors, ledger.WriteErrors);
+                writer.WritePropertyName(ArmKeys.Ledger.TargetSummary.Tcp);
                 writer.WriteStartObject();
-                tcp.WriteTotals(writer);
+                tcp.WriteTotals(writer, TcpTotalsKeys.Target);
                 writer.WriteEndObject();
-                writer.WritePropertyName("udp");
+                writer.WritePropertyName(ArmKeys.Ledger.TargetSummary.Udp);
                 writer.WriteStartObject();
                 udp.WriteTotals(writer);
                 writer.WriteEndObject();
-                writer.WritePropertyName("dns");
+                writer.WritePropertyName(ArmKeys.Ledger.TargetSummary.Dns);
                 writer.WriteStartObject();
-                dns.WriteTotals(writer);
+                dns.WriteTotals(writer, DnsTotalsKeys.Target);
                 writer.WriteEndObject();
                 if (dnsAlt is not null)
                 {
-                    writer.WritePropertyName("dnsAlt");
+                    writer.WritePropertyName(ArmKeys.Ledger.TargetSummary.DnsAlt);
                     writer.WriteStartObject();
-                    dnsAlt.WriteTotals(writer);
+                    dnsAlt.WriteTotals(writer, DnsTotalsKeys.Target);
                     writer.WriteEndObject();
                 }
             },

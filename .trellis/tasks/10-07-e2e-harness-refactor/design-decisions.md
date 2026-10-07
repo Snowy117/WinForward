@@ -689,6 +689,17 @@ internal interface ILanePolicy
 5. **`Settle` 必须排空整队**：引擎的 `SettleBurstLimit=8` 用尽仍未 `IsDrained` 时会返回；
    策略的 `Settle` 契约是"尽可能排空（循环到队列空或预算用尽）"，不能只结算一条。接线表里写明。
 
+### D18.7 E2-c check 后的边界登记（不阻塞，登记为已知边界）
+
+1. **同拼写跨层级常量互换在运行期不可判**（M4）：`Ledger.DnsTotals` 的 12 个拼写与 `Ledger.DnsSummary` 逐字相同，
+   把 `DnsTotalsKeys.Target` 换成 `DnsSummary` 常量后 6 条形状测试仍全绿。**裁定：接受现状**
+   （D14.17 的字面口径就是"每层各声明一份"；拼写不同的层级错位由 F1/F2 双向判；两层键集一旦分叉立刻红；
+   风险面只有两处 20 行的键集初始化器）。登记为"可判性边界"，不引入"块×前缀"表。
+2. **字面量 gate 的正则不认字符串字面量**（继承自 HEAD）：把 `["port"]` 写进 raw string 文本会被误报为字面量键
+   （只会多报、不会漏报）。可选硬化（匹配前擦除字符串字面量体）留 E5/后续。
+3. **gate 的 `File.Exists` 自检**只能抓"列名丢失/改名"，抓不到"**新增** Target 文件里写字面量键"——
+   新 target writer 必须手工进 `s_writerFiles`（已写进 spec 的 Testing Requirements）。
+
 ---
 
 ## D17. 零宽带宽与测量统计的裁定（B2b check 后）

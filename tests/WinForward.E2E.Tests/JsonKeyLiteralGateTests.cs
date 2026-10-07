@@ -17,16 +17,21 @@ namespace WinForward.E2E.Tests;
 /// (<c>run.json</c>), and the resource sampler's two files,
 /// <c>Client/ResourceSampler.cs</c> (the <c>sample</c> record) and
 /// <c>Client/ResourceSampleWriter.cs</c> (the counters, the process census and <c>samplerError</c>).
-/// <c>Target/</c> publishes its own key families to its own ledger and belongs to a later batch
+/// The target's ledger writers are scanned too -- <c>Target/TcpTargetServer.cs</c>,
+/// <c>Target/UdpEchoServer.cs</c>, <c>Target/DnsServer.cs</c> and <c>Target/TargetRunner.cs</c> -- and
+/// the other files of <c>Target/</c> publish no key at all, which is why they are not listed
 /// (D14.16/D12).</para>
 /// <para><b>What counts as a literal.</b> A string literal in a key position, which is either the
 /// first argument of one of the <c>Utf8JsonWriter</c> members that take a property name or the index
 /// of a dictionary being written under a key. That is deliberately narrower than "the name appears in
 /// the file": the same spelling is also a JSON <em>value</em> in these very files (the reliability arm
-/// publishes <c>observed: "clean"</c>, and <c>clean</c> is also a <c>byMode</c> member name), and a
-/// value is not a key. A console message that happens to spell a key name
-/// (<c>Console.WriteLine("message")</c>) is not a key either, so the property-name members are named
-/// one by one instead of being matched as <c>Write*</c>.</para>
+/// publishes <c>observed: "clean"</c>, and <c>clean</c> is also a <c>byMode</c> member name; the target
+/// names its record kinds <c>tcpSummary</c>/<c>targetSummary</c> and a connection's mode <c>unknown</c>
+/// the same way), and a value is not a key. A console message or a file path that happens to spell a
+/// key name (<c>Console.WriteLine("… listening on …")</c>, <c>"target-ledger.jsonl"</c>) is not a key
+/// either, so the property-name members are named one by one instead of being matched as
+/// <c>Write*</c>; <see cref="TheGateSeesAKeyLiteralAndNothingElse"/> is the control that holds both
+/// halves of that statement.</para>
 /// <para><b>How it is scanned.</b> Each file is read as one text rather than line by line, so a call
 /// the formatter wrapped still has a key position on it: a literal in the argument list of a
 /// <c>Write*</c> call is a key wherever the line breaks fall.</para>
@@ -36,16 +41,23 @@ namespace WinForward.E2E.Tests;
 /// </remarks>
 public sealed partial class JsonKeyLiteralGateTests
 {
-    private const string Client = "benchmarks/WinForward.E2E/Client";
+    private const string Harness = "benchmarks/WinForward.E2E";
 
-    /// <summary>The record writers beside the arm sources, each one named so a missing file fails the gate.</summary>
+    /// <summary>
+    /// The record writers of both binaries, harness-relative, each one named so a missing file fails
+    /// the gate.
+    /// </summary>
     private static readonly string[] s_writerFiles =
     [
-        "ClientRunner.cs",
-        "ArmRecordWriter.cs",
-        "RunFileWriter.cs",
-        "ResourceSampler.cs",
-        "ResourceSampleWriter.cs",
+        "Client/ClientRunner.cs",
+        "Client/ArmRecordWriter.cs",
+        "Client/RunFileWriter.cs",
+        "Client/ResourceSampler.cs",
+        "Client/ResourceSampleWriter.cs",
+        "Target/TcpTargetServer.cs",
+        "Target/UdpEchoServer.cs",
+        "Target/DnsServer.cs",
+        "Target/TargetRunner.cs",
     ];
 
     /// <summary>The first argument of a property-name <c>Utf8JsonWriter.Write*</c> call.</summary>
@@ -91,11 +103,22 @@ public sealed partial class JsonKeyLiteralGateTests
             .. DeclaredKeys.Under(typeof(ArmKeys.Sample.Counters), string.Empty),
             .. DeclaredKeys.Under(typeof(ArmKeys.Sample.ProcessEntry), string.Empty),
             .. DeclaredKeys.Under(typeof(ArmKeys.Sample.SamplerError), string.Empty),
+            .. DeclaredKeys.Under(typeof(ArmKeys.Ledger.Envelope), string.Empty),
+            .. DeclaredKeys.Under(typeof(ArmKeys.Ledger.TcpRecord), string.Empty),
+            .. DeclaredKeys.Under(typeof(ArmKeys.Ledger.TcpSummary), string.Empty),
+            .. DeclaredKeys.Under(typeof(ArmKeys.Ledger.UdpSummary), string.Empty),
+            .. DeclaredKeys.Under(typeof(ArmKeys.Ledger.UdpSummary.SourceEntry), string.Empty),
+            .. DeclaredKeys.Under(typeof(ArmKeys.Ledger.DnsSummary), string.Empty),
+            .. DeclaredKeys.Under(typeof(ArmKeys.Ledger.TargetSummary), string.Empty),
+            .. DeclaredKeys.Under(typeof(ArmKeys.Ledger.TargetSummary.TcpTotals), string.Empty),
+            .. DeclaredKeys.Under(typeof(ArmKeys.Ledger.TargetSummary.UdpTotals), string.Empty),
+            .. DeclaredKeys.Under(typeof(ArmKeys.Ledger.TargetSummary.DnsTotals), string.Empty),
+            .. DeclaredKeys.Under(typeof(ArmKeys.Ledger.VerdictNames), string.Empty),
         ],
         StringComparer.Ordinal);
 
     [Fact]
-    public void NoClientWriterSpellsAKnownKeyAsALiteral()
+    public void NoWriterSpellsAKnownKeyAsALiteral()
     {
         var root = RepoRoot();
         var files = GatedFiles(root);
@@ -111,6 +134,35 @@ public sealed partial class JsonKeyLiteralGateTests
         }
 
         Assert.True(failures.Count == 0, string.Join('\n', failures));
+    }
+
+    /// <summary>
+    /// The gate's own control, in both directions: a literal in a key position has to be seen, and the
+    /// literals these writers are full of -- a log line, a ledger path, a published value -- have to be
+    /// left alone. A scanner that quietly stopped matching would otherwise look exactly like a clean
+    /// tree, which is the one failure mode a source-scanning gate cannot detect by scanning.
+    /// </summary>
+    [Fact]
+    public void TheGateSeesAKeyLiteralAndNothingElse()
+    {
+        const string snippet = """
+            writer.WriteNumber("connections", Interlocked.Read(ref _connectionCount));
+            writer.WriteString(ArmKeys.Ledger.TcpRecord.Mode, "unknown");
+            await TargetLog.ReportAsync(string.Create(
+                CultureInfo.InvariantCulture,
+                $"e2e target: the udpSummary record could not be written ({ledger.WriteErrors} ledger write error(s) so far)"));
+            await Console.Out.WriteLineAsync($"e2e target listening on tcp {address}:{port}, ledger {Path.GetFullPath(options.LedgerPath)}");
+            var ledgerPath = "target-ledger.jsonl";
+            census[key] = datagrams["received"];
+            """;
+
+        var lines = snippet.Split('\n');
+        var literals = KeyLiteralsIn(snippet, lines);
+
+        // WriteName's matches come first, then IndexerName's: the key of a dictionary being written is
+        // a property name too, while a value, a message and a file path are not key positions at all.
+        Assert.Equal(["connections", "received"], literals.Select(literal => literal.Key));
+        Assert.Contains(literals[0].Key, s_knownKeys);
     }
 
     /// <summary>
@@ -132,30 +184,35 @@ public sealed partial class JsonKeyLiteralGateTests
     private static List<string> GatedFiles(string root)
     {
         var arms = Directory
-            .EnumerateFiles(Path.Combine(root, Client, "Arms"), "*.cs", SearchOption.AllDirectories)
+            .EnumerateFiles(Path.Combine(root, Harness, "Client", "Arms"), "*.cs", SearchOption.AllDirectories)
             .Order(StringComparer.Ordinal)
             .ToList();
         var writers = new List<string>();
         foreach (var name in s_writerFiles)
         {
-            var writer = Path.Combine(root, Client, name);
+            var writer = Path.Combine(root, Harness, name);
             Assert.True(File.Exists(writer), $"'{writer}' does not exist");
             writers.Add(writer);
         }
 
-        Assert.True(arms.Count > 0, $"no arm source was found under {Path.Combine(root, Client, "Arms")}");
+        Assert.True(arms.Count > 0, $"no arm source was found under {Path.Combine(root, Harness, "Client", "Arms")}");
         return [.. arms, .. writers];
     }
 
-    /// <summary>
-    /// One string literal in a key position, with the line it was found on. The file is scanned as one
-    /// text, so a call whose argument list is wrapped still yields its key; a literal on a line that is
-    /// a comment is skipped, because prose about a key is not a key.
-    /// </summary>
+    /// <summary>The literals in key position of one file, read from disk.</summary>
     private static List<(string Key, int Line)> KeyLiteralsIn(string file)
     {
         var lines = File.ReadAllLines(file);
-        var text = string.Join('\n', lines);
+        return KeyLiteralsIn(string.Join('\n', lines), lines);
+    }
+
+    /// <summary>
+    /// One string literal in a key position, with the line it was found on. The text is scanned as one
+    /// piece, so a call whose argument list is wrapped still yields its key; a literal on a line that is
+    /// a comment is skipped, because prose about a key is not a key.
+    /// </summary>
+    private static List<(string Key, int Line)> KeyLiteralsIn(string text, string[] lines)
+    {
         var literals = new List<(string Key, int Line)>();
         foreach (var regex in new[] { WriteName(), IndexerName() })
         {

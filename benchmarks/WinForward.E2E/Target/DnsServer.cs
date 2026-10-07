@@ -1,11 +1,106 @@
 using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text.Json;
+using WinForward.E2E.Contracts;
 using WinForward.E2E.Contracts.Json;
 using WinForward.E2E.Wire;
 
 namespace WinForward.E2E.Target;
+
+/// <summary>
+/// The key names one dns totals block is written with, in write order. The same counters reach the
+/// ledger at two levels -- a <c>dnsSummary</c> record's own root and the <c>targetSummary</c> containers
+/// <c>dns</c> and <c>dnsAlt</c> -- and a leaf written at another level is another constant (D14.17), so
+/// the writer takes the level's set instead of spelling a name at the call site. Both containers of the
+/// target level are the same depth and the same writer, so they share <see cref="Target"/>.
+/// </summary>
+[StructLayout(LayoutKind.Auto)]
+internal readonly struct DnsTotalsKeys
+{
+    private DnsTotalsKeys(
+        string port,
+        string udpQueries,
+        string udpAnswers,
+        string udpEmptyAnswers,
+        string udpMalformed,
+        string udpSendErrors,
+        string tcpQueries,
+        string tcpAnswers,
+        string tcpEmptyAnswers,
+        string tcpMalformed,
+        string tcpConnections,
+        string tcpAborted)
+    {
+        Port = port;
+        UdpQueries = udpQueries;
+        UdpAnswers = udpAnswers;
+        UdpEmptyAnswers = udpEmptyAnswers;
+        UdpMalformed = udpMalformed;
+        UdpSendErrors = udpSendErrors;
+        TcpQueries = tcpQueries;
+        TcpAnswers = tcpAnswers;
+        TcpEmptyAnswers = tcpEmptyAnswers;
+        TcpMalformed = tcpMalformed;
+        TcpConnections = tcpConnections;
+        TcpAborted = tcpAborted;
+    }
+
+    /// <summary>The key set of a <c>dnsSummary</c> record's own totals.</summary>
+    internal static DnsTotalsKeys Summary { get; } = new(
+        ArmKeys.Ledger.DnsSummary.Port,
+        ArmKeys.Ledger.DnsSummary.UdpQueries,
+        ArmKeys.Ledger.DnsSummary.UdpAnswers,
+        ArmKeys.Ledger.DnsSummary.UdpEmptyAnswers,
+        ArmKeys.Ledger.DnsSummary.UdpMalformed,
+        ArmKeys.Ledger.DnsSummary.UdpSendErrors,
+        ArmKeys.Ledger.DnsSummary.TcpQueries,
+        ArmKeys.Ledger.DnsSummary.TcpAnswers,
+        ArmKeys.Ledger.DnsSummary.TcpEmptyAnswers,
+        ArmKeys.Ledger.DnsSummary.TcpMalformed,
+        ArmKeys.Ledger.DnsSummary.TcpConnections,
+        ArmKeys.Ledger.DnsSummary.TcpAborted);
+
+    /// <summary>The key set of the same block one level down, under <c>targetSummary/dns</c>.</summary>
+    internal static DnsTotalsKeys Target { get; } = new(
+        ArmKeys.Ledger.TargetSummary.DnsTotals.Port,
+        ArmKeys.Ledger.TargetSummary.DnsTotals.UdpQueries,
+        ArmKeys.Ledger.TargetSummary.DnsTotals.UdpAnswers,
+        ArmKeys.Ledger.TargetSummary.DnsTotals.UdpEmptyAnswers,
+        ArmKeys.Ledger.TargetSummary.DnsTotals.UdpMalformed,
+        ArmKeys.Ledger.TargetSummary.DnsTotals.UdpSendErrors,
+        ArmKeys.Ledger.TargetSummary.DnsTotals.TcpQueries,
+        ArmKeys.Ledger.TargetSummary.DnsTotals.TcpAnswers,
+        ArmKeys.Ledger.TargetSummary.DnsTotals.TcpEmptyAnswers,
+        ArmKeys.Ledger.TargetSummary.DnsTotals.TcpMalformed,
+        ArmKeys.Ledger.TargetSummary.DnsTotals.TcpConnections,
+        ArmKeys.Ledger.TargetSummary.DnsTotals.TcpAborted);
+
+    internal string Port { get; }
+
+    internal string UdpQueries { get; }
+
+    internal string UdpAnswers { get; }
+
+    internal string UdpEmptyAnswers { get; }
+
+    internal string UdpMalformed { get; }
+
+    internal string UdpSendErrors { get; }
+
+    internal string TcpQueries { get; }
+
+    internal string TcpAnswers { get; }
+
+    internal string TcpEmptyAnswers { get; }
+
+    internal string TcpMalformed { get; }
+
+    internal string TcpConnections { get; }
+
+    internal string TcpAborted { get; }
+}
 
 internal sealed class DnsServer : IAsyncDisposable
 {
@@ -60,20 +155,20 @@ internal sealed class DnsServer : IAsyncDisposable
         await _acceptLoop.DrainAsync().ConfigureAwait(false);
     }
 
-    internal void WriteTotals(Utf8JsonWriter writer)
+    internal void WriteTotals(Utf8JsonWriter writer, DnsTotalsKeys keys)
     {
-        writer.WriteNumber("port", _port);
-        writer.WriteNumber("udpQueries", _udpQueries);
-        writer.WriteNumber("udpAnswers", _udpAnswers);
-        writer.WriteNumber("udpEmptyAnswers", _udpEmpty);
-        writer.WriteNumber("udpMalformed", _udpMalformed);
-        writer.WriteNumber("udpSendErrors", _udpSendErrors);
-        writer.WriteNumber("tcpQueries", _tcpQueries);
-        writer.WriteNumber("tcpAnswers", _tcpAnswers);
-        writer.WriteNumber("tcpEmptyAnswers", _tcpEmpty);
-        writer.WriteNumber("tcpMalformed", _tcpMalformed);
-        writer.WriteNumber("tcpConnections", _tcpConnectionsAccepted);
-        writer.WriteNumber("tcpAborted", _tcpAborted);
+        writer.WriteNumber(keys.Port, _port);
+        writer.WriteNumber(keys.UdpQueries, _udpQueries);
+        writer.WriteNumber(keys.UdpAnswers, _udpAnswers);
+        writer.WriteNumber(keys.UdpEmptyAnswers, _udpEmpty);
+        writer.WriteNumber(keys.UdpMalformed, _udpMalformed);
+        writer.WriteNumber(keys.UdpSendErrors, _udpSendErrors);
+        writer.WriteNumber(keys.TcpQueries, _tcpQueries);
+        writer.WriteNumber(keys.TcpAnswers, _tcpAnswers);
+        writer.WriteNumber(keys.TcpEmptyAnswers, _tcpEmpty);
+        writer.WriteNumber(keys.TcpMalformed, _tcpMalformed);
+        writer.WriteNumber(keys.TcpConnections, _tcpConnectionsAccepted);
+        writer.WriteNumber(keys.TcpAborted, _tcpAborted);
     }
 
     internal async ValueTask WriteSummaryAsync(CancellationToken cancellationToken)
@@ -81,8 +176,8 @@ internal sealed class DnsServer : IAsyncDisposable
         await _ledger.WriteAsync(
             writer =>
             {
-                writer.WriteString("type", "dnsSummary");
-                WriteTotals(writer);
+                writer.WriteString(ArmKeys.Common.Record.Type, "dnsSummary");
+                WriteTotals(writer, DnsTotalsKeys.Summary);
             },
             cancellationToken).ConfigureAwait(false);
     }

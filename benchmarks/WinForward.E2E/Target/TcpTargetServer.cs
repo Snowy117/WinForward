@@ -2,11 +2,53 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text.Json;
+using WinForward.E2E.Contracts;
 using WinForward.E2E.Contracts.Json;
 using WinForward.E2E.Wire;
 
 namespace WinForward.E2E.Target;
+
+/// <summary>
+/// The key names one tcp totals block is written with, in write order. The same counters reach the
+/// ledger at two levels -- the <c>tcpSummary</c> record's own root and <c>targetSummary/tcp</c> -- and
+/// a leaf written at another level is another constant (D14.17), so the writer takes the level's set
+/// instead of spelling a name at the call site.
+/// </summary>
+[StructLayout(LayoutKind.Auto)]
+internal readonly struct TcpTotalsKeys
+{
+    private TcpTotalsKeys(string connections, string bytesEchoed, string protocolErrors, string verdicts)
+    {
+        Connections = connections;
+        BytesEchoed = bytesEchoed;
+        ProtocolErrors = protocolErrors;
+        Verdicts = verdicts;
+    }
+
+    /// <summary>The key set of the <c>tcpSummary</c> record's own totals.</summary>
+    internal static TcpTotalsKeys Summary { get; } = new(
+        ArmKeys.Ledger.TcpSummary.Connections,
+        ArmKeys.Ledger.TcpSummary.BytesEchoed,
+        ArmKeys.Ledger.TcpSummary.ProtocolErrors,
+        ArmKeys.Ledger.TcpSummary.Verdicts);
+
+    /// <summary>The key set of the same block one level down, under <c>targetSummary/tcp</c>.</summary>
+    internal static TcpTotalsKeys Target { get; } = new(
+        ArmKeys.Ledger.TargetSummary.TcpTotals.Connections,
+        ArmKeys.Ledger.TargetSummary.TcpTotals.BytesEchoed,
+        ArmKeys.Ledger.TargetSummary.TcpTotals.ProtocolErrors,
+        ArmKeys.Ledger.TargetSummary.TcpTotals.Verdicts);
+
+    internal string Connections { get; }
+
+    internal string BytesEchoed { get; }
+
+    internal string ProtocolErrors { get; }
+
+    internal string Verdicts { get; }
+}
 
 internal sealed class TcpTargetServer : IAsyncDisposable
 {
@@ -45,12 +87,12 @@ internal sealed class TcpTargetServer : IAsyncDisposable
         return ValueTask.CompletedTask;
     }
 
-    internal void WriteTotals(Utf8JsonWriter writer)
+    internal void WriteTotals(Utf8JsonWriter writer, TcpTotalsKeys keys)
     {
-        writer.WriteNumber("connections", Interlocked.Read(ref _connectionCount));
-        writer.WriteNumber("bytesEchoed", Interlocked.Read(ref _bytesEchoed));
-        writer.WriteNumber("protocolErrors", Interlocked.Read(ref _protocolErrors));
-        writer.WriteStartObject("verdicts");
+        writer.WriteNumber(keys.Connections, Interlocked.Read(ref _connectionCount));
+        writer.WriteNumber(keys.BytesEchoed, Interlocked.Read(ref _bytesEchoed));
+        writer.WriteNumber(keys.ProtocolErrors, Interlocked.Read(ref _protocolErrors));
+        writer.WriteStartObject(keys.Verdicts);
         foreach (var verdict in Enum.GetValues<TcpVerdict>())
         {
             writer.WriteNumber(TcpCommand.Name(verdict), Volatile.Read(ref _verdicts[(int)verdict]));
@@ -64,8 +106,8 @@ internal sealed class TcpTargetServer : IAsyncDisposable
         await _ledger.WriteAsync(
             writer =>
             {
-                writer.WriteString("type", "tcpSummary");
-                WriteTotals(writer);
+                writer.WriteString(ArmKeys.Common.Record.Type, "tcpSummary");
+                WriteTotals(writer, TcpTotalsKeys.Summary);
             },
             cancellationToken).ConfigureAwait(false);
     }
@@ -131,15 +173,15 @@ internal sealed class TcpTargetServer : IAsyncDisposable
         await _ledger.WriteAsync(
             writer =>
             {
-                writer.WriteString("type", "tcp");
-                writer.WriteNumber("connectionId", connectionId);
-                writer.WriteString("mode", modeText);
-                writer.WriteNumber("expectedBytes", command.ExpectedBytes);
-                writer.WriteNumber("bytesEchoed", bytesEchoed);
-                writer.WriteString("verdict", verdictText);
-                writer.WriteString("peer", peer);
-                writer.WriteNumber("startedTicks", startedTicks);
-                writer.WriteNumber("endedTicks", endedTicks);
+                writer.WriteString(ArmKeys.Common.Record.Type, "tcp");
+                writer.WriteNumber(ArmKeys.Ledger.TcpRecord.ConnectionId, connectionId);
+                writer.WriteString(ArmKeys.Ledger.TcpRecord.Mode, modeText);
+                writer.WriteNumber(ArmKeys.Ledger.TcpRecord.ExpectedBytes, command.ExpectedBytes);
+                writer.WriteNumber(ArmKeys.Ledger.TcpRecord.BytesEchoed, bytesEchoed);
+                writer.WriteString(ArmKeys.Ledger.TcpRecord.Verdict, verdictText);
+                writer.WriteString(ArmKeys.Ledger.TcpRecord.Peer, peer);
+                writer.WriteNumber(ArmKeys.Ledger.TcpRecord.StartedTicks, startedTicks);
+                writer.WriteNumber(ArmKeys.Ledger.TcpRecord.EndedTicks, endedTicks);
             },
             CancellationToken.None).ConfigureAwait(false);
     }
