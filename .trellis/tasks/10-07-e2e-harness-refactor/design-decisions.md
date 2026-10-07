@@ -230,7 +230,7 @@ internal static class LaneEngine<TTransport> where TTransport : class, ILaneTran
 - **并发契约（D4）与接缝（D3）的决定提前到 E2 开工前**，E2 的接收侧一次按定稿形状写；
   `implement.md` 中"接缝在 E3 还会再改一次接口"那段（E3 步骤 1 的引言）作废。
 - E2 内部顺序：**2a 接缝（engine+两个 transport+ReplyClassifier+5 处 ConnectAsync+零散修复）
-  → 2b 纯搬移拆分 → 2c 解析器合一**；`design.md` §7 的 P2→P4 措辞以 E2 计划为准。
+  → 2b 纯搬移拆分 → 2c 账本键族 → 2d 解析器合一**；`design.md` §7 的 P2→P4 措辞以 E2 计划为准。
 - E1 拆**三个** impl→check 批次：**E1-A**（基线 + 测试工程 + Tier 0 止血）、
   **E1-B1**（Contracts 骨架 + `JsonlSink` + 盘点/改名表 + IDLE/THRU 走生产 typed 路径）、
   **E1-B2**（其余 6 臂 + `ControlArm` + `ClientRunner` + 形状/字面量 gate）。判据见 E1 计划。

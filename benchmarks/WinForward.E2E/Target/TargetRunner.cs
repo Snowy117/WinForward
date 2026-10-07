@@ -152,7 +152,8 @@ internal static class TargetRunner
               --label <name>       Run or row identity copied into every ledger record (default empty)
               --ledger <path>      JSONL ledger output path (default target-ledger.jsonl)
 
-            Runs until Ctrl+C or SIGTERM. Exits 0 on a clean shutdown, 2 on a usage error.
+            Runs until Ctrl+C or SIGTERM. Exits 0 on a clean shutdown, 1 on a runtime error, 2 on a
+            usage error.
             """);
     }
 }

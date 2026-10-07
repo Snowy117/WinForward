@@ -8,7 +8,12 @@ namespace WinForward.E2E;
 
 internal static class Program
 {
-    private static async Task<int> Main(string[] args)
+    /// <summary>
+    /// The entry point, and the harness's whole user-visible surface: the role, the help of either
+    /// verb, and the exit code. Internal rather than private so the snapshot test can replay it and
+    /// compare what a user sees instead of a re-derivation of it.
+    /// </summary>
+    internal static async Task<int> Main(string[] args)
     {
         if (args.Length == 0)
         {

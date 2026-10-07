@@ -1,0 +1,1 @@
+e2e target: the dns port must differ from the tcp and udp ports: --dns-port 40010 collides with --tcp-port 40010

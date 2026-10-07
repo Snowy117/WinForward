@@ -1,0 +1,297 @@
+[
+  {
+    "name": "client-help",
+    "stem": "00-client-help",
+    "argv": [
+      "client",
+      "--help"
+    ]
+  },
+  {
+    "name": "no-arguments",
+    "stem": "01-no-arguments",
+    "argv": []
+  },
+  {
+    "name": "role-help",
+    "stem": "02-role-help",
+    "argv": [
+      "--help"
+    ]
+  },
+  {
+    "name": "unknown-role",
+    "stem": "03-unknown-role",
+    "argv": [
+      "bogus"
+    ]
+  },
+  {
+    "name": "target-help",
+    "stem": "04-target-help",
+    "argv": [
+      "target",
+      "--help"
+    ]
+  },
+  {
+    "name": "target-unknown-option",
+    "stem": "05-target-unknown-option",
+    "argv": [
+      "target",
+      "--nope"
+    ]
+  },
+  {
+    "name": "target-missing-value",
+    "stem": "06-target-missing-value",
+    "argv": [
+      "target",
+      "--tcp-port"
+    ]
+  },
+  {
+    "name": "target-port-not-a-number",
+    "stem": "07-target-port-not-a-number",
+    "argv": [
+      "target",
+      "--tcp-port",
+      "abc"
+    ]
+  },
+  {
+    "name": "target-port-out-of-range",
+    "stem": "08-target-port-out-of-range",
+    "argv": [
+      "target",
+      "--tcp-port",
+      "65536",
+      "--dns-port",
+      "53"
+    ]
+  },
+  {
+    "name": "target-dns-collides-with-tcp",
+    "stem": "09-target-dns-collides-with-tcp",
+    "argv": [
+      "target",
+      "--tcp-port",
+      "40010",
+      "--dns-port",
+      "40010"
+    ]
+  },
+  {
+    "name": "target-dns-collides-with-udp",
+    "stem": "10-target-dns-collides-with-udp",
+    "argv": [
+      "target",
+      "--udp-port",
+      "40010",
+      "--dns-port",
+      "40010"
+    ]
+  },
+  {
+    "name": "target-dns-alt-collides",
+    "stem": "11-target-dns-alt-collides",
+    "argv": [
+      "target",
+      "--dns-alt-port",
+      "30010"
+    ]
+  },
+  {
+    "name": "target-bind-not-an-ip",
+    "stem": "12-target-bind-not-an-ip",
+    "argv": [
+      "target",
+      "--bind",
+      "localhost"
+    ]
+  },
+  {
+    "name": "client-unknown-option",
+    "stem": "13-client-unknown-option",
+    "argv": [
+      "client",
+      "--target",
+      "127.0.0.1",
+      "--out",
+      ".cli-snapshot-out",
+      "--nope"
+    ]
+  },
+  {
+    "name": "client-missing-value",
+    "stem": "14-client-missing-value",
+    "argv": [
+      "client",
+      "--target",
+      "127.0.0.1",
+      "--out",
+      ".cli-snapshot-out",
+      "--plan"
+    ]
+  },
+  {
+    "name": "client-empty-plan-inline",
+    "stem": "15-client-empty-plan-inline",
+    "argv": [
+      "client",
+      "--target",
+      "127.0.0.1",
+      "--out",
+      ".cli-snapshot-out",
+      "--plan="
+    ]
+  },
+  {
+    "name": "client-empty-plan-separate",
+    "stem": "16-client-empty-plan-separate",
+    "argv": [
+      "client",
+      "--target",
+      "127.0.0.1",
+      "--out",
+      ".cli-snapshot-out",
+      "--plan",
+      ""
+    ]
+  },
+  {
+    "name": "client-empty-sampler-process",
+    "stem": "17-client-empty-sampler-process",
+    "argv": [
+      "client",
+      "--target",
+      "127.0.0.1",
+      "--out",
+      ".cli-snapshot-out",
+      "--sampler-process="
+    ]
+  },
+  {
+    "name": "client-port-not-a-number",
+    "stem": "18-client-port-not-a-number",
+    "argv": [
+      "client",
+      "--target",
+      "127.0.0.1",
+      "--out",
+      ".cli-snapshot-out",
+      "--tcp-port",
+      "abc"
+    ]
+  },
+  {
+    "name": "client-port-out-of-range",
+    "stem": "19-client-port-out-of-range",
+    "argv": [
+      "client",
+      "--target",
+      "127.0.0.1",
+      "--out",
+      ".cli-snapshot-out",
+      "--tcp-port",
+      "65536"
+    ]
+  },
+  {
+    "name": "client-leading-dash-value",
+    "stem": "20-client-leading-dash-value",
+    "argv": [
+      "client",
+      "--target",
+      "127.0.0.1",
+      "--out",
+      ".cli-snapshot-out",
+      "--label",
+      "--out",
+      "x"
+    ]
+  },
+  {
+    "name": "client-target-required",
+    "stem": "21-client-target-required",
+    "argv": [
+      "client",
+      "--out",
+      ".cli-snapshot-out"
+    ]
+  },
+  {
+    "name": "client-out-required",
+    "stem": "22-client-out-required",
+    "argv": [
+      "client",
+      "--target",
+      "127.0.0.1"
+    ]
+  },
+  {
+    "name": "client-plan-out-of-range",
+    "stem": "23-client-plan-out-of-range",
+    "argv": [
+      "client",
+      "--target",
+      "127.0.0.1",
+      "--out",
+      ".cli-snapshot-out",
+      "--plan",
+      "tests/WinForward.E2E.Tests/Fixtures/plans/beyond-int-window.json"
+    ]
+  },
+  {
+    "name": "client-plan-unknown-key",
+    "stem": "24-client-plan-unknown-key",
+    "argv": [
+      "client",
+      "--target",
+      "127.0.0.1",
+      "--out",
+      ".cli-snapshot-out",
+      "--plan",
+      "tests/WinForward.E2E.Tests/Fixtures/plans/unknown-key.json"
+    ]
+  },
+  {
+    "name": "client-plan-fractional-value",
+    "stem": "25-client-plan-fractional-value",
+    "argv": [
+      "client",
+      "--target",
+      "127.0.0.1",
+      "--out",
+      ".cli-snapshot-out",
+      "--plan",
+      "tests/WinForward.E2E.Tests/Fixtures/plans/fractional-window.json"
+    ]
+  },
+  {
+    "name": "client-plan-colliding-names",
+    "stem": "26-client-plan-colliding-names",
+    "argv": [
+      "client",
+      "--target",
+      "127.0.0.1",
+      "--out",
+      ".cli-snapshot-out",
+      "--plan",
+      "tests/WinForward.E2E.Tests/Fixtures/plans/colliding-file-names.json"
+    ]
+  },
+  {
+    "name": "client-plan-arm-name-too-long",
+    "stem": "27-client-plan-arm-name-too-long",
+    "argv": [
+      "client",
+      "--target",
+      "127.0.0.1",
+      "--out",
+      ".cli-snapshot-out",
+      "--plan",
+      "tests/WinForward.E2E.Tests/Fixtures/plans/arm-name-too-long.json"
+    ]
+  }
+]

@@ -29,6 +29,7 @@ directly, and a transparent proxy rewrites the path beneath it.
 |---|---|
 | `Program.cs` | the two verbs (`target`, `client`), usage and process exit codes |
 | `Cli/ExitCodes.cs` | `0` success, `1` runtime error, `2` usage error |
+| `Cli/CommandLine.cs` | the argument walk both verbs share: the `--name=value` split and the two walk-level refusals (`unknown argument`, `missing value`) |
 | `Cli/ClientOptions.cs` | the client's arguments, parsed and validated before a plan is read |
 | `Cli/TargetOptions.cs` | the target's arguments, parsed and validated before anything is bound |
 | `Client/ClientRunner.cs` | the client run: the arm loop, the arm's failure boundary, and the output-path checks |

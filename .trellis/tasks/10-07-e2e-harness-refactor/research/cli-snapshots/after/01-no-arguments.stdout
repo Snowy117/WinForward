@@ -1,0 +1,10 @@
+WinForward.E2E - cross-platform end-to-end benchmark harness for the WinForward comparison.
+
+Usage:
+  WinForward.E2E target [--bind <ip>] [--tcp-port <n>] [--udp-port <n>] [--dns-port <n>] [--dns-alt-port <n>] [--label <name>] [--ledger <path>]
+  WinForward.E2E client --target <ip> --plan <path> --out <dir> [--label <name>]
+                        [--tcp-port <n>] [--udp-port <n>] [--dns-port <n>] [--sampler-process <name>]...
+                        [--inject-corrupt-every <n>] [--inject-rewrite-every <n>]
+
+  WinForward.E2E target --help
+  WinForward.E2E client --help

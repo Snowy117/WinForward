@@ -35,48 +35,19 @@ internal sealed class TargetOptions
         "--ledger",
     ];
 
-#pragma warning disable RCS1239 // Every flag may consume the next argument as its value, so the body advances the index and S127 (error) forbids a for loop here.
+    /// <summary>
+    /// Reads the verb's command line with the shared walk, then applies the one check that needs the
+    /// whole line: no port can be compared with another before every option has been read.
+    /// </summary>
     internal static bool TryCreate(string[] args, out TargetOptions options, out string? error)
     {
         options = new TargetOptions();
-        error = null;
 
-        var index = 0;
-        while (index < args.Length)
-        {
-            var argument = args[index];
-            var separator = argument.IndexOf('=', StringComparison.Ordinal);
-            var name = separator >= 0 ? argument[..separator] : argument;
-            var inlineValue = separator >= 0 ? argument[(separator + 1)..] : null;
-
-            if (Array.IndexOf(s_knownOptions, name) < 0)
-            {
-                error = $"unknown argument '{argument}'";
-                return false;
-            }
-
-            if (inlineValue is null)
-            {
-                if (++index >= args.Length)
-                {
-                    error = $"missing value for '{name}'";
-                    return false;
-                }
-
-                inlineValue = args[index];
-            }
-
-            if (!Apply(options, name, inlineValue, out error))
-            {
-                return false;
-            }
-
-            index++;
-        }
-
-        return ValidatePorts(options, out error);
+        // The port checks run only once the whole line was read, which is what the short circuit
+        // says: a rejected option leaves `error` as the walk left it and nothing is compared.
+        return CommandLine.TryParse(args, s_knownOptions, options, Apply, out error)
+            && ValidatePorts(options, out error);
     }
-#pragma warning restore RCS1239
 
     /// <summary>
     /// The port checks, which run once every option has been read: a collision can only be seen after

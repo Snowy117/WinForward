@@ -63,4 +63,33 @@ public sealed class TargetOptionsTests
 
         Assert.Contains("ports must be in the range 1..65535", error, StringComparison.Ordinal);
     }
+
+    // The walk-level refusals, which E2-d moved into the shared parser: both verbs must still refuse
+    // a name they do not declare and a declared option at the end of the line.
+    [Fact]
+    public void AnUnknownOptionIsRefusedWithTheArgumentAsWritten()
+    {
+        Assert.False(TargetOptions.TryCreate(["--bind", "127.0.0.1", "--typo", "3"], out _, out var error));
+
+        Assert.Equal("unknown argument '--typo'", error);
+    }
+
+    [Fact]
+    public void AnOptionWithNothingLeftToReadIsRefusedWithItsName()
+    {
+        Assert.False(TargetOptions.TryCreate(["--ledger"], out _, out var error));
+
+        Assert.Equal("missing value for '--ledger'", error);
+    }
+
+    // The client refuses a string value that starts with '-' because it is usually a forgotten
+    // option; the target does not, and the shared walk must not have imported the rule with the rest
+    // of the parsing (D14.23). A target label that looks like an option is a label.
+    [Fact]
+    public void AStringValueThatLooksLikeAnOptionIsStillAccepted()
+    {
+        Assert.True(TargetOptions.TryCreate(["--label", "--out"], out var options, out var error), error);
+
+        Assert.Equal("--out", options.Label);
+    }
 }

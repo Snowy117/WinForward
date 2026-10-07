@@ -24,7 +24,8 @@
 |---|---|---|---|
 | **E2-a** | 零散修复（`TcpCommand` 兜底、`Target/Sockets.cs`、端口冲突、`MaxPayloadLength`）+ **`Client/Lanes/` 接缝（D18）** + `ReplyClassifier` 纯函数化 + `LatencyArm` 两 lane 迁移 + 5 处 `ConnectAsync` 机制统一 | 六条门禁 + `selftest` 绿 + `achievedRate`/`sendWouldBlock` 量级不变 + 结构差异为空、契约零越带 + `--strict` 读数摘要 + 并发测试与分配 gate（含反证） | 2a-1…2a-4 |
 | **E2-b** | 7 个超标文件拆分 + Target 侧拆分 + `effective-lines.py` | **纯搬移**：结构差异为空、契约零越带；扫描脚本在三项目上无输出 | 1–2 |
-| **E2-c** | `Cli/CommandLine.cs` 解析器合一 | 两个 verb 的 `--help` 与全部错误消息**逐字不变**（快照） | 1 |
+| **E2-c** | Target 账本键族（D14.16 的闭合，排在 E4 之前） | 账本字节等价 + 形状测试 + gate 扩容 | 1 |
+| **E2-d** | `Cli/CommandLine.cs` 解析器合一 | 两个 verb 的 `--help` 与全部错误消息**逐字不变**（快照） | 1 |
 
 每批次结束：`scripts/publish.sh` → `dotnet build WinForward.slnx -c Release`（零警告）→
 `dotnet test tests/WinForward.E2E.Tests -c Release` → `selftest.sh` →
@@ -138,4 +139,4 @@
 | 解析器错误文本漂移 | 快照逐字比对；不通过即回退该批 |
 
 **回退点**：E2-a 的 4 个小批（2a-1 零散修复 / 2a-2 transport+engine / 2a-3 LAT 迁移+分类器 / 2a-4 收尾证据）、
-E2-b、E2-c 各自一个边界。
+E2-b、E2-c、E2-d 各自一个边界。

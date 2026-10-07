@@ -1,0 +1,12 @@
+Usage: WinForward.E2E target [options]
+
+  --bind <ip>          Address to bind (default 0.0.0.0)
+  --tcp-port <n>       TCP echo/command listener port (default 30010)
+  --udp-port <n>       UDP echo listener port (default 30010)
+  --dns-port <n>       DNS responder port, UDP and TCP (default 30053)
+  --dns-alt-port <n>   Second DNS responder port, UDP and TCP (default: none)
+  --label <name>       Run or row identity copied into every ledger record (default empty)
+  --ledger <path>      JSONL ledger output path (default target-ledger.jsonl)
+
+Runs until Ctrl+C or SIGTERM. Exits 0 on a clean shutdown, 1 on a runtime error, 2 on a
+usage error.

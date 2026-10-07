@@ -51,43 +51,18 @@ internal sealed class ClientOptions
         "--sampler-process",
     ];
 
-#pragma warning disable RCS1239 // Every flag may consume the next argument as its value, so the body advances the index and S127 (error) forbids a for loop here.
+    /// <summary>
+    /// Reads the verb's command line: the shared walk (the walk-level refusals are
+    /// <see cref="CommandLine"/>'s) and then the requirement that no other option can stand in for:
+    /// a run with no target or no output directory has nothing to do.
+    /// </summary>
     internal static bool TryCreate(string[] args, out ClientOptions options, out string? error)
     {
         options = new ClientOptions();
-        error = null;
 
-        var index = 0;
-        while (index < args.Length)
+        if (!CommandLine.TryParse(args, s_knownOptions, options, TryApply, out error))
         {
-            var argument = args[index];
-            var separator = argument.IndexOf('=', StringComparison.Ordinal);
-            var name = separator >= 0 ? argument[..separator] : argument;
-            var inlineValue = separator >= 0 ? argument[(separator + 1)..] : null;
-
-            if (Array.IndexOf(s_knownOptions, name) < 0)
-            {
-                error = $"unknown argument '{argument}'";
-                return false;
-            }
-
-            if (inlineValue is null)
-            {
-                if (++index >= args.Length)
-                {
-                    error = $"missing value for '{name}'";
-                    return false;
-                }
-
-                inlineValue = args[index];
-            }
-
-            if (!TryApply(options, name, inlineValue, out error))
-            {
-                return false;
-            }
-
-            index++;
+            return false;
         }
 
         if (options.TargetAddress.Length == 0)
@@ -110,7 +85,6 @@ internal sealed class ClientOptions
 
         return true;
     }
-#pragma warning restore RCS1239
 
     private static bool TryApply(ClientOptions options, string name, string value, out string? error)
     {

@@ -67,4 +67,22 @@ public sealed class ClientOptionsTests
 
         Assert.Contains("'--udp-port' is not a port number in 1..65535", error, StringComparison.Ordinal);
     }
+
+    // The two refusals that belong to the walk rather than to an option (E2-d): a name the verb does
+    // not declare, and a declared option at the end of the line with nothing left to read.
+    [Fact]
+    public void AnUnknownOptionIsRefusedWithTheArgumentAsWritten()
+    {
+        Assert.False(ClientOptions.TryCreate(["--target", "127.0.0.1", "--out", "/tmp/out", "--typo=3"], out _, out var error));
+
+        Assert.Equal("unknown argument '--typo=3'", error);
+    }
+
+    [Fact]
+    public void AnOptionWithNothingLeftToReadIsRefusedWithItsName()
+    {
+        Assert.False(ClientOptions.TryCreate(["--target", "127.0.0.1", "--out", "/tmp/out", "--label"], out _, out var error));
+
+        Assert.Equal("missing value for '--label'", error);
+    }
 }

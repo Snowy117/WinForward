@@ -1,0 +1,18 @@
+Usage: WinForward.E2E client --target <ip> --out <dir> [options]
+
+  --target <ip>             Target host address (required, IP literal)
+  --out <dir>               Output directory for <arm>.jsonl and run.json (required)
+  --plan <path>             Plan JSON; omit to use the built-in default arm set
+  --label <name>            Free-form label copied into every result row
+  --tcp-port <n>            Target TCP port (default 30010)
+  --udp-port <n>            Target UDP echo port (default 30010)
+  --dns-port <n>            Target DNS port, UDP and TCP (default 53)
+  --sampler-process <name>  Process name to sample at 1 Hz (repeatable, no .exe suffix)
+  --inject-corrupt-every <n>  Flip one payload byte of every n-th UDP datagram without
+                            recomputing its CRC: the target drops the frame as undecodable,
+                            so the client can only ever report it as path loss (never)
+  --inject-rewrite-every <n>  Flip one payload byte of every n-th UDP datagram and recompute
+                            the CRC, so the target echoes it and the client books it corrupt
+
+The client exits 0 when every requested arm completed, 1 when an arm failed, 2 on a
+usage error.
