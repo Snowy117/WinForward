@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using WinForward.E2E.Contracts;
 using WinForward.E2E.Contracts.Json;
 
 namespace WinForward.E2E.Client;
@@ -126,25 +127,20 @@ internal sealed class ResourceSampler : IAsyncDisposable
         await target.Sink.WriteAsync(
             writer =>
             {
-                writer.WriteString("type", "sample");
-                writer.WriteNumber("ticks", ticks);
-                writer.WriteString("arm", target.Arm);
-                writer.WriteString("process", processName);
-                writer.WriteBoolean("self", value: true);
-                writer.WriteNumber("matched", 1);
+                ResourceSampleWriter.WriteSampleHeader(writer, target, processName, self: true, ticks, matched: 1);
                 ResourceSampleWriter.WriteCounters(writer, counters);
                 if (hasHandles)
                 {
-                    writer.WriteNumber("handles", counters.Handles);
+                    writer.WriteNumber(ArmKeys.Sample.Handles, counters.Handles);
                 }
                 else
                 {
-                    writer.WriteNull("handles");
+                    writer.WriteNull(ArmKeys.Sample.Handles);
                 }
 
                 ResourceSampleWriter.WriteProcesses(writer, [identity]);
-                writer.WriteNumber("generatorCpuSeconds", NumberFormat.Round(counters.CpuSeconds, 4));
-                writer.WriteNumber("envWorkingSetBytes", environmentWorkingSet);
+                writer.WriteNumber(ArmKeys.Sample.GeneratorCpuSeconds, NumberFormat.Round(counters.CpuSeconds, 4));
+                writer.WriteNumber(ArmKeys.Sample.EnvWorkingSetBytes, environmentWorkingSet);
             },
             cancellationToken).ConfigureAwait(false);
     }
@@ -162,15 +158,10 @@ internal sealed class ResourceSampler : IAsyncDisposable
         await target.Sink.WriteAsync(
             writer =>
             {
-                writer.WriteString("type", "sample");
-                writer.WriteNumber("ticks", ticks);
-                writer.WriteString("arm", target.Arm);
-                writer.WriteString("process", name);
-                writer.WriteBoolean("self", value: false);
-                writer.WriteNumber("matched", totals.Processes.Count);
+                ResourceSampleWriter.WriteSampleHeader(writer, target, name, self: false, ticks, totals.Processes.Count);
                 if (totals.Processes.Count == 0)
                 {
-                    writer.WriteBoolean("absent", value: true);
+                    writer.WriteBoolean(ArmKeys.Sample.Absent, value: true);
                 }
                 else
                 {
@@ -184,11 +175,11 @@ internal sealed class ResourceSampler : IAsyncDisposable
                     ResourceSampleWriter.WriteCounters(writer, counters);
                     if (hasHandles)
                     {
-                        writer.WriteNumber("handles", counters.Handles);
+                        writer.WriteNumber(ArmKeys.Sample.Handles, counters.Handles);
                     }
                     else
                     {
-                        writer.WriteNull("handles");
+                        writer.WriteNull(ArmKeys.Sample.Handles);
                     }
                 }
 

@@ -67,7 +67,7 @@ internal static class Program
 
     private static async Task<int> RunTargetAsync(string[] args, CancellationToken cancellationToken)
     {
-        if (!TargetRunner.TryCreate(args, out var options, out var error))
+        if (!TargetOptions.TryCreate(args, out var options, out var error))
         {
             await Console.Error.WriteLineAsync($"e2e target: {error}").ConfigureAwait(false);
             TargetRunner.PrintHelp();

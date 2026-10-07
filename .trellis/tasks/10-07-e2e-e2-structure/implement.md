@@ -99,9 +99,21 @@
 - 判据：行为零变化（结构差异为空 + 契约零越带 + 迁移前后记录逐字节一致，除 D15 读数/身份类）；
   遵守 `directory-structure.md`（文件名=主类型名；不建 pass-through 别名层）。
 
-## E2-c：CLI 解析器合一
+## E2-c：Target 账本键族（D14.16 的闭合，**排在 E4 之前**）
 
-- 抽 `Cli/CommandLine.cs`（已知选项集合 + `TryApply`），两个 verb 共用；
+- 新增 `ArmKeys` 分片：信封（`utc`/`label`/`type`）+ `tcp`/`udpSummary`/`dnsSummary`/`targetSummary`
+  四个账本记录的键（当前 51 处 key 位字面量：`TcpTargetServer` 14、`UdpEchoServer` 14、`DnsServer` 13、
+  `TargetRunner` 10——以 gate 同款正则实测为准）；
+- 4–5 条**账本记录形状测试**（读生产写出的 `ledger.jsonl`，逐向比对键集/键序/三态）；
+- 字面量 gate 的扫描面扩到 `Target/**`（`s_writerFiles` 加四个 writer）；
+- 判据：账本字节等价（`compare-records.py` 的 ledger 组结构 0 差异，`target.out` 归一化 0 差异）；
+- 登记项：新文件里"DTO 簇"的文件名（`ReliabilityAttempt.cs`/`TcpConnectionProtocol.cs`/`MixMetricsWriter.cs`、
+  `ProcessSample.cs`）交 **E5 目录重排**时统一裁定（`directory-structure.md:89` 与"record+其消费者"簇的张力）。
+
+## E2-d：CLI 解析器合一
+
+- 抽 `Cli/CommandLine.cs`（已知选项集合 + `TryApply`），两个 verb 共用；`ClientOptions`/`TargetOptions` 的
+  setter 需要重新加宽赋值入口（E2-b1/b2 已收窄）；
 - 判据：`client --help`/`target --help` 与全部既有错误消息**逐字不变**（快照存 `research/cli-snapshots/`）；
   target help 补 E1 新增的退出码 1 说明属**有意变更**，单独登记。
 

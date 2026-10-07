@@ -402,7 +402,7 @@ public sealed class ContractShapeTests
     {
         using var stream = new MemoryStream();
         await using var sink = new JsonlSink(stream, JsonlPolicy.Propagate, envelope: null, s_noFlush);
-        var evidence = new ReliabilityArm.AttemptEvidence(sink);
+        var evidence = new AttemptEvidence(sink);
         await evidence.RecordAsync(
             new ReliabilityAttempt
             {

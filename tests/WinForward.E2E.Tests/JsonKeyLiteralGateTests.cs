@@ -13,10 +13,12 @@ namespace WinForward.E2E.Tests;
 /// <remarks>
 /// <para><b>What is scanned.</b> Every file under <c>Client/Arms/</c>, plus the client's record
 /// writers: <c>Client/ClientRunner.cs</c> (the arm loop), <c>Client/ArmRecordWriter.cs</c>
-/// (the <c>result</c>, <c>armSummary</c> and <c>error</c> records) and <c>Client/RunFileWriter.cs</c>
-/// (<c>run.json</c>).
-/// <c>Client/ResourceSampler.cs</c> and <c>Target/</c> publish their own key families and belong to a
-/// later batch (D14.16/D12).</para>
+/// (the <c>result</c>, <c>armSummary</c> and <c>error</c> records), <c>Client/RunFileWriter.cs</c>
+/// (<c>run.json</c>), and the resource sampler's two files,
+/// <c>Client/ResourceSampler.cs</c> (the <c>sample</c> record) and
+/// <c>Client/ResourceSampleWriter.cs</c> (the counters, the process census and <c>samplerError</c>).
+/// <c>Target/</c> publishes its own key families to its own ledger and belongs to a later batch
+/// (D14.16/D12).</para>
 /// <para><b>What counts as a literal.</b> A string literal in a key position, which is either the
 /// first argument of one of the <c>Utf8JsonWriter</c> members that take a property name or the index
 /// of a dictionary being written under a key. That is deliberately narrower than "the name appears in
@@ -37,7 +39,14 @@ public sealed partial class JsonKeyLiteralGateTests
     private const string Client = "benchmarks/WinForward.E2E/Client";
 
     /// <summary>The record writers beside the arm sources, each one named so a missing file fails the gate.</summary>
-    private static readonly string[] s_writerFiles = ["ClientRunner.cs", "ArmRecordWriter.cs", "RunFileWriter.cs"];
+    private static readonly string[] s_writerFiles =
+    [
+        "ClientRunner.cs",
+        "ArmRecordWriter.cs",
+        "RunFileWriter.cs",
+        "ResourceSampler.cs",
+        "ResourceSampleWriter.cs",
+    ];
 
     /// <summary>The first argument of a property-name <c>Utf8JsonWriter.Write*</c> call.</summary>
     [GeneratedRegex("""\.Write(?:StartObject|EndObject|StartArray|EndArray|PropertyName|Null|Boolean|Number|String|RawValue|Base64String)\(\s*"([^"]*)["]""")]
@@ -78,6 +87,10 @@ public sealed partial class JsonKeyLiteralGateTests
             .. DeclaredKeys.Under(typeof(ArmKeys.Reliability.ModeNames), string.Empty),
             .. DeclaredKeys.Under(typeof(ArmKeys.Reliability.Mode), string.Empty),
             .. DeclaredKeys.Under(typeof(ArmKeys.Reliability.Attempt), string.Empty),
+            .. DeclaredKeys.Under(typeof(ArmKeys.Sample), string.Empty),
+            .. DeclaredKeys.Under(typeof(ArmKeys.Sample.Counters), string.Empty),
+            .. DeclaredKeys.Under(typeof(ArmKeys.Sample.ProcessEntry), string.Empty),
+            .. DeclaredKeys.Under(typeof(ArmKeys.Sample.SamplerError), string.Empty),
         ],
         StringComparer.Ordinal);
 

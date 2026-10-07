@@ -12,12 +12,11 @@ internal sealed class DnsServer : IAsyncDisposable
     private const int MaxMessageLength = DnsWire.MaxMessageLength;
 
     private readonly Socket _udp;
-    private readonly Socket _tcp;
     private readonly JsonlSink _ledger;
     private readonly int _workerCount;
     private readonly int _port;
     private readonly EndPoint _sourceTemplate;
-    private readonly List<Task> _tcpConnections = [];
+    private readonly TcpAcceptLoop _acceptLoop;
     private long _udpQueries;
     private long _udpAnswers;
     private long _udpEmpty;
@@ -38,13 +37,13 @@ internal sealed class DnsServer : IAsyncDisposable
         _sourceTemplate = Sockets.SourceTemplate(endPoint);
 
         _udp = Sockets.BindUdp(endPoint);
-        _tcp = Sockets.BindTcpListener(endPoint);
+        _acceptLoop = new TcpAcceptLoop(Sockets.BindTcpListener(endPoint));
     }
 
     public ValueTask DisposeAsync()
     {
         _udp.Dispose();
-        _tcp.Dispose();
+        _acceptLoop.Dispose();
         return ValueTask.CompletedTask;
     }
 
@@ -56,9 +55,9 @@ internal sealed class DnsServer : IAsyncDisposable
             workers[index] = UdpLoopAsync(cancellationToken);
         }
 
-        workers[_workerCount] = AcceptLoopAsync(cancellationToken);
+        workers[_workerCount] = _acceptLoop.RunAsync(socket => HandleTcpConnectionAsync(socket, cancellationToken), cancellationToken);
         await Task.WhenAll(workers).ConfigureAwait(false);
-        await Task.WhenAll(_tcpConnections).ConfigureAwait(false);
+        await _acceptLoop.DrainAsync().ConfigureAwait(false);
     }
 
     internal void WriteTotals(Utf8JsonWriter writer)
@@ -86,37 +85,6 @@ internal sealed class DnsServer : IAsyncDisposable
                 WriteTotals(writer);
             },
             cancellationToken).ConfigureAwait(false);
-    }
-
-    private static async ValueTask<bool> ReadExactAsync(Socket socket, Memory<byte> buffer, CancellationToken cancellationToken)
-    {
-        var offset = 0;
-        while (offset < buffer.Length)
-        {
-            var received = await socket.ReceiveAsync(buffer[offset..], SocketFlags.None, cancellationToken).ConfigureAwait(false);
-            if (received == 0)
-            {
-                return false;
-            }
-
-            offset += received;
-        }
-
-        return true;
-    }
-
-    private static async ValueTask SendAllAsync(Socket socket, ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
-    {
-        while (!data.IsEmpty)
-        {
-            var sent = await socket.SendAsync(data, SocketFlags.None, cancellationToken).ConfigureAwait(false);
-            if (sent <= 0)
-            {
-                return;
-            }
-
-            data = data[sent..];
-        }
     }
 
     private static int BuildAnswer(ReadOnlySpan<byte> message, Span<byte> response, out int answerCount)
@@ -205,37 +173,6 @@ internal sealed class DnsServer : IAsyncDisposable
         }
     }
 
-    private async Task AcceptLoopAsync(CancellationToken cancellationToken)
-    {
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            Socket socket;
-            try
-            {
-                socket = await _tcp.AcceptAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-            catch (ObjectDisposedException)
-            {
-                break;
-            }
-            catch (SocketException)
-            {
-                continue;
-            }
-
-            socket.NoDelay = true;
-            _tcpConnections.Add(HandleTcpConnectionAsync(socket, cancellationToken));
-            if (_tcpConnections.Count >= 256)
-            {
-                _tcpConnections.RemoveAll(static task => task.IsCompleted);
-            }
-        }
-    }
-
     private async ValueTask<bool> AnswerTcpAsync(Socket socket, byte[] message, byte[] response, byte[] lengthBuffer, CancellationToken cancellationToken)
     {
         var responseLength = BuildAnswer(message, response, out var answerCount);
@@ -255,8 +192,10 @@ internal sealed class DnsServer : IAsyncDisposable
         }
 
         BinaryPrimitives.WriteUInt16BigEndian(lengthBuffer, (ushort)responseLength);
-        await SendAllAsync(socket, lengthBuffer, cancellationToken).ConfigureAwait(false);
-        await SendAllAsync(socket, response.AsMemory(0, responseLength), cancellationToken).ConfigureAwait(false);
+        // A send the peer refused is not this loop's decision: the answer is dropped, and the next
+        // read sees the end of the stream, which is where the connection ends.
+        _ = await SocketIo.TrySendAllAsync(socket, lengthBuffer, cancellationToken).ConfigureAwait(false);
+        _ = await SocketIo.TrySendAllAsync(socket, response.AsMemory(0, responseLength), cancellationToken).ConfigureAwait(false);
         return true;
     }
 
@@ -272,7 +211,7 @@ internal sealed class DnsServer : IAsyncDisposable
             {
                 while (!cancellationToken.IsCancellationRequested)
                 {
-                    if (!await ReadExactAsync(socket, lengthBuffer, cancellationToken).ConfigureAwait(false))
+                    if (!await SocketIo.ReadExactAsync(socket, lengthBuffer, cancellationToken).ConfigureAwait(false))
                     {
                         return;
                     }
@@ -286,7 +225,7 @@ internal sealed class DnsServer : IAsyncDisposable
                     }
 
                     var message = new byte[length];
-                    if (!await ReadExactAsync(socket, message, cancellationToken).ConfigureAwait(false))
+                    if (!await SocketIo.ReadExactAsync(socket, message, cancellationToken).ConfigureAwait(false))
                     {
                         return;
                     }

@@ -30,13 +30,14 @@ directly, and a transparent proxy rewrites the path beneath it.
 | `Program.cs` | the two verbs (`target`, `client`), usage and process exit codes |
 | `Cli/ExitCodes.cs` | `0` success, `1` runtime error, `2` usage error |
 | `Cli/ClientOptions.cs` | the client's arguments, parsed and validated before a plan is read |
+| `Cli/TargetOptions.cs` | the target's arguments, parsed and validated before anything is bound |
 | `Client/ClientRunner.cs` | the client run: the arm loop, the arm's failure boundary, and the output-path checks |
 | `Client/ArmRecordWriter.cs` | the `result`, `armSummary` and `error` records of one arm |
 | `Client/RunFileWriter.cs` | `run.json`: the run's environment and one summary per arm |
 | `Client/PlanFile.cs` | the plan schema and its loader |
 | `Client/ArmSpec.cs` | one arm's declared parameters |
 | `Client/ArmContext.cs` | the shared clock, the pacer, and the per-run latency histograms |
-| `Client/Arms/` | one file per arm kind, plus `ArmDispatch.cs` |
+| `Client/Arms/` | one file per arm kind, plus `ArmDispatch.cs`; the largest kinds also have their plan, metrics writer and phase loops beside them (`Mix*`, `Reliability*`, `Persistent*`) |
 | `Client/LogHistogram.cs` | the client's latency histogram: logarithmic buckets and the percentile snapshot |
 | `Client/UdpReliability.cs` | the UDP sequence bookkeeping and the arrived/late/never classification |
 | `Client/ResourceSampler.cs` | the 1 Hz process sampler: the tick loop, its target and its barrier |
@@ -46,6 +47,11 @@ directly, and a transparent proxy rewrites the path beneath it.
 | `Client/FrameBuffer.cs` | the frame buffer an arm builds its requests in, and the socket helpers the lanes share |
 | `../WinForward.E2E.Contracts/` | what both verbs share: the record key constants, the typed metrics and parameters value objects, the JSONL sink, its failure policy, and the number formats the records publish |
 | `Target/` | the target: TCP echo/command server, UDP echo server, DNS responder, the ledger summaries, the target log and the runner |
+| `Target/TcpConnectionProtocol.cs` | one TCP connection's command/echo state machine and its verdicts |
+| `Target/TcpAcceptLoop.cs` | the accept loop both TCP listeners share, its connection table and the drain |
+| `Target/SocketIo.cs` | the shared stream send/receive helpers |
+| `Target/Sockets.cs` | where the listeners are bound, and the reuse-port policy that makes a leftover instance loud |
+| `Target/SourceCensus.cs` | the UDP echo server's per-receiver source-endpoint census |
 | `Wire/` | the protocol both verbs share: frame codec, stream reader, CRC32C, command payload, half-close trailer, DNS wire subset, payload filler |
 | `scripts/plans/` | the committed plans: `full-plan`, `udp-plan`, `dns-plan`, `dual-plan`, `base-plan`, `selftest-plan` |
 | `scripts/plans-short/` | the same arm shapes at short durations and lower rates, for validating a change |

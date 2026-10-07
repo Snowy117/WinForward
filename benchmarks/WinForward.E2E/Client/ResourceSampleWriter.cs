@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
+using WinForward.E2E.Contracts;
 using WinForward.E2E.Contracts.Json;
 
 namespace WinForward.E2E.Client;
@@ -32,13 +33,27 @@ internal static class ResourceSampleWriter
         }
     }
 
+    /// <summary>
+    /// The members every sample record opens with: which arm's file it is going into, what the tick was,
+    /// which name it observed, and how many processes that name matched.
+    /// </summary>
+    internal static void WriteSampleHeader(Utf8JsonWriter writer, SamplerTarget target, string process, bool self, long ticks, int matched)
+    {
+        writer.WriteString(ArmKeys.Common.Record.Type, "sample");
+        writer.WriteNumber(ArmKeys.Sample.Ticks, ticks);
+        writer.WriteString(ArmKeys.Common.Record.Arm, target.Arm);
+        writer.WriteString(ArmKeys.Sample.Process, process);
+        writer.WriteBoolean(ArmKeys.Sample.Self, self);
+        writer.WriteNumber(ArmKeys.Sample.Matched, matched);
+    }
+
     internal static void WriteCounters(Utf8JsonWriter writer, in ProcessCounters counters)
     {
-        writer.WriteNumber("cpuSeconds", NumberFormat.Round(counters.CpuSeconds, 4));
-        writer.WriteNumber("privateBytes", counters.PrivateBytes);
-        writer.WriteNumber("workingSetBytes", counters.WorkingSet);
-        writer.WriteNumber("peakWorkingSetBytes", counters.PeakWorkingSet);
-        writer.WriteNumber("threads", counters.Threads);
+        writer.WriteNumber(ArmKeys.Sample.Counters.CpuSeconds, NumberFormat.Round(counters.CpuSeconds, 4));
+        writer.WriteNumber(ArmKeys.Sample.Counters.PrivateBytes, counters.PrivateBytes);
+        writer.WriteNumber(ArmKeys.Sample.Counters.WorkingSetBytes, counters.WorkingSet);
+        writer.WriteNumber(ArmKeys.Sample.Counters.PeakWorkingSetBytes, counters.PeakWorkingSet);
+        writer.WriteNumber(ArmKeys.Sample.Counters.Threads, counters.Threads);
     }
 
     /// <summary>
@@ -48,30 +63,30 @@ internal static class ResourceSampleWriter
     internal static void WriteProcesses(Utf8JsonWriter writer, IReadOnlyList<SampledProcess> processes)
     {
         var readErrors = 0;
-        writer.WriteStartArray("processes");
+        writer.WriteStartArray(ArmKeys.Sample.Processes);
         foreach (var process in processes)
         {
             writer.WriteStartObject();
-            writer.WriteNumber("pid", process.Id);
+            writer.WriteNumber(ArmKeys.Sample.ProcessEntry.Pid, process.Id);
             if (process.StartedUtc is { } startedUtc)
             {
-                writer.WriteString("startUtc", startedUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+                writer.WriteString(ArmKeys.Sample.ProcessEntry.StartUtc, startedUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
             }
             else
             {
-                writer.WriteNull("startUtc");
+                writer.WriteNull(ArmKeys.Sample.ProcessEntry.StartUtc);
             }
 
-            writer.WriteBoolean("countersRead", process.CountersRead);
+            writer.WriteBoolean(ArmKeys.Sample.ProcessEntry.CountersRead, process.CountersRead);
             if (process.CountersRead)
             {
-                writer.WriteNumber("cpuSeconds", NumberFormat.Round(process.CpuSeconds, 4));
-                writer.WriteNumber("privateBytes", process.PrivateBytes);
+                writer.WriteNumber(ArmKeys.Sample.ProcessEntry.CpuSeconds, NumberFormat.Round(process.CpuSeconds, 4));
+                writer.WriteNumber(ArmKeys.Sample.ProcessEntry.PrivateBytes, process.PrivateBytes);
             }
             else
             {
-                writer.WriteNull("cpuSeconds");
-                writer.WriteNull("privateBytes");
+                writer.WriteNull(ArmKeys.Sample.ProcessEntry.CpuSeconds);
+                writer.WriteNull(ArmKeys.Sample.ProcessEntry.PrivateBytes);
                 readErrors++;
             }
 
@@ -79,10 +94,10 @@ internal static class ResourceSampleWriter
         }
 
         writer.WriteEndArray();
-        writer.WriteNumber("readErrors", readErrors);
+        writer.WriteNumber(ArmKeys.Sample.ReadErrors, readErrors);
         if (readErrors > 0)
         {
-            writer.WriteBoolean("readError", value: true);
+            writer.WriteBoolean(ArmKeys.Sample.ReadError, value: true);
         }
     }
 
@@ -97,12 +112,12 @@ internal static class ResourceSampleWriter
             await target.Sink.WriteAsync(
                 writer =>
                 {
-                    writer.WriteString("type", "samplerError");
-                    writer.WriteNumber("ticks", Stopwatch.GetTimestamp());
-                    writer.WriteString("arm", target.Arm);
-                    writer.WriteString("process", process);
-                    writer.WriteString("error", exception.GetType().Name);
-                    writer.WriteString("message", exception.Message);
+                    writer.WriteString(ArmKeys.Common.Record.Type, "samplerError");
+                    writer.WriteNumber(ArmKeys.Sample.Ticks, Stopwatch.GetTimestamp());
+                    writer.WriteString(ArmKeys.Common.Record.Arm, target.Arm);
+                    writer.WriteString(ArmKeys.Sample.Process, process);
+                    writer.WriteString(ArmKeys.Sample.SamplerError.Error, exception.GetType().Name);
+                    writer.WriteString(ArmKeys.Sample.SamplerError.Message, exception.Message);
                 },
                 cancellationToken).ConfigureAwait(false);
         }

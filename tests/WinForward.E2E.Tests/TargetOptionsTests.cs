@@ -1,4 +1,4 @@
-using WinForward.E2E.Target;
+using WinForward.E2E.Cli;
 using Xunit;
 
 namespace WinForward.E2E.Tests;
@@ -17,7 +17,7 @@ public sealed class TargetOptionsTests
     public void TheSameTcpAndUdpPortIsAccepted()
     {
         Assert.True(
-            TargetRunner.TryCreate(
+            TargetOptions.TryCreate(
                 ["--bind", "127.0.0.1", "--tcp-port", "40010", "--udp-port", "40010", "--dns-port", "53", "--dns-alt-port", "40053"],
                 out var options,
                 out var error),
@@ -30,7 +30,7 @@ public sealed class TargetOptionsTests
     [Fact]
     public void ADnsPortEqualToTheTcpPortIsRefusedWithBothOptionsNamed()
     {
-        Assert.False(TargetRunner.TryCreate(["--tcp-port", "40010", "--dns-port", "40010"], out _, out var error));
+        Assert.False(TargetOptions.TryCreate(["--tcp-port", "40010", "--dns-port", "40010"], out _, out var error));
 
         Assert.Contains("--dns-port 40010", error, StringComparison.Ordinal);
         Assert.Contains("--tcp-port 40010", error, StringComparison.Ordinal);
@@ -39,7 +39,7 @@ public sealed class TargetOptionsTests
     [Fact]
     public void ADnsPortEqualToTheUdpPortIsRefusedWithBothOptionsNamed()
     {
-        Assert.False(TargetRunner.TryCreate(["--udp-port", "40010", "--dns-port", "40010"], out _, out var error));
+        Assert.False(TargetOptions.TryCreate(["--udp-port", "40010", "--dns-port", "40010"], out _, out var error));
 
         Assert.Contains("--dns-port 40010", error, StringComparison.Ordinal);
         Assert.Contains("--udp-port 40010", error, StringComparison.Ordinal);
@@ -51,7 +51,7 @@ public sealed class TargetOptionsTests
     public void ASecondDnsListenerOnAnAlreadyUsedPortIsRefused()
     {
         Assert.False(
-            TargetRunner.TryCreate(["--tcp-port", "40010", "--udp-port", "40011", "--dns-port", "53", "--dns-alt-port", "40011"], out _, out var error));
+            TargetOptions.TryCreate(["--tcp-port", "40010", "--udp-port", "40011", "--dns-port", "53", "--dns-alt-port", "40011"], out _, out var error));
 
         Assert.Contains("the additional dns port must differ", error, StringComparison.Ordinal);
     }
@@ -59,7 +59,7 @@ public sealed class TargetOptionsTests
     [Fact]
     public void APortOutsideTheSixteenBitRangeIsRefused()
     {
-        Assert.False(TargetRunner.TryCreate(["--tcp-port", "40010", "--dns-port", "65536"], out _, out var error));
+        Assert.False(TargetOptions.TryCreate(["--tcp-port", "40010", "--dns-port", "65536"], out _, out var error));
 
         Assert.Contains("ports must be in the range 1..65535", error, StringComparison.Ordinal);
     }
