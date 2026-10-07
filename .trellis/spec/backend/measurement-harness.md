@@ -113,6 +113,64 @@ A batch that claims to be behavior-neutral must attach the `--strict` reading su
 out-of-band reading. A contract finding on a zero-width band must be confirmed by a second run with the
 same binary before it is called a regression.
 
+### 3.6 Lane seam: engine / policy / transport
+
+An arm's send and receive loops live behind three collaborators (`Client/Lanes/`):
+
+| Collaborator | Owns | Must not |
+|---|---|---|
+| `ILaneTransport` (adapter) | connect (`OpenAsync` returns a result, never throws), one send, one receive | judge wire validity, dispose the policy/engine |
+| `ILanePolicy` | window admission + in-flight, frame building, reply classification, every receive-side counter | count on the receive thread, block, allocate in `BuildRequest` |
+| `LaneEngine<TTransport>` | pacing, the offer loop, the bounded defer queue, the grace drain, the **send-side** counters (`LaneCounts`) | keep a second copy of the window or of any policy counter |
+
+`LaneReceiveKind ∈ {Payload, EndOfStream, Malformed, IoError}` describes what arrived, not whether it is valid:
+the TCP adapter maps `BadMagic`/`BadLength` to `IoError` (framing lost, counted then stop), `BadChecksum` to
+`Malformed` (counted, keep reading), `EndOfStream` to `EndOfStream`; an oversized datagram becomes
+`Malformed` with `FrameDecodeError.Truncated`, never a silent "corrupt".
+
+Thread contract, in this order:
+
+1. the **receive** thread decodes, classifies and enqueues a settlement carrying `ReceivedTicks` — no counters;
+2. the **send** thread calls `Settle(now)` after `Pacer.WaitUntil` and before the next `BuildRequest`, and that is
+   the only place pending removal, RTT (from `ReceivedTicks`, never from the settle time), histograms, `inFlight--`
+   and receive-side counters change;
+3. at arm end: stop offering → bounded grace (keep receiving and settling until the book is empty or the drain
+   limit) → cancel and join the receive loop → a final `Settle` → compute gates and metrics.
+
+Per-slot sequence is strictly serial (`BuildRequest → SendAsync → OnSent`, `OnSent` before the next
+`BuildRequest`), and `BuildRequest` is idempotent: a deferred slot is retried with its original sequence and
+intended instant, once per slot in `Supplied`. `WouldBlock` is sampled from `IsCompleted` **before** the await,
+and a would-block that ends in an asynchronous failure increments both `SendWouldBlock` and `SendFailures`.
+`DeferredPending` (queue occupancy at teardown) is what completes `outstandingAtTeardown`; never derive it by
+subtracting the other counters (that only holds when a policy never returns `Skip`).
+
+### 3.7 Naming a record key
+
+One `const string` per **leaf per nesting level** — `Ledger.TcpSummary.Connections` and
+`Ledger.TargetSummary.TcpTotals.Connections` are two constants because they are two paths. The envelope
+(`utc`, `label`, `type`), the four arm families and the four ledger families each get their shard; conditional
+keys are listed in the shard's `<remarks>`; a data-driven container's member names get a `*Names` array next to
+the record. Adding a writer means adding it to the literal gate's file list — the gate only checks the files it
+is told about, and a new file with literals stays green until it is listed.
+
+### 3.8 Proving a refactor is behaviour-neutral
+
+Layered evidence, cheapest first; a claim must name which layer it used:
+
+1. **token multiset** over the moved files (comments stripped, string literals kept whole): differences must be
+   limited to visibility widening, cross-file qualification and the new type declarations;
+2. **ordered check**: every line of the new files maps monotonically onto the old file's line sequence
+   (catches swaps and reordering the multiset cannot see);
+3. **per-method body equality**: extract each method and compare bodies after normalising comments, visibility
+   and type qualification — this is what catches two statements swapped inside one method;
+4. **registered difference classes**: anything left (a constant changing owner, a nested type being promoted,
+   members reordered) is written down with its reason and its behavioural argument, not silently absorbed;
+5. **runtime equivalence**: `compare-records.py` on a frozen baseline with the same-binary pair difference as
+   the noise floor, plus the zero-width published keys compared value by value.
+
+A refactor that needs a real behaviour change (a failure path that used to kill the arm, a missing sent-set
+check) registers it as an intentional change with the affected keys named.
+
 ---
 
 ## 4. Validation & Error Matrix
@@ -155,6 +213,23 @@ same binary before it is called a regression.
   loads, and each rejection fixture yields exit 2 with the arm and key named.
 - **Sink matrix** (`JsonlSinkTests`): Propagate throws on body/write but not on close; SwallowAndCount counts
   all four failure kinds; a cancelled write never cuts a record in half; the periodic flush surfaces data.
+- **Lane seam** (`tests/WinForward.E2E.Tests/Lanes/*`): with a fake transport — send outcomes, would-block
+  sampled before the await (two facts, one per mutation), defer FIFO with a retry that does not re-count
+  `Supplied`, the three grace exits, settlement carrying the receive time, a concurrency identity
+  (`delivered == sent == settled`, each sequence exactly once) and a zero-allocation gate whose counter-proof
+  fails when `BuildRequest` allocates. With a real transport: the same gate on the sending path, and the
+  send path must keep using the `ReadOnlyMemory` overload (`byte[]`/`ArraySegment` binds an overload that
+  allocates per call — the fake gate cannot see that).
+- **Ledger shape** (`LedgerShapeTests`): drive the production writers (real connection, real datagram) and
+  compare the flattened ledger paths with the declared keys in both directions, per record family and in
+  declared order; the three states; the `sources` array written even when empty; the conditional `dnsAlt`
+  block omitted whole.
+- **CLI snapshots** (`CliSnapshotTests` + `scripts/cli-snapshots.py`): 28 commands (both helps and every error
+  path) recorded as exit code + stdout + stderr bytes; the replay test runs `Program.Main` in a
+  non-parallel collection and restores `Console.Out`/`Error`/cwd; a reworded message must turn it red.
+- **Effective lines** (`scripts/effective-lines.py`): the three harness projects must report nothing at a
+  400-line limit; the counter strips blanks, `//` and `/* */` the way the compiler sees them (a `//` inside a
+  string is not a comment, a multi-line raw string counts as code).
 - **Regression comparison**: `run1 vs run1` and `run1 vs run2 --band` compare clean; a mutated contract
   counter fails while a mutated pid and a mutated latency reading do not.
 
@@ -175,6 +250,27 @@ var metrics = new LatencyMetrics { Tcp = tcpBlock, Udp = udpBlock, /* required m
 public required IJsonWritable Metrics { get; init; }         // one production path
 await sink.WriteAsync(w => metrics.WriteTo(w), CancellationToken.None);  // cancellation at the lock only
 ```
+
+#### Wrong — the seam copies the bookkeeping
+```csharp
+// engine increments a window counter AND the policy keeps its own; nothing fails until the numbers drift
+if (++_inFlight > window) { _deferred.Enqueue(frame); }
+policy.OnReply(payload, Clock.Now);   // receive thread books RTT and counters
+policy.Settle(Clock.Now);             // and the send thread books them again
+```
+
+#### Correct — one writer per quantity
+```csharp
+var decision = policy.BuildRequest(sequence, intended, buffer, out var length);  // policy owns the window
+if (decision == LaneSlotDecision.Send) { var send = transport.SendAsync(...); var block = !send.IsCompleted; ... }
+policy.OnReceive(result, payload, receivedTicks);   // decode + classify + enqueue, no counters
+policy.Settle(Clock.Now);                           // the only settlement point, on the send thread
+```
+
+> **Gotcha — the noise floor is not zero.** Two runs of the *same* binary differ: contract counters move on
+> their own (target UDP echo ordering, boot clocks, host sampling). Before calling a batch's difference a
+> regression, run the same binary twice and compare the two difference lists; also check whether the moving
+> keys sit on a zero-width band, which means the band was never measured rather than that the value is stable.
 
 > **Gotcha — stale audit premises.** Defect lists written against an older tree go stale. Before
 > implementing an audit item, re-verify it against the current code (a grep or a failing test); record

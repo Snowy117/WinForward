@@ -82,6 +82,16 @@ These guides help you **ask the right questions before coding**.
 
 → Read [Measurement Harness](../backend/measurement-harness.md) (contract + comparison classes) and [Quality Guidelines](../backend/quality-guidelines.md)
 
+### When Claiming A Refactor Is Behaviour-Neutral
+
+- [ ] A token/multiset comparison alone is not proof → it is blind to reordering and to which type owns a member; add an ordered check and a per-method body comparison
+- [ ] Something will be left over (a constant changing owner, a nested type promoted, two statements swapped) → write it down as a registered difference with its behavioural argument
+- [ ] The baseline pair is not the only comparison → same binary twice gives the noise floor; a batch difference inside that floor is not a regression
+- [ ] A published key on a zero-width band → the band was never measured, so "it did not move" may be vacuous; check per key and say which ones
+- [ ] A test that stays green when the line is deleted → the assertion is not wired to the production path; drive the real collaborator or add a counter-proof
+
+→ Read [Measurement Harness §3.8](../backend/measurement-harness.md) and [Test Stability](../backend/test-stability.md)
+
 ---
 
 ## Pre-Modification Rule (CRITICAL)
