@@ -73,6 +73,15 @@ These guides help you **ask the right questions before coding**.
 
 **Verification rule**: Every CRITICAL/WARNING finding must be verified against the actual code before prioritizing. Budget ~35% false-positive rate for AI reviews.
 
+### When Implementing From An Audit Or A Defect List
+
+- [ ] The list may describe an **older tree** → before implementing an item, re-verify it against current code (grep or a failing test) and record `implemented | fixed | deferred` with a re-runnable command
+- [ ] The audit's "do not touch" section → check it before rewriting a subsystem the list also complains about
+- [ ] A "fixed by deletion" item → deleting the dispatcher/type can close a defect without a new rule; say so instead of adding a guard
+- [ ] Evidence lives in the task's `research/`, not in the chat → commands, exit codes and before/after numbers
+
+→ Read [Measurement Harness](../backend/measurement-harness.md) (contract + comparison classes) and [Quality Guidelines](../backend/quality-guidelines.md)
+
 ---
 
 ## Pre-Modification Rule (CRITICAL)

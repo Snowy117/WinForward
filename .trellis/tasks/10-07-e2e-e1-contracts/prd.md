@@ -63,35 +63,53 @@
 
 **Tier 0（第一批）**
 
-- [ ] D1–D7 与 `selftest.sh` 的问题全部不再崩溃、不再静默；每条附一个最小 plan 作回归用例。
-- [ ] `ratePerSecond × seconds > MaxSequence` 的 plan 得到退出码 2 与可诊断的错误信息（错误含 arm/最高序号/
+- [x] D1–D7 与 `selftest.sh` 的问题全部不再崩溃、不再静默；每条附一个最小 plan 作回归用例。
+- [x] `ratePerSecond × seconds > MaxSequence` 的 plan 得到退出码 2 与可诊断的错误信息（错误含 arm/最高序号/
       `MaxSequence`），而不是 `IndexOutOfRangeException`。校验只对 `kind ∈ {loss,mix,base}` 生效（DD D14.4）。
-- [ ] **AC7**：plan 的未知 key 让 `TryLoad` 失败并指出 arm 与 key（`ArmKind.Keys` 白名单，含文本键）。
-- [ ] 臂名 `A/B` 与 `A_B` 不再互相截断（变 load error）；270 字臂名不再崩（sanitize 后上限 128，DD D14.23）。
-- [ ] 顶层不再逃逸异常：任何臂级失败都留下 `error` 记录与 `run.json` 的 `failed:true`，
+- [x] **AC7**：plan 的未知 key 让 `TryLoad` 失败并指出 arm 与 key（`ArmKind.Keys` 白名单，含文本键）。
+- [x] 臂名 `A/B` 与 `A_B` 不再互相截断（变 load error）；270 字臂名不再崩（sanitize 后上限 128，DD D14.23）。
+- [x] 顶层不再逃逸异常：任何臂级失败都留下 `error` 记录与 `run.json` 的 `failed:true`，
       **包括 sink 写入/释放故障**（DD D14.7）。
 
 **安全网与契约（第二批）**
 
-- [ ] `tests/WinForward.E2E.Tests` 建好并加入 `WinForward.slnx`；`InternalsVisibleTo` 就位；
+- [x] `tests/WinForward.E2E.Tests` 建好并加入 `WinForward.slnx`；`InternalsVisibleTo` 就位；
       工程设了 `<IsTestProject>true</IsTestProject>`。
-- [ ] `WinForward.E2E.Contracts` 建好并加入 `WinForward.slnx`；`WinForward.E2E` 引用它；类型为 `public`（DD D14.20）。
-- [ ] `ArmKeys` 是 `result`/`armSummary` 顶层与 `metrics` 子树字段名的唯一定义点（作用域与 gate 见 DD D14.16）；
+- [x] `WinForward.E2E.Contracts` 建好并加入 `WinForward.slnx`；`WinForward.E2E` 引用它；类型为 `public`（DD D14.20）。
+- [x] `ArmKeys` 是 `result`/`armSummary` 顶层与 `metrics` 子树字段名的唯一定义点（作用域与 gate 见 DD D14.16）；
       `ResourceSampler` 与 `Target/**` 的字面量显式归 E2。
-- [ ] 形状测试：读**生产写出的 JSONL** 的路径集合，与 `ArmKeys` 声明路径集合比对；
+- [x] 形状测试：读**生产写出的 JSONL** 的路径集合，与 `ArmKeys` 声明路径集合比对；
       显式工厂让"新增属性忘加常量/忘写出"在编译期或测试期变红；含 null 用例、条件字段两种 flags、数组 arity。
-- [ ] `Dictionary<string, object?>` 仅允许出现在值对象内部构造嵌套块（DD D14.21）；
+- [x] `Dictionary<string, object?>` 仅允许出现在值对象内部构造嵌套块（DD D14.21）；
       `BaseArm.ReadCount`/`ReadMilliseconds` 一类"从字典读回再猜类型"的辅助函数消失。
-- [ ] 契约改名的映射表落盘 `../10-07-e2e-harness-refactor/research/contract-rename.json`（全量，含 identical）与
+- [x] 契约改名的映射表落盘 `../10-07-e2e-harness-refactor/research/contract-rename.json`（全量，含 identical）与
       `contract-rename.md`（只列 changed）；对同一份 selftest 输出，新旧**路径**集合的差异恰好等于该表的 changed 子集。
-- [ ] 改名取最小粒度：只消除同一概念的多种拼写，结构性嵌套（MIX 的 `classes.*`、BASE 的相位）保留。
-- [ ] **原 #13 已重新定义**（前提不成立：`Ratio` 自首个提交起就是 `denominator == 0 ? null`，
+- [x] 改名取最小粒度：只消除同一概念的多种拼写，结构性嵌套（MIX 的 `classes.*`、BASE 的相位）保留。
+- [x] **原 #13 已重新定义**（前提不成立：`Ratio` 自首个提交起就是 `denominator == 0 ? null`，
       没有 bug 可修）：`Ratio`/`PerSecond` 搬进 `Contracts` 作为唯一下口（`ticks<=0 ⇒ null`），
       并有测试或规则检查**证明不存在绕过它们的裸比率/裸除法计算**。
-- [ ] `dotnet build WinForward.slnx -c Release` 零警告；`dotnet test tests/WinForward.E2E.Tests -c Release` 绿；
+- [x] `dotnet build WinForward.slnx -c Release` 零警告；`dotnet test tests/WinForward.E2E.Tests -c Release` 绿；
       `dotnet format … --verify-no-changes` 空输出；`jb inspectcode …` 零 `<Issue>`。
-- [ ] `scripts/selftest.sh scripts/plans/selftest-plan.json` 绿。
+- [x] `scripts/selftest.sh scripts/plans/selftest-plan.json` 绿。
 
 > **权威规则**：父 `prd.md` 的 R/AC 是本子任务的**验收上限**；本文件的清单是它的展开，
 > 冲突时**以父为准**，且本文件每条验收都必须能追溯到父的一个 R 或 AC。
 > 父任务：`.trellis/tasks/10-07-e2e-harness-refactor/`。
+
+---
+
+## 完成记录（2026-10-07）
+
+- 覆盖批次：E1-A（基线 + 测试工程 + Tier 0）、E1-B1a（Json 原语 + `JsonlSink`）、
+  E1-B1b（`ArmKeys` 骨架 + `IJsonWritable` + IDLE/THRU）、E1-B1c（四类比对 + 改名表判定）、
+  E1-B2a（Latency/DNS）、E1-B2b（Mix/Control + 9 条改名全落地）、E1-B2c（Loss/Reliability/Persistent +
+  `ArmParameters` + 字面量 gate + 字典退役）。
+- 每个批次都经过「impl → 独立 check（含突变验证）→ 修复 → 提交」；六条门禁每批全绿；
+  测试从 0 增至 173（E2E 测试工程），`dotnet test WinForward.slnx -c Release` 全绿。
+- 证据：`../10-07-e2e-harness-refactor/research/baseline/{run1,run2,A1,A2,B1a,B1b,B1c,B2a,B2b,B2c}-*`、
+  `research/contract-inventory.json`、`research/contract-rename.{json,md}`、`research/semantic-fixes/index.jsonl`。
+- **AC1 的例外（转 E2）**：`benchmarks/WinForward.E2E` 仍有 7 个存量超 400 有效行的文件
+  （LatencyArm 816 / MixArm 687 / ReliabilityArm 612 / ClientRunner 567 / DnsArm 509 / ResourceSampler 469 /
+  PersistentArm 452），E1 只做到"不新引入超标文件"；拆分是 E2 的 R1。
+- 已知交接到后续批次：README 契约表旧拼写（E5）、冻结 Python 参考与 `make_tree.py`（E4）、
+  `compare-records.py` 的读数敏感性补强与脚本拆分（E2/E5，见 DD D17.4/D16.3）。
