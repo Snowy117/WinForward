@@ -9,6 +9,7 @@ namespace WinForward.E2E.Client.Arms;
 internal sealed class PersistentCounters
 {
     internal long _requests;
+    internal long _sentRequests;
     internal long _responses;
     internal long _reconnects;
     internal long _sendWouldBlock;
@@ -72,7 +73,7 @@ internal static class PersistentArm
                 [ArmKeys.Common.Gates.WindowMs] = 0,
             },
         };
-        outcome.Notes.Add("requests counts paced exchanges attempted and responses counts the echoes that completed them, each timed from its request's intended send instant; the difference is explained by connectFailures, sendFailures, timeouts, remoteClosed and protocolErrors.");
+        outcome.Notes.Add("requests counts paced exchanges attempted and responses counts the echoes that completed them, each timed from its request's intended send instant; the difference is explained by connectFailures, sendFailures, timeouts, remoteClosed and protocolErrors. achievedRate counts the requests whose send completed per elapsed second and completionRate counts the responses per elapsed second, so requests neither sent nor answered are in neither rate.");
         outcome.Notes.Add("a request that finds its connection dead opens a replacement connection first and is counted as a reconnect: it records no tcp-rtt sample, so the latency histograms exclude both the reconnect and the round it carries, while responses and responseRate still count that round when it echoes.");
         outcome.Notes.Add("survivedIdle is the connection live when the idle window opened completing the first request after it; it is false when that request had to reconnect, when it failed, and when no idle window fitted inside the arm.");
         outcome.Notes.Add("idleSecondsScheduled is the whole number of pacing intervals the requested idle period was rounded to, shortened to what the arm can hold; idleSecondsObserved is the silence between the last request sent before the window and the first sent after it, so it includes any reconnect the first post-idle request needed.");
@@ -115,7 +116,8 @@ internal static class PersistentArm
                 ? null
                 : NumberFormat.Round(Clock.ToMicroseconds(state._connectTicks) / (double)state._connectSamples / 1000.0),
             ResponseRate = JsonRate.Rate(state._responses, state._requests),
-            AchievedRate = JsonPerSecond.PerSecond(state._responses, elapsedTicks, Stopwatch.Frequency),
+            AchievedRate = JsonPerSecond.PerSecond(state._sentRequests, elapsedTicks, Stopwatch.Frequency),
+            CompletionRate = JsonPerSecond.PerSecond(state._responses, elapsedTicks, Stopwatch.Frequency),
         };
     }
 

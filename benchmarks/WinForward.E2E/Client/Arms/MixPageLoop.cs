@@ -118,7 +118,7 @@ internal static class MixPageLoop
         }
         catch (ObjectDisposedException)
         {
-            Interlocked.Increment(ref counters._pageErrors);
+            /* teardown closed the socket first: a teardown is not a page error and books nothing (D19.2 ⑨) */
         }
     }
 

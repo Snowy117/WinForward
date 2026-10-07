@@ -69,7 +69,10 @@ public static partial class ArmKeys
         /// <summary>Responses over requests; null when nothing was offered.</summary>
         public const string ResponseRate = "responseRate";
 
-        /// <summary>Responses per elapsed second; null when no time passed.</summary>
+        /// <summary>Requests whose send completed per elapsed second; null when no time passed.</summary>
         public const string AchievedRate = "achievedRate";
+
+        /// <summary>Responses per elapsed second; null when no time passed.</summary>
+        public const string CompletionRate = "completionRate";
     }
 }

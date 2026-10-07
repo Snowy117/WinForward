@@ -113,7 +113,10 @@ internal static class ReliabilityExchange
         }
         catch (ObjectDisposedException)
         {
-            attempt.OtherError = true;
+            // Teardown closed the socket under the attempt: the arm ended before the attempt observed
+            // anything, which is the cancelled status -- never an error the peer was seen to produce
+            // (D19.2 ⑨).
+            result._status = ExchangeStatus.Cancelled;
         }
         catch (IOException)
         {

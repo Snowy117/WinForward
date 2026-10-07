@@ -164,16 +164,24 @@ internal sealed class TcpTargetServer : IAsyncDisposable
 
             var reader = new FrameStreamReader(socket);
             var command = await TcpConnectionProtocol.RunConnectionAsync(socket, reader, _shutdown.Token).ConfigureAwait(false);
+            if (command.Outcome is not { } outcome)
+            {
+                // Teardown closed the socket under the connection before the protocol measured
+                // anything: no verdict and no connection record, because teardown is not a data
+                // point. The accept itself is already counted by the connection census above
+                // (D19.2 ⑨).
+                return;
+            }
 
             var endedTicks = Stopwatch.GetTimestamp();
-            Interlocked.Add(ref _bytesEchoed, command.Outcome.BytesEchoed);
-            Interlocked.Add(ref _protocolErrors, command.Outcome.ProtocolErrors);
-            if (command.Outcome.Truncated)
+            Interlocked.Add(ref _bytesEchoed, outcome.BytesEchoed);
+            Interlocked.Add(ref _protocolErrors, outcome.ProtocolErrors);
+            if (outcome.Truncated)
             {
                 Interlocked.Increment(ref _truncatedFrames);
             }
 
-            Interlocked.Increment(ref _verdicts[(int)command.Outcome.Verdict]);
+            Interlocked.Increment(ref _verdicts[(int)outcome.Verdict]);
 
             // The ledger's policy swallows and counts an I/O failure on its own; this guard is what
             // covers a body the sink was asked to propagate, and it keeps the fire-and-forget task
@@ -182,7 +190,7 @@ internal sealed class TcpTargetServer : IAsyncDisposable
             // the listener keeps serving (D14.7 item 1).
             try
             {
-                await WriteConnectionAsync(reader.Header.ConnectionId, command, peer, startedTicks, endedTicks).ConfigureAwait(false);
+                await WriteConnectionAsync(reader.Header.ConnectionId, command, outcome, peer, startedTicks, endedTicks).ConfigureAwait(false);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -195,11 +203,11 @@ internal sealed class TcpTargetServer : IAsyncDisposable
         }
     }
 
-    private async ValueTask WriteConnectionAsync(uint connectionId, CommandOutcome command, string peer, long startedTicks, long endedTicks)
+    private async ValueTask WriteConnectionAsync(uint connectionId, CommandOutcome command, TcpModeOutcome outcome, string peer, long startedTicks, long endedTicks)
     {
         var modeText = command.ModeKnown ? TcpCommand.Name(command.Mode) : "unknown";
-        var verdictText = TcpCommand.Name(command.Outcome.Verdict);
-        var bytesEchoed = command.Outcome.BytesEchoed;
+        var verdictText = TcpCommand.Name(outcome.Verdict);
+        var bytesEchoed = outcome.BytesEchoed;
         await _ledger.WriteAsync(
             writer =>
             {

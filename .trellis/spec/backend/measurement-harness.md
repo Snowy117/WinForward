@@ -13,6 +13,8 @@ Trigger this spec when a change:
 - publishes, renames or removes a key in an arm record (`<arm>.jsonl`), `run.json` or the target ledger;
 - changes what plan keys are accepted, or how a bad plan value is reported;
 - touches `JsonlSink` / the writers / flush or dispose behavior;
+- adds or edits a `catch (ObjectDisposedException)`, or changes what a teardown path publishes (§3.9);
+- touches a `*Rate` key or the population behind it (§3.10);
 - compares two harness runs (regression evidence) or claims a refactor is behavior-neutral.
 
 The contract lives in `benchmarks/WinForward.E2E.Contracts` (public); the harness references it.
@@ -171,6 +173,87 @@ Layered evidence, cheapest first; a claim must name which layer it used:
 A refactor that needs a real behaviour change (a failure path that used to kill the arm, a missing sent-set
 check) registers it as an intentional change with the affected keys named.
 
+### 3.9 Teardown books no data point (the `ObjectDisposedException` vocabulary)
+
+Trigger: any `catch (ObjectDisposedException)` over a socket, and any decision about what a teardown
+(a closed arm, a stopped target, a disposed socket) may publish. The rule is uniform: **teardown is not
+a measurement**, so such a catch books no counter, no verdict and no observation. The five shapes below
+are the whole allowed vocabulary, and `ObjectDisposedCatchGateTests` holds the registry (31 catches in
+19 files under `benchmarks/WinForward.E2E`; the three in `Contracts/Json/JsonlSink.cs` are the sink's own
+swallow-and-count policy, D14.7, and stay out of it):
+
+| Shape | Body | Published effect |
+|---|---|---|
+| ignored | a comment only | none — a loop/worker whose socket the teardown closed simply ends |
+| ends | `return;` / `return false;` / `break;` / `return "unknown";` | none |
+| connect failure | `return new LaneOpenResult(Ok: false, …)` | the caller's own result: this *arm* did fail to connect |
+| no verdict | `return CommandOutcome.TornDown;` | `TcpTargetServer` writes no `tcp` record and bumps no verdict bucket (`command.Outcome` is `null`) |
+| no observation | `result._status = ExchangeStatus.Cancelled;` | the REL attempt is published as `cancelled`, never as an `otherError` the peer was seen to produce |
+
+Two measured properties bound how much of this is behavioural, and both are load-bearing for anyone
+writing the next teardown path:
+
+1. a socket disposed **before** the next socket call throws `ObjectDisposedException` (so these arms are
+   reachable exactly when a socket object is reused after disposal);
+2. a socket disposed **under a pending receive** ends that receive as
+   `SocketException(OperationAborted)` ("Operation canceled"), which the socket sites book in a
+   socket-error arm — their own, or the transport's one level down (`LaneEngine`; the five E3-e moved
+   sites all have their own). A real teardown race therefore never reaches the teardown arm; the arms
+   are defensive, and the source gate (not a driven test) is what keeps them honest. Two of the 31 are
+   not sockets at all (`TargetLog`, `ResourceSampleWriter` wrap stderr) and have no socket-error arm:
+   there the catch is only a closed-pipe guard, and its shape is the gate's business too.
+   `TcpConnectionProtocol` is the exception worth driving: it takes its reader as an argument, so a
+   socket disposed before the first read reaches its arm (`AConnectionTornDownUnderTheProtocolPublishesNoVerdict`).
+
+REL keeps the teardown attempt inside `outcomes` (its `Observed` stays the arm's default) because
+`sum(outcomes) == connectAttempts == scheduledAttempts` is a live analyzer identity
+(`analyze.py reliability_invariants`); what a teardown changes there is the published `status`
+(`cancelled`, not `exchanged`) and the `otherError` flag. A site whose counter is a *census* rather than
+a measurement keeps counting: `TcpTargetServer` still increments `connections` at accept, so a torn-down
+connection can make `connections` exceed the number of `tcp` records.
+
+### 3.10 One rate name, one caliber: `achievedRate`
+
+`metrics/achievedRate` means one thing in every arm: **requests successfully sent per elapsed second** —
+the count of requests the socket accepted over the arm's elapsed span (`JsonPerSecond.PerSecond`,
+`null` when no time passed). One numerator per arm, and no arm is allowed to keep the old
+"completed responses" caliber under this name:
+
+| Arm | Numerator | Site |
+|---|---|---|
+| LAT / LATLOAD | `tcp.SentOk` / `udp.SentOk` | `LatencyMetricsWriter` |
+| LOSS | `UdpReliabilityTracker.SentOk` | `LossArm` |
+| DNS / DNSALT | `sent` (queries written to the socket) | `DnsArm` |
+| REL | attempts whose request send completed (`TransferMeasured`) | `ReliabilityMetricsWriter` |
+| PERSIST | `_sentRequests` (rounds whose frame send completed) | `PersistentArm` |
+
+The *completion* caliber is a different **name**, never the same one: PERSIST publishes
+`metrics/completionRate` (responses per elapsed second), which is the population `achievedRate` carried
+before the unification. So a run with `requests > responses` has `achievedRate > completionRate`, and the
+rename is value-preserving by construction: `completionRate == JsonPerSecond.PerSecond(responses, ticks)`,
+the old expression word for word.
+
+```csharp
+public static partial class ArmKeys
+{
+    public static class Persistent
+    {
+        public const string AchievedRate = "achievedRate";     // requests whose send completed per second
+        public const string CompletionRate = "completionRate"; // responses per second (new key, E3-e)
+    }
+}
+
+public sealed record PersistentMetrics : IJsonWritable
+{
+    public required double? AchievedRate { get; init; }
+    public required double? CompletionRate { get; init; }
+}
+```
+
+A new published key is registered in `scripts/contract-inventory.py`'s `ADDITIONS` (here
+`metrics/completionRate`) **before** `compare-records.py --rename-table … --batch B2` runs (D19.3 A):
+without the row the one-sided path reads as a structural difference and the batch's own gate goes red.
+
 ---
 
 ## 4. Validation & Error Matrix
@@ -186,6 +269,8 @@ check) registers it as an intentional change with the affected keys named.
 | arm throws / is interrupted | exit 1; an `error` record (`type,arm,kind,label,error,message,detail,startedTicks,endedTicks`) + `run.json.failed` |
 | sink write fails | the record is lost but counted; the arm is failed; `run.json` still written |
 | ledger / summary write fails | counted in `ledgerWriteErrors`; the target keeps serving |
+| a teardown catch books a counter, verdict or observation | `ObjectDisposedCatchGateTests` fails, naming `file:line` and the shape it read |
+| a published key is missing from the rename table's `ADDITIONS` | `contract-inventory.py rename` exits 1: "the fresh run publishes paths the table does not declare" |
 
 ---
 
@@ -198,6 +283,23 @@ check) registers it as an intentional change with the affected keys named.
 - **Bad**: `outcome.Metrics["sentOk"] = …` (string literal), a `Dictionary<string, object?>` carrier, or a
   field written as `null` because the value was unavailable — the first two are gated by
   `JsonKeyLiteralGateTests`, the third conflates "not measured" with "not published".
+- **Good (teardown)**: the empty catch (`catch (ObjectDisposedException) { /* the arm's own teardown closed it */ }`)
+  and the two explicit answers (`return CommandOutcome.TornDown;`,
+  `result._status = ExchangeStatus.Cancelled;`) — the shape is in the registry, so nothing is fabricated and
+  nothing is silently absorbed either.
+- **Base (teardown)**: a clean run's teardown counters stay where they were (`classes/page/errors`,
+  `classes/bulk/errors`, `dnsSummary/tcpAborted`, `tcpSummary/verdicts/error` and `outcomes/otherError` all
+  keep their values), because no harness path can dispose a socket under a call that owns it (§3.9).
+- **Bad (teardown)**: `catch (ObjectDisposedException) { Interlocked.Increment(ref counters._bulkErrors); }`
+  — a fabricated bulk error; and `catch (ObjectDisposedException) { attempt.OtherError = true; }` — an
+  `otherError` the peer was never seen to produce.
+- **Good (rates)**: PERSIST publishes `completionRate = responses/elapsed` and
+  `achievedRate = sentRequests/elapsed`, and a run with unanswered requests has
+  `achievedRate > completionRate` while an answered run has them equal — one numerator per name, and the
+  old value is still readable under the new completion name.
+- **Bad (rates)**: `AchievedRate = JsonPerSecond.PerSecond(state._responses, …)` in PERSIST (the completion
+  population under the send name) or `PerSecond(attempts.Length, …)` in REL (counts attempts that never
+  sent a request).
 
 ---
 
@@ -232,6 +334,18 @@ check) registers it as an intentional change with the affected keys named.
   string is not a comment, a multi-line raw string counts as code).
 - **Regression comparison**: `run1 vs run1` and `run1 vs run2 --band` compare clean; a mutated contract
   counter fails while a mutated pid and a mutated latency reading do not.
+- **Teardown vocabulary** (`ObjectDisposedCatchGateTests` + `ObjectDisposedTeardownTests`): the registry
+  holds every `catch (ObjectDisposedException)` site with its shape in source order, asserts the baseline
+  counts (31 sites / 19 files), and refuses any body that books a counter — re-adding an increment, or
+  reverting `TornDown`/`Cancelled`, turns it red (mutation-checked). The behavioural half drives the
+  protocol's torn-down arm (`Outcome is null`), the arm-cancelled arm (still `TcpVerdict.Error`), the two
+  MIX connect-failure arms (`_bulkErrors == 1`, `_pageErrors == 13`) and the DNS aborted-read arm
+  (`tcpAborted == 1`).
+- **Rate calibers** (`PersistentRateCaliberTests`, `Shapes/PersistentShape`): the shape factory carries
+  `completionRate` as a nullable reading and the declared-key comparison covers it; a real PERSIST run with
+  every request answered publishes `completionRate == achievedRate > 0`, and a run whose peer never answers
+  publishes `completionRate == 0 < achievedRate`; `contract-inventory.py rename` must report the key as
+  `added` and `compare-records.py --rename-table … --batch B2` must stay at `contract=0`.
 
 ---
 
@@ -265,6 +379,38 @@ var decision = policy.BuildRequest(sequence, intended, buffer, out var length); 
 if (decision == LaneSlotDecision.Send) { var send = transport.SendAsync(...); var block = !send.IsCompleted; ... }
 policy.OnReceive(result, payload, receivedTicks);   // decode + classify + enqueue, no counters
 policy.Settle(Clock.Now);                           // the only settlement point, on the send thread
+```
+
+#### Wrong — teardown booked as a measurement
+```csharp
+catch (ObjectDisposedException)
+{
+    Interlocked.Increment(ref counters._pageErrors);   // the harness's own teardown, published as a page error
+}
+
+catch (ObjectDisposedException)
+{
+    return new CommandOutcome(…, new TcpModeOutcome(TcpVerdict.Error, 0, 0, truncated: false));   // a verdict for a connection nothing measured
+}
+```
+
+#### Correct — teardown books nothing, the failure arms keep counting
+```csharp
+catch (ObjectDisposedException)
+{
+    /* teardown closed the socket first: a teardown is not a page error and books nothing (D19.2 ⑨) */
+}
+
+catch (ObjectDisposedException)
+{
+    // A socket disposed under the connection measured nothing, so no verdict is published (D19.2 ⑨).
+    return CommandOutcome.TornDown;
+}
+
+catch (SocketException)
+{
+    Interlocked.Increment(ref counters._pageErrors);    // a socket error the harness did see is still a page error
+}
 ```
 
 > **Gotcha — the noise floor is not zero.** Two runs of the *same* binary differ: contract counters move on

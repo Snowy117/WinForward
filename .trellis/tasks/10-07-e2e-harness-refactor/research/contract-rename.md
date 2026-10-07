@@ -5,8 +5,8 @@ form is [`contract-rename.json`](./contract-rename.json). Paths are canonical pa
 (`jsonl_paths.py`): member names joined with `/`, a dot inside a member name kept whole.
 
 - baseline: `.trellis/tasks/10-07-e2e-harness-refactor/research/baseline/run1`
-- fresh run: `/tmp/e3d/post1`
-- rows: **604** = identical 580 + renamed 9 + added 15 + removed 0
+- fresh run: `/tmp/e3e/post1`
+- rows: **605** = identical 580 + renamed 9 + added 16 + removed 0
 - batch that executes the renames: `B2`
 - renames landed in the fresh run: **9**; registered but still published under the old spelling: **0** (listed below); not observed at all: **0**
 - declared paths not observed in the fresh run: **2** (conditional keys; listed below)
@@ -54,6 +54,7 @@ form is [`contract-rename.json`](./contract-rename.json). Paths are canonical pa
 | `dnsAlt/truncatedFrames` | the second DNS listener's truncation counter one level down, under targetSummary/dnsAlt; present only when the target was started with a second DNS port (D19.3 B) |
 | `error` | error record field: the exception family name (D14.12) |
 | `metrics/classes/udp/sentOutOfRangeSequences` | mix UDP class: the same counter, folded from the per-desktop trackers (D7) |
+| `metrics/completionRate` | persistent metrics: the arm's completion caliber -- responses per elapsed second, the population metrics/achievedRate carried before the harness unified that name on requests successfully sent (D19.2 ⑧, E3-e) |
 | `metrics/loss/sentOutOfRangeSequences` | the control's loss phase publishes the same loss record one level down (D7) |
 | `metrics/sentOutOfRangeSequences` | loss metrics: offered slots the tracker refused to send as outside its bounded sequence space (D7) |
 | `planSource` | run.json top-level key: 'builtin' when no plan file was given (D14.23) |

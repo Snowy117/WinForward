@@ -19,7 +19,7 @@
 | [Hot-Path Conventions](./hot-path.md) | Zero-allocation packet pipeline: raw addresses, sync fast path, native lease lifetime, in-place reinjection | Active |
 | [Async Lifetime (Quiescence Scopes)](./async-lifetime.md) | Quiescence-scope contract: admission, seal/join drain, work leases, the `Run` door, WF fire-and-forget rules | Active |
 | [Test Stability](./test-stability.md) | Flake-proof test contracts: locked fake snapshots, real synchronization points, staged interleavings, process-wide counters and budgets | Active |
-| [Measurement Harness](./measurement-harness.md) | E2E harness contract: one field-name definition point, path alphabet, three-state `null`, sink policies, fail-closed plan loading, regression comparison classes | Active |
+| [Measurement Harness](./measurement-harness.md) | E2E harness contract: one field-name definition point, path alphabet, three-state `null`, sink policies, fail-closed plan loading, regression comparison classes, the teardown vocabulary (§3.9) and the `achievedRate` caliber (§3.10) | Active |
 
 > History: on 2026-08-29 the former 470-line `windows-ndisapi.md` monolith was split (paths verified against the post-08-29-refactor source tree) into `windows-ndisapi.md` + `tcp-local-redirect.md` + `udp-relay.md` + `traffic-policy-lifecycle.md`, and the never-filled `frontend/` layer and `database-guidelines.md` template were removed.
 

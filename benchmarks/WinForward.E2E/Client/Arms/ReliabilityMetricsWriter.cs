@@ -70,7 +70,10 @@ internal static class ReliabilityMetricsWriter
             MeanTransferMs = transferSamples == 0
                 ? null
                 : NumberFormat.Round(Clock.ToMicroseconds(transferTicks) / (double)transferSamples / 1000.0),
-            AchievedRate = JsonPerSecond.PerSecond(attempts.Length, elapsedTicks, System.Diagnostics.Stopwatch.Frequency),
+            // The attempts whose request send completed, the same population the transfer mean is
+            // taken over: achievedRate is requests successfully sent per second, so an attempt that
+            // never connected or whose send threw is in none of its numerator (D19.2 ⑧).
+            AchievedRate = JsonPerSecond.PerSecond(transferSamples, elapsedTicks, System.Diagnostics.Stopwatch.Frequency),
             EffectiveModeMix = mixText,
         };
     }

@@ -78,6 +78,7 @@ ADDITIONS = {
     "dns/acceptErrors": "the first DNS listener's refused accepts one level down, under targetSummary/dns (E3-d)",
     "dnsAlt/acceptErrors": "the second DNS listener's refused accepts one level down, under targetSummary/dnsAlt; present only when the target was started with a second DNS port (E3-d)",
     "udp/udpReceivers": "the UDP echo listener's receive loops that actually started, under targetSummary/udp (E3-d)",
+    "metrics/completionRate": "persistent metrics: the arm's completion caliber -- responses per elapsed second, the population metrics/achievedRate carried before the harness unified that name on requests successfully sent (D19.2 ⑧, E3-e)",
 }
 
 FAMILY_OF = {

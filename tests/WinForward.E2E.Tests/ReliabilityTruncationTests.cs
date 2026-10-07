@@ -48,6 +48,10 @@ public sealed class ReliabilityTruncationTests
         Assert.True(attempt.ProtocolError, "the truncated frame was not booked as a protocol error");
         Assert.False(attempt.Eof, "a stream cut inside a frame is not the clean end of stream the mode asks for");
         Assert.Equal(0, attempt.Echoed);
+
+        // The observation is what the peer did, not a teardown: the exchange ran to its end, which is the
+        // status a teardown-ended attempt must not publish (D19.2 ⑨).
+        Assert.Equal(ExchangeStatus.Completed, attempt.Status);
     }
 
     [Fact]

@@ -32,7 +32,7 @@ internal readonly struct TcpModeOutcome
 [StructLayout(LayoutKind.Auto)]
 internal readonly struct CommandOutcome
 {
-    internal CommandOutcome(TcpMode mode, uint expectedBytes, bool modeKnown, TcpModeOutcome outcome)
+    internal CommandOutcome(TcpMode mode, uint expectedBytes, bool modeKnown, TcpModeOutcome? outcome)
     {
         Mode = mode;
         ExpectedBytes = expectedBytes;
@@ -40,13 +40,24 @@ internal readonly struct CommandOutcome
         Outcome = outcome;
     }
 
+    /// <summary>
+    /// A connection the socket's own teardown ended before the protocol could measure anything: an
+    /// outcome that is published nowhere, because teardown is not a data point (D19.2 ⑨).
+    /// </summary>
+    internal static CommandOutcome TornDown { get; } = new(TcpMode.Clean, 0, modeKnown: false, outcome: null);
+
     internal TcpMode Mode { get; }
 
     internal uint ExpectedBytes { get; }
 
     internal bool ModeKnown { get; }
 
-    internal TcpModeOutcome Outcome { get; }
+    /// <summary>
+    /// What the connection was measured to be, or <see langword="null"/> when teardown ended it
+    /// before there was anything to measure: the two are different answers and only one of them is
+    /// published.
+    /// </summary>
+    internal TcpModeOutcome? Outcome { get; }
 }
 
 /// <summary>
@@ -99,7 +110,9 @@ internal static class TcpConnectionProtocol
         }
         catch (ObjectDisposedException)
         {
-            return new CommandOutcome(TcpMode.Clean, 0, modeKnown: false, new TcpModeOutcome(TcpVerdict.Error, 0, 0, truncated: false));
+            // Teardown closed the socket under the connection: nothing about this peer was measured,
+            // so the connection publishes no verdict (D19.2 ⑨).
+            return CommandOutcome.TornDown;
         }
     }
 

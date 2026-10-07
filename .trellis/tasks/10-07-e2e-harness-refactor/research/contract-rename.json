@@ -50,6 +50,12 @@
   {
     "kind": "added",
     "old_path": null,
+    "new_path": "metrics/completionRate",
+    "reason": "persistent metrics: the arm's completion caliber -- responses per elapsed second, the population metrics/achievedRate carried before the harness unified that name on requests successfully sent (D19.2 ⑧, E3-e)"
+  },
+  {
+    "kind": "added",
+    "old_path": null,
     "new_path": "metrics/loss/sentOutOfRangeSequences",
     "reason": "the control's loss phase publishes the same loss record one level down (D7)"
   },

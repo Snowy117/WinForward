@@ -78,6 +78,7 @@ internal static class PersistentConnection
             return PersistentExchange.NotSent;
         }
 
+        state._sentRequests++;
         state._lastSendTicks = Clock.Now;
         return await TryReadEchoAsync(context, link, sequence, intendedTicks, timedRound, roundDeadlineTicks, state, cancellationToken).ConfigureAwait(false);
     }

@@ -387,7 +387,7 @@ internal sealed class DnsServer : IAsyncDisposable
             }
             catch (ObjectDisposedException)
             {
-                Interlocked.Increment(ref _tcpAborted);
+                /* teardown closed the socket under the handler: a teardown is not an aborted query and books nothing (D19.2 ⑨) */
             }
         }
     }

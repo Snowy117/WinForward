@@ -6,7 +6,7 @@ namespace WinForward.E2E.Tests.Shapes;
 
 /// <summary>
 /// The <c>persistent</c> kind's shape contract: one flat metrics object whose reconnect, idle-window
-/// and error counters all sit beside each other, and the three readings an empty population or
+/// and error counters all sit beside each other, and the four readings an empty population or
 /// duration leaves unknown.
 /// </summary>
 internal static class PersistentShape
@@ -33,6 +33,7 @@ internal static class PersistentShape
         $"{MetricsPrefix}/{ArmKeys.Persistent.MeanConnectMs}",
         $"{MetricsPrefix}/{ArmKeys.Persistent.ResponseRate}",
         $"{MetricsPrefix}/{ArmKeys.Persistent.AchievedRate}",
+        $"{MetricsPrefix}/{ArmKeys.Persistent.CompletionRate}",
     ];
 
     internal static readonly KindContract s_contract = new(
@@ -101,6 +102,7 @@ internal static class PersistentShape
             MeanConnectMs = unknown ? null : 0.281,
             ResponseRate = unknown ? null : 1.0,
             AchievedRate = unknown ? null : 1.0,
+            CompletionRate = unknown ? null : 1.0,
         };
     }
 }

@@ -67,8 +67,11 @@ public sealed record PersistentMetrics : IJsonWritable
     /// <summary>Responses over requests; <see langword="null"/> when nothing was offered.</summary>
     public required double? ResponseRate { get; init; }
 
-    /// <summary>Responses per elapsed second; <see langword="null"/> when no time passed.</summary>
+    /// <summary>Requests whose send completed per elapsed second; <see langword="null"/> when no time passed.</summary>
     public required double? AchievedRate { get; init; }
+
+    /// <summary>Responses per elapsed second; <see langword="null"/> when no time passed.</summary>
+    public required double? CompletionRate { get; init; }
 
     /// <inheritdoc/>
     public void WriteTo(Utf8JsonWriter writer)
@@ -94,6 +97,7 @@ public sealed record PersistentMetrics : IJsonWritable
         Reading.Write(writer, ArmKeys.Persistent.MeanConnectMs, MeanConnectMs);
         Reading.Write(writer, ArmKeys.Persistent.ResponseRate, ResponseRate);
         Reading.Write(writer, ArmKeys.Persistent.AchievedRate, AchievedRate);
+        Reading.Write(writer, ArmKeys.Persistent.CompletionRate, CompletionRate);
         writer.WriteEndObject();
     }
 }

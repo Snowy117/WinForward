@@ -33,3 +33,37 @@ HEAD 工作树行号（`git rev-parse` 见 `research/baseline/E3b1-vs-run1.md`�
 
 本文件**只**登记 E3-b1 涉及的行；父任务 `implement.md` 提到的其它 README 旧拼写（E2 改名遗留）
 由 E5 按其自己的清单处理，不在此重复。
+
+## 5. E3-e（`achievedRate` 口径统一与 `completionRate` 新键）待改行
+
+行号是 **E3-e 施工后**的 `benchmarks/WinForward.E2E/README.md`（HEAD `46429b7` 的工作树）。
+核对命令（本文件里每一行都据此判过）：
+
+```console
+$ rg -n 'achievedRate|completionRate' benchmarks/WinForward.E2E/README.md
+rc=1                       # 零命中：README 里没有这两个驼峰键名
+$ rg -n 'achieved rate' benchmarks/WinForward.E2E/README.md
+421:| `gates/inFlightCeilingMs` | the tightest direct-measurable-latency ceiling, `window × lanes / achieved rate`; …
+$ rg -n 'achievedRate|completionRate' analysis/analyze.py analysis/README.md
+rc=1                       # 分析器与分析器 README 都是零命中
+```
+
+**结论**：README 里唯一提到这两个速率的地方是 `:421` 的**散文**「achieved rate」（**LAT** 的
+`gates/inFlightCeilingMs` 公式，与本轮无关，且 `:421` 是 E3-b1 已改过的行）；`completionRate` 零命中；
+两个速率都**不在**分析器的读键表（`:376` 是 `persistent` 的读键行，不含任何速率）。所以 E3-e **不改任何
+README 行**，只登记下面两条「将来若要写进文档就该这么写」的语义，交 E5 决定是否落笔。
+
+| 文件:行 | 今天写的 | 应该知道的 |
+|---|---|---|
+| `benchmarks/WinForward.E2E/README.md:351` | `PERSIST`（persistent）臂的能力行：one long-lived TCP connection … | 若要列发布键：`metrics/achievedRate` = **发送成功的请求/秒**（`_sentRequests`），`metrics/completionRate` = **应答/秒**（`responses`，即 D19.2 ⑧ 之前 `achievedRate` 的那个总体）。两者同分母（臂的 elapsed），所以 `requests > responses` 的运行里 `achievedRate > completionRate`；`requests == responses` 的运行里两者逐值相等（E3-e 证据 §4 的单轮对照） |
+| `benchmarks/WinForward.E2E/README.md:372` | `reliability` (REL) 的读键行（含 `metrics/outcomes/<name>` 等，不含 `achievedRate`） | **无需改动**：REL 的 `metrics/achievedRate` 分子从 `attempts.Length` 改成「请求发送完成的尝试数」（`TransferMeasured`），但该键不在分析器读集里。若要写进散文，口径与 PERSIST 同：成功发出的请求/秒 |
+| `benchmarks/WinForward.E2E/README.md:376` | `persistent` (PERSIST) 的读键行（`requests`、`responses`、`responseRate`、…，不含速率） | **无需改动**：`completionRate` 不在分析器读集里；`responseRate`（`responses/requests`）与两个速率是不同的统计，别并排引用 |
+
+**分析器侧零改动**（E3-e 证据 §6）：`rg -n 'achievedRate|completionRate' analysis/analyze.py` 无输出；
+`analysis/README.md` 同样零命中；`synthetic/make_tree.py` 的 PERSIST 块继续写它自己的 `achievedRate`
+（合成树只喂渲染，不校验发布键集），因此 `verification/*` 无需重生成。
+
+**ODE 语义**（teardown 不产生数据点，D19.2 ⑨）在 README 里**没有任何旧说法**可改
+（`rg -n 'ObjectDisposed' benchmarks/WinForward.E2E/README.md` 无输出）；契约落在
+`.trellis/spec/backend/measurement-harness.md` §3.9/§3.10，若 E5 要在 harness README 里复述一句，
+照那两节的措辞即可。

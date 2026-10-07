@@ -72,7 +72,7 @@ internal static class MixBulkLoop
         }
         catch (ObjectDisposedException)
         {
-            Interlocked.Increment(ref counters._bulkErrors);
+            /* teardown closed the socket first: a teardown is not a bulk error and books nothing (D19.2 ⑨) */
         }
     }
 }
