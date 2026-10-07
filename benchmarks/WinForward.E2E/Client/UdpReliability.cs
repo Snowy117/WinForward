@@ -122,6 +122,34 @@ internal readonly struct LossCounts
 /// by an arrival or a verdict, retires from the in-flight window when its W elapses, and lands in
 /// exactly one classification bucket.
 /// </summary>
+/// <remarks>
+/// <para>
+/// <b>Single-writer contract.</b> Every booking method — <see cref="MarkSupplied"/>,
+/// <see cref="MarkSent"/>, <see cref="MarkSendRefused"/>, <see cref="MarkSendFailure"/>,
+/// <see cref="MarkWouldBlock"/>, <see cref="MarkWindowOverflow"/>, <see cref="MarkArrival"/>,
+/// <see cref="MarkCorrupt"/>, <see cref="MarkCorruptWithKnownSequence"/>,
+/// <see cref="MarkUnmatchedReply"/>, <see cref="MarkForeignConnection"/> — belongs to one writer:
+/// the arm's send side. A receive loop never calls one of them, and never asks
+/// <see cref="WasSent"/> either. It only classifies the datagram and hands the still-unresolved
+/// verdict, with the instant the datagram arrived, to the send side (the MIX arm's
+/// <c>MixUdpBook</c> settlement queue); the send side then performs the <see cref="WasSent"/>
+/// question, the pending removal, the round-trip sample and the booking, in that order — the same
+/// ladder <c>UdpLatencyPolicy.Settle</c> pins for the latency arm (D19.3 F). The reason is not
+/// style: with two writers, <see cref="SentOk"/>, <see cref="Outstanding"/> and the sequence
+/// bitmaps interleave, and every identity this class exists to keep holds only "mostly".
+/// </para>
+/// <para>
+/// The send side is one <i>logical</i> writer, not necessarily one thread id: an arm's send loop is
+/// async and resumes on whichever thread completes its socket send, so the guarantee enforced here
+/// is that no second booker runs concurrently with it, which is what the settlement queue gives.
+/// </para>
+/// <para>
+/// <b>Teardown.</b> <see cref="Classify"/> (and the <see cref="Retire"/> it calls) is the arm's own
+/// read, taken by the arm's thread after every booking side has joined — and after the arm's receive
+/// loop has handed over its last settlement. It is outside the single-writer span: it must never run
+/// while a booker is live.
+/// </para>
+/// </remarks>
 internal sealed class UdpReliabilityTracker
 {
     // The tracker books sequences in [0, MaxSequence] and nothing outside it, so this bound is what

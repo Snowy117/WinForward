@@ -165,12 +165,8 @@ internal static class LossArm
                 Pacer.WaitUntil(intended, cancellationToken);
 #pragma warning restore S6966, VSTHRD103, MA0042
                 index++;
-                tracker.MarkSupplied();
-                tracker.Retire(Clock.Now, windowTicks);
-
-                if (tracker.Outstanding >= window)
+                if (!LossWindow.Admit(tracker, Clock.Now, windowTicks, window))
                 {
-                    tracker.MarkWindowOverflow();
                     continue;
                 }
 

@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Quality Check 清单入口"}
+{"file": ".trellis/spec/backend/measurement-harness.md", "reason": "契约、接缝不变量与等价性口径"}
+{"file": ".trellis/spec/backend/test-stability.md", "reason": "并发/仿真/穷举测试的稳定性要求（含 worker 线程取消必须干净退出）"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "三条门禁与零诊断"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "记账改动的零分配要求"}
+{"file": ".trellis/tasks/10-07-e2e-harness-refactor/design-decisions.md", "reason": "D19/D19.2/D19.3 的权威裁定（含逐条反证要求）"}
+{"file": ".trellis/tasks/10-07-e2e-harness-refactor/research/semantic-fixes/E3-premises.md", "reason": "前提复核结论与失效行号速查"}

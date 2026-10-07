@@ -1,0 +1,8 @@
+{"file": ".trellis/tasks/10-07-e2e-harness-refactor/design-decisions.md", "reason": "E3 的权威裁定：D19 前提重新基线、D19.2 十九条歧义裁定、D19.3 开工前补充（新键登记、账本键归属、Truncated 表态、n/a 形式、E3-a 接口钉死）"}
+{"file": ".trellis/tasks/10-07-e2e-harness-refactor/research/semantic-fixes/E3-premises.md", "reason": "21 条前提复核结论与失效行号速查表——施工前先读它 §2 末"}
+{"file": ".trellis/tasks/10-07-e2e-e3-semantics/prd.md", "reason": "E3 的范围/验收（已按 D19 重新基线）"}
+{"file": ".trellis/tasks/10-07-e2e-harness-refactor/research/semantic-fixes/index.jsonl", "reason": "逐条修复台账：verdict 枚举与 E3-* 条目的写法"}
+{"file": ".trellis/spec/backend/measurement-harness.md", "reason": "E2 建立的契约与接缝不变量：E3 的并发契约、账本键命名、等价性口径都要遵守它"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "接缝与记账改动的零分配/同步快路径契约"}
+{"file": ".trellis/spec/backend/test-stability.md", "reason": "并发/仿真/穷举测试的稳定性要求（不依赖真实网络与墙钟）"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "ODE 统一与 fail-closed 语义的既有约定"}

@@ -182,6 +182,27 @@ collection:
 - **Subscribe after the target exists.** `UnobservedExceptionProbe` counts any unobserved fault while
   its target is unset (by design), so the probe must be `Track`ed *before*
   `TaskScheduler.UnobservedTaskException += ...`.
+- **A worker thread ends on cancellation, it does not throw.** `BlockingCollection<T>.GetConsumingEnumerable(ct)`
+  signals a cancelled consuming token by **throwing** `OperationCanceledException` out of the
+  enumeration; only `CompleteAdding` ends it cleanly. A thread body that enumerates without a `catch`
+  therefore dies with an unhandled exception the moment its budget fires — and an unhandled exception
+  on any thread kills the **test host**, aborting the run and silently dropping the results of every
+  test that had not reported yet (measured on the E3-a check: the 276-test assembly reported 272, and
+  the keep-alive scaffold's own result was lost with it). A fact whose assertion abandoned a round
+  before `CompleteAdding` — a timeout, a staging assert — leaves exactly such a thread parked until its
+  budget, so the crash lands seconds later, on the strength of an unrelated test's failure. Wrap the
+  enumeration, or end the worker by completing the collection rather than by cancelling its token.
+
+  ```csharp
+  // Wrong: the token ends this loop by throwing, on a thread of its own.
+  using var stop = new CancellationTokenSource(budget);
+  foreach (var item in queue.GetConsumingEnumerable(stop.Token)) { Book(item); }
+
+  // Correct: the cancellation is an exit, not an escape.
+  using var stop = new CancellationTokenSource(budget);
+  try { foreach (var item in queue.GetConsumingEnumerable(stop.Token)) { Book(item); } }
+  catch (OperationCanceledException) { /* the budget ended the wait; the assert owns the verdict */ }
+  ```
 
 ## 3. Validation & Error Matrix
 
@@ -196,6 +217,7 @@ collection:
 | A process-wide counter asserted as an exact delta | the asserting class and every writer share one collection |
 | A fixed wait budget shorter than the suite's starvation allowance (~10 s) | forbidden — align with `WaitForAsync`'s default |
 | `WaitAsync`/`ReadAsync` with `CancellationToken.None` on a product-controlled path | forbidden — bound it, so a defect fails instead of hanging |
+| A worker thread waiting on `GetConsumingEnumerable(ct)` with no `catch` | forbidden — the token ends it by throwing, and the unhandled throw takes the test host and the unreported results with it |
 | A `Stopwatch` bound asserted as a dispatch contract | forbidden — assert the state that proves the contract |
 | A released gate re-read afterwards, or a gate not released on the timeout path | forbidden — capture before release, release from `finally` |
 

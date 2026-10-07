@@ -702,6 +702,64 @@ internal interface ILanePolicy
 
 ---
 
+## D19. E3 前提复核后的裁定（`research/semantic-fixes/E3-premises.md` 之后）
+
+### D19.1 重新基线（E3 的真实剩余工作 = 10 件，不是 13 条）
+
+- **已实现，只需回归护栏**：`#5`、`#7`、`#9`、`#10`、`#11`(LOSS 侧)、`#13`、`#15`、`#17`、`#18`、
+  **`#14`（D0 说错了一半：分析器 `analyze.py:1178-1256` 早已按 `(pid,startUtc)` 拒收负差）**、`#16`、`#6` 前半。
+- **真缺口**：① tracker 并发契约（**MIX 独有**：`MixUdpLoop.cs:34` 起接收任务，`:151→:194` 接收线程 `MarkArrival`
+  与 `:121` 发送线程 `MarkSent` 同写一个 tracker）；② `#12` 四臂 `clientSendLoss` 仍是 `0` 字面量
+  （`IdleArm.cs:29`/`DnsArm.cs:62`/`ThroughputArm.cs:122`/`ReliabilityArm.cs:65`；参照点是 **`LossArm.cs:37`**，
+  已派生的其实是**五个**：Latency/Mix/Control/Persistent 也在内）；③ D7 记账的 `SentOutOfRange` 不存在；
+  ④ `#8` 缺"格子 `n/a (windowOverflow > 0)`"（分析器的 `measurement-caveat` **已有**，`analyze.py:1812-1819`）；
+  ⑤ `#11` 的 `undecodable` 在分析器零消费；⑥ `FrameReadStatus.Truncated` 未做（写 trailer 的只有 TCP 一台）；
+  ⑦ 账本 `detail`/`acceptErrors`/`udpReceivers` 与 `--udp-receivers` 未做；⑧ ODE 统一（实测 **5 种形态 / 31 个 catch /
+  19 文件**，要动的只有 5 处：3 处把 teardown 计成数据点、2 处产出 verdict）；
+  ⑨ `achievedRate` 仍两口径 + `completionRate` 不存在；⑩ `#19`（CPU 仅用户态披露）是**唯一原样存活的审计条目**。
+
+### D19.2 歧义裁定
+
+| # | 裁定 |
+|---|---|
+| ① | **MIX 的并发契约镜像 D4**（接收任务只投递 settlement、发送线程 drain 结算），**不并入 `LaneEngine`**（第三个线格式 + 臂自有窗口；D18.1 只让 LAT 走引擎） |
+| ② | E3 **只改**与 `windowOverflow` caveat 直接相关的 README 段落；契约表的其余旧拼写仍归 **E5**（E3 的 check 逐行列出行号交给 E5） |
+| ③ | 允许"结构恒零"的 gate：IDLE 记 `n/a`（无样本）；REL 用 `scheduledAttempts` 恒等式当 gate |
+| ④ | `DnsArm` 的 gate 分子**只用 `unsent`**（`unsent + socketErrors` 是不同总体） |
+| ⑤ | `scripts/check-fairness.py` 归 **E3**（#17/#18 的可 grep 断言） |
+| ⑥ | MIX 的 `clientSendLoss` 与 LOSS **一起改**（同一公式，避免两臂口径分叉） |
+| ⑦ | BASE 下限与 LOSS 同表并列**算达标**（`analyze.py:3449-3450`），不再动 |
+| ⑧ | `achievedRate` 统一为"成功发出的请求/秒"；PERSIST 的完成口径改名 `completionRate`；**数值变化登记** |
+| ⑨ | ODE 统一**先枚举净影响**（哪些发布值会变）再改代码；`teardown 不产生数据点` 为唯一语义 |
+| ⑩ | `JsonlSink` 的 `body` **不移出** I/O try（D14.7 终裁优于 D10） |
+| ⑪ | `Truncated` **不接进 verdict 枚举**，只新增 `FrameReadStatus` 成员 + 两台 server 各自记账 + 环境键 |
+| ⑫ | "500 rps 下 `windowOverflow == 0`"分两层：单元层用 8.192 s 上界，判据轮用实测观测 |
+| ⑬ | 新键 `sentOutOfRangeSequences` **只增**（D14.7），显式工厂 `required` |
+| ⑭ | `#14` 的身份判定**归分析器**，不在 sampler 里加拒收 |
+| ⑮ | **不删** `corruptRate`（它能非零，只是去程损坏测不到） |
+| ⑯ | MIX 的 settle 时序对齐 `ILanePolicy.Settle` 的语义，但**不共享类型** |
+| ⑰ | `index.jsonl` 的 verdict 枚举固定 `implemented｜fixed｜deferred｜observation｜n/a`；E3 条目 id 用 `E3-<编号>-<短名>` |
+| ⑱ | `base` 声明 `lossWindowMs` 合法，但 `#6` 的判据以 D14.2 的 `{loss,mix}` 为准 |
+| ⑲ | **失效行号速查**（施工者必须先看）：`LossArm.cs:43`→`:37`；`ReliabilityArm.cs:602-606`→`ReliabilityExchange.cs:73-77`+`FrameBuffer.cs:63-66`；`DnsArm.cs:46,504-509`→`DnsTcpPhase.cs:26,117,161-176`；`BaseArm.cs:29-37`→`ControlArm.cs:26-33,104-126`；`LatencyArm.cs:435/668`→`LaneEngine.cs:271-289`；`README.md:550`→`:421`；`ClientRunner.cs:445`→`Cli/ClientOptions.cs:107-115` |
+
+### D19.3 E3 计划复核后的补充裁定（开工前必须遵守）
+
+| # | 裁定 |
+|---|---|
+| A | **新键必须登记进 `contract-rename.json`**：凡本任务新增的发布键（`sentOutOfRangeSequences`、`completionRate`、`truncatedFrames`、账本 `detail`/`acceptErrors`/`udpReceivers`）都要以 `added` 登记（或走 `--batch E3`），否则 `compare-records.py` 会把单边路径判成结构差异、**本批门禁自红** |
+| B | **账本键扩容的归属**：`truncatedFrames` 的两层常量 + 两个 keyset 结构体 + writer（四处）由 **E3-c** 拥有；E3-d 在其后追加自己的三字段（批次串行，不并行改同一分片） |
+| C | **DNS 的截断是独立定义**：`DnsServer` 不用 `FrameStreamReader`（它走长度前缀短读），不得硬塞 `FrameReadStatus.Truncated`；`dnsSummary/truncatedFrames` 的含义在分片 `<remarks>` 写明是"DNS TCP 长度前缀短读"，与 TCP 侧同键名不同机制 |
+| D | **`Truncated` 的表态**：跳过 trailer + 既有 `TcpVerdict.ProtocolError` + `tcpSummary/truncatedFrames++`（**不新增 verdict 成员**，D19.2 ⑪） |
+| E | **"结构恒零"的表达形式**：`ArmOutcome.Gates` 是 `Dictionary<string,double>`，写不出 `n/a` ⇒ 记录里**保留 0**，`n/a` 只出现在分析器/README 渲染；REL 的 `scheduledAttempts == connectAttempts` 恒等式**分析器已有**（`analyze.py:1316-1340`），记录侧不新增键（若要有值，最小形式是 `gates.clientSendLoss = scheduledAttempts − connectAttempts`） |
+| F | **E3-a 的接口钉死**：settlement 携带**未 Resolve** 的 verdict；`tracker.WasSent` 与 `pending.TryRemove` **都在发送线程**做（照 `UdpLatencyPolicy.Book` 的形状）；否则 `MixUdpLoop.cs:184` 的跨线程 `WasSent` 读留在原地，"单写者"只是名义成立 |
+| G | **E3-a 的用例不得 assert `clientSendLoss`**（该值在 E3-b 变），并在证据里写明这句 |
+| H | **E3-b 改 `analyze.py` 必须早于 E4 的冻结**（D6.3 的 `verification/golden/` 今天不存在）；`#11` 消费、`#8` 格子、`#19` 脚注与 `check-fairness.py` 在同一 commit，且断言要**先对当前输出红** |
+| I | **`#12` 的反证要求**：每臂至少一条"驱动到非零"的用例（DNS 构造 `unsent > 0`、THRU 构造发送失败、REL 伪造 `scheduledAttempts ≠ connectAttempts`），**不允许只断言 `== 0`** |
+| J | **`#8` 的反证**：`windowOverflow == 0` 的记录逐字节不变，只有 `> 0` 的改渲染；`>= 0` 的负控必须红 |
+| K | **E3-c 的反证成对**：完整帧后 EOF ⇒ `EndOfStream`；半帧后 EOF ⇒ `Truncated`；`FrameStreamReaderTests.cs:58-67` 的冻结用例**必须先红**；干净 half-close 仍收到 trailer（阳性用例） |
+
+---
+
 ## D17. 零宽带宽与测量统计的裁定（B2b check 后）
 
 **现象**：`LATLOAD` 的 `latency/tcp-rtt/count`、`metrics/tcp.outstandingAtTeardown`、
