@@ -175,6 +175,32 @@ public sealed class LaneTransportTests
         Assert.Equal(LaneReceiveKind.EndOfStream, arrival.Kind);
     }
 
+    /// <summary>
+    /// The other side of the pair above: the same close, ten bytes into a frame, is a lost boundary
+    /// rather than the end of a stream. The lane stops either way, and the reason it carries is what
+    /// separates a clean half-close from a truncation (D19.3 D).
+    /// </summary>
+    [Fact]
+    public async Task APeerFinInsideAFrameIsTerminalTruncation()
+    {
+        using var listener = ListenLoopbackTcp(out var endPoint);
+        using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        using var transport = new TcpLaneTransport(socket, endPoint, 0x7400_0005u);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var accept = listener.AcceptAsync(cancellation.Token);
+        await transport.OpenAsync(cancellation.Token);
+        using var peer = await accept;
+        await DrainAsync(peer, FrameCodec.HeaderSize + TcpCommand.PayloadLength + FrameCodec.TrailerSize, cancellation.Token);
+
+        await peer.SendAsync(BuildFrame(0x7400_0005u, 1).AsMemory(0, 10), SocketFlags.None, cancellation.Token);
+        peer.Shutdown(SocketShutdown.Send);
+
+        var truncated = await transport.ReceiveAsync(new byte[DestinationBytes()], cancellation.Token);
+        Assert.Equal(LaneReceiveKind.IoError, truncated.Kind);
+        Assert.Equal(FrameDecodeError.Truncated, truncated.Detail);
+        Assert.Equal(0, truncated.Length);
+    }
+
     [Fact]
     public async Task AHeaderClaimingAnImpossibleLengthIsTerminal()
     {

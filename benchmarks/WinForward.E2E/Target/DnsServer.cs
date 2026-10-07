@@ -30,6 +30,7 @@ internal readonly struct DnsTotalsKeys
         string tcpAnswers,
         string tcpEmptyAnswers,
         string tcpMalformed,
+        string tcpTruncatedFrames,
         string tcpConnections,
         string tcpAborted)
     {
@@ -43,6 +44,7 @@ internal readonly struct DnsTotalsKeys
         TcpAnswers = tcpAnswers;
         TcpEmptyAnswers = tcpEmptyAnswers;
         TcpMalformed = tcpMalformed;
+        TcpTruncatedFrames = tcpTruncatedFrames;
         TcpConnections = tcpConnections;
         TcpAborted = tcpAborted;
     }
@@ -59,6 +61,7 @@ internal readonly struct DnsTotalsKeys
         ArmKeys.Ledger.DnsSummary.TcpAnswers,
         ArmKeys.Ledger.DnsSummary.TcpEmptyAnswers,
         ArmKeys.Ledger.DnsSummary.TcpMalformed,
+        ArmKeys.Ledger.DnsSummary.TruncatedFrames,
         ArmKeys.Ledger.DnsSummary.TcpConnections,
         ArmKeys.Ledger.DnsSummary.TcpAborted);
 
@@ -74,6 +77,7 @@ internal readonly struct DnsTotalsKeys
         ArmKeys.Ledger.TargetSummary.DnsTotals.TcpAnswers,
         ArmKeys.Ledger.TargetSummary.DnsTotals.TcpEmptyAnswers,
         ArmKeys.Ledger.TargetSummary.DnsTotals.TcpMalformed,
+        ArmKeys.Ledger.TargetSummary.DnsTotals.TruncatedFrames,
         ArmKeys.Ledger.TargetSummary.DnsTotals.TcpConnections,
         ArmKeys.Ledger.TargetSummary.DnsTotals.TcpAborted);
 
@@ -96,6 +100,8 @@ internal readonly struct DnsTotalsKeys
     internal string TcpEmptyAnswers { get; }
 
     internal string TcpMalformed { get; }
+
+    internal string TcpTruncatedFrames { get; }
 
     internal string TcpConnections { get; }
 
@@ -121,6 +127,7 @@ internal sealed class DnsServer : IAsyncDisposable
     private long _tcpAnswers;
     private long _tcpEmpty;
     private long _tcpMalformed;
+    private long _tcpTruncated;
     private long _tcpConnectionsAccepted;
     private long _tcpAborted;
 
@@ -167,6 +174,7 @@ internal sealed class DnsServer : IAsyncDisposable
         writer.WriteNumber(keys.TcpAnswers, _tcpAnswers);
         writer.WriteNumber(keys.TcpEmptyAnswers, _tcpEmpty);
         writer.WriteNumber(keys.TcpMalformed, _tcpMalformed);
+        writer.WriteNumber(keys.TcpTruncatedFrames, _tcpTruncated);
         writer.WriteNumber(keys.TcpConnections, _tcpConnectionsAccepted);
         writer.WriteNumber(keys.TcpAborted, _tcpAborted);
     }
@@ -294,6 +302,23 @@ internal sealed class DnsServer : IAsyncDisposable
         return true;
     }
 
+    /// <summary>
+    /// Reads exactly <paramref name="buffer"/>'s length and books where the stream ended when it did
+    /// not. A peer that stops inside the length prefix or inside the message leaves one message cut in
+    /// half, which is this listener's own truncated frame; a peer that stops between messages ended
+    /// its stream cleanly and is not counted (D19.3 C).
+    /// </summary>
+    private async ValueTask<bool> ReadExactAsync(Socket socket, Memory<byte> buffer, CancellationToken cancellationToken)
+    {
+        var outcome = await SocketIo.ReadExactAsync(socket, buffer, cancellationToken).ConfigureAwait(false);
+        if (outcome == ReadExactOutcome.Short)
+        {
+            Interlocked.Increment(ref _tcpTruncated);
+        }
+
+        return outcome == ReadExactOutcome.Complete;
+    }
+
     private async Task HandleTcpConnectionAsync(Socket socket, CancellationToken cancellationToken)
     {
         using (socket)
@@ -306,7 +331,7 @@ internal sealed class DnsServer : IAsyncDisposable
             {
                 while (!cancellationToken.IsCancellationRequested)
                 {
-                    if (!await SocketIo.ReadExactAsync(socket, lengthBuffer, cancellationToken).ConfigureAwait(false))
+                    if (!await ReadExactAsync(socket, lengthBuffer, cancellationToken).ConfigureAwait(false))
                     {
                         return;
                     }
@@ -320,7 +345,7 @@ internal sealed class DnsServer : IAsyncDisposable
                     }
 
                     var message = new byte[length];
-                    if (!await SocketIo.ReadExactAsync(socket, message, cancellationToken).ConfigureAwait(false))
+                    if (!await ReadExactAsync(socket, message, cancellationToken).ConfigureAwait(false))
                     {
                         return;
                     }

@@ -142,9 +142,16 @@ internal sealed class TcpLaneTransport : ILaneTransport
                 // terminal rather than one bad message (D18.6 #3).
                 return new LaneReceiveResult(LaneReceiveKind.IoError, 0, status == FrameReadStatus.BadMagic ? FrameDecodeError.BadMagic : FrameDecodeError.BadLength);
 
+            case FrameReadStatus.Truncated:
+                // The same family as the two above -- the peer closed inside a frame, so the boundary
+                // is gone -- and terminal for the same reason. It is not EndOfStream: a stream that
+                // ends mid-frame is not the clean close the lane's modes are measured against, and
+                // the policy books the two as different facts.
+                return new LaneReceiveResult(LaneReceiveKind.IoError, 0, FrameDecodeError.Truncated);
+
             default:
-                // The reader's two remaining statuses are the two cases above; a status outside them
-                // would be a new reader outcome this transport has no mapping for.
+                // Every status the reader defines is named above, so a new reader outcome has to be
+                // mapped here rather than absorbed by whichever arm happened to be last.
                 return new LaneReceiveResult(LaneReceiveKind.IoError, 0);
         }
     }

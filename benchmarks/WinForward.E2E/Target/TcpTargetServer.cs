@@ -19,11 +19,12 @@ namespace WinForward.E2E.Target;
 [StructLayout(LayoutKind.Auto)]
 internal readonly struct TcpTotalsKeys
 {
-    private TcpTotalsKeys(string connections, string bytesEchoed, string protocolErrors, string verdicts)
+    private TcpTotalsKeys(string connections, string bytesEchoed, string protocolErrors, string truncatedFrames, string verdicts)
     {
         Connections = connections;
         BytesEchoed = bytesEchoed;
         ProtocolErrors = protocolErrors;
+        TruncatedFrames = truncatedFrames;
         Verdicts = verdicts;
     }
 
@@ -32,6 +33,7 @@ internal readonly struct TcpTotalsKeys
         ArmKeys.Ledger.TcpSummary.Connections,
         ArmKeys.Ledger.TcpSummary.BytesEchoed,
         ArmKeys.Ledger.TcpSummary.ProtocolErrors,
+        ArmKeys.Ledger.TcpSummary.TruncatedFrames,
         ArmKeys.Ledger.TcpSummary.Verdicts);
 
     /// <summary>The key set of the same block one level down, under <c>targetSummary/tcp</c>.</summary>
@@ -39,6 +41,7 @@ internal readonly struct TcpTotalsKeys
         ArmKeys.Ledger.TargetSummary.TcpTotals.Connections,
         ArmKeys.Ledger.TargetSummary.TcpTotals.BytesEchoed,
         ArmKeys.Ledger.TargetSummary.TcpTotals.ProtocolErrors,
+        ArmKeys.Ledger.TargetSummary.TcpTotals.TruncatedFrames,
         ArmKeys.Ledger.TargetSummary.TcpTotals.Verdicts);
 
     internal string Connections { get; }
@@ -46,6 +49,8 @@ internal readonly struct TcpTotalsKeys
     internal string BytesEchoed { get; }
 
     internal string ProtocolErrors { get; }
+
+    internal string TruncatedFrames { get; }
 
     internal string Verdicts { get; }
 }
@@ -65,6 +70,7 @@ internal sealed class TcpTargetServer : IAsyncDisposable
     private long _connectionCount;
     private long _bytesEchoed;
     private long _protocolErrors;
+    private long _truncatedFrames;
 
     internal TcpTargetServer(EndPoint endPoint, JsonlSink ledger)
     {
@@ -92,6 +98,7 @@ internal sealed class TcpTargetServer : IAsyncDisposable
         writer.WriteNumber(keys.Connections, Interlocked.Read(ref _connectionCount));
         writer.WriteNumber(keys.BytesEchoed, Interlocked.Read(ref _bytesEchoed));
         writer.WriteNumber(keys.ProtocolErrors, Interlocked.Read(ref _protocolErrors));
+        writer.WriteNumber(keys.TruncatedFrames, Interlocked.Read(ref _truncatedFrames));
         writer.WriteStartObject(keys.Verdicts);
         foreach (var verdict in Enum.GetValues<TcpVerdict>())
         {
@@ -144,6 +151,11 @@ internal sealed class TcpTargetServer : IAsyncDisposable
             var endedTicks = Stopwatch.GetTimestamp();
             Interlocked.Add(ref _bytesEchoed, command.Outcome.BytesEchoed);
             Interlocked.Add(ref _protocolErrors, command.Outcome.ProtocolErrors);
+            if (command.Outcome.Truncated)
+            {
+                Interlocked.Increment(ref _truncatedFrames);
+            }
+
             Interlocked.Increment(ref _verdicts[(int)command.Outcome.Verdict]);
 
             // The ledger's policy swallows and counts an I/O failure on its own; this guard is what

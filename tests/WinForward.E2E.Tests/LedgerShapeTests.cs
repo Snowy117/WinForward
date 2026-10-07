@@ -129,6 +129,7 @@ public sealed class LedgerShapeTests
         // The state before any traffic: the counters are present and zero, not missing.
         var emptyTcp = JsonPaths.FlattenJsonl(First(ledger, TcpSummaryKind));
         Assert.Equal(0, Number(emptyTcp, ArmKeys.Ledger.TcpSummary.Connections));
+        Assert.Equal(0, Number(emptyTcp, ArmKeys.Ledger.TcpSummary.TruncatedFrames));
         Assert.Equal(0, Number(emptyTcp, $"{ArmKeys.Ledger.TcpSummary.Verdicts}/{ArmKeys.Ledger.VerdictNames.Clean}"));
 
         var emptyUdp = JsonPaths.FlattenJsonl(First(ledger, UdpSummaryKind));
@@ -137,6 +138,7 @@ public sealed class LedgerShapeTests
 
         var emptyDns = JsonPaths.FlattenJsonl(First(ledger, DnsSummaryKind));
         Assert.Equal(0, Number(emptyDns, ArmKeys.Ledger.DnsSummary.UdpQueries));
+        Assert.Equal(0, Number(emptyDns, ArmKeys.Ledger.DnsSummary.TruncatedFrames));
 
         var emptyTarget = JsonPaths.FlattenJsonl(First(ledger, TargetSummaryKind));
         Assert.Equal(0, Number(emptyTarget, ArmKeys.Ledger.TargetSummary.LedgerWriteErrors));
@@ -148,11 +150,49 @@ public sealed class LedgerShapeTests
         Assert.Equal(0, Number(connection, ArmKeys.Ledger.TcpRecord.BytesEchoed));
 
         var measuredTcp = JsonPaths.FlattenJsonl(Last(ledger, TcpSummaryKind));
-        Assert.Equal(1, Number(measuredTcp, ArmKeys.Ledger.TcpSummary.Connections));
+        Assert.Equal(2, Number(measuredTcp, ArmKeys.Ledger.TcpSummary.Connections));
+        Assert.Equal(1, Number(measuredTcp, ArmKeys.Ledger.TcpSummary.TruncatedFrames));
         Assert.Equal(1, Number(measuredTcp, $"{ArmKeys.Ledger.TcpSummary.Verdicts}/{ArmKeys.Ledger.VerdictNames.Clean}"));
+        Assert.Equal(1, Number(measuredTcp, $"{ArmKeys.Ledger.TcpSummary.Verdicts}/{ArmKeys.Ledger.VerdictNames.ProtocolError}"));
+
+        var measuredDns = JsonPaths.FlattenJsonl(ledger[DnsSummaryKind][1]);
+        Assert.Equal(1, Number(measuredDns, ArmKeys.Ledger.DnsSummary.TruncatedFrames));
+        Assert.Equal(0, Number(measuredDns, ArmKeys.Ledger.DnsSummary.TcpAborted));
 
         var measuredUdp = JsonPaths.FlattenJsonl(Last(ledger, UdpSummaryKind));
         Assert.True(Number(measuredUdp, ArmKeys.Ledger.UdpSummary.Received) >= 1, "the measured state received no datagram");
+    }
+
+    /// <summary>
+    /// The truncation counters reach the ledger the way every other total does -- at the summary's own
+    /// root and one level down under <c>targetSummary</c> -- and each listener counts its own stream.
+    /// The TCP listener counts the connection whose close landed inside a frame; a DNS listener counts
+    /// a length-prefixed read that ended short, which is a different mechanism under the same key name
+    /// (D19.3 C). The second DNS listener served nothing here, so the two blocks are also shown to be
+    /// two counters rather than one written twice.
+    /// </summary>
+    [Fact]
+    public async Task TheTruncationCountersReachBothLevelsAndEachListenerCountsItsOwn()
+    {
+        var ledger = await PublishLedgerAsync();
+        var target = JsonPaths.FlattenJsonl(Last(ledger, TargetSummaryKind));
+
+        var tcp = JsonPaths.FlattenJsonl(Last(ledger, TcpSummaryKind));
+        Assert.Equal(1, Number(tcp, ArmKeys.Ledger.TcpSummary.TruncatedFrames));
+        Assert.Equal(
+            Number(tcp, ArmKeys.Ledger.TcpSummary.TruncatedFrames),
+            Number(target, $"{ArmKeys.Ledger.TargetSummary.Tcp}/{ArmKeys.Ledger.TargetSummary.TcpTotals.TruncatedFrames}"));
+
+        var first = JsonPaths.FlattenJsonl(ledger[DnsSummaryKind][1]);
+        var second = JsonPaths.FlattenJsonl(ledger[DnsSummaryKind][2]);
+        Assert.Equal(1, Number(first, ArmKeys.Ledger.DnsSummary.TruncatedFrames));
+        Assert.Equal(0, Number(second, ArmKeys.Ledger.DnsSummary.TruncatedFrames));
+        Assert.Equal(
+            Number(first, ArmKeys.Ledger.DnsSummary.TruncatedFrames),
+            Number(target, $"{ArmKeys.Ledger.TargetSummary.Dns}/{ArmKeys.Ledger.TargetSummary.DnsTotals.TruncatedFrames}"));
+        Assert.Equal(
+            Number(second, ArmKeys.Ledger.DnsSummary.TruncatedFrames),
+            Number(target, $"{ArmKeys.Ledger.TargetSummary.DnsAlt}/{ArmKeys.Ledger.TargetSummary.DnsTotals.TruncatedFrames}"));
     }
 
     /// <summary>
@@ -320,10 +360,15 @@ public sealed class LedgerShapeTests
         using var shutdown = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var accepting = tcp.RunAsync(shutdown.Token);
         var receiving = udp.RunAsync(shutdown.Token);
+
+        // The DNS listener has to be accepting for the short stream read below.
+        var serving = dns.RunAsync(shutdown.Token);
         await RunOneConnectionAsync(tcpPort, shutdown.Token);
         await EchoOneDatagramAsync(udpPort, shutdown.Token);
+        await RunOneTruncatedConnectionAsync(tcpPort, shutdown.Token);
+        await RunOneShortDnsReadAsync(dnsPort, shutdown.Token);
         await shutdown.CancelAsync();
-        await Task.WhenAll(accepting, receiving);
+        await Task.WhenAll(accepting, receiving, serving);
 
         // The state the same target publishes at the end of a run that did serve both listeners.
         await TargetRunner.WriteSummariesAsync(ledger, tcp, udp, dns, dnsAlt, startedTicks: 3, endedTicks: 4);
@@ -372,6 +417,58 @@ public sealed class LedgerShapeTests
         while (read > 0);
 
         Assert.Equal(0, read);
+    }
+
+    /// <summary>
+    /// One connection whose command frame is read whole and whose stream then stops inside the next
+    /// frame: the state the truncation counters exist for. The mode is <c>halfClose</c>, whose clean
+    /// close earns a trailer, so this drive is also what separates "the peer half-closed" from "the
+    /// peer stopped writing".
+    /// </summary>
+    private static async Task RunOneTruncatedConnectionAsync(int port, CancellationToken cancellationToken)
+    {
+        using var client = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        await client.ConnectAsync(new IPEndPoint(IPAddress.Loopback, port), cancellationToken).ConfigureAwait(false);
+        await SocketOps.SendCommandAsync(client, ConnectionId, TcpMode.HalfClose, expectedBytes: 0, cancellationToken).ConfigureAwait(false);
+
+        // Ten bytes of a frame: more than nothing and fewer than a header, which is the shape a
+        // connection cut mid-frame arrives in.
+        var frame = new FrameBuffer(PayloadBytes);
+        frame.Build(ConnectionId, sequence: 1, sendTicks: 0);
+        await client.SendAsync(frame.Memory[..10], SocketFlags.None, cancellationToken).ConfigureAwait(false);
+        SocketOps.ShutdownQuietly(client, SocketShutdown.Send);
+
+        var buffer = new byte[PayloadBytes];
+        int read;
+        do
+        {
+            read = await client.ReceiveAsync(buffer, SocketFlags.None, cancellationToken).ConfigureAwait(false);
+        }
+        while (read > 0);
+
+        Assert.Equal(0, read);
+    }
+
+    /// <summary>
+    /// One DNS stream connection that stops between messages: the length prefix was never begun, so
+    /// the listener has nothing to answer and no message was cut in half.
+    /// </summary>
+    private static async Task RunOneShortDnsReadAsync(int port, CancellationToken cancellationToken)
+    {
+        using var client = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        await client.ConnectAsync(new IPEndPoint(IPAddress.Loopback, port), cancellationToken).ConfigureAwait(false);
+
+        // One byte of the two-byte length prefix: the read ends short, not at a message boundary.
+        await client.SendAsync(new byte[1], SocketFlags.None, cancellationToken).ConfigureAwait(false);
+        SocketOps.ShutdownQuietly(client, SocketShutdown.Send);
+
+        var buffer = new byte[PayloadBytes];
+        int read;
+        do
+        {
+            read = await client.ReceiveAsync(buffer, SocketFlags.None, cancellationToken).ConfigureAwait(false);
+        }
+        while (read > 0);
     }
 
     /// <summary>

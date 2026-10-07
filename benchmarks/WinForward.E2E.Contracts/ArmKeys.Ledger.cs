@@ -25,6 +25,11 @@ namespace WinForward.E2E.Contracts;
 /// the eight verdict names every <c>verdicts</c> object is written with, the way
 /// <see cref="ArmKeys.Reliability.OutcomeNames"/> carries the leaves of three distributions at three
 /// levels.</para>
+/// <para><b>One leaf name may also be published by two families for two mechanisms.</b>
+/// <c>truncatedFrames</c> sits at the root of both <c>tcpSummary</c> and <c>dnsSummary</c>: the first
+/// counts a connection the frame reader found cut in half by the peer's close, the second counts the
+/// DNS listener's own short length-prefixed read (D19.3 C). They are two constants, and each family's
+/// value is only ever read against its own mechanism.</para>
 /// <para><b>Conditional keys.</b> One container is written only when the run asked for it:
 /// <see cref="Ledger.TargetSummary.DnsAlt"/> and the whole block under it appear only when the target
 /// was started with a second DNS port, and the listener it names publishes a second
@@ -103,6 +108,9 @@ public static partial class ArmKeys
 
             /// <summary>Frames the protocol could not read.</summary>
             public const string ProtocolErrors = "protocolErrors";
+
+            /// <summary>Connections the peer's close cut off in the middle of a frame.</summary>
+            public const string TruncatedFrames = "truncatedFrames";
 
             /// <summary>The verdict distribution: one member per name in <see cref="VerdictNames"/>.</summary>
             public const string Verdicts = "verdicts";
@@ -190,6 +198,16 @@ public static partial class ArmKeys
             /// <summary>Stream queries that carried no readable query.</summary>
             public const string TcpMalformed = "tcpMalformed";
 
+            /// <summary>Stream messages the peer stopped writing in the middle of.</summary>
+            /// <remarks>
+            /// This is the responder's own definition and not the frame reader's truncated status
+            /// (D19.3 C): the stream listener reads a two-byte length prefix and then that many bytes,
+            /// so a message is cut in half when either read ends short. It shares its name with
+            /// <see cref="TcpSummary.TruncatedFrames"/>, which counts a different mechanism on a
+            /// different listener; the two are compared only against themselves.
+            /// </remarks>
+            public const string TruncatedFrames = "truncatedFrames";
+
             /// <summary>Stream connections accepted.</summary>
             public const string TcpConnections = "tcpConnections";
 
@@ -248,6 +266,9 @@ public static partial class ArmKeys
 
                 /// <summary>Frames the protocol could not read.</summary>
                 public const string ProtocolErrors = "protocolErrors";
+
+                /// <summary>Connections the peer's close cut off in the middle of a frame.</summary>
+                public const string TruncatedFrames = "truncatedFrames";
 
                 /// <summary>The verdict distribution: one member per name in <see cref="VerdictNames"/>.</summary>
                 public const string Verdicts = "verdicts";
@@ -313,6 +334,13 @@ public static partial class ArmKeys
 
                 /// <summary>Stream queries that carried no readable query.</summary>
                 public const string TcpMalformed = "tcpMalformed";
+
+                /// <summary>
+                /// Stream messages a peer stopped writing in the middle of: this listener's own
+                /// short length-prefixed read, not the frame reader's truncated status (the meaning is
+                /// stated in full on <see cref="DnsSummary.TruncatedFrames"/>).
+                /// </summary>
+                public const string TruncatedFrames = "truncatedFrames";
 
                 /// <summary>Stream connections accepted.</summary>
                 public const string TcpConnections = "tcpConnections";

@@ -5,7 +5,22 @@ namespace WinForward.E2E.Wire;
 internal enum FrameReadStatus
 {
     Frame,
+
+    /// <summary>
+    /// The peer closed at a frame boundary: every frame it sent was read whole. This is the clean
+    /// half-close the modes that ask for one are measured against.
+    /// </summary>
     EndOfStream,
+
+    /// <summary>
+    /// The peer closed with bytes of a frame still buffered, so the frame they belong to was cut in
+    /// half. The frame boundary is gone and no later frame can be framed, which makes this terminal
+    /// and, unlike <see cref="EndOfStream"/>, not a clean close (D19.3 D); it is the same family as
+    /// <see cref="BadMagic"/> and <see cref="BadLength"/> (D18.6 #3). It is deliberately not a
+    /// verdict of its own: every consumer maps it into the vocabulary it already publishes.
+    /// </summary>
+    Truncated,
+
     BadMagic,
     BadLength,
     BadChecksum,
@@ -76,7 +91,10 @@ internal sealed class FrameStreamReader
 
             if (!await FillAsync(cancellationToken).ConfigureAwait(false))
             {
-                return FrameReadStatus.EndOfStream;
+                // The stream ended: with nothing buffered the last frame ended exactly where the peer
+                // stopped writing, but with bytes still buffered the frame they belong to was cut in
+                // half and its boundary can never be found.
+                return _end > _start ? FrameReadStatus.Truncated : FrameReadStatus.EndOfStream;
             }
         }
     }

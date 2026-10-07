@@ -55,15 +55,56 @@ public sealed class FrameStreamReaderTests
         Assert.Equal(Sequence + 1, reader.Header.Sequence);
     }
 
-    // E3 D9: 将改为 Truncated —— 冻结当前行为，使那次改动表现为测试差异而不是静默的行为变化。
+    // A peer that closes inside a frame: the boundary is gone, so the reader reports the cut rather
+    // than a close the peer never made.
     [Fact]
-    public async Task EndOfStreamInsideAFrameIsReportedAsEndOfStream()
+    public async Task EndOfStreamInsideAFrameIsReportedAsTruncated()
     {
         var frame = BuildFrame();
         var feed = new ChunkFeed(frame[..10]);
         var reader = new FrameStreamReader(feed.Read);
 
-        Assert.Equal(FrameReadStatus.EndOfStream, await reader.ReadAsync(CancellationToken.None));
+        Assert.Equal(FrameReadStatus.Truncated, await reader.ReadAsync(CancellationToken.None));
+    }
+
+    // The same frame arriving in three chunks, the last of them cut short: the header decoded and the
+    // payload was begun, which is the other half of "inside a frame" than a partial header.
+    [Fact]
+    public async Task EndOfStreamInsideAPayloadIsReportedAsTruncated()
+    {
+        var frame = BuildFrame();
+        var feed = new ChunkFeed(frame[..5], frame[5..25], frame[25..^10]);
+        var reader = new FrameStreamReader(feed.Read);
+
+        Assert.Equal(FrameReadStatus.Truncated, await reader.ReadAsync(CancellationToken.None));
+    }
+
+    // A whole frame followed by a cut one: the frames before the cut are still frames, and only the
+    // frame the peer stopped inside is reported as truncated.
+    [Fact]
+    public async Task AWholeFrameFollowedByACutOneKeepsTheWholeFrame()
+    {
+        var first = BuildFrame();
+        var second = BuildFrame(sequence: Sequence + 1);
+        var feed = new ChunkFeed([.. first, .. second[..40]]);
+        var reader = new FrameStreamReader(feed.Read);
+
+        Assert.Equal(FrameReadStatus.Frame, await reader.ReadAsync(CancellationToken.None));
+        Assert.Equal(Sequence, reader.Header.Sequence);
+        Assert.Equal(FrameReadStatus.Truncated, await reader.ReadAsync(CancellationToken.None));
+    }
+
+    // Truncation is terminal, not a per-call accident: the reader is asked again by a loop that has
+    // one more iteration coming and must not answer with a different status the second time.
+    [Fact]
+    public async Task TruncationIsReportedAgainOnTheNextRead()
+    {
+        var frame = BuildFrame();
+        var feed = new ChunkFeed(frame[..10]);
+        var reader = new FrameStreamReader(feed.Read);
+
+        Assert.Equal(FrameReadStatus.Truncated, await reader.ReadAsync(CancellationToken.None));
+        Assert.Equal(FrameReadStatus.Truncated, await reader.ReadAsync(CancellationToken.None));
     }
 
     [Fact]
@@ -74,6 +115,16 @@ public sealed class FrameStreamReaderTests
         var reader = new FrameStreamReader(feed.Read);
 
         Assert.Equal(FrameReadStatus.Frame, await reader.ReadAsync(CancellationToken.None));
+        Assert.Equal(FrameReadStatus.EndOfStream, await reader.ReadAsync(CancellationToken.None));
+    }
+
+    // The other side of the pair: a stream that closed before it carried anything is a clean close,
+    // not a truncated frame.
+    [Fact]
+    public async Task AnEmptyStreamIsReportedAsEndOfStream()
+    {
+        var reader = new FrameStreamReader(new ChunkFeed().Read);
+
         Assert.Equal(FrameReadStatus.EndOfStream, await reader.ReadAsync(CancellationToken.None));
     }
 

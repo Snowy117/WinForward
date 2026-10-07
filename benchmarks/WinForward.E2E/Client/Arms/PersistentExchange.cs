@@ -158,6 +158,9 @@ internal static class PersistentConnection
                 return PersistentFrame.Skipped;
             case FrameReadStatus.BadMagic:
             case FrameReadStatus.BadLength:
+            case FrameReadStatus.Truncated:
+                // A desynchronized frame boundary -- including a close inside a frame, which is not
+                // the RemoteClosed above: the peer's stream is unreadable from here on.
                 state._protocolErrors++;
                 return PersistentFrame.Dead;
             case FrameReadStatus.Frame:

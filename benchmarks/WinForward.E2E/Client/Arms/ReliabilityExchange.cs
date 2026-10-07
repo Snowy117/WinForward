@@ -141,6 +141,13 @@ internal static class ReliabilityExchange
                 case FrameReadStatus.BadLength:
                     attempt.ProtocolError = true;
                     return;
+                case FrameReadStatus.Truncated:
+                    // The peer closed inside a frame: the boundary is gone, so this attempt's stream
+                    // is unreadable from here on and it is booked as what it is. EndOfStream is the
+                    // status that says the peer closed between frames, and this one deliberately does
+                    // not set that flag -- the two are different observations about the same close.
+                    attempt.ProtocolError = true;
+                    return;
                 case FrameReadStatus.Frame:
                     if (attempt.Echoed < expectedBytes)
                     {

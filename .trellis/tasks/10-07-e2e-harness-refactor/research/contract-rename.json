@@ -8,6 +8,18 @@
   {
     "kind": "added",
     "old_path": null,
+    "new_path": "dns/truncatedFrames",
+    "reason": "the first DNS listener's truncation counter one level down, under targetSummary/dns (D19.3 B)"
+  },
+  {
+    "kind": "added",
+    "old_path": null,
+    "new_path": "dnsAlt/truncatedFrames",
+    "reason": "the second DNS listener's truncation counter one level down, under targetSummary/dnsAlt; present only when the target was started with a second DNS port (D19.3 B)"
+  },
+  {
+    "kind": "added",
+    "old_path": null,
     "new_path": "error",
     "reason": "error record field: the exception family name (D14.12)"
   },
@@ -34,6 +46,18 @@
     "old_path": null,
     "new_path": "planSource",
     "reason": "run.json top-level key: 'builtin' when no plan file was given (D14.23)"
+  },
+  {
+    "kind": "added",
+    "old_path": null,
+    "new_path": "tcp/truncatedFrames",
+    "reason": "the tcp truncation counter one level down, under targetSummary/tcp (D19.3 B)"
+  },
+  {
+    "kind": "added",
+    "old_path": null,
+    "new_path": "truncatedFrames",
+    "reason": "tcpSummary and dnsSummary roots: connections the peer's close cut off inside a frame, and DNS stream messages a peer stopped writing mid-message -- two mechanisms under one spelling (D19.3 C)"
   },
   {
     "kind": "identical",

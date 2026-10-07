@@ -8,11 +8,12 @@ namespace WinForward.E2E.Target;
 [StructLayout(LayoutKind.Auto)]
 internal readonly struct TcpModeOutcome
 {
-    internal TcpModeOutcome(TcpVerdict verdict, long bytesEchoed, int protocolErrors)
+    internal TcpModeOutcome(TcpVerdict verdict, long bytesEchoed, int protocolErrors, bool truncated)
     {
         Verdict = verdict;
         BytesEchoed = bytesEchoed;
         ProtocolErrors = protocolErrors;
+        Truncated = truncated;
     }
 
     internal TcpVerdict Verdict { get; }
@@ -20,6 +21,12 @@ internal readonly struct TcpModeOutcome
     internal long BytesEchoed { get; }
 
     internal int ProtocolErrors { get; }
+
+    /// <summary>
+    /// Whether the peer's close landed inside a frame, leaving bytes that never reached a boundary.
+    /// The ledger counts these apart from the clean closes that share <see cref="Verdict"/>.
+    /// </summary>
+    internal bool Truncated { get; }
 }
 
 [StructLayout(LayoutKind.Auto)]
@@ -59,7 +66,12 @@ internal static class TcpConnectionProtocol
             switch (first)
             {
                 case FrameReadStatus.EndOfStream:
-                    return new CommandOutcome(TcpMode.Clean, 0, modeKnown: false, new TcpModeOutcome(TcpVerdict.ClientClosedEarly, 0, 0));
+                    return new CommandOutcome(TcpMode.Clean, 0, modeKnown: false, new TcpModeOutcome(TcpVerdict.ClientClosedEarly, 0, 0, truncated: false));
+                case FrameReadStatus.Truncated:
+                    // Closed inside the command frame: there is no mode to run and no boundary to read
+                    // one from, so this is a protocol error like any other unreadable frame -- with
+                    // the truncation recorded beside it (D19.3 D).
+                    return new CommandOutcome(TcpMode.Clean, 0, modeKnown: false, new TcpModeOutcome(TcpVerdict.ProtocolError, 0, 1, truncated: true));
                 case FrameReadStatus.Frame
                     when reader.Header.Sequence == FrameCodec.CommandSequence
                     && TcpCommand.TryParse(reader.Payload.Span, out var mode, out var expectedBytes):
@@ -70,24 +82,24 @@ internal static class TcpConnectionProtocol
                 case FrameReadStatus.BadLength:
                 case FrameReadStatus.BadChecksum:
                 default:
-                    return new CommandOutcome(TcpMode.Clean, 0, modeKnown: false, new TcpModeOutcome(TcpVerdict.ProtocolError, 0, 1));
+                    return new CommandOutcome(TcpMode.Clean, 0, modeKnown: false, new TcpModeOutcome(TcpVerdict.ProtocolError, 0, 1, truncated: false));
             }
         }
         catch (OperationCanceledException)
         {
-            return new CommandOutcome(TcpMode.Clean, 0, modeKnown: false, new TcpModeOutcome(TcpVerdict.Error, 0, 0));
+            return new CommandOutcome(TcpMode.Clean, 0, modeKnown: false, new TcpModeOutcome(TcpVerdict.Error, 0, 0, truncated: false));
         }
         catch (SocketException)
         {
-            return new CommandOutcome(TcpMode.Clean, 0, modeKnown: false, new TcpModeOutcome(TcpVerdict.Error, 0, 0));
+            return new CommandOutcome(TcpMode.Clean, 0, modeKnown: false, new TcpModeOutcome(TcpVerdict.Error, 0, 0, truncated: false));
         }
         catch (IOException)
         {
-            return new CommandOutcome(TcpMode.Clean, 0, modeKnown: false, new TcpModeOutcome(TcpVerdict.Error, 0, 0));
+            return new CommandOutcome(TcpMode.Clean, 0, modeKnown: false, new TcpModeOutcome(TcpVerdict.Error, 0, 0, truncated: false));
         }
         catch (ObjectDisposedException)
         {
-            return new CommandOutcome(TcpMode.Clean, 0, modeKnown: false, new TcpModeOutcome(TcpVerdict.Error, 0, 0));
+            return new CommandOutcome(TcpMode.Clean, 0, modeKnown: false, new TcpModeOutcome(TcpVerdict.Error, 0, 0, truncated: false));
         }
     }
 
@@ -102,15 +114,23 @@ internal static class TcpConnectionProtocol
         {
             var status = await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
 
-            if (status == FrameReadStatus.EndOfStream)
+            // Two ways for a stream to end, and they are not the same outcome: a clean close answers
+            // the mode, while a close inside a frame leaves a boundary that can never be found and
+            // gets the protocol error -- and no trailer, which only the clean close earns (D19.3 D).
+            if (status is FrameReadStatus.EndOfStream or FrameReadStatus.Truncated)
             {
+                if (status == FrameReadStatus.Truncated)
+                {
+                    protocolErrors++;
+                    return new TcpModeOutcome(TcpVerdict.ProtocolError, bytesEchoed, protocolErrors, truncated: true);
+                }
+
                 return await CompleteOnEndOfStreamAsync(socket, connectionId, mode, bytesEchoed, protocolErrors, cancellationToken).ConfigureAwait(false);
             }
-
             if (status != FrameReadStatus.Frame)
             {
                 protocolErrors++;
-                return new TcpModeOutcome(TcpVerdict.ProtocolError, bytesEchoed, protocolErrors);
+                return new TcpModeOutcome(TcpVerdict.ProtocolError, bytesEchoed, protocolErrors, truncated: false);
             }
 
             if (stallPending)
@@ -135,11 +155,11 @@ internal static class TcpConnectionProtocol
                 if (mode == TcpMode.ResetAfterN)
                 {
                     socket.LingerState = new LingerOption(enable: true, 0);
-                    return new TcpModeOutcome(TcpVerdict.Reset, bytesEchoed, protocolErrors);
+                    return new TcpModeOutcome(TcpVerdict.Reset, bytesEchoed, protocolErrors, truncated: false);
                 }
 
                 socket.Shutdown(SocketShutdown.Send);
-                return new TcpModeOutcome(TcpVerdict.PartialFin, bytesEchoed, protocolErrors);
+                return new TcpModeOutcome(TcpVerdict.PartialFin, bytesEchoed, protocolErrors, truncated: false);
             }
         }
     }
@@ -161,12 +181,12 @@ internal static class TcpConnectionProtocol
             case TcpMode.HalfClose:
                 await SendTrailerAsync(socket, connectionId, cancellationToken).ConfigureAwait(false);
                 socket.Shutdown(SocketShutdown.Send);
-                return new TcpModeOutcome(TcpVerdict.HalfClose, bytesEchoed, protocolErrors);
+                return new TcpModeOutcome(TcpVerdict.HalfClose, bytesEchoed, protocolErrors, truncated: false);
             case TcpMode.ResetAfterN or TcpMode.PartialFin:
-                return new TcpModeOutcome(TcpVerdict.ClientClosedEarly, bytesEchoed, protocolErrors);
+                return new TcpModeOutcome(TcpVerdict.ClientClosedEarly, bytesEchoed, protocolErrors, truncated: false);
             case TcpMode.Clean or TcpMode.Stall:
                 socket.Shutdown(SocketShutdown.Send);
-                return new TcpModeOutcome(mode == TcpMode.Stall ? TcpVerdict.Stall : TcpVerdict.Clean, bytesEchoed, protocolErrors);
+                return new TcpModeOutcome(mode == TcpMode.Stall ? TcpVerdict.Stall : TcpVerdict.Clean, bytesEchoed, protocolErrors, truncated: false);
             default:
                 throw new InvalidOperationException($"the connection ended in an unclassified mode: {mode}");
         }
