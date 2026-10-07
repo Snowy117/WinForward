@@ -569,6 +569,113 @@ check 已实测：该改动对 `run1↔run1`、`run1↔run2`、`run1↔b1c` 三�
 
 ---
 
+## D18. E2 接缝与并发契约的最终形状（E2 计划审查后裁定，取代 D3/D4 的草案）
+
+### D18.1 引擎/策略边界（一条真正的接缝：发送机制 vs 回复解释）
+
+```csharp
+// 传输 adapter：两个实现。它只报告"收到了什么"，绝不解释线格式是否合法。
+internal enum LaneReceiveKind { Payload, EndOfStream, Malformed, IoError }
+internal readonly record struct LaneReceiveResult(LaneReceiveKind Kind, int Length);
+internal readonly record struct LaneOpenResult(bool Ok, string? Error);
+internal readonly record struct LaneSendResult(bool Accepted, bool WouldBlock, string? Error);
+
+internal interface ILaneTransport : IDisposable
+{
+    ValueTask<LaneOpenResult> OpenAsync(CancellationToken ct);          // connect 在这里，失败=结果而非异常
+    ValueTask<LaneSendResult> SendAsync(ReadOnlyMemory<byte> payload, CancellationToken ct);
+    ValueTask<LaneReceiveResult> ReceiveAsync(Memory<byte> destination, CancellationToken ct);
+}
+
+// 策略：窗口准入 + 帧构建 + 回复解释 + 全部接收侧计数（per-arm 状态住在策略里）
+internal interface ILanePolicy
+{
+    int BuildRequest(long sequence, long intendedTicks, Span<byte> destination); // 0 = 该槽位不发（策略自己的窗口决定）
+    void OnSent(long sequence, long intendedTicks, in LaneSendResult result);    // 发送线程
+    void OnReceive(in LaneReceiveResult result, ReadOnlySpan<byte> payload, long nowTicks); // 接收线程：解码 + 分类 + 入队
+    void Settle(long nowTicks);                                                  // 发送线程：结算队列
+    bool IsDrained { get; }                                                      // 臂末尾的收尾条件
+}
+```
+
+- **`LaneEngine<TTransport>` 只拥有发送侧**：配速、offer 循环（`BuildRequest` → `SendAsync` → `OnSent`）、
+  有界 Defer 队列、`scheduleTruncated`，以及**引擎自己的计数** `LaneCounts`
+  （`Supplied / SentOk / SendWouldBlock / SendFailures / DeferredQueued / DeferredDropped / ScheduleTruncated`），
+  对外只给不可变快照。**窗口准入与 in-flight 由策略持有**（`UdpLatencyState`），引擎不复制。
+- `LaneCounts` 与策略计数器"不相交"的判据落地为：`typeof(LaneCounts).GetProperties()` 的名字集合 ∩
+  策略状态类型（`UdpLatencyState`/`LatencyTcpState`）中**表示计数的公开属性**名字集合 = ∅；
+  策略侧计数必须去掉下划线前缀暴露为属性（否则断言空转）。
+- **窗口策略只暴露 `Defer`**（唯一真实消费者是 `LatencyArm`）。Drop/Block 不建枚举值（避免零消费者），
+  `DnsArm`/`LossArm`/`MixArm` 的窗口语义留在各自臂里并**如实登记为已知重复**。
+
+### D18.2 接收/结算的线程契约（取代 D4 的"排空→才 Classify"）
+
+1. **分类在接收线程**（解码 + `ReplyClassifier` + 计数），产物是一条小的 **settlement 记录**
+   投进 `ConcurrentQueue<Settlement>`（每回复一次入队；只有引擎覆盖的 lane，LAT ≤ 数百 rps，可接受）。
+   span 不出接收循环。
+2. **结算 `Settle` 在发送线程**：`Pacer.WaitUntil` **之后**、下一次 `BuildRequest` 之前调用一次；
+   臂末尾再调用一次直到 `IsDrained`。`pending.TryRemove`、RTT、直方图、`inFlight--`、接收侧计数
+   **只在 `Settle` 里发生**（这样 `UdpReliabilityTracker` 的单写者契约在 E2 就成立，E3 的并发修复只剩 LOSS/MIX）。
+3. **臂末尾顺序**：停止 offer → 取消接收循环并 join → `Settle` 排空 → 计算 gates/metrics。
+4. 发送线程独占"账本"（`UdpLatencyState` 的字段 + `UdpReliabilityTracker`）；接收线程只准写队列。
+   类文档逐字写明这条契约，并由**并发测试**（E2 必须写：N 轮发送/接收并发，恒等式不破）覆盖。
+
+### D18.3 回复分类的归属（不抹平真实差异）
+
+- `ReplyClassifier.Classify(ReadOnlySpan<byte>, uint expectedConnectionId) → ReplyVerdict(Kind, Sequence, PayloadBytes, FrameDecodeError)`
+  是**纯函数**，**只被 UDP 阶梯使用**（LAT/LOSS/MIX 三处合一）；调用者自己记账。
+- **TCP lane 不使用它**：TCP 的回复匹配是 `FrameStreamReader` + FIFO 队列（按到达顺序，不看 sequence），
+  这条差异**保持不变**并在计划里显式登记。
+- 三处阶梯的统一差异清单（必须写进 E2 证据）：统一 `WasSent` 检查（**LAT 补上**，登记为有意行为修正）、
+  `CorruptKnownSequence` 携带 `FrameDecodeError`、`Undecodable` 分支；**保持**：LAT 的
+  `_received` 含重复应答（`UdpLatencyState` 文档）、LOSS/MIX 的 tracker 记账路径、`foreignConnection` 语义。
+- **验收**：`received`/`unmatchedReplies`/`inFlight`（三个零宽带宽契约量）在 E2 之后与基线**逐值相同**
+  （除非命中登记的行为修正并逐条解释）。
+
+### D18.4 其余 E2 裁定
+
+| 项 | 裁定 |
+|---|---|
+| 5 处 UDP `ConnectAsync` | E2 落**机制**（引擎 `OpenAsync` 或共享 `SocketOps.TryConnectAsync` 返回结果，不再裸奔）；行为变化（失败→计数+臂继续）**在 E2 登记**，E3 只复核。AC 可 grep：`ConnectAsync` 不得出现在 try/catch 或该 helper 之外 |
+| `MaxPayloadLength` 用于 plan 校验 | 语义：`payloadBytes` 的域为 `0..FrameCodec.MaxPayloadLength`；超限 → 退出码 2，错误文本 `'payloadBytes' is <v>, which is outside 0..<max>` |
+| 有效行扫描脚本 | E2-b 新建 `benchmarks/WinForward.E2E/scripts/effective-lines.py`，规则与 `directory-structure.md` 一致（去空行、去 `//` 与 `/* */` 注释）；**严格口径**下的当前值是 803/678/612/500/460/449/567。AC1 的判据 = 该脚本在三项目上无输出 |
+| pragma 目标 | 引擎合并 LAT 的 4 个调用点 → 目标 **6 处**；DnsArm 的两处留在臂内（不并入引擎）；完成时用 `rg` 报实际数字 |
+| 分配 gate | 引擎跑在**调用线程**（不用 `Dedicated`）时测 `GC.GetAllocatedBytesForCurrentThread()`；按 `hot-path.md` 的开窗/配对规则；**必须有反证用例**（故意分配的实现必须被判红） |
+| 形状测试 kind 数 | 9（计划里的"8"是笔误） |
+| `PlanFile` 路径 | `benchmarks/WinForward.E2E/Client/PlanFile.cs` |
+| 比对工具欠账 | D17.4 的"默认 summary 报越带读数计数"→ **E2-a**；D17.3（多次运行带宽）与 D16.3（脚本拆分）→ **E5** |
+| E2-c | `--help` 与全部错误消息快照逐字比对；target help 里补 E1 新增的退出码 1 的说明属于**有意变更**，单独登记 |
+| `LatencyArm` 行号 | 发送三件套现在是 `463-571`/`694-796`；`MixArm` 的 page DNS connect 在 `:467` |
+
+### D18.5 聚焦复核后的修订（**开工 2a-2/2a-3 前必须遵守**）
+
+1. **RTT 基准**：`Settlement` 必须携带 `ReceivedTicks`，RTT 一律用**收到时刻**算（今天就是收到时刻；
+   用 `Settle` 的时刻会给每个样本加 0–1 个配速间隔，而 `latency/*` 是读数类、默认比对不报错）。
+2. **接收线程只解码+分类，不做任何计数**（D18.2 第 1 条的"…+计数"作废）；计数在 `Settle`。
+3. **LAT 的 UDP 回复四步顺序写死**：`_received++`（含重复应答）→ `pending.TryRemove` →
+   成功：`RTT(ReceivedTicks)` + `inFlight--`；失败（不在 pending / WasSent 不成立）：`_unmatchedReplies++`，**不减 inFlight**。
+4. **臂末尾保留 grace drain**：停止 offer → **有界 grace**（继续接收并每 tick `Settle`，直到 book 空或 1 s 上限）→
+   取消并 join 接收 → 最后一次 `Settle` → 计算 gates/metrics。（今天的 `GraceDrainAsync` 是尾 cohort RTT 的来源。）
+5. `IsDrained => settlements.IsEmpty`；另加 `BookEmpty`（pending 空且 in-flight 0）作为 grace 的终止条件。
+6. `OnSent` **失败时也调用**（`Accepted=false`）；`WouldBlock` 必须在 `await` **之前**从 `IsCompleted` 取
+   （审计 §9.6 的复用手法）。
+7. `BuildRequest` 返回**三态**：`Send(length)` / `Defer`（窗口满但可排队）/ `Skip`（该槽位整槽跳过）；
+   `DeferredQueued`/`DeferredDropped` 必须显式映射到契约键 `windowOverflow`/`backlogDrops`（接线表逐行写）。
+8. **严格串行**：同一 lane 上 `BuildRequest → SendAsync → OnSent` 不得重入；`OnSent` 必须先于下一次 `BuildRequest`；
+   `BuildRequest` 幂等、无副作用（Defer 后的重试走同一 sequence）。
+9. `Settlement` 是 `readonly record struct`；入队在**接收线程**（分配 gate 只覆盖发送路径，这一点写进性能契约）。
+10. **pragma 数字**：删掉"LAT 的 4 个调用点 / 目标 6"的说法；实施完成后用 `rg` 报实际值（上限 8），
+    并说明是否把等待包进非 async 的 `Pace(...)`（那会让部分调用点免 pragma）。
+11. **单写者范围**：E2 只让 `UdpLatencyState` 单写者；`UdpReliabilityTracker` 的多写者问题仍归 **E3**
+    （LAT 不用 tracker，`rg 'UdpReliabilityTracker' LatencyArm.cs` = 0）。
+12. **零宽发布键的核对清单**（不是"三个"）：`metrics/*.received`、`metrics/*.unmatchedReplies`、
+    `metrics/*.outstandingAtTeardown`、`latency/*-rtt/count`（冻结带逐键 `maxAbsDelta=0`）；
+    in-flight 只需一条内部单测（它不是发布键）。
+13. **不相交断言要带负向**：除 `typeof(LaneCounts)` 的属性名 ∩ 策略计数属性名 = ∅ 外，还要断言策略状态类型
+    **没有**同名的私有字段（`GetFields(Instance|NonPublic)`），否则"删了属性、留下 `_sentOk` 字段"照样绿。
+
+---
+
 ## D17. 零宽带宽与测量统计的裁定（B2b check 后）
 
 **现象**：`LATLOAD` 的 `latency/tcp-rtt/count`、`metrics/tcp.outstandingAtTeardown`、

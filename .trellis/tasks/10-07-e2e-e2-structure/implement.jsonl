@@ -1,0 +1,10 @@
+{"file": ".trellis/tasks/10-07-e2e-harness-refactor/design-decisions.md", "reason": "E2 的权威裁定：D3(接缝形状)、D4(并发契约)、D8(批次顺序)、D14.16/D14.21(字面量与字典)、D16/D17(比对与读数)"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "发包路径零分配与同步快路径约定（接缝迁移的性能契约）"}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "quiescence/独占线程语义：Dedicated.RunOnOwnThreadAsync 的每 lane 独占线程在引擎里必须保持"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "400 有效行、拆分纪律、文件名=主类型名"}
+{"file": ".trellis/spec/backend/test-stability.md", "reason": "新测试不得依赖真实时钟/网络；fake transport 的时间注入"}
+{"file": ".trellis/spec/backend/measurement-harness.md", "reason": "E1 建立的契约与比对四类：E2 的等价性判据（含 --strict 读数摘要要求）"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "门禁与抑制策略"}
+{"file": ".trellis/tasks/10-06-e2e-competitor-benchmark/research/arms-code-quality-audit.md", "reason": "Client/Arms 的 22 项重构建议与 §9.6 的 ValueTask 复用手法、§11 不要动清单"}
+{"file": ".trellis/tasks/10-06-e2e-competitor-benchmark/research/wire-target-code-quality-audit.md", "reason": "Wire/Target 的拆分清单与 §11 不要动（线格式、AOT）"}
+{"file": ".trellis/tasks/10-07-e2e-harness-refactor/research/baseline/run1", "reason": "E0 冻结基线（比对基准）"}

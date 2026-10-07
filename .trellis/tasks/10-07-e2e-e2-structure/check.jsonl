@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Quality Check 清单入口"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "三条门禁与零诊断"}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "核对接缝迁移是否引入分配/虚调用开销"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "核对拆分后的文件放置与行数"}
+{"file": ".trellis/spec/backend/measurement-harness.md", "reason": "核对等价性证据的口径（四类 + --strict 读数摘要）"}
+{"file": ".trellis/tasks/10-07-e2e-harness-refactor/design-decisions.md", "reason": "核对是否落在 D3/D4 的接缝与并发契约上"}
