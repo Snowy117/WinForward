@@ -51,20 +51,20 @@ E1（契约与安全网）必须先完成：拆文件时字段名已经在 `ArmK
 
 ## 验收标准
 
-- [ ] `Client/Lanes/` 就位；`LatencyArm` 的六对镜像函数消失；TCP 与 UDP 共用同一发送/接收/统计路径。
-- [ ] 发包路径**零额外分配**（Release 分配 gate 单测：fake transport 跑 N 次发送，
+- [x] `Client/Lanes/` 就位；`LatencyArm` 的六对镜像函数消失；TCP 与 UDP 共用同一发送/接收/统计路径。
+- [x] 发包路径**零额外分配**（Release 分配 gate 单测：fake transport 跑 N 次发送，
       `GC.GetAllocatedBytesForCurrentThread()` 增量 0）；`send.IsCompleted` 的 `ValueTask` 复用手法
       在引擎覆盖的两个 lane 逐字保持。去虚化是**观测项**，不作为验收断言（D3）。
-- [ ] `Pacer` 的 pragma 与注释随代码搬进引擎：E2E 内 pacing 家族 **9 处**（`ArmContext.cs:73` 定义体
+- [x] `Pacer` 的 pragma 与注释随代码搬进引擎：E2E 内 pacing 家族 **9 处**（`ArmContext.cs:73` 定义体
       + 8 个同步调用点），引擎范围 4 处，**合并后目标 6 处**（不是 1 处）。它们必须随代码走，
       否则 quality gate 会红。
-- [ ] **本任务范围内的三个项目**（`WinForward.E2E` / `.Contracts` / `.Analysis`）每个 .cs 有效行
+- [x] **本任务范围内的三个项目**（`WinForward.E2E` / `.Contracts` / `.Analysis`）每个 .cs 有效行
       （非空非注释）≤ 400，扫描脚本无输出。**不要**全扫 `benchmarks/`——`WinForward.Benchmarks/`
       有 3 个既有违规（909 / 684 / 410 有效行），它们不在本任务范围内（已登记为已知债务，见 E5）。
-- [ ] 三台 Target server 的重复收敛：bind / accept / `SendAll` / `ReadExact` / 账本段落各有唯一实现。
-- [ ] `Sockets.cs` 在 Unix 上显式清零 SO_REUSEPORT；残留实例再 bind 时**响亮地** `EADDRINUSE`。
-- [ ] `dotnet build WinForward.slnx -c Release` 零警告；`dotnet test tests/WinForward.E2E.Tests -c Release` 绿。
-- [ ] `scripts/selftest.sh scripts/plans/selftest-plan.json` 绿。
+- [x] 三台 Target server 的重复收敛：bind / accept / `SendAll` / `ReadExact` / 账本段落各有唯一实现。
+- [x] `Sockets.cs` 在 Unix 上显式清零 SO_REUSEPORT；残留实例再 bind 时**响亮地** `EADDRINUSE`。
+- [x] `dotnet build WinForward.slnx -c Release` 零警告；`dotnet test tests/WinForward.E2E.Tests -c Release` 绿。
+- [x] `scripts/selftest.sh scripts/plans/selftest-plan.json` 绿。
 
 ## 批次划分（顺序经审核修正：**先抽接缝，再拆文件**）
 
@@ -83,3 +83,24 @@ E1（契约与安全网）必须先完成：拆文件时字段名已经在 `ArmK
 > **权威规则**：父 `prd.md` 的 R/AC 是本子任务的**验收上限**；本文件的清单是它的展开，
 > 冲突时**以父为准**，且本文件每条验收都必须能追溯到父的一个 R 或 AC。
 > 父任务：`.trellis/tasks/10-07-e2e-harness-refactor/`。
+
+---
+
+## 完成记录（2026-10-07）
+
+- 批次：**2a-1**（名字表兜底/`Target/Sockets.cs`/端口冲突/`payloadBytes` 上界/越带读数计数）、
+  **2a-2**（`Client/Lanes/` 接口 + 引擎 + fake transport 测试）、
+  **2a-3**（真实 transport + `ReplyClassifier` 纯函数 + `LatencyArm` 两 lane 迁移 + 5 处 connect 机制）、
+  **2b1/2b2**（7 个超标文件 + Target 侧拆分，`effective-lines.py` 在三项目无输出 ⇒ **AC1 达成**）、
+  **2c**（Target 账本键族 `ArmKeys.Ledger` + 形状测试 + gate 扩容）、
+  **2d**（`Cli/CommandLine.cs` 合一 + 28 条命令快照）。
+- 每批都经「impl → 独立 check（含突变验证）→ 修复 → 提交」；六条门禁每批全绿；测试 188 → **264**。
+- 证据：`../10-07-e2e-harness-refactor/research/baseline/E2{a1,a2,a3,b1,b2,c,d}-vs-run1.md` 与
+  `E2{a2,a3,d}-check.md`、`research/cli-snapshots/**`、`research/semantic-fixes/index.jsonl`（E2-* 条目）。
+- **行为等价**：每批 `compare-records.py` 结构差异 0、契约零越带、改名表 9/9；拆前/拆后差异 ≤ 同一二进制
+  噪声地板；D18.5 #12 的 34 个零宽 (记录,路径) 对在多次运行间逐值相同。
+- **登记的有意变更**（只在病态路径可观测）：LAT 的 `WasSent` 检查、connect 失败不再打死整臂、
+  同步抛 `SocketException` 计数+继续、超长 UDP 数据报显式命名、TCP `BadChecksum` 落 corrupt 而
+  `BadMagic`/`BadLength` 落 protocolErrors 并终止、target help 补退出码 1 一行。
+- **交接到后续批次**：Target 账本已闭合（2c）；DTO 簇文件名与 `ProcessSample.cs` 由 **E5** 目录重排裁定；
+  gate 的"新 writer 需手工进 `s_writerFiles`"与字符串字面量假阳类登记在 DD D18.7。
