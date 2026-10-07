@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using WinForward.E2E.Cli;
 using WinForward.E2E.Contracts;
 using WinForward.E2E.Contracts.Json;
 

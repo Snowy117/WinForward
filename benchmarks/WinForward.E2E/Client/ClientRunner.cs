@@ -1,219 +1,14 @@
 using System.Globalization;
 using System.Net;
-using System.Runtime.InteropServices;
 using System.Security.Cryptography;
-using System.Text.Json;
 using WinForward.E2E.Cli;
 using WinForward.E2E.Client.Arms;
-using WinForward.E2E.Contracts;
 using WinForward.E2E.Contracts.Json;
 
 namespace WinForward.E2E.Client;
 
-internal sealed class ClientOptions
-{
-    internal string TargetAddress { get; set; } = string.Empty;
-
-    internal string? PlanPath { get; set; }
-
-    internal string OutDirectory { get; set; } = string.Empty;
-
-    internal string Label { get; set; } = string.Empty;
-
-    internal List<string> SamplerProcesses { get; } = [];
-
-    internal int TcpPort { get; set; } = 30010;
-
-    internal int UdpPort { get; set; } = 30010;
-
-    internal int DnsPort { get; set; } = 53;
-
-    internal int InjectCorruptEvery { get; set; }
-
-    internal int InjectRewriteEvery { get; set; }
-}
-
 internal static class ClientRunner
 {
-    private static readonly string[] s_knownOptions =
-    [
-        "--target",
-        "--plan",
-        "--out",
-        "--label",
-        "--sampler-process",
-        "--tcp-port",
-        "--udp-port",
-        "--dns-port",
-        "--inject-corrupt-every",
-        "--inject-rewrite-every",
-    ];
-
-    private static readonly string[] s_stringOptions =
-    [
-        "--target",
-        "--plan",
-        "--out",
-        "--label",
-        "--sampler-process",
-    ];
-
-#pragma warning disable RCS1239 // Every flag may consume the next argument as its value, so the body advances the index and S127 (error) forbids a for loop here.
-    internal static bool TryCreate(string[] args, out ClientOptions options, out string? error)
-    {
-        options = new ClientOptions();
-        error = null;
-
-        var index = 0;
-        while (index < args.Length)
-        {
-            var argument = args[index];
-            var separator = argument.IndexOf('=', StringComparison.Ordinal);
-            var name = separator >= 0 ? argument[..separator] : argument;
-            var inlineValue = separator >= 0 ? argument[(separator + 1)..] : null;
-
-            if (Array.IndexOf(s_knownOptions, name) < 0)
-            {
-                error = $"unknown argument '{argument}'";
-                return false;
-            }
-
-            if (inlineValue is null)
-            {
-                if (++index >= args.Length)
-                {
-                    error = $"missing value for '{name}'";
-                    return false;
-                }
-
-                inlineValue = args[index];
-            }
-
-            if (!TryApply(options, name, inlineValue, out error))
-            {
-                return false;
-            }
-
-            index++;
-        }
-
-        if (options.TargetAddress.Length == 0)
-        {
-            error = "--target is required";
-            return false;
-        }
-
-        if (!IPAddress.TryParse(options.TargetAddress, out _))
-        {
-            error = $"--target '{options.TargetAddress}' is not an IP address literal";
-            return false;
-        }
-
-        if (options.OutDirectory.Length == 0)
-        {
-            error = "--out is required";
-            return false;
-        }
-
-        return true;
-    }
-#pragma warning restore RCS1239
-
-    private static bool TryApply(ClientOptions options, string name, string value, out string? error)
-    {
-        error = null;
-
-        // A string option consumes the next argument when it has no inline value, so a forgotten
-        // value swallows the option that follows it and the run is configured by accident. Numbers
-        // cannot reach this check: a leading '-' already fails their parser.
-        if (value.StartsWith('-') && Array.IndexOf(s_stringOptions, name) >= 0)
-        {
-            error = $"'{name}' value '{value}' starts with '-'; a value that looks like an option usually means its own is missing";
-            return false;
-        }
-
-        switch (name)
-        {
-            case "--target":
-                options.TargetAddress = value;
-                return true;
-            case "--plan":
-                if (value.Length == 0)
-                {
-                    error = "--plan needs a path; omit the option to run the built-in plan";
-                    return false;
-                }
-
-                options.PlanPath = value;
-                return true;
-            case "--out":
-                options.OutDirectory = value;
-                return true;
-            case "--label":
-                options.Label = value;
-                return true;
-            case "--sampler-process":
-                if (value.Length == 0)
-                {
-                    error = "--sampler-process needs a process name; a process is matched by name and an empty one matches nothing";
-                    return false;
-                }
-
-                options.SamplerProcesses.Add(value);
-                return true;
-            case "--tcp-port":
-                return TryAssignPort(value, out error, static (target, port) => target.TcpPort = port, options);
-            case "--udp-port":
-                return TryAssignPort(value, out error, static (target, port) => target.UdpPort = port, options);
-            case "--dns-port":
-                return TryAssignPort(value, out error, static (target, port) => target.DnsPort = port, options);
-            case "--inject-corrupt-every":
-                return TryAssignCount(value, out error, static (target, count) => target.InjectCorruptEvery = count, options);
-            case "--inject-rewrite-every":
-                return TryAssignCount(value, out error, static (target, count) => target.InjectRewriteEvery = count, options);
-            default:
-                error = $"unknown argument '{name}'";
-                return false;
-        }
-    }
-
-    private static bool TryAssignPort(string value, out string? error, Action<ClientOptions, int> assign, ClientOptions options)
-    {
-        if (!TryPort(value, out var port, out error))
-        {
-            return false;
-        }
-
-        assign(options, port);
-        return true;
-    }
-
-    private static bool TryAssignCount(string value, out string? error, Action<ClientOptions, int> assign, ClientOptions options)
-    {
-        if (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var count) || count <= 0)
-        {
-            error = $"'{value}' is not a positive count";
-            return false;
-        }
-
-        error = null;
-        assign(options, count);
-        return true;
-    }
-
-    private static bool TryPort(string value, out int port, out string? error)
-    {
-        if (int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out port) && port is >= 1 and <= 65535)
-        {
-            error = null;
-            return true;
-        }
-
-        port = 0;
-        error = $"'{value}' is not a port number in 1..65535";
-        return false;
-    }
-
     internal static async Task<int> RunAsync(ClientOptions options, CancellationToken cancellationToken)
     {
         if (!PlanFile.TryLoad(options.PlanPath, out var arms, out var planBytes, out var planError))
@@ -255,7 +50,7 @@ internal static class ClientRunner
         }
 
         var runEndTicks = Clock.Now;
-        await WriteRunFileAsync(options, summaries, planHash, targetAddress, runStartTicks, runEndTicks, startedUtc, failed).ConfigureAwait(false);
+        await RunFileWriter.WriteRunFileAsync(options, summaries, planHash, targetAddress, runStartTicks, runEndTicks, startedUtc, failed).ConfigureAwait(false);
         await Console.Out.WriteLineAsync(string.Create(CultureInfo.InvariantCulture, $"e2e client: {summaries.Count} arm(s) written to {Path.GetFullPath(options.OutDirectory)}")).ConfigureAwait(false);
         if (cancellationToken.IsCancellationRequested)
         {
@@ -344,7 +139,7 @@ internal static class ClientRunner
         var endedTicks = Clock.Now;
         // An arm that threw before it built metrics still publishes an empty metrics object, the same
         // shape a run that reached the record writer with nothing measured always had.
-        failure = await WriteArmRecordsAsync(sink, sampler, options, arm, outcome ?? EmptyOutcome(), latency, fileName, failure, cancelled, startedTicks, endedTicks).ConfigureAwait(false);
+        failure = await WriteArmRecordsAsync(sink, sampler, options, arm, outcome ?? ArmRecordWriter.EmptyOutcome(), latency, fileName, failure, cancelled, startedTicks, endedTicks).ConfigureAwait(false);
 
         await Console.Out.WriteLineAsync(string.Create(
             CultureInfo.InvariantCulture,
@@ -402,19 +197,19 @@ internal static class ClientRunner
             if (failure is not null)
             {
                 failureAttempted = true;
-                await WriteFailureAsync(sink, options, arm, failure, cancelled, startedTicks, endedTicks).ConfigureAwait(false);
+                await ArmRecordWriter.WriteFailureAsync(sink, options, arm, failure, cancelled, startedTicks, endedTicks).ConfigureAwait(false);
             }
 
-            await WriteResultAsync(sink, options, arm, outcome, latency, startedTicks, endedTicks).ConfigureAwait(false);
-            await WriteArmSummaryAsync(sink, options, arm, outcome, startedTicks, endedTicks, fileName).ConfigureAwait(false);
+            await ArmRecordWriter.WriteResultAsync(sink, options, arm, outcome, latency, startedTicks, endedTicks).ConfigureAwait(false);
+            await ArmRecordWriter.WriteArmSummaryAsync(sink, options, arm, outcome, startedTicks, endedTicks, fileName).ConfigureAwait(false);
 
             // A record the file never took fails this arm, and the check runs while the sink is still
             // open, so the `error` record the failure owes its reader can still be written.
             if (sink.WriteErrors > 0 && !failureAttempted)
             {
-                failure = LostRecords(sink);
+                failure = ArmRecordWriter.LostRecords(sink);
                 failureAttempted = true;
-                await WriteFailureAsync(sink, options, arm, failure, cancelled, startedTicks, endedTicks).ConfigureAwait(false);
+                await ArmRecordWriter.WriteFailureAsync(sink, options, arm, failure, cancelled, startedTicks, endedTicks).ConfigureAwait(false);
             }
 
             // The sampler holds a reference to this sink and must stop writing before it closes: a
@@ -426,7 +221,7 @@ internal static class ClientRunner
             // the count — run.json still carries the arm's `failed` flag and the sink reports it to
             // stderr; the `await using` above remains the non-throwing backstop (D14.7).
             await sink.CompleteAsync().ConfigureAwait(false);
-            failure ??= sink.WriteErrors > 0 ? LostRecords(sink) : null;
+            failure ??= sink.WriteErrors > 0 ? ArmRecordWriter.LostRecords(sink) : null;
             return failure;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -434,246 +229,11 @@ internal static class ClientRunner
             failure ??= exception;
             if (!failureAttempted)
             {
-                await TryWriteFailureAsync(sink, options, arm, failure, cancelled, startedTicks, endedTicks).ConfigureAwait(false);
+                await ArmRecordWriter.TryWriteFailureAsync(sink, options, arm, failure, cancelled, startedTicks, endedTicks).ConfigureAwait(false);
             }
 
             return failure;
         }
-    }
-
-    private static IOException LostRecords(JsonlSink sink) =>
-        new($"the arm's record file could not be written: {sink.WriteErrors.ToString(CultureInfo.InvariantCulture)} record(s) lost");
-
-    /// <summary>
-    /// Writes the `error` record for an arm whose records could not be written at all. The sink is
-    /// the thing that failed, so this last attempt cannot end the run: the failure is reported to
-    /// stderr instead, and run.json still carries the arm's `failed` flag.
-    /// </summary>
-    private static async ValueTask TryWriteFailureAsync(
-        JsonlSink sink,
-        ClientOptions options,
-        ArmSpec arm,
-        Exception failure,
-        bool cancelled,
-        long startedTicks,
-        long endedTicks)
-    {
-        try
-        {
-            await WriteFailureAsync(sink, options, arm, failure, cancelled, startedTicks, endedTicks).ConfigureAwait(false);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            await Console.Error.WriteLineAsync(
-                $"e2e client: arm {arm.Name} failed and its error record could not be written: {exception.GetType().Name}: {exception.Message}").ConfigureAwait(false);
-        }
-    }
-
-    private static async ValueTask WriteFailureAsync(
-        JsonlSink sink,
-        ClientOptions options,
-        ArmSpec arm,
-        Exception failure,
-        bool cancelled,
-        long startedTicks,
-        long endedTicks)
-    {
-        // A token-driven cancellation surfaces as whichever subtype the await that observed it
-        // raises (TaskCanceledException and friends), so `error` is reported as the base type; a
-        // consumer reads the same name for every way a run can be stopped.
-        var error = cancelled ? nameof(OperationCanceledException) : failure.GetType().Name;
-        var message = cancelled ? "cancelled" : failure.Message;
-        var detail = failure.GetBaseException().GetType().Name;
-        await sink.WriteAsync(
-            writer =>
-            {
-                writer.WriteString(ArmKeys.Common.Record.Type, "error");
-                writer.WriteString(ArmKeys.Common.Record.Arm, arm.Name);
-                writer.WriteString(ArmKeys.Common.Record.Kind, arm.Kind);
-                writer.WriteString(ArmKeys.Common.Record.Label, options.Label);
-                writer.WriteString(ArmKeys.Common.ErrorRecord.Error, error);
-                writer.WriteString(ArmKeys.Common.ErrorRecord.Message, message);
-                writer.WriteString(ArmKeys.Common.ErrorRecord.Detail, detail);
-                writer.WriteNumber(ArmKeys.Common.Record.StartedTicks, startedTicks);
-                writer.WriteNumber(ArmKeys.Common.Record.EndedTicks, endedTicks);
-            },
-            CancellationToken.None).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Writes the arm's <c>result</c> record: the one place a record's skeleton and its
-    /// <c>metrics</c> object meet. Every arm reaches this writer with an <see cref="IJsonWritable"/>
-    /// for its metrics, so the shape of the published file is decided by the metrics type rather than
-    /// by a dictionary the writer has to interpret (D14.15).
-    /// </summary>
-    internal static async ValueTask WriteResultAsync(
-        JsonlSink sink,
-        ClientOptions options,
-        ArmSpec arm,
-        ArmOutcome outcome,
-        LatencySet latency,
-        long startedTicks,
-        long endedTicks)
-    {
-        await sink.WriteAsync(
-            writer =>
-            {
-                writer.WriteString(ArmKeys.Common.Record.Type, "result");
-                writer.WriteString(ArmKeys.Common.Record.Arm, arm.Name);
-                writer.WriteString(ArmKeys.Common.Record.Kind, arm.Kind);
-                writer.WriteString(ArmKeys.Common.Record.Label, options.Label);
-                writer.WritePropertyName(ArmKeys.Common.Record.Parameters);
-                outcome.Parameters.WriteTo(writer);
-                writer.WritePropertyName(ArmKeys.Common.Record.Metrics);
-                outcome.Metrics.WriteTo(writer);
-                latency.WriteTo(writer);
-                writer.WritePropertyName(ArmKeys.Common.Record.Gates);
-                WriteGates(writer, outcome.Gates);
-                writer.WritePropertyName(ArmKeys.Common.Record.Notes);
-                writer.WriteStartArray();
-                foreach (var note in outcome.Notes)
-                {
-                    writer.WriteStringValue(note);
-                }
-
-                writer.WriteEndArray();
-                writer.WriteNumber(ArmKeys.Common.Record.StartedTicks, startedTicks);
-                writer.WriteNumber(ArmKeys.Common.Record.EndedTicks, endedTicks);
-            },
-            CancellationToken.None).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Writes the arm's <c>gates</c> object. Which gates an arm publishes is the arm's business and
-    /// their order is its construction order, but every key is a
-    /// <see cref="ArmKeys.Common.Gates"/> constant and every value is a JSON number.
-    /// </summary>
-    private static void WriteGates(Utf8JsonWriter writer, Dictionary<string, double> gates)
-    {
-        writer.WriteStartObject();
-        foreach (var gate in gates)
-        {
-            writer.WriteNumber(gate.Key, gate.Value);
-        }
-
-        writer.WriteEndObject();
-    }
-
-    /// <summary>The outcome an arm that failed before building one still gets a record for.</summary>
-    private static ArmOutcome EmptyOutcome() => new()
-    {
-        Parameters = new ArmParameters(),
-        Metrics = new EmptyMetrics(),
-    };
-
-    private static async ValueTask WriteArmSummaryAsync(
-        JsonlSink sink,
-        ClientOptions options,
-        ArmSpec arm,
-        ArmOutcome outcome,
-        long startedTicks,
-        long endedTicks,
-        string fileName)
-    {
-        await sink.WriteAsync(
-            writer =>
-            {
-                writer.WriteString(ArmKeys.Common.Record.Type, "armSummary");
-                writer.WriteString(ArmKeys.Common.Record.Arm, arm.Name);
-                writer.WriteString(ArmKeys.Common.Record.Kind, arm.Kind);
-                writer.WriteString(ArmKeys.Common.Record.Label, options.Label);
-                writer.WritePropertyName(ArmKeys.Common.Record.Parameters);
-                outcome.Parameters.WriteTo(writer);
-                writer.WritePropertyName(ArmKeys.Common.Record.Gates);
-                WriteGates(writer, outcome.Gates);
-                writer.WriteString(ArmKeys.Common.ArmSummary.ResultFile, fileName);
-                writer.WriteNumber(ArmKeys.Common.Record.StartedTicks, startedTicks);
-                writer.WriteNumber(ArmKeys.Common.Record.EndedTicks, endedTicks);
-            },
-            CancellationToken.None).ConfigureAwait(false);
-    }
-
-    private static async ValueTask WriteRunFileAsync(
-        ClientOptions options,
-        List<ArmSummary> summaries,
-        string planHash,
-        IPAddress targetAddress,
-        long startTicks,
-        long endTicks,
-        DateTimeOffset startedUtc,
-        bool failed)
-    {
-        var path = Path.Combine(options.OutDirectory, "run.json");
-        await using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read, 8192, FileOptions.None);
-        await using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
-        {
-            writer.WriteStartObject();
-            writer.WriteString(ArmKeys.Run.Type, "run");
-            WriteEnvironment(writer, options, targetAddress, planHash);
-            writer.WriteString(ArmKeys.Run.StartedUtc, startedUtc.ToString("O", CultureInfo.InvariantCulture));
-            writer.WriteString(ArmKeys.Run.EndedUtc, DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
-            writer.WriteNumber(ArmKeys.Run.StartedTicks, startTicks);
-            writer.WriteNumber(ArmKeys.Run.EndedTicks, endTicks);
-            writer.WriteNumber(ArmKeys.Run.WallSeconds, NumberFormat.Round(Clock.ToSeconds(endTicks - startTicks)));
-            writer.WritePropertyName(ArmKeys.Run.Arms);
-            writer.WriteStartArray();
-            foreach (var summary in summaries)
-            {
-                writer.WriteStartObject();
-                writer.WriteString(ArmKeys.Run.Arm.Name, summary.Name);
-                writer.WriteString(ArmKeys.Run.Arm.Kind, summary.Kind);
-                writer.WriteString(ArmKeys.Run.Arm.File, summary.File);
-                writer.WriteNumber(ArmKeys.Run.Arm.StartedTicks, summary.StartedTicks);
-                writer.WriteNumber(ArmKeys.Run.Arm.EndedTicks, summary.EndedTicks);
-                writer.WriteBoolean(ArmKeys.Run.Arm.Failed, summary.Failed);
-                writer.WriteEndObject();
-            }
-
-            writer.WriteEndArray();
-            writer.WriteBoolean(ArmKeys.Run.Failed, failed);
-            writer.WriteEndObject();
-        }
-
-        await stream.FlushAsync(CancellationToken.None).ConfigureAwait(false);
-    }
-
-    private static void WriteEnvironment(Utf8JsonWriter writer, ClientOptions options, IPAddress targetAddress, string planHash)
-    {
-        writer.WriteString(ArmKeys.Run.Label, options.Label);
-        writer.WriteString(ArmKeys.Run.ClientVersion, typeof(ClientRunner).Assembly.GetName().Version?.ToString() ?? "0.0.0.0");
-        writer.WriteString(ArmKeys.Run.OsDescription, RuntimeInformation.OSDescription);
-        writer.WriteString(ArmKeys.Run.FrameworkDescription, RuntimeInformation.FrameworkDescription);
-        writer.WriteNumber(ArmKeys.Run.LogicalProcessors, Environment.ProcessorCount);
-        writer.WriteString(ArmKeys.Run.PlanHash, planHash);
-        if (options.PlanPath is null)
-        {
-            writer.WriteNull(ArmKeys.Run.PlanPath);
-        }
-        else
-        {
-            writer.WriteString(ArmKeys.Run.PlanPath, Path.GetFullPath(options.PlanPath));
-        }
-
-        // planPath answers "which file"; planSource answers "was there one at all", which a consumer
-        // needs without treating the null as a missing value.
-        writer.WriteString(ArmKeys.Run.PlanSource, options.PlanPath is null ? "builtin" : "file");
-
-        writer.WriteString(ArmKeys.Run.OutDirectory, Path.GetFullPath(options.OutDirectory));
-        writer.WritePropertyName(ArmKeys.Run.Target);
-        writer.WriteStartObject();
-        writer.WriteString(ArmKeys.Run.TargetObject.Address, targetAddress.ToString());
-        writer.WriteNumber(ArmKeys.Run.TargetObject.TcpPort, options.TcpPort);
-        writer.WriteNumber(ArmKeys.Run.TargetObject.UdpPort, options.UdpPort);
-        writer.WriteNumber(ArmKeys.Run.TargetObject.DnsPort, options.DnsPort);
-        writer.WriteEndObject();
-        writer.WritePropertyName(ArmKeys.Run.SamplerProcesses);
-        writer.WriteStartArray();
-        foreach (var name in options.SamplerProcesses)
-        {
-            writer.WriteStringValue(name);
-        }
-
-        writer.WriteEndArray();
     }
 
     internal static void PrintHelp()
@@ -699,6 +259,4 @@ internal static class ClientRunner
             usage error.
             """);
     }
-
-    private sealed record ArmSummary(string Name, string Kind, string File, long StartedTicks, long EndedTicks, bool Failed);
 }

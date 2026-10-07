@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using WinForward.E2E.Cli;
 using WinForward.E2E.Client.Lanes;
 using WinForward.E2E.Contracts;
 using WinForward.E2E.Contracts.Json;

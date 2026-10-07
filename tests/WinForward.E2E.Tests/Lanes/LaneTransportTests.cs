@@ -19,7 +19,7 @@ public sealed class LaneTransportTests
     private const int PayloadBytes = 32;
 
     [Fact]
-    public async Task TheUdpTransportSendsAndReceivesDatagramsAndReportsItsConnect()
+    public async Task TheUdpTransportSendsAndReceivesDatagrams()
     {
         using var peer = BindLoopbackUdp(out var peerEndPoint);
         using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
@@ -30,8 +30,6 @@ public sealed class LaneTransportTests
         var open = await transport.OpenAsync(cancellation.Token);
 
         Assert.True(open.Ok, open.Error);
-        Assert.True(transport.ConnectOk);
-        Assert.True(transport.ConnectTicks > 0);
 
         var send = await transport.SendAsync(sent, cancellation.Token);
         Assert.True(send.Accepted, send.Error);
@@ -85,7 +83,6 @@ public sealed class LaneTransportTests
         var open = await transport.OpenAsync(cancellation.Token);
 
         Assert.False(open.Ok);
-        Assert.False(transport.ConnectOk);
         Assert.NotNull(open.Error);
     }
 

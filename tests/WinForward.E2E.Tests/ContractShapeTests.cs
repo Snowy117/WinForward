@@ -1,4 +1,5 @@
 using System.Text;
+using WinForward.E2E.Cli;
 using WinForward.E2E.Client;
 using WinForward.E2E.Client.Arms;
 using WinForward.E2E.Contracts;
@@ -488,7 +489,7 @@ public sealed class ContractShapeTests
         await using var sink = new JsonlSink(stream, JsonlPolicy.Propagate, envelope: null, s_noFlush);
         var options = new ClientOptions { Label = "shape" };
 
-        await ClientRunner.WriteResultAsync(sink, options, arm, outcome, latency ?? new LatencySet(), 1_000_000, 2_000_000);
+        await ArmRecordWriter.WriteResultAsync(sink, options, arm, outcome, latency ?? new LatencySet(), 1_000_000, 2_000_000);
         var record = Encoding.UTF8.GetString(stream.ToArray());
         await sink.CompleteAsync();
         return record;

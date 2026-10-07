@@ -1,4 +1,4 @@
-using WinForward.E2E.Client;
+using WinForward.E2E.Cli;
 using Xunit;
 
 namespace WinForward.E2E.Tests;
@@ -20,14 +20,14 @@ public sealed class ClientOptionsTests
             ? new[] { "--target", "127.0.0.1", "--out", "/tmp/out", argument }
             : ["--target", "127.0.0.1", "--out", "/tmp/out", argument, string.Empty];
 
-        Assert.False(ClientRunner.TryCreate(args, out _, out var error));
+        Assert.False(ClientOptions.TryCreate(args, out _, out var error));
         Assert.Contains("--plan", error, StringComparison.Ordinal);
     }
 
     [Fact]
     public void OmittingThePlanKeepsTheBuiltInPlan()
     {
-        Assert.True(ClientRunner.TryCreate(["--target", "127.0.0.1", "--out", "/tmp/out"], out var options, out var error), error);
+        Assert.True(ClientOptions.TryCreate(["--target", "127.0.0.1", "--out", "/tmp/out"], out var options, out var error), error);
 
         Assert.Null(options.PlanPath);
     }
@@ -35,7 +35,7 @@ public sealed class ClientOptionsTests
     [Fact]
     public void AnEmptySamplerProcessIsAUsageError()
     {
-        Assert.False(ClientRunner.TryCreate(
+        Assert.False(ClientOptions.TryCreate(
             ["--target", "127.0.0.1", "--out", "/tmp/out", "--sampler-process="],
             out _,
             out var error));
@@ -48,7 +48,7 @@ public sealed class ClientOptionsTests
     [Fact]
     public void AValueThatLooksLikeAnOptionIsAUsageError()
     {
-        Assert.False(ClientRunner.TryCreate(
+        Assert.False(ClientOptions.TryCreate(
             ["--target", "127.0.0.1", "--out", "/tmp/out", "--label", "--out", "x"],
             out _,
             out var error));
@@ -60,7 +60,7 @@ public sealed class ClientOptionsTests
     [Fact]
     public void ANumberOptionStillRejectsANonNumericValue()
     {
-        Assert.False(ClientRunner.TryCreate(
+        Assert.False(ClientOptions.TryCreate(
             ["--target", "127.0.0.1", "--out", "/tmp/out", "--tcp-port", "--udp-port"],
             out _,
             out var error));

@@ -11,10 +11,12 @@ namespace WinForward.E2E.Tests;
 /// belongs to.
 /// </summary>
 /// <remarks>
-/// <para><b>What is scanned.</b> Every file under <c>Client/Arms/</c> and <c>Client/ClientRunner.cs</c>:
-/// those are the writers of the <c>result</c>, <c>armSummary</c>, <c>error</c>, <c>attempt</c> and
-/// <c>run.json</c> records. <c>Client/ResourceSampler.cs</c> and <c>Target/</c> publish their own key
-/// families and belong to a later batch (D14.16/D12).</para>
+/// <para><b>What is scanned.</b> Every file under <c>Client/Arms/</c>, plus the client's record
+/// writers: <c>Client/ClientRunner.cs</c> (the arm loop), <c>Client/ArmRecordWriter.cs</c>
+/// (the <c>result</c>, <c>armSummary</c> and <c>error</c> records) and <c>Client/RunFileWriter.cs</c>
+/// (<c>run.json</c>).
+/// <c>Client/ResourceSampler.cs</c> and <c>Target/</c> publish their own key families and belong to a
+/// later batch (D14.16/D12).</para>
 /// <para><b>What counts as a literal.</b> A string literal in a key position, which is either the
 /// first argument of one of the <c>Utf8JsonWriter</c> members that take a property name or the index
 /// of a dictionary being written under a key. That is deliberately narrower than "the name appears in
@@ -33,6 +35,9 @@ namespace WinForward.E2E.Tests;
 public sealed partial class JsonKeyLiteralGateTests
 {
     private const string Client = "benchmarks/WinForward.E2E/Client";
+
+    /// <summary>The record writers beside the arm sources, each one named so a missing file fails the gate.</summary>
+    private static readonly string[] s_writerFiles = ["ClientRunner.cs", "ArmRecordWriter.cs", "RunFileWriter.cs"];
 
     /// <summary>The first argument of a property-name <c>Utf8JsonWriter.Write*</c> call.</summary>
     [GeneratedRegex("""\.Write(?:StartObject|EndObject|StartArray|EndArray|PropertyName|Null|Boolean|Number|String|RawValue|Base64String)\(\s*"([^"]*)["]""")]
@@ -107,8 +112,8 @@ public sealed partial class JsonKeyLiteralGateTests
     }
 
     /// <summary>
-    /// The files the gate scans, with the two sources checked separately: a scan that found no arm
-    /// source, or could not find the runner, would pass while checking nothing, which is the one
+    /// The files the gate scans, with the record writers checked one by one: an arm source, or a
+    /// writer, that the gate could not find would pass while checking nothing, which is the one
     /// failure mode a gate of this shape has to rule out for itself.
     /// </summary>
     private static List<string> GatedFiles(string root)
@@ -117,10 +122,16 @@ public sealed partial class JsonKeyLiteralGateTests
             .EnumerateFiles(Path.Combine(root, Client, "Arms"), "*.cs", SearchOption.AllDirectories)
             .Order(StringComparer.Ordinal)
             .ToList();
-        var runner = Path.Combine(root, Client, "ClientRunner.cs");
+        var writers = new List<string>();
+        foreach (var name in s_writerFiles)
+        {
+            var writer = Path.Combine(root, Client, name);
+            Assert.True(File.Exists(writer), $"'{writer}' does not exist");
+            writers.Add(writer);
+        }
+
         Assert.True(arms.Count > 0, $"no arm source was found under {Path.Combine(root, Client, "Arms")}");
-        Assert.True(File.Exists(runner), $"'{runner}' does not exist");
-        return [.. arms, runner];
+        return [.. arms, .. writers];
     }
 
     /// <summary>

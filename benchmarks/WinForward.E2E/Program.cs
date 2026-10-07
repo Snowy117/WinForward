@@ -98,7 +98,7 @@ internal static class Program
 
     private static async Task<int> RunClientAsync(string[] args, CancellationToken cancellationToken)
     {
-        if (!ClientRunner.TryCreate(args, out var options, out var error))
+        if (!ClientOptions.TryCreate(args, out var options, out var error))
         {
             await Console.Error.WriteLineAsync($"e2e client: {error}").ConfigureAwait(false);
             ClientRunner.PrintHelp();

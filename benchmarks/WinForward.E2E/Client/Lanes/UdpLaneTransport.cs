@@ -23,6 +23,11 @@ namespace WinForward.E2E.Client.Lanes;
 /// <para>
 /// The wide buffer is allocated once, in the constructor, so the receive path allocates nothing.
 /// </para>
+/// <para>
+/// Unlike the stream adapter this one observes nothing about its connect: a udp connect has no
+/// handshake to time, and the record publishes connect facts under <c>tcp.*</c> only, so a failed open
+/// reaches the record as <c>scheduleTruncated</c> and <c>laneShortfall</c> instead.
+/// </para>
 /// </remarks>
 internal sealed class UdpLaneTransport : ILaneTransport
 {
@@ -51,24 +56,8 @@ internal sealed class UdpLaneTransport : ILaneTransport
         _receiveBuffer = new byte[datagramBytes + TruncationSlack];
     }
 
-    /// <summary>Whether the lane's socket reached its target.</summary>
-    internal bool ConnectOk { get; private set; }
-
-    /// <summary>How long the successful connect took, in <see cref="Clock"/> ticks.</summary>
-    internal long ConnectTicks { get; private set; }
-
-    public async ValueTask<LaneOpenResult> OpenAsync(CancellationToken cancellationToken)
-    {
-        var begin = Clock.Now;
-        var open = await SocketOps.TryConnectAsync(_socket, _endPoint, cancellationToken).ConfigureAwait(false);
-        if (open.Ok)
-        {
-            ConnectTicks = Clock.Now - begin;
-            ConnectOk = true;
-        }
-
-        return open;
-    }
+    public async ValueTask<LaneOpenResult> OpenAsync(CancellationToken cancellationToken) =>
+        await SocketOps.TryConnectAsync(_socket, _endPoint, cancellationToken).ConfigureAwait(false);
 
     public async ValueTask<LaneSendResult> SendAsync(ReadOnlyMemory<byte> payload, CancellationToken cancellationToken)
     {
