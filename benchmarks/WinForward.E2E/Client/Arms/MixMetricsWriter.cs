@@ -25,6 +25,7 @@ internal struct UdpTotals
     internal long _sendFailures;
     internal long _windowOverflow;
     internal long _outOfRange;
+    internal long _sentOutOfRange;
     internal long _clientSendLoss;
 
     internal readonly long Loss => _late + _never;
@@ -45,7 +46,11 @@ internal struct UdpTotals
         _sendFailures += tracker.SendFailure;
         _windowOverflow += tracker.WindowOverflow;
         _outOfRange += tracker.OutOfRange;
-        _clientSendLoss += tracker.SendFailure + tracker.WindowOverflow + counts.Undetermined;
+        _sentOutOfRange += tracker.SentOutOfRange;
+
+        // The same four terms LOSS publishes (D2/D7): the MIX UDP class has no in-flight window, so
+        // its third term is structurally zero and is published as such beside the other three.
+        _clientSendLoss += tracker.SendFailure + tracker.WindowOverflow + counts.Undetermined + tracker.SentOutOfRange;
     }
 }
 
@@ -121,6 +126,7 @@ internal static class MixMetricsWriter
         SendFailures = totals._sendFailures,
         WindowOverflow = totals._windowOverflow,
         OutOfRangeSequences = totals._outOfRange,
+        SentOutOfRangeSequences = totals._sentOutOfRange,
         Bytes = counters._udpBytes,
         ClientSendLoss = totals._clientSendLoss,
         LossRate = JsonRate.Rate(totals.Loss, totals._sent),

@@ -199,12 +199,20 @@ internal sealed class UdpReliabilityTracker
     internal long ReceivedBytes { get; private set; }
 
     /// <summary>
-    /// Sequences the bitmaps refused because they fell outside <see cref="MaxSequence"/>. A non-zero
-    /// value means part of the offered schedule was never tracked, so the published classification
-    /// covers fewer datagrams than <see cref="SentOk"/> claims: it is a measurement caveat, not a
-    /// detail, and it is published rather than left silent.
+    /// Sequences a received datagram named that the bitmaps refused because they fell outside
+    /// <see cref="MaxSequence"/>. The receiver side is the untrusted one -- a flipped byte can name any
+    /// sequence at all -- so a non-zero value says an arrival was refused and booked as nothing, which
+    /// is a measurement caveat about the arrival population rather than about the offered schedule.
     /// </summary>
-    internal long OutOfRange => _sent.OutOfRange + _arrived.OutOfRange + _corruptAt.OutOfRange;
+    internal long OutOfRange => _arrived.OutOfRange + _corruptAt.OutOfRange;
+
+    /// <summary>
+    /// Sequences the send side refused because they fell outside <see cref="MaxSequence"/>. A slot past
+    /// the bounded space was offered and never handed to the socket, so it is not sent, lands in no
+    /// classification bucket, and is client send loss; separately named and separately published from
+    /// the receive-side <see cref="OutOfRange"/> so the two refusals cannot be read as one population.
+    /// </summary>
+    internal long SentOutOfRange => _sent.OutOfRange;
 
     /// <summary>
     /// Sent datagrams whose W has not elapsed and which no arrival or verdict has resolved. A

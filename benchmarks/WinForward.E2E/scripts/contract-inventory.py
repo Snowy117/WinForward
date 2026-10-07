@@ -54,11 +54,17 @@ DOTTED_LEAF_RENAMES = {
 }
 
 # Paths the frozen baseline cannot contain because they arrived after it: a green run writes no
-# error record, and run.json's planSource was added with the plan handling (D14.23, D14.12).
+# error record, run.json's planSource was added with the plan handling (D14.23, D14.12), and the
+# three sentOutOfRangeSequences paths are D7's send-side half of outOfRangeSequences (E3-b1/D19.3 A).
+# An addition carries no batch: only a rename has an old spelling that has to disappear, and this
+# tool emits `batch` for the renamed rows alone, so the comparison licenses an addition by its kind.
 ADDITIONS = {
     "planSource": "run.json top-level key: 'builtin' when no plan file was given (D14.23)",
     "error": "error record field: the exception family name (D14.12)",
     "detail": "error record field: the innermost exception type name (D14.12)",
+    "metrics/sentOutOfRangeSequences": "loss metrics: offered slots the tracker refused to send as outside its bounded sequence space (D7)",
+    "metrics/loss/sentOutOfRangeSequences": "the control's loss phase publishes the same loss record one level down (D7)",
+    "metrics/classes/udp/sentOutOfRangeSequences": "mix UDP class: the same counter, folded from the per-desktop trackers (D7)",
 }
 
 FAMILY_OF = {

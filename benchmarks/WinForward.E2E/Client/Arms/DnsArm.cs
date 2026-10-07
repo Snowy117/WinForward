@@ -44,22 +44,18 @@ internal static class DnsArm
 
         // The metrics value is built after both halves joined, so every counter it carries is the
         // total the run ended with rather than a snapshot taken while a lane was still counting.
+        var metrics = MetricsOf(udp, tcp, Clock.Now - startTicks);
         var outcome = new ArmOutcome
         {
-            Parameters = new ArmParameters
-            {
-                Seconds = spec.Seconds,
-                RatePerSecond = rate,
-                TcpPercent = tcpPercent,
-                CnameEvery = cnameEvery,
-                DnsPort = dnsPort,
-                DrainWindowMs = DrainWindowMilliseconds,
-            },
-            Metrics = MetricsOf(udp, tcp, Clock.Now - startTicks),
+            Parameters = ParametersOf(spec, rate, tcpPercent, cnameEvery, dnsPort),
+            Metrics = metrics,
             Gates =
             {
-                // A dns arm measures queries, not datagrams, so it has no loss of its own to gate.
-                [ArmKeys.Common.Gates.ClientSendLoss] = 0L,
+                // The only query this arm destroys itself is the pacing slot it skipped because the
+                // in-flight window was full: it never reached the socket, so it is the same client send
+                // loss the udp arms publish. socketErrors counts failures that belong to no single query
+                // and is a different population, so it is not a term here (D19.2 ④).
+                [ArmKeys.Common.Gates.ClientSendLoss] = metrics.Unsent,
                 [ArmKeys.Common.Gates.WindowMs] = 0L,
             },
         };
@@ -72,6 +68,16 @@ internal static class DnsArm
         outcome.Notes.Add("transaction ids are reused on wraparound; a response matching no outstanding query is counted as unmatched, never as answered, and on TCP the response is matched against the id queued with the query it is credited to.");
         return outcome;
     }
+
+    private static ArmParameters ParametersOf(ArmSpec spec, int rate, int tcpPercent, int cnameEvery, int dnsPort) => new()
+    {
+        Seconds = spec.Seconds,
+        RatePerSecond = rate,
+        TcpPercent = tcpPercent,
+        CnameEvery = cnameEvery,
+        DnsPort = dnsPort,
+        DrainWindowMs = DrainWindowMilliseconds,
+    };
 
     private static DnsMetrics MetricsOf(DnsCounters udp, DnsCounters tcp, long elapsedTicks)
     {

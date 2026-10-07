@@ -95,8 +95,14 @@ public sealed record LossMetrics : IJsonWritable
     /// <summary>Client send loss over supplied; <see langword="null"/> when nothing was offered.</summary>
     public required double? ClientSendLossRate { get; init; }
 
-    /// <summary>Sequences the tracker refused as outside its bounded space.</summary>
+    /// <summary>Sequences a received datagram named that the tracker refused as outside its bounded space.</summary>
     public required long OutOfRangeSequences { get; init; }
+
+    /// <summary>
+    /// Offered slots the tracker refused to send as outside its bounded space: they reached no socket,
+    /// so they are client send loss and are not part of <see cref="Sent"/> or of any arrival bucket.
+    /// </summary>
+    public required long SentOutOfRangeSequences { get; init; }
 
     /// <summary>Sent datagrams per elapsed second; <see langword="null"/> when no time passed.</summary>
     public required double? AchievedRate { get; init; }
@@ -134,6 +140,7 @@ public sealed record LossMetrics : IJsonWritable
         Reading.Write(writer, ArmKeys.Loss.ReorderRate, ReorderRate);
         Reading.Write(writer, ArmKeys.Loss.ClientSendLossRate, ClientSendLossRate);
         writer.WriteNumber(ArmKeys.Loss.OutOfRangeSequences, OutOfRangeSequences);
+        writer.WriteNumber(ArmKeys.Loss.SentOutOfRangeSequences, SentOutOfRangeSequences);
         Reading.Write(writer, ArmKeys.Loss.AchievedRate, AchievedRate);
         writer.WriteEndObject();
     }

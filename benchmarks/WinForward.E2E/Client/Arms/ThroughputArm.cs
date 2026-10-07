@@ -107,6 +107,7 @@ internal static class ThroughputArm
         await Task.WhenAll(tasks).ConfigureAwait(false);
 
         var elapsedTicks = Clock.Now - startTicks;
+        var metrics = BuildMetrics(states, elapsedTicks, budget, targetBytesPerSecond, frameLength, limiter.BudgetExhausted);
         return new ArmOutcome
         {
             Parameters = new ArmParameters
@@ -116,10 +117,13 @@ internal static class ThroughputArm
                 TargetBytesPerSecond = targetBytesPerSecond,
                 FramePayloadBytes = FramePayloadBytes,
             },
-            Metrics = BuildMetrics(states, elapsedTicks, budget, targetBytesPerSecond, frameLength, limiter.BudgetExhausted),
+            Metrics = metrics,
             Gates =
             {
-                [ArmKeys.Common.Gates.ClientSendLoss] = 0L,
+                // This arm reserves a frame against its byte budget before offering it, so a frame the
+                // budget refuses is never a sample it destroyed; a send that threw is the one way this
+                // arm loses a frame of its own, and that is the counter behind sendFailures.
+                [ArmKeys.Common.Gates.ClientSendLoss] = metrics.SendFailures,
                 [ArmKeys.Common.Gates.WindowMs] = 0L,
             },
             Notes =

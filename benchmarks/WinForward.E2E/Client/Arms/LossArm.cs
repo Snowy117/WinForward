@@ -34,7 +34,7 @@ internal static class LossArm
             .ConfigureAwait(false);
 
         var counts = tracker.Classify(windowTicks, observationEndTicks);
-        var clientSendLoss = tracker.SendFailure + tracker.WindowOverflow + counts.Undetermined;
+        var clientSendLoss = ClientSendLoss(tracker, counts);
         var outcome = new ArmOutcome
         {
             Parameters = new ArmParameters
@@ -59,11 +59,21 @@ internal static class LossArm
         outcome.Notes.Add("corrupt frames whose header decoded are removed from the never bucket; the strict-loss rate adds corrupt back on top of loss, as RFC 2680 requires.");
         outcome.Notes.Add("a reply carrying another flow's connection id validates against that flow's own filler, so it is rejected by connection id before the filler check and booked as foreignConnection; a reply for a sequence this socket never sent is booked as unmatchedReplies.");
         outcome.Notes.Add("sendWouldBlock counts sends the kernel did not accept synchronously; a send that failed synchronously is counted in sendFailures only, because it completes rather than blocks and never enters the sent population.");
-        outcome.Notes.Add("outOfRangeSequences counts sequences the tracker refused as outside its bounded sequence space; a non-zero value means part of the offered schedule was never tracked, so this record's classification covers fewer datagrams than sent and must not be read as a complete loss measurement.");
+        outcome.Notes.Add("outOfRangeSequences counts sequences a received datagram named that the tracker refused as outside its bounded sequence space, and sentOutOfRangeSequences counts offered slots the tracker refused to send for the same reason; the refused slot reached no socket, so it is counted as client send loss and lands in no classification bucket, and a non-zero value of either means this record covers fewer datagrams than it claims to have measured.");
         outcome.Notes.Add("the offer phase and the drain phase share one socket, so a reply is never delivered to a socket nobody reads.");
         outcome.Notes.Add("a rate or ratio whose denominator is zero is written as null rather than 0: nothing was sent, so there is no rate to report.");
         return outcome;
     }
+
+    /// <summary>
+    /// The arm's client send loss: every datagram the client destroyed itself instead of handing it to
+    /// the socket. The four terms are the four ways that happens -- a send that threw, a slot the
+    /// in-flight window refused, a datagram still inside its window when the drain was cut short, and a
+    /// slot the tracker refused as outside its bounded sequence space (D2/D7). A datagram the path
+    /// dropped is in none of them, so this value and <c>lossRate</c> count disjoint populations.
+    /// </summary>
+    internal static long ClientSendLoss(UdpReliabilityTracker tracker, in LossCounts counts) =>
+        tracker.SendFailure + tracker.WindowOverflow + counts.Undetermined + tracker.SentOutOfRange;
 
     /// <summary>
     /// The record a finished run publishes: every counter the tracker and the classification ended
@@ -106,6 +116,7 @@ internal static class LossArm
             ReorderRate = JsonRate.Rate(counts.Reordered, tracker.SentOk),
             ClientSendLossRate = JsonRate.Rate(clientSendLoss, tracker.Supplied),
             OutOfRangeSequences = tracker.OutOfRange,
+            SentOutOfRangeSequences = tracker.SentOutOfRange,
             AchievedRate = JsonPerSecond.PerSecond(tracker.SentOk, elapsedTicks, System.Diagnostics.Stopwatch.Frequency),
         };
     }

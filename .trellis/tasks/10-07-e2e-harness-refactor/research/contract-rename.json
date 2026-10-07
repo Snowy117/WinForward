@@ -14,6 +14,24 @@
   {
     "kind": "added",
     "old_path": null,
+    "new_path": "metrics/classes/udp/sentOutOfRangeSequences",
+    "reason": "mix UDP class: the same counter, folded from the per-desktop trackers (D7)"
+  },
+  {
+    "kind": "added",
+    "old_path": null,
+    "new_path": "metrics/loss/sentOutOfRangeSequences",
+    "reason": "the control's loss phase publishes the same loss record one level down (D7)"
+  },
+  {
+    "kind": "added",
+    "old_path": null,
+    "new_path": "metrics/sentOutOfRangeSequences",
+    "reason": "loss metrics: offered slots the tracker refused to send as outside its bounded sequence space (D7)"
+  },
+  {
+    "kind": "added",
+    "old_path": null,
     "new_path": "planSource",
     "reason": "run.json top-level key: 'builtin' when no plan file was given (D14.23)"
   },

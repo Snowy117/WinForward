@@ -239,6 +239,7 @@ UDP_LABEL = {
 }
 
 NOT_CARRIED_CELL = "not carried (UDP bypassed)"
+WINDOW_OVERFLOW_CELL = "n/a (windowOverflow > 0)"
 NULL_RATE_REASON = "null rate: the harness wrote null because the denominator was zero"
 
 ARM_ORDER = ["IDLE", "LAT", "LATLOAD", "DNS", "DNSALT", "LOSS", "REL", "THRU", "MIX", "PERSIST", "BASE"]
@@ -3697,6 +3698,26 @@ def table_headline(ctx):
     return "\n".join(lines)
 
 
+def window_overflow_reached(ctx, row_id, arm_name):
+    """Whether this arm's own gate says its schedule went through the deferred queue.
+
+    ``gates/windowOverflow`` is the arm's counter for requests the in-flight window deferred, so a
+    non-zero value means part of what the percentiles below are computed from was measured through
+    the deferred queue rather than as a direct round trip. The comparison is ``> 0``: zero is the
+    measured-and-clean case and must not be rendered as unmeasurable.
+    """
+    for pass_id in ctx.pass_ids:
+        row = ctx.row_in(pass_id, row_id)
+        if row is None:
+            continue
+        value, _ = arm_number(row, arm_name, "gates/windowOverflow")
+        if value is not None and value > 0:
+            # One pass with a reached ceiling is enough: the cell below aggregates that pass with the
+            # others, so part of the number it prints was measured through the deferred queue.
+            return True
+    return False
+
+
 def table_latency(ctx):
     lines = ["## 5. Latency detail", ""]
     lines.append(
@@ -3742,6 +3763,11 @@ def table_latency(ctx):
                         [row_id, arm_name, "n/a (%s)" % (reasons[0] if reasons else "no histogram")]
                         + ["n/a"] * (len(PERCENTILES) + 1)
                     )
+                    continue
+                # Only a cell that would otherwise carry a number is replaced: a class this arm does
+                # not measure at all keeps saying so, because the ceiling is not why it is missing.
+                if window_overflow_reached(ctx, row_id, arm_name):
+                    rows.append([row_id, arm_name, WINDOW_OVERFLOW_CELL] + [WINDOW_OVERFLOW_CELL] * (len(PERCENTILES) + 1))
                     continue
                 cells = [
                     row_id,

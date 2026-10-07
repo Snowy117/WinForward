@@ -236,8 +236,9 @@ public sealed record MixDnsClassMetrics : IJsonWritable
 /// The classification identity holds by construction: <see cref="Arrived"/>, <see cref="Late"/>,
 /// <see cref="Never"/>, <see cref="AbandonedAtTeardown"/> and <see cref="CorruptDatagrams"/> sum to
 /// <see cref="Sent"/>, and <see cref="ClientSendLoss"/> is <see cref="AbandonedAtTeardown"/> plus
-/// <see cref="SendFailures"/> plus <see cref="WindowOverflow"/>. <see cref="LossRate"/> is
-/// <see langword="null"/> when nothing was sent, and <see cref="SentPerDesktop"/> holds one element per
+/// <see cref="SendFailures"/> plus <see cref="WindowOverflow"/> plus
+/// <see cref="SentOutOfRangeSequences"/>, with all four terms published beside it. <see cref="LossRate"/>
+/// is <see langword="null"/> when nothing was sent, and <see cref="SentPerDesktop"/> holds one element per
 /// desktop in desktop order.
 /// </remarks>
 public sealed record MixUdpClassMetrics : IJsonWritable
@@ -281,8 +282,11 @@ public sealed record MixUdpClassMetrics : IJsonWritable
     /// <summary>Datagrams deferred at a full in-flight window; structurally zero for this class.</summary>
     public required long WindowOverflow { get; init; }
 
-    /// <summary>Sequences the tracker refused as outside its bounded space.</summary>
+    /// <summary>Sequences a received datagram named that the tracker refused as outside its bounded space.</summary>
     public required long OutOfRangeSequences { get; init; }
+
+    /// <summary>Offered slots the tracker refused to send as outside its bounded space, folded into <see cref="ClientSendLoss"/>.</summary>
+    public required long SentOutOfRangeSequences { get; init; }
 
     /// <summary>Datagram bytes written.</summary>
     public required long Bytes { get; init; }
@@ -319,6 +323,7 @@ public sealed record MixUdpClassMetrics : IJsonWritable
         writer.WriteNumber(ArmKeys.Mix.UdpClass.SendFailures, SendFailures);
         writer.WriteNumber(ArmKeys.Mix.UdpClass.WindowOverflow, WindowOverflow);
         writer.WriteNumber(ArmKeys.Mix.UdpClass.OutOfRangeSequences, OutOfRangeSequences);
+        writer.WriteNumber(ArmKeys.Mix.UdpClass.SentOutOfRangeSequences, SentOutOfRangeSequences);
         writer.WriteNumber(ArmKeys.Mix.UdpClass.Bytes, Bytes);
         writer.WriteNumber(ArmKeys.Mix.UdpClass.ClientSendLoss, ClientSendLoss);
         Reading.Write(writer, ArmKeys.Mix.UdpClass.LossRate, LossRate);

@@ -15,7 +15,12 @@ record types, JSONL layout), and it deliberately contains:
 * per-run ledger labels in one pass and a single pass-level label in another, so both
   attribution paths are exercised.
 
-Usage: python3 make_tree.py <output-raw-dir>
+Usage: python3 make_tree.py <output-raw-dir> [--window-overflow ROW]
+
+`--window-overflow ROW` makes that row's `LAT` arm report a reached in-flight ceiling in
+pass 3 (`gates.windowOverflow = 3`, with `supplied == sentOk` and `clientSendLoss = 0`,
+because a deferral that went out is not a drop). The default tree has no reached ceiling, so
+the analysis's rendering of an ordinary latency row is byte-for-byte what it was.
 
 The generated tree is a fixture, not a measurement: every number in it is invented. It
 exists so the analysis can be exercised against every shape the campaign can produce,
@@ -303,7 +308,9 @@ def build_arm(builder, arm, row_id, plan, pass_index, rng, product_process, note
         if not udp_only:
             latency["tcp-connect"] = histogram(rng, connections, p50 * 0.7, p50 * 3.0)
             latency["tcp-rtt"] = histogram(rng, sent_tcp, p50, p50 * 4.5)
-        overflow = 0
+        # A deferral is not a drop: a window overflow the arm eventually sent leaves supplied == sentOk
+        # and clientSendLoss == 0, which is the shape the analysis has to render as unmeasurable.
+        overflow = injections.get("window_overflow", 0)
         if carries_udp:
             latency["udp-rtt"] = histogram(rng, sent_udp, p50 * 1.05, p50 * 5.0)
             metrics.update(
@@ -747,7 +754,14 @@ def build_arm(builder, arm, row_id, plan, pass_index, rng, product_process, note
 
 
 def main():
-    out = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("/tmp/wf-synth/raw")
+    arguments = sys.argv[1:]
+    window_overflow_row = None
+    if arguments and arguments[0] == "--window-overflow":
+        if len(arguments) < 2:
+            raise SystemExit("usage: make_tree.py <output-raw-dir> [--window-overflow ROW]")
+        window_overflow_row = arguments[1]
+        arguments = arguments[2:]
+    out = Path(arguments[0]) if arguments else Path("/tmp/wf-synth/raw")
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)
@@ -807,6 +821,8 @@ def main():
                     arm_injections["read_error_at"] = 3
                 if arm == "REL" and row_id == "wf-aot-opt" and pass_index == 2:
                     arm_injections["restart_at"] = 15
+                if window_overflow_row is not None and row_id == window_overflow_row and arm == "LAT" and pass_index == 3:
+                    arm_injections["window_overflow"] = 3
                 if arm in ("LAT", "LATLOAD", "LOSS", "MIX", "BASE"):
                     if row_id in ("wf-aot-opt", "wf-fdd-opt", "wf-aot-dnsrelay", "proxifyre", "proxybridge"):
                         arm_injections.setdefault("udp_endpoint", PROXY_ENDPOINT)

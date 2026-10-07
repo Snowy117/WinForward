@@ -13,9 +13,10 @@ internal static class RepoPaths
     internal static string ShortPlansDirectory => Path.Combine(Root, "benchmarks", "WinForward.E2E", "scripts", "plans-short");
 
     /// <summary>
-    /// The minimal plans that reproduce the Tier 0 defects (D1-D7). They live with the tests, not in
-    /// <c>scripts/plans/</c>: every one of them is either rejected at load time or would need a live
-    /// target, so shipping them next to the campaign plans would invite running them.
+    /// The minimal plans a fact loads by path: the Tier 0 defect repros (D1-D7), which are either
+    /// rejected at load time or would need a live target, and the semantic fixtures that pin one plan
+    /// key to one published value. They live with the tests, not in <c>scripts/plans/</c>, because none
+    /// of them is a campaign plan.
     /// </summary>
     private static string Tier0PlansDirectory => Path.Combine(Root, "tests", "WinForward.E2E.Tests", "Fixtures", "plans");
 

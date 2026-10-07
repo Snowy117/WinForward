@@ -7,6 +7,15 @@ namespace WinForward.E2E.Client.Arms;
 internal static class ReliabilityMetricsWriter
 {
     /// <summary>
+    /// The arm's client send loss: the pacing slots the pacer offered that no attempt ever ran for.
+    /// This arm back-pressures rather than discards -- a full attempt window makes the pacer slip,
+    /// which <c>achievedRate</c> reports -- so the two counters are equal on every run that retired
+    /// its attempts, and the difference is exactly the work the arm ended with still in flight.
+    /// </summary>
+    internal static long ClientSendLoss(long scheduledAttempts, long connectAttempts) =>
+        Math.Max(0, scheduledAttempts - connectAttempts);
+
+    /// <summary>
     /// The record a finished run publishes: the tallies and rates derived from the attempts that ran,
     /// folded once, together with what the evidence writer managed to record.
     /// </summary>

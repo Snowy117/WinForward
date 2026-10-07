@@ -230,6 +230,7 @@ internal static class MixShape
                 SendFailures = 0,
                 WindowOverflow = 0,
                 OutOfRangeSequences = 0,
+                SentOutOfRangeSequences = 0,
                 Bytes = 182_400,
                 ClientSendLoss = 0,
                 LossRate = 0.000833,

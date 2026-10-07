@@ -198,8 +198,11 @@ public static partial class ArmKeys
             /// <summary>Datagrams deferred at a full in-flight window; structurally zero for this class.</summary>
             public const string WindowOverflow = "windowOverflow";
 
-            /// <summary>Sequences the tracker refused as outside its bounded space.</summary>
+            /// <summary>Sequences a received datagram named that the tracker refused as outside its bounded space.</summary>
             public const string OutOfRangeSequences = "outOfRangeSequences";
+
+            /// <summary>Offered slots the tracker refused to send as outside its bounded space.</summary>
+            public const string SentOutOfRangeSequences = "sentOutOfRangeSequences";
 
             /// <summary>Datagram bytes written.</summary>
             public const string Bytes = "bytes";

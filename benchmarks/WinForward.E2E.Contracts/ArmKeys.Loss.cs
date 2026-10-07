@@ -99,8 +99,11 @@ public static partial class ArmKeys
         /// <summary>Client send loss over supplied; null when nothing was offered.</summary>
         public const string ClientSendLossRate = "clientSendLossRate";
 
-        /// <summary>Sequences the tracker refused as outside its bounded space.</summary>
+        /// <summary>Sequences a received datagram named that the tracker refused as outside its bounded space.</summary>
         public const string OutOfRangeSequences = "outOfRangeSequences";
+
+        /// <summary>Offered slots the tracker refused to send as outside its bounded space.</summary>
+        public const string SentOutOfRangeSequences = "sentOutOfRangeSequences";
 
         /// <summary>Sent datagrams per elapsed second; null when no time passed.</summary>
         public const string AchievedRate = "achievedRate";

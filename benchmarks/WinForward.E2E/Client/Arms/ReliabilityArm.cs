@@ -49,6 +49,7 @@ internal static class ReliabilityArm
 
         var scheduled = await Dedicated.RunOnOwnThreadAsync(() => PumpAsync(context, schedule, expectedBytes, rate, startTicks, deadlineTicks, results, evidence, cancellationToken)).ConfigureAwait(false);
 
+        var metrics = ReliabilityMetricsWriter.BuildMetrics([.. results], schedule, mixText, expectedBytes, Clock.Now - startTicks, scheduled, evidence);
         var outcome = new ArmOutcome
         {
             Parameters = new ArmParameters
@@ -59,11 +60,11 @@ internal static class ReliabilityArm
                 ModeMix = mixText,
                 FramePayloadBytes = FramePayloadBytes,
             },
-            Metrics = ReliabilityMetricsWriter.BuildMetrics([.. results], schedule, mixText, expectedBytes, Clock.Now - startTicks, scheduled, evidence),
+            Metrics = metrics,
             Gates =
             {
-                [ArmKeys.Common.Gates.ClientSendLoss] = 0,
-                [ArmKeys.Common.Gates.WindowMs] = 0,
+                [ArmKeys.Common.Gates.ClientSendLoss] = ReliabilityMetricsWriter.ClientSendLoss(metrics.ScheduledAttempts, metrics.ConnectAttempts),
+                [ArmKeys.Common.Gates.WindowMs] = 0L,
             },
         };
         outcome.Notes.Add("outcome values are what the client observed; 'expected' is what the requested mode calls for, and fidelityMismatch counts any divergence plus truncated echoes.");

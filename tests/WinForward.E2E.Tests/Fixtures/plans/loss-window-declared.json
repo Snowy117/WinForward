@@ -1,0 +1,5 @@
+{
+  "arms": [
+    { "name": "LOSS", "kind": "loss", "seconds": 0.6, "ratePerSecond": 500, "payloadBytes": 200, "window": 64, "lossWindowMs": 137 }
+  ]
+}

@@ -91,6 +91,7 @@ internal static class LossShape
         ReorderRate = flags.HasFlag(ShapeFlags.UnknownReadings) ? null : 0.0,
         ClientSendLossRate = flags.HasFlag(ShapeFlags.UnknownReadings) ? null : 0.0,
         OutOfRangeSequences = 0,
+        SentOutOfRangeSequences = 0,
         AchievedRate = flags.HasFlag(ShapeFlags.UnknownReadings) ? null : 100.0,
     };
 

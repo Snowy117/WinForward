@@ -6,6 +6,14 @@ namespace WinForward.E2E.Client.Arms;
 
 internal static class IdleArm
 {
+    /// <summary>
+    /// An idle arm offers no traffic, so it has no send-side counter to derive this gate from: the
+    /// value is zero by construction, not a measured zero. The record cannot say so -- <c>gates</c> is
+    /// a name/value map of numbers and has no third state -- so it keeps 0 and the analysis renders
+    /// this arm's client send loss as <c>n/a</c> instead of a zero that would read as a measurement.
+    /// </summary>
+    private const long NoTrafficClientSendLoss = 0;
+
     internal static async Task<ArmOutcome> RunAsync(ArmContext context)
     {
         var startTicks = Clock.Now;
@@ -26,7 +34,7 @@ internal static class IdleArm
             },
             Gates =
             {
-                [ArmKeys.Common.Gates.ClientSendLoss] = 0L,
+                [ArmKeys.Common.Gates.ClientSendLoss] = NoTrafficClientSendLoss,
                 [ArmKeys.Common.Gates.WindowMs] = 0L,
             },
             Notes = { "no traffic is generated; only the 1 Hz resource samples attached to this arm carry information." },

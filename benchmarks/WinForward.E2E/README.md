@@ -418,7 +418,7 @@ analysis.
 | `gates/sendFailures` | individual sends that threw; the loop continues, so a transient error costs that sample, which is also folded into `clientSendLoss` |
 | `gates/lanesPlanned`, `gates/lanesStarted`, `gates/laneShortfall` | lane bookkeeping for the latency arm: how many lanes the effective plan asked for, how many ran and supplied traffic, and how many were idle |
 | `gates/scheduleTruncated` | a lane never connected, or an offer loop ended before its deadline, so part of the offered schedule was never offered at all |
-| `gates/inFlightCeilingMs` | the tightest direct-measurable-latency ceiling, `window × lanes / achieved rate`; slower requests are measured through the deferred queue, so a reached ceiling is a disclosure (`windowOverflow > 0`), not a failure. `metrics/tcp.windowCeilingMs` and `metrics/udp.windowCeilingMs` are the per-protocol ceilings |
+| `gates/inFlightCeilingMs` | the tightest direct-measurable-latency ceiling, `window × lanes / achieved rate`; slower requests are measured through the deferred queue, so a reached ceiling is a disclosure (`windowOverflow > 0`), not a failure — and the analysis renders that arm's latency cells (section 5) as `n/a (windowOverflow > 0)` rather than printing percentiles that were partly measured through the queue; a record whose arm reports `windowOverflow == 0` is rendered as before. `metrics/tcp.windowCeilingMs` and `metrics/udp.windowCeilingMs` are the per-protocol ceilings |
 | `gates/idleLanes` | mix only: the number of lane witnesses that stayed at zero |
 
 The analysis asserts three accounting identities per record:

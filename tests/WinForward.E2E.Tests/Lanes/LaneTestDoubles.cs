@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using WinForward.E2E.Client;
@@ -480,10 +481,26 @@ internal sealed class LaneTransportFake : ILaneTransport
     {
         var call = Interlocked.Increment(ref _receiveCalls);
         _log.Record(LaneEventKind.Receive, 0);
+        if (PayloadAtReceive > 0 && call == PayloadAtReceive)
+        {
+            return new ValueTask<LaneReceiveResult>(PayloadAfterAsync(cancellationToken));
+        }
+
         return EndOfStreamAtReceive > 0 && call >= EndOfStreamAtReceive
             ? new ValueTask<LaneReceiveResult>(new LaneReceiveResult(LaneReceiveKind.EndOfStream, 0))
             : new ValueTask<LaneReceiveResult>(ParkAsync(cancellationToken));
     }
+
+    /// <summary>
+    /// Hands the loop one well-formed message on this receive (1-based), and never before
+    /// <see cref="PayloadNotBeforeTicks"/>: a reply staged for an instant past the offer loop's deadline
+    /// is what proves the lane samples the cohort it still has in flight instead of losing it with the
+    /// socket. 0 never does this, and the wait is the engine's to cancel.
+    /// </summary>
+    internal long PayloadAtReceive { get; init; }
+
+    /// <summary>The instant <see cref="PayloadAtReceive"/> may be handed up at, on <see cref="Clock"/>'s scale.</summary>
+    internal long PayloadNotBeforeTicks { get; init; }
 
     public void Dispose() => Interlocked.Increment(ref _disposeCalls);
 
@@ -502,6 +519,21 @@ internal sealed class LaneTransportFake : ILaneTransport
         }
 
         return new LaneReceiveResult(LaneReceiveKind.EndOfStream, 0);
+    }
+
+    /// <summary>
+    /// Holds the staged message until its instant and then hands it up. The delay is cancelled with the
+    /// run, so a lane whose drain never runs loses the message the same way it loses the socket.
+    /// </summary>
+    private async Task<LaneReceiveResult> PayloadAfterAsync(CancellationToken cancellationToken)
+    {
+        var remainingTicks = PayloadNotBeforeTicks - Stopwatch.GetTimestamp();
+        if (remainingTicks > 0)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(remainingTicks / (double)Stopwatch.Frequency), cancellationToken).ConfigureAwait(false);
+        }
+
+        return new LaneReceiveResult(LaneReceiveKind.Payload, 0);
     }
 
     private async ValueTask<LaneSendResult> CompleteLaterAsync(LaneSendResult result)
