@@ -791,3 +791,73 @@ internal interface ILanePolicy
 | **B2c** | `LossArm`/`ReliabilityArm`/`PersistentArm` 类型化；`JsonValue` 退役；`Dictionary<string, object?>` 清零（AC2/D14.21，含 `ControlArm.ReadCount`/`ReadMilliseconds` 删除）；`parameters` 强类型化；字面量 gate（D14.16）；改名表全量判定（`--batch B2` 9/9 satisfied） |
 
 每批次结束都要跑六条门禁 + 一次 `compare-records.py`（带改名表与批次）并落 `research/baseline/B2x-*.md`。
+
+---
+
+## D20. E4 计划审查后的裁定（机制层，开工前必须遵守）
+
+### D20.1 oracle 的边界（解 A-1）
+
+**正式判据 = 干净树（clean tree）上的 5 批切片空 diff**。边界行为（`windowOverflow`、`undecodable`、
+截断）**不扩 D6.4 的例外**：Python 参考仍只改「字段名 + `generated_by` + `tables.md` 第 3 行的程序名」。
+边界树（`--window-overflow` / `--undecodable` / `--truncated-tcp|dns`）各自冻结，**只对 C# 产物做定点断言**
+（不参与双实现 diff）。这样 A 侧逻辑一行不动，E4-c 的 caveat 也不会让批 5 的 diff 变红。
+
+### D20.2 切片与骨架（解 A-2）
+
+- `oracle-diff.py` 三态退出码：`0` 该批切片全存在且相等 / `1` 存在但不等 / `2` **应存在的切片缺失**。
+- `BATCH_SECTIONS = {batch: {"tables.md": [...], "verdict.json": [...]}}`，**14 个顶层键全部有归属**
+  （`metrics` 按表拆到批 3/4）；另有 `preamble` 切片（`## 0.` 之前的内容，含 `tables.md:3` 与 `--raw` 值）归批 1。
+- 骨架期**未实现的顶层键整键缺省**（JSON 里没有它），`oracle-diff.py` 报 rc=2；
+  `tables.md` 侧保留全部 16 个 `## N.` 标题 + 正文 `<!-- TODO(batch N) -->`（切片数恒为 16）。
+- **不允许**"整文件 diff 为空"当批 1–4 的判据。
+
+### D20.3 冻结树的布局契约（解 A-3）
+
+- tarball 根 = `/tmp/wf-synth/` 的**内容**（`raw/`、两份 `*ledger*.jsonl`、`plan-*.json`）；
+- `oracle-diff.py` 解压前 `rm -rf /tmp/wf-synth`；解压后**先断言** `${RAW}/../*ledger*.jsonl` ≥ 2 份，否则 rc=2；
+- 两侧一律以写死的绝对路径 `/tmp/wf-synth/raw` 调用（`raw`、账本路径、`planPath`、§2 的路径列都是字节的一部分）。
+
+### D20.4 公平性断言的载体（解 A-4）
+
+- 规则源**外置**成机器可读的 `benchmarks/WinForward.E2E.Analysis/verification/row-profiles.json`；
+  新脚本（`scripts/check-fairness.py` 重写）只对 **C# 产物**断言，`--tables PATH` 保留给变异负控；
+- `designed_rows` 为空 ⇒ **FAIL**（不是 NOTE）；
+- 旧 `check-fairness.py` 与 `analyze.py` **同批退役**（见 D20.9），不留 exit 2 的死脚本。
+
+### D20.5 逐字一致的两个物理前提（解 A-5/A-6）
+
+- **RNG**：`Stats/CpRandom.cs` 复刻 CPython `Random(int)` 语义（绝对值小端进 `init_by_array`）+ MT19937
+  `genrand_uint32` + `getrandbits(k)` + `_randbelow(n)` 拒绝采样；黄金向量由 **CPython 3.14** 生成后落盘作单测。
+- **文本格式**：`Json/VerbatimNumber.cs` 复刻 Python `%.*f`（**半偶**）与 `%.3g`（小写 `e`、指数至少两位）；
+  `Json/VerbatimJson.cs` 复刻 `json.dumps(indent=2, sort_keys=False) + "\n"`：插入序、`\n` 结尾、
+  **不转义** `'`/`+`/`>`/`<`/`&`、保留 `\uXXXX`、UTF-8 无 BOM。两者配中点值/指数表驱动单测。
+- 默认值逐字一致：`--resamples 10000`、`--seed 20261006`、`MIN_PASSES=3`。
+
+### D20.6 读入侧路线（解 A2-4）
+
+C# 分析器用 **`Utf8JsonReader`/`JsonDocument` + `ArmKeys.*` 常量路径**读 JSONL（零反射、AOT/trim 干净、合 D5）；
+**不引入源生成**、**不加 `InternalsVisibleTo`**（`Contracts` 的可见性归 E1）。E4-a 放一条编译级反证：
+临时 `JsonSerializer.Deserialize<T>` 必须 build 失败，再删掉。
+
+### D20.7 其余裁定
+
+| 项 | 裁定 |
+|---|---|
+| 批次表（A2-1/A2-2） | 用 `## N.` 编号；**§1 归批 1**；批 1 再切 **b1a**（Model+Loading+骨架+§15）/ **b1b**（Stats+CpRandom+格式化）/ **b1c**（§1+§2）；批 3 与批 4 可合并平衡 |
+| 最小路径（B-6） | 显式里程碑 **b1a + b3**（§4/§5/§8/§9 四张核心表）≈ 392 输出行 |
+| `prd.md:15/45-47` 过时（A2-3） | 行数改 6165/147；`#17`/`#18`/`#19`/`#11` **已由 E3 落地**，E4 只做 **C# 侧等价渲染 + 可执行断言 + 负控**，不重复实现 |
+| fixture 漂移（A2-7） | E4-a 加机械 guard：`make_tree.py` 产物用 `jsonl_paths.py` 拍平后与 `contract-inventory.json` 双向差集，非空即失败；同时修 fixture 的旧拼写与 `achievedRate`/`completionRate`；**fixture 只保证键集与三态，值不参与契约** |
+| §5 畸形行（A2-8） | **逐字复刻**（154 行 11 格 vs 10 列表头）；`python-oracle-changes.md` 增设"必须原样保留的渲染怪癖"一节 |
+| `plots/SKIPPED.md`（A2-5） | C# **无条件**写、文本固定（去 python/venv/nix 字样）、与冻结副本逐字一致；oracle 不比对 `plots/` |
+| `analysis/README.md`（A2-6） | 搬到 `benchmarks/WinForward.E2E.Analysis/README.md`，**归属 E4**（两行按 `E5-readme-rows.md` §3 改） |
+| `analyze.sh`（A2-9/C10） | 先 `dotnet build -c Release --no-restore` 再 **exec 产物**、**不改 CWD**、`--` 后原样透传；**stdout 不属契约**（在计划里写明） |
+| `tables.md:3`（A2-11） | 程序名中性化（两侧同批改、同批重冻 A），登记为 D6.4 的第二个例外；`preamble` 切片归批 1 |
+| 门禁（A2-10/C17） | `publish.sh` 的裸 build = 全解决方案（含新项目）；`selftest.sh` 对分析器**不适用**；`effective-lines.py` 列**四个**路径 |
+| `research/` 与 `scripts/` 路径（C13/C14） | 一律写全：`.trellis/tasks/10-07-e2e-harness-refactor/research/` 与 `benchmarks/WinForward.E2E/scripts/` |
+| 冻结物（C16/B-3） | `benchmarks/WinForward.E2E.Analysis/verification/{synthetic-tree.tar.gz,golden/{py-tables.md,py-verdict.json},synthetic/make_tree.py,FROZEN.md,row-profiles.json}`；旧 `verification/synthetic-*` 与不可复现的 `selftest-*` 在 E4-d 退役 |
+| 截断 caveat 落点（C23） | 落 §14 内的新 `### 14.7`；其它小节不得出现裸 token `undecodable`（#11 guard 跨全小节扫它） |
+| E4-c 负控（B-7） | "没有任何臂级格子消费它"必须有负控：把截断值写进某臂格子 ⇒ 断言必须红 |
+| `__pycache__`（C12/B-5） | E4-d 用 `git rm --cached` 处理那一枚被跟踪的 `.pyc` |
+| 删除时机（C25/B-4） | `analyze.py` 与 `check-fairness.py` **同批删除**（E4-c=E4-d 合并），证据落 `research/baseline/E4d-removal.md` |
+| `analyze.py` 事实（E12/E13） | 6165 行 / 147 顶层 def-class；`#19` 与 `#11` 的分析器侧**已实现** |
