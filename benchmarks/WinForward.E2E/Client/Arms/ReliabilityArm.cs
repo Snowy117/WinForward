@@ -616,7 +616,7 @@ internal static class ReliabilityArm
 
         try
         {
-            if (!await SocketOps.TryConnectAsync(socket, context.TcpEndPoint, token).ConfigureAwait(false))
+            if (!(await SocketOps.TryConnectAsync(socket, context.TcpEndPoint, token).ConfigureAwait(false)).Ok)
             {
                 result._status = ExchangeStatus.ConnectFail;
                 return result;

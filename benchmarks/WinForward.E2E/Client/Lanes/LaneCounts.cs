@@ -21,6 +21,13 @@ namespace WinForward.E2E.Client.Lanes;
 /// as the contract's <c>metrics.*.backlogDrops</c> and is a subset of <see cref="DeferredQueued"/>: a
 /// dropped slot counts in both, exactly as the two counters it replaces did.
 /// </param>
+/// <param name="DeferredPending">
+/// The intents still waiting in the defer queue when the run returned: requests the schedule offered and
+/// the window never let out. This publishes as one half of the contract's
+/// <c>metrics.*.outstandingAtTeardown</c> — the other half is the policy's pending replies (D18.6 #1) —
+/// and it is the queue's occupancy at return, not a count of deferrals: <see cref="DeferredQueued"/>
+/// minus <see cref="DeferredDropped"/> minus the intents that later went out.
+/// </param>
 /// <param name="ScheduleTruncated">The offer loop stopped before its deadline — cancelled, failed, or never connected.</param>
 [StructLayout(LayoutKind.Auto)]
 internal readonly record struct LaneCounts(
@@ -30,4 +37,5 @@ internal readonly record struct LaneCounts(
     long SendFailures,
     long DeferredQueued,
     long DeferredDropped,
+    long DeferredPending,
     bool ScheduleTruncated);

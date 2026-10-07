@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
+using WinForward.E2E.Client.Arms;
 using WinForward.E2E.Client.Lanes;
 using Xunit;
 
@@ -30,12 +31,43 @@ public sealed class LaneCountsDisjointnessTests
     }
 
     [Fact]
+    public void NoLaneCountsNameIsAlsoARealPolicyCounter()
+    {
+        // The two lane policies of the latency arm: the send side is the engine's (LaneCounts) and the
+        // receive side is theirs (D18.1). Both halves of the check apply to each — a counter property
+        // under an engine name, or the private field left behind after renaming one, would be two
+        // truths about one number.
+        AssertDisjoint(typeof(LatencyTcpState), "Started", "Received", "RemoteClosed", "Pending", "InFlight");
+        AssertDisjoint(typeof(UdpLatencyState), "Started", "Received", "ForeignConnection", "Pending", "InFlight");
+    }
+
+    [Fact]
     public void TheCheckSeesBothACollidingPropertyAndACollidingPrivateField()
     {
         var collisions = Collisions(typeof(LaneCounts), typeof(CollidingCounters));
 
         Assert.Contains("Supplied", collisions);
         Assert.Contains("_sentOk", collisions);
+    }
+
+    /// <summary>
+    /// The disjointness pair over one real state type, with its non-vacuity half: the intersection has
+    /// to have been taken over two non-empty name sets, or a state that had simply renamed everything
+    /// away would read as compliant.
+    /// </summary>
+    private static void AssertDisjoint(
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.NonPublicProperties | DynamicallyAccessedMemberTypes.NonPublicFields)] Type state,
+        params string[] expectedCounters)
+    {
+        Assert.Empty(Collisions(typeof(LaneCounts), state));
+
+        var properties = Array.ConvertAll(state.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic), property => property.Name);
+        foreach (var counter in expectedCounters)
+        {
+            Assert.Contains(counter, properties);
+        }
+
+        Assert.True(state.GetFields(BindingFlags.Instance | BindingFlags.NonPublic).Length > 0, $"{state.Name} has to own private state for the field half of the check to bite");
     }
 
     /// <summary>

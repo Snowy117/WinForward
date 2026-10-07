@@ -234,7 +234,15 @@ internal static class DnsArm
         CancellationToken cancellationToken)
     {
         using var socket = context.CreateUdpSocket();
-        await socket.ConnectAsync(dnsEndPoint, cancellationToken).ConfigureAwait(false);
+        if (!(await SocketOps.TryConnectAsync(socket, dnsEndPoint, cancellationToken).ConfigureAwait(false)).Ok)
+        {
+            // The udp phase never reached the resolver, so none of its share of the schedule was handed
+            // to a socket: booked as a socket error and the arm publishes the tcp phase's measurement
+            // instead of failing the record.
+            counters._socketErrors++;
+            return;
+        }
+
         var pending = new ConcurrentDictionary<ushort, long>();
         var receiveBuffer = new byte[4096];
         using var laneCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -387,7 +395,7 @@ internal static class DnsArm
         CancellationToken cancellationToken)
     {
         using var socket = context.CreateTcpSocket();
-        if (!await SocketOps.TryConnectAsync(socket, dnsEndPoint, cancellationToken).ConfigureAwait(false))
+        if (!(await SocketOps.TryConnectAsync(socket, dnsEndPoint, cancellationToken).ConfigureAwait(false)).Ok)
         {
             counters._socketErrors++;
             return;

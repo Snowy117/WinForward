@@ -210,7 +210,7 @@ internal static class ThroughputArm
         CancellationToken cancellationToken)
     {
         using var socket = context.CreateTcpSocket();
-        if (!await SocketOps.TryConnectAsync(socket, context.TcpEndPoint, cancellationToken).ConfigureAwait(false))
+        if (!(await SocketOps.TryConnectAsync(socket, context.TcpEndPoint, cancellationToken).ConfigureAwait(false)).Ok)
         {
             Interlocked.Increment(ref state._connectFailures);
             return;

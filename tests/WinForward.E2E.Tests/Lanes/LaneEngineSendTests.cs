@@ -28,6 +28,7 @@ public sealed class LaneEngineSendTests
         Assert.Equal(0, counts.SendWouldBlock);
         Assert.Equal(0, counts.DeferredQueued);
         Assert.Equal(0, counts.DeferredDropped);
+        Assert.Equal(0, counts.DeferredPending);
         Assert.True(counts.ScheduleTruncated, "the run was stopped before its deadline, so the tail of the schedule was never offered");
 
         Assert.Equal(5, policy.AcceptedSends);
@@ -134,6 +135,32 @@ public sealed class LaneEngineSendTests
     }
 
     [Fact]
+    public async Task AnAsynchronousRefusalCountsInBothTheWouldBlockAndTheFailureCounter()
+    {
+        var log = new LaneEventLog();
+        using var cancellation = new CancellationTokenSource();
+        var policy = new LanePolicyFake(log);
+        var transport = new LaneTransportFake(log)
+        {
+            // The shape a real adapter produces when the kernel refuses and the await is what fails:
+            // the send did not complete synchronously and it did not succeed either, and the two
+            // published counters have to say both (D18.6 #2).
+            Behavior = LaneSendBehavior.Refuse,
+            IncompleteSends = true,
+            CancelAfter = cancellation,
+            CancelAfterSends = 3,
+        };
+
+        var (counts, _) = await LaneTestOptions.RunAsync(transport, policy, LaneTestOptions.Loop(), cancellation.Token);
+        var diagnostic = $"supplied {counts.Supplied}, sentOk {counts.SentOk}, wouldBlock {counts.SendWouldBlock}, failures {counts.SendFailures}";
+
+        Assert.True(counts.SendFailures == 3, diagnostic);
+        Assert.True(counts.SendWouldBlock == 3, diagnostic);
+        Assert.True(counts.SentOk == 0, diagnostic);
+        Assert.Equal(3, policy.RefusedSends);
+    }
+
+    [Fact]
     public async Task ASkippedSlotCountsNothingAndIsStillASuppliedSlot()
     {
         var log = new LaneEventLog();
@@ -149,6 +176,7 @@ public sealed class LaneEngineSendTests
         Assert.Equal(0, counts.SendWouldBlock);
         Assert.Equal(0, counts.DeferredQueued);
         Assert.Equal(0, counts.DeferredDropped);
+        Assert.Equal(0, counts.DeferredPending);
         Assert.Equal(0, transport.SendCalls);
         Assert.Empty(policy.Sends);
         Assert.Equal(4, policy.OfferedSlots);
@@ -178,6 +206,10 @@ public sealed class LaneEngineSendTests
         Assert.Equal(5, counts.SentOk);
         Assert.Equal(5, counts.DeferredQueued);
         Assert.Equal(0, counts.DeferredDropped);
+
+        // Five intents were deferred and four of them went out again, so one is still waiting when the
+        // run stops: the occupancy is what the queue holds, not how many deferrals ever happened.
+        Assert.Equal(1, counts.DeferredPending);
         Assert.Equal([1, 2, 3, 4, 5], transport.SentSequences);
 
         // A retry is the same intent asked again: the sequence repeats and so does the instant it was
@@ -213,6 +245,10 @@ public sealed class LaneEngineSendTests
         Assert.Equal(5, counts.DeferredQueued);
         Assert.Equal(3, counts.DeferredDropped);
         Assert.True(counts.DeferredDropped < counts.DeferredQueued, "a dropped slot still found the window closed, so it counts as deferred too");
+
+        // Nothing ever answered, so the queue still holds what it could: the dropped ones are gone and
+        // the occupancy is the queue's own size, not the deferral history (D18.6 #1).
+        Assert.Equal(2, counts.DeferredPending);
         Assert.Equal([1], transport.SentSequences);
     }
 }

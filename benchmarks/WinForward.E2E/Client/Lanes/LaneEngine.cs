@@ -208,12 +208,16 @@ internal sealed class LaneEngine<TTransport>
         catch (SocketException exception)
         {
             // One request failed, not the loop: on a connected datagram socket a previous send's icmp
-            // error surfaces here while the next send may well succeed.
-            _state.SendFailures++;
-            _policy.OnSent(sequence, intendedTicks, new LaneSendResult(Accepted: false, WouldBlock: wouldBlock, Error: exception.Message));
-            return;
+            // error surfaces here while the next send may well succeed. A transport that throws
+            // instead of answering is booked exactly like one that answers Accepted: false — the two
+            // shapes differ in who caught the socket error, not in what the lane counts, and neither
+            // one ends the schedule.
+            result = new LaneSendResult(Accepted: false, WouldBlock: wouldBlock, Error: exception.Message);
         }
 
+        // One reading of "did this send block", from either side of the seam, and one increment per
+        // send: a failed send that parked on the socket counts in both the would-block and the failure
+        // counters, which is the pair the two counters published before the engine existed.
         if (wouldBlock || result.WouldBlock)
         {
             _state.SendWouldBlock++;
@@ -324,6 +328,13 @@ internal sealed class LaneEngine<TTransport>
         /// <summary>Deferred intents, oldest first: the queue's head is the oldest waiting intent.</summary>
         internal Queue<DeferredRequest> Deferred { get; }
 
+        /// <summary>
+        /// The queue's occupancy, read when the run returns: the intents no window ever let out. It is
+        /// the engine's half of <c>outstandingAtTeardown</c> (D18.6 #1) and deliberately not derived
+        /// from the other counters, which cannot see a slot the policy skipped.
+        /// </summary>
+        private long DeferredPending => Deferred.Count;
+
         internal long Supplied { get; set; }
 
         internal long SentOk { get; set; }
@@ -338,7 +349,7 @@ internal sealed class LaneEngine<TTransport>
 
         internal bool ScheduleTruncated { get; set; }
 
-        internal LaneCounts Snapshot() => new(Supplied, SentOk, SendWouldBlock, SendFailures, DeferredQueued, DeferredDropped, ScheduleTruncated);
+        internal LaneCounts Snapshot() => new(Supplied, SentOk, SendWouldBlock, SendFailures, DeferredQueued, DeferredDropped, DeferredPending, ScheduleTruncated);
     }
 
     /// <summary>An intent that found the window closed: the sequence and intended instant it waits for.</summary>

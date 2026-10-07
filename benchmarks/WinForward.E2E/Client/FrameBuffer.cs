@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using WinForward.E2E.Client.Lanes;
 using WinForward.E2E.Wire;
 
 namespace WinForward.E2E.Client;
@@ -33,6 +34,11 @@ internal sealed class FrameBuffer
     internal int RecomputeChecksum(int payloadBytes) => FrameCodec.FinishFrame(_buffer, payloadBytes);
 }
 
+/// <summary>
+/// The socket operations every TCP arm shares. A connect failure is a result rather than an exception
+/// (D18.4): an arm that cannot reach its target records that and keeps going instead of unwinding the
+/// whole run, and the deadline still bounds whatever it does next.
+/// </summary>
 internal static class SocketOps
 {
     internal static async ValueTask SendCommandAsync(Socket socket, uint connectionId, TcpMode mode, uint expectedBytes, CancellationToken cancellationToken)
@@ -43,24 +49,24 @@ internal static class SocketOps
         await socket.SendAsync(frame, SocketFlags.None, cancellationToken).ConfigureAwait(false);
     }
 
-    internal static async ValueTask<bool> TryConnectAsync(Socket socket, System.Net.EndPoint endPoint, CancellationToken cancellationToken)
+    internal static async ValueTask<LaneOpenResult> TryConnectAsync(Socket socket, System.Net.EndPoint endPoint, CancellationToken cancellationToken)
     {
         try
         {
             await socket.ConnectAsync(endPoint, cancellationToken).ConfigureAwait(false);
-            return true;
+            return new LaneOpenResult(Ok: true, Error: null);
         }
-        catch (SocketException)
+        catch (SocketException exception)
         {
-            return false;
+            return new LaneOpenResult(Ok: false, Error: exception.Message);
         }
         catch (OperationCanceledException)
         {
-            return false;
+            return new LaneOpenResult(Ok: false, Error: "the connect was cancelled");
         }
         catch (ObjectDisposedException)
         {
-            return false;
+            return new LaneOpenResult(Ok: false, Error: "the socket was already closed");
         }
     }
 

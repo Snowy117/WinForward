@@ -82,10 +82,19 @@
 
 ## E2-b：文件拆分（纯搬移）
 
-- 7 个超标文件（**严格有效行口径**：`LatencyArm` 803、`MixArm` 678、`ReliabilityArm` 612、`DnsArm` 500、
-  `ResourceSampler` 460、`PersistentArm` 449、`ClientRunner` 567）；
-- 新建 `benchmarks/WinForward.E2E/scripts/effective-lines.py`（去空行、去 `//` 与 `/* */`），
-  AC1 判据 = 它在三个项目上无输出；
+**严格有效行口径的当前值**（E2-a3 之后）：`LatencyArm` 471（已从 803 降下来）、`MixArm` 720、
+`ReliabilityArm` 612、`DnsArm` 504、`ResourceSampler` 460、`PersistentArm` 449、`ClientRunner` 567。
+先建 `benchmarks/WinForward.E2E/scripts/effective-lines.py`（去空行、去 `//` 与 `/* */`），AC1 判据 = 它在三个项目上无输出。
+
+**E2-a3 check 转来的必做项**（不得丢）：
+
+1. **补 `LatencyArm` 的 `outstandingAtTeardown` 求和覆盖**：删掉 `Outstanding += counts.DeferredPending;`
+   目前 245/245 仍绿，且基线上该键处处为 0 ⇒ D18.5 #12 的逐值核对对它**是空转**。
+   加一条测试直接驱动该求和（`AddCounts` 或等价接缝，必要时提 `internal`），断言"去掉 `DeferredPending` 项必红"。
+2. **清理 `UdpLaneTransport.ConnectOk/ConnectTicks`**（无生产消费者；UDP lane 有意不记 connect 事实）——
+   删除或在类文档里写明保留理由。
+3. 拆 `LatencyArm` 时保持 D18.5 #12 的四个零宽键（`metrics/*.received`/`*.unmatchedReplies`/
+   `*.outstandingAtTeardown`/`latency/*-rtt/count`）在拆分前后逐值相同。
 - Target 侧：`SourceCensus.cs`、`TcpConnectionProtocol.cs`、`TcpAcceptLoop.cs`、`SocketIo.cs`、`ILedgerSection`；
 - 判据：行为零变化（结构差异为空 + 契约零越带 + 迁移前后记录逐字节一致，除 D15 读数/身份类）；
   遵守 `directory-structure.md`（文件名=主类型名；不建 pass-through 别名层）。

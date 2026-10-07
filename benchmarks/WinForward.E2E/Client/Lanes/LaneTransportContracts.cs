@@ -29,7 +29,7 @@ internal enum LaneReceiveKind
     /// continue (a desynchronized frame boundary) is an <see cref="IoError"/> instead, because no
     /// further message can be read from that stream.
     /// </summary>
-    // ReSharper disable once UnusedMember.Global // One of the seam's four kinds: the engine only tests the two terminal ones, and the adapters that report this one land in 2a-3.
+    // ReSharper disable once UnusedMember.Global // One of the seam's four kinds: the engine only tests the two terminal ones, and a policy books this one as a message it could not score.
     Malformed = 2,
 
     /// <summary>

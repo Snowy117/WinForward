@@ -500,7 +500,7 @@ internal static class PersistentArm
     {
         var socket = context.CreateTcpSocket();
         var begin = Clock.Now;
-        if (!await SocketOps.TryConnectAsync(socket, context.TcpEndPoint, cancellationToken).ConfigureAwait(false))
+        if (!(await SocketOps.TryConnectAsync(socket, context.TcpEndPoint, cancellationToken).ConfigureAwait(false)).Ok)
         {
             socket.Dispose();
             state._connectFailures++;

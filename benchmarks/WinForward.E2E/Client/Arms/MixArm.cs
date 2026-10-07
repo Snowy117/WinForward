@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using WinForward.E2E.Client.Lanes;
 using WinForward.E2E.Contracts;
 using WinForward.E2E.Contracts.Json;
 using WinForward.E2E.Contracts.Metrics;
@@ -404,7 +405,7 @@ internal static class MixArm
         CancellationToken cancellationToken)
     {
         using var socket = context.CreateTcpSocket();
-        if (!await SocketOps.TryConnectAsync(socket, context.TcpEndPoint, cancellationToken).ConfigureAwait(false))
+        if (!(await SocketOps.TryConnectAsync(socket, context.TcpEndPoint, cancellationToken).ConfigureAwait(false)).Ok)
         {
             Interlocked.Increment(ref counters._pageErrors);
             return;
@@ -464,7 +465,15 @@ internal static class MixArm
         CancellationToken cancellationToken)
     {
         using var socket = context.CreateUdpSocket();
-        await socket.ConnectAsync(context.DnsEndPoint, cancellationToken).ConfigureAwait(false);
+        if (!(await SocketOps.TryConnectAsync(socket, context.DnsEndPoint, cancellationToken).ConfigureAwait(false)).Ok)
+        {
+            // This desktop's page dns phase never reached the resolver, so none of its queries were
+            // handed to a socket: booked in the phase's own catch-all bucket and the desktop's other
+            // phases carry on.
+            Interlocked.Increment(ref counters._dnsOther);
+            return;
+        }
+
         var sendBuffer = new byte[512];
         var receiveBuffer = new byte[4096];
 
@@ -575,7 +584,7 @@ internal static class MixArm
     {
         const int frameLength = FrameCodec.HeaderSize + BulkPayloadBytes + FrameCodec.TrailerSize;
         using var socket = context.CreateTcpSocket();
-        if (!await SocketOps.TryConnectAsync(socket, context.TcpEndPoint, cancellationToken).ConfigureAwait(false))
+        if (!(await SocketOps.TryConnectAsync(socket, context.TcpEndPoint, cancellationToken).ConfigureAwait(false)).Ok)
         {
             Interlocked.Increment(ref counters._bulkErrors);
             return;
@@ -645,7 +654,11 @@ internal static class MixArm
         CancellationToken cancellationToken)
     {
         using var socket = context.CreateUdpSocket();
-        await socket.ConnectAsync(context.UdpEndPoint, cancellationToken).ConfigureAwait(false);
+        if (!await TryOpenAsync(context, socket, tracker, observationEnds, desktopIndex, cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
         var frame = new FrameBuffer(UdpPayloadBytes);
         var receiveBuffer = new byte[FrameCodec.HeaderSize + UdpPayloadBytes + FrameCodec.TrailerSize + 64];
         var pending = new ConcurrentDictionary<ulong, long>();
@@ -668,15 +681,7 @@ internal static class MixArm
                 Pacer.WaitUntil(intended, laneCancellation.Token);
 #pragma warning restore S6966, VSTHRD103, MA0042
                 index++;
-                tracker.MarkSupplied();
-                // Registered before the socket call so a concurrent receive lane can never see a reply
-                // for a sequence the socket has not sent; a refused send is un-booked in the catch.
-                tracker.MarkSent(index, intended);
-                pending[(ulong)index] = intended;
-                var length = frame.Build(connectionId, (ulong)index, intended);
-                await socket.SendAsync(frame.Memory[..length], SocketFlags.None, laneCancellation.Token).ConfigureAwait(false);
-                drainUntilTicks = Clock.Now + windowTicks;
-                Interlocked.Add(ref counters._udpBytes, length);
+                drainUntilTicks = await SendDatagramAsync(counters, tracker, socket, frame, pending, connectionId, index, intended, windowTicks, laneCancellation.Token).ConfigureAwait(false);
             }
 
             await DrainPendingAsync(pending, drainUntilTicks, laneCancellation.Token).ConfigureAwait(false);
@@ -705,15 +710,53 @@ internal static class MixArm
         await receive.ConfigureAwait(false);
     }
 
-    private static void BookUndecodable(UdpReliabilityTracker tracker, ReadOnlySpan<byte> datagram, FrameDecodeError error)
+    /// <summary>
+    /// Connects the lane's socket, booking a failure as client send loss and ending this desktop's
+    /// observation where it stands: the lane offered nothing, so the record says the client destroyed
+    /// its own share of the schedule rather than failing the whole arm (D18.4's connect ruling).
+    /// </summary>
+    private static async ValueTask<bool> TryOpenAsync(
+        ArmContext context,
+        Socket socket,
+        UdpReliabilityTracker tracker,
+        long[] observationEnds,
+        int desktopIndex,
+        CancellationToken cancellationToken)
     {
-        if (error == FrameDecodeError.BadChecksum && FrameCodec.TryReadHeader(datagram, out var partial, out _))
+        if ((await SocketOps.TryConnectAsync(socket, context.UdpEndPoint, cancellationToken).ConfigureAwait(false)).Ok)
         {
-            tracker.MarkCorruptWithKnownSequence((long)partial.Sequence);
-            return;
+            return true;
         }
 
-        tracker.MarkCorrupt();
+        tracker.MarkSendFailure();
+        observationEnds[desktopIndex] = Clock.Now;
+        return false;
+    }
+
+    /// <summary>
+    /// Hands one datagram to the socket and answers the instant its observation horizon starts at. The
+    /// datagram is registered before the socket call, so a concurrent receive lane can never see a reply
+    /// for a sequence the socket has not sent; a refused send is un-booked in the caller's catch.
+    /// </summary>
+    private static async ValueTask<long> SendDatagramAsync(
+        MixCounters counters,
+        UdpReliabilityTracker tracker,
+        Socket socket,
+        FrameBuffer frame,
+        ConcurrentDictionary<ulong, long> pending,
+        uint connectionId,
+        long index,
+        long intended,
+        long windowTicks,
+        CancellationToken cancellationToken)
+    {
+        tracker.MarkSupplied();
+        tracker.MarkSent(index, intended);
+        pending[(ulong)index] = intended;
+        var length = frame.Build(connectionId, (ulong)index, intended);
+        await socket.SendAsync(frame.Memory[..length], SocketFlags.None, cancellationToken).ConfigureAwait(false);
+        Interlocked.Add(ref counters._udpBytes, length);
+        return Clock.Now + windowTicks;
     }
 
     private static async Task DrainPendingAsync(ConcurrentDictionary<ulong, long> pending, long drainUntilTicks, CancellationToken cancellationToken)
@@ -738,39 +781,7 @@ internal static class MixArm
             while (!cancellationToken.IsCancellationRequested)
             {
                 var received = await socket.ReceiveAsync(receiveBuffer, SocketFlags.None, cancellationToken).ConfigureAwait(false);
-                var now = Clock.Now;
-                var datagram = receiveBuffer.AsSpan(0, received);
-
-                if (!FrameCodec.TryDecode(datagram, out var header, out var payload, out var error))
-                {
-                    BookUndecodable(tracker, datagram, error);
-                    continue;
-                }
-
-                if (header.ConnectionId != connectionId)
-                {
-                    tracker.MarkForeignConnection();
-                    continue;
-                }
-
-                if (!Filler.Matches(header.ConnectionId, header.Sequence, payload))
-                {
-                    tracker.MarkCorruptWithKnownSequence((long)header.Sequence);
-                    continue;
-                }
-
-                if (!tracker.WasSent((long)header.Sequence))
-                {
-                    tracker.MarkUnmatchedReply();
-                    continue;
-                }
-
-                if (pending.TryRemove(header.Sequence, out var intended))
-                {
-                    context.Latency.UdpRtt.Record(Clock.ToNanoseconds(now - intended));
-                }
-
-                tracker.MarkArrival((long)header.Sequence, now, payload.Length);
+                BookDatagram(context, tracker, pending, connectionId, receiveBuffer.AsSpan(0, received), Clock.Now);
             }
         }
         catch (OperationCanceledException)
@@ -784,6 +795,59 @@ internal static class MixArm
         catch (ObjectDisposedException)
         {
             /* teardown closed the socket first */
+        }
+    }
+
+    /// <summary>
+    /// Books one datagram: the shared classifier answers what it is, this arm's tracker answers whether
+    /// the sequence was ever sent, and the arm's own window book adds the round trip when the reply
+    /// consumed a pending request (D18.3).
+    /// </summary>
+    private static void BookDatagram(
+        ArmContext context,
+        UdpReliabilityTracker tracker,
+        ConcurrentDictionary<ulong, long> pending,
+        uint connectionId,
+        ReadOnlySpan<byte> datagram,
+        long now)
+    {
+        var verdict = ReplyClassifier.Classify(datagram, connectionId);
+        if (verdict.Kind == ReplyKind.Arrived)
+        {
+            verdict = verdict.Resolve(tracker.WasSent(verdict.Sequence));
+            if (verdict.Kind == ReplyKind.Arrived && pending.TryRemove((ulong)verdict.Sequence, out var intended))
+            {
+                context.Latency.UdpRtt.Record(Clock.ToNanoseconds(now - intended));
+            }
+        }
+
+        switch (verdict.Kind)
+        {
+            case ReplyKind.Arrived:
+                tracker.MarkArrival(verdict.Sequence, now, verdict.PayloadBytes);
+                break;
+
+            case ReplyKind.Corrupt:
+            case ReplyKind.CorruptKnownSequence:
+                tracker.MarkCorruptWithKnownSequence(verdict.Sequence);
+                break;
+
+            case ReplyKind.ForeignConnection:
+                tracker.MarkForeignConnection();
+                break;
+
+            case ReplyKind.Unmatched:
+                tracker.MarkUnmatchedReply();
+                break;
+
+            case ReplyKind.Undecodable:
+                tracker.MarkCorrupt();
+                break;
+
+            default:
+                // Every verdict the classifier can produce is named above, so a future one has to be
+                // wired here rather than booked by whichever arm happened to be last.
+                throw new InvalidOperationException($"Unhandled reply kind '{verdict.Kind}'.");
         }
     }
 }

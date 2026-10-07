@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using WinForward.E2E.Client.Lanes;
 using WinForward.E2E.Contracts;
 using WinForward.E2E.Contracts.Json;
 using WinForward.E2E.Contracts.Metrics;
@@ -137,7 +138,15 @@ internal static class LossArm
         CancellationToken cancellationToken)
     {
         using var socket = context.CreateUdpSocket();
-        await socket.ConnectAsync(context.UdpEndPoint, cancellationToken).ConfigureAwait(false);
+        if (!(await SocketOps.TryConnectAsync(socket, context.UdpEndPoint, cancellationToken).ConfigureAwait(false)).Ok)
+        {
+            // The lane never reached its target, so none of the offered schedule was handed to a
+            // socket: booked as client send loss -- the client itself destroyed the whole run -- and
+            // the arm publishes an empty observation instead of failing the record.
+            tracker.MarkSendFailure();
+            return Clock.Now;
+        }
+
         var frame = new FrameBuffer(payloadBytes);
         var receiveBuffer = new byte[FrameCodec.HeaderSize + payloadBytes + FrameCodec.TrailerSize + 64];
         var pacer = new Pacer(rate, startTicks);
@@ -164,16 +173,7 @@ internal static class LossArm
                     continue;
                 }
 
-                var length = frame.Build(ConnectionId, (ulong)index, intended);
-                length = ApplyFaultInjection(context.Options, frame, payloadBytes, index, length);
-                lastSendTicks = Clock.Now;
-                var send = socket.SendAsync(frame.Memory[..length], SocketFlags.None, cancellationToken);
-                if (!send.IsCompleted)
-                {
-                    tracker.MarkWouldBlock();
-                }
-
-                await send.ConfigureAwait(false);
+                lastSendTicks = await SendDatagramAsync(context, tracker, socket, frame, payloadBytes, index, intended, cancellationToken).ConfigureAwait(false);
                 tracker.MarkSent(index, intended);
             }
         }
@@ -195,6 +195,34 @@ internal static class LossArm
         var horizonTicks = lastSendTicks + windowTicks;
         await DrainUntilAsync(socket, receiveBuffer, tracker, horizonTicks, cancellationToken).ConfigureAwait(false);
         return Math.Min(Clock.Now, horizonTicks);
+    }
+
+    /// <summary>
+    /// Hands one datagram to the socket and answers the instant the send started, which is the horizon
+    /// the observation is extended from; a send the kernel did not accept synchronously is still a send
+    /// that completes, so it is reported and not counted as loss.
+    /// </summary>
+    private static async ValueTask<long> SendDatagramAsync(
+        ArmContext context,
+        UdpReliabilityTracker tracker,
+        Socket socket,
+        FrameBuffer frame,
+        int payloadBytes,
+        long index,
+        long intended,
+        CancellationToken cancellationToken)
+    {
+        var length = frame.Build(ConnectionId, (ulong)index, intended);
+        length = ApplyFaultInjection(context.Options, frame, payloadBytes, index, length);
+        var sendTicks = Clock.Now;
+        var send = socket.SendAsync(frame.Memory[..length], SocketFlags.None, cancellationToken);
+        if (!send.IsCompleted)
+        {
+            tracker.MarkWouldBlock();
+        }
+
+        await send.ConfigureAwait(false);
+        return sendTicks;
     }
 
     private static async Task DrainUntilAsync(
@@ -236,41 +264,50 @@ internal static class LossArm
         {
             var received = await socket.ReceiveAsync(receiveBuffer, SocketFlags.None, cancellationToken).ConfigureAwait(false);
             var now = Clock.Now;
-            var datagram = receiveBuffer.AsSpan(0, received);
 
-            if (!FrameCodec.TryDecode(datagram, out var header, out var payload, out var error))
+            // The three udp arms share one classifier and each keeps its own book (D18.3): what the
+            // bytes are comes from the classifier, whether this socket ever sent that sequence comes
+            // from the tracker, and the WasSent step folds the two together.
+            var verdict = ReplyClassifier.Classify(receiveBuffer.AsSpan(0, received), ConnectionId);
+            if (verdict.Kind == ReplyKind.Arrived)
             {
-                if (error == FrameDecodeError.BadChecksum && FrameCodec.TryReadHeader(datagram, out var partial, out _))
-                {
-                    tracker.MarkCorruptWithKnownSequence((long)partial.Sequence);
-                }
-                else
-                {
-                    tracker.MarkCorrupt();
-                }
-
-                continue;
+                verdict = verdict.Resolve(tracker.WasSent(verdict.Sequence));
             }
 
-            if (header.ConnectionId != ConnectionId)
-            {
+            Book(tracker, verdict, now);
+        }
+    }
+
+    /// <summary>Books one classified datagram in the tracker that owns this phase's accounting.</summary>
+    private static void Book(UdpReliabilityTracker tracker, in ReplyVerdict verdict, long now)
+    {
+        switch (verdict.Kind)
+        {
+            case ReplyKind.Arrived:
+                tracker.MarkArrival(verdict.Sequence, now, verdict.PayloadBytes);
+                break;
+
+            case ReplyKind.Corrupt:
+            case ReplyKind.CorruptKnownSequence:
+                tracker.MarkCorruptWithKnownSequence(verdict.Sequence);
+                break;
+
+            case ReplyKind.ForeignConnection:
                 tracker.MarkForeignConnection();
-                continue;
-            }
+                break;
 
-            if (!Filler.Matches(header.ConnectionId, header.Sequence, payload))
-            {
-                tracker.MarkCorruptWithKnownSequence((long)header.Sequence);
-                continue;
-            }
-
-            if (!tracker.WasSent((long)header.Sequence))
-            {
+            case ReplyKind.Unmatched:
                 tracker.MarkUnmatchedReply();
-                continue;
-            }
+                break;
 
-            tracker.MarkArrival((long)header.Sequence, now, payload.Length);
+            case ReplyKind.Undecodable:
+                tracker.MarkCorrupt();
+                break;
+
+            default:
+                // Every verdict the classifier can produce is named above, so a future one has to be
+                // wired here rather than booked by whichever arm happened to be last.
+                throw new InvalidOperationException($"Unhandled reply kind '{verdict.Kind}'.");
         }
     }
 }

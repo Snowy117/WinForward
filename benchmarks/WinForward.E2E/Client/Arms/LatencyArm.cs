@@ -1,152 +1,14 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using WinForward.E2E.Client.Lanes;
 using WinForward.E2E.Contracts;
 using WinForward.E2E.Contracts.Json;
 using WinForward.E2E.Contracts.Metrics;
 using WinForward.E2E.Wire;
 
 namespace WinForward.E2E.Client.Arms;
-
-internal sealed class LatencyTcpState
-{
-    /// <summary>
-    /// 0 or 1, set by the lane body itself and summed across lanes, so a lane that never ran cannot
-    /// pass for a lane that merely sent nothing. The connect probe is not a lane and leaves it 0.
-    /// </summary>
-    internal long _started;
-
-    internal long _supplied;
-
-    internal long _sentOk;
-
-    internal long _sendWouldBlock;
-
-    internal long _windowOverflow;
-
-    internal long _backlogDrops;
-
-    internal long _sendFailures;
-
-    internal long _received;
-
-    internal long _corrupt;
-
-    internal long _protocolErrors;
-
-    internal long _remoteClosed;
-
-    internal long _unmatchedReplies;
-
-    internal long _connectSamples;
-
-    internal long _connectFailures;
-
-    internal long _connectTicks;
-
-    /// <summary>
-    /// The one counter both halves of a lane touch: the send half reserves a slot and the receive
-    /// half releases it, and the two run as independent async flows on the thread pool.
-    /// </summary>
-    internal long _inFlight;
-
-    /// <summary>
-    /// Requests still open when the lane stopped: sent but unanswered, plus deferred requests that
-    /// never got a slot.
-    /// </summary>
-    internal long _outstanding;
-
-    internal bool _scheduleTruncated;
-
-    /// <summary>
-    /// Requests that reached no latency histogram: supplied minus sent, which only counts samples
-    /// the client itself destroyed.
-    /// </summary>
-    internal long ClientSendLoss => Math.Max(0, _supplied - _sentOk);
-
-    internal void AddFrom(LatencyTcpState other)
-    {
-        _started += other._started;
-        _supplied += other._supplied;
-        _sentOk += other._sentOk;
-        _sendWouldBlock += other._sendWouldBlock;
-        _windowOverflow += other._windowOverflow;
-        _backlogDrops += other._backlogDrops;
-        _sendFailures += other._sendFailures;
-        _received += other._received;
-        _corrupt += other._corrupt;
-        _protocolErrors += other._protocolErrors;
-        _remoteClosed += other._remoteClosed;
-        _unmatchedReplies += other._unmatchedReplies;
-        _connectSamples += other._connectSamples;
-        _connectFailures += other._connectFailures;
-        _connectTicks += other._connectTicks;
-        _outstanding += other._outstanding;
-        _scheduleTruncated |= other._scheduleTruncated;
-    }
-}
-
-internal sealed class UdpLatencyState
-{
-    /// <summary>0 or 1: set by the lane body itself, exactly as <see cref="LatencyTcpState._started"/>.</summary>
-    internal long _started;
-
-    internal long _supplied;
-
-    internal long _sentOk;
-
-    internal long _sendWouldBlock;
-
-    internal long _windowOverflow;
-
-    internal long _backlogDrops;
-
-    internal long _sendFailures;
-
-    /// <summary>
-    /// Every valid frame, duplicates included, so it can exceed <see cref="_sentOk"/>. Loss is
-    /// therefore published against <c>Received - UnmatchedReplies</c> -- the frames that consumed a
-    /// pending request -- which no duplicate can inflate past <see cref="_sentOk"/>.
-    /// </summary>
-    internal long _received;
-
-    internal long _corrupt;
-
-    internal long _protocolErrors;
-
-    internal long _unmatchedReplies;
-
-    /// <summary>
-    /// Replies bearing a connection id this socket never used. Each UDP socket has its own id, so a
-    /// datagram from another flow is internally consistent -- its checksum and filler both validate
-    /// against its own id -- and would otherwise be credited as a legitimate arrival on this lane.
-    /// </summary>
-    internal long _foreignConnection;
-
-    internal long _inFlight;
-
-    internal long _outstanding;
-
-    internal bool _scheduleTruncated;
-
-    internal long ClientSendLoss => Math.Max(0, _supplied - _sentOk);
-}
-
-[StructLayout(LayoutKind.Auto)]
-internal readonly struct DeferredRequest
-{
-    internal DeferredRequest(long sequence, long intendedTicks)
-    {
-        Sequence = sequence;
-        IntendedTicks = intendedTicks;
-    }
-
-    internal long Sequence { get; }
-
-    internal long IntendedTicks { get; }
-}
 
 internal static class LatencyArm
 {
@@ -167,6 +29,10 @@ internal static class LatencyArm
     // than cancelled; the bound keeps a silent product from holding the arm open.
     private const int DrainSeconds = 1;
 
+    // How much room a lane's receive buffer keeps past one whole frame, so a datagram that is not a
+    // frame can still be read and judged instead of being cut off at the buffer's edge.
+    private const int ReceiveSlack = 64;
+
     private const uint UdpConnectionId = 0x7100_0001u;
     private const uint TcpConnectionIdBase = 0x7400_0000u;
 
@@ -183,7 +49,11 @@ internal static class LatencyArm
         await Task.WhenAll(tasks).ConfigureAwait(false);
 
         var elapsedTicks = Clock.Now - startTicks;
-        var tcp = Total(lanes.Tcp, lanes.Probe);
+
+        // Both totals are formed here, once every lane has joined: the engine's send-side snapshot and
+        // the policy's own book are joined by lane, never by a counter that one of them copied.
+        var tcp = TotalTcp(lanes.Tcp, lanes.Probe);
+        var udp = TotalUdp(lanes.Udp);
 
         // The metrics value is built after the lanes joined, so a protocol the arm did not run
         // publishes no block at all instead of a block of zeros that would read as a measurement.
@@ -193,13 +63,13 @@ internal static class LatencyArm
             Metrics = new LatencyMetrics
             {
                 Tcp = plan.UseTcp ? TcpMetrics(tcp, lanes.Tcp, plan, elapsedTicks) : null,
-                Udp = plan.UseUdp ? UdpMetrics(lanes.Udp, plan, elapsedTicks) : null,
+                Udp = plan.UseUdp ? UdpMetrics(udp, plan, elapsedTicks) : null,
             },
         };
 
-        var validity = new MeasurementValidity(plan, lanes, tcp, elapsedTicks);
-        WriteGates(outcome, lanes, tcp, validity);
-        WriteNotes(outcome, plan, lanes, tcp, validity, elapsedTicks);
+        var validity = new MeasurementValidity(plan, lanes, tcp, udp, elapsedTicks);
+        WriteGates(outcome, tcp, udp, validity);
+        WriteNotes(outcome, plan, tcp, udp, validity, elapsedTicks);
         return outcome;
     }
 
@@ -235,6 +105,25 @@ internal static class LatencyArm
     }
 
     /// <summary>
+    /// What one lane tells the engine about itself: the pace and deadline it shares with every other
+    /// lane, its own share of the deferred backlog, and the two buffers the engine reuses for every
+    /// slot. The receive buffer holds one whole frame plus the slack a non-frame datagram is read into.
+    /// </summary>
+    private static LaneEngineOptions LaneOptions(LatencyPlan plan, long startTicks, long deadlineTicks) => new()
+    {
+        RatePerSecond = plan.Rate,
+        StartTicks = startTicks,
+        DeadlineTicks = deadlineTicks,
+        BacklogLimit = plan.BacklogLimit,
+        SendBufferBytes = FrameCodec.HeaderSize + plan.PayloadBytes + FrameCodec.TrailerSize,
+        ReceiveBufferBytes = FrameCodec.HeaderSize + plan.PayloadBytes + FrameCodec.TrailerSize + ReceiveSlack,
+
+        // The arm's own bound, passed rather than left to the engine's default, so the record's note
+        // and the bound the drain actually ran with cannot drift apart.
+        DrainLimitTicks = Clock.FromSeconds(DrainSeconds),
+    };
+
+    /// <summary>
     /// The ceiling on directly measurable latency: a request slower than window / (per-lane achieved
     /// rate) no longer frees its slot before the next offer, so everything past it is measured
     /// through the deferred queue instead.
@@ -260,77 +149,77 @@ internal static class LatencyArm
     private static string RateText(double? perSecond) =>
         perSecond is { } value ? value.ToString("F3", CultureInfo.InvariantCulture) : "n/a";
 
-    private static LatencyTcpMetrics TcpMetrics(LatencyTcpState state, List<LatencyTcpState> laneStates, LatencyPlan plan, long elapsedTicks)
+    private static LatencyTcpMetrics TcpMetrics(LatencyTotals state, List<Lane<LatencyTcpState>> laneStates, LatencyPlan plan, long elapsedTicks)
     {
         var laneSupplied = new long[laneStates.Count];
         var laneSentOk = new long[laneStates.Count];
         for (var lane = 0; lane < laneStates.Count; lane++)
         {
-            laneSupplied[lane] = laneStates[lane]._supplied;
-            laneSentOk[lane] = laneStates[lane]._sentOk;
+            laneSupplied[lane] = laneStates[lane].Counts.Supplied;
+            laneSentOk[lane] = laneStates[lane].Counts.SentOk;
         }
 
         return new LatencyTcpMetrics
         {
-            LaneStarted = state._started,
+            LaneStarted = state.Started,
             LaneSupplied = laneSupplied,
             LaneSentOk = laneSentOk,
-            Supplied = state._supplied,
-            Sent = state._sentOk,
-            SendWouldBlock = state._sendWouldBlock,
-            WindowOverflow = state._windowOverflow,
-            BacklogDrops = state._backlogDrops,
-            SendFailures = state._sendFailures,
-            AbandonedAtTeardown = Math.Max(0, state._supplied - state._sentOk - state._sendFailures - state._backlogDrops),
+            Supplied = state.Supplied,
+            Sent = state.SentOk,
+            SendWouldBlock = state.SendWouldBlock,
+            WindowOverflow = state.WindowOverflow,
+            BacklogDrops = state.BacklogDrops,
+            SendFailures = state.SendFailures,
+            AbandonedAtTeardown = Math.Max(0, state.Supplied - state.SentOk - state.SendFailures - state.BacklogDrops),
             ClientSendLoss = state.ClientSendLoss,
-            Received = state._received,
-            OutstandingAtTeardown = state._outstanding,
-            Corrupt = state._corrupt,
-            ProtocolErrors = state._protocolErrors,
-            RemoteClosed = state._remoteClosed,
-            UnmatchedReplies = state._unmatchedReplies,
-            WindowCeilingMs = InFlightCeilingMs(plan.InFlightWindow, plan.Lanes, state._sentOk, elapsedTicks),
-            ScheduleTruncated = state._scheduleTruncated ? 1L : 0L,
-            AchievedRate = JsonPerSecond.PerSecond(state._sentOk, elapsedTicks, Stopwatch.Frequency),
-            ConnectAttempts = state._connectSamples + state._connectFailures,
-            ConnectFailures = state._connectFailures,
-            MeanConnectMs = state._connectSamples == 0
+            Received = state.Received,
+            OutstandingAtTeardown = state.Outstanding,
+            Corrupt = state.Corrupt,
+            ProtocolErrors = state.ProtocolErrors,
+            RemoteClosed = state.RemoteClosed,
+            UnmatchedReplies = state.UnmatchedReplies,
+            WindowCeilingMs = InFlightCeilingMs(plan.InFlightWindow, plan.Lanes, state.SentOk, elapsedTicks),
+            ScheduleTruncated = state.Truncated ? 1L : 0L,
+            AchievedRate = JsonPerSecond.PerSecond(state.SentOk, elapsedTicks, Stopwatch.Frequency),
+            ConnectAttempts = state.ConnectSamples + state.ConnectFailures,
+            ConnectFailures = state.ConnectFailures,
+            MeanConnectMs = state.ConnectSamples == 0
                 ? null
-                : NumberFormat.Round(Clock.ToMicroseconds(state._connectTicks) / (double)state._connectSamples / 1000.0),
+                : NumberFormat.Round(Clock.ToMicroseconds(state.ConnectTicks) / (double)state.ConnectSamples / 1000.0),
         };
     }
 
-    private static LatencyUdpMetrics UdpMetrics(UdpLatencyState state, LatencyPlan plan, long elapsedTicks) => new()
+    private static LatencyUdpMetrics UdpMetrics(LatencyTotals state, LatencyPlan plan, long elapsedTicks) => new()
     {
-        LaneStarted = state._started,
-        Supplied = state._supplied,
-        Sent = state._sentOk,
-        SendWouldBlock = state._sendWouldBlock,
-        WindowOverflow = state._windowOverflow,
-        BacklogDrops = state._backlogDrops,
-        SendFailures = state._sendFailures,
-        AbandonedAtTeardown = Math.Max(0, state._supplied - state._sentOk - state._sendFailures - state._backlogDrops),
+        LaneStarted = state.Started,
+        Supplied = state.Supplied,
+        Sent = state.SentOk,
+        SendWouldBlock = state.SendWouldBlock,
+        WindowOverflow = state.WindowOverflow,
+        BacklogDrops = state.BacklogDrops,
+        SendFailures = state.SendFailures,
+        AbandonedAtTeardown = Math.Max(0, state.Supplied - state.SentOk - state.SendFailures - state.BacklogDrops),
         ClientSendLoss = state.ClientSendLoss,
-        Received = state._received,
-        Corrupt = state._corrupt,
-        ProtocolErrors = state._protocolErrors,
-        UnmatchedReplies = state._unmatchedReplies,
-        ForeignConnection = state._foreignConnection,
-        OutstandingAtTeardown = state._outstanding,
-        WindowCeilingMs = InFlightCeilingMs(plan.InFlightWindow, 1, state._sentOk, elapsedTicks),
-        ScheduleTruncated = state._scheduleTruncated ? 1L : 0L,
+        Received = state.Received,
+        Corrupt = state.Corrupt,
+        ProtocolErrors = state.ProtocolErrors,
+        UnmatchedReplies = state.UnmatchedReplies,
+        ForeignConnection = state.ForeignConnection,
+        OutstandingAtTeardown = state.Outstanding,
+        WindowCeilingMs = InFlightCeilingMs(plan.InFlightWindow, 1, state.SentOk, elapsedTicks),
+        ScheduleTruncated = state.Truncated ? 1L : 0L,
 
         // Sent minus matched arrivals, never sent minus received, which duplicates can exceed.
-        LossRate = JsonRate.Rate(state._sentOk - (state._received - state._unmatchedReplies), state._sentOk),
-        AchievedRate = JsonPerSecond.PerSecond(state._sentOk, elapsedTicks, Stopwatch.Frequency),
+        LossRate = JsonRate.Rate(state.SentOk - (state.Received - state.UnmatchedReplies), state.SentOk),
+        AchievedRate = JsonPerSecond.PerSecond(state.SentOk, elapsedTicks, Stopwatch.Frequency),
     };
 
-    private static void WriteGates(ArmOutcome outcome, LaneStates lanes, LatencyTcpState tcp, MeasurementValidity validity)
+    private static void WriteGates(ArmOutcome outcome, LatencyTotals tcp, LatencyTotals udp, MeasurementValidity validity)
     {
-        outcome.Gates[ArmKeys.Common.Gates.ClientSendLoss] = tcp.ClientSendLoss + lanes.Udp.ClientSendLoss;
-        outcome.Gates[ArmKeys.Common.Gates.WindowOverflow] = tcp._windowOverflow + lanes.Udp._windowOverflow;
-        outcome.Gates[ArmKeys.Common.Gates.BacklogDrops] = tcp._backlogDrops + lanes.Udp._backlogDrops;
-        outcome.Gates[ArmKeys.Common.Gates.SendFailures] = tcp._sendFailures + lanes.Udp._sendFailures;
+        outcome.Gates[ArmKeys.Common.Gates.ClientSendLoss] = tcp.ClientSendLoss + udp.ClientSendLoss;
+        outcome.Gates[ArmKeys.Common.Gates.WindowOverflow] = tcp.WindowOverflow + udp.WindowOverflow;
+        outcome.Gates[ArmKeys.Common.Gates.BacklogDrops] = tcp.BacklogDrops + udp.BacklogDrops;
+        outcome.Gates[ArmKeys.Common.Gates.SendFailures] = tcp.SendFailures + udp.SendFailures;
         outcome.Gates[ArmKeys.Common.Gates.LanesPlanned] = validity.PlannedLanes;
         outcome.Gates[ArmKeys.Common.Gates.LanesStarted] = validity.StartedLanes;
         outcome.Gates[ArmKeys.Common.Gates.LaneShortfall] = validity.LaneShortfall;
@@ -342,8 +231,8 @@ internal static class LatencyArm
     private static void WriteNotes(
         ArmOutcome outcome,
         LatencyPlan plan,
-        LaneStates lanes,
-        LatencyTcpState tcp,
+        LatencyTotals tcp,
+        LatencyTotals udp,
         MeasurementValidity validity,
         long elapsedTicks)
     {
@@ -367,25 +256,25 @@ internal static class LatencyArm
         {
             outcome.Notes.Add(string.Create(
                 CultureInfo.InvariantCulture,
-                $"in-flight ceiling (tcp): {plan.Lanes} lane(s) at {RateText(JsonPerSecond.PerSecond(tcp._sentOk, elapsedTicks, Stopwatch.Frequency))} requests/s aggregate achieved with inFlightWindow {plan.InFlightWindow} per lane put the measurable direct-latency ceiling at {validity.TcpCeilingMs:F1} ms; slower requests are measured through the deferred queue, and the ceiling was {(tcp._windowOverflow > 0 ? "reached" : "not reached")} (windowOverflow = {tcp._windowOverflow})."));
+                $"in-flight ceiling (tcp): {plan.Lanes} lane(s) at {RateText(JsonPerSecond.PerSecond(tcp.SentOk, elapsedTicks, Stopwatch.Frequency))} requests/s aggregate achieved with inFlightWindow {plan.InFlightWindow} per lane put the measurable direct-latency ceiling at {validity.TcpCeilingMs:F1} ms; slower requests are measured through the deferred queue, and the ceiling was {(tcp.WindowOverflow > 0 ? "reached" : "not reached")} (windowOverflow = {tcp.WindowOverflow})."));
         }
 
         if (plan.UseUdp)
         {
             outcome.Notes.Add(string.Create(
                 CultureInfo.InvariantCulture,
-                $"in-flight ceiling (udp): 1 lane at {RateText(JsonPerSecond.PerSecond(lanes.Udp._sentOk, elapsedTicks, Stopwatch.Frequency))} requests/s achieved with inFlightWindow {plan.InFlightWindow} put the measurable direct-latency ceiling at {validity.UdpCeilingMs:F1} ms; slower requests are measured through the deferred queue, and the ceiling was {(lanes.Udp._windowOverflow > 0 ? "reached" : "not reached")} (windowOverflow = {lanes.Udp._windowOverflow})."));
+                $"in-flight ceiling (udp): 1 lane at {RateText(JsonPerSecond.PerSecond(udp.SentOk, elapsedTicks, Stopwatch.Frequency))} requests/s achieved with inFlightWindow {plan.InFlightWindow} put the measurable direct-latency ceiling at {validity.UdpCeilingMs:F1} ms; slower requests are measured through the deferred queue, and the ceiling was {(udp.WindowOverflow > 0 ? "reached" : "not reached")} (windowOverflow = {udp.WindowOverflow})."));
         }
 
         outcome.Notes.Add(string.Concat(
             "lanes actually run: ",
-            plan.UseTcp ? string.Create(CultureInfo.InvariantCulture, $"tcp {tcp._started} of {plan.Lanes}") : string.Empty,
+            plan.UseTcp ? string.Create(CultureInfo.InvariantCulture, $"tcp {tcp.Started} of {plan.Lanes}") : string.Empty,
             // ReSharper disable once MergeIntoPattern // Two independent plan flags read better as a conjunction than as a property pattern.
             plan.UseTcp && plan.UseUdp ? ", " : string.Empty,
-            plan.UseUdp ? string.Create(CultureInfo.InvariantCulture, $"udp {lanes.Udp._started} of 1") : string.Empty,
+            plan.UseUdp ? string.Create(CultureInfo.InvariantCulture, $"udp {udp.Started} of 1") : string.Empty,
             "; per-lane supplied and sent counts are published as tcp.laneSupplied and tcp.laneSentOk."));
 
-        if (tcp._scheduleTruncated || lanes.Udp._scheduleTruncated)
+        if (tcp.Truncated || udp.Truncated)
         {
             outcome.Notes.Add("a lane never connected or an offer loop ended before its deadline, so part of the offered schedule was never offered at all; gates.scheduleTruncated marks the record.");
         }
@@ -398,15 +287,137 @@ internal static class LatencyArm
         }
     }
 
-    private static LatencyTcpState Total(List<LatencyTcpState> lanes, LatencyTcpState probe)
+    /// <summary>
+    /// The arm's published counters as one value: the engine's send-side snapshot and the policy's own
+    /// book, joined per lane and then summed. It is the sum and nothing else — the engine owns what was
+    /// offered and sent, the policy owns what came back — so a published number can never drift from
+    /// the counter that produced it.
+    /// </summary>
+    private sealed class LatencyTotals
     {
-        var total = new LatencyTcpState();
-        foreach (var lane in lanes)
+        internal long Started { get; private set; }
+
+        internal long Supplied { get; private set; }
+
+        internal long SentOk { get; private set; }
+
+        internal long SendWouldBlock { get; private set; }
+
+        internal long WindowOverflow { get; private set; }
+
+        internal long BacklogDrops { get; private set; }
+
+        internal long SendFailures { get; private set; }
+
+        /// <summary>Unanswered requests plus deferred intents that never got a slot, when the lane stopped.</summary>
+        internal long Outstanding { get; private set; }
+
+        internal long Received { get; private set; }
+
+        internal long Corrupt { get; private set; }
+
+        internal long UnmatchedReplies { get; private set; }
+
+        internal long ForeignConnection { get; private set; }
+
+        internal long RemoteClosed { get; private set; }
+
+        internal long ProtocolErrors { get; private set; }
+
+        internal long ConnectSamples { get; private set; }
+
+        internal long ConnectFailures { get; private set; }
+
+        internal long ConnectTicks { get; private set; }
+
+        internal bool Truncated { get; private set; }
+
+        /// <summary>
+        /// Requests that reached no latency histogram: supplied minus sent, which only counts samples
+        /// the client itself destroyed.
+        /// </summary>
+        internal long ClientSendLoss => Math.Max(0, Supplied - SentOk);
+
+        internal void AddTcp(Lane<LatencyTcpState> lane)
         {
-            total.AddFrom(lane);
+            AddCounts(lane.Counts);
+            var book = lane.Book;
+            Started += book.Started;
+            Received += book.Received;
+            Corrupt += book.Corrupt;
+            ProtocolErrors += book.ProtocolErrors;
+            RemoteClosed += book.RemoteClosed;
+            UnmatchedReplies += book.UnmatchedReplies;
+            AddConnect(book);
         }
 
-        total.AddFrom(probe);
+        internal void AddUdp(Lane<UdpLatencyState> lane)
+        {
+            AddCounts(lane.Counts);
+            var book = lane.Book;
+            Started += book.Started;
+            Received += book.Received;
+            Corrupt += book.Corrupt;
+            ProtocolErrors += book.ProtocolErrors;
+            ForeignConnection += book.ForeignConnection;
+            UnmatchedReplies += book.UnmatchedReplies;
+        }
+
+        /// <summary>Adds the policy half of <c>outstandingAtTeardown</c>: requests no reply consumed.</summary>
+        internal void AddPending(long pending) => Outstanding += pending;
+
+        /// <summary>The connect probe is not a lane: it has connect facts and no engine counts at all.</summary>
+        internal void AddProbe(LatencyTcpState probe)
+        {
+            ConnectSamples += probe.ConnectSamples;
+            ConnectFailures += probe.ConnectFailures;
+            ConnectTicks += probe.ConnectTicks;
+        }
+
+        private void AddCounts(LaneCounts counts)
+        {
+            Supplied += counts.Supplied;
+            SentOk += counts.SentOk;
+            SendWouldBlock += counts.SendWouldBlock;
+            SendFailures += counts.SendFailures;
+
+            // D18.5 #7: the engine's two defer counters are the contract's two defer keys, by name and
+            // by value; the arm does not keep a second pair.
+            WindowOverflow += counts.DeferredQueued;
+            BacklogDrops += counts.DeferredDropped;
+
+            // The other half of outstandingAtTeardown: intents the window never let out (D18.6 #1).
+            Outstanding += counts.DeferredPending;
+            Truncated |= counts.ScheduleTruncated;
+        }
+
+        private void AddConnect(LatencyTcpState book)
+        {
+            ConnectSamples += book.ConnectSamples;
+            ConnectFailures += book.ConnectFailures;
+            ConnectTicks += book.ConnectTicks;
+        }
+
+    }
+
+    private static LatencyTotals TotalTcp(List<Lane<LatencyTcpState>> lanes, LatencyTcpState probe)
+    {
+        var total = new LatencyTotals();
+        foreach (var lane in lanes)
+        {
+            total.AddTcp(lane);
+            total.AddPending(lane.Book.Pending);
+        }
+
+        total.AddProbe(probe);
+        return total;
+    }
+
+    private static LatencyTotals TotalUdp(Lane<UdpLatencyState> lane)
+    {
+        var total = new LatencyTotals();
+        total.AddUdp(lane);
+        total.AddPending(lane.Book.Pending);
         return total;
     }
 
@@ -422,207 +433,24 @@ internal static class LatencyArm
 
     private static async Task RunTcpLaneAsync(
         ArmContext context,
-        LatencyTcpState state,
+        Lane<LatencyTcpState> lane,
         int laneIndex,
         LatencyPlan plan,
         long startTicks,
         long deadlineTicks,
         CancellationToken cancellationToken)
     {
-        state._started = 1;
-        using var socket = context.CreateTcpSocket();
-        var begin = Clock.Now;
-        if (!await SocketOps.TryConnectAsync(socket, context.TcpEndPoint, cancellationToken).ConfigureAwait(false))
-        {
-            Interlocked.Increment(ref state._connectFailures);
-
-            // A lane that never connects offered none of its share of the schedule, so the record
-            // must say the schedule was short rather than read as a quiet run.
-            state._scheduleTruncated = true;
-            return;
-        }
-
-        // One population: every connect the arm attempted, lane connects and probe alike.
-        var end = Clock.Now;
-        Interlocked.Increment(ref state._connectSamples);
-        Interlocked.Add(ref state._connectTicks, end - begin);
-
+        lane.Book.Started = 1;
         var connectionId = TcpConnectionIdBase + (uint)laneIndex;
-        await SocketOps.SendCommandAsync(socket, connectionId, TcpMode.Clean, 0, cancellationToken).ConfigureAwait(false);
-        var frame = new FrameBuffer(plan.PayloadBytes);
-        var pending = new ConcurrentQueue<long>();
-        using var laneCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var receive = ReceiveLoopAsync(context, socket, pending, state, laneCancellation.Token);
-        var unsent = await SendLoopAsync(socket, frame, connectionId, pending, state, plan, startTicks, deadlineTicks, laneCancellation.Token).ConfigureAwait(false);
-        await GraceDrainAsync(receive, pending, laneCancellation.Token).ConfigureAwait(false);
-        await laneCancellation.CancelAsync().ConfigureAwait(false);
-        await receive.ConfigureAwait(false);
-        state._outstanding = pending.Count + unsent;
-    }
+        var options = LaneOptions(plan, startTicks, deadlineTicks);
 
-    private static async Task<int> SendLoopAsync(
-        Socket socket,
-        FrameBuffer frame,
-        uint connectionId,
-        ConcurrentQueue<long> pending,
-        LatencyTcpState state,
-        LatencyPlan plan,
-        long startTicks,
-        long deadlineTicks,
-        CancellationToken cancellationToken)
-    {
-        var pacer = new Pacer(plan.Rate, startTicks);
-        var backlog = new DeferredQueue(plan.BacklogLimit);
-        long index = 0;
-        try
-        {
-            while (Clock.Now < deadlineTicks)
-            {
-#pragma warning disable S6966, VSTHRD103, MA0042 // Sub-millisecond open-loop pacing; Task.Delay cannot hold these instants on Windows.
-                // ReSharper disable once MethodHasAsyncOverload // The pacing must block: WaitUntilAsync's Task.Delay resolves to the 15.6 ms Windows timer tick and cannot hold these instants.
-                Pacer.WaitUntil(pacer.IntendedTicks(index), cancellationToken);
-#pragma warning restore S6966, VSTHRD103, MA0042
-                index++;
-                state._supplied = index;
-                await OfferFrameAsync(socket, frame, connectionId, pending, state, backlog, new DeferredRequest(index, pacer.IntendedTicks(index - 1)), plan.InFlightWindow, cancellationToken).ConfigureAwait(false);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            /* the arm deadline or a shutdown request ended the loop */
-        }
-        catch (SocketException)
-        {
-            /* a fatal socket error ended the offer loop; the shortfall is published below */
-        }
-        catch (ObjectDisposedException)
-        {
-            /* teardown closed the socket first */
-        }
-
-        // Stopping before the deadline means the tail of the schedule was never offered at all.
-        state._scheduleTruncated = Clock.Now < deadlineTicks || state._scheduleTruncated;
-        return backlog.Count;
-    }
-
-    private static async ValueTask OfferFrameAsync(
-        Socket socket,
-        FrameBuffer frame,
-        uint connectionId,
-        ConcurrentQueue<long> pending,
-        LatencyTcpState state,
-        DeferredQueue backlog,
-        DeferredRequest request,
-        int window,
-        CancellationToken cancellationToken)
-    {
-        // The longest-waiting intent goes out first, so a sample's age stays tied to when its
-        // request was wanted rather than to whichever slot happened to free.
-        while (Interlocked.Read(ref state._inFlight) < window && backlog.TryDequeue(out var deferred))
-        {
-            await SendFrameAsync(socket, frame, connectionId, deferred, pending, state, cancellationToken).ConfigureAwait(false);
-        }
-
-        if (Interlocked.Read(ref state._inFlight) < window)
-        {
-            await SendFrameAsync(socket, frame, connectionId, request, pending, state, cancellationToken).ConfigureAwait(false);
-            return;
-        }
-
-        state._windowOverflow++;
-        if (!backlog.TryEnqueue(request))
-        {
-            // Queue full too: the request yields no sample, which is censoring and is counted.
-            state._backlogDrops++;
-        }
-    }
-
-    private static async ValueTask SendFrameAsync(
-        Socket socket,
-        FrameBuffer frame,
-        uint connectionId,
-        DeferredRequest request,
-        ConcurrentQueue<long> pending,
-        LatencyTcpState state,
-        CancellationToken cancellationToken)
-    {
-        var length = frame.Build(connectionId, (ulong)request.Sequence, request.IntendedTicks);
-        var send = socket.SendAsync(frame.Memory[..length], SocketFlags.None, cancellationToken);
-        if (!send.IsCompleted)
-        {
-            state._sendWouldBlock++;
-        }
-
-        try
-        {
-            await send.ConfigureAwait(false);
-        }
-        catch (SocketException)
-        {
-            // One request failed, not the loop: the schedule continues without that sample.
-            state._sendFailures++;
-            return;
-        }
-
-        state._sentOk++;
-        Interlocked.Increment(ref state._inFlight);
-        pending.Enqueue(request.IntendedTicks);
-    }
-
-    private static async Task ReceiveLoopAsync(
-        ArmContext context,
-        Socket socket,
-        ConcurrentQueue<long> pending,
-        LatencyTcpState state,
-        CancellationToken cancellationToken)
-    {
-        var reader = new FrameStreamReader(socket);
-        try
-        {
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                var status = await reader.ReadAsync(cancellationToken).ConfigureAwait(false);
-                switch (status)
-                {
-                    case FrameReadStatus.EndOfStream:
-                        state._remoteClosed++;
-                        return;
-                    case FrameReadStatus.BadChecksum:
-                        state._corrupt++;
-                        continue;
-                    case FrameReadStatus.BadMagic:
-                    case FrameReadStatus.BadLength:
-                        state._protocolErrors++;
-                        return;
-                    case FrameReadStatus.Frame:
-                        state._received++;
-                        Interlocked.Decrement(ref state._inFlight);
-                        if (!pending.TryDequeue(out var intended))
-                        {
-                            state._unmatchedReplies++;
-                            continue;
-                        }
-
-                        context.Latency.TcpRtt.Record(Clock.ToNanoseconds(Clock.Now - intended));
-                        continue;
-                    default:
-                        state._protocolErrors++;
-                        return;
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            /* the arm deadline or a shutdown request ended the loop */
-        }
-        catch (SocketException)
-        {
-            state._protocolErrors++;
-        }
-        catch (ObjectDisposedException)
-        {
-            /* teardown closed the socket first */
-        }
+        // The transport owns the socket: it connects, sends the lane's command frame and reads the
+        // stream, and the engine disposes nothing.
+        using var transport = new TcpLaneTransport(context.CreateTcpSocket(), context.TcpEndPoint, connectionId);
+        var policy = new LatencyTcpPolicy(lane.Book, connectionId, plan.PayloadBytes, plan.InFlightWindow, context.Latency.TcpRtt);
+        var engine = new LaneEngine<TcpLaneTransport>(transport, policy, options);
+        lane.Counts = await engine.RunAsync(cancellationToken).ConfigureAwait(false);
+        lane.Book.BookConnect(transport.ConnectOk, transport.ConnectTicks);
     }
 
     private static async Task RunConnectProbeAsync(
@@ -647,16 +475,15 @@ internal static class LatencyArm
                 await Pacer.WaitUntilAsync(intended, cancellationToken).ConfigureAwait(false);
                 using var socket = context.CreateTcpSocket();
                 var begin = Clock.Now;
-                if (!await SocketOps.TryConnectAsync(socket, context.TcpEndPoint, cancellationToken).ConfigureAwait(false))
+                var open = await SocketOps.TryConnectAsync(socket, context.TcpEndPoint, cancellationToken).ConfigureAwait(false);
+                var end = Clock.Now;
+                state.BookConnect(open.Ok, end - begin);
+                if (!open.Ok)
                 {
-                    state._connectFailures++;
                     index++;
                     continue;
                 }
 
-                var end = Clock.Now;
-                state._connectSamples++;
-                state._connectTicks += end - begin;
                 context.Latency.TcpConnect.Record(Clock.ToNanoseconds(end - intended));
                 SocketOps.ShutdownQuietly(socket, SocketShutdown.Both);
                 index++;
@@ -670,220 +497,22 @@ internal static class LatencyArm
 
     private static async Task RunUdpLaneAsync(
         ArmContext context,
-        UdpLatencyState state,
+        Lane<UdpLatencyState> lane,
         LatencyPlan plan,
         long startTicks,
         long deadlineTicks,
         CancellationToken cancellationToken)
     {
-        state._started = 1;
-        using var socket = context.CreateUdpSocket();
-        await socket.ConnectAsync(context.UdpEndPoint, cancellationToken).ConfigureAwait(false);
-        var frame = new FrameBuffer(plan.PayloadBytes);
-        var receiveBuffer = new byte[FrameCodec.HeaderSize + plan.PayloadBytes + FrameCodec.TrailerSize + 64];
-        var pending = new ConcurrentDictionary<ulong, long>();
-        using var laneCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var receive = ReceiveUdpLoopAsync(context, socket, pending, state, receiveBuffer, laneCancellation.Token);
-        var unsent = await SendUdpLoopAsync(socket, frame, pending, state, plan, startTicks, deadlineTicks, laneCancellation.Token).ConfigureAwait(false);
-        await GraceDrainAsync(receive, pending, laneCancellation.Token).ConfigureAwait(false);
-        await laneCancellation.CancelAsync().ConfigureAwait(false);
-        await receive.ConfigureAwait(false);
-        state._outstanding = pending.Count + unsent;
-    }
+        lane.Book.Started = 1;
+        var options = LaneOptions(plan, startTicks, deadlineTicks);
+        using var transport = new UdpLaneTransport(context.CreateUdpSocket(), context.UdpEndPoint, options.ReceiveBufferBytes);
+        var policy = new UdpLatencyPolicy(lane.Book, UdpConnectionId, plan.PayloadBytes, plan.InFlightWindow, context.Latency.UdpRtt);
+        var engine = new LaneEngine<UdpLaneTransport>(transport, policy, options);
+        lane.Counts = await engine.RunAsync(cancellationToken).ConfigureAwait(false);
 
-    private static async Task<int> SendUdpLoopAsync(
-        Socket socket,
-        FrameBuffer frame,
-        ConcurrentDictionary<ulong, long> pending,
-        UdpLatencyState state,
-        LatencyPlan plan,
-        long startTicks,
-        long deadlineTicks,
-        CancellationToken cancellationToken)
-    {
-        var pacer = new Pacer(plan.Rate, startTicks);
-        var backlog = new DeferredQueue(plan.BacklogLimit);
-        long index = 0;
-        try
-        {
-            while (Clock.Now < deadlineTicks)
-            {
-#pragma warning disable S6966, VSTHRD103, MA0042 // Sub-millisecond open-loop pacing; Task.Delay cannot hold these instants on Windows.
-                // ReSharper disable once MethodHasAsyncOverload // The pacing must block: WaitUntilAsync's Task.Delay resolves to the 15.6 ms Windows timer tick and cannot hold these instants.
-                Pacer.WaitUntil(pacer.IntendedTicks(index), cancellationToken);
-#pragma warning restore S6966, VSTHRD103, MA0042
-                index++;
-                state._supplied = index;
-                await OfferDatagramAsync(socket, frame, pending, state, backlog, new DeferredRequest(index, pacer.IntendedTicks(index - 1)), plan.InFlightWindow, cancellationToken).ConfigureAwait(false);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            /* the arm deadline or a shutdown request ended the loop */
-        }
-        catch (SocketException)
-        {
-            /* a fatal socket error ended the offer loop; the shortfall is published below */
-        }
-        catch (ObjectDisposedException)
-        {
-            /* teardown closed the socket first */
-        }
-
-        state._scheduleTruncated = Clock.Now < deadlineTicks || state._scheduleTruncated;
-        return backlog.Count;
-    }
-
-    private static async ValueTask OfferDatagramAsync(
-        Socket socket,
-        FrameBuffer frame,
-        ConcurrentDictionary<ulong, long> pending,
-        UdpLatencyState state,
-        DeferredQueue backlog,
-        DeferredRequest request,
-        int window,
-        CancellationToken cancellationToken)
-    {
-        while (Interlocked.Read(ref state._inFlight) < window && backlog.TryDequeue(out var deferred))
-        {
-            await SendDatagramAsync(socket, frame, deferred, pending, state, cancellationToken).ConfigureAwait(false);
-        }
-
-        if (Interlocked.Read(ref state._inFlight) < window)
-        {
-            await SendDatagramAsync(socket, frame, request, pending, state, cancellationToken).ConfigureAwait(false);
-            return;
-        }
-
-        state._windowOverflow++;
-        if (!backlog.TryEnqueue(request))
-        {
-            state._backlogDrops++;
-        }
-    }
-
-    private static async ValueTask SendDatagramAsync(
-        Socket socket,
-        FrameBuffer frame,
-        DeferredRequest request,
-        ConcurrentDictionary<ulong, long> pending,
-        UdpLatencyState state,
-        CancellationToken cancellationToken)
-    {
-        var length = frame.Build(UdpConnectionId, (ulong)request.Sequence, request.IntendedTicks);
-        var send = socket.SendAsync(frame.Memory[..length], SocketFlags.None, cancellationToken);
-        if (!send.IsCompleted)
-        {
-            state._sendWouldBlock++;
-        }
-
-        try
-        {
-            await send.ConfigureAwait(false);
-        }
-        catch (SocketException)
-        {
-            // A connected udp socket surfaces a previous datagram's icmp error here; the next send
-            // may well succeed, so one failure must not end the schedule.
-            state._sendFailures++;
-            return;
-        }
-
-        state._sentOk++;
-        Interlocked.Increment(ref state._inFlight);
-        pending[(ulong)request.Sequence] = request.IntendedTicks;
-    }
-
-    private static async Task ReceiveUdpLoopAsync(
-        ArmContext context,
-        Socket socket,
-        ConcurrentDictionary<ulong, long> pending,
-        UdpLatencyState state,
-        byte[] receiveBuffer,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                var received = await socket.ReceiveAsync(receiveBuffer, SocketFlags.None, cancellationToken).ConfigureAwait(false);
-                var now = Clock.Now;
-                if (!FrameCodec.TryDecode(receiveBuffer.AsSpan(0, received), out var header, out var payload, out _))
-                {
-                    state._corrupt++;
-                    continue;
-                }
-
-                // Connection id before filler, as in the loss and mix arms: a reply from another
-                // flow validates against that flow's own filler, so a filler-first rule would book
-                // the product mixing two flows as an ordinary corrupt datagram.
-                if (header.ConnectionId != UdpConnectionId)
-                {
-                    state._foreignConnection++;
-                    continue;
-                }
-
-                if (!Filler.Matches(header.ConnectionId, header.Sequence, payload))
-                {
-                    state._corrupt++;
-                    continue;
-                }
-
-                state._received++;
-                Interlocked.Decrement(ref state._inFlight);
-                if (!pending.TryRemove(header.Sequence, out var intended))
-                {
-                    state._unmatchedReplies++;
-                    continue;
-                }
-
-                context.Latency.UdpRtt.Record(Clock.ToNanoseconds(now - intended));
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            /* the arm deadline or a shutdown request ended the loop */
-        }
-        catch (SocketException)
-        {
-            state._protocolErrors++;
-        }
-        catch (ObjectDisposedException)
-        {
-            /* teardown closed the socket first */
-        }
-    }
-
-    private static async Task GraceDrainAsync(Task receive, ConcurrentQueue<long> pending, CancellationToken cancellationToken)
-    {
-        var until = Clock.Now + Clock.FromSeconds(DrainSeconds);
-        try
-        {
-            while (Clock.Now < until && !receive.IsCompleted && !pending.IsEmpty)
-            {
-                await Task.Delay(1, cancellationToken).ConfigureAwait(false);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            /* the arm deadline or a shutdown request ended the loop */
-        }
-    }
-
-    private static async Task GraceDrainAsync(Task receive, ConcurrentDictionary<ulong, long> pending, CancellationToken cancellationToken)
-    {
-        var until = Clock.Now + Clock.FromSeconds(DrainSeconds);
-        try
-        {
-            while (Clock.Now < until && !receive.IsCompleted && !pending.IsEmpty)
-            {
-                await Task.Delay(1, cancellationToken).ConfigureAwait(false);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            /* the arm deadline or a shutdown request ended the loop */
-        }
+        // A udp lane books no connect facts: the record publishes them under tcp.* only (a udp connect
+        // has no handshake to time), so a failed open shows up the way a tcp lane's does -- through
+        // scheduleTruncated and laneShortfall -- instead of inflating the tcp connect population.
     }
 
     /// <summary>The effective run shape after plan defaults, shared by every lane and by the record.</summary>
@@ -942,8 +571,21 @@ internal static class LatencyArm
     }
 
     /// <summary>
-    /// Per-lane state containers: each lane writes only its own state and the totals are formed
-    /// after the lanes join.
+    /// One lane's two halves, kept apart until the totals are formed: the engine's send-side snapshot
+    /// and the policy's own book. Neither half is reachable from the other, which is what the
+    /// disjointness contract (D18.1) asks for.
+    /// </summary>
+    private sealed class Lane<TBook>
+        where TBook : new()
+    {
+        internal TBook Book { get; } = new();
+
+        internal LaneCounts Counts { get; set; }
+    }
+
+    /// <summary>
+    /// Per-lane containers: each lane writes only its own state and the totals are formed after the
+    /// lanes join.
     /// </summary>
     private sealed class LaneStates
     {
@@ -953,42 +595,15 @@ internal static class LatencyArm
             // per-lane arrays instead of shrinking them.
             for (var lane = 0; plan.UseTcp && lane < plan.Lanes; lane++)
             {
-                Tcp.Add(new LatencyTcpState());
+                Tcp.Add(new Lane<LatencyTcpState>());
             }
         }
 
-        internal List<LatencyTcpState> Tcp { get; } = [];
+        internal List<Lane<LatencyTcpState>> Tcp { get; } = [];
 
         internal LatencyTcpState Probe { get; } = new();
 
-        internal UdpLatencyState Udp { get; } = new();
-    }
-
-    private sealed class DeferredQueue
-    {
-        private readonly int _capacity;
-        private readonly Queue<DeferredRequest> _requests;
-
-        internal DeferredQueue(int capacity)
-        {
-            _capacity = capacity;
-            _requests = new Queue<DeferredRequest>(capacity);
-        }
-
-        internal int Count => _requests.Count;
-
-        internal bool TryEnqueue(DeferredRequest request)
-        {
-            if (_requests.Count >= _capacity)
-            {
-                return false;
-            }
-
-            _requests.Enqueue(request);
-            return true;
-        }
-
-        internal bool TryDequeue(out DeferredRequest request) => _requests.TryDequeue(out request);
+        internal Lane<UdpLatencyState> Udp { get; } = new();
     }
 
     /// <summary>
@@ -998,15 +613,15 @@ internal static class LatencyArm
     [StructLayout(LayoutKind.Auto)]
     private readonly struct MeasurementValidity
     {
-        internal MeasurementValidity(LatencyPlan plan, LaneStates lanes, LatencyTcpState tcp, long elapsedTicks)
+        internal MeasurementValidity(LatencyPlan plan, LaneStates lanes, LatencyTotals tcp, LatencyTotals udp, long elapsedTicks)
         {
             PlannedLanes = (plan.UseTcp ? plan.Lanes : 0) + (plan.UseUdp ? 1 : 0);
-            StartedLanes = (plan.UseTcp ? tcp._started : 0) + (plan.UseUdp ? lanes.Udp._started : 0);
-            var idleLanes = (plan.UseTcp ? CountIdleLanes(lanes.Tcp) : 0) + (IsIdle(lanes.Udp._started, lanes.Udp._supplied) ? 1 : 0);
+            StartedLanes = (plan.UseTcp ? tcp.Started : 0) + (plan.UseUdp ? udp.Started : 0);
+            var idleLanes = (plan.UseTcp ? CountIdleLanes(lanes.Tcp) : 0) + (IsIdle(udp.Started, udp.Supplied) ? 1 : 0);
             LaneShortfall = PlannedLanes - StartedLanes + idleLanes;
-            TcpCeilingMs = plan.UseTcp ? InFlightCeilingMs(plan.InFlightWindow, plan.Lanes, tcp._sentOk, elapsedTicks) : 0;
-            UdpCeilingMs = plan.UseUdp ? InFlightCeilingMs(plan.InFlightWindow, 1, lanes.Udp._sentOk, elapsedTicks) : 0;
-            Truncated = tcp._scheduleTruncated || lanes.Udp._scheduleTruncated || LaneShortfall > 0;
+            TcpCeilingMs = plan.UseTcp ? InFlightCeilingMs(plan.InFlightWindow, plan.Lanes, tcp.SentOk, elapsedTicks) : 0;
+            UdpCeilingMs = plan.UseUdp ? InFlightCeilingMs(plan.InFlightWindow, 1, udp.SentOk, elapsedTicks) : 0;
+            Truncated = tcp.Truncated || udp.Truncated || LaneShortfall > 0;
         }
 
         internal long PlannedLanes { get; }
@@ -1023,12 +638,12 @@ internal static class LatencyArm
 
         private static bool IsIdle(long started, long supplied) => started > 0 && supplied == 0;
 
-        private static long CountIdleLanes(List<LatencyTcpState> lanes)
+        private static long CountIdleLanes(List<Lane<LatencyTcpState>> lanes)
         {
             long idle = 0;
             foreach (var lane in lanes)
             {
-                idle += IsIdle(lane._started, lane._supplied) ? 1 : 0;
+                idle += IsIdle(lane.Book.Started, lane.Counts.Supplied) ? 1 : 0;
             }
 
             return idle;
