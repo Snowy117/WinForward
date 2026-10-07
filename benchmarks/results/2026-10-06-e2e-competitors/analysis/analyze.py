@@ -2587,6 +2587,33 @@ def ledger_dns_totals(ctx, pass_id):
 UDP_ECHO_ARMS = {"LAT", "LATLOAD", "LOSS", "MIX", "BASE"}
 
 
+def ledger_decode_totals(ctx):
+    """{ledger path: {received, undecodable}} over distinct ledgers, each ledger counted once.
+
+    An ``undecodable`` count is a running total for the ledger's whole lifetime, so a ledger's value
+    is the maximum any of its records reports. The same ledger is attached to every pass it spans, so
+    the key is the path: keying by pass would count one target's datagrams once per pass. Both the
+    per-second ``udpSummary`` and the closing ``targetSummary/udp`` block carry the counters.
+    """
+    totals = {}
+    for pass_id in ctx.pass_ids:
+        for ledger in ctx.ledgers.get(pass_id) or []:
+            entry = totals.setdefault(str(ledger.path), {"received": None, "undecodable": None})
+            for record in ledger.records:
+                kind = record.get("type")
+                if kind == "udpSummary":
+                    block = record
+                elif kind == "targetSummary" and isinstance(record.get("udp"), dict):
+                    block = record["udp"]
+                else:
+                    continue
+                for key in ("received", "undecodable"):
+                    value = as_number(block.get(key))
+                    if value is not None:
+                        entry[key] = value if entry[key] is None else max(entry[key], value)
+    return totals
+
+
 def table_row_profiles(ctx):
     lines = ["## 1. What each row is and what it does with UDP", ""]
     lines.append(
@@ -3662,7 +3689,8 @@ def table_headline(ctx):
         "unexpectedEofRate` is `metrics.unexpectedEof / metrics.connectAttempts` and `REL fidelityRate` is "
         "`metrics.fidelityMismatch / metrics.connectAttempts` (both over connect attempts, never over "
         "completed connections). Rates are percentages; `proxy CPU` is percent of one vCPU over the loaded arms "
-        "(IDLE excluded) and `steady-state private bytes` is the per-pass p50 of the product's samples after "
+        "(IDLE excluded), measured as user-mode process CPU only — section 6 states the scope in full — and "
+        "`steady-state private bytes` is the per-pass p50 of the product's samples after "
         "the first %.1f s of each arm. `DNS(53)` columns are the port-53 arm, whose UDP path differs per row "
         "(section 9): use `DNSALT` for a cross-product comparison. A cell reading `%s` is traffic the product "
         "does not carry, and an empty cell is a rate whose denominator was zero — not a zero." %
@@ -3943,6 +3971,17 @@ def table_cpu(ctx):
                 ]
             )
     lines.append(md_table(headers, rows))
+    lines.append("")
+    lines.append(
+        "**CPU scope: user-mode only — no kernel-mode work outside the process.** Every cell above is the "
+        "sampled process's own `Process.TotalProcessorTime`: the time the operating system charges to *that "
+        "process's* threads, its user time plus the privileged time those threads spend in system calls. Work "
+        "the product causes in kernel mode outside those threads is measured nowhere in this table: interrupt, "
+        "DPC and ISR time in a kernel data path, packets a driver serves on behalf of other processes, and "
+        "machine-wide CPU are all outside the number. A kernel-heavy product can therefore show a low cell here "
+        "while still costing the machine real CPU; compare the columns as equally-scoped process CPU, never as "
+        "a product's total cost."
+    )
     lines.append("")
     lines.append(
         "**Per-arm transaction and datagram denominators.** `LAT`, `LATLOAD`: "
@@ -5173,6 +5212,53 @@ def table_ledger(ctx):
     else:
         lines.append("n/a (no tcp records in the ledger)")
     lines.append("")
+    decode = ledger_decode_totals(ctx)
+    undecodable = sum((entry["undecodable"] or 0.0) for entry in decode.values())
+    if undecodable > 0:
+        lines.append("### 14.6 UDP decode quality (target side, unattributable)")
+        lines.append("")
+        lines.append(
+            "The target drops every datagram it cannot decode as a frame and counts it (`udpSummary`'s "
+            "`undecodable`, published again as `targetSummary/udp/undecodable`). That counter is the only "
+            "witness of corruption on the **request** path: a datagram the client sent but the target could not "
+            "read never comes back, so the client's own `corruptDatagrams` — a corrupted frame that *did* arrive "
+            "— cannot see it and the client can only report the result as path loss. The count is disclosed here "
+            "as a **target-side total and nothing else**: a datagram that fails to decode carries no sequence "
+            "number, so it belongs to no run and no arm, and no arm-level cell, rate or gate anywhere in this "
+            "file includes it. `lossRate`, `corruptRate` and `clientSendLoss` keep their own meanings and are "
+            "not adjusted by this number."
+        )
+        lines.append("")
+        decode_rows = []
+        total_received = 0.0
+        for path in sorted(decode):
+            entry = decode[path]
+            received = entry["received"] or 0.0
+            value = entry["undecodable"] or 0.0
+            total_received += received
+            if entry["undecodable"] is None:
+                share = "n/a (no undecodable counter)"
+            elif received:
+                share = fmt_num(100.0 * value / received, 4, " %")
+            else:
+                share = "n/a (no datagrams received)"
+            decode_rows.append([path, fmt_num(entry["received"], 0), fmt_num(entry["undecodable"], 0), share])
+        decode_rows.append(
+            [
+                "all ledgers",
+                fmt_num(total_received, 0),
+                fmt_num(undecodable, 0),
+                fmt_num(100.0 * undecodable / total_received, 4, " %") if total_received else "n/a (no datagrams received)",
+            ]
+        )
+        lines.append(md_table(["ledger", "datagrams received", "undecodable", "share of received"], decode_rows))
+        lines.append("")
+        lines.append(
+            "A ledger is one target instance's lifetime, and the same file can span every pass, so its row above "
+            "is that instance's total and the `all ledgers` row sums the instances. A campaign whose targets "
+            "could not decode a single datagram prints no such table at all."
+        )
+        lines.append("")
     return "\n".join(lines)
 
 

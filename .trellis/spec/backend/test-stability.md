@@ -204,6 +204,13 @@ collection:
   catch (OperationCanceledException) { /* the budget ended the wait; the assert owns the verdict */ }
   ```
 
+> **Run the judgement suite serially.** `dotnet test WinForward.slnx` starts one test host per
+> assembly; on a loaded machine that is enough to exhaust memory, and the OOM lands inside
+> `Thread.StartCore`, which reads as a product failure in unrelated projects and can leave a
+> dead host hanging the run. Run the full-solution suite after any static-analysis gate has
+> finished (`-m:1` when the box is busy), and treat a red run that overlaps another heavy
+> process as unproven rather than as a finding.
+
 ## 3. Validation & Error Matrix
 
 | Condition | Required result |

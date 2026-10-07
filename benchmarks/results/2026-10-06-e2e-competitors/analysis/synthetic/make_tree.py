@@ -15,12 +15,19 @@ record types, JSONL layout), and it deliberately contains:
 * per-run ledger labels in one pass and a single pass-level label in another, so both
   attribution paths are exercised.
 
-Usage: python3 make_tree.py <output-raw-dir> [--window-overflow ROW]
+Usage: python3 make_tree.py [--window-overflow ROW] [--undecodable N] [<output-raw-dir>]
 
 `--window-overflow ROW` makes that row's `LAT` arm report a reached in-flight ceiling in
 pass 3 (`gates.windowOverflow = 3`, with `supplied == sentOk` and `clientSendLoss = 0`,
 because a deferral that went out is not a drop). The default tree has no reached ceiling, so
 the analysis's rendering of an ordinary latency row is byte-for-byte what it was.
+
+`--undecodable N` makes the main ledger report `N` datagrams the target could not decode,
+written the way the target writes them: a running total, so the last `udpSummary` of the
+campaign and the closing `targetSummary/udp` block both carry `N`. The datagrams arrive from
+no particular arm — that is the point of the counter — so the knob adds no per-arm record.
+The default tree reports zero undecodable datagrams, so the analysis's rendering of a clean
+campaign is byte-for-byte what it was.
 
 The generated tree is a fixture, not a measurement: every number in it is invented. It
 exists so the analysis can be exercised against every shape the campaign can produce,
@@ -753,15 +760,49 @@ def build_arm(builder, arm, row_id, plan, pass_index, rng, product_process, note
     return records, result, windows
 
 
-def main():
-    arguments = sys.argv[1:]
+USAGE = "usage: make_tree.py [--window-overflow ROW] [--undecodable N] [<output-raw-dir>]"
+
+
+def parse_arguments(argv):
+    out = None
     window_overflow_row = None
-    if arguments and arguments[0] == "--window-overflow":
-        if len(arguments) < 2:
-            raise SystemExit("usage: make_tree.py <output-raw-dir> [--window-overflow ROW]")
-        window_overflow_row = arguments[1]
-        arguments = arguments[2:]
-    out = Path(arguments[0]) if arguments else Path("/tmp/wf-synth/raw")
+    undecodable_total = 0
+    remaining = list(argv)
+    while remaining:
+        argument = remaining.pop(0)
+        if argument in ("--window-overflow", "--undecodable"):
+            if not remaining:
+                raise SystemExit(USAGE)
+            value = remaining.pop(0)
+            if argument == "--window-overflow":
+                window_overflow_row = value
+            else:
+                try:
+                    undecodable_total = int(value)
+                except ValueError:
+                    raise SystemExit(USAGE) from None
+                if undecodable_total < 0:
+                    raise SystemExit(USAGE)
+        elif argument.startswith("--") or out is not None:
+            raise SystemExit(USAGE)
+        else:
+            out = Path(argument)
+    return (out if out is not None else Path("/tmp/wf-synth/raw")), window_overflow_row, undecodable_total
+
+
+def stamp_undecodable(records, total):
+    for record in reversed(records):
+        if record.get("type") == "udpSummary":
+            record["undecodable"] = total
+            break
+    for record in reversed(records):
+        if record.get("type") == "targetSummary":
+            record["udp"]["undecodable"] = total
+            break
+
+
+def main():
+    out, window_overflow_row, undecodable_total = parse_arguments(sys.argv[1:])
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)
@@ -1214,6 +1255,8 @@ def main():
     for _, records in campaign_ledgers:
         for record in records:
             (direct_records if record.get("_direct") else main_records).append(record)
+    if undecodable_total:
+        stamp_undecodable(main_records, undecodable_total)
     for path, records in ((out.parent / "ledger-main.jsonl", main_records), (out.parent / "ledger-direct.jsonl", direct_records)):
         with path.open("w", encoding="utf-8") as handle:
             for record in records:
