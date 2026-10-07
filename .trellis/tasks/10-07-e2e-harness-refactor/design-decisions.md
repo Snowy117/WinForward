@@ -674,6 +674,21 @@ internal interface ILanePolicy
 13. **不相交断言要带负向**：除 `typeof(LaneCounts)` 的属性名 ∩ 策略计数属性名 = ∅ 外，还要断言策略状态类型
     **没有**同名的私有字段（`GetFields(Instance|NonPublic)`），否则"删了属性、留下 `_sentOk` 字段"照样绿。
 
+### D18.6 2a-2 check 后的补充裁定（2a-3 必须遵守）
+
+1. **`LaneCounts` 增加 `DeferredPending`（第 8 个计数）**：返回时 Defer 队列的占用数。
+   `metrics/*.outstandingAtTeardown` = 策略侧 pending 数 + `DeferredPending`（与旧 `pending.Count + backlog.Count` 同义）；
+   不要用"七计数相减"去推（只在策略从不返回 `Skip` 时成立）。
+2. **发送失败的两种形状与旧计数对齐**：
+   - 同步抛 `SocketException`：**计数 + 继续**（与异步失败同策；旧代码结束循环属偶然，登记为有意变更）；
+   - 异步失败（`WouldBlock && !Accepted`）：**`SendWouldBlock` 与 `SendFailures` 都 +1**（保住旧发布值）。
+3. **TCP 接收终结性映射**（2a-3 的 adapter）：`BadMagic`/`BadLength` → `IoError` + `Detail`（流已失步，计数后终止）；
+   `BadChecksum` → `Malformed` + `Detail`（计数后继续）。`EndOfStream` 终止。
+4. **分配 gate 必须覆盖真实协作者**：2a-3 真实 transport 落地后补一条对真实 transport 的 gate
+   （`hot-path.md` / `quality-guidelines.md:48` 的要求），fake 的那条保留。
+5. **`Settle` 必须排空整队**：引擎的 `SettleBurstLimit=8` 用尽仍未 `IsDrained` 时会返回；
+   策略的 `Settle` 契约是"尽可能排空（循环到队列空或预算用尽）"，不能只结算一条。接线表里写明。
+
 ---
 
 ## D17. 零宽带宽与测量统计的裁定（B2b check 后）
