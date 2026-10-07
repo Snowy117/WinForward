@@ -19,9 +19,10 @@ namespace WinForward.E2E.Target;
 [StructLayout(LayoutKind.Auto)]
 internal readonly struct TcpTotalsKeys
 {
-    private TcpTotalsKeys(string connections, string bytesEchoed, string protocolErrors, string truncatedFrames, string verdicts)
+    private TcpTotalsKeys(string connections, string acceptErrors, string bytesEchoed, string protocolErrors, string truncatedFrames, string verdicts)
     {
         Connections = connections;
+        AcceptErrors = acceptErrors;
         BytesEchoed = bytesEchoed;
         ProtocolErrors = protocolErrors;
         TruncatedFrames = truncatedFrames;
@@ -31,6 +32,7 @@ internal readonly struct TcpTotalsKeys
     /// <summary>The key set of the <c>tcpSummary</c> record's own totals.</summary>
     internal static TcpTotalsKeys Summary { get; } = new(
         ArmKeys.Ledger.TcpSummary.Connections,
+        ArmKeys.Ledger.TcpSummary.AcceptErrors,
         ArmKeys.Ledger.TcpSummary.BytesEchoed,
         ArmKeys.Ledger.TcpSummary.ProtocolErrors,
         ArmKeys.Ledger.TcpSummary.TruncatedFrames,
@@ -39,12 +41,15 @@ internal readonly struct TcpTotalsKeys
     /// <summary>The key set of the same block one level down, under <c>targetSummary/tcp</c>.</summary>
     internal static TcpTotalsKeys Target { get; } = new(
         ArmKeys.Ledger.TargetSummary.TcpTotals.Connections,
+        ArmKeys.Ledger.TargetSummary.TcpTotals.AcceptErrors,
         ArmKeys.Ledger.TargetSummary.TcpTotals.BytesEchoed,
         ArmKeys.Ledger.TargetSummary.TcpTotals.ProtocolErrors,
         ArmKeys.Ledger.TargetSummary.TcpTotals.TruncatedFrames,
         ArmKeys.Ledger.TargetSummary.TcpTotals.Verdicts);
 
     internal string Connections { get; }
+
+    internal string AcceptErrors { get; }
 
     internal string BytesEchoed { get; }
 
@@ -73,9 +78,20 @@ internal sealed class TcpTargetServer : IAsyncDisposable
     private long _truncatedFrames;
 
     internal TcpTargetServer(EndPoint endPoint, JsonlSink ledger)
+        : this(new TcpAcceptLoop(Sockets.BindTcpListener(endPoint)), ledger)
+    {
+    }
+
+    /// <summary>
+    /// The server over a listener the caller already built. A refused accept cannot be produced from an
+    /// endpoint -- the kernel decides when one happens -- so the one socket whose accept always fails
+    /// has to arrive from outside, which is how the ledger's own evidence for
+    /// <see cref="TcpTotalsKeys.AcceptErrors"/> is driven.
+    /// </summary>
+    internal TcpTargetServer(TcpAcceptLoop acceptLoop, JsonlSink ledger)
     {
         _ledger = ledger;
-        _acceptLoop = new TcpAcceptLoop(Sockets.BindTcpListener(endPoint));
+        _acceptLoop = acceptLoop;
     }
 
     internal async Task RunAsync(CancellationToken cancellationToken)
@@ -96,6 +112,7 @@ internal sealed class TcpTargetServer : IAsyncDisposable
     internal void WriteTotals(Utf8JsonWriter writer, TcpTotalsKeys keys)
     {
         writer.WriteNumber(keys.Connections, Interlocked.Read(ref _connectionCount));
+        writer.WriteNumber(keys.AcceptErrors, _acceptLoop.AcceptErrors);
         writer.WriteNumber(keys.BytesEchoed, Interlocked.Read(ref _bytesEchoed));
         writer.WriteNumber(keys.ProtocolErrors, Interlocked.Read(ref _protocolErrors));
         writer.WriteNumber(keys.TruncatedFrames, Interlocked.Read(ref _truncatedFrames));
@@ -172,6 +189,7 @@ internal sealed class TcpTargetServer : IAsyncDisposable
                 await TargetLog.ReportAsync(string.Create(
                     CultureInfo.InvariantCulture,
                     $"e2e target: connection {reader.Header.ConnectionId} could not be recorded ({_ledger.WriteErrors} ledger write error(s) so far): {exception.GetType().Name}: {exception.Message}")).ConfigureAwait(false);
+                await TargetRunner.WriteErrorRecordAsync(_ledger, exception).ConfigureAwait(false);
                 socket.LingerState = new LingerOption(enable: true, 0);
             }
         }

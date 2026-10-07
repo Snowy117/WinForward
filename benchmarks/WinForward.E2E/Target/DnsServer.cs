@@ -32,6 +32,7 @@ internal readonly struct DnsTotalsKeys
         string tcpMalformed,
         string tcpTruncatedFrames,
         string tcpConnections,
+        string tcpAcceptErrors,
         string tcpAborted)
     {
         Port = port;
@@ -46,6 +47,7 @@ internal readonly struct DnsTotalsKeys
         TcpMalformed = tcpMalformed;
         TcpTruncatedFrames = tcpTruncatedFrames;
         TcpConnections = tcpConnections;
+        TcpAcceptErrors = tcpAcceptErrors;
         TcpAborted = tcpAborted;
     }
 
@@ -63,6 +65,7 @@ internal readonly struct DnsTotalsKeys
         ArmKeys.Ledger.DnsSummary.TcpMalformed,
         ArmKeys.Ledger.DnsSummary.TruncatedFrames,
         ArmKeys.Ledger.DnsSummary.TcpConnections,
+        ArmKeys.Ledger.DnsSummary.AcceptErrors,
         ArmKeys.Ledger.DnsSummary.TcpAborted);
 
     /// <summary>The key set of the same block one level down, under <c>targetSummary/dns</c>.</summary>
@@ -79,6 +82,7 @@ internal readonly struct DnsTotalsKeys
         ArmKeys.Ledger.TargetSummary.DnsTotals.TcpMalformed,
         ArmKeys.Ledger.TargetSummary.DnsTotals.TruncatedFrames,
         ArmKeys.Ledger.TargetSummary.DnsTotals.TcpConnections,
+        ArmKeys.Ledger.TargetSummary.DnsTotals.AcceptErrors,
         ArmKeys.Ledger.TargetSummary.DnsTotals.TcpAborted);
 
     internal string Port { get; }
@@ -104,6 +108,8 @@ internal readonly struct DnsTotalsKeys
     internal string TcpTruncatedFrames { get; }
 
     internal string TcpConnections { get; }
+
+    internal string TcpAcceptErrors { get; }
 
     internal string TcpAborted { get; }
 }
@@ -132,14 +138,28 @@ internal sealed class DnsServer : IAsyncDisposable
     private long _tcpAborted;
 
     internal DnsServer(IPEndPoint endPoint, JsonlSink ledger, int workerCount)
+        : this(Sockets.BindUdp(endPoint), new TcpAcceptLoop(Sockets.BindTcpListener(endPoint)), ledger, workerCount, endPoint.Port)
+    {
+    }
+
+    /// <summary>
+    /// The responder over sockets the caller already built. A refused accept cannot be produced from an
+    /// endpoint -- the kernel decides when one happens -- so the one socket whose accept always fails
+    /// has to arrive from outside, which is how the ledger's own evidence for
+    /// <see cref="DnsTotalsKeys.TcpAcceptErrors"/> is driven.
+    /// </summary>
+    internal DnsServer(Socket udp, TcpAcceptLoop acceptLoop, JsonlSink ledger, int workerCount, int port)
     {
         _ledger = ledger;
         _workerCount = workerCount;
-        _port = endPoint.Port;
-        _sourceTemplate = Sockets.SourceTemplate(endPoint);
+        _port = port;
 
-        _udp = Sockets.BindUdp(endPoint);
-        _acceptLoop = new TcpAcceptLoop(Sockets.BindTcpListener(endPoint));
+        // The receive template only has to be the socket's own address family, so it is taken from the
+        // socket rather than from an endpoint the caller would have to hand in twice.
+        _sourceTemplate = Sockets.SourceTemplate(udp.LocalEndPoint ?? new IPEndPoint(IPAddress.Any, port));
+
+        _udp = udp;
+        _acceptLoop = acceptLoop;
     }
 
     public ValueTask DisposeAsync()
@@ -176,6 +196,7 @@ internal sealed class DnsServer : IAsyncDisposable
         writer.WriteNumber(keys.TcpMalformed, _tcpMalformed);
         writer.WriteNumber(keys.TcpTruncatedFrames, _tcpTruncated);
         writer.WriteNumber(keys.TcpConnections, _tcpConnectionsAccepted);
+        writer.WriteNumber(keys.TcpAcceptErrors, _acceptLoop.AcceptErrors);
         writer.WriteNumber(keys.TcpAborted, _tcpAborted);
     }
 

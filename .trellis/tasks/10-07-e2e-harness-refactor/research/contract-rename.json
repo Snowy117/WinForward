@@ -2,14 +2,32 @@
   {
     "kind": "added",
     "old_path": null,
+    "new_path": "acceptErrors",
+    "reason": "tcpSummary and dnsSummary roots: accepts a listener's accept loop refused and then retried -- the same mechanism on two listeners (E3-d)"
+  },
+  {
+    "kind": "added",
+    "old_path": null,
     "new_path": "detail",
     "reason": "error record field: the innermost exception type name (D14.12)"
   },
   {
     "kind": "added",
     "old_path": null,
+    "new_path": "dns/acceptErrors",
+    "reason": "the first DNS listener's refused accepts one level down, under targetSummary/dns (E3-d)"
+  },
+  {
+    "kind": "added",
+    "old_path": null,
     "new_path": "dns/truncatedFrames",
     "reason": "the first DNS listener's truncation counter one level down, under targetSummary/dns (D19.3 B)"
+  },
+  {
+    "kind": "added",
+    "old_path": null,
+    "new_path": "dnsAlt/acceptErrors",
+    "reason": "the second DNS listener's refused accepts one level down, under targetSummary/dnsAlt; present only when the target was started with a second DNS port (E3-d)"
   },
   {
     "kind": "added",
@@ -50,6 +68,12 @@
   {
     "kind": "added",
     "old_path": null,
+    "new_path": "tcp/acceptErrors",
+    "reason": "the tcp listener's refused accepts one level down, under targetSummary/tcp (E3-d)"
+  },
+  {
+    "kind": "added",
+    "old_path": null,
     "new_path": "tcp/truncatedFrames",
     "reason": "the tcp truncation counter one level down, under targetSummary/tcp (D19.3 B)"
   },
@@ -58,6 +82,12 @@
     "old_path": null,
     "new_path": "truncatedFrames",
     "reason": "tcpSummary and dnsSummary roots: connections the peer's close cut off inside a frame, and DNS stream messages a peer stopped writing mid-message -- two mechanisms under one spelling (D19.3 C)"
+  },
+  {
+    "kind": "added",
+    "old_path": null,
+    "new_path": "udp/udpReceivers",
+    "reason": "the UDP echo listener's receive loops that actually started, under targetSummary/udp (E3-d)"
   },
   {
     "kind": "identical",

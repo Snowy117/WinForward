@@ -19,6 +19,9 @@ namespace WinForward.E2E.Tests;
 /// </remarks>
 internal sealed class ArmRunFixture : IAsyncDisposable
 {
+    /// <summary>The ports this process has handed out, so two facts never probe the same number.</summary>
+    private static readonly HashSet<int> s_handedOut = [];
+
     private readonly string _directory;
     private readonly CancellationTokenSource _cancellation = new();
 
@@ -102,12 +105,75 @@ internal sealed class ArmRunFixture : IAsyncDisposable
         return listener;
     }
 
-    /// <summary>A port nothing holds right now.</summary>
+    /// <summary>
+    /// A port nothing holds right now, and none this process has handed out before: a probe releases
+    /// the number it picked, so two facts running in parallel can otherwise be given the same one and
+    /// the second listener fails to bind (measured: one shape fact lost its udp port to another class's
+    /// probe). A port stays spoken for even if its caller never binds it, which costs a number and
+    /// removes the race.
+    /// </summary>
     internal static int FreePort(SocketType socketType, ProtocolType protocolType)
     {
-        using var probe = new Socket(AddressFamily.InterNetwork, socketType, protocolType);
-        probe.Bind(new IPEndPoint(IPAddress.Loopback, 0));
-        return ((IPEndPoint)probe.LocalEndPoint!).Port;
+        for (var attempt = 0; attempt < 64; attempt++)
+        {
+            using var probe = new Socket(AddressFamily.InterNetwork, socketType, protocolType);
+            probe.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+            var port = ((IPEndPoint)probe.LocalEndPoint!).Port;
+            lock (s_handedOut)
+            {
+                if (s_handedOut.Add(port))
+                {
+                    return port;
+                }
+            }
+        }
+
+        throw new InvalidOperationException("no port was free that this process has not already handed out");
+    }
+
+    /// <summary>
+    /// A port free for both transports, which a DNS responder needs: it binds a datagram socket and a
+    /// stream listener on the same number, so a port free for one of them is not enough.
+    /// </summary>
+    internal static int FreeDualPort()
+    {
+        for (var attempt = 0; attempt < 64; attempt++)
+        {
+            var port = FreePort(SocketType.Dgram, ProtocolType.Udp);
+            using var listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            try
+            {
+                listener.Bind(new IPEndPoint(IPAddress.Loopback, port));
+                return port;
+            }
+            catch (SocketException)
+            {
+                /* another process holds the stream half of this number; the next probe picks another */
+            }
+        }
+
+        throw new InvalidOperationException("no port was free for both a datagram socket and a stream listener");
+    }
+
+    /// <summary>
+    /// One datagram through a real receive loop: a valid frame is echoed back, which is what a fact
+    /// driving a listener needs to know it served.
+    /// </summary>
+    internal static async Task EchoOneDatagramAsync(int port, CancellationToken cancellationToken)
+    {
+        const int payloadBytes = 32;
+        using var client = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        await client.ConnectAsync(new IPEndPoint(IPAddress.Loopback, port), cancellationToken).ConfigureAwait(false);
+
+        var frame = new FrameBuffer(payloadBytes);
+        var length = frame.Build(connectionId: 0x5348_0001u, sequence: 1, sendTicks: 0);
+        var sent = frame.Memory[..length].ToArray();
+        await client.SendAsync(sent, SocketFlags.None, cancellationToken).ConfigureAwait(false);
+
+        var echoed = new byte[sent.Length];
+        var received = await client.ReceiveAsync(echoed, SocketFlags.None, cancellationToken).ConfigureAwait(false);
+        Assert.Equal(sent.Length, received);
+        Assert.Equal(sent, echoed);
     }
 
     public async ValueTask DisposeAsync()

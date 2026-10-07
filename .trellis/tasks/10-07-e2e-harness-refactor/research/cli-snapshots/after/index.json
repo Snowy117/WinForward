@@ -293,5 +293,32 @@
       "--plan",
       "tests/WinForward.E2E.Tests/Fixtures/plans/arm-name-too-long.json"
     ]
+  },
+  {
+    "name": "target-udp-receivers-not-a-number",
+    "stem": "28-target-udp-receivers-not-a-number",
+    "argv": [
+      "target",
+      "--udp-receivers",
+      "abc"
+    ]
+  },
+  {
+    "name": "target-udp-receivers-zero",
+    "stem": "29-target-udp-receivers-zero",
+    "argv": [
+      "target",
+      "--udp-receivers",
+      "0"
+    ]
+  },
+  {
+    "name": "target-udp-receivers-out-of-range",
+    "stem": "30-target-udp-receivers-out-of-range",
+    "argv": [
+      "target",
+      "--udp-receivers",
+      "65"
+    ]
   }
 ]

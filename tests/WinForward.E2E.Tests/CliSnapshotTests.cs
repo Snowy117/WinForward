@@ -17,11 +17,16 @@ namespace WinForward.E2E.Tests;
 /// the help printed behind it, and the code the shell sees. <see cref="Program.Main"/> returns
 /// before it opens a socket or creates a directory for every recorded case, which is what makes the
 /// replay safe inside the test host.</para>
-/// <para><b>The one registered change.</b> E2-d's only intended difference is the target help
-/// sentence that names the exit code 1 E1 introduced, so the cases whose stdout carries that help
-/// are compared against the <c>after/</c> tree, and
-/// <see cref="TheRegisteredTargetHelpSentenceIsTheOnlyDifferenceBetweenTheTrees"/> pins the two
-/// trees to that sentence. <c>INTENTIONAL.md</c> is the register.</para>
+/// <para><b>The registered changes.</b> The before tree is what a binary that predates E2-d printed,
+/// and every batch that changes user-visible text registers its substitution in
+/// <c>INTENTIONAL.md</c>: E2-d's target help sentence naming the exit code 1, and E3-d's receive-loop
+/// option line. <see cref="TheRegisteredChangesAreTheOnlyDifferenceBetweenTheTrees"/> pins the two
+/// trees to exactly those substitutions.</para>
+/// <para><b>The cases a later batch added.</b> A command that predates a batch is replayable against
+/// the before tree; one whose option that binary refused as unknown is not, so the cases E3-d added
+/// live only in the after tree and are replayed against it
+/// (<see cref="TheCasesTheBeforeTreePredatesStillPrintTheirRecordedText"/>). A stem is a case's
+/// identity, which is why the collector appends new ones instead of inserting them.</para>
 /// </remarks>
 [Collection(CliSnapshotCollection.Name)]
 public sealed class CliSnapshotTests
@@ -29,6 +34,12 @@ public sealed class CliSnapshotTests
     private const string TargetHelpBefore = "Runs until Ctrl+C or SIGTERM. Exits 0 on a clean shutdown, 2 on a usage error.";
     private const string TargetHelpAfter = "Runs until Ctrl+C or SIGTERM. Exits 0 on a clean shutdown, 1 on a runtime error, 2 on a\nusage error.";
     private const string TargetHelpCase = "target-help";
+    private const string UdpPortHelpBefore = "  --udp-port <n>       UDP echo listener port (default 30010)\n";
+    private const string UdpPortHelpAfter =
+        "  --udp-port <n>       UDP echo listener port (default 30010)\n"
+        + "  --udp-receivers <n>  UDP receive loops each datagram listener runs (default: half the\n"
+        + "                       processors, clamped to 2..8)\n";
+    private const string UdpReceiverOption = "--udp-receivers";
 
     private static string Before => Path.Combine(RepoPaths.CliSnapshotsDirectory, "before");
 
@@ -37,71 +48,124 @@ public sealed class CliSnapshotTests
     [Fact]
     public async Task EveryRecordedCommandStillPrintsItsRecordedText()
     {
-        var previousOut = Console.Out;
-        var previousError = Console.Error;
         var previousDirectory = Directory.GetCurrentDirectory();
         try
         {
             // The recorded argv names plans by repository-relative path, so the replay has to resolve
             // them the way the collector did.
             Directory.SetCurrentDirectory(RepoPaths.Root);
-            foreach (var recorded in ReadIndex())
+            foreach (var recorded in ReadIndex(Before))
             {
-                var frozen = Text(Path.Combine(Before, $"{recorded.Stem}.stdout"));
-                var expected = Path.Combine(CarriesTheRegisteredTargetHelp(frozen) ? After : Before, recorded.Stem);
-
-                var stdout = new StringWriter();
-                var stderr = new StringWriter();
-                Console.SetOut(stdout);
-                Console.SetError(stderr);
-                var exit = await Program.Main(recorded.Argv).ConfigureAwait(false);
-                Console.SetOut(previousOut);
-                Console.SetError(previousError);
-
-                Assert.Equal(ExitCode(expected), exit);
-                Assert.Equal(Text($"{expected}.stdout"), PlatformLines(stdout.ToString()));
-                Assert.Equal(Text($"{expected}.stderr"), PlatformLines(stderr.ToString()));
+                await ReplayAsync(
+                    recorded,
+                    Before,
+                    WithRegisteredChanges(Text(Path.Combine(Before, $"{recorded.Stem}.stdout")))).ConfigureAwait(false);
             }
         }
         finally
         {
-            Console.SetOut(previousOut);
-            Console.SetError(previousError);
+            Directory.SetCurrentDirectory(previousDirectory);
+        }
+    }
+
+    /// <summary>
+    /// The cases the before tree does not have, because the binary it recorded them with would have
+    /// refused their option as unknown: the receive-loop refusals E3-d added are replayed against the
+    /// tree that recorded them, so a reworded count message fails here like any other.
+    /// </summary>
+    [Fact]
+    public async Task TheCasesTheBeforeTreePredatesStillPrintTheirRecordedText()
+    {
+        var frozen = ReadIndex(Before).Select(recorded => recorded.Stem).ToHashSet(StringComparer.Ordinal);
+        var added = ReadIndex(After).Where(recorded => !frozen.Contains(recorded.Stem)).ToArray();
+
+        Assert.NotEmpty(added);
+
+        var previousDirectory = Directory.GetCurrentDirectory();
+        try
+        {
+            Directory.SetCurrentDirectory(RepoPaths.Root);
+            foreach (var recorded in added)
+            {
+                await ReplayAsync(recorded, After, stdout: null).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
             Directory.SetCurrentDirectory(previousDirectory);
         }
     }
 
     [Fact]
-    public void TheRegisteredTargetHelpSentenceIsTheOnlyDifferenceBetweenTheTrees()
+    public void TheRegisteredChangesAreTheOnlyDifferenceBetweenTheTrees()
     {
-        foreach (var recorded in ReadIndex())
+        foreach (var recorded in ReadIndex(Before))
         {
             var frozen = Text(Path.Combine(Before, $"{recorded.Stem}.stdout"));
 
             Assert.Equal(Text(Path.Combine(Before, $"{recorded.Stem}.exit")), Text(Path.Combine(After, $"{recorded.Stem}.exit")));
             Assert.Equal(Text(Path.Combine(Before, $"{recorded.Stem}.stderr")), Text(Path.Combine(After, $"{recorded.Stem}.stderr")));
-            Assert.Equal(frozen.Replace(TargetHelpBefore, TargetHelpAfter, StringComparison.Ordinal), Text(Path.Combine(After, $"{recorded.Stem}.stdout")));
+            Assert.Equal(WithRegisteredChanges(frozen), Text(Path.Combine(After, $"{recorded.Stem}.stdout")));
         }
 
-        // The substitution above is a no-op for the cases that carry no help, so the change itself
-        // needs its own assertion: the target's help is the case that shows it.
-        var help = Text(Path.Combine(After, $"{ReadIndex().Single(recorded => recorded.Name == TargetHelpCase).Stem}.stdout"));
+        // The substitutions above are no-ops for the cases that carry no help, so each change needs its
+        // own assertion: the target's help is the case that shows both of them.
+        var stem = ReadIndex(Before).Single(recorded => recorded.Name == TargetHelpCase).Stem;
+        var help = Text(Path.Combine(After, $"{stem}.stdout"));
 
         Assert.Contains(TargetHelpAfter, help, StringComparison.Ordinal);
+        Assert.Contains(UdpPortHelpAfter, help, StringComparison.Ordinal);
         Assert.DoesNotContain(TargetHelpBefore, help, StringComparison.Ordinal);
+
+        // The option is what E3-d added, so it is the one thing the before tree cannot contain; the
+        // sentence it replaced is the other, and its absence is stated by the line above.
+        Assert.DoesNotContain(UdpReceiverOption, Text(Path.Combine(Before, $"{stem}.stdout")), StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// Whether a recorded stdout is the target's help behind an error message. The target prints its
-    /// help on every usage error, so the one registered sentence reaches eight of the cases; the rule
-    /// reads the recorded text instead of naming them, because which commands print help is
-    /// <see cref="Program"/>'s behavior and not a property of the snapshot list.
+    /// One recorded command replayed through the entry point, with the exit code, stdout and stderr a
+    /// user would have seen. The three are compared against the tree that recorded them, except for a
+    /// stdout the caller already put through <see cref="WithRegisteredChanges"/>.
     /// </summary>
-    private static bool CarriesTheRegisteredTargetHelp(string stdout) => stdout.Contains(TargetHelpBefore, StringComparison.Ordinal);
-
-    private static List<RecordedCase> ReadIndex()
+    private static async Task ReplayAsync(RecordedCase recorded, string tree, string? stdout)
     {
-        using var document = JsonDocument.Parse(Text(Path.Combine(Before, "index.json")));
+        var previousOut = Console.Out;
+        var previousError = Console.Error;
+        try
+        {
+            var written = new StringWriter();
+            var reported = new StringWriter();
+            Console.SetOut(written);
+            Console.SetError(reported);
+            var exit = await Program.Main(recorded.Argv).ConfigureAwait(false);
+            Console.SetOut(previousOut);
+            Console.SetError(previousError);
+
+            Assert.Equal(ExitCode(Path.Combine(tree, recorded.Stem)), exit);
+            Assert.Equal(
+                stdout ?? Text(Path.Combine(tree, $"{recorded.Stem}.stdout")),
+                PlatformLines(written.ToString()));
+            Assert.Equal(Text(Path.Combine(tree, $"{recorded.Stem}.stderr")), PlatformLines(reported.ToString()));
+        }
+        finally
+        {
+            Console.SetOut(previousOut);
+            Console.SetError(previousError);
+        }
+    }
+
+    /// <summary>
+    /// A recorded stdout with the registered changes applied to it. The substitution is a no-op for a
+    /// case that carries neither sentence, which is how "everything else is byte for byte identical"
+    /// is asserted by the same comparison.
+    /// </summary>
+    private static string WithRegisteredChanges(string stdout) => stdout
+        .Replace(TargetHelpBefore, TargetHelpAfter, StringComparison.Ordinal)
+        .Replace(UdpPortHelpBefore, UdpPortHelpAfter, StringComparison.Ordinal);
+
+    private static List<RecordedCase> ReadIndex(string tree)
+    {
+        using var document = JsonDocument.Parse(Text(Path.Combine(tree, "index.json")));
 
         return
         [

@@ -24,11 +24,33 @@ internal sealed class TargetOptions
 
     internal string LedgerPath { get; private set; } = "target-ledger.jsonl";
 
+    /// <summary>
+    /// The receive loops every datagram listener starts: the UDP echo listener's and each DNS
+    /// responder's. It decides how much of the run's datagram service is concurrent, so the value a run
+    /// used is published in the ledger rather than left to the formula.
+    /// </summary>
+    internal int UdpReceivers { get; private set; } = DefaultUdpReceivers;
+
+    /// <summary>
+    /// The count a target started without <c>--udp-receivers</c> runs: half the processors, clamped to
+    /// 2..8. The formula is a guess about how much receive concurrency a host wants, so it is the
+    /// option's default and not a floor: a run that wants another value declares it.
+    /// </summary>
+    private static int DefaultUdpReceivers => Math.Clamp(Environment.ProcessorCount / 2, 2, 8);
+
+    /// <summary>The largest receive-loop count the option accepts.</summary>
+    /// <remarks>
+    /// A bound rather than none, because a count far above the host's core count only multiplies
+    /// threads blocked on the same socket, and a typo should be refused rather than run.
+    /// </remarks>
+    internal const int MaxUdpReceivers = 64;
+
     private static readonly string[] s_knownOptions =
     [
         "--bind",
         "--tcp-port",
         "--udp-port",
+        "--udp-receivers",
         "--dns-port",
         "--dns-alt-port",
         "--label",
@@ -121,6 +143,14 @@ internal sealed class TargetOptions
 
                 options.UdpPort = udpPort;
                 return true;
+            case "--udp-receivers":
+                if (!TryReceivers(value, out var receivers, out error))
+                {
+                    return false;
+                }
+
+                options.UdpReceivers = receivers;
+                return true;
             case "--dns-port":
                 if (!TryPort(value, out var dnsPort, out error))
                 {
@@ -157,5 +187,31 @@ internal sealed class TargetOptions
         port = 0;
         error = $"'{value}' is not a port number";
         return false;
+    }
+
+    /// <summary>
+    /// The receive-loop count, in the two refusals the option has: a value that is not a decimal number
+    /// at all -- a sign or a fraction included -- and one outside <see cref="MaxUdpReceivers"/>. A count
+    /// of zero is refused by the same range check as a count that is too large, because either leaves a
+    /// listener that serves nothing.
+    /// </summary>
+    private static bool TryReceivers(string value, out int receivers, out string? error)
+    {
+        if (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out receivers))
+        {
+            error = $"'{value}' is not a receive-loop count";
+            return false;
+        }
+
+        if (receivers is < 1 or > MaxUdpReceivers)
+        {
+            error = string.Create(
+                CultureInfo.InvariantCulture,
+                $"the udp receive-loop count must be in the range 1..{MaxUdpReceivers}");
+            return false;
+        }
+
+        error = null;
+        return true;
     }
 }

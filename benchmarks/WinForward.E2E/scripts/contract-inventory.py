@@ -56,7 +56,10 @@ DOTTED_LEAF_RENAMES = {
 # Paths the frozen baseline cannot contain because they arrived after it: a green run writes no
 # error record, run.json's planSource was added with the plan handling (D14.23, D14.12), the
 # three sentOutOfRangeSequences paths are D7's send-side half of outOfRangeSequences (E3-b1/D19.3 A),
-# and the four truncatedFrames paths are the two servers' truncation counters (E3-c/D19.3 B/C).
+# the four truncatedFrames paths are the two servers' truncation counters (E3-c/D19.3 B/C), and the
+# five acceptErrors/udpReceivers paths are E3-d's listener accounting (E3-d/D19.3 A). The ledger's
+# error record declares no path of its own here: `detail` is the spelling its family publishes, and
+# the client's arm files already publish that path.
 # An addition carries no batch: only a rename has an old spelling that has to disappear, and this
 # tool emits `batch` for the renamed rows alone, so the comparison licenses an addition by its kind.
 ADDITIONS = {
@@ -70,6 +73,11 @@ ADDITIONS = {
     "tcp/truncatedFrames": "the tcp truncation counter one level down, under targetSummary/tcp (D19.3 B)",
     "dns/truncatedFrames": "the first DNS listener's truncation counter one level down, under targetSummary/dns (D19.3 B)",
     "dnsAlt/truncatedFrames": "the second DNS listener's truncation counter one level down, under targetSummary/dnsAlt; present only when the target was started with a second DNS port (D19.3 B)",
+    "acceptErrors": "tcpSummary and dnsSummary roots: accepts a listener's accept loop refused and then retried -- the same mechanism on two listeners (E3-d)",
+    "tcp/acceptErrors": "the tcp listener's refused accepts one level down, under targetSummary/tcp (E3-d)",
+    "dns/acceptErrors": "the first DNS listener's refused accepts one level down, under targetSummary/dns (E3-d)",
+    "dnsAlt/acceptErrors": "the second DNS listener's refused accepts one level down, under targetSummary/dnsAlt; present only when the target was started with a second DNS port (E3-d)",
+    "udp/udpReceivers": "the UDP echo listener's receive loops that actually started, under targetSummary/udp (E3-d)",
 }
 
 FAMILY_OF = {

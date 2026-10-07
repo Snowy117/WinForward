@@ -12,7 +12,7 @@ using Xunit;
 namespace WinForward.E2E.Tests;
 
 /// <summary>
-/// The shape contract of the target's ledger: the bytes the four record families publish, flattened with
+/// The shape contract of the target's ledger: the bytes the record families publish, flattened with
 /// the shared path alphabet, against the paths <c>ArmKeys.Ledger</c> declares. Both sides of the
 /// comparison are the production ones -- the sink, its envelope, the servers' record writers and the
 /// runner's summary composition -- so a key written to the wrong level, written twice, declared but
@@ -26,7 +26,7 @@ namespace WinForward.E2E.Tests;
 /// loop with <c>TcpConnectionProtocol</c>, the receive loop with <c>SourceCensus</c> -- because those are
 /// what fill the records the test reads; the run-end summaries are then written by the runner itself.
 /// </remarks>
-public sealed class LedgerShapeTests
+public sealed partial class LedgerShapeTests
 {
     /// <summary>A label no key of the ledger's own is: the envelope carries it into every record.</summary>
     private const string Label = "shape";
@@ -44,6 +44,10 @@ public sealed class LedgerShapeTests
     private const string UdpSummaryKind = "udpSummary";
     private const string DnsSummaryKind = "dnsSummary";
     private const string TargetSummaryKind = "targetSummary";
+    private const string ErrorKind = "error";
+
+    /// <summary>The receive loops a listener starts in these facts, which is not the default formula.</summary>
+    private const int Receivers = 13;
 
     // Long enough that the periodic flush never fires inside a test; a memory stream needs no
     // draining for its bytes to be readable right after the write.
@@ -130,6 +134,7 @@ public sealed class LedgerShapeTests
         var emptyTcp = JsonPaths.FlattenJsonl(First(ledger, TcpSummaryKind));
         Assert.Equal(0, Number(emptyTcp, ArmKeys.Ledger.TcpSummary.Connections));
         Assert.Equal(0, Number(emptyTcp, ArmKeys.Ledger.TcpSummary.TruncatedFrames));
+        Assert.Equal(0, Number(emptyTcp, ArmKeys.Ledger.TcpSummary.AcceptErrors));
         Assert.Equal(0, Number(emptyTcp, $"{ArmKeys.Ledger.TcpSummary.Verdicts}/{ArmKeys.Ledger.VerdictNames.Clean}"));
 
         var emptyUdp = JsonPaths.FlattenJsonl(First(ledger, UdpSummaryKind));
@@ -139,9 +144,16 @@ public sealed class LedgerShapeTests
         var emptyDns = JsonPaths.FlattenJsonl(First(ledger, DnsSummaryKind));
         Assert.Equal(0, Number(emptyDns, ArmKeys.Ledger.DnsSummary.UdpQueries));
         Assert.Equal(0, Number(emptyDns, ArmKeys.Ledger.DnsSummary.TruncatedFrames));
+        Assert.Equal(0, Number(emptyDns, ArmKeys.Ledger.DnsSummary.AcceptErrors));
 
         var emptyTarget = JsonPaths.FlattenJsonl(First(ledger, TargetSummaryKind));
         Assert.Equal(0, Number(emptyTarget, ArmKeys.Ledger.TargetSummary.LedgerWriteErrors));
+
+        // The listener's concurrency is a counter of the loops that started, so the state before they
+        // run is zero rather than the number the server was built with.
+        Assert.Equal(
+            0,
+            Number(emptyTarget, $"{ArmKeys.Ledger.TargetSummary.Udp}/{ArmKeys.Ledger.TargetSummary.UdpTotals.UdpReceivers}"));
 
         // The same keys carry what the measured state put through them. The connection asked for no
         // echo and got none, so the per-connection record's zeros are values as well.
@@ -155,12 +167,22 @@ public sealed class LedgerShapeTests
         Assert.Equal(1, Number(measuredTcp, $"{ArmKeys.Ledger.TcpSummary.Verdicts}/{ArmKeys.Ledger.VerdictNames.Clean}"));
         Assert.Equal(1, Number(measuredTcp, $"{ArmKeys.Ledger.TcpSummary.Verdicts}/{ArmKeys.Ledger.VerdictNames.ProtocolError}"));
 
+        // A run whose listeners were never refused an accept keeps the key at zero, which is what
+        // separates "nothing was refused" from "the count is not published".
+        Assert.Equal(0, Number(measuredTcp, ArmKeys.Ledger.TcpSummary.AcceptErrors));
+
         var measuredDns = JsonPaths.FlattenJsonl(ledger[DnsSummaryKind][1]);
         Assert.Equal(1, Number(measuredDns, ArmKeys.Ledger.DnsSummary.TruncatedFrames));
+        Assert.Equal(0, Number(measuredDns, ArmKeys.Ledger.DnsSummary.AcceptErrors));
         Assert.Equal(0, Number(measuredDns, ArmKeys.Ledger.DnsSummary.TcpAborted));
 
         var measuredUdp = JsonPaths.FlattenJsonl(Last(ledger, UdpSummaryKind));
         Assert.True(Number(measuredUdp, ArmKeys.Ledger.UdpSummary.Received) >= 1, "the measured state received no datagram");
+
+        var measuredTarget = JsonPaths.FlattenJsonl(Last(ledger, TargetSummaryKind));
+        Assert.Equal(
+            Workers,
+            Number(measuredTarget, $"{ArmKeys.Ledger.TargetSummary.Udp}/{ArmKeys.Ledger.TargetSummary.UdpTotals.UdpReceivers}"));
     }
 
     /// <summary>
@@ -310,6 +332,7 @@ public sealed class LedgerShapeTests
             ArmKeys.Ledger.UdpSummary.SourceOverflow,
         ]),
         [DnsSummaryKind] = Root(DeclaredKeys.Under(typeof(ArmKeys.Ledger.DnsSummary), string.Empty)),
+        [ErrorKind] = Root(DeclaredKeys.Under(typeof(ArmKeys.Ledger.ErrorRecord), string.Empty)),
         [TargetSummaryKind] = Root(
         [
             ArmKeys.Ledger.TargetSummary.StartedTicks,
@@ -343,10 +366,10 @@ public sealed class LedgerShapeTests
         using var stream = new MemoryStream();
         await using var ledger = new JsonlSink(stream, JsonlPolicy.SwallowAndCount, TargetRunner.WriteLedgerEnvelope(Label), s_noFlush);
 
-        var tcpPort = FreePort(SocketType.Stream, ProtocolType.Tcp);
-        var udpPort = FreePort(SocketType.Dgram, ProtocolType.Udp);
-        var dnsPort = FreeDnsPort();
-        var dnsAltPort = FreeDnsPort();
+        var tcpPort = ArmRunFixture.FreePort(SocketType.Stream, ProtocolType.Tcp);
+        var udpPort = ArmRunFixture.FreePort(SocketType.Dgram, ProtocolType.Udp);
+        var dnsPort = ArmRunFixture.FreeDualPort();
+        var dnsAltPort = ArmRunFixture.FreeDualPort();
 
         await using var tcp = new TcpTargetServer(new IPEndPoint(IPAddress.Loopback, tcpPort), ledger);
         await using var udp = new UdpEchoServer(new IPEndPoint(IPAddress.Loopback, udpPort), ledger, Workers);
@@ -364,7 +387,7 @@ public sealed class LedgerShapeTests
         // The DNS listener has to be accepting for the short stream read below.
         var serving = dns.RunAsync(shutdown.Token);
         await RunOneConnectionAsync(tcpPort, shutdown.Token);
-        await EchoOneDatagramAsync(udpPort, shutdown.Token);
+        await ArmRunFixture.EchoOneDatagramAsync(udpPort, shutdown.Token);
         await RunOneTruncatedConnectionAsync(tcpPort, shutdown.Token);
         await RunOneShortDnsReadAsync(dnsPort, shutdown.Token);
         await shutdown.CancelAsync();
@@ -372,8 +395,23 @@ public sealed class LedgerShapeTests
 
         // The state the same target publishes at the end of a run that did serve both listeners.
         await TargetRunner.WriteSummariesAsync(ledger, tcp, udp, dns, dnsAlt, startedTicks: 3, endedTicks: 4);
+
+        // And the record a failure leaves when it cannot be written as the record it belonged to: the
+        // summary guard catches the body's exception and books the cause, which is the one path to the
+        // ledger's error family.
+        await TargetRunner.WriteSummaryAsync(ledger, UdpSummaryKind, ThrowingSummaryBody);
+
         await ledger.CompleteAsync();
 
+        return Parse(stream);
+    }
+
+    /// <summary>
+    /// The lines the sink wrote, keyed by the record kind the writer published. Reading the bytes back is
+    /// what makes the comparison a shape comparison: the keys are the ones that reached the file.
+    /// </summary>
+    private static Dictionary<string, List<string>> Parse(MemoryStream stream)
+    {
         var records = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         foreach (var line in Encoding.UTF8.GetString(stream.ToArray()).Split('\n'))
         {
@@ -395,6 +433,47 @@ public sealed class LedgerShapeTests
 
         return records;
     }
+
+    /// <summary>
+    /// A listener whose first <paramref name="refusals"/> accept calls fail with the error a full
+    /// descriptor table produces, and whose later ones are real: a refused accept is the kernel's
+    /// decision to time, so the count's evidence scripts the call that produces it and then lets the
+    /// loop serve normally.
+    /// </summary>
+    private static (TcpAcceptLoop Loop, IPEndPoint EndPoint) RefusingLoop(int refusals)
+    {
+        var listener = Sockets.BindTcpListener(new IPEndPoint(IPAddress.Loopback, 0));
+        var endPoint = (IPEndPoint)listener.LocalEndPoint!;
+        var remaining = refusals;
+        return (
+            new TcpAcceptLoop(
+                listener,
+                (socket, cancellationToken) => Interlocked.Decrement(ref remaining) >= 0
+                    ? throw new SocketException((int)SocketError.TooManyOpenSockets)
+                    : socket.AcceptAsync(cancellationToken)),
+            endPoint);
+    }
+
+    /// <summary>
+    /// Waits for both loops to have booked the scripted refusals, with the bound a scheduling delay
+    /// needs: the counters are written by the loops' own threads, so the fact synchronizes on them
+    /// rather than on a proxy for their progress.
+    /// </summary>
+    private static async Task WaitForAcceptErrorsAsync(TcpAcceptLoop first, TcpAcceptLoop second)
+    {
+        var deadline = Environment.TickCount64 + 5000;
+        while ((first.AcceptErrors < 2 || second.AcceptErrors < 2) && Environment.TickCount64 < deadline)
+        {
+            await Task.Yield();
+        }
+    }
+
+    /// <summary>
+    /// The body a summary guard is handed when its record cannot be written: an exception wrapped around
+    /// the cause the ledger has to name, because a failure on this path arrives nested in practice.
+    /// </summary>
+    private static ValueTask ThrowingSummaryBody() =>
+        throw new InvalidOperationException("the shape test's summary body failed", new SocketException((int)SocketError.ConnectionReset));
 
     /// <summary>
     /// One connection through the real listener: the command frame the arm would send, then a half-close,
@@ -471,26 +550,6 @@ public sealed class LedgerShapeTests
         while (read > 0);
     }
 
-    /// <summary>
-    /// One datagram through the real receive loop: a valid frame is echoed back, and the echo proves the
-    /// census recorded its source before the summary that reports the source is written.
-    /// </summary>
-    private static async Task EchoOneDatagramAsync(int port, CancellationToken cancellationToken)
-    {
-        using var client = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-        await client.ConnectAsync(new IPEndPoint(IPAddress.Loopback, port), cancellationToken).ConfigureAwait(false);
-
-        var frame = new FrameBuffer(PayloadBytes);
-        var length = frame.Build(ConnectionId, sequence: 1, sendTicks: 0);
-        var sent = frame.Memory[..length].ToArray();
-        await client.SendAsync(sent, SocketFlags.None, cancellationToken).ConfigureAwait(false);
-
-        var echoed = new byte[sent.Length];
-        var received = await client.ReceiveAsync(echoed, SocketFlags.None, cancellationToken).ConfigureAwait(false);
-        Assert.Equal(sent.Length, received);
-        Assert.Equal(sent, echoed);
-    }
-
     /// <summary>The first record of one kind: the state before any traffic went through the listeners.</summary>
     private static string First(Dictionary<string, List<string>> ledger, string kind) => ledger[kind][0];
 
@@ -502,39 +561,4 @@ public sealed class LedgerShapeTests
     /// <summary>The number one path carries in a flattened record.</summary>
     private static double Number(Dictionary<string, List<JsonPathObservation>> record, string path) =>
         record[path][0].Value.GetDouble();
-
-    /// <summary>
-    /// A port nothing holds right now: the probe is bound to port 0 so the kernel picks one, and it is
-    /// released before the caller binds it for real.
-    /// </summary>
-    private static int FreePort(SocketType socketType, ProtocolType protocolType)
-    {
-        using var probe = new Socket(AddressFamily.InterNetwork, socketType, protocolType);
-        probe.Bind(new IPEndPoint(IPAddress.Loopback, 0));
-        return ((IPEndPoint)probe.LocalEndPoint!).Port;
-    }
-
-    /// <summary>
-    /// A port free for both transports, which the DNS responder needs: it binds a datagram socket and a
-    /// stream listener on the same number, so a port free for one of them is not enough.
-    /// </summary>
-    private static int FreeDnsPort()
-    {
-        for (var attempt = 0; attempt < 64; attempt++)
-        {
-            var port = FreePort(SocketType.Dgram, ProtocolType.Udp);
-            using var listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            try
-            {
-                listener.Bind(new IPEndPoint(IPAddress.Loopback, port));
-                return port;
-            }
-            catch (SocketException)
-            {
-                /* another process holds the stream half of this number; the next probe picks another */
-            }
-        }
-
-        throw new InvalidOperationException("no port was free for both a datagram socket and a stream listener");
-    }
 }

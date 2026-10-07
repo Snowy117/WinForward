@@ -1,11 +1,12 @@
 namespace WinForward.E2E.Contracts;
 
 /// <summary>
-/// The keys of the target's <c>ledger.jsonl</c>: the envelope every record carries and the four record
+/// The keys of the target's <c>ledger.jsonl</c>: the envelope every record carries, the four summary
 /// families the target publishes (<c>tcp</c> per connection, <c>udpSummary</c>, <c>dnsSummary</c> and
-/// <c>targetSummary</c>). The ledger is the target half of the cross-binary contract -- the client
-/// writes the arm files, the target writes this one, and the analyzer reads both -- so its keys are
-/// declared here rather than spelled at the four writers that publish them (D12/D14.16).
+/// <c>targetSummary</c>) and the <c>error</c> record a failure that could not reach a summary leaves.
+/// The ledger is the target half of the cross-binary contract -- the client writes the arm files, the
+/// target writes this one, and the analyzer reads both -- so its keys are declared here rather than
+/// spelled at the four writers that publish them (D12/D14.16).
 /// </summary>
 /// <remarks>
 /// <para><b>The envelope.</b> <see cref="Ledger.Envelope.Utc"/> and <see cref="Ledger.Envelope.Label"/>
@@ -29,7 +30,17 @@ namespace WinForward.E2E.Contracts;
 /// <c>truncatedFrames</c> sits at the root of both <c>tcpSummary</c> and <c>dnsSummary</c>: the first
 /// counts a connection the frame reader found cut in half by the peer's close, the second counts the
 /// DNS listener's own short length-prefixed read (D19.3 C). They are two constants, and each family's
-/// value is only ever read against its own mechanism.</para>
+/// value is only ever read against its own mechanism. <c>acceptErrors</c> is the shared name of the
+/// other pair: one listener's accept call refused a connection, which the TCP listener counts in its
+/// own family and each DNS listener counts in its own, beside the connections it did accept. The two
+/// are the same mechanism on different listeners, so a reader comparing them is comparing two
+/// listeners rather than two definitions.</para>
+/// <para><b>The <c>error</c> family names itself.</b> A record whose <c>type</c> is <c>error</c> is the
+/// ledger's account of a failure that could not be written as the record it belonged to -- a summary
+/// or a connection the sink refused. Its family is the record kind itself, so the only key it declares
+/// is the innermost cause, <see cref="Ledger.ErrorRecord.Detail"/>; the client's arm files carry the same
+/// leaf name under <see cref="ArmKeys.Common.ErrorRecord"/> beside the outer exception's type, and the
+/// two are two constants for two levels (D14.17).</para>
 /// <para><b>Conditional keys.</b> One container is written only when the run asked for it:
 /// <see cref="Ledger.TargetSummary.DnsAlt"/> and the whole block under it appear only when the target
 /// was started with a second DNS port, and the listener it names publishes a second
@@ -102,6 +113,9 @@ public static partial class ArmKeys
         {
             /// <summary>Connections accepted.</summary>
             public const string Connections = "connections";
+
+            /// <summary>Accepts this listener's accept loop refused and then retried.</summary>
+            public const string AcceptErrors = "acceptErrors";
 
             /// <summary>Payload bytes echoed across every connection.</summary>
             public const string BytesEchoed = "bytesEchoed";
@@ -211,6 +225,13 @@ public static partial class ArmKeys
             /// <summary>Stream connections accepted.</summary>
             public const string TcpConnections = "tcpConnections";
 
+            /// <summary>Accepts this listener's accept loop refused and then retried.</summary>
+            /// <remarks>
+            /// The same mechanism <see cref="TcpSummary.AcceptErrors"/> counts, on this responder's own
+            /// stream listener: each listener owns its accept loop, so each publishes its own count.
+            /// </remarks>
+            public const string AcceptErrors = "acceptErrors";
+
             /// <summary>Stream connections that ended on a socket fault or a shutdown.</summary>
             public const string TcpAborted = "tcpAborted";
         }
@@ -261,6 +282,9 @@ public static partial class ArmKeys
                 /// <summary>Connections accepted.</summary>
                 public const string Connections = "connections";
 
+                /// <summary>Accepts the listener's accept loop refused and then retried.</summary>
+                public const string AcceptErrors = "acceptErrors";
+
                 /// <summary>Payload bytes echoed across every connection.</summary>
                 public const string BytesEchoed = "bytesEchoed";
 
@@ -282,6 +306,15 @@ public static partial class ArmKeys
             /// </summary>
             public static class UdpTotals
             {
+                /// <summary>Receive loops the echo listener actually started.</summary>
+                /// <remarks>
+                /// The loops that reached their receive call, not the number the command line asked for:
+                /// a listener whose loop never started serves nothing, and a count of what was requested
+                /// could not show that. The DNS listeners take the same configured count for their own
+                /// datagram loops, which are not part of this block.
+                /// </remarks>
+                public const string UdpReceivers = "udpReceivers";
+
                 /// <summary>Datagrams received across the run.</summary>
                 public const string Received = "received";
 
@@ -345,9 +378,31 @@ public static partial class ArmKeys
                 /// <summary>Stream connections accepted.</summary>
                 public const string TcpConnections = "tcpConnections";
 
+                /// <summary>Accepts this responder's accept loop refused and then retried.</summary>
+                public const string AcceptErrors = "acceptErrors";
+
                 /// <summary>Stream connections that ended on a socket fault or a shutdown.</summary>
                 public const string TcpAborted = "tcpAborted";
             }
+        }
+
+        /// <summary>
+        /// The members of an <c>error</c> record, in write order: the ledger's own account of a failure
+        /// that could not be written as the record it belonged to. The class is named after the record
+        /// it declares the members of rather than after a container, because the family is the record's
+        /// <c>type</c> and never a JSON member of its own.
+        /// </summary>
+        public static class ErrorRecord
+        {
+            /// <summary>The innermost exception of the failure, by type name.</summary>
+            /// <remarks>
+            /// The same derivation the client's arm files use for
+            /// <see cref="ArmKeys.Common.ErrorRecord.Detail"/> -- the base exception's type name, so a
+            /// wrapped failure names its cause rather than its wrapper -- declared again here because a
+            /// leaf at another level is another constant (D14.17). The wrapper's own type name is what
+            /// the family already says: the record is an error.
+            /// </remarks>
+            public const string Detail = "detail";
         }
 
         /// <summary>

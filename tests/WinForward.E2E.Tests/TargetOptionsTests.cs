@@ -1,3 +1,4 @@
+using System.Globalization;
 using WinForward.E2E.Cli;
 using Xunit;
 
@@ -91,5 +92,66 @@ public sealed class TargetOptionsTests
         Assert.True(TargetOptions.TryCreate(["--label", "--out"], out var options, out var error), error);
 
         Assert.Equal("--out", options.Label);
+    }
+
+    // A run that does not declare the count runs the formula it always ran; the option exists so a run
+    // can declare another one, not so the default moves.
+    [Fact]
+    public void TheUndeclaredUdpReceiverCountIsTheFormulaTheTargetAlwaysUsed()
+    {
+        Assert.True(TargetOptions.TryCreate(["--bind", "127.0.0.1"], out var options, out var error), error);
+
+        Assert.Equal(Math.Clamp(Environment.ProcessorCount / 2, 2, 8), options.UdpReceivers);
+    }
+
+    [Fact]
+    public void ADeclaredUdpReceiverCountIsTaken()
+    {
+        Assert.True(TargetOptions.TryCreate(["--udp-receivers", "3"], out var options, out var error), error);
+
+        Assert.Equal(3, options.UdpReceivers);
+    }
+
+    // The lowest count a listener can run with is 1: the option decides how much receive concurrency a
+    // run gets, and a single receive loop is a count a run may declare.
+    [Fact]
+    public void TheLowestReceiverCountTheRefusalNamesIsAccepted()
+    {
+        Assert.True(TargetOptions.TryCreate(["--udp-receivers", "1"], out var options, out var error), error);
+
+        Assert.Equal(1, options.UdpReceivers);
+    }
+
+    // Three kinds of refusal, one fact each: a value that is not a decimal number, one that would leave
+    // the listener with no loop at all, and one above the bound. Every one of them is a usage error, so
+    // the text has to name the value or the range rather than a bare "invalid".
+    [Theory]
+    [InlineData("abc", "is not a receive-loop count")]
+    [InlineData("1.5", "is not a receive-loop count")]
+    [InlineData("0", "the udp receive-loop count must be in the range 1..")]
+    [InlineData("-1", "is not a receive-loop count")]
+    [InlineData("65", "the udp receive-loop count must be in the range 1..")]
+    public void AnUdpReceiverCountThatCannotRunIsRefused(string value, string expected)
+    {
+        Assert.False(TargetOptions.TryCreate(["--udp-receivers", value], out _, out var error));
+
+        Assert.Contains(expected, error, StringComparison.Ordinal);
+    }
+
+    // The bound is a constant rather than a magic number in the message: the refusal names the same
+    // number the parser enforces, so raising one without the other is a test failure.
+    [Fact]
+    public void TheUdpReceiverBoundIsTheOneTheRefusalNames()
+    {
+        Assert.True(TargetOptions.TryCreate(["--udp-receivers", TargetOptions.MaxUdpReceivers.ToString(CultureInfo.InvariantCulture)], out var options, out var error), error);
+        Assert.Equal(TargetOptions.MaxUdpReceivers, options.UdpReceivers);
+
+        Assert.False(
+            TargetOptions.TryCreate(["--udp-receivers", (TargetOptions.MaxUdpReceivers + 1).ToString(CultureInfo.InvariantCulture)], out _, out var refused));
+
+        Assert.Contains(
+            string.Create(CultureInfo.InvariantCulture, $"1..{TargetOptions.MaxUdpReceivers}"),
+            refused,
+            StringComparison.Ordinal);
     }
 }

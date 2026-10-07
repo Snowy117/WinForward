@@ -18,7 +18,7 @@ internal static class TargetRunner
             return ExitCodes.UsageError;
         }
 
-        var workers = Math.Clamp(Environment.ProcessorCount / 2, 2, 8);
+        var workers = options.UdpReceivers;
         await using var ledger = new JsonlSink(options.LedgerPath, JsonlPolicy.SwallowAndCount, WriteLedgerEnvelope(options.Label));
         await using var tcp = new TcpTargetServer(new IPEndPoint(bindAddress, options.TcpPort), ledger);
         await using var udp = new UdpEchoServer(new IPEndPoint(bindAddress, options.UdpPort), ledger, workers);
@@ -125,7 +125,13 @@ internal static class TargetRunner
             CancellationToken.None)).ConfigureAwait(false);
     }
 
-    private static async ValueTask WriteSummaryAsync(JsonlSink ledger, string name, Func<ValueTask> write)
+    /// <summary>
+    /// Writes one summary through the guard that keeps a failed summary from skipping the rest and from
+    /// escaping the runner. Internal rather than private because every summary of the run is published
+    /// through it and the shape test drives the guard itself: a body that throws is the only way to
+    /// reach the ledger's <c>error</c> record for a summary.
+    /// </summary>
+    internal static async ValueTask WriteSummaryAsync(JsonlSink ledger, string name, Func<ValueTask> write)
     {
         try
         {
@@ -136,6 +142,39 @@ internal static class TargetRunner
             await TargetLog.ReportAsync(string.Create(
                 CultureInfo.InvariantCulture,
                 $"e2e target: the {name} record could not be written ({ledger.WriteErrors} ledger write error(s) so far): {exception.GetType().Name}: {exception.Message}")).ConfigureAwait(false);
+            await WriteErrorRecordAsync(ledger, exception).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// The ledger's account of a failure that could not be written as the record it belonged to, so the
+    /// reader sees the run was incomplete instead of an absent family. Internal rather than private
+    /// because both of the target's guarded failure boundaries publish through it -- a summary the
+    /// runner could not write and a connection the server could not record -- and the shape test drives
+    /// the composition that publishes the record.
+    /// </summary>
+    /// <remarks>
+    /// The record names its family through <c>type</c> and its cause through the innermost exception, so
+    /// a wrapper tells a reader nothing the family has not already said. The write is guarded like every
+    /// other diagnostic on this path: a failure that could not be recorded may not also end the target.
+    /// </remarks>
+    internal static async ValueTask WriteErrorRecordAsync(JsonlSink ledger, Exception failure)
+    {
+        try
+        {
+            await ledger.WriteAsync(
+                writer =>
+                {
+                    writer.WriteString(ArmKeys.Common.Record.Type, "error");
+                    writer.WriteString(ArmKeys.Ledger.ErrorRecord.Detail, failure.GetBaseException().GetType().Name);
+                },
+                CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            await TargetLog.ReportAsync(string.Create(
+                CultureInfo.InvariantCulture,
+                $"e2e target: the ledger's error record could not be written either ({ledger.WriteErrors} ledger write error(s) so far): {exception.GetType().Name}: {exception.Message}")).ConfigureAwait(false);
         }
     }
 
@@ -147,6 +186,8 @@ internal static class TargetRunner
               --bind <ip>          Address to bind (default 0.0.0.0)
               --tcp-port <n>       TCP echo/command listener port (default 30010)
               --udp-port <n>       UDP echo listener port (default 30010)
+              --udp-receivers <n>  UDP receive loops each datagram listener runs (default: half the
+                                   processors, clamped to 2..8)
               --dns-port <n>       DNS responder port, UDP and TCP (default 30053)
               --dns-alt-port <n>   Second DNS responder port, UDP and TCP (default: none)
               --label <name>       Run or row identity copied into every ledger record (default empty)

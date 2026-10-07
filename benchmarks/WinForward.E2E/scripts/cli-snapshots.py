@@ -68,6 +68,11 @@ CASES = [
     ("client-plan-fractional-value", ["client", "--target", "127.0.0.1", "--out", OUT, "--plan", f"{PLANS}/fractional-window.json"]),
     ("client-plan-colliding-names", ["client", "--target", "127.0.0.1", "--out", OUT, "--plan", f"{PLANS}/colliding-file-names.json"]),
     ("client-plan-arm-name-too-long", ["client", "--target", "127.0.0.1", "--out", OUT, "--plan", f"{PLANS}/arm-name-too-long.json"]),
+    # The cases a later batch adds are appended, never inserted: a stem is a case's identity in every
+    # tree that recorded it, and the trees recorded before the case existed cannot be renumbered.
+    ("target-udp-receivers-not-a-number", ["target", "--udp-receivers", "abc"]),
+    ("target-udp-receivers-zero", ["target", "--udp-receivers", "0"]),
+    ("target-udp-receivers-out-of-range", ["target", "--udp-receivers", "65"]),
 ]
 
 

@@ -18,6 +18,7 @@ internal sealed class UdpEchoServer : IAsyncDisposable
     private readonly int _receiverCount;
     private readonly EndPoint _sourceTemplate;
     private readonly SourceCensus[] _censuses;
+    private readonly int[] _receiverStarts;
     private long _received;
     private long _undecodable;
     private long _bytes;
@@ -28,6 +29,7 @@ internal sealed class UdpEchoServer : IAsyncDisposable
         _ledger = ledger;
         _receiverCount = receiverCount;
         _censuses = new SourceCensus[receiverCount];
+        _receiverStarts = new int[receiverCount];
         for (var index = 0; index < _censuses.Length; index++)
         {
             _censuses[index] = new SourceCensus();
@@ -38,12 +40,31 @@ internal sealed class UdpEchoServer : IAsyncDisposable
         _socket = Sockets.BindUdp(endPoint);
     }
 
+    /// <summary>
+    /// The receive loops that reached their receive call, one count per loop. A loop that never started
+    /// serves no datagram, so the sum of these is the listener's real concurrency rather than the
+    /// number it was configured with -- which is what <c>udpReceivers</c> publishes.
+    /// </summary>
+    internal long StartedReceivers
+    {
+        get
+        {
+            var started = 0L;
+            foreach (var count in _receiverStarts)
+            {
+                started += count;
+            }
+
+            return started;
+        }
+    }
+
     internal async Task RunAsync(CancellationToken cancellationToken)
     {
         var receivers = new Task[_receiverCount];
         for (var index = 0; index < receivers.Length; index++)
         {
-            receivers[index] = ReceiveLoopAsync(_censuses[index], cancellationToken);
+            receivers[index] = ReceiveLoopAsync(index, _censuses[index], cancellationToken);
         }
 
         var summary = SummarizeLoopAsync(cancellationToken);
@@ -59,6 +80,7 @@ internal sealed class UdpEchoServer : IAsyncDisposable
 
     internal void WriteTotals(Utf8JsonWriter writer)
     {
+        writer.WriteNumber(ArmKeys.Ledger.TargetSummary.UdpTotals.UdpReceivers, StartedReceivers);
         writer.WriteNumber(ArmKeys.Ledger.TargetSummary.UdpTotals.Received, _received);
         writer.WriteNumber(ArmKeys.Ledger.TargetSummary.UdpTotals.Undecodable, _undecodable);
         writer.WriteNumber(ArmKeys.Ledger.TargetSummary.UdpTotals.Bytes, _bytes);
@@ -112,8 +134,12 @@ internal sealed class UdpEchoServer : IAsyncDisposable
             cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task ReceiveLoopAsync(SourceCensus census, CancellationToken cancellationToken)
+    private async Task ReceiveLoopAsync(int index, SourceCensus census, CancellationToken cancellationToken)
     {
+        // The loop books its own start before it can block: this is the count the ledger publishes as
+        // udpReceivers, and it is a fact about this loop rather than about the array it was started from.
+        Interlocked.Increment(ref _receiverStarts[index]);
+
         var buffer = new byte[MaxDatagramSize];
         while (!cancellationToken.IsCancellationRequested)
         {
