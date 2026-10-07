@@ -1,25 +1,27 @@
 using WinForward.E2E.Analysis.Cli;
+using WinForward.E2E.Analysis.Model;
 
 namespace WinForward.E2E.Analysis.Loading;
 
 /// <summary>
-/// Finds the campaign's ledgers, in the order §2 prints their paths and §14 prints their rows: the
-/// pass directory, then <c>--raw</c>, then <c>--raw</c>'s parent, and inside each of them the four
-/// names a shipped launcher writes before the <c>*ledger*.jsonl</c> files sorted by path. A path
-/// seen twice is kept once, at its first position.
+/// Finds a pass's ledgers, in the order §2 prints their paths and §14 prints their rows: the pass
+/// directory, then <c>--raw</c>, then <c>--raw</c>'s parent, and inside each of them the four names a
+/// shipped launcher writes before the <c>*ledger*.jsonl</c> files sorted by path. A path seen twice is
+/// kept once, at its first position.
 /// </summary>
 /// <remarks>
-/// A campaign runs more than one target instance — the shipped launcher starts a proxied target and
-/// a separate direct-lane target, each with its own ledger — so "the ledger" is never a single file,
-/// and a first-seen order that disagrees with the reference would change §2's text and §14's rows.
-/// <c>--ledger</c> may be repeated and is used verbatim, filtered to the paths that exist.
+/// <para><b>A campaign runs more than one target instance</b> — the shipped launcher starts a proxied
+/// target and a separate direct-lane target, each with its own ledger — so "the ledger" is never a
+/// single file, and a first-seen order that disagrees with the reference would change §2's text and
+/// §14's rows.</para>
+/// <para><b><c>--ledger</c> replaces the search rather than extending it</b>, may be repeated, and is
+/// used verbatim, filtered to the paths that exist: a caller that names a ledger which is not there
+/// gets no ledger rather than a fallback to the tree's own.</para>
 /// </remarks>
 internal static class LedgerLocator
 {
     private static readonly string[] s_names =
         ["target-ledger.jsonl", "ledger.jsonl", "ledger-main.jsonl", "ledger-direct.jsonl"];
-
-    private const string Pattern = "*ledger*.jsonl";
 
     /// <summary>The ledgers belonging to one pass, or to the whole tree when no pass is given.</summary>
     internal static IReadOnlyList<string> Locate(AnalysisOptions options, string? passDirectory = null)
@@ -38,24 +40,28 @@ internal static class LedgerLocator
         }
 
         bases.Add(options.Raw);
-        var parent = Path.GetDirectoryName(Path.GetFullPath(options.Raw));
-        if (parent is not null)
-        {
-            bases.Add(parent);
-        }
+        bases.Add(PosixPathText.Parent(options.Raw));
 
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var found = new List<string>();
         foreach (var directory in bases)
         {
-            if (!Directory.Exists(directory))
+            var candidates = new List<string>(s_names.Length + 2);
+            foreach (var name in s_names)
             {
-                continue;
+                candidates.Add(PosixPathText.Join(directory, name));
             }
 
-            List<string> candidates = [.. s_names.Select(name => Path.Combine(directory, name))];
-            candidates.AddRange(Directory.EnumerateFiles(directory, Pattern).Order(StringComparer.Ordinal));
-            found.AddRange(candidates.Where(candidate => File.Exists(candidate) && seen.Add(candidate)));
+            candidates.AddRange(PythonGlob.LedgerFiles(directory));
+            foreach (var candidate in candidates)
+            {
+                if (!File.Exists(candidate) || !seen.Add(candidate))
+                {
+                    continue;
+                }
+
+                found.Add(candidate);
+            }
         }
 
         return found;

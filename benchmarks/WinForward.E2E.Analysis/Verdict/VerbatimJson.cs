@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Text;
+
 namespace WinForward.E2E.Analysis.Verdict;
 
 /// <summary>
@@ -19,4 +22,92 @@ internal static class VerbatimJson
 {
     /// <summary>What this file still owes, for the run summary a caller reads.</summary>
     internal const string Pending = "1b json.dumps-compatible writer (indent 2, insertion order, UTF-8 no BOM)";
+
+    /// <summary>
+    /// One string as <c>json.dumps(value)</c> writes it: the two mandatory escapes, the five short
+    /// control escapes, and <c>\uXXXX</c> for everything else outside the printable ASCII range, with
+    /// an astral code point written as its surrogate pair. The characters JSON allows through —
+    /// including <c>'</c>, <c>&lt;</c>, <c>&gt;</c>, <c>&amp;</c> and <c>/</c> — are passed through.
+    /// </summary>
+    internal static string String(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+
+        var text = new StringBuilder(value.Length + 2);
+        text.Append('"');
+        foreach (var character in value)
+        {
+            switch (character)
+            {
+                case '"':
+                    text.Append('\\').Append('"');
+                    break;
+                case '\\':
+                    text.Append('\\').Append('\\');
+                    break;
+                case '\b':
+                    text.Append("\\b");
+                    break;
+                case '\f':
+                    text.Append("\\f");
+                    break;
+                case '\n':
+                    text.Append("\\n");
+                    break;
+                case '\r':
+                    text.Append("\\r");
+                    break;
+                case '\t':
+                    text.Append("\\t");
+                    break;
+                default:
+                    AppendCharacter(text, character);
+                    break;
+            }
+        }
+
+        text.Append('"');
+        return text.ToString();
+    }
+
+    /// <summary>
+    /// A list of strings as <c>json.dumps(values, indent=2)</c> writes it one level down: an empty list
+    /// is <c>[]</c> on one line, a non-empty one puts every element on its own line, indented two
+    /// spaces past the key that names it.
+    /// </summary>
+    internal static string StringArray(IReadOnlyList<string> values)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+
+        if (values.Count == 0)
+        {
+            return "[]";
+        }
+
+        var text = new StringBuilder();
+        text.Append("[\n");
+        for (var index = 0; index < values.Count; index++)
+        {
+            text.Append("    ").Append(String(values[index]));
+            text.Append(index + 1 < values.Count ? ",\n" : "\n");
+        }
+
+        text.Append("  ]");
+        return text.ToString();
+    }
+
+    /// <summary>
+    /// One code unit, escaped when it is outside printable ASCII. An astral code point is two UTF-16
+    /// code units and so becomes the surrogate pair Python writes, with no special case needed.
+    /// </summary>
+    private static void AppendCharacter(StringBuilder text, char character)
+    {
+        if (character is >= ' ' and <= '~')
+        {
+            text.Append(character);
+            return;
+        }
+
+        text.Append("\\u").Append(((int)character).ToString("x4", CultureInfo.InvariantCulture));
+    }
 }

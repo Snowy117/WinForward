@@ -36,20 +36,15 @@ internal static class VerdictWriter
     /// <summary>Writes the object from the values a batch has already rendered.</summary>
     /// <param name="writer">Where the document goes; the caller owns the encoding and the newline.</param>
     /// <param name="rendered">
-    /// Key to its already-formatted JSON text, or <see langword="null"/> while no batch has rendered
-    /// one: a key of <c>s_topLevelKeys</c> that is not here is left out of the document entirely.
+    /// Key to its already-formatted JSON text: a key of <c>s_topLevelKeys</c> that is not here is left
+    /// out of the document entirely, and one that is here is written at its own position.
     /// </param>
-    internal static void Write(TextWriter writer, IReadOnlyDictionary<string, string>? rendered = null)
+    internal static void Write(TextWriter writer, IReadOnlyDictionary<string, string> rendered)
     {
         ArgumentNullException.ThrowIfNull(writer);
+        ArgumentNullException.ThrowIfNull(rendered);
 
-        var written = s_topLevelKeys.Where(entry => rendered is not null && rendered.ContainsKey(entry.Key)).ToArray();
-        if (written.Length == 0)
-        {
-            writer.Write("{}\n");
-            return;
-        }
-
+        var written = s_topLevelKeys.Where(entry => rendered.ContainsKey(entry.Key)).ToArray();
         writer.Write("{\n");
         for (var index = 0; index < written.Length; index++)
         {
@@ -57,7 +52,7 @@ internal static class VerdictWriter
             writer.Write("  \"");
             writer.Write(key);
             writer.Write("\": ");
-            writer.Write(rendered![key]);
+            writer.Write(rendered[key]);
             writer.Write(index + 1 < written.Length ? ",\n" : "\n");
         }
 

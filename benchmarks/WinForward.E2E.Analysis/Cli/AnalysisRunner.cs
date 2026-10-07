@@ -9,8 +9,8 @@ using WinForward.E2E.Analysis.Verdict;
 namespace WinForward.E2E.Analysis.Cli;
 
 /// <summary>
-/// One analysis run: read the tree, render the two documents, write the plotting notice, report what
-/// is still owed by which batch.
+/// One analysis run: read the tree, render the two documents, write the plotting notice, report what is
+/// still owed by which batch.
 /// </summary>
 /// <remarks>
 /// <para><b>The outputs are written unconditionally.</b> <c>tables.md</c> and <c>verdict.json</c> are
@@ -40,10 +40,9 @@ internal static class AnalysisRunner
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var campaign = CampaignLoader.Load(options);
-        if (campaign is null)
+        if (!CampaignLoader.TryLoad(options, out var campaign, out var error) || campaign is null)
         {
-            Console.Error.WriteLine($"analyze.py: input directory not found: {options.Raw}");
+            Console.Error.WriteLine($"analyze.py: {error}");
             Console.Error.WriteLine($"usage: {AnalysisOptions.Usage}");
             return ExitCodes.InputError;
         }
@@ -51,12 +50,12 @@ internal static class AnalysisRunner
         var output = Directory.CreateDirectory(options.Out);
         using (var tables = OpenOutput(Path.Combine(output.FullName, "tables.md")))
         {
-            TablesWriter.Write(tables);
+            TablesWriter.Write(tables, campaign);
         }
 
         using (var verdict = OpenOutput(Path.Combine(output.FullName, "verdict.json")))
         {
-            VerdictWriter.Write(verdict);
+            VerdictWriter.Write(verdict, VerdictSections.Build(campaign));
         }
 
         PlotsNotice.Write(Path.Combine(output.FullName, "plots"));
@@ -64,13 +63,21 @@ internal static class AnalysisRunner
         Console.WriteLine(string.Create(
             System.Globalization.CultureInfo.InvariantCulture,
             $"analyze.py: {campaign.PassIds.Count} pass(es), {campaign.RowCount} row(s), "
-            + $"{campaign.LedgerPaths.Count} ledger(s), {campaign.LedgerRecords} ledger record(s) -> {Path.Combine(output.FullName, "tables.md")}"));
+            + $"{campaign.LedgerFileCount} ledger(s), {campaign.Rows.Count} loaded run(s) -> {Path.Combine(output.FullName, "tables.md")}"));
         Console.WriteLine(string.Create(
             System.Globalization.CultureInfo.InvariantCulture,
             $"analyze.py: verdict -> {Path.Combine(output.FullName, "verdict.json")}; "
             + $"warmup {options.WarmupSeconds:0.0#} s, {options.Resamples} resamples, seed {options.Seed}, "
             + $"min passes {AnalysisOptions.DefaultMinPasses}"));
         Console.WriteLine("analyze.py: plots/ is not rendered; wrote plots/SKIPPED.md");
+        foreach (var passId in campaign.PassIds)
+        {
+            var ledgers = campaign.LedgerPaths.TryGetValue(passId, out var paths)
+                ? string.Join(", ", paths)
+                : "none";
+            Console.WriteLine($"analyze.py: {passId} ledger(s): {ledgers}");
+        }
+
         foreach (var pending in s_pending)
         {
             Console.WriteLine($"analyze.py: not yet rendered: {pending}");
