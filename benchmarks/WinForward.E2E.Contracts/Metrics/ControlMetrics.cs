@@ -10,11 +10,9 @@ namespace WinForward.E2E.Contracts.Metrics;
 /// failing to compile, and the write order below is the declaration order of <see cref="ArmKeys.Control"/>.
 /// </summary>
 /// <remarks>
-/// <see cref="Latency"/> is the latency arm's own typed record, so the phase publishes exactly the
-/// latency kind's members one level down. <see cref="Loss"/> is still carried as an
-/// <see cref="IJsonWritable"/> because the loss arm's metrics are not typed yet: the phase arrives as
-/// one JSON object with its own braces either way, and B2c narrows the property to the loss record
-/// without changing a byte of what it publishes.
+/// <see cref="Latency"/> and <see cref="Loss"/> are the phase arms' own typed records, so each phase
+/// publishes exactly its kind's members one level down: the phase and the standalone arm are one value
+/// with one writer, and a key cannot exist in one of them and not the other.
 /// </remarks>
 public sealed record ControlMetrics : IJsonWritable
 {
@@ -25,7 +23,7 @@ public sealed record ControlMetrics : IJsonWritable
     public required LatencyMetrics Latency { get; init; }
 
     /// <summary>The loss phase's metrics, one level down.</summary>
-    public required IJsonWritable Loss { get; init; }
+    public required LossMetrics Loss { get; init; }
 
     /// <inheritdoc/>
     public void WriteTo(Utf8JsonWriter writer)

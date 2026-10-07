@@ -10,16 +10,27 @@ internal static class ThroughputShape
     /// <summary>How many notes the factory below publishes.</summary>
     private const int Notes = 4;
 
+    private const string ParametersPrefix = ArmKeys.Common.Record.Parameters;
+
+    /// <summary>The parameter members the arm publishes, which is what the contract declares.</summary>
+    private static readonly string[] s_parameterNames =
+    [
+        ArmKeys.Common.Parameters.Seconds,
+        ArmKeys.Common.Parameters.Streams,
+        ArmKeys.Common.Parameters.TargetBytesPerSecond,
+        ArmKeys.Common.Parameters.FramePayloadBytes,
+    ];
+
     internal static readonly KindContract s_contract = new(
         "throughput",
         static flags => new ArmOutcome
         {
-            Parameters =
+            Parameters = new ArmParameters
             {
-                [ArmKeys.Common.Parameters.Seconds] = 8.0,
-                [ArmKeys.Common.Parameters.Streams] = 2,
-                [ArmKeys.Common.Parameters.TargetBytesPerSecond] = 20_000_000L,
-                [ArmKeys.Common.Parameters.FramePayloadBytes] = 32_768,
+                Seconds = 8.0,
+                Streams = 2,
+                TargetBytesPerSecond = 20_000_000L,
+                FramePayloadBytes = 32_768,
             },
             Metrics = new ThroughputMetrics
             {
@@ -70,5 +81,5 @@ internal static class ThroughputShape
             Arrays: [new ArrayArity(ArmKeys.Common.Record.Notes, Notes)],
             Blocks: [],
             Dynamic: []),
-        Parameters: []);
+        Parameters: [.. s_parameterNames.Select(name => $"{ParametersPrefix}/{name}")]);
 }

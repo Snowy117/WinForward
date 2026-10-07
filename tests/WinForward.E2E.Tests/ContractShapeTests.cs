@@ -1,8 +1,11 @@
 using System.Text;
 using WinForward.E2E.Client;
+using WinForward.E2E.Client.Arms;
 using WinForward.E2E.Contracts;
 using WinForward.E2E.Contracts.Json;
 using WinForward.E2E.Contracts.Metrics;
+using WinForward.E2E.Tests.Shapes;
+using WinForward.E2E.Wire;
 using Xunit;
 
 namespace WinForward.E2E.Tests;
@@ -305,25 +308,23 @@ public sealed class ContractShapeTests
                 RecordContract.Skeleton,
                 JsonPaths.TopLevel(observations)));
 
-            // Which gates and parameters an arm publishes is the arm's business; that every one of
-            // them is declared is the contract. A kind whose parameters nest another arm's parameters
-            // (the control's two phases) declares those paths in its own contract.
-            var parameterPaths = new List<string>(RecordContract.Parameters);
-            parameterPaths.AddRange(contract.Parameters);
-            foreach (var (group, declared) in new[]
+            // Which gates an arm publishes is the arm's business, but every one of them is declared.
+            var published = JsonPaths.Under(observations, ArmKeys.Common.Record.Gates);
+            if (published.Count == 0)
             {
-                (ArmKeys.Common.Record.Gates, RecordContract.Gates),
-                (ArmKeys.Common.Record.Parameters, parameterPaths),
-            })
-            {
-                var published = JsonPaths.Under(observations, group);
-                if (published.Count == 0)
-                {
-                    failures.Add($"{contract.Kind}: the record publishes no {group} member");
-                }
-
-                failures.AddRange(published.Where(path => !declared.Contains(path)).Select(path => $"{contract.Kind} {path}: published but not declared"));
+                failures.Add($"{contract.Kind}: the record publishes no {ArmKeys.Common.Record.Gates} member");
             }
+
+            failures.AddRange(published.Where(path => !RecordContract.Gates.Contains(path)).Select(path => $"{contract.Kind} {path}: published but not declared"));
+
+            // Parameters are the other way round: the object publishes exactly the members the arm
+            // set, so the set the kind publishes and the set its contract declares must be equal in
+            // both directions -- a parameter that started being published without being declared, and
+            // one that stopped being published, both fail here.
+            failures.AddRange(Differences(
+                $"{contract.Kind} parameters",
+                contract.Parameters,
+                JsonPaths.Under(observations, ArmKeys.Common.Record.Parameters)));
         }
 
         Assert.True(failures.Count == 0, string.Join('\n', failures));
@@ -333,30 +334,97 @@ public sealed class ContractShapeTests
     public async Task ARecordThatNestsAnotherRecordsMetricsWritesItAsOneObject()
     {
         // The control kind publishes one elapsed time and then the metrics of each phase it ran, so a
-        // typed value is nested inside a metrics object an arm is still building: it has to arrive as
-        // one JSON value with its own braces, not as a run of members of the object around it.
+        // typed value is nested inside the metrics object: it has to arrive as one JSON value with its
+        // own braces, not as a run of members of the object around it.
         var outcome = new ArmOutcome
         {
-            Parameters = { [ArmKeys.Common.Parameters.Seconds] = 10.0 },
-            Metrics = new DictionaryMetrics
+            Parameters = new ArmParameters { Seconds = 10.0 },
+            Metrics = new ControlMetrics
             {
-                ["elapsedSeconds"] = 10.2,
-                ["latency"] = new IdleMetrics { ElapsedSeconds = 5.001 },
+                ElapsedSeconds = 10.2,
+                Latency = new LatencyMetrics { Tcp = null, Udp = null },
+                Loss = LossShape.Metrics(ShapeFlags.None),
             },
         };
 
         var observations = await PublishAsync(outcome);
 
-        var nested = observations["metrics/latency"];
+        var nested = observations[$"metrics/{ArmKeys.Control.Loss}"];
         Assert.Equal(JsonPaths.KindObject, nested[0].Kind);
-        Assert.True(observations.ContainsKey("metrics/latency/elapsedSeconds"), "the nested metrics value was flattened into its parent");
+        Assert.True(
+            observations.ContainsKey($"metrics/{ArmKeys.Control.Loss}/{ArmKeys.Loss.Sent}"),
+            "the nested metrics value was flattened into its parent");
+    }
+
+    /// <summary>
+    /// The mode names the reliability contract declares are the ones the arm publishes: the arm writes
+    /// them through <c>TcpCommand.Name</c>, so a renamed mode would otherwise move the block without
+    /// moving the key.
+    /// </summary>
+    [Fact]
+    public void TheDeclaredReliabilityModeNamesAreTheScheduledOnes()
+    {
+        foreach (var (mode, name) in ReliabilityShape.s_modes)
+        {
+            Assert.Equal(TcpCommand.Name(mode), name);
+        }
+    }
+
+    /// <summary>
+    /// The declared loss window is the one the record publishes (audit #6): both arms take W from the
+    /// plan's <c>lossWindowMs</c> and publish it as the window their arrived/late/never split used, so
+    /// the value a consumer reads back is the one the classification ran with.
+    /// </summary>
+    [Fact]
+    public async Task ThePublishedLossWindowIsTheDeclaredOne()
+    {
+        var loss = ContractRegistry.s_all.Single(contract => contract.Kind == "loss");
+        var lossObservations = await PublishAsync(loss, ShapeFlags.None);
+        Assert.Equal(
+            200.0,
+            lossObservations[$"metrics/{ArmKeys.Loss.Window}"][0].Value.GetDouble());
+
+        var mix = ContractRegistry.s_all.Single(contract => contract.Kind == "mix");
+        var mixObservations = await PublishAsync(mix, ShapeFlags.None);
+        Assert.Equal(
+            200.0,
+            mixObservations[$"metrics/{ArmKeys.Mix.Classes}/{ArmKeys.Mix.ClassNames.Udp}/{ArmKeys.Mix.UdpClass.Window}"][0].Value.GetDouble());
+    }
+
+    /// <summary>
+    /// The per-attempt evidence records the reliability arm writes into its own file are part of the
+    /// contract too: one record is published through the production writer and compared with the keys
+    /// <see cref="ArmKeys.Reliability.Attempt"/> declares, in both directions and in write order.
+    /// </summary>
+    [Fact]
+    public async Task TheAttemptRecordPublishesExactlyTheDeclaredKeys()
+    {
+        using var stream = new MemoryStream();
+        await using var sink = new JsonlSink(stream, JsonlPolicy.Propagate, envelope: null, s_noFlush);
+        var evidence = new ReliabilityArm.AttemptEvidence(sink);
+        await evidence.RecordAsync(
+            new ReliabilityAttempt
+            {
+                Observed = ReliabilityOutcome.Reset,
+                Expected = ReliabilityOutcome.Clean,
+                Mode = TcpMode.ResetAfterN,
+                ConnectionId = 0x5245_0001u,
+            },
+            CancellationToken.None);
+        await sink.CompleteAsync();
+
+        var observations = JsonPaths.FlattenJsonl(Encoding.UTF8.GetString(stream.ToArray()));
+        var declared = DeclaredKeys.Under(typeof(ArmKeys.Reliability.Attempt), string.Empty);
+        declared.Insert(0, ArmKeys.Common.Record.Type);
+
+        Assert.Equal(declared, JsonPaths.TopLevel(observations));
     }
 
     private static ArmOutcome OutcomeWithNotes(params string[] notes)
     {
         var outcome = new ArmOutcome
         {
-            Parameters = { [ArmKeys.Common.Parameters.Seconds] = 1.0 },
+            Parameters = new ArmParameters { Seconds = 1.0 },
             Metrics = new IdleMetrics { ElapsedSeconds = 1.0 },
         };
         outcome.Notes.AddRange(notes);

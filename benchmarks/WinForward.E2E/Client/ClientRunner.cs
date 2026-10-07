@@ -487,15 +487,15 @@ internal static class ClientRunner
         await sink.WriteAsync(
             writer =>
             {
-                writer.WriteString("type", "error");
-                writer.WriteString("arm", arm.Name);
-                writer.WriteString("kind", arm.Kind);
-                writer.WriteString("label", options.Label);
-                writer.WriteString("error", error);
-                writer.WriteString("message", message);
-                writer.WriteString("detail", detail);
-                writer.WriteNumber("startedTicks", startedTicks);
-                writer.WriteNumber("endedTicks", endedTicks);
+                writer.WriteString(ArmKeys.Common.Record.Type, "error");
+                writer.WriteString(ArmKeys.Common.Record.Arm, arm.Name);
+                writer.WriteString(ArmKeys.Common.Record.Kind, arm.Kind);
+                writer.WriteString(ArmKeys.Common.Record.Label, options.Label);
+                writer.WriteString(ArmKeys.Common.ErrorRecord.Error, error);
+                writer.WriteString(ArmKeys.Common.ErrorRecord.Message, message);
+                writer.WriteString(ArmKeys.Common.ErrorRecord.Detail, detail);
+                writer.WriteNumber(ArmKeys.Common.Record.StartedTicks, startedTicks);
+                writer.WriteNumber(ArmKeys.Common.Record.EndedTicks, endedTicks);
             },
             CancellationToken.None).ConfigureAwait(false);
     }
@@ -523,16 +523,12 @@ internal static class ClientRunner
                 writer.WriteString(ArmKeys.Common.Record.Kind, arm.Kind);
                 writer.WriteString(ArmKeys.Common.Record.Label, options.Label);
                 writer.WritePropertyName(ArmKeys.Common.Record.Parameters);
-                writer.WriteStartObject();
-                JsonValue.WriteProperties(writer, outcome.Parameters);
-                writer.WriteEndObject();
+                outcome.Parameters.WriteTo(writer);
                 writer.WritePropertyName(ArmKeys.Common.Record.Metrics);
                 outcome.Metrics.WriteTo(writer);
                 latency.WriteTo(writer);
                 writer.WritePropertyName(ArmKeys.Common.Record.Gates);
-                writer.WriteStartObject();
-                JsonValue.WriteProperties(writer, outcome.Gates);
-                writer.WriteEndObject();
+                WriteGates(writer, outcome.Gates);
                 writer.WritePropertyName(ArmKeys.Common.Record.Notes);
                 writer.WriteStartArray();
                 foreach (var note in outcome.Notes)
@@ -547,8 +543,28 @@ internal static class ClientRunner
             CancellationToken.None).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Writes the arm's <c>gates</c> object. Which gates an arm publishes is the arm's business and
+    /// their order is its construction order, but every key is a
+    /// <see cref="ArmKeys.Common.Gates"/> constant and every value is a JSON number.
+    /// </summary>
+    private static void WriteGates(Utf8JsonWriter writer, Dictionary<string, double> gates)
+    {
+        writer.WriteStartObject();
+        foreach (var gate in gates)
+        {
+            writer.WriteNumber(gate.Key, gate.Value);
+        }
+
+        writer.WriteEndObject();
+    }
+
     /// <summary>The outcome an arm that failed before building one still gets a record for.</summary>
-    private static ArmOutcome EmptyOutcome() => new() { Metrics = new DictionaryMetrics() };
+    private static ArmOutcome EmptyOutcome() => new()
+    {
+        Parameters = new ArmParameters(),
+        Metrics = new EmptyMetrics(),
+    };
 
     private static async ValueTask WriteArmSummaryAsync(
         JsonlSink sink,
@@ -562,21 +578,17 @@ internal static class ClientRunner
         await sink.WriteAsync(
             writer =>
             {
-                writer.WriteString("type", "armSummary");
-                writer.WriteString("arm", arm.Name);
-                writer.WriteString("kind", arm.Kind);
-                writer.WriteString("label", options.Label);
-                writer.WritePropertyName("parameters");
-                writer.WriteStartObject();
-                JsonValue.WriteProperties(writer, outcome.Parameters);
-                writer.WriteEndObject();
-                writer.WritePropertyName("gates");
-                writer.WriteStartObject();
-                JsonValue.WriteProperties(writer, outcome.Gates);
-                writer.WriteEndObject();
-                writer.WriteString("resultFile", fileName);
-                writer.WriteNumber("startedTicks", startedTicks);
-                writer.WriteNumber("endedTicks", endedTicks);
+                writer.WriteString(ArmKeys.Common.Record.Type, "armSummary");
+                writer.WriteString(ArmKeys.Common.Record.Arm, arm.Name);
+                writer.WriteString(ArmKeys.Common.Record.Kind, arm.Kind);
+                writer.WriteString(ArmKeys.Common.Record.Label, options.Label);
+                writer.WritePropertyName(ArmKeys.Common.Record.Parameters);
+                outcome.Parameters.WriteTo(writer);
+                writer.WritePropertyName(ArmKeys.Common.Record.Gates);
+                WriteGates(writer, outcome.Gates);
+                writer.WriteString(ArmKeys.Common.ArmSummary.ResultFile, fileName);
+                writer.WriteNumber(ArmKeys.Common.Record.StartedTicks, startedTicks);
+                writer.WriteNumber(ArmKeys.Common.Record.EndedTicks, endedTicks);
             },
             CancellationToken.None).ConfigureAwait(false);
     }
@@ -596,29 +608,29 @@ internal static class ClientRunner
         await using (var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
         {
             writer.WriteStartObject();
-            writer.WriteString("type", "run");
+            writer.WriteString(ArmKeys.Run.Type, "run");
             WriteEnvironment(writer, options, targetAddress, planHash);
-            writer.WriteString("startedUtc", startedUtc.ToString("O", CultureInfo.InvariantCulture));
-            writer.WriteString("endedUtc", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
-            writer.WriteNumber("startedTicks", startTicks);
-            writer.WriteNumber("endedTicks", endTicks);
-            writer.WriteNumber("wallSeconds", NumberFormat.Round(Clock.ToSeconds(endTicks - startTicks)));
-            writer.WritePropertyName("arms");
+            writer.WriteString(ArmKeys.Run.StartedUtc, startedUtc.ToString("O", CultureInfo.InvariantCulture));
+            writer.WriteString(ArmKeys.Run.EndedUtc, DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+            writer.WriteNumber(ArmKeys.Run.StartedTicks, startTicks);
+            writer.WriteNumber(ArmKeys.Run.EndedTicks, endTicks);
+            writer.WriteNumber(ArmKeys.Run.WallSeconds, NumberFormat.Round(Clock.ToSeconds(endTicks - startTicks)));
+            writer.WritePropertyName(ArmKeys.Run.Arms);
             writer.WriteStartArray();
             foreach (var summary in summaries)
             {
                 writer.WriteStartObject();
-                writer.WriteString("name", summary.Name);
-                writer.WriteString("kind", summary.Kind);
-                writer.WriteString("file", summary.File);
-                writer.WriteNumber("startedTicks", summary.StartedTicks);
-                writer.WriteNumber("endedTicks", summary.EndedTicks);
-                writer.WriteBoolean("failed", summary.Failed);
+                writer.WriteString(ArmKeys.Run.Arm.Name, summary.Name);
+                writer.WriteString(ArmKeys.Run.Arm.Kind, summary.Kind);
+                writer.WriteString(ArmKeys.Run.Arm.File, summary.File);
+                writer.WriteNumber(ArmKeys.Run.Arm.StartedTicks, summary.StartedTicks);
+                writer.WriteNumber(ArmKeys.Run.Arm.EndedTicks, summary.EndedTicks);
+                writer.WriteBoolean(ArmKeys.Run.Arm.Failed, summary.Failed);
                 writer.WriteEndObject();
             }
 
             writer.WriteEndArray();
-            writer.WriteBoolean("failed", failed);
+            writer.WriteBoolean(ArmKeys.Run.Failed, failed);
             writer.WriteEndObject();
         }
 
@@ -627,34 +639,34 @@ internal static class ClientRunner
 
     private static void WriteEnvironment(Utf8JsonWriter writer, ClientOptions options, IPAddress targetAddress, string planHash)
     {
-        writer.WriteString("label", options.Label);
-        writer.WriteString("clientVersion", typeof(ClientRunner).Assembly.GetName().Version?.ToString() ?? "0.0.0.0");
-        writer.WriteString("osDescription", RuntimeInformation.OSDescription);
-        writer.WriteString("frameworkDescription", RuntimeInformation.FrameworkDescription);
-        writer.WriteNumber("logicalProcessors", Environment.ProcessorCount);
-        writer.WriteString("planHash", planHash);
+        writer.WriteString(ArmKeys.Run.Label, options.Label);
+        writer.WriteString(ArmKeys.Run.ClientVersion, typeof(ClientRunner).Assembly.GetName().Version?.ToString() ?? "0.0.0.0");
+        writer.WriteString(ArmKeys.Run.OsDescription, RuntimeInformation.OSDescription);
+        writer.WriteString(ArmKeys.Run.FrameworkDescription, RuntimeInformation.FrameworkDescription);
+        writer.WriteNumber(ArmKeys.Run.LogicalProcessors, Environment.ProcessorCount);
+        writer.WriteString(ArmKeys.Run.PlanHash, planHash);
         if (options.PlanPath is null)
         {
-            writer.WriteNull("planPath");
+            writer.WriteNull(ArmKeys.Run.PlanPath);
         }
         else
         {
-            writer.WriteString("planPath", Path.GetFullPath(options.PlanPath));
+            writer.WriteString(ArmKeys.Run.PlanPath, Path.GetFullPath(options.PlanPath));
         }
 
         // planPath answers "which file"; planSource answers "was there one at all", which a consumer
         // needs without treating the null as a missing value.
-        writer.WriteString("planSource", options.PlanPath is null ? "builtin" : "file");
+        writer.WriteString(ArmKeys.Run.PlanSource, options.PlanPath is null ? "builtin" : "file");
 
-        writer.WriteString("outDirectory", Path.GetFullPath(options.OutDirectory));
-        writer.WritePropertyName("target");
+        writer.WriteString(ArmKeys.Run.OutDirectory, Path.GetFullPath(options.OutDirectory));
+        writer.WritePropertyName(ArmKeys.Run.Target);
         writer.WriteStartObject();
-        writer.WriteString("address", targetAddress.ToString());
-        writer.WriteNumber("tcpPort", options.TcpPort);
-        writer.WriteNumber("udpPort", options.UdpPort);
-        writer.WriteNumber("dnsPort", options.DnsPort);
+        writer.WriteString(ArmKeys.Run.TargetObject.Address, targetAddress.ToString());
+        writer.WriteNumber(ArmKeys.Run.TargetObject.TcpPort, options.TcpPort);
+        writer.WriteNumber(ArmKeys.Run.TargetObject.UdpPort, options.UdpPort);
+        writer.WriteNumber(ArmKeys.Run.TargetObject.DnsPort, options.DnsPort);
         writer.WriteEndObject();
-        writer.WritePropertyName("samplerProcesses");
+        writer.WritePropertyName(ArmKeys.Run.SamplerProcesses);
         writer.WriteStartArray();
         foreach (var name in options.SamplerProcesses)
         {

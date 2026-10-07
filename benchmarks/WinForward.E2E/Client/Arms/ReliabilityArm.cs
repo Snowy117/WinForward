@@ -2,7 +2,9 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using WinForward.E2E.Contracts;
 using WinForward.E2E.Contracts.Json;
+using WinForward.E2E.Contracts.Metrics;
 using WinForward.E2E.Wire;
 
 namespace WinForward.E2E.Client.Arms;
@@ -135,20 +137,6 @@ internal static class ReliabilityArm
         var expectedBytes = spec.ExpectedBytes > 0 ? spec.ExpectedBytes : DefaultExpectedBytes;
         var mixText = string.IsNullOrEmpty(spec.ModeMix) ? ArmSpec.DefaultModeMix : spec.ModeMix;
 
-        var metrics = new DictionaryMetrics();
-        var outcome = new ArmOutcome
-        {
-            Parameters =
-            {
-                ["seconds"] = spec.Seconds,
-                ["connectionsPerSecond"] = rate,
-                ["expectedBytes"] = expectedBytes,
-                ["modeMix"] = mixText,
-                ["framePayloadBytes"] = FramePayloadBytes,
-            },
-            Metrics = metrics,
-        };
-
         if (!PlanFile.TryParseModeMix(mixText, out var weights, out var error))
         {
             throw new InvalidOperationException(error);
@@ -164,9 +152,23 @@ internal static class ReliabilityArm
 
         var scheduled = await Dedicated.RunOnOwnThreadAsync(() => PumpAsync(context, schedule, expectedBytes, rate, startTicks, deadlineTicks, results, evidence, cancellationToken)).ConfigureAwait(false);
 
-        WriteMetrics(metrics, [.. results], schedule, mixText, expectedBytes, Clock.Now - startTicks, scheduled, evidence);
-        outcome.Gates["clientSendLoss"] = 0;
-        outcome.Gates["windowMs"] = 0;
+        var outcome = new ArmOutcome
+        {
+            Parameters = new ArmParameters
+            {
+                Seconds = spec.Seconds,
+                ConnectionsPerSecond = rate,
+                ExpectedBytes = expectedBytes,
+                ModeMix = mixText,
+                FramePayloadBytes = FramePayloadBytes,
+            },
+            Metrics = BuildMetrics([.. results], schedule, mixText, expectedBytes, Clock.Now - startTicks, scheduled, evidence),
+            Gates =
+            {
+                [ArmKeys.Common.Gates.ClientSendLoss] = 0,
+                [ArmKeys.Common.Gates.WindowMs] = 0,
+            },
+        };
         outcome.Notes.Add("outcome values are what the client observed; 'expected' is what the requested mode calls for, and fidelityMismatch counts any divergence plus truncated echoes.");
         outcome.Notes.Add("partialFin is expected to end as unexpectedEof: the server closes its send side while the client has deliberately not half-closed.");
         outcome.Notes.Add("echoedBytes and trailerBytes are kept for every attempt whatever its outcome, so an attempt that timed out or reset still carries the echo and trailer evidence the verdict alone cannot; trailerBytes counts the bytes read after expectedBytes of echo, and the trailer the target writes is TrailerProtocol.TotalBytes.");
@@ -241,8 +243,10 @@ internal static class ReliabilityArm
     /// constants, never by the arm's runtime: at most <see cref="MaxAttemptRecords"/> records, spent
     /// on the disconfirming attempts first, with the ordinary attempts sampled at one in
     /// <see cref="AttemptSampleStride"/>. The two counters say how much of the arm the file covers.
+    /// The type is visible to the test assembly so the record's keys can be asserted against
+    /// <see cref="ArmKeys.Reliability.Attempt"/>.
     /// </summary>
-    private sealed class AttemptEvidence
+    internal sealed class AttemptEvidence
     {
         private readonly JsonlSink _sink;
         private long _seen;
@@ -280,21 +284,21 @@ internal static class ReliabilityArm
             await _sink.WriteAsync(
                 writer =>
                 {
-                    writer.WriteString("type", "attempt");
-                    writer.WriteNumber("connectionId", attempt.ConnectionId);
-                    writer.WriteString("mode", TcpCommand.Name(attempt.Mode));
-                    writer.WriteString("status", StatusName(attempt.Status));
-                    writer.WriteString("observed", s_outcomeNames[(int)attempt.Observed]);
-                    writer.WriteString("expected", s_outcomeNames[(int)attempt.Expected]);
-                    writer.WriteBoolean("truncated", attempt.Truncated);
-                    writer.WriteNumber("echoedBytes", attempt.Echoed);
-                    writer.WriteNumber("trailerBytes", attempt.TrailerBytes);
-                    writer.WriteBoolean("eof", attempt.Eof);
-                    writer.WriteBoolean("reset", attempt.Reset);
-                    writer.WriteBoolean("protocolError", attempt.ProtocolError);
-                    writer.WriteBoolean("otherError", attempt.OtherError);
-                    writer.WriteNumber("connectTicks", attempt.ConnectTicks);
-                    writer.WriteNumber("transferTicks", attempt.TransferTicks);
+                    writer.WriteString(ArmKeys.Common.Record.Type, "attempt");
+                    writer.WriteNumber(ArmKeys.Reliability.Attempt.ConnectionId, attempt.ConnectionId);
+                    writer.WriteString(ArmKeys.Reliability.Attempt.Mode, TcpCommand.Name(attempt.Mode));
+                    writer.WriteString(ArmKeys.Reliability.Attempt.Status, StatusName(attempt.Status));
+                    writer.WriteString(ArmKeys.Reliability.Attempt.Observed, s_outcomeNames[(int)attempt.Observed]);
+                    writer.WriteString(ArmKeys.Reliability.Attempt.Expected, s_outcomeNames[(int)attempt.Expected]);
+                    writer.WriteBoolean(ArmKeys.Reliability.Attempt.Truncated, attempt.Truncated);
+                    writer.WriteNumber(ArmKeys.Reliability.Attempt.EchoedBytes, attempt.Echoed);
+                    writer.WriteNumber(ArmKeys.Reliability.Attempt.TrailerBytes, attempt.TrailerBytes);
+                    writer.WriteBoolean(ArmKeys.Reliability.Attempt.Eof, attempt.Eof);
+                    writer.WriteBoolean(ArmKeys.Reliability.Attempt.Reset, attempt.Reset);
+                    writer.WriteBoolean(ArmKeys.Reliability.Attempt.ProtocolError, attempt.ProtocolError);
+                    writer.WriteBoolean(ArmKeys.Reliability.Attempt.OtherError, attempt.OtherError);
+                    writer.WriteNumber(ArmKeys.Reliability.Attempt.ConnectTicks, attempt.ConnectTicks);
+                    writer.WriteNumber(ArmKeys.Reliability.Attempt.TransferTicks, attempt.TransferTicks);
                 },
                 cancellationToken).ConfigureAwait(false);
         }
@@ -308,8 +312,11 @@ internal static class ReliabilityArm
         };
     }
 
-    private static void WriteMetrics(
-        DictionaryMetrics metrics,
+    /// <summary>
+    /// The record a finished run publishes: the tallies and rates derived from the attempts that ran,
+    /// folded once, together with what the evidence writer managed to record.
+    /// </summary>
+    private static ReliabilityMetrics BuildMetrics(
         ReliabilityAttempt[] attempts,
         List<TcpMode> schedule,
         string mixText,
@@ -331,35 +338,55 @@ internal static class ReliabilityArm
         var transferTicks = tally._transferTicks;
         var transferSamples = tally._transferSamples;
 
-        metrics["connectAttempts"] = attempts.Length;
-        metrics["scheduledAttempts"] = scheduled;
-        metrics["outcomes"] = Zip(s_outcomeNames, observed);
-        metrics["expected"] = Zip(s_outcomeNames, expected);
-        metrics["unexpectedEof"] = unexpectedEof;
-        metrics["expectedEarlyEof"] = expectedEarlyEof;
-        metrics["truncated"] = truncated;
-        metrics["fidelityMismatch"] = mismatches;
-        metrics["fidelityRate"] = JsonRate.Rate(mismatches, attempts.Length);
-        metrics["connectFail"] = connectFailures;
-        metrics["expectedBytes"] = expectedBytes;
-        metrics["modeSchedule"] = string.Join(',', schedule.ConvertAll(TcpCommand.Name));
-        metrics["echoedBytes"] = tally._echoed;
-        metrics["trailerBytes"] = tally._trailerBytes;
-        metrics["byMode"] = BuildModeBreakdown(attempts, schedule);
-        metrics["attemptRecords"] = evidence.Written;
-        metrics["attemptRecordsOmitted"] = evidence.Omitted;
-        metrics["meanConnectMs"] = connectSamples == 0
-            ? null
-            : NumberFormat.Round(Clock.ToMicroseconds(connectTicks) / (double)connectSamples / 1000.0);
+        return new ReliabilityMetrics
+        {
+            ConnectAttempts = attempts.Length,
+            ScheduledAttempts = scheduled,
+            Outcomes = Outcomes(observed),
+            Expected = Outcomes(expected),
+            UnexpectedEof = unexpectedEof,
+            ExpectedEarlyEof = expectedEarlyEof,
+            Truncated = truncated,
+            FidelityMismatch = mismatches,
+            FidelityRate = JsonRate.Rate(mismatches, attempts.Length),
+            ConnectFail = connectFailures,
+            ExpectedBytes = expectedBytes,
+            ModeSchedule = string.Join(',', schedule.ConvertAll(TcpCommand.Name)),
+            EchoedBytes = tally._echoed,
+            TrailerBytes = tally._trailerBytes,
+            ByMode = BuildModeBreakdown(attempts, schedule),
+            AttemptRecords = evidence.Written,
+            AttemptRecordsOmitted = evidence.Omitted,
+            MeanConnectMs = connectSamples == 0
+                ? null
+                : NumberFormat.Round(Clock.ToMicroseconds(connectTicks) / (double)connectSamples / 1000.0),
 
-        // Over the attempts that completed a request send, never over every attempt: an attempt that
-        // never connected has no send to average, and letting it in as a zero deflates the mean.
-        metrics["meanTransferMs"] = transferSamples == 0
-            ? null
-            : NumberFormat.Round(Clock.ToMicroseconds(transferTicks) / (double)transferSamples / 1000.0);
-        metrics["achievedRate"] = JsonPerSecond.PerSecond(attempts.Length, elapsedTicks, System.Diagnostics.Stopwatch.Frequency);
-        metrics["effectiveModeMix"] = mixText;
+            // Over the attempts that completed a request send, never over every attempt: an attempt
+            // that never connected has no send to average, and letting it in as a zero deflates the
+            // mean.
+            MeanTransferMs = transferSamples == 0
+                ? null
+                : NumberFormat.Round(Clock.ToMicroseconds(transferTicks) / (double)transferSamples / 1000.0),
+            AchievedRate = JsonPerSecond.PerSecond(attempts.Length, elapsedTicks, System.Diagnostics.Stopwatch.Frequency),
+            EffectiveModeMix = mixText,
+        };
     }
+
+    /// <summary>
+    /// One outcome distribution, read from a tally indexed by <see cref="ReliabilityOutcome"/>. The
+    /// properties are assigned from the member the tally counted rather than from a position in a
+    /// name array, so an outcome cannot silently move from one name to another.
+    /// </summary>
+    private static ReliabilityOutcomes Outcomes(long[] values) => new()
+    {
+        Clean = values[(int)ReliabilityOutcome.Clean],
+        Reset = values[(int)ReliabilityOutcome.Reset],
+        UnexpectedEof = values[(int)ReliabilityOutcome.UnexpectedEof],
+        Timeout = values[(int)ReliabilityOutcome.Timeout],
+        ConnectFail = values[(int)ReliabilityOutcome.ConnectFail],
+        HalfCloseViolation = values[(int)ReliabilityOutcome.HalfCloseViolation],
+        OtherError = values[(int)ReliabilityOutcome.OtherError],
+    };
 
     /// <summary>
     /// The joint mode x observed distribution. The marginals in <c>outcomes</c> cannot say which
@@ -367,7 +394,7 @@ internal static class ReliabilityArm
     /// exists to answer; every mode the schedule uses appears, including a mode that produced no
     /// attempt at all.
     /// </summary>
-    private static Dictionary<string, object?> BuildModeBreakdown(ReliabilityAttempt[] attempts, List<TcpMode> schedule)
+    private static Dictionary<string, ReliabilityModeMetrics> BuildModeBreakdown(ReliabilityAttempt[] attempts, List<TcpMode> schedule)
     {
         var tallies = new Dictionary<TcpMode, ModeTally>(schedule.Count);
         foreach (var mode in schedule)
@@ -380,7 +407,7 @@ internal static class ReliabilityArm
             tallies[attempt.Mode].Add(attempt);
         }
 
-        var breakdown = new Dictionary<string, object?>(schedule.Count, StringComparer.Ordinal);
+        var breakdown = new Dictionary<string, ReliabilityModeMetrics>(schedule.Count, StringComparer.Ordinal);
         foreach (var mode in schedule)
         {
             breakdown[TcpCommand.Name(mode)] = tallies[mode].ToRecord();
@@ -418,17 +445,17 @@ internal static class ReliabilityArm
             }
         }
 
-        internal Dictionary<string, object?> ToRecord() => new(StringComparer.Ordinal)
+        internal ReliabilityModeMetrics ToRecord() => new()
         {
-            ["attempts"] = _count,
-            ["observed"] = Zip(s_outcomeNames, _observed),
-            ["truncated"] = _truncated,
-            ["echoedBytes"] = _echoed,
-            ["trailerBytes"] = _trailer,
-            ["minEchoedBytes"] = _count == 0 ? null : _minEchoed,
-            ["maxEchoedBytes"] = _count == 0 ? null : _maxEchoed,
-            ["minTrailerBytes"] = _count == 0 ? null : _minTrailer,
-            ["maxTrailerBytes"] = _count == 0 ? null : _maxTrailer,
+            Attempts = _count,
+            Observed = Outcomes(_observed),
+            Truncated = _truncated,
+            EchoedBytes = _echoed,
+            TrailerBytes = _trailer,
+            MinEchoedBytes = _count == 0 ? null : _minEchoed,
+            MaxEchoedBytes = _count == 0 ? null : _maxEchoed,
+            MinTrailerBytes = _count == 0 ? null : _minTrailer,
+            MaxTrailerBytes = _count == 0 ? null : _maxTrailer,
         };
     }
 
@@ -489,17 +516,6 @@ internal static class ReliabilityArm
         }
 
         return tally;
-    }
-
-    private static Dictionary<string, object?> Zip(string[] names, long[] values)
-    {
-        var map = new Dictionary<string, object?>(names.Length, StringComparer.Ordinal);
-        for (var index = 0; index < names.Length; index++)
-        {
-            map[names[index]] = values[index];
-        }
-
-        return map;
     }
 
     private static List<TcpMode> BuildSchedule(List<ModeWeight> weights)

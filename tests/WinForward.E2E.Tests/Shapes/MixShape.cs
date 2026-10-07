@@ -17,6 +17,24 @@ internal static class MixShape
     /// <summary>How many notes the factory below publishes.</summary>
     private const int Notes = 2;
 
+    private const string ParametersPrefix = ArmKeys.Common.Record.Parameters;
+
+    /// <summary>The parameter members the arm publishes, which is what the contract declares.</summary>
+    private static readonly string[] s_parameterNames =
+    [
+        ArmKeys.Common.Parameters.Seconds,
+        ArmKeys.Common.Parameters.Desktops,
+        ArmKeys.Common.Parameters.PageIntervalSeconds,
+        ArmKeys.Common.Parameters.PageConnections,
+        ArmKeys.Common.Parameters.PageRequestsTotal,
+        ArmKeys.Common.Parameters.PageMessageBytes,
+        ArmKeys.Common.Parameters.BulkBitsPerSecondPerDesktop,
+        ArmKeys.Common.Parameters.DnsQueriesPerPage,
+        ArmKeys.Common.Parameters.UdpPacketsPerSecondPerDesktop,
+        ArmKeys.Common.Parameters.UdpPayloadBytes,
+        ArmKeys.Common.Parameters.LossWindowMs,
+    ];
+
     // The container paths every key of this record hangs off, composed from the same constants the
     // writer uses, so a container that is renamed moves the whole shape with it.
     private const string Metrics = "metrics";
@@ -96,7 +114,7 @@ internal static class MixShape
                     Blocks: []),
             ],
             Dynamic: []),
-        Parameters: []);
+        Parameters: [.. s_parameterNames.Select(name => $"{ParametersPrefix}/{name}")]);
 
     /// <summary>
     /// The declared paths of this record in document order: each class container ahead of its own block,
@@ -134,6 +152,7 @@ internal static class MixShape
     {
         var outcome = new ArmOutcome
         {
+            Parameters = ParametersOf(),
             Metrics = flags.HasFlag(ShapeFlags.UnknownReadings) ? UnknownMetrics() : MeasuredMetrics(),
             Gates =
             {
@@ -147,19 +166,24 @@ internal static class MixShape
                 "gates.idleLanes counts the witnesses that stayed at zero: a lane that never ran is a harness failure, not a smaller aggregate.",
             },
         };
-        outcome.Parameters.Add(ArmKeys.Common.Parameters.Seconds, 10.0);
-        outcome.Parameters.Add(ArmKeys.Common.Parameters.Desktops, Desktops);
-        outcome.Parameters.Add(ArmKeys.Common.Parameters.PageIntervalSeconds, 20.0);
-        outcome.Parameters.Add(ArmKeys.Common.Parameters.PageConnections, 13);
-        outcome.Parameters.Add(ArmKeys.Common.Parameters.PageRequestsTotal, 73);
-        outcome.Parameters.Add(ArmKeys.Common.Parameters.PageMessageBytes, 38_000);
-        outcome.Parameters.Add(ArmKeys.Common.Parameters.BulkBitsPerSecondPerDesktop, 5_000_000L);
-        outcome.Parameters.Add(ArmKeys.Common.Parameters.DnsQueriesPerPage, 4);
-        outcome.Parameters.Add(ArmKeys.Common.Parameters.UdpPacketsPerSecondPerDesktop, 30);
-        outcome.Parameters.Add(ArmKeys.Common.Parameters.UdpPayloadBytes, 120);
-        outcome.Parameters.Add(ArmKeys.Common.Parameters.LossWindowMs, 200);
         return outcome;
     }
+
+    /// <summary>The load the arm declared for this run.</summary>
+    private static ArmParameters ParametersOf() => new()
+    {
+        Seconds = 10.0,
+        Desktops = Desktops,
+        PageIntervalSeconds = 20.0,
+        PageConnections = 13,
+        PageRequestsTotal = 73,
+        PageMessageBytes = 38_000,
+        BulkBitsPerSecondPerDesktop = 5_000_000L,
+        DnsQueriesPerPage = 4,
+        UdpPacketsPerSecondPerDesktop = 30,
+        UdpPayloadBytes = 120,
+        LossWindowMs = 200,
+    };
 
     private static MixMetrics MeasuredMetrics() => new()
     {

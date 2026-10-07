@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using WinForward.E2E.Contracts;
 using WinForward.E2E.Contracts.Json;
+using WinForward.E2E.Contracts.Metrics;
 using WinForward.E2E.Wire;
 
 namespace WinForward.E2E.Client.Arms;
@@ -147,30 +149,30 @@ internal static class PersistentArm
         // answer, and it may not be shorter than the pacing interval it has to report within.
         var responseTimeoutMilliseconds = Math.Max(DefaultResponseTimeoutMilliseconds, intervalMilliseconds);
 
-        var metrics = new DictionaryMetrics();
-        var outcome = new ArmOutcome
-        {
-            Parameters =
-            {
-                ["seconds"] = spec.Seconds,
-                ["intervalMs"] = intervalMilliseconds,
-                ["idleSeconds"] = idleSeconds,
-                ["payloadBytes"] = payloadBytes,
-                ["expectedBytes"] = spec.ExpectedBytes,
-                ["responseTimeoutMs"] = responseTimeoutMilliseconds,
-            },
-            Metrics = metrics,
-        };
-
         var plan = new PersistentPlan(intervalMilliseconds, idleSeconds, payloadBytes, expectedBytes, Clock.FromSeconds(responseTimeoutMilliseconds / 1000.0));
         using var linked = context.CreateLinkedTokenSource();
         var cancellationToken = linked.Token;
         var state = new PersistentCounters();
         var schedule = await Dedicated.RunOnOwnThreadAsync(() => RunPersistentAsync(context, state, plan, cancellationToken)).ConfigureAwait(false);
 
-        WriteMetrics(metrics, state, schedule, Clock.Now);
-        outcome.Gates["clientSendLoss"] = state._connectFailures + state._sendFailures;
-        outcome.Gates["windowMs"] = 0;
+        var outcome = new ArmOutcome
+        {
+            Parameters = new ArmParameters
+            {
+                Seconds = spec.Seconds,
+                IntervalMs = intervalMilliseconds,
+                IdleSeconds = idleSeconds,
+                PayloadBytes = payloadBytes,
+                ExpectedBytes = spec.ExpectedBytes,
+                ResponseTimeoutMs = responseTimeoutMilliseconds,
+            },
+            Metrics = BuildMetrics(state, schedule, Clock.Now),
+            Gates =
+            {
+                [ArmKeys.Common.Gates.ClientSendLoss] = state._connectFailures + state._sendFailures,
+                [ArmKeys.Common.Gates.WindowMs] = 0,
+            },
+        };
         outcome.Notes.Add("requests counts paced exchanges attempted and responses counts the echoes that completed them, each timed from its request's intended send instant; the difference is explained by connectFailures, sendFailures, timeouts, remoteClosed and protocolErrors.");
         outcome.Notes.Add("a request that finds its connection dead opens a replacement connection first and is counted as a reconnect: it records no tcp-rtt sample, so the latency histograms exclude both the reconnect and the round it carries, while responses and responseRate still count that round when it echoes.");
         outcome.Notes.Add("survivedIdle is the connection live when the idle window opened completing the first request after it; it is false when that request had to reconnect, when it failed, and when no idle window fitted inside the arm.");
@@ -179,7 +181,11 @@ internal static class PersistentArm
         return outcome;
     }
 
-    private static void WriteMetrics(DictionaryMetrics metrics, PersistentCounters state, PersistentSchedule schedule, long endTicks)
+    /// <summary>
+    /// The record a finished run publishes: the counters the arm ended with, the idle window it
+    /// actually held, and the rates derived from them.
+    /// </summary>
+    private static PersistentMetrics BuildMetrics(PersistentCounters state, PersistentSchedule schedule, long endTicks)
     {
         var elapsedTicks = Math.Max(0, endTicks - schedule.StartTicks);
         var idleTicks = 0L;
@@ -189,26 +195,29 @@ internal static class PersistentArm
             idleTicks = Math.Max(0, idleEndTicks - state._idleBeginTicks);
         }
 
-        metrics["requests"] = state._requests;
-        metrics["responses"] = state._responses;
-        metrics["reconnects"] = state._reconnects;
-        metrics["survivedIdle"] = state._survivedIdle;
-        metrics["idleSecondsScheduled"] = NumberFormat.Round(Clock.ToSeconds(schedule.ScheduledIdleTicks));
-        metrics["idleSecondsObserved"] = NumberFormat.Round(Clock.ToSeconds(idleTicks));
-        metrics["sendWouldBlock"] = state._sendWouldBlock;
-        metrics["sendFailures"] = state._sendFailures;
-        metrics["timeouts"] = state._timeouts;
-        metrics["remoteClosed"] = state._remoteClosed;
-        metrics["protocolErrors"] = state._protocolErrors;
-        metrics["corrupt"] = state._corrupt;
-        metrics["unmatchedReplies"] = state._unmatchedReplies;
-        metrics["connectAttempts"] = state._connectSamples + state._connectFailures;
-        metrics["connectFailures"] = state._connectFailures;
-        metrics["meanConnectMs"] = state._connectSamples == 0
-            ? null
-            : NumberFormat.Round(Clock.ToMicroseconds(state._connectTicks) / (double)state._connectSamples / 1000.0);
-        metrics["responseRate"] = JsonRate.Rate(state._responses, state._requests);
-        metrics["achievedRate"] = JsonPerSecond.PerSecond(state._responses, elapsedTicks, Stopwatch.Frequency);
+        return new PersistentMetrics
+        {
+            Requests = state._requests,
+            Responses = state._responses,
+            Reconnects = state._reconnects,
+            SurvivedIdle = state._survivedIdle,
+            IdleSecondsScheduled = NumberFormat.Round(Clock.ToSeconds(schedule.ScheduledIdleTicks)),
+            IdleSecondsObserved = NumberFormat.Round(Clock.ToSeconds(idleTicks)),
+            SendWouldBlock = state._sendWouldBlock,
+            SendFailures = state._sendFailures,
+            Timeouts = state._timeouts,
+            RemoteClosed = state._remoteClosed,
+            ProtocolErrors = state._protocolErrors,
+            Corrupt = state._corrupt,
+            UnmatchedReplies = state._unmatchedReplies,
+            ConnectAttempts = state._connectSamples + state._connectFailures,
+            ConnectFailures = state._connectFailures,
+            MeanConnectMs = state._connectSamples == 0
+                ? null
+                : NumberFormat.Round(Clock.ToMicroseconds(state._connectTicks) / (double)state._connectSamples / 1000.0),
+            ResponseRate = JsonRate.Rate(state._responses, state._requests),
+            AchievedRate = JsonPerSecond.PerSecond(state._responses, elapsedTicks, Stopwatch.Frequency),
+        };
     }
 
     private static PersistentSchedule BuildSchedule(long startTicks, long deadlineTicks, PersistentPlan plan)

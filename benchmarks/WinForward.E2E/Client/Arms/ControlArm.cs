@@ -33,40 +33,7 @@ internal static class ControlArm
         var loss = await LossArm.RunAsync(lossContext).ConfigureAwait(false);
         var elapsedTicks = Clock.Now - startTicks;
 
-        // The record spans both phases, so the declared seconds must be their sum: a consumer that
-        // derives an offered or achieved rate from parameters.seconds would otherwise be short by
-        // the whole second phase.
-        var outcome = new ArmOutcome
-        {
-            Parameters =
-            {
-                [ArmKeys.Common.Parameters.Seconds] = phaseSeconds * 2,
-                [ArmKeys.Common.Parameters.PhaseSeconds] = phaseSeconds,
-                [ArmKeys.Common.Parameters.Phases] = s_phases,
-                [ArmKeys.Common.Parameters.Latency] = latency.Parameters,
-                [ArmKeys.Common.Parameters.Loss] = loss.Parameters,
-            },
-            Metrics = new ControlMetrics
-            {
-                ElapsedSeconds = NumberFormat.Round(Clock.ToSeconds(elapsedTicks), 4),
-
-                // LatencyArm always publishes the shared typed record, so the phase contract is the
-                // narrowing rather than a check.
-                Latency = (LatencyMetrics)latency.Metrics,
-                Loss = loss.Metrics,
-            },
-            Gates =
-            {
-                [ArmKeys.Common.Gates.ClientSendLoss] = ReadCount(latency.Gates, ArmKeys.Common.Gates.ClientSendLoss) + ReadCount(loss.Gates, ArmKeys.Common.Gates.ClientSendLoss),
-                [ArmKeys.Common.Gates.WindowOverflow] = ReadCount(latency.Gates, ArmKeys.Common.Gates.WindowOverflow) + ReadCount(loss.Gates, ArmKeys.Common.Gates.WindowOverflow),
-                [ArmKeys.Common.Gates.BacklogDrops] = ReadCount(latency.Gates, ArmKeys.Common.Gates.BacklogDrops) + ReadCount(loss.Gates, ArmKeys.Common.Gates.BacklogDrops),
-                [ArmKeys.Common.Gates.SendFailures] = ReadCount(latency.Gates, ArmKeys.Common.Gates.SendFailures) + ReadCount(loss.Gates, ArmKeys.Common.Gates.SendFailures),
-                [ArmKeys.Common.Gates.LaneShortfall] = ReadCount(latency.Gates, ArmKeys.Common.Gates.LaneShortfall) + ReadCount(loss.Gates, ArmKeys.Common.Gates.LaneShortfall),
-                [ArmKeys.Common.Gates.ScheduleTruncated] = Math.Max(ReadCount(latency.Gates, ArmKeys.Common.Gates.ScheduleTruncated), ReadCount(loss.Gates, ArmKeys.Common.Gates.ScheduleTruncated)),
-                [ArmKeys.Common.Gates.InFlightCeilingMs] = Math.Max(ReadMilliseconds(latency.Gates, ArmKeys.Common.Gates.InFlightCeilingMs), ReadMilliseconds(loss.Gates, ArmKeys.Common.Gates.InFlightCeilingMs)),
-                [ArmKeys.Common.Gates.WindowMs] = ReadMilliseconds(loss.Gates, ArmKeys.Common.Gates.WindowMs),
-            },
-        };
+        var outcome = BuildOutcome(latency, loss, phaseSeconds, elapsedTicks);
         outcome.Notes.Add("base runs the latency arm and then the loss arm back to back inside one record, with no proxifier loaded: it is the harness floor.");
         outcome.Notes.Add(string.Create(
             CultureInfo.InvariantCulture,
@@ -79,6 +46,57 @@ internal static class ControlArm
         outcome.Notes.AddRange(latency.Notes);
         outcome.Notes.AddRange(loss.Notes);
         return outcome;
+    }
+
+    /// <summary>
+    /// The record the two finished phases publish: the phase parameters and metrics one level down,
+    /// the elapsed wall time, and the gates the phases' own outcomes reported.
+    /// </summary>
+    private static ArmOutcome BuildOutcome(ArmOutcome latency, ArmOutcome loss, double phaseSeconds, long elapsedTicks)
+    {
+        // The record spans both phases, so the declared seconds must be their sum: a consumer that
+        // derives an offered or achieved rate from parameters.seconds would otherwise be short by
+        // the whole second phase.
+        return new ArmOutcome
+        {
+            Parameters = new ArmParameters
+            {
+                Seconds = phaseSeconds * 2,
+                PhaseSeconds = phaseSeconds,
+                Phases = s_phases,
+                Latency = latency.Parameters,
+                Loss = loss.Parameters,
+            },
+            Metrics = new ControlMetrics
+            {
+                ElapsedSeconds = NumberFormat.Round(Clock.ToSeconds(elapsedTicks), 4),
+
+                // Both arms always publish their own typed record, so each phase contract is the
+                // narrowing rather than a check.
+                Latency = (LatencyMetrics)latency.Metrics,
+                Loss = (LossMetrics)loss.Metrics,
+            },
+            Gates =
+            {
+                [ArmKeys.Common.Gates.ClientSendLoss] = Sum(latency.Gates, loss.Gates, ArmKeys.Common.Gates.ClientSendLoss),
+                [ArmKeys.Common.Gates.WindowOverflow] = Sum(latency.Gates, loss.Gates, ArmKeys.Common.Gates.WindowOverflow),
+                [ArmKeys.Common.Gates.BacklogDrops] = Sum(latency.Gates, loss.Gates, ArmKeys.Common.Gates.BacklogDrops),
+                [ArmKeys.Common.Gates.SendFailures] = Sum(latency.Gates, loss.Gates, ArmKeys.Common.Gates.SendFailures),
+                [ArmKeys.Common.Gates.LaneShortfall] = Sum(latency.Gates, loss.Gates, ArmKeys.Common.Gates.LaneShortfall),
+                [ArmKeys.Common.Gates.ScheduleTruncated] = Math.Max(
+                    latency.Gates.GetValueOrDefault(ArmKeys.Common.Gates.ScheduleTruncated),
+                    loss.Gates.GetValueOrDefault(ArmKeys.Common.Gates.ScheduleTruncated)),
+                [ArmKeys.Common.Gates.InFlightCeilingMs] = Math.Max(
+                    latency.Gates.GetValueOrDefault(ArmKeys.Common.Gates.InFlightCeilingMs),
+                    loss.Gates.GetValueOrDefault(ArmKeys.Common.Gates.InFlightCeilingMs)),
+                [ArmKeys.Common.Gates.WindowMs] = loss.Gates.GetValueOrDefault(ArmKeys.Common.Gates.WindowMs),
+            },
+        };
+
+        // The two phases publish different subsets of the shared gate set: a gate the phase did not
+        // publish is a zero, because a gate the arm has no quantity for is not a missing measurement.
+        static double Sum(Dictionary<string, double> first, Dictionary<string, double> second, string key) =>
+            first.GetValueOrDefault(key) + second.GetValueOrDefault(key);
     }
 
     // The latency phase keeps its own default load because it is a probe and the loss phase because
@@ -106,24 +124,4 @@ internal static class ControlArm
         Window = spec.Window,
         LossWindowMs = spec.LossWindowMs,
     };
-
-    private static long ReadCount(Dictionary<string, object?> gates, string key) =>
-        gates.TryGetValue(key, out var value)
-            ? value switch
-            {
-                long number => number,
-                double number => (long)number,
-                _ => 0,
-            }
-            : 0;
-
-    private static double ReadMilliseconds(Dictionary<string, object?> gates, string key) =>
-        gates.TryGetValue(key, out var value)
-            ? value switch
-            {
-                double number => number,
-                long number => number,
-                _ => 0,
-            }
-            : 0;
 }

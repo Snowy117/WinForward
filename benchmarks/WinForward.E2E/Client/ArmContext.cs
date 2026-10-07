@@ -123,7 +123,12 @@ internal sealed class LatencySet
 
 internal sealed class ArmOutcome
 {
-    internal Dictionary<string, object?> Parameters { get; } = new(StringComparer.Ordinal);
+    /// <summary>
+    /// What the arm ran with, after its own defaults were applied. The value is typed rather than a
+    /// name/value bag, so an arm constructs the members it published and every other member stays
+    /// absent from the record (D14.21).
+    /// </summary>
+    internal required ArmParameters Parameters { get; init; }
 
     /// <summary>
     /// The arm's <c>metrics</c> object. It is carried as an <see cref="IJsonWritable"/> rather than a
@@ -132,9 +137,32 @@ internal sealed class ArmOutcome
     /// </summary>
     internal required IJsonWritable Metrics { get; init; }
 
-    internal Dictionary<string, object?> Gates { get; } = new(StringComparer.Ordinal);
+    /// <summary>
+    /// The arm's <c>gates</c> object: a name/value map whose keys are the
+    /// <see cref="ArmKeys.Common.Gates"/> constants. The ceiling on directly measurable latency is a
+    /// fraction of a millisecond rather than a count, so the values are doubles; every counter is a
+    /// whole number far below 2^53 and therefore exact.
+    /// </summary>
+    internal Dictionary<string, double> Gates { get; } = new(StringComparer.Ordinal);
 
     internal List<string> Notes { get; } = [];
+}
+
+/// <summary>
+/// The metrics of an arm that failed before it built any: the record still publishes a
+/// <c>metrics</c> object, the same empty one a run that reached the writer with nothing measured has
+/// always had.
+/// </summary>
+internal sealed class EmptyMetrics : IJsonWritable
+{
+    /// <inheritdoc/>
+    public void WriteTo(Utf8JsonWriter writer)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+
+        writer.WriteStartObject();
+        writer.WriteEndObject();
+    }
 }
 
 internal sealed class ArmContext

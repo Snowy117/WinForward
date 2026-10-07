@@ -110,8 +110,9 @@ public static partial class ArmKeys
 
         /// <summary>
         /// The <c>parameters</c> object: what the arm actually ran with, after its own defaults were
-        /// applied. <see cref="Latency"/> and <see cref="Loss"/> are themselves nested objects whose
-        /// inner keys belong to the arms that produce those phases, not to this family.
+        /// applied, with one member per parameter any kind can publish. <see cref="Latency"/> and
+        /// <see cref="Loss"/> are themselves nested objects whose inner keys belong to the arms that
+        /// produce those phases, not to this family.
         /// </summary>
         public static class Parameters
         {
@@ -187,7 +188,37 @@ public static partial class ArmKeys
             public const string Latency = "latency";
 #pragma warning restore S3218
 
+            // S3218: the same shadowing as `latency` above, against `ArmKeys.Loss`.
+#pragma warning disable S3218
+            // ReSharper disable once MemberHidesStaticFromOuterClass
             public const string Loss = "loss";
+#pragma warning restore S3218
+        }
+
+        /// <summary>
+        /// The keys an armSummary record carries beyond the ones it shares with a result record: the
+        /// file the arm's own records went to, which the run file's roster points at.
+        /// </summary>
+        public static class ArmSummary
+        {
+            /// <summary>The result file this summary is the header of.</summary>
+            public const string ResultFile = "resultFile";
+        }
+
+        /// <summary>
+        /// The keys an error record carries beyond the ones it shares with a result record: what went
+        /// wrong, for an arm that ended without a result of its own (D14.12).
+        /// </summary>
+        public static class ErrorRecord
+        {
+            /// <summary>The exception family: <c>OperationCanceledException</c> for a stopped run.</summary>
+            public const string Error = "error";
+
+            /// <summary>The failure's message, or the fixed <c>cancelled</c> for a stopped run.</summary>
+            public const string Message = "message";
+
+            /// <summary>The innermost exception's type name.</summary>
+            public const string Detail = "detail";
         }
 
         /// <summary>

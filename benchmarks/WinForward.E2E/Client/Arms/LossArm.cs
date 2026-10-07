@@ -1,5 +1,7 @@
 using System.Net.Sockets;
+using WinForward.E2E.Contracts;
 using WinForward.E2E.Contracts.Json;
+using WinForward.E2E.Contracts.Metrics;
 using WinForward.E2E.Wire;
 
 namespace WinForward.E2E.Client.Arms;
@@ -20,19 +22,6 @@ internal static class LossArm
         var windowMs = spec.LossWindowMs > 0 ? spec.LossWindowMs : UdpLossMath.DefaultWindowMilliseconds;
         var windowTicks = UdpLossMath.WindowTicks(windowMs);
 
-        var metrics = new DictionaryMetrics();
-        var outcome = new ArmOutcome
-        {
-            Parameters =
-            {
-                ["seconds"] = spec.Seconds,
-                ["ratePerSecond"] = rate,
-                ["payloadBytes"] = payloadBytes,
-                ["lossWindowMs"] = windowMs,
-            },
-            Metrics = metrics,
-        };
-
         var tracker = new UdpReliabilityTracker();
         var startTicks = Clock.Now;
         var deadlineTicks = context.DeadlineTicks(startTicks);
@@ -44,9 +33,22 @@ internal static class LossArm
 
         var counts = tracker.Classify(windowTicks, observationEndTicks);
         var clientSendLoss = tracker.SendFailure + tracker.WindowOverflow + counts.Undetermined;
-        WriteMetrics(metrics, tracker, counts, windowMs, clientSendLoss, Clock.Now - startTicks);
-        outcome.Gates["clientSendLoss"] = clientSendLoss;
-        outcome.Gates["windowMs"] = (double)windowMs;
+        var outcome = new ArmOutcome
+        {
+            Parameters = new ArmParameters
+            {
+                Seconds = spec.Seconds,
+                RatePerSecond = rate,
+                PayloadBytes = payloadBytes,
+                LossWindowMs = windowMs,
+            },
+            Metrics = BuildMetrics(tracker, counts, windowMs, clientSendLoss, Clock.Now - startTicks),
+            Gates =
+            {
+                [ArmKeys.Common.Gates.ClientSendLoss] = clientSendLoss,
+                [ArmKeys.Common.Gates.WindowMs] = windowMs,
+            },
+        };
         outcome.Notes.Add("W is the plan's lossWindowMs, 200 ms when the plan does not declare one: it is declared and published as metrics.window rather than derived, so every row's arrived/late/never split is reproducible from the record alone (RFC 2680 style, a datagram is lost if it has not arrived W after its intended send instant).");
         outcome.Notes.Add("a slot leaves the in-flight window W after its intended send instant even without an arrival, so a datagram the path drops cannot wedge the offer loop and stop the client sending.");
         outcome.Notes.Add("every sent datagram is classified exactly once, so arrived + late + never + abandonedAtTeardown + corruptDatagrams == sent by construction; corruptDatagrams counts the sent datagrams booked corrupt, while corrupt counts corrupt arrivals and so also counts replay of a frame already booked corrupt.");
@@ -61,8 +63,11 @@ internal static class LossArm
         return outcome;
     }
 
-    private static void WriteMetrics(
-        DictionaryMetrics metrics,
+    /// <summary>
+    /// The record a finished run publishes: every counter the tracker and the classification ended
+    /// with, and the rates derived from them in one place.
+    /// </summary>
+    private static LossMetrics BuildMetrics(
         UdpReliabilityTracker tracker,
         LossCounts counts,
         int windowMs,
@@ -70,34 +75,37 @@ internal static class LossArm
         long elapsedTicks)
     {
         var loss = counts.Late + counts.Never;
-        metrics["sent"] = tracker.SentOk;
-        metrics["supplied"] = tracker.Supplied;
-        metrics["arrived"] = counts.Arrived;
-        metrics["late"] = counts.Late;
-        metrics["never"] = counts.Never;
-        metrics["corrupt"] = counts.Corrupt;
-        metrics["corruptDatagrams"] = counts.CorruptDatagrams;
-        metrics["duplicate"] = counts.Duplicate;
-        metrics["reordered"] = counts.Reordered;
-        metrics["unmatchedReplies"] = tracker.UnmatchedReplies;
-        metrics["foreignConnection"] = tracker.ForeignConnection;
-        metrics["receivedDatagrams"] = tracker.ReceivedDatagrams;
-        metrics["receivedBytes"] = tracker.ReceivedBytes;
-        metrics["clientSendLoss"] = clientSendLoss;
-        metrics["sendWouldBlock"] = tracker.SendWouldBlock;
-        metrics["sendFailures"] = tracker.SendFailure;
-        metrics["windowOverflow"] = tracker.WindowOverflow;
-        metrics["abandonedAtTeardown"] = counts.Undetermined;
-        metrics["window"] = (double)windowMs;
-        metrics["lossRate"] = JsonRate.Rate(loss, tracker.SentOk);
-        metrics["strictLossRate"] = JsonRate.Rate(loss + counts.Corrupt, tracker.SentOk);
-        metrics["lateRate"] = JsonRate.Rate(counts.Late, tracker.SentOk);
-        metrics["corruptRate"] = JsonRate.Rate(counts.Corrupt, tracker.SentOk);
-        metrics["duplicateRate"] = JsonRate.Rate(counts.Duplicate, tracker.SentOk);
-        metrics["reorderRate"] = JsonRate.Rate(counts.Reordered, tracker.SentOk);
-        metrics["clientSendLossRate"] = JsonRate.Rate(clientSendLoss, tracker.Supplied);
-        metrics["outOfRangeSequences"] = tracker.OutOfRange;
-        metrics["achievedRate"] = JsonPerSecond.PerSecond(tracker.SentOk, elapsedTicks, System.Diagnostics.Stopwatch.Frequency);
+        return new LossMetrics
+        {
+            Sent = tracker.SentOk,
+            Supplied = tracker.Supplied,
+            Arrived = counts.Arrived,
+            Late = counts.Late,
+            Never = counts.Never,
+            Corrupt = counts.Corrupt,
+            CorruptDatagrams = counts.CorruptDatagrams,
+            Duplicate = counts.Duplicate,
+            Reordered = counts.Reordered,
+            UnmatchedReplies = tracker.UnmatchedReplies,
+            ForeignConnection = tracker.ForeignConnection,
+            ReceivedDatagrams = tracker.ReceivedDatagrams,
+            ReceivedBytes = tracker.ReceivedBytes,
+            ClientSendLoss = clientSendLoss,
+            SendWouldBlock = tracker.SendWouldBlock,
+            SendFailures = tracker.SendFailure,
+            WindowOverflow = tracker.WindowOverflow,
+            AbandonedAtTeardown = counts.Undetermined,
+            Window = windowMs,
+            LossRate = JsonRate.Rate(loss, tracker.SentOk),
+            StrictLossRate = JsonRate.Rate(loss + counts.Corrupt, tracker.SentOk),
+            LateRate = JsonRate.Rate(counts.Late, tracker.SentOk),
+            CorruptRate = JsonRate.Rate(counts.Corrupt, tracker.SentOk),
+            DuplicateRate = JsonRate.Rate(counts.Duplicate, tracker.SentOk),
+            ReorderRate = JsonRate.Rate(counts.Reordered, tracker.SentOk),
+            ClientSendLossRate = JsonRate.Rate(clientSendLoss, tracker.Supplied),
+            OutOfRangeSequences = tracker.OutOfRange,
+            AchievedRate = JsonPerSecond.PerSecond(tracker.SentOk, elapsedTicks, System.Diagnostics.Stopwatch.Frequency),
+        };
     }
 
     private static int ApplyFaultInjection(ClientOptions options, FrameBuffer frame, int payloadBytes, long index, int length)

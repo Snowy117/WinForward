@@ -117,9 +117,10 @@ internal sealed record MetricsContract(
 /// <param name="Outcome">The explicit factory, one per flag state the kind's shape can take.</param>
 /// <param name="Metrics">The contract of the kind's <c>metrics</c> object.</param>
 /// <param name="Parameters">
-/// Declared parameter paths beyond the common family. A kind whose parameters nest another arm's
-/// parameters (the control's two phases) declares those paths here: the phase keys are the same
-/// constants one level down, which is where the arm publishes them.
+/// The <c>parameters</c> paths this kind publishes, and no others: the arm sets one member of
+/// <see cref="ArmParameters"/> per path, so the emitted set and this declaration are compared as
+/// sets. A kind whose parameters nest another arm's parameters (the control's two phases) declares
+/// those leaf paths under its own phase prefix.
 /// </param>
 /// <remarks>
 /// A required property added to a metrics record breaks the factory at compile time, and the key and
@@ -145,6 +146,9 @@ internal static class ContractRegistry
         DnsShape.s_contract,
         MixShape.s_contract,
         ControlShape.s_contract,
+        LossShape.s_contract,
+        ReliabilityShape.s_contract,
+        PersistentShape.s_contract,
     ];
 }
 
@@ -154,8 +158,6 @@ internal static class RecordContract
     internal static List<string> Skeleton => DeclaredKeys.Under(typeof(ArmKeys.Common.Record), string.Empty);
 
     internal static List<string> Gates => DeclaredKeys.Under(typeof(ArmKeys.Common.Gates), ArmKeys.Common.Record.Gates);
-
-    internal static List<string> Parameters => DeclaredKeys.Under(typeof(ArmKeys.Common.Parameters), ArmKeys.Common.Record.Parameters);
 
     /// <summary>
     /// The declared paths of the histogram named <paramref name="name"/>: the histogram itself, and

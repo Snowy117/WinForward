@@ -16,6 +16,19 @@ internal static class LatencyShape
     /// <summary>How many notes the factory below publishes.</summary>
     private const int Notes = 3;
 
+    private const string ParametersPrefix = ArmKeys.Common.Record.Parameters;
+
+    /// <summary>The parameter members the arm publishes, which is what the contract declares.</summary>
+    internal static readonly string[] s_parameterNames =
+    [
+        ArmKeys.Common.Parameters.Seconds,
+        ArmKeys.Common.Parameters.RatePerSecond,
+        ArmKeys.Common.Parameters.PayloadBytes,
+        ArmKeys.Common.Parameters.Protocol,
+        ArmKeys.Common.Parameters.Lanes,
+        ArmKeys.Common.Parameters.InFlightWindow,
+    ];
+
     internal static readonly KindContract s_contract = new(
         "latency",
         Outcome,
@@ -59,7 +72,7 @@ internal static class LatencyShape
                     Blocks: []),
             ],
             Dynamic: []),
-        Parameters: []);
+        Parameters: [.. s_parameterNames.Select(name => $"{ParametersPrefix}/{name}")]);
 
     /// <summary>
     /// The record the latency arm publishes under <paramref name="flags"/>: also the control's latency
@@ -121,20 +134,21 @@ internal static class LatencyShape
     /// The load the arm declares for this run, which is also what the control's
     /// <c>parameters/latency</c> object carries for its phase.
     /// </summary>
-    internal static Dictionary<string, object?> PhaseParameters(ShapeFlags flags) => new(StringComparer.Ordinal)
+    internal static ArmParameters PhaseParameters(ShapeFlags flags) => new()
     {
-        [ArmKeys.Common.Parameters.Seconds] = 8.0,
-        [ArmKeys.Common.Parameters.RatePerSecond] = 20,
-        [ArmKeys.Common.Parameters.PayloadBytes] = 120,
-        [ArmKeys.Common.Parameters.Protocol] = ShapeData.ProtocolOf(flags),
-        [ArmKeys.Common.Parameters.Lanes] = Lanes,
-        [ArmKeys.Common.Parameters.InFlightWindow] = 4096,
+        Seconds = 8.0,
+        RatePerSecond = 20,
+        PayloadBytes = 120,
+        Protocol = ShapeData.ProtocolOf(flags),
+        Lanes = Lanes,
+        InFlightWindow = 4096,
     };
 
     private static ArmOutcome Outcome(ShapeFlags flags)
     {
         var outcome = new ArmOutcome
         {
+            Parameters = PhaseParameters(flags),
             Metrics = Metrics(flags),
             Gates =
             {
@@ -156,11 +170,6 @@ internal static class LatencyShape
                 "tcp and udp counters are summed only after every lane has joined, so sent cannot exceed supplied however many lanes a plan asks for.",
             },
         };
-        foreach (var parameter in PhaseParameters(flags))
-        {
-            outcome.Parameters.Add(parameter.Key, parameter.Value);
-        }
-
         return outcome;
     }
 }

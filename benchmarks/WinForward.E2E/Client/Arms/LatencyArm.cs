@@ -189,13 +189,13 @@ internal static class LatencyArm
         // publishes no block at all instead of a block of zeros that would read as a measurement.
         var outcome = new ArmOutcome
         {
+            Parameters = plan.Parameters(),
             Metrics = new LatencyMetrics
             {
                 Tcp = plan.UseTcp ? TcpMetrics(tcp, lanes.Tcp, plan, elapsedTicks) : null,
                 Udp = plan.UseUdp ? UdpMetrics(lanes.Udp, plan, elapsedTicks) : null,
             },
         };
-        plan.WriteParameters(outcome);
 
         var validity = new MeasurementValidity(plan, lanes, tcp, elapsedTicks);
         WriteGates(outcome, lanes, tcp, validity);
@@ -921,18 +921,21 @@ internal static class LatencyArm
 
         internal bool UseUdp { get; }
 
-        internal void WriteParameters(ArmOutcome outcome)
+        /// <summary>
+        /// The load this arm actually ran with, after its own defaults were applied.
+        /// </summary>
+        internal ArmParameters Parameters() => new()
         {
-            outcome.Parameters[ArmKeys.Common.Parameters.Seconds] = Seconds;
-            outcome.Parameters[ArmKeys.Common.Parameters.RatePerSecond] = Rate;
-            outcome.Parameters[ArmKeys.Common.Parameters.PayloadBytes] = PayloadBytes;
-            outcome.Parameters[ArmKeys.Common.Parameters.Protocol] = Protocol;
-            outcome.Parameters[ArmKeys.Common.Parameters.Lanes] = Lanes;
+            Seconds = Seconds,
+            RatePerSecond = Rate,
+            PayloadBytes = PayloadBytes,
+            Protocol = Protocol,
+            Lanes = Lanes,
 
             // in-flight requests per lane; the loss arm's window is a millisecond threshold, so the
             // two arms must not publish one bare "window" that means different things.
-            outcome.Parameters[ArmKeys.Common.Parameters.InFlightWindow] = InFlightWindow;
-        }
+            InFlightWindow = InFlightWindow,
+        };
 
         private static int BacklogCapacity(int rate, int window) =>
             (int)Math.Min(MaxBacklogPerLane, Math.Max((long)window * 4, (long)rate * BacklogSeconds));

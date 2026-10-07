@@ -3,7 +3,7 @@
 
 Path alphabet (design-decisions D7 item 4, D14.6): a canonical path is ``"/".join(segments)``
 where each segment is the literal member name, so a dot inside a key is *never* split --
-``metrics/tcp.sentOk`` names the member ``tcp.sentOk`` of ``metrics``, not a nested ``tcp``.
+``metrics/tcp.sent`` names the member ``tcp.sent`` of ``metrics``, not a nested ``tcp``.
 An array contributes its own path exactly once and its elements are flattened under that same
 path (no ``[i]`` segments); how many elements there were is recorded as the array's arity.
 

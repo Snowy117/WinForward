@@ -83,14 +83,14 @@ internal static class DnsArm
         // total the run ended with rather than a snapshot taken while a lane was still counting.
         var outcome = new ArmOutcome
         {
-            Parameters =
+            Parameters = new ArmParameters
             {
-                [ArmKeys.Common.Parameters.Seconds] = spec.Seconds,
-                [ArmKeys.Common.Parameters.RatePerSecond] = rate,
-                [ArmKeys.Common.Parameters.TcpPercent] = tcpPercent,
-                [ArmKeys.Common.Parameters.CnameEvery] = cnameEvery,
-                [ArmKeys.Common.Parameters.DnsPort] = dnsPort,
-                [ArmKeys.Common.Parameters.DrainWindowMs] = DrainWindowMilliseconds,
+                Seconds = spec.Seconds,
+                RatePerSecond = rate,
+                TcpPercent = tcpPercent,
+                CnameEvery = cnameEvery,
+                DnsPort = dnsPort,
+                DrainWindowMs = DrainWindowMilliseconds,
             },
             Metrics = MetricsOf(udp, tcp, Clock.Now - startTicks),
             Gates =

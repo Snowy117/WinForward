@@ -35,7 +35,9 @@ The D15 classes and their verdicts:
    throughput, transfer volumes, latency-histogram readings. These are ``observed movement``:
    reported for information and **never a failure**, because a reading that did not move between
    two runs is the exception, not the contract. ``--strict`` lists every reading that moved; without
-   it only the census is printed.
+   it only the census is printed. D17.1 puts the whole ``latency/*`` histogram subtree here: it is a
+   sample aggregate, so its ``count`` beside its ``minUs``/``maxUs``/``meanUs``/percentile readings
+   moves with the host that ran the measurement, never with the contract.
 
 ``gates/inFlightCeilingMs`` is the cross-class key D15 item 6 names: it is a ``gates.*`` counter by
 shape and a millisecond measurement by meaning. It is classified by an explicit ``classOverrides``

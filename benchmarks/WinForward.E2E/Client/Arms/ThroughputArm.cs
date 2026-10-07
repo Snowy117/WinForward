@@ -109,12 +109,12 @@ internal static class ThroughputArm
         var elapsedTicks = Clock.Now - startTicks;
         return new ArmOutcome
         {
-            Parameters =
+            Parameters = new ArmParameters
             {
-                [ArmKeys.Common.Parameters.Seconds] = spec.Seconds,
-                [ArmKeys.Common.Parameters.Streams] = streams,
-                [ArmKeys.Common.Parameters.TargetBytesPerSecond] = targetBytesPerSecond,
-                [ArmKeys.Common.Parameters.FramePayloadBytes] = FramePayloadBytes,
+                Seconds = spec.Seconds,
+                Streams = streams,
+                TargetBytesPerSecond = targetBytesPerSecond,
+                FramePayloadBytes = FramePayloadBytes,
             },
             Metrics = BuildMetrics(states, elapsedTicks, budget, targetBytesPerSecond, frameLength, limiter.BudgetExhausted),
             Gates =

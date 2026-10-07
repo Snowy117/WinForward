@@ -13,18 +13,31 @@ internal static class DnsShape
     /// <summary>How many notes the factory below publishes.</summary>
     private const int Notes = 2;
 
+    private const string ParametersPrefix = ArmKeys.Common.Record.Parameters;
+
+    /// <summary>The parameter members the arm publishes, which is what the contract declares.</summary>
+    private static readonly string[] s_parameterNames =
+    [
+        ArmKeys.Common.Parameters.Seconds,
+        ArmKeys.Common.Parameters.RatePerSecond,
+        ArmKeys.Common.Parameters.TcpPercent,
+        ArmKeys.Common.Parameters.CnameEvery,
+        ArmKeys.Common.Parameters.DnsPort,
+        ArmKeys.Common.Parameters.DrainWindowMs,
+    ];
+
     internal static readonly KindContract s_contract = new(
         "dns",
         static flags => new ArmOutcome
         {
-            Parameters =
+            Parameters = new ArmParameters
             {
-                [ArmKeys.Common.Parameters.Seconds] = 8.0,
-                [ArmKeys.Common.Parameters.RatePerSecond] = 50,
-                [ArmKeys.Common.Parameters.TcpPercent] = 20,
-                [ArmKeys.Common.Parameters.CnameEvery] = 0,
-                [ArmKeys.Common.Parameters.DnsPort] = 5301,
-                [ArmKeys.Common.Parameters.DrainWindowMs] = 1000,
+                Seconds = 8.0,
+                RatePerSecond = 50,
+                TcpPercent = 20,
+                CnameEvery = 0,
+                DnsPort = 5301,
+                DrainWindowMs = 1000,
             },
             Metrics = new DnsMetrics
             {
@@ -78,5 +91,5 @@ internal static class DnsShape
                 new DynamicMembers($"metrics/{ArmKeys.Dns.Rcodes}", ShapeData.IsRcodeName),
                 new DynamicMembers($"metrics/{ArmKeys.Dns.QueryTypes}", ShapeData.IsQueryTypeName),
             ]),
-        Parameters: []);
+        Parameters: [.. s_parameterNames.Select(name => $"{ParametersPrefix}/{name}")]);
 }

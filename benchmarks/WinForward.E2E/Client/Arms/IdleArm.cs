@@ -15,10 +15,10 @@ internal static class IdleArm
         // of the record is filled at the one point that knows the value.
         return new ArmOutcome
         {
-            Parameters =
+            Parameters = new ArmParameters
             {
-                [ArmKeys.Common.Parameters.Seconds] = context.Spec.Seconds,
-                [ArmKeys.Common.Parameters.Traffic] = "none",
+                Seconds = context.Spec.Seconds,
+                Traffic = "none",
             },
             Metrics = new IdleMetrics
             {

@@ -147,26 +147,26 @@ internal static class MixArm
         var (metrics, clientSendLoss, idleLanes) = WriteMetrics(counters, trackers, observationEnds, windowMs, windowTicks, Clock.Now - startTicks);
         var outcome = new ArmOutcome
         {
-            Parameters =
+            Parameters = new ArmParameters
             {
-                [ArmKeys.Common.Parameters.Seconds] = context.Spec.Seconds,
-                [ArmKeys.Common.Parameters.Desktops] = desktops,
-                [ArmKeys.Common.Parameters.PageIntervalSeconds] = s_pageInterval.TotalSeconds,
-                [ArmKeys.Common.Parameters.PageConnections] = PageConnections,
-                [ArmKeys.Common.Parameters.PageRequestsTotal] = PageTotalRequests,
-                [ArmKeys.Common.Parameters.PageMessageBytes] = PageMessageBytes,
-                [ArmKeys.Common.Parameters.BulkBitsPerSecondPerDesktop] = BulkBitsPerSecond,
-                [ArmKeys.Common.Parameters.DnsQueriesPerPage] = DnsQueriesPerPage,
-                [ArmKeys.Common.Parameters.UdpPacketsPerSecondPerDesktop] = UdpPacketsPerSecond,
-                [ArmKeys.Common.Parameters.UdpPayloadBytes] = UdpPayloadBytes,
-                [ArmKeys.Common.Parameters.LossWindowMs] = windowMs,
+                Seconds = context.Spec.Seconds,
+                Desktops = desktops,
+                PageIntervalSeconds = s_pageInterval.TotalSeconds,
+                PageConnections = PageConnections,
+                PageRequestsTotal = PageTotalRequests,
+                PageMessageBytes = PageMessageBytes,
+                BulkBitsPerSecondPerDesktop = BulkBitsPerSecond,
+                DnsQueriesPerPage = DnsQueriesPerPage,
+                UdpPacketsPerSecondPerDesktop = UdpPacketsPerSecond,
+                UdpPayloadBytes = UdpPayloadBytes,
+                LossWindowMs = windowMs,
             },
             Metrics = metrics,
             Gates =
             {
                 [ArmKeys.Common.Gates.ClientSendLoss] = clientSendLoss,
                 [ArmKeys.Common.Gates.IdleLanes] = idleLanes,
-                [ArmKeys.Common.Gates.WindowMs] = (double)windowMs,
+                [ArmKeys.Common.Gates.WindowMs] = windowMs,
             },
         };
         outcome.Notes.Add("W is the plan's lossWindowMs, 200 ms when the plan does not declare one: it is declared and published as classes.udp.window rather than derived, so every row's arrived/late/never split is reproducible from the record alone (RFC 2680 style).");

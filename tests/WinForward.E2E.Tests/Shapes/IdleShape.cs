@@ -10,14 +10,23 @@ internal static class IdleShape
     /// <summary>How many notes the factory below publishes.</summary>
     private const int Notes = 1;
 
+    private const string ParametersPrefix = ArmKeys.Common.Record.Parameters;
+
+    /// <summary>The parameter members the arm publishes, which is what the contract declares.</summary>
+    private static readonly string[] s_parameterNames =
+    [
+        ArmKeys.Common.Parameters.Seconds,
+        ArmKeys.Common.Parameters.Traffic,
+    ];
+
     internal static readonly KindContract s_contract = new(
         "idle",
         static _ => new ArmOutcome
         {
-            Parameters =
+            Parameters = new ArmParameters
             {
-                [ArmKeys.Common.Parameters.Seconds] = 5.0,
-                [ArmKeys.Common.Parameters.Traffic] = "none",
+                Seconds = 5.0,
+                Traffic = "none",
             },
             Metrics = new IdleMetrics { ElapsedSeconds = 5.001 },
             Gates =
@@ -37,5 +46,5 @@ internal static class IdleShape
             Arrays: [new ArrayArity(ArmKeys.Common.Record.Notes, Notes)],
             Blocks: [],
             Dynamic: []),
-        Parameters: []);
+        Parameters: [.. s_parameterNames.Select(name => $"{ParametersPrefix}/{name}")]);
 }
