@@ -32,5 +32,6 @@
     <Project Path="benchmarks/WinForward.Benchmarks/WinForward.Benchmarks.csproj" />
     <Project Path="benchmarks/WinForward.E2E/WinForward.E2E.csproj" />
     <Project Path="benchmarks/WinForward.E2E.Contracts/WinForward.E2E.Contracts.csproj" />
+    <Project Path="benchmarks/WinForward.E2E.Analysis/WinForward.E2E.Analysis.csproj" />
   </Folder>
 </Solution>

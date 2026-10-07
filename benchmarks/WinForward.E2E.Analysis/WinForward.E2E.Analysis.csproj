@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>WinForward.E2E.Analysis</AssemblyName>
+    <RootNamespace>WinForward.E2E.Analysis</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../WinForward.E2E.Contracts/WinForward.E2E.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

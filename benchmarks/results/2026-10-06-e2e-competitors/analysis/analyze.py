@@ -992,7 +992,7 @@ def arm_result(row, arm_name):
 
 IDENTITY_BLOCKED_PREFIXES = {
     "LOSS": ("metrics/",),
-    "MIX": ("metrics/classes/udp/", "metrics/udpSent", "metrics/udpLossRate", "metrics/clientSendLoss"),
+    "MIX": ("metrics/classes/udp/", "metrics/udp.sent", "metrics/udp.lossRate", "metrics/clientSendLoss"),
     "BASE": ("metrics/loss/",),
 }
 
@@ -1368,7 +1368,7 @@ def lane_witnesses(row, arm_name):
                 if not isinstance(entry, dict):
                     continue
                 desktop = entry.get("desktop")
-                for field in ("udpSent", "pageConnections", "bulkFrames", "dnsSent"):
+                for field in ("udp.sent", "pageConnections", "bulkFrames", "dnsSent"):
                     value = as_number(entry.get(field))
                     witnesses.append(("desktop %s %s > 0 (=%s)" % (desktop, field, fmt_num(value, 0)), (value or 0) > 0))
     return witnesses or None
@@ -1418,12 +1418,12 @@ def foreign_connection_sources(row):
         desktops = dig(result, "metrics" + SEP + "desktops")
         if isinstance(desktops, list):
             for entry in desktops:
-                if isinstance(entry, dict) and (as_number(entry.get("udpForeignConnection")) or 0) > 0:
+                if isinstance(entry, dict) and (as_number(entry.get("udp.foreignConnection")) or 0) > 0:
                     out.append(
                         (
                             "MIX",
-                            "MIX.desktop %s udpForeignConnection" % entry.get("desktop"),
-                            as_number(entry.get("udpForeignConnection")),
+                            "MIX.desktop %s udp.foreignConnection" % entry.get("desktop"),
+                            as_number(entry.get("udp.foreignConnection")),
                         )
                     )
     return out
@@ -1460,7 +1460,7 @@ def metric_ratio_rate(row, arm_name, numerator_path, denominator_path):
 def metric_mix_udp_loss_rate(row):
     value, why = arm_number(row, "MIX", "metrics/classes/udp/lossRate")
     if value is None and why != NULL_RATE_REASON:
-        value, why = arm_number(row, "MIX", "metrics/udpLossRate")
+        value, why = arm_number(row, "MIX", "metrics/udp.lossRate")
     return (None if value is None else value * 100.0), why
 
 
@@ -1565,7 +1565,7 @@ METRIC_SPECS = [
      "extract": lambda ctx, row: arm_latency(row, "DNSALT", "dns-rtt", "p50Us")},
     {"key": "thru.goodputMbps", "label": "THRU goodputMbps", "unit": "Mbps", "digits": 3, "family": "none",
      "arm": "THRU", "extract": lambda ctx, row: arm_number(row, "THRU", "metrics/goodputMbps")},
-    {"key": "mix.udpLossRate", "label": "MIX udpLossRate", "unit": "pp", "digits": 4, "family": "udp-loss",
+    {"key": "mix.udp.lossRate", "label": "MIX udp.lossRate", "unit": "pp", "digits": 4, "family": "udp-loss",
      "arm": "MIX", "udp_path": "udp", "extract": lambda ctx, row: metric_mix_udp_loss_rate(row)},
     {"key": "persist.responseRate", "label": "PERSIST responseRate", "unit": "pp", "digits": 4,
      "family": "tcp-unexpected", "arm": "PERSIST",
@@ -1582,7 +1582,7 @@ METRIC_DEFINITIONS = {
     "lat.tcp_rtt.p50": "LAT arm, latency.tcp-rtt.p50Us",
     "lat.tcp_rtt.p99": "LAT arm, latency.tcp-rtt.p99Us",
     "lat.udp_rtt.p50": "LAT arm UDP lane, latency.udp-rtt.p50Us (proxied only where the row carries UDP)",
-    "lat.udp_lossRate": "LAT arm UDP lane, metrics.udp.lossRate (percentage points of udp.sentOk)",
+    "lat.udp_lossRate": "LAT arm UDP lane, metrics.udp.lossRate (percentage points of udp.sent)",
     "latload.tcp_rtt.p50": "LATLOAD arm, latency.tcp-rtt.p50Us",
     "latload.tcp_rtt.p99": "LATLOAD arm, latency.tcp-rtt.p99Us",
     "loss.lossRate": "LOSS arm, metrics.lossRate = (late + never) / sent (percentage points)",
@@ -1595,7 +1595,7 @@ METRIC_DEFINITIONS = {
     "dnsalt.answerRate": "DNSALT arm (a port no product special-cases), metrics.answerRate (percentage points)",
     "dnsalt.rtt.p50": "DNSALT arm (a port no product special-cases), latency.dns-rtt.p50Us",
     "thru.goodputMbps": "THRU metrics.goodputMbps",
-    "mix.udpLossRate": "MIX metrics.classes.udp.lossRate (percentage points)",
+    "mix.udp.lossRate": "MIX metrics.classes.udp.lossRate (percentage points)",
     "persist.responseRate": "PERSIST metrics.responseRate = responses / requests (percentage points)",
     "persist.reconnects": "PERSIST metrics.reconnects: a long-lived connection that had to be replaced",
     "mem.privateBytes.p50": "per-pass p50 of the product's steady-state privateBytes, then median across passes",
@@ -2296,18 +2296,18 @@ def client_datagram_count(row, arm_name):
         return None, why
     kind = result.get("kind")
     if kind == "latency":
-        return arm_number(row, arm_name, "metrics/udp.sentOk")[0], "metrics.udp.sentOk"
+        return arm_number(row, arm_name, "metrics/udp.sent")[0], "metrics.udp.sent"
     if kind == "loss":
         return arm_number(row, arm_name, "metrics/sent")[0], "metrics.sent"
     if kind == "mix":
-        return arm_number(row, arm_name, "metrics/udpSent")[0], "metrics.udpSent"
+        return arm_number(row, arm_name, "metrics/udp.sent")[0], "metrics.udp.sent"
     if kind == "base":
-        latency_lane, _ = arm_number(row, arm_name, "metrics/latency/udp.sentOk")
+        latency_lane, _ = arm_number(row, arm_name, "metrics/latency/udp.sent")
         loss_phase, _ = arm_number(row, arm_name, "metrics/loss/sent")
         if latency_lane is None and loss_phase is None:
             return None, "no UDP phase counter"
         return (latency_lane or 0.0) + (loss_phase or 0.0), (
-            "metrics.latency.udp.sentOk + metrics.loss.sent (both phases send datagrams)"
+            "metrics.latency.udp.sent + metrics.loss.sent (both phases send datagrams)"
         )
     if kind == "dns":
         return None, "the DNS arm sends to the DNS port, which the ledger reports as dnsSummary"
@@ -2565,7 +2565,7 @@ def ledger_dns_totals(ctx, pass_id):
                     str(port),
                     {"ledger_udp": 0.0, "ledger_tcp": 0.0, "client_udp": 0.0, "client_tcp": 0.0, "duration_seconds": 0.0},
                 )
-                entry["client_udp"] += as_number(dig(result, "metrics" + SEP + "udpSent")) or 0.0
+                entry["client_udp"] += as_number(dig(result, "metrics" + SEP + "udp.sent")) or 0.0
                 entry["client_tcp"] += as_number(dig(result, "metrics" + SEP + "tcpSent")) or 0.0
                 entry["duration_seconds"] += run.arm_window_seconds(arm_name) or 0.0
             result, _ = arm_result(run, "MIX")
@@ -2800,14 +2800,14 @@ def table_findings(ctx):
                 for entry in desktops:
                     if not isinstance(entry, dict):
                         continue
-                    value = as_number(entry.get("udpForeignConnection"))
+                    value = as_number(entry.get("udp.foreignConnection"))
                     if value:
                         foreign_rows.append(
                             [
                                 pass_id,
                                 row.row_id,
                                 "MIX",
-                                "desktop %s udpForeignConnection" % entry.get("desktop"),
+                                "desktop %s udp.foreignConnection" % entry.get("desktop"),
                                 fmt_num(value, 0),
                                 "CORRECTNESS FAILURE: the product mixed datagrams between flows",
                             ]
@@ -3616,7 +3616,7 @@ def client_flow_model(row):
         present = arm_name in row.arms
         attempts, _ = arm_number(row, arm_name, "metrics/tcp.connectAttempts")
         add_tcp("%s.tcp.connectAttempts" % arm_name, attempts, present)
-        udp_sent, _ = arm_number(row, arm_name, "metrics/udp.sentOk")
+        udp_sent, _ = arm_number(row, arm_name, "metrics/udp.sent")
         carries = (udp_sent or 0) > 0 if present else None
         add_udp_arm(arm_name, carries, present)
 
@@ -3655,9 +3655,9 @@ def client_flow_model(row):
 
     profile = ROW_PROFILES.get(row.row_id)
     dnsalt_present = "DNSALT" in row.arms
-    dnsalt_udp, _ = arm_number(row, "DNSALT", "metrics/udpSent")
+    dnsalt_udp, _ = arm_number(row, "DNSALT", "metrics/udp.sent")
     add_udp_arm("DNSALT", (dnsalt_udp > 0) if dnsalt_udp is not None else None, dnsalt_present)
-    dns_udp, _ = arm_number(row, "DNS", "metrics/udpSent")
+    dns_udp, _ = arm_number(row, "DNS", "metrics/udp.sent")
     dns_relayed = profile is not None and profile.udp53 == UDP53_RELAYED
     add_udp_arm(
         "DNS",
@@ -3815,11 +3815,11 @@ def arm_denominators(row, arm_name):
     """(transactions, datagrams, transaction label, datagram label) for one arm."""
     kind = row.arms[arm_name].kind if arm_name in row.arms else None
     if kind == "latency":
-        tcp, _ = arm_number(row, arm_name, "metrics/tcp.sentOk")
-        udp, _ = arm_number(row, arm_name, "metrics/udp.sentOk")
+        tcp, _ = arm_number(row, arm_name, "metrics/tcp.sent")
+        udp, _ = arm_number(row, arm_name, "metrics/udp.sent")
         if row.row_id in UDP_INCAPABLE_ROWS:
             udp = None
-        return (tcp or 0.0) + (udp or 0.0), udp, "tcp.sentOk + udp.sentOk", "udp.sentOk"
+        return (tcp or 0.0) + (udp or 0.0), udp, "tcp.sent + udp.sent", "udp.sent"
     if kind == "loss":
         sent, _ = arm_number(row, arm_name, "metrics/sent")
         return sent, sent, "sent (datagrams)", "sent (datagrams)"
@@ -3831,10 +3831,10 @@ def arm_denominators(row, arm_name):
         return frames, None, "frames", None
     if kind == "dns":
         sent, _ = arm_number(row, arm_name, "metrics/sent")
-        udp, _ = arm_number(row, arm_name, "metrics/udpSent")
+        udp, _ = arm_number(row, arm_name, "metrics/udp.sent")
         if row.row_id in UDP_INCAPABLE_ROWS:
             udp = None
-        return sent, udp, "sent (queries)", "udpSent (queries)"
+        return sent, udp, "sent (queries)", "udp.sent (queries)"
     if kind == "mix":
         page_messages, _ = arm_number(row, arm_name, "metrics/classes/page/messages")
         bulk_frames, _ = arm_number(row, arm_name, "metrics/classes/bulk/frames")
@@ -3985,10 +3985,10 @@ def table_cpu(ctx):
     lines.append("")
     lines.append(
         "**Per-arm transaction and datagram denominators.** `LAT`, `LATLOAD`: "
-        "`metrics.tcp.sentOk + metrics.udp.sentOk`; `DNS`: `metrics.sent`; `LOSS`: `metrics.sent`; "
+        "`metrics.tcp.sent + metrics.udp.sent`; `DNS`: `metrics.sent`; `LOSS`: `metrics.sent`; "
         "`REL`: `metrics.connectAttempts`; `PERSIST`: `metrics.requests`; `THRU`: `metrics.frames`; `MIX`: "
         "`classes.page.messages + classes.bulk.frames + classes.dns.sent + classes.udp.sent`. "
-        "Datagram denominators: `udp.sentOk` (LAT/LATLOAD), `sent` (LOSS), `udpSent` (DNS), "
+        "Datagram denominators: `udp.sent` (LAT/LATLOAD), `sent` (LOSS), `udp.sent` (DNS), "
         "`classes.udp.sent` (MIX). A row that does not carry UDP gets no datagram denominator at all — the "
         "column reads `n/a (no datagram denominator)` rather than a fabricated zero — and `IDLE` and `BASE` "
         "have no natural transaction denominator."
@@ -4400,7 +4400,7 @@ def _dns_udp_share(ctx, row_id, arm_name):
         row = ctx.row_in(pass_id, row_id)
         if row is None:
             continue
-        udp, _ = arm_number(row, arm_name, "metrics/udpSent")
+        udp, _ = arm_number(row, arm_name, "metrics/udp.sent")
         tcp, _ = arm_number(row, arm_name, "metrics/tcpSent")
         if udp is None or tcp is None or (udp + tcp) <= 0:
             continue
@@ -5329,7 +5329,7 @@ def build_tables_md(ctx):
     parts = [
         "# End-to-end transparent-proxy campaign — aggregated tables",
         "",
-        "Generated by `analysis/analyze.py` from `%s`%s."
+        "Generated by `e2e-analysis v1` from `%s`%s."
         % (ctx.raw, " (flat mode: immediate subdirectories are rows of one implicit pass)" if ctx.flat else ""),
         "",
         "**Aggregation policy.** Every aggregated number is computed over **passes**: one value per pass first, "
@@ -5621,7 +5621,7 @@ def build_verdict(ctx):
     drift = control_drift(ctx)
     views = ledger_views(ctx)
     return {
-        "generated_by": "benchmarks/results/2026-10-06-e2e-competitors/analysis/analyze.py",
+        "generated_by": "e2e-analysis v1",
         "raw": str(ctx.raw),
         "flat_mode": ctx.flat,
         "passes": ctx.pass_ids,

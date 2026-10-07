@@ -18,16 +18,18 @@
 | **E4-a** | 机制与骨架：`make_tree.py` 升级 + 最小改动 Python 参考 + 冻结树/golden A + `oracle-diff.py` + 项目骨架 + `analyze.sh` + `plots/SKIPPED.md`（+ fixture 漂移 guard） | 骨架必须让 `oracle-diff.py` 报 **rc=2**；改一个数字必须 rc=1；`dotnet build` 零警告 | 1 |
 | **E4-b1a** | `Loading` + `Model` + §15 可用性 + §2 环境（+ `preamble` 切片） | `--batch 1a` 空 diff | 1 |
 | **E4-b1b** | `Stats`：`CpRandom`（CPython 语义）+ `VerbatimNumber`/`VerbatimJson` + bootstrap | 黄金向量/中点值单测绿；`verdict.json` 的 `bootstrap`/`thresholds` 键命中 | 1 |
-| **E4-b1c** | §1（`ROW_PROFILES` 渲染）+ §0/§3 | `--batch 1c` 空 diff | 1 |
-| **E4-b2** | findings 分级 + gates 表（§0/§3 若未在 b1c 完成则于此收口） | `--batch 2` 空 diff | 1 |
-| **E4-b3** | **§4 headline / §5 latency / §8 udp / §9 dns**（四张核心表） | `--batch 3` 空 diff（覆盖率最大） | 1–2 |
-| **E4-b4** | §6 cpu / §7 memory / §10 persist / §11 tcp | `--batch 4` 空 diff | 1 |
+| **E4-b1c** | §1（`ROW_PROFILES` 渲染）+ §2（环境与 provenance） | `--batch 1c` 空 diff | 1 |
+| **E4-b2** | findings 分级 + gates 表（§0/§3） | `--batch 2` 空 diff | 1 |
+| **E4-b3** | **§5 latency / §8 udp / §9 dns**（三张核心表） | `--batch 3` 空 diff | 1–2 |
+| **E4-b4** | **§4 headline** / §6 cpu / §7 memory / §10 persist / §11 tcp | `--batch 4` 空 diff（覆盖率最大） | 1 |
 | **E4-b5** | §12 dual / §13 control / §14 ledger + `verdict.json` 其余键 | `--batch 5` 空 diff（AC9 达成） | 1 |
 | **E4-c** | E4-c=E4-d：C# 侧公平性断言（规则源 `verification/row-profiles.json`）+ 截断 caveat（§14.7，两种机制分开、不摊到臂，带负控）+ **删除 `analyze.py`/旧 `check-fairness.py`** + `git rm --cached` 那枚 `.pyc` + README 指向 `analyze.sh` | 断言先红后绿；负控红；`rg analyze.py` 只剩文档/历史 | 1 |
 
-**最小里程碑**：`b1a + b3`（四张核心表）≈ 392 输出行即已覆盖绝大多数结论（D20.7）。
+**最小里程碑**：`b1a + b3`（§5/§8/§9）**+ `b4`**（§4/§6/§7/§10/§11）——四张核心表要分两批才能各自达成
+（D20.8：§4 打印全部 21 个 metrics 列，其中 6 个属批 4）；此后覆盖率最大。
 
-每批门禁：build（零警告）→ `test -m:1` → format → inspectcode（解析 XML）→ `publish.sh`（其裸 build 覆盖新项目）
+每批门禁：build（零警告）→ `test -m:1` → format → inspectcode（解析 XML）→ **`dotnet build WinForward.slnx -c Release`**
+（`publish.sh` 只发布 harness 自己，**不覆盖**分析器，D20.8 #4；`analyze.sh` 自带 build）
 → `effective-lines.py` **四个**路径；`selftest.sh` 对分析器**不适用**（写明理由）。
 
 ## E4-a 的细节（本批最重，先做对机制）

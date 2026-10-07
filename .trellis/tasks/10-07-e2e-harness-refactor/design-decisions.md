@@ -861,3 +861,17 @@ C# 分析器用 **`Utf8JsonReader`/`JsonDocument` + `ArmKeys.*` 常量路径**�
 | `__pycache__`（C12/B-5） | E4-d 用 `git rm --cached` 处理那一枚被跟踪的 `.pyc` |
 | 删除时机（C25/B-4） | `analyze.py` 与 `check-fairness.py` **同批删除**（E4-c=E4-d 合并），证据落 `research/baseline/E4d-removal.md` |
 | `analyze.py` 事实（E12/E13） | 6165 行 / 147 顶层 def-class；`#19` 与 `#11` 的分析器侧**已实现** |
+
+### D20.8 E4-a 之后的补充裁定
+
+| # | 裁定 |
+|---|---|
+| 1 | **fixture guard 的"声明侧"= `contract-inventory.json` ∪ `contract-rename.json` 的复合**（inventory 是旧契约的快照），并显式维护 `UNOBSERVED_KEYS`（`readError`/`message`/`detail`）为"必须出现"；理由写进 `verification/check-fixture-drift.py` 的文档 |
+| 2 | **§4 归批 4**（它打印全部 21 个 metrics 列，其中 6 个属批 4）；里程碑改为 **b1a + b3（§5/§8/§9）+ b4（§4/§6/§7/§10/§11）**，让每批的判据都能独立达成 |
+| 3 | **Python 参考的散文一并改名**（34/34 处）：路径回显与 label 里的旧拼写属"字段名"一类，留着会发布不存在的路径。登记为 D6.4 第一类的展开，不新增例外 |
+| 4 | **`publish.sh` 不覆盖新项目**（实测：其 `repo=` 只上溯一层，裸 build 解析到 harness 自己的 csproj）——分析器由 `dotnet build WinForward.slnx -c Release` 与 `analyze.sh` 的 build 覆盖；**不改 `publish.sh`**，在 spec/证据里写明这条 |
+| 5 | **"读数为 JSON null ⇒ 空 cell"不进冻结树**（改 fixture 需重冻 A 并从批 1 重 diff，代价大于收益）：由 **b1b 的表驱动单测**兜住，`python-oracle-changes.md` 的怪癖清单已记录规则 |
+| 6 | **边界树只冻结配方 + hash**（不存四份额外 tarball）；tarball 的确定性（`--sort=name`、固定 mtime/owner）成为冻结契约的一部分 |
+
+> **D20.9**：`analysis/README.md` 的归属以 **D20.7** 为准（搬到分析器项目、归 E4）；E5 只复核其中
+> `#17`/`#18`/`#19` 的披露与表格脚注一致（E5 的 prd 已就地更正）。
