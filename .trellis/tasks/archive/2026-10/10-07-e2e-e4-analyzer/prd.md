@@ -74,18 +74,18 @@
 
 ## 验收标准
 
-- [ ] `WinForward.E2E.Analysis` 建好并加入 `WinForward.slnx`；引用 `Contracts`。
-- [ ] CLI 参数与 Python 版一致；可由单条命令运行（不需要 nix-shell 与 python 环境）。
-- [ ] **oracle：对同一棵新契约 synthetic 树，两套实现的 `tables.md` 与 `verdict.json` 逐字一致**
+- [x] `WinForward.E2E.Analysis` 建好并加入 `WinForward.slnx`；引用 `Contracts`。
+- [x] CLI 参数与 Python 版一致；可由单条命令运行（不需要 nix-shell 与 python 环境）。
+- [x] **oracle：对同一棵新契约 synthetic 树，两套实现的 `tables.md` 与 `verdict.json` 逐字一致**
       （两条 `diff` 均为空）。
-- [ ] 按 5 批推进，每批一次 `diff`；批次 3（四张核心表）完成时即已覆盖绝大多数结论。
-- [ ] 公平性 3 条落实：泄漏的 UDP 行输出 `not carried (UDP bypassed)` 而非数字并被排除出成对比较；
+- [x] 按 5 批推进，每批一次 `diff`；批次 3（四张核心表）完成时即已覆盖绝大多数结论。
+- [x] 公平性 3 条落实：泄漏的 UDP 行输出 `not carried (UDP bypassed)` 而非数字并被排除出成对比较；
       DNS 路径差异在表中标注；CPU 表显式声明「仅用户态、不含驱动/DPC/ISR/非分页池」。
-- [ ] 截断 caveat 落实：synthetic 树注入非零 `truncatedFrames` 时，数据质量小节出现该靶机/pass 的
+- [x] 截断 caveat 落实：synthetic 树注入非零 `truncatedFrames` 时，数据质量小节出现该靶机/pass 的
       截断计数（TCP 与 DNS 两种机制分开写），且**没有任何臂级格子**消费它。
-- [ ] `plots/` 输出降级声明。
-- [ ] 每个文件有效行 ≤400。
-- [ ] `dotnet build WinForward.slnx -c Release` 零警告。
+- [x] `plots/` 输出降级声明。
+- [x] 每个文件有效行 ≤400。
+- [x] `dotnet build WinForward.slnx -c Release` 零警告。
 
 ## 风险
 
@@ -98,3 +98,25 @@
 > **权威规则**：父 `prd.md` 的 R/AC 是本子任务的**验收上限**；本文件的清单是它的展开，
 > 冲突时**以父为准**，且本文件每条验收都必须能追溯到父的一个 R 或 AC。
 > 父任务：`.trellis/tasks/10-07-e2e-harness-refactor/`。
+
+---
+
+## 完成记录（2026-10-08）
+
+- 批次：**E4-a**（oracle 机制：升级 `make_tree.py` + 最小改动 Python 参考 + 冻结树/golden A + `oracle-diff.py` +
+  骨架 + fixture 漂移 guard）、**E4-a2**（按用户裁定把 differ 改成**语义比对**，DD **D21**）、
+  **E4-b1a/b1b/b1c2**（Loading/Model/§15/§2、`CpRandom`+格式化基元、§1/§0/§3 + 三键）、
+  **E4-b3/b4/b5**（§5/§8/§9 + 15 metrics；§4/§6/§7/§10/§11 + 6 metrics；§12/§13/§14 + 3 键）、
+  **E4-c**（§14.7 截断 caveat + `--zero-denominator` + 补偿求和锚 + 删 `analyze.py`）。
+- **双向 oracle 达成**：default 树上 `--mode semantic` **全批次 51/51 rc=0**、`--tolerance 0` rc=0；
+  byte 只在 `ledger.passes[*].types` 的 CPython set 成员序上有已登记差异。
+- 每批 impl → 独立 check（突变树 + 负控 + 清缓存 inspectcode）→ 修复 → 提交；测试 322 → **1656**；
+  六条门禁每批全绿，未新增任何 `.editorconfig` 抑制（仅 4 处带理由的 `S1244` pragma）。
+- **check 轮抓到的真缺陷**（冻结树照不到、靠自造输入/突变树才现形）：身份键把数值 `1203` 与字符串 `"1203"` 压平、
+  §13 不可用分支打印 `List\`1[String]`、`ledger_paths` 应按排序集合发布、`DnsFindings` 跳过判据看错边、
+  `ledger-write-errors` 用错 JSON 键导致永不触发、`dual_row_summary` 累加器被重置。
+- 产物：`verification/{synthetic-tree.tar.gz,golden/**,FROZEN.md,row-profiles.json,check-*.py,synthetic/make_tree.py}`；
+  证据 `research/baseline/E4{a,a2,b1a,b1b,b1c2,b3,b4,b5,c}-*.md` 与各自的 `*-check.md`；
+  `research/python-oracle-changes.md`（Python 侧的三类改动与必须保留的渲染怪癖）。
+- **交给 E5**：`publish-campaign.sh`（gitignored）里的 `python3 analyze.py` 应指向 `scripts/analyze.sh`；
+  `.trellis/spec/backend/measurement-harness.md` 里旧 `analyze.py` 字样已在本轮 §8 重写时清掉（其余归 E5）。
