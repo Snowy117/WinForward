@@ -28,6 +28,7 @@ internal sealed record DualRecord(
     double? DirectLossRate);
 
 /// <summary>One row's dual phase across passes, summarised for the interference findings.</summary>
+/// <param name="Passes">How many passes ran the phase.</param>
 /// <param name="Leak">The largest leak any pass reported.</param>
 /// <param name="DirectLatencyP50">The direct lane's per-pass LAT tcp-rtt p50 values.</param>
 /// <param name="ProxiedLatencyP50">The proxied lane's per-pass LAT tcp-rtt p50 values.</param>
@@ -35,6 +36,7 @@ internal sealed record DualRecord(
 /// <param name="ProxiedLoss">The proxied lane's per-pass LOSS loss rates.</param>
 /// <param name="ShapeNotes">Every shape difference any pass reported.</param>
 internal sealed record DualRowSummary(
+    int Passes,
     double? Leak,
     IReadOnlyList<double> DirectLatencyP50,
     IReadOnlyList<double> ProxiedLatencyP50,
@@ -75,7 +77,7 @@ internal static class DualFindings
     ];
 
     /// <summary>Every dual phase the campaign ran, pass by pass.</summary>
-    private static List<DualRecord> Records(CampaignModel campaign)
+    internal static List<DualRecord> Records(CampaignModel campaign)
     {
         ArgumentNullException.ThrowIfNull(campaign);
 
@@ -201,8 +203,11 @@ internal static class DualFindings
         return outFindings;
     }
 
-    private static Dictionary<string, DualRowSummary> Summarise(List<DualRecord> records)
+    /// <summary>One row's dual phase across passes: the largest leak, both lanes' readings, and the shape notes.</summary>
+    internal static Dictionary<string, DualRowSummary> Summarise(List<DualRecord> records)
     {
+        ArgumentNullException.ThrowIfNull(records);
+
         var summary = new Dictionary<string, DualRowSummary>(StringComparer.Ordinal);
         var shapeNotes = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         var directLatency = new Dictionary<string, List<double>>(StringComparer.Ordinal);
@@ -210,6 +215,7 @@ internal static class DualFindings
         var directLoss = new Dictionary<string, List<double>>(StringComparer.Ordinal);
         var proxiedLoss = new Dictionary<string, List<double>>(StringComparer.Ordinal);
         var leaks = new Dictionary<string, double>(StringComparer.Ordinal);
+        var passes = new Dictionary<string, int>(StringComparer.Ordinal);
         var order = new List<string>();
         foreach (var record in records)
         {
@@ -222,6 +228,7 @@ internal static class DualFindings
                 proxiedLoss[record.Row] = [];
             }
 
+            passes[record.Row] = passes.GetValueOrDefault(record.Row) + 1;
             if (record.Leak is not null)
             {
                 leaks[record.Row] = Math.Max(leaks.GetValueOrDefault(record.Row), record.Leak.Value);
@@ -240,6 +247,7 @@ internal static class DualFindings
         foreach (var row in order)
         {
             summary[row] = new DualRowSummary(
+                passes[row],
                 leaks.TryGetValue(row, out var leak) ? leak : null,
                 directLatency[row],
                 proxiedLatency[row],

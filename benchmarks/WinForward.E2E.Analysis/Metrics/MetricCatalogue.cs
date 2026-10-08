@@ -32,9 +32,6 @@ namespace WinForward.E2E.Analysis.Metrics;
 /// </remarks>
 internal static class MetricCatalogue
 {
-    /// <summary>What the run summary still owes: the sections and keys the batches after this one render.</summary>
-    internal const string Pending = "5 the control-block, dual-phase and ledger keys";
-
     private const string LatencyFamily = "latency";
 
     private const string UdpLossFamily = "udp-loss";

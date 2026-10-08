@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using WinForward.E2E.Analysis.Json;
 using WinForward.E2E.Analysis.Model;
 using WinForward.E2E.Analysis.Stats;
@@ -72,6 +73,8 @@ internal static class ControlDrift
 
     private const double LatencyThreshold = 0.05;
 
+    private static readonly ConditionalWeakTable<CampaignModel, ControlDriftResult> s_cache = [];
+
     /// <summary>Whether the two blocks bracket the product block inside one pass, or why they do not.</summary>
     internal static string? Ordering(CampaignModel campaign, string passId)
     {
@@ -126,6 +129,11 @@ internal static class ControlDrift
     {
         ArgumentNullException.ThrowIfNull(campaign);
 
+        return s_cache.GetValue(campaign, Build);
+    }
+
+    private static ControlDriftResult Build(CampaignModel campaign)
+    {
         var perPass = campaign.PassIds
             .Select(passId => new ControlPass(
                 passId,

@@ -1,3 +1,4 @@
+using WinForward.E2E.Analysis.Checks;
 using WinForward.E2E.Analysis.Findings;
 using WinForward.E2E.Analysis.Json;
 using WinForward.E2E.Analysis.Metrics;
@@ -85,9 +86,145 @@ internal static class VerdictSections
                     ("scope", VerbatimJson.String(finding.Scope)),
                     ("detail", VerbatimJson.String(finding.Detail))))]),
             ["findings_by_severity"] = FindingsBySeverity(findings),
+            ["control_blocks"] = ControlBlocks(campaign),
+            ["dual_phase"] = DualPhase(campaign),
+            ["ledger"] = Ledger(campaign),
             ["metrics"] = MetricComparisons.Render(campaign),
         };
     }
+
+    /// <summary>The two control blocks' comparisons, and what each pass held.</summary>
+    private static string ControlBlocks(CampaignModel campaign)
+    {
+        var drift = ControlDrift.Compute(campaign);
+        return VerbatimJson.Object(
+            1,
+            ("available", VerbatimJson.Boolean(drift.Available)),
+            ("comparisons", VerbatimJson.Array(
+                2,
+                [.. drift.Comparisons.Select(entry => VerbatimJson.Object(
+                    3,
+                    ("metric", VerbatimJson.String(entry.Metric)),
+                    ("key", VerbatimJson.String(entry.Key)),
+                    ("kind", VerbatimJson.String(entry.Kind)),
+                    ("unit", VerbatimJson.String(entry.Unit)),
+                    ("threshold", VerbatimJson.Number(entry.Threshold)),
+                    ("pre", Numbers(entry.Pre)),
+                    ("post", Numbers(entry.Post)),
+                    ("unavailable", Reasons(entry.Unavailable)),
+                    ("estimate", Number(entry.Comparison?.Estimate)),
+                    ("ci95", VerbatimJson.Array(4, [Number(entry.Comparison?.CiLow), Number(entry.Comparison?.CiHigh)])),
+                    ("statement", VerbatimJson.String(entry.Statement)),
+                    ("verdict", VerbatimJson.String(entry.Verdict)),
+                    ("reason", VerbatimJson.String(entry.Reason))))])),
+            ("per_pass", VerbatimJson.Array(
+                2,
+                [.. drift.PerPass.Select(entry => VerbatimJson.Object(
+                    3,
+                    ("pass", VerbatimJson.String(entry.Pass)),
+                    ("pre_present", VerbatimJson.Boolean(entry.PrePresent)),
+                    ("post_present", VerbatimJson.Boolean(entry.PostPresent)),
+                    ("ordering", Text(entry.Ordering))))])));
+    }
+
+    /// <summary>Every dual phase the campaign ran, one entry per pass and row.</summary>
+    private static string DualPhase(CampaignModel campaign)
+    {
+        var records = DualFindings.Records(campaign);
+        return VerbatimJson.Object(
+            1,
+            ("rows", VerbatimJson.Array(
+                2,
+                [.. records.Select(record => VerbatimJson.Object(
+                    3,
+                    ("pass", VerbatimJson.String(record.Pass)),
+                    ("row", VerbatimJson.String(record.Row)),
+                    ("direct_leak", Number(record.Leak)),
+                    ("proxied_latency_p50_us", Number(record.ProxiedLatencyP50)),
+                    ("direct_latency_p50_us", Number(record.DirectLatencyP50)),
+                    ("proxied_loss_rate_pp", Number(record.ProxiedLossRate)),
+                    ("direct_loss_rate_pp", Number(record.DirectLossRate)),
+                    ("shape_notes", VerbatimJson.StringArray(4, record.ShapeNotes))))])));
+    }
+
+    /// <summary>The ledgers the campaign read, and the DNS port totals they and the client published.</summary>
+    private static string Ledger(CampaignModel campaign)
+    {
+        var views = LedgerViewsBuilder.For(campaign);
+        var passes = new List<(string Key, string Value)>();
+        foreach (var (passId, entry) in views.Passes)
+        {
+            passes.Add((passId, VerbatimJson.Object(
+                3,
+                ("paths", VerbatimJson.StringArray(4, entry.Paths)),
+                ("records", VerbatimJson.Integer(entry.Records)),
+                ("types", VerbatimJson.Object(
+                    4,
+                    [.. entry.Types.Select(pair => (pair.Key, VerbatimJson.Integer(pair.Value)))])),
+                ("labels", VerbatimJson.Object(
+                    4,
+                    [.. entry.Labels.Select(pair => (pair.Key, VerbatimJson.Integer(pair.Value)))])),
+                ("bad_lines", VerbatimJson.Integer(entry.BadLines)),
+                ("attribution", Text(views.Attribution.GetValueOrDefault(passId))))));
+        }
+
+        var firstPass = campaign.PassIds.Count > 0 ? campaign.PassIds[0] : string.Empty;
+        var ports = new List<(string Key, string Value)>();
+        foreach (var (port, totals) in LedgerFindings.DnsTotals(campaign, firstPass))
+        {
+            var members = new List<(string Key, string Value)>
+            {
+                ("ledger_udp", VerbatimJson.Number(totals.LedgerUdp)),
+                ("ledger_tcp", VerbatimJson.Number(totals.LedgerTcp)),
+                ("client_udp", VerbatimJson.Number(totals.ClientUdp)),
+                ("client_tcp", VerbatimJson.Number(totals.ClientTcp)),
+                ("duration_seconds", VerbatimJson.Number(totals.DurationSeconds)),
+            };
+            if (totals.Summaries > 0)
+            {
+                members.Add(("summaries", VerbatimJson.Integer(totals.Summaries)));
+                members.Add(("ledger_paths", VerbatimJson.StringArray(4, totals.LedgerPaths)));
+            }
+
+            ports.Add((port, VerbatimJson.Object(3, [.. members])));
+        }
+
+        return VerbatimJson.Object(
+            1,
+            ("available", VerbatimJson.Boolean(views.Available)),
+            ("passes", VerbatimJson.Object(2, [.. passes])),
+            ("dns_ports", VerbatimJson.Object(2, [.. ports])));
+    }
+
+    /// <summary>A map of per-pass numbers, natural-key ordered.</summary>
+    private static string Numbers(IReadOnlyDictionary<string, double> values)
+    {
+        var members = new List<(string Key, string Value)>();
+        foreach (var passId in NaturalKey.Sort(values.Keys))
+        {
+            members.Add((passId, VerbatimJson.Number(values[passId])));
+        }
+
+        return VerbatimJson.Object(4, [.. members]);
+    }
+
+    /// <summary>A map of per-pass reasons, in the order the comparison recorded them.</summary>
+    private static string Reasons(IReadOnlyDictionary<string, string> values)
+    {
+        var members = new List<(string Key, string Value)>();
+        foreach (var (passId, reason) in values)
+        {
+            members.Add((passId, VerbatimJson.String(reason)));
+        }
+
+        return VerbatimJson.Object(4, [.. members]);
+    }
+
+    /// <summary>A number, or the null literal when the reading has no value.</summary>
+    private static string Number(double? value) => value is { } number ? VerbatimJson.Number(number) : VerbatimJson.Null;
+
+    /// <summary>A string, or the null literal where the reference publishes a design absence as null.</summary>
+    private static string Text(string? value) => value is null ? VerbatimJson.Null : VerbatimJson.String(value);
 
     /// <summary>The design table, in the declaration order the reference publishes it in.</summary>
     private static string RowProfiles()

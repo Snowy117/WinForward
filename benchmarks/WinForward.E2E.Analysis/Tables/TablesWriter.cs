@@ -120,6 +120,9 @@ internal static class TablesWriter
             "9" => TableDns.RenderBody(campaign),
             "10" => TablePersist.RenderBody(campaign),
             "11" => TableTcp.RenderBody(campaign),
+            "12" => TableDual.RenderBody(campaign),
+            "13" => TableControl.RenderBody(campaign),
+            "14" => TableLedger.RenderBody(campaign),
             "15" => TableAvailability.RenderBody(campaign),
             _ => $"<!-- TODO(batch {batch}) -->\n",
         };

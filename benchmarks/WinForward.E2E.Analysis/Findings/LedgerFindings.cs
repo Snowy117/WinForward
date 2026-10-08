@@ -20,9 +20,9 @@ namespace WinForward.E2E.Analysis.Findings;
 /// </remarks>
 internal static partial class LedgerFindings
 {
-    private const double ConnectionTolerance = 0.01;
+    internal const double ConnectionTolerance = 0.01;
 
-    private const double ConnectionSlack = 2.0;
+    internal const double ConnectionSlack = 2.0;
 
     private const double DatagramTolerance = 0.01;
 
@@ -229,7 +229,7 @@ internal static partial class LedgerFindings
     }
 
     /// <summary>The widest defensible agreement band for a datagram count.</summary>
-    private static double DatagramBand(double clientDatagrams, double durationSeconds)
+    internal static double DatagramBand(double clientDatagrams, double durationSeconds)
     {
         var band = Math.Max(DatagramSlack, DatagramTolerance * Math.Abs(clientDatagrams));
         if (clientDatagrams != 0.0 && durationSeconds != 0.0)
@@ -241,7 +241,7 @@ internal static partial class LedgerFindings
     }
 
     /// <summary>The agreement band DNS query totals are judged by: one summary interval of the client's own rate, or 1 %.</summary>
-    private static double DnsBand(DnsPortTotals totals)
+    internal static double DnsBand(DnsPortTotals totals)
     {
         ArgumentNullException.ThrowIfNull(totals);
 

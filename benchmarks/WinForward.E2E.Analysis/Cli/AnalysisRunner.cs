@@ -1,6 +1,5 @@
 using WinForward.E2E.Analysis.Findings;
 using WinForward.E2E.Analysis.Loading;
-using WinForward.E2E.Analysis.Metrics;
 using WinForward.E2E.Analysis.Tables;
 using WinForward.E2E.Analysis.Verdict;
 
@@ -22,11 +21,6 @@ namespace WinForward.E2E.Analysis.Cli;
 /// </remarks>
 internal static class AnalysisRunner
 {
-    private static readonly string[] s_pending =
-    [
-        MetricCatalogue.Pending,
-    ];
-
     /// <summary>Runs one analysis and returns the process exit code.</summary>
     internal static int Run(AnalysisOptions options)
     {
@@ -69,11 +63,6 @@ internal static class AnalysisRunner
                 ? string.Join(", ", paths)
                 : "none";
             Console.WriteLine($"analyze.py: {passId} ledger(s): {ledgers}");
-        }
-
-        foreach (var pending in s_pending)
-        {
-            Console.WriteLine($"analyze.py: not yet rendered: {pending}");
         }
 
         return ExitCodes.Success;

@@ -38,7 +38,7 @@ internal static partial class LedgerFindings
     /// <summary>Every finding the ledger contributes.</summary>
 
     /// <summary>The endpoints one row's UDP echo arms saw, split by the path each arm was configured to take.</summary>
-    private static Dictionary<string, EndpointSlot> EndpointPartition(CampaignModel campaign, string passId, LedgerPassView entry)
+    internal static Dictionary<string, EndpointSlot> EndpointPartition(CampaignModel campaign, string passId, LedgerPassView entry)
     {
         ArgumentNullException.ThrowIfNull(campaign);
         ArgumentNullException.ThrowIfNull(entry);
@@ -69,14 +69,29 @@ internal static partial class LedgerFindings
                 perRow[arm.Owner] = slot;
             }
 
-            var destination = string.Equals(path, "proxied", StringComparison.Ordinal) ? slot.Proxied : slot.Direct;
+            var proxied = string.Equals(path, "proxied", StringComparison.Ordinal);
+            var destination = proxied ? slot.Proxied : slot.Direct;
             foreach (var endpoint in arm.UdpEndpoints)
             {
                 destination.Add(endpoint);
             }
+
+            (proxied ? slot.ProxiedArms : slot.DirectArms).Add(ArmLabel(arm));
         }
 
         return perRow;
+    }
+
+    /// <summary>One arm window as the partition names it: the arm, or its lane with the arm.</summary>
+    private static string ArmLabel(LedgerArmView arm)
+    {
+        if (string.Equals(arm.Row, arm.Owner, StringComparison.Ordinal))
+        {
+            return arm.Arm;
+        }
+
+        var slash = arm.Row.LastIndexOf('/');
+        return $"{arm.Row[(slash + 1)..]}:{arm.Arm}";
     }
 
     /// <summary>The path a run's UDP echo traffic was configured to take, or null when its profile does not say.</summary>
@@ -183,6 +198,12 @@ internal static partial class LedgerFindings
 
         /// <summary>Endpoints a direct-path arm's window saw.</summary>
         internal HashSet<string> Direct { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>The proxied-path arms that contributed, as the partition labels them.</summary>
+        internal HashSet<string> ProxiedArms { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>The direct-path arms that contributed, as the partition labels them.</summary>
+        internal HashSet<string> DirectArms { get; } = new(StringComparer.Ordinal);
     }
 
 }

@@ -28,6 +28,13 @@ internal static partial class LedgerFindings
 
         /// <summary>How many shutdown summaries the numbers come from.</summary>
         internal int Summaries { get; set; }
+
+        /// <summary>
+        /// The ledger files that published a summary for this port, deduplicated and in ordinal order:
+        /// the reference publishes this member as a *sorted* set, and two targets reporting the same
+        /// port would otherwise publish the same paths in a different order.
+        /// </summary>
+        internal List<string> LedgerPaths { get; } = [];
     }
 
     /// <summary>One row's endpoints, split by the path the arm that saw them was configured to take.</summary>
@@ -48,8 +55,11 @@ internal static partial class LedgerFindings
     }
 
     /// <summary>One DNS port's ledger totals and the client totals they are read against.</summary>
-    private static Dictionary<string, DnsPortTotals> DnsTotals(CampaignModel campaign, string passId)
+    internal static Dictionary<string, DnsPortTotals> DnsTotals(CampaignModel campaign, string passId)
     {
+        ArgumentNullException.ThrowIfNull(campaign);
+        ArgumentNullException.ThrowIfNull(passId);
+
         var totals = new Dictionary<string, DnsPortTotals>(StringComparer.Ordinal);
         var ledgers = LedgerLoader.For(campaign, passId);
         if (ledgers.Count == 0)
@@ -58,18 +68,22 @@ internal static partial class LedgerFindings
         }
 
         var summaries = ledgers
-            .SelectMany(ledger => ledger.Records)
-            .Select(record => record.Payload)
-            .Where(payload => string.Equals(
-                JsonValue.String(payload, "type"),
+            .SelectMany(ledger => ledger.Records.Select(record => (ledger.Path, record.Payload)))
+            .Where(entry => string.Equals(
+                JsonValue.String(entry.Payload, "type"),
                 LedgerViewsBuilder.DnsSummary,
                 StringComparison.Ordinal));
-        foreach (var payload in summaries)
+        foreach (var (path, payload) in summaries)
         {
             var entry = Slot(totals, JsonText.Of(JsonValue.Member(payload, Contracts.ArmKeys.Ledger.DnsSummary.Port)));
             entry.LedgerUdp += JsonValue.Number(payload, Contracts.ArmKeys.Ledger.DnsSummary.UdpQueries) ?? 0.0;
             entry.LedgerTcp += JsonValue.Number(payload, Contracts.ArmKeys.Ledger.DnsSummary.TcpQueries) ?? 0.0;
             entry.Summaries++;
+            var position = entry.LedgerPaths.BinarySearch(path, StringComparer.Ordinal);
+            if (position < 0)
+            {
+                entry.LedgerPaths.Insert(~position, path);
+            }
         }
 
         foreach (var run in EveryRun(campaign))

@@ -58,15 +58,32 @@ internal sealed class LedgerArmView
 /// <summary>One pass's ledger, attributed arm by arm.</summary>
 internal sealed class LedgerPassView
 {
+    /// <summary>The ledger files this pass read, in discovery order.</summary>
+    internal required IReadOnlyList<string> Paths { get; init; }
+
     /// <summary>How many records the pass's ledgers hold.</summary>
     internal required int Records { get; init; }
+
+    /// <summary>
+    /// How many records of each <c>type</c>, keyed by the reference's own <c>str()</c> of the member
+    /// and in first-occurrence order.
+    /// </summary>
+    /// <remarks>
+    /// The reference counts the records by iterating a <b>set</b> of the types, so its member order is a
+    /// hash-table artefact rather than a decision. Every reader sorts these keys before printing them
+    /// (§14.1 does), and the semantic oracle ignores object member order, so the two orders are the same
+    /// answer everywhere except a byte-for-byte comparison of the <c>types</c> object.
+    /// </remarks>
+    internal required IReadOnlyDictionary<string, int> Types { get; init; }
+
+    /// <summary>How many records carry each <c>label</c>, in first-occurrence order.</summary>
+    internal required IReadOnlyDictionary<string, int> Labels { get; init; }
 
     /// <summary>How many lines were not JSON.</summary>
     internal required int BadLines { get; init; }
 
     /// <summary>One entry per arm window.</summary>
     internal required IReadOnlyList<LedgerArmView> PerArm { get; init; }
-
 }
 
 /// <summary>The campaign's ledgers, read once.</summary>
@@ -100,7 +117,7 @@ internal static class LedgerViewsBuilder
     private const string TypeKey = "type";
 
     /// <summary>The <c>udpSummary</c> record family, whose interval totals the views read.</summary>
-    private const string UdpSummary = "udpSummary";
+    internal const string UdpSummary = "udpSummary";
 
     /// <summary>The <c>dnsSummary</c> record family, which the DNS totals are read from.</summary>
     internal const string DnsSummary = "dnsSummary";
@@ -109,7 +126,7 @@ internal static class LedgerViewsBuilder
     internal const string TargetSummary = "targetSummary";
 
     /// <summary>The per-connection record family.</summary>
-    private const string Tcp = "tcp";
+    internal const string Tcp = "tcp";
 
     private static readonly string[] s_udpEchoArms = ["LAT", "LATLOAD", "LOSS", "MIX", "BASE"];
 
@@ -147,7 +164,10 @@ internal static class LedgerViewsBuilder
             var windows = WindowsOf(runs);
             passes[passId] = new LedgerPassView
             {
+                Paths = [.. ledgers.Select(ledger => ledger.Path)],
                 Records = records.Count,
+                Types = TypesOf(records),
+                Labels = labels,
                 BadLines = ledgers.Sum(ledger => ledger.BadLines),
                 PerArm = ArmViews(passId, runs, records, windows, discriminating),
             };
@@ -185,6 +205,13 @@ internal static class LedgerViewsBuilder
         records
             .GroupBy(
                 record => JsonText.Of(JsonValue.Member(record.Payload, Contracts.ArmKeys.Ledger.Envelope.Label)),
+                StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+
+    private static Dictionary<string, int> TypesOf(IReadOnlyList<LedgerRecord> records) =>
+        records
+            .GroupBy(
+                record => JsonText.Of(JsonValue.Member(record.Payload, TypeKey)),
                 StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
 
