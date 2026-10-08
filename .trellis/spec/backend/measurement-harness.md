@@ -52,12 +52,18 @@ public sealed class JsonlSink : IAsyncDisposable
     public ValueTask DisposeAsync();           // backstop only
 }
 
-// Regression comparison (repo: benchmarks/WinForward.E2E/scripts/)
+// Regression comparison and documentation gates (repo: benchmarks/WinForward.E2E/scripts/)
 //   compare-records.py <baseDir> <afterDir> --normalize research/record-normalize.json
 //       [--band baseline/jitter-band.json | --write-band <file>]
 //       [--rename-table research/contract-rename.json [--batch B2]] [--strict] [--explain-classes]
 //   contract-inventory.py            # publishes research/contract-inventory.json + contract-rename.{json,md}
+//   jsonl_paths.py                   # the one flattening alphabet the inventory, the comparator and the table share
 //   normalize-pattern-hits.py        # reports config patterns that match nothing
+//   check-readme-contract.py         # README contract table -> ArmKeys constants -> write sites (§3.11)
+//   effective-lines.py               # the 400-effective-line gate
+//   cli-snapshots.py                 # records and replays the CLI surface (exit code + stdout + stderr)
+//   oracle-diff.py                   # the frozen-oracle differ the analysis is judged with (semantic by default)
+//   check-fairness.py                # asserts the fairness disclosures against the analysis's own tables.md
 ```
 
 ---
@@ -207,10 +213,11 @@ writing the next teardown path:
 
 REL keeps the teardown attempt inside `outcomes` (its `Observed` stays the arm's default) because
 `sum(outcomes) == connectAttempts == scheduledAttempts` is a live analyzer identity
-(`analyze.py reliability_invariants`); what a teardown changes there is the published `status`
-(`cancelled`, not `exchanged`) and the `otherError` flag. A site whose counter is a *census* rather than
-a measurement keeps counting: `TcpTargetServer` still increments `connections` at accept, so a torn-down
-connection can make `connections` exceed the number of `tcp` records.
+(`WinForward.E2E.Analysis/Checks/IdentityChecks.cs`, `ReliabilityInvariantsOf`); what a teardown changes
+there is the published `status` (`cancelled`, not `exchanged`) and the `otherError` flag. A site whose
+counter is a *census* rather than a measurement keeps counting: `TcpTargetServer` still increments
+`connections` at accept, so a torn-down connection can make `connections` exceed the number of `tcp`
+records.
 
 ### 3.10 One rate name, one caliber: `achievedRate`
 
@@ -254,6 +261,43 @@ A new published key is registered in `scripts/contract-inventory.py`'s `ADDITION
 `metrics/completionRate`) **before** `compare-records.py --rename-table … --batch B2` runs (D19.3 A):
 without the row the one-sided path reads as a structural difference and the batch's own gate goes red.
 
+### 3.11 The README's contract table is checked, not trusted
+
+`benchmarks/WinForward.E2E/README.md`'s "Which keys are contract" section is what a reader consults
+when a cell looks wrong, and it is the one place a rename can go stale without anything failing: the
+analysis resolves most paths by arm kind, so a misspelt key renders an empty cell and the report still
+builds. The section is therefore a **gate**, not prose:
+
+```console
+$ python3 benchmarks/WinForward.E2E/scripts/check-readme-contract.py
+111 key(s) checked against 401 declared constant path(s): ok        # exit 0
+```
+
+The checker reads the section (tables *and* prose), and for every backticked key path it names — and
+for the five root names the table spells bare — it:
+
+1. resolves it to a `const string` in `ArmKeys.*.cs` — the class chain spells the path
+   (`ArmKeys.Common.Gates.ClientSendLoss` is `gates/clientSendLoss`), a `<name>` placeholder resolves
+   to its container, and a `metrics/latency/…`/`metrics/loss/…`/`parameters/latency/…`/
+   `parameters/loss/…` token resolves as the `BASE` phase key one level down;
+2. requires that constant to be **referenced by a write site** — `Client/`, `Target/`, `Wire/`,
+   `Cli/`, `Program.cs` or the `Contracts` records' own `WriteTo` methods; a test is not a write site,
+   because a key only a test writes is a key no run publishes, and a line-commented call is not one
+   either, because the scan drops line comments before it looks for the reference;
+3. fails on any token that is an `old_path` of `research/contract-rename.json` whose `new_path`
+   differs, so a rename cannot leave the table describing a record that no longer exists.
+
+Three token classes are declared rather than inferred, so that dropping them is an edit and not a
+silent pass: `metrics/clientSendLoss` (the analysis's legacy gate fallback, published by no current
+latency arm), and the two spellings the section documents as carrying nothing — `parameters/window`
+and `parameters/loss.lossWindowMs`, which are plan-key spellings that the analysis reads at neither
+path (it reads `parameters/inFlightWindow` and `parameters/loss/lossWindowMs` instead). A key that is
+contract but that no table reads (the two out-of-range counters and `completionRate`) belongs in the
+section's prose paragraph, where the same check covers it.
+
+The same section names its authority for the record's *shape*: every key it lists must be spelled the
+way `ArmKeys` spells it, and the write site is what proves the record carries it.
+
 ---
 
 ## 4. Validation & Error Matrix
@@ -271,6 +315,8 @@ without the row the one-sided path reads as a structural difference and the batc
 | ledger / summary write fails | counted in `ledgerWriteErrors`; the target keeps serving |
 | a teardown catch books a counter, verdict or observation | `ObjectDisposedCatchGateTests` fails, naming `file:line` and the shape it read |
 | a published key is missing from the rename table's `ADDITIONS` | `contract-inventory.py rename` exits 1: "the fresh run publishes paths the table does not declare" |
+| a README contract key has no `ArmKeys` constant, no write site, or is a renamed-away spelling | `check-readme-contract.py` exits 1, one `FAIL: <token>: <reason>` line per key; exit 2 when the README or the rename table cannot be read, when the `ArmKeys` shards declare nothing, or when the section names no key at all |
+| a harness `.cs` file passes the 400-effective-line limit | `effective-lines.py <paths>` exits 1, naming the file and its count |
 
 ---
 
@@ -300,6 +346,19 @@ without the row the one-sided path reads as a structural difference and the batc
 - **Bad (rates)**: `AchievedRate = JsonPerSecond.PerSecond(state._responses, …)` in PERSIST (the completion
   population under the send name) or `PerSecond(attempts.Length, …)` in REL (counts attempts that never
   sent a request).
+- **Good (README keys)**: the contract table names `gates/clientSendLoss`, `metrics/tcp.sent` and
+  `metrics/classes/udp/sentOutOfRangeSequences`; each resolves to a constant that a write site references,
+  so `check-readme-contract.py` prints `ok` and exits 0.
+- **Base (README keys)**: a plan-key spelling the section names as carrying nothing
+  (`parameters/window`) is carried in `DOCUMENTED_NON_KEYS` instead of failing — the section states
+  why no record has it and which path does, so the checker reads it as a statement rather than a hole.
+- **Bad (README keys)**: the table still names `metrics/tcp.sentOk` (renamed to `metrics/tcp.sent`), or a
+  key that exists only in a test factory, or a key whose only writer was commented out, or
+  `metrics/classes/udp/sentOutOfRangeSequences` while the MIX writer does not reference
+  `ArmKeys.Mix.UdpClass.SentOutOfRangeSequences` — the checker exits 1, naming the token and the reason.
+- **Bad (phase keys)**: spelling BASE's nested keys as `metrics/latency` + a fresh constant instead of the
+  latency arm's own (`ArmKeys.Latency.UdpSent`) — the checker's phase rule would still resolve it, but the
+  writer would not, so the second check (write site) is what catches a copy that drifted.
 
 ---
 
@@ -332,6 +391,13 @@ without the row the one-sided path reads as a structural difference and the batc
 - **Effective lines** (`scripts/effective-lines.py`): the three harness projects must report nothing at a
   400-line limit; the counter strips blanks, `//` and `/* */` the way the compiler sees them (a `//` inside a
   string is not a comment, a multi-line raw string counts as code).
+- **README contract keys** (`scripts/check-readme-contract.py`): the harness README's contract section must
+  report `ok` and exit 0 against `ArmKeys.*.cs` and `research/contract-rename.json`; the three assertion
+  points are that the parsed constant set is non-empty, that every token resolves to a constant a write site
+  references, and that no token is a renamed-away spelling. A reader that skipped the `ArmKeys` shards, or a
+  rename that only touched the record, must turn it red. The two emptiness guards are themselves checks:
+  a shard set that declares nothing, or a section that names no key at all, is an exit 2 rather than a
+  vacuous `ok`.
 - **Regression comparison**: `run1 vs run1` and `run1 vs run2 --band` compare clean; a mutated contract
   counter fails while a mutated pid and a mutated latency reading do not.
 - **Teardown vocabulary** (`ObjectDisposedCatchGateTests` + `ObjectDisposedTeardownTests`): the registry
@@ -413,6 +479,31 @@ catch (SocketException)
 }
 ```
 
+#### Wrong — the README keeps a spelling the record no longer has
+```markdown
+| `latency` (LAT, LATLOAD) | `metrics/tcp.sentOk`, `metrics/udp.sentOk`, `gates/clientSendLoss` |
+```
+The rename landed in `ArmKeys.Latency.TcpSent`/`UdpSent` and in every writer, and nothing fails: the
+analysis resolves the path by arm kind, finds nothing, and renders the cell empty. The report still
+builds, and the document now describes a record nobody publishes.
+
+#### Correct — the table names the constant, and a gate holds it there
+```markdown
+| `latency` (LAT, LATLOAD) | `metrics/tcp.sent`, `metrics/udp.sent`, `gates/clientSendLoss` … |
+```
+```console
+$ python3 benchmarks/WinForward.E2E/scripts/check-readme-contract.py
+111 key(s) checked against 401 declared constant path(s): ok
+```
+Both halves of the check matter: the constant must exist **and** a write site must reference it, so a
+key that survives only in a shape-test factory is still a failure.
+
+> **Gotcha — a published key with no reader is still contract.** `sentOutOfRangeSequences`,
+> `outOfRangeSequences` and `completionRate` are read by no table and gate, so a rename of any of them
+> leaves every artifact byte-identical while the record's meaning changes under it. That is why
+> `check-readme-contract.py` reads the contract section's prose too: the paragraph that documents such a
+> key is where its spelling has to be pinned.
+
 > **Gotcha — the noise floor is not zero.** Two runs of the *same* binary differ: contract counters move on
 > their own (target UDP echo ordering, boot clocks, host sampling). Before calling a batch's difference a
 > regression, run the same binary twice and compare the two difference lists; also check whether the moving
@@ -427,15 +518,22 @@ catch (SocketException)
 
 ## 8. The analyzer
 
-`analyze.py` was replaced by `benchmarks/WinForward.E2E.Analysis` (C#, shares `Contracts`). Entry point:
+The analyzer is `benchmarks/WinForward.E2E.Analysis` (C#, shares `Contracts`). It replaced the Python
+reference (`analyze.py`), which is no longer in the tree; the reference survives only as the frozen
+`verification/golden/` output the differ is run against. Entry point:
 `benchmarks/WinForward.E2E.Analysis/scripts/analyze.sh` — it builds once, then execs the binary with the
 caller's working directory and arguments untouched (`--raw --out --ledger --flat --warmup-seconds
---resamples --seed`, same defaults as the reference: `../raw`, `..`, `5.0`, `10000`, `20261006`, 3 passes).
-It reads JSONL with `JsonDocument` plus `ArmKeys` paths — no reflection, no source generation, no
-`InternalsVisibleTo`. Outputs `tables.md` (sixteen `## N.` sections), `verdict.json` (fourteen top-level
-keys) and `plots/SKIPPED.md` (written unconditionally).
+--resamples --seed`; defaults `../raw`, `..`, `5.0`, `10000`, `20261006`, and `--ledger` may be repeated.
+`AnalysisOptions.DefaultMinPasses = 3` is a constant rather than a flag: fewer than three passes is
+reported as `inconclusive`).
+It reads JSONL with `JsonDocument`: the envelope-level names come from `ArmKeys` (a compile error on a
+rename), while the paths inside `metrics`/`parameters` are literals addressed positionally on `/`, because
+only the arm's kind knows which map a path belongs to — so a metric rename is a two-sided edit and
+`scripts/check-readme-contract.py` gates the documented half of it (§3.11). No reflection, no source
+generation, no `InternalsVisibleTo`. Outputs `tables.md` (sixteen `## N.` sections), `verdict.json`
+(fourteen top-level keys) and `plots/SKIPPED.md` (written unconditionally).
 
-The Python reference is gone; what constrains the analyzer now:
+What constrains the analyzer now:
 
 | Artifact | Purpose |
 |---|---|

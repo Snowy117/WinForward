@@ -422,3 +422,21 @@ A nonzero loss rate or an EOF count under an adversarial mix is an observation, 
 failure — the numbers become meaningful as a comparison series across builds. For UDP, loss
 before the OS saturates (e.g. >0 at `--pps 50000`) indicates socket-buffer pressure worth
 investigating.
+
+## Known file-size debt (registered 2026-10-07)
+
+`directory-structure.md` caps every `.cs` file at 400 effective lines. Three files of this project
+are above it; they are recorded here as an explicit exception with splitting as a follow-up rather
+than silently inherited.
+
+```console
+$ python3 benchmarks/WinForward.E2E/scripts/effective-lines.py benchmarks/WinForward.Benchmarks
+  909  benchmarks/WinForward.Benchmarks/Perf/SessionSetupDecompositionBenchmarks.cs
+  684  benchmarks/WinForward.Benchmarks/Stability/GcSoakScenario.cs
+  410  benchmarks/WinForward.Benchmarks/Stability/UdpChurnScenario.cs
+```
+
+The first two were registered on 2026-09-28 in `results/2026-09-28-udp-reuse/README.md`, which
+measured them at 909 and 685 effective lines; `UdpChurnScenario.cs` was below the cap then (326 in
+that note) and has crossed it since (410 now). Every other file of this project is at or below the
+cap — the command above is the check, and it exits 1 while this section's list is non-empty.

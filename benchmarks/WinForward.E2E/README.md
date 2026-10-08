@@ -28,17 +28,15 @@ directly, and a transparent proxy rewrites the path beneath it.
 | Path | Holds |
 |---|---|
 | `Program.cs` | the two verbs (`target`, `client`), usage and process exit codes |
-| `Cli/ExitCodes.cs` | `0` success, `1` runtime error, `2` usage error |
-| `Cli/CommandLine.cs` | the argument walk both verbs share: the `--name=value` split and the two walk-level refusals (`unknown argument`, `missing value`) |
-| `Cli/ClientOptions.cs` | the client's arguments, parsed and validated before a plan is read |
-| `Cli/TargetOptions.cs` | the target's arguments, parsed and validated before anything is bound |
+| `Cli/` | the argument walk both verbs share: `ExitCodes.cs` (`0` success, `1` runtime error, `2` usage error), `CommandLine.cs` (the `--name=value` split and the two walk-level refusals, `unknown argument` and `missing value`), `ClientOptions.cs` (the client's arguments, parsed and validated before a plan is read) and `TargetOptions.cs` (the target's, parsed and validated before anything is bound) |
 | `Client/ClientRunner.cs` | the client run: the arm loop, the arm's failure boundary, and the output-path checks |
 | `Client/ArmRecordWriter.cs` | the `result`, `armSummary` and `error` records of one arm |
 | `Client/RunFileWriter.cs` | `run.json`: the run's environment and one summary per arm |
 | `Client/PlanFile.cs` | the plan schema and its loader |
 | `Client/ArmSpec.cs` | one arm's declared parameters |
 | `Client/ArmContext.cs` | the shared clock, the pacer, and the per-run latency histograms |
-| `Client/Arms/` | one file per arm kind, plus `ArmDispatch.cs`; the largest kinds also have their plan, metrics writer and phase loops beside them (`Mix*`, `Reliability*`, `Persistent*`) |
+| `Client/Arms/` | one file per arm kind, plus `ArmDispatch.cs` and one entry per kind in `ArmKind.cs` (the name, its accepted plan keys and its validator in one table); the largest kinds also have their plan, metrics writer and phase loops beside them (`Mix*`, `Reliability*`, `Persistent*`) |
+| `Client/Lanes/` | the seam every latency lane runs through: `ILanePolicy` (window admission, frame building, reply classification, every receive-side counter), `ILaneTransport` (connect, one send, one receive), `LaneEngine.cs` (pacing, the offer loop, the bounded defer queue, the grace drain and the send-side counters), the TCP and UDP transports, and `ReplyClassifier.cs` |
 | `Client/LogHistogram.cs` | the client's latency histogram: logarithmic buckets and the percentile snapshot |
 | `Client/UdpReliability.cs` | the UDP sequence bookkeeping and the arrived/late/never classification |
 | `Client/ResourceSampler.cs` | the 1 Hz process sampler: the tick loop, its target and its barrier |
@@ -46,13 +44,16 @@ directly, and a transparent proxy rewrites the path beneath it.
 | `Client/ProcessSample.cs` | one sampled process's identity, and the summed totals per process name |
 | `Client/ResourceSampleWriter.cs` | the `sample` and `samplerError` record shapes |
 | `Client/FrameBuffer.cs` | the frame buffer an arm builds its requests in, and the socket helpers the lanes share |
-| `../WinForward.E2E.Contracts/` | what both verbs share: the record key constants, the typed metrics and parameters value objects, the JSONL sink, its failure policy, and the number formats the records publish |
+| `../WinForward.E2E.Contracts/` | what both verbs share: the record key constants (`ArmKeys.*.cs`, one shard per family), the typed metrics and parameters value objects, the JSONL sink, its failure policy, and the number formats the records publish |
+| `../WinForward.E2E.Analysis/` | the campaign analysis, a .NET project of its own: the report tables, `verdict.json`, the frozen oracle under `verification/`, and the entry point `scripts/analyze.sh` |
+| `../../tests/WinForward.E2E.Tests/` | the harness's own tests: the per-kind record shape tests, the lane seam with a fake transport, the ledger shape tests, the CLI snapshots, the key-literal gate and the teardown-vocabulary gate |
 | `Target/` | the target: TCP echo/command server, UDP echo server, DNS responder, the ledger summaries, the target log and the runner |
 | `Target/TcpConnectionProtocol.cs` | one TCP connection's command/echo state machine and its verdicts |
-| `Target/TcpAcceptLoop.cs` | the accept loop both TCP listeners share, its connection table and the drain |
+| `Target/TcpAcceptLoop.cs` | the accept loop both TCP listeners share, its connection table, its refused-accept counter and the drain |
 | `Target/SocketIo.cs` | the shared stream send/receive helpers |
 | `Target/Sockets.cs` | where the listeners are bound, and the reuse-port policy that makes a leftover instance loud |
 | `Target/SourceCensus.cs` | the UDP echo server's per-receiver source-endpoint census |
+| `Target/TargetLog.cs` | the target's own stderr log, with the closed-pipe guard the teardown contract requires |
 | `Wire/` | the protocol both verbs share: frame codec, stream reader, CRC32C, command payload, half-close trailer, DNS wire subset, payload filler |
 | `scripts/plans/` | the committed plans: `full-plan`, `udp-plan`, `dns-plan`, `dual-plan`, `base-plan`, `selftest-plan` |
 | `scripts/plans-short/` | the same arm shapes at short durations and lower rates, for validating a change |
@@ -60,6 +61,14 @@ directly, and a transparent proxy rewrites the path beneath it.
 | `scripts/orchestrator.ps1` | the campaign driver, run on the machine under test |
 | `scripts/publish.sh` | build and publish the artifacts |
 | `scripts/selftest.sh` | run the harness against itself on one host |
+| `scripts/contract-inventory.py` | publish `research/contract-inventory.json` and `research/contract-rename.{json,md}` from a record tree |
+| `scripts/jsonl_paths.py` | the one canonical flattener (`join('/', member names)`) the inventory, the comparator and the rename table share |
+| `scripts/normalize-pattern-hits.py` | report the normalization patterns that match nothing in a tree |
+| `scripts/oracle-diff.py` | diff the analysis's output against the frozen reference: `--mode semantic` (default) or `--mode byte`, `--batch N`, `--tolerance` |
+| `scripts/check-fairness.py` | assert the fairness disclosures — the `not carried` rows, the port-53 carriage labels, the CPU scope, and the unattributable `undecodable` token — against the analysis's own `tables.md` |
+| `scripts/check-readme-contract.py` | assert that every key in this file's contract table is a constant in `ArmKeys` that a write site publishes, and that no stale spelling survives |
+| `scripts/effective-lines.py` | report the `.cs` files above the repository's effective-line limit |
+| `scripts/cli-snapshots.py` | record the 28 CLI commands (both helps and every error path) as exit code plus stdout and stderr bytes |
 
 Machine-specific files, listed in `.gitignore` and **absent from a fresh checkout**:
 
@@ -170,7 +179,7 @@ A campaign needs a target reachable from the machine under test. The target is t
 
 ```bash
 WinForward.E2E target [--bind <ip>] [--tcp-port <n>] [--udp-port <n>] [--dns-port <n>]
-                      [--dns-alt-port <n>] [--label <name>] [--ledger <path>]
+                      [--dns-alt-port <n>] [--udp-receivers <n>] [--label <name>] [--ledger <path>]
 ```
 
 | Target flag | Default | Meaning |
@@ -180,6 +189,7 @@ WinForward.E2E target [--bind <ip>] [--tcp-port <n>] [--udp-port <n>] [--dns-por
 | `--udp-port <n>` | 30010 | UDP echo listener |
 | `--dns-port <n>` | 30053 | DNS responder, UDP and TCP |
 | `--dns-alt-port <n>` | none | a second DNS responder, UDP and TCP, on a port no product special-cases; it must differ from the other three ports |
+| `--udp-receivers <n>` | `clamp(processors / 2, 2, 8)` | datagram receive loops each listener starts, `1..64` — the echo listener and both DNS listeners take the same count, and only the echo listener's started loops are published, as `targetSummary`'s `udp/udpReceivers` |
 | `--label <name>` | empty | run identity copied into every ledger record |
 | `--ledger <path>` | `target-ledger.jsonl` | JSONL ledger output |
 
@@ -285,9 +295,10 @@ One client run writes one directory. Every JSONL file is one JSON object per lin
 | `run.json` | one object | the run's identity and environment, its plan hash, path and source, its per-arm tick windows, and whether any arm failed |
 | target ledger | `tcp` | one finished TCP connection: `connectionId`, `mode`, `expectedBytes`, `bytesEchoed`, `verdict`, `peer`, tick window |
 | | `udpSummary` | once a second while the target runs and once at shutdown: running totals (`received`, `undecodable`, `bytes`) and the source endpoints seen in that interval |
-| | `dnsSummary` | once per listener at shutdown: UDP and TCP query, answer, empty-answer, malformed, send-error and connection totals |
-| | `tcpSummary` | once at shutdown: connections, bytes echoed, protocol errors, verdicts |
-| | `targetSummary` | once at shutdown: the tick window, the ledger write-error count, and the `tcp` / `udp` / `dns` / `dnsAlt` totals |
+| | `dnsSummary` | once per listener at shutdown: UDP and TCP query, answer, empty-answer, malformed, send-error and connection totals, plus the listener's refused accepts and its length-prefix short reads |
+| | `tcpSummary` | once at shutdown: connections, refused accepts, bytes echoed, protocol errors, frames cut off mid-frame by the peer's close, verdicts |
+| | `targetSummary` | once at shutdown: the tick window, the ledger write-error count, and the `tcp` / `udp` / `dns` / `dnsAlt` totals — the UDP block carries the receive-loop count that started (`udpReceivers`), and the `tcp`, `dns` and `dnsAlt` blocks repeat their listener's `acceptErrors` and `truncatedFrames` |
+| | `error` | a record that could not be written: `type`, `detail` (the innermost exception type), and the envelope |
 | `proxy-truth.json` | one object | `tcp`, `udp`, `utcp` and `total` — the proxied flows observed in the proxy's log — plus `directLeak` in the dual phase's file |
 | `dual/proxied/`, `dual/direct/` | as a row | the two lanes of the dual phase: one run around the proxy and one configured to go direct, the same workload shape against two targets. Each lane is a full run directory, and `dual/proxy-truth.json` carries the row's flow census plus `directLeak` |
 | `order.txt` | one line | the row ids in the order this pass ran them |
@@ -364,44 +375,68 @@ A rename inside the contract does not fail loudly: the cell becomes `n/a`, or th
 drops out of an aggregate, and the campaign report still renders. The analysis resolves most keys by
 arm kind, so the contract is (arm kind → key paths), not one global list.
 
+Every path in the table below is a published key, declared as a `const string` in
+`../WinForward.E2E.Contracts/ArmKeys.*.cs`, one shard per family: the class chain spells the path
+(`ArmKeys.Common.Gates.ClientSendLoss` is `gates/clientSendLoss`), a dotted value such as
+`ArmKeys.Latency.TcpSent = "tcp.sent"` is one member whose name contains a dot, and when two arms
+publish the same spelling each shard declares its own constant rather than sharing one.
+`scripts/check-readme-contract.py` is the gate: it reads every backticked key path this section names
+and every root name the table spells bare, resolves each against those declarations, and fails when a
+key has no constant, when no write site references a declaring constant, or when the spelling is an
+`old_path` of `research/contract-rename.json`.
+
 | Read from | Paths (inside the arm's `result` record) |
 |---|---|
 | every arm, by `kind` | `kind`; `type` to select the record; `parameters/…` for the dual-phase shape comparison |
-| `latency` (LAT, LATLOAD) | `parameters/protocol`; `metrics/tcp.connectAttempts`, `metrics/tcp.sentOk`, `metrics/tcp.laneSupplied[]`, `metrics/udp.sentOk`, `metrics/udp.laneStarted`, `metrics/udp.lossRate`, `metrics/udp.foreignConnection`; `gates/clientSendLoss` (with `metrics/clientSendLoss` as its fallback), `gates/windowOverflow`, `gates/backlogDrops`, `gates/scheduleTruncated`, `gates/laneShortfall`, `gates/inFlightCeilingMs`, `gates/lanesPlanned`, `gates/lanesStarted` |
+| `latency` (LAT, LATLOAD) | `parameters/protocol`; `metrics/tcp.connectAttempts`, `metrics/tcp.sent`, `metrics/tcp.laneSupplied[]`, `metrics/udp.sent`, `metrics/udp.laneStarted`, `metrics/udp.lossRate`, `metrics/udp.foreignConnection`; `gates/clientSendLoss` (with a bare `metrics/clientSendLoss` accepted as a fallback for records that predate the gate — `LOSS` and `MIX` publish that path, the latency kinds do not), `gates/windowOverflow`, `gates/backlogDrops`, `gates/scheduleTruncated`, `gates/laneShortfall`, `gates/inFlightCeilingMs`, `gates/lanesPlanned`, `gates/lanesStarted` |
 | `loss` (LOSS) | `metrics/sent`, `metrics/supplied`, `metrics/arrived`, `metrics/late`, `metrics/never`, `metrics/corrupt`, `metrics/corruptDatagrams`, `metrics/duplicate`, `metrics/reordered`, `metrics/foreignConnection`, `metrics/abandonedAtTeardown`, `metrics/clientSendLoss`, `metrics/lossRate`, `metrics/strictLossRate`, `metrics/corruptRate`, `metrics/reorderRate`, `metrics/window`; `gates/clientSendLoss`, `gates/windowMs` |
 | `reliability` (REL) | `metrics/connectAttempts`, `metrics/scheduledAttempts`, `metrics/outcomes/<name>` and `metrics/expected/<name>` for `clean`, `reset`, `unexpectedEof`, `timeout`, `connectFail`, `halfCloseViolation`, `otherError`; `metrics/unexpectedEof`, `metrics/fidelityMismatch`, `metrics/meanConnectMs`, `metrics/meanTransferMs` |
 | `throughput` (THRU) | `metrics/goodputMbps`, `metrics/frames`; `parameters/streams` |
-| `dns` (DNS, DNSALT) | `metrics/sent`, `metrics/answered`, `metrics/servfail`, `metrics/timeout`, `metrics/other`, `metrics/answerRate`, `metrics/udpSent`, `metrics/tcpSent`; `parameters/dnsPort` |
-| `mix` (MIX) | `metrics/classes/page/connections`, `metrics/classes/page/messages`, `metrics/classes/bulk/frames`, `metrics/classes/dns/sent`, `metrics/classes/udp/lossRate`, `metrics/classes/udp/sent`, `metrics/classes/udp/window`, `metrics/classes/udp/foreignConnection`; `metrics/udpSent`, `metrics/udpLossRate`, `metrics/pageConnections`; `metrics/desktops[]` with `desktop`, `udpSent`, `udpForeignConnection`, `pageConnections`, `bulkFrames`, `dnsSent`; `parameters/desktops`, `parameters/udpPacketsPerSecondPerDesktop`; `gates/idleLanes` |
+| `dns` (DNS, DNSALT) | `metrics/sent`, `metrics/answered`, `metrics/servfail`, `metrics/timeout`, `metrics/other`, `metrics/answerRate`, `metrics/udp.sent`, `metrics/tcpSent`; `parameters/dnsPort` |
+| `mix` (MIX) | `metrics/classes/page/connections`, `metrics/classes/page/messages`, `metrics/classes/bulk/frames`, `metrics/classes/dns/sent`, `metrics/classes/udp/lossRate`, `metrics/classes/udp/sent`, `metrics/classes/udp/window`, `metrics/classes/udp/foreignConnection`; `metrics/udp.sent`, `metrics/udp.lossRate`, `metrics/pageConnections`; `metrics/desktops[]` with `desktop`, `udp.sent`, `udp.foreignConnection`, `pageConnections`, `bulkFrames`, `dnsSent`; `parameters/desktops`, `parameters/udpPacketsPerSecondPerDesktop`; `gates/idleLanes` |
 | `persistent` (PERSIST) | `metrics/requests`, `metrics/responses`, `metrics/responseRate`, `metrics/reconnects`, `metrics/survivedIdle`, `metrics/connectAttempts`, `metrics/idleSecondsScheduled`, `metrics/idleSecondsObserved` |
-| `base` (BASE) | `metrics/latency/udp.sentOk`, `metrics/latency/udp.lossRate`, `metrics/latency/tcp.connectAttempts`, `metrics/loss/lossRate`, `metrics/loss/sent`, `metrics/loss/window`, `metrics/loss/foreignConnection` |
+| `base` (BASE) | `metrics/latency/udp.sent`, `metrics/latency/udp.lossRate`, `metrics/latency/tcp.connectAttempts`, `metrics/loss/lossRate`, `metrics/loss/sent`, `metrics/loss/window`, `metrics/loss/foreignConnection` |
 | every arm with a histogram | `latency/tcp-connect`, `latency/tcp-rtt`, `latency/udp-rtt`, `latency/dns-rtt`, each with `count` and `minUs`, `meanUs`, `p50Us`, `p90Us`, `p99Us`, `p999Us`, `maxUs` |
-| the UDP accuracy table | reads the fifteen fields it tabulates — `sent`, `arrived`, `late`, `never`, `corrupt`, `corruptDatagrams`, `duplicate`, `reordered`, `foreignConnection`, `abandonedAtTeardown`, `lossRate`, `strictLossRate`, `corruptRate`, `reorderRate`, `clientSendLoss` — from `metrics/…` for LOSS and from `metrics/classes/udp/…` for MIX, plus `sent` and `supplied` as the denominators behind its rule-of-three bounds. MIX does not publish `strictLossRate`, `corruptRate`, `reorderRate` or `supplied`, and the analysis prints an explicit `n/a (MIX does not publish …)` for those cells rather than a zero |
+| the UDP accuracy table | reads the fifteen fields it tabulates — `sent`, `arrived`, `late`, `never`, `corruptDatagrams`, `corrupt`, `duplicate`, `reordered`, `foreignConnection`, `abandonedAtTeardown`, `lossRate`, `strictLossRate`, `corruptRate`, `reorderRate`, `clientSendLoss` — from `metrics/…` for LOSS and from `metrics/classes/udp/…` for MIX, plus `sent` and `supplied` as the denominators behind its rule-of-three bounds. MIX does not publish `strictLossRate`, `corruptRate`, `reorderRate` or `supplied`, and the analysis prints an explicit `n/a (MIX does not publish …)` for those cells rather than a zero |
 | `run.json` | `label`, `planHash`, `clientVersion`, `osDescription`, `frameworkDescription`, `logicalProcessors`, `samplerProcesses`, `startedUtc`, `startedTicks`, `endedTicks`, `wallSeconds`, `arms[].{name,file,kind,startedTicks,endedTicks,failed}`, `target.{address,tcpPort,udpPort,dnsPort}`, `failed` |
-| samples | `self`, `process`, `matched`, `absent`, `ticks`, `readError`, `readErrors`, `cpuSeconds`, `privateBytes`, `workingSetBytes`, `peakWorkingSetBytes`, `processes[].{pid,startUtc,countersRead,cpuSeconds,privateBytes}` |
-| the ledger | `type`, `utc`, `label`; `tcp` records' `verdict`; `dnsSummary`'s `port`, `tcpQueries`, `udpQueries`; `udpSummary`'s `received`, `sources`, `sourceOverflow`; `targetSummary`'s `ledgerWriteErrors` |
+| samples | `self`, `process`, `matched`, `absent`, `ticks`, `readError`, `readErrors`, `cpuSeconds`, `privateBytes`, `workingSetBytes`, `peakWorkingSetBytes`, `generatorCpuSeconds`, `processes[].{pid,startUtc,countersRead,cpuSeconds,privateBytes}` |
+| the ledger | `type`, `utc`, `label`; `error` records' `detail`; `tcp` records' `verdict`; `udpSummary`'s `received`, `undecodable`, `sources[].{address,port,datagrams}`, `sourceOverflow`; `tcpSummary`'s and `dnsSummary`'s `truncatedFrames`; `dnsSummary`'s `port`, `tcpQueries`, `udpQueries`; `targetSummary`'s `ledgerWriteErrors`, `tcp`, `dns`, `dnsAlt` and their `truncatedFrames` |
 
-Two paths in that read-set are satisfied by no record, and both are read-only misses rather than
-invented numbers: `parameters/window` (the latency arm publishes the plan's `window` as
-`parameters/inFlightWindow`, because a bare `window` would be ambiguous between a request count and
-the loss arm's millisecond threshold) and `parameters/loss.lossWindowMs` (BASE nests the loss phase's
-parameter map, so the readable path is `parameters/loss/lossWindowMs`).
+Two spellings a reader may look for are not record keys, and the analysis reads neither:
+`parameters/window` (the latency arm publishes the plan's `window` as `parameters/inFlightWindow`,
+because a bare `window` would be ambiguous between a request count and the loss arm's millisecond
+threshold) and `parameters/loss.lossWindowMs` (BASE nests the loss phase's parameter map, so the
+readable path is `parameters/loss/lossWindowMs`). A lookup at either path returns nothing; the table
+above is written in the paths a record actually carries.
+
+Three published keys are contract without being read by any table, because they change what a record
+*means* rather than what a report prints. `metrics/sentOutOfRangeSequences` (on `LOSS`; the MIX UDP
+class publishes the same key under `metrics/classes/udp/sentOutOfRangeSequences`) counts offered
+slots the tracker refused to send as outside its bounded sequence space — such a slot is folded into
+`clientSendLoss` and lands in no classification bucket. Its receive-side twin,
+`metrics/outOfRangeSequences` (and `metrics/classes/udp/outOfRangeSequences`), counts sequences an
+*arriving* datagram named that the tracker refused for the same reason, so it is a measurement
+caveat rather than a client loss. `metrics/completionRate` (PERSIST) is the completion caliber —
+responses per elapsed second — which `metrics/achievedRate` carried before the two names were split;
+every arm's `achievedRate` is requests successfully sent per elapsed second. The analysis reads none
+of the three (nor the MIX twins), so a rename here still renders a report; they are listed because
+this section is where the record's meaning is defined, and
+`scripts/check-readme-contract.py` is what keeps the list true.
 
 The `metrics` map uses four different conventions, and all four are load-bearing:
 
 | Convention | Examples | Published by |
 |---|---|---|
 | flat per-arm names | `metrics.sent`, `metrics.lossRate`, `metrics.connectAttempts`, `metrics.goodputMbps`, `metrics.answerRate`, `metrics.reconnects` | loss, reliability, throughput, dns, persistent |
-| flat names that contain a dot | `metrics.tcp.sentOk`, `metrics.udp.sentOk`, `metrics.udp.lossRate`, `metrics.udp.foreignConnection`, `metrics.tcp.laneSupplied` | latency (`LAT`, `LATLOAD`) |
+| flat names that contain a dot | `metrics.tcp.sent`, `metrics.udp.sent`, `metrics.udp.lossRate`, `metrics.udp.foreignConnection`, `metrics.tcp.laneSupplied` | latency (`LAT`, `LATLOAD`), and the same dotted names are the dns arm's and the mix arm's roll-up |
 | one level of nesting under `classes.*` | `metrics.classes.udp.lossRate`, `metrics.classes.udp.window`, `metrics.classes.page.connections`, `metrics.classes.bulk.frames`, `metrics.classes.dns.sent` | mix |
-| a whole sub-arm nested under its phase name | `metrics.latency.udp.sentOk`, `metrics.latency.udp.lossRate`, `metrics.loss.sent`, `metrics.loss.lossRate` | base |
+| a whole sub-arm nested under its phase name | `metrics.latency.udp.sent`, `metrics.latency.udp.lossRate`, `metrics.loss.sent`, `metrics.loss.lossRate` | base |
 
 The dot inside the latency arm's keys is the reason the analysis walks paths on `/` rather than on
-`.`: `metrics/tcp.sentOk` is one map key, not a nested `tcp` object. The same statistic therefore has
-up to four spellings — `metrics.udp.sentOk` (latency), `metrics.udpSent` (dns and the mix arm's
-roll-up), `metrics.classes.udp.sent` (mix), `metrics.latency.udp.sentOk` (base) — and each spelling
-is what some table reads. Renaming one is a coordinated change with the analysis, never a local
-clean-up.
+`.`. The same statistic has three spellings — `metrics/udp.sent` (latency, dns and the mix arm's
+roll-up, one string), `metrics/classes/udp/sent` (mix class) and `metrics/latency/udp.sent` (base) —
+and each spelling is what some table reads. Renaming one is a coordinated change with the analysis,
+never a local clean-up.
 
 ## Gates and validity
 
@@ -411,7 +446,7 @@ analysis.
 
 | Gate | Meaning |
 |---|---|
-| `gates/clientSendLoss` | samples the client destroyed instead of offering them: for the latency arms, supplied minus sent, which is the deferred queue's residue plus the backlog drops plus the refused sends; for `LOSS` and `MIX`, the datagrams still in flight when observation stopped plus refused sends and window overflows; for `PERSIST`, the connect and send failures; `BASE` sums the two phase gates. The four arms that cannot destroy a sample write a literal `0`: `IDLE` offers no traffic, `THRU` refuses a frame against its byte budget before offering it, `REL` back-pressures its pacer on a full attempt window instead of dropping an attempt, and `DNS` publishes a pacing slot skipped by a full in-flight window as `metrics.unsent`, which never enters `sent` |
+| `gates/clientSendLoss` | samples the client destroyed instead of offering them. For the latency arms it is supplied minus sent, which is the deferred queue's residue (`abandonedAtTeardown`) plus the backlog drops plus the refused sends. For `LOSS` and the MIX UDP class it is four published terms — `abandonedAtTeardown + sendFailures + windowOverflow + sentOutOfRangeSequences`; MIX's `windowOverflow` is structurally zero because that class has no in-flight window, and `sentOutOfRangeSequences` is the slot the tracker refused to send as outside its bounded sequence space. For `PERSIST` it is the connect and send failures; `BASE` sums its two phase gates. `IDLE` is the only arm whose gate is structurally zero: it offers no traffic and has no send-side counter, so the record carries a literal `0` and the analysis never asks for it (its validity checks cover `LOSS`, `LAT`, `LATLOAD` and `BASE`), which is the one place a zero is a statement about the design rather than a measured value. The other three arms compute a gate rather than a literal: `THRU` publishes `metrics.sendFailures` (a frame the byte budget refuses is refused before it is offered, so it is not a destroyed sample), `REL` publishes `metrics.scheduledAttempts − metrics.connectAttempts` (the arm back-pressures its pacer instead of dropping an attempt, so the difference is the work it ended with still in flight, normally `0`, and the analysis also has that identity), and `DNS` publishes `metrics.unsent` — the pacing slots a full in-flight window skipped, which never enter `sent`; `metrics.socketErrors` is a different population and is deliberately outside it |
 | `gates/windowMs` | the declared UDP loss threshold W in milliseconds. It is `0` for every arm that has no millisecond loss window — that is every arm except `LOSS`, `MIX` and `BASE`, which publish the declared W they classified against |
 | `gates/windowOverflow` | the in-flight window was full. In the latency arms the request is deferred, not dropped: it goes out when a slot frees, still stamped with its original intended instant, so a deferral there is a disclosure rather than a loss. In `LOSS` the datagram is dropped and the overflow is folded into `clientSendLoss`; in `MIX` the UDP class has no in-flight window and the counter is structurally zero |
 | `gates/backlogDrops` | requests discarded because the deferred queue was full (bounded per lane by `max(4 × window, 10 s of the offered rate)`, capped at 2²⁰). These are censored samples and are folded into `clientSendLoss` |
@@ -440,7 +475,7 @@ zero witness means that lane never ran rather than that it sent nothing.
 | Arm | Witnesses |
 |---|---|
 | `LAT`, `LATLOAD` | every `metrics.tcp.laneSupplied[i] > 0`, `metrics.udp.laneStarted > 0` when the protocol includes udp, and `gates.lanesStarted == gates.lanesPlanned` |
-| `MIX` | every desktop entry's `udpSent`, `pageConnections`, `bulkFrames` and `dnsSent` > 0, and `gates.idleLanes == 0` |
+| `MIX` | every desktop entry's `udp.sent`, `pageConnections`, `bulkFrames` and `dnsSent` > 0, and `gates.idleLanes == 0` |
 
 The witness is set by the lane body itself, not inferred from a total, because a lane that never
 runs removes its whole share of the offered schedule while the record still reads as a complete run
@@ -458,7 +493,18 @@ an ordinary corrupt datagram.
 
 ## The target's protocol
 
-Everything on the wire is defined in `Wire/` and read by both verbs.
+Everything on the wire is defined in `Wire/` and read by both verbs. **This section is a mirror, not
+the authority: the code is.** Every table below names the file and the symbols it copies, so a reader
+who finds a difference knows which side to fix, and so does a writer who changes the code:
+
+| This section | Authority |
+|---|---|
+| the frame layout, the magic, the 28-byte header, the 4-byte trailer, the 4 MiB ceiling | `Wire/FrameCodec.cs` (`Magic`, `HeaderSize`, `TrailerSize`, `MaxPayloadLength`, `CommandSequence`) |
+| the CRC32C parameters | `Wire/Crc32C.cs` |
+| the mode byte and the published mode names | `Wire/TcpCommand.cs` (`TcpMode`, `TcpCommand.Name`, `PayloadLength = 5`) |
+| the mode/verdict behaviour below | `Target/TcpConnectionProtocol.cs` (`s_stallDelay`) and `Wire/FrameStreamReader.cs` |
+| the half-close trailer's shape | `Wire/TrailerProtocol.cs` (`PayloadBytes`, `FrameCount`, `TotalBytes`, `SequenceBase`) |
+| the DNS wire subset | `Wire/DnsWire.cs` (`TypeA`…`TypeHttps`, `MaxMessageLength`) |
 
 | Offset | Size | Field | Encoding |
 |---|---|---|---|
@@ -476,6 +522,18 @@ where SSE4.2 is available. A frame is rejected on a bad magic, a payload length 
 bad checksum; the UDP target never echoes a frame it could not decode and counts it as `undecodable`
 in its ledger.
 
+**A stream that ends inside a frame is `Truncated`, not a clean close.** `FrameReadStatus`
+(`Wire/FrameStreamReader.cs`) tells four ways a read can end: `Frame`, `EndOfStream` (the peer closed
+at a frame boundary — the clean half-close the modes below are measured against), `Truncated` (the
+peer closed with bytes of a frame still buffered, so the boundary is gone and no later frame can be
+framed), and the `BadMagic`/`BadLength`/`BadChecksum` rejects. `Truncated` is deliberately not a
+verdict of its own: the TCP echo listener keeps the connection's existing `protocolError` verdict and
+counts the cut-off frame in `tcpSummary`'s `truncatedFrames`, and the DNS listener — which frames its
+TCP messages with a two-byte length prefix rather than with `FrameStreamReader` — counts its own
+short reads in `dnsSummary`'s `truncatedFrames`. Two mechanisms, two counters, one leaf name; both
+reach `targetSummary` under their listener's block, and the analysis discloses them per target and
+per pass because a cut-off frame carries no sequence number and so belongs to no run and no arm.
+
 Sequence `0` is reserved for the command. Its 5-byte payload is a mode byte followed by a big-endian
 `u32` byte count:
 
@@ -489,8 +547,8 @@ Sequence `0` is reserved for the command. Its 5-byte payload is a mode byte foll
 
 A connection that closes before a valid command, or before the byte count in a fault mode, is
 recorded as `clientClosedEarly`; a first frame that is not a parsable command frame is recorded as
-`protocolError`. Each connection produces one `tcp` ledger record with its id, mode, byte counts and
-verdict.
+`protocolError`, and a connection that ends on a socket fault or a shutdown is `error`. Each
+connection produces one `tcp` ledger record with its id, mode, byte counts and verdict.
 
 **Half-close trailer.** When the client's FIN arrives in `halfClose` mode, the target writes three
 frames of 256 payload bytes each — 768 payload bytes in total, sequences from
@@ -543,17 +601,22 @@ charts the previous implementation drew.
 ## Non-obvious properties
 
 - **The histogram's ceiling.** The latency histograms are logarithmic: 34 buckets of 2048
-  sub-buckets, tracking values clamped into `[1 ns, 2³⁴ − 1 ns]` — that is 17.18 seconds. A sample
-  slower than the ceiling is recorded **at** the ceiling, and there is no overflow counter, so a
-  `maxUs` of 17179869.183 means "17.18 s or more", not "17.18 s". A percentile reports the exclusive
-  upper bound of the bucket it lands in, so it is never an underestimate.
+  sub-buckets, tracking values clamped into `[1 ns, 2³⁴ − 1 ns]` — that is 17.18 seconds
+  (`Client/LogHistogram.cs`). A sample slower than the ceiling is recorded **at** the ceiling, and
+  there is no overflow counter, so a `maxUs` of 17179869.183 means "17.18 s or more", not "17.18 s".
+  A percentile reports the exclusive upper bound of the bucket it lands in, so it is never an
+  underestimate.
 - **`latency.tcp-connect` and `metrics.meanConnectMs` are different statistics over different
   populations.** For `LAT` and `LATLOAD`, `latency.tcp-connect` holds only the 1 Hz connect probe and
   measures each probe from its *intended* instant, so pacing lateness is inside the sample; its count
-  is the number of probes. `metrics.meanConnectMs` is the mean over *every* successful connect the arm
-  made — the lane connects and the probe together, the population that `metrics.tcp.connectAttempts`
-  counts — each measured from the start of its own connect. `REL` and `PERSIST` publish their own
-  `meanConnectMs` over their own attempts. The two must not be cited side by side.
+  is the number of probes that connected at all. `metrics.meanConnectMs` is the mean over *every*
+  successful connect the arm made — the lane connects and the probe together, the population that
+  `metrics.tcp.connectAttempts` counts — each measured from the start of its own connect. `REL` and
+  `PERSIST` publish their own `meanConnectMs` over their own attempts. The two must not be cited side
+  by side, and neither covers a connect that failed: `metrics.tcp.connectFailures` counts those, and
+  no gate reads it, so a product that hangs or resets a connect contributes no `tcp-connect` sample
+  at all while one that answers slowly contributes a large one — the column can invert a connect
+  ranking by itself.
 - **`THRU` paces to a byte budget and can end budget-bound.** `budgetBytes = targetBytesPerSecond ×
   seconds`, and each frame is reserved whole, so a frame that would overshoot the budget is refused
   and the streams stop. `metrics.budgetReached: true` means the arm ended because the budget was
@@ -564,9 +627,9 @@ charts the previous implementation drew.
   between sends, and a second drain runs after the offer loop until W has elapsed since the last
   *real* send. They are separate because the in-loop drain must not stall the open-loop pacer, and
   only the post-offer drain knows the horizon. `MIX` keeps a dedicated receive task per desktop and a
-  separate waiter that ends at the same horizon, and both arms cap the observation instant at it.
-  A datagram still inside its window when observation stops is booked as `abandonedAtTeardown`, never
-  as `never`.
+  separate waiter that ends at the same horizon (`Client/Arms/MixUdpLoop.cs`), and both arms cap the
+  observation instant at it. A datagram still inside its window when observation stops is booked as
+  `abandonedAtTeardown`, never as `never`.
 - **`abandonedAtTeardown` is the interrupt bucket.** It counts sent datagrams whose W had not elapsed
   when observation stopped: neither an arrival nor a loss can be claimed for them. They are excluded
   from `lossRate` and are counted as client loss in `gates.clientSendLoss`, so a drain cut short
@@ -581,14 +644,23 @@ charts the previous implementation drew.
 - **Latency is measured from each request's intended instant, never from the instant it was actually
   sent.** A request deferred by a full in-flight window or a stalled product is published as an
   inflated sample, not a missing one, and the percentile includes the pacing lateness.
+- **The MIX arm's `dns-rtt` is polled, not awaited.** Its page loop asks `Socket.Available` and waits
+  `Task.Delay(1)` between asks (`Client/Arms/MixPageLoop.cs`), so the sample carries up to one timer
+  tick that has nothing to do with the path — on Windows that tick is up to 15.6 ms, on top of a
+  sub-millisecond DNS round trip. The `DNS` and `DNSALT` arms measure the same statistic from a
+  dedicated receive loop and do not pay it; the MIX cell is comparable between rows only because
+  every row pays the same poll.
 - **The UDP sequence space is bounded at 2¹⁸ − 1.** A plan whose offered schedule would run past it
   is refused where it is loaded, so reaching the bound means the schedule outran the space it
-  declared. The tracker then refuses each such sequence and counts it in `metrics.outOfRangeSequences`
-  (published by `LOSS` and by the MIX UDP class): the datagram was offered and handed to the socket,
-  but it is not booked as sent, so it lands in no classification bucket, it is not part of the
-  published `clientSendLoss`, and `sent` is smaller than `supplied`. A non-zero value therefore means
-  the classification covers fewer datagrams than the schedule offered and the record is not a
-  complete loss measurement.
+  declared. The tracker then refuses the sequence, and the side that offered it decides which counter
+  moves. On the **send** side a refused offer slot is counted in `metrics.sentOutOfRangeSequences`
+  (the MIX UDP class publishes it under `metrics/classes/udp/sentOutOfRangeSequences`): the slot
+  never reached the socket, it lands in no classification bucket, and it **is** folded into
+  `clientSendLoss`, so `sent` is smaller than `supplied` and the record is not a complete loss
+  measurement. On the **receive** side a datagram that arrived naming an out-of-space sequence is
+  counted in `metrics.outOfRangeSequences` (MIX: `metrics/classes/udp/outOfRangeSequences`); it is a
+  measurement caveat about the frame that arrived and is not client loss. The two counters are
+  different populations and must not be added together.
 
 ## Verification
 
@@ -600,18 +672,26 @@ hold. All of them are visible in the record itself.
 | the run completed | one `result` and one `armSummary` per arm; `run.json`'s `failed` false and no arm's `failed` true; no `error` record |
 | the self-test client exited 0 | the client exits 1 if any arm failed, 2 on a usage error |
 | the targets answered | the ledger holds `tcp` records with `clean`, `reset`, `partialFin` and `halfClose` verdicts, `udpSummary` totals, and the `targetSummary` written at shutdown. A `clientClosedEarly` record with `mode: unknown` is the normal record of a connect probe: the probe connects and closes without sending a command |
+| nothing was cut off mid-frame | `tcpSummary.truncatedFrames == 0` and `dnsSummary.truncatedFrames == 0`. A non-zero value is a disclosure rather than a failure — it says a peer closed inside a frame, which the fault mix can provoke on purpose — and the analysis reports it per target and per pass, because the count carries no sequence number and so no arm |
+| no accept was refused | `tcpSummary.acceptErrors == 0` and `dnsSummary.acceptErrors == 0`; a refused accept is retried, and the counter is how a listener's own trouble becomes visible instead of a connection that never appears |
 | the UDP identity holds | `arrived + late + never + abandonedAtTeardown + corruptDatagrams == sent` in `LOSS`, in `MIX`'s UDP class and in `BASE`'s loss phase |
 | the DNS partition holds | `answered + servfail + timeout + other == sent` in `DNS` and `DNSALT` |
 | the reliability identities hold | `connectAttempts == scheduledAttempts` and the outcome counts sum to `connectAttempts` |
 | no lane was dead | every witness above is non-zero: `gates.laneShortfall == 0`, `gates.scheduleTruncated == 0`, `gates.idleLanes == 0`, every `tcp.laneSupplied[i] > 0` |
-| nothing was dropped by the client | `gates.clientSendLoss == 0` and `gates.backlogDrops == 0` (the arms that compute them); for the latency arms a non-zero `gates.windowOverflow` is a disclosure, not a failure |
+| nothing was dropped by the client | `gates.clientSendLoss == 0` and `gates.backlogDrops == 0` (the arms the analysis checks; `IDLE`'s gate is a structural `0` no consumer reads); for the latency arms a non-zero `gates.windowOverflow` is a disclosure, not a failure, and the analysis renders that arm's latency cells as `n/a (windowOverflow > 0)` |
 | flows were not mixed | `foreignConnection == 0` in `LOSS`, `LAT`/`LATLOAD`'s udp block, `MIX`'s UDP class and per-desktop witnesses, and `BASE`'s loss phase |
 | the product behaved as configured | `REL`'s `fidelityMismatch == 0`; `PERSIST`'s `survivedIdle` true; a non-zero `unexpectedEof` excludes the early EOFs that `partialFin` deliberately provokes, which are counted separately as `expectedEarlyEof` |
 | the sampler worked | no `samplerError` record and no sample carrying `readError` |
 | a campaign is trustworthy | the analysis's own gates: the three identities, the lane witnesses, `clientSendLoss`, the two control blocks against each other, and `directLeak == 0` in the dual phase — see [README.md](../WinForward.E2E.Analysis/README.md) |
 
-A healthy self-test run prints the analysis's summary line — `1 pass(es), 1 row(s), N metric(s)` —
-and reports zero `correctness-failure` and zero `harness-error` findings. Two findings remain, and
-both are properties of a self-test rather than of the harness: an informational note that the DNS arm
-ran on port 5301 instead of 53, so the port-53 carriage label is declared rather than measured, and a
-measurement caveat that a flat tree has neither control block.
+The harness's own three gates run the same way: `scripts/check-readme-contract.py` fails when a key
+in the table above is no longer a constant in `ArmKeys`, `scripts/effective-lines.py` fails when a
+harness file grows past the repository's effective-line limit, and `CliSnapshotTests` fails when a
+CLI message is reworded.
+
+A healthy self-test run prints the analysis's summary line —
+`1 pass(es), 1 row(s), 1 ledger(s), 1 loaded run(s)` — and reports zero `correctness-failure` and zero
+`harness-error` findings. Two findings remain, and both are properties of a self-test rather than of
+the harness: an informational note that the DNS arm ran on port 5301 instead of 53, so the port-53
+carriage label is declared rather than measured, and a measurement caveat that a flat tree has neither
+control block.

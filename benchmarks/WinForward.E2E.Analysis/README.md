@@ -9,9 +9,17 @@ things:
 | `verdict.json` | per-row medians, the findings list, the control-block comparison, the dual phase, the ledger cross-check, and a pairwise practical-significance test per headline metric |
 | `plots/` | `plots/SKIPPED.md`; the charts the reference drew are not rendered (see "Plots") |
 
-It is a .NET console project in this repository, built with the rest of the solution and sharing the
-harness's own contract types, so a field the harness renames is a compile error here rather than a
-silently empty cell. No number in `tables.md` or `verdict.json` comes from a chart.
+It is a .NET console project in this repository, built with the rest of the solution and referencing the
+harness's contract project (`WinForward.E2E.Contracts`), so the envelope-level field names it reads —
+`run.json`'s keys, the sample counters, the ledger's records — are the same `ArmKeys` constants the
+harness writes and a rename there is a compile error rather than an empty cell. The paths *inside*
+`metrics` and `parameters` are string literals in this project, because the analysis addresses them
+positionally (`metrics/tcp.sent` is one member name, not a nested object) and only the arm's kind knows
+which map it should look in: a metric rename is therefore a two-sided change — the harness writes the new
+spelling and the analysis has to be taught it — and
+`benchmarks/WinForward.E2E/scripts/check-readme-contract.py`
+gates the documentation half of that contract. No number in `tables.md` or `verdict.json` comes from a
+chart.
 
 ## Running it
 
@@ -36,7 +44,7 @@ for the caller. `<repo>` is the checkout that holds this file.
 | `--out` | `..` | directory to write `tables.md`, `verdict.json` and `plots/` into |
 | `--ledger` | search | target ledger JSONL; by default the script looks for `target-ledger.jsonl`, `ledger.jsonl` or `*ledger*.jsonl` in each pass directory, in `--raw` itself and in `--raw`'s parent |
 | `--flat` | off | treat `--raw` itself (when it holds the run files) or its immediate subdirectories as rows of one implicit pass |
-| `--warmup-seconds` | 5 | seconds of each arm excluded from the steady-state memory and CPU cells |
+| `--warmup-seconds` | 5 | seconds of each arm excluded from the steady-state **memory** cells; the CPU cells are not warmed up (see "What the tables cannot see") |
 | `--resamples` | 10000 | bootstrap resamples (over passes, never samples) |
 | `--seed` | 20261006 | bootstrap seed; the per-pair seeds are derived from it deterministically |
 
@@ -119,6 +127,10 @@ unredirected, that arm's UDP never reaches the proxy: its latency and answer rat
 special-cases, so **only `DNSALT` is comparable across products**. Section 9 prints the port-53
 carriage beside both arms' numbers, and `verdict.json` refuses to compare a port-53 DNS metric
 between rows whose carriage differs.
+
+The MIX arm measures a third `dns-rtt`, in its own page loop, on the run's DNS port; it is polled
+rather than awaited, so it is comparable between rows but not with either DNS arm's cell. Item 3 of
+"What the tables cannot see" has the mechanism.
 
 ## Aggregation policy
 
@@ -256,6 +268,11 @@ counts what arrived. The script reads `udpSummary` (cumulative counters plus a p
   port the ledger reports that no client arm used says `no client counterpart`.
 - **Verdicts.** The target's per-connection verdicts are tabulated against the client's own
   expectations as a fidelity cross-check.
+- **Two target-side totals are disclosed, never attributed.** §14.6 prints the datagrams the target
+  could not decode and §14.7 the frames a peer's close cut in half. Neither number carries a
+  sequence, a run or an arm, so neither enters any arm-level cell or gate; the captions say so, and
+  §14.6's `DecodeNote` names the client's `corruptDatagrams` as the statistic that *cannot* see a
+  request-path corruption the target dropped.
 
 ## verdict.json
 
@@ -300,6 +317,99 @@ CPU and memory cell, because the harness writes `null` (not `0`) for a process i
 and a zero there is not a measurement; the rejected count and any `samplerError` records are
 printed and reported as findings.
 
+**CPU scope is the sampled process's own time, user mode and its own system calls — nothing else.**
+Every CPU cell is the delta of `Process.TotalProcessorTime` for the product process the sampler
+matched: the time the kernel charges to that process's threads, its user time plus the privileged
+time those threads spend in system calls. Kernel-mode work the product causes *outside* its own
+threads is measured nowhere here — interrupt, DPC and ISR time in a kernel data path, packets a
+driver serves for other processes, and machine-wide CPU are all outside the number — so a
+kernel-heavy product can show a low cell while still costing the machine real CPU. §6 says the same
+thing under its table, and `headroom %` is against logical-processor capacity rather than a measured
+machine total for the same reason. The **warmup window applies to the memory cells only**: §6 reads
+every readable sample of the arm, because a CPU rate wants the whole arm as its denominator.
+`generator %vCPU` is the sampler's own cost, read from the same per-identity accumulation but from
+the `self` series, so the cost of generating the load is never charged to the product.
+
+One consequence is worth stating plainly: the row-level `proxy CPU` in the headline matrix
+concatenates **every non-IDLE arm's samples for the pass** into one first-to-last span, so both its
+numerator and its denominator include the idle stretches between arms, while every §6 cell is one
+arm alone. The two are different populations; the headline is the run-level cost, not the sum of the
+section's cells.
+
+## What the tables cannot see
+
+Eight properties of the instrument change how a cell in this file has to be read. Each can invert a
+conclusion that the numbers alone appear to support, and each is a property of the harness, the
+ledger or the analysis rather than of any product. Items 1–2 concern the latency table, 3–4 the
+histogram columns, and 5–8 the ledger, the resource cells and the throughput column.
+
+1. **`tcp-connect`'s population is successful connects only.** A probe that fails to connect
+   contributes no sample to that histogram. `metrics.tcp.connectFailures` counts the failures and
+   **no gate reads that counter and no table prints it** — the `connectFail %` column in §11 is the
+   REL arm's own outcome, a different population — so a product that hangs or resets a connect
+   contributes nothing to the column while a product that answers slowly contributes a large sample:
+   the column can invert a connect ranking by itself. Read `metrics.tcp.connectFailures` and
+   `metrics.tcp.connectAttempts` from the record before drawing anything from the histogram.
+2. **`tcp-connect` and `metrics.meanConnectMs` are two statistics, never one pair.** For `LAT` and
+   `LATLOAD` the histogram holds only the 1 Hz connect probe, measured from each probe's *intended*
+   instant (so pacing lateness is inside the sample); `metrics.meanConnectMs` is the mean over every
+   *successful* connect the arm made — lane connects and probes together, each from the start of its
+   own connect — and `REL` and `PERSIST` publish their own over their own attempts. They may both be
+   printed, but they must never be cited side by side as one measurement of the same thing.
+3. **The MIX arm's `dns-rtt` is polled, not awaited.** The MIX page loop asks `Socket.Available` and
+   waits `Task.Delay(1)` between asks, so its sample carries up to one timer tick that has nothing to
+   do with the path; on Windows that tick is up to 15.6 ms on top of a sub-millisecond round trip.
+   The `DNS` and `DNSALT` arms measure the same statistic from a dedicated receive loop and do not pay
+   it, so the MIX cell is comparable between rows (every row pays the same poll) but not with the DNS
+   arms' cells.
+4. **The latency histograms saturate at 17.18 seconds.** Their buckets clamp into `[1 ns, 2³⁴ − 1 ns]`,
+   there is no overflow counter, and a percentile reports the exclusive upper bound of its bucket: a
+   printed `maxUs` of `17179869.183` means "17.18 s or more", and every longer hang is
+   indistinguishable from a 17.18 s one. Any tail drawn from these histograms is a tail up to that
+   ceiling.
+5. **The ledger attributes runs by label and window, and identifies no packet.** A ledger record
+   carries `utc` and `label` and nothing else that names a run: the analysis joins the label to a run
+   and bounds it with the arm's UTC window, derived from the client's `startedUtc` plus the arm's tick
+   offsets, and where a ledger carries a single label the window alone attributes (§14.1 prints which
+   case applied). Its UDP census is written once a second, and datagram totals come from the `sources`
+   deltas of that interval rather than from the cumulative `received`; `dnsSummary` is written once
+   per listener at shutdown and covers the ledger's whole lifetime. Nothing in it identifies a
+   datagram, so `undecodable` — the only witness of corruption on the request path — is a target-side
+   total with no sequence number: it belongs to no run and no arm, no cell anywhere in this file
+   includes it, and §14.6 discloses it as such. A frame the peer's close cut in half is the same kind
+   of number and is disclosed the same way in §14.7.
+6. **The 5-second warmup is a memory window, not a CPU window.** The CPU cells read every readable
+   sample of the arm, and the row-level `proxy CPU` in the headline matrix concatenates every non-IDLE
+   arm of a pass into one first-to-last span, so its denominator contains the idle stretches between
+   arms while its numerator contains the CPU the product burned during them. "IDLE is excluded" is
+   therefore true of the arms that are summed and not of the interval that is divided by. One footnote
+   still says otherwise: §2's `steady-state warmup` row reads "N s of every arm excluded from the
+   memory and CPU steady-state cells". The memory half is the measured behaviour; the CPU half is a
+   wording this analysis inherited from the frozen reference, and correcting it would change a compared
+   table cell and therefore require refreezing `verification/` (see `FROZEN.md`). This document and
+   §6's own caption are the authority until that refreeze happens.
+7. **The memory slope is fitted over arms concatenated in load order.** The time series behind the
+   leak slope appends one arm's post-warmup samples after another's in the analysis's fixed
+   `ArmRecords.LoadOrder`, not in the order the pass actually ran them, and it fits private bytes
+   against that concatenated elapsed time. When a pass's real order differs — the orchestrator seeds
+   it per pass — the curve jumps between arms and back, so the slope and the leak verdict describe the
+   shape of the concatenation rather than a product's memory over wall-clock time. The `MIX`-only
+   slope is the one series that is a single arm's own.
+8. **`THRU` measures up to its own declared ceiling, and nothing above it.** The arm paces every
+   stream to an aggregate `targetBytesPerSecond` and sends one 32 KiB frame at a time per stream, so a
+   path that can carry more than the declared rate is reported *at* the declared rate: rows that
+   differ by a factor of two above the ceiling print the same goodput, and nothing in the table marks
+   the ceiling — `metrics.budgetReached` says only whether the arm stopped on its byte budget or on
+   time, and an arm that keeps up with its pacer stops on the budget. The metric carries no
+   pre-declared threshold (`no-threshold-declared` in `verdict.json`), so only its confidence interval
+   separates rows — and at the ceiling there is nothing for it to separate. Read the row's goodput
+   against its plan's declared rate before calling a tie a result.
+
+Each item also has its counterpart in the harness's own document,
+[../WinForward.E2E/README.md](../WinForward.E2E/README.md) ("Non-obvious properties"); item 5 is
+stated under the tables it qualifies as well (§14.6 and §14.7), and item 6 records the one footnote
+that still disagrees with it.
+
 ## The rule of three
 
 In the UDP accuracy and TCP reliability tables, a cell is printed as `< 3/n` when *every* pass
@@ -333,13 +443,22 @@ there that the plots are not reproduced and that their inputs are all still in `
 - **Proxifier's UDP numbers do not exist.** Every UDP cell reads `not carried (UDP bypassed)`.
 - **The port-53 DNS arm is not comparable across products**; `DNSALT` is.
 - **Machine-wide CPU is not sampled.** `headroom %` is expressed against logical-processor
-  capacity: `100 × (P × 100 − generator %vCPU − proxy %vCPU) / (P × 100)`.
+  capacity: `100 × (P × 100 − generator %vCPU − proxy %vCPU) / (P × 100)`. The CPU columns are also
+  the sampled process's own time only; see "CPU and memory" for the full scope and for what the
+  warmup does and does not cover.
 - **The memory slope spans arms with different load shapes**, so it is given twice — over all
-  measured arms and over the `MIX` arm alone — and only the CI decides the leak verdict.
+  measured arms and over the `MIX` arm alone — and only the CI decides the leak verdict. The
+  all-arms series is concatenated in the analysis's fixed load order, not in the pass's real run
+  order; see item 7 of "What the tables cannot see".
 - **Fewer than 3 passes is never enough to decide a pair**, so such comparisons are reported as
   `inconclusive` rather than guessed.
-- **Only the most-sampled product process is analysed** per row; the provenance table lists every
-  non-self process name it saw, so a second name is easy to spot.
+- **Only the most-sampled product process name is analysed** per row, with ties broken by ordinal name
+  comparison — and every tick writes one record per name, so a tie is the normal case rather than an
+  edge one. A product whose work is split across two images has only one of them counted, and two
+  processes that share one name (a service and its GUI, say) are summed into one series without being
+  flagged. §2's sampling table is the provenance: it prints the configured names, the one that won,
+  and every other name it saw with its record count (`name xCount`), which shows the split but not how
+  many processes carried a name.
 - **A ledger arm's datagram count is judged with a one-second band**, because the target
   summarises its UDP census once a second and once more at shutdown.
 
