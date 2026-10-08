@@ -298,6 +298,49 @@ section's prose paragraph, where the same check covers it.
 The same section names its authority for the record's *shape*: every key it lists must be spelled the
 way `ArmKeys` spells it, and the write site is what proves the record carries it.
 
+### 3.12 The UDP source census is a per-interval table (T2, 2026-10-08)
+
+`udpSummary.sources[]` is what the *interval* saw and `sourceOverflow` is what the interval could not
+place; both readings are unchanged. What T2 changed is the capacity behind them, and the choice is
+recorded here rather than left in the code:
+
+- One fixed table of 64 slots per receive loop. A datagram takes the slot of its `(address, port)` when
+  its endpoint already holds one, and otherwise the lowest-numbered slot **no datagram of the current
+  interval has touched yet** — the idleness clock restarts at every `Harvest`, so every slot is claimable
+  at the moment an interval opens. A claim that changes hands starts its count over, so the delta
+  `Harvest` publishes is still the interval's own.
+- `Harvest` ends the interval. The previous behaviour — "an endpoint keeps its slot for the life of the
+  server" — made the table's capacity the process's lifetime distinct endpoints, so a campaign that
+  outlived 64 endpoints went blind **permanently**: E5-b's ledger held exactly 64 source endpoints and
+  then published `sources: []` with `received == sourceOverflow` for 42 minutes. Capacity is now the
+  interval's active endpoints per loop, which is what the produced delta was always about.
+- **The trade-off, stated.** A slot the opening interval has not touched yet may be handed to another
+  endpoint, so an endpoint that appears once and never again is no longer listed in later intervals (it
+  never had a non-zero delta there anyway) — and an endpoint that keeps arriving can lose its slot to a
+  fresh endpoint that arrives before its own first datagram of the interval. That costs it its running
+  count, not its record: its next datagram claims a fresh slot, and that claim's whole count is published
+  as this interval's datagrams under the endpoint's own key, because `sources[]` is keyed by endpoint and
+  not by slot. `sourceOverflow` therefore describes an interval that touched more than 64 endpoints on
+  one loop — the slots go to the **first** 64 endpoints of the interval, not to the busiest — rather than
+  a census that is dead for the rest of the run. A larger table was rejected: it only postpones the same
+  blindness and multiplies the per-datagram scan.
+- **The bounded boundary effect.** A re-claim overwrites the previous claim's count, and a datagram that
+  lands in the summariser's read window of the closing interval can be lost with it. Measured at campaign
+  shape (8 loops, 60 continuous + 400 historical + 100 probe endpoints, 32,040 datagrams): one datagram,
+  i.e. `received = censused + sourceOverflow + 1`. It is inside the analyzer's datagram band (1 %, or one
+  second of the arm's own rate) and is the price of a bounded table; the alternative is the permanent
+  blindness above. The window scales with how often `Harvest` runs against how long an endpoint lives: at
+  the shipped 1 Hz a churn run of 8 loops and 439,445 datagrams lost nothing, while a summariser looping
+  every few microseconds discards the tail of nearly every short-lived endpoint — the one-second summary
+  interval is part of this contract, not an implementation detail to shorten casually.
+- **The handshake.** One receive loop writes a table and the summariser is the only reader. A claim
+  publishes `_claim` last with a release `Volatile.Write`, so a reader of that value sees the identity
+  and count written before it; a re-claim writes `_claim = 0`, crosses `Interlocked.MemoryBarrier()`, then
+  moves the identity and publishes the new claim. `Harvest` reads `_claim`, the identity and the count,
+  then `_claim` again, and leaves a slot claimed under the read to the next interval, so a torn claim can
+  never be published as one endpoint's address beside another's count. No allocation, delegate or LINQ is
+  on the datagram path; the only added work is one volatile read of the interval's epoch per datagram.
+
 ---
 
 ## 4. Validation & Error Matrix
@@ -385,6 +428,11 @@ way `ArmKeys` spells it, and the write site is what proves the record carries it
   compare the flattened ledger paths with the declared keys in both directions, per record family and in
   declared order; the three states; the `sources` array written even when empty; the conditional `dnsAlt`
   block omitted whole.
+- **Source census** (`SourceCensusTests`, §3.12): a continuing endpoint is published as the interval's own
+  delta across intervals; a wave no datagram touched for an interval is reclaimed whole by the next wave
+  (the fact fails against a census that never reclaims); a full table reports the interval's unplaced
+  datagrams as `sourceOverflow`; and a summariser running on another thread beside the receive loop
+  publishes every recorded datagram exactly once, under its own port, with nothing unplaced.
 - **CLI snapshots** (`CliSnapshotTests` + `scripts/cli-snapshots.py`): 28 commands (both helps and every error
   path) recorded as exit code + stdout + stderr bytes; the replay test runs `Program.Main` in a
   non-parallel collection and restores `Console.Out`/`Error`/cwd; a reworded message must turn it red.
