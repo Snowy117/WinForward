@@ -9,6 +9,7 @@ namespace WinForward.E2E.Analysis.Metrics;
 /// <param name="Key">The metric's identifier, which is also its member name in <c>verdict.json</c>.</param>
 /// <param name="Label">The label the report prints.</param>
 /// <param name="Unit">The unit legend: <c>pp</c>, <c>us</c>, <c>Mbps</c>, <c>%vcpu</c>, <c>count</c>.</param>
+/// <param name="Digits">How many digits the headline matrix keeps after the point for this metric.</param>
 /// <param name="Family">Which pre-declared threshold family judges its comparisons.</param>
 /// <param name="Definition">The definition the report publishes beside the numbers.</param>
 /// <param name="Arm">The arm the metric is read from, or null for a metric read from the samples.</param>
@@ -19,6 +20,9 @@ namespace WinForward.E2E.Analysis.Metrics;
 /// <para><b>The unit is a legend, not a suffix.</b> A <c>count</c> cell prints no unit at all while a
 /// <c>pp</c> cell prints <c> pp</c>; the reference decides that from the unit name rather than from a
 /// second flag, and the two are not interchangeable in the compared text.</para>
+/// <para><b>The rounding is the metric's own, because §4 is the only section that prints every
+/// metric.</b> A section that renders one column of its own passes the digits where it prints them; the
+/// headline matrix reads them from here, which is why the declaration carries them at all.</para>
 /// <para><b>A metric with no threshold family is a published interval, not a verdict.</b> Throughput and
 /// event counts report their confidence interval as <c>no-threshold-declared</c> instead of guessing at
 /// a band nobody declared.</para>
@@ -27,6 +31,7 @@ internal sealed record MetricSpec(
     string Key,
     string Label,
     string Unit,
+    int Digits,
     string Family,
     string Definition,
     string? Arm,

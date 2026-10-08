@@ -112,6 +112,36 @@ internal static class DescriptiveStats
             : $"{VerbatimNumber.Cell(median, digits)} [{VerbatimNumber.Cell(p25, digits)}–{VerbatimNumber.Cell(p75, digits)}]{unit} {tail}";
     }
 
+    /// <summary>
+    /// The sum of a float series the way CPython's <c>sum</c> computes it: the running total with
+    /// Neumaier compensation, which is what keeps <c>1e16 + 1 - 1e16</c> from losing the middle term.
+    /// </summary>
+    /// <remarks>
+    /// A least-squares slope is a difference of large sums, so the last printed digit of §7's slope
+    /// cells depends on how the sums were accumulated. A plain loop is the wrong sum here: the
+    /// reference's <c>sum</c> compensates, and <c>total += value</c> does not (see
+    /// <see cref="OlsSlope"/>).
+    /// </remarks>
+    /// <param name="values">The values to add, in the order they are added.</param>
+    /// <returns>The compensated sum.</returns>
+    internal static double Sum(IReadOnlyList<double> values)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+
+        var total = 0.0;
+        var compensation = 0.0;
+        foreach (var value in values)
+        {
+            var sum = total + value;
+            compensation += Math.Abs(total) >= Math.Abs(value)
+                ? (total - sum) + value
+                : (value - sum) + total;
+            total = sum;
+        }
+
+        return total + compensation;
+    }
+
     /// <summary>One row's per-pass verdicts as one cell: the verdict itself, or a mixed summary.</summary>
     internal static string SummariseVerdicts(IReadOnlyList<string> verdicts)
     {

@@ -39,6 +39,19 @@ internal sealed record ArmRecords(
     internal static IReadOnlyList<string> LoadOrder { get; } =
         ["IDLE", "LAT", "LATLOAD", "DNS", "DNSALT", "LOSS", "REL", "THRU", "MIX", "PERSIST", "BASE"];
 
+    /// <summary>
+    /// The arm's kind — <c>latency</c>, <c>loss</c>, <c>reliability</c>, <c>throughput</c>, <c>dns</c>,
+    /// <c>mix</c> or <c>persistent</c> — which decides what the arm's own denominators are called.
+    /// </summary>
+    /// <remarks>
+    /// The result record is the authority and the summary is only read when there is no result: a run
+    /// that ended without one still knows what it was trying to measure, and an arm that wrote a result
+    /// carrying no kind is not silently re-described by its header.
+    /// </remarks>
+    internal string? Kind => Result is not null
+        ? JsonValue.String(Result, "kind")
+        : JsonValue.String(ArmSummary, "kind");
+
     /// <summary>The <c>type</c> value a record carries, or the empty string when it carries none.</summary>
     internal const string ResultKind = "result";
 

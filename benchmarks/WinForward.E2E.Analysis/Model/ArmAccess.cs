@@ -87,6 +87,75 @@ internal static class ArmAccess
         return (value, null);
     }
 
+    /// <summary>
+    /// A boolean metric — <c>metrics.survivedIdle</c> is the only one — which is a fact about the pass
+    /// rather than a number that could be averaged.
+    /// </summary>
+    /// <remarks>
+    /// A boolean is not read through the UDP identity gate: the gate exists to keep a violated identity
+    /// from being averaged over, and a flag is never averaged.
+    /// </remarks>
+    /// <param name="run">The run the arm belongs to.</param>
+    /// <param name="armName">The arm to read.</param>
+    /// <param name="path">The <c>/</c>-separated path inside the arm's result.</param>
+    internal static (bool? Value, string? Reason) Flag(ClientRun run, string armName, string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+
+        var (result, why) = ArmResult(run, armName);
+        if (result is null)
+        {
+            return (null, why);
+        }
+
+        var dotted = path.Replace(JsonValue.Separator, '.');
+        var (present, value) = JsonValue.DigPresent(result, path);
+        if (!present)
+        {
+            return (null, $"{armName} {dotted} missing");
+        }
+
+        return value?.ValueKind switch
+        {
+            JsonValueKind.True => (true, null),
+            JsonValueKind.False => (false, null),
+            _ => (null, $"{armName} {dotted} is not a boolean"),
+        };
+    }
+
+    /// <summary>
+    /// One counter divided by another, with a zero denominator reported as its own reason rather than as
+    /// an infinity or a zero.
+    /// </summary>
+    /// <param name="run">The run the arm belongs to.</param>
+    /// <param name="armName">The arm to read.</param>
+    /// <param name="numeratorPath">The <c>/</c>-separated path of the numerator.</param>
+    /// <param name="denominatorPath">The <c>/</c>-separated path of the denominator.</param>
+    internal static (double? Value, string? Reason) Ratio(
+        ClientRun run,
+        string armName,
+        string numeratorPath,
+        string denominatorPath)
+    {
+        var (numerator, why) = Number(run, armName, numeratorPath);
+        if (numerator is null)
+        {
+            return (null, why);
+        }
+
+        var (denominator, denominatorWhy) = Number(run, armName, denominatorPath);
+        if (denominator is null)
+        {
+            return (null, denominatorWhy);
+        }
+
+#pragma warning disable S1244 // An exact zero is the reference's own test here.
+        return denominator.Value == 0.0
+#pragma warning restore S1244
+            ? (null, $"{armName} {denominatorPath.Replace(JsonValue.Separator, '.')} is zero")
+            : (numerator.Value / denominator.Value, null);
+    }
+
     /// <summary>One histogram statistic, straight from the harness's own histogram.</summary>
     internal static (double? Value, string? Reason) Latency(ClientRun run, string armName, string latencyClass, string stat)
     {

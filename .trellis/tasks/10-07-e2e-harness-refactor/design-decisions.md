@@ -923,3 +923,12 @@ C# 分析器用 **`Utf8JsonReader`/`JsonDocument` + `ArmKeys.*` 常量路径**�
    （`table_ledger` 的 `0.0` falsy ⇒ band=None，而守卫查 `is None`），oracle 永远覆盖不到 ⇒ E4-c 必须：
    给 `make_tree.py` 加 `--zero-denominator` 边界旗标 + 对 **C# 产物单侧**定点断言（空 cell、`null_passes`
    的理由、回退闸）+ 负控（把空 cell 写成 `0` 必须红）。
+
+### D21.3 E4-b4 check 后的两条登记（交给 E4-c）
+
+1. **补偿求和要一条廉价回归锚**：CPython 3.12+ 的 `sum()` 是 Neumaier 补偿求和（`sum([1e16,1,-1e16]) == 1.0`），
+   E4-b4 的 OLS 与身份 CPU 和依赖它；实测**朴素累加能通过本批全部闸门**（byte 与 semantic 都 rc=0）
+   ⇒ 需要一条事实钉住（`DescriptiveStats.Sum([1e16,1,-1e16]) == 1.0`），可见性决定同 b1b 的三基元。
+2. **`RunSamples.ProcessName` 的 truthiness 压平**（参考 `sample.get("process") or ""` 只把 falsy 映射成空串，
+   移植版把所有非字符串都映射成空串）：仅当 `process` 既非字符串又非 falsy 时可分叉，而契约里它是字符串或缺失、
+   且该形状下参考会 `TypeError`（归 D20.1 的定点断言）⇒ **登记不修**，理由写进证据 §10.3。

@@ -54,6 +54,13 @@ internal static class RunClocks
         return null;
     }
 
+    /// <summary>
+    /// The tick an arm started at, which is what turns a warmup window in seconds into the cut a
+    /// sample's own tick is compared against.
+    /// </summary>
+    internal static double? ArmStartTicks(ClientRun run, string armName) =>
+        JsonValue.Number(ArmEntry(run, armName), ArmKeys.Run.Arm.StartedTicks);
+
     /// <summary>How long one arm ran, from the run's own tick deltas.</summary>
     internal static double? ArmWindowSeconds(ClientRun run, string armName)
     {
