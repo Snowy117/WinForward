@@ -1,0 +1,113 @@
+using System.Text.Json;
+using WinForward.E2E.Analysis.Checks;
+
+namespace WinForward.E2E.Analysis.Model;
+
+/// <summary>
+/// Reads a number, a string, a boolean or a histogram out of one arm's <c>result</c> record, with the
+/// reason a reading failed carried beside it so every cell that cannot be computed can print why.
+/// </summary>
+/// <remarks>
+/// <para><b>A reading is a value and a reason, never a default.</b> Every caller in the reference
+/// receives a <c>(value, why)</c> pair; the reason is what turns into <c>n/a (reason)</c>, and a
+/// missing counter and a counter whose UDP identity was violated are two different reasons.</para>
+/// <para><b>A violated UDP identity blocks the arm's UDP fields.</b> Those fields are excluded from
+/// every aggregate rather than averaged over, which is stated in the reading's own reason.</para>
+/// </remarks>
+internal static class ArmAccess
+{
+    /// <summary>The reason a rate the harness wrote as JSON null has no value.</summary>
+    private const string NullRateReason = "null rate: the harness wrote null because the denominator was zero";
+
+    /// <summary>One arm's <c>result</c> record, or the reason the arm has none.</summary>
+    internal static (JsonElement? Result, string? Reason) ArmResult(ClientRun run, string armName)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        ArgumentNullException.ThrowIfNull(armName);
+
+        var arm = run.Arms.Find(armName);
+        if (arm is null)
+        {
+            return (null, $"no {armName} arm");
+        }
+
+        return arm.Result is { } result ? (result, null) : (null, $"{armName} arm has no result record");
+    }
+
+    /// <summary>A numeric metric at a <c>/</c> path inside one arm's result.</summary>
+    internal static (double? Value, string? Reason) Number(ClientRun run, string armName, string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+
+        var (result, why) = ArmResult(run, armName);
+        if (result is null)
+        {
+            return (null, why);
+        }
+
+        var (blocked, detail) = IdentityChecks.BlockedPrefix(run, armName);
+        if (blocked is not null && path.StartsWith(blocked, StringComparison.Ordinal))
+        {
+            return (null, $"harness error: UDP identity violated ({detail}); excluded rather than averaged over");
+        }
+
+        var (present, value) = JsonValue.DigPresent(result, path);
+        var dotted = path.Replace(JsonValue.Separator, '.');
+        if (!present)
+        {
+            return (null, $"{armName} {dotted} missing");
+        }
+
+        if (value is { ValueKind: JsonValueKind.Null })
+        {
+            return (null, NullRateReason);
+        }
+
+        var number = JsonValue.AsNumber(value);
+        return number is not null ? (number, null) : (null, $"{armName} {dotted} is not a number");
+    }
+
+    /// <summary>A string (or any non-null scalar) at a <c>/</c> path inside one arm's result.</summary>
+    internal static (JsonElement? Value, string? Reason) Text(ClientRun run, string armName, string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+
+        var (result, why) = ArmResult(run, armName);
+        if (result is null)
+        {
+            return (null, why);
+        }
+
+        var (present, value) = JsonValue.DigPresent(result, path);
+        if (!present || value is null or { ValueKind: JsonValueKind.Null })
+        {
+            return (null, $"{armName} {path.Replace(JsonValue.Separator, '.')} missing");
+        }
+
+        return (value, null);
+    }
+
+    /// <summary>One histogram statistic, straight from the harness's own histogram.</summary>
+    internal static (double? Value, string? Reason) Latency(ClientRun run, string armName, string latencyClass, string stat)
+    {
+        ArgumentNullException.ThrowIfNull(latencyClass);
+        ArgumentNullException.ThrowIfNull(stat);
+
+        var (result, why) = ArmResult(run, armName);
+        if (result is null)
+        {
+            return (null, why);
+        }
+
+        var histogram = JsonValue.Dig(result, $"latency/{latencyClass}");
+        if (histogram is not { ValueKind: JsonValueKind.Object })
+        {
+            return (null, $"{armName} has no {latencyClass} histogram");
+        }
+
+        var value = JsonValue.Number(histogram, stat);
+        return value is not null
+            ? (value, null)
+            : (null, $"{armName} {latencyClass}.{stat} missing");
+    }
+}

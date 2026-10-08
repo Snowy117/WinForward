@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace WinForward.E2E.Analysis.Model;
 
 /// <summary>
@@ -26,6 +28,18 @@ internal sealed class CampaignModel
     /// §2 tells "the campaign keeps no ledger here" from "the ledger is empty".
     /// </summary>
     internal required IReadOnlyDictionary<string, IReadOnlyList<string>> LedgerPaths { get; init; }
+
+    /// <summary>
+    /// Each pass's <c>order.txt</c>, when the orchestrator wrote one: the rows in the order they ran, which
+    /// §2 prints because it is the only record of the order the campaign was executed in.
+    /// </summary>
+    internal required IReadOnlyDictionary<string, IReadOnlyList<string>> Order { get; init; }
+
+    /// <summary>The campaign's <c>environment.json</c>, or null when it is missing or unreadable.</summary>
+    internal required JsonElement? Environment { get; init; }
+
+    /// <summary>How many seconds of every arm the CPU and memory steady-state cells discard.</summary>
+    internal required double WarmupSeconds { get; init; }
 
     /// <summary>How many resamples each bootstrap interval is drawn with.</summary>
     internal required int Resamples { get; init; }

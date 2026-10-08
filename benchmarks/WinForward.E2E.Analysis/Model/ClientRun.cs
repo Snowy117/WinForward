@@ -46,8 +46,11 @@ internal sealed class ClientRun
     /// <summary>The arms found on disk, in the order the reference loads them.</summary>
     internal ArmTable Arms { get; } = new();
 
+    /// <summary>The <c>config*</c> files the row published, by path order, with their digests.</summary>
+    internal List<ConfigFile> Configs { get; } = [];
+
     /// <summary>How many <c>config*</c> files the row published.</summary>
-    internal int ConfigCount { get; set; }
+    internal int ConfigCount => Configs.Count;
 
     /// <summary>The parsed <c>proxy-truth.json</c>, or null when it is missing or unreadable.</summary>
     internal JsonElement? ProxyTruth { get; set; }

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using WinForward.E2E.Analysis.Cli;
 using WinForward.E2E.Analysis.Model;
 
@@ -25,6 +26,10 @@ internal static class CampaignLoader
 
     private const string FlatPassId = "flat";
 
+    private const string OrderFile = "order.txt";
+
+    private const string EnvironmentFile = "environment.json";
+
     /// <summary>
     /// Reads the tree the options point at. Returns false with the reason on
     /// <paramref name="error"/> when there is nothing to analyse.
@@ -41,7 +46,7 @@ internal static class CampaignLoader
             return false;
         }
 
-        var (passes, ledgerPaths) = options.Flat ? DiscoverFlat(options) : DiscoverPasses(options);
+        var (passes, ledgerPaths, order) = options.Flat ? DiscoverFlat(options) : DiscoverPasses(options);
         if (passes.Count == 0)
         {
             error = options.Flat
@@ -56,6 +61,9 @@ internal static class CampaignLoader
             Flat = options.Flat,
             Passes = passes,
             LedgerPaths = ledgerPaths,
+            Order = order,
+            Environment = ReadEnvironment(options.Raw),
+            WarmupSeconds = options.WarmupSeconds,
             Resamples = options.Resamples,
             Seed = options.Seed,
             MinPasses = AnalysisOptions.DefaultMinPasses,
@@ -63,11 +71,12 @@ internal static class CampaignLoader
         return true;
     }
 
-    private static (Dictionary<string, IReadOnlyList<ClientRun>> Passes, Dictionary<string, IReadOnlyList<string>> Ledgers) DiscoverFlat(
+    private static (Dictionary<string, IReadOnlyList<ClientRun>> Passes, Dictionary<string, IReadOnlyList<string>> Ledgers, Dictionary<string, IReadOnlyList<string>> Order) DiscoverFlat(
         AnalysisOptions options)
     {
         var passes = new Dictionary<string, IReadOnlyList<ClientRun>>(StringComparer.Ordinal);
         var ledgers = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        var order = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
 
         if (LooksLikeRow(options.Raw))
         {
@@ -75,7 +84,7 @@ internal static class CampaignLoader
             RunLoader.LoadDual(run);
             passes[FlatPassId] = [run];
             AttachLedger(options, ledgers, FlatPassId, options.Raw);
-            return (passes, ledgers);
+            return (passes, ledgers, order);
         }
 
         var rows = new List<ClientRun>();
@@ -97,14 +106,15 @@ internal static class CampaignLoader
         }
 
         AttachLedger(options, ledgers, FlatPassId, options.Raw);
-        return (passes, ledgers);
+        return (passes, ledgers, order);
     }
 
-    private static (Dictionary<string, IReadOnlyList<ClientRun>> Passes, Dictionary<string, IReadOnlyList<string>> Ledgers) DiscoverPasses(
+    private static (Dictionary<string, IReadOnlyList<ClientRun>> Passes, Dictionary<string, IReadOnlyList<string>> Ledgers, Dictionary<string, IReadOnlyList<string>> Order) DiscoverPasses(
         AnalysisOptions options)
     {
         var passes = new Dictionary<string, IReadOnlyList<ClientRun>>(StringComparer.Ordinal);
         var ledgers = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+        var order = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
 
         foreach (var passDirectory in ListDirectories(options.Raw))
         {
@@ -141,9 +151,51 @@ internal static class CampaignLoader
             }
 
             AttachLedger(options, ledgers, passId, passDirectory);
+            if (ReadOrder(passDirectory) is { Count: > 0 } ran)
+            {
+                order[passId] = ran;
+            }
         }
 
-        return (passes, ledgers);
+        return (passes, ledgers, order);
+    }
+
+    /// <summary>The rows <c>order.txt</c> says the pass ran, or null when the file is absent or unreadable.</summary>
+    private static List<string>? ReadOrder(string passDirectory)
+    {
+        var path = PosixPathText.Join(passDirectory, OrderFile);
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            return
+            [
+                .. File.ReadAllText(path, System.Text.Encoding.UTF8)
+                    .Trim()
+                    .Split([' ', '\t', '\r', '\n', ','], StringSplitOptions.RemoveEmptyEntries),
+            ];
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The campaign's <c>environment.json</c>: the one beside the pass directories, then the one beside
+    /// <c>--raw</c> itself; the first that parses wins.
+    /// </summary>
+    private static JsonElement? ReadEnvironment(string raw)
+    {
+        var candidate = new[]
+        {
+            PosixPathText.Join(raw, EnvironmentFile),
+            PosixPathText.Join(PosixPathText.Parent(raw), EnvironmentFile),
+        }.FirstOrDefault(File.Exists);
+        return candidate is null ? null : JsonReader.ReadFile(candidate, out _);
     }
 
     /// <summary>

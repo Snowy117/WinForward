@@ -1,8 +1,6 @@
-using WinForward.E2E.Analysis.Checks;
 using WinForward.E2E.Analysis.Findings;
 using WinForward.E2E.Analysis.Loading;
 using WinForward.E2E.Analysis.Metrics;
-using WinForward.E2E.Analysis.Stats;
 using WinForward.E2E.Analysis.Tables;
 using WinForward.E2E.Analysis.Verdict;
 
@@ -26,9 +24,6 @@ internal static class AnalysisRunner
 {
     private static readonly string[] s_pending =
     [
-        BootstrapResampler.Pending,
-        InvariantChecks.Pending,
-        FindingsCollector.Pending,
         MetricCatalogue.Pending,
     ];
 
@@ -45,14 +40,15 @@ internal static class AnalysisRunner
         }
 
         var output = Directory.CreateDirectory(options.Out);
+        var findings = FindingsCollector.Collect(campaign);
         using (var tables = OpenOutput(Path.Combine(output.FullName, "tables.md")))
         {
-            TablesWriter.Write(tables, campaign);
+            TablesWriter.Write(tables, campaign, findings);
         }
 
         using (var verdict = OpenOutput(Path.Combine(output.FullName, "verdict.json")))
         {
-            VerdictWriter.Write(verdict, VerdictSections.Build(campaign));
+            VerdictWriter.Write(verdict, VerdictSections.Build(campaign, findings));
         }
 
         PlotsNotice.Write(Path.Combine(output.FullName, "plots"));

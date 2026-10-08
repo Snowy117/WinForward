@@ -112,4 +112,12 @@ internal sealed class ArmTable
 
         return _byName.ContainsKey(name);
     }
+
+    /// <summary>The arm of this name, or null when the run never loaded one.</summary>
+    internal ArmRecords? Find(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+
+        return _byName.GetValueOrDefault(name);
+    }
 }

@@ -230,6 +230,23 @@ dotnet_diagnostic.S1135.severity = none
 # 审计移除：MA0056（测试树零 virtual/abstract 成员）、MA0009（零 Regex 使用）、
 # MA0015（零参数异常抛出；src 的刻意 member-path paramName 由局部 pragma 覆盖）、
 # S4456（零迭代器方法）。
+# The analysis reproduces the reference's own float comparisons: an accounting identity that must hold
+# exactly, a denominator that is exactly zero, a wall time that is exactly zero. The tolerance that makes
+# two implementations comparable lives in the oracle, not in the analysis.
+# CampaignQueries is the one file whose contents are almost all extension methods, and ReSharper offers
+# to rewrite the whole class as a C# 14 extension block. The project keeps the classic static-class form.
+[benchmarks/WinForward.E2E.Analysis/Model/CampaignQueries.cs]
+resharper_convert_to_extension_block_highlighting = none
+
+[benchmarks/WinForward.E2E.Analysis/Tables/GateValidity.cs]
+dotnet_diagnostic.S1244.severity = none
+
+[benchmarks/WinForward.E2E.Analysis/Tables/GateFlow.cs]
+dotnet_diagnostic.S1244.severity = none
+
+[benchmarks/WinForward.E2E.Analysis/Findings/LedgerFindings.cs]
+dotnet_diagnostic.S1244.severity = none
+
 [tests/**.cs]
 dotnet_diagnostic.S1144.severity = none
 dotnet_diagnostic.MA0051.severity = none

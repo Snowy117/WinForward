@@ -17,7 +17,7 @@
 | 批次 | 内容（`tables.md` 小节 / `verdict.json` 键） | 结束判据 | 提交 |
 |---|---|---|---|
 | **E4-a** | 机制与骨架：`make_tree.py` 升级 + 最小改动 Python 参考 + 冻结树/golden A + `oracle-diff.py` + 项目骨架 + `analyze.sh` + `plots/SKIPPED.md`（+ fixture 漂移 guard） | 骨架必须让 `oracle-diff.py` 报 **rc=2**；改一个数字必须 rc=1；`dotnet build` 零警告 | 1 |
-| **E4-b1a** | `Loading` + `Model` + §15 可用性 + §2 环境（+ `preamble` 切片） | `--batch 1a` 空 diff | 1 |
+| **E4-b1a** | `Loading` + `Model` + §15 可用性（+ `preamble` 切片） | `--batch 1a` 空 diff | 1 |
 | **E4-b1b** | `Stats`：`CpRandom`（CPython 语义）+ `VerbatimNumber`/`VerbatimJson` + bootstrap | 黄金向量/中点值单测绿；`verdict.json` 的 `bootstrap`/`thresholds` 键命中 | 1 |
 | **E4-b1c** | §1（`ROW_PROFILES` 渲染）+ §2（环境与 provenance） | `--batch 1c` 空 diff | 1 |
 | **E4-b2** | findings 分级 + gates 表（§0/§3） | `--batch 2` 空 diff | 1 |

@@ -1,3 +1,4 @@
+using WinForward.E2E.Analysis.Findings;
 using WinForward.E2E.Analysis.Model;
 
 namespace WinForward.E2E.Analysis.Tables;
@@ -70,10 +71,12 @@ internal static class TablesWriter
     /// <summary>Writes the document: the sections a batch has rendered, and a placeholder for the rest.</summary>
     /// <param name="writer">Where the document goes; the caller owns the encoding and the newline.</param>
     /// <param name="campaign">The tree every rendered section is read from.</param>
-    internal static void Write(TextWriter writer, CampaignModel campaign)
+    /// <param name="findings">The findings §0 counts and lists, as §0.4 and the severity line both read them.</param>
+    internal static void Write(TextWriter writer, CampaignModel campaign, IReadOnlyList<Finding> findings)
     {
         ArgumentNullException.ThrowIfNull(writer);
         ArgumentNullException.ThrowIfNull(campaign);
+        ArgumentNullException.ThrowIfNull(findings);
 
         var parts = new List<string>(s_sections.Length + 8)
         {
@@ -89,19 +92,29 @@ internal static class TablesWriter
 
         foreach (var (heading, batch) in s_sections)
         {
-            parts.Add(Section(heading, campaign, batch));
+            parts.Add(Section(heading, campaign, findings, batch));
         }
 
         writer.Write(string.Join('\n', parts).TrimEnd() + "\n");
     }
 
     /// <summary>One section: its heading, a blank line, and a body that ends in a newline.</summary>
-    private static string Section(string heading, CampaignModel campaign, string batch)
+    private static string Section(
+        string heading,
+        CampaignModel campaign,
+        IReadOnlyList<Finding> findings,
+        string batch)
     {
         var number = heading[3..heading.IndexOf('.', StringComparison.Ordinal)];
-        var body = string.Equals(number, "15", StringComparison.Ordinal)
-            ? TableAvailability.RenderBody(campaign)
-            : $"<!-- TODO(batch {batch}) -->\n";
+        var body = number switch
+        {
+            "0" => TableFindings.RenderBody(campaign, findings),
+            "1" => TableRowProfiles.RenderBody(campaign),
+            "2" => TableEnvironment.RenderBody(campaign),
+            "3" => TableGates.RenderBody(campaign),
+            "15" => TableAvailability.RenderBody(campaign),
+            _ => $"<!-- TODO(batch {batch}) -->\n",
+        };
 
         return heading + "\n\n" + body;
     }

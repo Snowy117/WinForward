@@ -1,3 +1,4 @@
+using WinForward.E2E.Analysis.Findings;
 using WinForward.E2E.Analysis.Json;
 using WinForward.E2E.Analysis.Model;
 
@@ -45,10 +46,11 @@ internal static class VerdictSections
         + "equivalence p-value for 'same'). A metric with no pre-declared threshold (throughput, event counts) "
         + "reports its CI as 'no-threshold-declared' instead of guessing.";
 
-    /// <summary>Builds the keys the batches landed so far have rendered.</summary>
-    internal static IReadOnlyDictionary<string, string> Build(CampaignModel campaign)
+    /// <summary>Builds every key the analysis renders, in the reference's own declaration order.</summary>
+    internal static IReadOnlyDictionary<string, string> Build(CampaignModel campaign, IReadOnlyList<Finding> findings)
     {
         ArgumentNullException.ThrowIfNull(campaign);
+        ArgumentNullException.ThrowIfNull(findings);
 
         return new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -57,6 +59,7 @@ internal static class VerdictSections
             ["flat_mode"] = VerbatimJson.Boolean(campaign.Flat),
             ["passes"] = VerbatimJson.StringArray(1, campaign.PassIds),
             ["rows"] = VerbatimJson.StringArray(1, campaign.RowIds),
+            ["row_profiles"] = RowProfiles(),
             ["bootstrap"] = VerbatimJson.Object(
                 1,
                 ("resamples", VerbatimJson.Integer(campaign.Resamples)),
@@ -72,6 +75,49 @@ internal static class VerdictSections
                 ("udp-loss", VerbatimJson.String("0.5 percentage points")),
                 ("tcp-unexpected", VerbatimJson.String("0.1 percentage points")),
                 ("note", VerbatimJson.String(ThresholdsNote))),
+            ["findings"] = VerbatimJson.Array(
+                1,
+                [.. findings.Select(finding => VerbatimJson.Object(
+                    2,
+                    ("severity", VerbatimJson.String(finding.Severity)),
+                    ("kind", VerbatimJson.String(finding.Kind)),
+                    ("scope", VerbatimJson.String(finding.Scope)),
+                    ("detail", VerbatimJson.String(finding.Detail))))]),
+            ["findings_by_severity"] = FindingsBySeverity(findings),
         };
+    }
+
+    /// <summary>The design table, in the declaration order the reference publishes it in.</summary>
+    private static string RowProfiles()
+    {
+        var rows = new List<(string Key, string Value)>();
+        foreach (var (rowId, profile) in Model.RowProfiles.Declared)
+        {
+            rows.Add((rowId, VerbatimJson.Object(
+                2,
+                ("product", VerbatimJson.String(profile.Product)),
+                ("configuration", VerbatimJson.String(profile.Config)),
+                ("plan", VerbatimJson.String(profile.Plan)),
+                ("plan_arms", VerbatimJson.StringArray(3, Model.RowProfiles.PlanArms[profile.Plan])),
+                ("dual_phase", VerbatimJson.Boolean(profile.Dual)),
+                ("udp53_carriage", VerbatimJson.String(profile.Udp53)),
+                ("udp53_label", VerbatimJson.String(Model.RowProfiles.Udp53Label(profile.Udp53))),
+                ("udp_carriage", VerbatimJson.String(profile.Udp)),
+                ("udp_label", VerbatimJson.String(Model.RowProfiles.UdpLabel(profile.Udp))),
+                ("udp_capable", VerbatimJson.Boolean(!string.Equals(profile.Udp, Model.RowProfiles.UdpNotCarried, StringComparison.Ordinal))))));
+        }
+
+        return VerbatimJson.Object(1, [.. rows]);
+    }
+
+    /// <summary>The finding counts per severity, in the order the severities are printed.</summary>
+    private static string FindingsBySeverity(IReadOnlyList<Finding> findings)
+    {
+        var bySeverity = FindingsCollector.BySeverity(findings);
+        return VerbatimJson.Object(
+            1,
+            [.. Severity.Order.Select(severity => (
+                severity,
+                VerbatimJson.Integer(bySeverity[severity].Count)))]);
     }
 }

@@ -74,10 +74,28 @@ internal static class RunLoader
 
         if (!isLane)
         {
-            run.ConfigCount = PythonGlob.ConfigFiles(directory).Count;
+            LoadConfigs(run, directory);
         }
 
         return run;
+    }
+
+    /// <summary>Reads the row's <c>config*</c> files and digests them.</summary>
+    private static void LoadConfigs(ClientRun run, string directory)
+    {
+        foreach (var path in PythonGlob.ConfigFiles(directory))
+        {
+            try
+            {
+                var bytes = File.ReadAllBytes(path);
+                var digest = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes))[..12];
+                run.Configs.Add(new ConfigFile(Path.GetFileName(path), digest, bytes.LongLength));
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                run.Configs.Add(new ConfigFile(Path.GetFileName(path), "unreadable", 0));
+            }
+        }
     }
 
     /// <summary>Attaches the row's own <c>dual</c> subdirectory, when it has one.</summary>
