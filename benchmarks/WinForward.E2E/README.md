@@ -7,7 +7,7 @@ under test, and the harness reports latency, CPU, memory, UDP accuracy and the T
 The products compared are WinForward in two builds, ProxiFyre, Proxifier and ProxyBridge.
 
 The analysis of a campaign is a sibling directory and a separate document:
-[analysis/README.md](../results/2026-10-06-e2e-competitors/analysis/README.md). This file covers the
+[README.md](../WinForward.E2E.Analysis/README.md). This file covers the
 harness: how to build it, how to run it, what it writes and how to read it.
 
 ## What this is, and what it is not
@@ -520,23 +520,25 @@ can only come from something on the path rewriting the response.
 
 ## Running the analysis
 
-From the analysis directory, with the campaign tree copied to `raw/`:
+Its entry point is a tracked wrapper that builds the project and `exec`s the binary, from the
+directory that holds the campaign tree (it never changes the working directory, so relative paths
+keep their meaning for the caller):
 
 ```bash
-cd benchmarks/results/2026-10-06-e2e-competitors/analysis
-python3 analyze.py --raw ../raw --out ..
+bash <repo>/benchmarks/WinForward.E2E.Analysis/scripts/analyze.sh --raw ../raw --out ..
 ```
 
 A flat tree — a single run directory holding `run.json` and the arm files, which is what the
 self-test produces — is read with `--flat`:
 
 ```bash
-python3 analyze.py --raw /tmp/wf-bench/selftest/out --flat --out /tmp/selftest-analysis
+bash <repo>/benchmarks/WinForward.E2E.Analysis/scripts/analyze.sh --raw /tmp/wf-bench/selftest/out --flat --out /tmp/selftest-analysis
 ```
 
 The flags, the inputs, the aggregation policy and every table are described in
-[analysis/README.md](../results/2026-10-06-e2e-competitors/analysis/README.md); the script is Python 3
-standard library only, and matplotlib is imported lazily and only for the plots.
+[README.md](../WinForward.E2E.Analysis/README.md); the analysis is a .NET project in this
+repository, sharing the harness's contract types, and it writes `plots/SKIPPED.md` instead of the
+charts the previous implementation drew.
 
 ## Non-obvious properties
 
@@ -606,7 +608,7 @@ hold. All of them are visible in the record itself.
 | flows were not mixed | `foreignConnection == 0` in `LOSS`, `LAT`/`LATLOAD`'s udp block, `MIX`'s UDP class and per-desktop witnesses, and `BASE`'s loss phase |
 | the product behaved as configured | `REL`'s `fidelityMismatch == 0`; `PERSIST`'s `survivedIdle` true; a non-zero `unexpectedEof` excludes the early EOFs that `partialFin` deliberately provokes, which are counted separately as `expectedEarlyEof` |
 | the sampler worked | no `samplerError` record and no sample carrying `readError` |
-| a campaign is trustworthy | the analysis's own gates: the three identities, the lane witnesses, `clientSendLoss`, the two control blocks against each other, and `directLeak == 0` in the dual phase — see [analysis/README.md](../results/2026-10-06-e2e-competitors/analysis/README.md) |
+| a campaign is trustworthy | the analysis's own gates: the three identities, the lane witnesses, `clientSendLoss`, the two control blocks against each other, and `directLeak == 0` in the dual phase — see [README.md](../WinForward.E2E.Analysis/README.md) |
 
 A healthy self-test run prints the analysis's summary line — `1 pass(es), 1 row(s), N metric(s)` —
 and reports zero `correctness-failure` and zero `harness-error` findings. Two findings remain, and
