@@ -16,14 +16,15 @@ public sealed class PlanFileTests
             string.Join(',', arms.Select(arm => arm.Name)));
     }
 
-    // 6 long-form plans plus 5 short-form ones. The count is asserted so that a plan moved out of
-    // these directories fails the suite instead of quietly shrinking the set under test.
+    // 6 long-form plans, 5 short-form ones and the Windows shape-preserving compression. The count is
+    // asserted so that a plan moved out of these directories fails the suite instead of quietly
+    // shrinking the set under test.
     [Fact]
     public void EveryShippedPlanLoads()
     {
         var plans = ShippedPlanPaths();
 
-        Assert.Equal(11, plans.Length);
+        Assert.Equal(12, plans.Length);
         foreach (var plan in plans)
         {
             Assert.True(PlanFile.TryLoad(plan, out var arms, out var planBytes, out var error), $"{plan}: {error}");
@@ -87,5 +88,6 @@ public sealed class PlanFileTests
     private static string[] ShippedPlanPaths() =>
         [.. Directory.GetFiles(RepoPaths.PlansDirectory, "*.json")
             .Concat(Directory.GetFiles(RepoPaths.ShortPlansDirectory, "*.json"))
+            .Concat(Directory.GetFiles(RepoPaths.WindowsPlansDirectory, "*.json"))
             .Order(StringComparer.Ordinal)];
 }

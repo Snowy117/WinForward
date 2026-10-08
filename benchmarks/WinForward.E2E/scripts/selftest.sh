@@ -14,7 +14,7 @@ plan=${1:-}
 # running behind it, and it has to be a non-zero exit so a caller cannot read it as a green run.
 if [ -z "$plan" ]; then
     echo "usage: $0 <plan.json>" >&2
-    echo "shipped plans: $repo/scripts/plans/*.json and $repo/scripts/plans-short/*.json" >&2
+    echo "shipped plans: $repo/scripts/plans/*.json, $repo/scripts/plans-short/*.json and $repo/scripts/plans-windows/*.json" >&2
     exit 2
 fi
 

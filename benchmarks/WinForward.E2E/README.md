@@ -57,6 +57,7 @@ directly, and a transparent proxy rewrites the path beneath it.
 | `Wire/` | the protocol both verbs share: frame codec, stream reader, CRC32C, command payload, half-close trailer, DNS wire subset, payload filler |
 | `scripts/plans/` | the committed plans: `full-plan`, `udp-plan`, `dns-plan`, `dual-plan`, `base-plan`, `selftest-plan` |
 | `scripts/plans-short/` | the same arm shapes at short durations and lower rates, for validating a change |
+| `scripts/plans-windows/` | `full-plan`'s load shape — `LOSS 120s × 500/s`, `LATLOAD 500 rps`, the `PERSIST` idle window, `DNS 200 rps` — at compressed arm durations, for validating a change through a real product without a full-length campaign |
 | `scripts/configs/` | the product configurations each row is measured with |
 | `scripts/orchestrator.ps1` | the campaign driver, run on the machine under test |
 | `scripts/publish.sh` | build and publish the artifacts |
@@ -138,7 +139,7 @@ self-test can run while a campaign target is up.
 
 The plan path is the only argument. With no argument the script prints usage and exits `2` before it
 starts anything, so a missing argument can neither be read as a green run nor leave a target behind;
-pass a path under `scripts/plans/` or `scripts/plans-short/`. The work directory is fixed at
+pass a path under `scripts/plans/`, `scripts/plans-short/` or `scripts/plans-windows/`. The work directory is fixed at
 `/tmp/wf-bench/selftest`.
 
 The client also runs against any plan directly, which is how the campaign drives it:

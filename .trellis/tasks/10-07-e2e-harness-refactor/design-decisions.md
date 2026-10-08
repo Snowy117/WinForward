@@ -932,3 +932,35 @@ C# 分析器用 **`Utf8JsonReader`/`JsonDocument` + `ArmKeys.*` 常量路径**�
 2. **`RunSamples.ProcessName` 的 truthiness 压平**（参考 `sample.get("process") or ""` 只把 falsy 映射成空串，
    移植版把所有非字符串都映射成空串）：仅当 `process` 既非字符串又非 falsy 时可分叉，而契约里它是字符串或缺失、
    且该形状下参考会 `TypeError`（归 D20.1 的定点断言）⇒ **登记不修**，理由写进证据 §10.3。
+
+---
+
+## D22. Windows 轻量验证（AC18）的裁定与 ticket
+
+**结果：`AC18 = fail`**（环境可用，非 blocked）。证据：`research/baseline/E5b-windows.md`。
+四条判据成立（client 退出码 0〔由 `failed` 与退出码同源推得〕、0 条 `error` 记录、18 个 run 全 `failed=false`、
+C# 分析器 exit 0 + `check-fairness.py` 14 条守卫全 PASS），**第五条不成立**：320 条白名单外 findings。
+
+**归因（没有一条指向被测的 wf-aot 链路）**——落成 ticket 写进 `research/tickets.md`：
+
+| # | 机制 | 影响 |
+|---|---|---|
+| **T1** | `start-targets.sh` 不给靶机 `--label` ⇒ 账本记录 label 全空、dual 相位两条车道并行 ⇒ 端点分区与窗口归属无法判定 | 10 条 endpoint-overlap + 60 条 window-ambiguous（判据 4 的 70 条主因） |
+| **T2** | 源端点普查表打满（pass 2 账本计数读成 0、`sourceOverflow` 3 万余） | 297 条 ledger caveat 的主体 |
+| T3 | orchestrator 的 `Write-Log` 被 `[void](Invoke-Client …)` 吞掉 ⇒ client 退出码日志为 0 条 | 判据 1 只能由代码等价推得 |
+| T4 | `deploy-campaign.sh`/`publish-campaign.sh` 的源与目标路径漂移（含 `cd` 进已删除的 `analysis/`） | 复现一轮的硬阻塞；本轮按脚本自己的第 1–3 步改指 |
+| T5 | `wf.sh` 的 `repl_cmd` 传输竞态 | 拉回时 `ls`/`unzip` 扑空（事后核对远端==本地） |
+| T6 | `make_tree.py` docstring 说"每 pass 一份 `target-ledger.jsonl`"但生成器不写 | 照它做会重复计数 |
+
+**裁定**：
+
+1. **AC18 保持 `fail`，不改判据**。按字面判据，任何用 shipped launcher 跑出的 campaign 都不可能为空（T1/T2 保证至少有账本 caveat）
+   ⇒ 这是一条真实缺陷记录，不是"记 blocked 了事"。
+2. **被测链路本身健康**：0 条 `harness-error`；wf-aot 的 LOSS/MIX `foreignConnection=0`；2 条 `foreign-connection`
+   打在竞品行 `proxybridge`；5 条 `control-drift-undecided` 是 2 pass < `--min-passes 3` 的必然结果；
+   2 条 `latency-ceiling-reached` 是分析器已定义的披露。
+3. **§11 第 1 条（WinForward 半关闭缺陷）在真实 Windows 轮次上以指标形态复现**：wf-aot 两行 REL `clean` 模式
+   7/121、10/121 干净、114/111 次超时，同拓扑 proxifier 121/121 ⇒ 与 §11「proxifier 证明可修」一致。
+4. **T1/T2 是后续工作的入口**（不在 E1–E5 的既定范围内）：修 T1 需要给靶机加 `--label` 并在分析器侧用 label 归属；
+   修 T2 需要先定位普查表打满的根因。两者都影响"判据 4 是否可达"，故 E5 的完成声明里必须显式写 `AC18=fail(T1,T2)`。
+5. 本轮拉回的 9.5 MB 结果树留在 `/tmp/wf-bench/e5b-campaign/`（不入库；证据文档已记录路径、命令与关键计数）。
