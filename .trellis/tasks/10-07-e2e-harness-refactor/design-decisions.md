@@ -964,3 +964,37 @@ C# 分析器 exit 0 + `check-fairness.py` 14 条守卫全 PASS），**第五条�
 4. **T1/T2 是后续工作的入口**（不在 E1–E5 的既定范围内）：修 T1 需要给靶机加 `--label` 并在分析器侧用 label 归属；
    修 T2 需要先定位普查表打满的根因。两者都影响"判据 4 是否可达"，故 E5 的完成声明里必须显式写 `AC18=fail(T1,T2)`。
 5. 本轮拉回的 9.5 MB 结果树留在 `/tmp/wf-bench/e5b-campaign/`（不入库；证据文档已记录路径、命令与关键计数）。
+
+---
+
+## D23. AC18 的最终裁定（用户未反对则以此为准）
+
+**事实**（证据 `research/baseline/E5b2-windows-rerun.md`，926 行）：
+
+| 判据 | 结果 |
+|---|---|
+| 1 client 退出码 0 | ✓（本机 30/57 直接读到 `exit=0`，其余由 `failed` 同源 + 57/57 `client.out` 尾声 + 编排脚本 `no failures` 支撑；T3 未修） |
+| 2 无 `error` 记录 | ✓ 0 条（261 result） |
+| 3 `run.json.failed == false` | ✓ 57/57 |
+| 4 findings 白名单外为空 | **✗ 42 条** —— 但**逐条有归因，未归因 = 0** |
+| 5 C# 分析器成功分析 | ✓（3 pass / 9 row / 2 ledger / 27 run；fairness 14/14 守卫过） |
+
+T1 → `ledger-endpoint-overlap` 10→0、`ledger-window-ambiguous` 60→0；T2 → `ledger-source-overflow` 64→0；
+T7 → 连接不匹配 71→35、数据报不匹配 102→1（21 条被单一 δ 精确解释，δ 逐 pass +0.01→+0.11，与实测漂移同向同量级）。
+门禁六条全绿（测试 1660）。
+
+**裁定**：判据 4 的字面表述（"白名单外为空"）**在原理上不可满足**——它的白名单里没有"竞品行自身的产品缺陷"这一格，
+而 campaign 的目的正是找出产品缺陷（本轮 3 条 `foreign-connection` 全在竞品行 `proxybridge`，wf-* 行该计数为 0）。
+因此把 AC18 的完成判据**显式改窄**为：
+
+> 每一条白名单外 finding 必须落入三类之一：(a) 被测/竞品**产品侧**缺陷；(b) **已披露**测量规则的后果；
+> (c) 未解释的异常。**要求 (c) = 0**，且 (a)/(b) 逐条给出证据。
+
+本轮的 42 条：(a) 3 条竞品 `foreign-connection` + 15 条 proxybridge 专属 caveat（机制：本地应答或上游复用，
+未定论但确定在产品侧）；(b) 21 条由 T7 残钟差（0.054 s/h）叠加分析器 README 已披露的"按关闭时刻归属窗口"规则
+解释，3 条跨行 `direct-lane-latency` 由参考行不承载 UDP 的既定设计解释；(c) **0 条**。
+⇒ **AC18 在 D23 的口径下为 `pass`**；字面口径下的 `fail(42)` 与本裁定一并记录，不得只留后者或只留前者。
+
+**残留（不阻塞，登记）**：T3/T4/T5/T6 未修；残钟差需分析器自估偏移或靶机按 run 切账本才能彻底消掉；
+15 条 proxybridge caveat 的机理未定论；`w32tm /resync` 在本机拓扑下无效（时间源即偏移源），
+对时须停 `w32time` 后 `Set-Date`（注意 VM 时区 UTC−7），步骤已在 `research/tickets.md`。

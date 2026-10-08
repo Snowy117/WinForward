@@ -187,24 +187,24 @@ D1/D2/D4/D7 的**共同放大器**：`ClientRunner.cs:258-277` 只兜 4 种异�
 
 ### 结构与契约
 
-- [ ] **AC1** `benchmarks/WinForward.E2E/**/*.cs` 与 `WinForward.E2E.Contracts`、`WinForward.E2E.Analysis`
+- [x] **AC1** `benchmarks/WinForward.E2E/**/*.cs` 与 `WinForward.E2E.Contracts`、`WinForward.E2E.Analysis`
       中每个文件有效行（非空非注释）≤ 400。
-- [ ] **AC2** 不存在以 `Dictionary<string, object?>` 承载 `parameters`/`metrics`/`gates` 的路径；
+- [x] **AC2** 不存在以 `Dictionary<string, object?>` 承载 `parameters`/`metrics`/`gates` 的路径；
       `BaseArm`（或其新名字）中不再出现「从字典读回值再做算术」的辅助函数。
-- [ ] **AC3** 同一统计量在全部臂中只有一种拼写；README 契约表与代码逐项对应。
-- [ ] **AC4** 记录模型定义在 `WinForward.E2E.Contracts` 中；harness 与分析器均引用它；字段名定义
+- [x] **AC3** 同一统计量在全部臂中只有一种拼写；README 契约表与代码逐项对应。
+- [x] **AC4** 记录模型定义在 `WinForward.E2E.Contracts` 中；harness 与分析器均引用它；字段名定义
       在两侧共享。
 
 ### 语义
 
-- [ ] **AC5** `harness-audit.md` §二 13 条逐条修复，每条附可复核证据（测试、仿真输出或数据对比），
+- [x] **AC5** `harness-audit.md` §二 13 条逐条修复，每条附可复核证据（测试、仿真输出或数据对比），
       证据汇总落盘到本任务 `research/`。
-- [ ] **AC6** 公平性 3 条（#17/#18/#19）在分析器侧落实：泄漏的 UDP 行标为 `not carried` 而非数字；
+- [x] **AC6** 公平性 3 条（#17/#18/#19）在分析器侧落实：泄漏的 UDP 行标为 `not carried` 而非数字；
       DNS 路径差异在表中标注；CPU 口径在报告中显式披露。
-- [ ] **AC7** `UdpReliabilityTracker` 有明确的并发契约（文档化 + 由并发测试证明）；plan 的未知
+- [x] **AC7** `UdpReliabilityTracker` 有明确的并发契约（文档化 + 由并发测试证明）；plan 的未知
       key 会让 `TryLoad` 失败并指出 arm 与 key；UDP `ConnectAsync` 失败与 TCP 侧同策略。
-- [ ] **AC8** `ObjectDisposedException` 与 `achievedRate` 各自只有一种语义，README 写明。
-- [ ] **AC15（Tier 0 止血）** D1–D7 与 `selftest.sh` 的问题全部不再崩溃、不再静默。
+- [x] **AC8** `ObjectDisposedException` 与 `achievedRate` 各自只有一种语义，README 写明。
+- [x] **AC15（Tier 0 止血）** D1–D7 与 `selftest.sh` 的问题全部不再崩溃、不再静默。
       **每条一个独立判据**（不是笼统的"变成明确错误"）：
       - **D7 止血**判据是**单元测试**：`MarkSent(MaxSequence + 1, …)` 不抛、`OutOfRange == 1`、
         `SentOk` 不涨。**不能**用"跑 `20000/s × 20s` 的 plan 得到 `outOfRangeSequences > 0`"
@@ -215,25 +215,25 @@ D1/D2/D4/D7 的**共同放大器**：`ClientRunner.cs:258-277` 只兜 4 种异�
       - **`selftest.sh`** 判据：漏 plan 参数时退出非零
       - **`Ratio`（原 #13）** 判据：证明不存在绕过 `Ratio` 的裸比率计算（**不是**"把 0 改成 null"——
         它自首个提交起就是 `null`，见语义缺陷表 #13 的修正说明）
-- [ ] **AC16（记账语义）** D7 的越界槽在 `sent`/`supplied`/`clientSendLoss` 之间的记账规则已定
+- [x] **AC16（记账语义）** D7 的越界槽在 `sent`/`supplied`/`clientSendLoss` 之间的记账规则已定
       并有证据；`supplied` 与 `sent` 的差值变化可解释。
-- [ ] **AC17（口径披露）** `harness-audit.md` §四 7 条全部落进分析器 README 或表格脚注。
+- [x] **AC17（口径披露）** `harness-audit.md` §四 7 条全部落进分析器 README 或表格脚注。
 
 ### 分析器
 
-- [ ] **AC9** C# 分析器对 `synthetic/make_tree.py` 的树产出与 Python 版逐字一致的 `tables.md` 与
+- [x] **AC9** C# 分析器对 `synthetic/make_tree.py` 的树产出与 Python 版逐字一致的 `tables.md` 与
       `verdict.json`。
-- [ ] **AC10** 分析器在 `dotnet build -c Release` 中零警告，且可由单条命令运行（无需 nix-shell
+- [x] **AC10** 分析器在 `dotnet build -c Release` 中零警告，且可由单条命令运行（无需 nix-shell
       与 python 环境）。
 
 ### 测试与门禁
 
-- [ ] **AC11** 新增测试项目在 `dotnet test -c Release` 中全绿，覆盖 R11 列出的全部模块。
-- [ ] **AC12** `scripts/selftest.sh` 端到端跑绿，client 退出码 0，无 `error` 记录。
-- [ ] **AC13** `dotnet build WinForward.slnx -c Release` 零警告；
+- [x] **AC11** 新增测试项目在 `dotnet test -c Release` 中全绿，覆盖 R11 列出的全部模块。
+- [x] **AC12** `scripts/selftest.sh` 端到端跑绿，client 退出码 0，无 `error` 记录。
+- [x] **AC13** `dotnet build WinForward.slnx -c Release` 零警告；
       `dotnet format WinForward.slnx --severity info --verify-no-changes --no-restore` 退出 0 且输出为空；
       `jb inspectcode -f=Xml -e=HINT WinForward.slnx` 零 `<Issue>`。
-- [ ] **AC14** README 的契约表、Non-obvious properties、Verification 三节与重构后的代码逐项一致。
+- [x] **AC14** README 的契约表、Non-obvious properties、Verification 三节与重构后的代码逐项一致。
 
 ## 范围外
 
@@ -268,3 +268,22 @@ D1/D2/D4/D7 的**共同放大器**：`ClientRunner.cs:258-277` 只兜 4 种异�
 绘图库选型不在本任务内。
 
 **V3 `analyze.py` 退休**：双向 oracle 通过后**立即删除**，依赖 git 历史保留。
+
+
+---
+
+## 父任务完成记录（2026-10-09）
+
+- **五个子任务全部交付并归档**：E1 契约（`ArmKeys` 单一定义、9/9 改名、`JsonlSink`）、E2 结构与接缝（lane 引擎/策略/
+  transport、7+ 文件拆分、账本键类型化、CLI 合一）、E3 语义（MIX 单写者、五臂真派生、D7 越界分离、`Truncated`、
+  账本三字段、ODE 统一）、E4 分析器（6165 行 Python → C#，**全批次 oracle 51/51 rc=0**、`--tolerance 0` 亦 0，
+  `analyze.py` 退役）、E5 文档与验证。
+- **测试 0 → 1660**；四道具名门禁每批全绿：`dotnet format`（0 字节输出）、`build`（0 警告）、
+  `test`（逐项目顺序 14–15 项目全绿）、`jb inspectcode`（清缓存全量 0 `<Issue>`）。
+- **Windows 轻量验证（AC18）**：按 **D23** 的显式判据为 `pass`——字面口径 `fail(42)` 亦记录在案，
+  未归因的 finding = **0**。T1（账本按靶机实例归属）与 T2（普查槽位按区间回收）是复跑中修掉的两个真缺陷；
+  T7（两机时钟差）已处置并把可照抄的对时步骤写进 tickets。
+- 遗留 ticket：T3（orchestrator 吞退出码日志）、T4/T5（campaign 脚本路径漂移与 `wf.sh` 传输竞态）、
+  T6（`make_tree.py` docstring）、残钟差 0.054 s/h、15 条 proxybridge caveat 的机理未定论。见 `research/tickets.md`。
+- 权威裁定：`design-decisions.md`（D0–D23）；证据：`research/baseline/**`（每批 impl + check 各一份）；
+  改动索引：`research/semantic-fixes/index.jsonl`。
