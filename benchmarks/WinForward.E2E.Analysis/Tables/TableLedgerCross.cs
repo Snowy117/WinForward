@@ -11,7 +11,8 @@ namespace WinForward.E2E.Analysis.Tables;
 /// <summary>
 /// §14.3 to §14.6 of "Target-ledger cross-check": where the traffic actually went, what each DNS listener
 /// counted, how the target's TCP verdicts compare with the client's expectation, and the target-side
-/// decode total when there is one.
+/// decode total when there is one. §14.7, the frames the targets cut off in half, is
+/// <see cref="TableLedgerTruncated"/>.
 /// </summary>
 /// <remarks>
 /// <para><b>The partition is a property of one row.</b> The same port number seen on two different rows is

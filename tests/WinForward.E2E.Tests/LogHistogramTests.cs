@@ -36,7 +36,7 @@ public sealed class LogHistogramTests
         Assert.Equal(1.0, snapshot.GetProperty("maxUs").GetDouble());
     }
 
-    // The bucket layout is a published contract: analyze.py reads p50Us and friends verbatim and
+    // The bucket layout is a published contract: the analysis reads p50Us and friends verbatim and
     // never recomputes them, so the exclusive upper bound of a coarse bucket is frozen here.
     [Fact]
     public void ACoarseBucketReportsItsExclusiveUpperBoundInMicroseconds()

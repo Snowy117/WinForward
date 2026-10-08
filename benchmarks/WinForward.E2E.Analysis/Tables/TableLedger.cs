@@ -81,6 +81,7 @@ internal static class TableLedger
         lines.AddRange(TableLedgerCross.Dns(campaign));
         lines.AddRange(TableLedgerCross.TcpVerdicts(campaign));
         lines.AddRange(TableLedgerCross.Decode(campaign));
+        lines.AddRange(TableLedgerTruncated.Truncated(campaign));
         return string.Join('\n', lines);
     }
 

@@ -19,7 +19,7 @@ internal static class Program
 
         if (!AnalysisOptions.TryParse(args, out var options, out var error))
         {
-            Console.Error.WriteLine($"analyze.py: {error}");
+            Console.Error.WriteLine($"e2e-analysis: {error}");
             Console.Error.WriteLine($"usage: {AnalysisOptions.Usage}");
             return ExitCodes.InputError;
         }

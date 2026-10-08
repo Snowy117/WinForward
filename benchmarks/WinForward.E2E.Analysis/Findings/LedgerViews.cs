@@ -119,6 +119,9 @@ internal static class LedgerViewsBuilder
     /// <summary>The <c>udpSummary</c> record family, whose interval totals the views read.</summary>
     internal const string UdpSummary = "udpSummary";
 
+    /// <summary>The <c>tcpSummary</c> record family, which the echo listener's own totals sit in.</summary>
+    internal const string TcpSummary = "tcpSummary";
+
     /// <summary>The <c>dnsSummary</c> record family, which the DNS totals are read from.</summary>
     internal const string DnsSummary = "dnsSummary";
 

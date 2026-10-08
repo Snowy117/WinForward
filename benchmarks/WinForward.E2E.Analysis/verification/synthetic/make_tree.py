@@ -32,13 +32,27 @@ Layout (the tarball's root is the *contents* of the raw directory's parent):
     <raw>/../*ledger*.jsonl    the target ledgers, beside the raw tree
     <raw>/../plan-<pass>.json  the plan files `run.json`'s `planPath` points at
 
-Usage: python3 make_tree.py [--window-overflow ROW] [--undecodable N]
+Usage: python3 make_tree.py [--window-overflow ROW] [--zero-denominator] [--undecodable N]
                             [--truncated-tcp N] [--truncated-dns N] [<output-raw-dir>]
 
 `--window-overflow ROW` makes that row's `LAT` arm report a reached in-flight ceiling in
 pass 3 (`gates.windowOverflow = 3`, with `supplied == sentOk` and `clientSendLoss = 0`,
 because a deferral that went out is not a drop). The default tree has no reached ceiling, so
 the analysis's rendering of an ordinary latency row is byte-for-byte what it was.
+
+`--zero-denominator` writes the shapes a **zero denominator** produces, which the clean tree
+cannot reach and the reference cannot survive (D21.2 #2):
+
+* pass1's `wf-aot-opt` `LAT` arm publishes `udp.sent = 0`, so its client-side datagram count
+  is the float zero and §14.2 has no band to judge the target's census with -- the shape the
+  retired reference raises `TypeError` on (`analyze.py:5037`) and this analysis answers with `n/a`;
+* every pass's `wf-fdd-opt` `PERSIST` arm publishes `requests = 0`, which the harness writes
+  as an explicit JSON `null` rate (`responseRate`), so the metric has no per-pass value at all
+  and its cell is **empty** rather than a zero;
+* pass1's `wf-aot-opt` `MIX` arm publishes `classes.udp.lossRate = null` (a null is the
+  harness saying the denominator was zero, so the arm-level fallback must **not** fire) and
+  pass2's drops the `classes.udp` block altogether (a missing field, so the fallback **must**
+  fire).
 
 `--undecodable N` makes the main ledger report `N` datagrams the target could not decode,
 written the way the target writes them: a running total, so the last `udpSummary` of the
@@ -465,6 +479,10 @@ def build_arm(builder, arm, row_id, plan, pass_index, rng, product_process, note
                     "udp.achievedRate": float(rate),
                 }
             )
+            if injections.get("zero_udp_sent"):
+                # A client-side datagram count of exactly zero: the census the ledger reports has no
+                # band to be judged against, because the band is derived from the client's own rate.
+                metrics["udp.sent"] = 0
         elif not udp_only:
             metrics.update(
                 {
@@ -763,9 +781,13 @@ def build_arm(builder, arm, row_id, plan, pass_index, rng, product_process, note
         gates.update({"clientSendLoss": block["clientSendLoss"], "idleLanes": idle_lanes, "windowMs": float(window_ms)})
         windows["tcp_connections"] = page_connections + desktops
         windows["udp_echo"] = (udp_sent, injections.get("udp_endpoint", CLIENT_ENDPOINT))
+        if injections.get("null_udp_class_rate"):
+            metrics["classes"]["udp"]["lossRate"] = None
+        if injections.get("drop_udp_class"):
+            del metrics["classes"]["udp"]
     elif arm == "PERSIST":
-        requests = max(2, seconds // 2)
-        responses = requests - injections.get("persist_timeouts", 0)
+        requests = 0 if injections.get("zero_requests") else max(2, seconds // 2)
+        responses = 0 if injections.get("zero_requests") else requests - injections.get("persist_timeouts", 0)
         reconnects = injections.get("reconnects", 0)
         parameters.update({"intervalMs": 500, "idleSeconds": 3, "payloadBytes": 200, "expectedBytes": 0,
                            "responseTimeoutMs": 2000})
@@ -965,7 +987,7 @@ def ledger_error_record(stamp, label, detail):
 
 
 USAGE = (
-    "usage: make_tree.py [--window-overflow ROW] [--undecodable N] "
+    "usage: make_tree.py [--window-overflow ROW] [--zero-denominator] [--undecodable N] "
     "[--truncated-tcp N] [--truncated-dns N] [<output-raw-dir>]"
 )
 
@@ -975,11 +997,14 @@ COUNTER_FLAGS = ("--undecodable", "--truncated-tcp", "--truncated-dns")
 def parse_arguments(argv):
     out = None
     window_overflow_row = None
+    zero_denominator = False
     counters = dict.fromkeys(COUNTER_FLAGS, 0)
     remaining = list(argv)
     while remaining:
         argument = remaining.pop(0)
-        if argument == "--window-overflow" or argument in COUNTER_FLAGS:
+        if argument == "--zero-denominator":
+            zero_denominator = True
+        elif argument == "--window-overflow" or argument in COUNTER_FLAGS:
             if not remaining:
                 raise SystemExit(USAGE)
             value = remaining.pop(0)
@@ -999,6 +1024,7 @@ def parse_arguments(argv):
     return (
         (out if out is not None else Path("/tmp/wf-synth/raw")),
         window_overflow_row,
+        zero_denominator,
         counters["--undecodable"],
         counters["--truncated-tcp"],
         counters["--truncated-dns"],
@@ -1030,7 +1056,8 @@ def plan_document(pass_index):
 
 
 def main():
-    out, window_overflow_row, undecodable_total, truncated_tcp, truncated_dns = parse_arguments(sys.argv[1:])
+    (out, window_overflow_row, zero_denominator, undecodable_total,
+     truncated_tcp, truncated_dns) = parse_arguments(sys.argv[1:])
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)
@@ -1093,6 +1120,15 @@ def main():
                     arm_injections["restart_at"] = 15
                 if window_overflow_row is not None and row_id == window_overflow_row and arm == "LAT" and pass_index == 3:
                     arm_injections["window_overflow"] = 3
+                if zero_denominator:
+                    if row_id == "wf-aot-opt" and arm == "LAT" and pass_index == 1:
+                        arm_injections["zero_udp_sent"] = True
+                    if row_id == "wf-fdd-opt" and arm == "PERSIST":
+                        arm_injections["zero_requests"] = True
+                    if row_id == "wf-aot-opt" and arm == "MIX" and pass_index == 1:
+                        arm_injections["null_udp_class_rate"] = True
+                    if row_id == "wf-aot-opt" and arm == "MIX" and pass_index == 2:
+                        arm_injections["drop_udp_class"] = True
                 if arm in ("LAT", "LATLOAD", "LOSS", "MIX", "BASE"):
                     if row_id in ("wf-aot-opt", "wf-fdd-opt", "wf-aot-dnsrelay", "proxifyre", "proxybridge"):
                         arm_injections.setdefault("udp_endpoint", PROXY_ENDPOINT)

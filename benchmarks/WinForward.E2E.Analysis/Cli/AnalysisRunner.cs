@@ -28,7 +28,7 @@ internal static class AnalysisRunner
 
         if (!CampaignLoader.TryLoad(options, out var campaign, out var error) || campaign is null)
         {
-            Console.Error.WriteLine($"analyze.py: {error}");
+            Console.Error.WriteLine($"e2e-analysis: {error}");
             Console.Error.WriteLine($"usage: {AnalysisOptions.Usage}");
             return ExitCodes.InputError;
         }
@@ -49,20 +49,20 @@ internal static class AnalysisRunner
 
         Console.WriteLine(string.Create(
             System.Globalization.CultureInfo.InvariantCulture,
-            $"analyze.py: {campaign.PassIds.Count} pass(es), {campaign.RowCount} row(s), "
+            $"e2e-analysis: {campaign.PassIds.Count} pass(es), {campaign.RowCount} row(s), "
             + $"{campaign.LedgerFileCount} ledger(s), {campaign.Rows.Count} loaded run(s) -> {Path.Combine(output.FullName, "tables.md")}"));
         Console.WriteLine(string.Create(
             System.Globalization.CultureInfo.InvariantCulture,
-            $"analyze.py: verdict -> {Path.Combine(output.FullName, "verdict.json")}; "
+            $"e2e-analysis: verdict -> {Path.Combine(output.FullName, "verdict.json")}; "
             + $"warmup {options.WarmupSeconds:0.0#} s, {options.Resamples} resamples, seed {options.Seed}, "
             + $"min passes {AnalysisOptions.DefaultMinPasses}"));
-        Console.WriteLine("analyze.py: plots/ is not rendered; wrote plots/SKIPPED.md");
+        Console.WriteLine("e2e-analysis: plots/ is not rendered; wrote plots/SKIPPED.md");
         foreach (var passId in campaign.PassIds)
         {
             var ledgers = campaign.LedgerPaths.TryGetValue(passId, out var paths)
                 ? string.Join(", ", paths)
                 : "none";
-            Console.WriteLine($"analyze.py: {passId} ledger(s): {ledgers}");
+            Console.WriteLine($"e2e-analysis: {passId} ledger(s): {ledgers}");
         }
 
         return ExitCodes.Success;

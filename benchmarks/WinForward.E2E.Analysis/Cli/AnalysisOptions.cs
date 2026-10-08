@@ -23,7 +23,7 @@ internal sealed record AnalysisOptions
     internal const int DefaultMinPasses = 3;
 
     internal const string Usage =
-        "analyze.py [--raw <dir>] [--out <dir>] [--ledger <path>] [--flat] "
+        "e2e-analysis [--raw <dir>] [--out <dir>] [--ledger <path>] [--flat] "
         + "[--warmup-seconds S] [--resamples N] [--seed N]";
 
     private static readonly string[] s_flags = ["--flat"];

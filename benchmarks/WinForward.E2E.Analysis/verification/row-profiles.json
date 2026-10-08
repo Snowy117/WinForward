@@ -1,0 +1,118 @@
+{
+  "note": [
+    "The campaign's declared rows and the carriage names their UDP traffic is judged by, as machine-readable rules.",
+    "This file is the rule source of benchmarks/WinForward.E2E/scripts/check-fairness.py, which asserts the C#",
+    "analysis's own output against it; a row, a carriage name or a label that changes here without changing the",
+    "analysis (or the other way round) turns that checker red, because the expected answer is read from this file",
+    "and the actual answer from the produced tables.md.",
+    "The same declarations live in the analysis's own source (Model/RowProfiles.cs); the checker is what keeps the",
+    "two honest, and the report's section 1 is generated from the analysis's copy."
+  ],
+  "not_carried_cell": "not carried (UDP bypassed)",
+  "order": [
+    "control-pre",
+    "wf-aot-opt",
+    "wf-fdd-opt",
+    "wf-aot-nativeudp",
+    "wf-aot-dnsrelay",
+    "proxifyre",
+    "proxifier",
+    "proxybridge",
+    "control-post"
+  ],
+  "plan_arms": {
+    "full": ["IDLE", "LAT", "LATLOAD", "DNS", "DNSALT", "LOSS", "REL", "THRU", "MIX", "PERSIST"],
+    "udp only": ["LAT", "LATLOAD", "LOSS"],
+    "dns only": ["DNS", "DNSALT"],
+    "BASE only": ["BASE"]
+  },
+  "carriage": {
+    "udp53": {
+      "relayed": "relayed through the proxy",
+      "direct-local-target": "direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy)",
+      "direct-hardcoded-bypass": "direct via the product's hardcoded port-53 pass-through",
+      "direct-not-carried": "direct (the product cannot carry UDP at all)",
+      "n/a": "n/a (no product loaded: the direct path is the only path)"
+    },
+    "udp": {
+      "proxied-utcp": "proxied (UDP-over-TCP v2)",
+      "proxied-native": "proxied (native UDP relay)",
+      "not-carried": "not carried (UDP bypassed)",
+      "n/a": "n/a (no product loaded)"
+    }
+  },
+  "rows": {
+    "wf-aot-opt": {
+      "product": "WinForward AOT",
+      "config": "UDP-over-TCP v2 on, DNS local target on (reference configuration)",
+      "plan": "full",
+      "dual": true,
+      "udp53": "direct-local-target",
+      "udp": "proxied-utcp"
+    },
+    "wf-fdd-opt": {
+      "product": "WinForward framework-dependent",
+      "config": "same configuration as wf-aot-opt",
+      "plan": "full",
+      "dual": true,
+      "udp53": "direct-local-target",
+      "udp": "proxied-utcp"
+    },
+    "wf-aot-nativeudp": {
+      "product": "WinForward AOT",
+      "config": "UDP-over-TCP off, everything else identical to wf-aot-opt",
+      "plan": "udp only",
+      "dual": false,
+      "udp53": "direct-local-target",
+      "udp": "proxied-native"
+    },
+    "wf-aot-dnsrelay": {
+      "product": "WinForward AOT",
+      "config": "DNS local target off, everything else identical to wf-aot-opt",
+      "plan": "dns only",
+      "dual": false,
+      "udp53": "relayed",
+      "udp": "proxied-utcp"
+    },
+    "proxifyre": {
+      "product": "ProxiFyre 2.6.1",
+      "config": "SOCKS5 rule for the client, supportedProtocols TCP+UDP",
+      "plan": "full",
+      "dual": true,
+      "udp53": "direct-hardcoded-bypass",
+      "udp": "proxied-native"
+    },
+    "proxifier": {
+      "product": "Proxifier 4.14",
+      "config": "SOCKS5 profile, process rules (no UDP support in the product)",
+      "plan": "full",
+      "dual": true,
+      "udp53": "direct-not-carried",
+      "udp": "not-carried"
+    },
+    "proxybridge": {
+      "product": "ProxyBridge 4.0.0",
+      "config": "PROXY rule for the client, DIRECT rule for sing-box",
+      "plan": "full",
+      "dual": true,
+      "udp53": "relayed",
+      "udp": "proxied-native"
+    },
+    "control-pre": {
+      "product": "none (control block before the product block)",
+      "config": "no product loaded",
+      "plan": "BASE only",
+      "dual": false,
+      "udp53": "n/a",
+      "udp": "n/a"
+    },
+    "control-post": {
+      "product": "none (control block after the product block)",
+      "config": "no product loaded",
+      "plan": "BASE only",
+      "dual": false,
+      "udp53": "n/a",
+      "udp": "n/a"
+    }
+  }
+}

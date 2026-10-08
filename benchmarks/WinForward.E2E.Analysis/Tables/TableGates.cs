@@ -18,6 +18,11 @@ namespace WinForward.E2E.Analysis.Tables;
 internal static class TableGates
 {
     /// <summary>The section's body, without its heading and ending in a newline.</summary>
+    /// <remarks>
+    /// The caption after §3.1 is followed by <c>### 3.2</c> with **no** blank line between them: the
+    /// reference appends the caption and the next heading back to back, so a blank line inserted there
+    /// is a line the document does not have.
+    /// </remarks>
     internal static string RenderBody(CampaignModel campaign)
     {
         ArgumentNullException.ThrowIfNull(campaign);
@@ -38,7 +43,6 @@ internal static class TableGates
                 GateFlow.Rows(campaign)),
             string.Empty,
             Caption(),
-            string.Empty,
             "### 3.2 Measurement validity gates",
             string.Empty,
             "Every value is one (pass, row) record. A `FAIL` here means the record cannot be compared against "

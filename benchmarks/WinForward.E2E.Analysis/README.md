@@ -1,28 +1,34 @@
 # Analysis for the 2026-10-06 end-to-end competitor campaign
 
-`analyze.py` reads a campaign tree, aggregates it **over passes**, and writes three things:
+`WinForward.E2E.Analysis` reads a campaign tree, aggregates it **over passes**, and writes three
+things:
 
 | output | what it is |
 |---|---|
 | `tables.md` | every table the campaign report needs, with the pass count printed in every cell |
 | `verdict.json` | per-row medians, the findings list, the control-block comparison, the dual phase, the ledger cross-check, and a pairwise practical-significance test per headline metric |
-| `plots/` | seven PNGs, or `plots/SKIPPED.md` when matplotlib is not importable |
+| `plots/` | `plots/SKIPPED.md`; the charts the reference drew are not rendered (see "Plots") |
 
-It is Python 3 standard library only. matplotlib is optional, imported lazily, and only used for
-the plots — no number in `tables.md` or `verdict.json` comes from a chart.
+It is a .NET console project in this repository, built with the rest of the solution and sharing the
+harness's own contract types, so a field the harness renames is a compile error here rather than a
+silently empty cell. No number in `tables.md` or `verdict.json` comes from a chart.
 
 ## Running it
 
 ```bash
-# the campaign tree the orchestrator writes: <raw>/pass<N>/<row>/...
-python3 analyze.py --raw ../raw --out ..
+# from the campaign's own directory: the tree the orchestrator writes sits beside it
+bash <repo>/benchmarks/WinForward.E2E.Analysis/scripts/analyze.sh --raw ../raw --out ..
 
 # a one-off flat run whose own directory holds run.json and the arm files
-python3 analyze.py --raw /tmp/wf-bench/selftest/out --flat --out /tmp/selftest-analysis
+bash <repo>/benchmarks/WinForward.E2E.Analysis/scripts/analyze.sh --raw /tmp/wf-bench/selftest/out --flat --out /tmp/selftest-analysis
 
 # the same tree with a ledger that is not where the search would look
-python3 analyze.py --raw ./raw --ledger ./target-ledger.jsonl --out .
+bash <repo>/benchmarks/WinForward.E2E.Analysis/scripts/analyze.sh --raw ./raw --ledger ./target-ledger.jsonl --out .
 ```
+
+`scripts/analyze.sh` builds the project and `exec`s the binary, passing every argument through
+unchanged and never changing the working directory, so the relative paths above mean what they mean
+for the caller. `<repo>` is the checkout that holds this file.
 
 | flag | default | meaning |
 |---|---|---|
@@ -162,8 +168,10 @@ udpGate     = (proxy-truth.udp + proxy-truth.utcp) > 0 required
   `inFlightCeilingMs`, the MIX `idleLanes` and per-desktop lane witnesses, the per-record
   accounting identities, the sampler errors, the rejected samples and the BASE floor from both
   control blocks. A reached in-flight ceiling is a disclosed `warn` (the tail is measured
-  through the deferred queue); destroyed samples, truncated schedules, a missing lane or a
-  broken identity are failures.
+  through the deferred queue), and it also renders that arm's latency cells in section 5 as
+  `n/a (windowOverflow > 0)` — a record whose `windowOverflow` is zero renders exactly as it
+  always did; destroyed samples, truncated schedules, a missing lane or a broken identity are
+  failures.
 - `proxifier` is exempt from the UDP gate only; both control blocks are exempt from the flow
   gates and from the carriage check.
 
@@ -177,7 +185,7 @@ performance number, most serious first:
 | `correctness-failure` | `directLeak > 0` (the product intercepted traffic configured to go direct), `foreignConnection > 0` (datagrams delivered into the wrong flow), an endpoint overlap between a proxied and a direct-path window, a dirty control block |
 | `path-interference` | a dual-phase row whose *direct* lane is worse than the best row's direct lane, beyond the pre-declared threshold |
 | `harness-error` | a broken UDP accounting identity, a zero lane witness, a sampler error, a sample carrying `readError`, a ledger that cannot be parsed |
-| `measurement-caveat` | a reached in-flight ceiling, `connectAttempts != scheduledAttempts`, a ledger/client count outside its declared tolerance, a missing ledger |
+| `measurement-caveat` | a reached in-flight ceiling (the affected arm's latency cells read `n/a (windowOverflow > 0)`), `connectAttempts != scheduledAttempts`, a ledger/client count outside its declared tolerance, a missing ledger |
 | `informational` | which rows' port-53 DNS arm is a direct-path measurement, and which rows do not carry UDP |
 
 The accounting identities are asserted per record:
@@ -302,7 +310,7 @@ keeps its ordinary `0 [0–x]` rendering so the spread stays visible.
 ## Plots
 
 An ECDF per arm is impossible from the summary histograms the harness writes, so the percentile
-curve uses the harness's own p50/p90/p99/p999 instead. The seven plots are
+curve uses the harness's own p50/p90/p99/p999 instead. The seven plots the reference drew are
 
 1. `latency-percentiles.png` — percentile curve per row for `LAT` and `LATLOAD` `tcp-rtt`
 2. `loss-rates.png` — grouped bars of `LOSS` `lossRate` and `corruptRate` (rows that do not carry UDP are omitted)
@@ -312,8 +320,8 @@ curve uses the harness's own p50/p90/p99/p999 instead. The seven plots are
 6. `lat-p99-by-pass.png` — `LAT` p99 against pass index, so run-order drift is visible
 7. `dual-direct-lanes.png` — proxied versus direct lane per row
 
-All are written at 150 dpi. Without matplotlib the script writes `plots/SKIPPED.md` instead,
-which contains the exact command to regenerate them.
+None of them is drawn: the analysis writes `plots/SKIPPED.md` unconditionally instead, and states
+there that the plots are not reproduced and that their inputs are all still in `tables.md`.
 
 ## Judgement calls worth knowing about
 
@@ -337,21 +345,26 @@ which contains the exact command to regenerate them.
 
 ## Verification
 
-`synthetic/make_tree.py` writes a fabricated multi-pass tree that follows the harness's schema
+`verification/synthetic/make_tree.py` writes a fabricated multi-pass tree that follows the harness's schema
 and deliberately contains every shape the campaign can produce, including the failures — a
 `directLeak`, a `foreignConnection`, an identity violation, a zero lane witness, a `samplerError`,
 a `readError` sample, a mid-run restart, a `scheduledAttempts` mismatch, a control-block drift and
 a per-pass ledger. Run it, then run the analysis over it:
 
 ```bash
-python3 synthetic/make_tree.py /tmp/wf-synth/raw
-python3 analyze.py --raw /tmp/wf-synth/raw --out /tmp/wf-synth/out
+python3 benchmarks/WinForward.E2E.Analysis/verification/synthetic/make_tree.py /tmp/wf-synth/raw
+bash benchmarks/WinForward.E2E.Analysis/scripts/analyze.sh --raw /tmp/wf-synth/raw --out /tmp/wf-synth/out
 ```
 
 A real one-off run is read the same way:
 
 ```bash
-python3 analyze.py --raw /tmp/wf-bench/selftest/out --flat --out /tmp/wf-selftest-out
+bash benchmarks/WinForward.E2E.Analysis/scripts/analyze.sh --raw /tmp/wf-bench/selftest/out --flat --out /tmp/wf-selftest-out
 ```
 
 A missing directory, an empty directory, or a tree with no rows exits 2 with a `usage:` line.
+
+The tree and the documents it is judged against are frozen under
+`benchmarks/WinForward.E2E.Analysis/verification/`; `FROZEN.md` there records what is frozen, how it
+was produced, and what the boundary trees are. `scripts/check-fairness.py` and
+`verification/check-boundary-trees.py` assert the disclosures this document describes.

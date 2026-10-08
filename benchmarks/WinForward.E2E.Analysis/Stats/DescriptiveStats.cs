@@ -17,8 +17,11 @@ namespace WinForward.E2E.Analysis.Stats;
 /// <para><b>A null pass is counted, not dropped.</b> A rate the harness wrote as JSON null has a zero
 /// denominator; when every pass is null the cell is empty, and when only some are the count is printed
 /// beside the pass count.</para>
+/// <para><b>The type is public because the test project drives <see cref="Sum"/> value by value</b>, and
+/// D20.6 keeps <c>InternalsVisibleTo</c> out of this assembly; every other member stays internal because
+/// only the analysis itself reads it.</para>
 /// </remarks>
-internal static class DescriptiveStats
+public static class DescriptiveStats
 {
     /// <summary>Linear-interpolation percentile over already-collected values; <paramref name="q"/> is in [0, 1].</summary>
     internal static double? Quantile(IReadOnlyList<double> values, double q)
@@ -124,7 +127,7 @@ internal static class DescriptiveStats
     /// </remarks>
     /// <param name="values">The values to add, in the order they are added.</param>
     /// <returns>The compensated sum.</returns>
-    internal static double Sum(IReadOnlyList<double> values)
+    public static double Sum(IReadOnlyList<double> values)
     {
         ArgumentNullException.ThrowIfNull(values);
 
