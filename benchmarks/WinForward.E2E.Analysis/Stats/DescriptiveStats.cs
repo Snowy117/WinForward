@@ -126,6 +126,36 @@ internal static class DescriptiveStats
         return distinct.Count == 1 ? distinct[0] : $"mixed across passes: {string.Join("; ", distinct)}";
     }
 
+    /// <summary>
+    /// The Holm–Bonferroni step-down adjustment over one metric's family of comparable pair
+    /// comparisons: the p-values in their own order, each replaced by the largest value the step-down
+    /// has reached, capped at one.
+    /// </summary>
+    /// <param name="pvalues">One p-value per comparison, in the family's own order.</param>
+    /// <returns>The adjusted p-values, in the order they were given.</returns>
+    internal static List<double> HolmAdjust(IReadOnlyList<double> pvalues)
+    {
+        ArgumentNullException.ThrowIfNull(pvalues);
+
+        var count = pvalues.Count;
+        var adjusted = new List<double>(count);
+        for (var index = 0; index < count; index++)
+        {
+            adjusted.Add(1.0);
+        }
+
+        var order = Enumerable.Range(0, count).OrderBy(index => pvalues[index]).ToList();
+        var running = 0.0;
+        for (var rank = 0; rank < order.Count; rank++)
+        {
+            var index = order[rank];
+            running = Math.Max(running, Math.Min(1.0, (count - rank) * pvalues[index]));
+            adjusted[index] = running;
+        }
+
+        return adjusted;
+    }
+
     /// <summary>Whether a value is exactly zero, which is the reference's own comparison.</summary>
     private static bool IsZero(double value) => value.Equals(0.0);
 

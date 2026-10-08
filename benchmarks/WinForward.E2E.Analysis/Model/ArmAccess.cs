@@ -17,7 +17,7 @@ namespace WinForward.E2E.Analysis.Model;
 internal static class ArmAccess
 {
     /// <summary>The reason a rate the harness wrote as JSON null has no value.</summary>
-    private const string NullRateReason = "null rate: the harness wrote null because the denominator was zero";
+    internal const string NullRateReason = "null rate: the harness wrote null because the denominator was zero";
 
     /// <summary>One arm's <c>result</c> record, or the reason the arm has none.</summary>
     internal static (JsonElement? Result, string? Reason) ArmResult(ClientRun run, string armName)

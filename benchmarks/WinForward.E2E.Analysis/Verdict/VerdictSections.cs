@@ -1,5 +1,6 @@
 using WinForward.E2E.Analysis.Findings;
 using WinForward.E2E.Analysis.Json;
+using WinForward.E2E.Analysis.Metrics;
 using WinForward.E2E.Analysis.Model;
 
 namespace WinForward.E2E.Analysis.Verdict;
@@ -84,6 +85,7 @@ internal static class VerdictSections
                     ("scope", VerbatimJson.String(finding.Scope)),
                     ("detail", VerbatimJson.String(finding.Detail))))]),
             ["findings_by_severity"] = FindingsBySeverity(findings),
+            ["metrics"] = MetricComparisons.Render(campaign),
         };
     }
 

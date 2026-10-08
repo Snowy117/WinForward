@@ -112,6 +112,9 @@ internal static class TablesWriter
             "1" => TableRowProfiles.RenderBody(campaign),
             "2" => TableEnvironment.RenderBody(campaign),
             "3" => TableGates.RenderBody(campaign),
+            "5" => TableLatency.RenderBody(campaign),
+            "8" => TableUdp.RenderBody(campaign),
+            "9" => TableDns.RenderBody(campaign),
             "15" => TableAvailability.RenderBody(campaign),
             _ => $"<!-- TODO(batch {batch}) -->\n",
         };

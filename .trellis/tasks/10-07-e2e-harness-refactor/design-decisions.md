@@ -912,3 +912,14 @@ C# 分析器用 **`Utf8JsonReader`/`JsonDocument` + `ArmKeys.*` 常量路径**�
 2. **容差方向**：以**参考的打印精度**为准——参考把小数取整成整数时留 1 个单位（`10400` vs `10400.4` 绿），
    而**产侧抹掉参考打印的小数**是失败（`0.0167` vs `0` 红）；两侧都打印成整数时差一必红（`6000` vs `6001`）。
    分点串（≥2 个点号，如 `192.168.77.2:51234`）按标识符精确比。
+
+### D21.2 E4-b3 check 后的两条登记（交给 E4-c）
+
+1. **byte 模式 `--batch 2` 的 §3 多一个空行**（`TableGates.cs` 的 `Caption()` 以换行开头，与段间的
+   `string.Empty` 叠加）：修法是**去掉 `Caption()` 的前导换行**（不是删段间的 `string.Empty`——删它会把空行
+   从表格前挪到段落后）。**语义惰性**（`section_blocks` 合并跨空行段落，§3 的 block 序列与单元格不变），
+   故 `--mode semantic --batch 2` 一直是 rc=0；交 **E4-c** 顺手修（那时 §3 会被再次触碰）。
+2. **零分母 ⇒ 空 cell 与 MIX arm 级回退的两条渲染规则没有已提交的测试**，且**参考在真零分母树上直接崩溃**
+   （`table_ledger` 的 `0.0` falsy ⇒ band=None，而守卫查 `is None`），oracle 永远覆盖不到 ⇒ E4-c 必须：
+   给 `make_tree.py` 加 `--zero-denominator` 边界旗标 + 对 **C# 产物单侧**定点断言（空 cell、`null_passes`
+   的理由、回退闸）+ 负控（把空 cell 写成 `0` 必须红）。
