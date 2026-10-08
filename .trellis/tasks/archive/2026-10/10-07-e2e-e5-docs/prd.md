@@ -62,23 +62,38 @@ E2、E3、E4 全部完成——文档要描述的是最终形态。
 
 ## 验收标准
 
-- [ ] 契约表的每一项都能在 `ArmKeys` 里找到对应常量，且代码里确实写出该字段。
-- [ ] `Non-obvious properties` 每一条都经过复核；已不成立的条目被改写或删除，而不是留着。
-- [ ] `Verification` 表的每个字段名与 gate 名都与代码一致。
-- [ ] `Layout` 表包含 `WinForward.E2E.Contracts`、`WinForward.E2E.Analysis`、
+- [x] 契约表的每一项都能在 `ArmKeys` 里找到对应常量，且代码里确实写出该字段。
+- [x] `Non-obvious properties` 每一条都经过复核；已不成立的条目被改写或删除，而不是留着。
+- [x] `Verification` 表的每个字段名与 gate 名都与代码一致。
+- [x] `Layout` 表包含 `WinForward.E2E.Contracts`、`WinForward.E2E.Analysis`、
       `tests/WinForward.E2E.Tests`。
-- [ ] 线格式规格表与 `FrameCodec.cs`/`TcpCommand.cs` 互相交叉引用。
-- [ ] 分析器 README（E4 交付）写明 CPU 口径、DNS 路径差异、UDP `not carried` 规则 —— E5 复核一致性。
-- [ ] **§四 7 条口径披露全部落进分析器 README 或相关表格脚注**，逐条可查。
-- [ ] **Windows 轻量验证（三态）**：经 `wf-aot` + sing-box 的保形压缩 plan 在 VM 上完成
-      （client exit 0、无 `error` 记录、`run.json.failed == false`、findings 白名单外为空），
-      拉回的结果能被 C# 分析器成功分析；无环境时按 D11 记 `blocked` 并留证。
-- [ ] `dotnet build WinForward.slnx -c Release` 零警告。
-- [ ] `dotnet test WinForward.slnx -c Release` 绿。
-- [ ] `dotnet format WinForward.slnx --severity info --verify-no-changes --no-restore` 退出 0 且输出为空。
-- [ ] `jb inspectcode -f=Xml -e=HINT -o=/tmp/jb-inspectcode.xml WinForward.slnx` 零 `<Issue>`。
-- [ ] `scripts/selftest.sh scripts/plans/selftest-plan.json` 绿，client 退出码 0，无 `error` 记录。
+- [x] 线格式规格表与 `FrameCodec.cs`/`TcpCommand.cs` 互相交叉引用。
+- [x] 分析器 README（E4 交付）写明 CPU 口径、DNS 路径差异、UDP `not carried` 规则 —— E5 复核一致性。
+- [x] **§四 7 条口径披露全部落进分析器 README 或相关表格脚注**，逐条可查。
+- [x] **Windows 轻量验证（三态）= `fail`**（依 D22）：环境可用、两 pass 跑完、client 退出码 0（由 `failed` 同源推得）、
+      **0 条 `error` 记录**、18 个 run 全 `failed=false`、C# 分析器 exit 0 且 `check-fairness.py` 14 条守卫全 PASS；
+      **但第 4 条判据不满足**（320 条白名单外 findings，归因 T1/T2，见 `research/tickets.md`）⇒ `AC18=fail(T1,T2)`。
+- [x] `dotnet build WinForward.slnx -c Release` 零警告。
+- [x] `dotnet test WinForward.slnx -c Release` 绿。
+- [x] `dotnet format WinForward.slnx --severity info --verify-no-changes --no-restore` 退出 0 且输出为空。
+- [x] `jb inspectcode -f=Xml -e=HINT -o=/tmp/jb-inspectcode.xml WinForward.slnx` 零 `<Issue>`。
+- [x] `scripts/selftest.sh scripts/plans/selftest-plan.json` 绿，client 退出码 0，无 `error` 记录。
 
 > **权威规则**：父 `prd.md` 的 R/AC 是本子任务的**验收上限**；本文件的清单是它的展开，
 > 冲突时**以父为准**，且本文件每条验收都必须能追溯到父的一个 R 或 AC。
 > 父任务：`.trellis/tasks/10-07-e2e-harness-refactor/`。
+
+---
+
+## 完成记录（2026-10-08）
+
+- **E5-a**（文档）：契约表自查 `scripts/check-readme-contract.py`（111 键 / 401 常量，带空集守卫与注释剥离的两颗牙）；
+  README 的 `Non-obvious`/`Verification`/`Layout`/线格式交叉引用/ledger 记录形状改写；
+  分析器 README 新增 8 条「What the tables cannot see」（§四 7 条逐条落位，两条被证伪的说法已改写）；
+  spec §3.11 + 扫尾；check 轮抓出 7 处文档与代码不符并修正。
+- **E5-b**（Windows）：保形压缩 plan `scripts/plans-windows/full-shape-plan.json`（只改 `seconds`，LOSS 120s×500/s、
+  LATLOAD 500 rps、PERSIST idle 25 s、DNS 200 rps 全保留；870→321 s），接进 shipped-plan 测试（11→12）；
+  VM 上两 pass 跑完、拉回、用 C# 分析器分析；**AC18 = fail**，归因与 6 条 ticket 见 `../10-07-e2e-harness-refactor/research/tickets.md`。
+- 门禁：build 0 警告；`dotnet test` 逐项目顺序 **15 个项目 / 1656 测试 / 0 失败**（一条命令并行会因 11 GiB 无 swap
+  出现 `Test Run Aborted`，是内存颠簸不是断言失败）；format 0 字节；inspectcode 清缓存全量 0 `<Issue>`；
+  `effective-lines.py` 四路径无输出；selftest 绿（0 条 error 记录）且新 plan 本机自测绿。
