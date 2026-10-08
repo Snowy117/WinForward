@@ -422,3 +422,40 @@ catch (SocketException)
 > implementing an audit item, re-verify it against the current code (a grep or a failing test); record
 > the verdict as `implemented | fixed | deferred` with a re-runnable command. In this repo the E2E audit's
 > §2 list was ~10/13 already implemented when the refactor started.
+
+---
+
+## 8. The analyzer
+
+`analyze.py` was replaced by `benchmarks/WinForward.E2E.Analysis` (C#, shares `Contracts`). Entry point:
+`benchmarks/WinForward.E2E.Analysis/scripts/analyze.sh` — it builds once, then execs the binary with the
+caller's working directory and arguments untouched (`--raw --out --ledger --flat --warmup-seconds
+--resamples --seed`, same defaults as the reference: `../raw`, `..`, `5.0`, `10000`, `20261006`, 3 passes).
+It reads JSONL with `JsonDocument` plus `ArmKeys` paths — no reflection, no source generation, no
+`InternalsVisibleTo`. Outputs `tables.md` (sixteen `## N.` sections), `verdict.json` (fourteen top-level
+keys) and `plots/SKIPPED.md` (written unconditionally).
+
+The Python reference is gone; what constrains the analyzer now:
+
+| Artifact | Purpose |
+|---|---|
+| `verification/synthetic-tree.tar.gz` | the campaign every regression runs on (deterministic tar: sorted entries, fixed mtime/owner) |
+| `verification/golden/{py-tables.md,py-verdict.json}` | the reference output for that tree |
+| `verification/golden/{cp-random-vectors,py-number-vectors,py-json-vectors}.json` | the primitives' vectors, not compared by the differ |
+| `verification/synthetic/make_tree.py` + `FROZEN.md` | how the tree is built, and how to refreeze (any change means refreezing and re-diffing from batch 1) |
+| `scripts/oracle-diff.py` | the differ: `--mode semantic` (default) or `--mode byte`, `--batch N`, `--tolerance` |
+| `verification/row-profiles.json` + `scripts/check-fairness.py` | the fairness rules as data, asserted against the C# output |
+| `verification/check-boundary-trees.py` | the knob trees (window overflow, undecodable, truncated, zero denominator) |
+
+Differ contract: exit `0` equal, `1` different, `2` **something that should exist does not** — a missing
+slice or an unreadable artifact is never a pass. Semantic mode keeps headings, column names, row identity,
+cell counts and cell kinds exact, compares numbers within one unit of the reference's printed precision,
+decodes strings before comparing, and ignores object key order and row order. Byte mode is a structure-surface
+regression, not a batch criterion. Every section and every verdict key belongs to exactly one batch in
+`BATCH_SECTIONS`; a new section must be added there, and a key without a batch is a usage error.
+
+A boundary state the reference cannot render (a zero denominator makes it raise) is asserted from the C#
+side alone: build the knob tree, assert the C# output, and add a negative control that must turn red.
+Records whose numbers are summed for the report follow CPython's compensated summation when the reference
+does; that rule has its own anchor test rather than relying on a comparison.
+
