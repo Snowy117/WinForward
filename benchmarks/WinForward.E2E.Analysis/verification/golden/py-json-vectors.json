@@ -1,0 +1,119 @@
+{
+  "what": "json.dumps(value, indent=2) with the reference's own encoder settings",
+  "cases": [
+    {
+      "name": "the characters json leaves alone",
+      "value": {
+        "text": "'+<>&/"
+      },
+      "text": "{\n  \"text\": \"'+<>&/\"\n}"
+    },
+    {
+      "name": "the two mandatory escapes",
+      "value": {
+        "quote": "\"",
+        "backslash": "\\"
+      },
+      "text": "{\n  \"quote\": \"\\\"\",\n  \"backslash\": \"\\\\\"\n}"
+    },
+    {
+      "name": "the five short control escapes",
+      "value": {
+        "text": "\b\f\n\r\t"
+      },
+      "text": "{\n  \"text\": \"\\b\\f\\n\\r\\t\"\n}"
+    },
+    {
+      "name": "the control characters with no short form",
+      "value": {
+        "text": "\u0000\u0001\u001f\u007f"
+      },
+      "text": "{\n  \"text\": \"\\u0000\\u0001\\u001f\\u007f\"\n}"
+    },
+    {
+      "name": "non-ASCII text",
+      "value": {
+        "text": "\u2013\u2014\u4e2d\u6587\u00e9\ufffd"
+      },
+      "text": "{\n  \"text\": \"\\u2013\\u2014\\u4e2d\\u6587\\u00e9\\ufffd\"\n}"
+    },
+    {
+      "name": "an astral code point",
+      "value": {
+        "text": "\ud83d\ude42\ud83d\ude80"
+      },
+      "text": "{\n  \"text\": \"\\ud83d\\ude42\\ud83d\\ude80\"\n}"
+    },
+    {
+      "name": "an empty object and an empty array",
+      "value": {
+        "object": {},
+        "array": []
+      },
+      "text": "{\n  \"object\": {},\n  \"array\": []\n}"
+    },
+    {
+      "name": "an array of objects",
+      "value": {
+        "pairs": [
+          {
+            "a": 1
+          },
+          {
+            "b": 2
+          }
+        ]
+      },
+      "text": "{\n  \"pairs\": [\n    {\n      \"a\": 1\n    },\n    {\n      \"b\": 2\n    }\n  ]\n}"
+    },
+    {
+      "name": "a nested object",
+      "value": {
+        "outer": {
+          "middle": {
+            "inner": "leaf"
+          }
+        }
+      },
+      "text": "{\n  \"outer\": {\n    \"middle\": {\n      \"inner\": \"leaf\"\n    }\n  }\n}"
+    },
+    {
+      "name": "a nested array",
+      "value": {
+        "grid": [
+          [
+            1,
+            2
+          ],
+          [
+            3
+          ]
+        ]
+      },
+      "text": "{\n  \"grid\": [\n    [\n      1,\n      2\n    ],\n    [\n      3\n    ]\n  ]\n}"
+    },
+    {
+      "name": "a key that needs escaping",
+      "value": {
+        "quote\"d": "back\\slash"
+      },
+      "text": "{\n  \"quote\\\"d\": \"back\\\\slash\"\n}"
+    },
+    {
+      "name": "one document with every scalar kind",
+      "value": {
+        "string": "x",
+        "integer": 7,
+        "plain float": 0.5,
+        "integral float": 100.0,
+        "exponent": 100.0,
+        "true": true,
+        "false": false,
+        "null": null
+      },
+      "text": "{\n  \"string\": \"x\",\n  \"integer\": 7,\n  \"plain float\": 0.5,\n  \"integral float\": 100.0,\n  \"exponent\": 100.0,\n  \"true\": true,\n  \"false\": false,\n  \"null\": null\n}"
+    }
+  ],
+  "generated_by": "CPython 3.14.7 (GCC 15.3.0)",
+  "command": "python3 benchmarks/WinForward.E2E.Analysis/verification/synthetic/make_cp_vectors.py"
+}

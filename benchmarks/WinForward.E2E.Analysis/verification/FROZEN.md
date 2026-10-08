@@ -23,6 +23,28 @@ Frozen on 2026-10-08 (E4-a). The tarball is built with sorted names, a fixed mti
 (`2026-10-01 00:00:00 UTC`) and zeroed ownership, so regenerating it from the same generator is
 byte-identical; `bash freeze-tree.sh` does exactly that and prints the new hash.
 
+### 1.1 The vector tables beside the golden (E4-b1b)
+
+Three more files under `golden/` are frozen the same way but take **no part in the two-implementation
+diff**: `oracle-diff.py` never reads them, and no change to `make_tree.py` invalidates them, because
+the tree they describe is CPython's own behaviour rather than a campaign.
+
+| Artifact | What it is | sha256 |
+|---|---|---|
+| `golden/cp-random-vectors.json` | `random.Random(int)` draws: 18 seeds × 8 raw words, 11 `getrandbits` widths and 28 `randrange` stops (702 draws) | `b011711e290a744827edb9ae7433304f29770619885cd7d4b953a0307bab2690` |
+| `golden/py-number-vectors.json` | `%.*f` (230 values), `%.*g` (135) and `repr` (36) as CPython writes them, midpoints included | `3d256f5994adcd1f7ba44e4f63f06ac7e144b8bbbd56eaa2a9903e812ffcae4e` |
+| `golden/py-json-vectors.json` | `json.dumps(value, indent=2)` for 12 documents: escapes, non-ASCII, astral pairs, empty and nested containers | `759c08345cb344901d13e799128ab17908ae3d71613b4ff36025f79cdc3bf49d` |
+| `synthetic/make_cp_vectors.py` | the generator of all three, standard library only | `3df6aea6a6171167464a0d7bbdf6e8428eee899524142e93b7bb22ea78d52c60` |
+
+They are the unit-test side of D20.5: the analysis's generator and its number formatting are judged
+against the numbers CPython produced rather than against a restatement of them, and the vectors are
+what make that auditable after the reference retires (E4-d). Regenerating them rewrites all three
+files in place and must leave the hashes above unchanged:
+
+```bash
+python3 benchmarks/WinForward.E2E.Analysis/verification/synthetic/make_cp_vectors.py
+```
+
 ## 2. How the frozen set was produced
 
 ```bash

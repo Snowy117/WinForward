@@ -10,6 +10,7 @@
 ## 批次总览（按 DD **D20** 修订）
 
 > 判据一律用 `benchmarks/WinForward.E2E/scripts/oracle-diff.py`（三态退出码 0/1/2；切片缺失 ≠ 通过）。
+> **判据模式：`--mode semantic`**（D21：语义等价取代逐字一致；数值按容差、键序无关、格式自由；`--mode byte` 只留结构面）。
 > 正式判据 = **干净树**上的切片空 diff；边界树（`--window-overflow`/`--undecodable`/`--truncated-*`）
 > **只对 C# 产物做定点断言**（Python 参考不扩例外，D20.1）。
 

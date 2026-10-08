@@ -193,9 +193,12 @@ reference, was restored with `git checkout --`.
    contain one; the divergence is documented in `JsonReader`'s remarks rather than papered over.
 2. **Invalid UTF-8 in a JSON file is an error, not a crash.** The reference reads `run.json` with
    `errors` unset, so a decode error escapes its `except (OSError, JSONDecodeError)` and takes the
-   whole analysis down; the port records `run.json unreadable (JsonException)` (a load error, so it
-   lands in §15's `notes`) and continues. Not reachable from the harness, and arguably the better
-   behaviour on a corrupt tree.
+   whole analysis down; the port continues instead, and what it records depends on where the bad bytes
+   are: inside a string value `System.Text.Json` substitutes U+FFFD and the file parses **without a
+   note**, while bad bytes between tokens (or a file that cannot be decoded at all) are recorded as
+   `run.json unreadable (JSONDecodeError)` — a load error, so it lands in §15's `notes`. Measured by
+   the check round (`E4b1a-check.md` §6, §9.1); this paragraph replaces the earlier claim that every
+   variant records a load error.
 3. **`order.txt` is not read yet.** `discover()` collects it and §3's gate table consumes it in b2;
    the parsed field would be unused state until then, so it lands with its reader.
 4. **`--warmup-seconds` / `--resamples` / `--seed` affect nothing this batch renders.** They are

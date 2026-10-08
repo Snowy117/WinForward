@@ -56,6 +56,9 @@ internal static class CampaignLoader
             Flat = options.Flat,
             Passes = passes,
             LedgerPaths = ledgerPaths,
+            Resamples = options.Resamples,
+            Seed = options.Seed,
+            MinPasses = AnalysisOptions.DefaultMinPasses,
         };
         return true;
     }

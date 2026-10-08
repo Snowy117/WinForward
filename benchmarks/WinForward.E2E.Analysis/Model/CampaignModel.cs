@@ -27,6 +27,15 @@ internal sealed class CampaignModel
     /// </summary>
     internal required IReadOnlyDictionary<string, IReadOnlyList<string>> LedgerPaths { get; init; }
 
+    /// <summary>How many resamples each bootstrap interval is drawn with.</summary>
+    internal required int Resamples { get; init; }
+
+    /// <summary>The base seed each comparison's generator is derived from.</summary>
+    internal required int Seed { get; init; }
+
+    /// <summary>How many passes an aggregate needs before it is allowed to make a claim.</summary>
+    internal required int MinPasses { get; init; }
+
     /// <summary>The passes, in natural-key order; <c>pass2</c> before <c>pass10</c>.</summary>
     internal IReadOnlyList<string> PassIds => field ??= NaturalKey.Sort(Passes.Keys);
 

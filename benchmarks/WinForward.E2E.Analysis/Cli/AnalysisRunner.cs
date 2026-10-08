@@ -26,10 +26,7 @@ internal static class AnalysisRunner
 {
     private static readonly string[] s_pending =
     [
-        CpRandom.Pending,
         BootstrapResampler.Pending,
-        VerbatimNumber.Pending,
-        VerbatimJson.Pending,
         InvariantChecks.Pending,
         FindingsCollector.Pending,
         MetricCatalogue.Pending,
