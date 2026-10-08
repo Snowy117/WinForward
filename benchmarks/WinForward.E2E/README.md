@@ -191,13 +191,19 @@ WinForward.E2E target [--bind <ip>] [--tcp-port <n>] [--udp-port <n>] [--dns-por
 | `--dns-port <n>` | 30053 | DNS responder, UDP and TCP |
 | `--dns-alt-port <n>` | none | a second DNS responder, UDP and TCP, on a port no product special-cases; it must differ from the other three ports |
 | `--udp-receivers <n>` | `clamp(processors / 2, 2, 8)` | datagram receive loops each listener starts, `1..64` — the echo listener and both DNS listeners take the same count, and only the echo listener's started loops are published, as `targetSummary`'s `udp/udpReceivers` |
-| `--label <name>` | empty | run identity copied into every ledger record |
+| `--label <name>` | empty | identity copied into every ledger record: the run's own label when the target serves one run, or `target:<port>` — the port the instance serves — when it serves many |
 | `--ledger <path>` | `target-ledger.jsonl` | JSONL ledger output |
 
 It runs until Ctrl+C or SIGTERM and writes its summary records at shutdown. The campaign runs two
 target instances — one per lane — against two different ports so that a flow to the direct lane is
 attributable; the launcher for them is machine-specific (`scripts/start-targets.sh`, local), and the
-ports it uses are the orchestrator's defaults.
+ports it uses are the orchestrator's defaults. That launcher labels each instance `target:<port>`,
+because an instance outlives every run it serves and so cannot be labelled with a run's name: the
+analysis reads a run against the ledger of the target the run's own `run.json` declares, and only
+then bounds it by the arm's UTC window. Sharing one pool of records instead makes the two lanes of a
+dual phase — which overlap in time by construction — each see the other's records, which the analysis
+reports as `ledger-window-ambiguous` and as a false `ledger-endpoint-overlap`. See "Attribution" in
+[the analysis README](../WinForward.E2E.Analysis/README.md).
 
 ### Plan schema
 

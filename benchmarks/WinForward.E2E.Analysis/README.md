@@ -243,15 +243,25 @@ counts what arrived. The script reads `udpSummary` (cumulative counters plus a p
 `source` census and `sourceOverflow`), `tcp` records (one per connection, with its verdict),
 `dnsSummary` (per port, written at shutdown), `tcpSummary` and `targetSummary`.
 
-- **Attribution.** Every ledger record carries `utc` and `label`. Where the campaign gave each
-  run its own label (the orchestrator labels every run, including both dual lanes), the label
-  selects the run and the arm's UTC window bounds it; the window is
-  derived from the client's `startedUtc` plus the arm's tick offsets, which is the only bridge
-  between the client's stopwatch and the ledger's wall clock. Where the ledger carries a single
-  label (a one-off run), the window alone attributes, and the script says so in the environment
-  table and in `verdict.json`. A connection that opens inside one arm and closes inside the next
-  is attributed where it closed. When two runs' windows overlap and the ledger carries no
-  per-run label, the counts are reported as unattributable rather than silently merged.
+- **Attribution.** Every ledger record carries `utc` and `label`, and attribution runs in two steps.
+  First the *ledger*, when the ledger names the target instance that wrote it: the shipped launcher
+  starts two long-lived instances and labels each `target:<port>`, and a run is read against the
+  ledger of the target its own `run.json` declares — so a record can only be attributed to a run that
+  could have produced it, and a run that declared one target is never read against another's ledger.
+  Then the *arm*, by the arm's UTC window: the window is derived from the client's `startedUtc` plus
+  the arm's tick offsets, which is the only bridge between the client's stopwatch and the ledger's
+  wall clock. A ledger that carries a second target's records is never in that run's pool, which is
+  what separates the dual phase's two lanes: they overlap in time by construction, but they wrote to
+  different instances. Where the campaign gave each run its own label — a target that serves one run,
+  the orchestrator's own `--label`, the synthetic tree — the label also selects the run. Where the
+  ledger carries a single label (a one-off run), the instance and the window attribute, and the script
+  says which of the three paths it took in the environment table and in `verdict.json`. A connection
+  that opens inside one arm and closes inside the next is attributed where it closed. When two runs'
+  windows overlap *and the two runs share a ledger* and the ledger carries no per-run label, the counts
+  are reported as unattributable rather than silently merged.
+  The window compares two machines' clocks, so a campaign whose client and target clocks differ by
+  seconds mis-attributes every arm's boundary; nothing in the ledger can detect that, and the
+  per-arm counts are the symptom.
 - **Counting.** Datagram totals come from the `sources` deltas (per-interval), not from the
   cumulative `received` field, and `sourceOverflow` is reported rather than silently dropped.
 - **Tolerances** are declared in the source and printed beside every number they judge:

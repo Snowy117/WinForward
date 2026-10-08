@@ -104,17 +104,30 @@ internal sealed class LedgerViews
 /// window's traffic looked like.
 /// </summary>
 /// <remarks>
-/// <para><b>Attribution is by label, then by the arm's own UTC window.</b> The ledger's label selects the
-/// run when the ledger carries more than one; the window — derived from the client's ticks — bounds it
-/// either way, because a label alone cannot say when.</para>
-/// <para><b>An overlapping window is disclosed.</b> Two runs whose windows overlap and a ledger with no
-/// per-run label means the records cannot be attributed to one of them, which the findings say rather
-/// than silently counting them twice.</para>
+/// <para><b>Attribution is by the ledger's own identity, then by label, then by the arm's own UTC
+/// window.</b> A ledger that names the target instance that wrote it (the shipped launcher labels each
+/// of its two long-lived instances <c>target:&lt;port&gt;</c>) is read against the runs whose own
+/// <c>run.json</c> declares that instance, so a record can only be attributed to a run that could have
+/// produced it; within that ledger the arm's UTC window — derived from the client's ticks — bounds it.
+/// A ledger that carries per-run labels still selects by label where the campaign supplied them, which
+/// is what a one-run-per-target campaign does.</para>
+/// <para><b>An overlapping window is disclosed.</b> Two runs whose windows overlap <em>and that share a
+/// ledger</em> cannot be told apart from the records alone, which the findings say rather than silently
+/// counting them twice. Two runs that wrote to different target instances are not ambiguous however
+/// much their windows overlap: the dual phase's two lanes overlap by construction and are separated by
+/// exactly this rule.</para>
 /// </remarks>
 internal static class LedgerViewsBuilder
 {
     /// <summary>The envelope member every ledger record carries.</summary>
     private const string TypeKey = "type";
+
+    /// <summary>
+    /// The prefix the shipped launcher gives a target instance's own label. The rest of the label is the
+    /// port the instance serves, which is the one thing its ledgers and its clients' <c>run.json</c> both
+    /// name.
+    /// </summary>
+    private const string InstanceLabelPrefix = "target:";
 
     /// <summary>The <c>udpSummary</c> record family, whose interval totals the views read.</summary>
     internal const string UdpSummary = "udpSummary";
@@ -132,6 +145,10 @@ internal static class LedgerViewsBuilder
     internal const string Tcp = "tcp";
 
     private static readonly string[] s_udpEchoArms = ["LAT", "LATLOAD", "LOSS", "MIX", "BASE"];
+
+    /// <summary>The <c>run.json</c> target members whose value is a port the run talked to.</summary>
+    private static readonly string[] s_targetPortKeys =
+        [Contracts.ArmKeys.Run.TargetObject.TcpPort, Contracts.ArmKeys.Run.TargetObject.UdpPort];
 
     private static readonly ConditionalWeakTable<CampaignModel, LedgerViews> s_cache = [];
 
@@ -164,6 +181,8 @@ internal static class LedgerViewsBuilder
             var labels = LabelsOf(records);
             var runs = RunsOf(campaign, passId);
             var discriminating = labels.Count > 1 && labels.Keys.Any(RunLabels(runs).Contains);
+            var instances = InstancesOf(ledgers);
+            var pools = PoolsOf(runs, instances);
             var windows = WindowsOf(runs);
             passes[passId] = new LedgerPassView
             {
@@ -172,13 +191,127 @@ internal static class LedgerViewsBuilder
                 Types = TypesOf(records),
                 Labels = labels,
                 BadLines = ledgers.Sum(ledger => ledger.BadLines),
-                PerArm = ArmViews(passId, runs, records, windows, discriminating),
+                PerArm = ArmViews(passId, runs, records, windows, discriminating, pools),
             };
-            attribution[passId] = Attribution(ledgers.Count, labels, discriminating);
+            attribution[passId] = Attribution(ledgers.Count, labels, discriminating, instances, pools);
         }
 
         LedgerFindings.AttachClientCounts(campaign, passes);
         return new LedgerViews { Available = available, Passes = passes, Attribution = attribution };
+    }
+
+    /// <summary>
+    /// The target instance each ledger was written by, keyed by ledger path, for the ledgers that name
+    /// one. A ledger names it by carrying the same <c>target:&lt;port&gt;</c> label on every record.
+    /// </summary>
+    private static Dictionary<string, int> InstancesOf(IReadOnlyList<LedgerData> ledgers)
+    {
+        var instances = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var ledger in ledgers)
+        {
+            if (InstancePortOf(ledger) is { } port)
+            {
+                instances[ledger.Path] = port;
+            }
+        }
+
+        return instances;
+    }
+
+    /// <summary>The port one ledger's own label names, or null when its records do not agree on one.</summary>
+    private static int? InstancePortOf(LedgerData ledger)
+    {
+        int? port = null;
+        foreach (var record in ledger.Records)
+        {
+            var label = JsonValue.String(record.Payload, Contracts.ArmKeys.Ledger.Envelope.Label);
+            if (InstancePort(label) is not { } candidate || (port is not null && port != candidate))
+            {
+                return null;
+            }
+
+            port = candidate;
+        }
+
+        return port;
+    }
+
+    /// <summary>The port a label names, or null when it is not the launcher's target-instance label.</summary>
+    private static int? InstancePort(string? label)
+    {
+        if (label is null || !label.StartsWith(InstanceLabelPrefix, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return int.TryParse(
+                label[InstanceLabelPrefix.Length..],
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var port)
+            && port is > 0 and <= 65535
+                ? port
+                : null;
+    }
+
+    /// <summary>
+    /// The ledgers each run's traffic could have reached: the instances its own <c>run.json</c> names,
+    /// when the ledgers name one. Null means "unknown, read every ledger", which is what a campaign whose
+    /// ledgers carry no instance label gets.
+    /// </summary>
+    private static Dictionary<string, HashSet<string>?> PoolsOf(
+        List<(ClientRun Run, ClientRun Owner)> runs,
+        Dictionary<string, int> instances)
+    {
+        var pools = new Dictionary<string, HashSet<string>?>(StringComparer.Ordinal);
+        foreach (var (run, _) in runs)
+        {
+            pools[run.RunId] = Pool(run, instances);
+        }
+
+        return pools;
+    }
+
+    private static HashSet<string>? Pool(ClientRun run, Dictionary<string, int> instances)
+    {
+        HashSet<string>? pool = null;
+        foreach (var port in TargetPorts(run))
+        {
+            foreach (var (path, instancePort) in instances)
+            {
+                if (instancePort == port)
+                {
+                    pool ??= new HashSet<string>(StringComparer.Ordinal);
+                    pool.Add(path);
+                }
+            }
+        }
+
+        return pool;
+    }
+
+    /// <summary>The ports the run's own <c>run.json</c> says it talked to.</summary>
+    private static List<int> TargetPorts(ClientRun run)
+    {
+        var ports = new List<int>(s_targetPortKeys.Length);
+        foreach (var name in s_targetPortKeys)
+        {
+            var path = Contracts.ArmKeys.Run.Target + JsonValue.Separator + name;
+            if (JsonValue.AsNumber(JsonValue.Dig(run.Document, path)) is > 0 and <= 65535 and var port)
+            {
+                ports.Add((int)port);
+            }
+        }
+
+        return ports;
+    }
+
+    /// <summary>Whether two runs' windows can be told apart by the ledgers they wrote to.</summary>
+    private static bool SharesLedger(string left, string right, Dictionary<string, HashSet<string>?> pools)
+    {
+        var leftPool = pools.GetValueOrDefault(left);
+        var rightPool = pools.GetValueOrDefault(right);
+        return leftPool is null || rightPool is null || leftPool.Overlaps(rightPool);
     }
 
     private static List<LedgerRecord> RecordsOf(IReadOnlyList<LedgerData> ledgers)
@@ -274,7 +407,8 @@ internal static class LedgerViewsBuilder
         List<(ClientRun Run, ClientRun Owner)> runs,
         List<LedgerRecord> records,
         Dictionary<string, List<(string Arm, DateTimeOffset Start, DateTimeOffset End)>> windows,
-        bool discriminating)
+        bool discriminating,
+        Dictionary<string, HashSet<string>?> pools)
     {
         var perArm = new List<LedgerArmView>();
         foreach (var (run, owner) in runs)
@@ -286,7 +420,7 @@ internal static class LedgerViewsBuilder
                     continue;
                 }
 
-                perArm.Add(ArmView(passId, run, owner, armName, window, records, windows, discriminating));
+                perArm.Add(ArmView(passId, run, owner, armName, window, records, windows, discriminating, pools));
             }
         }
 
@@ -301,11 +435,14 @@ internal static class LedgerViewsBuilder
         (DateTimeOffset Start, DateTimeOffset End) window,
         List<LedgerRecord> records,
         Dictionary<string, List<(string Arm, DateTimeOffset Start, DateTimeOffset End)>> windows,
-        bool discriminating)
+        bool discriminating,
+        Dictionary<string, HashSet<string>?> pools)
     {
         var label = RunClocks.Label(run);
+        var pool = pools.GetValueOrDefault(run.RunId);
         var selected = records
-            .Where(record => record.Utc is not null && window.Start <= record.Utc && record.Utc <= window.End)
+            .Where(record => (pool is null || pool.Contains(record.LedgerPath))
+                && record.Utc is not null && window.Start <= record.Utc && record.Utc <= window.End)
             .ToList();
         if (discriminating && label is not null)
         {
@@ -317,6 +454,7 @@ internal static class LedgerViewsBuilder
 
         var overlap = windows
             .Where(other => !string.Equals(other.Key, run.RunId, StringComparison.Ordinal)
+                && SharesLedger(run.RunId, other.Key, pools)
                 && other.Value.Exists(span => span.Start <= window.End && window.Start <= span.End))
             .Select(other => other.Key)
             .Order(StringComparer.Ordinal)
@@ -362,7 +500,12 @@ internal static class LedgerViewsBuilder
         return endpoints;
     }
 
-    private static string Attribution(int ledgerCount, Dictionary<string, int> labels, bool discriminating)
+    private static string Attribution(
+        int ledgerCount,
+        Dictionary<string, int> labels,
+        bool discriminating,
+        Dictionary<string, int> instances,
+        Dictionary<string, HashSet<string>?> pools)
     {
         var sorted = string.Join(", ", labels.Keys.Order(StringComparer.Ordinal));
         if (discriminating)
@@ -372,9 +515,37 @@ internal static class LedgerViewsBuilder
                 $"{ledgerCount} ledger(s); the ledger's own label ({sorted}) selects the run, then the arm's UTC window bounds it");
         }
 
+        if (instances.Count > 0)
+        {
+            var said = string.Join(
+                ", ",
+                instances.Values.Distinct().Order().Select(port => InstanceLabelPrefix + port.ToString(CultureInfo.InvariantCulture)));
+            const string names = "the ledger's own label names the target instance that wrote it";
+            return string.Create(
+                CultureInfo.InvariantCulture,
+                $"{ledgerCount} ledger(s); {names} ({said}), {Reach(pools)}");
+        }
+
         var carries = labels.Count == 1 ? "one label" : "no label";
         return string.Create(
             CultureInfo.InvariantCulture,
             $"{ledgerCount} ledger(s); the arm's UTC window only, because the ledger carries {carries}, so a record's own label cannot select a row");
+    }
+
+    /// <summary>
+    /// How far an instance label actually binds the pass's runs, which is the difference between the
+    /// rule being available and a run declaring the instance that wrote the ledger it read.
+    /// </summary>
+    private static string Reach(Dictionary<string, HashSet<string>?> pools)
+    {
+        if (!pools.Values.Any(pool => pool is not null))
+        {
+            return "but no run's own run.json declares one of them, so the arm's UTC window only, "
+                + "because a record's own label cannot select a run";
+        }
+
+        return pools.Values.All(pool => pool is not null)
+            ? "so a run is read against the ledger of the target its own run.json declares, then the arm's UTC window bounds it"
+            : "so a run whose own run.json declares one is read against that target's ledger and a run that declares none is read against every ledger, then the arm's UTC window bounds the arm";
     }
 }
