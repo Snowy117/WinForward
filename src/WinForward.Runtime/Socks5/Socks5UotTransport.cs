@@ -12,16 +12,16 @@ namespace WinForward.Runtime.Socks5;
 /// <summary>
 /// The per-flow UDP-over-TCP v2 (connect mode) transport: one authenticated SOCKS5 connection per
 /// flow whose stream is bound to the flow's single destination for its whole life, owned and
-/// disposed with the flow — no sharing, no pooling, no warm reuse (R1).
+/// disposed with the flow — no sharing, no pooling, no warm reuse.
 /// <para>
-/// Establishment is pipelined (R2). The dial writes the greeting (and the RFC 1929 message when
+/// Establishment is pipelined: the dial writes the greeting (and the RFC 1929 message when
 /// credentials are configured) and returns without reading a reply; the flow's first datagram then
 /// writes one buffer — the <c>CONNECT</c> to <see cref="UotCodec.MagicAddress"/>, the UoT request
 /// header, and the <c>u16be length | payload</c> frame — and does <b>not</b> await the CONNECT
 /// reply. Reply validation moves to the receive path, which consumes the deferred method/auth
 /// replies and then the CONNECT reply before the first frame; a refusal discovered there is
 /// <see cref="UdpTransportHandshakeRejectedException"/>, a death after establishment
-/// <see cref="UdpAssociationLostException"/> (R4).
+/// <see cref="UdpAssociationLostException"/>.
 /// </para>
 /// </summary>
 public sealed class Socks5UotTransport : IUdpProxyTransport, IUdpExchangeCounters
@@ -31,7 +31,7 @@ public sealed class Socks5UotTransport : IUdpProxyTransport, IUdpExchangeCounter
     /// (<c>VER CMD RSV ATYP 3 | len 23 | "sp.v2.udp-over-tcp.arpa" | port</c>), the longest UoT
     /// request header (IPv6, 20 bytes), and the 2-byte frame prefix. The send buffer is
     /// <c>UotSendPrefixLength + maximumFrameSize</c>, so a captured payload (bounded at
-    /// <c>cap - 42</c> by the pipeline) always fits (design §4).
+    /// <c>cap - 42</c> by the pipeline) always fits.
     /// </summary>
     private const int UotSendPrefixLength = 30 + UotCodec.MaximumRequestHeaderLength + UotCodec.FrameHeaderSize;
 
@@ -124,8 +124,8 @@ public sealed class Socks5UotTransport : IUdpProxyTransport, IUdpExchangeCounter
     /// Builds the per-flow transport over a connection the caller owns until this returns. The
     /// stream hand-off resets the per-attempt socket timeouts to infinite and the socket then goes
     /// non-blocking for the warm send path; both are legal before the deferred completion, whose
-    /// reads are asynchronous and governed by neither (batch 3's documented order). The caller owns
-    /// the connection and disposes it if this throws; on success the transport owns it.
+    /// reads are asynchronous and governed by neither. The caller owns the connection and disposes
+    /// it if this throws; on success the transport owns it.
     /// </summary>
     internal static Socks5UotTransport Create(Socks5ControlConnection control, int maximumFrameSize = UdpFrameBuilder.DefaultMaximumEthernetFrame)
     {
@@ -155,7 +155,7 @@ public sealed class Socks5UotTransport : IUdpProxyTransport, IUdpExchangeCounter
         // otherwise `_sendGate.WaitAsync` would observe the disposed gate. A single volatile read
         // keeps the warm shape allocation-free.
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
-        // I4 fail-closed: a connection whose handshake was rejected or whose stream died refuses the
+        // Fail-closed: a connection whose handshake was rejected or whose stream died refuses the
         // datagram before the gate and before the socket, so the coordinator tears the flow down with
         // the recorded reason instead of writing to a stream no one is reading. One volatile read
         // plus a reference read; the exception itself is cold and already carries the death.
@@ -163,10 +163,10 @@ public sealed class Socks5UotTransport : IUdpProxyTransport, IUdpExchangeCounter
         var gateWait = _sendGate.WaitAsync(cancellationToken);
         if (!gateWait.IsCompletedSuccessfully)
         {
-            // Documented cold-path exemption (task 09-18 M2): this copy allocates, but only on the
-            // contended-gate branch. The span cannot cross the gate await (it views native capture
-            // memory that recycles once the dispatch returns), so the datagram is materialized and
-            // rides the memory slow path; the warm uncontended shape below stays zero-alloc.
+            // Documented cold-path exemption: this copy allocates, but only on the contended-gate
+            // branch. The span cannot cross the gate await (it views native capture memory that
+            // recycles once the dispatch returns), so the datagram is materialized and rides the
+            // memory slow path; the warm uncontended shape below stays zero-alloc.
             return SendAfterGateAsync(gateWait, destination, payload.ToArray(), cancellationToken);
         }
 
@@ -188,7 +188,7 @@ public sealed class Socks5UotTransport : IUdpProxyTransport, IUdpExchangeCounter
 
             if (sent < written) return SendFrameAsync(sent, written, cancellationToken);
             // Recorded only after the kernel accepted the whole frame, so the one-shot retention
-            // class reads sends that actually went out (I3: one interlocked increment, no allocation).
+            // class reads sends that actually went out; one interlocked increment, no allocation.
             RecordDatagramSent();
             _sendGate.Release();
             return ValueTask.CompletedTask;
@@ -236,7 +236,7 @@ public sealed class Socks5UotTransport : IUdpProxyTransport, IUdpExchangeCounter
     /// Completes a frame whose inline send was refused, would-blocked, or partially accepted, and
     /// releases the send gate exactly once through every path. A stream fault after establishment is
     /// the flow's death typed: it is recorded and thrown as
-    /// <see cref="UdpAssociationLostException"/> so no raw socket fault reaches the session (R4).
+    /// <see cref="UdpAssociationLostException"/> so no raw socket fault reaches the session.
     /// </summary>
     private async ValueTask SendFrameAsync(int offset, int written, CancellationToken cancellationToken)
     {
@@ -360,7 +360,7 @@ public sealed class Socks5UotTransport : IUdpProxyTransport, IUdpExchangeCounter
         // the session would count as foreign. Unreachable on a flow that sent its first datagram.
         if (!Volatile.Read(ref _destinationRecorded)) return UdpTransportReceiveResult.Skipped(UdpTransportSkipReason.UnexpectedSource);
         // Only a frame that decoded proves this flow's replies come back: a skip is one anomaly, not
-        // evidence that the server answered (design §5).
+        // evidence that the server answered.
         RecordResponseReceived();
         var destination = _destination;
         return UdpTransportReceiveResult.Received(new UdpTransportDatagram(destination.Address, SourceDomain: null, destination.Port, buffer[..frameLength]));
@@ -461,7 +461,7 @@ public sealed class Socks5UotTransport : IUdpProxyTransport, IUdpExchangeCounter
     /// Whether a fault is the flow's connection dying rather than this transport's own teardown: a
     /// stream/socket fault on a live, non-cancelled transport. The translation is what keeps a raw
     /// <see cref="SocketError.ConnectionReset"/> from reaching the session, whose receive loop
-    /// treats that code as a single-datagram skip and would spin on a dead stream (R4).
+    /// treats that code as a single-datagram skip and would spin on a dead stream.
     /// </summary>
     private bool IsConnectionFault(Exception fault, CancellationToken cancellationToken) =>
         Volatile.Read(ref _disposed) == 0
@@ -480,8 +480,8 @@ public sealed class Socks5UotTransport : IUdpProxyTransport, IUdpExchangeCounter
     }
 
     /// <summary>
-    /// Records one datagram this flow sent successfully. One interlocked increment, no allocation —
-    /// this is the whole hot-path accounting addition (I3).
+    /// Records one datagram this flow sent successfully. One interlocked increment, no allocation:
+    /// this is the whole hot-path accounting addition.
     /// </summary>
     private void RecordDatagramSent() => Interlocked.Increment(ref _datagramsSent);
 

@@ -137,8 +137,8 @@ public sealed class FlowDispatcher : IFlowAttributionHost
         _logger = logger ?? NullLogger.Instance;
         _includeProcessPathInLogs = configuration.IncludeProcessPathInLogs;
         // The deferred pipeline exists only where attribution can actually run: without a process
-        // selector, an attributor, or an executor to run its work items, every eligible shape keeps
-        // today's inline path byte-for-byte.
+        // selector, an attributor, or a setup executor for its work items, every eligible shape
+        // keeps the inline path.
         if (attributionPool is not null && setupExecutor is not null && attributor is not null && _policy.RequiresProcessAttribution)
         {
             Attribution = new FlowAttributionPipeline(attributionPool, this, _logger);
@@ -155,8 +155,8 @@ public sealed class FlowDispatcher : IFlowAttributionHost
 
     /// <summary>
     /// Removes flow decisions idle past <paramref name="idleTimeout"/> so the bounded flow table
-    /// does not accumulate stale one-shot flows (design §7). The runtime calls this on a periodic
-    /// sweep; active flows keep their decisions because observations touch them. Entries whose
+    /// does not accumulate stale one-shot flows. The runtime calls this on a periodic sweep; active
+    /// flows keep their decisions because observations touch them. Entries whose
     /// <paramref name="isHeld"/> predicate reports a live holder (e.g. a TCP redirect session
     /// still relaying, or a flow inside its post-teardown grace window) are skipped with their
     /// activity timestamp untouched, so they expire at their original idle point once the hold
@@ -176,7 +176,7 @@ public sealed class FlowDispatcher : IFlowAttributionHost
     /// runs entirely synchronously on this non-async entry so the per-packet path allocates
     /// nothing: the executor call is returned directly and awaited exactly once by the caller.
     /// Every other shape — trace logging, a packet the wired reverse handler's diversion
-    /// predicate claims (X1: TCP with a live listener source port), a wildcard self-traffic tuple,
+    /// predicate claims (TCP with a live listener source port), a wildcard self-traffic tuple,
     /// reverse UDP responses, new flows needing attribution (where the full self-traffic check
     /// runs), and proxy decisions that cannot resolve inline — falls into
     /// <see cref="DispatchSlowAsync"/>, which keeps the full state machine and all diagnostic
@@ -184,30 +184,29 @@ public sealed class FlowDispatcher : IFlowAttributionHost
     /// </summary>
     public ValueTask DispatchAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
-        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease; CapturedFlowPacketGuards.ThrowLeaseRequired reports the null member (quality-guidelines.md).
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease, which the centralized guard reports as the null member.
         if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
 
         if (_logger.IsEnabled(LogLevel.Trace)) return DispatchSlowAsync(packet, cancellationToken);
-        // X1: only packets the reverse handler itself claims can be reverse candidates divert;
+        // Only packets the reverse handler itself claims can be reverse candidates divert;
         // a miss falls through here, and when the flow table also misses, the slow path still
         // runs the full handler — so tombstone stragglers keep their grace-drop behavior.
         if (_reverseHandler is not null && _reverseHandler.WantsPacket(packet)) return DispatchSlowAsync(packet, cancellationToken);
-        // ReSharper disable once DuplicatedSequentialIfBodies // Warm-path bypass enumeration: the trace-only bypass (above) and each lane below (X1 reverse claim, self-traffic wildcard ownership, unresolved flow) is a distinct documented reason; merging couples unrelated predicates into one >150-char guard.
+        // ReSharper disable once DuplicatedSequentialIfBodies // Warm-path bypass enumeration: the trace-only bypass (above) and each lane below (reverse claim, self-traffic wildcard ownership, unresolved flow) is a distinct documented reason; merging couples unrelated predicates into one >150-char guard.
         if (_selfTraffic.IsWildcardOwned(packet.Context)) return DispatchSlowAsync(packet, cancellationToken);
         if (!_flows.TryResolveWarm(packet.Context.Key, out var existing)) return DispatchSlowAsync(packet, cancellationToken);
 
         var decision = existing.Decision;
         if (decision.Action == FlowAction.Proxy)
         {
-            // Proxy is the main-path action (hot-path contract 3), so a decision that resolves
-            // inline to a known server stays on the synchronous warm shape: the executor's
-            // ValueTask is returned directly, allocating nothing when it completes synchronously.
-            // An unresolved server name and the UDP reverse-response special case handled by
-            // DispatchSlowAsync keep their slow-path behavior.
+            // A proxy decision that resolves inline to a known server stays on the synchronous warm
+            // shape: the executor's ValueTask is returned directly, allocating nothing when it
+            // completes synchronously. An unresolved server name and the UDP reverse-response case
+            // handled by DispatchSlowAsync keep their slow-path behavior.
             if (decision.TargetName is null || !_targets.TryGetValue(decision.TargetName, out var target)) return DispatchSlowAsync(packet, cancellationToken);
             if (packet.Context.Key.Protocol == TransportProtocol.Udp && existing.Key.IsReverseOf(packet.Context.Key)) return DispatchSlowAsync(packet, cancellationToken);
             packet = packet with { FlowGeneration = existing.Generation };
-            // ReSharper disable once ConvertIfStatementToReturnStatement // The condition completes the lease (side effect + state transition); folding it into a conditional expression hides the "already consumed" early exit (B1 disposition).
+            // ReSharper disable once ConvertIfStatementToReturnStatement // The condition completes the lease (side effect + state transition); folding it into a conditional expression hides the "already consumed" early exit.
             if (!packet.Lease.TryComplete(PacketDisposition.ProxyConsumed)) return ValueTask.CompletedTask;
             return _executor.ProxyAsync(packet, target, cancellationToken);
         }
@@ -222,7 +221,7 @@ public sealed class FlowDispatcher : IFlowAttributionHost
 
     private async ValueTask DispatchSlowAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
-        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease; CapturedFlowPacketGuards.ThrowLeaseRequired reports the null member (quality-guidelines.md).
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease, which the centralized guard reports as the null member.
         if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
         var key = packet.Context.Key;
         FlowLog.PacketClassified(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, "flow", key.Protocol, key.Origin, key.Local, key.Remote, packet.Context.ProcessName, _includeProcessPathInLogs ? packet.Context.ProcessPath : null);
@@ -231,8 +230,8 @@ public sealed class FlowDispatcher : IFlowAttributionHost
         // A packet on an active TCP redirect leg (a port matches a proxy listener port) must be
         // reversed back to the original server:client tuple before the Windows stack sees it. This
         // runs before flow lookup and policy so a reverse packet is never re-evaluated as a new
-        // client flow. Gated on TCP only (H1/M5): the reverse handler keys on numeric port alone,
-        // so a UDP datagram whose port collides with a TCP listener port must never reach it.
+        // client flow. Gated on TCP only: the reverse handler keys on numeric port alone, so a UDP
+        // datagram whose port collides with a TCP listener port must never reach it.
         if (await TryHandleReverseAsync(packet, cancellationToken).ConfigureAwait(false)) return;
 
         if (_flows.TryResolve(packet.Context.Key, out var existing) && existing is not null)
@@ -306,8 +305,8 @@ public sealed class FlowDispatcher : IFlowAttributionHost
     /// must continue its inline path.
     /// <para>
     /// Every ineligible shape (no process selector, a forwarded origin, a context that already
-    /// carries a process) is refused here before the pipeline is touched, so those flows keep
-    /// today's path byte-for-byte instead of paying a worker round-trip for nothing.
+    /// carries a process) is refused here before the pipeline is touched, so those flows keep the
+    /// inline path instead of paying a worker round-trip for nothing.
     /// </para>
     /// </summary>
     private async ValueTask<bool> TryDeferAttributionAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
@@ -365,7 +364,7 @@ public sealed class FlowDispatcher : IFlowAttributionHost
     /// <summary>
     /// The single eligibility predicate for process attribution, shared by the inline path and the
     /// deferred pipeline's admission so the two cannot drift. A miss still means "no process
-    /// match": evaluation continues without one, exactly as before.
+    /// match": evaluation continues without one.
     /// </summary>
     private bool ShouldAttribute(FlowContext context) =>
         _policy.RequiresProcessAttribution
@@ -437,7 +436,7 @@ public sealed class FlowDispatcher : IFlowAttributionHost
     /// </summary>
     public async ValueTask DispatchNonFlowAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
-        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease; CapturedFlowPacketGuards.ThrowLeaseRequired reports the null member (quality-guidelines.md).
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease, which the centralized guard reports as the null member.
         if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
         var nonFlowKey = packet.Context.Key;
         FlowLog.PacketClassified(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, "nonFlow", nonFlowKey.Protocol, nonFlowKey.Origin, nonFlowKey.Local, nonFlowKey.Remote, packet.Context.ProcessName, _includeProcessPathInLogs ? packet.Context.ProcessPath : null);
@@ -449,9 +448,9 @@ public sealed class FlowDispatcher : IFlowAttributionHost
         }
 
         // An IP fragment cannot be classified as a flow, but its address pair may belong to an
-        // active TCP redirect: such fragments must never pass toward the real server (S1). The
-        // check is a bounded bit test over the raw header — the non-fragment non-flow majority
-        // (ARP, ND, L2) pays only an ether-type compare.
+        // active TCP redirect: such fragments must never pass toward the real server. The check is
+        // a bounded bit test over the raw header — the non-fragment non-flow majority (ARP, ND, L2)
+        // pays only an ether-type compare.
         if (await TryHandleFragmentAsync(packet, cancellationToken).ConfigureAwait(false)) return;
 
         var actionKey = packet.Context.Key;

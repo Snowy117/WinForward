@@ -11,15 +11,15 @@ namespace WinForward.E2E.Contracts;
 /// <c>metrics/pageBytes</c>, <see cref="Mix.PageClass.Bytes"/> is <c>metrics/classes/page/bytes</c> and
 /// <see cref="Mix.UdpClass.Bytes"/> is <c>metrics/classes/udp/bytes</c>. Each of them is a separate
 /// constant, because a shared constant is how "which level was this written to" stops being
-/// checkable (D14.17).</para>
+/// checkable.</para>
 /// <para><b>Two keys contain a dot.</b> <see cref="Mix.UdpSent"/> (<c>metrics/udp.sent</c>) and
 /// <see cref="Mix.UdpLossRate"/> are one member name each, not an object named <c>udp</c>; the same
 /// holds for the three respelled members of a desktop lane (<see cref="Mix.DesktopLane.UdpSent"/>,
 /// <see cref="Mix.DesktopLane.UdpArrived"/>, <see cref="Mix.DesktopLane.UdpForeignConnection"/>).</para>
 /// <para><b>Conditional fields: none.</b> Every key here is published by every <c>mix</c> run: a flow
 /// class that measured nothing publishes its zeros rather than leaving its block out, and an unknown
-/// reading keeps its key and publishes JSON <see langword="null"/>. The only shape that follows the
-/// plan is an array's length: <see cref="Mix.UdpClass.SentPerDesktop"/> and <see cref="Mix.Desktops"/>
+/// reading keeps its key and publishes JSON <see langword="null"/>. The only shape that varies with
+/// the run is an array's length: <see cref="Mix.UdpClass.SentPerDesktop"/> and <see cref="Mix.Desktops"/>
 /// carry one element per desktop, in desktop order, so a lane that never ran is visible as its own
 /// zero rather than averaged away.</para>
 /// <para>The record's <c>gates</c> keys are shared and live in <see cref="ArmKeys.Common.Gates"/>; its
@@ -31,13 +31,10 @@ public static partial class ArmKeys
     public static class Mix
     {
         // S3218 / MemberHidesStaticFromOuterClass: every constant below is named after the member it
-        // publishes, and a member of a nested block legitimately repeats a name declared one level up
-        // (`DesktopLane.DnsSent` under `Mix.DnsSent`, `PageClass.Pages` under `Mix.Pages`,
-        // `ClassNames.Dns` under the `ArmKeys.Dns` shard, `UdpClass.ClientSendLoss` under
-        // `Mix.ClientSendLoss`, `DesktopLane.UdpSent`/`PageConnections` under the `Mix.*` constants of
-        // the same names). D14.17 makes each level its own constant precisely so this repetition stays
-        // visible, so the shadowing is the declaration rule rather than an accident. Each of the six
-        // members that trigger the two rules carries its own one-member suppression below.
+        // publishes, so a nested block legitimately repeats a name declared one level up. Each level
+        // declaring its own constant is what keeps that repetition visible, so the shadowing is the
+        // declaration rule rather than an accident; every member that triggers either rule carries
+        // its own one-member suppression below.
 
         /// <summary>The <c>classes</c> object: one member per flow class.</summary>
         public const string Classes = "classes";

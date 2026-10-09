@@ -77,7 +77,7 @@ public sealed class LocalUdpTransport : IUdpProxyTransport, IUdpExchangeCounters
     /// SIO_UDP_CONNRESET (vendor IOCTL 0x9800000C). While TRUE (the Windows default for UDP
     /// sockets), an ICMP port-unreachable answering one of this socket's sends is surfaced as
     /// <see cref="SocketError.ConnectionReset"/> on the next receive, which would terminate the
-    /// session's receive loop (S2).
+    /// session's receive loop.
     /// </summary>
     private const int SIOUdpConnreset = unchecked((int)0x9800000C);
 
@@ -181,8 +181,8 @@ public sealed class LocalUdpTransport : IUdpProxyTransport, IUdpExchangeCounters
             var family = target.Endpoint.AddressFamily == AddressFamilyKind.IPv4 ? AddressFamily.InterNetwork : AddressFamily.InterNetworkV6;
             socket = (socketFactory ?? (socketFamily => new Socket(socketFamily, SocketType.Dgram, ProtocolType.Udp)))(family);
             socket.ReceiveBufferSize = receiveBufferBytes;
-            // Applied before bind per the IOCTL's contract (S2): an ICMP-driven reset must never
-            // reach the receive loop. Injectable so tests can assert the call without a Windows socket.
+            // Applied before bind per the IOCTL's contract: an ICMP-driven reset must never reach
+            // the receive loop. Injectable so tests can assert the call without a Windows socket.
             (disableUdpConnectionReset ?? s_disableUdpConnectionResetAction)(socket);
             socket.Bind(new IPEndPoint(family == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any, 0));
             // Non-blocking mode keeps the send warm path synchronous: the kernel either takes the
@@ -232,10 +232,10 @@ public sealed class LocalUdpTransport : IUdpProxyTransport, IUdpExchangeCounters
         var gateWait = _sendGate.WaitAsync(cancellationToken);
         if (!gateWait.IsCompletedSuccessfully)
         {
-            // Documented cold-path exemption (task 09-18 M2): this copy allocates, but only on the
-            // contended-gate branch. The span cannot cross the gate await (it views native capture
-            // memory that recycles once the dispatch returns), so the datagram is materialized and
-            // rides the memory slow path; the warm uncontended shape below stays zero-alloc.
+            // Documented cold-path exemption: this copy allocates, but only on the contended-gate
+            // branch. The span cannot cross the gate await (it views native capture memory that
+            // recycles once the dispatch returns), so the datagram is materialized and rides the
+            // memory slow path; the warm uncontended shape below stays zero-alloc.
             return SendAfterGateAsync(gateWait, payload.ToArray(), cancellationToken);
         }
 
@@ -345,9 +345,9 @@ public sealed class LocalUdpTransport : IUdpProxyTransport, IUdpExchangeCounters
 
         // The socket is bound from construction, so its port is reachable before this flow ever sent a
         // datagram. There is no destination to declare as the reply's source yet, and delivering it with
-        // the default endpoint would inject a bogus frame toward the client (and move the R2 counter), so
-        // it is skipped as unexpected until a send records one. Acquire read, pairing the send path's
-        // release write (see _destinationRecorded).
+        // the default endpoint would inject a bogus frame toward the client, so it is skipped as
+        // unexpected until a send records one. Acquire read, pairing the send path's release write
+        // (see _destinationRecorded).
         if (!Volatile.Read(ref _destinationRecorded)) return UdpTransportReceiveResult.Skipped(UdpTransportSkipReason.UnexpectedSource);
         if (!IsAcceptableLocalSource(result.RemoteEndPoint, PeerEndpoint)) return UdpTransportReceiveResult.Skipped(UdpTransportSkipReason.UnexpectedSource);
         if (IsPossiblyTruncated(result.ReceivedBytes, buffer.Length)) return UdpTransportReceiveResult.Skipped(UdpTransportSkipReason.Oversized);
@@ -383,9 +383,9 @@ public sealed class LocalUdpTransport : IUdpProxyTransport, IUdpExchangeCounters
 
     /// <summary>
     /// Disables SIO_UDP_CONNRESET so an ICMP port-unreachable answering one of this socket's sends is
-    /// not surfaced as <see cref="SocketError.ConnectionReset"/> on the next receive (S2).
-    /// Windows-only at runtime: the Linux test host rejects vendor IOCTLs, and tests assert the call
-    /// through the injectable seam instead of executing it.
+    /// not surfaced as <see cref="SocketError.ConnectionReset"/> on the next receive. Windows-only at
+    /// runtime: the Linux test host rejects vendor IOCTLs, and tests assert the call through the
+    /// injectable seam instead of executing it.
     /// </summary>
     private static void DisableUdpConnectionReset(Socket socket)
     {
