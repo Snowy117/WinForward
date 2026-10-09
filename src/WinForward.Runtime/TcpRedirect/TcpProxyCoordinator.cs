@@ -11,14 +11,14 @@ using WinForward.Windows;
 namespace WinForward.Runtime.TcpRedirect;
 
 /// <summary>
-/// Coordinates the transparent TCP redirect data path described in design §8 behind abstraction seams,
+/// Coordinates the transparent TCP redirect data path behind abstraction seams,
 /// mirroring <see cref="UdpProxy.UdpProxyCoordinator"/>. For each proxy-selected TCP flow it: allocates a local
 /// listener, claims the flow exactly once in the redirect table, rewrites the SYN destination toward
 /// the listener, registers the listener tuple in the loop-prevention registry, injects the rewritten
 /// frame, and runs a background accept-and-relay loop. A proxy-selected flow is never silently passed:
 /// every listener-allocation, claim, rewrite, injection, and relay-setup failure fails closed and
 /// releases the listener, the table alias, and the self-traffic token. New-flow SYN setup never blocks
-/// the capture pump (R8, mirroring the UDP contract): the pump-side handler retains a bounded copy of
+/// the capture pump: the pump-side handler retains a bounded copy of
 /// the SYN in <see cref="TcpPendingSynSetupIndex"/> and returns <see cref="TcpRedirectOutcome.SetupPending"/>,
 /// and a background task performs the allocation/claim/rewrite/injection under the store's setup gate.
 /// The data path is delegated to focused modules: <see cref="TcpRedirectSetup"/> (new-flow pipeline),
@@ -102,7 +102,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
 
     public async ValueTask<TcpRedirectOutcome> HandleSynAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
     {
-        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease; CapturedFlowPacketGuards.ThrowLeaseRequired reports the null member (quality-guidelines.md).
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease.
         if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
         ArgumentNullException.ThrowIfNull(server);
         ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
@@ -131,7 +131,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
         // other straggler. The next connection claims a new source port and a new key.
         if (_store.Tombstones.TryHit(key, _timeProvider.GetUtcNow())) return TcpRedirectOutcome.Dropped;
 
-        // Setup-failure cooldown (R8): a redirect setup for this flow genuinely failed within
+        // Setup-failure cooldown: a redirect setup for this flow genuinely failed within
         // the last second — the failure path already logged and released its resources, and a
         // retransmitted SYN inside the window is consumed so a dead setup path is not re-armed
         // at the client's retransmission rate.
@@ -150,12 +150,12 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
             TcpRedirectLog.TcpRedirectRejected(_logger, packetSequence, flowGeneration, tcpAssociation: null, key.Local, key.Remote, "capacity");
             // The client is still in SYN_SENT: an immediate RST|ACK fails its connect fast
             // (ECONNREFUSED) instead of a 20-60s retransmission timeout, and the per-tuple
-            // cooldown keeps the guard amplification-free (S4).
+            // cooldown keeps the guard amplification-free.
             await _clientReset.InjectCapacityRejectedResetAsync(packet, cancellationToken).ConfigureAwait(false);
             return TcpRedirectOutcome.Blocked;
         }
 
-        // New flow (R8): retain a materialized copy of the SYN and hand setup to a background
+        // New flow: retain a materialized copy of the SYN and hand setup to a background
         // task, so the pump's strictly-ordered handler chain never waits on listener bind. The
         // copy is synchronous and inside the dispatch window (the pump's native batch slot is
         // recycled the moment this handler returns); every later step reads the retained copy.
@@ -163,7 +163,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
     }
 
     /// <summary>
-    /// Retains the SYN copy and launches the background setup (R8). A retransmission inside the
+    /// Retains the SYN copy and launches the background setup. A retransmission inside the
     /// pending window overwrites the retained copy and never starts a second task. Returns
     /// <see cref="TcpRedirectOutcome.SetupPending"/> on accept or <see cref="TcpRedirectOutcome.Blocked"/>
     /// when the bounded pending index refuses the retain.
@@ -206,7 +206,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
     }
 
     /// <summary>
-    /// Hands the freshly retained entry to the pooled setup executor (R8/B5). Returns false when the
+    /// Hands the freshly retained entry to the pooled setup executor. Returns false when the
     /// bounded setup ring is full: the retained entry is released and the flow fails closed, the
     /// same backpressure posture as the pending-index cap.
     /// </summary>
@@ -232,9 +232,9 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
     }
 
     /// <summary>
-    /// The background half of new-flow SYN setup (R8), invoked on a pooled setup worker: runs off
+    /// The background half of new-flow SYN setup, invoked on a pooled setup worker: runs off
     /// the pump thread under the store's inflight-setup drain, so dispose waits for it exactly like
-    /// the historical inline setups. Claim exactly-once, the concurrent-loser release, and the
+    /// the setup pipeline's other work. Claim exactly-once, the concurrent-loser release, and the
     /// rewrite/inject tail are the existing <see cref="TcpRedirectSetup"/> pipeline fed from the
     /// retained copy. A genuine failure fails closed for the flow and arms the per-flow setup
     /// cooldown; shutdown cancellation unwinds without one.
@@ -259,7 +259,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
             // The entry removal and its cooldown write must complete before the lease release
             // unblocks the store's dispose drain: the coordinator's post-drain RemoveAll clears
             // the index, so a write racing the drain would otherwise re-arm a cooldown on a
-            // disposed index (D3).
+            // disposed index.
             _pendingSyn.Complete(key, entry, writeCooldown, _timeProvider.GetUtcNow());
         }
         finally
@@ -346,12 +346,12 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
     }
 
     /// <summary>
-    /// The warm-entry diversion predicate (X1). TCP-only, then the listener-port prefilter: a
+    /// The warm-entry diversion predicate. TCP-only, then the listener-port prefilter: a
     /// reverse candidate's source port is always a live listener port, so a miss cannot match the
     /// reverse index and the packet falls through to the slow path only when the flow table also
     /// misses it — where the full handler still runs, so tombstone stragglers of a torn-down
-    /// redirect keep their grace-drop behavior (the fall-through theorem, design D3). Diversion
-    /// knowledge lives here so the dispatcher stays free of reverse-handler internals.
+    /// redirect keep their grace-drop behavior. Diversion knowledge lives here so the dispatcher
+    /// stays free of reverse-handler internals.
     /// </summary>
     public bool WantsPacket(in CapturedFlowPacket packet)
     {
@@ -368,11 +368,11 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
     /// </summary>
     public async ValueTask<TcpRedirectOutcome> HandleReverseIfApplicableAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
-        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease; CapturedFlowPacketGuards.ThrowLeaseRequired reports the null member (quality-guidelines.md).
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease.
         if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
         ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
 
-        // H1/M5 gate before the numeric-port lookup: this handler owns TCP reverse routing. A UDP
+        // Protocol gate before the numeric-port lookup: this handler owns TCP reverse routing. A UDP
         // or other-protocol frame whose local/remote port numerically matches an active TCP
         // listener port must be left to normal flow/policy handling, never dropped here.
         var key = packet.Context.Key;
@@ -406,13 +406,13 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
     /// </summary>
     public ValueTask<TcpRedirectOutcome> HandlePacketAsync(CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken)
     {
-        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease; CapturedFlowPacketGuards.ThrowLeaseRequired reports the null member (quality-guidelines.md).
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease.
         if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
         ArgumentNullException.ThrowIfNull(server);
         ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
 
         var key = packet.Context.Key;
-        // A2: the SYN bit-test reads the synchronous frame view (the native capture buffer while
+        // The SYN bit-test reads the synchronous frame view (the native capture buffer while
         // the lease is unmaterialized) — a pure span read that never forces a pooled managed copy.
         var syn = TcpFrameRewriter.IsTcpSyn(packet.Layout);
 
@@ -448,7 +448,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
         // instead of returning NotRelevant, whose executor fallback would reinject toward the real
         // server — which never saw the proxied connection and answers the unknown tuple with a
         // bounced RST.
-        // ReSharper disable once ConvertIfStatementToReturnStatement // Tombstones.TryHit is a side-effecting probe; the ternary would exceed the line budget and bury the "already-finished handshake straggler" early exit (B1 disposition).
+        // ReSharper disable once ConvertIfStatementToReturnStatement // Tombstones.TryHit is a side-effecting probe; the ternary would bury the "already-finished handshake straggler" early exit.
         if (_store.Tombstones.TryHit(key, _timeProvider.GetUtcNow())) return ValueTask.FromResult(TcpRedirectOutcome.Dropped);
 
         return ValueTask.FromResult(TcpRedirectOutcome.NotRelevant);
@@ -456,7 +456,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
 
     /// <summary>
     /// Handles an IP-fragment frame (IPv4 fragment bits or an IPv6 fragment header) whose IP
-    /// address pair matches an active redirect association in either orientation (S1). Such a
+    /// address pair matches an active redirect association in either orientation. Such a
     /// frame can never be rewritten or relayed, and passing it toward the real server would
     /// cross-talk an unknown tuple onto a proxied connection, so the association is torn down
     /// client-visibly and the fragment is consumed. Frames that match no association are not
@@ -465,7 +465,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
 #pragma warning disable IDE0060, RCS1163 // The cancellationToken parameter is fixed by the dispatcher's fragment-handler delegate; the teardown path takes no caller token (it runs on the store's shutdown token) and a client-visible RST teardown must complete even under caller cancellation.
     public async ValueTask<TcpRedirectOutcome> HandleFragmentAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
-        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease; CapturedFlowPacketGuards.ThrowLeaseRequired reports the null member (quality-guidelines.md).
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease.
         if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
         ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
 
@@ -491,9 +491,9 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
     /// have observed no activity for <paramref name="idleTimeout"/> and tears down their sessions
     /// (listener, relay, self-traffic token, table alias). A session is only removed while it is
     /// still <see cref="RelayPhase.Redirecting"/> — half-open and never relayed — so a genuinely
-    /// abandoned flow is released instead of occupying the bounded redirect table (design §7/§8).
+    /// abandoned flow is released instead of occupying the bounded redirect table.
     /// An established flow whose relay is <see cref="RelayPhase.Relaying"/> is NOT expired by this
-    /// wall-clock sweep (M4): a live connection silent at the packet level (e.g. SSH without
+    /// wall-clock sweep: a live connection silent at the packet level (e.g. SSH without
     /// keepalive) must not be force-torn-down. Teardown of a relaying session is instead tied to
     /// the relay completing/ending (see <see cref="TcpRedirectAcceptor"/>), and a truly
     /// stalled relay is reclaimed by the read/write timeouts in <see cref="TcpProxyRelay"/>.
@@ -506,7 +506,7 @@ public sealed partial class TcpProxyCoordinator : IAsyncDisposable, ITcpReverseH
     /// half-open redirect or a relaying connection) or the flow is inside its post-teardown grace
     /// tombstone. The idle sweeper passes this as the flow-expiry hold predicate so a silently
     /// relaying connection's flow-table decision is not expired out from under a live connection —
-    /// the flow-table counterpart of the M4 relaying exemption in <see cref="RemoveExpiredAsync"/>.
+    /// the flow-table counterpart of the relaying exemption in <see cref="RemoveExpiredAsync"/>.
     /// Generation is deliberately not compared: a new flow reusing the tuple claims a new table
     /// generation, so the hold naturally lapses.
     /// </summary>

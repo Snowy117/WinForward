@@ -5,9 +5,9 @@ using WinForward.NdisApi;
 namespace WinForward.Runtime.TcpRedirect;
 
 /// <summary>
-/// Creates the local TCP listener that redirected client connections arrive on. The concrete
-/// implementation (8c) binds a real socket and returns its translated tuple; a fake (8b tests)
-/// returns a deterministic tuple. The factory is the single seam that keeps the coordinator
+/// Creates the local TCP listener that redirected client connections arrive on. The real
+/// implementation binds a socket and returns its translated tuple; a test fake returns a
+/// deterministic tuple. The factory is the single seam that keeps the coordinator
 /// hardware-independent and testable without real sockets or NDISAPI reinjection.
 /// </summary>
 public interface ITcpRedirectListenerFactory
@@ -29,7 +29,7 @@ public interface ITcpRedirectListener : IAsyncDisposable
 /// <summary>
 /// A connection accepted on the redirect listener. The remote endpoint identifies which translated
 /// flow the connection belongs to, letting the coordinator resolve the original flow and its saved
-/// destination. Kept minimal in 8b; the real relay pump belongs to 8c.
+/// destination. The relay pump itself lives behind <see cref="ITcpProxyRelayFactory"/>.
 /// </summary>
 public interface ITcpAcceptedConnection : IAsyncDisposable
 {
@@ -37,10 +37,10 @@ public interface ITcpAcceptedConnection : IAsyncDisposable
 }
 
 /// <summary>
-/// Establishes the upstream SOCKS5 relay for an accepted redirected connection. The concrete
-/// implementation (8c) opens a SOCKS5 control socket, performs CONNECT for the original destination,
+/// Establishes the upstream SOCKS5 relay for an accepted redirected connection. The real
+/// implementation opens a SOCKS5 control socket, performs CONNECT for the original destination,
 /// and pumps bytes between the accepted local socket and the upstream socket with bounded buffers
-/// and backpressure. The fake (8b tests) asserts it received the correct original destination.
+/// and backpressure. The test fake asserts it received the correct original destination.
 /// </summary>
 public interface ITcpProxyRelayFactory
 {
@@ -50,7 +50,7 @@ public interface ITcpProxyRelayFactory
 /// <summary>
 /// A relay between an accepted redirect-leg connection and the upstream SOCKS5 socket. <see cref="Completion"/>
 /// transitions to a terminal state when both directions end, a direction stalls/errors, or the relay is torn down.
-/// The real byte pump is 8c; 8b uses a fake whose Completion is controlled by the test.
+/// The test fake's Completion is controlled by the test.
 /// </summary>
 public interface ITcpRelay : IAsyncDisposable
 {
@@ -73,7 +73,7 @@ public interface ITcpRedirectInjector
     /// <c>GetFrameStorage</c>/<c>CompleteFrame</c> — direction flag and adapter handle are part of
     /// the staging). The per-packet TCP paths (mid-flow rewrite, reverse rewrite) use this shape so
     /// the staged buffer is both the rewrite scratch and the send buffer: no managed materialization
-    /// and no second copy (A3). The native send completes synchronously and is not cancellable — the
+    /// and no second copy. The native send completes synchronously and is not cancellable — the
     /// token rides along only so the seam keeps the caller-cancellation observability contract of
     /// <see cref="InjectAsync"/> (a fake throws <see cref="OperationCanceledException"/> on it; the
     /// coordinator propagates that without touching the shared association). The buffer remains the
@@ -91,8 +91,7 @@ public interface ITcpRedirectInjector
     /// owns the buffers before and after the call: the send is synchronous and retains nothing, and
     /// a lane flush releases the rented ones itself, exactly once, after the attempt. The batched
     /// send IOCTLs report no per-packet success count (<c>lpOutBuffer=NULL</c>,
-    /// <c>METHOD_BUFFERED</c>; verified ABI property, evidence in the archived
-    /// <c>abi-packets-success.md</c>), so a rejected chunk delivered none of its frames. A call
+    /// <c>METHOD_BUFFERED</c>), so a rejected chunk delivered none of its frames. A call
     /// within the driver's per-request packet budget (126 packets at the pinned ABI, see
     /// <c>NdisApiDriver.SendPacketsBatch</c>) is therefore ALL-OR-NOTHING, and a caller may treat a
     /// failure as "every frame failed" and retry each one; a wider call spans several independently
@@ -103,7 +102,7 @@ public interface ITcpRedirectInjector
 }
 
 /// <summary>
-/// The dispatcher-level TCP reverse-routing seam (X1). <see cref="WantsPacket"/> is the warm-entry
+/// The dispatcher-level TCP reverse-routing seam. <see cref="WantsPacket"/> is the warm-entry
 /// diversion predicate: the dispatcher consults it to decide whether a packet MIGHT belong to a
 /// redirect reverse leg and should fall into the slow path where
 /// <see cref="HandleReverseIfApplicableAsync"/> runs. A false answer is allowed to be merely
@@ -117,7 +116,7 @@ public interface ITcpReverseHandler
 {
     /// <summary>
     /// Whether the dispatcher should divert this packet to the slow path before the warm entry
-    /// resolves it. Must stay a synchronous, allocation-free check (hot-path contract 3).
+    /// resolves it. Must stay a synchronous, allocation-free check.
     /// </summary>
     bool WantsPacket(in CapturedFlowPacket packet);
 
@@ -133,7 +132,7 @@ public interface ITcpReverseHandler
 /// its TIME_WAIT grace window (a tombstone hit): the caller consumes it silently — no
 /// reinjection, no block logging — so the finished handshake's tail never reaches the real server.
 /// <see cref="SetupPending"/> means a genuinely new SYN was retained and its redirect setup
-/// continues in the background (R8): nothing was injected yet and nothing failed; the caller
+/// continues in the background: nothing was injected yet and nothing failed; the caller
 /// consumes the packet silently exactly like <see cref="Dropped"/>, and the background setup
 /// injects the rewritten SYN from the retained copy once the listener exists.
 /// </summary>

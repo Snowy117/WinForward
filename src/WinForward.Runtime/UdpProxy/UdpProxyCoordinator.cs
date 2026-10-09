@@ -24,8 +24,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     // under _gate. A reader that loaded an entry before a removal's clear reaches the session the
     // removal is tearing down: an expiring or faulted session refuses the datagram and the caller
     // counts the fail-closed drop, while the plain-disposal path reaches the transport teardown the
-    // removal already started (the pre-existing outstanding-lease window of
-    // `udp-session-lifecycle.md`, "Scope-owned lifetime").
+    // removal already started.
     private readonly UdpSessionSlot?[] _sessionCache;
     private readonly UdpSetupCooldownTable _cooldowns;
     private readonly UdpSetupQueueBudget _budget;
@@ -308,7 +307,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     /// </summary>
     private bool EnqueueSetupDatagram(FlowKey flow, UdpSessionSlot slot, ReadOnlySpan<byte> payload)
     {
-        // R4: charge the global budget before the per-flow enqueue. Every charged byte is
+        // Charge the global budget before the per-flow enqueue. Every charged byte is
         // credited back exactly once at whichever sink dequeues it: the flush below, the
         // drop-oldest loop here, the slot drain (RemoveSlotAsync), or the dispose drain.
         if (!_budget.TryCharge(payload.Length))
@@ -356,7 +355,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
 
     public ValueTask DisposeAsync()
     {
-        // D11: the scope's single-flight covers only the drain, and the seal happens inside it, so a
+        // The scope's single-flight covers only the drain, and the seal happens inside it, so a
         // precheck on IsSealed would be TOCTOU. The one-shot claim owns the teardown; every caller
         // joins the drain, which the teardown body reaches last.
         return Interlocked.Exchange(ref _disposeStarted, 1) != 0
@@ -411,7 +410,7 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
             if (slot.Session is { } session) await session.DisposeAsync().ConfigureAwait(false);
         }
 
-        // D-C3-8: seal here — after every in-flight session's setup decision and teardown above, so
+        // The seal happens here — after every in-flight session's setup decision and teardown above, so
         // an already-started receive-failure teardown was admitted, and before the join below, so no
         // new one can start. DrainAsync both seals and joins the scope's children.
         await _scope.DrainAsync().ConfigureAwait(false);
@@ -528,10 +527,9 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     }
 
     /// <summary>
-    /// The receive-failure signal (F1): starts the teardown as a child of the coordinator's scope,
-    /// which tracks it, joins it in <see cref="DisposeCoreAsync"/>, and records its fault — that is
-    /// what replaces the former fire-and-forget list. A sealed scope refuses the child, which is
-    /// safe because disposal disposes every session anyway.
+    /// The receive-failure signal: starts the teardown as a child of the coordinator's scope,
+    /// which tracks it, joins it in <see cref="DisposeCoreAsync"/>, and records its fault. A sealed
+    /// scope refuses the child, which is safe because disposal disposes every session anyway.
     /// </summary>
     void IUdpSessionSlotHost.RemoveReceiveFailedSession(UdpProxySession session)
         => _scope.Run(_ => RemoveReceiveFailedSessionAsync(session), "udp.receive-failure");
@@ -544,8 +542,8 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
         }
         catch (Exception exception)
         {
-            // Run records the child's fault but cannot log this domain-specific warning (D-C3-9)
-            // the record keeps the child observed either way.
+            // Run records the child's fault but cannot log this domain-specific warning.
+            // The record keeps the child observed either way.
             var error = exception.GetType().Name;
             var detail = exception.Message;
             UdpProxyLog.UdpReceiveFailureTeardownFaulted(_logger, error, detail);

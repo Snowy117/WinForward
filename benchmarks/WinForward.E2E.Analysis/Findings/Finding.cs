@@ -4,15 +4,14 @@ namespace WinForward.E2E.Analysis.Findings;
 /// One finding: a correctness failure, a path-interference, a harness error, a measurement caveat or an
 /// informational note, with the scope it belongs to and the detail a reader needs.
 /// </summary>
-/// <param name="Severity">Which of the five severities §0 counts and <c>verdict.json</c> publishes.</param>
+/// <param name="Severity">Which of the five severities below, e.g. <c>path-interference</c>.</param>
 /// <param name="Kind">The rule that produced it, e.g. <c>direct-leak</c>.</param>
 /// <param name="Scope">What it is about: a <c>pass/row</c>, a <c>pass/row ARM</c>, a pass, or the campaign.</param>
 /// <param name="Detail">The finding's own sentence, including the numbers it is about.</param>
 internal sealed record Finding(string Severity, string Kind, string Scope, string Detail);
 
 /// <summary>
-/// The five severities, in the order §0 prints them and <c>verdict.json</c>'s <c>findings_by_severity</c>
-/// publishes them.
+/// The five severities, in the order they are printed and counted.
 /// </summary>
 internal static class Severity
 {
