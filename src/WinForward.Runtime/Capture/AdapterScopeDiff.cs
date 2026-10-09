@@ -1,13 +1,12 @@
 namespace WinForward.Runtime.Capture;
 
 /// <summary>
-/// The result of diffing two capture scopes' link state by stable ID (task 09-07
-/// adapter-refresh no-op skip): adapters entering scope, adapters leaving scope, and in-scope
-/// adapters whose (handle, MAC, MTU, address fingerprint) changed. An empty diff means the fresh
-/// enumeration is observably identical to the running generation's — a spurious signal that must
-/// not touch the running pumps. Since task 09-17 the address fingerprint participates, so host
-/// address changes (IPv6 temporary-address rotation) count as link-state changes even though the
-/// NDISRD bound-adapter list never rebuilds.
+/// The result of diffing two capture scopes' link state by stable ID: adapters entering scope,
+/// adapters leaving scope, and in-scope adapters whose handle, MAC, MTU or address fingerprint
+/// changed. An empty diff means the fresh enumeration is observably identical to the running
+/// generation's — a spurious signal that must not touch the running pumps. The fingerprint
+/// participates, so IPv6 temporary-address rotation alone counts as a link-state change even
+/// though the NDISRD bound-adapter list never rebuilds.
 /// </summary>
 internal readonly record struct AdapterScopeDiff(
     IReadOnlyList<AdapterEnumerationItem> Added,

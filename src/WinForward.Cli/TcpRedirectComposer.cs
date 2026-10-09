@@ -11,7 +11,7 @@ using WinForward.Windows;
 namespace WinForward.Cli;
 
 /// <summary>
-/// The bundle-created collaborators the durable TCP coordinator is wired from (P3): the redirect
+/// The bundle-created collaborators the durable TCP coordinator is wired from: the redirect
 /// table, the shared native pools and setup executor, and the shared SOCKS5 address cache.
 /// Creation, registration, rollback, and disposal stay in <see cref="DurableCaptureBundle"/>;
 /// the coordinator borrows the pools and the executor and never disposes them.

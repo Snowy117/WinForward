@@ -15,8 +15,8 @@ public sealed class LayeredCaptureRunnerPeriodicRefreshTests
         harness.Start();
         await harness.WaitForGenerationStartedAsync(0).ConfigureAwait(false);
 
-        // The outage shape (task 09-17): handle/MAC/MTU identical, only the unicast addresses
-        // rotated; the watcher alone would never notice, the fingerprint diff must.
+        // The outage shape: handle/MAC/MTU identical, only the unicast addresses rotated; the
+        // watcher alone would never notice, the fingerprint diff must.
         harness.Enumeration.SetAdapters(CaptureRunnerFakes.AdapterItem("id-a", 101, addressFingerprint: "192.168.77.2;240c:c001:202::9"));
         harness.ChangeSource.Trigger();
         // ReSharper disable once AccessToDisposedClosure // Polled by this WaitForAsync inside the test scope; the harness is disposed only after the awaited call returns, with its run already drained.

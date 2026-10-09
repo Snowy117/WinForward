@@ -56,15 +56,13 @@ internal sealed class NdisNativeCallGate
 }
 
 /// <summary>
-/// Maps NDISAPI adapter enumeration handles to per-adapter native call gates (design D3 of task
-/// 08-28-udp-loss-design-flaws): native calls on one adapter stay serialized, while calls on
-/// distinct adapters proceed in parallel, so a slow IOCTL on one adapter cannot stall every
-/// pump. Gates are keyed by the enumeration handle carried by requests, and the map only grows
-/// (bounded by the adapter count for the driver's lifetime). Lookup is lock-free on the fast
-/// path (a <see cref="ConcurrentDictionary{TKey,TValue}"/> read); first sight of a handle
-/// creates the gate under the dictionary's bucket, and a racing creator may construct a gate
-/// that is discarded — harmless, because a gate is a lazily-registered passive object and every
-/// caller still resolves to the single stored instance.
+/// Maps NDISAPI adapter enumeration handles to per-adapter native call gates: native calls on one
+/// adapter stay serialized, while calls on distinct adapters proceed in parallel, so a slow IOCTL
+/// on one adapter cannot stall every pump. The map only grows (bounded by the adapter count for the
+/// driver's lifetime). Lookup is lock-free on the fast path (a
+/// <see cref="ConcurrentDictionary{TKey,TValue}"/> read); a racing creator may construct a gate that
+/// is discarded — harmless, because a gate is a lazily-registered passive object and every caller
+/// still resolves to the single stored instance.
 /// </summary>
 internal sealed class NdisAdapterGateMap
 {

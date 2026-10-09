@@ -4,12 +4,12 @@ using Xunit;
 namespace WinForward.Runtime.Capture.Tests;
 
 /// <summary>
-/// The capture runner's quiescence contract (task 09-20-structured-concurrency C4, design §2.1):
-/// the run scope joins every registered worker before teardown returns. The adapter-list monitor
-/// is the worker whose body blocks for the whole run, so a monitor still parked in its blocking
-/// wait must keep <see cref="LayeredCaptureRunner.RunAsync"/> pending. The regression this catches
-/// is a monitor that is no longer tracked — or no longer joined — which would let teardown return
-/// while the dedicated thread was still inside the wait.
+/// The capture runner's quiescence contract: the run scope joins every registered worker before
+/// teardown returns. The adapter-list monitor is the worker whose body blocks for the whole run,
+/// so a monitor still parked in its blocking wait must keep
+/// <see cref="LayeredCaptureRunner.RunAsync"/> pending. The regression this catches is a monitor
+/// that is no longer tracked — or no longer joined — which would let teardown return while the
+/// dedicated thread was still inside the wait.
 /// </summary>
 public sealed class LayeredCaptureRunnerQuiescenceTests
 {

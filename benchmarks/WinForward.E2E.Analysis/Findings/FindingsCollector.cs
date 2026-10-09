@@ -10,9 +10,9 @@ namespace WinForward.E2E.Analysis.Findings;
 /// produces, in the reference's own order, each one once.
 /// </summary>
 /// <remarks>
-/// <para><b>The order is output.</b> §0.4 lists the findings by severity in the order they were
-/// collected, and <c>verdict.json</c> publishes the whole list in that order, so a rule evaluated
-/// earlier cannot be reordered later.</para>
+/// <para><b>The order is output.</b> The report lists the findings by severity in the order they
+/// were collected, and <c>verdict.json</c> publishes the whole list in that order, so a rule
+/// evaluated earlier cannot be reordered later.</para>
 /// <para><b>A finding is a rule, a scope and a sentence.</b> The sentence carries the numbers it is about
 /// because a reader must be able to check it without re-running the analysis.</para>
 /// </remarks>

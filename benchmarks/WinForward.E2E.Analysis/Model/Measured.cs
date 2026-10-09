@@ -9,7 +9,7 @@ namespace WinForward.E2E.Analysis.Model;
 /// that cannot be computed says why instead of reporting a zero nobody measured. A null value with a
 /// null reason is not a state any producer writes.</para>
 /// <para><b>The type argument is the value's own type.</b> A reader that may find nothing hands back
-/// <c>Measured&lt;double?&gt;</c> or <c>Measured&lt;JsonElement?&gt;</c>: the nullability belongs to the
-/// reading, so a caller that logs <see cref="Value"/> sees the same type the reader produced.</para>
+/// <c>Measured&lt;double?&gt;</c> or <c>Measured&lt;JsonElement?&gt;</c>, so a caller that logs
+/// <see cref="Value"/> sees the same type the reader produced.</para>
 /// </remarks>
 internal readonly record struct Measured<T>(T Value, string? Reason);

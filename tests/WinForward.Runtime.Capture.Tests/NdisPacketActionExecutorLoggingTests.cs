@@ -11,7 +11,7 @@ using static WinForward.TestSupport.TcpCoordinatorFakes;
 namespace WinForward.Runtime.Capture.Tests;
 
 /// <summary>
-/// S6b/S6c warn diagnostics of the packet action executor: the per-datagram UDP failure warn is
+/// Warn diagnostics of the packet action executor: the per-datagram UDP failure warn is
 /// rate-limited (5 s window), and every blocked proxy flow reports an accurate reason — the
 /// "not initialized in this build" sentence stays reserved for the genuinely uninitialized case.
 /// </summary>
@@ -46,7 +46,7 @@ public sealed class NdisPacketActionExecutorLoggingTests
             new FakeLocalAddressProvider());
         var executor = new NdisPacketActionExecutor(new FakeReinjector(), logger, tcpProxy: coordinator);
 
-        // Establish the association first (R8 settles the new-flow setup in the background),
+        // Establish the association first (it settles the new-flow setup in the background),
         // then send a mid-flow frame on the same flow whose ethertype defeats the rewrite's
         // parse stage: the association-reuse fast path fails closed synchronously (Blocked),
         // and the executor must label it reason=redirect — never "not initialized".
