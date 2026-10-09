@@ -6,7 +6,7 @@ using Xunit;
 namespace WinForward.E2E.Tests;
 
 /// <summary>
-/// The literal gate of D14.16: the client's writers may not spell a JSON key that
+/// The literal gate: the client's writers may not spell a JSON key that
 /// <c>ArmKeys</c> declares, because a literal is how a key stops being renamed with the contract it
 /// belongs to.
 /// </summary>
@@ -19,8 +19,7 @@ namespace WinForward.E2E.Tests;
 /// <c>Client/ResourceSampleWriter.cs</c> (the counters, the process census and <c>samplerError</c>).
 /// The target's ledger writers are scanned too -- <c>Target/TcpTargetServer.cs</c>,
 /// <c>Target/UdpEchoServer.cs</c>, <c>Target/DnsServer.cs</c> and <c>Target/TargetRunner.cs</c> -- and
-/// the other files of <c>Target/</c> publish no key at all, which is why they are not listed
-/// (D14.16/D12).</para>
+/// the other files of <c>Target/</c> publish no key at all, which is why they are not listed.</para>
 /// <para><b>What counts as a literal.</b> A string literal in a key position, which is either the
 /// first argument of one of the <c>Utf8JsonWriter</c> members that take a property name or the index
 /// of a dictionary being written under a key. That is deliberately narrower than "the name appears in
@@ -37,7 +36,7 @@ namespace WinForward.E2E.Tests;
 /// <c>Write*</c> call is a key wherever the line breaks fall.</para>
 /// <para><b>The known keys.</b> Every string constant declared by <c>ArmKeys</c>, read through
 /// <c>typeof(...)</c> literals because the trim and AOT analyzers cannot follow a type held in a
-/// variable (D14.20).</para>
+/// variable.</para>
 /// </remarks>
 public sealed partial class JsonKeyLiteralGateTests
 {

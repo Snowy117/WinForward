@@ -5,14 +5,13 @@ using WinForward.Runtime.Logging;
 
 namespace WinForward.Runtime.UdpProxy;
 
-// Mechanical file-size split of UdpProxyCoordinator (behavior-zero, 2026-09-18): the span-send
-// bridge that lets the capture path hand a native-buffer view to the relay without materializing
-// it. The coordinator's single _gate semantics, admission logic, and teardown stay in the main
-// file; these members moved verbatim.
+// Mechanical file-size split of UdpProxyCoordinator: the span-send bridge that lets the capture path
+// hand a native-buffer view to the relay without materializing it. The coordinator's single _gate
+// semantics, admission logic, and teardown stay in the main file.
 public sealed partial class UdpProxyCoordinator
 {
     /// <summary>
-    /// Span-based entry for the capture path (A4): the executor holds the datagram payload only as
+    /// Span-based entry for the capture path: the executor holds the datagram payload only as
     /// a synchronous view of the native capture buffer. The ready-session warm shape consumes the
     /// span synchronously (SOCKS5 encode into the transport's reusable buffer) so nothing
     /// materializes, while the setup-window path copies the datagram into the bounded setup queue

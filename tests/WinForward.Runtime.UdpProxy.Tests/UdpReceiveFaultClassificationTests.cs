@@ -10,7 +10,7 @@ using static WinForward.TestSupport.FlowBuilders;
 namespace WinForward.Runtime.UdpProxy.Tests;
 
 /// <summary>
-/// R4 / design §7: the receive path classifies the fault its session recorded through the same
+/// The receive path classifies the fault its session recorded through the same
 /// single decision point every other removal path uses. A relay handshake rejected after the
 /// transport's setup call returned is the setup failure the flow must cool down for (armed exactly
 /// as a refused `UDP ASSOCIATE` is on the native path), an association death stays the counted,
@@ -79,7 +79,7 @@ public sealed class UdpReceiveFaultClassificationTests
     }
 
     /// <summary>
-    /// The explicit native-delta proof (design §7): the native transport's receive path surfaces raw
+    /// The native-delta proof: the native transport's receive path surfaces raw
     /// socket faults only, so an untyped receive fault must keep the generic reason — slot removed,
     /// no cooldown armed, nothing counted as an association loss, and the flow free to re-establish
     /// at once. The assertions together are what discriminate it from both typed classes.

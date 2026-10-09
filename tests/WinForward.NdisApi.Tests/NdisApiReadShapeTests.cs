@@ -5,7 +5,7 @@ using Xunit;
 namespace WinForward.NdisApi.Tests;
 
 /// <summary>
-/// The read shape at the driver↔native seam (research F5.1): which of the two read-path native
+/// The read shape at the driver↔native seam: which of the two read-path native
 /// calls <see cref="NdisApiDriver"/> makes, in what order, with what requested count, and what each
 /// outcome classifies as. The pump↔driver half of the read accounting already exists
 /// (<see cref="CapturePumpReadCallTests"/>); this is the layer below it, reachable without
@@ -65,8 +65,8 @@ public sealed class NdisApiReadShapeTests
     [SupportedOSPlatform("windows")]
     public void AnEmptyQueueYieldsZeroPacketsWithNoErrorUnderEitherReadResult()
     {
-        // Hypothesis B: the driver succeeds with dwPacketsSuccess == 0 — the empty queue never
-        // needs a second call at all.
+        // The driver succeeds with dwPacketsSuccess == 0 — the empty queue never needs a second
+        // call at all.
         using (var batch = new PacketBatch(Capacity))
         {
             var calls = new RecordingReadCalls([(true, 0u, 0)], []);
@@ -81,7 +81,7 @@ public sealed class NdisApiReadShapeTests
             Assert.Equal(0, driver.ReadDiagnostics.FailedReads);
         }
 
-        // Hypothesis A: the driver fails on an empty queue. The query is the disambiguator, and the
+        // The driver fails on an empty queue. The query is the disambiguator, and the
         // drain is still zero packets and no error — only the query's position moved.
         using (var batch = new PacketBatch(Capacity))
         {

@@ -3,8 +3,8 @@ namespace WinForward.E2E.Contracts;
 /// <summary>
 /// The <c>metrics</c> object of a <c>latency</c> result record: one flat family per protocol, in write
 /// order. Every value here contains a dot, so each constant is <em>one</em> member name that happens
-/// to be dotted -- <see cref="Latency.TcpSent"/> declares the path <c>metrics/tcp.sent</c>, never an object
-/// named <c>tcp</c> (the canonical path walker keeps a dot inside a key whole, D14.6).
+/// to be dotted -- <see cref="Latency.TcpSent"/> declares the path <c>metrics/tcp.sent</c>, never an
+/// object named <c>tcp</c>.
 /// </summary>
 /// <remarks>
 /// <para><b>Conditional blocks.</b> The two families are published per protocol: an arm that ran only

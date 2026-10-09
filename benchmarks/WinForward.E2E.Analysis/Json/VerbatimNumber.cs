@@ -13,16 +13,14 @@ namespace WinForward.E2E.Analysis.Json;
 /// the same way: the exact binary value to the nearest digit with a midpoint going to the even one.
 /// <see cref="Fixed"/>, <see cref="Exponential"/> and <see cref="General"/> are the standard
 /// <c>F</c>/<c>E</c>/<c>G</c> specifiers, which do that on the exact binary value; a custom specifier
-/// such as <c>0.000e+00</c> would not, because it rounds the decimal the scaling produced and so moves the halves away from zero
-/// (measured: 1.0625 and 1234.5 both round up under it and down under <c>E3</c>). The reference's
-/// <c>%.*f</c>/<c>%.*e</c> rounded the exact binary value the same way the standard specifiers do — the
-/// frozen <c>tables.md</c> reproduces cell for cell, midpoints included. <see cref="Json"/> is the
-/// round-trip form, which is where the published text of <c>verdict.json</c>'s floats parts company with
-/// the reference's <c>repr</c>; the oracle compares those numbers as values.</para>
+/// such as <c>0.000e+00</c> would not, because it rounds the decimal the scaling produced and so moves the halves away from zero.
+/// The reference's <c>%.*f</c>/<c>%.*e</c> rounded the exact binary value the same way the standard specifiers do.
+/// <see cref="Json"/> is the round-trip form, which is where the published text of <c>verdict.json</c>'s
+/// floats parts company with the reference; the oracle compares those numbers as values.</para>
 /// <para>A value that is not a number at all is written the way .NET spells it (<c>NaN</c>,
 /// <c>Infinity</c>, <c>-Infinity</c>) rather than the way <c>printf</c> does.</para>
-/// <para>Public because the test project drives it value by value, midpoints included; D20.6 keeps the
-/// analyzer free of an <c>InternalsVisibleTo</c>.</para>
+/// <para>Public so the test project can drive it; the analyzer carries no
+/// <c>InternalsVisibleTo</c>.</para>
 /// </remarks>
 public static class VerbatimNumber
 {
