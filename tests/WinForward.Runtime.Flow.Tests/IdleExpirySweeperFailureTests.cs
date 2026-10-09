@@ -10,9 +10,8 @@ using static WinForward.TestSupport.AsyncTestExtensions;
 namespace WinForward.Runtime.Flow.Tests;
 
 /// <summary>
-/// S6d: a sweep failure is surfaced as a rate-limited warn while the swallow-and-retry contract
-/// holds — the loop keeps sweeping across failures, and repeated failures inside the 5 s window
-/// stay silent.
+/// A sweep failure is surfaced as a rate-limited warn while the swallow-and-retry contract holds:
+/// the loop keeps sweeping across failures, and repeated failures inside the 5 s window stay silent.
 /// </summary>
 public sealed class IdleExpirySweeperFailureTests
 {
@@ -143,8 +142,8 @@ public sealed class IdleExpirySweeperFailureTests
         await Task.Delay(80);
 
         await sweeper.DisposeAsync();
-        // Regression: before the migration a second dispose called CancelAsync on the already-disposed
-        // CTS and threw ObjectDisposedException; it must now join the same drain.
+        // A second dispose must join the same drain rather than cancel an already-disposed token
+        // source, which would throw ObjectDisposedException out of the caller's teardown path.
         await sweeper.DisposeAsync();
     }
 

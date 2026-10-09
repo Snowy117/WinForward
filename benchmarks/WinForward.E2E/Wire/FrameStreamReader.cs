@@ -15,9 +15,9 @@ internal enum FrameReadStatus
     /// <summary>
     /// The peer closed with bytes of a frame still buffered, so the frame they belong to was cut in
     /// half. The frame boundary is gone and no later frame can be framed, which makes this terminal
-    /// and, unlike <see cref="EndOfStream"/>, not a clean close (D19.3 D); it is the same family as
-    /// <see cref="BadMagic"/> and <see cref="BadLength"/> (D18.6 #3). It is deliberately not a
-    /// verdict of its own: every consumer maps it into the vocabulary it already publishes.
+    /// and, unlike <see cref="EndOfStream"/>, not a clean close; it is the same family as
+    /// <see cref="BadMagic"/> and <see cref="BadLength"/>. It is deliberately not a verdict of its
+    /// own: every consumer maps it into the vocabulary it already publishes.
     /// </summary>
     Truncated,
 

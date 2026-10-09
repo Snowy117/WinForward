@@ -28,9 +28,8 @@ public sealed class UdpAssociationTable
     private readonly Dictionary<RelayAlias, UdpAssociation> _byRelay = [];
     private readonly Lock _gate = new();
 
-    // Sweep-level single flight, outer to _gate and never taken while _gate is held. The sweep collects
-    // candidates into a reused scratch and then removes them one short hold at a time, which is why _gate
-    // no longer covers the scratch's lifetime.
+    // Single flight for the sweep, never taken while _gate is held: the sweep collects candidates
+    // into a reused scratch and then removes them one short hold at a time.
     private readonly Lock _sweepGate = new();
     private readonly List<UdpAssociation> _expiredScratch = [];
     private readonly int _capacity;

@@ -12,8 +12,8 @@ internal static class ConfigurationRules
     /// <summary>
     /// Parses one domain. The host domain is required and admits process selectors; the forwarded
     /// domain may be omitted entirely and its default action falls back to
-    /// <see cref="FlowAction.Pass"/>, which is the posture every configuration had before the
-    /// default became addressable.
+    /// <see cref="FlowAction.Pass"/>, the posture every configuration had before the default became
+    /// addressable.
     /// </summary>
     internal static FlowAction? ParseDomain(RuleDomainDto? domain, FlowOriginKind origin, Dictionary<string, ProxyTarget> targets, List<PolicyRule> parsed, List<ConfigDiagnostic> errors)
     {

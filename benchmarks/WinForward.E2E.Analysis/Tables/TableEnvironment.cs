@@ -8,7 +8,7 @@ using WinForward.E2E.Analysis.Stats;
 namespace WinForward.E2E.Analysis.Tables;
 
 /// <summary>
-/// §2, "Environment and provenance": what the campaign ran on and with, the declared loss window per arm,
+/// "Environment and provenance": what the campaign ran on and with, the declared loss window per arm,
 /// how long each arm ran, which process was sampled, what each row's configuration hashed to, and each
 /// run's own metadata.
 /// </summary>

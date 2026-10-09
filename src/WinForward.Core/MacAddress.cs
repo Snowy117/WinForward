@@ -31,7 +31,6 @@ public readonly struct MacAddress : IEquatable<MacAddress>
 
     /// <summary>Reads the six network-order bytes, or returns <see cref="Invalid"/> when the span is not exactly six bytes.</summary>
     public static MacAddress From(ReadOnlySpan<byte> source) => TryFrom(source, out var mac) ? mac : Invalid;
-    /// <summary>Reads exactly six network-order bytes into the inline representation.</summary>
     private static bool TryFrom(ReadOnlySpan<byte> source, out MacAddress mac)
     {
         if (source.Length != Length)

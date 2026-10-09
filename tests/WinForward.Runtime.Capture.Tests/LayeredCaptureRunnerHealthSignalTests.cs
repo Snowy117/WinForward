@@ -5,12 +5,14 @@ using Xunit;
 namespace WinForward.Runtime.Capture.Tests;
 
 /// <summary>
-/// The capture runner's interception-health integration (task 09-17 R1-B): failure reports
-/// crossing a threshold arm a forced refresh demand through the existing task-09-11 forced
-/// semantics — a rebuild runs even against an identical enumeration, logs
-/// <c>adapter.refresh forced=true</c> (never <c>noop</c>), and the completed install resets
-/// the monitor through <see cref="InterceptionHealthMonitor.NoteRefreshCompleted"/>.
+/// The capture runner's interception-health integration: failure reports crossing a threshold
+/// arm a forced refresh demand, so a rebuild runs even against an identical enumeration and
+/// logs <c>adapter.refresh forced=true</c> rather than <c>noop</c>.
 /// </summary>
+/// <remarks>
+/// The completed install resets the monitor through
+/// <see cref="InterceptionHealthMonitor.NoteRefreshCompleted"/>.
+/// </remarks>
 public sealed class LayeredCaptureRunnerHealthSignalTests
 {
     [Fact]
