@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 62
+- **Total Sessions**: 63
 - **Last Active**: 2026-10-09
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~152 | Active |
+| `journal-2.md` | ~176 | Active |
 | `journal-1.md` | ~1996 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 63 | 2026-10-09 | TCP close drain: retire the alias on the client's acknowledgement | `7d246c5`, `4f20c1a`, `e5bd7ab` | `master` |
 | 62 | 2026-10-09 | 代码树规范化：IPv4/IPv6 改名与全量注释精简 | `488e06f`, `fe97c11`, `85b199a`, `89d784f`, `c53a50a`, `17a439c`, `60f4433`, `c7db454` | `master` |
 | 61 | 2026-10-09 | E2E C#-native cleanup: four children, one parent, 1663 tests green | `a402289`, `90bc922`, `9310eda`, `8cfff82`, `ed436af`, `0d1edda`, `f1b556e`, `b23eceb`, `bf4bced`, `836db2b` | `master` |
 | 60 | 2026-10-09 | Spec revision: correct the drift, cut the padding, split the five oversized documents | `0576ce0`, `662c286` | `master` |

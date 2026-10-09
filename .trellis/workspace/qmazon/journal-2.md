@@ -150,3 +150,27 @@ Finish what D21 deferred: remove the CPython emulation the analyzer was ported w
 ### Status
 
 [OK] **Completed**
+
+
+## Session 63: TCP close drain: retire the alias on the client's acknowledgement
+<!-- trellis-session: v=2 fp=891f3668d3704ece -->
+
+**Date**: 2026-10-09
+**Task**: TCP close drain: retire the alias on the client's acknowledgement
+**Branch**: `master`
+
+### Summary
+
+Implemented the bounded close drain: a clean relay end keeps the session and its alias alive until the client's acknowledgement covers the close (5 s deadline fallback, session-token cancellation), so MSTCP's own FIN and tail retransmissions reach the client, and removed the crafted clean-end FIN path after the A/B arms proved it redundant; the abnormal-end crafted RST|ACK is untouched. AC0 classified the residual (105/1202 timeouts: 92 lost-close, 13 gap-shaped); Phase D and a final certification arm on the committed revision reached clean 601/601 with timeout 0 on halfClose=100 and clean=100, timeout 0 on the four-mode REL arm, 3004 drains acknowledged (p50 0 ms, max 2 ms, peak concurrency 1). trellis-check reported 0 blockers / 3 majors (A/B mechanism wording, allocation-gate coverage for TrackClientAck, spec sync) - all resolved; 7 spec docs updated. Gates: zero-warning Release build, 1678/1678 tests, dotnet format empty, jb inspectcode 0 issues.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7d246c5` | fix(tcp-redirect): retire the alias once the client acknowledges the close |
+| `4f20c1a` | docs(spec): describe the close drain the redirect now uses |
+| `e5bd7ab` | chore(task): record the close-drain task artifacts |
+
+### Status
+
+[OK] **Completed**
