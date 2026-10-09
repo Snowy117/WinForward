@@ -33,3 +33,34 @@ Opened task 10-06-tcp-half-close-fidelity and drove it to archive. Reproduced th
 ### Next Steps
 
 - Child task 10-07-tcp-close-drain: design the bounded close drain (or the bounded repeat), then measure the residual against the port budget.
+
+
+## Session 60: Spec revision: correct the drift, cut the padding, split the five oversized documents
+<!-- trellis-session: v=2 fp=c2cb04b06a841207 -->
+
+**Date**: 2026-10-09
+**Task**: Spec revision: correct the drift, cut the padding, split the five oversized documents
+**Branch**: `master`
+
+### Summary
+
+Session summary was not supplied.
+
+### Main Changes
+
+- 16 spec documents became 45, none over 400 lines; five hubs with topic maps and move tables; idle-expiry-sweep.md split out; directory-structure.md translated to English
+- 61 stale references adjudicated against the code; 23 code comments in 19 files retargeted from numbers to surviving section titles
+- verify-specs.py (size, index, family links, link resolution, identifiers, language) green; dotnet format exit 0; Release build 0 warnings
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Decide whether to fix the archived rename-table path in benchmarks/WinForward.E2E/scripts/check-readme-contract.py:47 (and check-fixture-drift.py:40) — the README contract gate currently exits 2
+- Review the two families that grew (tcp-local-redirect +25.9 % words, measurement-harness +15.7 %) if the scaffolding cost is judged too high

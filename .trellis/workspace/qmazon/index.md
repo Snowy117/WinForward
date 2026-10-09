@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 59
-- **Last Active**: 2026-10-07
+- **Total Sessions**: 60
+- **Last Active**: 2026-10-09
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~35 | Active |
+| `journal-2.md` | ~66 | Active |
 | `journal-1.md` | ~1996 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 60 | 2026-10-09 | Spec revision: correct the drift, cut the padding, split the five oversized documents | - | `master` |
 | 59 | 2026-10-07 | TCP half-close fidelity: measure the mechanism, ship the close injection, verify on the VM | `7cababb`, `c828548`, `c58a64b` | `master` |
 | 58 | 2026-10-06 | appsettings.json configuration surface with the standard Logging section | `4083ef3`, `1ef1a57` | `master` |
 | 57 | 2026-10-06 | AOT instruction-set floor: restoring the vectorized checksum and shipping a framework-dependent artifact | `f7bf652`, `5b00109`, `eae25af` | `master` |

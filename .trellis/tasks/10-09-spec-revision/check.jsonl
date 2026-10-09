@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/10-09-spec-revision/research/verify-specs.py", "reason": "The mechanical acceptance harness: size, index coverage, link resolution, unresolved identifiers, unexplained CJK."}
+{"file": "AGENTS.md", "reason": "The pre-commit quality gate (dotnet format, jb inspectcode, Release build) that a comment-touching change must still pass."}

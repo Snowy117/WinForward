@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/10-09-spec-revision/prd.md", "reason": "The requirements R1-R6 and acceptance criteria AC1-AC7 the revision is measured against."}
+{"file": ".trellis/tasks/10-09-spec-revision/design.md", "reason": "The authoring rules (house style, cross-reference policy), the family shape, and the verification procedure every revising agent obeys."}
+{"file": ".trellis/spec/backend/index.md", "reason": "The layer index: the document inventory that the split must keep truthful and complete."}
+{"file": ".trellis/spec/guides/index.md", "reason": "The guides index and its thinking triggers, which cite sections the split moves."}
