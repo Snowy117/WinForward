@@ -82,13 +82,12 @@ internal sealed class GatedEmptyCaptureReader : INdisPacketReader
 }
 
 /// <summary>
-/// The F5.2 shape: <c>TryReadPackets</c> announces that it is about to block, then blocks until the
-/// harness arms exactly one frame, then returns 1. The pump thread is therefore parked inside the
-/// read between wakes, and the harness's arm timestamp is the arrival the handler's dispatch is
-/// measured against. Only frame-delivering reads are counted in <see cref="ReadCalls"/>, which keeps
-/// the per-wake accounting stable while the pump is parked in the next read. <see cref="Stop"/>
-/// releases the parked read with an empty result, because a stop cannot cancel a read blocked in a
-/// semaphore wait.
+/// Blocks the pump inside its read between wakes: <c>TryReadPackets</c> announces that it is about to
+/// block, waits until the harness arms exactly one frame, then returns 1. The harness's arm timestamp
+/// is therefore the arrival the handler's dispatch is measured against. Only frame-delivering reads
+/// are counted in <see cref="ReadCalls"/>, which keeps the per-wake accounting stable while the pump
+/// is parked in the next read. <see cref="Stop"/> releases the parked read with an empty result,
+/// because a stop cannot cancel a read blocked in a semaphore wait.
 /// </summary>
 internal sealed class SignallingCaptureReader(byte[] frame) : INdisPacketReader, IDisposable
 {

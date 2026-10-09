@@ -9,10 +9,11 @@ using static WinForward.TestSupport.TcpCoordinatorFakes;
 namespace WinForward.Runtime.TcpRedirect.Tests;
 
 /// <summary>
-/// R8 pending-SYN infrastructure bounds: the entry cap and global byte budget reject with a
-/// trace (backpressure, not a cooldown), every retained copy is credited against the budget
-/// exactly once across overwrite / TTL-expiry / completion sinks, the retention TTL rides the
-/// idle sweep, and the setup-failure cooldown consumes retransmissions then self-prunes.
+/// The pending-SYN infrastructure's bounds, which the facts below assert one by one: the entry cap and
+/// global byte budget reject with a trace (backpressure, not a cooldown), every retained copy is
+/// credited against the budget exactly once across overwrite / TTL-expiry / completion sinks, the
+/// retention TTL rides the idle sweep, and the setup-failure cooldown consumes retransmissions then
+/// self-prunes.
 /// </summary>
 public sealed class TcpPendingSynSetupTests
 {
@@ -312,7 +313,7 @@ public sealed class TcpPendingSynSetupTests
     [Fact]
     public async Task SynDispatchDoesNotWaitForListenerAllocation()
     {
-        // R8's core contract: the pump-side SYN dispatch completes while the listener factory is
+        // The core contract: the pump-side SYN dispatch completes while the listener factory is
         // still parked — the historical inline setup would have blocked on the bind forever.
         var listenerFactory = new GatedListenerFactory();
         var table = new TcpRedirectTable();
@@ -367,7 +368,7 @@ public sealed class TcpPendingSynSetupTests
     [Fact]
     public async Task DisposeClearsTheCooldownAnEarlierFailureArmed()
     {
-        // D3: a genuine setup failure arms the cooldown while the index is live, and disposal's
+        // A genuine setup failure arms the cooldown while the index is live, and disposal's
         // index teardown clears it — the removed entry can never re-arm a cooldown afterwards.
         var table = new TcpRedirectTable();
         var coordinator = CreateCoordinator(new FakeListenerFactory(throwOnCreate: true), new FakeRelayFactory(), new FakeInjector(), table, new SelfTrafficRegistry(), new FakeLocalAddressProvider());
@@ -387,7 +388,7 @@ public sealed class TcpPendingSynSetupTests
     [Fact]
     public async Task DisposeRacingAnInFlightSetupLeavesNoCooldownOrCharge()
     {
-        // D3: a setup still parked in the listener factory when disposal begins completes its entry
+        // A setup still parked in the listener factory when disposal begins completes its entry
         // removal (with a shutdown-cancelled cooldown decision) before ExitSetup unblocks the
         // drain, so the post-drain RemoveAll is never raced by a late write.
         var listenerFactory = new GatedListenerFactory();

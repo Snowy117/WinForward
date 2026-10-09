@@ -17,8 +17,8 @@ namespace WinForward.E2E.Analysis.Stats;
 /// <para><b>A null pass is counted, not dropped.</b> A rate the harness wrote as JSON null has a zero
 /// denominator; when every pass is null the cell is empty, and when only some are the count is printed
 /// beside the pass count.</para>
-/// <para><b>The type is public because the test project drives <see cref="Sum"/> value by value</b>, and
-/// D20.6 keeps <c>InternalsVisibleTo</c> out of this assembly; every other member stays internal because
+/// <para><b>The type is public because the test project drives <see cref="Sum"/> value by value</b>,
+/// and <c>InternalsVisibleTo</c> stays out of this assembly; every other member stays internal because
 /// only the analysis itself reads it.</para>
 /// </remarks>
 public static class DescriptiveStats

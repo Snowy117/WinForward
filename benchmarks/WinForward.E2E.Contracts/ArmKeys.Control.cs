@@ -32,8 +32,7 @@ public static partial class ArmKeys
 
         // S3218 / MemberHidesStaticFromOuterClass: the published member name is `latency`, and
         // `ArmKeys.Latency` is the latency arm's own shard. The rule this file follows -- a member's
-        // name is its key's name -- makes the collision the contract rather than an accident; the
-        // same shadowing is already declared and justified on ArmKeys.Common.Parameters.Latency.
+        // name is its key's name -- makes the collision the contract rather than an accident.
 #pragma warning disable S3218
         // ReSharper disable once MemberHidesStaticFromOuterClass
         public const string Latency = "latency";

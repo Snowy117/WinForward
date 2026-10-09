@@ -5,14 +5,14 @@ using Xunit;
 namespace WinForward.E2E.Tests;
 
 /// <summary>
-/// The client keeps offering its whole schedule when the path drops datagrams (#4). The offer loop is
+/// The client keeps offering its whole schedule when the path drops datagrams. The offer loop is
 /// driven through the arm's own admission step (<see cref="LossWindow.Admit"/>) with a fake send path
 /// that drops a fixed share, so nothing here touches a socket or a wall clock: the pacing instants are
 /// the production <see cref="Pacer"/>'s and the clock is simulated.
 /// </summary>
 /// <remarks>
-/// Counter-proofs — each was applied to the production code and watched this file turn red, and the
-/// evidence records the restored hashes (D11):
+/// Counter-proofs — each was applied to the production code and watched this file turn red, which is
+/// what proves the assertions below are the load-bearing ones:
 /// <list type="bullet">
 /// <item>delete the <c>Retire</c> call from <see cref="LossWindow.Admit"/>: the 50% case fills the
 /// window and stops sending, so <c>sent == supplied</c>, the exact slot count and the overflow
@@ -73,8 +73,8 @@ public sealed class LossWindowSimulationTests
     {
         // Negative control for the two facts above: with the same fake path, a window that never lets a
         // slot go fills up, the offer loop then drops slots as client send loss, and the arm stops
-        // reaching the end of its schedule. This is the shape the audit described, produced on purpose
-        // from the one input that can produce it.
+        // reaching the end of its schedule. This is the failure shape, produced on purpose from the one
+        // input that can produce it.
         var scenario = Simulate(0.50, NeverRetireWindowTicks, Window);
         var diagnostic =
             $"frozen window: supplied {scenario.Supplied}, sent {scenario.Sent}, overflow {scenario.WindowOverflow}, last slot sent {scenario.LastSlotSent}, undetermined {scenario.Undetermined}";

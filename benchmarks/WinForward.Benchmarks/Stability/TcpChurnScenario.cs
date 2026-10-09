@@ -10,11 +10,10 @@ using WinForward.Runtime.TcpRedirect;
 namespace WinForward.Benchmarks.Stability;
 
 /// <summary>
-/// New-flow churn through the real TCP redirect relay path (research F8): <c>--rate</c> connections
-/// per second, each one dialled, SOCKS5-established, sent a small payload and closed, with
-/// <c>--tcp-concurrency</c> workers in flight. Reports the per-connection first-byte distribution —
-/// p50 through max, never a mean alone — plus establishment outcomes and the transient allocation the
-/// churn produces.
+/// New-flow churn through the real TCP redirect relay path: <c>--rate</c> connections per second, each
+/// one dialled, SOCKS5-established, sent a small payload and closed, with <c>--tcp-concurrency</c>
+/// workers in flight. Reports the per-connection first-byte distribution — p50 through max, never a
+/// mean alone — plus establishment outcomes and the transient allocation the churn produces.
 /// <para>
 /// The finding under test is that per-flow attribution work runs <em>on the pump thread</em> and
 /// therefore shows up as a latency tail rather than a uniform slowdown. That shape is reproducible
@@ -285,12 +284,12 @@ internal static class TcpChurnScenario
                     serverConnectReplies = server.ConnectReplies,
                     serverBytesEchoed = server.BytesEchoed,
                     gated = false,
-                    note = "Report-only churn row (design §3). The delayed class exists only when --attribution-delay-ms is set; on Windows the same shape comes from the real attributor, so this row is the instrument and the Windows run is the number.",
+                    note = "Report-only churn row. The delayed class exists only when --attribution-delay-ms is set; on Windows the same shape comes from the real attributor, so this row is the instrument and the Windows run is the number.",
                 };
             }
         }
 
-        /// <summary>Distribution of one class; the delayed class is the F8 tail, the stable class is its control.</summary>
+        /// <summary>Distribution of one class; the delayed class is the tail under test, the stable class is its control.</summary>
         private static object Describe(double[] samples, int count, double? incrementalMeanMs)
         {
             if (count == 0) return new { count = 0 };
