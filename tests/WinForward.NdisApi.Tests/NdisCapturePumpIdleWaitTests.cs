@@ -7,7 +7,7 @@ using Xunit;
 namespace WinForward.NdisApi.Tests;
 
 /// <summary>
-/// The capture pump's idle path once an arrival signal is installed (finding F5.2): one bounded
+/// The capture pump's idle path once an arrival signal is installed: one bounded
 /// wait per idle iteration instead of sleep pacing, the sleep fallback when no signal exists, and
 /// the disposal/allocation bounds that go with a blocking wait. Kept beside
 /// <see cref="NdisCapturePumpTests"/> rather than inside it — the batch-processing facts and these
@@ -148,7 +148,7 @@ public sealed class NdisCapturePumpIdleWaitTests
     /// <summary>
     /// The arrival wait's zero-allocation gate, over the production <see cref="NdisPacketArrivalSignal"/>
     /// rather than a fake, so the real <c>WaitOne(0)</c> entry point is inside the window. The
-    /// window contract is the suite's standard one (allocation-gates.md, "Allocation-gate stability").
+    /// window contract is the suite's standard one.
     /// </summary>
     [Fact]
     [SupportedOSPlatform("windows")]

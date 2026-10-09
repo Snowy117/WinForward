@@ -51,15 +51,15 @@ public static class CaptureAdapterScopeResolver
     }
 
     /// <summary>
-    /// Refresh-mode scope resolution for adapter-list changes (task 09-07-adapter-list-refresh,
-    /// PRD R4 — the deliberate non-fatal counterpart to fail-closed startup resolution): adapters
-    /// may have disappeared or appeared since the run started, so a selector that no longer
-    /// resolves, resolves ambiguously, or whose <c>adapterId</c>/<c>adapterName</c> pair disagrees
-    /// produces a warning and narrows scope instead of failing the run. A rule whose selector
-    /// matched nothing, or whose id/name pair disagrees, contributes nothing; an ambiguous selector
-    /// skips only its own addition. Widening to every MSTCP-bound adapter still applies for any
-    /// unconstrained rule, but a scope emptied by selector warnings never widens: a policy whose
-    /// constrained adapters all disappeared captures nothing rather than everything.
+    /// Refresh-mode scope resolution for adapter-list changes: the non-fatal counterpart to
+    /// fail-closed startup resolution. Adapters may have disappeared or appeared since the run
+    /// started, so a selector that no longer resolves, resolves ambiguously, or whose
+    /// <c>adapterId</c>/<c>adapterName</c> pair disagrees produces a warning and narrows scope
+    /// instead of failing the run. A rule whose selector matched nothing, or whose id/name pair
+    /// disagrees, contributes nothing; an ambiguous selector skips only its own addition. Widening
+    /// to every MSTCP-bound adapter still applies for any unconstrained rule, but a scope emptied
+    /// by selector warnings never widens: a policy whose constrained adapters all disappeared
+    /// captures nothing rather than everything.
     /// </summary>
     public static IReadOnlyList<WindowsAdapter> ResolveForRefresh(IReadOnlyList<WindowsAdapter> adapters, PolicySnapshot policy, out IReadOnlyList<string> warnings)
     {

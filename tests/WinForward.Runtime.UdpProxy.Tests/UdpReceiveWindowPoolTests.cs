@@ -16,8 +16,7 @@ namespace WinForward.Runtime.UdpProxy.Tests;
 /// <see cref="NativeBufferPool"/>'s counter counts every rent that missed the free list, so a first
 /// fill of N live sessions reads N at <em>any</em> capacity; the discriminating reading is the growth
 /// a second population cycle adds. The red-before — capacity 256 with a 300-session population, which
-/// grew by 44 on the second cycle — is recorded in
-/// <c>benchmarks/results/2026-10-01-udp-session-footprint/README.md</c> and asserted by
+/// grew by 44 on the second cycle — is asserted by
 /// <c>TheRetiredDefaultCapacityGrowsByTheUnpooledPopulationAcrossACycle</c>, so the green gate stays
 /// falsifiable in the tree.
 /// </para>

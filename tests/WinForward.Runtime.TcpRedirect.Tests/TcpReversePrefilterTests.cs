@@ -10,9 +10,9 @@ using static WinForward.TestSupport.TcpCoordinatorFakes;
 namespace WinForward.Runtime.TcpRedirect.Tests;
 
 /// <summary>
-/// The X1 listener-port prefilter: table reference-count semantics, the coordinator's
+/// The listener-port prefilter: table reference-count semantics, the coordinator's
 /// <see cref="TcpProxyCoordinator.WantsPacket"/> diversion predicate, and the dispatcher's
-/// production-shaped warm/candidate routing including the tombstone fall-through theorem (D3).
+/// production-shaped warm/candidate routing including the tombstone fall-through theorem.
 /// </summary>
 public sealed class TcpReversePrefilterTests
 {
@@ -97,7 +97,7 @@ public sealed class TcpReversePrefilterTests
         await using var coordinator = CreateCoordinator(listenerFactory, new CompletableRelayFactory(), new FakeInjector(), table, new SelfTrafficRegistry(), new FakeLocalAddressProvider());
         Assert.True(TryClaimListener(table, MakeOriginalKey(53000), IPAddress.Loopback, 40000));
 
-        // Stage (b): TCP with a claimed source port diverts; any other shape stays warm. The UDP
+        // TCP with a claimed source port diverts; any other shape stays warm. The UDP
         // rejection holds even when the source port numerically equals the claimed listener port.
         Assert.True(coordinator.WantsPacket(MakePacket(MakeTcpKey(40000))));
         Assert.False(coordinator.WantsPacket(MakePacket(MakeTcpKey(53000))));
@@ -107,7 +107,7 @@ public sealed class TcpReversePrefilterTests
     [Fact]
     public async Task WarmEntryPassesUdpAndBlockFlowsWithoutInvokingReverseHandler()
     {
-        // AC1: in the production-shaped composition (reverse handler wired), resolved UDP pass
+        // In the production-shaped composition (reverse handler wired), resolved UDP pass
         // and block flows execute on the warm entry — WantsPacket is consulted (the warm entry is
         // its only caller), the full handler never runs, and the decision still executes.
         var executor = new CountingExecutor();
@@ -154,7 +154,7 @@ public sealed class TcpReversePrefilterTests
         var second = MakePacket(nonCandidateKey);
         await dispatcher.DispatchAsync(first, CancellationToken.None);
         // The new-flow claim legitimately runs the slow path, which consults the full handler
-        // for TCP exactly as before (AC2): one call, answered NotRelevant.
+        // for TCP exactly as before: one call, answered NotRelevant.
         var handledAfterFirst = handler.HandleCount;
         var wantsAfterFirst = handler.WantsCount;
         Assert.Equal(1, handledAfterFirst);
@@ -172,7 +172,7 @@ public sealed class TcpReversePrefilterTests
     [Fact]
     public async Task CandidateTcpStillDivertsToReverseHandlerExactlyAsBefore()
     {
-        // AC2/AC3: a TCP packet whose source port is a claimed listener port diverts to the slow
+        // A TCP packet whose source port is a claimed listener port diverts to the slow
         // path where the full handler runs — the reverse routing behavior is unchanged.
         var executor = new CountingExecutor();
         var table = new TcpRedirectTable();
@@ -195,7 +195,7 @@ public sealed class TcpReversePrefilterTests
     [Fact]
     public async Task TombstoneStragglerFallsThroughPrefilterToGraceDrop()
     {
-        // D3 pin: after teardown the listener port left the prefilter, so the reverse straggler
+        // After teardown the listener port left the prefilter, so the reverse straggler
         // declines the diversion — yet the warm entry cannot resolve the listener-shaped tuple,
         // falls through to the slow path, and the full handler still lands the grace drop.
         var harness = CreateDispatcherHarness();

@@ -60,7 +60,7 @@ public sealed class TransactionalCaptureRuntime : IAsyncDisposable
     /// a race-free answer (the latch write — or its absence — is already visible). A fault
     /// while this is still false escaped the startup mode snapshot/apply phase and never
     /// reached the pumps, which is the signature the runner uses to classify a stale-handle
-    /// startup fault as recoverable (task 09-11).
+    /// startup fault as recoverable.
     /// </summary>
     public bool ReachedPumpRun
     {
@@ -120,7 +120,7 @@ public sealed class TransactionalCaptureRuntime : IAsyncDisposable
             runTask = _runTask;
         }
 
-        // The scope owns the shutdown token (D7); Cancel() is reachable only through the first
+        // The scope owns the shutdown token: Cancel() is reachable only through the first
         // Stopping transition, which precedes the cleanup's drain, so it can never run after the
         // release (the scope swallows a late cancel as a no-op).
         if (cancelShutdown) _scope.Cancel();
@@ -137,7 +137,7 @@ public sealed class TransactionalCaptureRuntime : IAsyncDisposable
     public ValueTask DisposeAsync() => StopAsync();
 
     /// <summary>
-    /// Marks one adapter's interception as degraded (R7) and restores its captured mode early:
+    /// Marks one adapter's interception as degraded and restores its captured mode early:
     /// the adapter's pump has stopped after exhausting transient-read retries (or a permanent
     /// native read error) while the run continues on the remaining adapters. The snapshot is
     /// removed from the applied set under the gate so the normal-shutdown restore does not repeat

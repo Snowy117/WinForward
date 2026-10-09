@@ -1,11 +1,10 @@
 namespace WinForward.Runtime.Capture;
 
 /// <summary>
-/// The capture runner's refresh workers (task 09-17 R1, split out by task
-/// 09-20-structured-concurrency C4 to keep <see cref="LayeredCaptureRunner"/> within the
-/// effective-line cap): the adapter-list monitor that owns a dedicated blocking OS thread, and the
-/// periodic link-state re-check tick. Both are tracked by the run's <see cref="QuiescenceScope"/>,
-/// whose drain is the join for them.
+/// The capture runner's refresh workers, split out to keep <see cref="LayeredCaptureRunner"/>
+/// within the effective-line cap: the adapter-list monitor that owns a dedicated blocking OS
+/// thread, and the periodic link-state re-check tick. Both are tracked by the run's
+/// <see cref="QuiescenceScope"/>, whose drain is the join for them.
 /// </summary>
 internal sealed class CaptureRefreshWorkers(
     IAdapterListChangeSource changeSource,
@@ -32,7 +31,7 @@ internal sealed class CaptureRefreshWorkers(
     }
 
     /// <summary>
-    /// Periodic link-state re-check (task 09-17 R1-A): the NDISRD bound-adapter list is not
+    /// Periodic link-state re-check: the NDISRD bound-adapter list is not
     /// rebuilt by host address changes (IPv6 temporary-address rotation), so a timer raises a
     /// NON-forced refresh demand every interval. An unchanged enumeration still resolves as the
     /// no-op skip, and the storm guard absorbs races with NDISRD signals; the demand gate sees

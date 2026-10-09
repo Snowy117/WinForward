@@ -210,8 +210,7 @@ internal static class LatencyArm
 
 /// <summary>
 /// One lane's two halves, kept apart until the totals are formed: the engine's send-side snapshot
-/// and the policy's own book. Neither half is reachable from the other, which is what the
-/// disjointness contract (D18.1) asks for.
+/// and the policy's own book. Neither half is reachable from the other.
 /// </summary>
 internal sealed class Lane<TBook>
     where TBook : new()
