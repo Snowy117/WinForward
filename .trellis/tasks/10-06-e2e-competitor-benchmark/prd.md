@@ -115,8 +115,8 @@ handshake.
 - [ ] At least three measured passes after a discarded warm-up pass, with the between-run spread
       reported rather than a single run's number.
 - [ ] Raw results, the analysis and a report: the analysis and the report live under
-      `benchmarks/WinForward.E2E.Analysis/` (the Python `analyze.py` there replaced the original
-      script), and the campaign's own artifact tree was removed with it.
+      `benchmarks/WinForward.E2E.Analysis/` (the C# analysis there replaced the original Python
+      `analyze.py`), and the campaign's own artifact tree was removed with it.
 - [ ] A written statement of what the numbers do and do not cover (loopback upstream hop,
       single-host loopback SOCKS5 server, no WAN, deviation from RFC 8219's ≥20 repetitions).
 
