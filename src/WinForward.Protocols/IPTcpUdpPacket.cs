@@ -37,8 +37,8 @@ public readonly record struct PacketView(
 
 public static class IPTcpUdpPacket
 {
-    private const ushort EtherTypeIpv4 = 0x0800;
-    private const ushort EtherTypeIpv6 = 0x86dd;
+    private const ushort EtherTypeIPv4 = 0x0800;
+    private const ushort EtherTypeIPv6 = 0x86dd;
     private const byte ProtocolTcp = 6;
     private const byte ProtocolUdp = 17;
     private const int EthernetHeaderLength = 14;
@@ -57,13 +57,13 @@ public static class IPTcpUdpPacket
         var etherType = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(12, 2));
         return etherType switch
         {
-            EtherTypeIpv4 => TryParseIpv4(frame, out view),
-            EtherTypeIpv6 => TryParseIpv6(frame, out view),
+            EtherTypeIPv4 => TryParseIPv4(frame, out view),
+            EtherTypeIPv6 => TryParseIPv6(frame, out view),
             _ => false,
         };
     }
 
-    private static bool TryParseIpv4(ReadOnlySpan<byte> frame, out PacketView view)
+    private static bool TryParseIPv4(ReadOnlySpan<byte> frame, out PacketView view)
     {
         view = default;
         var versionAndHeader = frame[EthernetHeaderLength];
@@ -81,7 +81,7 @@ public static class IPTcpUdpPacket
         return TryParseTransport(frame, EthernetHeaderLength + headerLength, totalLength - headerLength, protocol, source, destination, headerLength, out view);
     }
 
-    private static bool TryParseIpv6(ReadOnlySpan<byte> frame, out PacketView view)
+    private static bool TryParseIPv6(ReadOnlySpan<byte> frame, out PacketView view)
     {
         view = default;
         if (frame.Length < EthernetHeaderLength + 40 || frame[EthernetHeaderLength] >> 4 != 6) return false;

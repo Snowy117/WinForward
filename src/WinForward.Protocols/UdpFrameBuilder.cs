@@ -64,14 +64,14 @@ public static class UdpFrameBuilder
         if (sourceMac.Length != 6 || destinationMac.Length != 6) return false;
         if (maximumEthernetFrame <= 0) return false;
         if (sourceAddress.Family != destinationAddress.Family) return false;
-        var isIpv4 = sourceAddress.Family == AddressFamilyKind.IPv4;
-        var isIpv6 = sourceAddress.Family == AddressFamilyKind.IPv6;
-        if (!isIpv4 && !isIpv6) return false;
+        var isIPv4 = sourceAddress.Family == AddressFamilyKind.IPv4;
+        var isIPv6 = sourceAddress.Family == AddressFamilyKind.IPv6;
+        if (!isIPv4 && !isIPv6) return false;
 
         if (payload.Length > ushort.MaxValue - 8) return false;
         var udpLength = 8 + payload.Length;
-        if (isIpv4 && udpLength > ushort.MaxValue - 20) return false;
-        var ipHeaderLength = isIpv4 ? 20 : 40;
+        if (isIPv4 && udpLength > ushort.MaxValue - 20) return false;
+        var ipHeaderLength = isIPv4 ? 20 : 40;
         totalLength = 14 + ipHeaderLength + udpLength;
         if (totalLength > maximumEthernetFrame)
         {
@@ -93,39 +93,39 @@ public static class UdpFrameBuilder
         ReadOnlySpan<byte> destinationMac,
         int totalLength)
     {
-        var isIpv4 = sourceAddress.Family == AddressFamilyKind.IPv4;
+        var isIPv4 = sourceAddress.Family == AddressFamilyKind.IPv4;
 
         // Ethernet II header: destination MAC, source MAC, ethertype.
         destinationMac.CopyTo(result[..6]);
         sourceMac.CopyTo(result.Slice(6, 6));
-        BinaryPrimitives.WriteUInt16BigEndian(result.Slice(12, 2), isIpv4 ? (ushort)0x0800 : (ushort)0x86dd);
+        BinaryPrimitives.WriteUInt16BigEndian(result.Slice(12, 2), isIPv4 ? (ushort)0x0800 : (ushort)0x86dd);
 
         const int ipOffset = 14;
-        var ipHeaderLength = isIpv4 ? 20 : 40;
+        var ipHeaderLength = isIPv4 ? 20 : 40;
         var udpLength = totalLength - ipOffset - ipHeaderLength;
-        if (isIpv4)
+        if (isIPv4)
         {
-            WriteIpv4Header(result, ipOffset, sourceAddress, destinationAddress, udpLength);
+            WriteIPv4Header(result, ipOffset, sourceAddress, destinationAddress, udpLength);
         }
         else
         {
-            WriteIpv6Header(result, ipOffset, sourceAddress, destinationAddress, udpLength);
+            WriteIPv6Header(result, ipOffset, sourceAddress, destinationAddress, udpLength);
         }
 
         var udpOffset = ipOffset + ipHeaderLength;
         WriteUdpHeader(result, udpOffset, sourcePort, destinationPort, udpLength, payload.Span);
 
-        if (isIpv4)
+        if (isIPv4)
         {
-            PacketChecksums.WriteUdpChecksum(result, udpOffset, udpLength, result.Slice(ipOffset + 12, 4), result.Slice(ipOffset + 16, 4), isIpv6: false);
+            PacketChecksums.WriteUdpChecksum(result, udpOffset, udpLength, result.Slice(ipOffset + 12, 4), result.Slice(ipOffset + 16, 4), isIPv6: false);
         }
         else
         {
-            PacketChecksums.WriteUdpChecksum(result, udpOffset, udpLength, result.Slice(ipOffset + 8, 16), result.Slice(ipOffset + 24, 16), isIpv6: true);
+            PacketChecksums.WriteUdpChecksum(result, udpOffset, udpLength, result.Slice(ipOffset + 8, 16), result.Slice(ipOffset + 24, 16), isIPv6: true);
         }
     }
 
-    private static void WriteIpv4Header(Span<byte> frame, int ipOffset, IPAddressValue sourceAddress, IPAddressValue destinationAddress, int udpLength)
+    private static void WriteIPv4Header(Span<byte> frame, int ipOffset, IPAddressValue sourceAddress, IPAddressValue destinationAddress, int udpLength)
     {
         frame[ipOffset] = 0x45; // version 4, IHL 5 (no options)
         frame[ipOffset + 1] = 0; // DSCP/ECN
@@ -142,7 +142,7 @@ public static class UdpFrameBuilder
         BinaryPrimitives.WriteUInt16BigEndian(frame.Slice(ipOffset + 10, 2), PacketChecksums.InternetChecksum(frame.Slice(ipOffset, 20)));
     }
 
-    private static void WriteIpv6Header(Span<byte> frame, int ipOffset, IPAddressValue sourceAddress, IPAddressValue destinationAddress, int udpLength)
+    private static void WriteIPv6Header(Span<byte> frame, int ipOffset, IPAddressValue sourceAddress, IPAddressValue destinationAddress, int udpLength)
     {
         frame[ipOffset] = 0x60; // version 6, traffic class 0
         frame[ipOffset + 1] = 0;

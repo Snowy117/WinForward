@@ -57,7 +57,7 @@ internal sealed partial class IPHelperOwnerTableReader : IProcessOwnerTableReade
             for (var index = 0; index < rows.Length; index++)
             {
                 var row = IPHelperTables.ReadRow<IPHelperAbi.MibUdp6RowOwnerPid>(buffer, index);
-                rows[index] = new UdpOwnerRow(IPHelperAbi.DecodeIpv6Address(new ReadOnlySpan<byte>(row.LocalAddress, 16), row.ScopeId), IPHelperAbi.DecodeNetworkPort(row.LocalPort), row.ProcessId);
+                rows[index] = new UdpOwnerRow(IPHelperAbi.DecodeIPv6Address(new ReadOnlySpan<byte>(row.LocalAddress, 16), row.ScopeId), IPHelperAbi.DecodeNetworkPort(row.LocalPort), row.ProcessId);
             }
             return rows;
         }
@@ -91,7 +91,7 @@ internal sealed partial class IPHelperOwnerTableReader : IProcessOwnerTableReade
             for (var index = 0; index < rows.Length; index++)
             {
                 var row = IPHelperTables.ReadRow<IPHelperAbi.MibTcp6RowOwnerPid>(buffer, index);
-                rows[index] = new TcpOwnerRow(new Endpoint(AddressFamilyKind.IPv6, IPHelperAbi.DecodeIpv6Address(new ReadOnlySpan<byte>(row.LocalAddress, 16), row.LocalScopeId), IPHelperAbi.DecodeNetworkPort(row.LocalPort)), new Endpoint(AddressFamilyKind.IPv6, IPHelperAbi.DecodeIpv6Address(new ReadOnlySpan<byte>(row.RemoteAddress, 16), row.RemoteScopeId), IPHelperAbi.DecodeNetworkPort(row.RemotePort)), row.ProcessId);
+                rows[index] = new TcpOwnerRow(new Endpoint(AddressFamilyKind.IPv6, IPHelperAbi.DecodeIPv6Address(new ReadOnlySpan<byte>(row.LocalAddress, 16), row.LocalScopeId), IPHelperAbi.DecodeNetworkPort(row.LocalPort)), new Endpoint(AddressFamilyKind.IPv6, IPHelperAbi.DecodeIPv6Address(new ReadOnlySpan<byte>(row.RemoteAddress, 16), row.RemoteScopeId), IPHelperAbi.DecodeNetworkPort(row.RemotePort)), row.ProcessId);
             }
             return rows;
         }

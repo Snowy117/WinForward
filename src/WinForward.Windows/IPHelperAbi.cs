@@ -9,9 +9,9 @@ public static class IPHelperAbi
     internal const int UdpTableOwnerPid = 1;
 
     /// <summary>SOCKADDR_INET offsets inside the 28-byte union: family at 0, then the family-specific payload.</summary>
-    internal const int Ipv4AddressOffset = 4;
-    internal const int Ipv6AddressOffset = 8;
-    internal const int Ipv6ScopeIdOffset = 24;
+    internal const int IPv4AddressOffset = 4;
+    internal const int IPv6AddressOffset = 8;
+    internal const int IPv6ScopeIdOffset = 24;
     internal const int SockaddrInetSize = 28;
 
     /// <summary>
@@ -40,7 +40,7 @@ public static class IPHelperAbi
 
     internal static ushort DecodeNetworkPort(uint value) => (ushort)IPAddress.NetworkToHostOrder((short)(value & 0xffff));
 
-    internal static IPAddress DecodeIpv6Address(ReadOnlySpan<byte> address, uint scopeId) => new(address, scopeId);
+    internal static IPAddress DecodeIPv6Address(ReadOnlySpan<byte> address, uint scopeId) => new(address, scopeId);
 
     private static void AssertSize<T>(int expected) where T : struct
     {

@@ -14,15 +14,15 @@ namespace WinForward.Protocols;
 public static class TcpResetBuilder
 {
     private const int EthernetHeaderLength = 14;
-    private const int Ipv4HeaderLength = 20;
-    private const int Ipv6HeaderLength = 40;
+    private const int IPv4HeaderLength = 20;
+    private const int IPv6HeaderLength = 40;
     private const int TcpHeaderLength = 20;
     private const byte TcpFlagsOffset = 13;
     private const byte TcpResetAck = 0x14;
     private const byte TcpFinAck = 0x11;
 
     /// <summary>The largest reset frame the builder can produce (IPv6: 14 + 40 + 20 = 74).</summary>
-    public const int MaxResetFrameLength = EthernetHeaderLength + Ipv6HeaderLength + TcpHeaderLength;
+    public const int MaxResetFrameLength = EthernetHeaderLength + IPv6HeaderLength + TcpHeaderLength;
 
     /// <summary>
     /// Writes the reset frame into <paramref name="destination"/> (at least
@@ -75,17 +75,17 @@ public static class TcpResetBuilder
         // ReSharper disable once ConvertIfStatementToSwitchStatement // Each arm guards on the etherType AND both address families; `switch` + `when` clauses would bury those guards in a hot-path frame builder.
         if (etherType == 0x0800 && serverAddress.Family == AddressFamilyKind.IPv4 && clientAddress.Family == AddressFamilyKind.IPv4)
         {
-            const int required = EthernetHeaderLength + Ipv4HeaderLength + TcpHeaderLength;
+            const int required = EthernetHeaderLength + IPv4HeaderLength + TcpHeaderLength;
             if (destination.Length < required) return false;
-            BuildIpv4(originalSynFrame, serverAddress, serverPort, clientAddress, clientPort, serverSequenceNext, clientSequenceNext, tcpFlags, destination);
+            BuildIPv4(originalSynFrame, serverAddress, serverPort, clientAddress, clientPort, serverSequenceNext, clientSequenceNext, tcpFlags, destination);
             written = required;
             return true;
         }
         if (etherType == 0x86dd && serverAddress.Family == AddressFamilyKind.IPv6 && clientAddress.Family == AddressFamilyKind.IPv6)
         {
-            const int required = EthernetHeaderLength + Ipv6HeaderLength + TcpHeaderLength;
+            const int required = EthernetHeaderLength + IPv6HeaderLength + TcpHeaderLength;
             if (destination.Length < required) return false;
-            BuildIpv6(originalSynFrame, serverAddress, serverPort, clientAddress, clientPort, serverSequenceNext, clientSequenceNext, tcpFlags, destination);
+            BuildIPv6(originalSynFrame, serverAddress, serverPort, clientAddress, clientPort, serverSequenceNext, clientSequenceNext, tcpFlags, destination);
             written = required;
             return true;
         }
@@ -121,13 +121,13 @@ public static class TcpResetBuilder
         return TryBuildReset(synFrame, serverAddress, serverPort, clientAddress, clientPort, serverSequenceNext: 0, clientSequenceNext: clientInitialSeq + 1, destination, out written);
     }
 
-    private static void BuildIpv4(ReadOnlySpan<byte> synTemplate, IPAddressValue serverAddress, ushort serverPort, IPAddressValue clientAddress, ushort clientPort, uint serverSequenceNext, uint clientSequenceNext, byte tcpFlags, Span<byte> frame)
+    private static void BuildIPv4(ReadOnlySpan<byte> synTemplate, IPAddressValue serverAddress, ushort serverPort, IPAddressValue clientAddress, ushort clientPort, uint serverSequenceNext, uint clientSequenceNext, byte tcpFlags, Span<byte> frame)
     {
         WriteEthernetHeader(frame, synTemplate, 0x0800);
 
-        var ip = frame.Slice(EthernetHeaderLength, Ipv4HeaderLength);
+        var ip = frame.Slice(EthernetHeaderLength, IPv4HeaderLength);
         ip[0] = 0x45;
-        BinaryPrimitives.WriteUInt16BigEndian(ip.Slice(2, 2), Ipv4HeaderLength + TcpHeaderLength);
+        BinaryPrimitives.WriteUInt16BigEndian(ip.Slice(2, 2), IPv4HeaderLength + TcpHeaderLength);
         BinaryPrimitives.WriteUInt16BigEndian(ip.Slice(6, 2), 0x4000);
         ip[8] = 128;
         ip[9] = 6;
@@ -135,16 +135,16 @@ public static class TcpResetBuilder
         clientAddress.TryWrite(ip.Slice(16, 4), out _);
         BinaryPrimitives.WriteUInt16BigEndian(ip.Slice(10, 2), PacketChecksums.InternetChecksum(ip));
 
-        var tcp = frame.Slice(EthernetHeaderLength + Ipv4HeaderLength, TcpHeaderLength);
+        var tcp = frame.Slice(EthernetHeaderLength + IPv4HeaderLength, TcpHeaderLength);
         WriteTcpHeader(tcp, serverPort, clientPort, serverSequenceNext, clientSequenceNext, tcpFlags);
-        PacketChecksums.WriteTcpChecksum(frame, EthernetHeaderLength + Ipv4HeaderLength, TcpHeaderLength, ip.Slice(12, 4), ip.Slice(16, 4), isIpv6: false);
+        PacketChecksums.WriteTcpChecksum(frame, EthernetHeaderLength + IPv4HeaderLength, TcpHeaderLength, ip.Slice(12, 4), ip.Slice(16, 4), isIPv6: false);
     }
 
-    private static void BuildIpv6(ReadOnlySpan<byte> synTemplate, IPAddressValue serverAddress, ushort serverPort, IPAddressValue clientAddress, ushort clientPort, uint serverSequenceNext, uint clientSequenceNext, byte tcpFlags, Span<byte> frame)
+    private static void BuildIPv6(ReadOnlySpan<byte> synTemplate, IPAddressValue serverAddress, ushort serverPort, IPAddressValue clientAddress, ushort clientPort, uint serverSequenceNext, uint clientSequenceNext, byte tcpFlags, Span<byte> frame)
     {
         WriteEthernetHeader(frame, synTemplate, 0x86dd);
 
-        var ip = frame.Slice(EthernetHeaderLength, Ipv6HeaderLength);
+        var ip = frame.Slice(EthernetHeaderLength, IPv6HeaderLength);
         ip[0] = 0x60;
         BinaryPrimitives.WriteUInt16BigEndian(ip.Slice(4, 2), TcpHeaderLength);
         ip[6] = 6;
@@ -152,9 +152,9 @@ public static class TcpResetBuilder
         serverAddress.TryWrite(ip.Slice(8, 16), out _);
         clientAddress.TryWrite(ip.Slice(24, 16), out _);
 
-        var tcp = frame.Slice(EthernetHeaderLength + Ipv6HeaderLength, TcpHeaderLength);
+        var tcp = frame.Slice(EthernetHeaderLength + IPv6HeaderLength, TcpHeaderLength);
         WriteTcpHeader(tcp, serverPort, clientPort, serverSequenceNext, clientSequenceNext, tcpFlags);
-        PacketChecksums.WriteTcpChecksum(frame, EthernetHeaderLength + Ipv6HeaderLength, TcpHeaderLength, ip.Slice(8, 16), ip.Slice(24, 16), isIpv6: true);
+        PacketChecksums.WriteTcpChecksum(frame, EthernetHeaderLength + IPv6HeaderLength, TcpHeaderLength, ip.Slice(8, 16), ip.Slice(24, 16), isIPv6: true);
     }
 
     private static void WriteEthernetHeader(Span<byte> frame, ReadOnlySpan<byte> synTemplate, ushort etherType)

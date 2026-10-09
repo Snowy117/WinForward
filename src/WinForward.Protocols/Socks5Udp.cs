@@ -19,8 +19,8 @@ public static class Socks5UdpCodec
     /// </summary>
     public static bool TryEncode(IPAddressValue destinationAddress, ushort destinationPort, ReadOnlySpan<byte> payload, Span<byte> destination, out int written)
     {
-        var isIpv4 = destinationAddress.Family == AddressFamilyKind.IPv4;
-        var addressLength = isIpv4 ? 4 : 16;
+        var isIPv4 = destinationAddress.Family == AddressFamilyKind.IPv4;
+        var addressLength = isIPv4 ? 4 : 16;
         var totalLength = 6 + addressLength + payload.Length;
         if (destination.Length < totalLength)
         {
@@ -31,7 +31,7 @@ public static class Socks5UdpCodec
         destination[0] = 0;
         destination[1] = 0;
         destination[2] = 0;
-        destination[3] = isIpv4 ? (byte)1 : (byte)4;
+        destination[3] = isIPv4 ? (byte)1 : (byte)4;
         _ = destinationAddress.TryWrite(destination.Slice(4, addressLength), out _);
         BinaryPrimitives.WriteUInt16BigEndian(destination.Slice(4 + addressLength, 2), destinationPort);
         payload.CopyTo(destination[(6 + addressLength)..]);

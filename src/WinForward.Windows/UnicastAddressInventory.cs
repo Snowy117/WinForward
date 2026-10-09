@@ -158,7 +158,7 @@ public static partial class UnicastAddressInventory
         {
             return new UnicastAddressObservation(
                 row.InterfaceLuid,
-                new IPAddress(new ReadOnlySpan<byte>(row.Address + IPHelperAbi.Ipv4AddressOffset, 4)));
+                new IPAddress(new ReadOnlySpan<byte>(row.Address + IPHelperAbi.IPv4AddressOffset, 4)));
         }
 
         if (family == AfInet6)
@@ -166,8 +166,8 @@ public static partial class UnicastAddressInventory
             return new UnicastAddressObservation(
                 row.InterfaceLuid,
                 new IPAddress(
-                    new ReadOnlySpan<byte>(row.Address + IPHelperAbi.Ipv6AddressOffset, 16),
-                    *(uint*)(row.Address + IPHelperAbi.Ipv6ScopeIdOffset)));
+                    new ReadOnlySpan<byte>(row.Address + IPHelperAbi.IPv6AddressOffset, 16),
+                    *(uint*)(row.Address + IPHelperAbi.IPv6ScopeIdOffset)));
         }
 
         throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture, $"The unicast address table row {index} carries unsupported address family {family}."));

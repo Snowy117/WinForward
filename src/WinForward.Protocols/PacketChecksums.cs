@@ -25,8 +25,8 @@ public static class PacketChecksums
         var etherType = BinaryPrimitives.ReadUInt16BigEndian(ethernetFrame.Slice(12, 2));
         return etherType switch
         {
-            0x0800 => TryRewriteIpv4(ethernetFrame, sourceAddress, sourcePort, destinationAddress, destinationPort),
-            0x86dd => TryRewriteIpv6(ethernetFrame, sourceAddress, sourcePort, destinationAddress, destinationPort),
+            0x0800 => TryRewriteIPv4(ethernetFrame, sourceAddress, sourcePort, destinationAddress, destinationPort),
+            0x86dd => TryRewriteIPv6(ethernetFrame, sourceAddress, sourcePort, destinationAddress, destinationPort),
             _ => false,
         };
     }
@@ -41,8 +41,8 @@ public static class PacketChecksums
         var etherType = BinaryPrimitives.ReadUInt16BigEndian(ethernetFrame.Slice(12, 2));
         return etherType switch
         {
-            0x0800 => TryRewriteIpv4Tcp(ethernetFrame, sourceAddress, sourcePort, destinationAddress, destinationPort),
-            0x86dd => TryRewriteIpv6Tcp(ethernetFrame, sourceAddress, sourcePort, destinationAddress, destinationPort),
+            0x0800 => TryRewriteIPv4Tcp(ethernetFrame, sourceAddress, sourcePort, destinationAddress, destinationPort),
+            0x86dd => TryRewriteIPv6Tcp(ethernetFrame, sourceAddress, sourcePort, destinationAddress, destinationPort),
             _ => false,
         };
     }
@@ -66,11 +66,11 @@ public static class PacketChecksums
         if (ethernetFrame.Length < layout.TransportEnd) return false;
         if (sourceAddress.Family != destinationAddress.Family || (byte)sourceAddress.Family != layout.Family) return false;
         return layout.Family == (byte)AddressFamilyKind.IPv6
-            ? RewriteIpv6Tcp(ethernetFrame, layout.TransportOffset, sourceAddress, sourcePort, destinationAddress, destinationPort)
-            : RewriteIpv4Tcp(ethernetFrame, layout.TransportOffset, sourceAddress, sourcePort, destinationAddress, destinationPort);
+            ? RewriteIPv6Tcp(ethernetFrame, layout.TransportOffset, sourceAddress, sourcePort, destinationAddress, destinationPort)
+            : RewriteIPv4Tcp(ethernetFrame, layout.TransportOffset, sourceAddress, sourcePort, destinationAddress, destinationPort);
     }
 
-    private static bool TryRewriteIpv4(Span<byte> frame, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
+    private static bool TryRewriteIPv4(Span<byte> frame, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
     {
         const int ipOffset = 14;
         if (sourceAddress.Family != AddressFamilyKind.IPv4 || destinationAddress.Family != sourceAddress.Family || frame.Length < ipOffset + 20) return false;
@@ -89,16 +89,16 @@ public static class PacketChecksums
         frame[ipOffset + 10] = 0;
         frame[ipOffset + 11] = 0;
         BinaryPrimitives.WriteUInt16BigEndian(frame.Slice(ipOffset + 10, 2), InternetChecksum(frame.Slice(ipOffset, headerLength)));
-        WriteUdpChecksum(frame, udpOffset, udpLength, frame.Slice(ipOffset + 12, 4), frame.Slice(ipOffset + 16, 4), isIpv6: false);
+        WriteUdpChecksum(frame, udpOffset, udpLength, frame.Slice(ipOffset + 12, 4), frame.Slice(ipOffset + 16, 4), isIPv6: false);
         return true;
     }
 
-    private static bool TryRewriteIpv6(Span<byte> frame, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
+    private static bool TryRewriteIPv6(Span<byte> frame, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
     {
         const int ipOffset = 14;
         if (sourceAddress.Family != AddressFamilyKind.IPv6 || destinationAddress.Family != sourceAddress.Family || frame.Length < ipOffset + 40 || frame[ipOffset] >> 4 != 6) return false;
         var payloadLength = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(ipOffset + 4, 2));
-        if (frame.Length < ipOffset + 40 + payloadLength || !TryFindIpv6Transport(frame, ipOffset, payloadLength, 17, out var udpOffset)) return false;
+        if (frame.Length < ipOffset + 40 + payloadLength || !TryFindIPv6Transport(frame, ipOffset, payloadLength, 17, out var udpOffset)) return false;
         var availableLength = ipOffset + 40 + payloadLength - udpOffset;
         if (availableLength < 8 || frame.Length < udpOffset + 8) return false;
         var udpLength = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(udpOffset + 4, 2));
@@ -107,7 +107,7 @@ public static class PacketChecksums
         sourceAddress.TryWrite(frame.Slice(ipOffset + 8, 16), out _);
         destinationAddress.TryWrite(frame.Slice(ipOffset + 24, 16), out _);
         WritePorts(frame, udpOffset, sourcePort, destinationPort);
-        WriteUdpChecksum(frame, udpOffset, udpLength, frame.Slice(ipOffset + 8, 16), frame.Slice(ipOffset + 24, 16), isIpv6: true);
+        WriteUdpChecksum(frame, udpOffset, udpLength, frame.Slice(ipOffset + 8, 16), frame.Slice(ipOffset + 24, 16), isIPv6: true);
         return true;
     }
 
@@ -117,7 +117,7 @@ public static class PacketChecksums
     // emitted by MSTCP in answer to an injected leg, always carry valid checksums, and the
     // capture pipeline never hands this rewriter an offload-zeroed segment. The full-recompute
     // oracle below pins that equivalence by property.
-    private static bool TryRewriteIpv4Tcp(Span<byte> frame, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
+    private static bool TryRewriteIPv4Tcp(Span<byte> frame, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
     {
         const int ipOffset = 14;
         if (sourceAddress.Family != AddressFamilyKind.IPv4 || destinationAddress.Family != sourceAddress.Family || frame.Length < ipOffset + 20) return false;
@@ -132,10 +132,10 @@ public static class PacketChecksums
         var dataOffset = (frame[tcpOffset + 12] >> 4) * 4;
         if (dataOffset < 20 || dataOffset > tcpLength) return false;
 
-        return RewriteIpv4Tcp(frame, tcpOffset, sourceAddress, sourcePort, destinationAddress, destinationPort);
+        return RewriteIPv4Tcp(frame, tcpOffset, sourceAddress, sourcePort, destinationAddress, destinationPort);
     }
 
-    private static bool RewriteIpv4Tcp(Span<byte> frame, int tcpOffset, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
+    private static bool RewriteIPv4Tcp(Span<byte> frame, int tcpOffset, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
     {
         const int ipOffset = 14;
         var oldSource0 = ReadWord(frame, ipOffset + 12);
@@ -164,21 +164,21 @@ public static class PacketChecksums
         return true;
     }
 
-    private static bool TryRewriteIpv6Tcp(Span<byte> frame, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
+    private static bool TryRewriteIPv6Tcp(Span<byte> frame, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
     {
         const int ipOffset = 14;
         if (sourceAddress.Family != AddressFamilyKind.IPv6 || destinationAddress.Family != sourceAddress.Family || frame.Length < ipOffset + 40 || frame[ipOffset] >> 4 != 6) return false;
         var payloadLength = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(ipOffset + 4, 2));
-        if (frame.Length < ipOffset + 40 + payloadLength || !TryFindIpv6Transport(frame, ipOffset, payloadLength, 6, out var tcpOffset)) return false;
+        if (frame.Length < ipOffset + 40 + payloadLength || !TryFindIPv6Transport(frame, ipOffset, payloadLength, 6, out var tcpOffset)) return false;
         var tcpLength = ipOffset + 40 + payloadLength - tcpOffset;
         if (tcpLength < 20 || frame.Length < tcpOffset + tcpLength) return false;
         var dataOffset = (frame[tcpOffset + 12] >> 4) * 4;
         if (dataOffset < 20 || dataOffset > tcpLength) return false;
 
-        return RewriteIpv6Tcp(frame, tcpOffset, sourceAddress, sourcePort, destinationAddress, destinationPort);
+        return RewriteIPv6Tcp(frame, tcpOffset, sourceAddress, sourcePort, destinationAddress, destinationPort);
     }
 
-    private static bool RewriteIpv6Tcp(Span<byte> frame, int tcpOffset, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
+    private static bool RewriteIPv6Tcp(Span<byte> frame, int tcpOffset, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
     {
         const int ipOffset = 14;
         Span<ushort> oldAddressWords = stackalloc ushort[16];
@@ -211,13 +211,13 @@ public static class PacketChecksums
         var etherType = BinaryPrimitives.ReadUInt16BigEndian(ethernetFrame.Slice(12, 2));
         return etherType switch
         {
-            0x0800 => RewriteIpv4TcpFull(ethernetFrame, sourceAddress, sourcePort, destinationAddress, destinationPort),
-            0x86dd => RewriteIpv6TcpFull(ethernetFrame, sourceAddress, sourcePort, destinationAddress, destinationPort),
+            0x0800 => RewriteIPv4TcpFull(ethernetFrame, sourceAddress, sourcePort, destinationAddress, destinationPort),
+            0x86dd => RewriteIPv6TcpFull(ethernetFrame, sourceAddress, sourcePort, destinationAddress, destinationPort),
             _ => false,
         };
     }
 
-    private static bool RewriteIpv4TcpFull(Span<byte> frame, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
+    private static bool RewriteIPv4TcpFull(Span<byte> frame, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
     {
         const int ipOffset = 14;
         var headerLength = (frame[ipOffset] & 0x0f) * 4;
@@ -230,20 +230,20 @@ public static class PacketChecksums
         frame[ipOffset + 10] = 0;
         frame[ipOffset + 11] = 0;
         BinaryPrimitives.WriteUInt16BigEndian(frame.Slice(ipOffset + 10, 2), InternetChecksum(frame.Slice(ipOffset, headerLength)));
-        WriteTcpChecksum(frame, tcpOffset, tcpLength, frame.Slice(ipOffset + 12, 4), frame.Slice(ipOffset + 16, 4), isIpv6: false);
+        WriteTcpChecksum(frame, tcpOffset, tcpLength, frame.Slice(ipOffset + 12, 4), frame.Slice(ipOffset + 16, 4), isIPv6: false);
         return true;
     }
 
-    private static bool RewriteIpv6TcpFull(Span<byte> frame, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
+    private static bool RewriteIPv6TcpFull(Span<byte> frame, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
     {
         const int ipOffset = 14;
         var payloadLength = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(ipOffset + 4, 2));
-        if (!TryFindIpv6Transport(frame, ipOffset, payloadLength, 6, out var tcpOffset)) return false;
+        if (!TryFindIPv6Transport(frame, ipOffset, payloadLength, 6, out var tcpOffset)) return false;
         var tcpLength = ipOffset + 40 + payloadLength - tcpOffset;
         sourceAddress.TryWrite(frame.Slice(ipOffset + 8, 16), out _);
         destinationAddress.TryWrite(frame.Slice(ipOffset + 24, 16), out _);
         WritePorts(frame, tcpOffset, sourcePort, destinationPort);
-        WriteTcpChecksum(frame, tcpOffset, tcpLength, frame.Slice(ipOffset + 8, 16), frame.Slice(ipOffset + 24, 16), isIpv6: true);
+        WriteTcpChecksum(frame, tcpOffset, tcpLength, frame.Slice(ipOffset + 8, 16), frame.Slice(ipOffset + 24, 16), isIPv6: true);
         return true;
     }
 
@@ -268,7 +268,7 @@ public static class PacketChecksums
         return (ushort)~sum;
     }
 
-    private static bool TryFindIpv6Transport(ReadOnlySpan<byte> frame, int ipOffset, int payloadLength, byte targetNextHeader, out int transportOffset)
+    private static bool TryFindIPv6Transport(ReadOnlySpan<byte> frame, int ipOffset, int payloadLength, byte targetNextHeader, out int transportOffset)
     {
         var nextHeader = frame[ipOffset + 6];
         transportOffset = ipOffset + 40;
@@ -285,12 +285,12 @@ public static class PacketChecksums
         return nextHeader == targetNextHeader;
     }
 
-    internal static void WriteTcpChecksum(Span<byte> frame, int tcpOffset, int tcpLength, ReadOnlySpan<byte> source, ReadOnlySpan<byte> destination, bool isIpv6)
+    internal static void WriteTcpChecksum(Span<byte> frame, int tcpOffset, int tcpLength, ReadOnlySpan<byte> source, ReadOnlySpan<byte> destination, bool isIPv6)
     {
         frame[tcpOffset + 16] = 0;
         frame[tcpOffset + 17] = 0;
         var sum = Sum(source) + Sum(destination) + 6u;
-        sum += isIpv6 ? (uint)tcpLength : (ushort)tcpLength;
+        sum += isIPv6 ? (uint)tcpLength : (ushort)tcpLength;
         sum += Sum(frame.Slice(tcpOffset, tcpLength));
         // TCP has no UDP-style optional-zero-checksum: the folded value is stored verbatim,
         // so the rare 0x0000 result is written directly rather than inverted to 0xFFFF.
@@ -303,12 +303,12 @@ public static class PacketChecksums
         BinaryPrimitives.WriteUInt16BigEndian(frame.Slice(transportOffset + 2, 2), destinationPort);
     }
 
-    internal static void WriteUdpChecksum(Span<byte> frame, int udpOffset, int udpLength, ReadOnlySpan<byte> source, ReadOnlySpan<byte> destination, bool isIpv6)
+    internal static void WriteUdpChecksum(Span<byte> frame, int udpOffset, int udpLength, ReadOnlySpan<byte> source, ReadOnlySpan<byte> destination, bool isIPv6)
     {
         frame[udpOffset + 6] = 0;
         frame[udpOffset + 7] = 0;
         var sum = Sum(source) + Sum(destination) + 17u;
-        sum += isIpv6 ? (uint)udpLength : (ushort)udpLength;
+        sum += isIPv6 ? (uint)udpLength : (ushort)udpLength;
         sum += Sum(frame.Slice(udpOffset, udpLength));
         var checksum = Finish(sum);
         BinaryPrimitives.WriteUInt16BigEndian(frame.Slice(udpOffset + 6, 2), checksum == 0 ? ushort.MaxValue : checksum);

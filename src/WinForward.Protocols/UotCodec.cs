@@ -71,8 +71,8 @@ public static class UotCodec
             return false;
         }
 
-        var isIpv4 = destinationAddress.Family == AddressFamilyKind.IPv4;
-        var addressLength = isIpv4 ? 4 : 16;
+        var isIPv4 = destinationAddress.Family == AddressFamilyKind.IPv4;
+        var addressLength = isIPv4 ? 4 : 16;
         var totalLength = 2 + addressLength + 2;
         if (destination.Length < totalLength)
         {
@@ -81,7 +81,7 @@ public static class UotCodec
         }
 
         destination[0] = 1;
-        destination[1] = isIpv4 ? Socks5Messages.AddressTypeIPv4 : Socks5Messages.AddressTypeIPv6;
+        destination[1] = isIPv4 ? Socks5Messages.AddressTypeIPv4 : Socks5Messages.AddressTypeIPv6;
         _ = destinationAddress.TryWrite(destination.Slice(2, addressLength), out _);
         BinaryPrimitives.WriteUInt16BigEndian(destination.Slice(2 + addressLength, 2), destinationPort);
         written = totalLength;

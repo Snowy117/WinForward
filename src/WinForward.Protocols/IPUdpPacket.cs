@@ -32,13 +32,13 @@ public static class IPUdpPacket
         var etherType = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(12, 2));
         return etherType switch
         {
-            0x0800 => TryParseIpv4(frame, out packet),
-            0x86dd => TryParseIpv6(frame, out packet),
+            0x0800 => TryParseIPv4(frame, out packet),
+            0x86dd => TryParseIPv6(frame, out packet),
             _ => false,
         };
     }
 
-    private static bool TryParseIpv4(ReadOnlySpan<byte> bytes, out UdpPacketSpanView packet)
+    private static bool TryParseIPv4(ReadOnlySpan<byte> bytes, out UdpPacketSpanView packet)
     {
         packet = default;
         const int offset = 14;
@@ -55,7 +55,7 @@ public static class IPUdpPacket
         return TryParseUdp(bytes, offset + headerLength, source, destination, headerLength, totalLength - headerLength, out packet);
     }
 
-    private static bool TryParseIpv6(ReadOnlySpan<byte> bytes, out UdpPacketSpanView packet)
+    private static bool TryParseIPv6(ReadOnlySpan<byte> bytes, out UdpPacketSpanView packet)
     {
         packet = default;
         const int offset = 14;

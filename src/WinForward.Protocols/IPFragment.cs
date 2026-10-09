@@ -14,12 +14,12 @@ namespace WinForward.Protocols;
 /// </summary>
 public static class IPFragment
 {
-    private const ushort EtherTypeIpv4 = 0x0800;
-    private const ushort EtherTypeIpv6 = 0x86dd;
+    private const ushort EtherTypeIPv4 = 0x0800;
+    private const ushort EtherTypeIPv6 = 0x86dd;
     private const int EthernetHeaderLength = 14;
-    private const int Ipv4HeaderLength = 20;
-    private const int Ipv6HeaderLength = 40;
-    private const byte Ipv6FragmentHeader = 44;
+    private const int IPv4HeaderLength = 20;
+    private const int IPv6HeaderLength = 40;
+    private const byte IPv6FragmentHeader = 44;
 
     /// <summary>
     /// Detects an IP fragment: an IPv4 frame with any of the reserved/MF bits or a non-zero
@@ -33,8 +33,8 @@ public static class IPFragment
         var etherType = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(12, 2));
         return etherType switch
         {
-            EtherTypeIpv4 => IsIpv4Fragment(frame),
-            EtherTypeIpv6 => IsIpv6Fragment(frame),
+            EtherTypeIPv4 => IsIPv4Fragment(frame),
+            EtherTypeIPv6 => IsIPv6Fragment(frame),
             _ => false,
         };
     }
@@ -51,13 +51,13 @@ public static class IPFragment
         var etherType = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(12, 2));
         switch (etherType)
         {
-            case EtherTypeIpv4:
-                if (frame.Length < EthernetHeaderLength + Ipv4HeaderLength || frame[EthernetHeaderLength] >> 4 != 4) return false;
+            case EtherTypeIPv4:
+                if (frame.Length < EthernetHeaderLength + IPv4HeaderLength || frame[EthernetHeaderLength] >> 4 != 4) return false;
                 source = IPAddressValue.FromIPv4(frame.Slice(EthernetHeaderLength + 12, 4));
                 destination = IPAddressValue.FromIPv4(frame.Slice(EthernetHeaderLength + 16, 4));
                 return true;
-            case EtherTypeIpv6:
-                if (frame.Length < EthernetHeaderLength + Ipv6HeaderLength || frame[EthernetHeaderLength] >> 4 != 6) return false;
+            case EtherTypeIPv6:
+                if (frame.Length < EthernetHeaderLength + IPv6HeaderLength || frame[EthernetHeaderLength] >> 4 != 6) return false;
                 source = IPAddressValue.FromIPv6(frame.Slice(EthernetHeaderLength + 8, 16));
                 destination = IPAddressValue.FromIPv6(frame.Slice(EthernetHeaderLength + 24, 16));
                 return true;
@@ -66,32 +66,32 @@ public static class IPFragment
         }
     }
 
-    private static bool IsIpv4Fragment(ReadOnlySpan<byte> frame)
+    private static bool IsIPv4Fragment(ReadOnlySpan<byte> frame)
     {
-        if (frame.Length < EthernetHeaderLength + Ipv4HeaderLength || frame[EthernetHeaderLength] >> 4 != 4) return false;
+        if (frame.Length < EthernetHeaderLength + IPv4HeaderLength || frame[EthernetHeaderLength] >> 4 != 4) return false;
         var fragment = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(EthernetHeaderLength + 6, 2));
         return (fragment & 0xbfff) != 0;
     }
 
-    private static bool IsIpv6Fragment(ReadOnlySpan<byte> frame)
+    private static bool IsIPv6Fragment(ReadOnlySpan<byte> frame)
     {
-        if (frame.Length < EthernetHeaderLength + Ipv6HeaderLength || frame[EthernetHeaderLength] >> 4 != 6) return false;
+        if (frame.Length < EthernetHeaderLength + IPv6HeaderLength || frame[EthernetHeaderLength] >> 4 != 6) return false;
         // Walk the extension-header chain with the canonical parser's rules and bounds; a
         // fragment header reached anywhere in the chain makes the frame a fragment, and a
         // malformed chain is not a fragment (it keeps the non-flow pass behavior).
         var payloadLength = BinaryPrimitives.ReadUInt16BigEndian(frame.Slice(EthernetHeaderLength + 4, 2));
         var nextHeader = frame[EthernetHeaderLength + 6];
-        var offset = EthernetHeaderLength + Ipv6HeaderLength;
+        var offset = EthernetHeaderLength + IPv6HeaderLength;
         var extensionBytes = 0;
         while (nextHeader is 0 or 43 or 60)
         {
             if (offset + 2 > frame.Length) return false;
             var extensionLength = (frame[offset + 1] + 1) * 8;
-            if (extensionBytes + extensionLength > 256 || offset + extensionLength > EthernetHeaderLength + Ipv6HeaderLength + payloadLength) return false;
+            if (extensionBytes + extensionLength > 256 || offset + extensionLength > EthernetHeaderLength + IPv6HeaderLength + payloadLength) return false;
             nextHeader = frame[offset];
             offset += extensionLength;
             extensionBytes += extensionLength;
         }
-        return nextHeader == Ipv6FragmentHeader;
+        return nextHeader == IPv6FragmentHeader;
     }
 }

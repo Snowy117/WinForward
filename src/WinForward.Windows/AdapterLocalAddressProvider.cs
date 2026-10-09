@@ -13,7 +13,7 @@ namespace WinForward.Windows;
 /// </summary>
 public readonly record struct IPAdapterUnicastInfo(string Id, IReadOnlyList<IPAdapterUnicastAddress> Addresses);
 
-public readonly record struct IPAdapterUnicastAddress(IPAddress Address, IPAddress? Ipv4Mask);
+public readonly record struct IPAdapterUnicastAddress(IPAddress Address, IPAddress? IPv4Mask);
 
 public interface IAdapterLocalAddressProvider
 {
@@ -202,8 +202,8 @@ public sealed class WindowsAdapterLocalAddressProvider : IAdapterLocalAddressPro
         if (address.AddressFamily != clientAddress.AddressFamily) return false;
         if (address.AddressFamily == AddressFamily.InterNetwork)
         {
-            if (candidate.Ipv4Mask is null) return false;
-            var mask = candidate.Ipv4Mask.GetAddressBytes();
+            if (candidate.IPv4Mask is null) return false;
+            var mask = candidate.IPv4Mask.GetAddressBytes();
             if (mask.Length != 4 || mask.All(octet => octet == 0)) return false;
             var local = address.GetAddressBytes();
             var client = clientAddress.GetAddressBytes();
