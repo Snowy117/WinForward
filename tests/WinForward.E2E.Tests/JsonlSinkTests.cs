@@ -43,9 +43,9 @@ public sealed class JsonlSinkTests
         Assert.Equal(1, sink.WriteErrors);
     }
 
-    // The counter-target of "close never throws" is the writer this sink replaced: JsonlFile threw a
-    // close failure out of DisposeAsync, which is how a full disk killed a client run after its last
-    // record instead of failing the arm that owned the file. Both policies now book it and return.
+    // Close never throws: a close failure must be booked and returned rather than thrown, which is
+    // how a full disk stays a counted error instead of killing a client run after its last record.
+    // Both policies book it and return.
     [Fact]
     public async Task ACloseFailureIsCountedAndNeverThrown()
     {
@@ -110,10 +110,9 @@ public sealed class JsonlSinkTests
         Assert.Empty(stream.ToArray());
     }
 
-    // The counter-target here is any sink that passes the caller's token into the stream write: a
-    // cancellation landing between the record and its newline leaves a half line in the file, which
-    // every reader books as a bad line. This test cancels while the record is inside the write and
-    // requires the record to come out whole.
+    // A cancellation landing between the record and its newline would leave a half line in the file,
+    // which every reader books as a bad line: the record must come out whole even when the caller's
+    // token is cancelled while the write is in progress.
     [Fact]
     public async Task ACancellationDuringTheWriteDoesNotCutTheRecordInHalf()
     {
@@ -149,9 +148,8 @@ public sealed class JsonlSinkTests
             {
                 await sink.WriteAsync(static writer => writer.WriteString("type", "probe"), CancellationToken.None);
 
-                // Counter-target: the writer this sink replaced only wrote to the file when the arm
-                // ended, so a crash mid-arm left a 0-byte file and the arm's whole sample series was
-                // lost (D1/D2/D4). This loop never sees those bytes and fails.
+                // The arm polls the file while it is still open, so a record that only reaches the
+                // file at close would leave the probe above reading zero bytes.
                 var deadline = Environment.TickCount64 + 5000;
                 while (Environment.TickCount64 < deadline && new FileInfo(path).Length == 0)
                 {

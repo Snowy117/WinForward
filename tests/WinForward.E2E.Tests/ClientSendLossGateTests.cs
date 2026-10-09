@@ -11,7 +11,7 @@ namespace WinForward.E2E.Tests;
 /// The five <c>gates/clientSendLoss</c> values each arm derives from its own counters, one fact per
 /// arm, each driving that counter to a non-zero value: a gate that is only ever asserted at zero would
 /// pass for a literal. The four terms of the LOSS and MIX formula are driven one at a time as well,
-/// because "the client destroyed this datagram" has to be true of the out-of-range slot too (D2/D7).
+/// because "the client destroyed this datagram" has to be true of the out-of-range slot too.
 /// </summary>
 public sealed class ClientSendLossGateTests
 {
@@ -40,8 +40,8 @@ public sealed class ClientSendLossGateTests
             outcome.Gates.Keys.Order(StringComparer.Ordinal));
     }
 
-    // #12/DNS: the arm's own drop is the pacing slot the in-flight window refused. The black hole
-    // never answers, so the window fills and the refusal is guaranteed rather than hoped for.
+    // The arm's own drop is the pacing slot the in-flight window refused. The black hole never
+    // answers, so the window fills and the refusal is guaranteed rather than hoped for.
     [Fact]
     public async Task TheDnsArmGatesTheQueriesItsWindowRefusedToSend()
     {
@@ -68,10 +68,10 @@ public sealed class ClientSendLossGateTests
         Assert.Equal(metrics.Unsent, outcome.Gates[ArmKeys.Common.Gates.ClientSendLoss]);
     }
 
-    // #12/DNS negative population: a socket error belongs to no single query, so it is not the pacing
-    // slot a full in-flight window refused (D19.2 ④), and a formula that folded it in would publish the
-    // same number as `unsent` on every run whose socket never failed. Nothing is bound to the DNS port,
-    // so the resolver's socket fails after its first send and the two populations differ: `unsent` is the
+    // Negative population: a socket error belongs to no single query, so it is not the pacing slot a
+    // full in-flight window refused, and a formula that folded it in would publish the same number as
+    // `unsent` on every run whose socket never failed. Nothing is bound to the DNS port, so the
+    // resolver's socket fails after its first send and the two populations differ: `unsent` is the
     // slot the arm skipped, `socketErrors` is the failure that ended the phase.
     [Fact]
     public async Task TheDnsArmDoesNotGateItsSocketErrorsAsClientSendLoss()
@@ -96,8 +96,8 @@ public sealed class ClientSendLossGateTests
         Assert.Equal(metrics.Unsent, outcome.Gates[ArmKeys.Common.Gates.ClientSendLoss]);
     }
 
-    // #12/THRU: the frames the socket refused. The listener resets every connection it accepts, so the
-    // sends that follow the reset throw and the arm counts them instead of publishing a clean gate.
+    // The frames the socket refused. The listener resets every connection it accepts, so the sends
+    // that follow the reset throw and the arm counts them instead of publishing a clean gate.
     [Fact]
     public async Task TheThroughputArmGatesTheFramesItsSocketRefused()
     {
@@ -125,8 +125,8 @@ public sealed class ClientSendLossGateTests
         Assert.Equal(metrics.SendFailures, outcome.Gates[ArmKeys.Common.Gates.ClientSendLoss]);
     }
 
-    // #12/REL: the scheduled slots no attempt ran for. The arm back-pressures rather than discards, so
-    // the difference is zero on a run that retired its attempts -- which is exactly what the arm run
+    // The scheduled slots no attempt ran for. The arm back-pressures rather than discards, so the
+    // difference is zero on a run that retired its attempts -- which is exactly what the arm run
     // below pins -- and the forged pair below drives the production difference to a non-zero value.
     [Fact]
     public async Task TheReliabilityArmGatesTheScheduledSlotsNoAttemptRanFor()
@@ -173,9 +173,9 @@ public sealed class ClientSendLossGateTests
             StringComparison.Ordinal);
     }
 
-    // D7: the four terms of the loss arm's own formula, driven one at a time. The out-of-range slot is
-    // the new one, and it is driven by the same call an arm makes: it is refused, it is not sent, it is
-    // in no bucket, and it is still client send loss.
+    // The four terms of the loss arm's own formula, driven one at a time. The out-of-range slot is
+    // the new one, and it is driven by the same call an arm makes: it is refused, it is not sent, it
+    // is in no bucket, and it is still client send loss.
     [Fact]
     public void TheLossArmGateIsEveryWayTheClientDestroysADatagram()
     {
@@ -216,7 +216,7 @@ public sealed class ClientSendLossGateTests
         Assert.Equal(4, metrics.Classes.Udp.ClientSendLoss);
     }
 
-    // One datagram per term, and a different count per side of the D7 refusal: a send that threw, a slot
+    // One datagram per term, and a different count per side of the refusal: a send that threw, a slot
     // the window refused, a datagram still inside its window when observation stopped, one slot the send
     // side refused as out of range, and two corrupt arrivals naming sequences the receive side refused.
     // The two refusal counts differ, so the sum cannot be reproduced by the wrong side's counter and

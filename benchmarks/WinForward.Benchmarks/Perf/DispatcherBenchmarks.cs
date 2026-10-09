@@ -13,7 +13,6 @@ public class DispatcherBenchmarks
 {
     private static long s_sink;
 
-    /// <summary>The listener port claimed in the prefilter table for the diverted control (X1).</summary>
     private const ushort CandidatePort = 40_000;
 
     private FlowDispatcher _dispatcher = null!;
@@ -62,9 +61,9 @@ public class DispatcherBenchmarks
         _proxyExecutor = new CountingExecutor();
         _proxyDispatcher = new FlowDispatcher(proxyConfiguration, new NeverOwnedGuard(), _proxyExecutor, logger: logger);
 
-        // The production compositions wire a reverse handler (X1); the handler runs the real
-        // predicate path (protocol gate + a real TcpRedirectTable port array) and answers
-        // NotRelevant from its handling side, which warm packets never reach.
+        // The production compositions wire a reverse handler, which runs the real predicate path:
+        // protocol gate plus a real TcpRedirectTable port array. It answers NotRelevant on a path
+        // warm packets do not take.
         var reverseTable = new TcpRedirectTable();
         var reverseHandler = new PrefilterReverseHandler(reverseTable);
         _productionUdpKey = BenchmarkShared.CreateFlowKey(0);
@@ -75,9 +74,8 @@ public class DispatcherBenchmarks
         _productionProxyExecutor = new CountingExecutor();
         _productionProxyDispatcher = new FlowDispatcher(proxyConfiguration, new NeverOwnedGuard(), _productionProxyExecutor, reverseHandler: reverseHandler, logger: logger);
 
-        // The diverted control: a claimed listener port makes the candidate key's source port a
-        // prefilter hit, so every dispatch pays the slow path — the shape 100% of production
-        // packets ran before the X1 fix.
+        // The diverted control: the claimed listener port below makes the candidate key's source
+        // port a prefilter hit, so every dispatch pays the slow path.
         var claimKey = BenchmarkShared.CreateTcpFlowKey(CandidatePort);
         AssertClaim(reverseTable, claimKey, CandidatePort);
         _candidateKey = claimKey;
@@ -113,11 +111,11 @@ public class DispatcherBenchmarks
     }
 
     /// <summary>
-    /// The production-composition counterpart of <see cref="WarmPassDisabledTraceAsync"/> (X1):
+    /// The production-composition counterpart of <see cref="WarmPassDisabledTraceAsync"/>:
     /// identical shape plus a wired reverse handler, which is how <c>Program</c> always builds the
     /// dispatcher. The handler's prefilter declines this UDP key, so the packet must ride the warm
-    /// entry — this number matching the handler-less 160 B baseline proves the warm entry is live
-    /// in the production shape.
+    /// entry — this number matching the handler-less baseline proves the warm entry is live in the
+    /// production shape.
     /// </summary>
     [Benchmark]
     public async Task WarmPassProductionAsync()
@@ -130,7 +128,7 @@ public class DispatcherBenchmarks
     }
 
     /// <summary>
-    /// The production main path under a wired reverse handler (X1): a resolved TCP proxy decision
+    /// The production main path under a wired reverse handler: a resolved TCP proxy decision
     /// whose source port is no live listener port, so the prefilter declines and the packet rides
     /// the warm entry — the strictest warm shape, paying the full predicate (protocol gate + port
     /// array probe) plus the inline server resolution.
@@ -146,9 +144,9 @@ public class DispatcherBenchmarks
     }
 
     /// <summary>
-    /// The diverted control (X1): a TCP key whose source port is a claimed listener port, so the
+    /// The diverted control: a TCP key whose source port is a claimed listener port, so the
     /// prefilter diverts every dispatch into <see cref="FlowDispatcher.DispatchSlowAsync"/>. This
-    /// is the per-packet cost 100% of production traffic paid before the warm-entry revival.
+    /// is the per-packet cost production traffic paid before the warm entry was revived.
     /// </summary>
     [Benchmark]
     public async Task ReverseCandidateSlowPathAsync()
@@ -164,15 +162,14 @@ public class DispatcherBenchmarks
     {
         var translated = Endpoint.From(IPAddress.Loopback, listenerPort);
         if (!table.TryClaim(originalKey, originalKey.Remote, 0x1234, translated, forwardLocalAddress: null, DateTimeOffset.UtcNow, out _))
-            throw new InvalidOperationException("The candidate-port claim must succeed for the diverted control.");
+            throw new InvalidOperationException("The listener-port claim must succeed for the diverted control.");
     }
 }
 
 /// <summary>
-/// The production reverse-handler stand-in for dispatcher benchmarks (X1): its predicate runs the
-/// real path (protocol gate + the live <see cref="TcpRedirectTable"/> port array), and its handling
-/// side answers NotRelevant — an answer warm packets never trigger, so it only shapes the slow path
-/// of the diverted control.
+/// The production reverse-handler stand-in for dispatcher benchmarks: its predicate runs the
+/// real path (protocol gate + the live <see cref="TcpRedirectTable"/> port array), and its
+/// handling side answers NotRelevant, so it only shapes the diverted control's slow path.
 /// </summary>
 internal sealed class PrefilterReverseHandler(TcpRedirectTable table) : ITcpReverseHandler
 {

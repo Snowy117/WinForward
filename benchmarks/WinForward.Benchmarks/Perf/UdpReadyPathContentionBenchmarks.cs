@@ -8,11 +8,12 @@ using WinForward.Runtime.UdpProxy;
 namespace WinForward.Benchmarks.Perf;
 
 /// <summary>
-/// The UDP ready path's cost and its contention curve (research F2.4): one coordinator gate, one
-/// session lookup, one transport send — the locks a *ready* datagram pays before any socket is
-/// touched. <see cref="Workers"/> pre-established flows are driven in parallel on dedicated threads
-/// released from a barrier, each sending its own flow's datagrams, so a per-datagram cost that grows
-/// with <see cref="Workers"/> is contention on those gates and a flat cost is clean scaling.
+/// The UDP ready path's cost and its contention curve: one coordinator gate, one session lookup,
+/// one transport send — the locks a *ready* datagram pays before any socket is touched.
+/// <see cref="Workers"/> pre-established flows are driven in parallel on dedicated threads
+/// released from a barrier, each sending its own flow's datagrams, so a per-datagram cost that
+/// grows with <see cref="Workers"/> is contention on those gates and a flat cost is clean
+/// scaling.
 /// <para>
 /// The existing UDP scenarios cannot answer this: <c>udp.lossRate</c> and <c>udp.rawBaseline</c> both
 /// run at the ~25k pps loopback ceiling, where the per-datagram lock cost is invisible against the
@@ -95,9 +96,9 @@ public class UdpReadyPathContentionBenchmarks
     }
 
     /// <summary>
-    /// One measured round: release the workers, wait for every datagram of the round. Per-datagram cost
-    /// is <c>time / TotalSends</c>, so a value that grows with <see cref="Workers"/> is the gate
-    /// contention F2.4 describes.
+    /// One measured round: release the workers, wait for every datagram of the round. Per-datagram
+    /// cost is <c>time / TotalSends</c>, so a value that grows with <see cref="Workers"/> is gate
+    /// contention.
     /// </summary>
     [Benchmark(OperationsPerInvoke = TotalSends)]
     public void ReadySend()

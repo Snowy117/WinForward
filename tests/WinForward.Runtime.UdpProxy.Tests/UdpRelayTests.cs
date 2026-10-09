@@ -143,9 +143,9 @@ public sealed class UdpRelayTests
     [InlineData(9014)]
     public void FrameBuilderHonorsConfigurableCapBoundary(int cap)
     {
-        // M3: the pinned native frame cap is injectable (1514 vs a jumbo 9014 ABI). For IPv4 the
+        // The pinned native frame cap is injectable (1514 vs a jumbo 9014 ABI). For IPv4 the
         // rebuilt frame is ethernet(14) + ip(20) + udp(8) + payload, so a payload of cap - 42 fits
-        // exactly and cap - 41 exceeds it. The cap must not be a hard-coded 1514 magic number.
+        // exactly and cap - 41 exceeds it: the cap must not be a hard-coded 1514 magic number.
         var fits = cap - 42;
         var overflow = cap - 41;
         Assert.True(TryBuildUdpFrame(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[fits], s_macA, s_macB, out _, cap));
@@ -176,7 +176,7 @@ public sealed class UdpRelayTests
     [SupportedOSPlatform("windows")]
     public async Task UdpResponseReinjectorHonorsConfiguredFrameCap()
     {
-        // M3: the reinjector threads the configured cap into frame building; a payload over the cap
+        // The reinjector threads the configured cap into frame building; a payload over the cap
         // is dropped fail-closed, never injected.
         var reinjector = new FakeReinjector();
         var sink = new UdpResponseReinjector(reinjector, new UdpAdapterTargetSource(FlowBuilders.Slots, new UdpAdapterTarget(7, s_macA)), maximumFrameSize: 1514);
@@ -288,15 +288,15 @@ public sealed class UdpRelayTests
 
         await sink.InjectAsync(flow, server, new byte[] { 1 }, MacAddress.From(s_macC), CancellationToken.None);
 
-        // H2: a forwarded flow's response must reach the origin adapter, not the host adapter.
+        // A forwarded flow's response must reach the origin adapter, not the host adapter.
         Assert.Equal(0, reinjector.ToMstcpCount);
         Assert.Equal(1, reinjector.ToAdapterCount);
         Assert.Equal(originHandle, reinjector.LastAdapterHandle);
-        // H3: a frame injected toward an adapter is an ON_SEND (interface-bound), not ON_RECEIVE.
+        // A frame injected toward an adapter is an ON_SEND (interface-bound), not ON_RECEIVE.
         Assert.Equal(NdisApiAbi.PacketFlagOnSend, reinjector.LastDeviceFlags);
         // The rebuilt frame uses the origin adapter's MAC and addresses the recorded client (VM)
         // MAC as its destination: without the client MAC the vSwitch would deliver the response to
-        // the host stack and the VM would never receive it (R2).
+        // the host stack and the VM would never receive it.
         Assert.True(reinjector.LastFrame!.AsSpan(0, 6).SequenceEqual(s_macC));
         Assert.True(reinjector.LastFrame!.AsSpan(6, 6).SequenceEqual(s_macB));
         Assert.True(IPUdpPacket.TryParseSpan(reinjector.LastFrame!, out var udp));
@@ -308,7 +308,7 @@ public sealed class UdpRelayTests
     [SupportedOSPlatform("windows")]
     public async Task ForwardedFlowWithUnresolvedOriginAdapterIsDroppedFailClosed()
     {
-        // H2: when a forwarded flow's origin adapter is not in the reinjection map, the response
+        // When a forwarded flow's origin adapter is not in the reinjection map, the response
         // must be dropped fail-closed (with a rate-limited log) rather than sent out the wrong
         // (host) adapter where the VM could never receive it.
         var reinjector = new FakeReinjector();
@@ -323,7 +323,7 @@ public sealed class UdpRelayTests
         await sink.InjectAsync(flow, server, new byte[] { 1 }, MacAddress.Invalid, CancellationToken.None);
 
         // Fail-closed: no response is sent out any adapter (the VM could never receive it), and the
-        // missing-origin is surfaced via a log rather than silently dropped (H2).
+        // missing-origin is surfaced via a log rather than silently dropped.
         Assert.Equal(0, reinjector.ToMstcpCount);
         Assert.Equal(0, reinjector.ToAdapterCount);
         var (_, _, fields) = Assert.Single(logger.Events, e => e.Level == LogLevel.Warning && string.Equals(e.Name, "udp.reinject.drop", StringComparison.Ordinal));
@@ -336,7 +336,7 @@ public sealed class UdpRelayTests
     [SupportedOSPlatform("windows")]
     public async Task ForwardedFlowResponseWithoutValidClientMacIsDroppedFailClosed(byte[]? clientMac)
     {
-        // R2: a forwarded response must be rebuilt toward the recorded client MAC. When that MAC is
+        // A forwarded response must be rebuilt toward the recorded client MAC. When that MAC is
         // missing or malformed the response cannot reach the VM and must be dropped fail-closed
         // with a rate-limited log, never sent with the host MAC as destination.
         var reinjector = new FakeReinjector();
@@ -381,7 +381,7 @@ public sealed class UdpRelayTests
     [SupportedOSPlatform("windows")]
     public async Task ResponseInjectionUsesPooledBuffersWithoutPerDatagramManagedAllocation()
     {
-        // R4/AC4: the steady-state response path rents pooled native buffers, builds each frame
+        // The steady-state response path rents pooled native buffers, builds each frame
         // in place, and returns them — no managed byte[] per datagram, and the rented buffer
         // comes back to the pool (a never-returned buffer would leave the pool empty).
         using var pool = new NdisPacketBufferPool();

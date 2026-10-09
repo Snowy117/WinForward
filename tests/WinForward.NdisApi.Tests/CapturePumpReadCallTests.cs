@@ -6,13 +6,12 @@ using Xunit;
 namespace WinForward.NdisApi.Tests;
 
 /// <summary>
-/// The pump's read-call contract at the <see cref="INdisPacketReader"/> seam (research F5.1): exactly
-/// one <c>TryReadPackets</c> call per loop iteration — one for an empty poll and one for a whole batch,
-/// never one per packet — and exactly one handler invocation per packet returned. The F5.1 proposal
-/// ("speculative read halves the IOCTLs under load") changes the driver's internal queue-query + read
-/// pair, which sits <em>below</em> this seam in <c>NdisApiDriver.TryReadPackets</c>; the counts gated
-/// here are the seam-level half that makes the driver-internal pair the only remaining candidate, and
-/// the driver's own count stays a Windows measurement.
+/// The pump's read-call contract at the <see cref="INdisPacketReader"/> seam: exactly one
+/// <c>TryReadPackets</c> call per loop iteration — one for an empty poll and one for a whole batch,
+/// never one per packet — and exactly one handler invocation per packet returned. The driver's
+/// queue-query + read pair sits <em>below</em> this seam in <c>NdisApiDriver.TryReadPackets</c>, so
+/// the counts gated here leave that pair as the only remaining candidate; the driver's own count
+/// stays a Windows measurement.
 /// </summary>
 public sealed class CapturePumpReadCallTests
 {

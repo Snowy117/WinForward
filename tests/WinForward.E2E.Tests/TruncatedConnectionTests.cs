@@ -12,7 +12,7 @@ using Xunit;
 namespace WinForward.E2E.Tests;
 
 /// <summary>
-/// What the target does with a peer that stops writing inside a frame (D19.3 D): the connection is a
+/// What the target does with a peer that stops writing inside a frame: the connection is a
 /// protocol error and earns no trailer, while the half-close a mode actually asks for still does. The
 /// pair is the point -- a target that had simply stopped writing trailers would pass either fact alone.
 /// </summary>
@@ -83,8 +83,8 @@ public sealed class TruncatedConnectionTests
     }
 
     /// <summary>
-    /// The DNS listener reads a length prefix rather than a framed stream, so its truncation is its own
-    /// (D19.3 C): the responder must not name the frame reader's status, and the two keys that share the
+    /// The DNS listener reads a length prefix rather than a framed stream, so its truncation is its own:
+    /// the responder must not name the frame reader's status, and the two keys that share the
     /// spelling <c>truncatedFrames</c> stay two constants.
     /// </summary>
     [Fact]
