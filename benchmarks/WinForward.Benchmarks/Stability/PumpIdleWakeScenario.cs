@@ -105,7 +105,7 @@ internal static class PumpIdleWakeScenario
         // so the reader's count may lead the callback's by exactly one.
         if (sample.ReadCalls < sample.Polls || sample.ReadCalls > sample.Polls + 1)
         {
-            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture, $"The idle pump issued {sample.ReadCalls} read calls for {sample.Polls} polls; one read per poll is the F5.1 seam contract."));
+            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture, $"The idle pump issued {sample.ReadCalls} read calls for {sample.Polls} polls; one read per poll is the seam contract."));
         }
 
         context.WriteResult(
@@ -179,7 +179,7 @@ internal static class PumpIdleWakeScenario
         // mean the pump fell back to sleep pacing.
         if (waits != sample.Polls)
         {
-            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture, $"The arrival-waiting idle pump issued {waits} waits for {sample.Polls} polls; one bounded wait per idle iteration is the F5.2 contract."));
+            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture, $"The arrival-waiting idle pump issued {waits} waits for {sample.Polls} polls; one bounded wait per idle iteration is the contract."));
         }
 
         if (signal.LastTimeout != s_idleWaitTimeout)
@@ -326,7 +326,7 @@ internal static class PumpIdleWakeScenario
                 readCallsPerPacket = Round((double)frameReadCalls / packets, 6),
                 latencyMs = latency,
                 gated = false,
-                note = "Report-only timing (design §3): the arm-to-dispatch percentiles are a series, not a pass line. Every sample follows a confirmed block-then-ready transition, so the number is the OS wake-up cost of the F5.2 SetPacketEvent shape, not a hot semaphore pass. readCalls counts the reads that returned a frame (one per wake); the run's single terminating empty read is reported as emptyReads. Arrival is the harness's timestamp immediately before arming the frame and dispatch is the handler's entry timestamp on the pump thread. This row parks the reader, not the pump; pump.idleWakeEvent measures the pump-side wait.",
+                note = "Report-only timing: the arm-to-dispatch percentiles are a series, not a pass line. Every sample follows a confirmed block-then-ready transition, so the number is the OS wake-up cost of the SetPacketEvent shape, not a hot semaphore pass. readCalls counts the reads that returned a frame (one per wake); the run's single terminating empty read is reported as emptyReads. Arrival is the harness's timestamp immediately before arming the frame and dispatch is the handler's entry timestamp on the pump thread. This row parks the reader, not the pump; pump.idleWakeEvent measures the pump-side wait.",
             });
     }
 
@@ -421,7 +421,7 @@ internal static class PumpIdleWakeScenario
                 signalDrivenReturns = signalDriven,
                 latencyMs = latency,
                 gated = false,
-                note = "Report-only timing (design §3). Every sample is a confirmed park-then-wake: the harness waits for one more Wait entry than the previous wake, sleeps the park delay, then stamps arrival, arms the frame and sets the event; a missing entry fails the row rather than reporting a latency for a wake that did not happen, and the signalDrivenReturns/gated check rejects a timeout-driven sample. emptyReads and every other counter cover the measured window only, so the warmup's parks are not in the ratio. Accounting change against pump.idleWake: this row counts one extra seam-level read per wake (the empty read that parks the pump) because the proxy row counted only frame-delivering reads and hid its empty one inside the parked TryReadPackets — one IOCTL replaces ~886 empty-queue queries per second, so the bare readsPerWake 1.0 -> 2.0 comparison is not like-for-like and readCallsPerPacket is not an acceptance figure here.",
+                note = "Report-only timing. Every sample is a confirmed park-then-wake: the harness waits for one more Wait entry than the previous wake, sleeps the park delay, then stamps arrival, arms the frame and sets the event; a missing entry fails the row rather than reporting a latency for a wake that did not happen, and the signalDrivenReturns/gated check rejects a timeout-driven sample. emptyReads and every other counter cover the measured window only, so the warmup's parks are not in the ratio. Accounting change against pump.idleWake: this row counts one extra seam-level read per wake (the empty read that parks the pump) because the proxy row counted only frame-delivering reads and hid its empty one inside the parked TryReadPackets — one IOCTL replaces ~886 empty-queue queries per second, so the bare readsPerWake 1.0 -> 2.0 comparison is not like-for-like and readCallsPerPacket is not an acceptance figure here.",
             });
     }
 
@@ -574,7 +574,7 @@ internal static class PumpIdleWakeScenario
                 eventWakeFrameReadCallsPerWake = Round((double)eventWake.FrameReads / eventWake.Wakes, 6),
                 eventWakeParkConfirmationsPerWake = Round((double)eventWake.Entries / eventWake.Wakes, 6),
                 eventWakeSignalDrivenReturns = eventWake.SignalDriven,
-                note = "Report-only timing series for F5.2 (design §3). The exact gates live with the numbers: 0 B on pump.idle and pump.idleEvent, the wait/read counts on pump.idleEvent, and the call counts in CapturePumpReadCallTests. The driver's internal read shape is gated in NdisApiReadShapeTests at the driver↔native seam. pump.idle carries no arrival signal and must not move; the CPU and cadence pair in pump.idleEvent is what attributes the drop to the wait cadence rather than to pump work.",
+                note = "Report-only timing series. The exact gates live with the numbers: 0 B on pump.idle and pump.idleEvent, the wait/read counts on pump.idleEvent, and the call counts in CapturePumpReadCallTests. The driver's internal read shape is gated in NdisApiReadShapeTests at the driver↔native seam. pump.idle carries no arrival signal and must not move; the CPU and cadence pair in pump.idleEvent is what attributes the drop to the wait cadence rather than to pump work.",
             });
     }
 

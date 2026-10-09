@@ -31,7 +31,7 @@ public interface IFrameSource
 public sealed class PacketLease : IDisposable
 {
     [ThreadStatic]
-#pragma warning disable IDE1006 // The t_ prefix is the team convention for [ThreadStatic] fields (2026-09-19): the editorconfig naming rules cannot match attributes, so the s_ rule for internal/private static fields would otherwise claim this field and rename it away from its thread-local marker.
+#pragma warning disable IDE1006 // The t_ prefix marks [ThreadStatic] fields: the editorconfig naming rules cannot match attributes, so the s_ rule for internal/private static fields would otherwise claim this field and rename it away from its thread-local marker.
     private static PacketLease? t_recycleCache;
 #pragma warning restore IDE1006
 
