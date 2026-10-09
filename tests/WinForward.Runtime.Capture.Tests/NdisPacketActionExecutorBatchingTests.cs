@@ -211,7 +211,7 @@ public sealed class NdisPacketActionExecutorBatchingTests
         var reinjector = new FakeReinjector();
         var executor = new NdisPacketActionExecutor(reinjector);
         using var buffer = new NdisPacketBuffer();
-        var frame = CreateIpv4UdpFrame();
+        var frame = CreateIPv4UdpFrame();
         buffer.SetFrame(frame, NdisApiAbi.PacketFlagOnSend, 0x77, flags: 0x33);
 
         await executor.PassAsync(InPlacePass(buffer, TransportProtocol.Udp));

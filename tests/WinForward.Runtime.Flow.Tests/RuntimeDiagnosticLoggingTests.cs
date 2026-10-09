@@ -181,12 +181,12 @@ public sealed class RuntimeDiagnosticLoggingTests
 
     private static CapturedFlowPacket HostUdpPacket(ushort clientPort) =>
         new(
-            new PacketLease(FrameBuilders.CreateIpv4UdpFrame()),
+            new PacketLease(FrameBuilders.CreateIPv4UdpFrame()),
             FlowContext(FlowKey.Create(Endpoint.From(s_client, clientPort), Endpoint.From(s_destination, 53), TransportProtocol.Udp, FlowOriginKind.Host)));
 
     private static CapturedFlowPacket PassPacket() =>
         new(
-            new PacketLease(FrameBuilders.CreateIpv4UdpFrame()),
+            new PacketLease(FrameBuilders.CreateIPv4UdpFrame()),
             FlowBuilders.Context(
                 FlowKey.Create(Endpoint.From(s_client, 53000), Endpoint.From(s_destination, 53), TransportProtocol.Udp, FlowOriginKind.Host),
                 adapterId: "wlan-1", adapterName: "Wi-Fi"),

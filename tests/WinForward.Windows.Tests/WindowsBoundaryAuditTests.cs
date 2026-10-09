@@ -6,17 +6,17 @@ namespace WinForward.Windows.Tests;
 public sealed class WindowsBoundaryAuditTests
 {
     [Fact]
-    public void UdpOwnerPidTableClassIsSharedByIpv4AndIpv6()
+    public void UdpOwnerPidTableClassIsSharedByIPv4AndIPv6()
     {
         Assert.Equal(1, IPHelperAbi.UdpTableOwnerPid);
     }
 
     [Fact]
-    public void Ipv6ProjectionPreservesHostOrderScopeId()
+    public void IPv6ProjectionPreservesHostOrderScopeId()
     {
         const uint scopeId = 7;
 
-        var address = IPHelperAbi.DecodeIpv6Address(IPAddress.Parse("fe80::1").GetAddressBytes(), scopeId);
+        var address = IPHelperAbi.DecodeIPv6Address(IPAddress.Parse("fe80::1").GetAddressBytes(), scopeId);
 
         Assert.Equal(7L, address.ScopeId);
     }

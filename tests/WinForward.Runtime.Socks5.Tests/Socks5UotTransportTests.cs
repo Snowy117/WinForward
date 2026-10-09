@@ -364,7 +364,7 @@ public sealed class Socks5UotTransportTests
     }
 
     [Fact]
-    public async Task TheFixtureDecodesAnIpv6RequestDestinationThroughTheSocksAddressType()
+    public async Task TheFixtureDecodesAnIPv6RequestDestinationThroughTheSocksAddressType()
     {
         // The other half: 0x04 is the SOCKS IPv6 form, consumed as 16 address bytes, so a client that
         // wrote the per-datagram 0x01 for an IPv6 destination is read as a four-byte IPv4 address and

@@ -24,10 +24,10 @@ namespace WinForward.Runtime.TcpRedirect.Tests;
 /// </summary>
 public sealed class TcpFragmentHandlingTests
 {
-    private static readonly IPAddress s_clientIpv4 = IPAddress.Parse("192.0.2.10");
-    private static readonly IPAddress s_destIpv4 = IPAddress.Parse("192.0.2.53");
-    private static readonly IPAddress s_clientIpv6 = IPAddress.Parse("2001:db8::10");
-    private static readonly IPAddress s_destIpv6 = IPAddress.Parse("2001:db8::53");
+    private static readonly IPAddress s_clientIPv4 = IPAddress.Parse("192.0.2.10");
+    private static readonly IPAddress s_destIPv4 = IPAddress.Parse("192.0.2.53");
+    private static readonly IPAddress s_clientIPv6 = IPAddress.Parse("2001:db8::10");
+    private static readonly IPAddress s_destIPv6 = IPAddress.Parse("2001:db8::53");
     private static readonly IPAddress s_forwardLocal = IPAddress.Parse("192.0.2.1");
     private static readonly Socks5Server s_server = new("primary", "127.0.0.1", 1080, Username: null, Password: null);
 
@@ -37,7 +37,7 @@ public sealed class TcpFragmentHandlingTests
         var harness = FragmentHarness.CreateHost();
         await harness.EstablishRelayingWithSynAckAsync();
 
-        var fragment = MakeNonFlowPacket(BuildIpv4Fragment(s_clientIpv4, s_destIpv4, 53000, 443), isOnSend: true);
+        var fragment = MakeNonFlowPacket(BuildIPv4Fragment(s_clientIPv4, s_destIPv4, 53000, 443), isOnSend: true);
         await harness.Dispatcher.DispatchNonFlowAsync(fragment, CancellationToken.None);
 
         // Consumed, never reinjected toward the real server.
@@ -60,7 +60,7 @@ public sealed class TcpFragmentHandlingTests
         var harness = FragmentHarness.CreateHost();
         await harness.EstablishRelayingWithSynAckAsync();
 
-        var fragment = MakeNonFlowPacket(BuildIpv4Fragment(s_destIpv4, s_clientIpv4, 443, 53000), isOnSend: false);
+        var fragment = MakeNonFlowPacket(BuildIPv4Fragment(s_destIPv4, s_clientIPv4, 443, 53000), isOnSend: false);
         await harness.Dispatcher.DispatchNonFlowAsync(fragment, CancellationToken.None);
 
         Assert.Equal(PacketDisposition.ProxyConsumed, fragment.Lease.Disposition);
@@ -74,7 +74,7 @@ public sealed class TcpFragmentHandlingTests
         var harness = FragmentHarness.CreateForwarded();
         await harness.EstablishRelayingWithSynAckAsync();
 
-        var fragment = MakeNonFlowPacket(BuildIpv4Fragment(s_clientIpv4, s_destIpv4, 53000, 443), isOnSend: false, adapterId: "veth-1");
+        var fragment = MakeNonFlowPacket(BuildIPv4Fragment(s_clientIPv4, s_destIPv4, 53000, 443), isOnSend: false, adapterId: "veth-1");
         await harness.Dispatcher.DispatchNonFlowAsync(fragment, CancellationToken.None);
 
         Assert.Equal(PacketDisposition.ProxyConsumed, fragment.Lease.Disposition);
@@ -93,7 +93,7 @@ public sealed class TcpFragmentHandlingTests
         var harness = FragmentHarness.CreateHost();
         await harness.EstablishRelayingWithSynAckAsync();
 
-        var fragment = MakeNonFlowPacket(BuildIpv4NonFirstFragment(s_clientIpv4, s_destIpv4), isOnSend: true);
+        var fragment = MakeNonFlowPacket(BuildIPv4NonFirstFragment(s_clientIPv4, s_destIPv4), isOnSend: true);
         await harness.Dispatcher.DispatchNonFlowAsync(fragment, CancellationToken.None);
 
         Assert.Equal(PacketDisposition.ProxyConsumed, fragment.Lease.Disposition);
@@ -102,12 +102,12 @@ public sealed class TcpFragmentHandlingTests
     }
 
     [Fact]
-    public async Task Ipv6FragmentHeaderFrameIsConsumedWithReset()
+    public async Task IPv6FragmentHeaderFrameIsConsumedWithReset()
     {
         var harness = FragmentHarness.CreateHost(addressFamily: AddressFamilyKind.IPv6);
         await harness.EstablishRelayingWithSynAckAsync();
 
-        var fragment = MakeNonFlowPacket(BuildIpv6Fragment(s_clientIpv6, s_destIpv6, 53000, 443), isOnSend: true);
+        var fragment = MakeNonFlowPacket(BuildIPv6Fragment(s_clientIPv6, s_destIPv6, 53000, 443), isOnSend: true);
         await harness.Dispatcher.DispatchNonFlowAsync(fragment, CancellationToken.None);
 
         Assert.Equal(PacketDisposition.ProxyConsumed, fragment.Lease.Disposition);
@@ -124,7 +124,7 @@ public sealed class TcpFragmentHandlingTests
         // keeps the unconditional pass.
         var harness = FragmentHarness.CreateHost();
 
-        var fragment = MakeNonFlowPacket(BuildIpv4Fragment(s_clientIpv4, s_destIpv4, 53000, 443), isOnSend: true);
+        var fragment = MakeNonFlowPacket(BuildIPv4Fragment(s_clientIPv4, s_destIPv4, 53000, 443), isOnSend: true);
         await harness.Dispatcher.DispatchNonFlowAsync(fragment, CancellationToken.None);
         harness.Executor.FlushPendingPasses(0x1234);
 
@@ -142,7 +142,7 @@ public sealed class TcpFragmentHandlingTests
         var harness = FragmentHarness.CreateHost();
         await harness.EstablishRelayingAsync();
 
-        var fragment = MakeNonFlowPacket(BuildIpv4Fragment(s_clientIpv4, s_destIpv4, 53000, 443), isOnSend: true);
+        var fragment = MakeNonFlowPacket(BuildIPv4Fragment(s_clientIPv4, s_destIPv4, 53000, 443), isOnSend: true);
         await harness.Dispatcher.DispatchNonFlowAsync(fragment, CancellationToken.None);
 
         Assert.Equal(PacketDisposition.ProxyConsumed, fragment.Lease.Disposition);
@@ -164,7 +164,7 @@ public sealed class TcpFragmentHandlingTests
         Assert.True(harness.Coordinator.Tombstones.TryHit(harness.HostFlowKey, DateTimeOffset.UtcNow));
     }
 
-    private static byte[] BuildIpv4NonFirstFragment(IPAddress source, IPAddress destination)
+    private static byte[] BuildIPv4NonFirstFragment(IPAddress source, IPAddress destination)
     {
         // A payload-only continuation fragment: 20-byte IPv4 header + 8 payload bytes, fragment
         // offset 1 (MF clear) — no transport header at all.
@@ -219,8 +219,8 @@ public sealed class TcpFragmentHandlingTests
 
         private static FragmentHarness Create(bool forwarded, AddressFamilyKind addressFamily)
         {
-            var client = addressFamily == AddressFamilyKind.IPv6 ? s_clientIpv6 : s_clientIpv4;
-            var destination = addressFamily == AddressFamilyKind.IPv6 ? s_destIpv6 : s_destIpv4;
+            var client = addressFamily == AddressFamilyKind.IPv6 ? s_clientIPv6 : s_clientIPv4;
+            var destination = addressFamily == AddressFamilyKind.IPv6 ? s_destIPv6 : s_destIPv4;
             var listenerFactory = new FakeListenerFactory();
             var relayFactory = new CompletableRelayFactory();
             var injector = new FakeInjector();
@@ -247,7 +247,7 @@ public sealed class TcpFragmentHandlingTests
             // forwarded origin and its adapter context.
             var adapterSlot = FlowBuilders.SlotOf("veth-1", 7);
             var key = forwarded
-                ? FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Forwarded, adapterSlot, 7)
+                ? FlowKey.Create(Endpoint.From(s_clientIPv4, 53000), Endpoint.From(s_destIPv4, 443), TransportProtocol.Tcp, FlowOriginKind.Forwarded, adapterSlot, 7)
                 : FlowKey.Create(Endpoint.From(client, 53000), Endpoint.From(destination, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
             return new FragmentHarness(coordinator, listenerFactory, relayFactory, injector, reinjector, executor, logger, dispatcher, forwarded, key);
         }
@@ -255,7 +255,7 @@ public sealed class TcpFragmentHandlingTests
         public async Task EstablishRelayingAsync()
         {
             var syn = forwarded
-                ? MakeForwardedSynPacket(s_clientIpv4, s_destIpv4, 53000, 443)
+                ? MakeForwardedSynPacket(s_clientIPv4, s_destIPv4, 53000, 443)
                 : MakeSynPacket(Client, Destination, 53000, 443);
             await Dispatcher.DispatchAsync(syn, CancellationToken.None);
             // R8: the SYN dispatch defers the redirect setup to the background; the listener
@@ -264,7 +264,7 @@ public sealed class TcpFragmentHandlingTests
             var listener = listenerFactory.Listeners[0];
             // Host shape: the accepted peer is the server-address:client-port tuple the IP-swap
             // SYN presented; forwarded shape: the client itself (DNAT keeps its tuple).
-            var peer = forwarded ? Endpoint.From(s_clientIpv4, 53000) : Endpoint.From(Destination, 53000);
+            var peer = forwarded ? Endpoint.From(s_clientIPv4, 53000) : Endpoint.From(Destination, 53000);
             await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(peer), CancellationToken.None);
             await WaitForAsync(() => relayFactory.Relay is not null);
         }
@@ -276,7 +276,7 @@ public sealed class TcpFragmentHandlingTests
             await EstablishRelayingAsync();
             var listenerPort = listenerFactory.Listeners[0].TranslatedTuple.Port;
             var reverseSource = forwarded ? s_forwardLocal : Client;
-            var reverseDestination = forwarded ? s_clientIpv4 : Destination;
+            var reverseDestination = forwarded ? s_clientIPv4 : Destination;
             // The option-less TCP flags byte sits 7 bytes from the frame end for both families
             // (IPv4: 47, IPv6: 67), so the SYN|ACK mutation is family-agnostic.
             var synAck = MakeReversePacketClassifierOrientation(reverseSource, listenerPort, reverseDestination, 53000, mutateFrame: f => f[^7] = 0x12);
@@ -284,8 +284,8 @@ public sealed class TcpFragmentHandlingTests
             injector.InjectedFrames.Clear();
         }
 
-        private IPAddress Client => forwarded ? s_clientIpv4 : HostFlowKey.Local.Address.ToIPAddress();
+        private IPAddress Client => forwarded ? s_clientIPv4 : HostFlowKey.Local.Address.ToIPAddress();
 
-        private IPAddress Destination => forwarded ? s_destIpv4 : HostFlowKey.Remote.Address.ToIPAddress();
+        private IPAddress Destination => forwarded ? s_destIPv4 : HostFlowKey.Remote.Address.ToIPAddress();
     }
 }

@@ -12,7 +12,7 @@ namespace WinForward.Benchmarks;
 
 internal static class BenchmarkShared
 {
-    public static byte[] CreateIpv4UdpFrame(int frameSize)
+    public static byte[] CreateIPv4UdpFrame(int frameSize)
     {
         if (frameSize is < 64 or > UdpFrameBuilder.MaximumEthernetFrame) throw new ArgumentOutOfRangeException(nameof(frameSize));
         var frame = new byte[frameSize];
@@ -30,7 +30,7 @@ internal static class BenchmarkShared
         return frame;
     }
 
-    public static byte[] CreateIpv4TcpFrame(int frameSize)
+    public static byte[] CreateIPv4TcpFrame(int frameSize)
     {
         if (frameSize is < 64 or > UdpFrameBuilder.MaximumEthernetFrame) throw new ArgumentOutOfRangeException(nameof(frameSize));
         var frame = new byte[frameSize];
@@ -57,9 +57,9 @@ internal static class BenchmarkShared
     /// captured traffic — required since the endpoint rewriter updates checksums incrementally
     /// from the incoming values (RFC 1624).
     /// </summary>
-    public static byte[] CreateIpv4TcpFrame(int frameSize, bool bareSyn)
+    public static byte[] CreateIPv4TcpFrame(int frameSize, bool bareSyn)
     {
-        var frame = CreateIpv4TcpFrame(frameSize);
+        var frame = CreateIPv4TcpFrame(frameSize);
         const int ipTotalLengthOffset = 16;
         const int tcpFlagsOffset = 47;
         if (bareSyn)
@@ -85,13 +85,13 @@ internal static class BenchmarkShared
     }
 
     /// <summary>
-    /// The IPv6 counterpart of <see cref="CreateIpv4TcpFrame(int, bool)"/>: Ethernet + IPv6 (40 bytes,
+    /// The IPv6 counterpart of <see cref="CreateIPv4TcpFrame(int, bool)"/>: Ethernet + IPv6 (40 bytes,
     /// next header TCP) + TCP (20 bytes), same bare-SYN/mid-flow variants, with the TCP checksum
     /// computed over the IPv6 pseudo-header — which is what the endpoint rewriter's incremental update
     /// (RFC 1624) starts from, so a frame without it would measure a different path than captured
     /// traffic takes. The checksum is verified independently by <c>BenchmarkFrameBuilderTests</c>.
     /// </summary>
-    public static byte[] CreateIpv6TcpFrame(int frameSize, bool bareSyn)
+    public static byte[] CreateIPv6TcpFrame(int frameSize, bool bareSyn)
     {
         const int ethernetLength = 14;
         const int ipv6Length = 40;
@@ -129,13 +129,13 @@ internal static class BenchmarkShared
     }
 
     /// <summary>
-    /// The IPv6 counterpart of <see cref="CreateIpv4UdpFrame"/>: Ethernet + IPv6 (40 bytes, next header
-    /// UDP) + UDP (8 bytes) + payload, same field layout conventions as <see cref="CreateIpv6TcpFrame"/>.
+    /// The IPv6 counterpart of <see cref="CreateIPv4UdpFrame"/>: Ethernet + IPv6 (40 bytes, next header
+    /// UDP) + UDP (8 bytes) + payload, same field layout conventions as <see cref="CreateIPv6TcpFrame"/>.
     /// The UDP checksum stays zero, as in the IPv4 UDP builder and the test project's IPv6 UDP builder:
     /// these are parse-only shapes, and neither <c>IPTcpUdpPacket</c> nor <c>IPUdpPacket</c> reads the
     /// checksum, so computing one would add setup work without changing the measured parse.
     /// </summary>
-    public static byte[] CreateIpv6UdpFrame(int frameSize)
+    public static byte[] CreateIPv6UdpFrame(int frameSize)
     {
         const int ethernetLength = 14;
         const int ipv6Length = 40;

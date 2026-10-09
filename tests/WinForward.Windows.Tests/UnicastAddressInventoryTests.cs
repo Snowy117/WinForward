@@ -14,7 +14,7 @@ namespace WinForward.Windows.Tests;
 public sealed class UnicastAddressInventoryTests
 {
     [Fact]
-    public void ParseRowsReadsIpv4AndIpv6RowsWithLuidAndScope()
+    public void ParseRowsReadsIPv4AndIPv6RowsWithLuidAndScope()
     {
         var buffer = BuildTable(
             (UnicastAddressInventory.AfInet, ToBytes(IPAddress.Parse("192.168.77.2")), 0u, 11uL),
@@ -108,7 +108,7 @@ public sealed class UnicastAddressInventoryTests
     }
 
     [Fact]
-    public void GroupFingerprintsExcludesIpv6LinkLocalAddresses()
+    public void GroupFingerprintsExcludesIPv6LinkLocalAddresses()
     {
         var guid = new Guid(0xdd8cd9a1, 0xb6f, 0x4e6e, 0x9a, 0x86, 0x6, 0xf1, 0xae, 0xb0, 0xa1, 0xf0) /* dd8cd9a1-0b6f-4e6e-9a86-06f1aeb0a1f0 */;
         var rows = new[]
@@ -173,14 +173,14 @@ public sealed class UnicastAddressInventoryTests
             var row = (IPHelperAbi.MibUnicastIpAddressRow*)((byte*)buffer + IPHelperAbi.UnicastTableFirstRowOffset + (index * sizeof(IPHelperAbi.MibUnicastIpAddressRow)));
             var (family, address, scopeId, luid) = rows[index];
             *(ushort*)row->Address = family;
-            var addressOffset = family == UnicastAddressInventory.AfInet6 ? IPHelperAbi.Ipv6AddressOffset : IPHelperAbi.Ipv4AddressOffset;
+            var addressOffset = family == UnicastAddressInventory.AfInet6 ? IPHelperAbi.IPv6AddressOffset : IPHelperAbi.IPv4AddressOffset;
             fixed (byte* source = address)
             {
                 Buffer.MemoryCopy(source, row->Address + addressOffset, IPHelperAbi.SockaddrInetSize - addressOffset, address.Length);
             }
             if (family == UnicastAddressInventory.AfInet6)
             {
-                *(uint*)(row->Address + IPHelperAbi.Ipv6ScopeIdOffset) = scopeId;
+                *(uint*)(row->Address + IPHelperAbi.IPv6ScopeIdOffset) = scopeId;
             }
             row->InterfaceLuid = luid;
         }

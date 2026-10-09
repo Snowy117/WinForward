@@ -32,8 +32,8 @@ public class FrameRewriterBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _synFrame = BenchmarkShared.CreateIpv4TcpFrame(FrameSize, bareSyn: true);
-        _dataFrame = BenchmarkShared.CreateIpv4TcpFrame(FrameSize, bareSyn: false);
+        _synFrame = BenchmarkShared.CreateIPv4TcpFrame(FrameSize, bareSyn: true);
+        _dataFrame = BenchmarkShared.CreateIPv4TcpFrame(FrameSize, bareSyn: false);
         _scratch = new byte[FrameSize];
         _client = Endpoint.From(IPAddress.Parse("192.0.2.10"), 53_000);
         _server = Endpoint.From(IPAddress.Parse("192.0.2.80"), 443);

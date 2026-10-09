@@ -29,7 +29,7 @@ internal static class ChecksumMath
     /// <summary>Finished (complemented) checksum: valid data folds to zero.</summary>
     public static ushort Finish(uint sum) => (ushort)~Fold(sum);
 
-    public static void SetIpv4HeaderChecksum(byte[] frame)
+    public static void SetIPv4HeaderChecksum(byte[] frame)
     {
         var headerLength = (frame[14] & 0x0f) * 4;
         frame[24] = 0;
@@ -37,7 +37,7 @@ internal static class ChecksumMath
         BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(24, 2), PacketChecksums.InternetChecksum(frame.AsSpan(14, headerLength)));
     }
 
-    public static void SetIpv4TcpChecksum(byte[] frame, int tcp, int tcpLength)
+    public static void SetIPv4TcpChecksum(byte[] frame, int tcp, int tcpLength)
     {
         frame[tcp + 16] = 0;
         frame[tcp + 17] = 0;
@@ -45,7 +45,7 @@ internal static class ChecksumMath
         BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(tcp + 16, 2), Finish(sum));
     }
 
-    public static void SetIpv6TcpChecksum(byte[] frame, int tcp, int tcpLength)
+    public static void SetIPv6TcpChecksum(byte[] frame, int tcp, int tcpLength)
     {
         frame[tcp + 16] = 0;
         frame[tcp + 17] = 0;

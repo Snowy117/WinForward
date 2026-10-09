@@ -73,7 +73,7 @@ public sealed class NdisPacketActionExecutorLoggingTests
 
         // A TCP frame on a UDP-decided flow cannot be parsed as a UDP datagram.
         var packet = new CapturedFlowPacket(
-            new PacketLease(FrameBuilders.CreateIpv4TcpFrame()),
+            new PacketLease(FrameBuilders.CreateIPv4TcpFrame()),
             FlowContext(FlowKey.Create(Endpoint.From(s_client, 53000), Endpoint.From(s_destination, 53), TransportProtocol.Udp, FlowOriginKind.Host)),
             new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
 
@@ -110,7 +110,7 @@ public sealed class NdisPacketActionExecutorLoggingTests
 
     private static CapturedFlowPacket UdpPacket() =>
         new(
-            new PacketLease(FrameBuilders.CreateIpv4UdpFrame()),
+            new PacketLease(FrameBuilders.CreateIPv4UdpFrame()),
             FlowContext(FlowKey.Create(Endpoint.From(s_client, 53000), Endpoint.From(s_destination, 53), TransportProtocol.Udp, FlowOriginKind.Host)),
             new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
 

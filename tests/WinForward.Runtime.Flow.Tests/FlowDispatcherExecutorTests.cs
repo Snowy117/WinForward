@@ -320,7 +320,7 @@ public sealed class FlowDispatcherExecutorTests
         var dispatcher = new FlowDispatcher(CreateConfig(new RuleMatcher(), FlowAction.Pass), new FakeGuard(), executor);
         var adapter = new WindowsAdapter("id-a", "Ethernet", "internal-a", 7, 1);
         using var buffer = new NdisPacketBuffer();
-        var frame = FrameBuilders.CreateIpv4TcpFrame();
+        var frame = FrameBuilders.CreateIPv4TcpFrame();
         buffer.SetFrame(frame, NdisApiAbi.PacketFlagOnSend, 7);
 
         await new CapturePacketProcessor(dispatcher, FlowBuilders.Slots).ProcessAsync(
@@ -346,7 +346,7 @@ public sealed class FlowDispatcherExecutorTests
         var reinjector = new FakeReinjector();
         var executor = new NdisPacketActionExecutor(reinjector);
         using var buffer = new NdisPacketBuffer();
-        var frame = FrameBuilders.CreateIpv4UdpFrame();
+        var frame = FrameBuilders.CreateIPv4UdpFrame();
         buffer.SetFrame(frame, NdisApiAbi.PacketFlagOnReceive, 9, flags: 0x21);
         var lease = new PacketLease(buffer);
         var packet = new CapturedFlowPacket(lease, FlowContext(FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 1), Endpoint.From(IPAddress.Parse("192.0.2.53"), 2), TransportProtocol.Udp, FlowOriginKind.Host)), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, 9, 0x21), NativeFrame: new NativeFrameHandle(buffer));
@@ -367,7 +367,7 @@ public sealed class FlowDispatcherExecutorTests
         var reinjector = new FakeReinjector();
         var executor = new NdisPacketActionExecutor(reinjector);
         using var buffer = new NdisPacketBuffer();
-        var frame = FrameBuilders.CreateIpv4UdpFrame();
+        var frame = FrameBuilders.CreateIPv4UdpFrame();
         buffer.SetFrame(frame, NdisApiAbi.PacketFlagOnReceive, 9);
         var lease = new PacketLease(buffer);
         _ = lease.Frame.Length; // Materialize before the pass, as a proxy/rewrite consumer would.
@@ -411,7 +411,7 @@ public sealed class FlowDispatcherExecutorTests
         var dispatcher = new FlowDispatcher(CreateConfig(new RuleMatcher(), FlowAction.Pass), new FakeGuard(), executor);
         var adapter = new WindowsAdapter("id-a", "Ethernet", "internal-a", 7, 1);
         using var buffer = new NdisPacketBuffer();
-        buffer.SetFrame(FrameBuilders.CreateIpv4TcpFrame(), NdisApiAbi.PacketFlagOnSend, 7, flags: 0x4000_0021);
+        buffer.SetFrame(FrameBuilders.CreateIPv4TcpFrame(), NdisApiAbi.PacketFlagOnSend, 7, flags: 0x4000_0021);
 
         await new CapturePacketProcessor(dispatcher, FlowBuilders.Slots).ProcessAsync(
             NdisCapturedPacket.FromCapture(buffer, 7),
@@ -450,7 +450,7 @@ public sealed class FlowDispatcherExecutorTests
             new TcpRedirectTable(), new SelfTrafficRegistry(), new FakeLocalAddressProvider());
         var executor = new NdisPacketActionExecutor(reinjector, tcpProxy: coordinator);
         var key = FlowKey.Create(Endpoint.From(IPAddress.Parse("192.0.2.10"), 53000), Endpoint.From(IPAddress.Parse("192.0.2.53"), 443), TransportProtocol.Tcp, FlowOriginKind.Host);
-        var packet = new CapturedFlowPacket(new PacketLease(FrameBuilders.CreateIpv4TcpFrame()), FlowContext(key), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
+        var packet = new CapturedFlowPacket(new PacketLease(FrameBuilders.CreateIPv4TcpFrame()), FlowContext(key), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
 
         await executor.ProxyAsync(packet, ProxyTarget.FromServer(new Socks5Server("p", "127.0.0.1", 1080, Username: null, Password: null)), CancellationToken.None);
         executor.FlushPendingPasses(7);

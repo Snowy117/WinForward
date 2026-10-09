@@ -14,21 +14,21 @@ public sealed class IPFragmentTests
     private static readonly IPAddress s_destinationV6 = IPAddress.Parse("2001:db8::53");
 
     [Fact]
-    public void DetectsIpv4MfAndOffsetFragmentsButNotDfOnly()
+    public void DetectsIPv4MfAndOffsetFragmentsButNotDfOnly()
     {
         // The mask mirrors the canonical parser: reserved bit, MF, and a non-zero offset make a
         // fragment; DF alone does not.
-        Assert.True(IPFragment.IsFragment(WithIpv4Flags(0x2000)));
-        Assert.True(IPFragment.IsFragment(WithIpv4Flags(0x0001)));
-        Assert.True(IPFragment.IsFragment(WithIpv4Flags(0x8000)));
-        Assert.False(IPFragment.IsFragment(WithIpv4Flags(0x4000)));
-        Assert.False(IPFragment.IsFragment(WithIpv4Flags(0x0000)));
+        Assert.True(IPFragment.IsFragment(WithIPv4Flags(0x2000)));
+        Assert.True(IPFragment.IsFragment(WithIPv4Flags(0x0001)));
+        Assert.True(IPFragment.IsFragment(WithIPv4Flags(0x8000)));
+        Assert.False(IPFragment.IsFragment(WithIPv4Flags(0x4000)));
+        Assert.False(IPFragment.IsFragment(WithIPv4Flags(0x0000)));
     }
 
     [Fact]
-    public void DetectsIpv6FragmentHeaderAnywhereInChain()
+    public void DetectsIPv6FragmentHeaderAnywhereInChain()
     {
-        var direct = FrameBuilders.BuildIpv6Fragment(s_sourceV6, s_destinationV6, 53000, 443);
+        var direct = FrameBuilders.BuildIPv6Fragment(s_sourceV6, s_destinationV6, 53000, 443);
         Assert.True(IPFragment.IsFragment(direct));
 
         // Hop-by-hop first, then the fragment header: the chain walk must reach it.
@@ -42,7 +42,7 @@ public sealed class IPFragmentTests
         Assert.True(IPFragment.IsFragment(withHopByHop));
 
         // A plain extension chain without a fragment header is not a fragment.
-        var hopByHopOnly = FrameBuilders.BuildIpv6TcpFrameWithHopByHop(s_sourceV6, s_destinationV6, 53000, 443);
+        var hopByHopOnly = FrameBuilders.BuildIPv6TcpFrameWithHopByHop(s_sourceV6, s_destinationV6, 53000, 443);
         Assert.False(IPFragment.IsFragment(hopByHopOnly));
     }
 
@@ -59,12 +59,12 @@ public sealed class IPFragmentTests
     [Fact]
     public void ReadsAddressPairOfBothFamilies()
     {
-        var v4 = FrameBuilders.BuildIpv4Fragment(s_sourceV4, s_destinationV4, 53000, 443);
+        var v4 = FrameBuilders.BuildIPv4Fragment(s_sourceV4, s_destinationV4, 53000, 443);
         Assert.True(IPFragment.TryReadAddressPair(v4, out var v4Source, out var v4Destination));
         Assert.Equal(IPAddressValue.From(s_sourceV4), v4Source);
         Assert.Equal(IPAddressValue.From(s_destinationV4), v4Destination);
 
-        var v6 = FrameBuilders.BuildIpv6Fragment(s_sourceV6, s_destinationV6, 53000, 443);
+        var v6 = FrameBuilders.BuildIPv6Fragment(s_sourceV6, s_destinationV6, 53000, 443);
         Assert.True(IPFragment.TryReadAddressPair(v6, out var v6Source, out var v6Destination));
         Assert.Equal(IPAddressValue.From(s_sourceV6), v6Source);
         Assert.Equal(IPAddressValue.From(s_destinationV6), v6Destination);
@@ -75,9 +75,9 @@ public sealed class IPFragmentTests
         Assert.False(IPFragment.TryReadAddressPair(arp, out _, out _));
     }
 
-    private static byte[] WithIpv4Flags(ushort flags)
+    private static byte[] WithIPv4Flags(ushort flags)
     {
-        var frame = FrameBuilders.BuildIpv4TcpFrame(s_sourceV4, s_destinationV4, 53000, 443);
+        var frame = FrameBuilders.BuildIPv4TcpFrame(s_sourceV4, s_destinationV4, 53000, 443);
         BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(20, 2), flags);
         return frame;
     }

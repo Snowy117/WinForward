@@ -26,10 +26,10 @@ internal static class FrameBuilders
     }
 
     private const byte TcpFlagPshAck = 0x18;
-    public static byte[] BuildIpv4TcpSyn(IPAddress source, IPAddress destination, ushort sourcePort, ushort destinationPort, byte[]? payload = null) =>
-        BuildIpv4TcpFrame(source, destination, sourcePort, destinationPort, TcpFlagSyn, payload: payload);
+    public static byte[] BuildIPv4TcpSyn(IPAddress source, IPAddress destination, ushort sourcePort, ushort destinationPort, byte[]? payload = null) =>
+        BuildIPv4TcpFrame(source, destination, sourcePort, destinationPort, TcpFlagSyn, payload: payload);
 
-    public static byte[] BuildIpv4TcpFrame(
+    public static byte[] BuildIPv4TcpFrame(
         IPAddress source,
         IPAddress destination,
         ushort sourcePort,
@@ -67,15 +67,15 @@ internal static class FrameBuilders
         optionPadding.CopyTo(frame, tcp + 20 + options.Length);
         payload.CopyTo(frame, tcp + tcpHeaderLength);
 
-        ChecksumMath.SetIpv4HeaderChecksum(frame);
-        ChecksumMath.SetIpv4TcpChecksum(frame, tcp, totalLength - 20);
+        ChecksumMath.SetIPv4HeaderChecksum(frame);
+        ChecksumMath.SetIPv4TcpChecksum(frame, tcp, totalLength - 20);
         return frame;
     }
 
-    public static byte[] BuildIpv6TcpSyn(IPAddress source, IPAddress destination, ushort sourcePort, ushort destinationPort) =>
-        BuildIpv6TcpFrame(source, destination, sourcePort, destinationPort);
+    public static byte[] BuildIPv6TcpSyn(IPAddress source, IPAddress destination, ushort sourcePort, ushort destinationPort) =>
+        BuildIPv6TcpFrame(source, destination, sourcePort, destinationPort);
 
-    public static byte[] BuildIpv6TcpFrame(
+    public static byte[] BuildIPv6TcpFrame(
         IPAddress source,
         IPAddress destination,
         ushort sourcePort,
@@ -104,7 +104,7 @@ internal static class FrameBuilders
         frame[tcp + 13] = tcpFlags;
         payload.CopyTo(frame, tcp + 20);
 
-        ChecksumMath.SetIpv6TcpChecksum(frame, tcp, tcpLength);
+        ChecksumMath.SetIPv6TcpChecksum(frame, tcp, tcpLength);
         return frame;
     }
 
@@ -113,7 +113,7 @@ internal static class FrameBuilders
     /// (offset 20) = 0 (Hop-by-Hop); the extension's next-header (offset 54) = 6 (TCP) with
     /// length 0, i.e. (0+1)*8 = 8 bytes.
     /// </summary>
-    public static byte[] BuildIpv6TcpFrameWithHopByHop(IPAddress source, IPAddress destination, ushort sourcePort, ushort destinationPort)
+    public static byte[] BuildIPv6TcpFrameWithHopByHop(IPAddress source, IPAddress destination, ushort sourcePort, ushort destinationPort)
     {
         const int tcpHeaderLength = 20;
         const int extensionLength = 8;
@@ -139,12 +139,12 @@ internal static class FrameBuilders
         frame[tcp + 12] = 0x50;
         frame[tcp + 13] = TcpFlagSyn;
 
-        ChecksumMath.SetIpv6TcpChecksum(frame, tcp, tcpHeaderLength);
+        ChecksumMath.SetIPv6TcpChecksum(frame, tcp, tcpHeaderLength);
         return frame;
     }
 
     /// <summary>IPv4 UDP datagram; the UDP checksum stays zero (legal for IPv4).</summary>
-    public static byte[] BuildIpv4UdpFrame(IPAddress source, IPAddress destination, ushort sourcePort, ushort destinationPort, byte[]? payload = null)
+    public static byte[] BuildIPv4UdpFrame(IPAddress source, IPAddress destination, ushort sourcePort, ushort destinationPort, byte[]? payload = null)
     {
         payload ??= [];
         var udpLength = 8 + payload.Length;
@@ -163,12 +163,12 @@ internal static class FrameBuilders
         BinaryPrimitives.WriteUInt16BigEndian(frame.AsSpan(38, 2), (ushort)udpLength);
         payload.CopyTo(frame, 42);
 
-        ChecksumMath.SetIpv4HeaderChecksum(frame);
+        ChecksumMath.SetIPv4HeaderChecksum(frame);
         return frame;
     }
 
     /// <summary>IPv6 UDP datagram; the UDP checksum stays zero (parse-only tests do not validate it).</summary>
-    private static byte[] BuildIpv6UdpFrame(IPAddress source, IPAddress destination, ushort sourcePort, ushort destinationPort, byte[]? payload = null)
+    private static byte[] BuildIPv6UdpFrame(IPAddress source, IPAddress destination, ushort sourcePort, ushort destinationPort, byte[]? payload = null)
     {
         payload ??= [];
         var udpLength = 8 + payload.Length;
@@ -192,9 +192,9 @@ internal static class FrameBuilders
 
     // ---- Fragment builders ----
 
-    internal static byte[] BuildIpv4Fragment(IPAddress source, IPAddress destination, ushort sourcePort, ushort destinationPort)
+    internal static byte[] BuildIPv4Fragment(IPAddress source, IPAddress destination, ushort sourcePort, ushort destinationPort)
     {
-        var frame = BuildIpv4TcpFrame(source, destination, sourcePort, destinationPort);
+        var frame = BuildIPv4TcpFrame(source, destination, sourcePort, destinationPort);
         // Flags/fragment-offset field (frame 20..21): MF set makes the frame unparseable as a
         // flow, so the capture path routes it as non-flow. The stale checksum is irrelevant —
         // the fragment path never rewrites the frame.
@@ -202,7 +202,7 @@ internal static class FrameBuilders
         return frame;
     }
 
-    internal static byte[] BuildIpv6Fragment(IPAddress source, IPAddress destination, ushort sourcePort, ushort destinationPort)
+    internal static byte[] BuildIPv6Fragment(IPAddress source, IPAddress destination, ushort sourcePort, ushort destinationPort)
     {
         // IPv6(40) + fragment header(8) + TCP(20): nextHeader 44, the fragment header carries
         // TCP with a zero offset.
@@ -227,15 +227,15 @@ internal static class FrameBuilders
 
     // ---- Capture-pipeline fixed-address wrappers ----
 
-    internal static byte[] CreateIpv4TcpFrame() =>
-        BuildIpv4TcpFrame(IPAddress.Parse("192.0.2.10"), IPAddress.Parse("192.0.2.53"), 53000, 443, tcpFlags: 0);
+    internal static byte[] CreateIPv4TcpFrame() =>
+        BuildIPv4TcpFrame(IPAddress.Parse("192.0.2.10"), IPAddress.Parse("192.0.2.53"), 53000, 443, tcpFlags: 0);
 
-    internal static byte[] CreateIpv4UdpFrame() =>
-        BuildIpv4UdpFrame(IPAddress.Parse("192.0.2.10"), IPAddress.Parse("192.0.2.53"), 53000, 53);
+    internal static byte[] CreateIPv4UdpFrame() =>
+        BuildIPv4UdpFrame(IPAddress.Parse("192.0.2.10"), IPAddress.Parse("192.0.2.53"), 53000, 53);
 
-    internal static byte[] CreateIpv6TcpFrame() =>
-        BuildIpv6TcpFrame(IPAddress.Parse("2001:db8::10"), IPAddress.Parse("2001:db8::53"), 53000, 443, tcpFlags: 0, sequence: 0);
+    internal static byte[] CreateIPv6TcpFrame() =>
+        BuildIPv6TcpFrame(IPAddress.Parse("2001:db8::10"), IPAddress.Parse("2001:db8::53"), 53000, 443, tcpFlags: 0, sequence: 0);
 
-    internal static byte[] CreateIpv6UdpFrame() =>
-        BuildIpv6UdpFrame(IPAddress.Parse("2001:db8::10"), IPAddress.Parse("2001:db8::53"), 53000, 53);
+    internal static byte[] CreateIPv6UdpFrame() =>
+        BuildIPv6UdpFrame(IPAddress.Parse("2001:db8::10"), IPAddress.Parse("2001:db8::53"), 53000, 53);
 }

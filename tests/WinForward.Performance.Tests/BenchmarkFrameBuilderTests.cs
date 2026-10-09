@@ -25,9 +25,9 @@ public sealed class BenchmarkFrameBuilderTests
     [InlineData(128, true)]
     [InlineData(128, false)]
     [InlineData(1400, false)]
-    public void Ipv4TcpFrameCarriesAValidTcpChecksum(int frameSize, bool bareSyn)
+    public void IPv4TcpFrameCarriesAValidTcpChecksum(int frameSize, bool bareSyn)
     {
-        var frame = BenchmarkShared.CreateIpv4TcpFrame(frameSize, bareSyn);
+        var frame = BenchmarkShared.CreateIPv4TcpFrame(frameSize, bareSyn);
 
         Assert.Equal(0x0800, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(12, 2)));
         Assert.Equal(4, frame[14] >> 4);
@@ -51,9 +51,9 @@ public sealed class BenchmarkFrameBuilderTests
     [InlineData(128, true)]
     [InlineData(128, false)]
     [InlineData(1400, false)]
-    public void Ipv6TcpFrameCarriesAValidTcpChecksumAndATcpNextHeader(int frameSize, bool bareSyn)
+    public void IPv6TcpFrameCarriesAValidTcpChecksumAndATcpNextHeader(int frameSize, bool bareSyn)
     {
-        var frame = BenchmarkShared.CreateIpv6TcpFrame(frameSize, bareSyn);
+        var frame = BenchmarkShared.CreateIPv6TcpFrame(frameSize, bareSyn);
 
         Assert.Equal(0x86dd, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(12, 2)));
         Assert.Equal(6, frame[14] >> 4);
@@ -78,9 +78,9 @@ public sealed class BenchmarkFrameBuilderTests
     [InlineData(64)]
     [InlineData(512)]
     [InlineData(1514)]
-    public void Ipv6UdpFrameCarriesTheIpv6UdpStructure(int frameSize)
+    public void IPv6UdpFrameCarriesTheIPv6UdpStructure(int frameSize)
     {
-        var frame = BenchmarkShared.CreateIpv6UdpFrame(frameSize);
+        var frame = BenchmarkShared.CreateIPv6UdpFrame(frameSize);
 
         Assert.Equal(frameSize, frame.Length);
         Assert.Equal(0x86dd, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(12, 2)));
@@ -104,9 +104,9 @@ public sealed class BenchmarkFrameBuilderTests
     [InlineData(64)]
     [InlineData(512)]
     [InlineData(1514)]
-    public void BothUdpParsersAcceptTheIpv6UdpFrame(int frameSize)
+    public void BothUdpParsersAcceptTheIPv6UdpFrame(int frameSize)
     {
-        var frame = BenchmarkShared.CreateIpv6UdpFrame(frameSize);
+        var frame = BenchmarkShared.CreateIPv6UdpFrame(frameSize);
 
         Assert.True(IPTcpUdpPacket.TryParse(frame, out var classified));
         Assert.Equal(PacketTransport.Udp, classified.Transport);
@@ -136,8 +136,8 @@ public sealed class BenchmarkFrameBuilderTests
     public void BothLegsAcceptTheBuiltFrameInBothShapes(bool ipv6)
     {
         var frame = ipv6
-            ? BenchmarkShared.CreateIpv6TcpFrame(1400, bareSyn: false)
-            : BenchmarkShared.CreateIpv4TcpFrame(1400, bareSyn: false);
+            ? BenchmarkShared.CreateIPv6TcpFrame(1400, bareSyn: false)
+            : BenchmarkShared.CreateIPv4TcpFrame(1400, bareSyn: false);
         var client = ipv6 ? Endpoint.From(s_client, 53_000) : Endpoint.From(IPAddress.Parse("192.0.2.10"), 53_000);
         var server = ipv6 ? Endpoint.From(s_server, 443) : Endpoint.From(IPAddress.Parse("192.0.2.80"), 443);
         var translated = Endpoint.From(ipv6 ? IPAddress.Parse("2001:db8::1080") : IPAddress.Parse("192.168.77.2"), 1080);

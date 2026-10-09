@@ -24,8 +24,8 @@ public class ParserBenchmarks
     public void Setup()
     {
         _payloadLength = FrameBytes - 14 - 20 - 8;
-        _frame = BenchmarkShared.CreateIpv4UdpFrame(FrameBytes);
-        _ipv6Frame = BenchmarkShared.CreateIpv6UdpFrame(FrameBytes);
+        _frame = BenchmarkShared.CreateIPv4UdpFrame(FrameBytes);
+        _ipv6Frame = BenchmarkShared.CreateIPv6UdpFrame(FrameBytes);
         _destination = IPAddress.Parse("192.0.2.53");
         var socksFrame = new byte[22 + _payloadLength];
         if (!Socks5UdpCodec.TryEncode(IPAddressValue.From(_destination), 53, _frame.AsSpan(_frame.Length - _payloadLength), socksFrame, out var socksWritten)) throw new InvalidOperationException("SOCKS5 UDP span encoder rejected the benchmark frame.");
@@ -34,7 +34,7 @@ public class ParserBenchmarks
     }
 
     [Benchmark]
-    public long Ipv4UdpTryParse()
+    public long IPv4UdpTryParse()
     {
         long value = 0;
         if (!IPTcpUdpPacket.TryParse(_frame, out var packet)) throw new InvalidOperationException("Parser rejected the benchmark frame.");
@@ -44,7 +44,7 @@ public class ParserBenchmarks
     }
 
     [Benchmark]
-    public long Ipv4UdpPayload()
+    public long IPv4UdpPayload()
     {
         long value = 0;
         if (!IPUdpPacket.TryParseSpan(_frame, out var packet)) throw new InvalidOperationException("UDP parser rejected the benchmark frame.");
@@ -54,7 +54,7 @@ public class ParserBenchmarks
     }
 
     [Benchmark]
-    public long Ipv6UdpTryParse()
+    public long IPv6UdpTryParse()
     {
         long value = 0;
         if (!IPTcpUdpPacket.TryParse(_ipv6Frame, out var packet)) throw new InvalidOperationException("Parser rejected the IPv6 benchmark frame.");
@@ -64,7 +64,7 @@ public class ParserBenchmarks
     }
 
     [Benchmark]
-    public long Ipv6UdpPayload()
+    public long IPv6UdpPayload()
     {
         long value = 0;
         if (!IPUdpPacket.TryParseSpan(_ipv6Frame, out var packet)) throw new InvalidOperationException("UDP parser rejected the IPv6 benchmark frame.");

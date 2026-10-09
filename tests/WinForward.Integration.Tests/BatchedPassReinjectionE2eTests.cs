@@ -138,7 +138,7 @@ public sealed class BatchedPassReinjectionE2eTests
     /// </summary>
     private sealed class FiniteMixedPassReader(int totalPackets, CancellationTokenSource completion, nint adapterHandle) : INdisPacketReader
     {
-        private readonly byte[] _frame = CreateIpv4TcpFrame();
+        private readonly byte[] _frame = CreateIPv4TcpFrame();
         private int _sequence;
 
         public int TryReadPackets(nint handle, NdisPacketBuffer[] buffers)
@@ -167,7 +167,7 @@ public sealed class BatchedPassReinjectionE2eTests
     /// </summary>
     private sealed class ScriptedFaultingReader(nint adapterHandle) : INdisPacketReader
     {
-        private readonly byte[] _frame = CreateIpv4TcpFrame();
+        private readonly byte[] _frame = CreateIPv4TcpFrame();
         private bool _served;
 
         public int TryReadPackets(nint handle, NdisPacketBuffer[] buffers)

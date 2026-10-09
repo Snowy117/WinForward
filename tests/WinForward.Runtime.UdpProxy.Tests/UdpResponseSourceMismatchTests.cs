@@ -190,7 +190,7 @@ public sealed class UdpResponseSourceMismatchTests
     }
 
     [Fact]
-    public async Task SamePeerWithADifferentIpv6ScopeIsNotAMismatch()
+    public async Task SamePeerWithADifferentIPv6ScopeIsNotAMismatch()
     {
         var destination = Endpoint.From(IPAddress.Parse("fe80::1%7"), 53);
         var flow = FlowKey.Create(Endpoint.From(IPAddress.Parse("fe80::2"), 53000), destination, TransportProtocol.Udp, FlowOriginKind.Host);
@@ -218,7 +218,7 @@ public sealed class UdpResponseSourceMismatchTests
     }
 
     [Fact]
-    public async Task AnIpv6ReplyFromDifferentAddressBitsInTheSameScopeIsAMismatch()
+    public async Task AnIPv6ReplyFromDifferentAddressBitsInTheSameScopeIsAMismatch()
     {
         var destination = Endpoint.From(IPAddress.Parse("fe80::1%7"), 53);
         var flow = FlowKey.Create(Endpoint.From(IPAddress.Parse("fe80::2"), 53000), destination, TransportProtocol.Udp, FlowOriginKind.Host);

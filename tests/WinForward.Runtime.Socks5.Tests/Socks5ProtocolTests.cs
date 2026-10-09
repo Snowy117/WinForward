@@ -267,7 +267,7 @@ public sealed class Socks5ProtocolTests
     }
 
     [Fact]
-    public void NormalizeBndAddressMapsIpv4MappedToPlainIpv4()
+    public void NormalizeBndAddressMapsIPv4MappedToPlainIPv4()
     {
         // M1: an IPv4-mapped ::ffff:a.b.c.d reply is normalized to its IPv4 form.
         var mapped = IPAddress.Parse("::ffff:192.0.2.53");
@@ -277,7 +277,7 @@ public sealed class Socks5ProtocolTests
     }
 
     [Fact]
-    public void NormalizeBndAddressCarriesControlPeerScopeOverIpv6Reply()
+    public void NormalizeBndAddressCarriesControlPeerScopeOverIPv6Reply()
     {
         // M2: a genuine IPv6 relay address reconstructed from raw bytes has ScopeId 0; it inherits
         // the control peer's non-zero interface scope so a link-local relay routes correctly.

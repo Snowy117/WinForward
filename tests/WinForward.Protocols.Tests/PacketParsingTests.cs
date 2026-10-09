@@ -12,41 +12,41 @@ public sealed class PacketParsingTests
     // ---- Packet parser (IPTcpUdpPacket) ----
 
     [Fact]
-    public void ParsesIpv4TcpAndUdpAndRejectsNonTcpUdp()
+    public void ParsesIPv4TcpAndUdpAndRejectsNonTcpUdp()
     {
-        Assert.True(IPTcpUdpPacket.TryParse(FrameBuilders.CreateIpv4TcpFrame(), out var tcp));
+        Assert.True(IPTcpUdpPacket.TryParse(FrameBuilders.CreateIPv4TcpFrame(), out var tcp));
         Assert.Equal(PacketTransport.Tcp, tcp.Transport);
         Assert.Equal((ushort)53000, tcp.SourcePort);
         Assert.Equal((ushort)443, tcp.DestinationPort);
         Assert.Equal(IPAddress.Parse("192.0.2.10"), tcp.SourceAddress);
         Assert.Equal(IPAddress.Parse("192.0.2.53"), tcp.DestinationAddress);
 
-        Assert.True(IPTcpUdpPacket.TryParse(FrameBuilders.CreateIpv4UdpFrame(), out var udp));
+        Assert.True(IPTcpUdpPacket.TryParse(FrameBuilders.CreateIPv4UdpFrame(), out var udp));
         Assert.Equal(PacketTransport.Udp, udp.Transport);
         Assert.Equal((ushort)53, udp.DestinationPort);
 
-        var icmp = FrameBuilders.CreateIpv4UdpFrame();
+        var icmp = FrameBuilders.CreateIPv4UdpFrame();
         icmp[23] = 1; // ICMP
         Assert.False(IPTcpUdpPacket.TryParse(icmp, out _));
     }
 
     [Fact]
-    public void ParsesIpv6TcpAndUdp()
+    public void ParsesIPv6TcpAndUdp()
     {
-        Assert.True(IPTcpUdpPacket.TryParse(FrameBuilders.CreateIpv6TcpFrame(), out var tcp));
+        Assert.True(IPTcpUdpPacket.TryParse(FrameBuilders.CreateIPv6TcpFrame(), out var tcp));
         Assert.Equal(PacketTransport.Tcp, tcp.Transport);
         Assert.Equal(IPAddress.Parse("2001:db8::10"), tcp.SourceAddress);
         Assert.Equal((ushort)443, tcp.DestinationPort);
 
-        Assert.True(IPTcpUdpPacket.TryParse(FrameBuilders.CreateIpv6UdpFrame(), out var udp));
+        Assert.True(IPTcpUdpPacket.TryParse(FrameBuilders.CreateIPv6UdpFrame(), out var udp));
         Assert.Equal(PacketTransport.Udp, udp.Transport);
         Assert.Equal(IPAddress.Parse("2001:db8::53"), udp.DestinationAddress);
     }
 
     [Fact]
-    public void RejectsIpv4FragmentsAndTruncatedFrames()
+    public void RejectsIPv4FragmentsAndTruncatedFrames()
     {
-        var frame = FrameBuilders.CreateIpv4TcpFrame();
+        var frame = FrameBuilders.CreateIPv4TcpFrame();
         frame[20] = 0x20; // MF fragment flag
         Assert.False(IPTcpUdpPacket.TryParse(frame, out _));
 
@@ -84,7 +84,7 @@ public sealed class PacketParsingTests
     }
 
     [Fact]
-    public void ClassifyFlowPreservesIpv6Endpoints()
+    public void ClassifyFlowPreservesIPv6Endpoints()
     {
         var adapter = new WindowsAdapter("id-6", "vEthernet", "internal-6", 2, 1);
         var view = new PacketView(PacketTransport.Udp, IPAddress.Parse("2001:db8::10"), IPAddress.Parse("2001:db8::53"), 53000, 53, 40, 8, TransportLength: 8, TcpFlags: 0);

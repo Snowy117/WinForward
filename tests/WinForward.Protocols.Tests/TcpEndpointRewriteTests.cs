@@ -13,69 +13,69 @@ public sealed class TcpEndpointRewriteTests
     private static readonly IPAddress s_ipv4Dest = IPAddress.Parse("192.0.2.53");
     private static readonly IPAddress s_ipv6Source = IPAddress.Parse("2001:db8::10");
     private static readonly IPAddress s_ipv6Dest = IPAddress.Parse("2001:db8::53");
-    private static readonly IPAddress s_newIpv4Source = IPAddress.Parse("203.0.113.7");
-    private static readonly IPAddress s_newIpv4Dest = IPAddress.Parse("127.0.0.1");
-    private static readonly IPAddress s_newIpv6Source = IPAddress.Parse("2001:db8:1::7");
-    private static readonly IPAddress s_newIpv6Dest = IPAddress.Parse("::1");
+    private static readonly IPAddress s_newIPv4Source = IPAddress.Parse("203.0.113.7");
+    private static readonly IPAddress s_newIPv4Dest = IPAddress.Parse("127.0.0.1");
+    private static readonly IPAddress s_newIPv6Source = IPAddress.Parse("2001:db8:1::7");
+    private static readonly IPAddress s_newIPv6Dest = IPAddress.Parse("::1");
 
     [Fact]
-    public void Ipv4RewritesAddressesPortsAndRecomputesBothChecksums()
+    public void IPv4RewritesAddressesPortsAndRecomputesBothChecksums()
     {
-        var frame = BuildIpv4TcpFrame();
+        var frame = BuildIPv4TcpFrame();
         var original = frame.ToArray();
 
-        var ok = PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIpv4Source, 1111, s_newIpv4Dest, 2222);
+        var ok = PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIPv4Source, 1111, s_newIPv4Dest, 2222);
 
         Assert.True(ok);
-        AssertChangedOnly(Ipv4ExpectedMutableOffsets(), original, frame);
+        AssertChangedOnly(IPv4ExpectedMutableOffsets(), original, frame);
 
-        Assert.Equal(s_newIpv4Source, new IPAddress(frame.AsSpan(26, 4).ToArray()));
-        Assert.Equal(s_newIpv4Dest, new IPAddress(frame.AsSpan(30, 4).ToArray()));
+        Assert.Equal(s_newIPv4Source, new IPAddress(frame.AsSpan(26, 4).ToArray()));
+        Assert.Equal(s_newIPv4Dest, new IPAddress(frame.AsSpan(30, 4).ToArray()));
         Assert.Equal((ushort)1111, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(34, 2)));
         Assert.Equal((ushort)2222, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(36, 2)));
 
-        Assert.True(ValidateIpv4HeaderChecksum(frame));
-        Assert.True(ValidateIpv4TcpChecksum(frame));
+        Assert.True(ValidateIPv4HeaderChecksum(frame));
+        Assert.True(ValidateIPv4TcpChecksum(frame));
     }
 
     [Fact]
-    public void Ipv6RewritesAddressesPortsAndRecomputesTcpChecksumOnly()
+    public void IPv6RewritesAddressesPortsAndRecomputesTcpChecksumOnly()
     {
-        var frame = BuildIpv6TcpFrame();
+        var frame = BuildIPv6TcpFrame();
         var original = frame.ToArray();
 
-        var ok = PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIpv6Source, 3333, s_newIpv6Dest, 4444);
+        var ok = PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIPv6Source, 3333, s_newIPv6Dest, 4444);
 
         Assert.True(ok);
-        AssertChangedOnly(Ipv6ExpectedMutableOffsets(), original, frame);
+        AssertChangedOnly(IPv6ExpectedMutableOffsets(), original, frame);
 
-        Assert.Equal(s_newIpv6Source, new IPAddress(frame.AsSpan(22, 16).ToArray()));
-        Assert.Equal(s_newIpv6Dest, new IPAddress(frame.AsSpan(38, 16).ToArray()));
+        Assert.Equal(s_newIPv6Source, new IPAddress(frame.AsSpan(22, 16).ToArray()));
+        Assert.Equal(s_newIPv6Dest, new IPAddress(frame.AsSpan(38, 16).ToArray()));
         Assert.Equal((ushort)3333, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(54, 2)));
         Assert.Equal((ushort)4444, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(56, 2)));
 
-        Assert.True(ValidateIpv6TcpChecksum(frame));
+        Assert.True(ValidateIPv6TcpChecksum(frame));
     }
 
     [Fact]
-    public void RoundTripIpv4RestoresOriginalFrameByteForByte()
+    public void RoundTripIPv4RestoresOriginalFrameByteForByte()
     {
-        var frame = BuildIpv4TcpFrame(payload: [0xde, 0xad, 0xbe, 0xef]);
+        var frame = BuildIPv4TcpFrame(payload: [0xde, 0xad, 0xbe, 0xef]);
         var original = frame.ToArray();
 
-        Assert.True(PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIpv4Source, 1111, s_newIpv4Dest, 2222));
+        Assert.True(PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIPv4Source, 1111, s_newIPv4Dest, 2222));
         Assert.True(PacketChecksums.TryRewriteTcpEndpoints(frame, s_ipv4Source, 53000, s_ipv4Dest, 443));
 
         Assert.Equal(original, frame);
     }
 
     [Fact]
-    public void RoundTripIpv6RestoresOriginalFrameByteForByte()
+    public void RoundTripIPv6RestoresOriginalFrameByteForByte()
     {
-        var frame = BuildIpv6TcpFrame(payload: [0x01, 0x02, 0x03, 0x04]);
+        var frame = BuildIPv6TcpFrame(payload: [0x01, 0x02, 0x03, 0x04]);
         var original = frame.ToArray();
 
-        Assert.True(PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIpv6Source, 3333, s_newIpv6Dest, 4444));
+        Assert.True(PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIPv6Source, 3333, s_newIPv6Dest, 4444));
         Assert.True(PacketChecksums.TryRewriteTcpEndpoints(frame, s_ipv6Source, 53000, s_ipv6Dest, 443));
 
         Assert.Equal(original, frame);
@@ -85,13 +85,13 @@ public sealed class TcpEndpointRewriteTests
     public void SynWithOptionsSurvivesRewriteIntact()
     {
         var options = new byte[] { 0x02, 0x04, 0x05, 0xb4 };
-        var frame = BuildIpv4TcpFrame(tcpDataOffsetWords: 6, options: options);
+        var frame = BuildIPv4TcpFrame(tcpDataOffsetWords: 6, options: options);
         var originalOptions = options.ToArray();
 
-        var ok = PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIpv4Source, 1111, s_newIpv4Dest, 2222);
+        var ok = PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIPv4Source, 1111, s_newIPv4Dest, 2222);
 
         Assert.True(ok);
-        Assert.True(ValidateIpv4TcpChecksum(frame));
+        Assert.True(ValidateIPv4TcpChecksum(frame));
         Assert.Equal(originalOptions, frame.AsSpan(54, 4).ToArray());
     }
 
@@ -101,7 +101,7 @@ public sealed class TcpEndpointRewriteTests
         var frame = new byte[20];
         var copy = frame.ToArray();
 
-        var ok = PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIpv4Source, 1, s_newIpv4Dest, 2);
+        var ok = PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIPv4Source, 1, s_newIPv4Dest, 2);
 
         Assert.False(ok);
         Assert.Equal(copy, frame);
@@ -110,25 +110,25 @@ public sealed class TcpEndpointRewriteTests
     [Fact]
     public void RejectsNonIpEtherTypeWithoutMutating()
     {
-        var frame = BuildIpv4TcpFrame();
+        var frame = BuildIPv4TcpFrame();
         frame[12] = 0x08;
         frame[13] = 0x06;
         var copy = frame.ToArray();
 
-        var ok = PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIpv4Source, 1, s_newIpv4Dest, 2);
+        var ok = PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIPv4Source, 1, s_newIPv4Dest, 2);
 
         Assert.False(ok);
         Assert.Equal(copy, frame);
     }
 
     [Fact]
-    public void RejectsIpv4FragmentWithoutMutating()
+    public void RejectsIPv4FragmentWithoutMutating()
     {
-        var frame = BuildIpv4TcpFrame();
+        var frame = BuildIPv4TcpFrame();
         frame[20] = 0x20;
         var copy = frame.ToArray();
 
-        var ok = PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIpv4Source, 1, s_newIpv4Dest, 2);
+        var ok = PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIPv4Source, 1, s_newIPv4Dest, 2);
 
         Assert.False(ok);
         Assert.Equal(copy, frame);
@@ -137,10 +137,10 @@ public sealed class TcpEndpointRewriteTests
     [Fact]
     public void RejectsUdpFramePassedToTcpRewriterWithoutMutating()
     {
-        var frame = BuildIpv4UdpFrame();
+        var frame = BuildIPv4UdpFrame();
         var copy = frame.ToArray();
 
-        var ok = PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIpv4Source, 1, s_newIpv4Dest, 2);
+        var ok = PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIPv4Source, 1, s_newIPv4Dest, 2);
 
         Assert.False(ok);
         Assert.Equal(copy, frame);
@@ -149,39 +149,39 @@ public sealed class TcpEndpointRewriteTests
     [Fact]
     public void RejectsMalformedTcpDataOffsetWithoutMutating()
     {
-        var frame = BuildIpv4TcpFrame();
+        var frame = BuildIPv4TcpFrame();
         frame[46] = 0x10;
         var copy = frame.ToArray();
 
-        var ok = PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIpv4Source, 1, s_newIpv4Dest, 2);
+        var ok = PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIPv4Source, 1, s_newIPv4Dest, 2);
 
         Assert.False(ok);
         Assert.Equal(copy, frame);
     }
 
     [Fact]
-    public void RejectsIpv6FragmentExtensionWithoutMutating()
+    public void RejectsIPv6FragmentExtensionWithoutMutating()
     {
-        var frame = BuildIpv6TcpFrame();
+        var frame = BuildIPv6TcpFrame();
         frame[20] = 44;
         var copy = frame.ToArray();
 
-        var ok = PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIpv6Source, 1, s_newIpv6Dest, 2);
+        var ok = PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIPv6Source, 1, s_newIPv6Dest, 2);
 
         Assert.False(ok);
         Assert.Equal(copy, frame);
     }
 
     [Fact]
-    public void RejectsUnsupportedIpv6ExtensionChainWithoutMutating()
+    public void RejectsUnsupportedIPv6ExtensionChainWithoutMutating()
     {
-        var frame = BuildIpv6TcpFrame();
+        var frame = BuildIPv6TcpFrame();
         frame[20] = 60;
         frame[40] = 59;
         frame[41] = 0;
         var copy = frame.ToArray();
 
-        var ok = PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIpv6Source, 1, s_newIpv6Dest, 2);
+        var ok = PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIPv6Source, 1, s_newIPv6Dest, 2);
 
         Assert.False(ok);
         Assert.Equal(copy, frame);
@@ -190,61 +190,61 @@ public sealed class TcpEndpointRewriteTests
     [Fact]
     public void RejectsAddressFamilyMismatchWithoutMutating()
     {
-        var frame = BuildIpv4TcpFrame();
+        var frame = BuildIPv4TcpFrame();
         var copy = frame.ToArray();
 
-        var ok = PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIpv6Source, 1, s_newIpv6Dest, 2);
+        var ok = PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIPv6Source, 1, s_newIPv6Dest, 2);
 
         Assert.False(ok);
         Assert.Equal(copy, frame);
     }
 
     [Fact]
-    public void Ipv6HopByHopExtensionThenTcpRewritesSuccessfully()
+    public void IPv6HopByHopExtensionThenTcpRewritesSuccessfully()
     {
         // IPv6 Hop-by-Hop (next-header 0) followed by TCP (6): proves the shared transport-finder's
         // accept branch is reachable from the TCP entry point, not only via the UDP path.
-        var frame = BuildIpv6TcpFrameWithHopByHop();
+        var frame = BuildIPv6TcpFrameWithHopByHop();
         var original = frame.ToArray();
 
-        var ok = PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIpv6Source, 5555, s_newIpv6Dest, 6666);
+        var ok = PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIPv6Source, 5555, s_newIPv6Dest, 6666);
 
         Assert.True(ok);
-        AssertChangedOnly(Ipv6ExtensionExpectedMutableOffsets(), original, frame);
+        AssertChangedOnly(IPv6ExtensionExpectedMutableOffsets(), original, frame);
 
-        Assert.Equal(s_newIpv6Source, new IPAddress(frame.AsSpan(22, 16).ToArray()));
-        Assert.Equal(s_newIpv6Dest, new IPAddress(frame.AsSpan(38, 16).ToArray()));
+        Assert.Equal(s_newIPv6Source, new IPAddress(frame.AsSpan(22, 16).ToArray()));
+        Assert.Equal(s_newIPv6Dest, new IPAddress(frame.AsSpan(38, 16).ToArray()));
         Assert.Equal((ushort)5555, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(62, 2)));
         Assert.Equal((ushort)6666, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(64, 2)));
 
         Assert.Equal(original.AsSpan(54, 8).ToArray(), frame.AsSpan(54, 8).ToArray());
         Assert.Equal(original.AsSpan(66, 12).ToArray(), frame.AsSpan(66, 12).ToArray());
 
-        Assert.True(ValidateIpv6TcpChecksumWithHopByHop(frame));
+        Assert.True(ValidateIPv6TcpChecksumWithHopByHop(frame));
     }
 
     [Fact]
     public void TcpChecksumNeverInvertsZeroToFFFF()
     {
-        var frame = BuildIpv4TcpFrame();
-        Assert.True(PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIpv4Source, 1, s_newIpv4Dest, 2));
+        var frame = BuildIPv4TcpFrame();
+        Assert.True(PacketChecksums.TryRewriteTcpEndpoints(frame, s_newIPv4Source, 1, s_newIPv4Dest, 2));
 
         var stored = BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(50, 2));
-        var recomputed = RecomputeIpv4TcpChecksumField(frame);
+        var recomputed = RecomputeIPv4TcpChecksumField(frame);
         Assert.Equal(recomputed, stored);
         Assert.NotEqual(ushort.MaxValue, (ushort)(stored ^ recomputed));
     }
 
-    private static bool ValidateIpv4HeaderChecksum(byte[] frame)
+    private static bool ValidateIPv4HeaderChecksum(byte[] frame)
     {
         var headerLength = (frame[14] & 0x0f) * 4;
         return PacketChecksums.InternetChecksum(frame.AsSpan(14, headerLength)) == 0;
     }
 
-    private static bool ValidateIpv4TcpChecksum(byte[] frame)
+    private static bool ValidateIPv4TcpChecksum(byte[] frame)
         => TcpSegmentChecksumIncludingCksumField(frame) == 0;
 
-    private static bool ValidateIpv6TcpChecksum(byte[] frame)
+    private static bool ValidateIPv6TcpChecksum(byte[] frame)
     {
         const int tcpOffset = 54;
         var tcpLength = frame.Length - tcpOffset;
@@ -252,7 +252,7 @@ public sealed class TcpEndpointRewriteTests
         return Finish(sum) == 0;
     }
 
-    private static bool ValidateIpv6TcpChecksumWithHopByHop(byte[] frame)
+    private static bool ValidateIPv6TcpChecksumWithHopByHop(byte[] frame)
     {
         const int tcpOffset = 62;
         var tcpLength = frame.Length - tcpOffset;
@@ -260,7 +260,7 @@ public sealed class TcpEndpointRewriteTests
         return Finish(sum) == 0;
     }
 
-    private static ushort RecomputeIpv4TcpChecksumField(byte[] frame)
+    private static ushort RecomputeIPv4TcpChecksumField(byte[] frame)
     {
         var headerLength = (frame[14] & 0x0f) * 4;
         var tcpOffset = 14 + headerLength;
@@ -279,10 +279,10 @@ public sealed class TcpEndpointRewriteTests
         return Finish(sum);
     }
 
-    private static HashSet<int> Ipv4ExpectedMutableOffsets()
+    private static HashSet<int> IPv4ExpectedMutableOffsets()
         => [24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 50, 51];
 
-    private static HashSet<int> Ipv6ExpectedMutableOffsets()
+    private static HashSet<int> IPv6ExpectedMutableOffsets()
     {
         var set = new HashSet<int>();
         for (var i = 22; i < 58; i++) set.Add(i);
@@ -291,7 +291,7 @@ public sealed class TcpEndpointRewriteTests
         return set;
     }
 
-    private static HashSet<int> Ipv6ExtensionExpectedMutableOffsets()
+    private static HashSet<int> IPv6ExtensionExpectedMutableOffsets()
     {
         // Ethernet(14) + IPv6(40) + Hop-by-Hop(8) + TCP(20..). Mutable: IPv6 src(22..37),
         // IPv6 dst(38..53), TCP src port(62..63), TCP dst port(64..65), TCP checksum(78..79).
@@ -317,15 +317,15 @@ public sealed class TcpEndpointRewriteTests
         }
     }
 
-    private static byte[] BuildIpv4TcpFrame(int tcpDataOffsetWords = 5, byte[]? options = null, byte[]? payload = null) =>
-        FrameBuilders.BuildIpv4TcpFrame(s_ipv4Source, s_ipv4Dest, 53000, 443, tcpDataOffsetWords: tcpDataOffsetWords, options: options, payload: payload);
+    private static byte[] BuildIPv4TcpFrame(int tcpDataOffsetWords = 5, byte[]? options = null, byte[]? payload = null) =>
+        FrameBuilders.BuildIPv4TcpFrame(s_ipv4Source, s_ipv4Dest, 53000, 443, tcpDataOffsetWords: tcpDataOffsetWords, options: options, payload: payload);
 
-    private static byte[] BuildIpv6TcpFrameWithHopByHop() =>
-        FrameBuilders.BuildIpv6TcpFrameWithHopByHop(s_ipv6Source, s_ipv6Dest, 53000, 443);
+    private static byte[] BuildIPv6TcpFrameWithHopByHop() =>
+        FrameBuilders.BuildIPv6TcpFrameWithHopByHop(s_ipv6Source, s_ipv6Dest, 53000, 443);
 
-    private static byte[] BuildIpv6TcpFrame(byte[]? payload = null) =>
-        FrameBuilders.BuildIpv6TcpFrame(s_ipv6Source, s_ipv6Dest, 53000, 443, payload);
+    private static byte[] BuildIPv6TcpFrame(byte[]? payload = null) =>
+        FrameBuilders.BuildIPv6TcpFrame(s_ipv6Source, s_ipv6Dest, 53000, 443, payload);
 
-    private static byte[] BuildIpv4UdpFrame() =>
-        FrameBuilders.BuildIpv4UdpFrame(s_ipv4Source, s_ipv4Dest, 53000, 53);
+    private static byte[] BuildIPv4UdpFrame() =>
+        FrameBuilders.BuildIPv4UdpFrame(s_ipv4Source, s_ipv4Dest, 53000, 53);
 }

@@ -20,56 +20,56 @@ public sealed class TcpEndpointRewriteIncrementalTests
     private const int RandomIterations = 512;
 
     [Fact]
-    public void Ipv4IncrementalMatchesFullRecomputeAndValidatesAcrossRandomFrames()
+    public void IPv4IncrementalMatchesFullRecomputeAndValidatesAcrossRandomFrames()
     {
         var random = new Random(0xC0FFEE);
         for (var iteration = 0; iteration < RandomIterations; iteration++)
         {
             var dataOffsetWords = 5 + random.Next(0, 3);
             var maxOptionBytes = (dataOffsetWords - 5) * 4;
-            var frame = FrameBuilders.BuildIpv4TcpFrame(
-                RandomIpv4(random), RandomIpv4(random),
+            var frame = FrameBuilders.BuildIPv4TcpFrame(
+                RandomIPv4(random), RandomIPv4(random),
                 RandomPort(random), RandomPort(random),
                 tcpDataOffsetWords: dataOffsetWords,
                 options: new byte[random.Next(0, maxOptionBytes + 1)],
                 payload: RandomPayload(random, random.Next(0, 97)));
 
-            var (incremental, full) = RewriteBothWays(frame, RandomIpv4(random), RandomIpv4(random), RandomPort(random), RandomPort(random));
+            var (incremental, full) = RewriteBothWays(frame, RandomIPv4(random), RandomIPv4(random), RandomPort(random), RandomPort(random));
 
             Assert.Equal(full, incremental);
-            Assert.True(ValidateIpv4HeaderChecksum(incremental), string.Create(CultureInfo.InvariantCulture, $"header checksum invalid at iteration {iteration}"));
-            Assert.True(ValidateIpv4TcpChecksum(incremental), string.Create(CultureInfo.InvariantCulture, $"tcp checksum invalid at iteration {iteration}"));
+            Assert.True(ValidateIPv4HeaderChecksum(incremental), string.Create(CultureInfo.InvariantCulture, $"header checksum invalid at iteration {iteration}"));
+            Assert.True(ValidateIPv4TcpChecksum(incremental), string.Create(CultureInfo.InvariantCulture, $"tcp checksum invalid at iteration {iteration}"));
         }
     }
 
     [Fact]
-    public void Ipv6IncrementalMatchesFullRecomputeAndValidatesAcrossRandomFrames()
+    public void IPv6IncrementalMatchesFullRecomputeAndValidatesAcrossRandomFrames()
     {
         var random = new Random(0x0DB8);
         for (var iteration = 0; iteration < RandomIterations; iteration++)
         {
-            var frame = FrameBuilders.BuildIpv6TcpFrame(
-                RandomIpv6(random), RandomIpv6(random),
+            var frame = FrameBuilders.BuildIPv6TcpFrame(
+                RandomIPv6(random), RandomIPv6(random),
                 RandomPort(random), RandomPort(random),
                 payload: RandomPayload(random, random.Next(0, 97)));
 
-            var (incremental, full) = RewriteBothWays(frame, RandomIpv6(random), RandomIpv6(random), RandomPort(random), RandomPort(random));
+            var (incremental, full) = RewriteBothWays(frame, RandomIPv6(random), RandomIPv6(random), RandomPort(random), RandomPort(random));
 
             Assert.Equal(full, incremental);
-            Assert.True(ValidateIpv6TcpChecksum(incremental), string.Create(CultureInfo.InvariantCulture, $"tcp checksum invalid at iteration {iteration}"));
+            Assert.True(ValidateIPv6TcpChecksum(incremental), string.Create(CultureInfo.InvariantCulture, $"tcp checksum invalid at iteration {iteration}"));
         }
     }
 
     [Fact]
-    public void Ipv6ExtensionHeaderIncrementalMatchesFullRecompute()
+    public void IPv6ExtensionHeaderIncrementalMatchesFullRecompute()
     {
         var random = new Random(0x60);
-        var frame = FrameBuilders.BuildIpv6TcpFrameWithHopByHop(RandomIpv6(random), RandomIpv6(random), RandomPort(random), RandomPort(random));
+        var frame = FrameBuilders.BuildIPv6TcpFrameWithHopByHop(RandomIPv6(random), RandomIPv6(random), RandomPort(random), RandomPort(random));
 
-        var (incremental, full) = RewriteBothWays(frame, RandomIpv6(random), RandomIpv6(random), RandomPort(random), RandomPort(random));
+        var (incremental, full) = RewriteBothWays(frame, RandomIPv6(random), RandomIPv6(random), RandomPort(random), RandomPort(random));
 
         Assert.Equal(full, incremental);
-        Assert.True(ValidateIpv6TcpChecksumAt(incremental, tcpOffset: 62));
+        Assert.True(ValidateIPv6TcpChecksumAt(incremental, tcpOffset: 62));
     }
 
     [Fact]
@@ -80,8 +80,8 @@ public sealed class TcpEndpointRewriteIncrementalTests
         // 0x0000 — TCP stores it verbatim, never inverting to 0xFFFF) and the carry-folded
         // mid-range. Every candidate must equal the oracle byte-for-byte.
         var random = new Random(0xFFFF);
-        var frame = FrameBuilders.BuildIpv4TcpFrame(
-            RandomIpv4(random), RandomIpv4(random), RandomPort(random), RandomPort(random),
+        var frame = FrameBuilders.BuildIPv4TcpFrame(
+            RandomIPv4(random), RandomIPv4(random), RandomPort(random), RandomPort(random),
             payload: RandomPayload(random, 5));
         var sawStoredZero = false;
 
@@ -101,11 +101,11 @@ public sealed class TcpEndpointRewriteIncrementalTests
     public void AddressOnlyAndPortOnlyDeltasMatchFullRecompute()
     {
         var random = new Random(0xA11CE);
-        var frame = FrameBuilders.BuildIpv4TcpFrame(
-            RandomIpv4(random), RandomIpv4(random), RandomPort(random), RandomPort(random),
+        var frame = FrameBuilders.BuildIPv4TcpFrame(
+            RandomIPv4(random), RandomIPv4(random), RandomPort(random), RandomPort(random),
             payload: RandomPayload(random, 33));
 
-        var (incrementalAddresses, fullAddresses) = RewriteBothWays(frame, RandomIpv4(random), RandomIpv4(random), ReadPort(frame, isSource: true), ReadPort(frame, isSource: false));
+        var (incrementalAddresses, fullAddresses) = RewriteBothWays(frame, RandomIPv4(random), RandomIPv4(random), ReadPort(frame, isSource: true), ReadPort(frame, isSource: false));
         Assert.Equal(fullAddresses, incrementalAddresses);
 
         var (incrementalPorts, fullPorts) = RewriteBothWays(frame, new IPAddress(frame.AsSpan(26, 4).ToArray()), new IPAddress(frame.AsSpan(30, 4).ToArray()), RandomPort(random), RandomPort(random));
@@ -219,13 +219,13 @@ public sealed class TcpEndpointRewriteIncrementalTests
         return BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(14 + headerLength + (isSource ? 0 : 2), 2));
     }
 
-    private static bool ValidateIpv4HeaderChecksum(byte[] frame)
+    private static bool ValidateIPv4HeaderChecksum(byte[] frame)
     {
         var headerLength = (frame[14] & 0x0f) * 4;
         return Finish(Sum(frame.AsSpan(14, headerLength))) == 0;
     }
 
-    private static bool ValidateIpv4TcpChecksum(byte[] frame)
+    private static bool ValidateIPv4TcpChecksum(byte[] frame)
     {
         var headerLength = (frame[14] & 0x0f) * 4;
         var tcpOffset = 14 + headerLength;
@@ -234,23 +234,23 @@ public sealed class TcpEndpointRewriteIncrementalTests
         return Finish(sum) == 0;
     }
 
-    private static bool ValidateIpv6TcpChecksum(byte[] frame) => ValidateIpv6TcpChecksumAt(frame, tcpOffset: 54);
+    private static bool ValidateIPv6TcpChecksum(byte[] frame) => ValidateIPv6TcpChecksumAt(frame, tcpOffset: 54);
 
-    private static bool ValidateIpv6TcpChecksumAt(byte[] frame, int tcpOffset)
+    private static bool ValidateIPv6TcpChecksumAt(byte[] frame, int tcpOffset)
     {
         var tcpLength = frame.Length - tcpOffset;
         var sum = Sum(frame.AsSpan(22, 16)) + Sum(frame.AsSpan(38, 16)) + 6u + (uint)tcpLength + Sum(frame.AsSpan(tcpOffset, tcpLength));
         return Finish(sum) == 0;
     }
 
-    private static IPAddress RandomIpv4(Random random)
+    private static IPAddress RandomIPv4(Random random)
     {
         var bytes = new byte[4];
         random.NextBytes(bytes);
         return new IPAddress(bytes);
     }
 
-    private static IPAddress RandomIpv6(Random random)
+    private static IPAddress RandomIPv6(Random random)
     {
         var bytes = new byte[16];
         random.NextBytes(bytes);

@@ -37,7 +37,7 @@ public class CapturePumpBenchmarks
         var dispatcher = new FlowDispatcher(passConfiguration, new NeverOwnedGuard(), executor, logger: logger);
         var processor = new CapturePacketProcessor(dispatcher, new AdapterSlotTable(), logger);
         var adapter = new WindowsAdapter("bench-adapter", "Benchmark Adapter", @"\DEVICE\{00000000-B3NCH-4ARK-0000-000000000000}", 0x55, 1);
-        var frame = BenchmarkShared.CreateIpv4TcpFrame(FrameBytes);
+        var frame = BenchmarkShared.CreateIPv4TcpFrame(FrameBytes);
 
         using var completion = new CancellationTokenSource();
         var reader = new FiniteCaptureReader(frame, PacketsPerRound, DistinctFlows, completion, NdisApiAbi.PacketFlagOnSend);

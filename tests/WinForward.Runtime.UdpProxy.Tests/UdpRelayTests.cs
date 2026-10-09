@@ -23,7 +23,7 @@ public sealed class UdpRelayTests
     // ---- UdpFrameBuilder ----
 
     [Fact]
-    public void Ipv4FrameRoundTripsThroughParser()
+    public void IPv4FrameRoundTripsThroughParser()
     {
         var source = IPAddress.Parse("192.0.2.53");
         var destination = IPAddress.Parse("192.0.2.10");
@@ -41,14 +41,14 @@ public sealed class UdpRelayTests
     }
 
     [Fact]
-    public void Ipv4HeaderChecksumValidatesToZero()
+    public void IPv4HeaderChecksumValidatesToZero()
     {
         Assert.True(TryBuildUdpFrame(IPAddress.Parse("192.0.2.53"), 53, IPAddress.Parse("192.0.2.10"), 53000, new byte[] { 1, 2, 3 }, s_macA, s_macB, out var frame));
         Assert.Equal((ushort)0, PacketChecksums.InternetChecksum(frame.AsSpan(14, 20)));
     }
 
     [Fact]
-    public void Ipv4UdpChecksumValidatesWithPseudoHeader()
+    public void IPv4UdpChecksumValidatesWithPseudoHeader()
     {
         var source = IPAddress.Parse("192.0.2.53");
         var destination = IPAddress.Parse("192.0.2.10");
@@ -95,7 +95,7 @@ public sealed class UdpRelayTests
     }
 
     [Fact]
-    public void Ipv6FrameParsesAndChecksumValidatesWithPseudoHeader()
+    public void IPv6FrameParsesAndChecksumValidatesWithPseudoHeader()
     {
         var source = IPAddress.Parse("2001:db8::53");
         var destination = IPAddress.Parse("2001:db8::10");

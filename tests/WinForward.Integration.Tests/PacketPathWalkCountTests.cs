@@ -25,8 +25,8 @@ namespace WinForward.Integration.Tests;
 [SupportedOSPlatform("windows")]
 public sealed class PacketPathWalkCountTests
 {
-    private static readonly IPAddress s_clientIpv4 = IPAddress.Parse("192.0.2.10");
-    private static readonly IPAddress s_destIpv4 = IPAddress.Parse("192.0.2.53");
+    private static readonly IPAddress s_clientIPv4 = IPAddress.Parse("192.0.2.10");
+    private static readonly IPAddress s_destIPv4 = IPAddress.Parse("192.0.2.53");
     private static readonly Socks5Server s_server = new("primary", "127.0.0.1", 1080, Username: null, Password: null);
     private const nint AdapterHandle = 0x1234;
 
@@ -136,7 +136,7 @@ public sealed class PacketPathWalkCountTests
     {
         await using var composition = await Composition.CreateAsync();
         const int count = 8;
-        var frame = FrameBuilders.BuildIpv4TcpSyn(s_clientIpv4, s_destIpv4, 51000, 443);
+        var frame = FrameBuilders.BuildIPv4TcpSyn(s_clientIPv4, s_destIPv4, 51000, 443);
 
         // The sibling parse happens before the probe is attached: awaiting its completion may
         // resume this test on another pool thread, and a probe attached before that await would
@@ -254,7 +254,7 @@ public sealed class PacketPathWalkCountTests
         public IReadOnlyList<PacketLayout> LaidOutPackets => _executor.Layouts;
 
         public TcpRedirectAssociation Association =>
-            Table.TryResolveByReverse(Endpoint.From(s_clientIpv4, ListenerPort), Endpoint.From(s_destIpv4, 53000), DateTimeOffset.UtcNow, out var association) && association is not null
+            Table.TryResolveByReverse(Endpoint.From(s_clientIPv4, ListenerPort), Endpoint.From(s_destIPv4, 53000), DateTimeOffset.UtcNow, out var association) && association is not null
                 ? association
                 : throw new InvalidOperationException("the harness has no reverse-resolvable association");
 
@@ -278,10 +278,10 @@ public sealed class PacketPathWalkCountTests
                 table,
                 processor,
                 recorder,
-                FrameBuilders.BuildIpv4TcpFrame(s_clientIpv4, s_destIpv4, 53000, 443, TcpFlagAck, payload: [1, 2, 3, 4]),
-                FrameBuilders.BuildIpv4TcpFrame(s_clientIpv4, s_destIpv4, 40001, 53000, 0x12, payload: [1, 2, 3, 4]));
+                FrameBuilders.BuildIPv4TcpFrame(s_clientIPv4, s_destIPv4, 53000, 443, TcpFlagAck, payload: [1, 2, 3, 4]),
+                FrameBuilders.BuildIPv4TcpFrame(s_clientIPv4, s_destIPv4, 40001, 53000, 0x12, payload: [1, 2, 3, 4]));
 
-            var syn = FrameBuilders.BuildIpv4TcpSyn(s_clientIpv4, s_destIpv4, 53000, 443);
+            var syn = FrameBuilders.BuildIPv4TcpSyn(s_clientIPv4, s_destIPv4, 53000, 443);
             using (var synBuffer = new NdisPacketBuffer())
             {
                 synBuffer.SetFrame(syn, NdisApiAbi.PacketFlagOnSend, AdapterHandle);

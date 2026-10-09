@@ -36,7 +36,7 @@ public sealed class ProtocolAuditTests
     [InlineData(5)]
     [InlineData(6)]
     [InlineData(7)]
-    public void UdpIpv6RewriterRejectsShortPayloadWithoutMutating(int payloadLength)
+    public void UdpIPv6RewriterRejectsShortPayloadWithoutMutating(int payloadLength)
     {
         var frame = new byte[14 + 40 + payloadLength];
         frame[12] = 0x86;
@@ -51,10 +51,10 @@ public sealed class ProtocolAuditTests
     }
 
     [Fact]
-    public void ReservedIpv4FragmentFlagIsRejectedWithoutMutating()
+    public void ReservedIPv4FragmentFlagIsRejectedWithoutMutating()
     {
-        var tcp = CreateIpv4TcpFrame();
-        var udp = CreateIpv4UdpFrame();
+        var tcp = CreateIPv4TcpFrame();
+        var udp = CreateIPv4UdpFrame();
         tcp[20] = 0x80;
         udp[20] = 0x80;
         var tcpOriginal = tcp.ToArray();
@@ -116,7 +116,7 @@ public sealed class ProtocolAuditTests
         Assert.Equal(0, ipv6Length);
     }
 
-    private static byte[] CreateIpv4TcpFrame()
+    private static byte[] CreateIPv4TcpFrame()
     {
         var frame = new byte[14 + 20 + 20];
         frame[12] = 0x08;
@@ -128,7 +128,7 @@ public sealed class ProtocolAuditTests
         return frame;
     }
 
-    private static byte[] CreateIpv4UdpFrame()
+    private static byte[] CreateIPv4UdpFrame()
     {
         var frame = new byte[14 + 20 + 8];
         frame[12] = 0x08;

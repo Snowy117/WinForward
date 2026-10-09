@@ -67,7 +67,7 @@ public sealed class LocalTargetDispatchTests
         var localTargetFlowsBefore = RuntimeCounters.Shared.Get(RuntimeCounters.UdpLocalTargetFlows);
 
         using var buffer = new NdisPacketBuffer();
-        buffer.SetFrame(BuildIpv4UdpFrame(s_client, s_dnsServer, 53_000, 53, query), NdisApiAbi.PacketFlagOnSend, AdapterHandle);
+        buffer.SetFrame(BuildIPv4UdpFrame(s_client, s_dnsServer, 53_000, 53, query), NdisApiAbi.PacketFlagOnSend, AdapterHandle);
         await processor.ProcessAsync(NdisCapturedPacket.FromCapture(buffer, AdapterHandle), adapter, slot, shutdown.Token);
 
         await WaitForAsync(() => reinjector.ToMstcpCount == 1);

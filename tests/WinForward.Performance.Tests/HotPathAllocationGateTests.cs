@@ -23,8 +23,8 @@ namespace WinForward.Performance.Tests;
 /// </summary>
 public sealed class HotPathAllocationGateTests
 {
-    private static readonly IPAddress s_clientIpv4 = IPAddress.Parse("192.0.2.10");
-    private static readonly IPAddress s_destIpv4 = IPAddress.Parse("192.0.2.53");
+    private static readonly IPAddress s_clientIPv4 = IPAddress.Parse("192.0.2.10");
+    private static readonly IPAddress s_destIPv4 = IPAddress.Parse("192.0.2.53");
     private static readonly Socks5Server s_server = new("primary", "127.0.0.1", 1080, Username: null, Password: null);
 
     [Fact]
@@ -35,8 +35,8 @@ public sealed class HotPathAllocationGateTests
         var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, new TcpRedirectTable(), new SelfTrafficRegistry(), new FakeLocalAddressProvider());
         await using (coordinator)
         {
-            await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
-            var midFlow = MakeForwardTcpPacket(s_clientIpv4, s_destIpv4, 53000, 443, TcpFlagAck, payload: [1, 2, 3, 4]);
+            await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIPv4, s_destIPv4, 53000, 443), s_server);
+            var midFlow = MakeForwardTcpPacket(s_clientIPv4, s_destIPv4, 53000, 443, TcpFlagAck, payload: [1, 2, 3, 4]);
 
             // Warm the JIT and the frame pool so the measured loop sees only steady-state behavior.
             for (var warm = 0; warm < 8; warm++) await coordinator.HandlePacketAsync(midFlow, s_server, CancellationToken.None);
@@ -62,8 +62,8 @@ public sealed class HotPathAllocationGateTests
         var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, new TcpRedirectTable(), new SelfTrafficRegistry(), new FakeLocalAddressProvider());
         await using (coordinator)
         {
-            await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
-            var template = MakeForwardTcpPacket(s_clientIpv4, s_destIpv4, 53000, 443, TcpFlagAck, payload: [1, 2, 3, 4]);
+            await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIPv4, s_destIPv4, 53000, 443), s_server);
+            var template = MakeForwardTcpPacket(s_clientIPv4, s_destIPv4, 53000, 443, TcpFlagAck, payload: [1, 2, 3, 4]);
             using var slot = new NdisPacketBuffer();
             slot.SetFrame(template.Lease.Frame.Span, NdisApiAbi.PacketFlagOnSend, 0x1234);
             // The slot holds the same bytes as the template, so it carries the same parse layout:
@@ -99,9 +99,9 @@ public sealed class HotPathAllocationGateTests
         var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, new SelfTrafficRegistry(), new FakeLocalAddressProvider());
         await using (coordinator)
         {
-            await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
+            await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIPv4, s_destIPv4, 53000, 443), s_server);
             var listenerTuple = Assert.Single(listenerFactory.Listeners).TranslatedTuple;
-            var synAck = MakeReversePacketClassifierOrientation(s_clientIpv4, listenerTuple.Port, s_destIpv4, 53000, mutateFrame: frame => frame[47] = 0x12);
+            var synAck = MakeReversePacketClassifierOrientation(s_clientIPv4, listenerTuple.Port, s_destIPv4, 53000, mutateFrame: frame => frame[47] = 0x12);
             Assert.True(table.TryResolveByReverse(synAck.Context.Key.Local, synAck.Context.Key.Remote, DateTimeOffset.UtcNow, out var association));
 
             for (var warm = 0; warm < 8; warm++) await coordinator.HandleReverseAsync(synAck, association!, CancellationToken.None);
@@ -136,9 +136,9 @@ public sealed class HotPathAllocationGateTests
 
         var payload = new byte[64];
         var frameBuffer = new byte[UdpFrameBuilder.DefaultMaximumEthernetFrame];
-        Assert.True(UdpFrameBuilder.TryBuildInto(IPAddressValue.From(s_clientIpv4), 53000, IPAddressValue.From(s_destIpv4), 53, payload, [0x02, 0x00, 0x00, 0x00, 0x00, 0x01], [0x02, 0x00, 0x00, 0x00, 0x00, 0x02], frameBuffer, out var frameLength));
+        Assert.True(UdpFrameBuilder.TryBuildInto(IPAddressValue.From(s_clientIPv4), 53000, IPAddressValue.From(s_destIPv4), 53, payload, [0x02, 0x00, 0x00, 0x00, 0x00, 0x01], [0x02, 0x00, 0x00, 0x00, 0x00, 0x02], frameBuffer, out var frameLength));
         var frame = frameBuffer.AsSpan(0, frameLength).ToArray();
-        var flow = FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 53), TransportProtocol.Udp, FlowOriginKind.Host);
+        var flow = FlowKey.Create(Endpoint.From(s_clientIPv4, 53000), Endpoint.From(s_destIPv4, 53), TransportProtocol.Udp, FlowOriginKind.Host);
         var packet = new CapturedFlowPacket(new PacketLease(frame), FlowBuilders.Context(flow), new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 7));
 
         // The first datagram arms the background setup (cold, allocates freely); the session is
@@ -225,7 +225,7 @@ public sealed class HotPathAllocationGateTests
         var factory = new StalledTransportFactory(gate.Task);
         using var pool = new NativeBufferPool(64, capacity: 64);
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new NoopResponseSink(), new UdpProxyOptions { MaximumFrameSize = 64 }, setupQueuePool: pool);
-        var flow = FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 53), TransportProtocol.Udp, FlowOriginKind.Host);
+        var flow = FlowKey.Create(Endpoint.From(s_clientIPv4, 53000), Endpoint.From(s_destIPv4, 53), TransportProtocol.Udp, FlowOriginKind.Host);
         var payload = new byte[32];
 
         // The first datagram starts the cold setup; 40 more materialize the Queue<> and reach the
@@ -278,10 +278,10 @@ public sealed class HotPathAllocationGateTests
     [Fact]
     public void TcpResetBuildViaSpanAllocatesNoManagedBytes()
     {
-        var template = BuildIpv4TcpSyn(s_clientIpv4, s_destIpv4, 53000, 443);
+        var template = BuildIPv4TcpSyn(s_clientIPv4, s_destIPv4, 53000, 443);
         Span<byte> destination = stackalloc byte[TcpResetBuilder.MaxResetFrameLength];
-        var serverAddress = IPAddressValue.From(s_destIpv4);
-        var clientAddress = IPAddressValue.From(s_clientIpv4);
+        var serverAddress = IPAddressValue.From(s_destIPv4);
+        var clientAddress = IPAddressValue.From(s_clientIPv4);
 
         for (var warm = 0; warm < 8; warm++)
         {
@@ -315,7 +315,7 @@ public sealed class HotPathAllocationGateTests
         var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, new TcpRedirectTable(), new SelfTrafficRegistry(), new FakeLocalAddressProvider(), synCopyPool: synCopyPool);
         try
         {
-            var syn = MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443);
+            var syn = MakeSynPacket(s_clientIPv4, s_destIPv4, 53000, 443);
             Assert.Equal(TcpRedirectOutcome.SetupPending, await coordinator.HandleSynAsync(syn, s_server, CancellationToken.None));
             await listenerFactory.CreateStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
 
@@ -359,7 +359,7 @@ public sealed class HotPathAllocationGateTests
             new PolicySnapshot([], FlowAction.Pass));
         var dispatcher = new FlowDispatcher(config, new FakeGuard(), executor, reverseHandler: handler);
 
-        var key = FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 53), TransportProtocol.Udp, FlowOriginKind.Host);
+        var key = FlowKey.Create(Endpoint.From(s_clientIPv4, 53000), Endpoint.From(s_destIPv4, 53), TransportProtocol.Udp, FlowOriginKind.Host);
 
         // The first dispatch claims the flow (cold, allocates freely); the measured window is warm.
         await dispatcher.DispatchAsync(MakePacket(), CancellationToken.None);
@@ -431,8 +431,8 @@ public sealed class HotPathAllocationGateTests
         for (var index = 0; index < capacity; index++)
         {
             keys[index] = FlowKey.Create(
-                Endpoint.From(s_clientIpv4, (ushort)(10_000 + index)),
-                Endpoint.From(s_destIpv4, 53),
+                Endpoint.From(s_clientIPv4, (ushort)(10_000 + index)),
+                Endpoint.From(s_destIPv4, 53),
                 TransportProtocol.Udp,
                 FlowOriginKind.Host);
         }
@@ -469,8 +469,8 @@ public sealed class HotPathAllocationGateTests
     public void FlowTableRecyclesExpiredStatesThroughItsPool()
     {
         var table = new FlowTable(capacity: 1);
-        var first = FlowKey.Create(Endpoint.From(s_clientIpv4, 53_000), Endpoint.From(s_destIpv4, 53), TransportProtocol.Udp, FlowOriginKind.Host);
-        var second = FlowKey.Create(Endpoint.From(s_clientIpv4, 53_001), Endpoint.From(s_destIpv4, 53), TransportProtocol.Udp, FlowOriginKind.Host);
+        var first = FlowKey.Create(Endpoint.From(s_clientIPv4, 53_000), Endpoint.From(s_destIPv4, 53), TransportProtocol.Udp, FlowOriginKind.Host);
+        var second = FlowKey.Create(Endpoint.From(s_clientIPv4, 53_001), Endpoint.From(s_destIPv4, 53), TransportProtocol.Udp, FlowOriginKind.Host);
 
         Assert.True(table.TryClaimResolved(first, () => new FlowDecision(FlowAction.Pass, 0, TargetName: null), out var state));
         state!.Touch(DateTimeOffset.UtcNow - TimeSpan.FromMinutes(5));

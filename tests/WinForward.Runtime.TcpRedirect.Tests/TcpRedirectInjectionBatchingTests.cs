@@ -27,8 +27,8 @@ namespace WinForward.Runtime.TcpRedirect.Tests;
 public sealed class TcpRedirectInjectionBatchingTests
 {
     private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, Username: null, Password: null);
-    private static readonly IPAddress s_clientIpv4 = IPAddress.Parse("192.0.2.10");
-    private static readonly IPAddress s_destIpv4 = IPAddress.Parse("192.0.2.53");
+    private static readonly IPAddress s_clientIPv4 = IPAddress.Parse("192.0.2.10");
+    private static readonly IPAddress s_destIPv4 = IPAddress.Parse("192.0.2.53");
 
     /// <summary>The enumeration handle the shared SYN fakes carry; both data legs key their lanes on it.</summary>
     private const nint AdapterHandle = 0x1234;
@@ -66,8 +66,8 @@ public sealed class TcpRedirectInjectionBatchingTests
     {
         await using var harness = new RedirectHarness();
         var listener = await harness.EstablishHostRedirectAsync(53000);
-        var reverseSource = Endpoint.From(s_clientIpv4, listener.Port);
-        var reverseDestination = Endpoint.From(s_destIpv4, 53000);
+        var reverseSource = Endpoint.From(s_clientIPv4, listener.Port);
+        var reverseDestination = Endpoint.From(s_destIPv4, 53000);
 
         // Capture order interleaves the two host legs: the client's forward data and the listener's
         // reversed replies both target MSTCP on the same adapter, so they share one lane and leave
@@ -93,7 +93,7 @@ public sealed class TcpRedirectInjectionBatchingTests
         await using var harness = new RedirectHarness(forwardLocal: forwardLocal);
         var listener = await harness.EstablishForwardedRedirectAsync(originHandle);
         var reverseSource = Endpoint.From(forwardLocal, listener.Port);
-        var reverseDestination = Endpoint.From(s_clientIpv4, 53000);
+        var reverseDestination = Endpoint.From(s_clientIPv4, 53000);
 
         // A forwarded flow's client frame arrives on the origin adapter and goes toward MSTCP; its
         // reversed reply is emitted on that same origin adapter even when it was captured on another
@@ -125,7 +125,7 @@ public sealed class TcpRedirectInjectionBatchingTests
         await using var harness = new RedirectHarness(failDataFrameSends: true, forwardLocal: forwardLocal, pool: pool);
         var listener = await harness.EstablishForwardedRedirectAsync(originHandle);
         var reverseSource = Endpoint.From(forwardLocal, listener.Port);
-        var reverseDestination = Endpoint.From(s_clientIpv4, 53000);
+        var reverseDestination = Endpoint.From(s_clientIPv4, 53000);
 
         // No pump drains a lane keyed on an adapter that left the scope, so the frame must keep the
         // immediate send: it fails on the stale handle and runs the per-flow tail, where a lane would
@@ -163,7 +163,7 @@ public sealed class TcpRedirectInjectionBatchingTests
 
         // The second flow hits the session capacity gate, so its SYN is answered immediately with a
         // crafted RST|ACK — control frames are never deferred, and dispatch always precedes the flush.
-        Assert.Equal(TcpRedirectOutcome.Blocked, await harness.Coordinator.HandleSynAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53001, 443), s_server, CancellationToken.None));
+        Assert.Equal(TcpRedirectOutcome.Blocked, await harness.Coordinator.HandleSynAsync(MakeSynPacket(s_clientIPv4, s_destIPv4, 53001, 443), s_server, CancellationToken.None));
         await harness.DispatchForwardDataAsync(53000, 1);
 
         harness.Coordinator.FlushPendingRedirectInjections(AdapterHandle);
@@ -265,7 +265,7 @@ public sealed class TcpRedirectInjectionBatchingTests
         // SYN copy (RunSetupPipelineAsync): a materialized lease and a default NativeFrameHandle.
         // The lanes have no append lock, so such a packet must never append.
         await harness.DispatchForwardDataAsync(53000, 1, pumpOwned: false);
-        await harness.DispatchReverseDataAsync(Endpoint.From(s_clientIpv4, listener.Port), Endpoint.From(s_destIpv4, 53000), 2, pumpOwned: false);
+        await harness.DispatchReverseDataAsync(Endpoint.From(s_clientIPv4, listener.Port), Endpoint.From(s_destIPv4, 53000), 2, pumpOwned: false);
 
         Assert.Equal(2, harness.Injector.SingleCalls.Count);
         Assert.Empty(harness.Injector.BatchCalls);
@@ -326,7 +326,7 @@ public sealed class TcpRedirectInjectionBatchingTests
     {
         await using var harness = new RedirectHarness();
         await harness.EstablishHostRedirectAsync(53000);
-        var pristine = BuildIpv4TcpFrame(s_clientIpv4, s_destIpv4, 53000, 443, payload: [1]);
+        var pristine = BuildIPv4TcpFrame(s_clientIPv4, s_destIPv4, 53000, 443, payload: [1]);
 
         var (outcome, frame) = await harness.DispatchForwardDataWithoutLayoutAsync(53000, 1);
 
@@ -431,7 +431,7 @@ public sealed class TcpRedirectInjectionBatchingTests
             // Cross-adapter deferral requires the origin adapter to be in the installed scope.
             UpdateRedirectTargets(adapterHandle);
             var before = _listeners.Listeners.Count;
-            var syn = MakeForwardedSynPacket(s_clientIpv4, s_destIpv4, 53000, 443) with { Metadata = new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, adapterHandle) };
+            var syn = MakeForwardedSynPacket(s_clientIPv4, s_destIPv4, 53000, 443) with { Metadata = new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnReceive, adapterHandle) };
             Assert.Equal(TcpRedirectOutcome.SetupPending, await Coordinator.HandleSynAsync(syn, s_server, CancellationToken.None));
             await Coordinator.DrainPendingSetupsAsync();
             Assert.Equal(before + 1, _listeners.Listeners.Count);
@@ -441,7 +441,7 @@ public sealed class TcpRedirectInjectionBatchingTests
         public void UpdateRedirectTargets(params nint[] activeAdapterHandles) =>
             Coordinator.UpdateRedirectTargets(activeAdapterHandles);
 
-        private static CapturedFlowPacket HostSyn(ushort clientPort) => MakeSynPacket(s_clientIpv4, s_destIpv4, clientPort, 443);
+        private static CapturedFlowPacket HostSyn(ushort clientPort) => MakeSynPacket(s_clientIPv4, s_destIPv4, clientPort, 443);
 
         /// <summary>
         /// Records the listener's SYN|ACK through the reverse hook (the server ISN a crafted client
@@ -450,28 +450,28 @@ public sealed class TcpRedirectInjectionBatchingTests
         /// </summary>
         public async Task RecordServerSynAckAsync(Endpoint listener, ushort clientPort)
         {
-            var source = Endpoint.From(s_clientIpv4, listener.Port);
-            var destination = Endpoint.From(s_destIpv4, clientPort);
-            var frame = BuildIpv4TcpFrame(source.Address.ToIPAddress(), destination.Address.ToIPAddress(), source.Port, destination.Port, tcpFlags: 0x12);
+            var source = Endpoint.From(s_clientIPv4, listener.Port);
+            var destination = Endpoint.From(s_destIPv4, clientPort);
+            var frame = BuildIPv4TcpFrame(source.Address.ToIPAddress(), destination.Address.ToIPAddress(), source.Port, destination.Port, tcpFlags: 0x12);
             Assert.Equal(TcpRedirectOutcome.Injected, await DispatchAsync(frame, FlowKey.Create(source, destination, TransportProtocol.Tcp, FlowOriginKind.Host), AdapterHandle, pumpOwned: false));
         }
 
         public ValueTask<TcpRedirectOutcome> DispatchForwardDataAsync(ushort clientPort, byte marker, nint adapterHandle = AdapterHandle, bool pumpOwned = true)
         {
-            var key = FlowKey.Create(Endpoint.From(s_clientIpv4, clientPort), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
-            return DispatchAsync(BuildIpv4TcpFrame(s_clientIpv4, s_destIpv4, clientPort, 443, payload: [marker]), key, adapterHandle, pumpOwned);
+            var key = FlowKey.Create(Endpoint.From(s_clientIPv4, clientPort), Endpoint.From(s_destIPv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
+            return DispatchAsync(BuildIPv4TcpFrame(s_clientIPv4, s_destIPv4, clientPort, 443, payload: [marker]), key, adapterHandle, pumpOwned);
         }
 
         public ValueTask<TcpRedirectOutcome> DispatchForwardedDataAsync(ushort clientPort, byte marker, nint adapterHandle = AdapterHandle, bool pumpOwned = true)
         {
-            var key = FlowKey.Create(Endpoint.From(s_clientIpv4, clientPort), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Forwarded, FlowBuilders.SlotOf("veth-1", 7), 7);
-            return DispatchAsync(BuildIpv4TcpFrame(s_clientIpv4, s_destIpv4, clientPort, 443, payload: [marker]), key, adapterHandle, pumpOwned);
+            var key = FlowKey.Create(Endpoint.From(s_clientIPv4, clientPort), Endpoint.From(s_destIPv4, 443), TransportProtocol.Tcp, FlowOriginKind.Forwarded, FlowBuilders.SlotOf("veth-1", 7), 7);
+            return DispatchAsync(BuildIPv4TcpFrame(s_clientIPv4, s_destIPv4, clientPort, 443, payload: [marker]), key, adapterHandle, pumpOwned);
         }
 
         public ValueTask<TcpRedirectOutcome> DispatchReverseDataAsync(Endpoint source, Endpoint destination, byte marker, bool pumpOwned = true, nint adapterHandle = AdapterHandle)
         {
             var key = FlowKey.Create(source, destination, TransportProtocol.Tcp, FlowOriginKind.Host);
-            return DispatchAsync(BuildIpv4TcpFrame(source.Address.ToIPAddress(), destination.Address.ToIPAddress(), source.Port, destination.Port, payload: [marker]), key, adapterHandle, pumpOwned);
+            return DispatchAsync(BuildIPv4TcpFrame(source.Address.ToIPAddress(), destination.Address.ToIPAddress(), source.Port, destination.Port, payload: [marker]), key, adapterHandle, pumpOwned);
         }
 
         /// <summary>The lease of the most recent pump-owned dispatch, for the materialization assertion.</summary>
@@ -498,10 +498,10 @@ public sealed class TcpRedirectInjectionBatchingTests
             DispatchKeepingSlotAsync(ForwardDataFrame(clientPort, marker), ForwardKey(clientPort), AdapterHandle, materializeLease: true);
 
         private static FlowKey ForwardKey(ushort clientPort) =>
-            FlowKey.Create(Endpoint.From(s_clientIpv4, clientPort), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
+            FlowKey.Create(Endpoint.From(s_clientIPv4, clientPort), Endpoint.From(s_destIPv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
 
         private static byte[] ForwardDataFrame(ushort clientPort, byte marker) =>
-            BuildIpv4TcpFrame(s_clientIpv4, s_destIpv4, clientPort, 443, payload: [marker]);
+            BuildIPv4TcpFrame(s_clientIPv4, s_destIPv4, clientPort, 443, payload: [marker]);
 
         private async Task<NdisPacketBuffer> DispatchKeepingSlotAsync(byte[] frame, FlowKey key, nint adapterHandle, bool materializeLease, bool withLayout = true)
         {

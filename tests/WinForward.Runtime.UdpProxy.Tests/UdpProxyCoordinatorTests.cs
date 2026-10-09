@@ -90,7 +90,7 @@ public sealed class UdpProxyCoordinatorTests
     }
 
     [Fact]
-    public async Task Ipv6OriginalFlowCanUseIpv4RelayAliasWithoutFlowKeyMismatch()
+    public async Task IPv6OriginalFlowCanUseIPv4RelayAliasWithoutFlowKeyMismatch()
     {
         var factory = new FakeTransportFactory();
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink());
@@ -112,7 +112,7 @@ public sealed class UdpProxyCoordinatorTests
     }
 
     [Fact]
-    public async Task Ipv6OriginalFlowStillSupportsMatchingIpv6Relay()
+    public async Task IPv6OriginalFlowStillSupportsMatchingIPv6Relay()
     {
         var factory = new FakeTransportFactory(AddressFamily.InterNetworkV6);
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink());

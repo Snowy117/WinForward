@@ -262,7 +262,7 @@ internal static class PumpIdleWakeScenario
     /// </summary>
     private static async Task<WakeResult> MeasureWakeAsync(StabilityContext context)
     {
-        using var reader = new SignallingCaptureReader(BenchmarkShared.CreateIpv4TcpFrame(128));
+        using var reader = new SignallingCaptureReader(BenchmarkShared.CreateIPv4TcpFrame(128));
         var recorder = new WakeRecorder(WakeWarmup + WakeCount);
         await using var pump = new NdisCapturePump(reader, 0x1D1F, (_, _) => recorder.RecordDispatchAsync(), new NdisCapturePumpOptions { PollDelay = s_pollDelay });
 
@@ -343,7 +343,7 @@ internal static class PumpIdleWakeScenario
         using var arrival = new EventWaitHandle(initialState: false, EventResetMode.AutoReset);
         using var productionSignal = new NdisPacketArrivalSignal(arrival);
         using var signal = new ParkConfirmingArrivalSignal(productionSignal);
-        var reader = new ArmedFrameCaptureReader(BenchmarkShared.CreateIpv4TcpFrame(128));
+        var reader = new ArmedFrameCaptureReader(BenchmarkShared.CreateIPv4TcpFrame(128));
         var recorder = new WakeRecorder(WakeWarmup + WakeCount);
         await using var pump = new NdisCapturePump(reader, 0x1D3F, (_, _) => recorder.RecordDispatchAsync(), new NdisCapturePumpOptions
         {

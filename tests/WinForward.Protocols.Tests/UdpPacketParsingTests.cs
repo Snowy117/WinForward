@@ -23,7 +23,7 @@ public sealed class UdpPacketParsingTests
     }
 
     [Fact]
-    public void SocksUdpIpv4RoundTripDecodesToTheRawAddressValue()
+    public void SocksUdpIPv4RoundTripDecodesToTheRawAddressValue()
     {
         // R2: address-typed datagrams decode straight to IPAddressValue — no framework address
         // on the decode path; IPv4 keeps its four big-endian bytes in the low 32 bits.
@@ -81,7 +81,7 @@ public sealed class UdpPacketParsingTests
     }
 
     [Fact]
-    public void Socks5UdpDecodeCarriesRelayScopeForIpv6Address()
+    public void Socks5UdpDecodeCarriesRelayScopeForIPv6Address()
     {
         // M2: the SOCKS5 UDP wire format carries no scope, so TryDecode accepts an explicit scope
         // and reconstructs an IPv6 destination with a non-zero ScopeId.
@@ -122,7 +122,7 @@ public sealed class UdpPacketParsingTests
     [Fact]
     public void IPv4UdpRewriteUpdatesEndpointsAndChecksums()
     {
-        var frame = CreateIpv4UdpFrame();
+        var frame = CreateIPv4UdpFrame();
 
         Assert.True(PacketChecksums.TryRewriteUdpEndpoints(frame, IPAddress.Parse("198.51.100.1"), 40000, IPAddress.Parse("203.0.113.2"), 5353));
         Assert.True(IPUdpPacket.TryParseSpan(frame, out var packet));
@@ -136,7 +136,7 @@ public sealed class UdpPacketParsingTests
     [Fact]
     public void UdpChecksumIsValidAfterEndpointRewrite()
     {
-        var frame = CreateIpv4UdpFrame();
+        var frame = CreateIPv4UdpFrame();
         Assert.True(PacketChecksums.TryRewriteUdpEndpoints(frame, IPAddress.Parse("198.51.100.1"), 40000, IPAddress.Parse("203.0.113.2"), 5353));
         const int udpOffset = 14 + 20;
         var udpLength = BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(udpOffset + 4, 2));
@@ -156,7 +156,7 @@ public sealed class UdpPacketParsingTests
     [Fact]
     public void IPv6UdpPacketParserReadsAddressesAndPayload()
     {
-        var frame = CreateIpv6UdpFrame();
+        var frame = CreateIPv6UdpFrame();
 
         Assert.True(IPUdpPacket.TryParseSpan(frame, out var packet));
         Assert.Equal(IPAddress.Parse("2001:db8::10"), packet.SourceAddress);
@@ -169,7 +169,7 @@ public sealed class UdpPacketParsingTests
     [Fact]
     public void IPv6UdpRewriteUpdatesEndpointsAndChecksum()
     {
-        var frame = CreateIpv6UdpFrame();
+        var frame = CreateIPv6UdpFrame();
 
         Assert.True(PacketChecksums.TryRewriteUdpEndpoints(frame, IPAddress.Parse("2001:db8::99"), 40000, IPAddress.Parse("2001:db8::1"), 5353));
         Assert.True(IPUdpPacket.TryParseSpan(frame, out var packet));
@@ -195,13 +195,13 @@ public sealed class UdpPacketParsingTests
     [Fact]
     public void IPv6UdpParserRejectsFragmentHeader()
     {
-        var frame = CreateIpv6UdpFrame();
+        var frame = CreateIPv6UdpFrame();
         frame[20] = 44; // next header = fragment
 
         Assert.False(IPUdpPacket.TryParseSpan(frame, out _));
     }
 
-    private static byte[] CreateIpv6UdpFrame()
+    private static byte[] CreateIPv6UdpFrame()
     {
         var frame = new byte[14 + 40 + 8 + 3];
         frame[12] = 0x86;
@@ -222,7 +222,7 @@ public sealed class UdpPacketParsingTests
         return frame;
     }
 
-    private static byte[] CreateIpv4UdpFrame()
+    private static byte[] CreateIPv4UdpFrame()
     {
         var frame = new byte[14 + 20 + 8 + 3];
         frame[12] = 0x08;

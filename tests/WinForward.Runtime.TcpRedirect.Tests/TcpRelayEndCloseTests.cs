@@ -15,8 +15,8 @@ namespace WinForward.Runtime.TcpRedirect.Tests;
 
 public sealed class TcpRelayEndCloseTests
 {
-    private static readonly IPAddress s_clientIpv4 = IPAddress.Parse("192.0.2.10");
-    private static readonly IPAddress s_destIpv4 = IPAddress.Parse("192.0.2.53");
+    private static readonly IPAddress s_clientIPv4 = IPAddress.Parse("192.0.2.10");
+    private static readonly IPAddress s_destIPv4 = IPAddress.Parse("192.0.2.53");
     private static readonly NativeBufferPool s_synCopyPool = new(NdisApiAbi.MaximumEthernetFrame);
     private static readonly string[] s_injectThenTeardownOrder = ["inject", "teardown"];
     private static readonly string[] s_teardownOnlyOrder = ["teardown"];
@@ -160,9 +160,9 @@ public sealed class TcpRelayEndCloseTests
     {
         var (frame, towardMstcp, _) = Assert.Single(injector.Frames);
         Assert.True(towardMstcp);
-        Assert.Equal(s_destIpv4, new IPAddress(frame.AsSpan(26, 4).ToArray()));
+        Assert.Equal(s_destIPv4, new IPAddress(frame.AsSpan(26, 4).ToArray()));
         Assert.Equal(443u, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(34, 2)));
-        Assert.Equal(s_clientIpv4, new IPAddress(frame.AsSpan(30, 4).ToArray()));
+        Assert.Equal(s_clientIPv4, new IPAddress(frame.AsSpan(30, 4).ToArray()));
         Assert.Equal(53000u, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(36, 2)));
         Assert.Equal(10u, BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(38, 4)));
         Assert.Equal(7u, BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(42, 4)));
@@ -177,9 +177,9 @@ public sealed class TcpRelayEndCloseTests
     {
         var (frame, towardMstcp, _) = Assert.Single(injector.Frames);
         Assert.True(towardMstcp);
-        Assert.Equal(s_destIpv4, new IPAddress(frame.AsSpan(26, 4).ToArray()));
+        Assert.Equal(s_destIPv4, new IPAddress(frame.AsSpan(26, 4).ToArray()));
         Assert.Equal(443u, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(34, 2)));
-        Assert.Equal(s_clientIpv4, new IPAddress(frame.AsSpan(30, 4).ToArray()));
+        Assert.Equal(s_clientIPv4, new IPAddress(frame.AsSpan(30, 4).ToArray()));
         Assert.Equal(53000u, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(36, 2)));
         Assert.Equal(expectedServerSequence, BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(38, 4)));
         Assert.Equal(7u, BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(42, 4)));
@@ -215,21 +215,21 @@ public sealed class TcpRelayEndCloseTests
     /// </summary>
     private static TcpRedirectSession CreateSession(out FakeListener listener, bool observedSequences)
     {
-        var key = FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
+        var key = FlowKey.Create(Endpoint.From(s_clientIPv4, 53000), Endpoint.From(s_destIPv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
         var association = new TcpRedirectAssociation(key, key.Remote, 0x1234, Endpoint.From(IPAddress.Loopback, 40000), forwardLocalAddress: null, 1, DateTimeOffset.UtcNow);
 
         if (observedSequences)
         {
-            TcpSequenceObservation.RecordClientSyn(BuildIpv4TcpSyn(s_clientIpv4, s_destIpv4, 53000, 443), association, s_synCopyPool);
-            var synAck = BuildIpv4TcpSyn(s_destIpv4, s_clientIpv4, 443, 53000);
+            TcpSequenceObservation.RecordClientSyn(BuildIPv4TcpSyn(s_clientIPv4, s_destIPv4, 53000, 443), association, s_synCopyPool);
+            var synAck = BuildIPv4TcpSyn(s_destIPv4, s_clientIPv4, 443, 53000);
             synAck[47] = 0x12;
             TcpSequenceObservation.RecordServerSynAck(synAck, association);
 
-            var clientData = BuildIpv4TcpSyn(s_clientIpv4, s_destIpv4, 53000, 443, [1, 2, 3, 4, 5]);
+            var clientData = BuildIPv4TcpSyn(s_clientIPv4, s_destIPv4, 53000, 443, [1, 2, 3, 4, 5]);
             clientData[47] = TcpFlagAck;
             BinaryPrimitives.WriteUInt32BigEndian(clientData.AsSpan(38, 4), 2);
             TcpSequenceObservation.TrackClientSequence(clientData, association);
-            var serverData = BuildIpv4TcpSyn(s_destIpv4, s_clientIpv4, 443, 53000, [1, 2, 3, 4, 5, 6, 7, 8]);
+            var serverData = BuildIPv4TcpSyn(s_destIPv4, s_clientIPv4, 443, 53000, [1, 2, 3, 4, 5, 6, 7, 8]);
             serverData[47] = TcpFlagAck;
             BinaryPrimitives.WriteUInt32BigEndian(serverData.AsSpan(38, 4), 2);
             TcpSequenceObservation.TrackServerSequence(serverData, association);

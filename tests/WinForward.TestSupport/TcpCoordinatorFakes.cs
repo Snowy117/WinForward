@@ -20,14 +20,14 @@ namespace WinForward.TestSupport;
 /// </summary>
 internal static class TcpCoordinatorFakes
 {
-    private static readonly IPAddress s_clientIpv4 = IPAddress.Parse("192.0.2.10");
-    private static readonly IPAddress s_destIpv4 = IPAddress.Parse("192.0.2.53");
+    private static readonly IPAddress s_clientIPv4 = IPAddress.Parse("192.0.2.10");
+    private static readonly IPAddress s_destIPv4 = IPAddress.Parse("192.0.2.53");
 
     internal static CapturedFlowPacket MakeSynPacket(IPAddress client, IPAddress destination, ushort clientPort, ushort destinationPort, byte[]? payload = null)
     {
         var frame = client.AddressFamily == AddressFamily.InterNetwork
-            ? BuildIpv4TcpSyn(client, destination, clientPort, destinationPort, payload)
-            : BuildIpv6TcpSyn(client, destination, clientPort, destinationPort);
+            ? BuildIPv4TcpSyn(client, destination, clientPort, destinationPort, payload)
+            : BuildIPv6TcpSyn(client, destination, clientPort, destinationPort);
         var local = Endpoint.From(client, clientPort);
         var remote = Endpoint.From(destination, destinationPort);
         var key = FlowKey.Create(local, remote, TransportProtocol.Tcp, FlowOriginKind.Host);
@@ -39,8 +39,8 @@ internal static class TcpCoordinatorFakes
     internal static CapturedFlowPacket MakeForwardedSynPacket(IPAddress client, IPAddress destination, ushort clientPort, ushort destinationPort, Action<byte[]>? mutateFrame = null)
     {
         var frame = client.AddressFamily == AddressFamily.InterNetwork
-            ? BuildIpv4TcpSyn(client, destination, clientPort, destinationPort)
-            : BuildIpv6TcpSyn(client, destination, clientPort, destinationPort);
+            ? BuildIPv4TcpSyn(client, destination, clientPort, destinationPort)
+            : BuildIPv6TcpSyn(client, destination, clientPort, destinationPort);
         mutateFrame?.Invoke(frame);
         var local = Endpoint.From(client, clientPort);
         var remote = Endpoint.From(destination, destinationPort);
@@ -53,8 +53,8 @@ internal static class TcpCoordinatorFakes
     internal static CapturedFlowPacket MakeReversePacketClassifierOrientation(IPAddress source, ushort sourcePort, IPAddress destination, ushort destinationPort, nint adapterHandle = 0x1234, Action<byte[]>? mutateFrame = null, byte[]? payload = null)
     {
         var frame = source.AddressFamily == AddressFamily.InterNetwork
-            ? BuildIpv4TcpSyn(source, destination, sourcePort, destinationPort, payload)
-            : BuildIpv6TcpSyn(source, destination, sourcePort, destinationPort);
+            ? BuildIPv4TcpSyn(source, destination, sourcePort, destinationPort, payload)
+            : BuildIPv6TcpSyn(source, destination, sourcePort, destinationPort);
         mutateFrame?.Invoke(frame);
         var local = Endpoint.From(source, sourcePort);
         var remote = Endpoint.From(destination, destinationPort);
@@ -75,7 +75,7 @@ internal static class TcpCoordinatorFakes
     /// </summary>
     internal static CapturedFlowPacket MakeForwardTcpPacket(IPAddress client, IPAddress destination, ushort clientPort, ushort destinationPort, byte tcpFlags, byte[]? payload = null, Action<byte[]>? mutateFrame = null)
     {
-        var frame = BuildIpv4TcpSyn(client, destination, clientPort, destinationPort, payload);
+        var frame = BuildIPv4TcpSyn(client, destination, clientPort, destinationPort, payload);
         const int tcpFlagsOffset = 47;
         frame[tcpFlagsOffset] = tcpFlags;
         mutateFrame?.Invoke(frame);
@@ -86,7 +86,7 @@ internal static class TcpCoordinatorFakes
         return new CapturedFlowPacket(new PacketLease(frame), context, new PacketCaptureMetadata(NdisApiAbi.PacketFlagOnSend, 0x1234), Layout: LayoutOf(frame));
     }
 
-    internal static FlowKey MakeHostFlowKey() => FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
+    internal static FlowKey MakeHostFlowKey() => FlowKey.Create(Endpoint.From(s_clientIPv4, 53000), Endpoint.From(s_destIPv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
 
     /// <summary>
     /// Builds a coordinator whose borrowed syn-copy pool and setup executor default to the
@@ -121,7 +121,7 @@ internal static class TcpCoordinatorFakes
     /// lifetime use it without a coordinator.
     /// </summary>
     internal static TcpRedirectAssociation CreateHostAssociation(Endpoint translatedListenerTuple)
-        => CreateHostAssociation(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), translatedListenerTuple);
+        => CreateHostAssociation(Endpoint.From(s_clientIPv4, 53000), Endpoint.From(s_destIPv4, 443), translatedListenerTuple);
 
     private static TcpRedirectAssociation CreateHostAssociation(Endpoint local, Endpoint remote, Endpoint translatedListenerTuple)
     {
@@ -160,12 +160,12 @@ internal static class TcpCoordinatorFakes
 
     internal static async Task EstablishRelayingSessionAsync(DispatcherHarness harness)
     {
-        await harness.Dispatcher.DispatchAsync(MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), CancellationToken.None);
+        await harness.Dispatcher.DispatchAsync(MakeSynPacket(s_clientIPv4, s_destIPv4, 53000, 443), CancellationToken.None);
         // R8: the SYN dispatch returns SetupPending; the listener exists only after the
         // background setup settles, so drain before touching the factory's recordings.
         await harness.Coordinator.DrainPendingSetupsAsync();
         var listener = Assert.Single(harness.ListenerFactory.Listeners);
-        await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(Endpoint.From(s_destIpv4, 53000)), CancellationToken.None);
+        await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(Endpoint.From(s_destIPv4, 53000)), CancellationToken.None);
         await WaitForAsync(() => harness.RelayFactory.Relay is not null);
     }
 

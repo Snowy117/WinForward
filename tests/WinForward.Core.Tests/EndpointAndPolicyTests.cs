@@ -23,7 +23,7 @@ public sealed class EndpointAndPolicyTests
     }
 
     [Fact]
-    public void EndpointPeerIdentityIgnoresTheIpv6ScopeWhileEqualityKeepsIt()
+    public void EndpointPeerIdentityIgnoresTheIPv6ScopeWhileEqualityKeepsIt()
     {
         var wireForm = Endpoint.From(IPAddress.Parse("fe80::215:5dff:fe03:728b"), 52_840);
         var socketForm = Endpoint.From(IPAddress.Parse("fe80::215:5dff:fe03:728b%26"), 52_840);

@@ -12,8 +12,8 @@ namespace WinForward.Performance.Tests;
 public sealed class TcpRedirectWarmPathGateTests
 {
     private static readonly Socks5Server s_server = new("test", "127.0.0.1", 1080, Username: null, Password: null);
-    private static readonly IPAddress s_clientIpv4 = IPAddress.Parse("192.0.2.10");
-    private static readonly IPAddress s_destIpv4 = IPAddress.Parse("192.0.2.53");
+    private static readonly IPAddress s_clientIPv4 = IPAddress.Parse("192.0.2.10");
+    private static readonly IPAddress s_destIPv4 = IPAddress.Parse("192.0.2.53");
 
     [Fact]
     public async Task TcpRedirectWarmPacketTakesZeroGateEntriesAndZeroClockReads()
@@ -27,14 +27,14 @@ public sealed class TcpRedirectWarmPathGateTests
             harness.Time.ThrowOnRead = true;
             var readsBefore = harness.Time.Reads;
 
-            var forward = MakeForwardTcpPacket(s_clientIpv4, s_destIpv4, 53000, 443, TcpFlagAck);
+            var forward = MakeForwardTcpPacket(s_clientIPv4, s_destIPv4, 53000, 443, TcpFlagAck);
             Assert.Equal(TcpRedirectOutcome.Injected, await harness.Coordinator.HandlePacketAsync(forward, s_server, CancellationToken.None));
 
             Assert.Equal(gateEntriesAtStart, harness.Table.GateEntryCountForDiagnostics);
             Assert.Equal(readsBefore, harness.Time.Reads);
             Assert.Equal(0, harness.Table.ReverseProbeCountForDiagnostics - reverseProbesAtStart);
 
-            var reverse = MakeReversePacketClassifierOrientation(s_clientIpv4, harness.ListenerPort, s_destIpv4, 53000, mutateFrame: frame => frame[47] = 0x12);
+            var reverse = MakeReversePacketClassifierOrientation(s_clientIPv4, harness.ListenerPort, s_destIPv4, 53000, mutateFrame: frame => frame[47] = 0x12);
             Assert.Equal(TcpRedirectOutcome.Injected, await harness.Coordinator.HandlePacketAsync(reverse, s_server, CancellationToken.None));
 
             Assert.Equal(gateEntriesAtStart, harness.Table.GateEntryCountForDiagnostics);
@@ -49,7 +49,7 @@ public sealed class TcpRedirectWarmPathGateTests
     {
         var table = new TcpRedirectTable();
         var now = ActivityBucket.ToUtc(ActivityBucket.FromUtc(DateTimeOffset.UtcNow));
-        var key = FlowKey.Create(Endpoint.From(s_clientIpv4, 53000), Endpoint.From(s_destIpv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
+        var key = FlowKey.Create(Endpoint.From(s_clientIPv4, 53000), Endpoint.From(s_destIPv4, 443), TransportProtocol.Tcp, FlowOriginKind.Host);
         Assert.True(table.TryClaim(key, key.Remote, 0x1234, Endpoint.From(IPAddress.Loopback, 42000), forwardLocalAddress: null, now, out var association));
 
         var parked = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -108,7 +108,7 @@ public sealed class TcpRedirectWarmPathGateTests
                 new SelfTrafficRegistry(),
                 new FakeLocalAddressProvider(),
                 new TcpRedirectOptions { TimeProvider = time, ActivityClock = activityClock });
-            await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIpv4, s_destIpv4, 53000, 443), s_server);
+            await HandleSynSettledAsync(coordinator, MakeSynPacket(s_clientIPv4, s_destIPv4, 53000, 443), s_server);
             return new RedirectHarness(coordinator, table, time, Assert.Single(listenerFactory.Listeners).TranslatedTuple.Port);
         }
     }

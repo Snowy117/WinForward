@@ -32,7 +32,7 @@ public sealed class Socks5UdpAssociateTests
     }
 
     [Fact]
-    public async Task CoordinatorSendsIpv6DestinationThroughIpv4RelayAfterAllZeroAssociate()
+    public async Task CoordinatorSendsIPv6DestinationThroughIPv4RelayAfterAllZeroAssociate()
     {
         using var tcpListener = new TcpListener(IPAddress.Loopback, 0);
         using var relaySocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
@@ -87,7 +87,7 @@ public sealed class Socks5UdpAssociateTests
     }
 
     [Fact]
-    public async Task MatchingIpv6ControlAndRelayRemainSupported()
+    public async Task MatchingIPv6ControlAndRelayRemainSupported()
     {
         using var tcpListener = new TcpListener(IPAddress.IPv6Loopback, 0);
         using var relaySocket = new Socket(AddressFamily.InterNetworkV6, SocketType.Dgram, ProtocolType.Udp);

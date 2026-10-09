@@ -53,7 +53,7 @@ public sealed class TcpRedirectDataPathAllocationGateTests
     /// </summary>
     private static TcpRedirectDataPathBenchmarks CreateBenchmarks(bool ipv6)
     {
-        var benchmarks = new TcpRedirectDataPathBenchmarks { Ipv6 = ipv6, FrameSize = FrameSize };
+        var benchmarks = new TcpRedirectDataPathBenchmarks { IPv6 = ipv6, FrameSize = FrameSize };
         benchmarks.Setup();
         return benchmarks;
     }

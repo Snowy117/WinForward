@@ -17,7 +17,7 @@ public class NdisBufferBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _frame = BenchmarkShared.CreateIpv4UdpFrame(FrameBytes);
+        _frame = BenchmarkShared.CreateIPv4UdpFrame(FrameBytes);
         _buffer = new NdisPacketBuffer();
     }
 

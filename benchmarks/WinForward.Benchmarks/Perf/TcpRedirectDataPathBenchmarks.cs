@@ -29,7 +29,7 @@ public class TcpRedirectDataPathBenchmarks
 
     // ReSharper disable PropertyCanBeMadeInitOnly.Global // BenchmarkDotNet's [Params] contract is a settable public property: it writes each case's value through the setter, a reflection-based writer the analyzer cannot see (the same false-positive family as the [Params] accessor suppression scoped to this directory in .editorconfig).
     [Params(false, true)]
-    public bool Ipv6 { get; set; }
+    public bool IPv6 { get; set; }
 
     [Params(128, 1400)]
     public int FrameSize { get; set; }
@@ -46,25 +46,25 @@ public class TcpRedirectDataPathBenchmarks
     [GlobalSetup]
     public void Setup()
     {
-        _pristine = Ipv6
-            ? BenchmarkShared.CreateIpv6TcpFrame(FrameSize, bareSyn: false)
-            : BenchmarkShared.CreateIpv4TcpFrame(FrameSize, bareSyn: false);
+        _pristine = IPv6
+            ? BenchmarkShared.CreateIPv6TcpFrame(FrameSize, bareSyn: false)
+            : BenchmarkShared.CreateIPv4TcpFrame(FrameSize, bareSyn: false);
         _scratch = new byte[FrameSize];
-        _client = Ipv6
+        _client = IPv6
             ? Endpoint.From(IPAddress.Parse("2001:db8::10"), 53_000)
             : Endpoint.From(IPAddress.Parse("192.0.2.10"), 53_000);
-        _server = Ipv6
+        _server = IPv6
             ? Endpoint.From(IPAddress.Parse("2001:db8::80"), 443)
             : Endpoint.From(IPAddress.Parse("192.0.2.80"), 443);
 
         var hostKey = FlowKey.Create(_client, _server, TransportProtocol.Tcp, FlowOriginKind.Host, BenchmarkShared.SlotOf("adapter-0"), 0);
         var forwardedKey = FlowKey.Create(_client, _server, TransportProtocol.Tcp, FlowOriginKind.Forwarded, BenchmarkShared.SlotOf("adapter-0"), 0);
-        var translated = Endpoint.From(IPAddress.Parse(Ipv6 ? "2001:db8::1080" : "192.168.77.2"), ListenerPort);
+        var translated = Endpoint.From(IPAddress.Parse(IPv6 ? "2001:db8::1080" : "192.168.77.2"), ListenerPort);
         var now = DateTimeOffset.UnixEpoch;
         _host = new TcpRedirectAssociation(hostKey, _server, 0, translated, forwardLocalAddress: null, 1, now);
         // The forward-local address must be the flow's own family: production takes it from the
         // adapter, and a mismatched family makes the rewriter reject every packet.
-        var forwardLocal = IPAddress.Parse(Ipv6 ? "2001:db8::1" : "192.168.77.1");
+        var forwardLocal = IPAddress.Parse(IPv6 ? "2001:db8::1" : "192.168.77.1");
         _forwarded = new TcpRedirectAssociation(forwardedKey, _server, 0, translated, IPAddressValue.From(forwardLocal), 2, now);
         // Production carries the classification parse's layout on the packet; the rows below
         // consume it the way the coordinator's data legs do, so they measure the shipped shape.

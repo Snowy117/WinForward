@@ -11,7 +11,7 @@ public sealed class AdapterLocalAddressProviderTests
 
     [Fact]
     [SupportedOSPlatform("windows")]
-    public void SelectsIpv4AddressOnCorrelatedAdapter()
+    public void SelectsIPv4AddressOnCorrelatedAdapter()
     {
         var provider = new WindowsAdapterLocalAddressProvider(() =>
         [
@@ -97,15 +97,15 @@ public sealed class AdapterLocalAddressProviderTests
 
     [Fact]
     [SupportedOSPlatform("windows")]
-    public void ExcludesIpv6LinkLocalAndPrefersClientPrefix()
+    public void ExcludesIPv6LinkLocalAndPrefersClientPrefix()
     {
         var provider = new WindowsAdapterLocalAddressProvider(() =>
         [
             new IPAdapterUnicastInfo(AdapterGuid,
             [
-                new IPAdapterUnicastAddress(IPAddress.Parse("fe80::abcd"), Ipv4Mask: null),
-                new IPAdapterUnicastAddress(IPAddress.Parse("fd00:1234:5678:2::1"), Ipv4Mask: null),
-                new IPAdapterUnicastAddress(IPAddress.Parse("fd00:1234:5678:1::1"), Ipv4Mask: null),
+                new IPAdapterUnicastAddress(IPAddress.Parse("fe80::abcd"), IPv4Mask: null),
+                new IPAdapterUnicastAddress(IPAddress.Parse("fd00:1234:5678:2::1"), IPv4Mask: null),
+                new IPAdapterUnicastAddress(IPAddress.Parse("fd00:1234:5678:1::1"), IPv4Mask: null),
             ]),
         ]);
 
