@@ -138,7 +138,7 @@ public sealed class LatencyPolicyTests
 
         Assert.Equal(1, state.Corrupt);
         Assert.Equal(1, state.ProtocolErrors);
-        Assert.True(policy.IsDrained, "one settle call has to empty the whole queue (D18.6 #5)");
+        Assert.True(policy.IsDrained, "one settle call has to empty the whole queue");
     }
 
     [Fact]

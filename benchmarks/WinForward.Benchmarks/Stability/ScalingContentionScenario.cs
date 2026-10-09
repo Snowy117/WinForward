@@ -257,7 +257,7 @@ internal static class ScalingContentionScenario
         return new
         {
             gated = false,
-            note = "Report-only contention curve. Only the warm arm (populated registry, lock-free wildcard half, lock-free cache probe, no per-lookup exact IsOwned and no gated resolve) carries the acceptance figure; the fake arm answers without touching a lock and cannot show the reorder, and the real arm is the pre-change comparator. warmResolve records both the self-normalised ratio (denominator = this run's own one-thread arm, which rises with the fix) and ratioVersusRecordedBaseline against the recorded 3,331,758.3/s one-thread baseline, plus the measured cache miss rate so the ratio is attributable. A warm miss is charged only the failed probe; the production fallback is the dispatcher's slow path and is outside this resolve-shaped unit.",
+            note = "Report-only contention curve. Only the warm arm (populated registry, lock-free wildcard half, lock-free cache probe, no per-lookup exact IsOwned and no gated resolve) carries the acceptance figure; the fake arm answers without touching a lock and cannot show the reorder. warmResolve records both the self-normalised ratio (denominator = this run's own one-thread arm, which rises with the warm path) and ratioVersusRecordedBaseline against the recorded one-thread baseline, plus the measured cache miss rate so the ratio is attributable. A warm miss is charged only the failed probe; the production fallback is the dispatcher's slow path and is outside this resolve-shaped unit.",
             baselineThreads = threads[0],
             fakeGuard = Describe(GuardArmKind.Fake),
             realGuard = Describe(GuardArmKind.Real),
