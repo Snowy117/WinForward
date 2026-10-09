@@ -124,7 +124,10 @@ public sealed class NativeBufferPoolTests
     {
         using var pool = new NativeBufferPool(bufferSize: 16);
         var lease = pool.Rent();
-        // ReSharper disable once InlineTemporaryVariable // `copy` IS the asserted scenario object: the test locks "a lease copy releases the same rental window idempotently"; inlining would degrade it to two disposes of one variable and silently drop the regression coverage (B1 disposition).
+        // `copy` IS the asserted scenario object: the test locks "a lease copy releases the same
+        // rental window idempotently"; inlining would degrade it to two disposes of one variable and
+        // silently drop the regression coverage.
+        // ReSharper disable once InlineTemporaryVariable // Reason: see above.
         var copy = lease;
 
         copy.Dispose();
@@ -238,7 +241,7 @@ public sealed class NativeBufferPoolTests
     [Fact]
     public async Task ReturnsRacingDisposeNeverStrandBuffers()
     {
-        // L2: a return that passes the disposed check just before Dispose sets its flag can
+        // A return that passes the disposed check just before Dispose sets its flag can
         // enqueue after the disposer's drain already saw an empty queue. The return's
         // post-enqueue recheck drains on the returner's side, so once every returner and the
         // dispose have completed, every allocated buffer has been freed — none stays stranded in
@@ -275,7 +278,9 @@ public sealed class NativeBufferPoolTests
         var lease = pool.Rent();
         lease.Dispose();
         var reused = pool.Rent();
-        // ReSharper disable once InlineTemporaryVariable // `stale` IS the asserted scenario object: the test locks "a stale copy's release is a no-op after the live handle returned the buffer"; inlining would drop that coverage (B1 disposition).
+        // `stale` IS the asserted scenario object: the test locks "a stale copy's release is a
+        // no-op after the live handle returned the buffer"; inlining would drop that coverage.
+        // ReSharper disable once InlineTemporaryVariable // Reason: see above.
         var stale = reused;
         reused.Dispose();
         stale.Dispose();

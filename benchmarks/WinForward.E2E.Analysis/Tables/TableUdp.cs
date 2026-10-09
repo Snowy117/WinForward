@@ -12,7 +12,7 @@ namespace WinForward.E2E.Analysis.Tables;
 internal sealed record UdpField(string Name, string Field, bool Rate, string? Denominator);
 
 /// <summary>
-/// §8, "UDP accuracy detail": the two arms that carry the full UDP classification, every datagram
+/// The UDP accuracy detail: the two arms that carry the full UDP classification, every datagram
 /// outcome the harness counts, and the denominators behind the rule-of-three bounds.
 /// </summary>
 /// <remarks>

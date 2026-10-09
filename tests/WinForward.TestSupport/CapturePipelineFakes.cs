@@ -9,11 +9,6 @@ using WinForward.Windows;
 namespace WinForward.TestSupport;
 
 /// <summary>
-/// Dispatcher/executor fakes shared by the capture-pipeline test files: a never-owning
-/// self-traffic guard, a counting process attributor, counting and throwing action executors,
-/// and throwing TCP redirect collaborators that prove a proxy path never allocates.
-/// </summary>
-/// <summary>
 /// A self-traffic guard that reports nothing owned by default; flip <see cref="Owned"/> to script
 /// the dispatcher's self-traffic early-pass path.
 /// </summary>

@@ -9,7 +9,7 @@ namespace WinForward.NdisApi.Tests;
 /// The composite arrival signal's facts: the two-handle park the pump's idle path waits in once a
 /// pipeline wake event is composed with the driver's borrowed signal, the registry's ownership of
 /// exactly one event per adapter handle, and the exact-window allocation gate over the production
-/// wait entry point (allocation-gates.md's exact-window class list).
+/// wait entry point.
 /// </summary>
 public sealed class CompositePacketArrivalSignalTests
 {
@@ -86,9 +86,8 @@ public sealed class CompositePacketArrivalSignalTests
     /// <summary>
     /// The composite park's zero-allocation gate: the production two-handle wait
     /// (<see cref="CompositePacketArrivalSignal.Wait"/>) over two unsignaled handles at a zero
-    /// timeout allocates nothing. The window contract is the suite's standard one (allocation-gates.md,
-    /// "Allocation-gate stability"): the exact zero, the unchanged measured thread, and the
-    /// call-count backstop.
+    /// timeout allocates nothing. The window contract is the suite's standard one: the exact zero,
+    /// the unchanged measured thread, and the call-count backstop.
     /// </summary>
     [Fact]
     public void CompositeArrivalWaitAllocatesNoManagedBytes()

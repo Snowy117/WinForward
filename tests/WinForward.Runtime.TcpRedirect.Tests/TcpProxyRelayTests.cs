@@ -16,7 +16,7 @@ public sealed class TcpProxyRelayTests
     [Fact]
     public void RelayFactoryCapsSocks5ConnectBudgetToTenSecondsTwoAttempts()
     {
-        // D3: the redirect leg completes the client's handshake in tens of milliseconds, so the
+        // The redirect leg completes the client's handshake in tens of milliseconds, so the
         // relay's upstream budget bounds the client's perceived failure window. The call site
         // binds to these constants, which cap the worst case at DNS + 2 x 10s instead of the
         // 4 x 30s per-attempt defaults (worst case ~150s).
@@ -110,7 +110,7 @@ public sealed class TcpProxyRelayTests
     [Fact]
     public async Task MidStreamFailureCancelsSiblingPumpAfterRepeatedStallWindowRearms()
     {
-        // P1/X8a: the stall window is one reused CTS per direction, re-armed at most once per
+        // The stall window is one reused CTS per direction, re-armed at most once per
         // second via TryReset. After both pumps have completed several read+write cycles, a
         // fault in one pump must still cancel the sibling immediately through the surviving
         // lifetime-token link — re-arming (and throttling it) must never unlink session
@@ -142,7 +142,7 @@ public sealed class TcpProxyRelayTests
     [Fact]
     public void StallRearmIsDueOnlyForFirstArmAndAfterThrottleInterval()
     {
-        // X8a: the first arm is unconditional; within one second of the last arm the re-arm is
+        // The first arm is unconditional; within one second of the last arm the re-arm is
         // skipped (the previous arm's 30-minute window still covers the operations), and an
         // arm past the interval goes through.
         var now = Stopwatch.GetTimestamp();
@@ -192,7 +192,7 @@ public sealed class TcpProxyRelayTests
     [Fact]
     public async Task DisposeLeavesCompletionCompletedAndReturnsPumpBuffers()
     {
-        // R1: the relay owns its pump lifetimes. DisposeAsync must not return while a pump is
+        // The relay owns its pump lifetimes. DisposeAsync must not return while a pump is
         // still running: it awaits the completion, so the disposal-manufactured fault is observed
         // and swallowed rather than surfacing as an unobserved task exception, and both pooled
         // direction buffers are already back by the time it returns.
@@ -205,7 +205,7 @@ public sealed class TcpProxyRelayTests
         await local.SendAsync(new byte[] { 1 }, SocketFlags.None);
 
         // ReSharper disable once DisposeOnUsingVariable // The test awaits this DisposeAsync to assert the post-disposal state; the await using stays as the dispose-on-failure safety net and the repeat disposal is an idempotent no-op.
-        // D-C3-3: one pump is parked in a read that never completes on its own, so only the
+        // One pump is parked in a read that never completes on its own, so only the
         // disposal ordering (seal + cancel, socket close, then drain) can make this return.
         await relay.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
 
@@ -217,7 +217,7 @@ public sealed class TcpProxyRelayTests
     [Fact]
     public async Task ConcurrentDisposalRunsTheOwnerTeardownOnce()
     {
-        // D11: the scope's single-flight covers only the drain, so the one-shot claim is what keeps
+        // The scope's single-flight covers only the drain, so the one-shot claim is what keeps
         // two disposal callers from running the socket/control teardown twice. The control's
         // disposal is counted and gated: the second caller has to join the drain while the first is
         // parked in the owner teardown, so a double-run would show a count of two.

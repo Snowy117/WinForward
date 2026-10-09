@@ -10,8 +10,8 @@ namespace WinForward.Runtime.UdpProxy;
 /// gate — nothing calls back into the coordinator while holding it; coordinator call sites keep
 /// holding the coordinator gate around table calls wherever their own critical sections require
 /// it, so the table's lock is additional, leaf-level. The structural mirror of the TCP reset
-/// cooldown table (TcpRedirect/TcpResetCooldownTable.cs); distinct from the TCP redirect grace
-/// index (a 60 s TIME_WAIT window) — this is a 1 s retry cooldown.
+/// cooldown table; distinct from the TCP redirect grace index (a 60 s TIME_WAIT window) — this
+/// is a 1 s retry cooldown.
 /// </summary>
 internal sealed class UdpSetupCooldownTable
 {
@@ -48,7 +48,7 @@ internal sealed class UdpSetupCooldownTable
     {
         lock (_gate)
         {
-            // R3-UDP: the cooldown dictionary is bounded at the session capacity (one entry per
+            // The cooldown dictionary is bounded at the session capacity (one entry per
             // distinct flow is the natural upper bound). At capacity the oldest-timestamp entry
             // is evicted rather than refusing the write — refusal would skip the cooldown and
             // turn a failing-server storm into an immediate-retry storm. Refreshing an existing

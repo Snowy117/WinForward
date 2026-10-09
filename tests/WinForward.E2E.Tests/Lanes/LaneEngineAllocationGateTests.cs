@@ -6,7 +6,7 @@ using Xunit;
 namespace WinForward.E2E.Tests.Lanes;
 
 /// <summary>
-/// The send path's performance contract (DD D14.11, <c>allocation-gates.md</c>): driven on the caller's thread —
+/// The send path's performance contract: driven on the caller's thread —
 /// no <c>DedicatedThread</c> — a slot must allocate no managed bytes. The window is opened and closed inside
 /// the transport, on the thread the engine runs on, because
 /// <see cref="GC.GetAllocatedBytesForCurrentThread"/> is a per-thread counter and the send path never
@@ -32,7 +32,7 @@ public sealed class LaneEngineAllocationGateTests
         Assert.Equal(BatchSize * BatchCount, gate.SendCalls);
 
         // Readiness: the path has to become allocation-stable before the measured batches count, and a
-        // path that never does fails here instead of being averaged away — allocation-gates.md forbids relaxing
+        // path that never does fails here instead of being averaged away — the gate forbids relaxing
         // the exact zero to a bound.
         var batches = gate.Batches;
         var stable = Array.IndexOf(batches, 0L);

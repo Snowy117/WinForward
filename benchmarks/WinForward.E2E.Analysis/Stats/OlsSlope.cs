@@ -1,8 +1,8 @@
 namespace WinForward.E2E.Analysis.Stats;
 
 /// <summary>
-/// The least-squares fit §7's leak verdict is read from: private bytes regressed on elapsed time, with
-/// a 95 % confidence interval and the one sentence the verdict is.
+/// The least-squares fit the leak verdict is read from: private bytes regressed on elapsed time, with
+/// a 95 % confidence interval and the verdict sentence.
 /// </summary>
 /// <param name="Slope">The fitted slope, or null when there is too little data to fit one.</param>
 /// <param name="Low">The interval's lower end, or null with the slope.</param>
