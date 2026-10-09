@@ -128,8 +128,8 @@ surfaced as an `IOException`, and re-ran a full SOCKS5 handshake per datagram.
   [udp-session-lifecycle.md](./udp-session-lifecycle.md).
 
 Tests: `SendSpanAsyncForwardsTheSessionEndpointToTheTransportUnchanged` (endpoint fidelity through
-the session); `SocksUdpIpv4RoundTripDecodesToTheRawAddressValue` and
-`Socks5UdpDecodeCarriesRelayScopeForIpv6Address` (the raw value and its propagated scope);
+the session); `SocksUdpIPv4RoundTripDecodesToTheRawAddressValue` and
+`Socks5UdpDecodeCarriesRelayScopeForIPv6Address` (the raw value and its propagated scope);
 `JumboCapSendBufferEncodesPayloadsBeyondTheDefaultCap` (9014 cap, 2000 B payload, end to end through
 a loopback relay) and `DefaultCapSendBufferFailsClosedOnOversizedPayloads`; the skip-class,
 connection-reset and reinjection suites stay green.

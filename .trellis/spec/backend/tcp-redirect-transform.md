@@ -211,7 +211,7 @@ The forwarded leg must never convert an address per packet.
   receives `fe80::…` with no interface to dial on. The supported posture is to not intercept on-link
   traffic: `"RemoteCidr": ["fe80::/10"], "Action": "pass"` (prefix matching ignores the scope) leaves
   those flows direct. Config keys are PascalCase.
-- Locked by `EndpointAndPolicyTests.EndpointPeerIdentityIgnoresTheIpv6ScopeWhileEqualityKeepsIt` (identity
+- Locked by `EndpointAndPolicyTests.EndpointPeerIdentityIgnoresTheIPv6ScopeWhileEqualityKeepsIt` (identity
   matches across scopes; port, address bits and family still reject; `==` stays scope-sensitive) and
   `TcpRedirectAcceptorTests.LinkLocalPeerWhoseZoneOnlyTheSocketKnowsStillEstablishesTheRelay` (a `%26`
   peer of a scope-zero association establishes the relay and emits no `tcp.redirect.unrelatedPeer`; red

@@ -50,7 +50,7 @@
   the bounded SYN template (recorded before rewrite).
 - **In-place rewrite ordering**: `RecordClientSyn`/`RecordServerSynAck` (reads of the original frame)
   MUST run BEFORE `TryRewriteTcpEndpoints` (write) on the same frame, or the RST template is polluted
-  by rewritten endpoints/MACs. `TryRewriteIpv4Tcp/Ipv6Tcp` keeps the invariant "every
+  by rewritten endpoints/MACs. `TryRewriteIPv4Tcp`/`TryRewriteIPv6Tcp` keeps the invariant "every
   parse/validation precedes the first field write; no failure branch after writing begins", so an
   in-place rewrite either leaves the frame untouched or fully rewrites it. A lease whose `Frame` is
   not array-backed fails closed (`reason=rewrite`, `TcpRedirectOutcome.Blocked`).

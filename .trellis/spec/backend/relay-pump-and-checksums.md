@@ -30,7 +30,7 @@
 
 ## Checksum endpoint rewrite (P2a: RFC 1624 incremental)
 
-- `PacketChecksums.TryRewriteIpv4Tcp` / `TryRewriteIpv6Tcp` are **private static** helpers behind the
+- `PacketChecksums.TryRewriteIPv4Tcp` / `TryRewriteIPv6Tcp` are **private static** helpers behind the
   span entry point, not callable API. The internal full-recompute oracle is kept for property tests,
   under `InternalsVisibleTo` grants to **both** `WinForward.Protocols.Tests` and
   `WinForward.Integration.Tests`.

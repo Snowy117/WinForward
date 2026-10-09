@@ -58,7 +58,7 @@
   it on adapter-list change.
 - IP Helper owner-PID IPv6 `ScopeId` fields are host-order DWORDs and must be preserved when
   constructing `IPAddress`; only owner-row port fields use network byte order and require conversion
-  (`IPHelperAbi.DecodeIpv6Address` / `DecodeNetworkPort`).
+  (`IPHelperAbi.DecodeIPv6Address` / `DecodeNetworkPort`).
 
 | Condition | Result |
 |---|---|
