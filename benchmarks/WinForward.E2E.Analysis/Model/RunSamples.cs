@@ -16,8 +16,8 @@ namespace WinForward.E2E.Analysis.Model;
 /// which is why the reference keeps those records instead of dropping them.</para>
 /// <para><b>A partially read sample is rejected rather than averaged.</b> The harness writes
 /// <c>readError</c> when it could not read a process's counters and leaves the counters null;
-/// averaging that in would report a measurement that did not happen. The rejected count is published in
-/// §15 beside the sample count precisely so the reader can see how much of a series was discarded.</para>
+/// averaging that in would report a measurement that did not happen. The rejected count is published
+/// beside the sample count precisely so the reader can see how much of a series was discarded.</para>
 /// </remarks>
 internal static class RunSamples
 {

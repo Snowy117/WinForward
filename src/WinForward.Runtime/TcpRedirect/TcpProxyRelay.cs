@@ -22,7 +22,7 @@ public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic, ILogge
     internal const int RelayConnectMaxAttempts = 2;
     internal static readonly TimeSpan s_relayConnectAttemptTimeout = TimeSpan.FromSeconds(10);
 
-    /// <summary>The per-direction relay pump window; the bundle-owned relay pool uses this size (B11).</summary>
+    /// <summary>The per-direction relay pump window; the bundle-owned relay pool uses this size.</summary>
     public const int PumpBufferSize = 64 * 1024;
 
     public async ValueTask<ITcpRelay> EstablishAsync(Endpoint originalDestination, ITcpAcceptedConnection acceptedConnection, Socks5Server server, CancellationToken cancellationToken)
@@ -39,7 +39,7 @@ public sealed class TcpProxyRelayFactory(SelfTrafficRegistry selfTraffic, ILogge
         // The socket is bound to a wildcard local endpoint, so the registration uses Any:port and
         // the wildcard matcher in SelfTrafficRegistry covers the routing-chosen source IP. This
         // mirrors the UDP relay transport and prevents a catch-all proxy rule from recursively
-        // intercepting WinForward's own SOCKS5 control traffic (design §10).
+        // intercepting WinForward's own SOCKS5 control traffic.
         var control = await Socks5ControlConnection.ConnectAsync(server, cancellationToken, (local, remote) =>
             selfTraffic.Register(new SelfTrafficRegistry.SelfTrafficKey(
                 TransportProtocol.Tcp,
@@ -101,14 +101,14 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
     /// </summary>
     private static readonly NativeBufferPool s_sharedPumpBufferPool = new(PumpBufferSize, capacity: 64);
     // A relay that makes no progress in one direction for this long is considered stalled and the
-    // whole relay is reclaimed (M4). Established connections that are merely idle at the packet
+    // whole relay is reclaimed. Established connections that are merely idle at the packet
     // level (e.g. SSH with keepalives) keep traffic flowing in both directions (data + ACKs), so
     // this generous stall window only fires for a genuinely dead peer and cannot be held forever
     // by <see cref="TcpProxyRelay"/>. Teardown is otherwise tied to the relay ending, not to a
     // per-flow wall-clock idle timeout.
-    private static readonly TimeSpan s_stallTimeout = TimeSpan.FromMinutes(30);    // One re-arm per second is enough for a 30-minute window (X8a): the window drifts by at most
-    // one second, while skipping the per-chunk TryReset + CancelAfter timer-queue updates saves
-    // ~100-200 ns per operation at 10 Gbps single-flow chunk rates.
+    private static readonly TimeSpan s_stallTimeout = TimeSpan.FromMinutes(30);    // The re-arm throttle: one per second is enough for a 30-minute window, during which the
+    // window drifts by at most one second. Skipping the per-chunk TryReset + CancelAfter
+    // timer-queue updates saves ~100-200 ns per operation at 10 Gbps chunk rates.
     internal static readonly long s_armThrottleTicks = Stopwatch.Frequency;
 
     // Only reachable if a pump reports a fault it did not record, which the pump body cannot do.
@@ -118,9 +118,9 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
     private readonly IAsyncDisposable _control;
     private readonly ILogger _logger;
     private readonly NativeBufferPool _pumpBufferPool;
-    // Owns the pumps' lifetime token (D7) in place of the former per-relay linked source, and joins
-    // the pumps when the relay is disposed. It is sealed and drained only after the local socket is
-    // closed, which is what forces a pump the stall fast-exit abandoned to return (D-C3-3).
+    // Owns the pumps' lifetime token and joins the pumps when the relay is disposed. It is sealed
+    // and drained only after the local socket is closed, which is what forces a pump the stall
+    // fast-exit abandoned to return.
     private readonly QuiescenceScope _scope = new();
     private int _teardownStarted;
     private long _serverStreamBytes;
@@ -159,7 +159,7 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
 
         // A pump returns Ended only when its admission was refused, meaning the scope is already sealed
         // and disposal has begun. That is not a relay end: the join below observes the sibling and the
-        // relay ends cleanly rather than as a stall (D-C3-4).
+        // relay ends cleanly rather than as a stall.
         if (firstResult != PumpResult.Ended)
         {
             _scope.Cancel();
@@ -168,14 +168,14 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
                 // Stall fast-exit: the relay is reclaimed without awaiting the sibling, so Completion
                 // still completes on a stall instead of waiting for both pumps. The sibling is a
                 // tracked child — the scope's drain joins it inside DisposeAsync, and the socket close
-                // there makes it return (D-C3-3).
+                // there makes it return.
                 EndKind = RelayEndKind.Stalled;
                 return;
             }
 
-            // The faulting pump recorded its own fault before returning it (D9/F2), so surfacing it
-            // here is the only observation the orphaned sibling needs: a pump never completes with
-            // an exception of its own, so no pump task can ever be an unobserved fault.
+            // The faulting pump recorded its own fault before returning it, so surfacing it here is
+            // the only observation the orphaned sibling needs: a pump never completes with an
+            // exception of its own, so no pump task can ever be an unobserved fault.
             EndKind = RelayEndKind.Faulted;
             throw _scope.Fault ?? new IOException(PumpFaultMessage);
         }
@@ -201,13 +201,13 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
         EndKind = RelayEndKind.CleanEnded;
     }
 
-    // One reusable per-operation stall window per pump direction (P1): re-arms a single linked
-    // CTS via TryReset + CancelAfter instead of allocating a fresh linked source + timer per
-    // chunk, which dominated relay allocations at high throughput (measured 160 B/chunk).
-    // TryReset keeps the lifetime-token link armed, so session-wide and cross-pump cancellation
-    // still cancel an in-flight operation immediately; the source is recreated only when a
-    // previous stall timer raced with operation completion (TryReset returns false). Re-arms are
-    // throttled to one per second (X8a); the window is never disarmed between operations.
+    // One reusable per-operation stall window per pump direction: re-arms a single linked CTS via
+    // TryReset + CancelAfter instead of allocating a fresh linked source + timer per chunk, which
+    // dominated relay allocations at high throughput. TryReset keeps the lifetime-token link armed,
+    // so session-wide and cross-pump cancellation still cancel an in-flight operation at once. The
+    // source is recreated only when a previous stall timer raced with operation completion
+    // (TryReset returns false). Re-arms are throttled by IsRearmDue, and the window is never
+    // disarmed between operations.
     private sealed class StallWindow(CancellationToken lifetime) : IDisposable
     {
         private CancellationTokenSource _source = CreateArmed(lifetime);
@@ -248,13 +248,13 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
     {
         // A sealed scope means disposal already began and this pump never ran: reporting a clean end
         // rather than a stall keeps an ordinary teardown from looking like a stall timeout, which
-        // the acceptor would surface as a client reset (D-C3-4).
+        // the acceptor would surface as a client reset.
         if (!_scope.TryEnter(out var workLease)) return PumpResult.Ended;
-        // One native 64 KiB window per pump direction (X5/B11): directions have independent
-        // lifetimes via half-close, so the lease brackets this whole pump and the pool bounds
-        // steady-state memory while an 8 KiB fixed buffer paid ~8x the per-byte
-        // syscall/memcpy cost. The lease's Memory view (allocation-free, backed by the
-        // per-allocation MemoryManager) feeds the async stream APIs.
+        // One native 64 KiB window per pump direction: directions have independent lifetimes via
+        // half-close, so the lease brackets this whole pump and the pool bounds steady-state memory
+        // while an 8 KiB fixed buffer paid ~8x the per-byte syscall/memcpy cost. The lease's Memory
+        // view (allocation-free, backed by the per-allocation MemoryManager) feeds the async stream
+        // APIs.
         var lease = pumpBufferPool.Rent();
         long serverStreamBytes = 0;
         try
@@ -301,11 +301,10 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
         }
     }
 
-    // Fault observation is intrinsic to the pump body (D9): the exception is recorded on the scope
-    // and reported as a result instead of being thrown, so a pump task can never be left faulted —
-    // and therefore never needs an external observer to avoid an unobserved fault (F2). The
-    // `tcp.relay.faulted` event, whose only producer used to be the deleted external observer,
-    // moves here with the fault.
+    // Fault observation is intrinsic to the pump body: the exception is recorded on the scope and
+    // reported as a result instead of being thrown, so a pump task can never be left faulted — and
+    // therefore never needs an external observer to avoid an unobserved fault. The
+    // `tcp.relay.faulted` event is raised here, with the fault.
     private void RecordPumpFault(Exception exception)
     {
         _scope.RecordFault(exception, "tcp.relay.pump");
@@ -338,10 +337,10 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
 
     public async ValueTask DisposeAsync()
     {
-        // D11 — the scope's single-flight covers only the drain, and the seal happens *inside*
-        // DrainAsync, so a precheck on IsSealed would be TOCTOU: two concurrent callers could both
-        // run the socket/control teardown. The Interlocked claim restores the one-shot guarantee the
-        // pre-migration code had; every caller — the claimant included — joins the drain below.
+        // The scope's single-flight covers only the drain, and the seal happens *inside* DrainAsync,
+        // so a precheck on IsSealed would be TOCTOU: two concurrent callers could both run the
+        // socket/control teardown. The Interlocked claim restores the one-shot guarantee; every
+        // caller — the claimant included — joins the drain below.
         if (Interlocked.Exchange(ref _teardownStarted, 1) != 0)
         {
             await _scope.DrainAsync().ConfigureAwait(false);
@@ -358,11 +357,11 @@ internal sealed class TcpProxyRelay : ITcpRelay, ITcpRelayEndInfo
         }
         finally
         {
-            // Owning the pump boundary (R1): the cancelled token plus the socket close terminate
-            // both pumps, so the drain is a real quiescence point and stays bounded — closing the
-            // socket forces a pump the stall fast-exit abandoned to return (D-C3-3). Awaiting
-            // Completion afterwards observes the orchestration task itself, so a fault it carries
-            // can never surface as an unobserved task exception.
+            // The cancelled token plus the socket close terminate both pumps, so the drain is a real
+            // quiescence point and stays bounded — closing the socket forces a pump the stall
+            // fast-exit abandoned to return. Awaiting Completion afterwards observes the
+            // orchestration task itself, so a fault it carries can never surface as an unobserved
+            // task exception.
             await drained.ConfigureAwait(false);
             await ObserveCompletionAsync().ConfigureAwait(false);
         }

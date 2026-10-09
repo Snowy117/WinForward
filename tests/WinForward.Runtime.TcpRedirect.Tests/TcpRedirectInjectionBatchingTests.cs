@@ -14,15 +14,14 @@ using static WinForward.TestSupport.TcpCoordinatorFakes;
 namespace WinForward.Runtime.TcpRedirect.Tests;
 
 /// <summary>
-/// Lane-batched redirect injection (task 09-29-tcp-redirect-batched-injection): the two mid-flow
-/// redirect data legs accumulate rewritten frames in per-(adapter handle, target direction) lanes
-/// and one pump-iteration flush sends each lane as a single batched reinjection call; the immediate
-/// single send survives as the control-frame, non-pump-packet, and lane-overflow path. Pinned here:
-/// one batch per (adapter, direction) per iteration in append order, both host legs sharing the
-/// toward-MSTCP lane, control frames staying immediate and ordered before the flush, an
-/// all-or-nothing batch failure degrading to per-frame sends with each frame's own failure tail
-/// (and no rental leak or double release), lane overflow falling back to the immediate send, and a
-/// reconstructed non-pump packet never entering a lane.
+/// Lane-batched redirect injection: the two mid-flow redirect data legs accumulate rewritten frames
+/// in per-(adapter handle, target direction) lanes and one pump-iteration flush sends each lane as a
+/// single batched reinjection call; the immediate single send survives as the control-frame,
+/// non-pump-packet, and lane-overflow path. Pinned here: one batch per (adapter, direction) per
+/// iteration in append order, both host legs sharing the toward-MSTCP lane, control frames staying
+/// immediate and ordered before the flush, an all-or-nothing batch failure degrading to per-frame
+/// sends with each frame's own failure tail (and no rental leak or double release), lane overflow
+/// falling back to the immediate send, and a reconstructed non-pump packet never entering a lane.
 /// </summary>
 public sealed class TcpRedirectInjectionBatchingTests
 {
@@ -42,8 +41,8 @@ public sealed class TcpRedirectInjectionBatchingTests
         await using var harness = new RedirectHarness();
         await harness.EstablishHostRedirectAsync(53000);
 
-        // A full 32-frame pump batch: one batched call replaces 32 single sends (the >= 10x call
-        // reduction acceptance) and the frames keep capture order.
+        // A full 32-frame pump batch: one batched call replaces 32 single sends and the frames keep
+        // capture order.
         const int frames = 32;
         for (byte marker = 1; marker <= frames; marker++) await harness.DispatchForwardDataAsync(53000, marker);
 

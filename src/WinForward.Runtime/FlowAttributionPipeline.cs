@@ -111,7 +111,7 @@ internal sealed class FlowAttributionPipeline : IAsyncDisposable
         {
             case AttributionAdmission.Deferred:
                 // One admission per pending entry, not per packet: the entries are what a worker
-                // attributes and what AC-1 counts.
+                // attributes and counts.
                 if (createdEntry is not null)
                 {
                     _ = Interlocked.Increment(ref _admissions);

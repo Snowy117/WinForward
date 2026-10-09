@@ -181,8 +181,8 @@ public static partial class ArmKeys
             public const string Phases = "phases";
 
             // S3218: the published member name is `latency`, and `ArmKeys.Latency` is the latency
-            // arm's own key shard. The rule this file documents -- a member's name is its key's
-            // name -- makes the collision the contract rather than an accident (D14.17).
+            // arm's own key shard. A member's name is its key's name, so the collision is the
+            // contract rather than an accident.
 #pragma warning disable S3218
             // ReSharper disable once MemberHidesStaticFromOuterClass
             public const string Latency = "latency";
@@ -207,7 +207,7 @@ public static partial class ArmKeys
 
         /// <summary>
         /// The keys an error record carries beyond the ones it shares with a result record: what went
-        /// wrong, for an arm that ended without a result of its own (D14.12).
+        /// wrong, for an arm that ended without a result of its own.
         /// </summary>
         public static class ErrorRecord
         {
