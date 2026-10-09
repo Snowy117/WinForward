@@ -1,0 +1,7 @@
+benchmarks/WinForward.Benchmarks/Stability/ResidencyCensusScenario.cs
+benchmarks/WinForward.Benchmarks/Stability/UdpChurnScenario.cs
+benchmarks/WinForward.E2E.Contracts/Json/NumberFormat.cs
+benchmarks/WinForward.E2E/Client/Arms/UdpLatencyPolicy.cs
+src/WinForward.Core/NativeBufferPool.cs
+src/WinForward.Protocols/Socks5State.cs
+src/WinForward.Runtime/Socks5/Socks5UdpAssociation.cs

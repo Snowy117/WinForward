@@ -1,0 +1,12 @@
+benchmarks/WinForward.Benchmarks/Stability/EchoReceiver.cs
+benchmarks/WinForward.Benchmarks/Stability/UdpLossScenario.cs
+benchmarks/WinForward.E2E.Analysis/Tables/TableCpu.cs
+benchmarks/WinForward.E2E.Analysis/Tables/TableLatency.cs
+benchmarks/WinForward.E2E.Analysis/Tables/TableLedger.cs
+benchmarks/WinForward.E2E.Analysis/Tables/TablesWriter.cs
+src/WinForward.Runtime/Capture/CapturePacketProcessor.cs
+src/WinForward.Runtime/UdpProxy/UdpSetupQueueBudget.cs
+tests/WinForward.Configuration.Tests/ConfigurationLayeringTests.cs
+tests/WinForward.E2E.Tests/Lanes/LaneCountsDisjointnessTests.cs
+tests/WinForward.E2E.Tests/UdpReceiverOptionTests.cs
+tests/WinForward.Runtime.TcpRedirect.Tests/TcpRelayObservationTests.cs

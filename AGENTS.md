@@ -20,6 +20,27 @@ Managed by Trellis. Edits outside this block are preserved; edits inside may be 
 
 <!-- TRELLIS:END -->
 
+# Comment Conventions
+
+A comment describes the code as it stands. Write one only where the code cannot speak for itself:
+
+- **Explain the non-obvious** — invariants and preconditions, why a lock or an ordering is required, boundary and reject paths, performance and allocation constraints, ownership and lifetime, and the external spec a behaviour follows (RFC clause, Windows or NDISAPI semantics).
+- **State the motivation** — why this approach rather than the one a reader would reach for first.
+
+Do not write:
+
+- **Archive pointers** — task names and in-task item numbers (`task 09-17`, `R1-A`, `B11`, `P3`, `design §3.5`, `PRD`, `AC2`), dates, and paths into `benchmarks/results/` or task research directories. The task gets archived, and the pointer decays into a reference no maintainer can resolve. Keep the constraint, drop the pointer.
+- **Narration** — comments that restate the adjacent statement, and comments describing code that no longer exists.
+- **History** — what the code used to do, what it replaced, or how it changed. To justify a line, justify the line.
+
+Rules that outlive a single edit:
+
+- XML doc comments keep every tag paired and complete (`<summary>`, `<param>`, `<returns>`, `<remarks>`, `<see cref>`, `<paramref>`, `<c>`, `<para>`); a `cref` that no longer resolves fails the build under `TreatWarningsAsErrors`.
+- Every suppression carries a reason verifiable against this repository — the quality gate below requires it, so the reason is not optional prose.
+- References that stay: live specs under `.trellis/spec/`, sibling types and tests inside this tree, protocol constants, interpolation format specifiers, and any label a test or golden file pins.
+- A printed string is user-visible output: rewrite one only when nothing pins it, and re-run the gates afterwards.
+- A rewritten `//` line never ends in `;`, `)`, `{`, `}` or `=>` — Sonar `S125` reads such a line as commented-out code and fails the build.
+
 # Pre-Commit Quality Gate
 
 Before creating **any** git commit in this repository, run:

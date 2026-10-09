@@ -1,0 +1,9 @@
+benchmarks/WinForward.E2E.Analysis/Loading/RunLoader.cs
+benchmarks/WinForward.E2E.Contracts/ArmParameters.cs
+src/WinForward.Runtime/Capture/MultiAdapterCaptureLoop.cs
+src/WinForward.Runtime/TcpRedirect/TcpRedirectAcceptor.cs
+src/WinForward.Runtime/TcpRedirect/TcpRedirectOptions.cs
+src/WinForward.Runtime/TcpRedirect/TcpRedirectSetup.cs
+src/WinForward.Windows/AdapterLocalAddressProvider.cs
+tests/WinForward.E2E.Tests/Lanes/LatencyPolicyTests.cs
+tests/WinForward.TestSupport/CaptureRunnerFakes.cs

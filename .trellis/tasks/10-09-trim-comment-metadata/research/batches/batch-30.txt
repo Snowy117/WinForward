@@ -1,0 +1,11 @@
+benchmarks/WinForward.Benchmarks/Stability/AttributionOffPumpScenario.cs
+benchmarks/WinForward.E2E.Analysis/Findings/DualFindings.cs
+benchmarks/WinForward.E2E.Analysis/Metrics/MetricComparisons.cs
+benchmarks/WinForward.E2E.Analysis/Model/ArmAccess.cs
+benchmarks/WinForward.E2E.Analysis/Stats/BootstrapPair.cs
+src/WinForward.Configuration/ConfigurationModels.cs
+src/WinForward.Protocols/TcpResetBuilder.cs
+src/WinForward.Runtime/UdpProxy/UdpProxyCoordinator.Sweep.cs
+src/WinForward.Runtime/UdpProxy/UdpProxyDiagnostics.cs
+tests/WinForward.E2E.Tests/DeclaredKeys.cs
+tests/WinForward.E2E.Tests/LedgerShapeTests.Accounting.cs

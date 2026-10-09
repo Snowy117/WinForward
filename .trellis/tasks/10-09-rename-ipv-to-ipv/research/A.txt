@@ -1,0 +1,12 @@
+src/WinForward.Protocols/IPFragment.cs
+src/WinForward.Protocols/IPTcpUdpPacket.cs
+src/WinForward.Protocols/IPUdpPacket.cs
+src/WinForward.Protocols/PacketChecksums.cs
+src/WinForward.Protocols/Socks5Udp.cs
+src/WinForward.Protocols/TcpResetBuilder.cs
+src/WinForward.Protocols/UdpFrameBuilder.cs
+src/WinForward.Protocols/UotCodec.cs
+src/WinForward.Windows/AdapterLocalAddressProvider.cs
+src/WinForward.Windows/IPHelperAbi.cs
+src/WinForward.Windows/IPHelperOwnerTableReader.cs
+src/WinForward.Windows/UnicastAddressInventory.cs

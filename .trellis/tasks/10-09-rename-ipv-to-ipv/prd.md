@@ -45,21 +45,21 @@
 
 ## Acceptance Criteria
 
-- [ ] AC1 `rg -n '\bIpv[46]\w*' --glob '*.cs' src tests benchmarks` 零命中。
-- [ ] AC2 `rg -n '\bIPV[46]' --glob '*.cs' .` 零命中（不引入新的大小写分裂）。
-- [ ] AC3 全小写 camelCase 前缀未被误改：`rg -c '[A-Za-z0-9_]ipv[46]' --glob '*.cs' tests benchmarks`
+- [x] AC1 `rg -n '\bIpv[46]\w*' --glob '*.cs' src tests benchmarks` 零命中。
+- [x] AC2 `rg -n '\bIPV[46]' --glob '*.cs' .` 零命中（不引入新的大小写分裂）。
+- [x] AC3 全小写 camelCase 前缀未被误改：`rg -c '[A-Za-z0-9_]ipv[46]' --glob '*.cs' tests benchmarks`
       的逐文件计数与 `git grep -c '[A-Za-z0-9_]ipv[46]' HEAD -- tests benchmarks` 完全一致。
       注：`src/` 本来就没有小写形式，该守卫在 src 上恒为空——src 的等价性改用下面的字节恒等证明。
-- [ ] AC3b 字节恒等证明：对每个改动文件，`git show HEAD:<file> | sed 's/Ipv/IPv/g'` 与工作区
+- [x] AC3b 字节恒等证明：对每个改动文件，`git show HEAD:<file> | sed 's/Ipv/IPv/g'` 与工作区
       文件逐字节相同（证明除该子串替换外无任何其他改动）。批次 A 已用此证明，批次 B 沿用。
-- [ ] AC4 `dotnet build WinForward.slnx -c Release` 零警告。
-- [ ] AC5 `dotnet test WinForward.slnx -c Release` 与改动前基线计数一致。基线（2026-10-09 实测，
+- [x] AC4 `dotnet build WinForward.slnx -c Release` 零警告。
+- [x] AC5 `dotnet test WinForward.slnx -c Release` 与改动前基线计数一致。基线（2026-10-09 实测，
       14 个程序集）：总计 **1,663**，逐程序集 Configuration 121 / Windows 58 / E2E 364 /
       Integration 24 / Core 63 / Runtime.Flow 183 / NdisApi 74 / Runtime.TcpRedirect 157 /
       Performance 137 / Runtime.Socks5 108 / Runtime.UdpProxy 164 / Runtime.Capture 120 /
       Protocols 72 / Analyzers 18。
-- [ ] AC6 `dotnet format WinForward.slnx --severity info --verify-no-changes --no-restore` 零输出。
-- [ ] AC7 证据落盘：改动前后的 `rg -o '\bIpv[46]\w*'` 全量清单、改名映射表、Release 构建与
+- [x] AC6 `dotnet format WinForward.slnx --severity info --verify-no-changes --no-restore` 零输出。
+- [x] AC7 证据落盘：改动前后的 `rg -o '\bIpv[46]\w*'` 全量清单、改名映射表、Release 构建与
       测试输出，写入 `research/rename-evidence.md`。
 
 ## Out Of Scope

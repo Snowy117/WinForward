@@ -1,0 +1,7 @@
+benchmarks/WinForward.E2E.Analysis/Findings/LedgerViewsBuilder.cs
+benchmarks/WinForward.E2E.Analysis/Metrics/MetricCell.cs
+benchmarks/WinForward.E2E/Client/Lanes/TcpLaneTransport.cs
+src/WinForward.Core/PacketRuntime.cs
+src/WinForward.Windows/UnicastAddressInventory.cs
+tests/WinForward.Runtime.Capture.Tests/LayeredCaptureRunnerRefreshTests.cs
+tests/WinForward.TestSupport/TcpCoordinatorFakes.cs

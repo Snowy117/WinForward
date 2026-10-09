@@ -1,0 +1,11 @@
+benchmarks/WinForward.Benchmarks/Stability/ExternalLoopbackSocks5UdpServer.cs
+benchmarks/WinForward.Benchmarks/Stability/PumpIdleWakeProbes.cs
+benchmarks/WinForward.Benchmarks/Stability/TcpChurnScenario.cs
+benchmarks/WinForward.E2E.Analysis/Stats/DescriptiveStats.cs
+benchmarks/WinForward.E2E.Contracts/ArmKeys.Control.cs
+benchmarks/WinForward.E2E/Client/EmptyMetrics.cs
+src/WinForward.Protocols/PacketLayout.cs
+src/WinForward.Runtime/TcpRedirect/TcpFrameRewriter.cs
+tests/WinForward.E2E.Tests/LossWindowSimulationTests.cs
+tests/WinForward.Runtime.TcpRedirect.Tests/TcpPendingSynSetupTests.cs
+tests/WinForward.Runtime.UdpProxy.Tests/UdpSessionRetentionTests.cs

@@ -1,0 +1,4 @@
+benchmarks/WinForward.E2E/Client/Lanes/LaneTransportContracts.cs
+src/WinForward.NdisApi/NdisCapture.cs
+src/WinForward.Runtime/Capture/NdisPacketActionExecutor.cs
+src/WinForward.Runtime/Socks5/Socks5ControlConnection.cs

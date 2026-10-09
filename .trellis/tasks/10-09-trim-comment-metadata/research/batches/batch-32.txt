@@ -1,0 +1,11 @@
+benchmarks/WinForward.Benchmarks/Stability/TcpThroughputScenario.cs
+benchmarks/WinForward.E2E.Analysis/Loading/JsonReader.cs
+benchmarks/WinForward.E2E.Analysis/Model/ClientRun.cs
+benchmarks/WinForward.E2E.Contracts/ArmKeys.Persistent.cs
+benchmarks/WinForward.E2E/Target/TargetRunner.cs
+benchmarks/WinForward.E2E/Target/TcpConnectionProtocol.cs
+src/WinForward.Runtime/Capture/AdapterEnumeration.cs
+tests/WinForward.Core.Tests/CoreFlowStructuresTests.cs
+tests/WinForward.E2E.Tests/Lanes/LaneEngineConcurrencyTests.cs
+tests/WinForward.E2E.Tests/Lanes/LaneTransportAllocationGateTests.cs
+tests/WinForward.Protocols.Tests/PacketLayoutTests.cs

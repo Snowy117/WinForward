@@ -1,0 +1,13 @@
+benchmarks/WinForward.Benchmarks/Perf/TcpRedirectDataPathBenchmarks.cs
+benchmarks/WinForward.E2E.Analysis/Findings/LedgerTruncationTotals.cs
+benchmarks/WinForward.E2E.Analysis/Model/RunClocks.cs
+benchmarks/WinForward.E2E/Client/ArmRecordWriter.cs
+benchmarks/WinForward.E2E/Client/Arms/ReliabilityMetricsWriter.cs
+benchmarks/WinForward.E2E/Target/TcpTargetServer.cs
+tests/WinForward.E2E.Tests/Shapes/MixShape.cs
+tests/WinForward.Integration.Tests/BatchedPassReinjectionE2eTests.cs
+tests/WinForward.Runtime.Capture.Tests/MultiAdapterCaptureLoopArrivalSignalTests.cs
+tests/WinForward.Runtime.Flow.Tests/InterceptionHealthMonitorTests.cs
+tests/WinForward.Runtime.UdpProxy.Tests/UdpUotRetentionTests.cs
+tests/WinForward.TestSupport/CaptureLifecycleFakes.cs
+tests/WinForward.TestSupport/UdpCoordinatorFakes.cs

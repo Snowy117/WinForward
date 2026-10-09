@@ -1,0 +1,7 @@
+benchmarks/WinForward.Benchmarks/Stability/SweepPauseScenario.cs
+benchmarks/WinForward.E2E.Analysis/Stats/ComparisonSeed.cs
+benchmarks/WinForward.E2E/Client/Arms/MixUdpBook.cs
+src/WinForward.Runtime/QuiescenceScope.cs
+src/WinForward.Runtime/TcpRedirect/TcpPendingSynSetup.cs
+src/WinForward.Runtime/UdpProxy/UdpTransportContracts.cs
+tests/WinForward.TestSupport/ScriptedSocks5UotServer.cs

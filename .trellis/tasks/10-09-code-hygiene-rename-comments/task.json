@@ -1,0 +1,29 @@
+{
+  "id": "code-hygiene-rename-comments",
+  "name": "code-hygiene-rename-comments",
+  "title": "代码树命名与注释规范化整理",
+  "description": "Unify Ipv4/Ipv6 identifiers to the canonical IPv4/IPv6 spelling across src, tests and benchmarks with zero behavior change, and trim code comments to concise statements about the code itself (no task names, dates, PRD or design-item numbering); behavior is pinned by an unchanged Release test baseline.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "qmazon",
+  "assignee": "qmazon",
+  "createdAt": "2026-10-09",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "10-09-rename-ipv-to-ipv",
+    "10-09-trim-comment-metadata"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

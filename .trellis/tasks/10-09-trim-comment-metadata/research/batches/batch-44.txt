@@ -1,0 +1,14 @@
+benchmarks/WinForward.E2E.Analysis/Findings/LedgerFindings.cs
+benchmarks/WinForward.E2E.Analysis/Tables/TableDual.cs
+benchmarks/WinForward.E2E.Analysis/Tables/TableLedgerTruncated.cs
+benchmarks/WinForward.E2E/Client/ArmOutcome.cs
+src/WinForward.NdisApi/NdisApiAbi.cs
+src/WinForward.Runtime/TcpRedirect/TcpRedirectSession.cs
+src/WinForward.Runtime/TcpRedirect/TcpResetCooldownTable.cs
+src/WinForward.Runtime/UdpProxy/IUdpSessionSlotHost.cs
+src/WinForward.Windows/AdapterIdentity.cs
+tests/WinForward.E2E.Tests/Lanes/LaneEngineOrderTests.cs
+tests/WinForward.E2E.Tests/Lanes/LaneTestOptions.cs
+tests/WinForward.Runtime.Flow.Tests/RuntimeDiagnosticLoggingTests.cs
+tests/WinForward.Runtime.TcpRedirect.Tests/TcpRelayEndCloseTests.cs
+tests/WinForward.Runtime.UdpProxy.Tests/UdpSessionSetupTests.cs

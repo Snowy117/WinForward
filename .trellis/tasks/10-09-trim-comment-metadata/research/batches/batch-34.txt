@@ -1,0 +1,11 @@
+benchmarks/WinForward.E2E.Contracts/Metrics/ThroughputMetrics.cs
+benchmarks/WinForward.E2E/Client/Arms/LatencyArm.cs
+src/WinForward.Runtime/Capture/CaptureAdapterScopeResolver.cs
+src/WinForward.Runtime/Capture/CaptureLifecycle.cs
+src/WinForward.Runtime/Capture/CaptureRefreshWorkers.cs
+src/WinForward.Windows/ProcessAttribution.cs
+tests/WinForward.E2E.Tests/AnalyzerNumberGoldenTests.cs
+tests/WinForward.NdisApi.Tests/NdisCapturePumpIdleWaitTests.cs
+tests/WinForward.Performance.Tests/UdpSessionBudgetScenarioTests.cs
+tests/WinForward.Runtime.TcpRedirect.Tests/TcpReversePrefilterTests.cs
+tests/WinForward.Runtime.UdpProxy.Tests/UdpReceiveWindowPoolTests.cs

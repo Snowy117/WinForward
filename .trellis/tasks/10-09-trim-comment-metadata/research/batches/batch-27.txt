@@ -1,0 +1,11 @@
+benchmarks/WinForward.E2E.Analysis/Model/CampaignModel.cs
+src/WinForward.Core/AdapterSlotTable.cs
+src/WinForward.NdisApi/NdisPacketBuffer.cs
+src/WinForward.Runtime/TcpRedirect/TcpProxyCoordinator.Diagnostics.cs
+src/WinForward.Runtime/TcpRedirect/TcpRedirectTombstoneTable.cs
+src/WinForward.Windows/ProcessOwnerTableCache.cs
+tests/WinForward.E2E.Tests/ArmRunFixture.cs
+tests/WinForward.E2E.Tests/Lanes/LanePolicyFake.cs
+tests/WinForward.E2E.Tests/ObjectDisposedTeardownTests.cs
+tests/WinForward.Integration.Tests/PacketPathWalkCountTests.cs
+tests/WinForward.Runtime.TcpRedirect.Tests/TcpProxyCoordinatorLifecycleTests.cs

@@ -1,0 +1,7 @@
+benchmarks/WinForward.Benchmarks/Stability/StabilityShared.cs
+benchmarks/WinForward.E2E.Analysis/Metrics/MetricSpec.cs
+src/WinForward.Cli/Program.cs
+src/WinForward.Runtime/RuntimeHeartbeat.cs
+src/WinForward.Runtime/TcpRedirect/ClientResetInjector.cs
+tests/WinForward.E2E.Tests/ObjectDisposedCatchGateTests.cs
+tests/WinForward.Runtime.Capture.Tests/NdisPacketActionExecutorBatchingTests.cs

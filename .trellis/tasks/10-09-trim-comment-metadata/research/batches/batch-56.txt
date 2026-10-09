@@ -1,0 +1,7 @@
+analyzers/WinForward.Analyzers/AwaitableClassifier.cs
+analyzers/WinForward.Analyzers/BareAwaitableExpressionAnalyzer.cs
+analyzers/WinForward.Analyzers/ContinueWithAnalyzer.cs
+analyzers/WinForward.Analyzers/DiagnosticDescriptors.cs
+analyzers/WinForward.Analyzers/TaskRunAnalyzer.cs
+analyzers/WinForward.Analyzers/UnawaitedAwaitableDiscardAnalyzer.cs
+analyzers/WinForward.Analyzers/WellKnownTypes.cs

@@ -1,0 +1,9 @@
+benchmarks/WinForward.Benchmarks/Stability/SoakRunner.cs
+benchmarks/WinForward.E2E.Analysis/Tables/GateFlow.cs
+benchmarks/WinForward.E2E/Client/Arms/LossArm.cs
+benchmarks/WinForward.E2E/Client/ClientRunner.cs
+src/WinForward.Configuration/ConfigurationTargets.cs
+src/WinForward.Windows/HighResolutionTimerScope.cs
+tests/WinForward.Integration.Tests/DurableCaptureBundleTests.cs
+tests/WinForward.Runtime.Flow.Tests/FlowAttributionPendingIndexTests.cs
+tests/WinForward.Runtime.Socks5.Tests/Socks5UotTransportSendTests.cs

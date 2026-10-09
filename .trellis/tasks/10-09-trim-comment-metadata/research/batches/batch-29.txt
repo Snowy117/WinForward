@@ -1,0 +1,9 @@
+benchmarks/WinForward.E2E.Analysis/Checks/ControlDrift.cs
+benchmarks/WinForward.E2E.Contracts/Metrics/DnsMetrics.cs
+benchmarks/WinForward.E2E/Target/SourceCensus.cs
+src/WinForward.Runtime/Logging/RuntimeLogging.cs
+src/WinForward.Runtime/UdpProxy/UdpProxyOptions.cs
+tests/WinForward.Performance.Tests/WarmPathGateTests.cs
+tests/WinForward.Runtime.Capture.Tests/NdisCaptureResilienceTests.cs
+tests/WinForward.Runtime.Flow.Tests/RuntimeHeartbeatTests.cs
+tests/WinForward.TestSupport/ScriptedSocks5UdpServer.cs

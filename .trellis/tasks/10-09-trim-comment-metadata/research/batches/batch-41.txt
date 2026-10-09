@@ -1,0 +1,16 @@
+benchmarks/WinForward.Benchmarks/Stability/Socks5UdpServerMode.cs
+benchmarks/WinForward.E2E.Analysis/Model/JsonNumber.cs
+benchmarks/WinForward.E2E.Analysis/Tables/TableArmDenominator.cs
+benchmarks/WinForward.E2E.Analysis/Tables/TablePersist.cs
+benchmarks/WinForward.E2E/Target/SocketIO.cs
+benchmarks/WinForward.E2E/Target/TcpAcceptLoop.cs
+src/WinForward.Protocols/IPFragment.cs
+src/WinForward.Protocols/Socks5Udp.cs
+src/WinForward.Runtime/RuntimeLogThrottle.cs
+tests/WinForward.Configuration.Tests/ConfigurationValidationTests.cs
+tests/WinForward.Core.Tests/PackedFlowKeyTests.cs
+tests/WinForward.E2E.Tests/Lanes/LaneEngineSendTests.cs
+tests/WinForward.E2E.Tests/PersistentRateCaliberTests.cs
+tests/WinForward.Performance.Tests/TcpRedirectDataPathAllocationGateTests.cs
+tests/WinForward.Runtime.Socks5.Tests/Socks5UdpTransportFactoryTests.cs
+tests/WinForward.TestSupport/FlowBuilders.cs

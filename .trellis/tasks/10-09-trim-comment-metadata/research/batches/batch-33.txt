@@ -1,0 +1,10 @@
+benchmarks/WinForward.Benchmarks/Stability/UdpSessionRetentionScenario.cs
+benchmarks/WinForward.E2E.Analysis/Loading/CampaignLoader.cs
+benchmarks/WinForward.E2E/Client/Arms/LatencyPlan.cs
+benchmarks/WinForward.E2E/Client/Arms/ReliabilityAttempt.cs
+src/WinForward.NdisApi/NdisReadDiagnostics.cs
+src/WinForward.NdisApi/NdisReadPacketCalls.cs
+tests/WinForward.Runtime.Socks5.Tests/Socks5UdpTransportSendTests.cs
+tests/WinForward.Runtime.TcpRedirect.Tests/SetupExecutorTests.cs
+tests/WinForward.Runtime.UdpProxy.Tests/UdpReceiveResilienceTests.cs
+tests/WinForward.TestSupport/UdpTransportFakes.cs

@@ -1,0 +1,5 @@
+benchmarks/WinForward.Benchmarks/Stability/ResidencyCensusScenario.cs
+benchmarks/WinForward.Benchmarks/Stability/SweepPauseScenario.cs
+benchmarks/WinForward.Benchmarks/Stability/ScalingContentionScenario.cs
+benchmarks/WinForward.Benchmarks/Stability/UdpSessionBudgetAcceptance.cs
+tests/WinForward.E2E.Tests/Lanes/LatencyPolicyTests.cs

@@ -1,0 +1,7 @@
+benchmarks/WinForward.E2E.Analysis/Verdict/VerdictSections.cs
+benchmarks/WinForward.E2E/Client/Lanes/LaneEngineOptions.cs
+tests/WinForward.E2E.Tests/PlanFileValidationTests.cs
+tests/WinForward.Runtime.TcpRedirect.Tests/TcpFragmentHandlingTests.cs
+tests/WinForward.Runtime.TcpRedirect.Tests/TcpProxyCoordinatorRewriteTests.cs
+tests/WinForward.Runtime.UdpProxy.Tests/UdpProxyCoordinatorLifecycleTests.cs
+tests/WinForward.Runtime.UdpProxy.Tests/UdpSetupCooldownTests.cs

@@ -1,0 +1,12 @@
+benchmarks/WinForward.E2E.Analysis/Stats/OlsSlope.cs
+benchmarks/WinForward.E2E.Analysis/Tables/TableUdp.cs
+benchmarks/WinForward.E2E.Contracts/Metrics/PersistentMetrics.cs
+benchmarks/WinForward.E2E/Client/Lanes/LaneCounts.cs
+src/WinForward.Core/BoundedSetupQueue.cs
+src/WinForward.Runtime/UdpProxy/UdpSetupCooldownTable.cs
+tests/WinForward.Core.Tests/NativeBufferPoolTests.cs
+tests/WinForward.E2E.Tests/Lanes/LaneEngineAllocationGateTests.cs
+tests/WinForward.E2E.Tests/Shapes/ReliabilityShape.cs
+tests/WinForward.NdisApi.Tests/CompositePacketArrivalSignalTests.cs
+tests/WinForward.Runtime.TcpRedirect.Tests/TcpProxyRelayTests.cs
+tests/WinForward.TestSupport/CapturePipelineFakes.cs

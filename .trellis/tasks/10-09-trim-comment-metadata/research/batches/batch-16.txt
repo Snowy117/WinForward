@@ -1,0 +1,7 @@
+benchmarks/WinForward.Benchmarks/Stability/UdpBurstScenario.cs
+benchmarks/WinForward.Benchmarks/Stability/UdpSessionBudgetScenario.cs
+benchmarks/WinForward.E2E.Contracts/ArmKeys.Idle.cs
+src/WinForward.Protocols/UotCodec.cs
+src/WinForward.Runtime/RuntimeCounters.cs
+tests/WinForward.Runtime.Socks5.Tests/Socks5ControlConnectionDeferredHandshakeTests.cs
+tests/WinForward.Runtime.Socks5.Tests/Socks5UotTransportTests.cs

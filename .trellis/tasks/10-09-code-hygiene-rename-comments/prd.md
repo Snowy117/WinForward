@@ -47,21 +47,21 @@
 
 ## Acceptance Criteria
 
-- [ ] AC1 `rg -n '\bIpv[46]\w*' --glob '*.cs' src tests benchmarks` 零命中（`Ipv` 变体在 `.cs`
+- [x] AC1 `rg -n '\bIpv[46]\w*' --glob '*.cs' src tests benchmarks` 零命中（`Ipv` 变体在 `.cs`
       文件中彻底消失）。
-- [ ] AC2 注释中不再出现任务编号、任务名、日期或 PRD/design 交叉引用模式：
+- [x] AC2 注释中不再出现任务编号、任务名、日期或 PRD/design 交叉引用模式：
       `rg -n '/[/]?.*(task [0-9]|\b[A-Z][0-9]{1,2}\b|20[0-9]{2}-[0-9]{2}-[0-9]{2}|design §|PRD)' --glob '*.cs'`
       的人工复核结论为"零真实命中"（`\b[A-Z][0-9]\b` 的假阳性如 `CS1574`、`0x0A1` 需逐条排除）。
-- [ ] AC3 `dotnet build WinForward.slnx -c Release` 零警告（`TreatWarningsAsErrors` 下即零错误）。
-- [ ] AC4 `dotnet test WinForward.slnx -c Release` 与本次整理开始前记录的基线完全一致
+- [x] AC3 `dotnet build WinForward.slnx -c Release` 零警告（`TreatWarningsAsErrors` 下即零错误）。
+- [x] AC4 `dotnet test WinForward.slnx -c Release` 与本次整理开始前记录的基线完全一致
       （总数与逐项目计数皆相同；测试的显示名随方法名变化不影响计数）。
       基线（2026-10-09 实测，14 个程序集全部通过、零跳过）：总计 **1,663**，逐程序集
       Configuration 121 / Windows 58 / E2E 364 / Integration 24 / Core 63 / Runtime.Flow 183 /
       NdisApi 74 / Runtime.TcpRedirect 157 / Performance 137 / Runtime.Socks5 108 /
       Runtime.UdpProxy 164 / Runtime.Capture 120 / Protocols 72 / Analyzers 18。
-- [ ] AC5 两个代码门禁命令全部通过：`dotnet format … --verify-no-changes` 零输出、
+- [x] AC5 两个代码门禁命令全部通过：`dotnet format … --verify-no-changes` 零输出、
       `jb inspectcode` 零 `<Issue>`。
-- [ ] AC6 语义保全抽查：从本次改写的注释中抽取样本，确认每一条仍能独立说明"这段代码为什么
+- [x] AC6 语义保全抽查：从本次改写的注释中抽取样本，确认每一条仍能独立说明"这段代码为什么
       这么写"或"这段代码在什么前提下成立"，没有把不变量简化成同义反复。
 
 ## Out Of Scope

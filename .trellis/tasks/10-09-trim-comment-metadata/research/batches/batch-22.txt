@@ -1,0 +1,8 @@
+benchmarks/WinForward.Benchmarks/Stability/UdpSessionBudgetAcceptance.cs
+benchmarks/WinForward.E2E.Analysis/Model/ArmRecords.cs
+benchmarks/WinForward.E2E.Contracts/Json/JsonlSink.cs
+src/WinForward.Protocols/PacketChecksums.cs
+src/WinForward.Windows/IProcessOwnerTableReader.cs
+tests/WinForward.E2E.Tests/Lanes/LaneTransportFake.cs
+tests/WinForward.E2E.Tests/MixUdpBookConcurrencyTests.cs
+tests/WinForward.Runtime.Socks5.Tests/Socks5ProtocolTests.cs

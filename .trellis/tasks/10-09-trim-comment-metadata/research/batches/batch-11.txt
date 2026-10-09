@@ -1,0 +1,8 @@
+benchmarks/WinForward.Benchmarks/Stability/SoakOptions.cs
+benchmarks/WinForward.E2E.Analysis/Cli/ExitCodes.cs
+benchmarks/WinForward.E2E.Analysis/Json/VerbatimJson.cs
+benchmarks/WinForward.E2E.Contracts/Metrics/LatencyMetrics.cs
+benchmarks/WinForward.E2E/Client/Lanes/LaneEngine.cs
+src/WinForward.Runtime/SetupExecutor.cs
+src/WinForward.Runtime/UdpProxy/UdpSessionSetup.cs
+tests/WinForward.E2E.Tests/ContractRegistry.cs

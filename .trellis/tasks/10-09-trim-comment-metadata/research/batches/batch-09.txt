@@ -1,0 +1,5 @@
+benchmarks/WinForward.Benchmarks/Stability/LoopbackSocks5UotServer.cs
+benchmarks/WinForward.E2E/Client/Lanes/ILanePolicy.cs
+src/WinForward.Runtime/Capture/LayeredCaptureRunner.cs
+src/WinForward.Runtime/TcpRedirect/TcpProxyCoordinator.Injections.cs
+src/WinForward.Runtime/TcpRedirect/TcpRedirectSessionStore.cs

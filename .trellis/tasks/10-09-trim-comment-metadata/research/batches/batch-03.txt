@@ -1,0 +1,5 @@
+benchmarks/WinForward.Benchmarks/Stability/UdpSessionBudgetInstrumentation.cs
+src/WinForward.Core/FlowTable.cs
+src/WinForward.Runtime/Socks5/Socks5UdpTransport.cs
+src/WinForward.Runtime/TcpRedirect/TcpRedirectTable.cs
+src/WinForward.Runtime/UdpProxy/UdpSessionState.cs

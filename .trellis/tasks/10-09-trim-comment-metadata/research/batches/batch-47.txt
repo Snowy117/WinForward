@@ -1,0 +1,15 @@
+benchmarks/WinForward.Benchmarks/Stability/LoopbackSocks5TcpServer.cs
+benchmarks/WinForward.E2E.Analysis/Cli/PlotsNotice.cs
+benchmarks/WinForward.E2E.Analysis/Loading/ArmLoader.cs
+benchmarks/WinForward.E2E.Analysis/Tables/TableEnvironment.cs
+benchmarks/WinForward.E2E/Client/Arms/PersistentArm.cs
+benchmarks/WinForward.E2E/Wire/FrameStreamReader.cs
+src/WinForward.Configuration/ConfigurationRules.cs
+src/WinForward.Core/MacAddress.cs
+src/WinForward.Core/Policy.cs
+src/WinForward.Protocols/IPUdpPacket.cs
+src/WinForward.Runtime/UdpProxy/UdpAssociations.cs
+tests/WinForward.Core.Tests/AdapterSlotTableTests.cs
+tests/WinForward.Runtime.Capture.Tests/LayeredCaptureRunnerHealthSignalTests.cs
+tests/WinForward.Runtime.Flow.Tests/IdleExpirySweeperFailureTests.cs
+tests/WinForward.TestSupport/LoopbackUdpEndpoint.cs

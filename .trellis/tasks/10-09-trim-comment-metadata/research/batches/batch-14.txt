@@ -1,0 +1,6 @@
+benchmarks/WinForward.E2E/Client/Lanes/ReplyClassifier.cs
+src/WinForward.Runtime/Capture/NdisCaptureGeneration.cs
+src/WinForward.Runtime/TcpRedirect/RedirectInjectionLanes.cs
+tests/WinForward.E2E.Tests/ContractShapeTests.cs
+tests/WinForward.Performance.Tests/HotPathAllocationGateTests.cs
+tests/WinForward.Runtime.UdpProxy.Tests/UdpUotFlowLifecycleTests.cs

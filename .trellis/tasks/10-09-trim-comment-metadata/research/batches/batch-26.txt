@@ -1,0 +1,10 @@
+benchmarks/WinForward.Benchmarks/BenchmarkShared.cs
+benchmarks/WinForward.Benchmarks/Perf/UdpSessionBenchmarks.cs
+benchmarks/WinForward.Benchmarks/Stability/UdpBurstInstrumentation.cs
+benchmarks/WinForward.E2E.Analysis/Tables/TableMemory.cs
+benchmarks/WinForward.E2E.Contracts/ArmKeys.Dns.cs
+benchmarks/WinForward.E2E/Cli/TargetOptions.cs
+benchmarks/WinForward.E2E/Client/Arms/MixUdpLoop.cs
+src/WinForward.Runtime/Capture/AdapterListWatcher.cs
+src/WinForward.Runtime/UdpProxy/UdpAdapterTargetSource.cs
+tests/WinForward.Runtime.TcpRedirect.Tests/TcpProxyCoordinatorConcurrencyTests.cs

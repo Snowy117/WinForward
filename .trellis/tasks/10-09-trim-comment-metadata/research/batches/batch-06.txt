@@ -1,0 +1,5 @@
+benchmarks/WinForward.E2E/Client/UdpReliability.cs
+src/WinForward.Cli/DurableCaptureBundle.cs
+src/WinForward.NdisApi/NdisApiDriver.cs
+src/WinForward.NdisApi/NdisPacketArrivalSignal.cs
+tests/WinForward.E2E.Tests/LedgerShapeTests.cs

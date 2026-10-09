@@ -1,0 +1,6 @@
+benchmarks/WinForward.E2E.Analysis/Metrics/MetricCatalogue.cs
+benchmarks/WinForward.E2E.Contracts/Json/JsonPerSecond.cs
+src/WinForward.Configuration/ConfigurationLimits.cs
+src/WinForward.Runtime/InterceptionHealthMonitor.cs
+tests/WinForward.Performance.Tests/UdpSessionBudgetAcceptanceTests.cs
+tests/WinForward.Runtime.UdpProxy.Tests/LocalUdpTransportTests.cs

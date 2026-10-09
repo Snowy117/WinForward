@@ -1,0 +1,15 @@
+benchmarks/WinForward.Benchmarks/Stability/SessionFootprintScenario.cs
+benchmarks/WinForward.E2E.Analysis/Loading/PythonGlob.cs
+benchmarks/WinForward.E2E.Analysis/Model/JsonValue.cs
+benchmarks/WinForward.E2E.Analysis/Tables/FlowModel.cs
+benchmarks/WinForward.E2E.Analysis/Tables/TableLedgerCross.cs
+benchmarks/WinForward.E2E/Client/Arms/ArmKind.cs
+benchmarks/WinForward.E2E/Client/ResourceSampleWriter.cs
+src/WinForward.Core/IPAddressValue.cs
+src/WinForward.Protocols/IPTcpUdpPacket.cs
+src/WinForward.Runtime/FlowAttributionWakeRegistry.cs
+tests/WinForward.E2E.Tests/ClientRunnerTests.cs
+tests/WinForward.E2E.Tests/Shapes/ControlShape.cs
+tests/WinForward.Integration.Tests/LocalTargetDispatchTests.cs
+tests/WinForward.Performance.Tests/UdpResponseOwnershipTests.cs
+tests/WinForward.Runtime.Flow.Tests/IdleExpirySweeperCadenceTests.cs
