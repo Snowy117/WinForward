@@ -14,12 +14,11 @@ internal readonly record struct UnicastAddressObservation(ulong InterfaceLuid, I
 
 /// <summary>
 /// Reads the system unicast-address table (iphlpapi <c>GetUnicastIpAddressTable</c>) and folds it
-/// into per-interface address fingerprints (task 09-17 R1-A). Host link-state changes that never
-/// rebuild the NDISRD bound-adapter list — IPv6 temporary-address rotation above all — are
-/// invisible to the NDISAPI enumeration, so the capture runner additionally diffs each adapter's
-/// unicast addresses. The query is a cold-path control operation invoked once per enumeration;
-/// a failure must be tolerated by callers as empty fingerprints, never allowed to break
-/// enumeration.
+/// into per-interface address fingerprints. Host link-state changes that never rebuild the NDISRD
+/// bound-adapter list — IPv6 temporary-address rotation above all — are invisible to the NDISAPI
+/// enumeration, so the capture runner additionally diffs each adapter's unicast addresses. The
+/// query is a cold-path control operation invoked once per enumeration; callers tolerate a failure
+/// as empty fingerprints and never let it break enumeration.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public static partial class UnicastAddressInventory

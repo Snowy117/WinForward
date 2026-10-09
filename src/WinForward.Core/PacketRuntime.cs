@@ -48,10 +48,10 @@ public sealed class PacketLease : IDisposable
     /// Creates a lease whose frame is returned to its owner (for example an array pool) exactly
     /// once, on the lease's unique completion path. The callback fires inside
     /// <see cref="TryComplete(PacketDisposition)"/> (including the <see cref="Dispose"/> path), so
-    /// any frame read must happen before completion when this constructor is used. The callback
-    /// shape is deliberately memory-based: a completion callback can never be combined with a
-    /// producer-owned source (see <see cref="PacketLease(IFrameSource)"/>), so completing the
-    /// lease can never become the path that materializes a native frame.
+    /// any frame read must happen before completion. The callback shape is deliberately
+    /// memory-based: it can never be combined with a producer-owned source (see
+    /// <see cref="PacketLease(IFrameSource)"/>), so completing the lease can never materialize a
+    /// native frame.
     /// </summary>
     public PacketLease(ReadOnlyMemory<byte> frame, Action<ReadOnlyMemory<byte>>? onCompleted)
     {
@@ -147,9 +147,8 @@ public sealed class PacketLease : IDisposable
         if (Interlocked.Exchange(ref _completed, 1) != 0) return false;
         Disposition = disposition;
         // The callback constructor only ever wraps stable memory (_source stays null there), so
-        // invoking the callback on the stored frame can never materialize a pooled copy. The
-        // Frame property is deliberately unreachable here: completion must not be the path that
-        // materializes a producer-owned native frame.
+        // invoking the callback on the stored frame can never materialize a pooled copy: completion
+        // must not be the path that materializes a producer-owned native frame.
         _onCompleted?.Invoke(_frame);
         return true;
     }

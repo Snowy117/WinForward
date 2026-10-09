@@ -161,8 +161,8 @@ internal static class TcpCoordinatorFakes
     internal static async Task EstablishRelayingSessionAsync(DispatcherHarness harness)
     {
         await harness.Dispatcher.DispatchAsync(MakeSynPacket(s_clientIPv4, s_destIPv4, 53000, 443), CancellationToken.None);
-        // R8: the SYN dispatch returns SetupPending; the listener exists only after the
-        // background setup settles, so drain before touching the factory's recordings.
+        // The SYN dispatch returns SetupPending; the listener exists only after the background
+        // setup settles, so drain before touching the factory's recordings.
         await harness.Coordinator.DrainPendingSetupsAsync();
         var listener = Assert.Single(harness.ListenerFactory.Listeners);
         await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(Endpoint.From(s_destIPv4, 53000)), CancellationToken.None);
@@ -178,11 +178,10 @@ internal static class TcpCoordinatorFakes
     }
 
     /// <summary>
-    /// Dispatches a SYN through the coordinator and awaits the background redirect setup R8 moved
+    /// Dispatches a SYN through the coordinator and awaits the background redirect setup that runs
     /// off the pump thread, so tests observe the settled state (listener created, rewritten SYN
-    /// injected, failure logged and cooldown armed). The synchronous fast paths — flow reuse,
-    /// TIME_WAIT grace, setup cooldown, capacity — return their outcome directly and skip the
-    /// drain.
+    /// injected, failure logged, cooldown armed). The synchronous fast paths — flow reuse,
+    /// TIME_WAIT grace, setup cooldown, capacity — return directly and skip the drain.
     /// </summary>
     internal static async Task HandleSynSettledAsync(TcpProxyCoordinator coordinator, CapturedFlowPacket packet, Socks5Server server, CancellationToken cancellationToken = default)
     {
@@ -267,7 +266,7 @@ internal sealed class FakeListener(Endpoint translatedTuple) : ITcpRedirectListe
 /// <summary>
 /// A listener whose DisposeAsync parks on a shared gate until released, holding a teardown's
 /// trailing disposal mid-flight while the retire critical section has already committed — the
-/// exact window the atomic retire contract (R2) is asserted against.
+/// exact window the atomic retire contract is asserted against.
 /// </summary>
 internal sealed class ParkingDisposeListener(FakeListener inner, TaskCompletionSource release) : ITcpRedirectListener
 {

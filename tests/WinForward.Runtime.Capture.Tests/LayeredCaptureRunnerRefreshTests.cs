@@ -14,13 +14,13 @@ public sealed class LayeredCaptureRunnerRefreshTests
     [Fact]
     public async Task RefreshChurnKeepsPassBatchingAliveAcrossGenerations()
     {
-        // The design-review P0-1 leak: the durable executor's pass lanes were keyed by
+        // The leak this regression pins: the durable executor's pass lanes are keyed by
         // (adapter handle, direction) and never removed, while every adapter-list refresh mints
-        // fresh handles — after a handful of refreshes the fixed lane table filled with dead
-        // keys and every pass silently degraded to an immediate single send. This regression
-        // drives five generations × two adapters (ten distinct handles) through the runner with
-        // the production shape of the scope-installed callback (retire lanes outside the
-        // installed scope) and proves the final generation still batches.
+        // fresh handles — after a handful of refreshes the fixed lane table would fill with dead
+        // keys and every pass would silently degrade to an immediate single send. Five generations
+        // × two adapters (ten distinct handles) are driven through the runner with the production
+        // shape of the scope-installed callback (retire lanes outside the installed scope), and
+        // the test proves the final generation still batches.
         var reinjector = new FakeReinjector();
         var executor = new NdisPacketActionExecutor(reinjector);
         CaptureRunnerHarness? harness = null;

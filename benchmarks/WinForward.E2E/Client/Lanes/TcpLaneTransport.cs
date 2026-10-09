@@ -6,9 +6,8 @@ namespace WinForward.E2E.Client.Lanes;
 
 /// <summary>
 /// A lane's TCP wire endpoint: the socket, the connect, the lane's one command frame and the frame
-/// reader that turns the stream back into messages. It reports what it read and never judges whether
-/// the bytes were legal — the policy owns every verdict and every counter — and it owns the socket's
-/// lifetime, because the engine disposes nothing (D18.1).
+/// reader that turns the stream back into messages. The policy owns every verdict and every counter,
+/// and this transport owns the socket's lifetime, because the engine disposes nothing.
 /// </summary>
 /// <remarks>
 /// The reader hands up a frame's payload, so a message is copied once into the engine's destination
@@ -42,8 +41,7 @@ internal sealed class TcpLaneTransport : ILaneTransport
 
     /// <summary>
     /// How long the successful connect took, in <see cref="Clock"/> ticks. The lane's connect sample is
-    /// published as a mean, so the connect is timed on its own and the command frame below stays out of
-    /// it, exactly as the per-lane connect has always been timed.
+    /// published as a mean, so the command frame below stays out of it.
     /// </summary>
     internal long ConnectTicks { get; private set; }
 
@@ -59,9 +57,9 @@ internal sealed class TcpLaneTransport : ILaneTransport
         ConnectTicks = Clock.Now - begin;
         try
         {
-            // The command frame is the lane's handshake, not one of its requests: it carries the command
-            // sequence and stays out of every request counter. A target that never learns the mode would
-            // answer frames the lane cannot score, so a handshake that fails is an open failure.
+            // The lane's handshake, not one of its requests: it carries the command sequence and stays
+            // out of every request counter. A target that never learns the mode would answer frames the
+            // lane cannot score, so a handshake that fails is an open failure.
             await SocketOps.SendCommandAsync(_socket, _connectionId, TcpMode.Clean, 0, cancellationToken).ConfigureAwait(false);
         }
         catch (SocketException exception)
@@ -92,8 +90,8 @@ internal sealed class TcpLaneTransport : ILaneTransport
         // overload a byte[] argument binds to that allocates a Task per call (measured 72 B). The
         // real-transport allocation gate is what keeps this overload, and the parameter type that
         // selects it, in place.
-        // The transport's own pre-await reading of the same property the engine reads off the returned
-        // task (audit §9.6); the engine takes the union of the two, so neither side can double-count it.
+        // The pre-await reading of the same property the engine also reads off the returned task: the
+        // engine takes the union of the two, so neither side can double-count it.
         var wouldBlock = !send.IsCompleted;
         try
         {
@@ -139,7 +137,7 @@ internal sealed class TcpLaneTransport : ILaneTransport
             case FrameReadStatus.BadMagic:
             case FrameReadStatus.BadLength:
                 // The stream's frame boundary is gone and no later message can be framed, so this is
-                // terminal rather than one bad message (D18.6 #3).
+                // terminal rather than one bad message.
                 return new LaneReceiveResult(LaneReceiveKind.IOError, 0, status == FrameReadStatus.BadMagic ? FrameDecodeError.BadMagic : FrameDecodeError.BadLength);
 
             case FrameReadStatus.Truncated:
