@@ -19,7 +19,8 @@
   "pr_url": null,
   "subtasks": [],
   "children": [
-    "10-07-tcp-close-drain"
+    "10-07-tcp-close-drain",
+    "10-09-tcp-close-drain-primary"
   ],
   "parent": null,
   "relatedFiles": [],

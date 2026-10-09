@@ -1,0 +1,35 @@
+{
+  "type": "run",
+  "label": "rel-nofin",
+  "clientVersion": "1.0.0.0",
+  "osDescription": "Microsoft Windows 10.0.26100",
+  "frameworkDescription": ".NET 10.0.12",
+  "logicalProcessors": 16,
+  "planHash": "91185995e3037e77",
+  "planPath": "C:\\wf-ac0\\plans\\p-rel.json",
+  "planSource": "file",
+  "outDirectory": "C:\\wf-ac0\\o-rel-nofin",
+  "target": {
+    "address": "192.168.100.4",
+    "tcpPort": 40020,
+    "udpPort": 40020,
+    "dnsPort": 40053
+  },
+  "samplerProcesses": [],
+  "startedUtc": "2026-10-09T10:36:00.2184300\u002B00:00",
+  "endedUtc": "2026-10-09T10:37:00.3088385\u002B00:00",
+  "startedTicks": 59599473203,
+  "endedTicks": 60200339719,
+  "wallSeconds": 60.087,
+  "arms": [
+    {
+      "name": "REL",
+      "kind": "reliability",
+      "file": "REL.jsonl",
+      "startedTicks": 59599574206,
+      "endedTicks": 60200037042,
+      "failed": false
+    }
+  ],
+  "failed": false
+}

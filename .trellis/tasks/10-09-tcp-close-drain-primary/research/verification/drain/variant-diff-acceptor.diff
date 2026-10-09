@@ -1,0 +1,49 @@
+--- /tmp/wf-drain-snapshot/src/WinForward.Runtime/TcpRedirect/TcpRedirectAcceptor.cs	2026-10-09 18:15:42.886441039 +0800
++++ /tmp/wf-drain-only/src/WinForward.Runtime/TcpRedirect/TcpRedirectAcceptor.cs	2026-10-09 18:24:52.472226871 +0800
+@@ -239,7 +239,7 @@
+             // holds the SYN template and the sequence trackers: RST|ACK for a stalled or faulted
+             // relay, FIN|ACK for a clean end.
+             var endKind = relay is ITcpRelayEndInfo endInfo ? endInfo.EndKind : RelayEndKind.CleanEnded;
+-            await InjectClientVisibleCloseAsync(relay, session, endKind).ConfigureAwait(false);
++            await InjectClientVisibleCloseAsync(session, endKind).ConfigureAwait(false);
+             var endKindName = EndKindName(endKind);
+             TcpRedirectLog.TcpRelayEnded(
+                 logger,
+@@ -328,30 +328,19 @@
+         return true;
+     }
+ 
+-    private async ValueTask InjectClientVisibleCloseAsync(ITcpRelay relay, TcpRedirectSession session, RelayEndKind endKind)
++    private async ValueTask InjectClientVisibleCloseAsync(TcpRedirectSession session, RelayEndKind endKind)
+     {
++        // EXPERIMENT VARIANT (A/B arm only, never committed) — the crafted clean-end FIN is gone, and the
++        // drain carries the close on MSTCP's own FIN and its retransmissions. Only the abnormal end
++        // still injects, and the clean end injects nothing at all.
++        if (endKind == RelayEndKind.CleanEnded) return;
+         try
+         {
+-            if (endKind != RelayEndKind.CleanEnded)
+-            {
+-                await clientReset.TryInjectClientResetAsync(session.Association, CancellationToken.None).ConfigureAwait(false);
+-            }
+-            else
+-            {
+-                var serverStreamBytes = relay is ITcpRelayEndInfo byteInfo ? byteInfo.ServerStreamBytes : (long?)null;
+-                await clientReset.TryInjectClientCloseAsync(session.Association, serverStreamBytes, CancellationToken.None).ConfigureAwait(false);
+-            }
++            await clientReset.TryInjectClientResetAsync(session.Association, CancellationToken.None).ConfigureAwait(false);
+         }
+         catch (Exception exception)
+         {
+-            if (endKind != RelayEndKind.CleanEnded)
+-            {
+-                TcpRedirectLog.TcpRedirectRelayEndResetFailed(logger, exception);
+-            }
+-            else
+-            {
+-                TcpRedirectLog.TcpRedirectRelayEndCloseFailed(logger, exception);
+-            }
++            TcpRedirectLog.TcpRedirectRelayEndResetFailed(logger, exception);
+         }
+     }
+ 

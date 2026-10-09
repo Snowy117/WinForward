@@ -1,0 +1,12 @@
+{"file": ".trellis/tasks/10-09-tcp-close-drain-primary/design.md", "reason": "The design being implemented: dispose-drain-retire ordering of section 3, the computed drain target of section 4, the always-on ACK tracking of section 5, and the removal list of section 6."}
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "The layer being changed: relay-end close, atomic retire, tombstone grace - the invariant the drain moves but must not weaken."}
+{"file": ".trellis/spec/backend/tcp-client-close-injection.md", "reason": "The spec this task rewrites: the clean-end FIN contract leaves, the drain contract enters; the RST shapes and sequence fallbacks stay."}
+{"file": ".trellis/spec/backend/async-lifetime.md", "reason": "Session, accept-loop and quiescence-scope lifetime contracts: relay disposal moves before the drain without adding a second lifetime owner."}
+{"file": ".trellis/spec/backend/hot-path.md", "reason": "Zero-allocation packet pipeline rules: the ACK observation adds one 4-byte read plus a signed compare per forward packet, no allocation, no delegate (R6)."}
+{"file": ".trellis/spec/backend/warm-path-dispatch.md", "reason": "The no-async-state-machine warm-path contract the forward-leg observation lives under."}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Structured [LoggerMessage] rules for the drain event carrying AC5's exit reason and duration."}
+{"file": ".trellis/spec/backend/test-stability.md", "reason": "Flake-proof contracts for the drain-exit regression tests (state assertions, real synchronization points)."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Build/test/format/JB gates and the narrow suppression policy."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Capture -> relay -> reverse-leg rewrite layering, which is where the drain sits."}
+{"file": ".trellis/tasks/archive/2026-10/10-06-tcp-half-close-fidelity/research/verification/README.md", "reason": "The residual's measured shape and why the parent's two recorded directions are superseded."}
+{"file": ".trellis/tasks/archive/2026-10/10-06-tcp-half-close-fidelity/implement.md", "reason": "The VM measurement recipe: sandbox layout, current-tree appsettings.json, orchestrator and watchdog hazards."}

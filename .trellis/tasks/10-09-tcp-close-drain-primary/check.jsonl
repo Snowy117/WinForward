@@ -1,0 +1,8 @@
+{"file": ".trellis/tasks/10-09-tcp-close-drain-primary/design.md", "reason": "Verify against the design's invariants, the rejected alternatives, and the risk table of section 8."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Final gates: zero-warning build, Release tests, format-verify, JB inspectcode."}
+{"file": ".trellis/spec/backend/tcp-local-redirect.md", "reason": "Verify the retire stays the single atomic alias-removal plus tombstone step and no path bypasses it during a drain."}
+{"file": ".trellis/spec/backend/tcp-client-close-injection.md", "reason": "Verify the removal is complete (no crafted FIN path remains) and the abnormal-end RST contract is untouched."}
+{"file": ".trellis/spec/backend/test-stability.md", "reason": "Verify each drain-exit test is deterministic and asserts state, not wall clock."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify the client-visible close end to end: local-stack FIN and tail retransmission -> reverse rewrite -> client ACK -> forward rewrite."}
+{"file": ".trellis/tasks/archive/2026-10/10-06-tcp-half-close-fidelity/research/verification/README.md", "reason": "Verify the measured acceptance numbers against the recorded residual and its two readings."}
+{"file": "benchmarks/WinForward.E2E/README.md", "reason": "Verify AC0-AC5 against the harness's arm, mode and evidence-record semantics (attempt records carry echoedBytes/trailerBytes/eof)."}

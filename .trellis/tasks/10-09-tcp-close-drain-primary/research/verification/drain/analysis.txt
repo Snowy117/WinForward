@@ -1,0 +1,114 @@
+========== hh-nofin ==========
+planHash=0f215d26f7c0b8b6 plan=C:\wf-ac0\plans\p-hh.json out=C:\wf-ac0\o-hh-nofin window=30.112s [2026-10-09T10:33:09.580660+00:00 .. 2026-10-09T10:33:39.696963+00:00]
+parameters={"seconds": 30, "framePayloadBytes": 1024, "connectionsPerSecond": 20, "modeMix": "halfClose=100", "expectedBytes": 8192}
+connectAttempts=601 scheduledAttempts=601 attemptRecords=37 omitted=0 clientSendLoss=0 achievedRate=20.021
+observed={"clean": 601, "reset": 0, "unexpectedEof": 0, "timeout": 0, "connectFail": 0, "halfCloseViolation": 0, "otherError": 0}
+expected={"clean": 601, "reset": 0, "unexpectedEof": 0, "timeout": 0, "connectFail": 0, "halfCloseViolation": 0, "otherError": 0}
+fidelityMismatch=0 fidelityRate=0 truncated=0
+  byMode halfClose    attempts=601   observed={"clean": 601, "reset": 0, "unexpectedEof": 0, "timeout": 0, "connectFail": 0, "halfCloseViolation": 0, "otherError": 0}
+attempt record shapes (mode, observed, expected, echoed, eof):
+     37  ('halfClose', 'clean', 'clean', 8192, True)
+product log lines=4219 levels={"Information": 9, "Warning": 2, "Debug": 4208}
+relay session events={"established": 601, "cleanEnded": 601}
+clientClose injected={} clientReset injected={}
+drain events=601 outcomes={"acknowledged": 601}
+   acknowledged n=601   min=0 p50=0.0 p90=0.0 p99=0.0 max=1 mean=0.00 sum=1
+   ALL          n=601   min=0 p50=0.0 p90=0.0 p99=0.0 max=1
+drain peak concurrency=1 at 2026-10-09 10:33:10.064000+00:00
+total drain hold sum=1 ms; worst-case budget = deadline 5 s x clean-end rate 20/s = 100 concurrent
+WARN ('-07:00 2026-10-09 03:32:57.629', 'Warning', "Configuration warning: WinForward.LocalTargets[0].Host: Local target 'dns' at 192.168.100.4 is not a loopback address: the flow's payload leaves this ")
+WARN ('-07:00 2026-10-09 03:33:09.769', 'Warning', 'Read-shape mismatch on adapter Internal ({1AE40BBA-3759-40BD-9811-A7EC28134394}): the driver queued 1 of the 32 requested packet(s) (native error 87).')
+ledger tcp total=3004 in-window(raw)=590 in-window(offset -400 ms)=601
+ledger modes={"halfClose": 601}
+ledger verdicts={"halfClose": 601}
+ledger rows missing bytesEchoed=0
+sing-box inbound socks connections to target: exact window=593 (+-2s=601)
+========== hh-fin ==========
+planHash=0f215d26f7c0b8b6 plan=C:\wf-ac0\plans\p-hh.json out=C:\wf-ac0\o-hh-fin window=30.090s [2026-10-09T10:34:22.376744+00:00 .. 2026-10-09T10:34:52.471020+00:00]
+parameters={"seconds": 30, "framePayloadBytes": 1024, "connectionsPerSecond": 20, "modeMix": "halfClose=100", "expectedBytes": 8192}
+connectAttempts=601 scheduledAttempts=601 attemptRecords=37 omitted=0 clientSendLoss=0 achievedRate=20.01
+observed={"clean": 601, "reset": 0, "unexpectedEof": 0, "timeout": 0, "connectFail": 0, "halfCloseViolation": 0, "otherError": 0}
+expected={"clean": 601, "reset": 0, "unexpectedEof": 0, "timeout": 0, "connectFail": 0, "halfCloseViolation": 0, "otherError": 0}
+fidelityMismatch=0 fidelityRate=0 truncated=0
+  byMode halfClose    attempts=601   observed={"clean": 601, "reset": 0, "unexpectedEof": 0, "timeout": 0, "connectFail": 0, "halfCloseViolation": 0, "otherError": 0}
+attempt record shapes (mode, observed, expected, echoed, eof):
+     37  ('halfClose', 'clean', 'clean', 8192, True)
+product log lines=4821 levels={"Information": 9, "Warning": 2, "Debug": 4810}
+relay session events={"established": 601, "cleanEnded": 601}
+clientClose injected={"injected": 601} clientReset injected={}
+drain events=601 outcomes={"acknowledged": 601}
+   acknowledged n=601   min=0 p50=0.0 p90=0.0 p99=0.0 max=2 mean=0.00 sum=2
+   ALL          n=601   min=0 p50=0.0 p90=0.0 p99=0.0 max=2
+drain peak concurrency=1 at 2026-10-09 10:34:23.870000+00:00
+total drain hold sum=2 ms; worst-case budget = deadline 5 s x clean-end rate 20/s = 100 concurrent
+WARN ('-07:00 2026-10-09 03:34:17.391', 'Warning', "Configuration warning: WinForward.LocalTargets[0].Host: Local target 'dns' at 192.168.100.4 is not a loopback address: the flow's payload leaves this ")
+WARN ('-07:00 2026-10-09 03:34:23.407', 'Warning', 'Read-shape mismatch on adapter Internal ({1AE40BBA-3759-40BD-9811-A7EC28134394}): the driver queued 1 of the 32 requested packet(s) (native error 87).')
+ledger tcp total=3004 in-window(raw)=590 in-window(offset -400 ms)=598
+ledger modes={"halfClose": 598}
+ledger verdicts={"halfClose": 598}
+ledger rows missing bytesEchoed=0
+sing-box inbound socks connections to target: exact window=589 (+-2s=601)
+========== cl-nofin ==========
+planHash=fd58a2d9e3b2fb95 plan=C:\wf-ac0\plans\p-cl.json out=C:\wf-ac0\o-cl-nofin window=30.084s [2026-10-09T10:35:10.900587+00:00 .. 2026-10-09T10:35:40.988821+00:00]
+parameters={"seconds": 30, "framePayloadBytes": 1024, "connectionsPerSecond": 20, "modeMix": "clean=100", "expectedBytes": 8192}
+connectAttempts=601 scheduledAttempts=601 attemptRecords=37 omitted=0 clientSendLoss=0 achievedRate=20.015
+observed={"clean": 601, "reset": 0, "unexpectedEof": 0, "timeout": 0, "connectFail": 0, "halfCloseViolation": 0, "otherError": 0}
+expected={"clean": 601, "reset": 0, "unexpectedEof": 0, "timeout": 0, "connectFail": 0, "halfCloseViolation": 0, "otherError": 0}
+fidelityMismatch=0 fidelityRate=0 truncated=0
+  byMode clean        attempts=601   observed={"clean": 601, "reset": 0, "unexpectedEof": 0, "timeout": 0, "connectFail": 0, "halfCloseViolation": 0, "otherError": 0}
+attempt record shapes (mode, observed, expected, echoed, eof):
+     37  ('clean', 'clean', 'clean', 8192, True)
+product log lines=4220 levels={"Information": 9, "Warning": 2, "Debug": 4209}
+relay session events={"established": 601, "cleanEnded": 601}
+clientClose injected={} clientReset injected={}
+drain events=601 outcomes={"acknowledged": 601}
+   acknowledged n=601   min=0 p50=0.0 p90=0.0 p99=0.0 max=2 mean=0.00 sum=2
+   ALL          n=601   min=0 p50=0.0 p90=0.0 p99=0.0 max=2
+drain peak concurrency=1 at 2026-10-09 10:35:11.706000+00:00
+total drain hold sum=2 ms; worst-case budget = deadline 5 s x clean-end rate 20/s = 100 concurrent
+WARN ('-07:00 2026-10-09 03:35:05.832', 'Warning', "Configuration warning: WinForward.LocalTargets[0].Host: Local target 'dns' at 192.168.100.4 is not a loopback address: the flow's payload leaves this ")
+WARN ('-07:00 2026-10-09 03:35:11.340', 'Warning', 'Read-shape mismatch on adapter Internal ({1AE40BBA-3759-40BD-9811-A7EC28134394}): the driver queued 1 of the 32 requested packet(s) (native error 87).')
+ledger tcp total=3004 in-window(raw)=590 in-window(offset -400 ms)=601
+ledger modes={"clean": 601}
+ledger verdicts={"clean": 601}
+ledger rows missing bytesEchoed=0
+sing-box inbound socks connections to target: exact window=601 (+-2s=601)
+========== rel-nofin ==========
+planHash=91185995e3037e77 plan=C:\wf-ac0\plans\p-rel.json out=C:\wf-ac0\o-rel-nofin window=60.087s [2026-10-09T10:36:00.218430+00:00 .. 2026-10-09T10:37:00.308838+00:00]
+parameters={"seconds": 60, "framePayloadBytes": 1024, "connectionsPerSecond": 20, "modeMix": "clean=25,resetAfterN=25,partialFin=25,halfClose=25", "expectedBytes": 8192}
+connectAttempts=1201 scheduledAttempts=1201 attemptRecords=375 omitted=0 clientSendLoss=0 achievedRate=20.006
+observed={"clean": 607, "reset": 0, "unexpectedEof": 590, "timeout": 0, "connectFail": 0, "halfCloseViolation": 0, "otherError": 4}
+expected={"clean": 601, "reset": 300, "unexpectedEof": 300, "timeout": 0, "connectFail": 0, "halfCloseViolation": 0, "otherError": 0}
+fidelityMismatch=300 fidelityRate=0.249792 truncated=0
+  byMode clean        attempts=301   observed={"clean": 301, "reset": 0, "unexpectedEof": 0, "timeout": 0, "connectFail": 0, "halfCloseViolation": 0, "otherError": 0}
+  byMode resetAfterN  attempts=300   observed={"clean": 6, "reset": 0, "unexpectedEof": 290, "timeout": 0, "connectFail": 0, "halfCloseViolation": 0, "otherError": 4}
+  byMode partialFin   attempts=300   observed={"clean": 0, "reset": 0, "unexpectedEof": 300, "timeout": 0, "connectFail": 0, "halfCloseViolation": 0, "otherError": 0}
+  byMode halfClose    attempts=300   observed={"clean": 300, "reset": 0, "unexpectedEof": 0, "timeout": 0, "connectFail": 0, "halfCloseViolation": 0, "otherError": 0}
+attempt record shapes (mode, observed, expected, echoed, eof):
+    274  ('resetAfterN', 'unexpectedEof', 'reset', 0, True)
+     75  ('halfClose', 'clean', 'clean', 8192, True)
+     14  ('resetAfterN', 'unexpectedEof', 'reset', 7168, True)
+      6  ('resetAfterN', 'clean', 'reset', 8192, True)
+      2  ('resetAfterN', 'otherError', 'reset', 2048, False)
+      2  ('resetAfterN', 'unexpectedEof', 'reset', 3072, True)
+      2  ('resetAfterN', 'otherError', 'reset', 5120, False)
+   otherError detail: {"type": "attempt", "connectionId": 1380254017, "mode": "resetAfterN", "status": "exchanged", "observed": "otherError", "expected": "reset", "truncated": false, "echoedBytes": 2048, "trailerBytes": 0, "eof": false, "reset": false, "protocolError": true, "otherError": false, "connectTicks": 115915, "transferTicks": 6283}
+   otherError detail: {"type": "attempt", "connectionId": 1380254461, "mode": "resetAfterN", "status": "exchanged", "observed": "otherError", "expected": "reset", "truncated": false, "echoedBytes": 5120, "trailerBytes": 0, "eof": false, "reset": false, "protocolError": true, "otherError": false, "connectTicks": 117121, "transferTicks": 5001}
+   otherError detail: {"type": "attempt", "connectionId": 1380254681, "mode": "resetAfterN", "status": "exchanged", "observed": "otherError", "expected": "reset", "truncated": false, "echoedBytes": 2048, "trailerBytes": 0, "eof": false, "reset": false, "protocolError": true, "otherError": false, "connectTicks": 113219, "transferTicks": 2845}
+   otherError detail: {"type": "attempt", "connectionId": 1380254769, "mode": "resetAfterN", "status": "exchanged", "observed": "otherError", "expected": "reset", "truncated": false, "echoedBytes": 5120, "trailerBytes": 0, "eof": false, "reset": false, "protocolError": true, "otherError": false, "connectTicks": 114195, "transferTicks": 5654}
+product log lines=8424 levels={"Information": 11, "Warning": 3, "Debug": 8410}
+relay session events={"established": 1201, "cleanEnded": 1201}
+clientClose injected={} clientReset injected={}
+drain events=1201 outcomes={"acknowledged": 1201}
+   acknowledged n=1201  min=0 p50=0.0 p90=0.0 p99=0.0 max=1 mean=0.00 sum=1
+   ALL          n=1201  min=0 p50=0.0 p90=0.0 p99=0.0 max=1
+drain peak concurrency=1 at 2026-10-09 10:36:00.669000+00:00
+total drain hold sum=1 ms; worst-case budget = deadline 5 s x clean-end rate 20/s = 100 concurrent
+WARN ('-07:00 2026-10-09 03:35:55.174', 'Warning', "Configuration warning: WinForward.LocalTargets[0].Host: Local target 'dns' at 192.168.100.4 is not a loopback address: the flow's payload leaves this ")
+WARN ('-07:00 2026-10-09 03:36:00.653', 'Warning', 'Read-shape mismatch on adapter Internal ({1AE40BBA-3759-40BD-9811-A7EC28134394}): the driver queued 1 of the 32 requested packet(s) (native error 87).')
+WARN ('-07:00 2026-10-09 03:36:55.329', 'Warning', 'Garbage collection observed since the last heartbeat: gen0 86, gen1 56, gen2 56 (198 collection(s) since startup).')
+ledger tcp total=3004 in-window(raw)=1190 in-window(offset -400 ms)=1198
+ledger modes={"halfClose": 300, "clean": 300, "resetAfterN": 299, "partialFin": 299}
+ledger verdicts={"halfClose": 300, "clean": 300, "reset": 299, "partialFin": 299}
+ledger rows missing bytesEchoed=0
+sing-box inbound socks connections to target: exact window=1186 (+-2s=1201)

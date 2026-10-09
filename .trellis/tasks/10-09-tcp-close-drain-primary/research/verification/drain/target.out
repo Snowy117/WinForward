@@ -1,0 +1,1 @@
+e2e target listening on tcp 192.168.100.4:40020, udp 192.168.100.4:40020, dns 192.168.100.4:40053 (label 'drain', ledger /tmp/wf-drain-run/ledger.jsonl)
