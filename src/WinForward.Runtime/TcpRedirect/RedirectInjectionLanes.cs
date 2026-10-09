@@ -19,7 +19,7 @@ namespace WinForward.Runtime.TcpRedirect;
 /// to a spare pool, so no adapter-handle entry can outlive the iteration that created it, no
 /// scope-install retirement hook is needed, and steady-state lane creation allocates nothing.
 /// Serialization is the pump's, not this container's: every append and every flush of one key runs
-/// on that adapter's strictly-ordered pump handler chain (windows-ndisapi.md, "Batched reinjection
+/// on that adapter's strictly-ordered pump handler chain (ndis-batched-send.md, "Batched reinjection
 /// sends" — serialization rests on the pump's await chain, not thread identity), so a lane needs no
 /// lock of its own, and a caller outside that chain must not append at all.
 /// </para>

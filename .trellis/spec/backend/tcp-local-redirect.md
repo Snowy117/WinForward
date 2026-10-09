@@ -1,470 +1,117 @@
 # TCP Local Redirect Contracts
 
-> How WinForward transparently redirects host and forwarded TCP flows to a local SOCKS5 relay: the WinpkFilter local_redirect transform, forwarded DNAT shape, client-reset lifecycle, and teardown grace. Split 2026-08-29 from the former monolithic NDISAPI file; NDISAPI transport basics live in [windows-ndisapi.md](./windows-ndisapi.md).
-
----
-
-## WinpkFilter local_redirect transform (hardware-verified 2026-08-08, Win11)
-
-The official WinpkFilter transparent-TCP-redirect pattern (`ndisapi::local_redirector`, used by socksify/ProxiFyre) is NOT "rewrite dst to loopback + SendToMstcp". It is:
-
-1. Swap Ethernet src/dst MACs.
-2. Swap IP src/dst.
-3. Rewrite `th_dport` to the local proxy port. **The client's source port (`th_sport`) MUST be preserved** — the redirector only rewrites th_dport. The local proxy server's accepted connection then has peer = server_ip:client_orig_port, which the per-flow mapping resolves by client source port.
-4. Recompute IP + TCP checksums (the pseudo-header uses the swapped addresses).
-5. The listener binds `0.0.0.0:proxy_port` (all interfaces), not loopback — the rewritten packet's destination is the client's own IP address + proxy port.
-
-Attempting dst=loopback + SendToMstcp produced a byte-correct frame (verified checksums) that MSTCP silently ignored — the local-redirect contract requires the IP-swap form.
-
-### Reverse path (the subtle part)
-
-The SYN-ACK that MSTCP emits in response to an injected (`SendPacketsToMstcp`) SYN is a reverse packet (source port = proxy port). It must be recognized and reversed BEFORE flow-table lookup and policy evaluation:
-
-- A dispatcher-level reverse hook (`TcpProxyCoordinator` implementing `ITcpReverseHandler`, wired as `FlowDispatcher._reverseHandler`, dispatched from `FlowDispatcher.TryHandleReverseAsync`) runs right after the self-traffic check. If the packet's local/remote endpoint pair matches a `ReverseRedirectTuple` (full pre-rewrite wire tuple, never a listener port alone), it is reversed (`src -> original server:port, dst -> original client:port`, MACs swapped) and injected toward MSTCP. This prevents the reverse packet from being re-evaluated as a new client flow (which policy would silently `pass`, killing the handshake).
-- **Warm-entry diversion precheck (X1, 2026-08-30)**: `ITcpReverseHandler.WantsPacket(in CapturedFlowPacket)` is consulted ONLY on the dispatcher's non-async warm entry — divert to the slow path iff `protocol == Tcp && src port ∈ active listener-port set` (`TcpRedirectTable.IsReverseCandidatePort`, reference-count array). The count increments inside `TryClaim` under the table gate BEFORE the rewritten SYN is injected (the SYN-ACK can never precede port visibility) and decrements in `TryRemove` (ReferenceEquals-guarded) / `RemoveExpired`. The slow path always runs the full handler regardless of `WantsPacket` — prefilter misses (e.g. tombstone-window stragglers with the port already decremented) fall through to the slow path because listener-shaped tuples never resolve in any `FlowTable.TryResolve` mode, so behavior degrades to the pre-X1 slow path, never to wrong routing.
-- Without the hook, the reverse packet is evaluated by policy (process attribution can't match the injected tuple) and passed straight to the wire — the client never receives its SYN-ACK and the connection times out. This was the dominant failure mode during bring-up.
-- **LoopbackFilter (0x20) is NOT required** for this reverse path: the hook catches the reverse packet on the normal capture path. (Loopback filtering was investigated; enabling it caused the injected SYN's loopback reflection to be re-captured, which then had to be drained.)
-
-### Mid-flow data
-
-After the handshake, client -> listener data on the original flow must also be rewritten to the proxy tuple and reinjected (`ReinjectExistingFlowDataAsync`: same swap, dst -> proxy port). A flow with an active redirect association is recognized by `TryResolveByOriginal` (`TcpRedirectTable`); anything else is not ours.
-
-**Batched and in-place since 2026-09-29 (task 09-29-tcp-redirect-batched-injection).** Both data legs
-(the forward leg above and the reverse leg in `HandleReverseAsync`) now stage their rewritten frame and
-hand it to a per-(adapter handle, target direction) lane instead of sending it immediately, so one pump
-iteration pays one batched injection call per lane rather than one IOCTL per frame. When the packet was
-dispatched by a pump and its lease never materialized, the rewrite runs **on the capture slot itself**
-and the slot is queued — no pool rental, no frame copy; any other shape (materialized lease, the setup
-worker's reconstructed packet) keeps the rented pooled stage. Control frames — the SYN setup injection,
-every `ClientResetInjector` reset, fragment/teardown resets — stay immediate single sends issued during
-dispatch, so they can never be overtaken by a batched data frame of the same iteration. The full
-contract, the pump-chain-only append precondition, the cross-adapter scope gate, and the degraded-batch
-failure posture live in [windows-ndisapi.md](./windows-ndisapi.md) § "Redirect deferred-injection lanes".
-One attribution change follows from deferral: a failed data-leg injection now surfaces from the flush as
-a rate-limited `tcp.redirect.deferred-failed` warn plus the same client reset and fail-closed association
-write, instead of the per-packet `proxy-blocked` outcome line.
-
-### Data-bearing SYNs (TCP Fast Open) are tolerated, never blocked (2026-09-06)
-
-A client SYN carrying data (TFO, RFC 7413) rides the exact same redirect pipeline as a bare SYN: `TcpFrameRewriter.IsTcpSyn` is a boolean SYN predicate (SYN set, ACK clear — no payload discrimination), and `TcpProxyCoordinator.HandlePacketAsync` routes every SYN into `HandleSynAsync`. Why tolerance needs no extra support: the forward-leg rewrite is an RFC 1624 incremental update over addresses/ports only (payload bytes are never touched), `TcpSequenceObservation.TryReadTcpSequenceAdvance` already counts SYN data in the sequence advance (`payloadLen + SYN + FIN` from IP totalLength), the RST template is header-only, and the non-TFO local listener stack queues or drops the SYN data, after which the client retransmits it post-handshake (RFC 7413 graceful degradation) — the relay sees a normal stream either way. Blocking data-bearing SYNs (the pre-2026-09-06 `TcpSynKind.WithPayload → Blocked` fast path) only blackholed TFO clients: the executor consumed every retransmission silently and the client died at ETIMEDOUT. Locked by `SynWithPayloadIsRedirectedLikeBareSyn` (payload survival + checksum validity) and `RetransmittedSynWithPayloadReusesAssociation` (`ClientNextSeq == ISN + 1 + payloadLen`) in `TcpProxyCoordinatorRewriteTests`. **F4 (2026-09-30)**: `IsTcpSyn` and `TryReadTcpSequenceAdvance` no longer re-parse — they consume the `PacketLayout` the classifier's single parse produced (`IsTcpSyn(in PacketLayout)` tests `layout.IsTcp` and the flags byte; the advance reads `TransportOffset + 4` under a `frame.Length >= TransportOffset + 8` bound). The predicates are unchanged (`SYN set ∧ ACK clear`; `payloadLen + SYN + FIN` from the IP-derived transport length), the span-taking entry points remain the oracle, and a defaulted layout is refused rather than read (`LayoutSynTestMatchesTheSpanTest`, `DefaultedLayoutObservesNoSequence`, `SequenceAdvanceIgnoresEthernetPadding`).
-
-### Redundant accepts
-
-A retransmitted SYN can make MSTCP open a second connection on the same listener. After the first relay is established, further accepts must be drained and closed immediately (`DrainRedundantConnectionsAsync`, `TcpRedirectAcceptor.cs`) rather than starting a second relay — otherwise every extra accept fails with SocketException and the log floods.
-
-**Reference**: `src/WinForward.Runtime/TcpRedirect/TcpProxyCoordinator.cs` (HandleSynAsync/HandleReverseAsync/ReinjectExistingFlowDataAsync/HandleReverseIfApplicableAsync), `TcpRedirectAcceptor.cs` (accept loop + DrainRedundantConnectionsAsync), `TcpRedirectListener.cs` (0.0.0.0 bind), `src/WinForward.Runtime/FlowDispatcher.cs` (`_reverseHandler`).
-
-### Forwards-direction reverse injection (hardware-verified complement)
-
-Reverse-packet injection direction follows the flow origin:
-
-- Host-originated flow (client on this host): the reversed packet goes to MSTCP (`SendToMstcp`).
-- Forwarded flow (client behind a VM/remote adapter): the reversed packet must go back to the origin adapter (`SendToAdapter`), not MSTCP.
-
-`TcpRedirectInjector.InjectAsync(frame, towardMstcp, adapterHandle, ct)` selects the direction; the coordinator passes `association.OriginalKey.Origin == FlowOriginKind.Host`. Locked by `ForwardedFlowReverseInjectsTowardOriginAdapter` / `HostFlowReverseInjectsTowardMstcp` in the TCP coordinator tests.
-
-> **Note**: the current Win11 test host has no Hyper-V VM stack (the "Microsoft Hyper-V Network Adapter" interfaces exist but no vSwitch/VM is present), so guest-originated forwarded traffic cannot be exercised end-to-end here. The forwarded code path is unit-locked; a host with a real guest VM is required for the hardware matrix.
-
-### Forwarded flows use the DNAT-to-local transform (fixed 2026-08-14)
-
-The WinpkFilter IP-swap transform above is only valid for **host-originated** flows. Applied to a forwarded SYN it produces dst = client-ip:listener-port, which is not a local address — MSTCP routes the frame back out to the client, the listener never sees a SYN, and the flow hangs (observed on the 192.168.77.x gateway: `tcp.relay.started` stayed 0 while mangled frames were passed back to the client). Forwarded flows therefore use a different shape, selected per association by `TcpRedirectAssociation.ForwardLocalAddress`:
-
-- Forward leg (SYN and mid-flow data, `TryRewriteForwardLeg`): **src stays client:client-port; only dst moves to (adapter-local address L, listener port)**. L is resolved per origin adapter via `IAdapterLocalAddressProvider` (wired as `WindowsAdapterLocalAddressProvider`, `src/WinForward.Windows/AdapterLocalAddressProvider.cs`): IPv4 prefers a same-subnet address, IPv6 skips link-local and prefers a /64 prefix match. **Never 127.0.0.1** — the reverse reply from a loopback destination would carry a martian source and can be dropped by the stack before reaching the capture layer for rewriting. No L candidate → fail-closed `Blocked` (`tcp.redirect.rejected reason=localAddress`).
-- No MAC swap on the forward leg: the arrival frame's dst MAC already addresses this host. The MAC swap is now gated on `towardMstcp` everywhere (host shape swaps; forwarded never does).
-- Table endpoints follow the shape: forwarded `ReverseSource = (L, listener-port)`, `ReverseDestination = AcceptedPeer = (client, client-port)`, so the accept-loop peer validation and `TryResolveByReverse` see the real client tuple.
-- Reverse leg is unchanged textually (`src -> original server:port, dst -> original client:port`) and still injects to the origin adapter; the association's origin-shaped endpoints make the same rewrite call correct for both shapes.
-- The wildcard self-traffic registration `(Tcp, 0.0.0.0:P, 0.0.0.0:P)` cannot match the forwarded SYN-ACK `(L:P -> client:port)` because the remote leg must equal the observed remote exactly — the reverse hook still owns that packet.
-- Locked by `ForwardedFlowSynRewritesTowardAdapterLocalListener`, `ForwardedFlowWithoutLocalAddressFailsClosed`, `ForwardedFlowAcceptsClientTuplePeer`, and the rewritten `ForwardedFlowReverseInjectsTowardOriginAdapter`.
-
-### Accept-loop peer identity excludes the IPv6 zone (fixed 2026-10-04)
-
-- `TcpRedirectAcceptor.TryEstablishRelayAsync` validates its peer with `accepted.RemoteEndPoint.MatchesPeerIgnoringScope(session.Association.AcceptedPeerEndpoint)` — port, family and address bits, scope id excluded (`Endpoint.MatchesPeerIgnoringScope`, `src/WinForward.Core/Domain.cs`). `Endpoint.Equals`/`IPAddressValue.Equals` keep the scope, so they can never match a captured endpoint against an OS-reported one.
-- Why they can never be equal: an IPv6 header has no zone, so a captured endpoint's scope is always 0, while Windows reports the interface index for a link-local peer of an accepted connection (the field log that found this showed `expected=[fe80::215:5dff:fe03:728b]:52840`, `actual=[fe80::215:5dff:fe03:728b%26]:52840`). Before the fix that single-field mismatch fired `tcp.redirect.unrelatedPeer`, disposed the accepted connection, and left the flow with no relay — and since the client's handshake had already completed (the rewritten SYN went to MSTCP and its SYN-ACK came back through the reverse hook), the app saw an instant close/reset rather than a hang. Both shapes were affected: host (`AcceptedPeerEndpoint` = the original destination address + the client's source port, so a link-local destination) and forwarded (the client's own tuple, so a link-local client).
-- Deliberately NOT relaxed elsewhere: the reverse index and tombstone keys stay scope-sensitive (both sides are wire-derived there), and link-local process attribution still fails closed across interfaces — do not answer this by making the owner-table comparison scope-insensitive; it is waiting on the adapter stable-ID → IPv6 interface-index/scope projection the 2026-08-10 Windows audit records as its prerequisite.
-- Known protocol ceiling, not fixed here: a link-local *destination* still cannot be relayed. The SOCKS5 CONNECT request carries address bytes only (RFC 1928 has no zone field), so the upstream server receives `fe80::…` with no interface to dial on. The supported posture for on-link traffic is to not intercept it: a policy rule `remoteCidr: ["fe80::/10"]` with `pass` (prefix matching ignores the scope) leaves those flows direct.
-- Locked by `EndpointAndPolicyTests.EndpointPeerIdentityIgnoresTheIpv6ScopeWhileEqualityKeepsIt` (identity matches across scopes; port, address bits and family still reject; `==` stays scope-sensitive) and `TcpRedirectAcceptorTests.LinkLocalPeerWhoseZoneOnlyTheSocketKnowsStillEstablishesTheRelay` (a `%26` peer of a scope-zero association establishes the relay and emits no `tcp.redirect.unrelatedPeer`; red against the pre-fix `!=` comparison).
-
-### Relay setup failure resets the client (fixed 2026-08-14)
-
-When the SOCKS5 relay cannot be established after a successful redirect (proxy down, auth failure, upstream unreachable), the client's connection is already established through the redirect leg and would otherwise hang. The coordinator records the client ISN (+ a bounded copy of the original SYN) at setup and the server ISN when the reverse SYN-ACK passes the hook; on relay failure it crafts a standalone RST|ACK (`TcpResetBuilder`, `src/WinForward.Protocols/TcpResetBuilder.cs`, fresh checksums, MACs mirrored from the SYN template) with seq = server-ISN + 1 — in-window for the client's established state — and injects it toward MSTCP (host) or the origin adapter (forwarded) before tearing the session down. Missing sequence numbers degrade to plain teardown. Locked by `RelaySetupFailureInjectsClientResetWhenSequencesKnown` / `ForwardedRelayFailureInjectsClientResetTowardOriginAdapter` / `RelaySetupFailureBlocksAndReleasesAlias` (degradation) and `TcpResetBuilderTests`.
-
----
-
-## Client-reset sequence tracking and injection-failure exits (wired 2026-08-28)
-
-- **Tracked sequences beat ISN+1**: `TcpRedirectAssociation` (`TcpRedirectTable.cs`) observes both directions' `seq + payloadLen` (SYN/FIN each count 1, payload length from IP totalLength — never ethernet frame length, padding pollutes it; IPv6 extension headers deducted) at the two pre-rewrite points, wrap-aware advance-only. **F4 (2026-09-30):** the trackers are two `long` fields (−1 = unobserved, so `0xFFFFFFFF` stays a legal tracked value) written by a CAS-max loop over the unchanged `IsSequenceAhead` predicate and read with `Volatile.Read`; `_sequenceGate` and its per-association `Lock` are gone, so a redirected forward+reverse packet pair takes zero gate entries (`RedirectPacketTakesZeroSequenceGateEntries`, `TcpRedirectAssociationHoldsNoLockField`, `ConcurrentSequenceObservationsKeepTheLargerValue`, `UnobservedTrackerReadsNullAndObservedZeroReadsZero`). The `uint?` properties are unchanged, and the RST builders still tolerate a weakly consistent read: the value only ever moves forward within the comparison window. `ClientResetInjector.TryInjectClientResetAsync` (`TcpRedirect/ClientResetInjector.cs`) must use `ClientNextSeq ?? clientInitialSeq+1` (ack) and `ServerNextSeq ?? serverInitialSeq+1` (seq): ISN+1 is out-of-window once the client has sent data and the stack silently discards the RST (slow-EOF symptom). New observation sites must read the frame BEFORE rewrite (original bytes) and synchronously (Span must not cross an await).
-- **Every `SendPacketTo*` failure exits through `HandleInjectionFailureAsync`** (also in `ClientResetInjector.cs`): warn `tcp.redirect.failed reason=injectionFailure` with nativeError/adapterHandle/flow key → best-effort client RST → `FailAssociationAsync` (tombstone single write point, see teardown grace below). Free-text catches around injections are forbidden — a silent `FailAssociationAsync` after adapter-handle staleness is exactly the invisible-teardown defect this rule exists to prevent.
-- **SOCKS5 relay setup budget**: the relay call site (`TcpRedirect/TcpProxyRelay.cs`) passes `RelayConnectMaxAttempts = 2` with `RelayConnectAttemptTimeout = 10s` (internal constants). The default 30s is per-attempt (worst ~150s over multi-address DNS); after redirect accept the client is already established, so every extra budget second is a "connected then reset" second.
-
----
-
-## Capacity RST, fragment consume+RST, and relay-completion observation (wired 2026-08-29)
-
-Task 08-29-proxy-stability-perf (S3/S4/S1).
-
-### Capacity-rejected SYN → RST|ACK (S4)
-
-- `TcpResetBuilder.BuildResetFromSyn(synFrame, serverTuple, clientTuple)` (`src/WinForward.Protocols/TcpResetBuilder.cs`) reads the client ISN from the observed SYN and builds `seq=0, ack=clientISN+1, flags=RST|ACK` (0x14) — in-window for a SYN_SENT client, which aborts immediately with ECONNREFUSED. No association exists on this path; MACs/IPs are mirrored from the SYN template.
-- `ClientResetInjector.InjectCapacityRejectedResetAsync` is **claim-then-inject**: `TcpResetCooldownTable` (`TcpRedirect/TcpResetCooldownTable.cs`, per-4-tuple 1 s window, capacity = session budget, FIFO evict-oldest; a refreshed tuple is NOT re-enqueued) claims the window before any build/inject attempt, so even a failed injection consumes the cooldown — strongest anti-amplification. Injection follows the direction matrix (host → MSTCP, forwarded → origin adapter capture handle); it never throws and never changes the `Blocked` result. Debug event `tcp.redirect.capacityReset`; the existing `tcp.redirect.rejected reason=capacity` trace and `tcp.redirect.capacity` summary are unchanged.
-- Locked by the capacity coordinator tests: exactly one RST per tuple per window, retransmissions inside the window silent, new RST after window expiry, direction matrix, injection-failure warn leaves the result unchanged.
-
-### Fragments on associated flows (S1)
-
-- `TcpProxyCoordinator.HandleFragmentAsync` (wired as the `FlowDispatcher` fragment handler, consulted in `DispatchNonFlowAsync` after the self-traffic check): `IPFragment.IsFragment`/`TryReadAddressPair` (`src/WinForward.Protocols/IPFragment.cs`, IPv4 mask `0xbfff`; IPv6 extension-chain walk, nextHeader 44) → `TcpRedirectTable.TryResolveByAddressPair` (third index `_byAddressPair`, direction-agnostic normalized IP pair, same-family gated, last-writer-wins for multi-flow pairs, `ReferenceEquals`-guarded removal — all under the single `_gate`) → hit: trace `tcp.redirect.fragment reason=fragment`, `HandleFragmentTeardownAsync` (best-effort RST via tracked sequences; warn + silent teardown when sequences were never observed; unconditional `_failAssociation` → single tombstone write point), outcome `Dropped`; miss: `NotRelevant` keeps the non-flow pass.
-- Dispatcher mapping: fragment-handler `Dropped` → `ProxyConsumed` (silent), `Blocked` → policy path. `CapturedFlowPacket.InspectionSpan` reads the frame without forcing a pooled materialization (ARP/ND frequency on the non-flow path). The hot flow path (`DispatchAsync`) is untouched — non-fragment frames pay one ether-type compare.
-- Known residual (accepted): post-tombstone fragments fall back to pass (bounded window); address-pair granularity can tear down the newer of two same-IP-pair associations.
-
-### Faulted relay completions must be observed (S3)
-
-- `TcpRelayFaultObserver.Observe(relay, logger)` (`TcpRedirect/TcpRelayFaultObserver.cs`) attaches an `OnlyOnFaulted | ExecuteSynchronously` continuation on every path that discards a relay without awaiting `Completion`: `TcpProxyRelay.DisposeAsync` (before disposal faults the pumps) and the acceptor's attach-failure branch. Debug event `tcp.relay.faulted`.
-- **.NET gotcha (load-bearing)**: attaching a `OnlyOnFaulted` continuation does NOT mark a faulted task observed — only **reading `Task.Exception`** (or awaiting) does. The observer must read `task.Exception` BEFORE any `IsEnabled` log gate; the original implementation checked the log level first and silently left exceptions unobserved under the default `info` threshold (tests passed because the recording logger was always-enabled). Do not reorder.
-
-### Mid-flow relay fault/stall must reset the client (R1, wired 2026-08-30)
-
-Task 08-30-fast-hardening (research R1).
-
-- **Contract**: every relay end that is not a clean FIN-propagated end is surfaced to the client as an in-window RST|ACK via `ClientResetInjector.TryInjectClientResetAsync`, injected in `TcpRedirectAcceptor.ObserveRelayCompletionAsync` **before** `_tearDownSession` — while the association still holds the SYN template and `ClientNextSeq`/`ServerNextSeq` trackers. Without this, the teardown tombstone eats every subsequent client retransmission and the client hangs to ETIMEDOUT (minutes) instead of aborting instantly.
-- **Surface**: `TcpProxyRelay` implements the internal capability `ITcpRelayEndInfo { RelayEndKind EndKind; long ServerStreamBytes }` with `RelayEndKind { CleanEnded, Stalled, Faulted }`, valid after `Completion` completes. The enum is internal, so it lives on a separate capability interface rather than the public `ITcpRelay`; a relay not implementing it is treated as `CleanEnded` (no reset — the clean-end FIN below still applies). Derivation: pump returns `PumpResult.Stalled` → `Stalled`; pump faults → `Faulted`; both pumps complete cleanly (FINs propagated via `ShutdownSend`) → `CleanEnded`. **`_endKind` initializes to `Faulted`**: if `RunPumpAsync` throws before its first classification write (e.g. `NetworkStream`/CTS construction), `Completion` faults with the field still at its default — a `CleanEnded` default there would silently skip the client reset and reproduce the blackhole (caught in review 2026-08-30).
-- **Ordering & containment**: reset → teardown (injector reads live-association state, matching the `HandleRelaySetupFailureAsync` precedent); the inject is wrapped so a reset failure warns but never blocks teardown; the whole completion tail is wrapped so nothing escapes the fire-and-forget task as an unobserved task exception. OCE on an externally-cancelled (retired) session still returns early without a reset.
-- Locked by `TcpRelayEndResetTests`: fault→RST and stall→RST with seq/ack asserted from the advanced trackers (not ISN+1), reset-then-teardown ordering; clean end and end-info-less relay → no injection; real-relay `EndKind` derivation on all three terminal paths.
-
-### Every end injects its client-visible close before the retire (task 10-06-tcp-half-close-fidelity, 2026-10-06)
-
-- **Contract**: a relay end delivers its client-visible close *before* `_tearDownSession`, while the association still holds the SYN template and the sequence trackers — RST|ACK for `Stalled`/`Faulted`, and now FIN|ACK for `CleanEnded` (`ClientResetInjector.TryInjectClientCloseAsync`). The clean-end FIN is not left to the socket close: `TcpProxyRelay.RunPumpAsync` closes the client-facing socket as it returns, i.e. in the same instant `Completion` completes, so that FIN races the retire that releases `_byReverse` and arms the tombstone. A client that half-closed (`shutdown(SD_SEND)`) has already ended the read direction, so the race normally loses and the client observes **no end of stream at all** — measured 545 of 601 half-closing attempts hanging to the client's own 10 s timeout, with no FIN, no RST and no truncation.
-- **Sequence**: the crafted FIN's sequence is `server-ISN + 1 + delivered server-stream bytes` (`ITcpRelayEndInfo.ServerStreamBytes`), not the packet-path tracker. The tracker can lag the capture pipeline, and it also counts the SYN-ACK and the client-facing socket's own FIN, either of which places the FIN past the client's receive sequence — a FIN the client queues forever.
-- **Degradation**: no SYN template or either ISN unobserved → no injection, plain teardown (the reset path's posture); the ack still comes from the client tracker.
-- Locked by `TcpRelayEndCloseTests` (clean end → FIN|ACK sequenced from the delivered byte count, injected before the teardown; end-info-less relay → FIN|ACK sequenced from the trackers; unobserved sequences → nothing injected; fault/stall → RST|ACK unchanged) and `TcpProxyRelayTests.RelayReportsTheServerStreamBytesItWroteToTheClient`.
-- **Known residual (2026-10-06, deliberately not fixed here)**: 23–50 of 601 attempts still hang with the close injected exactly once and no injection-path warning. Once the relay ends and the alias retires, neither the crafted FIN nor the socket's own FIN — nor any unacknowledged tail data — can be retransmitted, so a close packet dropped at the client is lost for good. A bounded close drain (keep the socket and the alias until the client's acknowledgement covers the close) or a bounded repeat of the crafted close remove it; both are out of scope until measured against the port budget.
-
-### New-flow SYN setup never blocks the capture pump (R8, wired 2026-08-30)
-
-Task 08-30-driver-resilience R8 — the TCP counterpart of the UDP setup contract.
-
-- **Pump side (`TcpProxyCoordinator.HandleSynAsync`)**: the synchronous fast paths are unchanged and stay instantaneous — existing-association re-inject (`TryResolveByOriginal`), TIME_WAIT tombstone hit, the new setup-failure cooldown hit (1 s, consumed as `Dropped`), and the capacity gate + S4 RST|ACK (the gate counts `_pendingSyn.ActiveCount` alongside live sessions so the RST fast-fail never depends on background registration timing). Since 2026-09-29 the existing-association re-inject rewrites the retransmitted SYN and defers it to that iteration's lane flush (the data-leg contract above): the handler itself is still synchronous and still returns without touching the driver, but the frame leaves at the iteration-end flush rather than inline. A genuinely new SYN takes one path only: copy the frame synchronously (`packet.InspectionSpan.ToArray()` — the pump's native batch slot is recycled the moment the handler returns), retain it in the coordinator-owned `TcpPendingSynSetupIndex`, launch the background setup via `Task.Run`, and return `TcpRedirectOutcome.SetupPending` (executor consumes silently, trace `packet.dropped reason=setupPending`).
-- **Pending index bounds** (`TcpPendingSynSetup.cs`, leaf lock never nested under store/table gates): 1024-entry cap (distinct original keys — reject+trace `tcp.setup.pending.dropped`, outcome `Blocked`, same posture as the capacity gate), a 1 MiB global Interlocked byte budget charged on retain and credited exactly once at every sink (retransmission overwrite, completing setup's removal, TTL expiry, dispose drain), a 5 s retention TTL enforced by the idle sweep (the still-running task is unaffected — it captured its own frame reference at launch; a replacement generation meets the table claim as an ordinary concurrent loser), and the 1 s per-flow setup-failure cooldown (bounded, evict-oldest) written only on genuine failure, never on shutdown cancellation.
-- **Background (`SetupPendingAsync`)**: wrapped in the store's `EnterSetup`/`finally ExitSetup` inflight drain (dispose semantics preserved; a task that starts after disposal unwinds via the `EnterSetup` `ObjectDisposedException` catch without a cooldown). The pipeline is the existing `SetupNewRedirectAsync` fed a `CapturedFlowPacket` built over the retained copy — claim exactly-once and the concurrent-loser release stay as they were; on claim success the rewrite/injection/session-registration/accept-loop tail runs from the retained copy; a loser re-injects against the existing association; genuine failure (null return or exception) warns and arms the cooldown; shutdown cancellation unwinds without one.
-- **Store-gate audit**: the pump side no longer holds `EnterSetup` at all; `RetireSessionUnderGate` (D1) drain semantics now cover background setups through the same inflight counter. Lock order: pending lock (leaf) → store gate → table gate → tombstone gate, verified acyclic.
-- Locked by `TcpPendingSynSetupTests` (index bounds, exactly-once credit, TTL, cooldown, cap trace, dispatch-does-not-wait-for-bind, sweep expiry while in flight) and the reworked coordinator suites (absorption burst, pre-claim re-inject, dispose drain of a parked setup).
-
----
-
-## SOCKS5 control-socket timeout lifecycle (fixed 2026-08-15)
-
-- `Socks5ControlConnection.ConnectOnceAsync` (`Socks5/Socks5ControlConnection.cs`) sets `socket.ReceiveTimeout`/`socket.SendTimeout` to the per-attempt timeout (default 30s; the TCP relay call site passes 10s) as the connect/authenticate ceiling. In .NET, async socket reads/writes honor these timeouts, so any socket handed to a long-lived consumer keeps that per-attempt ceiling.
-- `GetUpstreamStream()` (the `TcpProxyRelay` handoff point) MUST reset both to `Timeout.Infinite` before returning the stream — otherwise an idle relay connection dies at 30s via `SocketException(TimedOut)`, defeating the relay's own 30-minute stall window (M4). The CONNECT command (`ConnectDestinationAsync`) runs BEFORE `GetUpstreamStream()`, so the per-attempt window still governs setup. The UDP control socket never goes through `GetUpstreamStream()` and has no post-associate operations, so it is intentionally left unchanged.
-- Relay-side idle protection is owned by `TcpProxyRelay.PumpAsync`'s per-operation write/read timeout CTS (30 minutes); the socket-level timeouts are only for the bounded setup phase. Locked by `UpstreamStreamClearsPerAttemptSocketTimeouts` (asserts `ReceiveTimeout == -1 && SendTimeout == -1` after handoff; note .NET reads a disabled timeout back as 0 on Linux and -1 on Windows, so assert `<= 0`).
-
----
-
-## Deployment: Windows Firewall inbound rule is required (hardware-verified 2026-08-15)
-
-Every redirect path terminates at a local listener socket, and the injected SYN is an unsolicited inbound TCP connection from the stack's perspective. On adapters whose network profile applies the default inbound block (typically Public), the Windows Firewall silently drops that SYN before it reaches TCP: `tcp.redirect.created` appears, no SYN-ACK ever leaves, and the flow hangs. Forwarded DNAT injections onto Private/unidentified-profile virtual adapters passed by default, which is why the failure only showed on the WLAN (Public) host path. Symptom trio: `tcp.redirect.created` present, `tcp.relay.started` absent, zero captures for the listener port. Diagnose with `Set-NetFirewallProfile -All -LogBlocked True` + `pfirewall.log` (DROP to the listener port) and `Get-NetTCPConnection -State SynReceived` (empty). Remedy is a deployment rule, not code: `New-NetFirewallRule -Direction Inbound -Action Allow -Program "<path>\WinForward.exe" -Profile Any`.
-
----
-
-## Redirect teardown grace and flow-hold contracts (wired 2026-08-28)
-
-### 1. Scope / Trigger
-
-- Trigger: any change to TCP redirect teardown, the `NotRelevant → Pass` fallback, flow-table expiry, or the idle sweeper ordering.
-
-### 2. Signatures
-
-- `TcpRedirectTombstoneTable` (`TcpRedirect/TcpRedirectTombstoneTable.cs`) — dual-key (`FlowKey` forward + reverse `Endpoint` pair) → shared entry with `ExpiryUtc`; `TryAdd(forward, reverseSource, reverseDestination, expiryUtc)` (FIFO evict-oldest at capacity), `TryHit(FlowKey, now)` and `TryHit(reverseSource, reverseDestination, now)` (hit only while `now < ExpiryUtc`), `RemoveExpired(now)` (also head-drains the insertion-order queue).
-- `TcpRedirectOutcome.Dropped` (`TcpRedirectInterfaces.cs`) — a dedicated outcome; **never reuse `Blocked`** for grace drops (executor's `Blocked` path fires `LogProxyUnavailable`, mislabeling grace consumption as proxy failure).
-- `FlowTable.RemoveExpired(now, isHeld?)` (`src/WinForward.Core/FlowTable.cs`) — optional hold predicate; held entries are skipped **without Touch**, so they expire at their original idle point once the hold lapses.
-
-### 3. Contracts
-
-- **Single tombstone write point**: every teardown entry (relay completion, relay failure, fail-closed, global dispose) funnels through `TcpRedirectSessionStore.RemoveAssociationFromTable` — the only caller of `TcpRedirectTable.TryRemove` — and that point also writes the tombstone (grace `TombstoneGracePeriod` = 60 s, defined in `TcpRedirectSessionStore`). Any new teardown path must go through it.
-- **Atomic retire (task 08-30-atomic-retire, 2026-08-30)**: `RetireSessionUnderGate` performs the session-dict removal, `Phase = Closing`, retire, table alias removal, AND tombstone arming **inside one store-gate critical section** — all three retire entry points (`TearDownSessionAsync`, sweep `RemoveExpiredAsync`, `DisposeCoreAsync`) are covered by that single method. Disposal (listener → self-traffic token → relay → lifetime CTS) trails *outside* the gate; only the synchronous table+tombstone pair is atomic. Documented lock order: **store gate → table gate → tombstone gate** (verified acyclic repo-wide; table/tombstone critical sections never call upward — do not add a path that does). Session-less release paths (`FailAssociationAsync` no-session branch, `TcpRedirectSetup` disposed-store path) still call the standalone `RemoveAssociationFromTable` — mutually exclusive with retire per association instance, and `TryRemove`'s `ReferenceEquals` guard makes any repeat call (and any port-bitmap double-decrement) a no-op. Without this, a same-tuple SYN in the retire→removal gap completed a handshake with an about-to-be-disposed listener (client saw connect-then-instant-death); the relay-end RST (R1) made the window practically reachable because the client reacts to the RST while the stale alias is still resolvable.
-- **Tombstone queue drains on sweep (R3-TCP, same task)**: `RemoveExpired` head-drains `_insertionOrder` while the head is expired *or* stale (dictionary's current entry for the key is a different record — a refresh appends a fresh tail with a new expiry, so queue order ≈ expiry order and head-drain is order-safe). Before this, the queue grew monotonically with total TryAdd calls (days of churn → hundreds of MB) while the dictionaries stayed bounded.
-- **Late-packet consumption**: after a forward (`TryResolveByOriginal`) or reverse (`TryResolveByReverse`) miss, the coordinator consults the tombstone (`TcpProxyCoordinator` checks `Tombstones.TryHit`) before falling back — **on the SYN path too** (`HandleSynAsync` checks after resolve-miss, before capacity/`TryClaim`; wired 2026-08-30 with atomic retire — previously a straggler SYN in grace silently opened a fresh redirect instead of consuming the grace). A hit returns `Dropped`; the executor silently consumes (trace `packet.dropped reason=grace`), and the dispatcher maps reverse-straggler `Dropped` to `ProxyConsumed` — **not** `Block` (which would emit `reason=policy`).
-- **The `NotRelevant → Pass` fallback remains solely for connections established before capture started** — those packets are data-plane-identical to late packets, so no timestamp can separate them; only the per-flow tombstone expiry can. Baseline smoke: 113 notrelevant pre-fix → 11 (legitimate pre-existing connections) with 55 grace-dropped post-fix.
-- **Flow hold**: `TcpProxyCoordinator.HoldsFlow` = has session ∨ has tombstone. Sweeper order is **tcp → flows → udp** (see `IdleExpirySweeper`) so tombstones/sessions are recycled before flows are evaluated; capacity summary stays at tick end. Held flows are not touched, so a silently-idle relaying flow survives flow-idle expiry and resumes without re-evaluation (no `flow.created`).
-- **Capacity**: tombstone capacity derives from the same `tcpFlowCapacity` budget at wiring; tombstones occupy neither `_sessions` nor the `TryClaim` gate.
-- UDP is deliberately untouched: sessions rebuild directly on expiry (no handshake → no stray-packet rebound); responses have their own reverse branch.
-- **One reverse probe per packet (task 09-30-warm-path-lock-chain, 2026-09-30).** `TryResolveByReverse` IS the reverse-candidate check: `IsReverseCandidate` (a gated `_byReverse.ContainsKey` followed by a second gated `TryGetValue` of the same key) is deleted, `HandleReverseAsync` takes the resolved `TcpRedirectAssociation` and no longer probes, and `HandlePacketAsync` resolves once and passes it through. A warm reverse packet therefore takes exactly **one** reverse-index probe and **zero** redirect gate entries when its reverse entry is cache-resident (a cache collision costs the one gated probe); a warm forward packet takes zero probes and zero entries **when its local port is not itself a live listener port**, because `HandlePacketAsync` keeps the listener-port prefilter in front of the probe (a reverse tuple's source port is always a live listener port — the count rises in the same `_gate` hold that publishes the reverse index entry and falls in the same hold that removes it — so a prefilter miss *proves* the reverse index cannot match). The prefilter is a *candidate* filter, not a proof of absence for the forward direction: both client source ports and translated listener ports are OS-assigned ephemerals, so a forward flow whose source port number coincides with a live listener port takes one gated reverse probe per packet while that listener exists (still one gate entry fewer than the pre-change candidate+resolve pair), and the miss then falls through to the original-index probe. `HandleReverseIfApplicableAsync` (the slow path) deliberately does NOT prefilter: a tombstone straggler whose port was already decremented must still reach the full check. The two per-packet indexes are served from pre-allocated direct-mapped caches (`TryResolveByReverse` by the reverse tuple, `TryResolveByOriginal` by the original key) validated by the association's get-only fields; the four `Dictionary` indexes stay the gated authority and every mutation (claim, the factored `RemoveUnderGate`, the sweep) runs under `_gate` and maintains the corresponding cache entry with a `ReferenceEquals` guard. `Count` keeps reading `_byOriginal.Count` under the gate — no maintained counter. `_byAddressPair` stays gated (the fragment path is not a warm packet path). Association activity is a bucket stamp: `Touch` writes `ActivityBucket.FromUtc(now)` and the association/session-store sweeps compare `BucketForDiagnostics < ActivityBucket.Cutoff(now, idleTimeout)`.
-
-### 4. Validation & Error Matrix
-
-| Condition | Result |
+> How WinForward transparently redirects proxy-selected TCP flows to a local SOCKS5 relay, and how it
+> ends them again. This is the family hub: the pipeline, the two wire shapes, and the invariants that
+> hold on every redirect path. A redirect is **not** routing and **not** a NAT through the host's
+> stack: WinForward captures the SYN, claims the flow, reshapes the frame so it arrives at a listener
+> socket WinForward owns, and relays the accepted connection to the original destination. Everything
+> the client sees after that — handshake, data, close — is produced by this path, not by the real
+> server. Read this first; the child that owns a rule is named at every stage and in the topic map.
+> Transport basics are [windows-ndisapi.md](./windows-ndisapi.md)'s, and the deferred-injection lane
+> mechanics are [ndis-batched-send.md](./ndis-batched-send.md)'s;
+> the quiescence primitive the relay and store are built on is [async-lifetime.md](./async-lifetime.md);
+> policy and flow-hold interplay is [traffic-policy-lifecycle.md](./traffic-policy-lifecycle.md).
+> Split 2026-08-29 from the former monolithic NDISAPI file; split again 2026-10-09 into this hub plus
+> five children.
+
+## The pipeline
+
+| Stage | What happens | Owner |
+|---|---|---|
+| Policy and claim | A proxy-decided TCP flow reaches `TcpProxyCoordinator`; the SYN claims one association in `TcpRedirectTable` (exactly-once per original key). | [tcp-syn-setup-admission.md](./tcp-syn-setup-admission.md) |
+| Rewrite | The forward leg is reshaped in place or into a pooled stage: host shape swaps addresses, forwarded shape moves only the destination. Sequence trackers read the **pre-rewrite** bytes. | [tcp-redirect-transform.md](./tcp-redirect-transform.md) |
+| Inject and accept | The rewritten frame is injected toward the listener (immediate on the setup path, deferred to the iteration-end lane flush on the data legs); the accept loop validates the peer and establishes the SOCKS5 relay. | [tcp-redirect-transform.md](./tcp-redirect-transform.md), [tcp-relay-lifecycle.md](./tcp-relay-lifecycle.md) |
+| Relay | Two pumps copy bytes in both directions under one scope-owned lifetime and a 30-minute stall window; the reverse leg is reversed back to the client. | [tcp-relay-lifecycle.md](./tcp-relay-lifecycle.md) |
+| Close | Every relay end injects the client-visible close — RST\|ACK for `Stalled`/`Faulted`, FIN\|ACK for `CleanEnded` — while the association still holds the SYN template and its trackers. | [tcp-client-close-injection.md](./tcp-client-close-injection.md) |
+| Retire | The session retires under the store gate: session-dict removal, table-alias removal and tombstone arming in one critical section, then the disposals trail. | [tcp-redirect-teardown-grace.md](./tcp-redirect-teardown-grace.md) |
+
+## The two wire shapes
+
+Shape is selected per association by `TcpRedirectAssociation.ForwardLocalAddress`; the reverse leg
+always returns to where the flow came from.
+
+| | Host-originated flow | Forwarded flow (guest/remote client) |
+|---|---|---|
+| Forward leg | Swap MACs and IPs; `th_dport` (a driver-header field name) → listener port; the client's source port is preserved. | `src` stays client:client-port; only `dst` moves to (adapter-local address L, listener port). No MAC swap. |
+| Listener | Binds `0.0.0.0` / `[::]` on an ephemeral port — never loopback. | Same listener, reached through L. |
+| Reverse leg | Reversed to the original server:client tuple, injected toward MSTCP. | Same rewrite, injected toward the **origin adapter**. |
+| Failure posture | No usable L → fail closed: `tcp.redirect.rejected reason=localAddress`. | Same. |
+
+## Cross-cutting invariants
+
+- **A proxy-selected flow is never silently passed.** Every setup failure fails closed (`Blocked`) or
+  is surfaced client-visibly; the reverse hook runs before flow-table lookup and policy so a reverse
+  packet is never re-evaluated as a new client flow.
+- **Every relay end injects its client-visible close before the retire.** The association is still
+  complete when the close is crafted; see [tcp-client-close-injection.md](./tcp-client-close-injection.md).
+- **One atomic retire arms the grace window.** Session-dict removal, table-alias removal and tombstone
+  arming happen in one store-gate critical section, and every teardown path funnels through the single
+  tombstone write point; see [tcp-redirect-teardown-grace.md](./tcp-redirect-teardown-grace.md).
+- **The capture pump never waits on setup.** A genuinely new SYN retains a bounded copy and returns
+  `SetupPending`; the listener bind, claim, rewrite and injection run on a pooled setup worker; see
+  [tcp-syn-setup-admission.md](./tcp-syn-setup-admission.md).
+- **Outcomes stay distinguishable.** Grace drops are `TcpRedirectOutcome.Dropped`, never `Blocked` —
+  the executor's `Blocked` branch reports a proxy problem and would mislabel a normal grace consume.
+- **One owner per lifetime.** Relay pumps, the session lifetime CTS and the store's inflight setups
+  live on `QuiescenceScope`; dispose returns only after the tasks it owns have finished.
+
+## Deployment prerequisite: Windows Firewall inbound rule
+
+Every redirect path terminates at a local listener socket, so the injected SYN is an unsolicited
+inbound connection from the stack's perspective. On adapters whose profile applies the default
+inbound block (typically Public), Windows Firewall silently drops it before TCP: `tcp.redirect.created`
+appears, no SYN-ACK ever leaves, `tcp.relay.started` stays absent, and the flow hangs. Diagnose with
+`Set-NetFirewallProfile -All -LogBlocked True` plus `pfirewall.log`, and
+`Get-NetTCPConnection -State SynReceived` (empty). The remedy is a deployment rule, not code:
+`New-NetFirewallRule -Direction Inbound -Action Allow -Program "<path>\WinForward.exe" -Profile Any`.
+Forwarded DNAT injections onto Private/unidentified-profile virtual adapters pass by default, which is
+why the failure first showed on the public-profile WLAN host path (hardware-verified 2026-08-15).
+
+## Topic map
+
+| Read it when you are changing… | Document |
 |---|---|
-| Late forward/reverse packet within grace | `Dropped`, silent consume, no reinjection to the real server |
-| Late packet after grace expiry | falls back `NotRelevant → Pass` (pre-existing-connection semantics) |
-| Tombstone table full | evict oldest entry, add new |
-| Relay-held flow reaches flow-idle expiry | skipped, no Touch, no re-evaluation on resume |
-| Hold lapses (teardown + grace passed) | flow expires at its original idle point |
+| The frame shape, the reverse hook, mid-flow data legs, deferred injection, redundant accepts, forwarded DNAT, the IPv6-zone peer rule | [tcp-redirect-transform.md](./tcp-redirect-transform.md) |
+| The client-visible close: RST\|ACK/FIN\|ACK shapes, their sequences, capacity resets, fragment teardown, injection-failure exits, the relay-end close contract | [tcp-client-close-injection.md](./tcp-client-close-injection.md) |
+| Admitting a new SYN: pump fast paths, the capacity gate, the bounded pending index, the setup executor and cooldown | [tcp-syn-setup-admission.md](./tcp-syn-setup-admission.md) |
+| What happens after a redirect retires: the single tombstone write point, atomic retire, grace consumption, the flow-hold predicate, the warm reverse probe | [tcp-redirect-teardown-grace.md](./tcp-redirect-teardown-grace.md) |
+| The relay and store lifetime: pump result classification, `EndKind`, the stall window, dispose ordering and single-flight, setup leases, the accept loop's lifetime | [tcp-relay-lifecycle.md](./tcp-relay-lifecycle.md) |
 
-### 5. Good/Base/Bad Cases
+## Where things moved
 
-- Good: client's final ACK after relay completion hits the tombstone and is consumed — no RST rebounds from the real server.
-- Base: a packet for a connection torn down 90 s ago (grace lapsed) passes as `NotRelevant` — same as pre-capture traffic.
-- Bad: reusing `Blocked` for grace drops (mislabels as proxy-unavailable); holding flows by Touching them (defeats original-idle-point expiry).
+This table keeps the numbered and titled citations frozen in `benchmarks/results/**` resolvable after
+the 2026-10-09 split. The old numbered sections (`### 1. Scope / Trigger` … `### 7. Wrong vs Correct`)
+were template scaffolding; their content is in the child named for the topic.
 
-### 6. Tests Required
-
-- `TcpRedirectTombstoneTableTests`: window hit / evict-oldest / expiry recycle / rewrite-refresh / queue-drain convergence (`RemoveExpiredDrainsStaleQueueRecordsFromRefreshChurn`, `QueueLengthConvergesToLiveEntriesUnderRefreshAndExpiryChurn`).
-- Coordinator tests: both-direction straggler `Dropped`; grace-expiry fallback to `NotRelevant`; relay-failure writes tombstone; executor silent consume + trace (and no executor `packet.completed` for grace); `HoldsFlow` phases; flow expiry at original idle point after hold lapses (split clocks); real-sweeper silent-flow survival (no `flow.created`); atomic-retire parking-listener test (`RetireRemovesTableAliasAndArmsTombstoneBeforeListenerDisposalCompletes` — same-tuple SYN mid-teardown must hit the tombstone, never the dying listener).
-- Dispatcher regression: reverse-straggler `Dropped` maps to `ProxyConsumed` without a `reason=policy` label.
-- Sweep gates (task 09-30-expiry-sweep-bounded-pause): `SweepAllocationGateTests.TcpRedirectTableSweepAllocatesNoManagedBytes` (retiring tick over 4,096 idle associations, 355,672 B → 0) and `…TcpRedirectSessionStoreSweepAllocatesNoManagedBytes` (no-op tick over 64 registered `Redirecting` sessions plus unexpired tombstones — the shape that repeats on the 60 s main leg — 520 B → 0). Both are exact `GC.GetAllocatedBytesForCurrentThread` windows with a populated world, a pinned managed thread id, `IsCompletedSuccessfully` on the async one, and a call-count backstop; each was re-discriminated with one injected `new byte[64]` (88 B).
-
-### 7. Wrong vs Correct
-
-#### Wrong
-
-```csharp
-// Grace drop reusing Blocked: executor's Blocked branch logs proxy-unavailable
-// and the trace says reason=policy — both mislead diagnosis.
-if (tombstone.TryHit(key, now)) return TcpRedirectOutcome.Blocked;
-```
-
-#### Correct
-
-```csharp
-// Dedicated outcome; executor consumes silently with its own trace reason,
-// and the dispatcher maps the reverse-straggler form to ProxyConsumed.
-if (Tombstones.TryHit(reverseSource, reverseDestination, now) ||
-    Tombstones.TryHit(key, now))
-    return TcpRedirectOutcome.Dropped;
-```
-
----
-
-## Relay/redirect quiescence, attach-failure teardown, and setup-fault release (wired 2026-09-20, task 09-20-transport-lifecycle)
-
-> Superseded in part by the C3 section below (2026-09-21, task `09-20-lifecycle-migration-cluster`):
-> `TcpRelayFaultObserver.Observe`, `TcpProxyRelay.ObservePump`, the store's `_shutdown` /
-> `_inflightSetups` / `_setupsDrained` / `_disposeTask` / `_disposed`, and the sync
-> `TcpRedirectSession.DisposeLifetime()` no longer exist; `EnterSetup`/`ExitSetup` became
-> `TryEnterSetup(out WorkLease)`. Keep this section for its quiescence *reasoning*; take the mechanisms
-> and signatures from the C3 section.
-
-### 1. Scope / Trigger
-
-- Trigger: any change to TCP relay/acceptor teardown, `TcpRedirectSessionStore` lifetime
-  disposal, the acceptor's attach-failure branch, `TcpRedirectSetup.RegisterSession`, or
-  `TcpProxyCoordinator`'s background SYN-setup tail.
-
-### 2. Signatures
-
-- `TcpProxyRelay.DisposeAsync()` — after disposing the local socket and the control
-  connection, it `await`s `Completion` inside a contained catch. Returning from it means no
-  pump task is running and `Completion` is completed; the fault the disposal itself
-  manufactures is observed and swallowed.
-- `TcpRedirectAcceptor.RunAcceptLoopAsync(...)` — awaits both terminal steps
-  (`ObserveRelayCompletionAsync` then `DrainRedundantConnectionsAsync`); no `_ =` discards.
-  The loop owns `session.DisposeLifetime()`, so `session.AcceptLoop` spans the whole session
-  lifetime and the store's `await session.AcceptLoop` is a true quiescence wait.
-- `TcpRedirectSessionStore.DisposeCoreAsync()` — awaits each `session.AcceptLoop` before
-  disposing that session's lifetime CTS (`TcpRedirectSession.DisposeLifetime()`, exactly once,
-  tolerant of an already-disposed lifetime).
-- `TcpRedirectSetup.RegisterSessionAsync(...)` -> `ValueTask<TcpRedirectSession?>`.
-- `TcpRelayFaultObserver.Observe(relay, logger)` — exactly one registration per discard path.
-
-### 3. Contracts
-
-- **Ownership-await quiescence**: dispose returns only after the tasks it owns have finished.
-  `TcpProxyRelay.DisposeAsync` -> `Completion`; the acceptor's accept loop -> its terminal
-  observation + redundant-accept drain; the store's dispose -> every session `AcceptLoop`.
-  No global task registry is used.
-- **Lifetime CTS is disposed after its last reader**. `Retire()` cancels the session lifetime;
-  the CTS *dispose* is deferred until after `await session.AcceptLoop`, so the accept loop and
-  the client-reset path that reads `session.Token` can never touch a disposed
-  `CancellationTokenSource`. An `IsDisposed` gate makes late teardown entries
-  (`TearDownSessionAsync`, `FailAssociationAsync`, `RemoveExpiredAsync`, `TryRegister`) no-ops.
-- **Fault observer is per discard path, not deduplicated globally**. The two call sites —
-  `TcpProxyRelay.DisposeAsync` and the acceptor's attach-failure branch — are **distinct
-  discard paths** (the acceptor may discard an arbitrary `ITcpRelay` whose `DisposeAsync` need
-  not observe). Exactly one registration per path; never two on one path (`ContinueWith`-based
-  registration is not idempotent). Preserve the .NET gotcha: read `task.Exception` before any
-  `IsEnabled` gate.
-- **Attach failure leaves no half-open session**: when `tryAttachRelay` returns false the
-  accepted connection is closed and the relay discarded **outside** the setup `try`, then the
-  session is torn down. A throw from that disposal must never fall into
-  `HandleRelaySetupFailureAsync` (which would inject a client reset against a retired session).
-- **RegisterSession releases on partial failure**: a construction fault after the
-  listener/alias was claimed releases it via `store.ReleaseAssociationAsync` exactly once
-  (the success path releases nothing).
-- **Setup cooldown is written inside the store inflight section**: the pending-index entry
-  removal and its setup-failure cooldown write complete before `ExitSetup()` unblocks the
-  store's dispose drain, so a post-drain `RemoveAll` can never run in between.
-
-### 4. Validation & Error Matrix
-
-| Condition | Required result |
+| Old section (title or number) | Now |
 |---|---|
-| `TcpProxyRelay.DisposeAsync` returns | `Completion` completed, no pump running, disposal fault observed |
-| Acceptor reaches end of accept loop | terminal observation + redundant-accept drain awaited (not discarded) |
-| Store dispose while a session is mid-teardown | `AcceptLoop` awaited before the lifetime CTS is disposed |
-| Late teardown entry after store dispose | no-op via `IsDisposed` gate |
-| `tryAttachRelay` returns false | relay discarded + accepted closed + session torn down; store session count 0 |
-| Disposal throw on the attach-failure path | contained (warn); never re-enters `HandleRelaySetupFailureAsync` |
-| Construction fault inside `RegisterSessionAsync` | claimed listener/alias/self-traffic token released exactly once, exception surfaces |
-| Genuine setup failure completes | cooldown written before `ExitSetup()`; a store dispose racing it leaves no cooldown/charge |
+| "WinpkFilter local_redirect transform" (the five-step host transform) | [tcp-redirect-transform.md](./tcp-redirect-transform.md) |
+| "Reverse path (the subtle part)" / the X1 prefilter row | [tcp-redirect-transform.md](./tcp-redirect-transform.md) |
+| "Mid-flow data" | [tcp-redirect-transform.md](./tcp-redirect-transform.md) |
+| "Data-bearing SYNs (TCP Fast Open)" — the `IsTcpSyn`/tolerance half | [tcp-redirect-transform.md](./tcp-redirect-transform.md) |
+| "Data-bearing SYNs (TCP Fast Open)" — the sequence-advance/tracker half | [tcp-client-close-injection.md](./tcp-client-close-injection.md) |
+| "Redundant accepts" | [tcp-redirect-transform.md](./tcp-redirect-transform.md) |
+| "Forwards-direction reverse injection" | [tcp-redirect-transform.md](./tcp-redirect-transform.md) |
+| "Forwarded flows use the DNAT-to-local transform" | [tcp-redirect-transform.md](./tcp-redirect-transform.md) |
+| "Accept-loop peer identity excludes the IPv6 zone" | [tcp-redirect-transform.md](./tcp-redirect-transform.md) |
+| "Relay setup failure resets the client" | [tcp-client-close-injection.md](./tcp-client-close-injection.md) |
+| "Client-reset sequence tracking and injection-failure exits" | [tcp-client-close-injection.md](./tcp-client-close-injection.md) |
+| "Capacity-rejected SYN → RST\|ACK" — the shape and cooldown | [tcp-client-close-injection.md](./tcp-client-close-injection.md) |
+| "Capacity-rejected SYN → RST\|ACK" — the capacity gate that triggers it | [tcp-syn-setup-admission.md](./tcp-syn-setup-admission.md) |
+| "Fragments on associated flows" | [tcp-client-close-injection.md](./tcp-client-close-injection.md) |
+| "Faulted relay completions must be observed (S3)" | Deleted: the `ContinueWith` observer is gone; the surviving rule is in [tcp-relay-lifecycle.md](./tcp-relay-lifecycle.md). |
+| "Mid-flow relay fault/stall must reset the client" | [tcp-client-close-injection.md](./tcp-client-close-injection.md), [tcp-relay-lifecycle.md](./tcp-relay-lifecycle.md) |
+| "Every end injects its client-visible close before the retire" | [tcp-client-close-injection.md](./tcp-client-close-injection.md) (same heading) |
+| "New-flow SYN setup never blocks the capture pump" | [tcp-syn-setup-admission.md](./tcp-syn-setup-admission.md) |
+| "SOCKS5 control-socket timeout lifecycle" | [tcp-relay-lifecycle.md](./tcp-relay-lifecycle.md) |
+| "Deployment: Windows Firewall inbound rule is required" | this hub, "Deployment prerequisite" |
+| "Redirect teardown grace and flow-hold contracts" (§1–§7) | [tcp-redirect-teardown-grace.md](./tcp-redirect-teardown-grace.md) |
+| "Redirect teardown grace…" §3 (Contracts) — the numbered citation in `benchmarks/results/2026-09-30-warm-path-lock-chain/README.md` | [tcp-redirect-teardown-grace.md](./tcp-redirect-teardown-grace.md) |
+| "Relay/redirect quiescence, attach-failure teardown, and setup-fault release" (§1–§7) | [tcp-relay-lifecycle.md](./tcp-relay-lifecycle.md) |
+| "Relay pump tracking, scope-owned lifetimes, and intrinsic fault observation" (§1–§7) | [tcp-relay-lifecycle.md](./tcp-relay-lifecycle.md) |
+| "UDP is deliberately untouched" (one-line contrast) | Deleted; the UDP side owns its own teardown in [udp-relay.md](./udp-relay.md). |
 
-### 5. Good/Base/Bad Cases
-
-- Good: disposing a relay against a loopback socket returns with `Completion` completed and
-  both pump buffers returned.
-- Base: a store dispose racing an in-flight setup drains it and leaves zero active/charged
-  setups and no cooldown.
-- Bad: discarding `ObserveRelayCompletionAsync` with `_ =`; disposing the lifetime CTS before
-  `AcceptLoop` finishes; deduplicating the two distinct fault-observer registrations into one
-  call site; writing the setup cooldown after `ExitSetup()`.
-
-### 6. Tests Required
-
-- `TcpProxyRelayTests.DisposeLeavesCompletionCompletedAndReturnsPumpBuffers`.
-- `TcpRelayObservationTests` — exactly one `tcp.relay.faulted` per discard path (all three),
-  plus the debug-gate suppression case.
-- `TcpRedirectAcceptorTests.UnattachableRelayIsDiscardedAndTheSessionIsTornDown`.
-- `TcpRedirectSetupTests.RegistrationFaultReleasesTheClaimedListenerAliasAndToken`.
-- `TcpRedirectSessionTests` / `TcpRedirectSessionStoreTests` — deferred lifetime dispose
-  (no `ObjectDisposedException`), idempotence, post-dispose teardown re-entry.
-- `TcpPendingSynSetupTests.DisposeClearsTheCooldownAnEarlierFailureArmed`,
-  `DisposeRacingAnInFlightSetupLeavesNoCooldownOrCharge`, and
-  `LaunchedSetupItemCarriesTheShutdownTokenSoParkedSetupsUnwindOnDispose`.
-
-### 7. Wrong vs Correct
-
-#### Wrong
-
-```csharp
-// Fire-and-forget end handling: the store's "await AcceptLoop" is not a quiescence wait,
-// and the lifetime CTS may be disposed while the loop still reads session.Token.
-_ = ObserveRelayCompletionAsync(session);
-await DrainRedundantConnectionsAsync();
-DisposeLifetime();
-```
-
-#### Correct
-
-```csharp
-// The accept loop owns its terminal steps and the lifetime; the store's dispose awaits
-// session.AcceptLoop before disposing the CTS.
-await ObserveRelayCompletionAsync(session);
-await DrainRedundantConnectionsAsync();
-```
-
----
-
-## Relay pump tracking, scope-owned lifetimes, and intrinsic fault observation (wired 2026-09-21, task 09-20-lifecycle-migration-cluster)
-
-### 1. Scope / Trigger
-
-- Trigger: any change to `TcpProxyRelay`'s pumps or `DisposeAsync`, `TcpRedirectSession` /
-  `TcpRedirectSessionStore` lifetime ownership, the TCP setup admission seam (`TryEnterSetup`), or the
-  acceptor's relay-completion observation.
-
-The cluster now runs on `QuiescenceScope` — `async-lifetime.md` is the primitive's contract and carries
-the per-owner table. **This section supersedes the previous section where they differ**:
-`TcpRelayFaultObserver.Observe` and `TcpProxyRelay.ObservePump` are **deleted** (fault observation is
-intrinsic to each pump body); `TcpRedirectSession.DisposeLifetime()` → `DisposeLifetimeAsync()` and
-`Retire()` no longer owns a lifetime CTS (the scope does); the store's `_shutdown` CTS,
-`_inflightSetups`, `_setupsDrained`, `_disposeTask` and `_disposed` are gone; `EnterSetup`/`ExitSetup`
-are replaced by `TryEnterSetup(out WorkLease)`.
-
-### 2. Signatures
-
-- `TcpRedirectSessionStore`: `_scope = new QuiescenceScope()` owns the CTS;
-  `ShutdownToken => _scope.Token`; `IsDisposed => _scope.IsSealed`;
-  `bool TryEnterSetup(out WorkLease lease)`; `DisposeAsync() => new(DisposeCoreAsync())`.
-- `TcpRedirectSession`: `Token => _scope.Token` (a nested scope linked to the store's token);
-  `bool IsRetired`; `Retire()`; `ValueTask DisposeLifetimeAsync()`.
-- `TcpProxyRelay`: the scope-owned token replaces the old leaked `pumpCancellation` CTS;
-  `PumpAsync` is an **instance** method that takes `_scope.TryEnter(out var lease)`;
-  `enum PumpResult { Ended, Stalled, Faulted }`.
-- `TcpProxyCoordinator.SetupPendingAsync`: `if (!_store.TryEnterSetup(out var lease)) { _pendingSyn.Complete(..., writeCooldown: false, ...); return; }`
-  with `lease.Dispose()` in the `finally` **after** `_pendingSyn.Complete`.
-
-### 3. Contracts
-
-- **A sealed `TryEnter` refusal in a pump reports a clean end, never a stall.** A refusal means disposal
-  already began; `PumpResult.Stalled` would drive `EndKind = Stalled`, and the acceptor injects a client
-  RST for any non-`CleanEnded` `EndKind` — so an ordinary teardown would look like a stall timeout. The
-  branch is unreachable in practice (both pumps start synchronously in the constructor, before the relay
-  can be sealed); it exists to make the worst case harmless.
-- **A pump never leaves a faulted task.** `PumpAsync` catches everything: an
-  `OperationCanceledException` becomes `PumpResult.Stalled`, any other exception is recorded by
-  `RecordPumpFault` (which emits the Debug `tcp.relay.faulted` event) and returned as
-  `PumpResult.Faulted`. `RunPumpAsync` surfaces the recorded `_scope.Fault` on `Completion`. A pump
-  abandoned by the fast-exit therefore cannot become an unobserved fault, so no external reaper is
-  needed — this is what makes `WF0002` (`ContinueWith`) enforceable with no allowlist entry.
-- **`Completion` keeps relay-level semantics.** The stall fast-exit still returns without awaiting the
-  sibling pump, so `Completion` completes on a stall without waiting for both pumps.
-  `ITcpRelay.Completion` and `RelayEndKind` are unchanged; `DisposeAsync` observes `Completion` on every
-  path (`ObserveCompletionAsync`) so a faulted `Completion` is never unobserved.
-- **The drain is bounded by the socket close.** `DisposeAsync` order: one-shot claim → cancel →
-  `_localSocket.Dispose()` → `await _control.DisposeAsync()` → drain → observe `Completion`. Closing the
-  socket is what forces a pump abandoned by the fast-exit to return, so the drain cannot hang.
-- **Setup admission is a bool, not an exception.** `TryEnterSetup` returning `false` replaces the old
-  `EnterSetup` `ObjectDisposedException`; `_pendingSyn.Complete(writeCooldown: false)` must still run
-  **before** the lease is released, so a disposal racing a launched setup leaves no cooldown.
-- **The accept loop holds no scope lease (documented deviation).** The store joins
-  `session.AcceptLoop` explicitly in `DisposeCoreAsync`, which is where that loop's quiescence comes
-  from; the session's `DisposeAsync` is therefore **not** a quiescence point for it. A lease would
-  deadlock against the in-loop `DisposeLifetimeAsync()` reached via `ObserveRelayCompletionAsync`.
-- **`TcpRedirectSession._retired` is retained** as the owner's admission flag: `Retire()` claims and
-  `Cancel()`s — it must never seal or drain — because the accept loop and `ClientResetInjector` read
-  `session.Token` while unwinding.
-- **Owner teardown single-flight (D11).** `TcpProxyRelay.DisposeAsync` keeps an explicit one-shot
-  claim; a second caller joins the drain instead of re-running `_localSocket.Dispose()` /
-  `_control.DisposeAsync()`. A late caller joins only the drain, so it does not observe the claimant's
-  teardown fault.
-
-### 4. Validation & Error Matrix
-
-| Condition | Required result |
-|---|---|
-| Dispose a relay whose stall fast-exit abandoned a pump | drain completes (the socket close unblocks the pump); `Completion` already completed at the fast-exit |
-| Two concurrent `DisposeAsync` calls | owner teardown runs **once**; the second caller joins the drain |
-| `TryEnter` refused because the scope is sealed | pump returns `PumpResult.Ended`, never `Stalled`; no client RST |
-| Genuine pump fault | `RecordFault` + one Debug `tcp.relay.faulted`; `Completion` faults with the recorded exception; no unobserved task exception |
-| Dispose a relay mid-transfer | no spurious client reset; `EndKind` is not `Stalled` |
-| `TryEnterSetup` returns false | `_pendingSyn.Complete(writeCooldown: false)` then return; the lease releases after |
-| Store dispose with in-flight accept loops | each `await session.AcceptLoop` completes before the lifetime is released |
-
-### 5. Good/Base/Bad Cases
-
-- Good: a discarded relay is disposed → drained → its pump fault recorded and observed by construction.
-- Base: a store dispose racing an in-flight setup leaves zero active setups and no cooldown.
-- Bad: treating a sealed refusal as a stall; re-adding a `ContinueWith` observer; awaiting the sibling
-  pump on the stall path; taking a scope lease on the accept loop; re-reading `IsSealed` as the
-  teardown's one-shot guard (TOCTOU — see D11).
-
-### 6. Tests Required
-
-- `TcpProxyRelayTests` — `DisposeLeavesCompletionCompletedAndReturnsPumpBuffers` (5 s drain bound),
-  `ConcurrentDisposalRunsTheOwnerTeardownOnce`, `PumpFaultFaultsCompletionAndEmitsExactlyOneFaultEvent`,
-  `FaultEventIsSuppressedWhenDebugLoggingIsDisabled`,
-  `DisposingARelayObservesItsFaultedCompletionSoItNeverEscapes` (uses `UnobservedExceptionProbe`).
-- `TcpRelayEndResetTests.RelayEndKindIsStalledWhenPumpStalls` — pins `Completion`'s fast-exit.
-- `TcpRedirectSessionTests` — the drained-lifetime contract (a late `Retire` after the drained lifetime
-  is harmless).
-- `TcpRedirectSessionStoreTests` — `DisposeWaitsForTheRegisteredSetupLease`,
-  `TryEnterSetupIsRefusedOnceDisposed`, `RetireIsOrderedBeforeTheRelayIsDisposed`,
-  `DisposeIsSingleFlightAndLateTeardownNeverReEnters`,
-  `RegistrationLosingTheDisposeRaceLeavesTheAssociationReleasable`.
-
-### 7. Wrong vs Correct
-
-#### Wrong
-
-```csharp
-// A refused admission classified as a stall: an ordinary teardown looks like a stall timeout
-// and the acceptor injects a client RST. Rethrowing after recording leaves an abandoned pump's
-// task faulted with nothing left to reap it.
-if (!_scope.TryEnter(out var lease)) return PumpResult.Stalled;
-catch (Exception exception) { _scope.RecordFault(exception); throw; }
-```
-
-#### Correct
-
-```csharp
-// Refusal = disposal already began, so report a clean end. Faults are recorded AND reported as a
-// result, so no pump task can ever be faulted-but-unobserved.
-if (!_scope.TryEnter(out var lease)) return PumpResult.Ended;
-catch (OperationCanceledException) { return PumpResult.Stalled; }
-catch (Exception exception) { RecordPumpFault(exception); return PumpResult.Faulted; }
-```
+The frozen citation `benchmarks/results/2026-09-30-flow-key-parse-once/README.md:178` (and
+`…/2026-09-30-warm-path-lock-chain/README.md:198`) names "TFO SYN / sequence tracking" without a heading:
+the SYN predicate and tolerance half is in [tcp-redirect-transform.md](./tcp-redirect-transform.md), the
+tracker and sequence-advance half in [tcp-client-close-injection.md](./tcp-client-close-injection.md).

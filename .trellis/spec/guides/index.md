@@ -1,124 +1,119 @@
 # Thinking Guides
 
-> **Purpose**: Expand your thinking to catch things you might not have considered.
-
----
-
-## Why Thinking Guides?
-
-**Most bugs and tech debt come from "didn't think of that"**, not from lack of skill:
-
-- Didn't think about what happens at layer boundaries → cross-layer bugs
-- Didn't think about code patterns repeating → duplicated code everywhere
-- Didn't think about edge cases → runtime errors
-- Didn't think about future maintainers → unreadable code
-
-These guides help you **ask the right questions before coding**.
+> **Purpose**: widen your thinking before you code, so the bug you would have shipped is one you
+> already asked about. These are checklists that point at the specs — the rules themselves live in
+> [`../backend/`](../backend/index.md).
 
 ---
 
 ## Available Guides
 
-| Guide | Purpose | When to Use |
+| Guide | Purpose | When to use |
 |-------|---------|-------------|
-| [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | Identify patterns and reduce duplication | When you notice repeated patterns |
-| [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | Think through data flow across layers | Features spanning multiple layers |
+| [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | Find the existing thing before writing a new one; know who owns a shared contract | When you notice a repeated pattern, or are about to copy code |
+| [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | Map the data flow and the boundary you are crossing | Any feature spanning 3+ layers, or a config/wire/ABI field |
 
 ---
 
-## Quick Reference: Thinking Triggers
+## Thinking Triggers
 
-### When to Think About Cross-Layer Issues
+### When to think about cross-layer issues
 
-- [ ] Feature touches 3+ layers (Config, Runtime, NdisApi/Protocols, Cli)
+- [ ] Feature touches 3+ layers (Configuration, Runtime, NdisApi/Protocols, Cli)
 - [ ] Data format changes between layers
 - [ ] Multiple consumers need the same data
-- [ ] You're not sure where to put some logic
 - [ ] You are adding a config field, wire-format field, ABI member, or trace event
 - [ ] Consumer code starts parsing raw payload/frame fields inline
+- [ ] You are not sure where a piece of logic belongs
 
-→ Read [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md)
+→ [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md)
 
-### When to Think About Code Reuse
+### When to think about code reuse
 
-- [ ] You're writing similar code to something that exists
-- [ ] You see the same pattern repeated 3+ times
-- [ ] You're adding a new field to multiple places
-- [ ] **You're modifying any constant or config**
-- [ ] **You're creating a new utility/helper function** ← Search first!
+- [ ] You are writing code similar to something that exists
+- [ ] The same pattern appears 3+ times
+- [ ] You are adding a field to multiple places
+- [ ] **You are modifying any constant or configuration value**
+- [ ] **You are creating a new utility or helper** ← search first
 - [ ] Two files read the same untyped payload field with local casts
 - [ ] Multiple branches update the same derived state from `kind` / `action`
 
-→ Read [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md)
+→ [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md)
 
-### When Auditing Analyzer Suppressions
+### When auditing analyzer suppressions
 
-- [ ] A suppressed rule may still be live → neutralize the directive in an isolated worktree and rerun the gate; for jb, delete the whole directive line (blanking or commenting it out can hide the finding)
+- [ ] A suppressed rule may still be live → neutralize the directive in an isolated worktree and rerun
+      the gate; for the JetBrains gate, delete the whole directive line (blanking or commenting it out
+      can hide the finding)
 - [ ] A rule-level `severity = none` landed → the matching site pragmas are now redundant; remove them
-- [ ] You are about to suppress instead of fix → state a repo-verifiable reason and scope `.editorconfig` globs to exactly the paths the evidence covers
+- [ ] You are about to suppress instead of fix → state a repo-verifiable reason and scope the
+      `.editorconfig` glob to exactly the paths the evidence covers
 
-→ Read [Quality Guidelines](../backend/quality-guidelines.md)
+→ [Quality Guidelines](../backend/quality-guidelines.md)
 
-### When Verifying AI Cross-Review Results
+### When verifying AI cross-review results
 
-- [ ] Reviewer claims "user input can be malicious" → Check the actual data source (internal manifest? user config? external API?)
-- [ ] Reviewer flags "missing validation" → Is the data from a trusted internal source?
-- [ ] Reviewer says "behavior change" → Read the code comments — is it intentional design?
-- [ ] Reviewer identifies a "bug" in test → Mentally delete the feature being tested — does the test still pass? If yes → tautological test
+- [ ] Reviewer claims "user input can be malicious" → check the actual data source (internal manifest?
+      user config? external API?)
+- [ ] Reviewer flags "missing validation" → is the data from a trusted internal source?
+- [ ] Reviewer says "behaviour change" → read the code comments; is it an intentional design?
+- [ ] Reviewer identifies a "bug" in a test → mentally delete the feature being tested; does the test
+      still pass? If yes, the test is tautological
 
-**Common AI reviewer false-positive patterns**:
-1. **Trust boundary confusion**: Treating internal data (bundled JSON manifests) as untrusted external input
-2. **Ignoring design comments**: Flagging intentional behavior documented in code comments as bugs
-3. **Variable misreading**: Not tracing a variable to its actual definition (e.g., Map keyed by path vs name)
+**Common AI-reviewer false positives**: treating internal data (bundled JSON manifests) as untrusted
+input; flagging behaviour that a comment documents as intentional; misreading a variable without
+tracing it to its definition (a map keyed by path, not by name).
 
-**Verification rule**: Every CRITICAL/WARNING finding must be verified against the actual code before prioritizing. Budget ~35% false-positive rate for AI reviews.
+**Verification rule**: every CRITICAL/WARNING finding is verified against the code before it is
+prioritized. Budget roughly a 35 % false-positive rate for AI reviews.
 
-### When Implementing From An Audit Or A Defect List
+### When implementing from an audit or a defect list
 
-- [ ] The list may describe an **older tree** → before implementing an item, re-verify it against current code (grep or a failing test) and record `implemented | fixed | deferred` with a re-runnable command
-- [ ] The audit's "do not touch" section → check it before rewriting a subsystem the list also complains about
-- [ ] A "fixed by deletion" item → deleting the dispatcher/type can close a defect without a new rule; say so instead of adding a guard
-- [ ] Evidence lives in the task's `research/`, not in the chat → commands, exit codes and before/after numbers
+- [ ] The list may describe an **older tree** → before implementing an item, re-verify it against
+      current code (a grep or a failing test) and record `implemented | fixed | deferred` with a
+      re-runnable command
+- [ ] The audit's "do not touch" section → check it before rewriting a subsystem the list also
+      complains about
+- [ ] A "fixed by deletion" item → deleting the dispatcher or type can close a defect without a new
+      rule; say so instead of adding a guard
+- [ ] Evidence belongs in the task's `research/`, not in the chat: commands, exit codes, before/after
+      numbers
 
-→ Read [Measurement Harness](../backend/measurement-harness.md) (contract + comparison classes) and [Quality Guidelines](../backend/quality-guidelines.md)
+→ [Measurement Harness](../backend/measurement-harness.md) (what a comparison may claim) and
+[Quality Guidelines](../backend/quality-guidelines.md)
 
-### When Claiming A Refactor Is Behaviour-Neutral
+### When claiming a refactor is behaviour-neutral
 
-- [ ] A token/multiset comparison alone is not proof → it is blind to reordering and to which type owns a member; add an ordered check and a per-method body comparison
-- [ ] Something will be left over (a constant changing owner, a nested type promoted, two statements swapped) → write it down as a registered difference with its behavioural argument
-- [ ] The baseline pair is not the only comparison → same binary twice gives the noise floor; a batch difference inside that floor is not a regression
-- [ ] A published key on a zero-width band → the band was never measured, so "it did not move" may be vacuous; check per key and say which ones
-- [ ] A test that stays green when the line is deleted → the assertion is not wired to the production path; drive the real collaborator or add a counter-proof
+- [ ] A token or multiset comparison alone is not proof → it is blind to reordering and to which type
+      owns a member; add an ordered check and a per-method body comparison
+- [ ] Something will be left over (a constant changing owner, a nested type promoted, two statements
+      swapped) → write it down as a registered difference with its behavioural argument
+- [ ] The baseline pair is not the only comparison → the same binary twice gives the noise floor; a
+      batch difference inside that floor is not a regression
+- [ ] A published key sitting on a zero-width band → the band was never measured, so "it did not move"
+      may be vacuous; check per key and say which ones
+- [ ] A test that stays green when the line is deleted → the assertion is not wired to the production
+      path; drive the real collaborator or add a counter-proof
 
-→ Read [Measurement Harness §3.8](../backend/measurement-harness.md) and [Test Stability](../backend/test-stability.md)
+→ [Measurement Harness — proving a refactor is behaviour-neutral](../backend/measurement-judgement.md)
+and [Test Stability](../backend/test-stability.md)
 
 ---
 
 ## Pre-Modification Rule (CRITICAL)
 
-> **Before changing ANY value, ALWAYS search first!**
+> **Before changing ANY value, search for it first.**
 
 ```bash
-# Search for the value you're about to change
-rg -uu -n "value_to_change" .
+rg -n "value_to_change" .
 ```
 
-This single habit prevents most "forgot to update X" bugs.
+This one habit prevents most "forgot to update X" bugs.
 
 ---
 
-## How to Use This Directory
+## How to Use These Guides
 
-1. **Before coding**: Skim the relevant thinking guide
-2. **During coding**: If something feels repetitive or complex, check the guides
-3. **After bugs**: Add new insights to the relevant guide (learn from mistakes)
-
----
-
-## Contributing
-
-Found a new "didn't think of that" moment? Add it to the relevant guide.
-
----
-
-**Core Principle**: 30 minutes of thinking saves 3 hours of debugging.
+1. **Before coding**: skim the guide for the kind of change you are making.
+2. **During coding**: when something feels repetitive or complex, check the trigger lists above.
+3. **After a bug**: if it was a "didn't think of that" moment, add the trigger to this index.

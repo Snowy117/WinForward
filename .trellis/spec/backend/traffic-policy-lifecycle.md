@@ -1,53 +1,222 @@
 # Traffic Policy & Lifecycle Contracts
 
-> How WinForward decides which captured flows are proxied (host vs forwarded policy domains), which frames bypass policy entirely, how WinForward's own traffic is exempted (loop prevention), and how idle state is swept. Split 2026-08-29 from the former monolithic NDISAPI file; transport-level contracts live in [windows-ndisapi.md](./windows-ndisapi.md), [tcp-local-redirect.md](./tcp-local-redirect.md), [udp-relay.md](./udp-relay.md).
+> Which captured flows WinForward proxies: the two policy domains, the frames that bypass policy
+> entirely, and how WinForward keeps its own traffic out of the proxy.
+> The idle-expiry sweeper that recycles the state these rules create has its own document:
+> [idle-expiry-sweep.md](./idle-expiry-sweep.md). Transport-level contracts live in the
+> [redirect family hub](./tcp-local-redirect.md), the [UDP relay family hub](./udp-relay.md) and the
+> [NDISAPI hub](./windows-ndisapi.md).
+
+## Scope / Trigger
+
+Read before touching `PolicySnapshot`, `RuleMatcher`, `FlowDispatcher`'s dispatch or admission path,
+`CaptureAdapterScopeResolver`, `SelfTrafficRegistry`, or the `Host.Rules` / `Forwarded.Rules`
+configuration schema.
 
 ---
 
-## Host vs forwarded policy domains (fixed 2026-08-11; domains made explicit in the configuration 2026-10-04)
+## Two Policy Domains
 
-- Policy eligibility is not the same as capture scope. Adapter-unqualified host rules may require all MSTCP-bound adapters to remain captured, so forwarded eligibility is enforced after self-traffic, TCP reverse handling, and existing-flow resolution, immediately before a genuinely new flow is claimed. **F8 (2026-10-01) adds an admission-side twin of that check**: only the attribution-eligible shape — `RequiresProcessAttribution ∧ attributor ≠ null ∧ Process is null ∧ Origin == Host` — is deferred to the setup worker, so a forwarded (or no-process-rule) miss is refused admission before the pipeline is touched and keeps the inline path byte-for-byte. The two predicates are the same method (`FlowDispatcher.ShouldAttribute`), pinned by `AForwardedMissNeverCreatesAPendingEntry` and `ANoProcessRuleMissNeverCreatesAPendingEntry`.
-- New `Host` flows evaluate `host.rules` in order (`PolicySnapshot.EvaluateHost`) and use `host.fallbackAction`. **Where evaluation runs changed in F8**: for an attribution-eligible host miss, process attribution *and* policy evaluation now run on a pooled setup worker before the flow-table claim, not inside the claim's gate on the pump thread. The rule, its inputs and the rule order are unchanged; the claim still stores the decision exactly once per logical flow (`FlowTable.TryClaimResolved`), and a second entry for one transport tuple pays a second evaluation whose claim returns the existing decision — counted as `attributionReAdmission`.
-- New `Forwarded` flows evaluate `forwarded.rules` in order (`PolicySnapshot.EvaluateForwarded`, both invoked from `FlowDispatcher`) and use `forwarded.fallbackAction`, defaulting to `pass`. **Rule eligibility became positional on 2026-10-04 (task 10-04-host-forwarded-rule-split)**: `adapterId`/`adapterName` now narrow a forwarded rule to the adapter the packet arrived on instead of deciding whether the rule belongs to the forwarded domain, so a forwarded rule with no adapter selector is valid and applies to every forwarded flow, and `EvaluateForwarded` no longer consults `RuleMatcher.IsAdapterQualified` (the property was deleted). Rule order and every additional matcher condition are preserved.
-- **No rule serves both domains (2026-10-04).** `PolicySnapshot` holds two lists — `HostRules` and `ForwardedRules` — and each evaluation reads only its own, so a rule intended for both must be written in both `host.rules` and `forwarded.rules`. `process` is rejected inside `forwarded.rules` at validation (a forwarded flow has no host process owner, so the matcher could never fire), which is why `PolicySnapshot.RequiresProcessAttribution` scans host rules only. Capture scope unions both lists (`CaptureAdapterScopeResolver.AccumulateScope`): adapter-constrained rules in either domain contribute their resolved adapters, an unconstrained rule in either domain widens scope to every MSTCP-bound adapter, and selector diagnostics are domain-qualified (`host.rules[i]` / `forwarded.rules[i]`). A missed list here reads as a policy bug but is a scope bug — "rule configured, adapter never captured".
-- Non-flow frames (non-IP, non-TCP/UDP, unparseable, fragmented) always pass on both origins without any policy evaluation. **Superseded 2026-08-14**: an earlier adapter-qualified-only/default-pass contract applied to forwarded non-flow packets; blocking them broke ARP/ICMPv6-ND and silently severed L2 (see "Non-flow frames always pass").
-- The forwarded default pass is cached in `FlowTable` (`src/WinForward.Core/FlowTable.cs`); reverse and cross-adapter observations reuse it before origin-specific policy can run again. Flow-table capacity exhaustion still fails closed.
-- `Forwarded` is derived from NDIS `ON_RECEIVE`, not an authoritative Windows routing decision. It includes both traffic Windows may route across adapters and new inbound traffic addressed to a service on the host.
-- Regression coverage: `ForwardedPolicyEvaluatesUnqualifiedRulesInItsOwnDomain`, `EachDomainEvaluatesOnlyItsOwnRuleList`, `ForwardedFallbackDefaultsToPassAndIsConfigurable`, `ForwardedPolicyPreservesRuleOrderAndMatcherConditions`, `DispatcherSeparatesForwardedAdaptersFromHostCatchAllPolicy`, `DispatcherCachesForwardedFallbackPassAcrossOriginsAndFailsClosedAtCapacity`, `AdapterScopeFollowsAForwardedDomainsAdapterConstraint`, `AdapterScopeWidensForAnUnconstrainedForwardedRule`, `AdapterScopeDiagnosticsNameTheRuleDomain`; non-flow pass coverage moved to `DispatcherForwardedNonFlowAlwaysPassesRegardlessOfRules` / `DispatcherHostNonFlowAlwaysPassesRegardlessOfFallbackAndRules` (see "Non-flow frames always pass").
-- **The policy surface is unchanged by F4's slim context (2026-09-30).** `RuleMatcher` still reads `context.ProcessName`, `ProcessPath`, `AdapterId`, `AdapterName` and `RemotePort`, but the values now come from the two interned metadata references the packet carries (`AdapterMetadata` from the slot table's own instance, `ProcessMetadata` created once at claim) and from the packed `FlowKey.RemotePort` — no string is copied per packet, and a warm packet still carries the adapter identity (with a null process identity) exactly as before (`FlowContextMetadataTests.ClaimedFlowCarriesTheInternedAdapterAndProcessMetadata`, `WarmHitKeepsTheAdapterMetadataAndCarriesNoProcessMetadata`). An adapter-qualified rule on an adapter the slot table does not know sees `AdapterId == null`, the same shape as an adapter-less key.
+**Policy eligibility is not capture scope.** Adapter-unqualified host rules may require every
+MSTCP-bound adapter to stay captured, so forwarded eligibility is enforced *after* self-traffic, TCP
+reverse handling and existing-flow resolution — immediately before a genuinely new flow is claimed.
+
+**Admission has a second, earlier gate (F8, 2026-10-01).** Only the attribution-eligible shape is
+deferred to the setup worker:
+
+```
+RequiresProcessAttribution ∧ attributor ≠ null ∧ Process is null ∧ Origin == Host
+```
+
+A forwarded miss, or a host miss with no process rule, is refused admission before the pipeline is
+touched and keeps the inline path byte-for-byte. Both gates are the same method
+(`FlowDispatcher.ShouldAttribute`), pinned by `AForwardedMissNeverCreatesAPendingEntry` and
+`ANoProcessRuleMissNeverCreatesAPendingEntry`.
+
+- **`Host` flows** evaluate `Host.Rules` in order (`PolicySnapshot.EvaluateHost`) and fall back to
+  `Host.FallbackAction`. For an attribution-eligible miss, process attribution *and* policy
+  evaluation run on a pooled setup worker before the flow-table claim rather than inside the claim's
+  gate on the pump thread. The decision is still stored exactly once per logical flow
+  (`FlowTable.TryClaimResolved`); a second entry for one transport tuple pays a second evaluation
+  whose claim returns the existing decision, counted as `attributionReAdmission`.
+- **`Forwarded` flows** evaluate `Forwarded.Rules` in order (`PolicySnapshot.EvaluateForwarded`) and
+  fall back to `Forwarded.FallbackAction`, default `pass`.
+- **Rule eligibility is positional (2026-10-04, task 10-04-host-forwarded-rule-split).**
+  `adapterId`/`adapterName` on a forwarded rule narrow it to the adapter the packet arrived on; they
+  no longer decide whether the rule belongs to the forwarded domain. A forwarded rule with no adapter
+  selector is therefore valid and applies to every forwarded flow, and `EvaluateForwarded` no longer
+  consults `RuleMatcher.IsAdapterQualified` (deleted). Rule order and every other matcher condition
+  are preserved.
+- **`Forwarded` is derived from NDIS `ON_RECEIVE`**, not from an authoritative Windows routing
+  decision. It covers both traffic Windows may route across adapters and new inbound traffic addressed
+  to a service on the host.
+- The forwarded default pass is **cached in `FlowTable`** (`src/WinForward.Core/FlowTable.cs`); reverse
+  and cross-adapter observations reuse it before origin-specific policy can run again. Flow-table
+  capacity exhaustion still fails closed.
+
+### No rule serves both domains (2026-10-04)
+
+`PolicySnapshot` holds two lists — `HostRules` and `ForwardedRules` — and each evaluation reads only
+its own. A rule intended for both domains must be written in both `Host.Rules` and `Forwarded.Rules`.
+
+- `process` is **rejected inside `Forwarded.Rules` at validation**: a forwarded flow has no host
+  process owner, so the matcher could never fire. This is why `PolicySnapshot.RequiresProcessAttribution`
+  scans host rules only.
+- Capture scope **unions both lists** (`CaptureAdapterScopeResolver.AccumulateScope`):
+  adapter-constrained rules in either domain contribute their resolved adapters, an unconstrained rule
+  in either domain widens scope to every MSTCP-bound adapter, and selector diagnostics are
+  domain-qualified (`WinForward.Host.Rules[i]` / `WinForward.Forwarded.Rules[i]`).
+- A list missed here reads as a policy bug but is a scope bug: "rule configured, adapter never
+  captured".
+
+Enforced by `EndpointAndPolicyTests` (domain separation and rule order),
+`AdapterScopeAndFlowTableTests` (scope union and diagnostics), `FlowDispatcherExecutorTests`
+(cross-origin fallback caching and capacity) and `FlowAttributionPipelineTests` (admission).
+
+### Rule evaluation reads interned metadata (F4, 2026-09-30)
+
+`RuleMatcher` reads `context.ProcessName`, `ProcessPath`, `AdapterId`, `AdapterName` and `RemotePort`,
+but the values come from the two interned metadata references the packet carries — `AdapterMetadata`
+from the slot table's own instance, `ProcessMetadata` created once at claim — plus the packed
+`FlowKey.RemotePort`. No string is copied per packet, and a warm packet still carries the adapter
+identity with a null process identity
+(`FlowContextMetadataTests.ClaimedFlowCarriesTheInternedAdapterAndProcessMetadata`,
+`WarmHitKeepsTheAdapterMetadataAndCarriesNoProcessMetadata`). An adapter-qualified rule on an adapter
+the slot table does not know sees `AdapterId == null`, the same shape as an adapter-less key.
 
 ---
 
-## Non-flow frames always pass (fixed 2026-08-14)
-
-Frames that cannot be classified as TCP/UDP flows (ARP, ICMPv6 ND, other L2/L3, unparseable, fragments) are never policy-evaluated: `FlowDispatcher.DispatchNonFlowAsync` passes them unconditionally after the self-traffic check. Policy exists to govern proxyable flows; blocking non-flow frames under a catch-all proxy/block rule silently broke ARP resolution and produced total L2 failure on the gateway (26 `packet.dropped reason=policy`, all nonFlow, 23 of them 42-byte ARP frames, while test traffic never even reached the capture layer). Locked by `DispatcherForwardedNonFlowAlwaysPassesRegardlessOfRules` / `DispatcherHostNonFlowAlwaysPassesRegardlessOfFallbackAndRules`.
 
 ---
 
-## Policy authoring for gateway LANs (hardware-verified 2026-08-15)
+## Process Attribution: The Owner-Table Cache
 
-Because `forwarded.rules` is its own domain, a LAN exemption is written once in that list rather than being smuggled in as an adapter-qualified rule ordered ahead of the proxy rule. A bare `remoteCidr`-only pass rule in `forwarded.rules` is now eligible on its own (positional eligibility, 2026-10-04), so the working pattern is `{ "remoteCidr": [LAN prefixes], "action": "pass" }` placed **before** the adapter proxy rule in `forwarded.rules`. If host egress on the bridge adapter also needs the exemption, the same rule goes in `host.rules` as well: since no rule serves both domains, the two lists are written independently, and rule ORDER only decides within one domain. Without the exemption a remote upstream cannot reach 192.168.x and the connection blackholes after the redirect handshake.
+A cold process-attribution cache: it allocates, it awaits, and it never runs on the packet
+path. It is what turns a policy rule's `process` selector into a decided owner.
+
+A cold process-attribution cache: it allocates, it awaits, and it never runs on the packet path.
+
+- **One snapshot slot and one single-flight refresh gate per `OwnerTableKind`** (Tcp4, Tcp6, Udp4,
+  Udp6). Concurrent missers join one in-flight read whose snapshot is published after the last of them
+  asked, so a burst's own newly-bound sockets are visible to the shared read — a window alone cannot
+  deliver that, because a socket's row appears at bind, microseconds before the packet that triggers
+  the lookup. Recorded series: the `attribution.ownerBurst` row costs **1** read for 16 concurrent
+  flows over one scripted table, and the exact form is
+  `ProcessOwnerTableCacheTests.NConcurrentMissesInsideTheWindowReadTheTableExactlyOnce`. The scan
+  count is a **series, never a threshold**.
+- **The freshness rule is the request instant, not a flag.** A snapshot taken before the caller asked
+  may only answer a **positive TCP row**; a miss always falls through to a read, so a flow whose
+  socket bound after the last read still gets a real scan. `WindowsProcessAttributor.FindAsync`'s 2 ms
+  retry is just a lookup with a later instant, which is what lets it coalesce onto an epoch that
+  started after it asked instead of forcing a second scan.
+- **Positive caching is per kind, and the bound is the predicate's.** A TCP row matches all four tuple
+  fields, so a row that survives into a later request describes the same connection; an
+  exact-4-tuple reuse inside the 300 ms window is effectively impossible under TIME_WAIT, so TCP
+  reuse is accepted. A UDP row matches the **local port alone**, so a recycled port inside the window
+  would attribute a flow to the previous process (fail-open) — **UDP never reuses a snapshot older
+  than the request**, only coalescing onto an epoch published at or after it. Closing the UDP half
+  needs the `*_TABLE_OWNER_MODULE` creation timestamp, a recorded on-Windows follow-up.
+- **The seam is the platform boundary.** `IPHelperOwnerTableReader` is the single
+  `[SupportedOSPlatform("windows")]` type and owns the size probe, the fail-closed row-count
+  validation and the `FreeHGlobal`. The default reader off-Windows is `UnavailableOwnerTableReader`,
+  so the observable result there stays `null` while the managed cache logic is exercisable on any host
+  through an injected reader. The predicates moved into `OwnerTable` unchanged and the
+  `Where/Select/Distinct/ToArray` chain became one predicate pass, so a snapshot hit and a fresh scan
+  answer identically for identical rows.
+- **The wake signal is latency, never correctness, and its ownership is split three ways.**
+  `CompositePacketArrivalSignal` composes the **borrowed** driver signal with one event the
+  `FlowAttributionWakeRegistry` owns: the composite disposes the driver signal in place of the list
+  owner (so the driver registration is still released exactly once), the registry never touches a
+  composite, and the registry keeps **one event per adapter handle**, reused across generations,
+  which `DurableCaptureBundle` disposes after the pumps have stopped and the pipeline is sealed (a
+  disposed event is reported as "not signalled", so a racing `Wait`/`Signal` cannot throw out of the
+  idle path). A refused driver registration registers nothing and the pipeline's signal becomes a
+  no-op: delivery then waits at most the poll delay or the idle bound
+  (`CompositePacketArrivalSignalTests`,
+  `FlowAttributionPipelineTests.ThePipelineSignalsOnlyItsOwnAdaptersEvent`).
+
+```csharp
+// Wrong: serve a UDP answer from a snapshot taken before the request — the predicate is the local
+// port alone, so a recycled port attributes the flow to the previous process (fail-open).
+return snapshot.Table.Lookup(key);
+
+// Correct: only a positive TCP row may be reused; a UDP lookup coalesces onto an epoch published at
+// or after its request instant and otherwise reads.
+if (snapshot is not null && ReusesSnapshot(kind) && snapshot.IsUsable && IsFresh(snapshot, now) && snapshot.TakenUtc <= requestInstant
+    && snapshot.Table.Lookup(key) is { } cached)
+{
+    return cached;
+}
+```
+
+Tests: `ProcessOwnerTableCacheTests` — coalescing, the retry joining a later epoch, a post-read bind
+forcing exactly one more read, a cached TCP hit, UDP never reusing, window expiry, scan/snapshot
+agreement, the recycled-port asymmetry, `window = 0`, and the unavailable reader.
 
 ---
 
-## Loop prevention: control-connection registration happens BEFORE the SYN (fixed 2026-08-12)
+## Non-flow Frames Always Pass (fixed 2026-08-14)
 
-- **Both TCP `CONNECT` and UDP `ASSOCIATE` control connections are SOCKS5 traffic to the proxy endpoint and must be registered in `SelfTrafficRegistry` before their SYN leaves the host.** A catch-all proxy rule would otherwise capture WinForward's own control SYN and recurse until the bounded session capacity is exhausted.
-- `Socks5ControlConnection.ConnectAsync` (`src/WinForward.Runtime/Socks5/Socks5ControlConnection.cs`) binds the socket to a wildcard local endpoint first, invokes an `onSocketReady(local, remote)` callback (which returns the loop-prevention token) BEFORE `socket.ConnectAsync`, and owns/disposes the token with the connection. Registering after connect leaves a race where the SYN is already observable.
-- The registered tuple is `(Tcp, Any:bound_port, proxy_ip:socks_port)`: the socket is bound to wildcard, so the local address is Any and the wildcard matcher covers the routing-chosen source IP, exactly like the UDP relay socket. Registering `(proxy, proxy)` is a bug — it can never match the observed `(host:ephemeral, proxy:socks)` and silently disables loop prevention.
-- A failed connection attempt (DNS multi-address fallback) disposes the registration of that attempt before trying the next address.
-- Locked by `SelfTrafficUpstreamTcpTupleIsOwnedWhenObservedAsHostEphemeralToProxy` (forward + reverse owned; an unrelated app sharing the proxy endpoint with its own source port is NOT exempted).
+Frames that cannot be classified as TCP/UDP flows — ARP, ICMPv6 ND, other L2/L3, unparseable,
+fragments — are **never policy-evaluated**: `FlowDispatcher.DispatchNonFlowAsync` passes them
+unconditionally after the self-traffic check.
+
+Policy exists to govern proxyable flows. Blocking non-flow frames under a catch-all proxy/block rule
+silently broke ARP resolution and produced total L2 failure on the gateway: 26
+`packet.dropped reason=policy` records, all nonFlow, 23 of them 42-byte ARP frames, while test traffic
+never reached the capture layer. Locked by `DispatcherForwardedNonFlowAlwaysPassesRegardlessOfRules`
+and `DispatcherHostNonFlowAlwaysPassesRegardlessOfFallbackAndRules`.
 
 ---
 
-## Idle expiry sweep (wired 2026-08-12)
+## Loop Prevention: Control Connections Register Before Their SYN (fixed 2026-08-12)
 
-- `FlowTable.RemoveExpired`, `TcpRedirectTable.RemoveExpired`, and `UdpAssociationTable.RemoveExpired` (`src/WinForward.Runtime/UdpProxy/UdpAssociations.cs`) implement idle expiry but had no caller; UDP sessions accumulated to the bounded capacity and then failed closed.
-- `IdleExpirySweeper` (`src/WinForward.Runtime/IdleExpirySweeper.cs`) is the single wiring point: created and started by `DurableCaptureBundle.BuildWithUdpAsync`, it sweeps `TcpProxyCoordinator.RemoveExpiredAsync` and `FlowDispatcher.RemoveExpiredFlows` (the main-leg group, tcp → flows, so redirect tombstones/sessions are recycled before flows are evaluated; see the flow-hold contract in [tcp-local-redirect.md](./tcp-local-redirect.md)) and `UdpProxyCoordinator.RemoveExpiredAsync` (the UDP leg). It is disposed first in the bundle's single-flight ordered teardown, before the coordinators are released.
-- **Two cadences, one tick loop.** The tick period is the UDP leg's cadence — derived from the **effective retention floor** (`IdleExpirySweeper.EffectiveUdpRetentionFloor`: the shorter of the configured retention and the 5 s one-shot class) through `IdleExpirySweeper.DeriveUdpSweepInterval`: the *request* is `max(5 s, floor / 2)` and the result is `min(mainInterval, request)`, so the 5 s floor is applied **before** the main-interval cap and a main interval shorter than 5 s still wins. At the default 30 s retention, the 5 s one-shot class and 60 s main interval that is **5 s** (15 s under uniform retention). The main-leg group keeps its historical one-minute cadence by gating inside each tick on the injected clock (`now - lastMainSweepUtc >= _interval`); a failing main sweep stamps the gate before its legs run, so it can never shorten or extend the group's cadence. The per-tick `runtime.expired` debug aggregate reports flows, tcpRedirects, and udpSessions together.
-- **Per-site chunked retirement (task 09-30-expiry-sweep-bounded-pause).** Every sweep site now scans in a bounded hold and re-checks each candidate under the gate before removing it, and none of them allocates on the tick (`SweepAllocationGateTests`): `FlowTable.RemoveExpired` at minimal hold granularity (scan hold ≤ 256 examinations stopping on the first idle-elapsed candidate → `isHeld` with **no lock held** → one removal hold per entry, at the cursor; the live-slot registry invariant lives in [hot-path.md](./hot-path.md)); `TcpRedirectTable.RemoveExpired` / `UdpAssociationTable.RemoveExpired` (no production caller, tests only) with a reused scratch filled under one hold then one short hold per removal, `Distinct()` deleted; `TcpRedirectSessionStore.RemoveExpiredAsync` (+ the tombstone sweep riding its tick) with a reused candidate/retire scratch, no LINQ, and per-entry disposal containment outside the gate; `UdpProxyCoordinator.RemoveExpiredAsync` with a reused `(slot, session)` scratch and the existing `TryBeginExpiry` re-check as the outside-gate verifier. Sites that await their disposal tail use a `SemaphoreSlim(1,1)` sweep gate held across the whole method — a `Lock` cannot span an `await`; the synchronous tables use a plain `Lock` sweep gate outer to the table gate (order: sweep gate → table gate, acyclic). Scratches are cleared at the **start** of the critical section except the store's retired list, which is cleared only after every disposal has been attempted (an aborted tick must not lose already-retired, not-yet-disposed sessions — its leftovers are drained whole by the next tick). The per-tick `HoldProbe` counts (`SweepChunkEntries` examination bound, one removal per hold) are the sweep's acceptance evidence; its wall-clock series is report-only.
-- **Leg groups are isolated (S6d).** The main-leg group and the UDP leg each own a `try`/`catch` inside the tick: a failing group is surfaced through one rate-limited (5 s) warn and the next tick retries it, without skipping or starving the other group. Cancellation while the scope is sealed is the normal exit, not a failure.
-- `UdpProxySession` tracks its activity as a **bucket-derived stamp** (`LastActivityUtc` is derived from the internal integer bucket; a send or receive writes one integer from the shared `ActivityBucketClock` and never reads a clock), and `UdpProxyCoordinator.RemoveExpiredAsync` disposes idle sessions and releases their `UdpAssociationTable` entries. The coordinator's scan compares `session.ActivityBucketForDiagnostics < ActivityBucket.Cutoff(now, min(idleTimeout, oneShotIdleTimeout))` as a pre-filter (the *later* cutoff, so the candidate set is a superset of both classes) and `TryBeginExpiry` re-checks the candidate's **own class cutoff** under the session gate, so retirement is never early and at most one 500 ms bucket late. The never-early bound is therefore **class-relative**: a session stamped at `t0` retires in `(τ_class, τ_class + 500 ms + sweep]` — short class `(5, 10.5] s`, long class `(30, 35.5] s` (was `(30, 45.5] s` at the 15 s tick; **no session can be retired later than before**, and only completed one-shots retire earlier). The relay-alias collision guard (`UdpAssociationTable` claim per flow, design §8) is live: a second flow claiming the same relay alias is rejected fail-closed.
-- **The self-traffic split (task 09-30-warm-path-lock-chain).** The warm entry answers only the **wildcard** half (`ISelfTrafficGuard.IsWildcardOwned`, lock-free over the `(protocol, Any:port, remote)` registrations), while the **exact-tuple** half runs once per claim against the full `IsOwned`. The wildcard half is the load-bearing loop-prevention guard: `TcpProxyRelay` registers its upstream control connection before its SYN, so a host-flow ephemeral port recycled to that socket must never resolve the stale proxy state on the warm path (`ARelayWildcardTupleIsNeverProxiedOnAWarmHit`). The accepted delta is that an **exact** registration made *after* a flow was claimed no longer diverts the next packet — the claimed state is the "proven not self" record and every warm hit re-touches it, so the flow keeps proxying while it keeps receiving traffic (both registration sites and the bound are named in the task's design §4/§7).
-- **Association retention is the flow's, not the sweeper's.** A flow's association lives exactly as long as its session: `UdpProxyCoordinator.RemoveExpiredAsync` disposes the idle session, and the session's disposal releases the transport's own relay socket and control connection with it. There is no warm retention, no association maintenance child, and nothing association-shaped the sweeper could retire independently. See "UDP association ownership" in [udp-relay.md](./udp-relay.md). The sweeper owns only the session legs above.
-- Sweep failures are isolated (RCS1075 suppression, same pattern as `CaptureLifecycle.cs` in `src/WinForward.Runtime/Capture/`) so a transient teardown error cannot stop the capture loop.
+- **Both the TCP `CONNECT` and the UDP `ASSOCIATE` control connection are SOCKS5 traffic to the proxy
+  endpoint and must be registered in `SelfTrafficRegistry` before their SYN leaves the host.** A
+  catch-all proxy rule would otherwise capture WinForward's own control SYN and recurse until the
+  bounded session capacity is exhausted.
+- `Socks5ControlConnection.ConnectAsync`
+  (`src/WinForward.Runtime/Socks5/Socks5ControlConnection.cs`) binds the socket to a wildcard local
+  endpoint first, invokes an `onSocketReady(local, remote)` callback — which returns the
+  loop-prevention token — **before** `socket.ConnectAsync`, and owns and disposes that token with the
+  connection. Registering after connect leaves a race in which the SYN is already observable.
+- The registered tuple is `(Tcp, Any:bound_port, proxy_ip:socks_port)`. The socket is bound to
+  wildcard, so the local address is `Any` and the wildcard matcher covers the routing-chosen source
+  IP, exactly like the UDP relay socket. **Registering `(proxy, proxy)` is a bug**: it can never match
+  the observed `(host:ephemeral, proxy:socks)` and silently disables loop prevention.
+- A failed connection attempt (DNS multi-address fallback) disposes that attempt's registration before
+  trying the next address.
+- **The guard is split: the wildcard half answers on the warm path, the exact half once per claim.**
+  The wildcard half is the load-bearing one for loop prevention — `TcpProxyRelay` registers its
+  upstream control connection before its SYN, so a host-flow ephemeral port recycled to that socket
+  must never resolve stale proxy state on the warm path
+  (`ARelayWildcardTupleIsNeverProxiedOnAWarmHit`). The lock-free shape of that half, the exact-tuple
+  half, and the accepted delta for an exact registration made after a flow was claimed are in
+  [warm-path-dispatch.md](./warm-path-dispatch.md), "the self-traffic split".
+- `SelfTrafficUpstreamTcpTupleIsOwnedWhenObservedAsHostEphemeralToProxy` locks the tuple shape in
+  both directions; an unrelated application sharing the proxy endpoint with its own source port is
+  **not** exempted.
+
+---
+
+## Authoring Policy For A Gateway LAN (hardware-verified 2026-08-15)
+
+Because `Forwarded.Rules` is its own domain, a LAN exemption is written once in that list instead of
+being smuggled in as an adapter-qualified rule ordered ahead of the proxy rule. Positional eligibility
+(2026-10-04) makes a bare `RemoteCidr`-only pass rule eligible on its own, so the working pattern is
+
+```json
+{ "RemoteCidr": ["<LAN prefixes>"], "Action": "pass" }
+```
+
+placed **before** the adapter proxy rule in `Forwarded.Rules`. If host egress on the bridge adapter
+also needs the exemption, the same rule goes into `Host.Rules` as well — no rule serves both domains,
+and rule order only decides within one domain. Without the exemption a remote upstream cannot reach
+192.168.x and the connection blackholes after the redirect handshake.
+
+**Configuration key names are PascalCase, and a wrongly-cased key fails the load.** The document goes
+through `JsonSerializer.Deserialize` with the source-generated context, which is case-sensitive:
+`"remoteCidr"` is not a selector with a default, it is an unusable setting. The loader's own
+no-section diagnostic states the rule — settings live under a `WinForward` object and key names are
+PascalCase, for example `WinForward.TcpFlowCapacity` (`ConfigurationLayering.cs`), and every other
+diagnostic names the rule's full path (`WinForward.Host.Rules[0].RemoteCidr`).

@@ -1,121 +1,169 @@
 # Directory Structure
 
-> How backend code is organized in this project.
+> Where backend code lives: the project graph, the layout, the file-length ceiling, and where a type
+> belongs when it has to move.
+
+## Scope / Trigger
+
+Read before adding a project, directory, namespace or file; before splitting a file; before
+extracting a shared test fake; before moving a type across layers.
 
 ---
 
-## Overview
+## Project Graph
 
-WinForward 是 .NET 10 解决方案（`WinForward.slnx`），按层分项目，依赖方向固定：
+7 production projects and 14 test projects in one .NET 10 solution (`WinForward.slnx`). Dependency
+direction is fixed:
 
 ```
-Cli → { Core, Configuration, Protocols, NdisApi, Runtime, Windows }
-Runtime → { Configuration, Core, NdisApi, Protocols, Windows }
+Cli     → { Core, Configuration, Protocols, NdisApi, Runtime, Windows }
+Runtime → { Core, Configuration, Protocols, NdisApi, Windows }
+Windows, Protocols, NdisApi, Configuration → Core
 ```
 
-依赖方向不得逆转；发现需要跨层移动类型时先确认方向再动手。
+Never reverse an edge. When a type appears to need one, confirm the direction before touching
+anything and move the type instead.
 
----
-
-## Directory Layout
+## Layout
 
 ```
 src/
-├── WinForward.Cli/            # 入口 + composition root（Program.cs；协调器组合器 TcpRedirectComposer/UdpProxyComposer）
-├── WinForward.Configuration/  # JSON DTO + ConfigurationLoader + ValidatedConfiguration
-├── WinForward.Core/           # 零依赖基元（Endpoint、IPAddressValue、FlowKey、IPPrefix…）
-├── WinForward.NdisApi/        # NDISAPI interop（Abi 声明 / Driver / Gate / Buffer）
-├── WinForward.Protocols/      # 纯协议编解码（Socks5Messages、Socks5UdpCodec）
-├── WinForward.Runtime/        # 捕获/调度运行时；内部分 4 个子命名空间（见下节）
-└── WinForward.Windows/        # Windows 专属（AdapterIdentity 等）
+├── WinForward.Cli/            # entry point + composition root (TcpRedirectComposer/UdpProxyComposer)
+├── WinForward.Configuration/  # JSON DTOs + ConfigurationLoader + ValidatedConfiguration
+├── WinForward.Core/           # dependency-free primitives (Endpoint, IPAddressValue, FlowKey, IPPrefix…)
+├── WinForward.NdisApi/        # NDISAPI interop (Abi declarations / Driver / Gate / Buffer)
+├── WinForward.Protocols/      # pure protocol codecs (Socks5Messages, Socks5UdpCodec)
+├── WinForward.Runtime/        # capture/dispatch runtime; five sub-namespaces (below)
+└── WinForward.Windows/        # Windows-only helpers (AdapterIdentity, owner tables)
 tests/
-├── Directory.Build.props      # 测试项目共享配置（TieredCompilation=false；显式 import 仓库根 props）
-├── WinForward.TestSupport/    # 跨测试项目共享的 fakes/builders（**非测试项目**：IsTestProject=false）
-├── WinForward.Core.Tests/     # 每个 src 层一个 xunit 项目（类-每-文件）；Runtime 按其子命名空间再分
-├── WinForward.Configuration.Tests/
-├── WinForward.Protocols.Tests/
-├── WinForward.NdisApi.Tests/
-├── WinForward.Windows.Tests/
-├── WinForward.Runtime.Capture.Tests/
-├── WinForward.Runtime.Flow.Tests/        # Runtime 根命名空间面（dispatcher/attribution/sweeper/diagnostics）
-├── WinForward.Runtime.TcpRedirect.Tests/
-├── WinForward.Runtime.UdpProxy.Tests/
-├── WinForward.Runtime.Socks5.Tests/
-├── WinForward.Integration.Tests/         # 跨层端到端 + Cli 组合（DurableCaptureBundle、composition）
-├── WinForward.Performance.Tests/         # 分配门控 + GC soak + benchmark harness 校验
-└── WinForward.Analyzers.Tests/           # 分析器规则测试（独立，不共享 TestSupport）
-benchmarks/                    # 基准宿主（BenchmarkDotNet 性能基准 + 稳定性 soak 运行器，同样受文件行数约定约束）
+├── Directory.Build.props      # shared test config (TieredCompilation=false; imports the root props)
+├── WinForward.TestSupport/    # shared fakes/builders — NOT a test project (IsTestProject=false)
+├── WinForward.<Layer>.Tests/  # Core, Configuration, Protocols, NdisApi, Windows
+├── WinForward.Runtime.<Sub>.Tests/  # Capture, Flow, Socks5, TcpRedirect, UdpProxy
+├── WinForward.Integration.Tests/    # cross-layer end-to-end + Cli composition
+├── WinForward.E2E.Tests/            # the E2E harness, over benchmarks/WinForward.E2E*
+├── WinForward.Performance.Tests/    # allocation gates + GC soak + benchmark-harness checks
+└── WinForward.Analyzers.Tests/      # analyzer rules (standalone; no TestSupport)
+benchmarks/
+├── WinForward.Benchmarks/     # BenchmarkDotNet hosts (Perf/ one class per file, Stability/ one scenario per file)
+├── WinForward.E2E/            # end-to-end harness (contract in measurement-harness.md)
+└── WinForward.E2E.Analysis/   # report generator for harness runs
 ```
 
-### 测试项目切分（2026-10-01 确立，任务 10-01-split-test-projects）
+Cli has no test project of its own: it is covered through `WinForward.Integration.Tests`.
+`WinForward.Runtime.Flow.Tests` carries the Runtime **root** namespace surface (dispatcher,
+attribution, sweeper, diagnostics); the other four mirror the sub-namespaces.
 
-此前全部 126 个测试类挤在单个 `WinForward.Core.Tests` 中，且该项目的 csproj 引用全部 7 个 `src/` 项目加 `benchmarks/`，依赖图读不出任何信息。现按被测生产层切分为 12 个 xunit 项目加一个共享支持库。
+### Test project split (2026-10-01, task 10-01-split-test-projects)
 
-- 测试项目与 `src/` 分层一一对应；`WinForward.Runtime` 内部既有的 4 个子命名空间各自成项，另设 `Runtime.Flow.Tests` 承接根命名空间面。
-- 每个测试项目只引用它真正编译依赖的生产项目：`ProjectReference` 集合 = 其源码 `using` 到的生产项目集合 ∪ `TestSupport`，不再保留"引用全部"的姿态。
-- 测试命名空间 = 项目名，`--filter` 与堆栈可直接定位到项目。
-- 命名空间变更会改变 C# 的**父命名空间隐式可见性**。旧树所有文件位于 `WinForward.Core.Tests`（父级 `WinForward.Core`），因此无需任何 `using` 就能解析 `Endpoint`、`FlowKey` 等 Core 类型；迁移后该祖先不再可达，必须显式补 `using`。这是拆分中改动量最大的一类编辑。
-- 生产项目对测试项目的 `InternalsVisibleTo` 由编译器证据决定，缺授权表现为 `CS0122`（及成员级 `CS1061`/`CS0117`/`CS7036`）。`CS0122` 会**掩蔽**其后的错误——不可访问的类型会让编译器停止分析使用它的表达式——因此授权落地后必须重新构建、再迭代一轮才能收敛。
-- `WinForward.TestSupport` 需**反向**给每个消费它的测试项目授权：其 fake、builder、harness 均为 internal，跨程序集使用需要 friend access。
+All 126 test classes used to live in a single `WinForward.Core.Tests`, whose csproj referenced every
+production project plus `benchmarks/` — a dependency graph that said nothing. The split established
+the mapping above.
 
-### Runtime 子命名空间（2026-08-29 确立）
+- A test project references only the production projects its own sources actually use:
+  `ProjectReference` = the set of projects named by its `using` directives ∪ `TestSupport`.
+- Test namespace = project name, so `--filter` and stack traces point straight at the project.
+- Changing namespaces changes C#'s **implicit parent-namespace visibility**. The old tree sat in
+  `WinForward.Core.Tests` (parent `WinForward.Core`), so `Endpoint`, `FlowKey` and friends resolved
+  with no `using` at all; after the split that ancestor is unreachable and every such file needs an
+  explicit `using`. This was the largest class of edit in the split.
+- `InternalsVisibleTo` from production to test is decided by compiler evidence. A missing grant
+  surfaces as `CS0122` (and member-level `CS1061`/`CS0117`/`CS7036`), and `CS0122` **masks** the
+  errors behind it — the compiler stops analysing expressions that use an unreachable type. Grant,
+  rebuild, and iterate once more before the tree converges.
 
-`WinForward.Runtime` 根只放调度核心与日志：`FlowDispatcher`（含 `CapturedFlowPacket`、`PacketCaptureMetadata`、`NativeFrameHandle`、`IPacketActionExecutor`、`ISelfTrafficGuard`）、`PacketFlowClassifier`、`IdleExpirySweeper`、`SelfTrafficRegistry`（含嵌套 `SelfTrafficKey`/`SelfTrafficToken`）、`RuntimeLogging`（共 15 个类型）。其余按域分子目录，目录名 = 命名空间后缀：
+### Runtime Sub-namespaces (2026-08-29)
 
-| 命名空间 | 内容 |
+`WinForward.Runtime` is one project split into five namespaces by domain; the directory name is the
+namespace suffix.
+
+| Namespace | Contents |
 |---|---|
-| `WinForward.Runtime.Capture` | NDIS 抓包：生命周期、适配器模式控制、包处理、再注入（`IPacketReinjector` 在此） |
-| `WinForward.Runtime.TcpRedirect` | TCP 全链路：redirect 表/会话/监听/注入、relay、frame 改写、`ClientResetInjector`（按类型依赖归 TCP，勿移回根） |
-| `WinForward.Runtime.UdpProxy` | UDP 会话、响应再注入，以及传输接缝契约（`UdpTransportContracts.cs`：`IUdpProxyTransport`/工厂/接收结果词汇） |
-| `WinForward.Runtime.Socks5` | TCP/UDP 共用的 SOCKS5 拨号与 UDP 传输实现（编解码仍在 `WinForward.Protocols`） |
+| `WinForward.Runtime` (root) | the vocabulary every group shares: `FlowDispatcher` and its packet types (`CapturedFlowPacket`, `PacketCaptureMetadata`, `NativeFrameHandle`, `IPacketActionExecutor`, `ISelfTrafficGuard`), `PacketFlowClassifier`, `SelfTrafficRegistry`, `IdleExpirySweeper`, `QuiescenceScope`, `SetupExecutor`, the flow-attribution pipeline, `InterceptionHealthMonitor`, `RuntimeCounters`/`RuntimeHeartbeat`/`RuntimeLogThrottle` |
+| `WinForward.Runtime.Logging` | the `[LoggerMessage]` definitions, one file per group (`TcpRedirectLog`, `UdpProxyLog`, `CaptureLog`, `FlowLog`) over `RuntimeLogging` |
+| `WinForward.Runtime.Capture` | NDIS capture: generation lifetime, adapter mode control, packet processing, reinjection (`IPacketReinjector` lives here) |
+| `WinForward.Runtime.TcpRedirect` | the TCP path: redirect table/session/listener/injection, relay, frame rewrite, `ClientResetInjector` |
+| `WinForward.Runtime.UdpProxy` | UDP sessions, response reinjection, and the transport seam (`UdpTransportContracts.cs`: `IUdpProxyTransport`, its factory and the receive-result vocabulary) |
+| `WinForward.Runtime.Socks5` | SOCKS5 dialing and UDP transports shared by the TCP and UDP paths (codecs stay in `WinForward.Protocols`) |
 
-- 新文件按域归组；根命名空间只进"所有组都引用的调度词汇"。
-- 跨组引用直接 `using`，允许的既有边：根→TcpRedirect（`TcpRedirectOutcome`）、根/Capture→两个 Coordinator、TcpRedirect/UdpProxy→Capture 的 `IPacketReinjector`、TcpRedirect→Socks5、UdpProxy→Socks5（关联池与控制连接的拨号）、Socks5→UdpProxy（实现传输接缝及其接收结果词汇；契约自 2026-10-05 由 UdpProxy 拥有，传输中性，数据报线上编解码在 `WinForward.Protocols`）。出现新的组间循环时先考虑挪类型再考虑加 using。
+- New files go to their domain; the root takes only vocabulary that every group references.
+- Cross-group references are direct `using`s. The edges in use today: the root → `TcpRedirect`,
+  `UdpProxy`, `Logging`; `Capture` → `TcpRedirect`/`UdpProxy` (via `NdisPacketActionExecutor`) and
+  `Logging`; `TcpRedirect`/`UdpProxy` → `Capture`'s `IPacketReinjector`, `Socks5`, `Logging`;
+  `Socks5` → `UdpProxy`; `Logging` → `TcpRedirect` (log fields typed by its enums). A new cycle is
+  first a question about where the type belongs, and only then a question about adding a `using`.
 
 ---
 
-## Module Organization
+## File Length Ceiling (2026-08-28; extended to benchmarks/ 2026-08-29)
 
-### 文件行数上限（2026-08-28 重构确立；2026-08-29 扩展到 benchmarks/）
+- **Every `.cs` file stays at or under 400 effective lines**, where an effective line is one that
+  carries code: blank lines and lines that are only a comment do not count. `wc -l` is a reference
+  number, never the criterion. The gate is
+  `python3 benchmarks/WinForward.E2E/scripts/effective-lines.py <paths>` (exit 1 when a file is over).
+- **`benchmarks/` obeys the same ceiling.** The host splits by scenario family: `Perf/` holds one
+  benchmark class per file; `BenchmarkShared.cs` sits at the project root in the root namespace and
+  is shared by `Perf/` and `Stability/`; `Stability/` holds one scenario per file plus
+  `StabilityShared.cs` (latency statistics, the product-event census) and `UdpBurstInstrumentation.cs`.
+  Two host-specific rules: BDN benchmark classes are never `sealed` (BDN generates a derived proxy),
+  and async benchmark methods carry the `Async` suffix (VSTHRD200 is fatal under `benchmarks/`).
+- Over the limit, split along a natural seam first — a cluster of static pure functions, a nested
+  type ready to be promoted, a `// ----` partition, a second top-level type — and only then invent a
+  module.
+- **Do not split for splitting's sake.** A split must not damage readability or performance.
+  `Cli/Program.cs` stays whole at 377 effective lines because it is one cohesive entry point; a tiny
+  type keeps its own file when it is widely shared — `WindowsAdapter.cs` is 7 effective lines and is
+  referenced from ~34 files.
+- **Meeting the ceiling is not a licence to stop.** A file near 400 lines splits along its existing
+  seams before it goes over, not after. Precedent (2026-10-04): `ConfigurationModels.cs` was kept
+  whole at 367 effective lines on the strength of the bullet above, then reached 375 while still
+  growing, and split on the loader/validator seam already drawn by `ConfigurationLimits` into
+  `ConfigurationModels.cs` + `ConfigurationRules.cs`.
 
-- 每个 .cs 文件**有效行数 ≤ 400**：有效行 = 非空、非注释行（`wc -l` 总行数仅作参考，不作为超标依据）。
-- **benchmarks/ 同样受此约束**（2026-08-29 用户决策，任务 08-29-benchmark-rewrite 起；2026-09-08 B5 调整组织）：基准宿主按场景族拆文件（`Perf/` 每基准类一文件；`BenchmarkShared.cs` 位于项目根、根 namespace，Perf 与 Stability 共用；`Stability/` 每 scenario 一文件 + `StabilityShared.cs` 共享延迟统计/产品事件 census + `UdpBurstInstrumentation.cs` burst 计量类型）。BDN 基准类不能 `sealed`（BDN 生成派生代理）；async 基准方法带 `Async` 后缀（VSTHRD200 在 benchmarks 下 fatal）。
-- 行数超标时的拆分顺序：先找自然接缝（static 纯函数簇、嵌套类提升、`// ----` 分区注释、第二顶层类型），再考虑新模块。
-- **不为拆而拆**：拆分不得严重损害可读性或性能。先例：`Cli/Program.cs`（397 有效行）达标后保持内聚不拆；`TcpRedirectLogging` 因被 4 个文件 15 处调用而保留独立文件，即使只有 25 有效行。
-- **达标不是免拆金牌**：文件逼近 400 行上限时仍要沿既有接缝拆，不要等到超标再动手。先例（2026-10-04，任务 10-04-host-forwarded-rule-split）：`ConfigurationModels.cs` 曾以「达标后不拆」为由保持内聚（其时 367 有效行），但加入规则域形状后升到 375 行并仍要再加，遂按 `ConfigurationLimits` 既有的「loader 留默认值与对象图、协作者管归一化校验」接缝抽出 `ConfigurationRules.cs`（现 230 + 179 有效行）。
+### Files and Types
 
-### 文件与类型的关系
+- **Filename = primary type name**, one primary type per file.
+- Co-location is allowed only for tight clusters: an interface beside its single implementation
+  (`IUdpResponseSink` inside `UdpResponseReinjector.cs`), interop declarations for one ABI directory,
+  or a record plus the static class that operates on it.
+- A second, unrelated top-level type is the split signal. Precedent: `Socks5Client.cs` held five
+  types and became `Socks5ControlConnection.cs` + `Socks5UdpTransport.cs`.
+- A seam type belongs next to its **implementation**, not next to its callers.
 
-- **文件名 = 主类型名**，一个文件一个主类型。
-- 允许的同文件簇（紧密关联才同居）：接口 + 唯一实现（如 `UdpResponseReinjector.cs` 内的 `IUdpResponseSink`）；同一 ABI 目录的互操作声明；record + 直接操作它的静态类。
-- 同文件多类型是例外不是常态；出现第二个"不相关"顶层类型时就是拆分信号（先例：`Socks5Client.cs` 曾装 5 个类型 → 拆为 `Socks5ControlConnection.cs` + `Socks5UdpTransport.cs`）。
-- 接缝归位：接口放在其**实现**旁边，不放在使用方文件里。
+### Split Discipline (behaviour-neutral refactors)
 
-### 拆分纪律（行为零变更重构）
-
-- 拆分 = 物理搬移 + 调整可见性，逻辑不动；lock body 逐字迁移，保持单锁语义（先例：`TcpRedirectSessionStore` 吸收原 coordinator 全部 `_gate` 锁状态）。
-- 死公共面删除前必须 rg 全仓（含 tests/、benchmarks/）复验零调用点；ABI P/Invoke 声明保留完整目录，即使托管包装层无人调用（先例：批量 `SendPacketsTo*` 删除、`NdisApiNative` P/Invoke 保留）。
-- pass-through 别名（一行转调）不设独立方法，内联到调用点（先例：`ReinjectExistingSynAsync`）。
+- A split is a physical move plus visibility changes; logic does not move with it. Lock bodies move
+  verbatim so single-lock semantics survive — precedent: `TcpRedirectSessionStore` absorbed the
+  coordinator's entire `_gate`-guarded state.
+- Deleting dead public surface requires a repo-wide `rg` (including `tests/` and `benchmarks/`) to
+  re-confirm zero call sites. P/Invoke declarations are the exception: a complete ABI directory stays
+  complete even where no managed caller exists (`SendPacketsTo*` was deleted; `NdisApiNative`'s
+  declarations stayed).
+- A pass-through alias — a one-line forwarder — gets no method of its own; inline it at the call
+  site (precedent: `ReinjectExistingSynAsync`, since inlined).
 
 ---
 
 ## Naming Conventions
 
-- 产品代码文件 = 主类型名 PascalCase；xunit 测试文件 = 测试类名 + `Tests` 后缀，按主题命名（`TcpProxyCoordinatorLifecycleTests`、`ConfigurationValidationTests`）。
-- 测试 fake/helper 组织：
-  - 仅单文件使用 → 留在该文件内（private nested 或文件私有均可）。
-  - **≥ 2 个测试文件重复 → 提取到 `tests/WinForward.TestSupport/`**，按类别分组文件（`ChecksumMath`、`FrameBuilders`、`FlowBuilders`、`UdpTransportFakes`、`PacketReinjectorFakes`、`TcpCoordinatorFakes`、`Socks5TestServer`…）。该库是**非测试项目**（显式 `<IsTestProject>false</IsTestProject>`，因为 `xunit.core.props` 会无条件把它设为 true，从而让 `dotnet test` 对库启动测试宿主并以 exit 1 中止整轮），供各测试项目 `ProjectReference`。
-  - TestSupport 的文件使用自身 namespace（`WinForward.TestSupport`，与项目名一致，无 `.TestHelpers` 后缀）；fake 从 private nested 提升为 internal。
-  - fake 为 internal，因此**每个消费它的测试项目**都需在 `WinForward.TestSupport.csproj` 获得 `InternalsVisibleTo`。该库自行声明 `xunit` 包引用（部分 helper 使用 `Assert`）。
-  - 若 TestSupport 自身需要访问生产代码的 internal 接缝，在对应生产项目声明 `InternalsVisibleTo("WinForward.TestSupport")`；2026-10-01 实测仅 `Runtime`（示例：`Socks5UdpTransportFactory`/`Socks5UdpTransport`）与 `Windows`（`OwnerTable`/`OwnerTableKind`）有此需要。
-  - 合并重复 fake 时取行为超集（先例：`FakeReinjector` 同时记录 `DeviceFlags` 与 `Flags` 两个 flag 平面；`TrackingSocket` 支持可选 SocketType/ProtocolType）。
-
----
-
-## Examples
-
-- 深模块拆分范例：`TcpProxyCoordinator.cs`（原 1158 行）→ coordinator（入口路由）+ `TcpRedirectSessionStore`（单锁并发核心）+ `TcpRedirectSetup` + `TcpRedirectAcceptor` + `ClientResetInjector` + `TcpFrameRewriter`/`TcpSequenceObservation`（static 纯簇，OS 无关可测）。
-- 深模块拆分范例（UDP，2026-09-08）：`UdpProxyCoordinator.cs`（原 471 有效行）→ coordinator（槽字典 + 入场 + 拆除）+ `UdpSetupCooldownTable`（setup 失败冷却，叶子锁）+ `UdpSetupQueueBudget`（全局 setup 字节预算，仅 Interlocked）+ `UdpSessionSetup`（dial/claim/construct/flush 管线，经 `IUdpSessionSlotHost` 接缝回协调器门）+ `UdpProxyLogging`（static 事件格式化）——镜像 TCP 1158→5 先例；协调器 `_gate` 仍是槽状态的唯一门。
-- 深模块参数与诊断范例（2026-09-19，任务 09-19-design-deepening-refactors）：coordinator/pump 的可选依赖收敛为 options record（`TcpRedirectOptions`/`UdpProxyOptions`/`NdisCapturePumpOptions`，测试缝成员 `internal init` + `InternalsVisibleTo`）；只读指标收敛为快照 record（`TcpRedirectDiagnostics`/`UdpProxyDiagnostics`/`NdisPumpDiagnostics`，生产消费面如 `HoldsFlow` 保持直连）；`IUdpSessionSlotHost` 接口与其实现（coordinator）同目录；`UdpSessionSetup` 的直接测试以 fake host 构造（无需真 coordinator，`UdpSessionSetupTests` 先例）；Cli 组合拆入 `TcpRedirectComposer`/`UdpProxyComposer`（composition record 传递 bundle 创建的池，bundle 保留创建/回滚/拆除顺序）。
-- 接缝归位范例：`IUdpResponseSink` 从 `UdpProxyCoordinator.cs` 移到唯一实现所在的 `UdpResponseReinjector.cs`。
-- 重复消除范例：校验和数学（`Sum`/`Finish`/`Set*Checksum`）与帧构造器统一进 `tests/WinForward.TestSupport/ChecksumMath.cs` / `FrameBuilders.cs`，调用点留 1 行 wrapper 固定默认参数。
+- Production files are the primary type in PascalCase. xunit files are the test-class name plus a
+  `Tests` suffix, named by subject (`TcpProxyCoordinatorLifecycleTests`,
+  `ConfigurationValidationTests`).
+- Test fakes and helpers:
+  - Used by one file → keep it there (private nested or file-private both fine).
+  - **Used by two or more test files → move it to `tests/WinForward.TestSupport/`**, grouped by
+    category (`ChecksumMath`, `FrameBuilders`, `FlowBuilders`, the fake families). TestSupport is a
+    **non-test project** with an explicit `<IsTestProject>false</IsTestProject>`: `xunit.core.props`
+    sets it to true unconditionally, which makes `dotnet test` start a test host for the library and
+    abort the whole run with exit 1.
+  - TestSupport files use their own namespace (`WinForward.TestSupport`, matching the project name)
+    and promote the fakes from private nested to `internal`.
+  - Because the fakes are `internal`, every consuming test project needs an `InternalsVisibleTo` in
+    `WinForward.TestSupport.csproj`. The library declares its own `xunit` reference for the helpers
+    that assert.
+  - When TestSupport itself needs a production internal seam, that production project grants
+    `InternalsVisibleTo("WinForward.TestSupport")`. As of 2026-10-01 only `WinForward.Runtime` does;
+    `WinForward.Windows` grants its owner-table seam to `WinForward.Benchmarks` instead.
+  - Merging duplicate fakes takes the behavioural superset of the two (precedent: `FakeReinjector`
+    records both the `DeviceFlags` and `Flags` planes; `TrackingSocket` takes an optional socket
+    type/protocol).

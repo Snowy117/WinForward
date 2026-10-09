@@ -264,7 +264,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
         }
     }
 
-#pragma warning disable RCS1229 // Deliberate non-async warm entry (hot-path.md #3): the steady-state send path must not pay an async state machine; a synchronous failure before the returned ValueTask is part of the warm contract and handled by the dispatcher.
+#pragma warning disable RCS1229 // Deliberate non-async warm entry (hot-path.md → warm-path-dispatch.md, "No async state machines on the steady-state path"): the steady-state send path must not pay an async state machine; a synchronous failure before the returned ValueTask is part of the warm contract and handled by the dispatcher.
     public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken)
 #pragma warning restore RCS1229
     {

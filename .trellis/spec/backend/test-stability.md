@@ -1,9 +1,9 @@
 # Test Stability: publication order, real synchronization points, and process-wide state
 
-> How the suite's concurrent tests must be written so that a failure means the product is wrong,
-> not that the host scheduled something unluckily. Derived from the 2026-10-06 flaky sweep, which
-> reproduced nine failing signatures across 44 loaded full-suite runs and fixed every one that was
-> a property of the tests rather than of the host.
+> How the suite's concurrent tests must be written so that a failure means the product is wrong, not
+> that the host scheduled something unluckily. Derived from the 2026-10-06 flaky sweep: nine failing
+> signatures reproduced across 44 loaded full-suite runs, every one a property of the tests rather
+> than of the host.
 
 ---
 
@@ -15,16 +15,17 @@
 - **Also applies** to the shared fakes and harnesses under `tests/WinForward.TestSupport/`: a fake
   that publishes state from a product thread is part of the contract, not scaffolding.
 - **Not in scope**: the residual exact-gate allocation lump, which is a host property of this
-  machine — see `hot-path.md` §"The residual exact-gate lump".
+  machine — see [allocation-gate-host-lumps.md](./allocation-gate-host-lumps.md), "Addendum
+  (2026-10-06 flaky sweep)".
 
 ## 2. Contracts
 
 ### 2.1 A fake's collection is read through the same lock that writes it
 
-`List<T>.Add` stores `_size` before the element, so an unlocked `Count`-then-index read can observe a
-count that includes a slot whose element is still `null` — `Assert.Single` then returns `null` and the
-following member access throws `NullReferenceException`. Every collection that a product thread
-appends to must be exposed as a snapshot property taken under the writer's lock:
+`List<T>.Add` shows the count before the element, so an unlocked `Count`-then-index read can see a
+count that includes a slot whose element is still `null` — `Assert.Single` returns `null` and the
+following member access throws `NullReferenceException`. Every collection a product thread appends to
+must be exposed as a snapshot property taken under the writer's lock:
 
 ```csharp
 // Wrong: the setup worker appends from its own thread; the reader's Count-then-index pair is not atomic.
@@ -34,27 +35,26 @@ lock (Transports) Transports.Add(transport);          // writer locks...
 await WaitForAsync(() => factory.Transports.Count == 1);
 var transport = Assert.Single(factory.Transports);     // ...reader does not -> possible null
 
-// Correct: one lock, one consistent snapshot (UdpTransportFakes.RecordingTransportFactory shape).
+// Correct: one lock, one consistent snapshot (RecordingTransportFactory's shape).
 private readonly Lock _gate = new();
 private readonly List<FakeTransport> _transports = [];
 public IReadOnlyList<FakeTransport> Transports { get { lock (_gate) return [.. _transports]; } }
 ```
 
-Landed on `FakeTransportFactory`, `ImmediateFaultTransportFactory`, `GatedTransportFactory`,
-`DelayedTransportFactory`, `CollidingAliasTransportFactory` and `UdpSessionRetentionTests`'
-`ExchangeTransportFactory`; the `List<T>`-only members (`Exists`, `TrueForAll`) at their call sites
-became `Any`/`All` over the snapshot. `FakeTransport.Sent` already locked on both sides and is the
-other accepted shape.
+A snapshot replaces the `List<T>`-only members (`Exists`, `TrueForAll`) at the call site with
+`Any`/`All` over it; `FakeTransport.Sent` (a `List<T>` locked on both sides) is the other accepted
+shape. Exposed this way: `FakeTransportFactory`, `RecordingTransportFactory`,
+`ImmediateFaultTransportFactory`, `GatedTransportFactory`, `DelayedTransportFactory`,
+`CollidingAliasTransportFactory`, and `UdpSessionRetentionTests`' `ExchangeTransportFactory`.
 
 ### 2.2 Synchronize on the state you assert, not on a proxy for it
 
 `CaptureRunnerHarness.WaitForGenerationStartedAsync` waited only for `FakeCaptureGeneration.Started`,
-which is latched at the top of the generation's run — **before** `InstallGenerationAsync` publishes
-the scope through the composed `onScopeInstalled` callback. Facts asserting on `InstalledScopes` or on
-the recorded event timeline could therefore read a state whose writes had not happened yet
-(`Expected 2 / Actual 1`, or a timeline missing its last two entries). The harness now publishes an
-install counter **after** the composed callback returns and `WaitForGenerationStartedAsync` waits for
-both:
+latched at the top of the generation's run — **before** `InstallGenerationAsync` publishes the scope
+through the composed `onScopeInstalled` callback. A fact asserting on `InstalledScopes` or on the
+recorded event timeline could therefore read a state whose writes had not happened yet (`Expected 2 /
+Actual 1`, or a timeline missing its last two entries). The harness now publishes an install counter
+**after** the composed callback returns, and `WaitForGenerationStartedAsync` waits for both:
 
 ```csharp
 await AsyncTestExtensions.WaitForAsync(() => Generations.Generations.Count > index
@@ -62,16 +62,13 @@ await AsyncTestExtensions.WaitForAsync(() => Generations.Generations.Count > ind
 await AsyncTestExtensions.WaitForAsync(() => Volatile.Read(ref _installedScopes) > index).ConfigureAwait(false);
 ```
 
-Rule: when a fact needs "generation N is installed", wait for the install, not for a latch that fires
-earlier in the same pipeline.
-
 ### 2.3 Poll monotonic state monotonically
 
 `Generations.Generations.Count` only ever grows, so `WaitForAsync(() => Count == 3)` samples a
-*transient* value: the storm guard (`minimumRefreshInterval`) spaces consecutive generations, and a
-continuation starved past that interval observes the count after it already moved on — the predicate
-is then never true again and the fact dies on the 10 s budget instead of on its assertion. Use the
-monotonic form:
+*transient* value: the storm guard (`minimumRefreshInterval`, 50 ms in this harness against the
+runner's 1 s default) spaces consecutive generations, and a continuation starved past that interval
+observes the count after it already moved on — the predicate is then never true again and the fact
+dies on the 10 s budget instead of on its assertion. Poll monotonically instead:
 
 ```csharp
 await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Count >= 3);
@@ -80,9 +77,9 @@ await AsyncTestExtensions.WaitForAsync(() => harness.Generations.Generations.Cou
 ### 2.4 A scripted fault is authoritative over a racing cancellation
 
 `Task.WaitAsync(ct)` completes when either the source completes **or** the token fires, and the token's
-callback can win the internal race even when the source completed first. A fake that holds a scripted
-fault behind a release gate must therefore treat the release as decisive and only let cancellation
-win while the release is still pending:
+callback can win the internal race even when the source completed first. A fake holding a scripted
+fault behind a release gate must treat the release as decisive and let cancellation win only while the
+release is pending:
 
 ```csharp
 try
@@ -91,7 +88,7 @@ try
 }
 catch (OperationCanceledException) when (!release.Task.IsCompleted)
 {
-    throw;                       // the fault never landed: this really is a cancellation
+    throw;                       // filtered out when the release landed; then control falls to the throw below
 }
 
 throw startupFault;              // the release landed: the fault is the outcome, whoever ran first
@@ -103,11 +100,11 @@ loaded suite runs** once the interleaving was staged.
 
 ### 2.5 Stage the interleaving, do not hope for it
 
-A fact that pins a race must force the interleaving it asserts. The original
+A fact that pins a race must force the interleaving it asserts.
 `RefreshDemandRacingAStartupStaleHandleFaultIsAbsorbedIntoARebuild` signalled a refresh demand and
-released the fault on the next statement, leaving the winner to the scheduler — the only thing pacing
-the runner was the 50 ms wall-clock storm guard, so a test thread starved past it lost the race and
-the fact failed with "no absorbed startup fault". It now parks the runner deterministically:
+released the fault on the next statement, leaving the winner to the scheduler; the only thing pacing
+the runner was the storm guard, so a test thread starved past it lost the race and the fact failed with
+"no absorbed startup fault". It now parks the runner deterministically:
 
 ```csharp
 harness.Enumeration.NextEnumerationGate = refreshRead;   // consumed inside ProcessRefreshDemandAsync's Enumerate()
@@ -117,16 +114,16 @@ finally { release.TrySetResult(); refreshRead.TrySetResult(); }   // both releas
 ```
 
 The runner is therefore parked *after* the demand was consumed and *before* the outgoing generation is
-stopped; the fault lands inside that window, so the stop always awaits an already-faulted generation.
-Releasing both gates from `finally` is part of the shape: a poll that times out must not strand the
-parked read and hang the harness's disposal.
+stopped, which is the window the fault has to land in. Releasing both gates from `finally` is part of
+the shape: a poll that times out must not strand the parked read and hang the harness's disposal.
 
 ### 2.6 Never re-read a field the tested code clears
 
 `SetupExecutorRejectsBeyondRingCapacityAndRecyclesTheRejectedItem` released a worker's gate and then
 re-read `blocker._completion` — a field the worker nulls through `Reset()` in its `finally` on the way
-out. Measured as a `NullReferenceException` on that line in a loaded full-suite run. Capture the
-reference while the code under test is still parked and await the captured one:
+out (`SetupExecutor.Execute`). Measured as a `NullReferenceException` on that line in a loaded
+full-suite run. Capture the reference while the code under test is still parked and await the captured
+one:
 
 ```csharp
 var blockerCompletion = blocker._completion!;   // only readable while the gate is closed
@@ -153,29 +150,32 @@ A shared well-known id (`"id-a"`) stays fine for classes that assert only on the
 xUnit parallelises across collections, so every fact whose assertion is an exact — or zero — delta on
 a process-wide counter must share one collection with **every** class that can move that counter.
 A class can join exactly one collection, so when a class moves two counters the counters share a
-collection:
+collection. Each collection is owned by its `CollectionDefinition` type in
+`tests/WinForward.Runtime.UdpProxy.Tests/`:
 
-| Counter | Collection | Members |
+| Counter (`RuntimeCounters` constant) | Collection | Members |
 |---|---|---|
-| `udpLocalTargetFailures`, `udpResponseSourceMismatch` | `udp-process-counters` | `LocalUdpTransportTests` (writes both), `LocalUdpTransportRetentionTests`, `UdpResponseSourceMismatchTests` |
-| `udpCapacityRejections` | `udp-capacity-rejections` | `UdpProxyCoordinatorTests` (exact delta), `UdpProxyCoordinatorLifecycleTests` (drives a capacity-1 coordinator to refusal while polling) |
-| `udpAssociationLost` | `udp-association-lost` | unchanged |
+| `UdpLocalTargetFailures`, `UdpResponseSourceMismatch` | `udp-process-counters` | `LocalUdpTransportTests` (writes both), `LocalUdpTransportRetentionTests`, `UdpResponseSourceMismatchTests` |
+| `UdpCapacityRejections` | `udp-capacity-rejections` | `UdpProxyCoordinatorTests` (exact delta), `UdpProxyCoordinatorLifecycleTests` (drives a capacity-1 coordinator to refusal while polling) |
+| `UdpAssociationLost` | `udp-association-lost` | `UdpAssociationLossTests`, `UdpUotFlowLifecycleTests`, `UdpReceiveFaultClassificationTests` |
 
 ### 2.9 Budgets: aligned, bounded, and never wall-clock
 
 - **Fixed `WaitAsync` budgets align with `AsyncTestExtensions.WaitForAsync`'s 10 s default.** The
   suite's own comment records that a loaded host can starve queued continuations for *seconds*; a 2 s
   or 5 s budget turns that into a false failure. Aligned: `UdpSetupQueueBudgetTests`,
-  `UdpProxySessionTests`, `UdpProxyCoordinatorLifecycleTests` (`WaitUntilTrueAsync` now polls 1 000 ×
-  10 ms), the `NdisCaptureResilienceTests` degradation waits, `AdapterListWatcherTests`.
-- **No unbounded waits.** `WaitAsync(CancellationToken.None)` / `ReadAsync(CancellationToken.None)`
-  turns a product defect into a hung test host (this repository has already lost 41 minutes to one
-  hang). Bounded: the receive waits in `UdpReceiveResilienceTests`, the sweep steps in
+  `UdpProxyCoordinatorLifecycleTests` (`WaitUntilTrueAsync` polls 1 000 × 10 ms), the
+  `NdisCaptureResilienceTests` degradation waits, `AdapterListWatcherTests`.
+- **No unbounded waits on a product-controlled path.** `WaitAsync(CancellationToken.None)` /
+  `ReadAsync(CancellationToken.None)` turns a product defect into a hung test host (this repository
+  has already lost 41 minutes to one hang). Bounded: the receive waits in `UdpReceiveResilienceTests`,
+  the sweep steps in
   `UdpProxyCoordinatorLifecycleTests.ExpirySnapshotDoesNotDisposeSessionWhoseReceiveRefreshesActivity`.
-- **Dispatch contracts are state, not duration.** `FirstDatagramDoesNotAwaitAStalledSetupAndDatagramsRelayInFifoOrder`
-  asserted `stopwatch.Elapsed < 3 s` to prove the dispatcher did not await the setup; that gates the
-  host's scheduling. It now asserts the state that proves the same thing — the stall gate is still
-  closed, so no transport can exist yet — whatever the host did to the test thread.
+- **Dispatch contracts are state, not duration.**
+  `FirstDatagramDoesNotAwaitAStalledSetupAndDatagramsRelayInFifoOrder` asserted
+  `stopwatch.Elapsed < 3 s` to prove the dispatcher did not await the setup; that gates the host's
+  scheduling. It now asserts the state that proves the same thing — the stall gate is still closed, so
+  no transport can exist yet — whatever the host did to the test thread.
 - **Publish before the count.** `LoopbackUdpResponder` incremented `ReceivedCount` before writing
   `LastPayload`, so a fact that waited for the count could still read a null payload; the payload is
   written first.
@@ -185,13 +185,13 @@ collection:
 - **A worker thread ends on cancellation, it does not throw.** `BlockingCollection<T>.GetConsumingEnumerable(ct)`
   signals a cancelled consuming token by **throwing** `OperationCanceledException` out of the
   enumeration; only `CompleteAdding` ends it cleanly. A thread body that enumerates without a `catch`
-  therefore dies with an unhandled exception the moment its budget fires — and an unhandled exception
-  on any thread kills the **test host**, aborting the run and silently dropping the results of every
-  test that had not reported yet (measured on the E3-a check: the 276-test assembly reported 272, and
-  the keep-alive scaffold's own result was lost with it). A fact whose assertion abandoned a round
-  before `CompleteAdding` — a timeout, a staging assert — leaves exactly such a thread parked until its
-  budget, so the crash lands seconds later, on the strength of an unrelated test's failure. Wrap the
-  enumeration, or end the worker by completing the collection rather than by cancelling its token.
+  dies with an unhandled exception the moment its budget fires — and an unhandled exception on any
+  thread kills the **test host**, aborting the run and silently dropping the results of every test that
+  had not reported yet (measured on the E3-a check: the 276-test assembly reported 272 and lost the
+  keep-alive scaffold's own result with it). A fact whose assertion abandoned a round before
+  `CompleteAdding` leaves exactly such a thread parked until its budget, so the crash lands seconds
+  later, on the strength of an unrelated test's failure. Wrap the enumeration, or end the worker by
+  completing the collection rather than by cancelling its token.
 
   ```csharp
   // Wrong: the token ends this loop by throwing, on a thread of its own.
@@ -231,15 +231,12 @@ collection:
 ## 4. Tests Required — the repeat-run proof
 
 Fixes of this class cannot be proven by one green run. The accepted evidence is a **loaded** soak:
-two `dotnet test WinForward.slnx -c Release` streams running concurrently (which is also the condition
-that reproduced every signature), plus a focused high-frequency stream over the affected class, with
-every round's padded summary and every failure's assertion text recorded. A failure anywhere is
-diagnosed, not averaged away.
-
-Recorded on the 2026-10-06 sweep (`master` + the fix set). "Before" is the discovery phase — 20 serial
-baseline rounds plus 24 concurrently loaded rounds, 44 loaded runs; "after" is 48 loaded full-suite
-runs (2 concurrent streams) plus the focused streams named per row. Every round's padded summary and
-every failure's assertion text are recorded under `/tmp/wf-*` for the session.
+two `dotnet test WinForward.slnx -c Release` streams running concurrently (the condition that
+reproduced every signature), plus a focused high-frequency stream over the affected class. Every
+round's padded summary and every failure's assertion text are recorded under `/tmp/wf-*`; a failure
+anywhere is diagnosed, not averaged away. Table recorded on the 2026-10-06 sweep (`master` + the fix
+set): "before" is the discovery phase — 20 serial baseline rounds plus 24 concurrently loaded rounds;
+"after" is 48 loaded full-suite runs (2 concurrent streams) plus the focused streams named per row.
 
 | Signature | Before (44 loaded runs) | After |
 |---|---:|---|
@@ -247,10 +244,7 @@ every failure's assertion text are recorded under `/tmp/wf-*` for the session.
 | `FlowContextMetadataTests.ClaimedFlowCarriesTheInternedAdapterAndProcessMetadata` | 1 | **0** (48 loaded runs) |
 | `LayeredCaptureRunnerRefreshTests.RefreshDemandRacingAStartupStaleHandleFaultIsAbsorbedIntoARebuild` | 1 | **0** (24 loaded runs + 42 whole-project Capture.Tests runs); the staged interleaving first exposed a wrong-sign filter in the fake, which read **7 in 32** runs until corrected |
 | `Socks5ControlConnectionDeferredHandshakeTests.DisposeJoinsAParkedCompletion` (surfaced by the soak) | 2 in 24 | **0** (24 loaded runs + 52 whole-project Socks5.Tests runs) |
-| `SweepAllocationGateTests.*` — host residual, **not** a test property | 3 | 7 in ~125 loaded runs (≈6 %): recorded in `hot-path.md` §6, gates unchanged |
-
-Gate results on the frozen tree: Release build **0 warnings**, `dotnet format --severity info
---verify-no-changes` **exit 0 with empty output**, `jb inspectcode` **0 `<Issue>` entries**.
+| `SweepAllocationGateTests.*` — host residual, **not** a test property | 3 | 7 in ~125 loaded runs (≈6 %): [allocation-gate-host-lumps.md](./allocation-gate-host-lumps.md), "Addendum (2026-10-06 flaky sweep)", gates unchanged |
 
 ## 5. Wrong vs Correct
 

@@ -183,7 +183,7 @@ public sealed class WarmPathGateTests
         Assert.True(table.TryResolveWarm(key, out _), "the gate relies on a warm slot, not on a false miss");
 
         // Probe batches until the per-thread counter reads exactly zero on an unchanged thread
-        // (hot-path.md's window contract); the loop is bounded, so a genuine per-call allocation fails
+        // (allocation-gates.md's window contract); the loop is bounded, so a genuine per-call allocation fails
         // the fact instead of passing.
         var stabilized = false;
         for (var attempt = 0; attempt < 8 && !stabilized; attempt++)

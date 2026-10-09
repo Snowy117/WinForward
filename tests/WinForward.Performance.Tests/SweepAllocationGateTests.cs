@@ -21,7 +21,7 @@ namespace WinForward.Performance.Tests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Every fact here follows the shape in <c>hot-path.md</c> §"Allocation-gate stability": a bounded run
+/// Every fact here follows the shape in <c>allocation-gates.md</c> §"Allocation-gate stability": a bounded run
 /// of probe batches that must each read an <em>exactly zero</em> per-thread delta on an unchanged
 /// thread before the measured window opens, then one measured window on the same managed thread, then
 /// <c>Assert.Equal(0, allocated)</c> — exact, never a threshold. Assertions stay outside the window
@@ -69,7 +69,7 @@ public sealed class SweepAllocationGateTests
         // returns every state to the pool, so once a sweep reads an exactly-zero delta on one thread
         // the measured sweep sees steady state rather than one-time growth. Requiring the exact zero
         // here is what keeps a genuine sweep allocation failing rather than stabilizing
-        // (hot-path.md, "Allocation-gate stability").
+        // (allocation-gates.md, "Allocation-gate stability").
         const int maximumProbeSweeps = 8;
         var stabilized = false;
         for (var sweep = 0; sweep < maximumProbeSweeps && !stabilized; sweep++)

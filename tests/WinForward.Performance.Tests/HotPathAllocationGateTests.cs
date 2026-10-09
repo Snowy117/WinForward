@@ -373,7 +373,7 @@ public sealed class HotPathAllocationGateTests
 
         // The measured window drives a synchronously-completing dispatch, so no continuation can
         // migrate and the per-thread reading is valid; the thread is asserted unchanged to keep
-        // that property honest (hot-path.md, "An allocation gate must open only after its path is
+        // that property honest (allocation-gates.md, "An allocation gate must open only after its path is
         // ready, and must verify it stayed on one thread").
         var measuredThreadId = Environment.CurrentManagedThreadId;
         var before = GC.GetAllocatedBytesForCurrentThread();

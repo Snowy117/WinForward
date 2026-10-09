@@ -6,7 +6,7 @@ namespace WinForward.Runtime.TcpRedirect;
 /// The observability half of <see cref="TcpProxyCoordinator"/>: the read-only counter snapshot and
 /// the periodic capacity-rejection summary the idle sweeper drives. One coordinator type split
 /// across files purely for the repository's effective-line budget (directory-structure.md,
-/// "文件行数上限"); every member keeps its single source of truth in the coordinator's own state —
+/// "File Length Ceiling"); every member keeps its single source of truth in the coordinator's own state —
 /// this file only reads it.
 /// </summary>
 // ReSharper disable once ClassNeverInstantiated.Global // The type is instantiated outside this partial file through target-typed new (TcpRedirectComposer.cs:42, TcpCoordinatorFakes.cs:105); only its constructor-less diagnostics part lives here.

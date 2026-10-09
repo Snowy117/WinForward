@@ -13,9 +13,9 @@ namespace WinForward.E2E.Tests.Lanes;
 /// </summary>
 /// <remarks>
 /// The offer loop offers only while its window is open, so the window is sized to absorb a host stall
-/// of hundreds of milliseconds (`test-stability.md` §2.9) rather than to be consumed by one, and both
-/// warm-ups keep first-call compilation out of it. The reply is staged past the deadline by far less
-/// than the drain bound, so it is booked inside the drain and can never outlive it.
+/// of hundreds of milliseconds (`test-stability.md`, "Budgets") rather than to be consumed by one;
+/// both warm-ups keep first-call compilation out of it. The reply is staged past the deadline by far
+/// less than the drain bound, so it is booked inside the drain and can never outlive it.
 /// </remarks>
 public sealed class LatencyArmDrainSamplingTests
 {

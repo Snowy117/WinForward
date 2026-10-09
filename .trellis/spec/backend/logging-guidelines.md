@@ -3,159 +3,158 @@
 ## Overview
 
 Runtime logging uses `Microsoft.Extensions.Logging`. Every log statement is a `[LoggerMessage]`
-source-generated method, so the level check lives in generated code and no call site hand-writes
-`IsEnabled`. The console sink is `Microsoft.Extensions.Logging.Console`; the project owns no
-formatter and no logger interface. Its configuration is the standard `Logging` section of the
-operator's `appsettings.json`, and the project adds no logging key of its own.
+source-generated method, so the level check lives in generated code and a call site hand-writes
+`IsEnabled` only in the two exceptions the rules below name. The console sink is
+`Microsoft.Extensions.Logging.Console`; the project registers no formatter and owns no logger
+interface. Its configuration is the standard `Logging` section of the merged configuration — the
+operator's `appsettings.json` beside the executable, then `--config` — and the project adds no
+logging key of its own. Read this before adding a log statement or a `Logging` key.
 
-Logging is observational and must never participate in packet disposition, fail-closed, relay, or
+Logging is observational: it must never participate in packet disposition, fail-closed, relay, or
 shutdown decisions.
 
 ## Composition
 
-- `src/WinForward.Runtime/Logging/RuntimeLogging.cs` builds the one `ILoggerFactory` from the
-  `Logging` section the composition root hands it: `AddConfiguration(section)` then `AddConsole()`,
-  plus **one** `PostConfigure<ConsoleLoggerOptions>` action that owns every project default. It
-  forces `LogToStandardErrorThreshold = LogLevel.Trace` unconditionally and supplies the timestamp
-  format and the formatter name **only where the configuration is silent**.
-  `IPostConfigureOptions<T>` runs after every `IConfigureOptions<T>`, so the invariant and the
-  defaults are order-independent and an explicit operator value still wins.
-- The same type owns `RuntimeLogging.TryValidate`, the pre-flight **both `run` and `validate`** run
-  over the merged `Logging` section before the factory is built. It reports the two values MEL
-  leaves undiagnosed — an unparseable `LogLevel` entry and an unregistered `FormatterName` — as
-  `ConfigDiagnostic`s, which the CLI prints to stderr with exit code 1. `validate` also builds the
-  factory a run would build, so a malformed formatter option (a value MEL's binder throws on)
+- Build the one `ILoggerFactory` in `RuntimeLogging.CreateLoggerFactory`
+  (`src/WinForward.Runtime/Logging/RuntimeLogging.cs`): `AddConfiguration(<Logging section>)`, then
+  `AddConsole()`, then the `PostConfigure` actions. `IPostConfigureOptions<T>` runs after every
+  `IConfigureOptions<T>`, so a project default applies only where the operator was silent and never
+  depends on registration order.
+- Force `LogToStandardErrorThreshold = LogLevel.Trace` unconditionally: the destination is an
+  invariant rather than a setting. `WinForward adapters` writes a TSV table and `validate` writes
+  its source list and confirmation on stdout, so no configuration value may move a record there.
+- Supply the remaining defaults only where the configuration is silent:
+  `PostConfigure<ConsoleLoggerOptions>` supplies the formatter name,
+  `PostConfigure<SimpleConsoleFormatterOptions>` and `PostConfigure<JsonConsoleFormatterOptions>`
+  supply the timestamp formats and the JSON encoder.
+- Run `RuntimeLogging.TryValidate` as a pre-flight for both `run` and `validate`, before the factory
+  is built. It reports the two values MEL leaves undiagnosed — an unparseable `LogLevel` and an
+  unregistered `FormatterName` — as `ConfigDiagnostic`s, which the CLI prints to stderr with exit
+  code 1.
+- Build in `validate` the factory a run would build, so a formatter option MEL's binder throws on
   surfaces as that command's error rather than as an unhandled exception mid-run.
-- Runtime logging goes to **stderr only**, and that destination is an **invariant rather than a
-  setting**. `WinForward adapters` writes a TSV table on stdout, and `validate` writes its source
-  list and its confirmation there; a log line must never share that stream. No configuration value
-  can move a record to stdout — the post-configure action above fixes the threshold after the
-  framework has read the file.
-- The CLI holds the factory in a `using`, because `ConsoleLogger` writes through a background
-  queue that `Dispose` drains.
-- Components receive a pre-categorised `ILogger` from the composition root, and the category is
-  the **fully-qualified name of the type that owns the logger**, which is MEL's documented
-  convention (OTel phrases it as dot-separated UpperCamelCase, usually satisfied by the FQCN) and
-  what makes `Logging:LogLevel:<category>` overrides worth configuring. Create it with
-  `loggerFactory.CreateLogger<Owner>()`; the CLI's own startup lines use
-  `CreateLogger(typeof(Program).FullName!)` because `Program` is static and cannot be a type
-  argument. One logger per **module owner**, not per class: a subsystem that receives an `ILogger`
-  through its options record (the UDP and TCP coordinators and everything they construct) shares
-  that owner's category. Giving every class its own category means threading an `ILoggerFactory`
-  through those options records instead of an `ILogger` — deliberately deferred, not forgotten.
+- Hold the factory in a `using` in the CLI: MEL's console provider writes through a background
+  queue and drains it on dispose.
+- Give each component a pre-categorised `ILogger` from the composition root, created with
+  `loggerFactory.CreateLogger<Owner>()`. The category is the fully-qualified name of the type that
+  owns the logger — MEL's documented convention, and what makes `Logging:LogLevel:<category>`
+  overrides worth configuring.
+- Use `CreateLogger(typeof(Program).FullName!)` for the CLI's own startup lines, because `Program`
+  is static and cannot be a type argument.
+- Keep one logger per module owner, not per class: the UDP and TCP coordinators take an `ILogger`
+  through their options record (`UdpProxyOptions.Logger`, `TcpRedirectOptions.Logger`) and
+  everything they construct shares that category. Giving every class its own category would mean
+  threading an `ILoggerFactory` through those records instead — deliberately deferred, not
+  forgotten.
 
 ## Log Levels
 
-The vocabulary is MEL's and lives in the standard section: `Logging:LogLevel:Default` and
-`Logging:LogLevel:<fully-qualified category>` take `Trace`, `Debug`, `Information`, `Warning`,
-`Error`, `Critical`, or `None`. The names are matched case-insensitively, so an operator may write
-either casing; the canonical spelling is the one listed, and an omitted `Default` means MEL's own
-`Information`. Threshold ordering is `Trace < Debug < Information < Warning < Error < Critical`, and
-the configured threshold includes itself and every more-severe level; `None` is not a severity in
-that chain, it disables the category it is set on. The project emits `Trace` through `Error`;
-`Critical` is the framework's level above `Error`.
-
-**The names are full names, and the retired short tokens are not level names.** `info`, `warn`,
-`INFO`, and `Verbose` are not accepted in any position: MEL's own filter parsing throws
-`InvalidOperationException` ("Configuration value 'info' is not supported.") rather than defaulting,
-so the mistake would surface as a framework exception instead of a diagnostic.
-`RuntimeLogging.TryValidate` therefore pre-checks every `Logging:LogLevel:<category>` value and
-reports an unparseable one as a `Logging.LogLevel.<category>` diagnostic, so `validate` and `run`
-fail with exit code 1 and an actionable message instead. The pre-check is the migration's safety net,
-because `"logLevel": "info"` is the value most likely to be carried across.
-
-`Information` is concise operational lifecycle output; `Debug` records logical flow and proxy
-lifecycle; `Trace` records per-packet processing stages and terminal outcomes. Never raise a level
-to make a line more visible.
+- Use MEL's vocabulary: `Logging:LogLevel:Default` and `Logging:LogLevel:<fully-qualified
+  category>` take `Trace`, `Debug`, `Information`, `Warning`, `Error`, `Critical`, or `None`,
+  matched case-insensitively; an omitted `Default` means MEL's own `Information`.
+- Remember the ordering: `Trace < Debug < Information < Warning < Error < Critical`. A threshold
+  includes itself and every more-severe level; `None` is not a severity in that chain, it disables
+  the category it is set on. Filtering is MEL's `LoggerFilterOptions` job, not the call site's.
+- Emit `Trace` through `Error`; `Critical` is the framework's level above `Error`.
+- Write level names in full. `info`, `warn`, `INFO`, and `Verbose` are not level names in any
+  position: MEL's filter parsing throws `InvalidOperationException` ("Configuration value 'info' is
+  not supported.") instead of defaulting.
+- Let `RuntimeLogging.TryValidate` pre-check every `Logging:LogLevel:<category>` value: an
+  unparseable one becomes a `Logging.LogLevel.<category>` diagnostic, so `validate` and `run` fail
+  with exit code 1 and an actionable message instead of a framework exception. The pre-check is the
+  safety net for a carried-over `"logLevel": "info"`.
+- Reserve `Information` for concise operational lifecycle output, `Debug` for logical flow and proxy
+  lifecycle, and `Trace` for per-packet processing stages and terminal outcomes.
+- Never raise a level to make a line more visible.
 
 ## Console Format
 
-Choosing a formatter is `Logging:Console:FormatterName`, which names the formatters MEL registers:
-`simple`, `json`, and `systemd`. The project has no format key of its own: the old `logFormat` key,
-its `LogFormat` enumeration and the resolver that mapped them were deleted with the move to the
-standard section, so `FormatterName` plus the auto rule below is the whole surface. When the operator
-configures nothing, the post-configure action supplies the auto rule: `json` when stderr is
-redirected, and `simple` when stderr is an interactive terminal.
-
-An unregistered name is a `Logging.Console.FormatterName` diagnostic from the same
-`RuntimeLogging.TryValidate` pre-check, not a fallback: given a name it cannot resolve, MEL selects
-`simple` in silence and reports nothing, which reads to an operator as their formatter setting being
-ignored. The accepted list is MEL's three stock names, so a formatter this project does not register
-is rejected rather than selected — a build that adds one must extend that list with it.
-
-- `simple` abbreviates the level (`trce`, `dbug`, `info`, `warn`, `fail`), then the category, the
-  numeric `EventId`, and the message; an exception's stack trace follows on continuation lines.
-- `json` writes one JSON object per line: `Timestamp`, `EventId`, `LogLevel`, `Category`,
-  `Message`, `Exception`, and `State` (the message template's fields plus `{OriginalFormat}`).
-  `FormatterOptions:JsonWriterOptions:Indented` breaks that one-record-per-line shape deliberately.
-
-Every default lives in code: the auto rule above, a local wall-clock timestamp carrying its UTC
-offset (`zzz yyyy-MM-dd HH:mm:ss.fff`, with a trailing space in `simple`), `SingleLine` at MEL's
-`false` so an exception keeps its stack trace, and the stderr destination from Composition. The
-timestamp default reaches the two formatters whose records carry one; `systemd` renders journald's
-own shape, which has no timestamp unless `FormatterOptions:TimestampFormat` is set, because journald
-stamps the record itself. The
-shipped `appsettings.example.json` documents those defaults and is **never loaded** — an upgrade
-must not be able to overwrite the operator's own `appsettings.json` — and a test keeps the example's
-`Logging` values in sync with the code constants they document.
-
-`FormatterOptions` is the operator's surface here: `TimestampFormat` (the code default above applies
-when it is absent and the selected formatter has one), `SingleLine`, `ColorBehavior`,
-`IncludeScopes`, and `JsonWriterOptions:*` such as `Indented`. They are MEL's own options, bound by
-the framework.
-
-**Consequences of owning no formatter.** A record is no longer guaranteed to be one physical line,
-a value containing CR/LF is no longer escaped, and a console write failure is no longer swallowed
-by project code. Those guarantees died with `ConsoleRuntimeLogger`.
+- Choose the formatter with `Logging:Console:FormatterName`, which names the three formatters this
+  build registers: `simple`, `json`, and `systemd`. It is the whole surface — the project has no
+  format key of its own — and configuring nothing selects the auto rule: `json` when stderr is
+  redirected, `simple` when stderr is an interactive terminal.
+- Treat an unregistered name as a `Logging.Console.FormatterName` diagnostic from
+  `RuntimeLogging.TryValidate`, never as a fallback: given a name it cannot resolve, MEL selects
+  `simple` in silence and reports nothing, which reads to an operator as their formatter setting
+  being ignored. The accepted list is MEL's three stock names, so a build that adds a formatter must
+  extend `RuntimeLogging.AcceptedFormatterNames`.
+- Expect `simple` to write the abbreviated level (`trce`, `dbug`, `info`, `warn`, `fail`), the
+  category, the numeric `EventId`, and the message, with an exception's stack trace on continuation
+  lines.
+- Expect `json` to write one JSON object per line carrying `Timestamp`, `EventId`, `LogLevel`,
+  `Category`, `Message`, `Exception`, and `State` (the template's fields plus `{OriginalFormat}`).
+  `FormatterOptions:JsonWriterOptions:Indented` deliberately breaks that one-record-per-line shape.
+- Keep every default in code, in `RuntimeLogging.CreateLoggerFactory`: the auto rule, a local
+  wall-clock timestamp carrying its UTC offset (`zzz yyyy-MM-dd HH:mm:ss.fff`, with a trailing space
+  in `simple`), `SingleLine` at MEL's `false` so an exception keeps its stack trace, a relaxed JSON
+  encoder (`JavaScriptEncoder.UnsafeRelaxedJsonEscaping`, because MEL's default escapes every
+  non-ASCII character), and the stderr destination.
+- Apply that timestamp default to the two formatters whose records carry one: `systemd` renders
+  journald's own shape, which has no timestamp unless `FormatterOptions:TimestampFormat` is set,
+  because journald stamps the record itself.
+- Treat `FormatterOptions` as the operator's surface — `TimestampFormat`, `SingleLine`,
+  `ColorBehavior`, `IncludeScopes`, and `JsonWriterOptions:*` such as `Indented` — bound by the
+  framework, with a code default applying only where the key is absent.
+- Accept that MEL owns the line shape: a record may occupy several physical lines (`simple` writes a
+  CR/LF-bearing value verbatim), and a console write failure is no longer swallowed by project code.
+- Ship `src/WinForward.Cli/appsettings.example.json` as documentation, never as an implicit source —
+  nothing loads it on its own, and an upgrade must not overwrite the operator's own
+  `appsettings.json`. It shows the default posture — `LogLevel.Default: Information` and no
+  `FormatterName` — and `AppSettingsExampleTests` keeps it in step with the constants it documents.
 
 ## Message Templates and Event Identity
 
-- The message is a natural English sentence that embeds its placeholders. It does not repeat the
-  event name: `"UDP session created for {source} -> {destination} via {target} ({udpTransport}), association {udpAssociation}."`
-- Every structured event declares `EventName = "area.event"`, the stable dotted identifier machine
-  consumers read through `EventId.Name`. Renaming one is a breaking change: the stability census in
-  `benchmarks/WinForward.Benchmarks/Stability/StabilityShared.cs` looks up a fixed list, and the
-  diagnostic tests assert on these names.
-- Every placeholder is spelled exactly like the field key it carries (`{flow}`, `{udpAssociation}`,
-  `{processPath}`). A null value always stays null in the structured state, but **how it renders in
-  the message depends on the parameter count**: up to six parameters the generator uses MEL's
-  `LogValues<T0..T5>`, which renders `(null)`, while more than six it synthesises its own state
-  struct, which renders nothing at all. Most events here are over six parameters, so the common
-  case is a silently empty slot. **Put a nullable placeholder where an empty slot still reads
-  acceptably** — at the end of a clause rather than mid-sentence, or behind its own label — and
-  never rely on `(null)` appearing for a human reader. This was measured, not assumed; see the
-  probe results recorded in the task's `design.md` §9.3.
-- A method without `EventName` takes its method name as `EventId.Name`; machine consumers ignore it.
-- **One name, one level.** `SYSLIB1025` rejects two `[LoggerMessage]` methods that share an
+- Write the message as a natural English sentence that embeds its placeholders, and do not restate
+  the dotted event name in it: `tcp.redirect.unrelatedPeer` reads `"Accepted a peer that is not the
+  redirect's expected client on listener {Listener}: expected {Expected}, actual {Actual}."`
+- Declare `EventName = "area.event"` on every event a machine consumer reads — the stable dotted
+  identifier it reads through `EventId.Name`. Renaming one is a breaking change: the stability
+  census names a fixed list (`benchmarks/WinForward.Benchmarks/Stability/StabilityShared.cs`) and
+  the diagnostic tests assert on these names.
+- Take the method name as `EventId.Name` when a method declares no `EventName`; machine consumers
+  ignore those events.
+- Spell every placeholder exactly like the field key it carries: `{Flow}`, `{UdpAssociation}`,
+  `{ProcessPath}`.
+- Expect a null placeholder to render by parameter count: up to six parameters the generator uses
+  MEL's `LogValues<T0..T5>`, which renders `(null)`, while more than six it synthesises its own
+  state struct, which renders nothing at all. Most events here are over six parameters, so the
+  common case is a silently empty slot; the structured state keeps the null either way (measured on
+  MEL 10.0.12, task 10-06-mel-logging).
+- Put a nullable placeholder where an empty slot still reads acceptably — at the end of a clause
+  rather than mid-sentence, or behind its own label — and never rely on `(null)` appearing for a
+  human reader.
+- Keep one name to one level. `SYSLIB1025` rejects two `[LoggerMessage]` methods that share an
   `EventName` inside one class, and that is the framework stating a design position rather than an
-  obstacle to route around: the level is part of an event's identity, which is exactly how ETW and
-  the Windows event log read an `EventId`. Two levels therefore mean two events with two names —
-  never one name split across two partial classes. The one occurrence in this codebase was
-  `generation.startup-fault`: the absorbed-and-retrying half kept the name at `Warning`, and the
-  budget-exhausted fail-closed half became `generation.startup-fault.exhausted` at `Error`, so an
-  existing filter still catches the frequent case and a prefix search catches both.
+  obstacle to route around: the level is part of an event's identity, which is how ETW and the
+  Windows event log read an `EventId`. Two levels therefore mean two events with two names — never
+  one name split across two partial classes.
+- Split a name rather than share it, as `generation.startup-fault` did: the absorbed-and-retrying
+  half kept the name at `Warning`, and the budget-exhausted fail-closed half became
+  `generation.startup-fault.exhausted` at `Error`, so an existing filter still catches the frequent
+  case and a prefix search catches both.
 - Attach a real `Exception` only where the fault is genuinely unexpected. Routinely handled I/O
-  failures (socket reset, timeout) keep their structured `error` / `socketError` / `nativeError`
-  fields and no stack trace, so an expected fault never costs a stack trace in the log.
-- A plain operator line with no structured fields is still a `[LoggerMessage]` method, with no
-  placeholders when the text is constant. `ILogger.LogInformation` / `LogWarning` / `LogError`
-  extension calls are not used in `src/`.
-- **Every parameter must appear in the message template.** `SYSLIB1015` rejects a parameter that no
+  failures (socket reset, timeout) keep their structured `{Error}` / `{SocketError}` /
+  `{NativeError}` fields and no stack trace, so an expected fault never costs a stack trace in the
+  log.
+- Write a plain operator line as a `[LoggerMessage]` method too, with no placeholders when the text
+  is constant; `ILogger.LogInformation` / `LogWarning` / `LogError` extension calls are not used in
+  `src/`.
+- Make every parameter appear in the message template: `SYSLIB1015` rejects a parameter that no
   placeholder references, so there is no such thing as a "structured-only" field. Two call shapes
   that cannot share one template are two events, not one event with a union of nullable fields.
-- **A call-site `IsEnabled` is legitimate for exactly one purpose: skipping expensive argument
-  construction on a timer-driven path.** The generated method's own level check keeps the disabled
-  path free, but it cannot un-evaluate the arguments the caller already built. Guarding a *cheap*
-  argument is not worth it (and makes behaviour depend on the logging configuration). Guarding an
-  expensive one is MEL's own idiom. `RuntimeHeartbeat.Emit` is the only site that qualifies: its
-  tick is driven by a timer rather than by the event, so without the guard it would invoke the
-  usage delegate and build the pool and delta blocks on every tick even at `logLevel=warn`. The
-  guard covers only the heartbeat; the warn-level GC alarm in the same tick is independent of it.
-  Two further sites build arguments the level may discard — `LayeredCaptureRunner`'s
-  `DescribeWindows` and `UdpResponseReinjector`'s adapter-id join — and are **accepted as is**,
-  because both run at most once per occurrence of the event they describe, never more often than
-  the record itself would have been written.
-- **One exception to the no-hand-written-`IsEnabled` rule.** `FlowDispatcher`'s warm-path bypass
+- **Guard a log call with a call-site `IsEnabled` for exactly one purpose: skipping expensive
+  argument construction on a timer-driven path.** The generated method's own level check keeps the
+  disabled path free but cannot un-evaluate arguments the caller already built; guarding a *cheap*
+  argument is not worth it and makes behaviour depend on the logging configuration, while guarding
+  an expensive one is MEL's own idiom. `RuntimeHeartbeat.Emit` is the only site that qualifies: its
+  tick is timer-driven rather than event-driven, so without the guard it would invoke the usage
+  delegate and build the pool and delta blocks on every tick even at `logLevel=warn`. The guard
+  covers only the heartbeat; the warn-level GC alarm in the same tick is independent of it. Two
+  further sites build arguments the level may discard — `LayeredCaptureRunner`'s `DescribeWindows`
+  and `UdpResponseReinjector`'s adapter-id join — and are **accepted as is**: both run at most once
+  per occurrence of the event they describe, never more often than the record itself would have been
+  written.
+- **One exception to that rule.** `FlowDispatcher`'s warm-path bypass
   (`if (_logger.IsEnabled(LogLevel.Trace)) return DispatchSlowAsync(...)`) reads a level but is a
   dispatch decision rather than a log guard: with trace enabled every packet takes the observable
   slow path. Deleting it as a "leftover guard" would route the steady state through that path and
@@ -163,133 +162,123 @@ by project code. Those guarantees died with `ConsoleRuntimeLogger`.
 
 ## What to Log
 
-Log lifecycle events, recoverable and fail-closed faults, policy/action decisions, classification,
-proxy setup/relay/teardown, reinjection, drops, and terminal packet outcomes. Metadata may include
-transport and endpoints, adapter/process identity, rule index, proxy server name, stage, reason,
-and byte counts.
-
-`info` must let an operator read a run end to end: the resolved configuration summary, the capture
-scope, each TCP listener and UDP target coming up, interception start, the heartbeat, shutdown
-request, and clean stop.
+- Log lifecycle events, recoverable and fail-closed faults, policy/action decisions, classification,
+  proxy setup/relay/teardown, reinjection, drops, and terminal packet outcomes.
+- Let `Information` carry a run end to end: the resolved configuration summary, the capture scope,
+  each target coming up, interception start, the heartbeat, the shutdown request, and the clean stop.
+- Correlate packet diagnostics on the `Packet` sequence and flow diagnostics on the `Flow`
+  generation; a TCP or UDP association generation is an additional field (`TcpAssociation`,
+  `UdpAssociation`) where the record has one.
+- Emit a `flow.created` record from both flow-creation paths (2026-10-05, task
+  10-05-host-flow-created-logging): the inline dispatcher and the deferred attribution pipeline both
+  call one shared builder, so the field set is identical. The deferred path can only log at claim
+  time — the claim is the last step of delivery — so a host flow's record may follow the proxy legs
+  it produced, and the flow's `Process` / `ProcessPath` / `Rule` fields stay absent until the
+  worker's verdict lands.
+- Treat an entry created with no `flow.created` record as a defect, not as a level to raise: before
+  2026-10-05 a host flow whose entry the pipeline claimed was invisible at every level, which is
+  exactly the "I configured a process rule and my own traffic disappeared from the log" report.
+- Allowed metadata: transport and endpoints, adapter and process identity, rule index, proxy server
+  name, stage, reason, and byte counts.
 
 ## What NOT to Log
 
-Never log SOCKS5 usernames or passwords, authentication frames, raw packet bytes, payloads, relay
-buffers, or raw configuration text. Full process paths are emitted only when validated policy
-configuration contains a path-based process selector; process names remain permitted.
+- Never log SOCKS5 usernames or passwords, authentication frames, raw packet bytes or spans,
+  payloads, relay buffers, or raw configuration text.
+- Emit full process paths only when the validated policy contains a path-based process selector
+  (`ConfigurationRules.AnyProcessSelectorIsAPath`, surfaced as `ValidatedConfiguration`
+  `IncludeProcessPathInLogs`); process names stay permitted.
 
 ## Executable Contract
 
-### Scope / Signatures
-
-This contract applies to the `Logging` configuration section, the `ILoggerFactory` built by
-`RuntimeLogging.CreateLoggerFactory` from that section, every `[LoggerMessage]` method, packet
-dispatch, and proxy coordinators. The level vocabulary is MEL's, so no project type owns it and
-`ValidatedConfiguration` carries no logging fields; the configuration loader merges the sources at
-the JSON level and validates the merged `WinForward` object alone, while the `Logging` section
-reaches MEL unchanged. The process-path privacy flag is still derived from the validated policy
-rules (`ConfigurationRules.AnyProcessSelectorIsAPath`).
-
-### Boundary Contracts
-
-- Accepted levels are MEL's full names `Trace`, `Debug`, `Information`, `Warning`, `Error`,
-  `Critical`, and `None`, parsed case-insensitively; an omitted `Logging:LogLevel:Default` means
-  `Information`. The retired short tokens (`info`, `warn`, …) are not level names, and
-  `RuntimeLogging.TryValidate` rejects them with a diagnostic rather than letting MEL throw.
-- The console formatter is `Logging:Console:FormatterName`; absent means the auto rule from Console
-  Format. Only MEL's three registered names are accepted (`simple`, `json`, `systemd`); any other
-  name is a diagnostic, because MEL would otherwise fall back to `simple` in silence.
-  `Logging:Console:LogToStandardErrorThreshold` is not part of the surface: the post-configure action
-  forces it, so configuring it has no effect.
-- Threshold ordering is `Trace < Debug < Information < Warning < Error < Critical`; a threshold
-  includes itself and all more-severe levels, and `None` sits outside that chain as the value that
-  disables the category it is set on. Filtering is `LoggerFilterOptions`' job; the disabled path is
-  short-circuited by the generated method before it builds any state.
-- Records use `yyyy-MM-dd HH:mm:ss.fff` with a `zzz` UTC offset on stderr.
-- Packet diagnostics use the runtime `packet` sequence; flow diagnostics use the `FlowTable`
-  generation. TCP/UDP association generations may be additional fields.
-- **Both flow-creation paths owe a `flow.created` record** (2026-10-05, task
-  10-05-host-flow-created-logging). A flow-table entry is created either by the inline dispatcher
-  or by the deferred attribution pipeline, and each one emits the event with the same field set
-  from one shared builder. The deferred path can only log at claim time — the claim is the last
-  step of delivery — so a host flow's record may follow the proxy legs it produced, and the flow's
-  `process`/`processPath`/`rule` fields are still absent until the worker's verdict lands. An
-  entry created with no record at all is a defect, not a log level to raise: before 2026-10-05 a
-  host flow whose entry the pipeline claimed was invisible at every level, which is exactly the
-  "I configured a process rule and my own traffic disappeared from the log" report.
-- Allowed metadata includes endpoints, adapters, process identity, rule/action, stage, reason, and
-  byte counts. Full process paths require a path-based process selector.
+Applies to the `Logging` configuration section, the `ILoggerFactory` that
+`RuntimeLogging.CreateLoggerFactory` builds from it, every `[LoggerMessage]` method, packet dispatch,
+and the proxy coordinators. The level vocabulary and the formatter surface are MEL's, so no project
+type owns them and `ValidatedConfiguration` carries no level or formatter field — its only
+logging-shaped member is the derived `IncludeProcessPathInLogs` privacy flag. The loader merges its
+sources at the JSON level, validates the merged `WinForward` object alone, and serves the merged
+document from memory (`ConfigurationLoader.TryLoad`, `ConfigurationLayering.cs`), so the `Logging`
+section reaches MEL unchanged and always belongs to the same document as `WinForward`.
 
 ### Validation and Error Matrix
 
 | Condition | Required result |
 | --- | --- |
 | `Logging:LogLevel:Default` omitted | MEL's own `Information` |
-| An accepted level, formatter, or formatter-option value | Bound by MEL and in effect; the code default applies only where the key is absent |
+| An accepted level, formatter, or formatter-option value | Bound by MEL and in effect; a code default applies only where the key is absent |
 | A `LogLevel` value that is not a level name (`info`, `warn`, `Verbose`) | Fail with the `Logging.LogLevel.<category>` diagnostic and exit code 1 — never a silent fallback to `Information` |
 | A `FormatterName` that is not a registered formatter | Fail with the `Logging.Console.FormatterName` diagnostic and exit code 1 — MEL alone would fall back to `simple` in silence |
 | A formatter option MEL's binder cannot apply | Reported by `run`/`validate` through the factory build, not as an unhandled exception |
-| An unknown key under `Logging` (any other name) | Ignored by the framework; not a WinForward diagnostic |
+| An unknown key under `Logging` outside `LogLevel` | Ignored by MEL's binder; not a WinForward diagnostic |
 | A `WinForward` key that is missing, unknown, wrongly cased, or wrongly typed — a quoted number where a number belongs included | Fail with the path diagnostic (`WinForward.Host.Rules[6].RemoteCidr[0]`-shaped) without echoing raw input |
 | `Logging:Console:LogToStandardErrorThreshold` configured | Ignored: the post-configure action forces `Trace`, so no record reaches stdout |
-| Entry below the threshold | The generated method returns before constructing state; no formatting, no output |
-| Console writer failure | Not swallowed by project code (MEL owns the sink) |
-| Classification/dispatch failure | Emit trace `packet.failed` when possible, dispose the lease, and rethrow |
-| Proxy or reinjection failure | Preserve existing fail-closed behavior and log metadata/reason only |
-
-### Good / Base / Bad Cases
-
-- Good: `"Logging": { "LogLevel": { "Default": "Trace" }, "Console": { "FormatterName": "json" } }`
-  produces one JSON object per record whose `Message` reads
-  `UDP session created for 10.0.0.5:5353 -> 8.8.8.8:53 via main (socks5/uot), association 7.`
-  and whose `State` carries `source`, `destination`, `target`, `udpTransport`, `udpAssociation`.
-- Base: an omitted `Logging` section preserves concise lifecycle output on a terminal and
-  structured JSON in a redirected log, with the code's timestamp default and no per-packet work.
-- Bad: passing a SOCKS5 password, packet span, UDP payload, authentication frame, relay buffer, or
-  raw configuration JSON to a `[LoggerMessage]` method.
+| An entry below the threshold | The generated method returns before constructing state; no formatting, no output |
+| A console write failure | Not swallowed by project code (MEL owns the sink) |
+| A classification or dispatch failure | Emit trace `packet.failed` when possible, dispose the lease, and rethrow |
+| A proxy or reinjection failure | Preserve the existing fail-closed behavior and log metadata/reason only |
 
 ### Required Tests
 
-- Configuration tests cover the two layers, the PascalCase schema, the three strictness properties
-  (unknown, wrongly cased, wrongly typed), and the new `WinForward`-rooted diagnostic paths.
-- Logging-configuration tests cover the level filter at `Default` and per category, an explicit
-  `FormatterName`, and the auto rule when it is absent — including a hostile configuration that sets
+- Configuration tests (`ConfigurationLayeringTests`, `ConfigurationValidationTests`) cover the two
+  layers, the PascalCase schema, the strict reader's unknown-member and wrong-casing rejections, and
+  the `WinForward`-rooted diagnostic paths.
+- `RuntimeLoggingTests` covers the level filter at `Default` and per category, an explicit
+  `FormatterName`, the auto rule when it is absent, and a hostile configuration that sets
   `LogToStandardErrorThreshold` and still writes nothing to stdout.
-- `RuntimeLogging.TryValidate` tests cover both of its checks: every retired short token and every
-  other unparseable level is reported per category, an unregistered `FormatterName` is reported with
-  its key, and absent values are not errors (absence selects the defaults).
-- A test keeps `appsettings.example.json` in sync with the code defaults: it parses under the strict
-  validator, and its `Logging` values match the constants they document.
-- Logger tests cover the threshold contract through `LoggerFactory` for every level: an entry at
-  or above the threshold reaches the provider, an entry below it does not.
-- Runtime tests cover packet/flow correlation, terminal completion/failure, process-path privacy,
-  proxy lifecycle metadata, and unchanged packet dispositions.
-- Static review/search confirms credentials, payloads, raw frames, and relay buffers never reach
-  logging calls.
+- `RuntimeLoggingTests` covers both `RuntimeLogging.TryValidate` checks: every retired short token
+  and every other unparseable level is reported per category, an unregistered `FormatterName` is
+  reported with its key, and absent values are not errors.
+- `AppSettingsExampleTests` keeps `appsettings.example.json` parsing under the strict validator, with
+  `Logging` values that match the constants they document.
+- `RuntimeLoggingTests` covers the threshold contract through `LoggerFactory` for every level: an
+  entry at or above the threshold reaches the provider, an entry below it does not.
+- Runtime tests (`RuntimeDiagnosticLoggingTests`, `UdpProxyLoggingTests`, `CaptureMilestoneLoggingTests`,
+  `NdisPacketActionExecutorLoggingTests`) cover packet/flow correlation, terminal completion and
+  failure, process-path privacy, proxy lifecycle metadata, and unchanged packet dispositions.
+- Confirm by search that credentials, payloads, raw frames, and relay buffers never reach a logging
+  call.
 
-### Wrong vs Correct
+## Runtime Diagnostics Conventions
 
-Wrong:
+The 2026-09-17 outage post-mortem found every decisive failure path silent (Trace-only or swallowed)
+while harmless warns flooded; these conventions gate every new failure site (task
+09-17-adapter-staleness-logging).
 
-```csharp
-if (_logger.IsEnabled(LogLevel.Trace)) UdpLog.UdpPacketReceived(_logger, packet, payload.Span);
-```
-
-Correct:
-
-```csharp
-UdpLog.UdpPacketReceived(_logger, flowGeneration, associationGeneration, source, destination, payloadLength);
-```
-
-The generated method performs the level check; the call site passes only typed values.
-
-## Runtime Diagnostics Conventions (wired 2026-09-17, task 09-17-adapter-staleness-logging)
-
-> Root cause of the 2026-09-17 outage post-mortem: every decisive failure path was silent (Trace-only or swallowed) while harmless warns flooded. These conventions gate every new failure site.
-
-- **`RuntimeLogThrottle`** (src/WinForward.Runtime/RuntimeLogThrottle.cs): per-event-site key + window throttle. First occurrence always emits; suppressed occurrences cost nothing — checks are **check-first** (`ShouldEmit()` before any field construction). With `[LoggerMessage]` the level check is free, so a throttled site is now only a `ShouldEmit()` check.
-- **`RuntimeCounters`** (src/WinForward.Runtime/RuntimeCounters.cs): observation-only `Interlocked` long counters (zero-alloc after key creation), shared instance + `Snapshot()`. The stable key vocabulary lives as constants (`relaySetupFailed`, `udpOriginUnresolved`, `udpFailClosedDrop`, `flowCapacityBlock`, `attributionMiss`, `passReinjectFailed`, …) and is shared by the health monitor thresholds and heartbeat deltas — never retype a key literal. Counters never influence behavior.
-- **Heartbeat**: `runner.heartbeat` (info, 60 s default, `RuntimeHeartbeat`) aggregates usage (flows/flowCapacity, tcp/udp sessions+capacity, pumps running/degraded), health state (degraded, consecutiveForced, cooldownRemainingSeconds), and the counter movement since the previous tick. **The counter deltas are one `deltas` field**, not one field per counter: the key set is open (`RuntimeCounters.Increment` accepts any key, and the native pools register `pool.<name>.rented|returned` at runtime), and `SYSLIB1015` requires every `[LoggerMessage]` parameter to appear in its message template, so a runtime key set cannot be a set of placeholders. The field carries `key=delta` tokens in ordinal key order with zero deltas omitted and is null when nothing moved; the same constraint shaped `runner.forcedRefresh`'s single `windows` field. A consumer that used to read `Fields["attributionMiss"]` must parse the token list instead. Observational loop: a faulty usage provider warns and retries next tick, never dies.
-- **Change-gated group warns**: recurring state-shaped warnings (e.g. `udp.targets.noMac`) emit on first occurrence and only when the member SET changes — not on every refresh. Full recovery (all MACs valid) or empty scope resets the memory so the next occurrence re-emits.
-- **Failure-path events carry their reason**: never log a fixed-text failure line again. `tcp.redirect.relaySetupFailed` carries error type + socketError/nativeError + upstream + attempts; `tcp.redirect.unrelatedPeer` carries listener/expected/actual; `udp.reinject.*` carry flow key + map summary. A failure log without its distinguisher is a defect.
-- **Incident triad rule** (acceptance gate for future diagnostics work): for any incident, the log must let an operator read out the three essentials — 失效环节 (which leg failed), 触发信号 (which signal fired), 恢复动作 (what recovery ran). The 2026-09-17 replay against the new events satisfies this; keep it that way.
+- Throttle a recurring failure line with one `RuntimeLogThrottle`
+  (`src/WinForward.Runtime/RuntimeLogThrottle.cs`) per event site: the first occurrence always
+  emits, later ones collapse into its window, and the check is **check-first** (`ShouldEmit()`
+  before any field construction), so a suppressed occurrence costs nothing. With `[LoggerMessage]`
+  the level check is already free, so a throttled site costs only that one call.
+- Aggregate failure and decision counts in `RuntimeCounters`
+  (`src/WinForward.Runtime/RuntimeCounters.cs`): observation-only `Interlocked` counters, zero-alloc
+  once the key's box exists, with a `Shared` instance and a lock-free `Snapshot()`. Take key names
+  from its constants (`RelaySetupFailed`, `UdpOriginUnresolved`, `UdpFailClosedDrop`,
+  `FlowCapacityBlock`, `AttributionMiss`, `PassReinjectFailed`, …) — never retype a key literal —
+  because the health monitor's thresholds and the heartbeat's deltas both read them. Counters never
+  influence behavior.
+- Emit the periodic `runner.heartbeat` (`RuntimeHeartbeat`, `Information`, 60 s default)
+  aggregating usage (flows and flow capacity, TCP/UDP sessions against capacity, pumps
+  running/degraded), health state (`Degraded`, `ConsecutiveForced`, `CooldownSeconds`), the GC
+  posture, and the counter movement since the previous tick.
+- Carry that movement in one `Deltas` field, not one field per counter: the key set is open
+  (`RuntimeCounters.Increment` accepts any key, and the native pools register
+  `pool.<name>.rented|returned` at runtime) and `SYSLIB1015` requires every `[LoggerMessage]`
+  parameter to appear in its message template, so a runtime key set cannot be a set of placeholders.
+  The field carries `key=delta` tokens in ordinal key order with zero deltas omitted and is null
+  when nothing moved; the same constraint shaped `runner.forcedRefresh`'s single `Windows` field.
+  Parse that token list rather than reading a field per counter.
+- Never let diagnostics take the runtime down: a faulty usage provider warns
+  (`HeartbeatSummaryFailed`) and retries on the next tick.
+- Gate recurring state-shaped warns on change (`DurableCaptureBundle.WarnNoMacAdaptersOnChange`):
+  `udp.targets.noMac.adapters` emits on first occurrence and only when its member SET changes, and
+  `udp.targets.noMac` on first occurrence and only when its host changes — never on every refresh.
+  A full recovery (all MACs valid) or an empty scope resets the memory so the next occurrence
+  re-emits.
+- Carry the distinguisher on every failure event — never log a fixed-text failure line again.
+  `tcp.redirect.relaySetupFailed` carries `Error`, `SocketError`, `NativeError`, `Upstream`, and
+  `Attempts`; `tcp.redirect.unrelatedPeer` carries `Listener`, `Expected`, and `Actual`;
+  `udp.reinject.*` carry the flow key and the map summary. A failure log without its distinguisher
+  is a defect.
+- Apply the incident triad as the acceptance gate for new diagnostics work (2026-09-17 replay): for
+  any incident the log must let an operator read out which leg failed, which signal fired, and what
+  recovery ran.

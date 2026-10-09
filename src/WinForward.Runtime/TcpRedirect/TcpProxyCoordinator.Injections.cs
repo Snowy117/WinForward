@@ -11,8 +11,8 @@ namespace WinForward.Runtime.TcpRedirect;
 /// The deferred-injection half of <see cref="TcpProxyCoordinator"/>: the append predicate both data
 /// legs consult, the per-(adapter handle, target direction) lane flush the pump's batch-completed
 /// callback drives, and the failure tails a degraded batch runs. One coordinator type split across
-/// two files purely for the repository's effective-line budget (directory-structure.md, "文件行数上限");
-/// the members keep the ownership the design assigns them — the coordinator owns the lanes because
+/// two files purely for the repository's effective-line budget (directory-structure.md, "File Length
+/// Ceiling"); the members keep the ownership the design assigns them — the coordinator owns the lanes because
 /// it owns the association and the per-flow failure attribution of the frames they hold.
 /// </summary>
 public sealed partial class TcpProxyCoordinator
@@ -241,7 +241,7 @@ public sealed partial class TcpProxyCoordinator
         TcpRedirectLog.TcpRedirectBatchFailed(_logger, "batchSend", nativeError, error, adapterHandle, direction, frames);
     }
 
-#pragma warning disable RCS1229 // Deliberate non-async warm entry (hot-path.md #3): the per-packet path must not pay an async state machine; synchronous failures before the returned ValueTask are part of the warm contract (cold tails live in async helpers).
+#pragma warning disable RCS1229 // Deliberate non-async warm entry (hot-path.md → warm-path-dispatch.md, "No async state machines on the steady-state path"): the per-packet path must not pay an async state machine; synchronous failures before the returned ValueTask are part of the warm contract (cold tails live in async helpers).
     private ValueTask<TcpRedirectOutcome> ReinjectExistingFlowDataAsync(CapturedFlowPacket packet, TcpRedirectAssociation association, CancellationToken cancellationToken)
 #pragma warning restore RCS1229
     {
@@ -294,7 +294,7 @@ public sealed partial class TcpProxyCoordinator
         }
     }
 
-#pragma warning disable RCS1229 // Deliberate non-async warm entry (hot-path.md #3): the per-packet reverse path must not pay an async state machine; synchronous failures before the returned ValueTask are part of the warm contract.
+#pragma warning disable RCS1229 // Deliberate non-async warm entry (hot-path.md → warm-path-dispatch.md, "No async state machines on the steady-state path"): the per-packet reverse path must not pay an async state machine; synchronous failures before the returned ValueTask are part of the warm contract.
     public ValueTask<TcpRedirectOutcome> HandleReverseAsync(CapturedFlowPacket packet, TcpRedirectAssociation association, CancellationToken cancellationToken)
 #pragma warning restore RCS1229
     {
@@ -359,7 +359,7 @@ public sealed partial class TcpProxyCoordinator
     /// before failing closed. Non-async so the per-packet reverse path never boxes a state
     /// machine; the cold failure tails run in their own async helpers.
     /// </summary>
-#pragma warning disable RCS1229 // Deliberate non-async warm entry (hot-path.md #3): the per-packet reverse path must not pay an async state machine; the cold failure tails run in their own async helpers.
+#pragma warning disable RCS1229 // Deliberate non-async warm entry (hot-path.md → warm-path-dispatch.md, "No async state machines on the steady-state path"): the per-packet reverse path must not pay an async state machine; the cold failure tails run in their own async helpers.
     private ValueTask<TcpRedirectOutcome> InjectReverseFrameAsync(CapturedFlowPacket packet, TcpRedirectAssociation association, NdisPacketBuffer buffer, bool towardMstcp, nint targetHandle, CancellationToken cancellationToken)
 #pragma warning restore RCS1229
     {

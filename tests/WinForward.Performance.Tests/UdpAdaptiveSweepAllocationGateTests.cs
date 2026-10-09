@@ -20,7 +20,7 @@ namespace WinForward.Performance.Tests;
 /// gate's scope and is not the byte-exact shape.
 /// </para>
 /// <para>
-/// Window contract (<c>hot-path.md</c>): bounded probe batches that must each read an exactly zero
+/// Window contract (<c>allocation-gates.md</c>): bounded probe batches that must each read an exactly zero
 /// per-thread delta on an unchanged thread before the measured window opens; the driven call must
 /// complete synchronously; the managed thread id is captured before the window and asserted unchanged
 /// after it; the assertion is the exact <c>Assert.Equal(0, allocated)</c>; and a thread-independent

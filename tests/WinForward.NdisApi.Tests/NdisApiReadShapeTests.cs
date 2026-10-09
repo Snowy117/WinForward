@@ -173,7 +173,7 @@ public sealed class NdisApiReadShapeTests
     /// <summary>
     /// The per-drain driver body — the seam dispatch, the counters, the classifier and the guard
     /// probe's lock-free lookup — must not touch the managed heap. The window contract is the
-    /// suite's standard one (hot-path.md, "Allocation-gate stability"): a non-recording fake, a JIT
+    /// suite's standard one (allocation-gates.md, "Allocation-gate stability"): a non-recording fake, a JIT
     /// warm-up, probe batches that each read an exactly-zero delta on an unchanged thread, the exact
     /// zero, and a thread-independent call-count backstop. <see langword="stackalloc"/> is native
     /// stack, not managed heap, so the request never appears here.

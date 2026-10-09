@@ -464,9 +464,10 @@ dotnet_diagnostic.WF0002.severity = error
 dotnet_diagnostic.WF0003.severity = error
 dotnet_diagnostic.WF0004.severity = error
 
-# 永久豁免（不在收缩清单内）：QuiescenceScope.cs:133 `_ = RunChildAsync(...)` 与 :170
+# 永久豁免（不在收缩清单内）：QuiescenceScope.cs 的 `_ = RunChildAsync(...)` 与
 # `_ = DrainCoreAsync(...)` 是原语自身的受管子任务与分离的 drain——子任务已由 TryEnter 准入、
 # 其 lease 由 RunChildAsync 释放、故障在同一处 RecordFault 记录，drain 则自含故障（避免分离任务
-# 浮现为未观察异常）。两处丢弃都不是无人观察的 fire-and-forget（async-lifetime.md「原语的永久豁免」）。
+# 浮现为未观察异常）。两处丢弃都不是无人观察的 fire-and-forget（async-lifetime.md "The primitive's
+# permanent exemption"）。
 [src/WinForward.Runtime/QuiescenceScope.cs]
 dotnet_diagnostic.WF0001.severity = none

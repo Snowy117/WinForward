@@ -1,109 +1,89 @@
 # Cross-Layer Thinking Guide
 
-> **Purpose**: Think through data flow across layers before implementing.
+> **Purpose**: think through data flow across layers *before* implementing. Most bugs in this
+> codebase live at layer boundaries, not inside a layer.
 
 ---
 
 ## The Problem
 
-**Most bugs happen at layer boundaries**, not within layers.
+The failures this project actually sees at boundaries:
 
-Common cross-layer bugs:
-
-- Configuration defines a shape the runtime parses differently
-- NDISAPI ABI structs drift from the managed declaration (layout/offset assumptions)
-- Multiple layers implement the same logic differently (e.g. checksum, endpoint rewrite)
+- Configuration defines a shape the runtime parses differently (a wrongly-cased key silently never
+  loads — see [traffic-policy-lifecycle.md](../backend/traffic-policy-lifecycle.md)).
+- An NDISAPI ABI struct drifts from the managed declaration (layout/offset assumptions).
+- Two layers implement the same logic differently (checksum, endpoint rewrite, field extraction).
 
 ---
 
-## Before Implementing Cross-Layer Features
+## Before Implementing A Cross-Layer Feature
 
-### Step 1: Map the Data Flow
-
-Draw out how data moves:
+**1. Map the data flow.** Write the arrows down and check each one:
 
 ```
 Config JSON → ConfigurationLoader → ValidatedConfiguration → Runtime wiring
 Captured frame → parse → classify → dispatch → rewrite → reinject
 ```
 
-For each arrow, ask:
+For every arrow: what format is the data in, what can go wrong, and who validates it?
 
-- What format is the data in?
-- What could go wrong?
-- Who is responsible for validation?
+**2. Identify the boundary you are actually crossing:**
 
-### Step 2: Identify Boundaries
-
-| Boundary | Common Issues |
-|----------|---------------|
-| Cli ↔ Runtime composition | wiring arity drift (same value passed twice, or not at all) |
-| Runtime ↔ NdisApi interop | struct layout/offset mismatch, handle vs pointer confusion |
+| Boundary | What goes wrong there |
+|---|---|
+| Cli ↔ Runtime composition | wiring arity drift — the same value passed twice, or not at all |
+| Runtime ↔ NdisApi interop | struct layout/offset mismatch, handle vs. pointer confusion |
 | Runtime ↔ Protocols codecs | parse strictness differs between sibling parsers |
 | Core primitives ↔ all consumers | equality/hash semantics assumed differently per caller |
 
-### Step 3: Define Contracts
-
-For each boundary:
-
-- What is the exact input format?
-- What is the exact output format?
-- What errors can occur?
+**3. State the contract at that boundary:** exact input format, exact output format, and the errors
+that can occur.
 
 ---
 
 ## Common Cross-Layer Mistakes
 
-### Mistake 1: Implicit Format Assumptions
+### 1. Implicit format assumptions
 
-**Bad**: Assuming byte order, struct layout, or string format without checking
+Assuming byte order, struct layout or string format without checking. **Instead:** convert
+explicitly and assert the layout at the boundary (`NdisApiAbi.AssertManagedLayout`).
 
-**Good**: Explicit conversion and layout assertions at boundaries (e.g. `AssertManagedX64Layout`)
+### 2. Scattered validation
 
-### Mistake 2: Scattered Validation
+Validating the same thing in several layers. **Instead:** validate once, at the entry point.
 
-**Bad**: Validating the same thing in multiple layers
+### 3. Leaky abstractions
 
-**Good**: Validate once at the entry point
+A coordinator that knows ABI-level struct details. **Instead:** each layer knows only its neighbours;
+interop details stay in the interop project.
 
-### Mistake 3: Leaky Abstractions
+### 4. Every consumer parses the same payload
 
-**Bad**: A coordinator knowing ABI-level struct details
-
-**Good**: Each layer only knows its neighbors; interop details stay in the interop project
-
-### Mistake 4: Every Consumer Parses The Same Payload
-
-**Bad**: Each call site parses the same fields/bytes with its own inline logic. This looks local, but it means every consumer owns a private version of the contract. The next field change will update one call site and miss another.
-
-**Good**: Decode once at the boundary, export the typed projection, make consumers use it.
-
-**Rule**: For config files, captured frames, or relay payloads, create one owner for the type definitions and parse/normalize helpers. Callers may format values, but must not redefine the contract.
+Each call site parses the same fields with its own inline logic. It looks local, but every consumer
+then owns a private copy of the contract — the next field change updates one call site and misses
+another. **Instead:** decode once at the boundary and export a typed projection that consumers use.
+For config files, captured frames and relay payloads, exactly one owner defines the types and the
+parse/normalize helpers; callers may format values but must not redefine the contract. See the
+"search before you write" rule in [code-reuse-thinking-guide.md](./code-reuse-thinking-guide.md).
 
 ---
 
-## Checklist for Cross-Layer Features
+## Checklist
 
 Before implementation:
 
-- [ ] Mapped the complete data flow
-- [ ] Identified all layer boundaries
-- [ ] Defined format at each boundary
-- [ ] Decided where validation happens
+- [ ] The complete data flow is mapped, arrow by arrow
+- [ ] Every boundary it crosses is identified
+- [ ] The format at each boundary is written down
+- [ ] It is decided where validation happens, and only there
 
 After implementation:
 
-- [ ] Tested with edge cases (null, empty, invalid, truncated)
-- [ ] Verified error handling at each boundary
-- [ ] Checked data survives round-trip (e.g. rewrite-back is byte-identical)
-- [ ] Checked that consumers use the shared parser/projection instead of re-parsing locally
+- [ ] Edge cases exercised: null, empty, invalid, truncated
+- [ ] Error handling verified at each boundary
+- [ ] Data survives a round trip (a rewrite-back is byte-identical)
+- [ ] Consumers use the shared parser/projection instead of re-parsing locally
 
----
-
-## When to Create Flow Documentation
-
-Create detailed flow docs when:
-
-- Feature spans 3+ layers
-- Feature has caused bugs before
-- Data format is complex (ABI structs, wire protocols)
+**Write a flow document when** the feature spans three or more layers, has caused bugs before, or
+carries a complex format (ABI structs, wire protocols) — and put it in the task's `research/`, not in
+the chat.

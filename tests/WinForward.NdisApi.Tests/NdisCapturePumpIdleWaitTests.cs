@@ -148,7 +148,7 @@ public sealed class NdisCapturePumpIdleWaitTests
     /// <summary>
     /// The arrival wait's zero-allocation gate, over the production <see cref="NdisPacketArrivalSignal"/>
     /// rather than a fake, so the real <c>WaitOne(0)</c> entry point is inside the window. The
-    /// window contract is the suite's standard one (hot-path.md, "Allocation-gate stability").
+    /// window contract is the suite's standard one (allocation-gates.md, "Allocation-gate stability").
     /// </summary>
     [Fact]
     [SupportedOSPlatform("windows")]

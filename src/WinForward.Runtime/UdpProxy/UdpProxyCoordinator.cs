@@ -24,7 +24,8 @@ public sealed partial class UdpProxyCoordinator : IAsyncDisposable, IUdpSessionS
     // under _gate. A reader that loaded an entry before a removal's clear reaches the session the
     // removal is tearing down: an expiring or faulted session refuses the datagram and the caller
     // counts the fail-closed drop, while the plain-disposal path reaches the transport teardown the
-    // removal already started (the pre-existing outstanding-lease window of `udp-relay.md`).
+    // removal already started (the pre-existing outstanding-lease window of
+    // `udp-session-lifecycle.md`, "Scope-owned lifetime").
     private readonly UdpSessionSlot?[] _sessionCache;
     private readonly UdpSetupCooldownTable _cooldowns;
     private readonly UdpSetupQueueBudget _budget;

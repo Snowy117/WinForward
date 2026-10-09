@@ -306,7 +306,7 @@ public sealed class NdisCapturePumpTests
         for (var warm = 0; warm < 64; warm++) pump.RunIterationForTests(CancellationToken.None);
 
         // Open the measured window only after the instrument itself is quiet: the per-thread counter
-        // can move by a host-level lump that no driven code caused (hot-path.md, "Allocation-gate
+        // can move by a host-level lump that no driven code caused (allocation-gates.md, "Allocation-gate
         // stability"). Every probe batch must read an exactly-zero delta, so a genuine per-call
         // allocation still fails before the window opens.
         const int iterations = 1_000;
