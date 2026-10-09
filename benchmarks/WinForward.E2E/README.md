@@ -304,10 +304,10 @@ work (`scripts/deploy-campaign.sh`, local).
 
 ### The configs and the plan sets
 
-Six configuration files under `scripts/configs/`, one per product row. Until this section, no repository
-file named any of them: the rows are wired by the **deployed** path, and the only mapper is the local
-`scripts/deploy-campaign.sh`, which stages each repo file and verifies the upload by the remote file's
-size. Measured 2026-10-09:
+Six committed configuration files cover six of the seven rows; the Proxifier row has none (see below).
+Until this section, no tracked file outside the task notes under `.trellis/tasks/` named any of them:
+the rows are wired by the **deployed** path, and the only mapper is the local `scripts/deploy-campaign.sh`,
+which stages each repo file and verifies the upload by the remote file's size. Measured 2026-10-09:
 
 | Repo file | Row id (`scripts/orchestrator.ps1`) | Deployed path the orchestrator reads |
 |---|---|---|
