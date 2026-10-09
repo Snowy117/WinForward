@@ -8,7 +8,7 @@ namespace WinForward.E2E.Contracts;
 /// <remarks>
 /// <para><b>Same leaf name at a different level is a different constant.</b> <see cref="Run.Failed"/>,
 /// <see cref="Run.StartedTicks"/> and <see cref="Run.EndedTicks"/> are declared here and again under
-/// <see cref="Run.Arm"/>, because the run's own verdict and one arm's verdict are two paths (D14.17).</para>
+/// <see cref="Run.Arm"/>, because the run's own verdict and one arm's verdict are two paths.</para>
 /// <para><b>The array element.</b> <see cref="Run.Arms"/> names the array; each element's members are
 /// declared by <see cref="Run.Arm"/>, which is never a JSON member of its own.</para>
 /// </remarks>
@@ -74,10 +74,7 @@ public static partial class ArmKeys
         /// <summary>Whether any arm of the run failed.</summary>
         public const string Failed = "failed";
 
-        /// <summary>
-        /// The members of one <c>arms</c> element, in write order. The class is named after the array
-        /// it declares the elements of, because it is never a JSON member of its own.
-        /// </summary>
+        /// <summary>The members of one <c>arms</c> element, in write order.</summary>
         public static class Arm
         {
             /// <summary>The arm's plan name.</summary>
@@ -90,21 +87,21 @@ public static partial class ArmKeys
             public const string File = "file";
 
             /// <summary>Stopwatch tick the arm started at.</summary>
-            /// <remarks>Shadows <see cref="Run.StartedTicks"/>; see the shard's shadowing note.</remarks>
+            /// <remarks>Shadows <see cref="Run.StartedTicks"/>.</remarks>
 #pragma warning disable S3218
             // ReSharper disable once MemberHidesStaticFromOuterClass
             public const string StartedTicks = "startedTicks";
 #pragma warning restore S3218
 
             /// <summary>Stopwatch tick the arm ended at.</summary>
-            /// <remarks>Shadows <see cref="Run.EndedTicks"/>; see the shard's shadowing note.</remarks>
+            /// <remarks>Shadows <see cref="Run.EndedTicks"/>.</remarks>
 #pragma warning disable S3218
             // ReSharper disable once MemberHidesStaticFromOuterClass
             public const string EndedTicks = "endedTicks";
 #pragma warning restore S3218
 
             /// <summary>Whether this arm failed.</summary>
-            /// <remarks>Shadows <see cref="Run.Failed"/>; see the shard's shadowing note.</remarks>
+            /// <remarks>Shadows <see cref="Run.Failed"/>.</remarks>
 #pragma warning disable S3218
             // ReSharper disable once MemberHidesStaticFromOuterClass
             public const string Failed = "failed";

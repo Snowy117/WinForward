@@ -13,15 +13,14 @@ using WinForward.Runtime.UdpProxy;
 namespace WinForward.Benchmarks.Perf;
 
 /// <summary>
-/// Staged decomposition of <c>UdpSessionBenchmarks.PopulateSessionsNoopTransportAsync</c> (task
-/// 09-21-session-creation-cost, design §2): each variant stops the real coordinator pipeline at
-/// one boundary, so the delta between consecutive variants prices one per-session stage each. All
-/// variants drive the real <see cref="UdpProxyCoordinator"/> against in-memory fake transports;
-/// every variant asserts its own stop condition before its measured window closes. The teardown of
-/// every stage except <c>StageS5</c> runs in <c>[IterationCleanup]</c> — BenchmarkDotNet's engine
-/// reads the GC counters after the workload and before the iteration cleanup, so stage deltas
-/// price setup work only and the teardown cost is the S5 (teardown inside the window, today's
-/// probe shape) minus StageS4 (teardown outside) difference.
+/// Staged decomposition of <c>UdpSessionBenchmarks.PopulateSessionsNoopTransportAsync</c>: each
+/// variant stops the real coordinator pipeline at one boundary, so the delta between consecutive
+/// variants prices one per-session stage each. All variants drive the real
+/// <see cref="UdpProxyCoordinator"/> against in-memory fake transports; every variant asserts its
+/// own stop condition before its measured window closes. The teardown of every stage except
+/// <c>StageS5</c> runs in <c>[IterationCleanup]</c> — BenchmarkDotNet's engine reads the GC
+/// counters after the workload and before the iteration cleanup, so stage deltas price setup work
+/// only and the S5-minus-S4 difference is the teardown cost.
 /// <para>
 /// Measured stop boundaries: S1 = admission only (an enqueue-only <see cref="ISetupExecutor"/>
 /// keeps the background pipeline from starting); S2 = background setup started (real executor,
@@ -173,7 +172,7 @@ public class SessionSetupDecompositionBenchmarks
         _pending.Add(fixture);
     }
 
-    /// <summary>S4: full readiness with the datagram flushed through the fake transport (today's probe shape, teardown outside the window).</summary>
+    /// <summary>S4: full readiness with the datagram flushed through the fake transport and the teardown outside the measured window.</summary>
     [Benchmark]
     public async Task StageS4_ReadinessTeardownOutsideAsync()
     {
@@ -182,7 +181,7 @@ public class SessionSetupDecompositionBenchmarks
         _pending.Add(fixture);
     }
 
-    /// <summary>S5: full readiness with the coordinator disposal inside the measured window (today's probe shape). The S5 minus S4 difference is the teardown cost (T).</summary>
+    /// <summary>S5: full readiness with the coordinator disposal inside the measured window; S5 minus S4 is the teardown cost (T).</summary>
     [Benchmark]
     public async Task StageS5_ReadinessTeardownInsideAsync()
     {
@@ -394,19 +393,17 @@ public class SessionSetupDecompositionBenchmarks
     }
 
     /// <summary>
-    /// C2a1: the context construction alone with today's static-lambda observer — since the
-    /// 2026-09-22 change the context is a <c>readonly record struct</c>, so N constructions must
-    /// allocate 0 bytes: the case is the regression guard against turning the context back into a
-    /// class (the pre-change record class measured 240.0 B/session in this case, probe campaign of
-    /// 2026-09-22). The construction is kept live by a non-boxing sink field —
-    /// <c>GC.KeepAlive</c> over a <c>Nullable&lt;UdpProxySessionContext&gt;</c> boxes the value per
-    /// iteration (16-byte header + 224-byte payload, byte-identical to the former class), so the
-    /// keep-alive shape would report the box, never the context — and a per-iteration
-    /// <c>FlowGeneration</c> keeps the constructed value loop-variant so the JIT cannot hoist the
-    /// construction out of the loop. The flow key, association, transport, pool and lifetime source
-    /// are shared across the contexts (the struct stores references), so the case prices the context
-    /// construction and the ActivityObserver conversion without a per-session claim or fake
-    /// transport.
+    /// C2a1: the context construction alone with the static-lambda observer. The context is a
+    /// <c>readonly record struct</c>, so N constructions must allocate 0 bytes: the case is the
+    /// regression guard against turning the context back into a class. The construction is kept
+    /// live by a non-boxing sink field — <c>GC.KeepAlive</c> over a
+    /// <c>Nullable&lt;UdpProxySessionContext&gt;</c> boxes the value per iteration (16-byte header
+    /// + 224-byte payload), so the keep-alive shape would report the box, never the context — and
+    /// a per-iteration <c>FlowGeneration</c> keeps the constructed value loop-variant so the JIT
+    /// cannot hoist the construction out of the loop. The flow key, association, transport, pool
+    /// and lifetime source are shared across the contexts (the struct stores references), so the
+    /// case prices the context construction and the ActivityObserver conversion without a
+    /// per-session claim or fake transport.
     /// </summary>
     [Benchmark]
     public void ComponentC2a1_ContextRecordStaticLambda()
@@ -449,8 +446,8 @@ public class SessionSetupDecompositionBenchmarks
     /// OnSessionActivity into every session context. The context construction itself allocates 0
     /// (struct), so the case is the guard that the instance-method-group conversion still allocates
     /// its ≈64 B/session on top — the cost production avoids by caching the delegate in the setup
-    /// instance's constructor and today's static-lambda probes hide (zero only if the compiler
-    /// caches the conversion, which it does not).
+    /// instance's constructor and the static-lambda probes hide (zero only if the compiler caches
+    /// the conversion, which it does not).
     /// </summary>
     [Benchmark]
     public void ComponentC2a2_ContextRecordMethodGroup()
@@ -557,7 +554,7 @@ public class SessionSetupDecompositionBenchmarks
         _pendingResources.Add(new ScopeFixture(scopes, linkedTo: null));
     }
 
-    /// <summary>C2e: the session activity gate alone — N Lock instances constructed into the keep-alive sink (GC.KeepAlive would convert the lock to object and trip CS9216); sizes the per-session lock for the adoption table.</summary>
+    /// <summary>C2e: the session activity gate alone — N Lock instances constructed into the keep-alive sink (GC.KeepAlive would convert the lock to object and trip CS9216); sizes the per-session lock.</summary>
     [Benchmark]
     public void ComponentC2e_LockConstruction()
     {
@@ -569,7 +566,7 @@ public class SessionSetupDecompositionBenchmarks
         Assert(_lockProbeSink is not null, "C2e must construct one lock per session");
     }
 
-    /// <summary>C2e: the drain completion cell alone — N TaskCompletionSource instances constructed with RunContinuationsAsynchronously and kept alive; sizes the quiescence scope's drain cell for the adoption table.</summary>
+    /// <summary>C2e: the drain completion cell alone — N TaskCompletionSource instances constructed with RunContinuationsAsynchronously and kept alive; sizes the quiescence scope's drain cell.</summary>
     [Benchmark]
     public void ComponentC2e_TaskCompletionSourceConstruction()
     {
@@ -583,7 +580,7 @@ public class SessionSetupDecompositionBenchmarks
         Assert(last is not null, "C2e must construct one completion cell per session");
     }
 
-    /// <summary>C2e: the linked lifetime source alone — N linked CancellationTokenSource instances created from one parent token and released in cleanup; sizes the per-scope linked-source cost for the adoption table.</summary>
+    /// <summary>C2e: the linked lifetime source alone — N linked CancellationTokenSource instances created from one parent token and released in cleanup; sizes the per-scope linked-source cost.</summary>
     [Benchmark]
     public void ComponentC2e_LinkedTokenSourceConstruction()
     {
@@ -598,7 +595,7 @@ public class SessionSetupDecompositionBenchmarks
         _pendingResources.Add(new LinkedSourceFixture(linked, parent));
     }
 
-    /// <summary>E1: the exception-count calibration for one canceled await at one await site — per item a fresh CTS cancels a <c>Task.Delay(Timeout.InfiniteTimeSpan, token)</c> and the already-canceled delay is awaited once in this method; the case asserts one caught cancellation per item. The <c>// Exceptions:</c> count at N = 1 is the readout: 1 means the canceled-await mechanics throw once (the awaiter of the canceled task) and 2 means they throw twice. Compare with the recorded teardown cases, whose fake parks on <c>Task.Delay</c> inside a nested async method and whose receive loop then awaits that canceled transport method: their per-session count is the sum over both await sites (T5's benign park never throws, so its count is 0). Attribution-only: the per-item CTS and delay-task allocations are deliberate noise — the readout is the exception count, never the allocation.</summary>
+    /// <summary>E1: the exception-count calibration for one canceled await at one await site — per item a fresh CTS cancels a <c>Task.Delay(Timeout.InfiniteTimeSpan, token)</c> and the already-canceled delay is awaited once in this method; the case asserts one caught cancellation per item. The <c>// Exceptions:</c> count at N = 1 is the readout: 1 means the canceled-await mechanics throw once (the awaiter of the canceled task) and 2 means they throw twice. The teardown cases add a second await site — a nested <c>Task.Delay</c> park their receive loop awaits — so their per-session count sums both (T5's benign park never throws, so its count is 0). Attribution-only: the per-item CTS and delay-task allocations are deliberate noise — the readout is the exception count, never the allocation.</summary>
     [Benchmark]
     public async Task ComponentE1_CanceledDelayAwaitAsync()
     {
@@ -631,7 +628,7 @@ public class SessionSetupDecompositionBenchmarks
         Assert(caught == Sessions, "E1 must observe one canceled delay per session");
     }
 
-    /// <summary>E2: the isolated source of the S5 fixed per-invocation exception term — one real <see cref="SetupExecutor"/> per operation (deliberately independent of <c>Sessions</c>), whose workers start lazily on the first enqueue. The single rented item carries a production-shaped completion cell, its handler completes immediately, and the awaited completion proves a worker ran the pipeline; <see cref="SetupExecutor.Dispose"/>, inside the measured window, then cancels the executor's shutdown source so every worker parked in the synchronous <c>SemaphoreSlim.Wait(token)</c> exits by cancellation (each such wait throws once inside the semaphore's cancellation-aware wait loop and rethrows the same instance where the wait surfaces it). The <c>// Exceptions:</c> count is the readout: the default worker count (<c>max(2 × ProcessorCount, 16)</c> — 64 on this 32-processor host) times one or two first-chance events per worker, i.e. 64 or 128; the recorded S5 case's N-independent fixed term (128 at 64 workers) must match this isolated count, which carries no per-session component. The settle delay before the dispose only lets the worker that ran the item return to its park, so every worker is blocked in the wait when the cancellation fires; it contributes time, never exceptions. Attribution-only: the per-operation allocations and duration are noise and the case must never be quoted as an anchor.</summary>
+    /// <summary>E2: the isolated source of the S5 fixed per-invocation exception term — one real <see cref="SetupExecutor"/> per operation (deliberately independent of <c>Sessions</c>), whose workers start lazily on the first enqueue. The single rented item carries a production-shaped completion cell, its handler completes immediately, and the awaited completion proves a worker ran the pipeline; <see cref="SetupExecutor.Dispose"/>, inside the measured window, then cancels the executor's shutdown source so every worker parked in the synchronous <c>SemaphoreSlim.Wait(token)</c> exits by cancellation (each such wait throws once inside the semaphore's cancellation-aware wait loop and rethrows the same instance where the wait surfaces it). The <c>// Exceptions:</c> count is the readout: the default worker count (<c>max(2 × ProcessorCount, 16)</c> — 64 on this 32-processor host) times one or two first-chance events per worker, i.e. 64 or 128, with no per-session component; it must match the S5 fixed term. The settle delay before the dispose only lets the worker that ran the item return to its park, so every worker is blocked in the wait when the cancellation fires; it contributes time, never exceptions. Attribution-only: the per-operation allocations and duration are noise and the case must never be quoted as an anchor.</summary>
     [Benchmark]
     public async Task ComponentE2_SetupExecutorDisposeAsync()
     {
@@ -690,7 +687,7 @@ public class SessionSetupDecompositionBenchmarks
         Assert(_slotSink is not null, "A4 must construct one slot per session");
     }
 
-    /// <summary>A4b: the admission leg's queue object alone — one <see cref="BoundedSetupQueue"/> per session with the slot's production bounds (32 packets / 32 KiB), sizing the queue's own share of A4's slot-plus-queue pair for the adoption table. The struct-inlining conversion measured net 24.0 B/session (the slot object grows 48.0 → 120.0, swallowing 72 of the 96) and was reverted — below the ≈64 B/session adoption rule — so in the current tree the case prices the class queue at 96.0 B/session and reads ≈0 only if a future decision inlines the queue into its slot.</summary>
+    /// <summary>A4b: the admission leg's queue object alone — one <see cref="BoundedSetupQueue"/> per session with the slot's production bounds (32 packets / 32 KiB), sizing the queue's own share of A4's slot-plus-queue pair. Inlining the queue into its slot was rejected as below the ≈64 B/session adoption rule, so the case prices the class queue at 96.0 B/session and reads ≈0 only if a future decision inlines it.</summary>
     [Benchmark]
     public void ComponentA4b_BoundedSetupQueueObject()
     {
@@ -782,7 +779,7 @@ public class SessionSetupDecompositionBenchmarks
     [Benchmark]
     public void ComponentA9a_DictionaryGrowthSpansResize() => AddDictionaryGrowthEntries(1_024);
 
-    /// <summary>A9b: A9a's no-resize counterpart — the same 2,048 adds into the dictionary shape pre-seeded to 2,048 (just enough to absorb them without a resize), so A9a minus A9b isolates the amortized share of the resize the 1,024 pre-seed cannot; a 4,096 pre-seed was rejected in review because its own arrays exceed A9a's pre-seed plus resize and flipped the contrast negative. The standard marginal formula does not apply to this pair.</summary>
+    /// <summary>A9b: A9a's no-resize counterpart — the same 2,048 adds into the dictionary shape pre-seeded to 2,048 (just enough to absorb them without a resize), so A9a minus A9b isolates the amortized share of the resize the 1,024 pre-seed cannot; a 4,096 pre-seed would exceed A9a's pre-seed plus resize and flip the contrast negative. The standard marginal formula does not apply to this pair.</summary>
     [Benchmark]
     public void ComponentA9b_DictionaryGrowthNoResize() => AddDictionaryGrowthEntries(2_048);
 
@@ -1127,7 +1124,7 @@ public class SessionSetupDecompositionBenchmarks
         public async ValueTask<UdpTransportReceiveResult> ReceiveAsync(Memory<byte> buffer, CancellationToken cancellationToken)
         {
             owner.NoteReceiveEntry();
-#pragma warning disable MA0166 // The fake's park must stay shape-identical to BenchmarkUdpTransport's (the recorded harness shape the teardown numbers were calibrated on); a TimeProvider-based timer is a different implementation.
+#pragma warning disable MA0166 // The fake's park must stay shape-identical to BenchmarkUdpTransport's; a TimeProvider-based timer is a different implementation.
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
 #pragma warning restore MA0166
             throw new InvalidOperationException("The C2 receive should end through cancellation.");

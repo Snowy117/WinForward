@@ -108,10 +108,9 @@ internal sealed class PendingFlowAttribution
     public int Count { get; private set; }
 
     /// <summary>
-    /// Appends one retained packet, keeping the oldest prefix when the ring is full — the head is
-    /// the flow's triggering packet, so drop-oldest would discard the packet whose delivery the
-    /// rest of the batch is ordered after (<c>design.md</c> §2.1). Returns false when the ring is
-    /// full, leaving the ring untouched.
+    /// Appends one retained packet, keeping the oldest prefix when the ring is full: the head is the
+    /// flow's triggering packet, so drop-oldest would discard the packet the batch is ordered after.
+    /// Returns false when the ring is full, leaving the ring untouched.
     /// </summary>
     public bool TryAppend(RetainedPacket packet)
     {
