@@ -35,10 +35,8 @@ Do not write:
 
 Rules that outlive a single edit:
 
-- XML doc comments keep every tag paired and complete (`<summary>`, `<param>`, `<returns>`, `<remarks>`, `<see cref>`, `<paramref>`, `<c>`, `<para>`); a `cref` that no longer resolves fails the build under `TreatWarningsAsErrors`.
 - Every suppression carries a reason verifiable against this repository — the quality gate below requires it, so the reason is not optional prose.
 - References that stay: live specs under `.trellis/spec/`, sibling types and tests inside this tree, protocol constants, interpolation format specifiers, and any label a test or golden file pins.
-- A printed string is user-visible output: rewrite one only when nothing pins it, and re-run the gates afterwards.
 - A rewritten `//` line never ends in `;`, `)`, `{`, `}` or `=>` — Sonar `S125` reads such a line as commented-out code and fails the build.
 
 # Pre-Commit Quality Gate
