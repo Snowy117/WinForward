@@ -10,7 +10,7 @@ namespace WinForward.E2E.Tests.Lanes;
 
 /// <summary>
 /// The send path's performance contract over a <b>real</b> collaborator (allocation-gates.md,
-/// quality-guidelines.md "Allocations", D18.6 #4): the fake-transport gate in
+/// quality-guidelines.md "Allocations"): the fake-transport gate in
 /// <see cref="LaneEngineAllocationGateTests"/> measures the engine, this one measures the engine plus
 /// the udp adapter's socket call on loopback. The window is opened and closed inside a decorator that
 /// owns no state of its own, so what it measures is exactly the real send path; the batch's closing

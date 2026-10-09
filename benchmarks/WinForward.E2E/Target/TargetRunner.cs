@@ -86,7 +86,7 @@ internal static class TargetRunner
         // Every summary, including the targetSummary that names the failure count, is written
         // through the guard: the ledger's own policy already swallows an I/O failure, and this is
         // the second line of defence that keeps one failed summary from skipping the rest and keeps
-        // any of them from escaping TargetRunner (D14.7 item 2).
+        // any of them from escaping TargetRunner.
         await WriteSummaryAsync(ledger, "udpSummary", () => udp.WriteSummaryAsync(CancellationToken.None)).ConfigureAwait(false);
         await WriteSummaryAsync(ledger, "dnsSummary", () => dns.WriteSummaryAsync(CancellationToken.None)).ConfigureAwait(false);
         if (dnsAlt is not null)

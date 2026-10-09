@@ -9,15 +9,14 @@ using WinForward.Windows;
 namespace WinForward.Runtime.Capture;
 
 /// <summary>
-/// One correlated adapter plus the NDIS runtime link state that the enumeration handles carry
-/// (design §3.5 of task 09-07-adapter-list-refresh): the kernel handle, the adapter MAC, the
-/// MTU, and — since task 09-17-adapter-staleness-logging — the per-adapter unicast-address
-/// fingerprint. A refresh diffs this state per stable ID to decide whether the adapter view went
-/// stale: handles are fresh pointers after every bound-list rebuild, MAC/MTU changes matter to
-/// the UDP reinjection targets, and the address fingerprint catches host link-state changes the
-/// NDISRD list never signals (IPv6 temporary-address rotation, address add/remove), so any of
-/// the four changing demands a new generation. An empty fingerprint means "unknown" and compares
-/// equal only to another empty fingerprint.
+/// One correlated adapter plus the NDIS runtime link state that the enumeration handles carry: the
+/// kernel handle, the adapter MAC, the MTU, and the per-adapter unicast-address fingerprint. A refresh
+/// diffs this state per stable ID to decide whether the adapter view went stale: handles are fresh
+/// pointers after every bound-list rebuild, MAC/MTU changes matter to the UDP reinjection targets, and
+/// the address fingerprint catches host link-state changes the NDISRD list never signals (IPv6
+/// temporary-address rotation, address add/remove), so any of the four changing demands a new
+/// generation. An empty fingerprint means "unknown" and compares equal only to another empty
+/// fingerprint.
 /// </summary>
 public sealed record AdapterEnumerationItem(WindowsAdapter Adapter, byte[] Mac, ushort Mtu, string AddressFingerprint = "")
 {
@@ -82,9 +81,9 @@ public sealed class NdisAdapterEnumerationProvider : IAdapterEnumerationProvider
     }
 
     /// <summary>
-    /// A broken address query must never break capture (task 09-17 R1-A): failures degrade to
-    /// empty fingerprints — enumeration still produces handles/MACs/MTUs, the refresh diff just
-    /// stops seeing address changes — with a one-shot debug event leaving a forensic trace.
+    /// A broken address query must never break capture: failures degrade to empty fingerprints —
+    /// enumeration still produces handles/MACs/MTUs, the refresh diff just stops seeing address
+    /// changes — with a one-shot debug event leaving a forensic trace.
     /// </summary>
     private IReadOnlyDictionary<string, string> ReadAddressFingerprintsTolerantly()
     {

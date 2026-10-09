@@ -9,7 +9,7 @@ using Xunit;
 namespace WinForward.E2E.Tests.Lanes;
 
 /// <summary>
-/// The receive/settle thread contract (D18.2): the receive half classifies and enqueues on whatever
+/// The receive/settle thread contract: the receive half classifies and enqueues on whatever
 /// thread its transport completes on, the send half settles on the thread the engine runs on, and the
 /// identity <c>delivered == settled</c> holds with no reply lost and none booked twice. The two halves
 /// really do overlap — the fake's channel is created with <c>AllowSynchronousContinuations = false</c>,
@@ -79,7 +79,7 @@ public sealed class LaneEngineConcurrencyTests
     /// <summary>
     /// The send half: books sends in <c>OnSent</c> and replies only in <c>Settle</c>, exactly as the
     /// real policy must. <c>OnReceive</c> only classifies and enqueues — it keeps no counter at all,
-    /// which is the receive-thread half of the contract (D18.5 #2).
+    /// which is the receive-thread half of the contract.
     /// </summary>
     private sealed class SettlingPolicy : ILanePolicy
     {

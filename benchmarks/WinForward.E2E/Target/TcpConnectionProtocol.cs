@@ -42,7 +42,7 @@ internal readonly struct CommandOutcome
 
     /// <summary>
     /// A connection the socket's own teardown ended before the protocol could measure anything: an
-    /// outcome that is published nowhere, because teardown is not a data point (D19.2 ⑨).
+    /// outcome that is published nowhere, because teardown is not a data point.
     /// </summary>
     internal static CommandOutcome TornDown { get; } = new(TcpMode.Clean, 0, modeKnown: false, outcome: null);
 
@@ -81,7 +81,7 @@ internal static class TcpConnectionProtocol
                 case FrameReadStatus.Truncated:
                     // Closed inside the command frame: there is no mode to run and no boundary to read
                     // one from, so this is a protocol error like any other unreadable frame -- with
-                    // the truncation recorded beside it (D19.3 D).
+                    // the truncation recorded beside it.
                     return new CommandOutcome(TcpMode.Clean, 0, modeKnown: false, new TcpModeOutcome(TcpVerdict.ProtocolError, 0, 1, truncated: true));
                 case FrameReadStatus.Frame
                     when reader.Header.Sequence == FrameCodec.CommandSequence
@@ -111,7 +111,7 @@ internal static class TcpConnectionProtocol
         catch (ObjectDisposedException)
         {
             // Teardown closed the socket under the connection: nothing about this peer was measured,
-            // so the connection publishes no verdict (D19.2 ⑨).
+            // so the connection publishes no verdict.
             return CommandOutcome.TornDown;
         }
     }
@@ -129,7 +129,7 @@ internal static class TcpConnectionProtocol
 
             // Two ways for a stream to end, and they are not the same outcome: a clean close answers
             // the mode, while a close inside a frame leaves a boundary that can never be found and
-            // gets the protocol error -- and no trailer, which only the clean close earns (D19.3 D).
+            // gets the protocol error -- and no trailer, which only the clean close earns.
             if (status is FrameReadStatus.EndOfStream or FrameReadStatus.Truncated)
             {
                 if (status == FrameReadStatus.Truncated)
