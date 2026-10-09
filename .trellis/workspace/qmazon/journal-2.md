@@ -54,7 +54,10 @@ Session summary was not supplied.
 
 ### Git Commits
 
-(No commits - planning session)
+| Hash | Message |
+|------|---------|
+| `0576ce0` | docs(spec): verify the library against the code, trim it, and split the oversized documents |
+| `662c286` | chore(task): record the spec revision task |
 
 ### Status
 
