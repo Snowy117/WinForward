@@ -4,7 +4,7 @@ using static WinForward.TestSupport.AsyncTestExtensions;
 namespace WinForward.Runtime.TcpRedirect.Tests;
 
 /// <summary>
-/// Setup-slot pool balance (task 09-18 M3): the bounded free list recycles completed work items,
+/// Setup-slot pool balance: the bounded free list recycles completed work items,
 /// so a warm executor rents without fresh allocations, and rent/enqueue/complete counters stay
 /// balanced across rounds.
 /// </summary>
@@ -133,8 +133,8 @@ public sealed class SetupExecutorTests
         // window: a worker must not fault its thread on the disposed shutdown source (it exits like
         // a cancelled one), and an accepted item must settle its completion rather than sit in a
         // ring nobody drains. The interleaving needs no forcing — it fires within the first hundred
-        // attempts (measured 2026-09-30: the host aborted on every run without the worker guard,
-        // and 1997 of 1998 accepted items were stranded without the post-enqueue recheck).
+        // attempts (without the worker guard the host aborted on every run, and without the
+        // post-enqueue recheck 1997 of 1998 accepted items were stranded).
         const int attempts = 512;
         var accepted = 0;
         for (var attempt = 0; attempt < attempts; attempt++)

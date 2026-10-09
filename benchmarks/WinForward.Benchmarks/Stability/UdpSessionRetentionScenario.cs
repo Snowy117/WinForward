@@ -8,16 +8,16 @@ using WinForward.Runtime.UdpProxy;
 namespace WinForward.Benchmarks.Stability;
 
 /// <summary>
-/// The mixed one-shot/sustained retention arm (F6). It measures a mechanism with no pre-change
-/// counterpart, so instead of a before-artifact it carries its own control: two identically built
-/// cohorts, one shared mutable clock, and <em>one sweep per cohort at the same instant</em> — the
-/// control sweeping with both timeouts equal to the configured retention (nothing is past it, so both
-/// classes stay resident) and the treatment sweeping with the 5 s one-shot class.
+/// The mixed one-shot/sustained retention arm. The mechanism has no pre-change counterpart, so the
+/// arm carries its own control instead of a before-artifact: two identically built cohorts, one
+/// shared mutable clock, and <em>one sweep per cohort at the same instant</em> — the control
+/// sweeping with both timeouts equal to the configured retention (nothing is past it, so both
+/// classes stay resident), the treatment with the 5 s one-shot class.
 /// <para>
-/// One coordinator per cohort is load-bearing: a coordinator sweep is population-wide, so a single
-/// coordinator could not sweep its control half without also retiring its treatment half before the
-/// treatment arm could be read. The two coordinators share the clock, the transport factory and the
-/// receive-window pool, so the only difference between the two rows is the classification.
+/// One coordinator per cohort is load-bearing: a sweep is population-wide, so a single coordinator
+/// could not sweep its control half without also retiring its treatment half before the treatment
+/// arm could be read. The two coordinators share the clock, the transport factory and the
+/// receive-window pool, so the only difference between the rows is the classification.
 /// </para>
 /// <para>
 /// The row carries the population it actually retired per class, so a vacuous run cannot green the

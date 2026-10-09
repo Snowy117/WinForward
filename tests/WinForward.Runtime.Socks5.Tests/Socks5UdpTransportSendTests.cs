@@ -14,7 +14,7 @@ using static WinForward.TestSupport.Socks5TestServer;
 namespace WinForward.Runtime.Socks5.Tests;
 
 /// <summary>
-/// D2 sync-send fast path: the relay socket runs non-blocking and <c>SendSpanAsync</c> is a
+/// The sync-send fast path: the relay socket runs non-blocking and <c>SendSpanAsync</c> is a
 /// non-async entry whose warm shape hands the datagram to the kernel inline (no IOCP hop, no
 /// state machine); a loopback echo peer proves the synchronous send is actually delivered.
 /// </summary>
@@ -151,7 +151,7 @@ public sealed class Socks5UdpTransportSendTests
     [Fact]
     public async Task JumboCapSendBufferEncodesPayloadsBeyondTheDefaultCap()
     {
-        // R4: the send buffer derives from the frame cap fed at construction. With a jumbo cap
+        // The send buffer derives from the frame cap fed at construction. With a jumbo cap
         // (9014), a 2000-byte payload — far beyond the default ABI's 1508-byte ceiling — encodes
         // and reaches the relay instead of failing the buffer bound.
         using var tcpListener = new TcpListener(IPAddress.Loopback, 0);
@@ -186,7 +186,7 @@ public sealed class Socks5UdpTransportSendTests
     [Fact]
     public async Task DefaultCapSendBufferFailsClosedOnOversizedPayloads()
     {
-        // R4: the buffer bound stays fail-closed. At the default cap the send buffer covers
+        // The buffer bound stays fail-closed. At the default cap the send buffer covers
         // 6 + 16 + 1514 bytes, so a 2000-byte payload cannot encode; the IOException (not a
         // silent drop) is the guard if the capture-bounds-the-payload assumption ever breaks.
         using var tcpListener = new TcpListener(IPAddress.Loopback, 0);

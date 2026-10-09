@@ -170,12 +170,12 @@ internal sealed class LatencyTotals
         SendWouldBlock += counts.SendWouldBlock;
         SendFailures += counts.SendFailures;
 
-        // D18.5 #7: the engine's two defer counters are the contract's two defer keys, by name and
-        // by value; the arm does not keep a second pair.
+        // The engine's two defer counters are the contract's two defer keys, by name and by
+        // value; the arm does not keep a second pair.
         WindowOverflow += counts.DeferredQueued;
         BacklogDrops += counts.DeferredDropped;
 
-        // The other half of outstandingAtTeardown: intents the window never let out (D18.6 #1).
+        // The other half of outstandingAtTeardown: intents the window never let out.
         Outstanding += counts.DeferredPending;
         Truncated |= counts.ScheduleTruncated;
     }

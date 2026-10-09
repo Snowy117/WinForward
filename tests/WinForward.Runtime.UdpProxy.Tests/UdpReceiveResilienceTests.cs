@@ -12,7 +12,7 @@ using static WinForward.TestSupport.FlowBuilders;
 namespace WinForward.Runtime.UdpProxy.Tests;
 
 /// <summary>
-/// R2/R5 receive- and send-path resilience: one malformed, unexpected-source, or oversized relay
+/// Receive- and send-path resilience: one malformed, unexpected-source, or oversized relay
 /// datagram must skip (never kill the session), a failed response reinjection must not tear the
 /// session down, and concurrent transport sends must never interleave in the shared send buffer.
 /// </summary>
@@ -23,7 +23,7 @@ public sealed class UdpReceiveResilienceTests
     [Fact]
     public async Task ReceiveLoopSurvivesMalformedUnexpectedAndOversizedRelayDatagrams()
     {
-        // AC2: valid datagrams before AND after each anomalous one are delivered, and the
+        // Valid datagrams before AND after each anomalous one are delivered, and the
         // session survives all three skip reasons.
         var factory = new FakeTransportFactory();
         var sink = new FakeResponseSink();
@@ -162,7 +162,7 @@ public sealed class UdpReceiveResilienceTests
     [Fact]
     public async Task ConcurrentSendsSerializeIntoTheSharedSendBuffer()
     {
-        // R5: two pumps dispatching the same flow must never interleave writes into the shared
+        // Two pumps dispatching the same flow must never interleave writes into the shared
         // SOCKS5 encode buffer; every received datagram must decode to exactly one input.
         using var tcpListener = new TcpListener(IPAddress.Loopback, 0);
         using var relaySocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
@@ -208,7 +208,7 @@ public sealed class UdpReceiveResilienceTests
     [Fact]
     public async Task ReceiveLoopSurvivesTransportConnectionReset()
     {
-        // S2: one ICMP-driven ConnectionReset from the transport must skip (never kill the
+        // One ICMP-driven ConnectionReset from the transport must skip (never kill the
         // session); datagrams after it are delivered and further sends reuse the same session.
         var transport = new ConnectionResetOnceTransport();
         var factory = new SingleTransportFactory(transport);
@@ -245,7 +245,7 @@ public sealed class UdpReceiveResilienceTests
     [Fact]
     public async Task DomainTypedResponseIsCountedAndSkipped()
     {
-        // S6a: a domain-typed relay response cannot be reinjected (no IP source to rebuild the
+        // A domain-typed relay response cannot be reinjected (no IP source to rebuild the
         // frame from); it is counted in the skip summary while address-typed responses flow on.
         var factory = new FakeTransportFactory();
         var sink = new FakeResponseSink();
@@ -291,7 +291,7 @@ public sealed class UdpReceiveResilienceTests
     }
 
     /// <summary>
-    /// A transport whose first receive throws the ICMP-driven ConnectionReset (S2) and whose later
+    /// A transport whose first receive throws the ICMP-driven ConnectionReset and whose later
     /// receives behave like the channel-backed fake: proves the session loop treats the fault as
     /// skip-class and keeps delivering.
     /// </summary>
