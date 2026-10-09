@@ -60,12 +60,15 @@ Two comparison modes:
                                 (`p_value`, `holm_p_value`, `p_equivalence`, `holm_p_equivalence`)
                                 are compared within an absolute `5e-2` and the two interval edges
                                 (`ci95[0]`, `ci95[1]`) within `max(1e-2, 1e-2 * abs(expected))`.
-                                A p-value is a `--resamples`-draw estimate of a probability,
-                                doubled, so two generator sequences estimate the same one with a
-                                difference of 6.4e-3 on average and 3.5e-2 at worst -- wider than
-                                the last-printed-digit rule allows and narrower than any real
-                                change. `holm_p_value` and both `ci95` edges move nowhere on this
-                                tree (3 passes leave the 2.5 % quantile on the smallest atom) and
+                                Each of the four is a `--resamples`-draw estimate of a probability:
+                                `p_value` and `holm_p_value` double the one-sided count while the
+                                equivalence pair takes one edge instead, so two generator sequences
+                                estimate the same one with a difference whose standard deviation is
+                                6.4e-3 and whose worst case is 3.5e-2 -- wider than the
+                                last-printed-digit rule allows and narrower than any real change.
+                                The bound is conservative for the equivalence pair (1.4e-2 worst). `holm_p_value` and both `ci95` edges
+                                move nowhere on this tree (every `holm_p_value` leaf sits at 0 or 1;
+                                3 passes leave the 2.5 % quantile on the smallest atom) and
                                 stay in the set for the longer campaigns where they do. The bound is
                                 the width of that noise, the path has to match exactly, and the
                                 leaves are the only numbers the relaxation touches; the estimates

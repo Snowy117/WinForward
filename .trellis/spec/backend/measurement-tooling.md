@@ -140,11 +140,18 @@ usage error.
 published: inside a `metrics/<member>.pairs[i]` entry, the four p-values (`p_value`, `holm_p_value`,
 `p_equivalence`, `holm_p_equivalence`) are compared within an absolute `5e-2` and the two interval edges
 (`ci95[0]`, `ci95[1]`) within `max(1e-2, 1e-2 · abs(expected))` (`oracle-diff.py`:
-`STATISTICAL_PATH`/`statistical_tolerance`). The bound is measured, not chosen: the p-value is a
-`--resamples`-draw estimate of a probability doubled by the two-sided rule, so two generator sequences
-differ by SD 6.4e-3 and 3.5e-2 at worst on the frozen tree — wider than one printed unit, narrower than
-any real change. The path must match exactly, so no table cell, `estimate`/`median`/`iqr`, verdict string
-or key set is relaxed, and widening the pattern or the bound is an edit that owes a new measurement.
+`STATISTICAL_PATH`/`statistical_tolerance`). The bound is measured, not chosen: each of the four is a
+`--resamples`-draw estimate of a probability (the direct pair doubles the one-sided count, the equivalence
+pair takes one edge), so two generator sequences differ by SD 6.4e-3 and 3.5e-2 at worst on the frozen
+tree — wider than one printed unit, narrower than any real change. The path must match exactly, so no
+table cell, `estimate`/`median`/`iqr`, verdict string or key set is relaxed, and widening the pattern or
+the bound is an edit that owes a new measurement.
+
+**Serialize differ runs.** `oracle-diff.py` re-extracts `/tmp/wf-synth` and both sides write
+`/tmp/wf-oracle/cs`, so two concurrent runs truncate each other's tree: a concurrent run was measured
+reporting `28 structure, 751 value, 118 missing` with a partially read ledger (`6376/0/0` records, zero
+unparsable), while the identical worktree, binary and script re-ran rc=0 and 20 serial runs on a static
+tree were stable. The failure looks like a real regression, so it is worth knowing before chasing one.
 
 A boundary state the reference cannot render (a zero denominator makes it raise) is asserted from the C#
 side alone: build the knob tree, assert the C# output, and add a negative control that must turn red.
