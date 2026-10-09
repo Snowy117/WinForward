@@ -8,11 +8,11 @@ using WinForward.Runtime.UdpProxy;
 namespace WinForward.Runtime;
 
 /// <summary>
-/// Runs the periodic idle-expiry sweep for the bounded flow/association tables (design §7/§8).
-/// The added tables have <c>RemoveExpired</c> implementations but nothing invoked them; this
-/// component is the single wiring point so stale one-shot flows and idle redirect/relay sessions
-/// are released instead of accumulating to the bounded capacities. Sweep failures are isolated so
-/// a transient teardown error cannot stop the capture loop.
+/// Runs the periodic idle-expiry sweep for the bounded flow/association tables. The tables have
+/// <c>RemoveExpired</c> implementations but nothing else invokes them; this component is the single
+/// wiring point so stale one-shot flows and idle redirect/relay sessions are released instead of
+/// accumulating to the bounded capacities. Sweep failures are isolated so a transient teardown error
+/// cannot stop the capture loop.
 /// </summary>
 public sealed class IdleExpirySweeper : IAsyncDisposable
 {
@@ -144,7 +144,7 @@ public sealed class IdleExpirySweeper : IAsyncDisposable
         catch (Exception exception) when (exception is not OperationCanceledException || !token.IsCancellationRequested)
         {
             // A sweep failure must not stop the capture loop; the next tick retries. It is still
-            // surfaced (rate-limited) so a persistently failing leg is diagnosable (S6d).
+            // surfaced (rate-limited) so a persistently failing leg is diagnosable.
             LogSweepFailureRateLimited(exception);
             return (0, 0, now);
         }

@@ -8,14 +8,14 @@ namespace WinForward.E2E.Client.Arms;
 /// <summary>
 /// The latency arm's tcp book: what came back on one lane and what is still owed, plus the connect
 /// facts the lane body measured. Every counter is a property and none is named after a
-/// <see cref="LaneCounts"/> member (D18.1): the send side belongs to the engine, this side to the
+/// <see cref="LaneCounts"/> member: the send side belongs to the engine, this side to the
 /// policy.
 /// </summary>
 /// <remarks>
 /// The pending book is a plain FIFO of the instants requests were wanted for, because a tcp reply is
-/// matched by arrival order and never by the sequence it echoes (D18.3). Its size is the in-flight
-/// count: an accepted send enters both and a matched reply leaves both. Single-writer by contract
-/// (D18.5 #11): <see cref="LatencyTcpPolicy.Settle"/> on the send thread is the only writer, and the
+/// matched by arrival order and never by the sequence it echoes. Its size is the in-flight
+/// count: an accepted send enters both and a matched reply leaves both. Single-writer by contract:
+/// <see cref="LatencyTcpPolicy.Settle"/> on the send thread is the only writer, and the
 /// receive thread only enqueues settlements.
 /// </remarks>
 internal sealed class LatencyTcpState
@@ -98,9 +98,9 @@ internal sealed class LatencyTcpState
 }
 
 /// <summary>
-/// One receive outcome waiting for the send thread (D18.5 #2). The stream's framing has already been
+/// One receive outcome waiting for the send thread. The stream's framing has already been
 /// read by the transport, so there is no sequence here to carry: a tcp reply is matched by arrival
-/// order (D18.3), and the only decision left is which counter the outcome moves.
+/// order, and the only decision left is which counter the outcome moves.
 /// </summary>
 [StructLayout(LayoutKind.Auto)]
 internal readonly record struct TcpSettlement(LaneReceiveKind Kind, long ReceivedTicks);
@@ -108,10 +108,10 @@ internal readonly record struct TcpSettlement(LaneReceiveKind Kind, long Receive
 /// <summary>
 /// The latency arm's tcp policy: window admission, frame construction and the reply book, matched in
 /// arrival order because a tcp stream cannot tell a reply's sequence from any other frame's. It holds
-/// the window the engine deliberately does not (D18.1) and frames straight into the engine's buffer.
+/// the window the engine deliberately does not, and frames straight into the engine's buffer.
 /// </summary>
 /// <remarks>
-/// The receive thread only classifies and enqueues (D18.5 #2); every counter and every round-trip
+/// The receive thread only classifies and enqueues; every counter and every round-trip
 /// sample moves in <see cref="Settle"/>, on the send thread.
 /// </remarks>
 internal sealed class LatencyTcpPolicy : ILanePolicy
@@ -165,7 +165,7 @@ internal sealed class LatencyTcpPolicy : ILanePolicy
 
     public void Settle(long nowTicks)
     {
-        // The contract is to empty the queue, not to book one item (D18.6 #5).
+        // The contract is to empty the queue, not to book one item.
         while (_settlements.TryDequeue(out var settlement))
         {
             switch (settlement.Kind)

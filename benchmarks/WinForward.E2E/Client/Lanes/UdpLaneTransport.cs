@@ -7,8 +7,7 @@ namespace WinForward.E2E.Client.Lanes;
 /// <summary>
 /// A lane's datagram wire endpoint: a connected UDP socket and the buffer one datagram is read into.
 /// It reports what arrived and never judges whether the bytes were legal — the policy owns every
-/// verdict and every counter — and it owns the socket's lifetime, because the engine disposes nothing
-/// (D18.1).
+/// verdict and every counter — and it owns the socket's lifetime, because the engine disposes nothing.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -78,8 +77,8 @@ internal sealed class UdpLaneTransport : ILaneTransport
         // overload a byte[] argument binds to that allocates a Task per call (measured 72 B). The
         // real-transport allocation gate is what keeps this overload, and the parameter type that
         // selects it, in place.
-        // The transport's own pre-await reading of the same property the engine reads off the returned
-        // task (audit §9.6); the engine takes the union of the two, so neither side can double-count it.
+        // The transport reads the same property off the returned task that the engine reads, before
+        // awaiting it; the engine takes the union of the two, so neither side can double-count it.
         var wouldBlock = !send.IsCompleted;
         try
         {

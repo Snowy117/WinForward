@@ -9,7 +9,7 @@ using static WinForward.TestSupport.FlowBuilders;
 namespace WinForward.Runtime.UdpProxy.Tests;
 
 /// <summary>
-/// R1: the first datagram of a new UDP flow must never drag the capture pump through the SOCKS5
+/// The first datagram of a new UDP flow must never drag the capture pump through the SOCKS5
 /// setup. These tests pin the bounded setup queue and its entry lifetime: the dispatcher-side
 /// send returns during a long stall, buffered datagrams relay in FIFO order, overflow drops the
 /// oldest, a send racing the flush cannot overtake the queue, dispose drains without awaiting
@@ -128,7 +128,7 @@ public sealed class UdpSetupQueueTests
     [Fact]
     public async Task FlushDropsSetupDatagramsOlderThanTheTtl()
     {
-        // R4 TTL: a datagram still buffered after the setup window has long been retransmitted
+        // TTL: a datagram still buffered after the setup window has long been retransmitted
         // or abandoned at the application layer — the flush delivers only fresh state. The
         // window runs from the dial start (the re-stamp applied when the setup leaves the
         // limiter), so the test pins the dial boundary first (CreateAsync entered) before
@@ -167,13 +167,12 @@ public sealed class UdpSetupQueueTests
     public async Task LimiterQueueWaitDoesNotExpireTheTriggeringDatagram()
     {
         // TTL re-attribution at dial start: a datagram's staleness must not accrue while its
-        // flow's setup waits on the 8-wide setup limiter (2026-09-06 burst baseline: wave k's
-        // triggering datagram waited (k−1)×dial on the limiter and the enqueue-stamp TTL
-        // dropped it). Flow #9 queues 4 s behind the occupants, then its dial stalls another
-        // 2 s: 6 s total from enqueue — past the 5 s TTL under the enqueue-stamp semantics —
-        // but only the 2 s dial age survives the re-stamp, so the datagram is delivered and
-        // nothing expires. The occupants' own dials (4 s) stay under the TTL, so all nine
-        // datagrams deliver.
+        // flow's setup waits on the 8-wide setup limiter (under enqueue-stamp TTL, wave k's
+        // triggering datagram waited (k−1)×dial on the limiter and was dropped). Flow #9 queues 4 s
+        // behind the occupants, then its dial stalls another 2 s: 6 s total from enqueue — past the
+        // 5 s TTL under the enqueue-stamp semantics — but only the 2 s dial age survives the
+        // re-stamp, so the datagram is delivered and nothing expires. The occupants' own dials (4 s)
+        // stay under the TTL, so all nine datagrams deliver.
         var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
         var occupantGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         const int occupants = 8;
@@ -202,7 +201,7 @@ public sealed class UdpSetupQueueTests
         await WaitForAsync(() =>
         {
             // Occupant transports can still be appending while this polls: enumerate under the
-            // factory lock, or the Sum throws "collection was modified" (observed 2026-09-17).
+            // factory lock, or the Sum throws "collection was modified".
             lock (factory.Transports)
             {
                 return factory.Transports.Sum(transport =>

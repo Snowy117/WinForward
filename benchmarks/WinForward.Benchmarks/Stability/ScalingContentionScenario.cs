@@ -8,25 +8,24 @@ using WinForward.Runtime;
 namespace WinForward.Benchmarks.Stability;
 
 /// <summary>
-/// Contention and scaling probe for the global lock chain (research F2). One shared flow table plus
-/// one self-traffic registry, driven by 1/2/4 worker threads that resolve mostly disjoint keys through
-/// the operations a warm packet pays. The claim under test is the scaling ratio
+/// Contention and scaling probe for the global lock chain. One shared flow table plus one
+/// self-traffic registry, driven by 1/2/4 worker threads that resolve mostly disjoint keys through the
+/// operations a warm packet pays. The claim under test is the scaling ratio
 /// <c>throughput(N) / (N × throughput(1))</c>: every process-wide lock on the warm path pushes the
 /// ratio below 1.
 /// <para>
 /// Three arms: <c>fake</c> (<see cref="NeverOwnedGuard"/>, the guard shape the dispatcher benchmarks
 /// use, plus the real gated resolve), <c>real</c> (a populated <see cref="SelfTrafficRegistry"/> and the
-/// full <see cref="ISelfTrafficGuard.IsOwned"/>), and <c>warm</c> — the post-reorder production shape:
-/// the same populated registry, the retained lock-free wildcard half
-/// (<see cref="ISelfTrafficGuard.IsWildcardOwned"/>) and the lock-free cache probe
-/// (<see cref="FlowTable.TryResolveWarm"/>) in place of the per-lookup exact-tuple check and the gated
-/// resolve. The warm arm counts the probe's hits and misses, so its ratio is attributable to the
-/// measured cache miss rate; the arm charges a miss only the failed probe (the production fallback is
-/// the dispatcher's slow path, which is not part of this resolve-shaped unit). The fake arm
-/// cannot show the reorder (it answers without touching a lock); the real arm is the pre-change
-/// comparator. Only <c>warm</c> carries the acceptance figure, and its verdict row records both the
-/// self-normalised ratio and the ratio against the recorded one-thread baseline, because the
-/// self-normalised denominator is this run's own one-thread arm and therefore rises with the fix.
+/// full <see cref="ISelfTrafficGuard.IsOwned"/>), and <c>warm</c> (the same populated registry, the
+/// lock-free wildcard half <see cref="ISelfTrafficGuard.IsWildcardOwned"/> and the lock-free cache
+/// probe <see cref="FlowTable.TryResolveWarm"/> in place of the per-lookup exact-tuple check and the
+/// gated resolve). The warm arm counts the probe's hits and misses, so its ratio is attributable to the
+/// measured cache miss rate; a miss is charged only the failed probe, because the production fallback
+/// is the dispatcher's slow path and is not part of this resolve-shaped unit. The fake arm answers
+/// without touching a lock, so it cannot show the reorder. Only <c>warm</c> carries the acceptance
+/// figure; its verdict row records both the self-normalised ratio and the ratio against the recorded
+/// one-thread baseline, because the self-normalised denominator is this run's own one-thread arm and
+/// therefore rises with the warm path.
 /// </para>
 /// </summary>
 internal static class ScalingContentionScenario
@@ -40,7 +39,7 @@ internal static class ScalingContentionScenario
     /// <summary>Lookups per batch; the batch keeps the clock check out of the inner loop.</summary>
     private const int BatchSize = 64;
 
-    /// <summary>The recorded one-thread baseline of the pre-change <c>real</c> arm (resolutions/s).</summary>
+    /// <summary>The recorded one-thread baseline the verdict also divides by (resolutions/s).</summary>
     private const double RecordedOneThreadBaseline = 3_331_758.3;
 
     private static long s_sink;
@@ -158,8 +157,8 @@ internal static class ScalingContentionScenario
         {
             for (var step = 0; step < BatchSize; step++)
             {
-                // Every lookup is one unit of work (the recorded before-series counted the gated resolve
-                // the same way), and the warm arm additionally splits that unit into cache hits/misses.
+                // Every lookup is one unit of work, and the warm arm additionally splits that unit into
+                // cache hits and misses.
                 LookupOutcome outcome;
                 if (sharedCount > 0 && sinceShared == 0)
                 {
@@ -192,8 +191,8 @@ internal static class ScalingContentionScenario
 
     /// <summary>
     /// One lookup: the self-traffic check then the flow-table resolve — the serialized lock
-    /// acquisitions and dictionary probes a warm packet pays (research F2's cost model). Inlined so the
-    /// measurement is the collaborators, not the loop.
+    /// acquisitions and dictionary probes a warm packet pays. Inlined so the measurement is the
+    /// collaborators, not the loop.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static LookupOutcome Resolve(GuardArm arm, FlowTable table, in FlowKey key, in FlowContext context)

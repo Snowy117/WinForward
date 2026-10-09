@@ -5,7 +5,7 @@ using WinForward.E2E.Contracts;
 namespace WinForward.E2E.Analysis.Stats;
 
 /// <summary>
-/// What one CPU reading did, for the §6 columns that report the reading's own shape rather than its
+/// What one CPU reading did, for the columns that report the reading's own shape rather than its
 /// value: how many process identities the samples carried, how many of them could be used, and how many
 /// distinct process starts were seen.
 /// </summary>
@@ -16,7 +16,7 @@ internal sealed record CpuDiagnostics(int Identities, int IdentitiesUsed, int Re
 
 /// <summary>
 /// One arm's CPU as a share of one logical processor, summed per process identity, plus the reasons a
-/// reading can fail and the diagnostics §6 prints beside it.
+/// reading can fail and the diagnostics printed beside it.
 /// </summary>
 /// <remarks>
 /// <para><b>Per identity, not per process name.</b> Each <c>(pid, startUtc)</c> contributes the delta of
@@ -144,7 +144,7 @@ internal static class CpuDetail
 
     /// <summary>
     /// The CPU seconds one arm's samples accumulate, summed over the identities that carry two readable
-    /// counters — the numerator §6's per-transaction columns divide by a denominator.
+    /// counters — the numerator the per-transaction columns divide by a denominator.
     /// </summary>
     /// <remarks>
     /// Unlike <see cref="Compute"/> this reads no fallback: the per-transaction column is about the
