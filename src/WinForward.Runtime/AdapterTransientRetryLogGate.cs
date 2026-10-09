@@ -4,12 +4,13 @@ using WinForward.Runtime.Logging;
 namespace WinForward.Runtime;
 
 /// <summary>
-/// Rate-limited (5 s) warn gate for transient adapter read retries (R7): per-retry invocation is
-/// naturally bounded by the pump's retry budget, and this window keeps a persistently flapping
-/// adapter from flooding the console. The window anchors on the last emitted warn — a suppressed
-/// retry does not extend it — and the CAS admits exactly one writer when retries from several
-/// adapters race. The clock is a <see cref="TimeProvider"/> so the window semantics stay testable
-/// without real time.
+/// Rate-limited (5 s) warn gate for transient adapter read retries: the window keeps a permanently
+/// flapping adapter from flooding the console. It anchors on the last emitted warn — a suppressed
+/// retry does not extend it — and the CAS admits exactly one writer when several adapters race.
+/// <para>
+/// The clock is a <see cref="TimeProvider"/> so the window semantics stay testable without real
+/// time.
+/// </para>
 /// </summary>
 #pragma warning disable MA0182 // Consumed by WinForward.Cli through InternalsVisibleTo (Program.cs wires it into the pump's retry logging) and by AdapterTransientRetryLogGateTests; the analyzer only sees usages inside this assembly and cannot see IVT consumers.
 internal sealed class AdapterTransientRetryLogGate(ILogger logger, TimeProvider? timeProvider = null)

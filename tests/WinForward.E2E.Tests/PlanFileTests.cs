@@ -34,9 +34,9 @@ public sealed class PlanFileTests
         }
     }
 
-    // #6: a loss or mix arm classifies arrivals against a loss window W, and a plan that declares
-    // none silently measures against the 200 ms default instead. base passes W through from its own
-    // entry and dns has no such arm, so only these two kinds are held to declaring it (D14.2).
+    // A loss or mix arm classifies arrivals against a loss window W, and a plan that declares none
+    // silently measures against the 200 ms default instead. base passes W through from its own entry
+    // and dns has no such arm, so only these two kinds are held to declaring it.
     [Fact]
     public void EveryLossAndMixArmDeclaresItsLossWindow()
     {

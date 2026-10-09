@@ -6,11 +6,10 @@ using WinForward.Runtime.UdpProxy;
 namespace WinForward.TestSupport;
 
 /// <summary>
-/// Process-wide native pools and one shared setup executor for coordinator construction in tests
-/// (Phase A / R6): a coordinator borrows its pools and executor from composition and never
-/// disposes them, so tests that do not assert pool behavior share these long-lived instances
-/// instead of owning a per-test one. The shared UDP pools are sized for the largest frame cap any
-/// test pins; tests that assert pool accounting pass their own pool.
+/// Process-wide native pools and one shared setup executor for coordinator construction in tests: a
+/// coordinator borrows both from composition and never disposes them, so tests that do not assert
+/// pool behavior share these long-lived instances. The shared UDP pools are sized for the largest
+/// frame cap any test pins; tests that assert pool accounting pass their own pool.
 /// </summary>
 internal static class TestPools
 {

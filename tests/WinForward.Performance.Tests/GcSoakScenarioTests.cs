@@ -92,8 +92,7 @@ public sealed class GcSoakScenarioTests
         const long canonicalSends = 432_000;
         // BCL lock-contention noise observed in the gate is a few hundred bytes; it must pass.
         Assert.True(300 <= GcSoakScenario.SenderAllocationAllowance(canonicalSends));
-        // A real per-datagram allocation (the 72 B/datagram regression this gate exists to catch)
-        // must exceed the allowance by orders of magnitude.
+        // A real per-datagram allocation the allowance must catch by orders of magnitude.
         Assert.True(72 * canonicalSends > GcSoakScenario.SenderAllocationAllowance(canonicalSends));
         // The allowance never drops below the absolute noise ceiling.
         Assert.Equal(GcSoakScenario.SenderAllocationNoiseCeilingBytes, GcSoakScenario.SenderAllocationAllowance(0));
@@ -102,7 +101,7 @@ public sealed class GcSoakScenarioTests
     [Fact]
     public void OverflowGrewToleratesOutstandingDriftButCatchesFreshNativeAllocation()
     {
-        // The exact shape of the failed 30-minute run: identical overflow, relay outstanding drifted
+        // The exact shape of a run that failed this way: identical overflow, relay outstanding drifted
         // 16 -> 14 because relays finished and returned their leases. A return is not a leak, so the
         // window gate must pass.
         var baseline = new GcSoakScenario.PoolSnapshot(

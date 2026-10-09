@@ -83,9 +83,10 @@ public sealed class RuntimeCountersTests
     }
 
     /// <summary>
-    /// The native-pool registry (task 09-18 M0): registered pools record cumulative
-    /// rents/returns under pool.&lt;name&gt;.rented/.returned, occupancy is rented − returned,
-    /// and the heartbeat aggregates occupancy across every registered pool.
+    /// The native-pool registry: registered pools record cumulative
+    /// rents/returns under pool.&lt;name&gt;.rented/.returned, while occupancy —
+    /// rented minus returned — is what the heartbeat aggregates across every
+    /// registered pool.
     /// </summary>
     public sealed class PoolRegistryTests
     {

@@ -15,9 +15,9 @@ namespace WinForward.Runtime.UdpProxy.Tests;
 /// The observability promise end to end: the <c>udp.session.created</c> event the real setup
 /// pipeline emits over the real transport factory names the UDP carriage the resolved target
 /// selects — <c>uot</c> for a SOCKS5 server with <c>udpOverTcp</c>, <c>native</c> for every other
-/// SOCKS5 server — beside an unchanged <c>targetKind=socks5</c>. The batch-1 unit test pins the
-/// field's formatting in isolation; these facts pin that the field survives the target → factory →
-/// transport → setup pipeline path that produces it in production.
+/// SOCKS5 server — beside an unchanged <c>targetKind=socks5</c>. The unit test pins the field's
+/// formatting in isolation; these facts pin that it survives the target → factory → transport →
+/// setup pipeline path that produces it in production.
 /// </summary>
 public sealed class UdpSessionTransportObservabilityTests
 {

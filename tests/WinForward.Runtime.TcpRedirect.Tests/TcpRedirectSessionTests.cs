@@ -6,8 +6,8 @@ using Xunit;
 namespace WinForward.Runtime.TcpRedirect.Tests;
 
 /// <summary>
-/// R1: the accept loop owns the lifetime drain — its finally runs when the linked shutdown
-/// cancellation ends the loop first, so a retire that arrives afterwards must tolerate an already
+/// The accept loop owns the lifetime drain: its finally already ran when the linked shutdown
+/// cancellation ends the loop first, so a retire arriving afterwards must tolerate an already
 /// drained (and released) source. Retire and the lifetime drain must also be idempotent in either
 /// order.
 /// </summary>
