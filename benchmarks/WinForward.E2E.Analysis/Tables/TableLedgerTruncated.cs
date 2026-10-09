@@ -6,19 +6,19 @@ using WinForward.E2E.Analysis.Model;
 namespace WinForward.E2E.Analysis.Tables;
 
 /// <summary>
-/// §14.7 of "Target-ledger cross-check": the frames the targets had cut off in half, one table per
+/// The target-ledger cross-check: the frames the targets had cut off in half, one table per
 /// mechanism and one row per target and pass.
 /// </summary>
 /// <remarks>
 /// <para><b>Two mechanisms share one leaf name.</b> The TCP echo listener counts a connection the
 /// peer's close cut off in the middle of a frame; a DNS listener counts a message its own two-byte
-/// length prefix read short (D19.3 C). They are rendered apart rather than added together, and each
+/// length prefix read short. They are rendered apart rather than added together, and each
 /// listener's DNS count is listed under its own port.</para>
 /// <para><b>Per target and per pass, never per arm.</b> A truncated frame carries no sequence number,
 /// so it belongs to no run and no arm: the counters are the target's own running totals, printed as
-/// the same target-and-pass row §14.1 lists its ledgers with, and no cell, rate or gate above this
-/// subsection includes them. A tree in which no target truncated anything prints no subsection at
-/// all, which is the §14.6 condition one mechanism further out.</para>
+/// the same target-and-pass row its ledger is listed with elsewhere, and no cell, rate or gate in
+/// this section includes them. A tree in which no target truncated anything prints no subsection at
+/// all, which is the same condition one mechanism further out.</para>
 /// </remarks>
 internal static class TableLedgerTruncated
 {
@@ -97,7 +97,7 @@ internal static class TableLedgerTruncated
         return rows;
     }
 
-    /// <summary>One (pass, ledger) row of §14.7: the target's TCP total, and its per-listener DNS totals.</summary>
+    /// <summary>One (pass, ledger) row of the truncated-frames table: the target's TCP total, and its per-listener DNS totals.</summary>
     private sealed record TruncationRow(
         string Pass,
         string Ledger,
@@ -124,7 +124,7 @@ internal static class TableLedgerTruncated
 
     private const string DnsTruncationNote =
         "**DNS — a length-prefix short read.** A DNS listener reads a two-byte length prefix and then that "
-        + "many bytes, so either read ending short is this listener's own `dnsSummary/truncatedFrames` "
-        + "(D19.3 C). It is a different mechanism from the frame reader's, which is why it is listed per "
+        + "many bytes, so either read ending short is this listener's own `dnsSummary/truncatedFrames`. "
+        + "It is a different mechanism from the frame reader's, which is why it is listed per "
         + "listener with its port: two listeners keep two counts, and neither is the echo listener's.";
 }

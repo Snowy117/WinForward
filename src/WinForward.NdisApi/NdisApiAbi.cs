@@ -167,7 +167,7 @@ internal static partial class NdisApiNative
 
     private static nint ResolveLibrary(string libraryName, System.Reflection.Assembly assembly, DllImportSearchPath? searchPath)
     {
-        // ReSharper disable once ConvertIfStatementToReturnStatement // Foreign-library probe: the early "not our library" return keeps the load path out of a 150+ char ternary (B1 disposition).
+        // ReSharper disable once ConvertIfStatementToReturnStatement // Foreign-library probe: the early "not our library" return keeps the load path out of a 150+ char ternary.
         if (!string.Equals(libraryName, LibraryName, StringComparison.OrdinalIgnoreCase)) return nint.Zero;
         return NativeLibrary.Load(GetApplicationLocalLibraryPath(AppContext.BaseDirectory));
     }
@@ -176,7 +176,7 @@ internal static partial class NdisApiNative
     {
         ArgumentException.ThrowIfNullOrEmpty(applicationBaseDirectory);
         var path = Path.Combine(applicationBaseDirectory, LibraryName);
-        // ReSharper disable once ConvertIfStatementToReturnStatement // Guard-clause + throw reads failure-first; the suggested `cond ? throw ... : value` form has no precedent in this repo (B1 disposition).
+        // ReSharper disable once ConvertIfStatementToReturnStatement // Guard-clause + throw reads failure-first; the suggested `cond ? throw ... : value` form has no precedent in this repo.
         if (!File.Exists(path)) throw new DllNotFoundException($"WinForward requires {LibraryName} beside the executable: {path}");
         return path;
     }
@@ -202,13 +202,9 @@ internal static partial class NdisApiNative
     internal static partial int SetAdapterListChangeEvent(NdisApiSafeHandle handle, nint win32Event);
 
     /// <summary>
-    /// Registers (or, with a NULL event, releases) the adapter's packet-arrival notification. Pinned
-    /// from <c>wiresock/ndisapi@417b8734</c>: <c>include/ndisapi.h:307</c> (C wrapper),
-    /// <c>ndisapi/ndisapi.cpp:3586</c>, <c>ndisapi.vs2012/ndisapi.def:16</c>; the bare-name export was
-    /// hardware-verified on the real DLL on 2026-08-27 (only the export table — the signalling
-    /// behaviour itself is unverified here). The pinned header documents the driver as signalling the
-    /// caller's Win32 event while the adapter's packet queue is non-empty; the caller owns the event's
-    /// lifetime.
+    /// Registers (or, with a NULL event, releases) the adapter's packet-arrival notification. The
+    /// bare-name export was verified against the real DLL; the driver signals the caller's Win32
+    /// event while the adapter's packet queue is non-empty, and the caller owns the event's lifetime.
     /// </summary>
     [LibraryImport(LibraryName, EntryPoint = "SetPacketEvent", SetLastError = true)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvStdcall)])]

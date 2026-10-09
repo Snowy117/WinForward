@@ -310,7 +310,7 @@ public sealed class TcpRelayEndCloseTests
             order.Add("inject");
         }
 
-        /// <summary>Appends a batch's frames in order, marking each one as an injection like the single-send overloads.</summary>
+        /// <summary>Appends a batch's frames in order.</summary>
         public void InjectBatch(NdisPacketBuffer[] frames, int count, bool towardMstcp, nint adapterHandle)
         {
             lock (Frames)

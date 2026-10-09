@@ -3,7 +3,7 @@ using WinForward.Core;
 namespace WinForward.Runtime.TcpRedirect;
 
 /// <summary>
-/// The per-tuple amplification guard for capacity-rejection resets (S4). A SYN rejected at the
+/// The per-tuple amplification guard for capacity-rejection resets. A SYN rejected at the
 /// session budget elicits at most one RST|ACK per original 4-tuple per cooldown window, so
 /// retransmitted SYNs inside the window stay silently dropped and a spoofed-source SYN flood
 /// cannot turn the proxy into a reflection amplifier. Bounded by the session budget and evicts

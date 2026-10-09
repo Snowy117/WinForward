@@ -8,11 +8,10 @@ using static WinForward.TestSupport.FlowBuilders;
 namespace WinForward.Runtime.UdpProxy.Tests;
 
 /// <summary>
-/// R4 seam proof: <see cref="UdpSessionSetup"/> is constructible directly against a fake
-/// <see cref="IUdpSessionSlotHost"/> — no coordinator — so the dial/claim/construct/flush
-/// pipeline is testable through the single slot-access seam. The TTL-drop flush path is pinned
-/// here: a datagram whose entry stamp is older than the setup TTL is dropped and its lease
-/// released, never sent.
+/// The TTL-drop flush path is pinned here: a datagram whose entry stamp is older than the setup TTL
+/// is dropped and its lease released, never sent. <see cref="UdpSessionSetup"/> is constructible
+/// directly against a fake <see cref="IUdpSessionSlotHost"/> — no coordinator — so the
+/// dial/claim/construct/flush pipeline is testable through the single slot-access seam.
 /// </summary>
 public sealed class UdpSessionSetupTests
 {

@@ -8,7 +8,7 @@ internal sealed class ArmOutcome
     /// <summary>
     /// What the arm ran with, after its own defaults were applied. The value is typed rather than a
     /// name/value bag, so an arm constructs the members it published and every other member stays
-    /// absent from the record (D14.21).
+    /// absent from the record.
     /// </summary>
     internal required ArmParameters Parameters { get; init; }
 

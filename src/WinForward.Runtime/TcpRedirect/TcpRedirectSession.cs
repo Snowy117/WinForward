@@ -10,11 +10,11 @@ namespace WinForward.Runtime.TcpRedirect;
 /// coordinator itself.
 /// </summary>
 /// <remarks>
-/// The lifetime is a nested <see cref="QuiescenceScope"/> linked to the store's scope token (D7):
+/// The lifetime is a nested <see cref="QuiescenceScope"/> linked to the store's scope token:
 /// <see cref="Retire"/> cancels it, <see cref="DisposeLifetimeAsync"/> drains it (seal + join + release the
 /// CTS), and <see cref="Token"/> is the scope-owned token. <see cref="IsRetired"/> stays an explicit
-/// owner-held admission flag (D1) because the scope has no seal-only transition: retiring must cancel
-/// the accept loop immediately while the token stays readable until that loop ends (R1).
+/// owner-held admission flag because the scope has no seal-only transition: retiring must cancel
+/// the accept loop immediately while the token stays readable until that loop ends.
 /// </remarks>
 internal sealed class TcpRedirectSession(TcpRedirectAssociation association, ITcpRedirectListener listener, SelfTrafficRegistry.SelfTrafficToken selfTrafficToken, Socks5Server server, long flowGeneration, CancellationToken shutdown)
 {
@@ -36,7 +36,7 @@ internal sealed class TcpRedirectSession(TcpRedirectAssociation association, ITc
         if (Interlocked.Exchange(ref _retired, 1) != 0) return;
         // Cancel, never dispose: the accept loop (and the reset injector it drives) may still read
         // Token while it unwinds, so only the drain — invoked once the loop has ended — releases
-        // the scope's CTS (R1).
+        // the scope's CTS.
         _scope.Cancel();
     }
 

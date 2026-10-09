@@ -6,14 +6,14 @@ using WinForward.E2E.Analysis.Stats;
 namespace WinForward.E2E.Analysis.Tables;
 
 /// <summary>
-/// §12, "Dual-phase detail": per row, the two lanes' LAT and LOSS readings, how far the direct lane sits
+/// The dual-phase detail: per row, the two lanes' LAT and LOSS readings, how far the direct lane sits
 /// from the campaign's best direct lane, and the one-sentence verdict on whether the product interfered.
 /// </summary>
 /// <remarks>
 /// <para><b>The direct lane is a property of the path.</b> It leaves the product alone, so its latency and
 /// loss are what the path itself does; a row whose direct lane is worse than another row's is showing
 /// interference rather than a slow product, and a non-zero <c>directLeak</c> is a correctness failure
-/// reported in the same words §0.1 uses.</para>
+/// reported in the same words the summary section uses.</para>
 /// <para><b>A row that never ran the phase says why.</b> A plan without a dual phase and a plan whose
 /// phase left no directory are two different absences and the reason column spells each one out.</para>
 /// </remarks>

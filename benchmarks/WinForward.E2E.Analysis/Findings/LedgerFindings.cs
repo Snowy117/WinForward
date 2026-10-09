@@ -74,8 +74,7 @@ internal static partial class LedgerFindings
             outFindings.AddRange(OverlapFindings(campaign, passId, entry));
         }
 
-        // The reference's dns-totals block reads the pass variable its own loop above left behind, so it
-        // reads the records of the last pass that has a ledger; the client totals span every pass.
+        // The ledger side reads the last pass that has one; the client totals span every pass.
         outFindings.AddRange(DnsFindings(campaign, lastPass));
         return outFindings;
     }

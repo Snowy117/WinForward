@@ -6,7 +6,7 @@ namespace WinForward.E2E.Tests.Lanes;
 /// <summary>
 /// The order the engine drives its seam in: <c>BuildRequest → SendAsync → OnSent</c> strictly serial,
 /// <c>OnSent</c> before the next <c>BuildRequest</c>, and <c>Settle</c> after the slot's pace and
-/// before the slot's request (D18.5 #6/#8).
+/// before the slot's request.
 /// </summary>
 public sealed class LaneEngineOrderTests
 {
