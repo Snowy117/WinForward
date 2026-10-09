@@ -197,7 +197,7 @@ public sealed class NdisPacketBufferPoolTests
     [Fact]
     public async Task ReturnsRacingDisposeNeverStrandBuffers()
     {
-        // L2: a return that passes the disposed check just before Dispose sets its flag can
+        // A return that passes the disposed check just before Dispose sets its flag can
         // enqueue after the disposer's drain already saw an empty queue. The return's
         // post-enqueue recheck drains on the returner's side, so once every returner and the
         // dispose have completed, every allocated buffer has been freed — none stays stranded in

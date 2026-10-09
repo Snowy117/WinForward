@@ -13,14 +13,13 @@ namespace WinForward.Performance.Tests;
 /// The two-class idle sweep's allocation contract, in its own file because
 /// <c>SweepAllocationGateTests.cs</c> is already over the 400-effective-line cap.
 /// <para>
-/// The gated tick is the <em>no-op</em> tick over a populated world driven through the three-argument
-/// overload: every session is past the short-class pre-filter cutoff (so the candidate scan, the
-/// per-candidate transport-class read and the per-class cutoff comparison all run) and none is past
-/// the long class's cutoff, so nothing retires — the retiring tick awaits slot removal outside this
-/// gate's scope and is not the byte-exact shape.
+/// The gated tick is the <em>no-op</em> tick over a populated world: every session is past the
+/// short-class pre-filter cutoff (so the candidate scan, the per-candidate transport-class read and
+/// the per-class cutoff comparison all run) and none is past the long class's cutoff, so nothing
+/// retires.
 /// </para>
 /// <para>
-/// Window contract (<c>allocation-gates.md</c>): bounded probe batches that must each read an exactly zero
+/// Window contract: bounded probe batches that must each read an exactly zero
 /// per-thread delta on an unchanged thread before the measured window opens; the driven call must
 /// complete synchronously; the managed thread id is captured before the window and asserted unchanged
 /// after it; the assertion is the exact <c>Assert.Equal(0, allocated)</c>; and a thread-independent

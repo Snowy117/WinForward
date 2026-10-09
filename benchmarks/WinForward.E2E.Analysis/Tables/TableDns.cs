@@ -6,15 +6,14 @@ using WinForward.E2E.Analysis.Stats;
 namespace WinForward.E2E.Analysis.Tables;
 
 /// <summary>
-/// §9, "DNS comparability detail": the port-53 arm beside the arm on a port no product special-cases,
+/// "DNS comparability detail": the port-53 arm beside the arm on a port no product special-cases,
 /// with the carriage each row measures and how much of the arm rode it.
 /// </summary>
 /// <remarks>
 /// <para><b>Only the alt-port arm is comparable across products.</b> The port-53 UDP path differs per
 /// row — relayed through the proxy on some, forwarded verbatim to a local DNS target on others, and
 /// passed through unredirected by a hardcoded port-53 rule — so a port-53 number measures that row's
-/// own wiring rather than the product's DNS handling. The comparability column says which of those a
-/// row is, in the same words §1 uses.</para>
+/// own wiring rather than the product's DNS handling.</para>
 /// <para><b>The share is what tells a reader how much of the arm was on that path.</b> The TCP part of
 /// the arm is proxied on every row, so the UDP share is the part whose carriage is in question.</para>
 /// <para><b>A row that does not carry UDP has no comparable DNS number at all.</b> Its rate and latency

@@ -8,10 +8,10 @@ using static WinForward.TestSupport.FlowBuilders;
 namespace WinForward.Runtime.UdpProxy.Tests;
 
 /// <summary>
-/// R4: per-flow bounds alone allow capacity × 32 KiB of buffered datagrams; this file pins the
-/// global byte budget. The datagram that would cross the aggregate is rejected without a cooldown
-/// tombstone (backpressure, not a setup failure), and every charged byte plus its pooled lease is
-/// credited back on flush, setup failure, dispose, drop-oldest, and the flush TTL drop.
+/// Per-flow bounds alone allow capacity × 32 KiB of buffered datagrams; this file pins the global byte
+/// budget. The datagram that would cross the aggregate is rejected without a cooldown tombstone
+/// (backpressure, not a setup failure), and every charged byte plus its pooled lease is credited back
+/// on flush, setup failure, dispose, and the flush TTL drop.
 /// </summary>
 public sealed class UdpSetupQueueBudgetTests
 {
@@ -20,10 +20,10 @@ public sealed class UdpSetupQueueBudgetTests
     [Fact]
     public async Task GlobalSetupBudgetRejectsBeyondTheAggregateAndCreditsBackOnFlush()
     {
-        // R4: per-flow bounds alone allow capacity × 32 KiB of buffered datagrams; the global
-        // byte budget rejects the datagram that would cross the aggregate, without a cooldown
-        // tombstone (backpressure, not a setup failure), and every flushed byte is credited
-        // back so the budget recovers once the setup completes.
+        // Per-flow bounds alone allow capacity × 32 KiB of buffered datagrams; the global byte budget
+        // rejects the datagram that would cross the aggregate, without a cooldown tombstone
+        // (backpressure, not a setup failure), and every flushed byte is credited back so the budget
+        // recovers once the setup completes.
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new DelayedTransportFactory(gate.Task);
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, MaximumFrameSize = 4096, SetupQueueGlobalByteBudget = 4096 });
@@ -104,8 +104,8 @@ public sealed class UdpSetupQueueBudgetTests
     [Fact]
     public async Task SetupQueueLeasesReturnToThePoolAcrossDropOldestFlushAndTtlDrop()
     {
-        // B4 balance: every queued datagram holds a lease; drop-oldest eviction, the flush TTL
-        // drop, and the flush send must each release their lease exactly once.
+        // Every queued datagram holds a lease; drop-oldest eviction, the flush TTL drop, and the
+        // flush send must each release their lease exactly once.
         var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new DelayedTransportFactory(gate.Task);
@@ -143,7 +143,7 @@ public sealed class UdpSetupQueueBudgetTests
     [Fact]
     public async Task SetupQueueLeaseIsReleasedWhenTheDatagramExceedsTheFrameCap()
     {
-        // B4 bounds refusal: a datagram larger than the pinned frame cap cannot be copied into a
+        // A datagram larger than the pinned frame cap cannot be copied into a
         // pooled lease; it is rejected fail-closed with its lease and budget charge released.
         using var pool = new NativeBufferPool(64, capacity: 8);
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(new FakeTransportFactory(), new FakeResponseSink(), new UdpProxyOptions { Capacity = 16, MaximumFrameSize = 64 }, setupQueuePool: pool);

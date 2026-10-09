@@ -6,13 +6,13 @@ using WinForward.E2E.Analysis.Model;
 namespace WinForward.E2E.Analysis.Tables;
 
 /// <summary>
-/// §4, "Headline matrix": every metric the analysis publishes, one column each, one row per measured
+/// "Headline matrix": every metric the analysis publishes, one column each, one row per measured
 /// program, plus the pass counts behind each cell.
 /// </summary>
 /// <remarks>
-/// <para><b>This is the only section that prints all twenty-one metrics.</b> Each column is rendered
-/// from its own declaration — the label, the unit and the rounding travel with the metric — so the
-/// matrix and <c>verdict.json</c> cannot disagree about what a metric is or how it is scaled.</para>
+/// <para><b>This is the only table that prints every metric.</b> Each column is rendered from its own
+/// declaration — the label, the unit and the rounding travel with the metric — so the matrix and
+/// <c>verdict.json</c> cannot disagree about what a metric is or how it is scaled.</para>
 /// <para><b>An empty cell is a statement, not a gap.</b> A rate the harness wrote as <see langword="null"/> had a
 /// zero denominator: nothing was sent, so there is no rate to print and <c>0</c> would be a different
 /// claim. <c>not carried (UDP bypassed)</c> is the same kind of statement about a product that cannot

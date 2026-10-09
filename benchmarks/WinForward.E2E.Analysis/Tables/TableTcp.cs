@@ -7,7 +7,7 @@ using WinForward.E2E.Analysis.Stats;
 namespace WinForward.E2E.Analysis.Tables;
 
 /// <summary>
-/// §11, "TCP reliability detail": one line per row, the <c>REL</c> arm's outcome distribution, its two
+/// "TCP reliability detail": one line per row, the <c>REL</c> arm's outcome distribution, its two
 /// surprise rates, its attempt counts, and whether the arm ended with work in flight.
 /// </summary>
 /// <remarks>

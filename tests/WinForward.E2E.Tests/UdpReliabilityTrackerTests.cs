@@ -136,11 +136,11 @@ public sealed class UdpReliabilityTrackerTests
         Assert.Equal(0, counts.CorruptDatagrams);
     }
 
-    // The sending-side contract (D7): a sequence outside the bounded space is refused, never
-    // indexed. Ensure does not grow the parallel arrays past MaxSequence + 1 elements, so "the
-    // call returned" is itself the evidence that neither array was written; reading the private
-    // fields back would test the test rather than the contract. The refusal is booked on the send
-    // side only, which is what tells it apart from an arrival naming an impossible sequence.
+    // The sending-side contract: a sequence outside the bounded space is refused, never indexed.
+    // Ensure does not grow the parallel arrays past MaxSequence + 1 elements, so "the call returned"
+    // is itself the evidence that neither array was written; reading the private fields back would
+    // test the test rather than the contract. The refusal is booked on the send side only, which is
+    // what tells it apart from an arrival naming an impossible sequence.
     [Fact]
     public void ASendPastTheBoundedSequenceSpaceIsRefusedWithoutTouchingTheArrays()
     {
@@ -174,7 +174,7 @@ public sealed class UdpReliabilityTrackerTests
         Assert.Equal(0, tracker.ReceivedBytes);
     }
 
-    // #5: a schedule index the window refused was never handed to the socket, so it cannot be published
+    // A schedule index the window refused was never handed to the socket, so it cannot be published
     // as a datagram that never arrived. The scenario puts skipped indices *below* the highest sent one,
     // which is what makes Classify's sent-set guard observable: without it the scan would walk to the
     // highest sent sequence and report the skipped indices as path loss (5 never instead of 2).
@@ -214,7 +214,7 @@ public sealed class UdpReliabilityTrackerTests
         Assert.Equal(tracker.SentOk, counts.Arrived + counts.Late + counts.Never + counts.Undetermined + counts.CorruptDatagrams);
     }
 
-    // #7: a datagram's age runs from the instant it was *scheduled* for, never from the instant the
+    // A datagram's age runs from the instant it was *scheduled* for, never from the instant the
     // client got around to sending it, so a client that stalls raises its own late and never counts
     // instead of having the stall subtracted out of the measurement.
     [Fact]

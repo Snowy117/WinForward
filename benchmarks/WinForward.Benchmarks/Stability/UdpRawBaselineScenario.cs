@@ -147,7 +147,7 @@ internal static class UdpRawBaselineScenario
     /// <summary>
     /// One forwarder socket per flow, mirroring the harness SOCKS5 relay role without the codec:
     /// client datagrams go to the echo destination (remembering the client's source endpoint),
-    /// echo replies go back to that last client. Buffer sizing matches the harness relay (4 MiB).
+    /// echo replies go back to that last client. Buffer sizing matches the harness relay.
     /// </summary>
     private sealed class Forwarder : IAsyncDisposable
     {

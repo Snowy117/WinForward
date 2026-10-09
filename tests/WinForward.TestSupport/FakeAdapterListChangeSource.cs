@@ -3,14 +3,13 @@ using WinForward.Runtime.Capture;
 namespace WinForward.TestSupport;
 
 /// <summary>
-/// Manual-trigger <see cref="IAdapterListChangeSource"/> for consumer-side tests (design §3.2
-/// test impl). Trigger semantics mirror the native auto-reset event: triggers raised while no
-/// waiter is parked coalesce into ONE pending observation (the ground truth is the
-/// re-enumeration, never the signal count), so any number of triggers between waits consumes as
-/// a single <c>WaitOne == true</c>. A trigger arriving while a waiter is parked resolves exactly
-/// that waiter with true. <see cref="Cancel"/> (also invoked by <see cref="Dispose"/>) releases
-/// every parked waiter with false, makes all future waits return false, and ignores later
-/// triggers; cancelling is idempotent.
+/// Manual-trigger <see cref="IAdapterListChangeSource"/> for consumer-side tests. Trigger semantics
+/// mirror the native auto-reset event: triggers raised while no waiter is parked coalesce into ONE
+/// pending observation (the ground truth is the re-enumeration, never the signal count), so any
+/// number of triggers between waits consumes as a single <c>WaitOne == true</c>. A trigger arriving
+/// while a waiter is parked resolves exactly that waiter with true. <see cref="Cancel"/> (also
+/// invoked by <see cref="Dispose"/>) releases every parked waiter with false, makes all future waits
+/// return false, and ignores later triggers; cancelling is idempotent.
 /// </summary>
 internal sealed class FakeAdapterListChangeSource : IAdapterListChangeSource
 {
@@ -71,7 +70,7 @@ internal sealed class FakeAdapterListChangeSource : IAdapterListChangeSource
 /// An <see cref="IAdapterListChangeSource"/> whose <see cref="WaitOne"/> parks until
 /// <see cref="Release"/> is called, consulting its cancellation token only once the wait is
 /// released. A test can therefore hold a capture runner's monitor inside its blocking wait while
-/// teardown runs (task 09-20-structured-concurrency C4, the monitor-lease quiescence test).
+/// teardown runs (the monitor-lease quiescence test).
 /// <see cref="Dispose"/> releases the wait like <see cref="FakeAdapterListChangeSource.Cancel"/>
 /// does.
 /// </summary>

@@ -25,7 +25,7 @@ public static class UdpFrameBuilder
     /// Writes the complete Ethernet II + IPv4/IPv6 + UDP frame directly into
     /// <paramref name="destination"/> (for example a pooled native buffer's frame storage) and
     /// reports the frame length. Returns false without writing when the inputs are rejected
-    /// (MAC length, address families, wire-length fields, the frame cap) or when the destination
+    /// (MAC length, address families, the frame cap) or when the destination
     /// span is shorter than the computed frame.
     /// </summary>
     public static bool TryBuildInto(

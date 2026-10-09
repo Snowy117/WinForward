@@ -93,16 +93,12 @@ public class FlowTableHitBenchmarks
 
 /// <summary>
 /// The flow table at its production cardinality (the default <c>tcpFlowCapacity</c>, 4,096) in the two
-/// orientations a proxied connection actually resolves, plus the per-hit activity-clock read that rides
-/// along with them (research F4/F3.4).
+/// orientations a proxied connection actually resolves.
 /// <para>
-/// The existing hit row uses a <em>foreign</em> origin (cross-adapter) and cardinalities chosen for the
-/// original probe sweep; these rows are the same-orientation and reversed-orientation shapes at the
-/// shipped capacity, so a change to the key's hash, the orientation index, or the per-hit clock can be
-/// read as a delta here. The claim path is deliberately not a row: BenchmarkDotNet invokes one method
-/// many times per iteration and this table has no per-invocation reset, so a "new key" claim would
-/// silently degrade into a resolve partway through the iteration. The claim cost is measured instead by
-/// the controlled loop in the sweep/churn scenarios, where the table's lifetime is owned by the harness.
+/// A change to the key's hash or the orientation index can be read as a delta here. The claim path is
+/// deliberately not a row: BenchmarkDotNet invokes one method many times per iteration and this table
+/// has no per-invocation reset, so a "new key" claim would silently degrade into a resolve partway
+/// through the iteration.
 /// </para>
 /// </summary>
 [MemoryDiagnoser]
@@ -130,7 +126,6 @@ public class FlowTableProductionShapeBenchmarks
 
         _stored = BenchmarkShared.CreateFlowKey(Cardinality / 2);
 
-        // The orientation a proxied reply arrives in: the same transport tuple seen from the other end.
         _reverse = _stored.Reverse();
 
         // A row that silently measured the miss path would report a plausible number for the wrong
@@ -160,10 +155,8 @@ public class FlowTableProductionShapeBenchmarks
     }
 
     /// <summary>
-    /// The post-change production shape the dispatcher's warm entry drives: the direct-mapped cache
-    /// probe with its seqlock snapshot and transport-tuple corroboration, no gate and no clock read.
-    /// The retired <c>ReadActivityClock</c> row (~40 ns) measured the per-hit clock call this row no
-    /// longer contains, so it is recorded as obsolete rather than re-measured.
+    /// The dispatcher's warm entry: the direct-mapped cache probe with its seqlock snapshot and
+    /// transport-tuple corroboration, no gate and no clock read.
     /// </summary>
     [Benchmark]
     public long ResolveWarmHit()

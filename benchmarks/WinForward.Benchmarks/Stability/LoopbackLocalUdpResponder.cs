@@ -6,14 +6,12 @@ namespace WinForward.Benchmarks.Stability;
 /// <summary>
 /// The local hop's server side: one loopback UDP socket that answers every datagram it receives back
 /// to that datagram's own sender, and counts what it received. The analogue of
-/// <see cref="LoopbackSocks5UdpServer"/> with the SOCKS5 machinery removed — no TCP control channel,
-/// no UDP ASSOCIATE, no datagram codec, and no last-sender state: the reply target is the endpoint
-/// the receive call itself reported for that datagram, read and used inside the same loop iteration,
-/// and the type holds no field a previous sender could be kept in. One socket serves every flow of
-/// the run, which is what makes the absence of that field observable: the SOCKS5 server's
-/// last-sender write path, driven by the same flows at the same pacing, misdelivers most of a wave.
-/// The payload is echoed verbatim, so the harness's own datagram header survives the round trip and
-/// the client's per-flow attribution still works.
+/// <see cref="LoopbackSocks5UdpServer"/> with the SOCKS5 machinery and its last-sender state removed:
+/// the reply target is the endpoint the receive call itself reported, read and used inside the same
+/// loop iteration. One socket serves every flow of the run, which is what makes the absence of that
+/// field observable: the SOCKS5 server's last-sender write path, driven by the same flows at the same
+/// pacing, misdelivers most of a wave. The payload is echoed verbatim, so the harness's own datagram
+/// header survives the round trip and the client's per-flow attribution still works.
 /// </summary>
 internal sealed class LoopbackLocalUdpResponder : IAsyncDisposable
 {
@@ -81,8 +79,8 @@ internal sealed class LoopbackLocalUdpResponder : IAsyncDisposable
 
             Interlocked.Increment(ref _datagramsReceived);
             var payload = buffer.AsMemory(0, result.ReceivedBytes);
-            // The reply's destination is this datagram's own sender, taken from the receive result:
-            // no shared field, no "current client", nothing a concurrent flow could overwrite.
+            // The reply's destination is this datagram's own sender, read from the receive result:
+            // nothing a concurrent flow could overwrite.
             try
             {
                 _ = _socket.SendTo(payload.Span, SocketFlags.None, result.RemoteEndPoint);
