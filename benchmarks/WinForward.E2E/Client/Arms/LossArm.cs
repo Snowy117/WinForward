@@ -69,7 +69,7 @@ internal static class LossArm
     /// The arm's client send loss: every datagram the client destroyed itself instead of handing it to
     /// the socket. The four terms are the four ways that happens -- a send that threw, a slot the
     /// in-flight window refused, a datagram still inside its window when the drain was cut short, and a
-    /// slot the tracker refused as outside its bounded sequence space (D2/D7). A datagram the path
+    /// slot the tracker refused as outside its bounded sequence space. A datagram the path
     /// dropped is in none of them, so this value and <c>lossRate</c> count disjoint populations.
     /// </summary>
     internal static long ClientSendLoss(UdpReliabilityTracker tracker, in LossCounts counts) =>
@@ -273,9 +273,9 @@ internal static class LossArm
             var received = await socket.ReceiveAsync(receiveBuffer, SocketFlags.None, cancellationToken).ConfigureAwait(false);
             var now = Clock.Now;
 
-            // The three udp arms share one classifier and each keeps its own book (D18.3): what the
-            // bytes are comes from the classifier, whether this socket ever sent that sequence comes
-            // from the tracker, and the WasSent step folds the two together.
+            // The three udp arms share one classifier and each keeps its own book: what the bytes
+            // are comes from the classifier, whether this socket ever sent that sequence comes from
+            // the tracker, and the WasSent step folds the two together.
             var verdict = ReplyClassifier.Classify(receiveBuffer.AsSpan(0, received), ConnectionId);
             if (verdict.Kind == ReplyKind.Arrived)
             {

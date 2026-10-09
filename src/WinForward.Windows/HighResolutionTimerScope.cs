@@ -8,8 +8,8 @@ namespace WinForward.Windows;
 /// Scoped Windows timer-resolution upgrade for a capture run. The NDIS capture pump polls an
 /// empty adapter queue with a 1 ms delay, but <c>Task.Delay</c> rounds that up to the default
 /// system timer resolution (~15.6 ms) unless the period is explicitly lowered, which amplifies
-/// ndisrd driver-queue overflow under bursts (task 08-28-udp-loss-design-flaws, R6). Creating
-/// this scope calls winmm <c>timeBeginPeriod(1)</c> so the 1 ms poll delay is real (~1–2 ms);
+/// ndisrd driver-queue overflow under bursts. Creating this scope calls winmm
+/// <c>timeBeginPeriod(1)</c> so the 1 ms poll delay is real (~1–2 ms);
 /// disposing it calls <c>timeEndPeriod(1)</c> exactly once. A failed begin degrades the run to
 /// the default resolution instead of aborting it: <see cref="IsEnabled"/> reports the outcome
 /// and the caller decides whether to warn.
@@ -52,8 +52,8 @@ public sealed partial class HighResolutionTimerScope : IDisposable
         }
         catch (Exception)
         {
-            // winmm is a system library, but a missing export or a failing host must not take
-            // the capture loop down; run with the default (~15.6 ms) poll granularity instead.
+            // winmm is a system library, but a failing host must not take the capture loop down;
+            // run with the default (~15.6 ms) poll granularity instead.
             IsEnabled = false;
         }
     }

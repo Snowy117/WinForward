@@ -19,7 +19,7 @@ namespace WinForward.Integration.Tests;
 /// forwarded responses, host responses use the fallback) with a structured warn, a zero-MAC
 /// scope head keeps the zero-placeholder fallback semantics, an empty scope clears the snapshot,
 /// and a new scope swaps the snapshot wholesale so stale adapters stop resolving. The no-MAC
-/// warns are change-gated (task 09-17 R2.4): repeated installs of the same zero-MAC set warn
+/// warns are change-gated: repeated installs of the same zero-MAC set warn
 /// once, a changed set warns again, and an all-MAC (or empty) install resets the memory.
 /// </summary>
 [SupportedOSPlatform("windows")]

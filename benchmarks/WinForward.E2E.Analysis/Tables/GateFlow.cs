@@ -28,7 +28,7 @@ internal enum CheckState
 internal sealed record GateCheck(string Name, CheckState State, string Detail);
 
 /// <summary>
-/// §3.1, the flow gates: what the client says it opened, what the target's own truth file counted, and
+/// The flow gates: what the client says it opened, what the target's own truth file counted, and
 /// whether the row's UDP carriage is the one its profile declares.
 /// </summary>
 /// <remarks>
@@ -43,7 +43,7 @@ internal static class GateFlow
     /// <summary>How much of the client's own TCP attempt count the proxy must have seen.</summary>
     internal const double TcpGateMin = 0.95;
 
-    /// <summary>Every row of §3.1, pass by pass.</summary>
+    /// <summary>Every flow-gate row, pass by pass.</summary>
     internal static List<IReadOnlyList<string>> Rows(CampaignModel campaign)
     {
         ArgumentNullException.ThrowIfNull(campaign);
@@ -60,7 +60,7 @@ internal static class GateFlow
         return rows;
     }
 
-    /// <summary>One (pass, row) flow-gate row, in the reference's column order.</summary>
+    /// <summary>One (pass, row) flow-gate row, in the output table's column order.</summary>
     internal static IReadOnlyList<string> For(string passId, ClientRun row)
     {
         ArgumentNullException.ThrowIfNull(row);
@@ -369,7 +369,7 @@ internal static class GateFlow
         var profile = RowProfiles.Find(rowId);
         if (profile is null)
         {
-            return (null, "row id is not in the design table");
+            return (null, "row id is not in the profile table");
         }
 
         if (string.Equals(profile.Udp, RowProfiles.UdpNotCarried, StringComparison.Ordinal))

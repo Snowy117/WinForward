@@ -152,9 +152,8 @@ internal static class ClientRunner
     /// Runs one arm and books whatever it threw as that arm's failure. A stopped run must leave the
     /// same evidence a broken arm leaves, so a cancellation is a failure too, and only its message
     /// stays the literal "cancelled" so an interrupted arm reads the same whatever await noticed the
-    /// token (D14.12). Every other exception is an arm failure: letting one escape would abort the
-    /// process before run.json is written and take every completed arm's summary down with it
-    /// (D1/D4/D7).
+    /// token. Every other exception is an arm failure: letting one escape would abort the
+    /// process before run.json is written and take every completed arm's summary down with it.
     /// </summary>
     private static async Task<(ArmOutcome? Outcome, Exception? Failure, bool Cancelled)> RunGuardedAsync(ArmContext context)
     {
@@ -176,7 +175,7 @@ internal static class ClientRunner
     /// Writes the arm's records and releases its sink, all inside the arm's failure boundary: a
     /// record that cannot be written, or a file that cannot be drained, fails the arm here — where
     /// run.json.failed and an `error` record follow — instead of escaping RunArmAsync and taking the
-    /// remaining arms and run.json with it (D1/D4/D7, D14.7). Returns the failure the arm ends with.
+    /// remaining arms and run.json with it. Returns the failure the arm ends with.
     /// </summary>
     private static async ValueTask<Exception?> WriteArmRecordsAsync(
         JsonlSink sink,
@@ -219,7 +218,7 @@ internal static class ClientRunner
             // The release belongs to this arm's boundary too: a file that cannot be drained fails the
             // arm. That failure cannot be written into the file it is about, so it is read back from
             // the count — run.json still carries the arm's `failed` flag and the sink reports it to
-            // stderr; the `await using` above remains the non-throwing backstop (D14.7).
+            // stderr; the `await using` above remains the non-throwing backstop.
             await sink.CompleteAsync().ConfigureAwait(false);
             failure ??= sink.WriteErrors > 0 ? ArmRecordWriter.LostRecords(sink) : null;
             return failure;
