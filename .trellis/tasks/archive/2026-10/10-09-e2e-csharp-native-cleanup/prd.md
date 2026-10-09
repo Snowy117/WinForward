@@ -182,3 +182,66 @@ partial 分片没按 `Type.Topic.cs` 命名；4 个真实未用 `using`。
 | R3 | C2 的改名撞上门禁的字面路径：`.editorconfig:238,241,244,247` glob 了四个 Analysis 文件；3 个测试把源码路径当字符串读；`README.md:30-56,506-514` 点名字段 | `02` 的"不许动"清单 + 每步 `dotnet format`/测试；README 区间改动前后跑 `check-readme-contract.py` |
 | R4 | C4 改 README 时静默缩小契约表覆盖 | 改动前后各跑一次 `check-readme-contract.py`，对比"111 key(s) checked against 401 declared constant path(s)"这行输出 |
 | R5 | 三个子任务并行改同一批文件 | C1 → C2 串行（先删后改名）；C3 只碰 `scripts/`（与 C1/C2 无交集）；C4 最后 |
+
+## 父任务完成记录（2026-10-09）
+
+**四个子任务全部归档，全套门禁绿，目标达成。**
+
+### 子任务
+
+| 子任务 | 提交 | 结果 |
+|---|---|---|
+| C1 `10-09-e2e-analysis-native-rng-and-format` | `a402289` `90bc922` `9310eda` `8cfff82` | Python 仿真收尾：`CpRandom`→`System.Random`、半偶 BigInteger 机器删除、`PythonExponential`→格式串、oracle 六叶窄放宽、三张向量表退役 |
+| C2 `10-09-e2e-naming-and-idiom-pass` | `ed436af` | 缩写规则（4 处）、`Measured<T>`、三处拆分、五处 `git mv`、迁移词汇清理、`IsTestProject` 豁免的实测记录 |
+| C3 `10-09-e2e-scripts-triage` | `0d1edda` `f1b556e` | 删 2 个死脚本、`tools/` 与 `verification/` 归位、7 处坏路径修复（含 T3/T6） |
+| C4 `10-09-e2e-docs-and-scaffolding` | `b23eceb` `bf4bced` | 16 条陈旧声明处置、plans/configs 实测记录、FROZEN 纠错、oracle 接进 CI（新 `ubuntu-latest` job） |
+
+### 规模
+
+`git diff --stat f992370..HEAD`：**172 文件、+9667/−8556**（其中 Analysis 55 文件 +8510/−6980，
+E2E 32 文件 +312/−2725，测试 21 文件 +720/−838，`tools/` +230，`.github/` +13，Contracts 1 行）。
+
+### 门禁证据（最终状态）
+
+| 门禁 | 结果 |
+|---|---|
+| `dotnet build WinForward.slnx -c Release` | 0 warning / 0 error |
+| `dotnet test WinForward.slnx -c Release -m:1` | **14 项目、1663 passed、0 failed、exit 0** |
+| `dotnet format … --severity info --verify-no-changes` | 空输出，rc=0 |
+| `jb inspectcode -f=Xml -e=HINT` | **0 issue** |
+| `verification/oracle-diff.py` | 51 切片、0 差异、rc=0 |
+| `verification/check-fairness.py` | 14/14 guards，rc=0 |
+| `verification/check-boundary-trees.py` | 5 棵树 + 12 负控，rc=0 |
+| `verification/check-fixture-drift.py --tree /tmp/wf-synth` | `fixture drift: none`，rc=0（坏输入 rc=2） |
+| `benchmarks/WinForward.E2E/scripts/check-readme-contract.py` | `111 key(s) checked against 401 declared constant path(s): ok`，rc=0 |
+| `tools/effective-lines.py` 四路径 | 无输出，rc=0 |
+| `publish.sh` + `selftest.sh selftest-plan.json` | 端到端自测 rc=0（goodput 159.9 Mbps、0 protocolErrors、0 sendFailures） |
+
+### 计划被实测纠正的地方（都留了证据，这是本次的主要教训）
+
+| 计划说 | 实测 | 处置 |
+|---|---|---|
+| `Truthy` 的 5 个调用点在写侧 | 写侧看不到 `JsonValue`；真实点在 `RunSamples`/`GateFlow`/`TableEnvironment` | 派发途中更正（D 记录） |
+| `VerbatimJson` → `Utf8JsonWriter` + `UnsafeRelaxedJsonEscaping` | 金标非 ASCII 字节 0、`\u` 360、字面 `+` 22 → 两个内建编码器各错一半 | **D10**：转义规则是我们的契约，不换写手 |
+| `Fixed` 可以改成 away-from-zero | 金标有真实的零位小数 `.5` 中点 → 会红 11 格且放宽永远吸收不了 | 保留 half-to-even（β 段） |
+| `1e-2` 是 p 值的合适容差 | 同树换种子 p 值就动 SD 6.4e-3 / 最坏 3.0e-2；`1e-2` 只吸收 75 条里的 48 条 | **D8 修正为 5e-2**（γ 段实测） |
+| `1e-06` 的 27 格钉住 `%.3g` 回退 | 那是硬编码字面量；钉住回退的是区间单元格 | 判据改为 oracle 全绿（β 段） |
+| 4 个未用 `using` 可以删 | 四个都在解析真实类型（`PosixSignalRegistration`、`ConditionalWeakTable<,>`） | 恢复，AC 条款记为不可达（C2） |
+| `check-fixture-drift` 只改 `:40` | `:39` 是 `import jsonl_paths` 能解析的原因 | 保留 `:38`/`:39`（C3 计划） |
+| S4/S5 各一个 commit（S4 故意留红） | 会留一个门禁红的提交，`git bisect` 踩雷 | **D11**：合并为一次派发、一个绿 commit，证据进 notes |
+| `Reading<T>` 是安全名字 | `Contracts.Json.Reading` 已存在且语义不同 | **D12**：改名 `Measured<T>` |
+| oracle 可以塞进现有 CI job | 两个 job 都在 `windows-latest`，differ 的 apphost 无扩展名、冻结树钉死 `/tmp` | **D13**：新增 `ubuntu-latest` job |
+| `research/04` 说 `plans-short` 有 5 处 `ratePerSecond` 差异 | 实测 4 处（非 `seconds` 差异共 7 处） | README 按实测写（C4 + check 复核） |
+| 审计说两个 `__pycache__` 树 8 个 `.pyc` | 实际只剩 1 个，另一个树已不存在 | 按实测删（C3） |
+| `publish.sh` 也是本机未跟踪脚本 | 它**在** `git ls-files` 里 | check 子代理纠正父 session（C4） |
+
+### 登记为后续（不在本任务范围）
+
+1. `PlanFile` 的 plan 覆盖/合并机制（去重 `plans-windows` 需要它）→ 需要 loader 行为 + 校验 + `PlanFileTests` 的 12 文件计数。
+2. `wf-fdd-opt.json` 与 `wf-aot-opt.json` 逐字节相同的单份上传。
+3. Proxifier 的 `bench.ppx` 是否入库。
+4. `deploy-campaign.sh:48` 往 `C:\wfbench\stage` 暂存，而它自己的布局循环从不创建该目录（本机脚本）。
+5. `wf.sh:47-61` 的传输竞态（T5）；`orchestrator.ps1` 的未用 `-Pass` 参数；`selftest.sh` 的内嵌 heredoc。
+6. `Stats/DescriptiveStats.cs:119` 的 CPython 措辞（删词会一并删掉理由）；`oracle-diff.py` 的 `Report.show()` 160 字符截断。
+7. `10-06-e2e-competitor-benchmark` 的 `design.md:214`/`implement.md:96` 仍把 `plots/` 列为产物。
+8. CI 缺口（没有 workflow 跑 `dotnet build`/`dotnet test`）——D5 决定另立任务。

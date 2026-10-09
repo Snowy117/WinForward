@@ -173,3 +173,20 @@
 **裁定**：新记录命名 **`Measured<T>`**（"这份分析得出的值，或得不出它的原因"），
 放 `Analysis/Model/Measured.cs`；C2 的 AC2 与实现清单按此更新。
 不用形容词式命名（`Available<T>`）——`research/02` Part A 已记下"形容词不是类型名"这条房规。
+
+## D13 · D7 的落地形态：新增 `ubuntu-latest` job，不加进现有 windows job（2026-10-09，父 session 实测裁定）
+
+**背景**：D7 批准把 oracle 接进 CI。原计划是给 `analyzer-gate.yml` 现有 job 加一步。
+
+**实测障碍**：那个 workflow 的两个 job 都跑 `windows-latest`，而 differ 是 **POSIX-only**：
+
+1. `oracle-diff.py` 的 `ANALYZER` 是**无扩展名**的路径
+   （`…/bin/Release/net10.0/WinForward.E2E.Analysis`）——Linux 的 apphost 没扩展名，
+   Windows 上那个文件叫 `.exe`，直接执行会失败；
+2. 冻结树与 `--raw` 硬编码 `/tmp/wf-synth`（`TREE = Path("/tmp/wf-synth")`），
+   `FROZEN.md` 还专门写明"路径是配方的一部分"（换目录树哈希就变）。
+
+**裁定**：在 `.github/workflows/analyzer-gate.yml` 里**新增一个 `ubuntu-latest` job**
+`oracle-regression`（`dotnet build -c Release` → `verification/oracle-diff.py` → `verification/check-fairness.py`），
+**不动**既有两个 windows job。修 differ 的跨平台性是另一件事，不在本任务。
+判据：workflow diff 审查 + 本地同序三条命令 rc=0。
