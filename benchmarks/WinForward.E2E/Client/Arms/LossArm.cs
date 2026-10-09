@@ -29,7 +29,7 @@ internal static class LossArm
         var deadlineTicks = context.DeadlineTicks(startTicks);
         using var linked = context.CreateLinkedTokenSource();
         var cancellationToken = linked.Token;
-        var observationEndTicks = await Dedicated
+        var observationEndTicks = await DedicatedThread
             .RunOnOwnThreadAsync(() => RunUdpPhaseAsync(context, tracker, rate, payloadBytes, window, windowTicks, startTicks, deadlineTicks, cancellationToken))
             .ConfigureAwait(false);
 

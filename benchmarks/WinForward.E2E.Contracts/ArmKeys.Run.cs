@@ -27,7 +27,7 @@ public static partial class ArmKeys
         public const string ClientVersion = "clientVersion";
 
         /// <summary>The host's OS description.</summary>
-        public const string OsDescription = "osDescription";
+        public const string OSDescription = "osDescription";
 
         /// <summary>The .NET runtime description.</summary>
         public const string FrameworkDescription = "frameworkDescription";

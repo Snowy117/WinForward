@@ -156,7 +156,7 @@ internal static class TcpConnectionProtocol
                 await Task.Delay(s_stallDelay, CancellationToken.None).ConfigureAwait(false);
             }
 
-            if (!await SocketIo.TrySendAllAsync(socket, reader.Raw, cancellationToken).ConfigureAwait(false))
+            if (!await SocketIO.TrySendAllAsync(socket, reader.Raw, cancellationToken).ConfigureAwait(false))
             {
                 throw new IOException("The peer closed while a frame was being echoed.");
             }
@@ -219,7 +219,7 @@ internal static class TcpConnectionProtocol
             FrameCodec.FinishFrame(frame, TrailerProtocol.PayloadBytes);
         }
 
-        if (!await SocketIo.TrySendAllAsync(socket, buffer, cancellationToken).ConfigureAwait(false))
+        if (!await SocketIO.TrySendAllAsync(socket, buffer, cancellationToken).ConfigureAwait(false))
         {
             throw new IOException("The peer closed while a frame was being echoed.");
         }

@@ -31,9 +31,10 @@ internal static class RepoPaths
 
     /// <summary>
     /// The CLI's recorded text (research/cli-snapshots: the before/ tree from the last binary
-    /// published before E2-d, the after/ tree from the one it produced), which lives with the
-    /// parent task's research rather than with the tests because the record has to outlive the
-    /// batch that took it. Archiving a task moves its whole directory under
+    /// published before the two argument parsers became one shared walk, the after/ tree from the
+    /// binary that carries it), which lives with the task's research rather than with the tests
+    /// because the record has to outlive the change that took it. Archiving a task moves its whole
+    /// directory under
     /// <c>.trellis/tasks/archive/&lt;month&gt;/</c>, so the lookup follows it there instead of
     /// breaking the suite the day the task is closed.
     /// </summary>

@@ -250,7 +250,7 @@ internal sealed class LaneEngine<TTransport>
                 // Settle (D18.5 #1).
                 _policy.OnReceive(received, destination.Span[..received.Length], Clock.Now);
 
-                if (received.Kind is LaneReceiveKind.EndOfStream or LaneReceiveKind.IoError)
+                if (received.Kind is LaneReceiveKind.EndOfStream or LaneReceiveKind.IOError)
                 {
                     // The transport's two terminal outcomes; a malformed message is one message, not
                     // the lane.

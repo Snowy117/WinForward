@@ -47,7 +47,7 @@ internal static class ReliabilityArm
         var results = new ConcurrentBag<ReliabilityAttempt>();
         var evidence = new AttemptEvidence(context.Sink);
 
-        var scheduled = await Dedicated.RunOnOwnThreadAsync(() => PumpAsync(context, schedule, expectedBytes, rate, startTicks, deadlineTicks, results, evidence, cancellationToken)).ConfigureAwait(false);
+        var scheduled = await DedicatedThread.RunOnOwnThreadAsync(() => PumpAsync(context, schedule, expectedBytes, rate, startTicks, deadlineTicks, results, evidence, cancellationToken)).ConfigureAwait(false);
 
         var metrics = ReliabilityMetricsWriter.BuildMetrics([.. results], schedule, mixText, expectedBytes, Clock.Now - startTicks, scheduled, evidence);
         var outcome = new ArmOutcome

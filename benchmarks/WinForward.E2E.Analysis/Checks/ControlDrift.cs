@@ -283,5 +283,5 @@ internal static class ControlDrift
         string Kind,
         string Unit,
         double Scale,
-        Func<ClientRun, (double? Value, string? Reason)> Extract);
+        Func<ClientRun, Measured<double?>> Extract);
 }

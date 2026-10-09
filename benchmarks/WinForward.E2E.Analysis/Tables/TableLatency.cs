@@ -89,12 +89,12 @@ internal static class TableLatency
         var (status, reason) = MetricStatus.Resolve(campaign, armName, udpPath, dns53: false, rowId);
         if (status is MetricStatus.NotInPlan or MetricStatus.DeclaredAbsent)
         {
-            return [rowId, armName, $"n/a ({reason})", .. Repeated(MetricCatalogue.Percentiles.Count + 1, "n/a")];
+            return [rowId, armName, $"n/a ({reason})", .. MarkdownTable.Repeated(MetricCatalogue.Percentiles.Count + 1, "n/a")];
         }
 
         if (string.Equals(status, MetricStatus.NotCarried, StringComparison.Ordinal))
         {
-            return [rowId, armName, .. Repeated(MetricCatalogue.Percentiles.Count + 2, RowProfiles.NotCarriedCell)];
+            return [rowId, armName, .. MarkdownTable.Repeated(MetricCatalogue.Percentiles.Count + 2, RowProfiles.NotCarriedCell)];
         }
 
         var (cells, reasons) = Histograms(campaign, latencyClass, rowId, armName);
@@ -102,12 +102,12 @@ internal static class TableLatency
             && !MetricCatalogue.Percentiles.Any(stat => cells[stat].Values.Count > 0))
         {
             var why = reasons.Count > 0 ? reasons[0] : "no histogram";
-            return [rowId, armName, $"n/a ({why})", .. Repeated(MetricCatalogue.Percentiles.Count + 1, "n/a")];
+            return [rowId, armName, $"n/a ({why})", .. MarkdownTable.Repeated(MetricCatalogue.Percentiles.Count + 1, "n/a")];
         }
 
         if (WindowOverflow.Reached(campaign, rowId, armName))
         {
-            return [rowId, armName, .. Repeated(MetricCatalogue.Percentiles.Count + 2, WindowOverflowCell)];
+            return [rowId, armName, .. MarkdownTable.Repeated(MetricCatalogue.Percentiles.Count + 2, WindowOverflowCell)];
         }
 
         var rendered = new List<string>(s_headers.Length)
@@ -176,13 +176,5 @@ internal static class TableLatency
         {
             yield return stat;
         }
-    }
-
-    /// <summary>One cell value repeated for a row that has no numbers to print.</summary>
-    private static string[] Repeated(int count, string value)
-    {
-        var cells = new string[count];
-        Array.Fill(cells, value);
-        return cells;
     }
 }

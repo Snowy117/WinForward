@@ -110,7 +110,7 @@ internal sealed record MetricsContract(
 }
 
 /// <summary>
-/// One migrated kind: the explicit factory that builds the outcome the arm would publish, and the
+/// One registered kind: the explicit factory that builds the outcome the arm would publish, and the
 /// keys that outcome is allowed to contain.
 /// </summary>
 /// <param name="Kind">The plan kind the factory stands for.</param>
@@ -133,7 +133,7 @@ internal sealed record KindContract(
     IReadOnlyList<string> Parameters);
 
 /// <summary>
-/// The migrated kinds, one shape file each. A kind is registered here when its arm publishes a typed
+/// The registered kinds, one shape file each. A kind is registered here when its arm publishes a typed
 /// metrics record; the record-level parts every kind shares live in <see cref="RecordContract"/>.
 /// </summary>
 internal static class ContractRegistry

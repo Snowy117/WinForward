@@ -35,56 +35,56 @@ internal static class ArmAccess
     }
 
     /// <summary>A numeric metric at a <c>/</c> path inside one arm's result.</summary>
-    internal static (double? Value, string? Reason) Number(ClientRun run, string armName, string path)
+    internal static Measured<double?> Number(ClientRun run, string armName, string path)
     {
         ArgumentNullException.ThrowIfNull(path);
 
         var (result, why) = ArmResult(run, armName);
         if (result is null)
         {
-            return (null, why);
+            return new(Value: null, Reason: why);
         }
 
         var (blocked, detail) = IdentityChecks.BlockedPrefix(run, armName);
         if (blocked is not null && path.StartsWith(blocked, StringComparison.Ordinal))
         {
-            return (null, $"harness error: UDP identity violated ({detail}); excluded rather than averaged over");
+            return new(Value: null, Reason: $"harness error: UDP identity violated ({detail}); excluded rather than averaged over");
         }
 
         var (present, value) = JsonValue.DigPresent(result, path);
         var dotted = path.Replace(JsonValue.Separator, '.');
         if (!present)
         {
-            return (null, $"{armName} {dotted} missing");
+            return new(Value: null, Reason: $"{armName} {dotted} missing");
         }
 
         if (value is { ValueKind: JsonValueKind.Null })
         {
-            return (null, NullRateReason);
+            return new(Value: null, Reason: NullRateReason);
         }
 
         var number = JsonValue.AsNumber(value);
-        return number is not null ? (number, null) : (null, $"{armName} {dotted} is not a number");
+        return number is not null ? new(Value: number, Reason: null) : new(Value: null, Reason: $"{armName} {dotted} is not a number");
     }
 
     /// <summary>A string (or any non-null scalar) at a <c>/</c> path inside one arm's result.</summary>
-    internal static (JsonElement? Value, string? Reason) Text(ClientRun run, string armName, string path)
+    internal static Measured<JsonElement?> Text(ClientRun run, string armName, string path)
     {
         ArgumentNullException.ThrowIfNull(path);
 
         var (result, why) = ArmResult(run, armName);
         if (result is null)
         {
-            return (null, why);
+            return new(Value: null, Reason: why);
         }
 
         var (present, value) = JsonValue.DigPresent(result, path);
         if (!present || value is null or { ValueKind: JsonValueKind.Null })
         {
-            return (null, $"{armName} {path.Replace(JsonValue.Separator, '.')} missing");
+            return new(Value: null, Reason: $"{armName} {path.Replace(JsonValue.Separator, '.')} missing");
         }
 
-        return (value, null);
+        return new(Value: value, Reason: null);
     }
 
     /// <summary>
@@ -98,28 +98,28 @@ internal static class ArmAccess
     /// <param name="run">The run the arm belongs to.</param>
     /// <param name="armName">The arm to read.</param>
     /// <param name="path">The <c>/</c>-separated path inside the arm's result.</param>
-    internal static (bool? Value, string? Reason) Flag(ClientRun run, string armName, string path)
+    internal static Measured<bool?> Flag(ClientRun run, string armName, string path)
     {
         ArgumentNullException.ThrowIfNull(path);
 
         var (result, why) = ArmResult(run, armName);
         if (result is null)
         {
-            return (null, why);
+            return new(Value: null, Reason: why);
         }
 
         var dotted = path.Replace(JsonValue.Separator, '.');
         var (present, value) = JsonValue.DigPresent(result, path);
         if (!present)
         {
-            return (null, $"{armName} {dotted} missing");
+            return new(Value: null, Reason: $"{armName} {dotted} missing");
         }
 
         return value?.ValueKind switch
         {
-            JsonValueKind.True => (true, null),
-            JsonValueKind.False => (false, null),
-            _ => (null, $"{armName} {dotted} is not a boolean"),
+            JsonValueKind.True => new(Value: true, Reason: null),
+            JsonValueKind.False => new(Value: false, Reason: null),
+            _ => new(Value: null, Reason: $"{armName} {dotted} is not a boolean"),
         };
     }
 
@@ -131,7 +131,7 @@ internal static class ArmAccess
     /// <param name="armName">The arm to read.</param>
     /// <param name="numeratorPath">The <c>/</c>-separated path of the numerator.</param>
     /// <param name="denominatorPath">The <c>/</c>-separated path of the denominator.</param>
-    internal static (double? Value, string? Reason) Ratio(
+    internal static Measured<double?> Ratio(
         ClientRun run,
         string armName,
         string numeratorPath,
@@ -140,24 +140,24 @@ internal static class ArmAccess
         var (numerator, why) = Number(run, armName, numeratorPath);
         if (numerator is null)
         {
-            return (null, why);
+            return new(Value: null, Reason: why);
         }
 
         var (denominator, denominatorWhy) = Number(run, armName, denominatorPath);
         if (denominator is null)
         {
-            return (null, denominatorWhy);
+            return new(Value: null, Reason: denominatorWhy);
         }
 
 #pragma warning disable S1244 // An exact zero: a near-zero denominator still yields a ratio.
         return denominator.Value == 0.0
 #pragma warning restore S1244
-            ? (null, $"{armName} {denominatorPath.Replace(JsonValue.Separator, '.')} is zero")
-            : (numerator.Value / denominator.Value, null);
+            ? new(Value: null, Reason: $"{armName} {denominatorPath.Replace(JsonValue.Separator, '.')} is zero")
+            : new(Value: numerator.Value / denominator.Value, Reason: null);
     }
 
     /// <summary>One histogram statistic, straight from the harness's own histogram.</summary>
-    internal static (double? Value, string? Reason) Latency(ClientRun run, string armName, string latencyClass, string stat)
+    internal static Measured<double?> Latency(ClientRun run, string armName, string latencyClass, string stat)
     {
         ArgumentNullException.ThrowIfNull(latencyClass);
         ArgumentNullException.ThrowIfNull(stat);
@@ -165,18 +165,18 @@ internal static class ArmAccess
         var (result, why) = ArmResult(run, armName);
         if (result is null)
         {
-            return (null, why);
+            return new(Value: null, Reason: why);
         }
 
         var histogram = JsonValue.Dig(result, $"latency/{latencyClass}");
         if (histogram is not { ValueKind: JsonValueKind.Object })
         {
-            return (null, $"{armName} has no {latencyClass} histogram");
+            return new(Value: null, Reason: $"{armName} has no {latencyClass} histogram");
         }
 
         var value = JsonValue.Number(histogram, stat);
         return value is not null
-            ? (value, null)
-            : (null, $"{armName} {latencyClass}.{stat} missing");
+            ? new(Value: value, Reason: null)
+            : new(Value: null, Reason: $"{armName} {latencyClass}.{stat} missing");
     }
 }

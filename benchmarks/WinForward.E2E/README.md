@@ -34,7 +34,13 @@ directly, and a transparent proxy rewrites the path beneath it.
 | `Client/RunFileWriter.cs` | `run.json`: the run's environment and one summary per arm |
 | `Client/PlanFile.cs` | the plan schema and its loader |
 | `Client/ArmSpec.cs` | one arm's declared parameters |
-| `Client/ArmContext.cs` | the shared clock, the pacer, and the per-run latency histograms |
+| `Client/ArmContext.cs` | one arm's shared context: its spec, the parsed options, the target endpoints, the socket factories and the run's canceller |
+| `Client/Clock.cs` | the shared clock, and the tick conversions to seconds, nanoseconds and microseconds |
+| `Client/Pacer.cs` | the open-loop pacer: the intended tick of a request, and the two waits that hold the instant |
+| `Client/DedicatedThread.cs` | starting an async body on a thread of its own, so a lane cannot run to completion inside the loop that starts the lanes |
+| `Client/LatencySet.cs` | the per-run latency histograms and their record shape |
+| `Client/ArmOutcome.cs` | what one arm reports back: its parameters, its metrics, its gates and its notes |
+| `Client/EmptyMetrics.cs` | the empty `metrics` object an arm that failed before it built any publishes |
 | `Client/Arms/` | one file per arm kind, plus `ArmDispatch.cs` and one entry per kind in `ArmKind.cs` (the name, its accepted plan keys and its validator in one table); the largest kinds also have their plan, metrics writer and phase loops beside them (`Mix*`, `Reliability*`, `Persistent*`) |
 | `Client/Lanes/` | the seam every latency lane runs through: `ILanePolicy` (window admission, frame building, reply classification, every receive-side counter), `ILaneTransport` (connect, one send, one receive), `LaneEngine.cs` (pacing, the offer loop, the bounded defer queue, the grace drain and the send-side counters), the TCP and UDP transports, and `ReplyClassifier.cs` |
 | `Client/LogHistogram.cs` | the client's latency histogram: logarithmic buckets and the percentile snapshot |
@@ -50,7 +56,7 @@ directly, and a transparent proxy rewrites the path beneath it.
 | `Target/` | the target: TCP echo/command server, UDP echo server, DNS responder, the ledger summaries, the target log and the runner |
 | `Target/TcpConnectionProtocol.cs` | one TCP connection's command/echo state machine and its verdicts |
 | `Target/TcpAcceptLoop.cs` | the accept loop both TCP listeners share, its connection table, its refused-accept counter and the drain |
-| `Target/SocketIo.cs` | the shared stream send/receive helpers |
+| `Target/SocketIO.cs` | the shared stream send/receive helpers |
 | `Target/Sockets.cs` | where the listeners are bound, and the reuse-port policy that makes a leftover instance loud |
 | `Target/SourceCensus.cs` | the UDP echo server's per-receiver source-endpoint census |
 | `Target/TargetLog.cs` | the target's own stderr log, with the closed-pipe guard the teardown contract requires |

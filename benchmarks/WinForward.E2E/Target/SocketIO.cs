@@ -24,7 +24,7 @@ internal enum ReadExactOutcome
 /// handled in one place. Neither helper decides what a closed peer means: that is the caller's
 /// protocol verdict, and it stays at the call site.
 /// </summary>
-internal static class SocketIo
+internal static class SocketIO
 {
     /// <summary>
     /// Sends every byte of <paramref name="data"/>, answering false when the peer stopped accepting

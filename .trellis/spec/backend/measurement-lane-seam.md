@@ -16,13 +16,13 @@ An arm's send and receive loops live behind three collaborators (`Client/Lanes/`
 | `ILanePolicy` | window admission + in-flight, frame building, reply classification, every receive-side counter | count on the receive thread, block, allocate in `BuildRequest` |
 | `LaneEngine<TTransport>` | pacing, the offer loop, the bounded defer queue, the grace drain, the **send-side** counters (`LaneCounts`) | keep a second copy of the window or of any policy counter |
 
-`LaneReceiveKind ∈ {Payload, EndOfStream, Malformed, IoError}` describes what arrived, not whether it is
+`LaneReceiveKind ∈ {Payload, EndOfStream, Malformed, IOError}` describes what arrived, not whether it is
 valid. The TCP adapter maps the frame reader's statuses (`Client/Lanes/TcpLaneTransport.cs:110-152`):
 
 - `Payload` → `Payload`; `EndOfStream` → `EndOfStream`;
 - `BadChecksum` → `Malformed` (counted, keep reading: the boundary was still readable, so the next frame
   can be found);
-- `BadMagic`, `BadLength` and a peer close inside a frame (`Truncated`) → `IoError` (the frame boundary
+- `BadMagic`, `BadLength` and a peer close inside a frame (`Truncated`) → `IOError` (the frame boundary
   is gone and no later message can be framed, so the lane stops);
 - an oversized datagram becomes `Malformed` with `FrameDecodeError.Truncated`
   (`Client/Lanes/UdpLaneTransport.cs:113`), never a silent "corrupt".

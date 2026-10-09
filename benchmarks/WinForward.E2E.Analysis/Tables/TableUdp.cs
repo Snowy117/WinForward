@@ -116,12 +116,12 @@ internal static class TableUdp
         {
             var (_, reason) = MetricStatus.Resolve(campaign, armName, udpPath: null, dns53: false, rowId);
             var why = reason ?? $"no {armName} arm";
-            return [rowId, armName, "0", carriage, .. Repeated(s_fields.Length + 2, $"n/a ({why})")];
+            return [rowId, armName, "0", carriage, .. MarkdownTable.Repeated(s_fields.Length + 2, $"n/a ({why})")];
         }
 
         if (profile is not null && string.Equals(profile.Udp, RowProfiles.UdpNotCarried, StringComparison.Ordinal))
         {
-            return [rowId, armName, "n/a", RowProfiles.NotCarriedCell, .. Repeated(s_fields.Length + 2, RowProfiles.NotCarriedCell)];
+            return [rowId, armName, "n/a", RowProfiles.NotCarriedCell, .. MarkdownTable.Repeated(s_fields.Length + 2, RowProfiles.NotCarriedCell)];
         }
 
         var cells = new Dictionary<string, MetricCell>(StringComparer.Ordinal);
@@ -244,14 +244,6 @@ internal static class TableUdp
             }
         }
 
-        return cells;
-    }
-
-    /// <summary>One cell value repeated for a row that has no numbers to print.</summary>
-    private static string[] Repeated(int count, string value)
-    {
-        var cells = new string[count];
-        Array.Fill(cells, value);
         return cells;
     }
 }

@@ -112,7 +112,7 @@ tick span. Do not write a bare `(double)a / b`.
   constant in the arm's shard, written from `WriteTo` — the shape test's explicit factory then fails to
   compile until the new member is set, and the two-way path-set comparison covers it.
 - **Base** — an arm that never runs still publishes `metrics: {}` and `parameters: {}` through
-  `EmptyMetrics` (`Client/ArmContext.cs:157`, `Client/ArmRecordWriter.cs:21`).
+  `EmptyMetrics` (`Client/EmptyMetrics.cs:11`, `Client/ArmRecordWriter.cs:21`).
 - **Bad** — a key-position literal written by hand, e.g. `writer.WriteString("sent", …)` where
   `ArmKeys.Loss.Sent` declares `sent`: `JsonKeyLiteralGateTests` fails on it. The gate matches only
   literals that are **currently declared** spellings, so the retired `sentOk`

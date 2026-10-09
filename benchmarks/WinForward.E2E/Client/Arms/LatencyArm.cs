@@ -69,15 +69,15 @@ internal static class LatencyArm
             {
                 var laneState = lanes.Tcp[lane];
                 var laneIndex = lane;
-                tasks.Add(Dedicated.RunOnOwnThreadAsync(() => RunTcpLaneAsync(context, laneState, laneIndex, plan, startTicks, deadlineTicks, cancellationToken)));
+                tasks.Add(DedicatedThread.RunOnOwnThreadAsync(() => RunTcpLaneAsync(context, laneState, laneIndex, plan, startTicks, deadlineTicks, cancellationToken)));
             }
 
-            tasks.Add(Dedicated.RunOnOwnThreadAsync(() => RunConnectProbeAsync(context, lanes.Probe, startTicks, deadlineTicks, cancellationToken)));
+            tasks.Add(DedicatedThread.RunOnOwnThreadAsync(() => RunConnectProbeAsync(context, lanes.Probe, startTicks, deadlineTicks, cancellationToken)));
         }
 
         if (plan.UseUdp)
         {
-            tasks.Add(Dedicated.RunOnOwnThreadAsync(() => RunUdpLaneAsync(context, lanes.Udp, plan, startTicks, deadlineTicks, cancellationToken)));
+            tasks.Add(DedicatedThread.RunOnOwnThreadAsync(() => RunUdpLaneAsync(context, lanes.Udp, plan, startTicks, deadlineTicks, cancellationToken)));
         }
 
         return tasks;

@@ -68,8 +68,8 @@ public sealed class ClientOptionsTests
         Assert.Contains("'--udp-port' is not a port number in 1..65535", error, StringComparison.Ordinal);
     }
 
-    // The two refusals that belong to the walk rather than to an option (E2-d): a name the verb does
-    // not declare, and a declared option at the end of the line with nothing left to read.
+    // The two refusals that belong to the walk rather than to an option: a name the verb does not
+    // declare, and a declared option at the end of the line with nothing left to read.
     [Fact]
     public void AnUnknownOptionIsRefusedWithTheArgumentAsWritten()
     {

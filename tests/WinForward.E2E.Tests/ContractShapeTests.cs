@@ -12,7 +12,7 @@ using Xunit;
 namespace WinForward.E2E.Tests;
 
 /// <summary>
-/// The shape contract of a migrated kind: the bytes its record publishes, flattened with the shared
+/// The shape contract of a registered kind: the bytes its record publishes, flattened with the shared
 /// path alphabet, against the paths <c>ArmKeys</c> declares. Both sides of the comparison are the
 /// production ones -- the arm's <c>WriteTo</c>, the record writer and the JSONL sink -- so a key
 /// written to the wrong level, written twice, declared but never written, or written but never
@@ -27,7 +27,7 @@ public sealed class ContractShapeTests
     private static readonly string?[] s_threeNotes = ["first", "second", "third"];
 
     [Fact]
-    public async Task EveryMigratedKindWritesExactlyTheMetricPathsItsKeysDeclare()
+    public async Task EveryRegisteredKindWritesExactlyTheMetricPathsItsKeysDeclare()
     {
         var failures = new List<string>();
         foreach (var contract in ContractRegistry.s_all)

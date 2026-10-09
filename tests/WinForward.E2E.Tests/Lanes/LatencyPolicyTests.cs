@@ -131,7 +131,7 @@ public sealed class LatencyPolicyTests
         var policy = NewUdpPolicy(out _, out var state, window: 4);
 
         policy.OnReceive(new LaneReceiveResult(LaneReceiveKind.Malformed, 0, FrameDecodeError.Truncated), [], Clock.Now);
-        policy.OnReceive(new LaneReceiveResult(LaneReceiveKind.IoError, 0), [], Clock.Now);
+        policy.OnReceive(new LaneReceiveResult(LaneReceiveKind.IOError, 0), [], Clock.Now);
         Assert.False(policy.IsDrained);
 
         policy.Settle(Clock.Now);
@@ -263,7 +263,7 @@ public sealed class LatencyPolicyTests
 
         policy.OnReceive(new LaneReceiveResult(LaneReceiveKind.EndOfStream, 0), [], Clock.Now);
         policy.OnReceive(new LaneReceiveResult(LaneReceiveKind.Malformed, 0, FrameDecodeError.BadChecksum), [], Clock.Now);
-        policy.OnReceive(new LaneReceiveResult(LaneReceiveKind.IoError, 0, FrameDecodeError.BadMagic), [], Clock.Now);
+        policy.OnReceive(new LaneReceiveResult(LaneReceiveKind.IOError, 0, FrameDecodeError.BadMagic), [], Clock.Now);
         policy.Settle(Clock.Now);
 
         Assert.Equal(1, state.RemoteClosed);

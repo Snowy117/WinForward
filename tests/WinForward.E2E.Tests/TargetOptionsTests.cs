@@ -65,8 +65,8 @@ public sealed class TargetOptionsTests
         Assert.Contains("ports must be in the range 1..65535", error, StringComparison.Ordinal);
     }
 
-    // The walk-level refusals, which E2-d moved into the shared parser: both verbs must still refuse
-    // a name they do not declare and a declared option at the end of the line.
+    // The walk-level refusals the shared parser owns: both verbs must still refuse a name they do
+    // not declare and a declared option at the end of the line.
     [Fact]
     public void AnUnknownOptionIsRefusedWithTheArgumentAsWritten()
     {

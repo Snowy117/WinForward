@@ -37,7 +37,7 @@ internal sealed record MetricSpec(
     string? Arm,
     string? UdpPath,
     bool Dns53,
-    Func<CampaignModel, ClientRun, (double? Value, string? Reason)> Extract);
+    Func<CampaignModel, ClientRun, Measured<double?>> Extract);
 
 /// <summary>
 /// The pre-declared practical-significance thresholds: what a difference has to clear before the report

@@ -14,9 +14,9 @@ namespace WinForward.E2E.Tests;
 /// <para><b>The baseline.</b> <c>benchmarks/WinForward.E2E</c> holds <b>31</b> of these catches in
 /// <b>19</b> files (the premise re-verification's count, <c>research/semantic-fixes/E3-premises.md</c>
 /// item 19), and the registry below is that list, per file and in source order. The three sites whose
-/// counter E3-e removed -- <c>MixBulkLoop</c>, <c>MixPageLoop</c>'s page connection and
-/// <c>DnsServer</c>'s stream handler -- are registered as <see cref="Ignored"/> like their 19
-/// siblings: putting the increment back is an <see cref="Unregistered"/> shape and fails.</para>
+/// catch no longer writes a counter -- <c>MixBulkLoop</c>, <c>MixPageLoop</c>'s page connection
+/// and <c>DnsServer</c>'s stream handler -- are registered as <see cref="Ignored"/> like their
+/// 19 siblings: putting the increment back is an <see cref="Unregistered"/> shape and fails.</para>
 /// <para><b>What is not in the baseline.</b> <c>WinForward.E2E.Contracts</c> holds three more of these
 /// catches, in <c>JsonlSink</c>, and they are deliberately outside this gate: the sink's policy is
 /// "swallow and count the write failure" (D14.7), so one of them books a

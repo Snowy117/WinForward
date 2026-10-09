@@ -146,6 +146,12 @@ namespace suffix.
 
 ## Naming Conventions
 
+- **Acronyms in identifiers.** A two-letter acronym is all caps (`IO`, `IP`, `OS`); `Id` is the
+  exception and stays `Id`. Three or more letters read as a word (`Html`, `Json`, `Tcp`, `Udp`, `Dns`,
+  `Cpu`). `IPv4`/`IPv6` keep `IP` caps and a lower-case `v`. Measured examples in the tree:
+  `src/WinForward.Core/IPPrefix.cs`, `IPAddressValue`, `SupportedOSPlatform`, `StableId` (40 uses).
+  The rule applies to new and touched code; the 108 existing `Ipv[46]` spellings across 12 `src/`
+  files are a separate follow-up, not a reason to keep writing them.
 - Production files are the primary type in PascalCase. xunit files are the test-class name plus a
   `Tests` suffix, named by subject (`TcpProxyCoordinatorLifecycleTests`,
   `ConfigurationValidationTests`).
@@ -158,6 +164,17 @@ namespace suffix.
     abort the whole run with exit 1.
   - TestSupport files use their own namespace (`WinForward.TestSupport`, matching the project name)
     and promote the fakes from private nested to `internal`.
+  - **`IsTestProject` also gates the analyzer packages**, and at restore time it is the *project's own*
+    value that decides: NuGet restores with `ExcludeRestorePackageImports=true`, so `xunit.core.props`
+    never runs and the root `Directory.Build.props` ItemGroup (`'$(IsTestProject)' != 'true'`) hands
+    the four analyzers to every test project that does not declare the property itself. Measured
+    2026-10-09: 14 of 15 test projects resolve Meziantou + VSTHRD + Roslynator + Sonar;
+    `tests/WinForward.E2E.Tests` resolves none, because it declares `<IsTestProject>true</IsTestProject>`
+    explicitly. Writing that line is therefore a real decision, not boilerplate: deleting it turns the
+    analyzers on, and the test sources then report 31 findings under `TreatWarningsAsErrors`
+    (MA0006 ×14, S3358 ×5, MA0002 ×5, S127 ×2, MA0009 ×2, S2344, S1118, MA0008). The E2E test project
+    keeps the line with a comment stating that measurement and the revisit trigger: clear the list,
+    then drop the line so it is analysed like its siblings.
   - Because the fakes are `internal`, every consuming test project needs an `InternalsVisibleTo` in
     `WinForward.TestSupport.csproj`. The library declares its own `xunit` reference for the helpers
     that assert.

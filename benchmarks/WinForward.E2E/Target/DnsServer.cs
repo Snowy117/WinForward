@@ -318,8 +318,8 @@ internal sealed class DnsServer : IAsyncDisposable
         BinaryPrimitives.WriteUInt16BigEndian(lengthBuffer, (ushort)responseLength);
         // A send the peer refused is not this loop's decision: the answer is dropped, and the next
         // read sees the end of the stream, which is where the connection ends.
-        _ = await SocketIo.TrySendAllAsync(socket, lengthBuffer, cancellationToken).ConfigureAwait(false);
-        _ = await SocketIo.TrySendAllAsync(socket, response.AsMemory(0, responseLength), cancellationToken).ConfigureAwait(false);
+        _ = await SocketIO.TrySendAllAsync(socket, lengthBuffer, cancellationToken).ConfigureAwait(false);
+        _ = await SocketIO.TrySendAllAsync(socket, response.AsMemory(0, responseLength), cancellationToken).ConfigureAwait(false);
         return true;
     }
 
@@ -331,7 +331,7 @@ internal sealed class DnsServer : IAsyncDisposable
     /// </summary>
     private async ValueTask<bool> ReadExactAsync(Socket socket, Memory<byte> buffer, CancellationToken cancellationToken)
     {
-        var outcome = await SocketIo.ReadExactAsync(socket, buffer, cancellationToken).ConfigureAwait(false);
+        var outcome = await SocketIO.ReadExactAsync(socket, buffer, cancellationToken).ConfigureAwait(false);
         if (outcome == ReadExactOutcome.Short)
         {
             Interlocked.Increment(ref _tcpTruncated);

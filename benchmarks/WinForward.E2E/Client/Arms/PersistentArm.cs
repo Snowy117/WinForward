@@ -53,7 +53,7 @@ internal static class PersistentArm
         using var linked = context.CreateLinkedTokenSource();
         var cancellationToken = linked.Token;
         var state = new PersistentCounters();
-        var schedule = await Dedicated.RunOnOwnThreadAsync(() => RunPersistentAsync(context, state, plan, cancellationToken)).ConfigureAwait(false);
+        var schedule = await DedicatedThread.RunOnOwnThreadAsync(() => RunPersistentAsync(context, state, plan, cancellationToken)).ConfigureAwait(false);
 
         var outcome = new ArmOutcome
         {

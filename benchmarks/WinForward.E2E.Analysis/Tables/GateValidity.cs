@@ -272,11 +272,11 @@ internal static class GateValidity
         return (pre, post);
     }
 
-    private static (double? Value, string? Reason) BaseLossRate(CampaignModel campaign, ClientRun row, string controlId)
+    private static Measured<double?> BaseLossRate(CampaignModel campaign, ClientRun row, string controlId)
     {
         var control = campaign.InPass(row.PassId, controlId);
         return control is null
-            ? (null, $"no {controlId} row in {row.PassId}")
+            ? new(Value: null, Reason: $"no {controlId} row in {row.PassId}")
             : ArmAccess.Number(control, "BASE", "metrics/loss/lossRate");
     }
 

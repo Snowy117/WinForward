@@ -86,7 +86,7 @@ internal static class TableEnvironment
             "tick frequency (Hz)",
             ticks.Count > 0 ? DescriptiveStats.FmtStat(ticks, 1) : "n/a (no run.json with ticks and wallSeconds)");
         AddRow(info, "logical processors", Join(Sorted(runs, Contracts.ArmKeys.Run.LogicalProcessors)));
-        AddRow(info, "OS", Join(Sorted(runs, Contracts.ArmKeys.Run.OsDescription), "; "));
+        AddRow(info, "OS", Join(Sorted(runs, Contracts.ArmKeys.Run.OSDescription), "; "));
         AddRow(info, "client version", Join(Sorted(runs, Contracts.ArmKeys.Run.ClientVersion)));
         AddRow(info, ".NET runtime", Join(Sorted(runs, Contracts.ArmKeys.Run.FrameworkDescription), "; "));
         AddRow(info, "plan hash(es)", Join(Sorted(runs, Contracts.ArmKeys.Run.PlanHash)));

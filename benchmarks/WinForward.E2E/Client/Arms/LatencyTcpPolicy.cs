@@ -194,7 +194,7 @@ internal sealed class LatencyTcpPolicy : ILanePolicy
                     _state.Corrupt++;
                     break;
 
-                case LaneReceiveKind.IoError:
+                case LaneReceiveKind.IOError:
                     _state.ProtocolErrors++;
                     break;
 

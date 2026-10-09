@@ -32,7 +32,7 @@ public sealed class JsonlSinkTests
     }
 
     [Fact]
-    public async Task AnIoFailureIsPropagatedUnderTheClientPolicy()
+    public async Task AnIOFailureIsPropagatedUnderTheClientPolicy()
     {
         var stream = new FailingStream();
         await using var sink = new JsonlSink(stream, JsonlPolicy.Propagate, envelope: null, s_noFlush);

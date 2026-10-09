@@ -94,7 +94,7 @@ public sealed class TruncatedConnectionTests
 
         Assert.DoesNotContain(nameof(FrameReadStatus), source, StringComparison.Ordinal);
         Assert.DoesNotContain(nameof(FrameStreamReader), source, StringComparison.Ordinal);
-        Assert.Contains(nameof(SocketIo.ReadExactAsync), source, StringComparison.Ordinal);
+        Assert.Contains(nameof(SocketIO.ReadExactAsync), source, StringComparison.Ordinal);
         Assert.Equal(ArmKeys.Ledger.TcpSummary.TruncatedFrames, ArmKeys.Ledger.DnsSummary.TruncatedFrames);
         Assert.NotEqual(
             typeof(ArmKeys.Ledger.TcpSummary).GetField(nameof(ArmKeys.Ledger.TcpSummary.TruncatedFrames)),

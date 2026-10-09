@@ -31,7 +31,7 @@ internal static class MixArm
             // genuinely asynchronous await, so starting a desktop inline would keep this loop from
             // ever constructing the next one and the arm would silently measure fewer desktops than
             // the plan declares.
-            tasks[index] = Dedicated.RunOnOwnThreadAsync(() => RunDesktopAsync(context, counters, trackers[desktopIndex], observationEnds, desktopIndex, startTicks, deadlineTicks, windowTicks, cancellationToken));
+            tasks[index] = DedicatedThread.RunOnOwnThreadAsync(() => RunDesktopAsync(context, counters, trackers[desktopIndex], observationEnds, desktopIndex, startTicks, deadlineTicks, windowTicks, cancellationToken));
         }
 
         await Task.WhenAll(tasks).ConfigureAwait(false);
@@ -89,9 +89,9 @@ internal static class MixArm
         // being started.
         var tasks = new[]
         {
-            Dedicated.RunOnOwnThreadAsync(() => MixPageLoop.PageLoopAsync(context, counters, desktopIndex, startTicks, deadlineTicks, token)),
-            Dedicated.RunOnOwnThreadAsync(() => MixBulkLoop.BulkLoopAsync(context, counters, desktopIndex, startTicks, deadlineTicks, token)),
-            Dedicated.RunOnOwnThreadAsync(() => MixUdpLoop.UdpLoopAsync(context, counters, tracker, observationEnds, desktopIndex, startTicks, deadlineTicks, windowTicks, token)),
+            DedicatedThread.RunOnOwnThreadAsync(() => MixPageLoop.PageLoopAsync(context, counters, desktopIndex, startTicks, deadlineTicks, token)),
+            DedicatedThread.RunOnOwnThreadAsync(() => MixBulkLoop.BulkLoopAsync(context, counters, desktopIndex, startTicks, deadlineTicks, token)),
+            DedicatedThread.RunOnOwnThreadAsync(() => MixUdpLoop.UdpLoopAsync(context, counters, tracker, observationEnds, desktopIndex, startTicks, deadlineTicks, windowTicks, token)),
         };
 
         await Task.WhenAll(tasks).ConfigureAwait(false);

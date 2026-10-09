@@ -226,11 +226,11 @@ internal static class MetricCatalogue
     }
 
     /// <summary>The same reading as percentage points, which is the unit every rate metric uses.</summary>
-    private static (double? Value, string? Reason) Percent((double? Value, string? Reason) reading) =>
-        reading.Value is { } value ? (value * 100.0, null) : reading;
+    private static Measured<double?> Percent(Measured<double?> reading) =>
+        reading.Value is { } value ? new(Value: value * 100.0, Reason: null) : reading;
 
     /// <summary>The MIX arm's UDP loss rate, from its UDP class with the arm-level fallback.</summary>
-    private static (double? Value, string? Reason) MixUdpLossRate(ClientRun row)
+    private static Measured<double?> MixUdpLossRate(ClientRun row)
     {
         var reading = ArmAccess.Number(row, "MIX", "metrics/classes/udp/lossRate");
         if (reading.Value is null && !string.Equals(reading.Reason, ArmAccess.NullRateReason, StringComparison.Ordinal))
@@ -247,11 +247,11 @@ internal static class MetricCatalogue
     /// </summary>
     /// <param name="campaign">The campaign the warmup window is read from.</param>
     /// <param name="row">The run to read.</param>
-    private static (double? Value, string? Reason) SteadyPrivateBytes(CampaignModel campaign, ClientRun row)
+    private static Measured<double?> SteadyPrivateBytes(CampaignModel campaign, ClientRun row)
     {
         if (RunSamples.PrimaryProductProcess(row) is not { } primary)
         {
-            return (null, NoProductProcess);
+            return new(Value: null, Reason: NoProductProcess);
         }
 
         var values = new List<double>();
@@ -267,8 +267,8 @@ internal static class MetricCatalogue
         }
 
         return values.Count == 0
-            ? (null, "no steady-state product samples")
-            : (DescriptiveStats.Quantile(values, 0.50), null);
+            ? new(Value: null, Reason: "no steady-state product samples")
+            : new(Value: DescriptiveStats.Quantile(values, 0.50), Reason: null);
     }
 
     /// <summary>
@@ -276,11 +276,11 @@ internal static class MetricCatalogue
     /// through the same per-identity accumulation §6 prints per arm.
     /// </summary>
     /// <param name="row">The run to read.</param>
-    private static (double? Value, string? Reason) ProxyCpu(ClientRun row)
+    private static Measured<double?> ProxyCpu(ClientRun row)
     {
         if (RunSamples.PrimaryProductProcess(row) is not { } primary)
         {
-            return (null, NoProductProcess);
+            return new(Value: null, Reason: NoProductProcess);
         }
 
         var ordered = row.Arms.All
@@ -291,6 +291,6 @@ internal static class MetricCatalogue
         var (value, why, _) = CpuDetail.Compute(
             [.. ordered],
             RunClocks.TickFrequency(row));
-        return (value, why);
+        return new(Value: value, Reason: why);
     }
 }

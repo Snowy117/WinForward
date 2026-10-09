@@ -101,7 +101,7 @@ internal static class ThroughputArm
         {
             states[index] = new ThroughputStreamState();
             var streamIndex = index;
-            tasks[index] = Dedicated.RunOnOwnThreadAsync(() => RunStreamAsync(context, states[streamIndex], streamIndex, limiter, frameLength, deadlineTicks, cancellationToken));
+            tasks[index] = DedicatedThread.RunOnOwnThreadAsync(() => RunStreamAsync(context, states[streamIndex], streamIndex, limiter, frameLength, deadlineTicks, cancellationToken));
         }
 
         await Task.WhenAll(tasks).ConfigureAwait(false);

@@ -28,7 +28,7 @@ internal sealed record ArmDenominators(
 /// <c>n/a (no datagram denominator)</c> rather than a fabricated zero, because dividing by a datagram
 /// count the row never produced would report a cost per datagram that does not exist.</para>
 /// </remarks>
-internal static class ArmDenominatorTable
+internal static class TableArmDenominator
 {
     /// <summary>One arm's denominators and their names, or an empty set for a kind this table does not know.</summary>
     /// <param name="row">The run the arm belongs to.</param>
@@ -97,6 +97,6 @@ internal static class ArmDenominatorTable
             DatagramLabel: "udp.sent");
     }
 
-    private static ArmDenominators One((double? Value, string? Reason) reading, string label) =>
+    private static ArmDenominators One(Measured<double?> reading, string label) =>
         new(reading.Value, Datagrams: null, TransactionLabel: label, DatagramLabel: null);
 }

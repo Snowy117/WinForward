@@ -26,7 +26,7 @@ internal enum LaneReceiveKind
     /// <summary>
     /// One message could not be read as a message. Not terminal — one bad message is not the lane, the
     /// same way one corrupt datagram never ended a UDP lane. The stream case that genuinely cannot
-    /// continue (a desynchronized frame boundary) is an <see cref="IoError"/> instead, because no
+    /// continue (a desynchronized frame boundary) is an <see cref="IOError"/> instead, because no
     /// further message can be read from that stream.
     /// </summary>
     // ReSharper disable once UnusedMember.Global // One of the seam's four kinds: the engine only tests the two terminal ones, and a policy books this one as a message it could not score.
@@ -36,14 +36,14 @@ internal enum LaneReceiveKind
     /// The transport itself failed: a socket error, or a stream that can no longer be framed.
     /// Terminal: the receive loop stops once the policy has seen it.
     /// </summary>
-    IoError = 3,
+    IOError = 3,
 }
 
 /// <summary>
 /// One receive outcome. <see cref="Length"/> is how many bytes of the destination the transport filled
 /// for this outcome and is 0 for the outcomes that carry none; <see cref="Detail"/> carries the
 /// framing-level reason when the transport has one, and is only meaningful for
-/// <see cref="LaneReceiveKind.Malformed"/> and <see cref="LaneReceiveKind.IoError"/>.
+/// <see cref="LaneReceiveKind.Malformed"/> and <see cref="LaneReceiveKind.IOError"/>.
 /// </summary>
 [StructLayout(LayoutKind.Auto)]
 internal readonly record struct LaneReceiveResult(LaneReceiveKind Kind, int Length, FrameDecodeError Detail = FrameDecodeError.None);
@@ -100,7 +100,7 @@ internal interface ILaneTransport : IDisposable
     /// <summary>
     /// Receives one message into <paramref name="destination"/>. The buffer belongs to the engine and
     /// the bytes written into it do not outlive the call. A socket failure is reported as
-    /// <see cref="LaneReceiveKind.IoError"/>, never thrown.
+    /// <see cref="LaneReceiveKind.IOError"/>, never thrown.
     /// </summary>
     ValueTask<LaneReceiveResult> ReceiveAsync(Memory<byte> destination, CancellationToken cancellationToken);
 }

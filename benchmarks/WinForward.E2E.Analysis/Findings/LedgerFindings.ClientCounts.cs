@@ -118,75 +118,75 @@ internal static partial class LedgerFindings
         return profile.Udp is RowProfiles.UdpProxiedUtcp or RowProfiles.UdpProxiedNative ? "proxied" : null;
     }
 
-    private static (double? Value, string? Reason) ClientConnectionCount(ClientRun run, string armName)
+    private static Measured<double?> ClientConnectionCount(ClientRun run, string armName)
     {
         var (result, why) = ArmAccess.ArmResult(run, armName);
         if (result is null)
         {
-            return (null, why);
+            return new(Value: null, Reason: why);
         }
 
         var kind = JsonValue.String(result, "kind");
         return kind switch
         {
-            "latency" => (ArmAccess.Number(run, armName, "metrics/tcp.connectAttempts").Value,
-                "metrics.tcp.connectAttempts (every connect the arm attempted: its lane connects + the 1 Hz connect probe)"),
-            "reliability" => (ArmAccess.Number(run, armName, "metrics/connectAttempts").Value, "metrics.connectAttempts"),
-            "throughput" => (ArmAccess.Number(run, armName, "parameters/streams").Value,
-                "parameters.streams (one connection per stream)"),
-            "persistent" => (ArmAccess.Number(run, armName, "metrics/connectAttempts").Value,
-                "metrics.connectAttempts (a reconnect opens a second connection)"),
+            "latency" => new(Value: ArmAccess.Number(run, armName, "metrics/tcp.connectAttempts").Value,
+                Reason: "metrics.tcp.connectAttempts (every connect the arm attempted: its lane connects + the 1 Hz connect probe)"),
+            "reliability" => new(Value: ArmAccess.Number(run, armName, "metrics/connectAttempts").Value, Reason: "metrics.connectAttempts"),
+            "throughput" => new(Value: ArmAccess.Number(run, armName, "parameters/streams").Value,
+                Reason: "parameters.streams (one connection per stream)"),
+            "persistent" => new(Value: ArmAccess.Number(run, armName, "metrics/connectAttempts").Value,
+                Reason: "metrics.connectAttempts (a reconnect opens a second connection)"),
             "mix" => MixConnections(run, armName),
-            "base" => (ArmAccess.Number(run, armName, "metrics/latency/tcp.connectAttempts").Value,
-                "metrics.latency.tcp.connectAttempts (the latency phase's lane connects + its 1 Hz connect probe)"),
-            "dns" => (null, "the DNS arm opens its TCP connection on the DNS port, which the ledger reports as dnsSummary"),
-            _ => (null, $"{armName} opens no connection on the TCP echo port"),
+            "base" => new(Value: ArmAccess.Number(run, armName, "metrics/latency/tcp.connectAttempts").Value,
+                Reason: "metrics.latency.tcp.connectAttempts (the latency phase's lane connects + its 1 Hz connect probe)"),
+            "dns" => new(Value: null, Reason: "the DNS arm opens its TCP connection on the DNS port, which the ledger reports as dnsSummary"),
+            _ => new(Value: null, Reason: $"{armName} opens no connection on the TCP echo port"),
         };
     }
 
-    private static (double? Value, string? Reason) MixConnections(ClientRun run, string armName)
+    private static Measured<double?> MixConnections(ClientRun run, string armName)
     {
         var page = ArmAccess.Number(run, armName, "metrics/classes/page/connections").Value;
         var desktops = ArmAccess.Number(run, armName, "parameters/desktops").Value;
         if (page is null && desktops is null)
         {
-            return (null, "no page-connection or desktop counter");
+            return new(Value: null, Reason: "no page-connection or desktop counter");
         }
 
-        return ((page ?? 0.0) + (desktops ?? 0.0), "classes.page.connections + parameters.desktops (bulk streams)");
+        return new(Value: (page ?? 0.0) + (desktops ?? 0.0), Reason: "classes.page.connections + parameters.desktops (bulk streams)");
     }
 
-    private static (double? Value, string? Reason) ClientDatagramCount(ClientRun run, string armName)
+    private static Measured<double?> ClientDatagramCount(ClientRun run, string armName)
     {
         var (result, why) = ArmAccess.ArmResult(run, armName);
         if (result is null)
         {
-            return (null, why);
+            return new(Value: null, Reason: why);
         }
 
         var kind = JsonValue.String(result, "kind");
         return kind switch
         {
-            "latency" => (ArmAccess.Number(run, armName, "metrics/udp.sent").Value, "metrics.udp.sent"),
-            "loss" => (ArmAccess.Number(run, armName, "metrics/sent").Value, "metrics.sent"),
-            "mix" => (ArmAccess.Number(run, armName, "metrics/udp.sent").Value, "metrics.udp.sent"),
+            "latency" => new(Value: ArmAccess.Number(run, armName, "metrics/udp.sent").Value, Reason: "metrics.udp.sent"),
+            "loss" => new(Value: ArmAccess.Number(run, armName, "metrics/sent").Value, Reason: "metrics.sent"),
+            "mix" => new(Value: ArmAccess.Number(run, armName, "metrics/udp.sent").Value, Reason: "metrics.udp.sent"),
             "base" => BaseDatagrams(run, armName),
-            "dns" => (null, "the DNS arm sends to the DNS port, which the ledger reports as dnsSummary"),
-            _ => (null, $"{armName} sends no datagram to the UDP echo port"),
+            "dns" => new(Value: null, Reason: "the DNS arm sends to the DNS port, which the ledger reports as dnsSummary"),
+            _ => new(Value: null, Reason: $"{armName} sends no datagram to the UDP echo port"),
         };
     }
 
-    private static (double? Value, string? Reason) BaseDatagrams(ClientRun run, string armName)
+    private static Measured<double?> BaseDatagrams(ClientRun run, string armName)
     {
         var latencyLane = ArmAccess.Number(run, armName, "metrics/latency/udp.sent").Value;
         var lossPhase = ArmAccess.Number(run, armName, "metrics/loss/sent").Value;
         if (latencyLane is null && lossPhase is null)
         {
-            return (null, "no UDP phase counter");
+            return new(Value: null, Reason: "no UDP phase counter");
         }
 
-        return ((latencyLane ?? 0.0) + (lossPhase ?? 0.0),
-            "metrics.latency.udp.sent + metrics.loss.sent (both phases send datagrams)");
+        return new(Value: (latencyLane ?? 0.0) + (lossPhase ?? 0.0),
+                Reason: "metrics.latency.udp.sent + metrics.loss.sent (both phases send datagrams)");
     }
 
     /// <summary>One DNS port's ledger totals and the client totals they are read against.</summary>

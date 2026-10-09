@@ -75,7 +75,7 @@ internal static class TableDns
         if (string.Equals(dnsStatus, MetricStatus.NotInPlan, StringComparison.Ordinal)
             && string.Equals(altStatus, MetricStatus.NotInPlan, StringComparison.Ordinal))
         {
-            return [rowId, .. Repeated(9, "n/a"), dnsReason!];
+            return [rowId, .. MarkdownTable.Repeated(9, "n/a"), dnsReason!];
         }
 
         var notCarried = profile is not null && string.Equals(profile.Udp, RowProfiles.UdpNotCarried, StringComparison.Ordinal);
@@ -226,13 +226,5 @@ internal static class TableDns
         }
 
         return ports;
-    }
-
-    /// <summary>One cell value repeated for a row that measures neither DNS arm.</summary>
-    private static string[] Repeated(int count, string value)
-    {
-        var cells = new string[count];
-        Array.Fill(cells, value);
-        return cells;
     }
 }

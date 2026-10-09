@@ -34,4 +34,12 @@ internal static class MarkdownTable
 
         return string.Join('\n', lines);
     }
+
+    /// <summary>One cell value repeated for a row that has no numbers to print.</summary>
+    internal static string[] Repeated(int count, string value)
+    {
+        var cells = new string[count];
+        Array.Fill(cells, value);
+        return cells;
+    }
 }

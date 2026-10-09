@@ -5,8 +5,8 @@ using Xunit;
 namespace WinForward.E2E.Tests;
 
 /// <summary>
-/// The CLI's user-visible text, frozen before E2-d replaced the two argument parsers with one shared
-/// walk (<c>research/cli-snapshots</c>). The commands in <c>before/index.json</c> are replayed
+/// The CLI's user-visible text, frozen before the two argument parsers became one shared walk
+/// (<c>research/cli-snapshots</c>). The commands in <c>before/index.json</c> are replayed
 /// through <see cref="Program.Main"/> and compared -- exit code, stdout and stderr -- with what the
 /// published binary printed, so a changed message, a changed exit code, or a help that lost a line
 /// fails here instead of in a campaign.
@@ -17,14 +17,14 @@ namespace WinForward.E2E.Tests;
 /// the help printed behind it, and the code the shell sees. <see cref="Program.Main"/> returns
 /// before it opens a socket or creates a directory for every recorded case, which is what makes the
 /// replay safe inside the test host.</para>
-/// <para><b>The registered changes.</b> The before tree is what a binary that predates E2-d printed,
-/// and every batch that changes user-visible text registers its substitution in
-/// <c>INTENTIONAL.md</c>: E2-d's target help sentence naming the exit code 1, and E3-d's receive-loop
+/// <para><b>The registered changes.</b> The before tree is what the last binary carrying the two
+/// separate parsers printed, and every change to user-visible text registers its substitution in
+/// <c>INTENTIONAL.md</c>: the target help sentence naming the exit code 1, and the receive-loop
 /// option line. <see cref="TheRegisteredChangesAreTheOnlyDifferenceBetweenTheTrees"/> pins the two
 /// trees to exactly those substitutions.</para>
-/// <para><b>The cases a later batch added.</b> A command that predates a batch is replayable against
-/// the before tree; one whose option that binary refused as unknown is not, so the cases E3-d added
-/// live only in the after tree and are replayed against it
+/// <para><b>The cases the before tree never printed.</b> A command the before binary already carried
+/// is replayable against the before tree; one whose option it refused as unknown is not, so those
+/// cases live only in the after tree and are replayed against it
 /// (<see cref="TheCasesTheBeforeTreePredatesStillPrintTheirRecordedText"/>). A stem is a case's
 /// identity, which is why the collector appends new ones instead of inserting them.</para>
 /// </remarks>
@@ -70,8 +70,8 @@ public sealed class CliSnapshotTests
 
     /// <summary>
     /// The cases the before tree does not have, because the binary it recorded them with would have
-    /// refused their option as unknown: the receive-loop refusals E3-d added are replayed against the
-    /// tree that recorded them, so a reworded count message fails here like any other.
+    /// refused their option as unknown: the receive-loop refusals are replayed against the tree that
+    /// recorded them, so a reworded count message fails here like any other.
     /// </summary>
     [Fact]
     public async Task TheCasesTheBeforeTreePredatesStillPrintTheirRecordedText()
@@ -117,8 +117,8 @@ public sealed class CliSnapshotTests
         Assert.Contains(UdpPortHelpAfter, help, StringComparison.Ordinal);
         Assert.DoesNotContain(TargetHelpBefore, help, StringComparison.Ordinal);
 
-        // The option is what E3-d added, so it is the one thing the before tree cannot contain; the
-        // sentence it replaced is the other, and its absence is stated by the line above.
+        // The option is the one thing the before tree cannot contain; the sentence it replaced is
+        // the other, and its absence is stated by the line above.
         Assert.DoesNotContain(UdpReceiverOption, Text(Path.Combine(Before, $"{stem}.stdout")), StringComparison.Ordinal);
     }
 

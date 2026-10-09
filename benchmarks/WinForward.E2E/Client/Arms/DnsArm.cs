@@ -32,12 +32,12 @@ internal static class DnsArm
 
         if (udpRate > 0)
         {
-            tasks.Add(Dedicated.RunOnOwnThreadAsync(() => DnsUdpPhase.RunUdpAsync(context, udp, dnsEndPoint, udpRate, cnameEvery, startTicks, deadlineTicks, cancellationToken)));
+            tasks.Add(DedicatedThread.RunOnOwnThreadAsync(() => DnsUdpPhase.RunUdpAsync(context, udp, dnsEndPoint, udpRate, cnameEvery, startTicks, deadlineTicks, cancellationToken)));
         }
 
         if (tcpRate > 0)
         {
-            tasks.Add(Dedicated.RunOnOwnThreadAsync(() => DnsTcpPhase.RunTcpAsync(context, tcp, dnsEndPoint, tcpRate, cnameEvery, startTicks, deadlineTicks, cancellationToken)));
+            tasks.Add(DedicatedThread.RunOnOwnThreadAsync(() => DnsTcpPhase.RunTcpAsync(context, tcp, dnsEndPoint, tcpRate, cnameEvery, startTicks, deadlineTicks, cancellationToken)));
         }
 
         await Task.WhenAll(tasks).ConfigureAwait(false);

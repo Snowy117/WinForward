@@ -231,7 +231,7 @@ internal static class TableCpu
             return;
         }
 
-        var denominators = ArmDenominatorTable.Of(row, armName);
+        var denominators = TableArmDenominator.Of(row, armName);
         if (denominators.Transactions is { } transactions && transactions.CompareTo(0.0) != 0)
         {
             reading.PerTransaction.Add(1e6 * seconds / transactions);

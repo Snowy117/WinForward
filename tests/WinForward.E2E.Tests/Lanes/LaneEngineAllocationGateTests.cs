@@ -7,7 +7,7 @@ namespace WinForward.E2E.Tests.Lanes;
 
 /// <summary>
 /// The send path's performance contract (DD D14.11, <c>allocation-gates.md</c>): driven on the caller's thread —
-/// no <c>Dedicated</c> — a slot must allocate no managed bytes. The window is opened and closed inside
+/// no <c>DedicatedThread</c> — a slot must allocate no managed bytes. The window is opened and closed inside
 /// the transport, on the thread the engine runs on, because
 /// <see cref="GC.GetAllocatedBytesForCurrentThread"/> is a per-thread counter and the send path never
 /// suspends; the send count is asserted next to the byte count so the gate cannot pass by not running.

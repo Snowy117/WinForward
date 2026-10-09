@@ -153,7 +153,7 @@ public sealed class LaneTransportTests
         var lost = new byte[FrameCodec.HeaderSize];
         await peer.SendAsync(lost, SocketFlags.None, cancellation.Token);
         var ioError = await transport.ReceiveAsync(received, cancellation.Token);
-        Assert.Equal(LaneReceiveKind.IoError, ioError.Kind);
+        Assert.Equal(LaneReceiveKind.IOError, ioError.Kind);
         Assert.Equal(FrameDecodeError.BadMagic, ioError.Detail);
     }
 
@@ -196,7 +196,7 @@ public sealed class LaneTransportTests
         peer.Shutdown(SocketShutdown.Send);
 
         var truncated = await transport.ReceiveAsync(new byte[DestinationBytes()], cancellation.Token);
-        Assert.Equal(LaneReceiveKind.IoError, truncated.Kind);
+        Assert.Equal(LaneReceiveKind.IOError, truncated.Kind);
         Assert.Equal(FrameDecodeError.Truncated, truncated.Detail);
         Assert.Equal(0, truncated.Length);
     }
@@ -219,7 +219,7 @@ public sealed class LaneTransportTests
         FrameCodec.WriteHeader(absurd, 0x7400_0003u, 1, 0, FrameCodec.MaxPayloadLength + 1);
         await peer.SendAsync(absurd, SocketFlags.None, cancellation.Token);
         var badLength = await transport.ReceiveAsync(received, cancellation.Token);
-        Assert.Equal(LaneReceiveKind.IoError, badLength.Kind);
+        Assert.Equal(LaneReceiveKind.IOError, badLength.Kind);
         Assert.Equal(FrameDecodeError.BadLength, badLength.Detail);
     }
 

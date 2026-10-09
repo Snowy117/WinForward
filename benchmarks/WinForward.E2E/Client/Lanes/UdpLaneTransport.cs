@@ -103,7 +103,7 @@ internal sealed class UdpLaneTransport : ILaneTransport
         catch (SocketException)
         {
             // The socket is gone: the lane has no further arrivals to report.
-            return new LaneReceiveResult(LaneReceiveKind.IoError, 0);
+            return new LaneReceiveResult(LaneReceiveKind.IOError, 0);
         }
 
         if (received > destination.Length)

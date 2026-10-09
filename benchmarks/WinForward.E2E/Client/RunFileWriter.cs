@@ -65,7 +65,7 @@ internal static class RunFileWriter
     {
         writer.WriteString(ArmKeys.Run.Label, options.Label);
         writer.WriteString(ArmKeys.Run.ClientVersion, typeof(ClientRunner).Assembly.GetName().Version?.ToString() ?? "0.0.0.0");
-        writer.WriteString(ArmKeys.Run.OsDescription, RuntimeInformation.OSDescription);
+        writer.WriteString(ArmKeys.Run.OSDescription, RuntimeInformation.OSDescription);
         writer.WriteString(ArmKeys.Run.FrameworkDescription, RuntimeInformation.FrameworkDescription);
         writer.WriteNumber(ArmKeys.Run.LogicalProcessors, Environment.ProcessorCount);
         writer.WriteString(ArmKeys.Run.PlanHash, planHash);

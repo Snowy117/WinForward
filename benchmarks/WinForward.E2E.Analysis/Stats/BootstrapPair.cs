@@ -1,4 +1,5 @@
 using System.Globalization;
+using WinForward.E2E.Analysis.Model;
 
 namespace WinForward.E2E.Analysis.Stats;
 
@@ -41,7 +42,7 @@ internal sealed record Comparison(
 internal static class BootstrapPair
 {
     /// <summary>Bootstraps one pair of per-pass value maps, or reports why it cannot.</summary>
-    internal static (Comparison? Comparison, string? Error) Draw(
+    internal static Measured<Comparison?> Draw(
         IReadOnlyDictionary<string, double> valuesA,
         IReadOnlyDictionary<string, double> valuesB,
         string kind,
@@ -55,7 +56,7 @@ internal static class BootstrapPair
 
         if (valuesA.Count == 0 || valuesB.Count == 0)
         {
-            return (null, "one side has no per-pass value for this metric");
+            return new(Value: null, Reason: "one side has no per-pass value for this metric");
         }
 
         var shared = valuesA.Keys.Where(valuesB.ContainsKey).Order(StringComparer.Ordinal).ToList();
@@ -66,7 +67,7 @@ internal static class BootstrapPair
             : DifferenceEstimates(valuesA, valuesB, shared, paired, random, resamples);
         if (error is not null)
         {
-            return (null, error);
+            return new(Value: null, Reason: error);
         }
 
         estimates.Sort();
@@ -97,14 +98,14 @@ internal static class BootstrapPair
             equivalence = Math.Max(belowEdge, aboveEdge);
         }
 
-        return (new Comparison(
+        return new(Value: new Comparison(
             point,
             DescriptiveStats.Quantile(estimates, 0.025)!.Value,
             DescriptiveStats.Quantile(estimates, 0.975)!.Value,
             Math.Min(1.0, 2.0 * Math.Min(below, above)),
             equivalence,
             mode,
-            estimates[0].Equals(estimates[^1])), null);
+            estimates[0].Equals(estimates[^1])), Reason: null);
     }
 
     /// <summary>The resampled ratios: in log space when the two sides ran the same passes, else separately.</summary>

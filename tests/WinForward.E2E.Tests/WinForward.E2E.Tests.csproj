@@ -1,6 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <IsPackable>false</IsPackable>
+    <!--
+      This explicit property is the only thing that keeps the four analyzer packages out of this
+      project. At restore time NuGet sets ExcludeRestorePackageImports=true, so xunit's props never
+      run; without the line the root Directory.Build.props ItemGroup, which tests
+      "'$(IsTestProject)' != 'true'", would hand this project Meziantou, Roslynator, Sonar and
+      VSTHRD like the other fourteen test projects. Measured 2026-10-09 by deleting the line,
+      restoring, and building Release: the analyzers do resolve, and the test sources then report
+      31 findings (MA0006 x14, S3358 x5, MA0002 x5, S127 x2, MA0009 x2, S2344, S1118, MA0008) that
+      TreatWarningsAsErrors turns into build errors.
+      Revisit when that list has been cleared: drop the line and fix the findings, so this project is
+      analysed like its siblings.
+    -->
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
   <ItemGroup>
