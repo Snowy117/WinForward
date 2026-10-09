@@ -121,3 +121,32 @@ Finish what D21 deferred: remove the CPython emulation the analyzer was ported w
 - Local glue still needs attention: wf.sh's transfer race (T5), deploy-campaign.sh's missing C:\wfbench\stage, orchestrator's unused -Pass parameters, selftest.sh's heredoc
 - Two wording items were left deliberately: DescriptiveStats.cs:119's CPython sum sentence (deleting the words deletes the reason) and oracle-diff.py's Report.show() 160-character truncation
 - 10-06-e2e-competitor-benchmark's design.md:214 and implement.md:96 still list plots/ as an output though the C# analysis draws none
+
+
+## Session 62: 代码树规范化：IPv4/IPv6 改名与全量注释精简
+<!-- trellis-session: v=2 fp=42807aa1a20cc259 -->
+
+**Date**: 2026-10-09
+**Task**: 代码树规范化：IPv4/IPv6 改名与全量注释精简
+**Branch**: `master`
+
+### Summary
+
+两阶段整理，63 个 commit。阶段一：58 个 .cs 文件里 850 次 Ipv→IPv 子串替换（842 处 token），逐文件以「HEAD 施加同一替换后字节恒等」证明只动了拼写，5 个 backend spec 的 9 处符号引用同步；编译期由 cref 校验兜底。阶段二：C 档全量重审 596 个文件的约 2 万行注释，按字节装箱切成 56 个主批次 + 2 个补漏批，每批一个子代理（禁用脚本编辑、禁用 dotnet），约 1001 处注释站点改写、13 处字符串字面量指针清除；每轮由父代理串行验证。全部门禁绿：Release 构建 0 警告、1663 测试通过（14 程序集）、dotnet format 空输出、jb inspectcode 清缓存后 0 Issue、E2E 分析 oracle-diff 51 slice 全 equal + check-fairness 14 guard 全 PASS。注释与字符串中的任务名/条目号/日期/design 章节引用全树归零。AGENTS.md 新增 Comment Conventions 一节固化本次判据与 S125/golden-pin 两个坑。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `488e06f` | refactor(naming): spell IPv4/IPv6 canonically across src |
+| `fe97c11` | refactor(naming): spell IPv4/IPv6 canonically across tests and benchmarks |
+| `85b199a` | docs(spec): follow the IPv4/IPv6 rename in the backend specs |
+| `89d784f` | refactor(comments): trim archive metadata and narration in batch 01 |
+| `c53a50a` | refactor(comments): trim archive metadata and narration in batch 55 |
+| `17a439c` | refactor(benchmarks): drop archive pointers printed by the idle-pump notes |
+| `60f4433` | refactor(benchmarks): drop archive pointers printed by the census and sweep notes |
+| `c7db454` | docs(agents): record the comment conventions this campaign applied |
+
+### Status
+
+[OK] **Completed**
