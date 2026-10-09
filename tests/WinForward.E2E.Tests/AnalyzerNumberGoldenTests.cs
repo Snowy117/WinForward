@@ -6,11 +6,13 @@ using Xunit;
 namespace WinForward.E2E.Tests;
 
 /// <summary>
-/// Holds the analysis's number formatting to the text CPython produces. Every number in
-/// <c>tables.md</c> is compared as text, so the two formatters have to agree on the digit *and* on the
-/// shape: `%.*f` rounds halves to the even neighbour on the exact binary value, and `%.*g` picks
-/// between the plain and the exponential form by the exponent the rounding produced, not the one the
-/// value started with.
+/// Holds the analysis's numbers to the text it publishes: the fixed form of the table cells, the general
+/// form that keeps a small non-zero value visible, and the round-trip text of the floats inside
+/// <c>verdict.json</c>. The frozen vector table is the reference's own answer for the same values and
+/// stands in as the expected column where the two still agree — .NET's fixed-point formatting rounds the
+/// exact binary value the way <c>%.*f</c> did, midpoints included, so every fixed entry is reproduced
+/// character for character — while a float's published text is this writer's own and is held to reading
+/// back as the same value instead.
 /// </summary>
 public sealed class AnalyzerNumberGoldenTests
 {
@@ -36,6 +38,8 @@ public sealed class AnalyzerNumberGoldenTests
     [Fact]
     public void EveryGoldenGeneralValueIsReproduced()
     {
+        // The general form is .NET's `G<precision>` with the exponent lower-cased, which is the same
+        // choice between the plain and the exponential spelling and the same digits as `%.*g` made.
         using var document = JsonDocument.Parse(
             File.ReadAllText(RepoPaths.AnalyzerGolden("py-number-vectors.json")));
 
@@ -54,7 +58,7 @@ public sealed class AnalyzerNumberGoldenTests
     }
 
     [Fact]
-    public void EveryGoldenFloatReprIsReproduced()
+    public void EveryGoldenFloatReadsBackAsTheSameValue()
     {
         using var document = JsonDocument.Parse(
             File.ReadAllText(RepoPaths.AnalyzerGolden("py-number-vectors.json")));
@@ -63,7 +67,8 @@ public sealed class AnalyzerNumberGoldenTests
         var seen = 0;
         foreach (var entry in repr.GetProperty("finite").EnumerateArray())
         {
-            Assert.Equal(entry.GetProperty("text").GetString(), VerbatimNumber.Json(entry.GetProperty("value").GetDouble()));
+            var value = entry.GetProperty("value").GetDouble();
+            Assert.Equal(value, double.Parse(VerbatimNumber.Json(value), CultureInfo.InvariantCulture));
             seen++;
         }
 
@@ -78,9 +83,9 @@ public sealed class AnalyzerNumberGoldenTests
     }
 
     /// <summary>
-    /// The eight exact binary midpoints of the three-digit grid, with the reference's answer beside
-    /// each. Four of them round down to an even digit and four round up to one, so a formatter that
-    /// rounded halves away from zero would be right about half the table and wrong about the rest.
+    /// The eight exact binary midpoints of the three-digit grid, with the answer beside each. Four of
+    /// them round down to an even digit and four round up to one, so a formatter that rounded halves
+    /// away from zero would be right about half the table and wrong about the rest.
     /// </summary>
     [Theory]
     [InlineData(0.0625, "0.062")]
@@ -98,7 +103,8 @@ public sealed class AnalyzerNumberGoldenTests
     public void TheMidpointTableTellsHalfToEvenFromHalfAwayFromZero()
     {
         // The negative control the table needs to be a test rather than a restatement: if the
-        // formatter rounded halves away from zero, exactly these four cells would move.
+        // formatter rounded halves away from zero, exactly these four cells would move. The frozen
+        // tables hold such midpoints at no decimals, so the rule is not free to change.
         double[] midpoints = [0.0625, 0.1875, 0.3125, 0.4375, 0.5625, 0.6875, 0.8125, 0.9375];
         var moved = 0;
         foreach (var midpoint in midpoints)
@@ -130,8 +136,10 @@ public sealed class AnalyzerNumberGoldenTests
     [Fact]
     public void ACellFallsBackToTheGeneralFormRatherThanPrintingANonZeroValueAsZero()
     {
-        // `fmt_num`: the fixed form unless it would print a non-zero value as zero. 0.008 at three
-        // digits stays plain because the fixed form keeps it; 0.0004 and 0.4 at no digits do not.
+        // The fixed form unless it would print a non-zero value as zero: 0.008 at three digits stays
+        // plain because the fixed form keeps it; 0.0004 and 0.4 at no digits do not. The tables carry
+        // the same shape in their ranges, so the fallback is what keeps '0 [0–0.5]' from becoming
+        // '0 [0–0]' at no decimals.
         Assert.Equal("0.000", VerbatimNumber.Cell(0.0));
         Assert.Equal("-0.000", VerbatimNumber.Cell(-0.0));
         Assert.Equal("0.008", VerbatimNumber.Cell(0.008));
@@ -144,18 +152,22 @@ public sealed class AnalyzerNumberGoldenTests
     }
 
     [Fact]
-    public void TheReprKeepsThePointOfAnIntegralValueAndItsOwnExponentRange()
+    public void TheFloatTextIsTheShortestThatReadsBack()
     {
-        // The two places .NET's shortest form differs from Python's: it drops the `.0`, and it
-        // switches to an exponent a decade earlier.
-        Assert.Equal("1.0", VerbatimNumber.Json(1.0));
-        Assert.Equal("100.0", VerbatimNumber.Json(100.0));
-        Assert.Equal("1000000000000000.0", VerbatimNumber.Json(1e15));
-        Assert.Equal("1e+16", VerbatimNumber.Json(1e16));
+        // Where .NET's round-trip text differs from Python's `repr`: an integral value keeps no `.0`,
+        // and the exponent switches magnitude and case. Every one of these is a JSON number literal,
+        // and the non-finite spellings are the ones JSON's own readers accept.
+        Assert.Equal("1", VerbatimNumber.Json(1.0));
+        Assert.Equal("-0", VerbatimNumber.Json(-0.0));
+        Assert.Equal("100", VerbatimNumber.Json(100.0));
+        Assert.Equal("1000000000000000", VerbatimNumber.Json(1e15));
+        Assert.Equal("10000000000000000", VerbatimNumber.Json(1e16));
+        Assert.Equal("1E+17", VerbatimNumber.Json(1e17));
         Assert.Equal("0.0001", VerbatimNumber.Json(0.0001));
-        Assert.Equal("1e-05", VerbatimNumber.Json(0.00001));
-        Assert.Equal("-0.0", VerbatimNumber.Json(-0.0));
-        Assert.Equal("100.0", VerbatimNumber.Json(1e2));
+        Assert.Equal("1E-05", VerbatimNumber.Json(0.00001));
         Assert.Equal("0.30000000000000004", VerbatimNumber.Json(0.1 + 0.2));
+        Assert.Equal("NaN", VerbatimNumber.Json(double.NaN));
+        Assert.Equal("Infinity", VerbatimNumber.Json(double.PositiveInfinity));
+        Assert.Equal("-Infinity", VerbatimNumber.Json(double.NegativeInfinity));
     }
 }

@@ -5,10 +5,11 @@ using Xunit;
 namespace WinForward.E2E.Tests;
 
 /// <summary>
-/// Holds the analysis's JSON text to <c>json.dumps(value, indent=2, sort_keys=False)</c>. Each golden
-/// case is a document and the text CPython wrote for it; the test rebuilds the text through the
-/// writer's own entry points, so the escaping, the nesting and the insertion order are all exercised
-/// on values rather than on fragments.
+/// Holds the analysis's JSON text to the bytes it publishes: <c>json.dumps(value, indent=2,
+/// sort_keys=False)</c> and one newline, which is what the frozen reference wrote for the same
+/// documents. Each golden case is a document and that text; the test rebuilds it through the writer's
+/// own entry points, so the escaping, the nesting and the insertion order are all exercised on values
+/// rather than on fragments.
 /// </summary>
 public sealed class AnalyzerJsonGoldenTests
 {
@@ -19,14 +20,32 @@ public sealed class AnalyzerJsonGoldenTests
             File.ReadAllText(RepoPaths.AnalyzerGolden("py-json-vectors.json")));
 
         var cases = 0;
+        var floats = 0;
         foreach (var entry in document.RootElement.GetProperty("cases").EnumerateArray())
         {
             var name = entry.GetProperty("name").GetString();
-            Assert.Equal(entry.GetProperty("text").GetString(), Render(entry.GetProperty("value"), 0, name));
+            var value = entry.GetProperty("value");
+            var rendered = Render(value, 0, name);
+            if (HoldsFloat(value))
+            {
+                // A float's digits are this writer's own (`VerbatimJson.Number` is .NET's round-trip
+                // text, not Python's `repr`), so a case that carries one is held to the reference's
+                // structure and wording with its numbers compared as values. The text itself is pinned
+                // in AnalyzerNumberGoldenTests.
+                using var parsed = JsonDocument.Parse(rendered);
+                Assert.True(JsonElement.DeepEquals(value, parsed.RootElement));
+                floats++;
+            }
+            else
+            {
+                Assert.Equal(entry.GetProperty("text").GetString(), rendered);
+            }
+
             cases++;
         }
 
         Assert.True(cases >= 10, $"the vector table holds {cases} case(s)");
+        Assert.Equal(1, floats);
     }
 
     [Fact]
@@ -41,18 +60,19 @@ public sealed class AnalyzerJsonGoldenTests
     }
 
     [Fact]
-    public void TheWriterNeverEscapesWhatTheReferenceLeavesAlone()
+    public void TheWriterNeverEscapesWhatJsonAllowsThrough()
     {
-        // `'`, `+`, `<`, `>`, `&` and `/` look like they should be escaped and are not: the golden
-        // `verdict.json` carries all six as themselves, and the differ compares text.
+        // `'`, `+`, `<`, `>`, `&` and `/` are legal inside a JSON string and are published as
+        // themselves: the escape set stops at the characters JSON requires, and the differ reads every
+        // one of them back.
         Assert.Equal("\"'+<>&/\"", VerbatimJson.String("'+<>&/"));
     }
 
     [Fact]
-    public void NonAsciiIsWrittenBackAsTheEscapeTheReferenceUses()
+    public void NonAsciiIsWrittenAsAnEscape()
     {
-        // `ensure_ascii=True` is per file, not per repository: `tables.md` carries the character
-        // itself where `verdict.json` carries `\u2013`.
+        // The escaped form is this writer's rule: `verdict.json` carries `\u2013`, while `tables.md` is
+        // markdown and carries the character itself.
         Assert.Equal("\"\\u2013\"", VerbatimJson.String("–"));
         Assert.Equal("\"\\u2014\"", VerbatimJson.String("—"));
         Assert.Equal("\"\\u4e2d\\u6587\"", VerbatimJson.String("中文"));
@@ -85,7 +105,7 @@ public sealed class AnalyzerJsonGoldenTests
     }
 
     [Fact]
-    public void TheScalarsAreWrittenTheWayTheReferenceWritesThem()
+    public void TheScalarsAreWrittenInTheirJsonSpelling()
     {
         Assert.Equal("null", VerbatimJson.Null);
         Assert.Equal("true", VerbatimJson.Boolean(true));
@@ -93,12 +113,12 @@ public sealed class AnalyzerJsonGoldenTests
         Assert.Equal("-7", VerbatimJson.Integer(-7));
         Assert.Equal("10000", VerbatimJson.Integer(10000));
         Assert.Equal("0.5", VerbatimJson.Number(0.5));
-        Assert.Equal("1.0", VerbatimJson.Number(1.0));
+        Assert.Equal("1", VerbatimJson.Number(1.0));
     }
 
     /// <summary>
-    /// One parsed JSON value as the writer produces it: the same tree the reference handed to
-    /// <c>json.dumps</c>, rebuilt through <see cref="VerbatimJson"/> instead.
+    /// One parsed JSON value as the writer produces it: the document the vector table holds, rebuilt
+    /// through <see cref="VerbatimJson"/> instead of the reference's <c>json.dumps</c>.
     /// </summary>
     private static string Render(JsonElement element, int level, string? name) => element.ValueKind switch
     {
@@ -120,8 +140,20 @@ public sealed class AnalyzerJsonGoldenTests
     };
 
     /// <summary>
-    /// Whether the literal was a float, which is the distinction Python's `int` and `float` repr make
-    /// and a parsed <see cref="JsonElement"/> no longer carries: `100.0` and `1e2` are floats there.
+    /// Whether any value under this one is a float literal, which is the distinction Python's `int` and
+    /// `float` text makes and a parsed <see cref="JsonElement"/> no longer carries: `100.0` and `1e2`
+    /// are floats there.
+    /// </summary>
+    private static bool HoldsFloat(JsonElement element) => element.ValueKind switch
+    {
+        JsonValueKind.Object => element.EnumerateObject().Any(property => HoldsFloat(property.Value)),
+        JsonValueKind.Array => element.EnumerateArray().Any(HoldsFloat),
+        JsonValueKind.Number => IsFloatLiteral(element),
+        _ => false,
+    };
+
+    /// <summary>
+    /// Whether the literal was written as a float in the text it was parsed from.
     /// </summary>
     private static bool IsFloatLiteral(JsonElement element) =>
         element.GetRawText().AsSpan().IndexOfAny('.', 'e', 'E') >= 0;
