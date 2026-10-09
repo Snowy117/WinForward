@@ -28,7 +28,7 @@ public enum UdpTransportSkipReason
     /// <summary>
     /// The receive call itself faulted with <see cref="SocketError.ConnectionReset"/>: on Windows an
     /// ICMP port-unreachable answering one of this socket's sends surfaces this way. Skip-class like
-    /// the datagram anomalies: the session keeps receiving (S2).
+    /// the datagram anomalies: the session keeps receiving.
     /// </summary>
     ConnectionReset = 4,
 }
@@ -167,7 +167,7 @@ internal sealed class UdpTransportFactory(IUdpProxyTransportFactory socks5, IUdp
 
 /// <summary>
 /// The receive-path fault vocabulary shared by the transports: a <see cref="SocketError.ConnectionReset"/>
-/// is skip-class (S2: an ICMP port-unreachable answering one of this socket's sends must not end a
+/// is skip-class (an ICMP port-unreachable answering one of this socket's sends must not end a
 /// session's receive loop), while every other socket fault is fatal and keeps tearing the session down.
 /// </summary>
 internal static class UdpTransportReceiveClassifier

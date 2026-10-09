@@ -15,13 +15,13 @@ internal enum MixUdpBooking
 }
 
 /// <summary>
-/// One receive outcome waiting for the send side. A record struct, never a reference (D18.5 #9): the
-/// receive task enqueues it and drops every span it saw. The verdict is deliberately left unresolved —
-/// the WasSent step belongs to the send side, which is the only holder of the sent book (D19.3 F).
+/// One receive outcome waiting for the send side. A record struct, never a reference: the receive task
+/// enqueues it and drops every span it saw. The verdict is deliberately left unresolved — the WasSent
+/// step belongs to the send side, which is the only holder of the sent book.
 /// </summary>
 /// <param name="Booking">What happened, which decides which counter moves.</param>
 /// <param name="Verdict">The classifier's product; only read for <see cref="MixUdpBooking.Verdict"/>.</param>
-/// <param name="ArrivedTicks">When the datagram arrived, never when it was settled (D18.5 #1).</param>
+/// <param name="ArrivedTicks">When the datagram arrived, never when it was settled.</param>
 [StructLayout(LayoutKind.Auto)]
 internal readonly record struct MixUdpSettlement(MixUdpBooking Booking, ReplyVerdict Verdict, long ArrivedTicks);
 
@@ -32,7 +32,7 @@ internal readonly record struct MixUdpSettlement(MixUdpBooking Booking, ReplyVer
 /// <remarks>
 /// <para>
 /// <b>Threading contract</b> — the same shape <c>ILanePolicy.Settle</c> pins for the latency arm,
-/// carried by this book's own types (D19.2 ⑯: no shared type, no merge into <c>LaneEngine</c>):
+/// carried by this book's own types, with no merge into <c>LaneEngine</c>:
 /// </para>
 /// <list type="number">
 /// <item>the <b>receive</b> task calls only <see cref="Offer"/> and
@@ -42,10 +42,9 @@ internal readonly record struct MixUdpSettlement(MixUdpBooking Booking, ReplyVer
 /// in one place and the send side the tracker's only writer.</item>
 /// <item>the <b>send</b> side calls <see cref="BookSent"/> before it hands the datagram to the
 /// socket — never after, so a reply can never name a sequence the sent book has not booked yet —
-/// and <see cref="Settle"/> at every pacing point: after <c>Pacer.WaitUntil</c> and before the next
-/// send, the order D18.2 pins. Every tracker mutation, the <c>WasSent</c> question, the pending
-/// removal and the round-trip sample happen inside <see cref="Settle"/>, on that one logical
-/// writer.</item>
+/// and <see cref="Settle"/> at every pacing point: after <c>Pacer.WaitUntil</c> and before the
+/// next send. Every tracker mutation, the <c>WasSent</c> question, the pending removal and the
+/// round-trip sample happen inside <see cref="Settle"/>, on that one logical writer.</item>
 /// <item>at arm end the order is offer loop → drain to the horizon → cancel and join the receive
 /// task → one final <see cref="Settle"/>, so a reply that arrived just before the socket closed is
 /// still booked instead of being dropped with the queue.</item>
@@ -199,10 +198,9 @@ internal sealed class MixUdpBook
     }
 
     /// <summary>
-    /// The reply ladder's booking half, in the order D18.5 #3 pins: the WasSent question first, then
-    /// the pending lookup that decides whether the reply consumed a request, then the booking. All
-    /// three are the send side's, which is the point of the settlement: the receive side saw the same
-    /// datagram but is not allowed to answer for this book.
+    /// The reply ladder's booking half, in order: the WasSent question first, then the pending lookup
+    /// that decides whether the reply consumed a request, then the booking. All three are the send
+    /// side's, which is the point of the settlement: the receive side must not answer for this book.
     /// </summary>
     private void Book(in ReplyVerdict raw, long arrivedTicks)
     {
@@ -213,7 +211,7 @@ internal sealed class MixUdpBook
             ResolvedOnSettle++;
             if (verdict.Kind == ReplyKind.Arrived && _pending.Remove((ulong)verdict.Sequence, out var intended))
             {
-                // A round trip is measured against arrival, never against the later settle (D18.5 #1).
+                // A round trip is measured against arrival, never against the later settle.
                 _rtt.Record(Clock.ToNanoseconds(arrivedTicks - intended));
             }
         }

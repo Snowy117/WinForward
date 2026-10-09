@@ -5,44 +5,39 @@ using WinForward.Core;
 namespace WinForward.Benchmarks.Stability;
 
 /// <summary>
-/// The flow table's stop-the-world sweep, measured as the pause it imposes on packet processing
-/// (research F3). A sweeper thread repeatedly fills the table with already-expired states and sweeps
-/// them with the production call — <see cref="FlowTable.RemoveExpired"/> plus the same "is this flow
-/// still held?" predicate the coordinator passes — while observer threads resolve live keys as fast as
-/// they can and record how long each resolve took.
+/// The flow table's stop-the-world sweep, measured as the pause it imposes on packet processing. A
+/// sweeper thread repeatedly fills the table with already-expired states and sweeps them with the
+/// production call — <see cref="FlowTable.RemoveExpired"/> plus the same "is this flow still held?"
+/// predicate the coordinator passes — while observer threads resolve live keys as fast as they can and
+/// record how long each resolve took.
 /// <para>
-/// The metric the research names is the <em>maximum</em> time a resolve blocks during a sweep tick, so
-/// the observer side keeps an exact maximum and counts of pauses over 0.1 / 0.5 / 1 / 5 ms rather than
-/// sampling percentiles: a sampled distribution can miss the one pause that matters, and this probe
-/// exists to catch exactly that one.
+/// The metric is the <em>maximum</em> time a resolve blocks during a sweep tick, so the observer side
+/// keeps an exact maximum and counts of pauses over 0.1 / 0.5 / 1 / 5 ms rather than sampling
+/// percentiles, which can miss the one pause that matters.
 /// </para>
 /// <para>
 /// The live observer keys are TCP and the swept population is UDP, which is what lets the hold
 /// predicate be a static protocol test: no allocation, no lookup, and the observer set survives every
-/// sweep. The verdict row is report-only with the research's 0.5 ms line recorded as the target, and it
-/// carries the sweep's own allocation (which must stay zero — the xunit gate asserts that exactly).
+/// sweep. The row also carries the sweep's own allocation, which must stay zero — the xunit gate
+/// asserts that exactly.
 /// </para>
 /// <para>
 /// The raw series cannot carry the finding by itself: the scenario refills each round with 65,536
 /// <em>individual</em> claims that contend on the same table gate, so most observer-visible pauses are
-/// refill cost the sweep does not own. The probe therefore also scopes a phase to the sweep itself — a
-/// flag armed immediately around the <see cref="FlowTable.RemoveExpired"/> call — and an observer counts
-/// a resolve as in-window only when it <em>started</em> while that flag was set.
-/// <c>maxSweepWindowPauseMs</c> and the <c>pausesInWindow*</c> counts are phase-scoped
-/// <em>diagnostics</em>: the phase fixed attribution (they no longer include the refill contention) but
-/// not attributability to the hold, because the calibration control — the same flag armed for
-/// <c>--sweep-window-control-ms</c> with <em>no product call at all</em> — measures the same order of
-/// in-window pauses on a shared host. No timing field in this row is an acceptance figure; the sweep's
-/// hold bound is proven by counts in
-/// <c>SweepAllocationGateTests.FlowTableSweepHoldWorkIsBoundedByChunkEntries</c>. The user-visible win
-/// here is <c>sweepWindowResolves</c>, which reports the window's own population so a vacuous window is
-/// visible, and the probe aborts on a zero-window run rather than publishing a maximum for a window that
-/// never existed.
+/// refill cost the sweep does not own. A phase flag armed immediately around the
+/// <see cref="FlowTable.RemoveExpired"/> call therefore scopes <c>maxSweepWindowPauseMs</c> and the
+/// <c>pausesInWindow*</c> counts to the sweep, and an observer counts a resolve as in-window only when
+/// it <em>started</em> while that flag was set. Those figures are <em>diagnostics</em>, not acceptance
+/// figures: the calibration control — the same flag armed for <c>--sweep-window-control-ms</c> with
+/// <em>no product call at all</em> — measures the same order of in-window pauses on a shared host. The
+/// sweep's hold bound is proven by counts in
+/// <c>SweepAllocationGateTests.FlowTableSweepHoldWorkIsBoundedByChunkEntries</c>, and a run whose
+/// window observed no resolve aborts rather than publishing a maximum for a window that never existed.
 /// </para>
 /// </summary>
 internal static class SweepPauseScenario
 {
-    /// <summary>The research's seeded cardinality; <c>--flows</c> can raise it but not lower it, because a small table cannot exhibit the scan this probe measures.</summary>
+    /// <summary>The cardinality floor; <c>--flows</c> can raise it but not lower it, because a small table cannot exhibit the scan this probe measures.</summary>
     private const int MinimumFlows = 65_536;
 
     /// <summary>Live keys the observers resolve; large enough that the table cannot hold them all in one cache line.</summary>
@@ -51,7 +46,6 @@ internal static class SweepPauseScenario
     /// <summary>Observer key ports, kept clear of the identifiers the swept population uses.</summary>
     private const int ObserverPortFloor = 40_000;
 
-    /// <summary>Claims in the claim-cost loop (the row R2 could not express in BenchmarkDotNet).</summary>
     private const int ClaimFlows = 4_096;
 
     /// <summary>Sweeps whose allocation is sampled: the first tick also pays the table's own population growth, so one sample would not be the sweep.</summary>

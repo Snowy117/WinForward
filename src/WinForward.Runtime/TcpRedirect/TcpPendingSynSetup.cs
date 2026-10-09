@@ -4,7 +4,7 @@ using WinForward.Protocols;
 namespace WinForward.Runtime.TcpRedirect;
 
 /// <summary>
-/// One genuinely new SYN awaiting its background redirect setup (R8): a materialized copy of the
+/// One genuinely new SYN awaiting its background redirect setup: a materialized copy of the
 /// frame (the pump's native batch slot is recycled the moment the dispatch returns), the packet
 /// metadata the setup tail needs (flow context, capture metadata for injection, sequence and
 /// generation stamps for logging and session registration), and the owning setup task slot.
@@ -41,7 +41,7 @@ internal sealed class PendingSynSetup
 }
 
 /// <summary>
-/// The coordinator-owned index of pending TCP SYN setups (R8), the TCP counterpart of the UDP
+/// The coordinator-owned index of pending TCP SYN setups, the TCP counterpart of the UDP
 /// bounded setup queue: the pump-side handler retains a copy of each new-flow SYN and returns
 /// immediately, and the background task performs the listener allocation, claim, rewrite, and
 /// injection. Bounds mirror the UDP shape: a fixed entry cap (distinct original flow keys), a

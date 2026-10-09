@@ -327,7 +327,6 @@ internal sealed class ScriptedSocks5UotServer : IAsyncDisposable
         }
 
         // The defining property: the CONNECT reply is deferred until the first frame has been read.
-        // A frame read after that is an ordinary frame on an established flow.
         var replyWritten = false;
         while (await ReadFrameAsync(stream, !replyWritten, token).ConfigureAwait(false) is { } frame)
         {

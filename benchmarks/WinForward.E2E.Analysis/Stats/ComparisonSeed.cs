@@ -15,8 +15,8 @@ namespace WinForward.E2E.Analysis.Stats;
 /// <see cref="Random"/>, so the intervals are this analysis's own rather than a reproduction of another
 /// implementation's; it is the derivation, which the <c>--seed</c> promise rests on, that has to stay
 /// put.</para>
-/// <para>The type is public because the test project drives it value by value, and D20.6 keeps the
-/// analyzer free of an <c>InternalsVisibleTo</c>.</para>
+/// <para>The type is public because the test project drives it value by value, and the analyzer keeps
+/// no <c>InternalsVisibleTo</c>.</para>
 /// </remarks>
 public static class ComparisonSeed
 {

@@ -177,9 +177,9 @@ internal sealed class QuiescenceScope(CancellationToken linkedTo = default) : IA
             // the seal was taken — and the seal refuses every later TryEnter (its CAS compares against
             // a word without the seal bit, which can no longer be observed), so no lease can be
             // counted after this point and no Exit() can run. The join cell would therefore never be
-            // read: the join is vacuous, and allocating it is pure per-drain overhead (88 B measured,
-            // C2e). Cancellation still runs its callbacks to completion before the drain completes,
-            // and the owned source is released before the completion cell, exactly as below.
+            // read: the join is vacuous, and allocating it is pure per-drain overhead. Cancellation
+            // still runs its callbacks to completion before the drain completes, and the owned source
+            // is released before the completion cell, exactly as below.
             _ = DrainCoreAsync(drained, joined: null);
             return drained.Task;
         }
