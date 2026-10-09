@@ -1,37 +1,29 @@
 namespace WinForward.E2E.Contracts;
 
 /// <summary>
-/// The <c>metrics</c> object of a <c>reliability</c> result record: the outcome distribution of one
-/// connection schedule, the expected distribution beside it, and the joint mode x observed breakdown
-/// the per-mode blocks carry. It also declares the keys of the per-attempt <c>attempt</c> records the
-/// same arm writes into the same file.
+/// The <c>metrics</c> object of a <c>reliability</c> result record: the observed and expected outcome
+/// distributions of one connection schedule, the joint mode x observed breakdown, and the keys of the
+/// per-attempt <c>attempt</c> records the same arm writes into the same file.
 /// </summary>
 /// <remarks>
 /// <para><b>Two outcome levels, one schema.</b> <see cref="Reliability.Outcomes"/> and
-/// <see cref="Reliability.Expected"/> are
-/// two distributions over the same seven names, and every mode block carries a third one under
-/// <c>observed</c>. All three write <see cref="Reliability.OutcomeNames"/>, whose class is never a JSON member of
-/// its own: the container key (<c>outcomes</c>, <c>expected</c>, <c>observed</c>) is written by the
-/// record that holds it, exactly as <see cref="ArmKeys.Common.LatencyRecord.Histogram"/> carries the
-/// leaves of four different histograms.</para>
-/// <para><b>One block per scheduled mode.</b> <see cref="Reliability.ModeNames"/> names the modes a plan's
-/// <c>modeMix</c> can schedule, and <c>modeSchedule</c> publishes the schedule itself. The blocks
-/// under <see cref="Reliability.ByMode"/> carry the four names of the schedule the shape test models; a run whose
-/// plan schedules fewer modes publishes fewer blocks, so the member set follows the plan while each
-/// block's schema does not.</para>
+/// <see cref="Reliability.Expected"/> are two distributions over the same seven names, and every mode
+/// block carries a third under <c>observed</c>. All three write
+/// <see cref="Reliability.OutcomeNames"/>, which is never a JSON member of its own: the container key
+/// is written by the record that holds it, as <see cref="ArmKeys.Common.LatencyRecord.Histogram"/>
+/// does for its four histograms.</para>
+/// <para><b>One block per scheduled mode.</b> <see cref="Reliability.ModeNames"/> names the modes a
+/// plan's <c>modeMix</c> can schedule and <c>modeSchedule</c> publishes the mix itself.
+/// <see cref="Reliability.ByMode"/> carries one block per scheduled name: a run scheduling fewer modes
+/// publishes fewer blocks, while each block's schema stays fixed.</para>
 /// <para><b>Conditional fields: none.</b> A reading with no measurement behind it is written as JSON
-/// <see langword="null"/> and keeps its key; the four mode names that are data appear only because the
-/// schedule named them.</para>
+/// <see langword="null"/> and keeps its key.</para>
 /// <para><b>Same leaf name at a different level is a different constant.</b>
-/// <see cref="Reliability.Truncated"/> and <see cref="Reliability.Mode.Truncated"/> are two paths, and so
-/// are <see cref="Reliability.Expected"/> and <see cref="Reliability.Attempt.Expected"/>; each level
-/// declares its own, which is why several members here share a name with a member declared one level up.
-/// Those members -- <see cref="Reliability.OutcomeNames"/>'s <c>unexpectedEof</c> and <c>connectFail</c>,
-/// <see cref="Reliability.Mode"/>'s <c>truncated</c>,
-/// <c>echoedBytes</c> and <c>trailerBytes</c>, and <see cref="Reliability.Attempt"/>'s <c>mode</c>,
-/// <c>expected</c>, <c>truncated</c>, <c>echoedBytes</c> and <c>trailerBytes</c> -- each carry their
-/// own one-member suppression of the two shadowing rules, because the shadowing is the declaration
-/// rule rather than an accident (D14.17).</para>
+/// <see cref="Reliability.Truncated"/> and <see cref="Reliability.Mode.Truncated"/> are two paths, and
+/// so are <see cref="Reliability.Expected"/> and <see cref="Reliability.Attempt.Expected"/>; each level
+/// declares its own, which is why several members here shadow a name declared one level up. Each
+/// carries its own one-member suppression of the two shadowing rules, because the shadowing is the
+/// declaration rule rather than an accident.</para>
 /// <para>The record's <c>gates</c> keys are shared and live in <see cref="ArmKeys.Common.Gates"/>; its
 /// <c>parameters</c> keys in <see cref="ArmKeys.Common.Parameters"/>.</para>
 /// </remarks>
@@ -104,10 +96,9 @@ public static partial class ArmKeys
         public const string EffectiveModeMix = "effectiveModeMix";
 
         /// <summary>
-        /// The outcome names every distribution is written under, in write order. This class is named
-        /// after the members it declares rather than after a container, because it is never a JSON
-        /// member of its own: <see cref="Outcomes"/>, <see cref="Expected"/> and each mode's
-        /// <c>observed</c> write these leaves inside their own object.
+        /// The outcome names every distribution is written under, in write order. Never a JSON member of
+        /// its own: <see cref="Outcomes"/>, <see cref="Expected"/> and each mode's <c>observed</c> write
+        /// these leaves inside their own object.
         /// </summary>
         public static class OutcomeNames
         {
@@ -118,7 +109,7 @@ public static partial class ArmKeys
             public const string Reset = "reset";
 
             /// <summary>The stream ended before the complete echo arrived.</summary>
-            /// <remarks>Shadows <see cref="Reliability.UnexpectedEof"/>; see the shard's shadowing note.</remarks>
+            /// <remarks>Shadows <see cref="Reliability.UnexpectedEof"/>.</remarks>
 #pragma warning disable S3218
             // ReSharper disable once MemberHidesStaticFromOuterClass
             public const string UnexpectedEof = "unexpectedEof";
@@ -128,7 +119,7 @@ public static partial class ArmKeys
             public const string Timeout = "timeout";
 
             /// <summary>The connection could not be established.</summary>
-            /// <remarks>Shadows <see cref="Reliability.ConnectFail"/>; see the shard's shadowing note.</remarks>
+            /// <remarks>Shadows <see cref="Reliability.ConnectFail"/>.</remarks>
 #pragma warning disable S3218
             // ReSharper disable once MemberHidesStaticFromOuterClass
             public const string ConnectFail = "connectFail";
@@ -142,9 +133,9 @@ public static partial class ArmKeys
         }
 
         /// <summary>
-        /// The mode names a plan's <c>modeMix</c> schedules, in the order the arm's default mix
-        /// declares them. The arm writes them through <c>TcpCommand.Name</c>, so these declarations
-        /// are the schedule's spelling and a test asserts they still agree with it.
+        /// The mode names a plan's <c>modeMix</c> schedules, in the order the arm's default mix declares
+        /// them. The arm writes them through <c>TcpCommand.Name</c>, so these declarations are the
+        /// schedule's spelling, pinned by a test.
         /// </summary>
         public static class ModeNames
         {
@@ -162,14 +153,12 @@ public static partial class ArmKeys
         }
 
         /// <summary>
-        /// The members of one <c>byMode</c> block: the tally, the observed distribution and the echo
-        /// and trailer extremes, in write order. The block's own member name is the mode's
-        /// <see cref="ModeNames"/> name, written by the record that holds it.
+        /// The members of one <c>byMode</c> block, in write order. The block's own member name is the
+        /// mode's <see cref="ModeNames"/> name, written by the record that holds it.
         /// </summary>
         /// <remarks>
-        /// <see cref="Truncated"/>, <see cref="EchoedBytes"/> and <see cref="TrailerBytes"/> are
-        /// declared again here rather than shared with the arm-wide keys of the same names, because
-        /// one is a per-mode path and the other an arm-wide one (D14.17).
+        /// <see cref="Truncated"/>, <see cref="EchoedBytes"/> and <see cref="TrailerBytes"/> are declared
+        /// again here rather than shared with the arm-wide names: a per-mode path is not an arm-wide one.
         /// </remarks>
         public static class Mode
         {
@@ -180,21 +169,21 @@ public static partial class ArmKeys
             public const string Observed = "observed";
 
             /// <summary>This mode's attempts whose echo was cut short.</summary>
-            /// <remarks>Shadows <see cref="Reliability.Truncated"/>; see the shard's shadowing note.</remarks>
+            /// <remarks>Shadows <see cref="Reliability.Truncated"/>.</remarks>
 #pragma warning disable S3218
             // ReSharper disable once MemberHidesStaticFromOuterClass
             public const string Truncated = "truncated";
 #pragma warning restore S3218
 
             /// <summary>Echo bytes this mode read back.</summary>
-            /// <remarks>Shadows <see cref="Reliability.EchoedBytes"/>; see the shard's shadowing note.</remarks>
+            /// <remarks>Shadows <see cref="Reliability.EchoedBytes"/>.</remarks>
 #pragma warning disable S3218
             // ReSharper disable once MemberHidesStaticFromOuterClass
             public const string EchoedBytes = "echoedBytes";
 #pragma warning restore S3218
 
             /// <summary>Bytes this mode read after the expected echo.</summary>
-            /// <remarks>Shadows <see cref="Reliability.TrailerBytes"/>; see the shard's shadowing note.</remarks>
+            /// <remarks>Shadows <see cref="Reliability.TrailerBytes"/>.</remarks>
 #pragma warning disable S3218
             // ReSharper disable once MemberHidesStaticFromOuterClass
             public const string TrailerBytes = "trailerBytes";
@@ -225,7 +214,7 @@ public static partial class ArmKeys
             public const string ConnectionId = "connectionId";
 
             /// <summary>The mode the attempt ran.</summary>
-            /// <remarks>Shadows <see cref="Reliability.Mode"/>; see the shard's shadowing note.</remarks>
+            /// <remarks>Shadows <see cref="Reliability.Mode"/>.</remarks>
 #pragma warning disable S3218
             // ReSharper disable once MemberHidesStaticFromOuterClass
             public const string Mode = "mode";
@@ -238,28 +227,28 @@ public static partial class ArmKeys
             public const string Observed = "observed";
 
             /// <summary>The outcome the attempt's mode called for.</summary>
-            /// <remarks>Shadows <see cref="Reliability.Expected"/>; see the shard's shadowing note.</remarks>
+            /// <remarks>Shadows <see cref="Reliability.Expected"/>.</remarks>
 #pragma warning disable S3218
             // ReSharper disable once MemberHidesStaticFromOuterClass
             public const string Expected = "expected";
 #pragma warning restore S3218
 
             /// <summary>Whether the echo was cut short.</summary>
-            /// <remarks>Shadows <see cref="Reliability.Truncated"/>; see the shard's shadowing note.</remarks>
+            /// <remarks>Shadows <see cref="Reliability.Truncated"/>.</remarks>
 #pragma warning disable S3218
             // ReSharper disable once MemberHidesStaticFromOuterClass
             public const string Truncated = "truncated";
 #pragma warning restore S3218
 
             /// <summary>Echo bytes the attempt read back.</summary>
-            /// <remarks>Shadows <see cref="Reliability.EchoedBytes"/>; see the shard's shadowing note.</remarks>
+            /// <remarks>Shadows <see cref="Reliability.EchoedBytes"/>.</remarks>
 #pragma warning disable S3218
             // ReSharper disable once MemberHidesStaticFromOuterClass
             public const string EchoedBytes = "echoedBytes";
 #pragma warning restore S3218
 
             /// <summary>Bytes the attempt read after the expected echo.</summary>
-            /// <remarks>Shadows <see cref="Reliability.TrailerBytes"/>; see the shard's shadowing note.</remarks>
+            /// <remarks>Shadows <see cref="Reliability.TrailerBytes"/>.</remarks>
 #pragma warning disable S3218
             // ReSharper disable once MemberHidesStaticFromOuterClass
             public const string TrailerBytes = "trailerBytes";

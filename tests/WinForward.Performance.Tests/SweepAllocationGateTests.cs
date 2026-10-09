@@ -13,19 +13,18 @@ using static WinForward.TestSupport.TcpCoordinatorFakes;
 namespace WinForward.Performance.Tests;
 
 /// <summary>
-/// The sweep allocation contract (research F3.3: "no allocation under any table lock"). One fact per
-/// sweep site, with the gated tick the design names for it (<c>design.md</c> §6.1): a <em>retiring</em>
-/// tick for the synchronous table sweeps (the flow table and the two test-only tables) and a
-/// <em>no-op</em> tick over a populated world for the two async legs, whose retiring ticks await
-/// disposal outside the gate's scope.
+/// The sweep allocation contract: "no allocation under any table lock". One fact per sweep site, on
+/// the tick that site actually runs: a <em>retiring</em> tick for the synchronous table sweeps (the
+/// flow table and the two test-only tables) and a <em>no-op</em> tick over a populated world for the
+/// two async legs, whose retiring ticks await disposal outside the gate's scope.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Every fact here follows the shape in <c>allocation-gates.md</c> §"Allocation-gate stability": a bounded run
-/// of probe batches that must each read an <em>exactly zero</em> per-thread delta on an unchanged
-/// thread before the measured window opens, then one measured window on the same managed thread, then
-/// <c>Assert.Equal(0, allocated)</c> — exact, never a threshold. Assertions stay outside the window
-/// (<c>Assert.Equal</c> allocates; the boolean <c>Assert.True</c> form does not).
+/// Every fact here follows the same shape: a bounded run of probe batches that must each read an
+/// <em>exactly zero</em> per-thread delta on an unchanged thread before the measured window opens,
+/// then one measured window on the same managed thread, then <c>Assert.Equal(0, allocated)</c> —
+/// exact, never a threshold. Assertions stay outside the window: <c>Assert.Equal</c> allocates, the
+/// boolean <c>Assert.True</c> form does not.
 /// </para>
 /// <para>
 /// Each fact also states the four-property window contract: the driven operation completed
@@ -33,12 +32,6 @@ namespace WinForward.Performance.Tests;
 /// managed thread id is captured before the window and asserted unchanged after it, the exact zero, and
 /// a thread-independent call-count backstop. A gate whose window changes is re-discriminated by
 /// injecting one allocation into it and recording the exact failing byte count.
-/// </para>
-/// <para>
-/// The flow table is no longer the only site that satisfies F3.3: the other sites' gates land with
-/// their fixes, because a gate added before its fix would be red on an unmodified tree. The exact red
-/// byte count each of those facts first reported is recorded in
-/// <c>benchmarks/results/2026-09-30-expiry-sweep-bounded-pause/README.md</c>.
 /// </para>
 /// </remarks>
 public sealed class SweepAllocationGateTests
@@ -68,8 +61,7 @@ public sealed class SweepAllocationGateTests
         // Probe sweeps until the instrument itself is quiet: the first grows the scratch list and
         // returns every state to the pool, so once a sweep reads an exactly-zero delta on one thread
         // the measured sweep sees steady state rather than one-time growth. Requiring the exact zero
-        // here is what keeps a genuine sweep allocation failing rather than stabilizing
-        // (allocation-gates.md, "Allocation-gate stability").
+        // here is what keeps a genuine sweep allocation failing rather than stabilizing.
         const int maximumProbeSweeps = 8;
         var stabilized = false;
         for (var sweep = 0; sweep < maximumProbeSweeps && !stabilized; sweep++)
@@ -113,12 +105,10 @@ public sealed class SweepAllocationGateTests
 
     /// <summary>
     /// Site 1 with a hold predicate: the retiring tick a production sweep actually runs (half the idle
-    /// entries held by a live session, the rest retired) must stay byte-exact. Regression-only — an
-    /// unmodified <see cref="FlowTable"/> already swept at exactly 0 B once its scratch list had
-    /// stabilised, so this fact exists to fail if the chunked rewrite starts allocating. The predicate is
-    /// exactly one hoisted instance shared by the probe and measured calls: a lambda written at the call
-    /// site would allocate its cached delegate on its first invocation, inside the measured window
-    /// (<c>HotPathAllocationGateTests.cs:435-436</c>).
+    /// entries held by a live session, the rest retired) must stay byte-exact. Regression-only: it fails
+    /// if the sweep starts allocating. The predicate is exactly one hoisted instance shared by the probe
+    /// and measured calls — a lambda written at the call site allocates its cached delegate on its first
+    /// invocation, inside the measured window.
     /// </summary>
     [Fact]
     public void FlowTableSweepWithHoldPredicateAllocatesNoManagedBytes()
@@ -202,8 +192,8 @@ public sealed class SweepAllocationGateTests
     }
 
     /// <summary>
-    /// Requirement 3's direct proof: the hold predicate is consulted for idle-elapsed candidates only, and
-    /// never while the table gate is held (the nested store/tombstone lock edge the design removes).
+    /// The hold predicate is consulted for idle-elapsed candidates only, and never while the table gate
+    /// is held (the nested store/tombstone lock edge).
     /// </summary>
     [Fact]
     public void SweepHoldPredicateRunsOutsideTheTableGate()
@@ -231,12 +221,11 @@ public sealed class SweepAllocationGateTests
     }
 
     /// <summary>
-    /// The acceptance fact (design §2.3/§6.1, D-A): the work-per-hold bound, by exact counts. 65,536
-    /// idle-elapsed flows plus the scenario's observer-equivalent held set, a
-    /// <see cref="FlowTable.SweepHoldProbe"/> attached. No hold may examine more than
+    /// The work-per-hold bound, by exact counts: 65,536 idle-elapsed flows plus the observer-equivalent
+    /// held set, a <see cref="FlowTable.SweepHoldProbe"/> attached. No hold may examine more than
     /// <see cref="FlowTable.SweepChunkEntries"/> entries, **no hold may remove more than one entry**, the
-    /// round must still retire the whole idle population in one call, and the hold counts and histograms are
-    /// the recorded shape. No timing is asserted anywhere here: the sweep's own duration is report-only, and
+    /// round must still retire the whole idle population in one call, and the hold counts and histograms
+    /// are exact. No timing is asserted anywhere here: the sweep's own duration is report-only, and
     /// minimal granularity deliberately pays duration for warm-path progress.
     /// </summary>
     [Fact]
@@ -265,9 +254,9 @@ public sealed class SweepAllocationGateTests
         Assert.True(probe.MaxExaminations <= FlowTable.SweepChunkEntries, string.Create(CultureInfo.InvariantCulture, $"a scan hold examined {probe.MaxExaminations} entries"));
         Assert.True(probe.MaxRemovals <= 1, string.Create(CultureInfo.InvariantCulture, $"a removal hold removed {probe.MaxRemovals} entries"));
 
-        // The recorded minimal-granularity shape: every entry is a candidate in this fixture, so the round
-        // runs one scan hold (1 examination) and one removal hold per entry — the 65,536 removals each in
-        // their own hold, and the held set's holds removing nothing.
+        // Minimal granularity in this fixture: every entry is a candidate, so the round runs one scan hold
+        // (1 examination) and one removal hold per entry — the 65,536 removals each in their own hold, and
+        // the held set's holds removing nothing.
         Assert.Equal(SweepFlows + HeldFlows, probe.ScanHolds);
         Assert.Equal(SweepFlows + HeldFlows, probe.RemovalHolds);
         Assert.Equal(1, probe.MaxExaminations);
@@ -289,11 +278,10 @@ public sealed class SweepAllocationGateTests
     private static bool IsHeldTcp(FlowKey key) => key.Protocol == TransportProtocol.Tcp;
 
     /// <summary>
-    /// The production-shape probe the PRD requires: a mostly-live round (4,096 live flows and 32
-    /// idle-elapsed ones) records its hold count and shape. No duration assertion — the round's duration is
-    /// a report-only series, recorded in the artifact README — but the counts are exact and pin that a live
-    /// table pays full <see cref="FlowTable.SweepChunkEntries"/> scan holds with no removals, while each
-    /// idle entry costs exactly one scan hold and one single-entry removal hold.
+    /// The production-shape probe: a mostly-live round (4,096 live flows and 32 idle-elapsed ones)
+    /// records its hold count and shape. No duration assertion — duration is report-only — but the counts
+    /// are exact and pin that a live table pays full <see cref="FlowTable.SweepChunkEntries"/> scan holds
+    /// with no removals, while each idle entry costs one scan hold and one single-entry removal hold.
     /// </summary>
     [Fact]
     public void FlowTableProductionShapeSweepRecordsItsHoldShape()

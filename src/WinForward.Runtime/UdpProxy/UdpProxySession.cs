@@ -9,11 +9,10 @@ namespace WinForward.Runtime.UdpProxy;
 /// The construction context of one UDP relay session: the flow identity, the claimed relay
 /// association, the transport/sink collaborators, the recorded client MAC, and the activity
 /// plumbing the session reports through. Grouping them gives the setup pipeline (and the tests
-/// that construct sessions directly) one named construction vocabulary; the positional order
-/// mirrors the former constructor parameters. A value type deliberately: the context is copied
-/// into the session constructor and the instance is never retained, so as a record class it was
-/// one heap allocation per session (240 B/session measured, probe C2a1) with no reader of its
-/// identity — record value equality is unchanged by the shape.
+/// that construct sessions directly) one named construction vocabulary. A value type deliberately:
+/// the context is copied into the session constructor and never retained, so as a record class it
+/// was one heap allocation per session with no reader of its identity — record value equality is
+/// unchanged by the shape.
 /// </summary>
 internal readonly record struct UdpProxySessionContext(
     FlowKey Flow,
@@ -241,9 +240,9 @@ internal sealed class UdpProxySession : IAsyncDisposable
 
     public ValueTask DisposeAsync()
     {
-        // D11: the scope's single-flight covers only the drain, and sealing happens inside it, so a
-        // precheck on IsSealed would be TOCTOU. The one-shot claim owns the transport/loop teardown
-        // every caller joins the drain, which the teardown body reaches last.
+        // The scope's single-flight covers only the drain, and sealing happens inside it, so a
+        // precheck on IsSealed would be TOCTOU. The one-shot claim owns the transport/loop teardown.
+        // Every caller joins the drain, which the teardown body reaches last.
         return Interlocked.Exchange(ref _teardownStarted, 1) != 0
             ? new ValueTask(_scope.DrainAsync())
             : new ValueTask(DisposeCoreAsync());
@@ -284,9 +283,8 @@ internal sealed class UdpProxySession : IAsyncDisposable
     }
 
     /// <summary>
-    /// Uniform retention, kept as a delegating overload: it is the shape every caller that has one
-    /// timeout to offer (the F3 uniform callers, and tests draining a session with
-    /// <see cref="TimeSpan.Zero"/>) already speaks.
+    /// Uniform retention, kept as a delegating overload: the shape every caller that has one timeout to
+    /// offer already speaks, including tests that drain a session with <see cref="TimeSpan.Zero"/>.
     /// </summary>
     internal bool TryBeginExpiry(DateTimeOffset now, TimeSpan idleTimeout) =>
         TryBeginExpiry(now, idleTimeout, idleTimeout);
@@ -331,11 +329,10 @@ internal sealed class UdpProxySession : IAsyncDisposable
     }
 
     /// <summary>
-    /// The session's receive loop. One async method on purpose: the former
-    /// <c>ReceiveLoopAsync</c> + <c>ReceiveDatagramsAsync</c> pair boxed two state machines (and two
-    /// Task objects) per session for a single loop that the outer method called exactly once, so the
-    /// split bought no seam. The loop reads the scope token and rents the receive window once up
-    /// front, and signals a genuine receive fault after the lease is released.
+    /// The session's receive loop. One async method on purpose: splitting it into an outer plus an
+    /// inner loop boxes two state machines (and two Task objects) per session with no seam to show for
+    /// it. The loop reads the scope token and rents the receive window once up front, and signals a
+    /// genuine receive fault after the lease is released.
     /// </summary>
     private async Task ReceiveLoopAsync(Action<UdpProxySession> receiveFailureHandler)
     {
@@ -352,8 +349,8 @@ internal sealed class UdpProxySession : IAsyncDisposable
                 }
                 catch (SocketException exception) when (exception.SocketErrorCode == SocketError.ConnectionReset)
                 {
-                    // An ICMP port-unreachable answering one of this session's relay sends (S2),
-                    // skip-class even from transports that surface it directly, so never fatal
+                    // An ICMP port-unreachable answering one of this session's relay sends, skip-class
+                    // even from transports that surface it directly, so never fatal
                     RecordSkippedDatagram(UdpTransportSkipReason.ConnectionReset);
                     continue;
                 }
@@ -385,7 +382,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
 
         if (_scope.Fault is not null)
         {
-            // A synchronous signal, deliberately not awaited (F1): the handler starts this session's
+            // A synchronous signal, deliberately not awaited: the handler starts this session's
             // teardown on the coordinator's scope, and awaiting it here would re-enter session
             // disposal, which joins this loop.
             receiveFailureHandler(this);
@@ -395,7 +392,7 @@ internal sealed class UdpProxySession : IAsyncDisposable
     /// <summary>
     /// Classifies one receive result: one anomalous datagram (unexpected relay source, oversized,
     /// malformed) skips and the loop keeps receiving, a domain-typed response has no IP source to
-    /// rebuild the frame from (S6a) and is counted with the other skip-class anomalies, and only a
+    /// rebuild the frame from and is counted with the other skip-class anomalies, and only a
     /// response with a decodable source yields its endpoint. Both skips are counted here; only
     /// socket-level failures tear the session down.
     /// <para>

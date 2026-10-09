@@ -112,7 +112,7 @@ public readonly record struct FlowKey
     /// </summary>
     public static FlowKey Create(Endpoint local, Endpoint remote, TransportProtocol protocol, FlowOriginKind origin, ushort adapterSlot, long adapterGeneration)
     {
-        // ReSharper disable once ConvertIfStatementToReturnStatement // Guard-clause + throw reads failure-first; the suggested `cond ? throw ... : value` form has no precedent in this repo (B1 disposition).
+        // ReSharper disable once ConvertIfStatementToReturnStatement // Guard-clause + throw reads failure-first; the suggested `cond ? throw ... : value` form has no precedent in this repo.
         if (local.AddressFamily != remote.AddressFamily) throw new ArgumentException("Flow endpoints must use the same address family.", nameof(remote));
         return new FlowKey(local.AddressFamily, protocol, local, remote, origin, adapterSlot, adapterGeneration);
     }
@@ -307,8 +307,8 @@ public readonly record struct FlowDecision(FlowAction Action, int? RuleIndex, st
 /// <see cref="FlowKey"/>, the interned adapter identity the packet was observed on, and — once a
 /// claim attributed it — the interned process identity. The two metadata references replace four
 /// per-packet strings (and the remote port, which is read straight off the key), so the struct a
-/// dispatch copies 2-3 times per packet stays small and no string is copied per packet. The
-/// properties keep their old names and meanings for policy, logging and the executors.
+/// dispatch copies 2-3 times per packet stays small and copies no string. Policy, logging and the
+/// executors read the derived properties below by name.
 /// </summary>
 [StructLayout(LayoutKind.Auto)]
 public readonly record struct FlowContext(
