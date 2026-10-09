@@ -1,7 +1,7 @@
 {
   "note": [
     "The campaign's declared rows and the carriage names their UDP traffic is judged by, as machine-readable rules.",
-    "This file is the rule source of benchmarks/WinForward.E2E/scripts/check-fairness.py, which asserts the C#",
+    "This file is the rule source of benchmarks/WinForward.E2E.Analysis/verification/check-fairness.py, which asserts the C#",
     "analysis's own output against it; a row, a carriage name or a label that changes here without changing the",
     "analysis (or the other way round) turns that checker red, because the expected answer is read from this file",
     "and the actual answer from the produced tables.md.",

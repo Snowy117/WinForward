@@ -100,7 +100,8 @@ namespace suffix.
 - **Every `.cs` file stays at or under 400 effective lines**, where an effective line is one that
   carries code: blank lines and lines that are only a comment do not count. `wc -l` is a reference
   number, never the criterion. The gate is
-  `python3 benchmarks/WinForward.E2E/scripts/effective-lines.py <paths>` (exit 1 when a file is over).
+  `python3 tools/effective-lines.py <paths>` (exit 1 when a file is over); it is run by hand, because
+  no CI workflow runs it.
 - **`benchmarks/` obeys the same ceiling.** The host splits by scenario family: `Perf/` holds one
   benchmark class per file; `BenchmarkShared.cs` sits at the project root in the root namespace and
   is shared by `Perf/` and `Stability/`; `Stability/` holds one scenario per file plus

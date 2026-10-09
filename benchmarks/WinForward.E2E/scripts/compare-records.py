@@ -63,7 +63,7 @@ are reported as pending instead.
 Usage:
     compare-records.py RUN1 RUN2 --normalize record-normalize.json [--band jitter-band.json]
                        [--write-band jitter-band.json] [--json-out findings.json]
-                       [--rename-table contract-rename.json [--batch B2]]
+                       [--rename-table benchmarks/WinForward.E2E.Analysis/verification/contract-rename.json [--batch B2]]
                        [--strict] [--show-bands] [--explain-classes]
 
 ``RUN1``/``RUN2`` are the per-run artifact directories (the ones holding ``out/``,
@@ -833,7 +833,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--band", type=Path, help="recorded per-key jitter band; without it the contract values are judged at band 0 (mutually exclusive with --write-band)")
     parser.add_argument("--write-band", type=Path, help="write the jitter band measured from this pair (measurement mode: the contract values are not judged; mutually exclusive with --band)")
     parser.add_argument("--json-out", type=Path, help="write the findings as JSON")
-    parser.add_argument("--rename-table", type=Path, help="contract-rename.json, checked against the two path sets")
+    parser.add_argument("--rename-table", type=Path, help="contract-rename.json (benchmarks/WinForward.E2E.Analysis/verification/), checked against the two path sets")
     parser.add_argument("--batch", help="the rename batch that has been executed; its entries must be observed exactly")
     parser.add_argument("--strict", action="store_true", help="list every reading that moved")
     parser.add_argument("--show-bands", action="store_true", help="print every measured per-key band")

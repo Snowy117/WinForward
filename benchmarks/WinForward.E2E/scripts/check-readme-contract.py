@@ -13,8 +13,8 @@ It reads three things:
 * ``benchmarks/WinForward.E2E.Contracts/ArmKeys.*.cs`` -- one ``const string`` per published key,
   nested so that the class chain spells the key's own path (``ArmKeys.Common.Gates.ClientSendLoss``
   is ``gates/clientSendLoss``);
-* ``research/contract-rename.json`` -- the rename registry, whose ``old_path`` entries are spellings
-  the README must no longer use.
+* ``benchmarks/WinForward.E2E.Analysis/verification/contract-rename.json`` -- the frozen rename
+  registry, whose ``old_path`` entries are spellings the README must no longer use.
 
 Every key path the section names must then satisfy three checks, and so must the five root names the
 table spells bare: a matching constant exists, that constant is referenced by a write site (the
@@ -44,7 +44,9 @@ from typing import NoReturn
 HARNESS_DIR = Path(__file__).resolve().parent.parent
 REPO_DIR = HARNESS_DIR.parent.parent
 CONTRACTS_DIR = HARNESS_DIR.parent / "WinForward.E2E.Contracts"
-RENAME_TABLE = REPO_DIR / ".trellis/tasks/10-07-e2e-harness-refactor/research/contract-rename.json"
+RENAME_TABLE = (
+    REPO_DIR / "benchmarks" / "WinForward.E2E.Analysis" / "verification" / "contract-rename.json"
+)
 
 KEYS_GLOB = "ArmKeys.*.cs"
 

@@ -52,8 +52,9 @@ public enum JsonlPolicy { Propagate, SwallowAndCount }                   // what
   `metrics/latency/udp.sent`, `parameters/seconds`, `records/run.json`.
 - An array contributes its own path exactly once; its elements flatten under that same path, and the
   element count is recorded as the array's arity (no `[i]` segments).
-- `jsonl_paths.py` is the single flattener, shared by the inventory, `compare-records.py` and the rename
-  table; two alphabets would make them disagree about what a key is.
+- `jsonl_paths.py` is the single flattener, shared by `compare-records.py` and the fixture-drift guard
+  and mirrored in C# by `tests/WinForward.E2E.Tests/JsonPaths.cs`; two alphabets would make them
+  disagree about what a key is.
 
 ## Three states, never conflated
 
@@ -116,8 +117,8 @@ tick span. Do not write a bare `(double)a / b`.
 - **Bad** — a key-position literal written by hand, e.g. `writer.WriteString("sent", …)` where
   `ArmKeys.Loss.Sent` declares `sent`: `JsonKeyLiteralGateTests` fails on it. The gate matches only
   literals that are **currently declared** spellings, so the retired `sentOk`
-  (`contract-inventory.py:53`, `DOTTED_LEAF_RENAMES`) passes it — it catches a duplicated spelling, not a
-  stale one. Writing `null` because the value was unavailable is the third wrong shape: it conflates
+  (`benchmarks/WinForward.E2E.Analysis/verification/contract-rename.json`, the `metrics/*/sentOk` rows)
+  passes it — it catches a duplicated spelling, not a stale one. Writing `null` because the value was unavailable is the third wrong shape: it conflates
   "not measured" with "not published", and a validator that falls back to a default on an unknown key
   does the same for a plan nobody wrote.
 

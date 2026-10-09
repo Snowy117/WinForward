@@ -260,7 +260,10 @@ function Invoke-Client {
 
     $exit = if ($null -eq $process.ExitCode) { 'unknown' } else { $process.ExitCode }
     Write-Log ('  client {0} exit={1} in {2:n0}s' -f $Label, $exit, $stopwatch.Elapsed.TotalSeconds)
-    return (Test-ClientRun -OutDir $OutDir -Label $Label)
+    # This function publishes no return value: a log line and a value on the same stream would let a
+    # caller that captures or discards the value take the exit-code line with it. The verdict is
+    # recorded in $script:Failures by Test-ClientRun, so callers need nothing back.
+    [void](Test-ClientRun -OutDir $OutDir -Label $Label)
 }
 
 function Test-ClientRun {
@@ -355,9 +358,9 @@ function Invoke-Row {
     Clear-SingBoxLog
     Touch-Heartbeat
 
-    [void](Invoke-Client -Label ($Product.Id + '-p' + $Pass) -OutDir $productDir `
+    Invoke-Client -Label ($Product.Id + '-p' + $Pass) -OutDir $productDir `
         -PlanPath (Join-Path $PlanRoot $Product.Plan) -TcpPortValue $TcpPort -DnsPortValue $DnsPort `
-        -SamplerProcess @($Product.ProcessName))
+        -SamplerProcess @($Product.ProcessName)
 
     $truth = Get-ProxyTruth
     Write-JsonNoBom -Path (Join-Path $productDir 'proxy-truth.json') -Value $truth
@@ -379,8 +382,8 @@ function Invoke-ControlBlock {
     Write-Log ('  --- control {0} (no product) ---' -f $Tag)
     Assert-CleanSlate -Except $null
     $dir = Join-Path $PassDir ('control-' + $Tag)
-    [void](Invoke-Client -Label ('control-' + $Tag + '-p' + $Pass) -OutDir $dir `
-        -PlanPath (Join-Path $PlanRoot 'base-plan.json') -TcpPortValue $TcpPort -DnsPortValue $DnsPort)
+    Invoke-Client -Label ('control-' + $Tag + '-p' + $Pass) -OutDir $dir `
+        -PlanPath (Join-Path $PlanRoot 'base-plan.json') -TcpPortValue $TcpPort -DnsPortValue $DnsPort
     Touch-Heartbeat
 }
 

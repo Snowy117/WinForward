@@ -23,9 +23,9 @@ document. ``--tables PATH`` skips both and checks an already-written ``tables.md
 how a mutated copy proves the guards can fail.
 
 Usage:
-    python3 benchmarks/WinForward.E2E/scripts/check-fairness.py
-    python3 benchmarks/WinForward.E2E/scripts/check-fairness.py --workdir /tmp/fairness
-    python3 benchmarks/WinForward.E2E/scripts/check-fairness.py --tables /tmp/fairness/out/tables.md
+    python3 benchmarks/WinForward.E2E.Analysis/verification/check-fairness.py
+    python3 benchmarks/WinForward.E2E.Analysis/verification/check-fairness.py --workdir /tmp/fairness
+    python3 benchmarks/WinForward.E2E.Analysis/verification/check-fairness.py --tables /tmp/fairness/out/tables.md
 
 Exit codes: ``0`` every guard held; ``1`` at least one guard failed; ``2`` the input could not be
 produced or read.

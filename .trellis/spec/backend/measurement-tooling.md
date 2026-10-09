@@ -6,7 +6,7 @@
 
 ## The README contract table is a gate, not prose
 
-`benchmarks/WinForward.E2E/README.md`'s "Which keys are contract" section (line 372) is what a reader
+`benchmarks/WinForward.E2E/README.md`'s "Which keys are contract" section (line 382) is what a reader
 consults when a cell looks wrong, and it is the one place a rename can go stale without anything failing:
 the analysis resolves most paths by arm kind, so a misspelt key renders an empty cell and the report still
 builds. `check-readme-contract.py` reads the section — tables *and* prose — and for every backticked key
@@ -33,19 +33,14 @@ analysis reads at neither path — it reads `parameters/inFlightWindow` and
 `parameters/loss/lossWindowMs`). A key that is contract but that no table reads — the two out-of-range
 counters and `completionRate` — belongs in the section's prose paragraph, where the same check covers it.
 
-**The gate is red today, for one dead path.** The script hard-codes the rename table at
-`.trellis/tasks/10-07-e2e-harness-refactor/research/contract-rename.json`
-(`check-readme-contract.py:47`); task `10-07-e2e-harness-refactor` was archived by `aee1955`, so the
-table now lives at
-`.trellis/tasks/archive/2026-10/10-07-e2e-harness-refactor/research/contract-rename.json`. As shipped the
-checker exits **2** and prints only `cannot read …/contract-rename.json: [Errno 2] No such file or
-directory` — it never reaches its checks. Run against the archived table it prints
-`111 key(s) checked against 401 declared constant path(s): ok` and exits 0, so those numbers are the
-checker's real output and only the path is dead. The archive-aware lookup the .NET side already uses is
-`tests/WinForward.E2E.Tests/RepoPaths.cs:49-71`; the fix belongs in the script (or in where the table
-lives), not in this document. Exit codes: `0` every key resolved; `1` at least one key is stale,
-unwritten or unspellable, one `FAIL: <token>: <reason>` line per key; `2` an input could not be read, the
-`ArmKeys` shards declare nothing, or the section names no key.
+**The gate is green.** The script reads the rename table at
+`benchmarks/WinForward.E2E.Analysis/verification/contract-rename.json` (`check-readme-contract.py:47`),
+beside the inventory and the row profiles it belongs with. It prints
+`111 key(s) checked against 401 declared constant path(s): ok` and exits 0; those two counts read the
+README's tokens and the `ArmKeys` constants, never the table, so moving the table cannot change them.
+Exit codes: `0` every key resolved; `1` at least one key is stale, unwritten or unspellable, one
+`FAIL: <token>: <reason>` line per key; `2` an input could not be read, the `ArmKeys` shards declare
+nothing, or the section names no key.
 
 ## The key-literal gate
 
@@ -62,26 +57,43 @@ it: the gate catches a duplicated spelling, not a stale one
 
 ## The scripts
 
-Each script is run by hand unless a test says otherwise; the README's script table (`README.md:58-72`)
-lists the rest of the directory.
+**No CI runs any of these scripts, and no test invokes one.** `.github/workflows/` holds exactly
+`analyzer-gate.yml` (`dotnet format` + `jb inspectcode`) and `release-build.yml` (the CLI's publishes);
+neither mentions E2E, Python or `tools/`. Each script is run by hand unless a test says otherwise; the
+two READMEs' layout tables (`benchmarks/WinForward.E2E/README.md`,
+`benchmarks/WinForward.E2E.Analysis/README.md`) list where each one lives.
+
+Scripts under `benchmarks/WinForward.E2E/scripts/`:
 
 | Script | What it checks |
 |---|---|
-| `jsonl_paths.py` | the one canonical flattener (`join('/', member names)`); the inventory, `compare-records.py` and the rename table all import it |
-| `contract-inventory.py` | `inventory --run DIR --out FILE` writes every canonical path of one run; `rename --baseline DIR --run DIR --out-json FILE --out-md FILE` writes the full `{kind, old_path, new_path, reason}` table and fails (exit 1) when the fresh run publishes a path the table does not declare |
+| `jsonl_paths.py` | the one canonical flattener (`join('/', member names)`); `compare-records.py` and `check-fixture-drift.py` import it |
 | `compare-records.py` | the run-to-run comparison — classes, band and rename table; [judgement](./measurement-judgement.md) owns the manual procedure |
-| `normalize-pattern-hits.py` | reports normalization-config patterns that match nothing in a tree |
 | `check-readme-contract.py` | the README contract table against `ArmKeys` and the rename table (above) |
-| `effective-lines.py` | the 400-effective-line limit over the `.cs` files it is given; exit 1 naming the file and its count, exit 2 when a path does not exist |
 | `cli-snapshots.py` | records a CLI surface as exit code + stdout + stderr bytes: `cli-snapshots.py <harness-binary> <out-directory>` |
+
+Scripts under `benchmarks/WinForward.E2E.Analysis/verification/` — the analysis project owns its own
+instruments, so a checker of the analysis is not split across a project boundary:
+
+| Script | What it checks |
+|---|---|
 | `oracle-diff.py` | the differ the analysis is judged with (below) |
 | `check-fairness.py` | asserts the fairness disclosures in `row-profiles.json` against the analysis's own `tables.md` |
+| `check-boundary-trees.py` | the knob trees (window overflow, undecodable, truncated, zero denominator) |
+| `check-fixture-drift.py` | the fixture's key set against the contract, in both directions |
 
-`compare-records.py` and `effective-lines.py` are **not run by any test or CI workflow**. Run them by
-hand — the comparison as [judgement](./measurement-judgement.md) shows it, the line gate as:
+Two more tools live elsewhere, because neither belongs to the harness directory:
+
+| Tool | What it checks |
+|---|---|
+| `tools/effective-lines.py` | the 400-effective-line limit over the `.cs` files it is given; exit 1 naming the file and its count, exit 2 when a path does not exist. The rule is solution-wide, so the tool is not the harness's own |
+| `benchmarks/WinForward.E2E.Analysis/scripts/analyze.sh` | builds the analyzer and `exec`s it with the caller's cwd and arguments untouched |
+
+`compare-records.py` and `tools/effective-lines.py` are both manual gates: neither is run by a test or
+a workflow. Run the line gate from the repository root as:
 
 ```
-python3 benchmarks/WinForward.E2E/scripts/effective-lines.py \
+python3 tools/effective-lines.py \
     benchmarks/WinForward.E2E benchmarks/WinForward.E2E.Contracts \
     benchmarks/WinForward.E2E.Analysis tests/WinForward.E2E.Tests
 ```
@@ -123,10 +135,11 @@ byte-identical copy of the last one is `verification/plots-SKIPPED.md`.
 | `verification/synthetic-tree.tar.gz` | the campaign every regression runs on (deterministic tar: sorted entries, fixed mtime/owner) |
 | `verification/golden/{py-tables.md,py-verdict.json}` | the reference output for that tree |
 | `verification/synthetic/make_tree.py` + `FROZEN.md` | how the tree is built, and how to refreeze (any change means refreezing and re-diffing from batch 1) |
-| `benchmarks/WinForward.E2E/scripts/oracle-diff.py` | the differ — the harness's `scripts/`, not this project's: `--mode semantic` (default) or `--mode byte`, `--batch N`, `--tolerance` |
-| `verification/row-profiles.json` + `benchmarks/WinForward.E2E/scripts/check-fairness.py` | the fairness rules as data, asserted against the C# output |
+| `verification/oracle-diff.py` | the differ: `--mode semantic` (default) or `--mode byte`, `--batch N`, `--tolerance` |
+| `verification/row-profiles.json` + `verification/check-fairness.py` | the fairness rules as data, asserted against the C# output |
 | `verification/check-boundary-trees.py` | the knob trees (window overflow, undecodable, truncated, zero denominator) |
-| `verification/check-fixture-drift.py` | fixture paths no green run observes, against the contract constants; it resolves its fixtures from the same archived task path (`check-fixture-drift.py:40`) and needs the same fix |
+| `verification/contract-{inventory,rename}.json` | the frozen contract tables `check-readme-contract.py` and `check-fixture-drift.py` read; their generator (`contract-inventory.py`) was a spent migration tool and is deleted, so the tables are ground truth rather than regenerable output |
+| `verification/check-fixture-drift.py` | fixture paths no green run observes, against the contract constants; both it and the differ address `verification/` directly |
 
 Differ contract: exit `0` equal, `1` different, `2` **something that should exist does not** — a missing
 slice or an unreadable artifact is never a pass. Semantic mode keeps headings, column names, row identity,

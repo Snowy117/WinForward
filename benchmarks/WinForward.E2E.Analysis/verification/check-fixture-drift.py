@@ -7,14 +7,18 @@ harness never writes, or that omits one it does, would let both implementations 
 other while neither agrees with a real campaign. This script is the mechanical guard for that; the
 fixture's *values* are out of scope, because every value in the tree is invented.
 
-Two authorities, composed:
+Two authorities, composed, both beside this file:
 
-* `contract-inventory.json` (`.trellis/tasks/10-07-e2e-harness-refactor/research/`) is the frozen
+* `contract-inventory.json` (`benchmarks/WinForward.E2E.Analysis/verification/`) is the frozen
   pre-migration inventory: every canonical path one real run published, flattened with the shared
-  alphabet (`benchmarks/WinForward.E2E/scripts/jsonl_paths.py`);
+  alphabet. That alphabet is `jsonl_paths.py`, which still lives with the harness it describes
+  (`benchmarks/WinForward.E2E/scripts/jsonl_paths.py`) and is imported from there;
 * `contract-rename.json` is the registered delta E1-E3 landed on top of it -- one row per path, of
   kind `identical`, `renamed` (the new spelling) or `added` (a path the migration introduced). Its
   `new_path` column is therefore the current contract *as a real run publishes it*.
+
+Neither table has a generator: the migrated pair is ground truth rather than regenerable output, so
+an edit to either is an edit to the contract the fixture is judged against.
 
 The check is not a plain two-set difference, because the fixture deliberately covers shapes a green
 campaign never produces, and those keys exist in the contract without ever being observed in one
@@ -24,8 +28,13 @@ it, and they must be *present* in the fixture: a declaration that no longer occu
 Usage:
     python3 check-fixture-drift.py [--tree DIR] [--root DIR]
 
-`--tree` defaults to `/tmp/wf-synth`, the tree the oracle extracts; `--root` defaults to the
-repository root three levels above this file. Exit code 0 means both differences are empty.
+`--tree` defaults to `/tmp/wf-synth`, the tree the oracle extracts; `--root` defaults to this
+script's own directory, which holds the two contract tables.
+
+Exit codes, following the differ's three-state contract: ``0`` both differences are empty; ``1`` the
+fixture drifts from the declared contract; ``2`` an authority could not be read -- a missing table, a
+`--tree` that does not exist or holds no records, or a rename table that names baseline paths the
+inventory does not have, which leaves the contract undecidable rather than drifted.
 """
 
 from __future__ import annotations
@@ -34,10 +43,11 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS = REPO_ROOT / "benchmarks" / "WinForward.E2E" / "scripts"
-RESEARCH = REPO_ROOT / ".trellis" / "tasks" / "10-07-e2e-harness-refactor" / "research"
+VERIFICATION = REPO_ROOT / "benchmarks" / "WinForward.E2E.Analysis" / "verification"
 
 sys.path.insert(0, str(SCRIPTS))
 
@@ -60,15 +70,32 @@ NON_CONTRACT_NAMES = {"environment.json", "proxy-truth.json"}
 NON_CONTRACT_PATTERNS = ("plan-*.json",)
 
 
+def unusable(message: str) -> NoReturn:
+    """Exit 2: an authority could not be read, so no drift judgement was made."""
+    print(f"check-fixture-drift.py: {message}", file=sys.stderr)
+    raise SystemExit(2)
+
+
+def read_table(root: Path, name: str) -> object:
+    """One of the two contract tables, or exit 2 when it is not there to be read."""
+    path = root / name
+    if not path.is_file():
+        unusable(f"no contract table at {path}")
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        unusable(f"{path} is not readable JSON: {error}")
+
+
 def contract_paths(root: Path) -> set[str]:
     """The paths the current contract declares, as a real run publishes them."""
-    inventory = json.loads((root / "contract-inventory.json").read_text(encoding="utf-8"))
-    rename = json.loads((root / "contract-rename.json").read_text(encoding="utf-8"))
+    inventory = read_table(root, "contract-inventory.json")
+    rename = read_table(root, "contract-rename.json")
     declared = {row["new_path"] or row["old_path"] for row in rename}
     known = set(inventory["paths"])
     unknown = {row["old_path"] for row in rename if row["old_path"] and row["old_path"] not in known}
     if unknown:
-        raise SystemExit(
+        unusable(
             "the rename table names baseline paths the inventory does not have: "
             + ", ".join(sorted(unknown))
         )
@@ -78,6 +105,8 @@ def contract_paths(root: Path) -> set[str]:
 
 def fixture_paths(tree: Path) -> set[str]:
     """Every canonical path the fixture publishes, in the contract's own alphabet."""
+    if not tree.is_dir():
+        unusable(f"{tree} is not a directory; point --tree at the extracted tree's raw directory")
     files = [
         candidate
         for candidate in sorted(tree.rglob("*"))
@@ -87,7 +116,7 @@ def fixture_paths(tree: Path) -> set[str]:
         and not any(candidate.match(pattern) for pattern in NON_CONTRACT_PATTERNS)
     ]
     if not files:
-        raise SystemExit(f"{tree}: no .json/.jsonl records below the tree; point --tree at the raw directory")
+        unusable(f"{tree}: no .json/.jsonl records below the tree; point --tree at the raw directory")
 
     observations: dict[str, list] = {}
     for file in files:
@@ -105,7 +134,7 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tree", type=Path, default=Path("/tmp/wf-synth"),
                         help="the generated tree (its parent holds the ledgers)")
-    parser.add_argument("--root", type=Path, default=RESEARCH, help="directory holding the two contract tables")
+    parser.add_argument("--root", type=Path, default=VERIFICATION, help="directory holding the two contract tables")
     args = parser.parse_args(argv[1:])
 
     contract = contract_paths(args.root)

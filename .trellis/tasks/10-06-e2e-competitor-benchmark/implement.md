@@ -92,13 +92,13 @@ Four passes with randomized program order; pass 1 discarded as warm-up.
 ## Phase D — analysis and report
 
 ### D1 · Analysis pipeline
-`analysis/analyze.py`: JSONL → `tables.md`, `plots/`, `verdict.json`, with per-run percentile
-computation, cross-run median and bootstrap intervals, the pre-declared practical thresholds and
-Holm–Bonferroni correction.
+`benchmarks/WinForward.E2E.Analysis/` (the C# port of the original `analysis/analyze.py`): JSONL →
+`tables.md`, `plots/`, `verdict.json`, with per-run percentile computation, cross-run median and
+bootstrap intervals, the pre-declared practical thresholds and Holm–Bonferroni correction.
 - **Validate:** re-running on the same inputs reproduces byte-identical tables.
 
 ### D2 · Report
-`benchmarks/results/2026-10-06-e2e-competitors/README.md`: the headline matrix, the ratio-to-control
+`benchmarks/WinForward.E2E.Analysis/README.md`: the headline matrix, the ratio-to-control
 matrix, per-arm detail with gate values, the plots, the verbatim product configurations, and an
 explicit statement of what the numbers do and do not cover (loopback upstream hop, single-host
 SOCKS5 server, no WAN, four passes instead of RFC 8219's ≥20 repetitions).

@@ -495,5 +495,8 @@ A missing directory, an empty directory, or a tree with no rows exits 2 with a `
 
 The tree and the documents it is judged against are frozen under
 `benchmarks/WinForward.E2E.Analysis/verification/`; `FROZEN.md` there records what is frozen, how it
-was produced, and what the boundary trees are. `scripts/check-fairness.py` and
-`verification/check-boundary-trees.py` assert the disclosures this document describes.
+was produced, and what the boundary trees are. That directory also holds this project's own instruments:
+`verification/check-fairness.py`, `verification/oracle-diff.py`,
+`verification/check-boundary-trees.py` and `verification/check-fixture-drift.py` assert the disclosures
+and the key sets this document describes. **No CI runs any of them** — `.github/workflows/` holds only
+`analyzer-gate.yml` and `release-build.yml` — so each is run by hand.

@@ -430,7 +430,7 @@ are above it; they are recorded here as an explicit exception with splitting as 
 than silently inherited.
 
 ```console
-$ python3 benchmarks/WinForward.E2E/scripts/effective-lines.py benchmarks/WinForward.Benchmarks
+$ python3 tools/effective-lines.py benchmarks/WinForward.Benchmarks
   909  benchmarks/WinForward.Benchmarks/Perf/SessionSetupDecompositionBenchmarks.cs
   684  benchmarks/WinForward.Benchmarks/Stability/GcSoakScenario.cs
   410  benchmarks/WinForward.Benchmarks/Stability/UdpChurnScenario.cs
@@ -439,4 +439,10 @@ $ python3 benchmarks/WinForward.E2E/scripts/effective-lines.py benchmarks/WinFor
 The first two were registered on 2026-09-28 in `results/2026-09-28-udp-reuse/README.md`, which
 measured them at 909 and 685 effective lines; `UdpChurnScenario.cs` was below the cap then (326 in
 that note) and has crossed it since (410 now). Every other file of this project is at or below the
-cap — the command above is the check, and it exits 1 while this section's list is non-empty.
+cap — the command above is the check, and it exits 1 while this section's list is non-empty. **No CI
+runs it** (`.github/workflows/` holds only `analyzer-gate.yml` and `release-build.yml`), so the
+counter is a hand-run command: the debt this section registers is not enforced anywhere, only
+recorded.
+
+The counter lives at the repository root rather than inside `WinForward.E2E` because the 400-line
+rule is solution-wide — the same command is what keeps the E2E projects under the cap.

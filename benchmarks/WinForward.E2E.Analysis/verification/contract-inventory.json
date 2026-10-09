@@ -1,5 +1,5 @@
 {
-  "generatedBy": "benchmarks/WinForward.E2E/scripts/contract-inventory.py inventory",
+  "generatedBy": "contract-inventory.py inventory (the spent E1-E3 migration tool, since deleted; this table is frozen ground truth)",
   "alphabet": "jsonl_paths.canonical_path: '/'.join(member names); a dot inside a key never splits",
   "run": "/tmp/b1c-run",
   "groups": {

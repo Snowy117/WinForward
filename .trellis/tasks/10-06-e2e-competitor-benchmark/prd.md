@@ -114,8 +114,9 @@ handshake.
       shows path loss below 1e-6 — otherwise the harness, not the products, is being measured.
 - [ ] At least three measured passes after a discarded warm-up pass, with the between-run spread
       reported rather than a single run's number.
-- [ ] Raw results, the analysis script, plots and a report live under
-      `benchmarks/results/2026-10-06-e2e-competitors/`.
+- [ ] Raw results, the analysis and a report: the analysis and the report live under
+      `benchmarks/WinForward.E2E.Analysis/` (the Python `analyze.py` there replaced the original
+      script), and the campaign's own artifact tree was removed with it.
 - [ ] A written statement of what the numbers do and do not cover (loopback upstream hop,
       single-host loopback SOCKS5 server, no WAN, deviation from RFC 8219's ≥20 repetitions).
 

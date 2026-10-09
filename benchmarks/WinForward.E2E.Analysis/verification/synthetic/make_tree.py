@@ -12,8 +12,10 @@ absent because the kind does not publish it), and it deliberately contains:
   witness, a `samplerError` record, a sample carrying `readError`, a mid-run product
   restart, a `scheduledAttempts` mismatch and a `control-post` drift;
 * the reliability arm's per-attempt records and its `byMode` block;
-* a `target-ledger.jsonl` per pass whose source census, connection records and per-port
-  DNS summaries agree with the client records (except where a mismatch is intentional);
+* the two ledgers the shipped target setup produces — `ledger-main.jsonl` for the proxied rows
+  and `ledger-direct.jsonl` for the dual phase's direct lane, both beside the raw directory —
+  whose source census, connection records and per-port DNS summaries agree with the client
+  records (except where a mismatch is intentional);
 * per-run ledger labels in one pass and a single pass-level label in another, so both
   attribution paths are exercised.
 

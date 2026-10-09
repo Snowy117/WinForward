@@ -16,10 +16,10 @@ A path may be a directory (walked recursively for ``*.cs``) or one file. Build o
 and ``obj`` are never counted: they are generated copies, not sources. The exit status is 1 when at
 least one file is over the limit, so the script can stand as the gate itself.
 
-Usage:
-    python3 effective-lines.py benchmarks/WinForward.E2E tests/WinForward.E2E.Tests
-    python3 effective-lines.py --all benchmarks/WinForward.E2E
-    python3 effective-lines.py --limit 200 benchmarks/WinForward.E2E/Client
+Usage, from the repository root:
+    python3 tools/effective-lines.py benchmarks/WinForward.E2E tests/WinForward.E2E.Tests
+    python3 tools/effective-lines.py --all benchmarks/WinForward.E2E
+    python3 tools/effective-lines.py --limit 200 benchmarks/WinForward.E2E/Client
 """
 
 from __future__ import annotations

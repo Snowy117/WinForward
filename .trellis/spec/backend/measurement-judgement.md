@@ -69,11 +69,13 @@ population `achievedRate` carried before the unification. A run with `requests >
 records the two populations as one under a new name, and the old expression survives word for word
 (`JsonPerSecond.PerSecond(state._responses, …)`).
 
-A new published key is registered in `contract-inventory.py`'s `ADDITIONS` (here
-`metrics/completionRate`) **before** `compare-records.py --rename-table … --batch B2` runs (D19.3 A):
-without the row the one-sided path reads as a structural difference and the batch's own gate goes red,
-and `contract-inventory.py rename` exits 1 with "the fresh run publishes paths the table does not
-declare".
+A new published key is declared in `ArmKeys` (here `metrics/completionRate`) and asserted natively by
+`ContractShapeTests` + `DeclaredKeys` (`tests/WinForward.E2E.Tests/ContractShapeTests.cs:14-19`,
+`DeclaredKeys.cs:6-9`), which compare each kind's declared paths against the bytes a run publishes in
+both directions — the same two-way diff the deleted migration tool `contract-inventory.py` used to
+compute offline. `compare-records.py --rename-table … --batch B2` (D19.3 A) reads the frozen
+`contract-rename.json` from `benchmarks/WinForward.E2E.Analysis/verification/`: a path the table does
+not declare reads as a structural difference and the batch's own gate goes red.
 
 #### Bad — a rate under the wrong population
 ```csharp
@@ -86,8 +88,9 @@ AchievedRate = JsonPerSecond.PerSecond(attempts.Length, …)    // REL: counts a
 - **Rate calibers** (`PersistentRateCaliberTests`, `Shapes/PersistentShape`): the shape factory carries
   `completionRate` as a nullable reading and the declared-key comparison covers it; a real PERSIST run
   with every request answered publishes `completionRate == achievedRate > 0`, and a run whose peer never
-  answers publishes `completionRate == 0 < achievedRate`; `contract-inventory.py rename` must report the
-  key as `added` and `compare-records.py --rename-table … --batch B2` must stay at `contract=0`.
+  answers publishes `completionRate == 0 < achievedRate`; `ContractShapeTests` must show the PERSIST
+  arm declaring and publishing `completionRate`, and `compare-records.py --rename-table … --batch B2`
+  must stay at `contract=0`.
 - **Regression comparison — a manual gate, not a test.** No test and no workflow invokes
   `compare-records.py`; run it by hand over two artifact directories (each holding `out/`,
   `ledger.jsonl` and `target.out`):
@@ -98,11 +101,15 @@ AchievedRate = JsonPerSecond.PerSecond(attempts.Length, …)    // REL: counts a
       [--strict] [--explain-classes]
   ```
 
-  The normalization and rename fixtures live in the archive,
-  `.trellis/tasks/archive/2026-10/10-07-e2e-harness-refactor/research/` (`record-normalize.json`,
-  `contract-rename.json`, `contract-inventory.json`), not at a live `research/` path.
-  `normalize-pattern-hits.py` reports patterns in the normalization config that match nothing in a tree,
-  which is how a reading that is really being compared as a contract value is caught. `run1 vs run1` and
+  The normalization fixture still sits in the archive,
+  `.trellis/tasks/archive/2026-10/10-07-e2e-harness-refactor/research/record-normalize.json`; the
+  rename and inventory tables it composes with moved out of the archive to
+  `benchmarks/WinForward.E2E.Analysis/verification/` (`contract-rename.json`, `contract-inventory.json`),
+  beside the row profiles and the golden. Neither table has a generator left: `contract-inventory.py`
+  was the spent migration tool that produced the pair and is deleted, so they are ground truth rather
+  than regenerable output. `normalize-pattern-hits.py` (D16.2's dead-pattern report) is deleted with it;
+  the normalization config stays a frozen fixture, and the declared-vs-published comparison it informed
+  is now `ContractShapeTests`' job. `run1 vs run1` and
   `run1 vs run2 --band` must compare clean; a mutated contract counter fails while a mutated pid and a
   mutated latency reading do not. The script exits 1 on any structural, identity, contract or
   rename-table finding, and 0 when the comparison is clean.

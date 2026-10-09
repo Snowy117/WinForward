@@ -207,8 +207,7 @@ Verified on the VM; each one is asserted by the orchestrator rather than assumed
 
 ## 7. Analysis
 
-`benchmarks/results/2026-10-06-e2e-competitors/analysis/analyze.py` (Linux, Python) reads the JSONL
-and emits:
+`benchmarks/WinForward.E2E.Analysis/` (C#, .NET console) reads the JSONL and emits:
 
 - `tables.md` — the headline matrix, the ratio-to-control matrix, and per-arm detail with the gate
   values;
@@ -231,5 +230,7 @@ and emits:
 ## 9. Deliverables
 
 - `benchmarks/WinForward.E2E/` — harness source (target, client, plan, orchestrator, adapters).
-- `benchmarks/results/2026-10-06-e2e-competitors/` — raw JSONL, effective product configurations,
-  analysis script, plots, and `README.md` with the tables and the interpretation limits.
+- `benchmarks/WinForward.E2E.Analysis/` — the analysis that replaced the retired Python reader, plus
+  the campaign report (`README.md`) with the tables and the interpretation limits. The campaign's own
+  artifact tree (`benchmarks/results/2026-10-06-e2e-competitors/`) was removed once the analysis was
+  ported; only the report and the frozen oracle inputs survive in the repository.

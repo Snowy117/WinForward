@@ -68,16 +68,20 @@ directly, and a transparent proxy rewrites the path beneath it.
 | `scripts/orchestrator.ps1` | the campaign driver, run on the machine under test |
 | `scripts/publish.sh` | build and publish the artifacts |
 | `scripts/selftest.sh` | run the harness against itself on one host |
-| `scripts/contract-inventory.py` | publish `research/contract-inventory.json` and `research/contract-rename.{json,md}` from a record tree |
-| `scripts/jsonl_paths.py` | the one canonical flattener (`join('/', member names)`) the inventory, the comparator and the rename table share |
-| `scripts/normalize-pattern-hits.py` | report the normalization patterns that match nothing in a tree |
-| `scripts/oracle-diff.py` | diff the analysis's output against the frozen reference: `--mode semantic` (default) or `--mode byte`, `--batch N`, `--tolerance` |
-| `scripts/check-fairness.py` | assert the fairness disclosures — the `not carried` rows, the port-53 carriage labels, the CPU scope, and the unattributable `undecodable` token — against the analysis's own `tables.md` |
+| `scripts/jsonl_paths.py` | the one canonical flattener (`join('/', member names)`) the comparator and the fixture-drift guard share |
+| `scripts/compare-records.py` | compare two artifact trees run-to-run: structural / identity / contract / reading classes, a per-key jitter band and the rename table; the procedure is [measurement-judgement.md](../../.trellis/spec/backend/measurement-judgement.md)'s |
 | `scripts/check-readme-contract.py` | assert that every key in this file's contract table is a constant in `ArmKeys` that a write site publishes, and that no stale spelling survives |
-| `scripts/effective-lines.py` | report the `.cs` files above the repository's effective-line limit |
 | `scripts/cli-snapshots.py` | record the 28 CLI commands (both helps and every error path) as exit code plus stdout and stderr bytes |
+| `../../tools/effective-lines.py` | report the `.cs` files above the repository's 400-effective-line limit — a **solution-wide** rule, not this harness's own |
+| `../WinForward.E2E.Analysis/verification/` | the analysis's instruments, beside the frozen tree, the golden, the two contract tables and the row profiles: `oracle-diff.py` (diff this file's frozen reference against the C# output: `--mode semantic` (default) or `--mode byte`, `--batch N`, `--tolerance`), `check-fairness.py` (the `not carried` rows, the port-53 carriage labels, the CPU scope and the unattributable `undecodable` token against the analysis's own `tables.md`), `check-boundary-trees.py` and `check-fixture-drift.py` |
 
-Machine-specific files, listed in `.gitignore` and **absent from a fresh checkout**:
+**No CI runs any script in this document, and no test invokes one.** `.github/workflows/` holds exactly
+`analyzer-gate.yml` (`dotnet format`, `jb inspectcode`) and `release-build.yml` (the product CLI's
+publishes); neither mentions E2E, Python or `tools/`. Every gate below is a hand-run command whose
+output a human has to read.
+
+Machine-specific **local glue**, listed in `.gitignore` and **absent from a fresh checkout** (none of
+these four is in `git ls-files`, so a fix to one can never be committed):
 
 | Path | Why it is not in the repository |
 |---|---|
@@ -396,7 +400,7 @@ publish the same spelling each shard declares its own constant rather than shari
 `scripts/check-readme-contract.py` is the gate: it reads every backticked key path this section names
 and every root name the table spells bare, resolves each against those declarations, and fails when a
 key has no constant, when no write site references a declaring constant, or when the spelling is an
-`old_path` of `research/contract-rename.json`.
+`old_path` of `../WinForward.E2E.Analysis/verification/contract-rename.json`.
 
 | Read from | Paths (inside the arm's `result` record) |
 |---|---|
@@ -697,10 +701,12 @@ hold. All of them are visible in the record itself.
 | the sampler worked | no `samplerError` record and no sample carrying `readError` |
 | a campaign is trustworthy | the analysis's own gates: the three identities, the lane witnesses, `clientSendLoss`, the two control blocks against each other, and `directLeak == 0` in the dual phase — see [README.md](../WinForward.E2E.Analysis/README.md) |
 
-The harness's own three gates run the same way: `scripts/check-readme-contract.py` fails when a key
-in the table above is no longer a constant in `ArmKeys`, `scripts/effective-lines.py` fails when a
-harness file grows past the repository's effective-line limit, and `CliSnapshotTests` fails when a
-CLI message is reworded.
+The harness's own gates run the same way, by hand: `scripts/check-readme-contract.py` fails when a key
+in the table above is no longer a constant in `ArmKeys`, and `CliSnapshotTests` fails when a CLI message
+is reworded. The 400-effective-line limit is **not** one of them — it is a repository-wide rule, and its
+tool is `../../tools/effective-lines.py`, which counts every `.cs` file it is given, this harness's and
+`WinForward.Benchmarks`'s alike. No CI runs any of these: `.github/workflows/` holds only
+`analyzer-gate.yml` and `release-build.yml`.
 
 A healthy self-test run prints the analysis's summary line —
 `1 pass(es), 1 row(s), 1 ledger(s), 1 loaded run(s)` — and reports zero `correctness-failure` and zero

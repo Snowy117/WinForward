@@ -2,7 +2,7 @@
 
 The C# analysis is judged by **two-implementation oracle**: the same synthetic campaign tree is
 analyzed twice — once by the frozen Python reference, once by `WinForward.E2E.Analysis` — and the
-two full outputs are compared slice by slice with `benchmarks/WinForward.E2E/scripts/oracle-diff.py`.
+two full outputs are compared slice by slice with `oracle-diff.py`, beside this file.
 This directory holds the frozen side of that comparison, so both runs start from the same bytes.
 
 The **reference is retired**: `analyze.py` was deleted once all five batches passed (E4-c/D6.6), and
@@ -19,10 +19,10 @@ Everything below is *frozen*: changing it changes what the C# implementation is 
 | `golden/py-tables.md` | the Python reference's `tables.md` on that tree (1245 lines) | `8011d05bdad5dd0b2232a1f9e0bd269a637ad7995299d351dae71a945104ebbc` |
 | `golden/py-verdict.json` | the Python reference's `verdict.json` on that tree (14125 lines) | `2e0e64dada67524502cde8958dafdf6f90b1e54400015dacd89c921d8483c55d` |
 | `plots-SKIPPED.md` | the fixed text the C# analysis writes to `<out>/plots/SKIPPED.md`, unconditionally | `39795a79df7ed8f33a875618553654153e3b1b85009161832052bf28d3144ad4` |
-| `synthetic/make_tree.py` | the generator of the tree | `b946a38dd061752f2e23f9da96aac7df9d1f0424e8d7a1dd7780ba11d3474e2d` |
-| `check-fixture-drift.py` | the key-set guard between the generator and the harness contract | `acf4178105f911f7a7e3ef81611bf0dff069ae812ed5718f62086fd06f0dec2b` |
+| `synthetic/make_tree.py` | the generator of the tree | `56a557f76af182c4d7088115acc2b0416647859b4174d3e5b22d117ca57f8e81` |
+| `check-fixture-drift.py` | the key-set guard between the generator and the harness contract | `598e74460038a875c0e7fe557dcbfbe1596303ceeb665ae1936834a1abf5debc` |
 | `check-boundary-trees.py` | the boundary trees' assertions and their negative controls (§4) | `ac83aa2a1372f37b0c474794ce2d86c6448837fc20c70853338a4b2d79ab5ee2` |
-| `row-profiles.json` | the declared rows and carriage labels `benchmarks/WinForward.E2E/scripts/check-fairness.py` asserts against | `f426b945114151df0a5075c4dc0b535b194705e11acef247e7cfc20e40228b7f` |
+| `row-profiles.json` | the declared rows and carriage labels `check-fairness.py` asserts against | `f40002095052887a016e5f944fc2366a43e4ab59c2aaf7296ca2480366b884ce` |
 
 Frozen on 2026-10-08 (E4-a). The tarball is built with sorted names, a fixed mtime
 (`2026-10-01 00:00:00 UTC`) and zeroed ownership, so regenerating it from the same generator is
@@ -32,13 +32,22 @@ byte-identical; `bash freeze-tree.sh` does exactly that and prints the new hash.
 the generator's own hash moved from `b3e946a7…` to `b946a38d…`, and regenerating the tree and the
 golden from it reproduced `723b7378…`, `8011d05b…` and `2e0e64da…` **byte for byte**, so no golden
 text moved and no slice had to be re-established. Every batch was re-run from batch 1 anyway
-(`.trellis/tasks/10-07-e2e-harness-refactor/research/baseline/E4c-caveats.md` §2).
+(`.trellis/tasks/archive/2026-10/10-07-e2e-harness-refactor/research/baseline/E4c-caveats.md` §2).
 
 The two script hashes above (`synthetic/make_tree.py`, `check-boundary-trees.py`) were re-measured on
 the batch's final bytes during the E4-c check round. Both scripts were rewritten after this table was
 first drafted, so the values it had carried for them (`60d96cf8…` and `8c370853…`) did not match the
 files a checker would hash; everything else in the table was already exact. The functional claims
 were re-established on the files as they now hash, which is what §1's rows are for.
+
+**Three hash rows were re-measured after the C3 scripts triage (2026-10-09)**:
+`synthetic/make_tree.py` (its docstring promised a per-pass `target-ledger.jsonl` the generator never
+writes; it writes the two ledgers beside `raw/`), `check-fixture-drift.py` (its exit-code path for an
+unreadable authority, and the directory the two contract tables are read from) and `row-profiles.json`
+(the script path in its own note). No generator logic, rule, number or table moved: regenerating the
+tree from the edited generator reproduced `723b7378…` byte for byte, so the golden below still stands.
+The two contract tables (`contract-inventory.json`, `contract-rename.json`) and `contract-rename.md`
+also live in this directory now rather than in an archived task's `research/`.
 
 ### 1.1 The retired vector tables (E4-b1b, retired 2026-10-09)
 
@@ -86,7 +95,7 @@ python3 benchmarks/WinForward.E2E.Analysis/verification/check-fixture-drift.py -
 The reference implementation was the one commit of `analyze.py` whose only changes were the five
 field spellings of `contract-rename.json` plus the two name neutralizations; the complete,
 line-by-line list is in
-`.trellis/tasks/10-07-e2e-harness-refactor/research/python-oracle-changes.md`. Both implementations
+`.trellis/tasks/archive/2026-10/10-07-e2e-harness-refactor/research/python-oracle-changes.md`. Both implementations
 are called with the hardcoded absolute path `/tmp/wf-synth/raw`, which is why the tree must be
 extracted there and not somewhere else: the raw path, the two ledger paths and §2's path columns are
 part of the compared bytes.
@@ -150,7 +159,7 @@ in any other directory hashes differently (measured: all five reproduce only und
 
 `python3 check-boundary-trees.py` builds each of the first, third, fourth and fifth trees at
 `/tmp/wf-synth`, runs the built analysis over it and judges the produced documents; the second is
-covered by `scripts/check-fairness.py`, whose `#11` guard reads the `undecodable` disclosure of any
+covered by `check-fairness.py`, whose `#11` guard reads the `undecodable` disclosure of any
 document it is handed (`--tables`). Both carry their negative controls inside themselves, so
 `--self-check`-style red is one command away.
 
