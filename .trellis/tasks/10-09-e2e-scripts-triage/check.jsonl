@@ -1,5 +1,0 @@
-{"file": ".trellis/tasks/10-09-e2e-csharp-native-cleanup/research/03-scripts-audit.md", "reason": "Per-script disposition with file:line callers: the delete list, the three moves, the seven broken paths and the exact offending lines."}
-{"file": ".trellis/tasks/10-09-e2e-csharp-native-cleanup/prd.md", "reason": "Requirements R4/AC6 and the recorded decisions D2 (moves) and D3 (leave the gitignored local scripts untracked)."}
-{"file": ".trellis/spec/backend/measurement-tooling.md", "reason": "The authoritative script table: what each gate checks, the three-state exit-code rule, and the gates' current dead paths."}
-{"file": ".trellis/spec/backend/directory-structure.md", "reason": "The solution-wide 400-effective-line rule that effective-lines.py enforces, and its documented command line."}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "The build/test/format/JB gates and the suppression policy."}

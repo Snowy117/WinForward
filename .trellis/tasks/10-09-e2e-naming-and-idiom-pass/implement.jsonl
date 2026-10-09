@@ -1,4 +1,0 @@
-{"file": ".trellis/tasks/10-09-e2e-csharp-native-cleanup/research/02-naming-and-idioms.md", "reason": "Part A derives the house conventions with citations; Part B is the ranked change list, the do-not-touch list and the path-literal hazard table."}
-{"file": ".trellis/tasks/10-09-e2e-csharp-native-cleanup/prd.md", "reason": "Requirement R3 (the user's acronym rule), AC5, and the recorded decisions D4/D7."}
-{"file": ".trellis/spec/backend/directory-structure.md", "reason": "File-length ceiling, filename-equals-primary-type, and the Type.Topic.cs shard convention."}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "The format/JB gates and the narrow suppression policy for any analyzer finding the IsTestProject spike turns up."}
