@@ -10,37 +10,36 @@ using WinForward.Windows;
 namespace WinForward.Runtime.Capture;
 
 /// <summary>
-/// Runs capture generations across Windows adapter-list changes (task 09-07-adapter-list-refresh,
-/// design §3.5). Generation 0 resolves its scope with fail-closed startup semantics; every later
-/// generation is rebuilt through the refresh pipeline: the change source — or a pump degradation
-/// with native error 87 (R3) — raises a refresh demand, the runner waits out the storm-guard
-/// interval, re-enumerates, and diffs the fresh in-scope link state (stable ID →
-/// handle/MAC/MTU/address fingerprint) against the running generation's. An identical diff is a
-/// logged no-op that never touches the running pumps; a real change stops the current generation
-/// (its runtime cleanup performs the best-effort mode restore), swaps the durable layer's adapter
-/// views via <c>onScopeInstalled</c>, and starts the next generation on fresh handles. The durable
-/// layer is disposed exactly once, after the final generation completes. A generation fault is
-/// fail-closed: it propagates out of <see cref="RunAsync"/> after teardown — except a stale-handle
-/// startup fault (native 87 before the generation reached its pump run), which is absorbed and
-/// rebuilt through a forced, storm-guarded refresh, bounded by
-/// <see cref="MaxConsecutiveStartupRecoveries"/> consecutive recoveries (task 09-11). Since task
-/// 09-17 a NON-forced periodic refresh demand (default every 30 s, disabled with
+/// Runs capture generations across Windows adapter-list changes. Generation 0 resolves its scope
+/// with fail-closed startup semantics; every later generation is rebuilt through the refresh
+/// pipeline: the change source — or a pump degradation with native error 87 — raises a refresh
+/// demand, the runner waits out the storm-guard interval, re-enumerates, and diffs the fresh
+/// in-scope link state (stable ID → handle/MAC/MTU/address fingerprint) against the running
+/// generation's. An identical diff is a logged no-op that never touches the running pumps; a real
+/// change stops the current generation (its runtime cleanup performs the best-effort mode restore),
+/// swaps the durable layer's adapter views via <c>onScopeInstalled</c>, and starts the next
+/// generation on fresh handles. The durable layer is disposed exactly once, after the final
+/// generation completes. A generation fault is fail-closed: it propagates out of
+/// <see cref="RunAsync"/> after teardown — except a stale-handle startup fault (native 87 before the
+/// generation reached its pump run), which is absorbed and rebuilt through a forced, storm-guarded
+/// refresh, bounded by <see cref="MaxConsecutiveStartupRecoveries"/> consecutive recoveries. A
+/// NON-forced periodic refresh demand (default every 30 s, disabled with
 /// <see cref="TimeSpan.Zero"/>) re-checks the enumeration so host link-state changes the NDISRD
 /// list never signals — IPv6 temporary-address rotation above all — still refresh the adapter
 /// view, and interception-path failure rates reaching their health thresholds arm a FORCED
-/// refresh through the same pipeline (<see cref="HealthSignal"/>, task 09-17 R1-B).
+/// refresh through the same pipeline (<see cref="HealthSignal"/>).
 /// </summary>
 public sealed class LayeredCaptureRunner
 {
     private static readonly TimeSpan s_defaultMinimumRefreshInterval = TimeSpan.FromSeconds(1);
-    /// <summary>The periodic link-state re-check interval (task 09-17 R1-A); <see cref="TimeSpan.Zero"/> disables it.</summary>
+    /// <summary>The periodic link-state re-check interval; <see cref="TimeSpan.Zero"/> disables it.</summary>
     private static readonly TimeSpan s_defaultPeriodicRefreshInterval = TimeSpan.FromSeconds(30);
     /// <summary>ERROR_INVALID_PARAMETER: every cached handle went stale because the driver rebuilt its bound-adapter list.</summary>
     private const int AdapterListRebuiltNativeError = 87;
     /// <summary>
     /// Consecutive recoverable startup faults beyond this count rethrow the original fault
     /// fail-closed: a settling adapter-list churn recovers within two or three rebuilds, so a
-    /// longer streak is a genuine defect, not a race (task 09-11 R3).
+    /// longer streak is a genuine defect, not a race.
     /// </summary>
     private const int MaxConsecutiveStartupRecoveries = 3;
     private readonly IAdapterEnumerationProvider _enumerationProvider;
@@ -106,15 +105,15 @@ public sealed class LayeredCaptureRunner
     }
 
     /// <summary>
-    /// The interception-health signal the durable layer reports reinject/forward failures into
-    /// (task 09-17 R1-B). A threshold crossing arms a forced refresh demand through the runner's
-    /// existing forced semantics — never a direct rebuild.
+    /// The interception-health signal the durable layer reports reinject/forward failures into. A
+    /// threshold crossing arms a forced refresh demand through the runner's existing forced
+    /// semantics — never a direct rebuild.
     /// </summary>
     public IInterceptionHealthSignal HealthSignal => _healthMonitor;
 
     /// <summary>
-    /// The current generation's pump snapshot (task 09-17 R2.3, heartbeat source): running and
-    /// degraded adapter-pump counts, default (0/0) while no generation is installed. The
+    /// The current generation's pump snapshot, the heartbeat's source: running and degraded
+    /// adapter-pump counts, default (0/0) while no generation is installed. The
     /// generation reference is read without a lock — reference reads are atomic, a torn read is
     /// impossible, and the worst outcome is one heartbeat reporting the previous generation's
     /// counts (or none) during a refresh swap, which is an acceptable stale read for telemetry.
@@ -122,7 +121,7 @@ public sealed class LayeredCaptureRunner
     public CapturePumpState PumpState => _generation?.Pumps ?? default;
 
     /// <summary>
-    /// Feeds a degraded-pump observation into the refresh pipeline (R3): a degradation with
+    /// Feeds a degraded-pump observation into the refresh pipeline: a degradation with
     /// ERROR_INVALID_PARAMETER means the adapter's handle went stale, which is the in-process
     /// symptom of a bound-adapter-list rebuild. The pending re-check is storm-guarded like any
     /// other refresh demand, so a genuine defect cannot cause a rebuild loop. Other native errors
@@ -236,20 +235,19 @@ public sealed class LayeredCaptureRunner
     }
 
     /// <summary>
-    /// The health monitor's trigger (task 09-17 R1-B): an interception-path failure rate crossed
-    /// its threshold, so a forced refresh demand reconciles the adapter view on fresh handles
-    /// even when the NDISRD list never signalled — the outage shape the periodic re-check cannot
-    /// catch faster than its interval. Arming rides the existing forced semantics (the flag is
-    /// consumed once by the next demand; an install clears it), and the storm guard still paces
-    /// the rebuild itself. The warn is observational and never changes the refresh outcome.
+    /// The health monitor's trigger: an interception-path failure rate crossed its threshold, so a
+    /// forced refresh demand reconciles the adapter view on fresh handles even when the NDISRD list
+    /// never signalled — the outage shape the periodic re-check cannot catch faster than its
+    /// interval. Arming rides the existing forced semantics (the flag is consumed once by the next
+    /// demand; an install clears it), and the storm guard still paces the rebuild itself. The warn
+    /// is observational and never changes the refresh outcome.
     /// <para>
     /// Every logged field comes from <paramref name="trigger"/>, the snapshot the monitor captured
     /// in the same locked section that armed this trigger: the demand signalled here is processed
     /// concurrently by <see cref="RunAsync"/>'s loop, whose success hook
     /// (<see cref="InterceptionHealthMonitor.NoteRefreshCompleted"/>) resets the streak and clears
-    /// the windows, so reading the monitor back from this handler logged a post-reset
-    /// <c>consecutive=0</c> for a trigger that fired at streak <c>1</c>
-    /// (<c>LayeredCaptureRunnerHealthSignalTests</c>).
+    /// the windows, so reading the monitor back from this handler would log a post-reset
+    /// <c>consecutive=0</c> for a trigger that fired at streak <c>1</c>.
     /// </para>
     /// </summary>
     private void OnForcedRefreshTriggered(ForcedRefreshTrigger trigger)
@@ -302,8 +300,8 @@ public sealed class LayeredCaptureRunner
 
     /// <summary>
     /// Stops the running generation and rethrows the fault it ended with, if any; a classified
-    /// startup stale-handle fault is absorbed into a forced rebuild instead (task 09-11), with
-    /// no extra demand signal — the caller's demand processing installs the replacement next.
+    /// startup stale-handle fault is absorbed into a forced rebuild instead, with no extra demand
+    /// signal — the caller's demand processing installs the replacement next.
     /// </summary>
     private async Task StopGenerationAsync()
     {
@@ -353,10 +351,10 @@ public sealed class LayeredCaptureRunner
     }
 
     /// <summary>
-    /// A generation fault is a recoverable startup stale-handle fault (task 09-11 R1) exactly when
-    /// it is the adapter-list-rebuilt native error and the generation never reached its pump run:
-    /// during startup the only adapter-associated native calls are the mode snapshot/apply, so
-    /// this signature means the list rebuilt after the runner's enumeration.
+    /// A generation fault is a recoverable startup stale-handle fault exactly when it is the
+    /// adapter-list-rebuilt native error and the generation never reached its pump run: during
+    /// startup the only adapter-associated native calls are the mode snapshot/apply, so this
+    /// signature means the list rebuilt after the runner's enumeration.
     /// </summary>
     private static bool IsRecoverableStartupFault(ICaptureGeneration generation, Exception fault) =>
         fault is Win32Exception { NativeErrorCode: AdapterListRebuiltNativeError }
@@ -388,10 +386,10 @@ public sealed class LayeredCaptureRunner
     }
 
     /// <summary>
-    /// Exit-observation recovery (task 09-11 R2): the faulted generation is released exactly as a
-    /// refresh stop would release it, the forced rebuild is armed, and a refresh demand is raised
-    /// so the loop reconciles on fresh handles. Over cap, the original fault is rethrown
-    /// fail-closed after the release, so the subsequent teardown finds no generation to stop.
+    /// Exit-observation recovery: the faulted generation is released exactly as a refresh stop
+    /// would release it, the forced rebuild is armed, and a refresh demand is raised so the loop
+    /// reconciles on fresh handles. Over cap, the original fault is rethrown fail-closed after the
+    /// release, so the subsequent teardown finds no generation to stop.
     /// </summary>
     private async Task RecoverFromStartupFaultAsync(ICaptureGeneration generation, Exception fault)
     {

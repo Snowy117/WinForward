@@ -7,8 +7,8 @@ namespace WinForward.Runtime.TcpRedirect;
 /// <summary>
 /// A retired session and its (already detached) relay, captured atomically under the store gate.
 /// Retire itself already removed the table alias and armed the tombstone inside that critical
-/// section (R2); only the trailing disposals (listener, relay, self-traffic token, lifetime CTS)
-/// run outside the lock.
+/// section; only the trailing disposals — listener, relay, self-traffic token, lifetime CTS — run
+/// outside the lock.
 /// </summary>
 internal sealed record RetiredSession(TcpRedirectSession Session, ITcpRelay? Relay);
 
@@ -16,18 +16,18 @@ internal sealed record RetiredSession(TcpRedirectSession Session, ITcpRelay? Rel
 /// Owns the TCP redirect session set and its lifecycle invariants: every mutation of the session
 /// dictionary happens under one gate, so registration, teardown, expiry, and dispose remain mutually
 /// exclusive. The store's lifetime CTS and its inflight-setup drain live in a
-/// <see cref="QuiescenceScope"/> (D7): <c>DisposeAsync</c> seals and drains it, which is what joins
-/// every registered setup before the ordered session teardown runs. It is
-/// also the single tombstone write point: every teardown path funnels through
-/// <see cref="RemoveAssociationFromTable"/>, which records the TIME_WAIT-grace tombstone when the
-/// removal wins. The retire path removes the table alias and arms the tombstone while still
-/// holding the store gate, so session-dictionary removal, Phase=Closing, lifetime retire, table
-/// alias removal, and tombstone arming are ONE atomic step — a same-tuple packet can never land
-/// in a window where the session is gone but the alias still resolves (R2); only disposal trails
-/// outside the gate. The resulting lock order is store gate → table gate → tombstone gate; it is
-/// acyclic repo-wide (no path acquires them in reverse), and the table/tombstone critical
-/// sections are synchronous and non-blocking, so nesting them under the store gate is safe.
-/// The coordinator and setup pipeline reach the session set only through this module's methods.
+/// <see cref="QuiescenceScope"/>: <c>DisposeAsync</c> seals and drains it, which is what joins
+/// every registered setup before the ordered session teardown runs. It is also the single tombstone
+/// write point: every teardown path funnels through <see cref="RemoveAssociationFromTable"/>, which
+/// records the TIME_WAIT-grace tombstone when the removal wins. The retire path removes the table
+/// alias and arms the tombstone while still holding the store gate, so session-dictionary removal,
+/// Phase=Closing, lifetime retire, table alias removal, and tombstone arming are ONE atomic step —
+/// a same-tuple packet can never land in a window where the session is gone but the alias still
+/// resolves; only disposal trails outside the gate. The resulting lock order is store gate → table
+/// gate → tombstone gate; it is acyclic repo-wide (no path acquires them in reverse), and the
+/// table/tombstone critical sections are synchronous and non-blocking, so nesting them under the
+/// store gate is safe. The coordinator and setup pipeline reach the session set only through this
+/// module's methods.
 /// </summary>
 internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, ILogger logger, int capacity, TimeProvider timeProvider)
 {
@@ -105,8 +105,8 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, ILogger lo
     /// <summary>
     /// Retires and releases every half-open session still <see cref="RelayPhase.Redirecting"/> with
     /// no activity for the idle timeout, then reclaims elapsed tombstones. A relaying session is
-    /// deliberately not expired here (M4); its teardown is tied to relay completion. The optional
-    /// pending-SYN prune hook (R8) rides this existing sweep tick (no dedicated timer), running
+    /// deliberately not expired here; its teardown is tied to relay completion. The optional
+    /// pending-SYN prune hook rides this existing sweep tick (no dedicated timer), running
     /// inside the same sweep phase as the store's own expiry so their clocks agree, and takes the tick's
     /// timestamp so its caller can cache one delegate instead of allocating a closure per tick.
     /// <para>
@@ -203,9 +203,9 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, ILogger lo
 
     private async Task DisposeCoreAsync()
     {
-        // The scope owns the store's lifetime CTS (D7) and joins every in-flight setup, so the
-        // ordered teardown keeps its historical shape with the setup drain as the scope's join:
-        // cancel the token, drain the setups, retire the sessions, then await their accept loops.
+        // The scope owns the store's lifetime CTS and joins every in-flight setup, so the ordered
+        // teardown is: cancel the token, drain the setups, retire the sessions, then await their
+        // accept loops.
         _scope.Cancel();
         await _scope.DrainAsync().ConfigureAwait(false);
 
@@ -227,7 +227,7 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, ILogger lo
                 catch (OperationCanceledException) { /* the expected shutdown path */ }
                 catch (ObjectDisposedException) { /* the listener was already disposed during shutdown */ }
             }
-            // The accept loop owns the lifetime CTS disposal (R1); a session whose loop was never
+            // The accept loop owns the lifetime CTS disposal; a session whose loop was never
             // launched has no other owner, so it is released here after the quiescence wait.
             await session.DisposeLifetimeAsync().ConfigureAwait(false);
         }
@@ -266,7 +266,7 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, ILogger lo
         session.Retire();
         var relay = session.Relay;
         session.Relay = null;
-        // Runs while the store gate is still held (R2): a same-tuple SYN or data packet can
+        // Runs while the store gate is still held: a same-tuple SYN or data packet can
         // never observe the session gone from the dictionary while the alias still resolves —
         // the removal and the grace tombstone land in the same critical section as the retire.
         // Lock order store → table → tombstone is documented on the class.
@@ -303,7 +303,7 @@ internal sealed class TcpRedirectSessionStore(TcpRedirectTable table, ILogger lo
         }
         // The lifetime CTS is disposed by the accept loop once it ends (it is the only reader of
         // session.Token), so a retire can never pull the CTS out from under a concurrent Token
-        // read (R1). A session whose loop was never launched is disposed here.
+        // read. A session whose loop was never launched is disposed here.
         if (session.AcceptLoop is null) await session.DisposeLifetimeAsync().ConfigureAwait(false);
     }
 

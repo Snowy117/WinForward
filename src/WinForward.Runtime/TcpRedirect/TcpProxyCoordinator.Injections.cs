@@ -10,10 +10,9 @@ namespace WinForward.Runtime.TcpRedirect;
 /// <summary>
 /// The deferred-injection half of <see cref="TcpProxyCoordinator"/>: the append predicate both data
 /// legs consult, the per-(adapter handle, target direction) lane flush the pump's batch-completed
-/// callback drives, and the failure tails a degraded batch runs. One coordinator type split across
-/// two files purely for the repository's effective-line budget (directory-structure.md, "File Length
-/// Ceiling"); the members keep the ownership the design assigns them — the coordinator owns the lanes because
-/// it owns the association and the per-flow failure attribution of the frames they hold.
+/// callback drives, and the failure tails a degraded batch runs. The split into two files is purely
+/// for the repository's effective-line ceiling; the coordinator owns the lanes because it owns the
+/// association and the per-flow failure attribution of the frames they hold.
 /// </summary>
 public sealed partial class TcpProxyCoordinator
 {
@@ -303,9 +302,9 @@ public sealed partial class TcpProxyCoordinator
         ObjectDisposedException.ThrowIf(_store.IsDisposed, this);
 
         var key = packet.Context.Key;
-        // M5 belt-and-suspenders: this coordinator owns TCP redirect table entries only. The
-        // dispatcher already gates the reverse handler to TCP (H1), but a non-TCP packet must never
-        // be routed into reverse handling regardless of call context.
+        // This coordinator owns TCP redirect table entries only: the dispatcher already gates the
+        // reverse handler to TCP, but a non-TCP packet must never be routed into reverse handling
+        // regardless of call context.
         if (key.Protocol != TransportProtocol.Tcp) return ValueTask.FromResult(TcpRedirectOutcome.NotRelevant);
 
         var original = association.OriginalKey;
