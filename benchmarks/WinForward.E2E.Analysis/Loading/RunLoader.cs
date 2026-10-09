@@ -11,14 +11,14 @@ namespace WinForward.E2E.Analysis.Loading;
 /// <remarks>
 /// <para><b>The roster decides which arms exist, the directory decides what they are called.</b>
 /// <c>run.json</c> names each arm and the file it wrote; a file the roster does not mention is still
-/// loaded, under its own name, because a campaign that wrote an unplanned file did measure something.
-/// Arms are loaded in the reference's own order so the sample series and every derived list follow it.</para>
+/// loaded under its own name, because a campaign that wrote an unplanned file did measure something.
+/// Arms load in the reference's own order so the sample series and every derived list follow it.</para>
 /// <para><b>A lane is loaded differently, and deliberately.</b> <see cref="LoadDual"/> attaches the
 /// dual lanes to the row their <em>labels</em> name, not to the row whose directory holds them: the
-/// shipped orchestrator writes one <c>&lt;pass&gt;/dual</c> for the whole pass and rebuilds it for every
-/// dual row, so the directory a lane sits in says nothing about which row it belongs to. The
-/// pass-level directory is offered to the rows that have no lanes of their own, in row order, until the
-/// row the lanes name is reached — which is also why an earlier row can end up holding a copy.</para>
+/// orchestrator writes one <c>&lt;pass&gt;/dual</c> per pass and rebuilds it for every dual row, so
+/// the directory a lane sits in says nothing about its row. That directory is offered to the rows
+/// without lanes of their own, in row order, until the row the lanes name is reached — which is why
+/// an earlier row can end up holding a copy.</para>
 /// </remarks>
 internal static class RunLoader
 {
@@ -48,10 +48,10 @@ internal static class RunLoader
     /// <param name="runId">The row id, as the directory spells it.</param>
     /// <param name="directory">The run's directory.</param>
     /// <param name="requireTruth">
-    /// Whether a missing <c>proxy-truth.json</c> is a load error. A lane's truth lives one level up, in
-    /// the dual directory, so a lane is loaded without requiring its own.
+    /// Whether a missing <c>proxy-truth.json</c> is a load error. A lane's truth lives one level up,
+    /// in the dual directory, so a lane is loaded without requiring its own.
     /// </param>
-    /// <param name="isLane">Whether this is a dual lane: a lane publishes no config files of its own.</param>
+    /// <param name="isLane">Whether this is a dual lane, which publishes no config files of its own.</param>
     internal static ClientRun Load(string passId, string runId, string directory, bool requireTruth = true, bool isLane = false)
     {
         ArgumentNullException.ThrowIfNull(passId);
@@ -159,7 +159,7 @@ internal static class RunLoader
         return owner;
     }
 
-    /// <summary>The row id the lanes' labels name, taken from the first label that names one.</summary>
+    /// <summary>The row id the first label that names one points at.</summary>
     private static string? Owner(IReadOnlyList<(string Lane, ClientRun Run)> lanes)
     {
         foreach (var (_, run) in lanes)
@@ -192,13 +192,14 @@ internal static class RunLoader
     /// <paramref name="run"/>.
     /// </summary>
     /// <remarks>
-    /// <para>A document that is just <see langword="null"/> reads as no value here: the run has no truth,
-    /// §15 prints <c>no</c>, and a dual truth reads as <c>no dual/proxy-truth.json</c>. A
-    /// <see cref="JsonElement"/> cannot carry that distinction for this model, so the file's own
+    /// <para>A document that is just <see langword="null"/> reads as no value here: the run has no
+    /// truth, the report prints <c>no</c>, and a dual truth reads as <c>no dual/proxy-truth.json</c>.
+    /// A <see cref="JsonElement"/> cannot carry that distinction for this model, so the file's own
     /// <see langword="null"/> and its absence are answered the same way.</para>
-    /// <para>The note names the failure by its .NET exception type, and that string is part of §15's
-    /// compared bytes. A truncated <c>run.json</c> is reachable — the harness creates it in place, so an
-    /// interrupted write leaves a file that is valid UTF-8 and not valid JSON.</para>
+    /// <para>The note names the failure by its .NET exception type, and that string is part of the
+    /// compared bytes the report prints. A truncated <c>run.json</c> is reachable — the harness
+    /// creates it in place, so an interrupted write leaves a file that is valid UTF-8 and not valid
+    /// JSON.</para>
     /// </remarks>
     private static JsonElement? ReadJsonFile(ClientRun run, string path, string label)
     {

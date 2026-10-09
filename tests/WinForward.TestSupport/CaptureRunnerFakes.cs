@@ -6,8 +6,8 @@ using WinForward.Windows;
 namespace WinForward.TestSupport;
 
 /// <summary>
-/// Manual-switch <see cref="IAdapterEnumerationProvider"/> for capture-runner tests (task
-/// 09-07-adapter-list-refresh): the test rewrites the visible enumeration between refresh signals.
+/// Manual-switch <see cref="IAdapterEnumerationProvider"/> for capture-runner tests: the test
+/// rewrites the visible enumeration between refresh signals.
 /// </summary>
 internal sealed class FakeAdapterEnumerationProvider(IReadOnlyList<AdapterEnumerationItem> initial) : IAdapterEnumerationProvider
 {
@@ -52,7 +52,7 @@ internal sealed class FakeAdapterEnumerationProvider(IReadOnlyList<AdapterEnumer
 /// real runtime), the test completes it, or the test faults it (the exception propagates).
 /// Latches <see cref="ReachedPumpRun"/> once its run starts, mirroring the latch position of
 /// the real runtime's start sequence; a <see cref="FaultAtStartupWith"/> exception escapes
-/// before that latch — the pre-pump startup signature (task 09-11).
+/// before that latch — the pre-pump startup signature.
 /// </summary>
 internal sealed class FakeCaptureGeneration(int index, IReadOnlyList<AdapterEnumerationItem> scope) : ICaptureGeneration
 {
@@ -134,7 +134,7 @@ internal sealed class FakeCaptureGenerationFactory : ICaptureGenerationFactory
 
     public Action<FakeCaptureGeneration>? OnCreated { get; set; }
 
-    /// <summary>Per-creation script (task 09-11): assigns the startup-fault knobs on each freshly created generation before it can run.</summary>
+    /// <summary>Per-creation script: assigns the startup-fault knobs on each freshly created generation before it can run.</summary>
     public Action<FakeCaptureGeneration>? StartupFaultScript { get; set; }
 
     public IReadOnlyList<FakeCaptureGeneration> Generations

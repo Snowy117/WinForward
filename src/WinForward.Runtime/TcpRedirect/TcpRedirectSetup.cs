@@ -73,10 +73,10 @@ internal sealed class TcpRedirectSetup(ITcpRedirectListenerFactory listenerFacto
             return null;
         }
 
-        // A concurrent caller may have claimed this same original flow first. TryClaim returns the
-        // existing association (whose translated tuple differs from this listener's) rather than a
-        // new one. The just-allocated listener is redundant: release it and fall back to the
-        // re-inject path against the existing association so only one listener owns the flow.
+        // A concurrent caller may have claimed this same original flow first, in which case TryClaim
+        // returns that existing association rather than a new one. The just-allocated listener is
+        // redundant: release it and fall back to re-injecting against the existing association, so
+        // only one listener owns the flow.
         if (association.TranslatedListenerTuple != translatedTuple)
         {
             Interlocked.Increment(ref _concurrentLoserCount);
@@ -91,17 +91,16 @@ internal sealed class TcpRedirectSetup(ITcpRedirectListenerFactory listenerFacto
     /// Resolves the adapter-local redirect destination address for a forwarded flow's SYN
     /// (DNAT-to-local). The host IP-swap shape would send the frame to the client's own address,
     /// which is not local for a forwarded flow, so the listener would never see it. Loopback is
-    /// deliberately excluded by the provider: a martian-source reverse reply could be dropped by
-    /// the stack before it reaches the capture layer for rewriting. Returns null for host flows
-    /// (host shape needs no such address) and when the origin adapter owns no usable address of
-    /// the flow's family; the caller fails closed on the latter.
+    /// deliberately excluded by the provider. Returns null for host flows (which need no such
+    /// address) and when the origin adapter owns no usable address of the flow's family; the caller
+    /// fails closed on the latter.
     /// </summary>
     private IPAddressValue? ResolveForwardLocalAddress(FlowKey key)
     {
         if (key.Origin != FlowOriginKind.Forwarded) return null;
         if (!slots.TryResolve(key.OriginAdapterSlot, out var adapterMetadata) || adapterMetadata is null) return null;
-        // Hot-path contract 1: this cold edge performs the flow's only From(IPAddress)
-        // conversion; the per-packet rewrite reads the stored raw address instead.
+        // Hot-path contract: this cold edge performs the flow's only From(IPAddress) conversion; the
+        // per-packet rewrite reads the stored raw address instead.
         var address = localAddresses.SelectLocalAddress(adapterMetadata.StableId, key.AddressFamily, key.Local.Address.ToIPAddress());
         return address is not null ? IPAddressValue.From(address) : (IPAddressValue?)null;
     }
@@ -115,8 +114,8 @@ internal sealed class TcpRedirectSetup(ITcpRedirectListenerFactory listenerFacto
             return null;
         }
 
-        // The rewrite below mutates the lease's pooled frame in place, so the original-SYN
-        // template must be recorded first; afterwards the frame only holds the rewritten form.
+        // The rewrite below mutates the lease's pooled frame in place, so the original-SYN template
+        // must be recorded first; afterwards the frame holds only the rewritten form.
         var frame = packet.Lease.Frame;
         var key = packet.Context.Key;
         var originalClient = key.Local;
@@ -140,7 +139,7 @@ internal sealed class TcpRedirectSetup(ITcpRedirectListenerFactory listenerFacto
             return null;
         }
 
-        // L4 clarity: the wildcard registry cannot match this key — the observable reverse leg is
+        // The wildcard registry cannot match this key — the observable reverse leg is
         // (client:orig_port) -> (client_ip:proxy_port), whose per-client source port is unknown
         // until a connection arrives. The TCP-only reverse hook guards that leg; this registration
         // stays as writer-intent belt-and-suspenders for an exact listener tuple.
@@ -173,7 +172,7 @@ internal sealed class TcpRedirectSetup(ITcpRedirectListenerFactory listenerFacto
     /// fault releases them exactly once through the store and surfaces unchanged. The
     /// already-disposed-store shape is not a fault: <see cref="TcpRedirectSessionStore.TryRegister"/>
     /// returns null after retiring the session and releasing its token, and the session's lifetime
-    /// drain runs here (the store's registration is synchronous and may not discard an awaitable).
+    /// drain is run here rather than returned as a discarded awaitable.
     /// </summary>
     private async ValueTask<TcpRedirectSession?> RegisterSessionAsync(ITcpRedirectListener listener, TcpRedirectAssociation association, Endpoint translatedTuple, Socks5Server server, long flowGeneration)
     {

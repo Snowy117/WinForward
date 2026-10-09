@@ -71,7 +71,7 @@ public sealed class WindowsAdapterLocalAddressProvider : IAdapterLocalAddressPro
         _adapters = adapters ?? GetWindowsAdapterAddresses;
         _timeProvider = timeProvider;
         // Process-lifetime subscription by design: the provider is a composition-root singleton
-        // that outlives every capture pump, so no unsubscribe is kept.
+        // outliving every capture pump, so no unsubscribe is kept.
         (subscribeAddressChanged ?? SubscribeNetworkAddressChanged)(InvalidateSnapshot);
     }
 
@@ -131,9 +131,9 @@ public sealed class WindowsAdapterLocalAddressProvider : IAdapterLocalAddressPro
     }
 
     /// <summary>
-    /// Returns the current address snapshot, rebuilding it at most once per invalidation even
-    /// when several pump threads race: the fast path is a lock-free volatile read, and callers
-    /// that lose the rebuild gate re-check freshness before enumerating again.
+    /// Returns the current address snapshot, rebuilding it at most once per invalidation even when
+    /// several pump threads race: the fast path takes no lock, and only a caller that loses the
+    /// rebuild gate enumerates.
     /// </summary>
     private AddressSnapshot GetSnapshot()
     {
@@ -152,8 +152,8 @@ public sealed class WindowsAdapterLocalAddressProvider : IAdapterLocalAddressPro
             }
             catch when (snapshot is not null)
             {
-                // Enumeration failure keeps the last snapshot: stale beats fail-closed for
-                // address selection, and the new capture stamp bounds retries to one per TTL.
+                // Enumeration failure keeps the last snapshot: stale beats fail-closed for address
+                // selection, and a fresh stamp bounds retries to one per TTL.
                 adapters = snapshot.Adapters;
             }
 

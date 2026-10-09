@@ -13,7 +13,7 @@ namespace WinForward.Runtime.TcpRedirect;
 internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, ILogger logger, ClientResetInjector clientReset, Func<TcpRedirectSession, ITcpRelay, bool> tryAttachRelay, Func<TcpRedirectSession, ValueTask> tearDownSession)
 {
 
-    /// <summary>A short bounded back-off between retries of a transient accept error (L3).</summary>
+    /// <summary>A short bounded back-off between retries of a transient accept error.</summary>
     private static readonly TimeSpan s_boundedAcceptRetryDelay = TimeSpan.FromMilliseconds(100);
 
     public async Task RunAcceptLoopAsync(TcpRedirectSession session)
@@ -39,7 +39,7 @@ internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IL
                 }
                 catch (Exception acceptEx)
                 {
-                    // L3: a transient accept error is retried after a bounded delay, never a tight
+                    // A transient accept error is retried after a bounded delay, never a tight
                     // busy-loop. Cancellation and a disposed listener already break out above.
                     var error = acceptEx.GetType().Name;
                     TcpRedirectLog.TcpRedirectAcceptFailed(logger, error);
@@ -55,7 +55,7 @@ internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IL
             // This loop is the only reader of session.Token (directly and through
             // ClientResetInjector's session overload), so it owns the lifetime CTS disposal: the
             // store defers DisposeLifetimeAsync until the loop ends and a retire can never pull the
-            // CTS out from under a concurrent Token read (R1). Disposal is single-flight, so the
+            // CTS out from under a concurrent Token read. Disposal is single-flight, so the
             // store's own drain after it awaits this loop is a no-op.
             await session.DisposeLifetimeAsync().ConfigureAwait(false);
         }
@@ -97,7 +97,7 @@ internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IL
                 // Both terminal drains own the session's remaining lifetime: the relay-completion
                 // observer runs the teardown, the redundant-accept drain spans until that teardown
                 // disposes the listener. Awaiting both (no discarded tasks) makes session.AcceptLoop
-                // the store's true quiescence wait (R1/R2).
+                // the store's true quiescence wait.
                 var relayCompletion = ObserveRelayCompletionAsync(session, relay, token);
                 await DrainRedundantConnectionsAsync(session, token).ConfigureAwait(false);
                 await relayCompletion.ConfigureAwait(false);
@@ -119,7 +119,7 @@ internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IL
         // the accept-to-attach window), so the relay and the accepted connection have no owner and
         // the redirect must not be left half-open. This runs outside the setup try: a disposal
         // fault here is not a relay setup failure, and routing it through the reset/fail handler
-        // would inject against an already retired session (R7).
+        // would inject against an already retired session.
         await DiscardUnattachedRelayAsync(unattachedRelay, accepted).ConfigureAwait(false);
         await tearDownSession(session).ConfigureAwait(false);
         return false;
@@ -175,9 +175,9 @@ internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IL
             }
             catch
             {
-                // L3: a non-cancel, non-disposed accept error must not be a tight busy-loop; back
-                // off for a bounded delay before retrying. The loop still ends when teardown
-                // disposes the listener.
+                // A non-cancel, non-disposed accept error must not be a tight busy-loop; back off
+                // for a bounded delay before retrying. The loop still ends when teardown disposes
+                // the listener.
                 await BoundedRetryDelayAsync(token).ConfigureAwait(false);
                 continue;
             }

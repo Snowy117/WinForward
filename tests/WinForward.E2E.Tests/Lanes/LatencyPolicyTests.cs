@@ -13,8 +13,8 @@ namespace WinForward.E2E.Tests.Lanes;
 /// The two lane policies on their own: the book they keep, the order they book a reply in, and the
 /// window they answer admission from. These facts drive the policies directly, so what they pin is the
 /// policy's contract and not the engine's loop (the loop's order has its own facts), and they are the
-/// place the ruled order of a udp settlement (D18.5 #3) and the composition of
-/// <c>outstandingAtTeardown</c> (D18.6 #1) are locked.
+/// place the ruled order of a udp settlement and the composition of
+/// <c>outstandingAtTeardown</c> are locked.
 /// </summary>
 public sealed class LatencyPolicyTests
 {
@@ -190,7 +190,7 @@ public sealed class LatencyPolicyTests
         policy.OnReceive(Payload(1), Frame(1), arrived);
 
         // Settled five seconds later: a sample taken at the settle instant would be two orders of
-        // magnitude larger, and the reading has to be the arrival (D18.5 #1).
+        // magnitude larger, and the reading has to be the arrival.
         policy.Settle(arrived + Clock.FromSeconds(5));
 
         var snapshot = HistogramSnapshot(rtt);
@@ -273,10 +273,10 @@ public sealed class LatencyPolicyTests
     }
 
     /// <summary>
-    /// The composition D18.6 #1 rules: what the record publishes as <c>outstandingAtTeardown</c> is the
-    /// policy's pending book plus the engine's defer-queue occupancy. The engine is the only thing that
-    /// can see the queue, so the fact drives a real lane (real policy, a transport that never answers)
-    /// and reads both halves from where they live.
+    /// The composition rule behind <c>outstandingAtTeardown</c>: the record publishes the policy's
+    /// pending book plus the engine's defer-queue occupancy. The engine is the only thing that can see
+    /// the queue, so the fact drives a real lane (real policy, a transport that never answers) and reads
+    /// both halves from where they live.
     /// </summary>
     [Fact]
     public async Task OutstandingAtTeardownIsThePolicyPendingBookPlusTheEnginesDeferredIntents()
@@ -306,8 +306,8 @@ public sealed class LatencyPolicyTests
     /// <summary>
     /// The engine's defer occupancy is a snapshot of the queue, not a formula over the other counters.
     /// The policy below makes the difference visible: it refuses the retried intent, so an intent is
-    /// dequeued without any counter moving — the subtraction the 2a-2 check warned about would then
-    /// report the deferred count as the whole queue history (4), while the queue really holds one.
+    /// dequeued without any counter moving — a subtraction over the counters would report the deferred
+    /// count as the whole queue history (4), while the queue really holds one.
     /// </summary>
     [Fact]
     public async Task DeferredPendingIsTheQueueOccupancyAndNotASubtractionOverTheOtherCounters()
@@ -327,8 +327,8 @@ public sealed class LatencyPolicyTests
         Assert.Equal(1, counts.DeferredPending);
         Assert.Equal([1], transport.SentSequences);
 
-        // The 2a-2 check's subtraction would report four here: it cannot see a skipped retry leaving
-        // the queue without moving any counter.
+        // The subtraction reports four here: it cannot see a skipped retry leaving the queue without
+        // moving any counter.
         var subtraction = (counts.DeferredQueued - counts.DeferredDropped) - ((counts.SentOk + counts.SendFailures) - (counts.Supplied - counts.DeferredQueued));
         Assert.NotEqual(counts.DeferredPending, subtraction);
     }
@@ -389,8 +389,8 @@ public sealed class LatencyPolicyTests
 
     /// <summary>
     /// A policy that sends the first slot, defers every later one, and answers <c>Skip</c> to a retried
-    /// intent — the third decision D18.5 #7 allows and no real lane uses. It is what lets a fact tell a
-    /// queue snapshot apart from a formula: a skipped retry leaves the queue without moving any counter.
+    /// intent — a decision no real lane uses. It is what lets a fact tell a queue snapshot apart from a
+    /// formula: a skipped retry leaves the queue without moving any counter.
     /// </summary>
     private sealed class SkipTheRetryPolicy : ILanePolicy
     {

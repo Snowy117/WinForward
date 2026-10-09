@@ -16,8 +16,8 @@ public readonly record struct AdapterCaptureBinding(WindowsAdapter Adapter, usho
 /// adapter concurrently. Graceful cancellation (the linked token) lets every pump exit normally. An
 /// unexpected failure in any pump cancels the shared token so sibling pumps stop promptly, then the
 /// exception propagates for the runtime to restore adapter modes (fail-closed). A degraded pump exit
-/// (R7: transient-read retries exhausted, or a permanent native read error) is NOT a failure: the
-/// pump returns normally, siblings keep running uncanceled, and the optional
+/// (transient-read retries exhausted, or a permanent native read error) is NOT a failure: the pump
+/// returns normally, siblings keep running uncanceled, and the optional
 /// <c>onAdapterDegraded(adapter, nativeError)</c> callback is forwarded so the wiring can restore
 /// just that adapter's mode while interception continues elsewhere. The driver stays owned by the
 /// caller for the whole run, so <see cref="DisposeAsync"/> only stops the pumps, releases the
@@ -79,13 +79,13 @@ public sealed class MultiAdapterCaptureLoop : IPacketCaptureLoop
                 }))];
     }
 
-    /// <summary>How many adapter pumps exited through the degraded path (telemetry, R7).</summary>
+    /// <summary>How many adapter pumps exited through the degraded path (telemetry).</summary>
     internal long DegradedAdapterCount => Interlocked.Read(ref _degradedAdapterCount);
 
     /// <summary>
-    /// Live pump counts for the heartbeat (task 09-17 R2.3): running excludes pumps that exited
-    /// through the degraded path, because a degraded pump never returns to its loop. Both reads
-    /// are lock-free monotonic counters — the value is observational telemetry only.
+    /// Live pump counts for the heartbeat: running excludes pumps that exited through the degraded
+    /// path, because a degraded pump never returns to its loop. Both reads are lock-free monotonic
+    /// counters — the value is observational telemetry only.
     /// </summary>
     internal CapturePumpState PumpState
     {
@@ -113,7 +113,7 @@ public sealed class MultiAdapterCaptureLoop : IPacketCaptureLoop
 
     public ValueTask DisposeAsync()
     {
-        // D11: the one-shot claim owns the teardown and every caller joins the drain. The pumps are
+        // The one-shot claim owns the teardown and every caller joins the drain. The pumps are
         // disposed before the drain on purpose: a pump that degrades while it is being disposed is
         // still admitted by the scope, then joined by the drain, so its forward is awaited rather
         // than orphaned.
@@ -147,7 +147,7 @@ public sealed class MultiAdapterCaptureLoop : IPacketCaptureLoop
         }
         catch (OperationCanceledException) when (linked.IsCancellationRequested)
         {
-            // Graceful shutdown path: the pump is stopping because the run is being cancelled.
+            // Graceful shutdown: the pump is stopping because the run is being cancelled.
         }
         catch
         {
@@ -161,9 +161,7 @@ public sealed class MultiAdapterCaptureLoop : IPacketCaptureLoop
         Interlocked.Increment(ref _degradedAdapterCount);
         if (_onAdapterDegraded is null) return;
         // Tracked child: the degraded pump has already exited its loop, so the forward cannot delay
-        // it; the scope's drain joins the forward instead of letting it outlive the loop. A faulting
-        // callback is recorded by Run and also swallowed inside the forward (the wiring performs its
-        // own logging and best-effort mode restore).
+        // it; the scope's drain joins the forward instead of letting it outlive the loop.
         _scope.Run(
             _ => ForwardDegradationAsync(_onAdapterDegraded, adapter, nativeError),
             "capture.degrade-forward");
