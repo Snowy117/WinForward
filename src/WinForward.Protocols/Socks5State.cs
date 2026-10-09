@@ -13,8 +13,8 @@ public enum Socks5Command : byte
 /// The discriminated outcome of parsing a SOCKS5 reply (RFC 1928 section 6). <see cref="Invalid"/>
 /// is a malformed or truncated reply, <see cref="Failure"/> is a well-formed reply carrying a
 /// definite failure REP status (1-8), and <see cref="Success"/> is a well-formed success reply
-/// (REP 0) with a valid bound address. Callers distinguish these so an undersized failure reply is
-/// never mistaken for a successful parse.
+/// (REP 0) with a valid bound address. Undersized failure replies stay distinguishable so none is
+/// mistaken for a successful parse.
 /// </summary>
 public enum Socks5ReplyKind
 {
@@ -37,9 +37,8 @@ public static class Socks5Messages
     /// <summary>
     /// The number of address bytes a SOCKS address type carries: 4 for IPv4, 16 for IPv6, and 0 for
     /// the domain form, whose name is length-prefixed by the message itself. A negative result is an
-    /// address family no SOCKS implementation defines — the exact condition the pinned UoT server
-    /// rejects with <c>unknown address family: &lt;byte&gt;</c>, so decoders in this tree fail closed
-    /// the same way. This is the one mapping the SOCKS5 writers, the UoT request header
+    /// address family no SOCKS implementation defines, so decoders in this tree fail closed on it.
+    /// This is the one mapping the SOCKS5 writers, the UoT request header
     /// (<see cref="UotCodec"/>) and every loopback server share, so an address type cannot mean two
     /// things in this tree.
     /// </summary>
@@ -147,8 +146,7 @@ public static class Socks5Messages
     /// status and, for a success reply, the bound address type and port. A failure reply (REP 1-8)
     /// carries no meaningful bound address per RFC 1928 and is reported as <see cref="Socks5ReplyKind.Failure"/>
     /// without requiring a bound address; only a success reply is <see cref="Socks5ReplyKind.Success"/>.
-    /// A truncated success reply (fewer than 8 bytes) is <see cref="Socks5ReplyKind.Invalid"/>, never
-    /// "parsed" into garbage (L2).
+    /// A truncated success reply is <see cref="Socks5ReplyKind.Invalid"/>, never "parsed" into garbage.
     /// </summary>
     public static Socks5ReplyKind TryParseReply(ReadOnlySpan<byte> reply, out byte status, out byte addressType, out ushort port)
     {
@@ -185,10 +183,10 @@ public static class Socks5Messages
     /// to its IPv4 form before any decision. Only a <see cref="Socks5Command.UdpAssociate"/> reply
     /// substitutes an unspecified wildcard (<c>0.0.0.0</c>/<c>::</c>) with the TCP control peer's
     /// address (the RFC-endorsed fallback); a <see cref="Socks5Command.Connect"/> reply is never
-    /// routed so no substitution is applied (M1). The server-provided BND port is never modified
+    /// routed so no substitution is applied. The server-provided BND port is never modified
     /// here — the caller preserves it. A genuine IPv6 reply that lost its scope during raw-byte
     /// reconstruction inherits the control peer's non-zero <see cref="IPAddress.ScopeId"/> so a
-    /// link-local relay resolves on the correct interface (M2).
+    /// link-local relay resolves on the correct interface.
     /// </summary>
     public static IPAddress NormalizeBndAddress(IPAddress replyAddress, IPAddress controlPeer, Socks5Command command)
     {

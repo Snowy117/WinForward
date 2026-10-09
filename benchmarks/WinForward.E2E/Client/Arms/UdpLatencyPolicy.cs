@@ -8,14 +8,14 @@ namespace WinForward.E2E.Client.Arms;
 /// <summary>
 /// The latency arm's udp book: what came back on one lane and what is still owed, plus the connect
 /// facts the lane body measured. Every counter is a property and none is named after a
-/// <see cref="LaneCounts"/> member (D18.1): the send side belongs to the engine, this side to the
+/// <see cref="LaneCounts"/> member: the send side belongs to the engine, this side to the
 /// policy, and a name on both would be two truths about one number.
 /// </summary>
 /// <remarks>
 /// The pending book maps a sequence to the instant it was wanted for — the only place a round trip's
-/// start can come from — and its size is the in-flight count, because a reply leaves both together
-/// (D18.5 #3). Single-writer by contract (D18.5 #11): <see cref="UdpLatencyPolicy.Settle"/> on the
-/// send thread is the only writer, and the receive thread only enqueues settlements.
+/// start can come from — and its size is the in-flight count, because a reply leaves both together.
+/// Single-writer: <see cref="UdpLatencyPolicy.Settle"/> on the send thread is the only writer, and
+/// the receive thread only enqueues settlements.
 /// </remarks>
 internal sealed class UdpLatencyState
 {
@@ -64,18 +64,17 @@ internal sealed class UdpLatencyState
     }
 
     /// <summary>
-    /// D18.5 #3's second step, and this lane's WasSent answer: a sequence the book still holds is a
-    /// sequence this socket sent and no reply has consumed, so removing it is what proves the reply
-    /// belonged to a request. The release of the slot is the caller's separate step, in the order the
-    /// ruling pins.
+    /// This lane's WasSent answer: a sequence the book still holds is a sequence this socket sent and
+    /// no reply has consumed, so removing it is what proves the reply belonged to a request. The
+    /// release of the slot is the caller's separate step, in the order the ladder keeps.
     /// </summary>
     internal bool TryTakePending(long sequence, out long intendedTicks) => _pending.Remove((ulong)sequence, out intendedTicks);
 
-    /// <summary>D18.5 #3's third step: the slot a consumed request held goes back to the window.</summary>
+    /// <summary>The slot a consumed request held goes back to the window.</summary>
     internal void ReleaseInFlight() => InFlight--;
 }
 
-/// <summary>What the send thread must book for one queued receive outcome (D18.5 #2: the receive thread classifies, the send thread counts).</summary>
+/// <summary>What the send thread must book for one queued receive outcome: the receive thread classifies, the send thread counts.</summary>
 internal enum UdpBooking
 {
     /// <summary>A datagram the classifier scored.</summary>
@@ -89,22 +88,22 @@ internal enum UdpBooking
 }
 
 /// <summary>
-/// One receive outcome waiting for the send thread. A record struct, never a reference (D18.5 #9): the
+/// One receive outcome waiting for the send thread. A record struct, never a reference: the
 /// receive thread enqueues it and drops every span it saw.
 /// </summary>
 /// <param name="Booking">What happened, which decides which counter moves.</param>
 /// <param name="Verdict">The classifier's product; only read for <see cref="UdpBooking.Verdict"/>.</param>
-/// <param name="ReceivedTicks">When the receive completed, never when it was settled (D18.5 #1).</param>
+/// <param name="ReceivedTicks">When the receive completed, never when it was settled.</param>
 [StructLayout(LayoutKind.Auto)]
 internal readonly record struct UdpSettlement(UdpBooking Booking, ReplyVerdict Verdict, long ReceivedTicks);
 
 /// <summary>
 /// The latency arm's udp policy: window admission, frame construction and the reply book. It holds the
-/// window and the in-flight count the engine deliberately does not (D18.1) and frames straight into the
+/// window and the in-flight count the engine deliberately does not, and frames straight into the
 /// engine's buffer, so a request is written once and no lane-owned copy exists.
 /// </summary>
 /// <remarks>
-/// The receive thread only classifies and enqueues (D18.5 #2); every counter and every round-trip
+/// The receive thread only classifies and enqueues; every counter and every round-trip
 /// sample moves in <see cref="Settle"/>, on the send thread, so the stats writer and the book have one
 /// writer each.
 /// </remarks>
@@ -156,14 +155,14 @@ internal sealed class UdpLatencyPolicy : ILanePolicy
 
     public void OnReceive(in LaneReceiveResult result, ReadOnlySpan<byte> payload, long receivedTicks)
     {
-        // Receive thread: decode, classify, enqueue — no counter moves here (D18.5 #2).
+        // Receive thread: decode, classify, enqueue — no counter moves here.
         var settlement = result.Kind switch
         {
             LaneReceiveKind.Payload => new UdpSettlement(UdpBooking.Verdict, ReplyClassifier.Classify(payload, _connectionId), receivedTicks),
 
             // Too large for the lane's buffer: unreadable, and the engine's receive loop continues. The
-            // transport names it; the book counts it as an unscoreable datagram, which is the bucket a
-            // kernel-truncated datagram landed in before the seam could tell the two apart.
+            // book counts it as an unscoreable datagram, the bucket a kernel-truncated datagram landed
+            // in before the transport seam could tell the two apart.
             LaneReceiveKind.Malformed => new UdpSettlement(UdpBooking.Oversized, default, receivedTicks),
 
             _ => new UdpSettlement(UdpBooking.TransportFailed, default, receivedTicks),
@@ -175,7 +174,7 @@ internal sealed class UdpLatencyPolicy : ILanePolicy
     public void Settle(long nowTicks)
     {
         // The contract is to empty the queue, not to book one item: the engine's burst limit is a
-        // guard against a policy that never drains, never a budget this policy spends (D18.6 #5).
+        // guard against a policy that never drains, never a budget this policy spends.
         while (_settlements.TryDequeue(out var settlement))
         {
             switch (settlement.Booking)
@@ -199,7 +198,7 @@ internal sealed class UdpLatencyPolicy : ILanePolicy
     }
 
     /// <summary>
-    /// The reply ladder's booking half, in the order D18.5 #3 pins: every valid frame counts, the
+    /// The reply ladder's booking half, in the order it keeps: every valid frame counts, the
     /// pending book decides whether the reply belonged to a request, and only a reply that did releases
     /// its slot.
     /// </summary>
@@ -211,7 +210,7 @@ internal sealed class UdpLatencyPolicy : ILanePolicy
                 _state.Received++;
                 if (_state.TryTakePending(verdict.Sequence, out var intended))
                 {
-                    // A round trip is measured against arrival, never against the later settle (D18.5 #1).
+                    // A round trip is measured against arrival, never against the later settle.
                     _rtt.Record(Clock.ToNanoseconds(receivedTicks - intended));
                     _state.ReleaseInFlight();
                 }
@@ -231,16 +230,15 @@ internal sealed class UdpLatencyPolicy : ILanePolicy
             case ReplyKind.Corrupt:
             case ReplyKind.CorruptKnownSequence:
             case ReplyKind.Undecodable:
-                // What this arm publishes as corrupt is every frame it cannot score, whatever the
-                // decoder's reason: the three verdicts stay distinguishable at the seam, not in a
-                // published counter whose meaning is fixed.
+                // Everything this arm cannot score lands in one corrupt counter; the decoder's own
+                // reason stays distinguishable at the seam, not in what gets published.
                 _state.Corrupt++;
                 break;
 
             case ReplyKind.Unmatched:
-                // The classifier never answers this -- only a ladder's WasSent step produces it, and
-                // this ladder's step is the pending lookup above, which books the same counter from the
-                // book it owns. The arm names the verdict so the switch covers the vocabulary.
+                // The classifier never answers this: only a ladder's WasSent step produces it, and this
+                // ladder's step is the pending lookup above, which books the same counter. The arm
+                // names the verdict so the switch covers the vocabulary.
                 _state.UnmatchedReplies++;
                 break;
 

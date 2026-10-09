@@ -13,24 +13,23 @@ using WinForward.Runtime.UdpProxy;
 namespace WinForward.Benchmarks.Stability;
 
 /// <summary>
-/// Live-residency census (research A1/A4 memory items plus F6's TCP half): at <c>--flows</c> live TCP
-/// flows and <c>--udp-flows</c> live UDP sessions, the resident cost of each population measured as a
-/// per-flow delta against a zero-flow baseline taken in the same process. Three populations are built in
-/// order — the flow table seeded through the production claim call, <c>--flows</c> real loopback SOCKS5
+/// Live-residency census: at <c>--flows</c> live TCP flows and <c>--udp-flows</c> live UDP sessions,
+/// the resident cost of each population measured as a per-flow delta against a zero-flow baseline
+/// taken in the same process. Three populations are built in order — the flow table seeded through
+/// the production claim call, <c>--flows</c> real loopback SOCKS5
 /// relays held open (two 64 KiB pump windows each), and <c>--udp-flows</c> coordinator sessions over fake
 /// transports — and a forced full collection immediately precedes every sample, so a stage cannot look
 /// cheap merely because it dropped garbage.
 /// <para>
 /// The populations are cumulative, so each row carries two deltas: against the baseline (which still
 /// contains every earlier stage) and against the previous stage (which is the one attributable to this
-/// stage's own population). A per-flow figure is only meaningful where its column actually moves with
-/// the population, so every row carries a note naming what dominates it — the flow table's cost is its
-/// pre-allocated capacity rather than its live states, and the relay pump windows are native memory that
-/// lands in private bytes rather than on the managed heap. This is the artifact the A4 FlowTable rebuild
-/// (−19 MB steady state) and the relay-window item (−10 MB @100 conns) are judged against.
+/// stage's own population). A per-flow figure is only meaningful where its column actually moves
+/// with the population, so every row names what dominates it — the flow table's cost is its
+/// pre-allocated capacity rather than its live states, and the relay pump windows are native memory
+/// that lands in private bytes rather than on the managed heap.
 /// </para>
 /// <para>
-/// Report-only (design §3): no timing or byte threshold can fail the run. The only aborts are the
+/// Report-only: no timing or byte threshold can fail the run. The only aborts are the
 /// population proofs — the flow table's own count, the loopback server's CONNECT-reply count, and the
 /// transport factory's created count cross-checked against the coordinator's session count — because a
 /// census of a population that silently failed to build would be a fabricated number.
@@ -39,15 +38,15 @@ namespace WinForward.Benchmarks.Stability;
 internal static class ResidencyCensusScenario
 {
     /// <summary>
-    /// The flow-table capacity every census stage runs at: the table's own default (65,536), which is
-    /// the production shape A1 item 1a describes ("<c>_states</c> pre-sized to 65,536"). A scaled-down
-    /// table would price the harness instead of the process.
+    /// The flow-table capacity every census stage runs at: the table's own default (65,536), the
+    /// production shape this process actually constructs. A scaled-down table would price the
+    /// harness instead of the process.
     /// </summary>
     private const int ProductionFlowCapacity = 65_536;
 
     private static readonly byte[] s_udpPopulatePayload = [1];
 
-    /// <summary>Bounds every population proof and the UDP populate loop; a timeout aborts the run instead of reporting a smaller census.</summary>
+    /// <summary>Bounds every population proof and the UDP populate loop; a timeout aborts the run rather than reporting a smaller census.</summary>
     private static readonly TimeSpan s_populationTimeout = TimeSpan.FromSeconds(30);
 
     private static readonly TimeSpan s_populateRoundDelay = TimeSpan.FromMilliseconds(10);
@@ -72,7 +71,7 @@ internal static class ResidencyCensusScenario
         {
             // The server's reply counter is written by its own connection task after the establishing
             // call returns, so the proof waits for it rather than snapshotting a racing read.
-            // ReSharper disable once AccessToDisposedClosure // the awaited poll reads the live server's counter and returns before the await using scope disposes tcpServer below.
+            // ReSharper disable once AccessToDisposedClosure // the awaited poll reads the live server's counter before the scope disposes tcpServer below.
             await WaitUntilAsync("tcpRelayWindows", () => tcpServer.ConnectReplies, options.Flows, "loopback SOCKS5 CONNECT replies").ConfigureAwait(false);
             RequirePopulation("tcpRelayWindows", tcpServer.ConnectReplies, options.Flows, "loopback SOCKS5 CONNECT replies");
             RequirePopulation("tcpRelayWindows", relays.Count, options.Flows, "established relays");
@@ -80,7 +79,7 @@ internal static class ResidencyCensusScenario
             Emit(context, afterRelays, baseline, afterTable);
 
             // The relays stay live through the UDP stage, so the UDP row's previous-stage delta prices
-            // the sessions alone; disposal is in the finally below.
+            // the sessions alone.
             await using var udp = new UdpCensusStage(options.UdpFlows);
             await udp.PopulateAsync().ConfigureAwait(false);
             RequirePopulation("udpSessions", udp.CreatedTransports, options.UdpFlows, "fake UDP transports created");
@@ -96,7 +95,7 @@ internal static class ResidencyCensusScenario
     }
 
     /// <summary>
-    /// One sample: a forced full collection first (the contract that makes stages comparable), then the
+    /// One sample: a forced full collection first (what makes stages comparable), then the
     /// managed heap, the GC's committed bytes, the process's working set and private bytes, the
     /// per-generation collection counts, and the process's descriptor count. Descriptors are read last
     /// because the <c>/proc/self/fd</c> enumeration allocates: its garbage belongs to the next stage's
@@ -104,8 +103,8 @@ internal static class ResidencyCensusScenario
     /// </summary>
     private static CensusSample Capture(Process process, string stage, string follows, int population, FlowTable? flowTable, int relays, int udpSessions)
     {
-        // The forced full collection is the census contract, not a GC workaround: without it a stage
-        // could read cheap because it merely dropped garbage, and its delta would be a GC artifact.
+        // Without the forced full collection a stage could read cheap because it merely dropped
+        // garbage, and its delta would be a GC artifact.
 #pragma warning disable S1215 // Collected-before-sample is the measurement; every stage is sampled from the same post-full-GC state.
         GC.Collect();
         GC.WaitForPendingFinalizers();
@@ -162,7 +161,7 @@ internal static class ResidencyCensusScenario
     /// <paramref name="flows"/> real relays through the loopback SOCKS5 server, established one at a
     /// time and held open — the same establishment path <c>TcpChurnScenario</c> drives, so each relay
     /// owns its two 64 KiB pump windows for its whole life. A failure mid-way disposes what was built
-    /// and rethrows; the caller's population proof then never sees a partial population.
+    /// and rethrows, so the caller's population proof never sees a partial population.
     /// </summary>
     private static async Task<List<RelayHandle>> EstablishRelaysAsync(int flows, LoopbackSocks5TcpServer server)
     {
@@ -189,7 +188,7 @@ internal static class ResidencyCensusScenario
         }
     }
 
-    /// <summary>The relay's client leg plus its accepted local socket; both must stay open for the relay to stay established.</summary>
+    /// <summary>Both legs must stay open for the relay to stay established.</summary>
     private static async Task DisposeRelaysAsync(List<RelayHandle> relays)
     {
         foreach (var handle in relays)
@@ -266,7 +265,7 @@ internal static class ResidencyCensusScenario
     /// The derived reading: absolute deltas in every column plus the per-flow form the run was asked
     /// for, <c>(sample − reference) / population</c>, over the stage's own population. Both the managed
     /// and the native columns are divided, because which one carries a population is the point of the
-    /// census (the flow table is managed, the relay windows are not).
+    /// census — the flow table is managed, the relay windows are not.
     /// </summary>
     private static object Delta(CensusSample sample, CensusSample reference, int population)
     {
@@ -314,13 +313,12 @@ internal static class ResidencyCensusScenario
     /// <summary>Per-flow division; zero for the zero-flow baseline, where the delta is the whole process.</summary>
     private static double PerFlow(long delta, int population) => population == 0 ? 0 : Round((double)delta / population, 1);
 
-    /// <summary>Artifact rounding: the analyzer requires an explicit midpoint mode, and ToEven is the runtime's own default.</summary>
+    /// <summary>Artifact rounding: the analyzer requires an explicit midpoint mode.</summary>
     private static double Round(double value, int digits) => Math.Round(value, digits, MidpointRounding.ToEven);
 
     /// <summary>
     /// What dominates each stage's numbers. The note travels with the row because a per-flow figure
-    /// quoted without it (e.g. the flow table's 65,536-state pre-allocation divided by 100 live flows)
-    /// would read as per-flow cost when it is not.
+    /// quoted without it would read as per-flow cost when it is not.
     /// </summary>
     private static string NoteFor(string stage) => stage switch
     {
@@ -354,10 +352,11 @@ internal static class ResidencyCensusScenario
 
     /// <summary>
     /// The UDP half of the census: <c>--udp-flows</c> coordinator sessions over fake transports, built
-    /// with the footprint scenario's populate pattern — offer every key, let the setup-failure cooldown
-    /// lapse, and wait for the factory's own created count rather than assuming the first offer worked.
-    /// The fake transport is deliberate: the measured part is the session/slot/association residency, and a
-    /// real dial would put loopback socket work and timeouts into the census loop.
+    /// with the same populate pattern as the footprint scenario — offer every key, let the
+    /// setup-failure cooldown lapse, and wait for the factory's own created count rather than
+    /// assuming the first offer worked. The fake transport is deliberate: the measured part is the
+    /// session/slot/association residency, and a real dial would put loopback socket work and
+    /// timeouts into the census loop.
     /// </summary>
     private sealed class UdpCensusStage : IAsyncDisposable
     {
@@ -384,7 +383,7 @@ internal static class ResidencyCensusScenario
         /// <summary>The fake transport factory's own count: the proof that every session reached a transport, not just a slot.</summary>
         public int CreatedTransports => _factory.Created;
 
-        /// <summary>The coordinator's gate-consistent live session count; the second, independent half of the population proof.</summary>
+        /// <summary>The coordinator's gate-consistent live session count; the population proof's second half.</summary>
         public int LiveSessions => _coordinator.SessionCount;
 
         public async Task PopulateAsync()

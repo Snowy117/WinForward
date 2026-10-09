@@ -12,8 +12,7 @@ namespace WinForward.Runtime.Socks5;
 /// The collaborators every per-flow association is built from: the loop-prevention registry the
 /// control tuple is registered in before the SYN leaves the host, the shared SOCKS5 address cache,
 /// the dial seam, the logger, and the association-lost log throttle the factory owns for every
-/// association it creates. A value type — the factory holds one and copies it into each
-/// association.
+/// association it creates.
 /// </summary>
 internal readonly record struct Socks5UdpAssociationContext(
     SelfTrafficRegistry SelfTraffic,
@@ -38,8 +37,8 @@ internal readonly record struct Socks5UdpAssociationContext(
 /// <para>
 /// The association is an owner in the <see cref="QuiescenceScope"/> sense: the watchdog is its
 /// scope child, so <see cref="DisposeAsync"/> seals the scope synchronously and only then closes
-/// the control connection, which is what makes teardown distinguishable from death (a sealed scope
-/// never records a fault for the read it just faulted).
+/// the control connection. A sealed scope records no fault for the read it just faulted, which is
+/// what makes teardown distinguishable from death.
 /// </para>
 /// </summary>
 internal sealed class Socks5UdpAssociation : IAsyncDisposable
@@ -78,8 +77,7 @@ internal sealed class Socks5UdpAssociation : IAsyncDisposable
 
     /// <summary>
     /// The association's death, or null while its control stream is alive. Typed as the exception
-    /// the transport throws, so the fail-closed check on the datagram path is one null test and the
-    /// thrown exception carries the control-stream death as its inner exception.
+    /// the transport throws, so the fail-closed check on the datagram path is one null test.
     /// </summary>
     internal UdpAssociationLostException? Fault => Volatile.Read(ref _fault);
 
@@ -228,9 +226,8 @@ internal sealed class Socks5UdpAssociation : IAsyncDisposable
     /// </summary>
     private async ValueTask FaultAsync(Exception death)
     {
-        // The watchdog is this association's only writer — it is its one scope child, and it exits
-        // after this call — so a plain guarded publication is enough: only the first death is
-        // recorded, reported, and closed.
+        // The watchdog is this association's only writer, so a plain guarded publication is enough:
+        // only the first death is recorded, reported, and closed.
         if (Volatile.Read(ref _fault) is not null) return;
         var lost = new UdpAssociationLostException("The flow's SOCKS5 UDP association was lost; the flow must be re-established.", death);
         Volatile.Write(ref _fault, lost);

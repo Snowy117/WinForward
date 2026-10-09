@@ -11,7 +11,7 @@ using WinForward.Runtime.UdpProxy;
 namespace WinForward.Benchmarks.Stability;
 
 /// <summary>
-/// UDP session churn at the design bounds (task 09-21-session-creation-cost, design §4): waves of
+/// UDP session churn at the design bounds: waves of
 /// <c>--burst-flows</c> short-lived sessions through the real dial path, each wave retired through
 /// the coordinator's own idle-expiry path (<see cref="UdpProxyCoordinator.RemoveExpiredAsync(DateTimeOffset, TimeSpan)"/> with
 /// a zero timeout — the per-session teardown the periodic sweeper would drive), with per-wave
@@ -39,20 +39,19 @@ internal static class UdpChurnScenario
         var sustained = waves <= 0;
         // --socks5-external: the server and the receiver it relays into run in a child process, so
         // their per-connection buffers (64 KiB relay loop, 4 MiB relay socket) no longer land in
-        // this process's GC.GetTotalAllocatedBytes readings. The in-process default stays as
-        // recorded, so its command lines keep reproducing their numbers.
+        // this process's GC.GetTotalAllocatedBytes readings.
         await using var externalServer = options.Socks5External
             ? await ExternalLoopbackSocks5UdpServer.StartAsync(flows, associateDelay, CancellationToken.None).ConfigureAwait(false)
             : null;
         await using var receiver = externalServer is null ? new EchoReceiver(flows) : null;
         await using var server = receiver is null ? null : new LoopbackSocks5UdpServer(receiver.Endpoint, associateDelay);
-        // Hosted only for its own column: the UoT fixture's counters are that column's evidence, so a
-        // column that did not dial it omits the field rather than reporting a zero nobody observed.
+        // Hosted only for its own column, whose counters it is the evidence for, so a column that did
+        // not dial it omits the field rather than reporting a zero nobody observed.
         await using var uotServer = options.Target == SoakTargetKind.Uot && receiver is not null
             ? new LoopbackSocks5UotServer(receiver.Endpoint, associateDelay)
             : null;
-        // Hosted in every column, so the rows of all three carry the local hop's own counters: the
-        // SOCKS5 columns observe zero datagrams arriving on it, the local column observes the wave.
+        // Hosted in every column, so all three rows carry the local hop's own counters: the SOCKS5
+        // columns observe zero datagrams arriving on it, the local column observes the wave.
         await using var localResponder = new LoopbackLocalUdpResponder();
         var flowKeys = new FlowKey[flows];
         for (var index = 0; index < flowKeys.Length; index++) flowKeys[index] = BenchmarkShared.CreateFlowKey(index);
@@ -143,7 +142,7 @@ internal static class UdpChurnScenario
     /// The wave window must outlive the serialized setup chain it measures: with an 8-wide limiter
     /// and a per-flow dial of <paramref name="associateDelay"/>, the last flow's first response
     /// needs roughly ceil(N/8) × delay; three times that plus the 30 s floor absorbs scheduling
-    /// noise (mirrors <c>UdpBurstScenario.ComputeBurstTimeout</c>).
+    /// noise.
     /// </summary>
     private static TimeSpan ComputeWaveTimeout(int flows, TimeSpan associateDelay) =>
         TimeSpan.FromMilliseconds(Math.Max(
@@ -179,13 +178,11 @@ internal static class UdpChurnScenario
     /// <summary>
     /// Fires and retires two unmeasured waves for the uot column and one for every other: the first
     /// wave of a process pays first-call JIT/tiering, the executor's worker-thread creation, and
-    /// socket-stack warmup (measured ~2x the steady-state per-session allocation), so it would
-    /// otherwise dominate a short wave-mode row. The uot column needs the second because its fixture
-    /// is a second in-process server implementation — a connection task and a reply loop per flow,
-    /// which the native fixture's single relay loop does not have — and that cost lands in the
-    /// column's first <em>measured</em> row when it is left in the warm-up's shadow. The same warmup
-    /// discipline the burst scenario gets from its pre-established background flows. Returns the
-    /// payload sequence the warm-up consumed.
+    /// socket-stack warmup, so it would otherwise dominate a short wave-mode row. The uot column
+    /// needs the second because its fixture is a second in-process server implementation — a
+    /// connection task and a reply loop per flow, which the native fixture's single relay loop does
+    /// not have — and that cost lands in the column's first <em>measured</em> row when it is left in
+    /// the warm-up's shadow. Returns the payload sequence the warm-up consumed.
     /// </summary>
     private static async Task<long> WarmUpAsync(
         UdpProxyCoordinator coordinator,
@@ -429,8 +426,7 @@ internal static class UdpChurnScenario
     /// row's handshake evidence. The SOCKS5 server and the local responder stay up for every column,
     /// so each row can show what the other transports did with the same flows; the UoT fixture is
     /// hosted only by its own column, so its field is omitted elsewhere. The child's death must fail
-    /// the wave (its counters are the only progress signal the response wait has) rather than let the
-    /// wait time out into a silent zero-response row.
+    /// the wave rather than let the response wait time out into a silent zero-response row.
     /// </summary>
     private sealed record ChurnTarget(
         ProxyTarget Socks5,

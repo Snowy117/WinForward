@@ -10,8 +10,8 @@ namespace WinForward.Core;
 /// Buffers are raw <c>NativeMemory.AllocZeroed</c> storage; each allocation carries a
 /// one-word rental-state cell immediately before the payload so the lightweight
 /// <see cref="NativeLease"/> handle stays a struct with idempotent release across copies.
-/// Semantics mirror the M1-hardened <c>NdisPacketBufferPool</c>: a <see cref="ConcurrentQueue{T}"/>
-/// free-list bounded by <see cref="Capacity"/>, interlocked rent/return accounting exposed through
+/// The free-list is a <see cref="ConcurrentQueue{T}"/> bounded by <see cref="Capacity"/>, with
+/// interlocked rent/return accounting exposed through
 /// <see cref="Stats"/>, an optional <see cref="AccountingSink"/> for process-wide diagnostics, and
 /// a dispose that drains the queue (a return racing a concurrent dispose is freed by the returner's
 /// post-enqueue recheck, never stranded until process exit). Renting from a disposed pool still
@@ -48,9 +48,8 @@ public sealed unsafe class NativeBufferPool : IDisposable
     /// <summary>
     /// Optional per-rent/return accounting sink for process-wide diagnostics (the RuntimeCounters
     /// pool registry): invoked once per successful rent (<see langword="true"/>) and once per completed
-    /// return (<see langword="false"/>). Composition sets it once at startup, before any consumer can rent;
-    /// it stays <see langword="null"/> when unwired. Diagnostics only — the sink must not throw and never
-    /// influences pool behavior.
+    /// return (<see langword="false"/>). Composition sets it once at startup, before any consumer can rent.
+    /// Diagnostics only — the sink must not throw and never influences pool behavior.
     /// </summary>
     public Action<bool>? AccountingSink { get; set; }
 
@@ -66,8 +65,8 @@ public sealed unsafe class NativeBufferPool : IDisposable
     /// Rents a buffer, reusing a pooled instance when one is available. The renter owns the buffer
     /// until <see cref="NativeLease.Dispose"/> hands it back; the lease may be copied freely, and a
     /// release through any copy is idempotent (the rental-state cell admits exactly one release per
-    /// rental window — a stale release after the pool has re-rented the same storage is a
-    /// rental-contract violation documented on <see cref="NativeLease"/>, confined to that renter).
+    /// rental window — a stale release after the pool has re-rented the same storage breaks the
+    /// rental contract documented on <see cref="NativeLease"/>).
     /// </summary>
     public NativeLease Rent()
     {
@@ -100,8 +99,7 @@ public sealed unsafe class NativeBufferPool : IDisposable
     /// <see cref="Dispose"/> may pass the disposed check just before the flag is set and enqueue
     /// after the disposer's drain already saw an empty queue; the post-enqueue recheck below
     /// closes that window by draining on the returner's side — one of the two drains always
-    /// observes the buffer, so a raced return is freed now, never stranded until process exit and
-    /// never freed twice.
+    /// observes the buffer, so a raced return is neither stranded nor freed twice.
     /// </summary>
     internal void Release(NativeLease lease)
     {
@@ -151,9 +149,8 @@ public sealed unsafe class NativeBufferPool : IDisposable
 /// payload pointer, and the length. The handle is a copyable struct; <see cref="Dispose"/> returns
 /// the buffer to its pool and is idempotent across copies (exactly one release per rental window
 /// succeeds — the rental-state cell lives in-band, before the payload). The default value carries
-/// no pool and disposing it is a no-op. The span is valid until the first release through any copy;
-/// like every native rental, a stale release after the pool has re-rented the same storage would
-/// hand the buffer back under its current renter, so renters must release exactly once per rental.
+/// no pool and disposing it is a no-op. The span is valid until the first release through any copy,
+/// so renters must release exactly once per rental.
 /// </summary>
 [StructLayout(LayoutKind.Auto)]
 public readonly unsafe struct NativeLease : IDisposable
@@ -190,10 +187,9 @@ public readonly unsafe struct NativeLease : IDisposable
 /// <summary>
 /// Bridges one pooled native buffer to <see cref="Memory{T}"/> so async socket and stream APIs can
 /// consume pooled native storage without a managed copy. Exactly one manager is constructed per
-/// fresh native allocation in <see cref="NativeBufferPool.Rent"/> (the cold/overflow path) and then
-/// travels with its buffer through the free list, so steady-state rents reuse it and allocate
-/// nothing. The native storage never moves, so <see cref="Pin"/> hands out the raw pointer and
-/// <see cref="Unpin"/> is a no-op.
+/// fresh native allocation (the cold/overflow path) and then travels with its buffer through the
+/// free list, so steady-state rents reuse it and allocate nothing. The native storage never moves,
+/// so <see cref="Pin"/> hands out the raw pointer and <see cref="Unpin"/> is a no-op.
 /// </summary>
 internal sealed unsafe class NativeMemoryManager(void* pointer, int length) : MemoryManager<byte>
 {
@@ -220,8 +216,7 @@ internal sealed unsafe class NativeMemoryManager(void* pointer, int length) : Me
 /// Point-in-time rent/return accounting for one <see cref="NativeBufferPool"/>. Totals are
 /// cumulative since pool construction; <see cref="InPool"/> tracks idle queue occupancy. The
 /// balance identity <c>OverflowAllocations == DisposedCount + InPool + Outstanding</c> holds once
-/// every renter has returned (every allocation is either freed by the pool, idle in the queue, or
-/// still checked out), which is what the pool balance tests assert.
+/// every renter has returned, which is what the pool balance tests assert.
 /// </summary>
 [StructLayout(LayoutKind.Auto)]
 internal readonly record struct NativeBufferPoolStats(
