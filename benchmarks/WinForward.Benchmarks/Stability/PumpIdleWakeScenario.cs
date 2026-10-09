@@ -6,7 +6,7 @@ using WinForward.NdisApi;
 namespace WinForward.Benchmarks.Stability;
 
 /// <summary>
-/// The capture pump's idle cost and its wake-to-dispatch latency (research F5). Four rows over the
+/// The capture pump's idle cost and its wake-to-dispatch latency. Four rows over the
 /// real <see cref="NdisCapturePump"/> with a fake reader:
 /// <list type="bullet">
 /// <item><c>pump.idle</c> — an always-empty reader for a capped window, reporting process CPU seconds
@@ -24,7 +24,7 @@ namespace WinForward.Benchmarks.Stability;
 /// </list>
 /// The driver's internal read-call shape sits below the <see cref="INdisPacketReader"/> seam and is
 /// gated exactly in <c>NdisApiReadShapeTests</c>; what these rows establish is the pump's own cadence
-/// and its wake cost. Report-only timing (design §3): the exact counts and bytes are the gates, the
+/// and its wake cost. Report-only timing: the exact counts and bytes are the gates, the
 /// latencies are a series.
 /// </summary>
 internal static class PumpIdleWakeScenario
@@ -44,8 +44,7 @@ internal static class PumpIdleWakeScenario
     /// <summary>
     /// How long the harness waits after the reader announces its blocking wait, so the wake it measures
     /// is a real blocked→ready transition. It runs before the arrival timestamp and therefore adds
-    /// nothing to any sample; it is what keeps a hot handoff from masquerading as a wake (a hot pass
-    /// through the semaphore measures sub-microsecond and tells F5.2 nothing).
+    /// nothing to any sample; it is what keeps a hot handoff from masquerading as a wake.
     /// </summary>
     private static readonly TimeSpan s_parkDelay = TimeSpan.FromMilliseconds(1);
 

@@ -16,7 +16,7 @@ using WinForward.Runtime.UdpProxy;
 namespace WinForward.Benchmarks.Stability;
 
 /// <summary>
-/// The GC-posture soak (task 09-18 M5). Warmup establishes a full mixed working set — SOCKS5 TCP
+/// The GC-posture soak. Warmup establishes a full mixed working set — SOCKS5 TCP
 /// relays and UDP proxy sessions over the loopback fake servers — and then drives only that
 /// established shape for the measured window: TCP relays flood in both directions and UDP
 /// datagrams ride the forward relay path. The window asserts the application-level guarantee
@@ -28,11 +28,11 @@ namespace WinForward.Benchmarks.Stability;
 /// not asserted, and this is deliberate: the loopback fake servers drive their receive loops with
 /// <c>await</c>, so a loop that parks between datagrams boxes BCL async state machines (measured
 /// ~400 B/datagram across the harness at the soak's datagram rates), while the application's own
-/// calling threads measure exactly zero. The PRD places those BCL slow-path state machines out of
-/// scope; asserting on the process counter would gate the harness, not the product. Likewise the
-/// UDP response leg is not part of the measured window because the product's own
+/// calling threads measure exactly zero. Those BCL slow paths are out of scope; asserting on the
+/// process counter would gate the harness, not the product. Likewise the UDP response leg is not
+/// part of the measured window because the product's own
 /// <c>UdpProxySession.ReceiveLoopAsync</c> boxes on parked receives; its zero-allocation hot shape
-/// is covered by the M2 allocation-gate tests. Any failed assertion throws so
+/// is covered by the allocation-gate tests. Any failed assertion throws so
 /// <see cref="SoakRunner"/> counts the scenario as failed.
 /// </para>
 /// </summary>
@@ -57,10 +57,9 @@ internal static class GcSoakScenario
     private const long WorkingSetGrowthLimitBytes = 32L * 1024 * 1024;
     /// <summary>
     /// The UDP forward lanes must not allocate per datagram. The runtime's own lock infrastructure
-    /// can allocate a few hundred bytes under contention (PRD Out-of-Scope BCL infrastructure), so
-    /// the gate is a leak detector rather than a strict zero: an absolute noise ceiling plus a
-    /// per-send rate far below any real per-datagram allocation (a 1 B/datagram leak exceeds the
-    /// rate by orders of magnitude at the scenario's send counts).
+    /// can allocate a few hundred bytes under contention, so the gate is a leak detector rather
+    /// than a strict zero: a noise ceiling plus a per-send rate far below any real per-datagram
+    /// allocation (a 1 B/datagram leak exceeds the rate by orders of magnitude here).
     /// </summary>
     internal const long SenderAllocationNoiseCeilingBytes = 64 * 1024;
 
@@ -228,9 +227,8 @@ internal static class GcSoakScenario
 
         // The application-level guarantee: the UDP forward path — the product's main path — ran
         // hundreds of thousands of datagrams through established sessions without allocating a
-        // meaningful number of managed bytes on the calling threads. This is what the M5 soak can
-        // assert exactly; see the type-level note for why process-wide collection counts are
-        // reported instead.
+        // meaningful number of managed bytes on the calling threads. See the type-level note for
+        // why process-wide collection counts are reported instead.
         var allowedSenderBytes = SenderAllocationAllowance(udpFlood.SendCount);
         if (udpFlood.ThreadAllocatedBytes > allowedSenderBytes)
         {
@@ -265,8 +263,7 @@ internal static class GcSoakScenario
     /// Overflow is the only unbounded native-allocation signal across the measured window.
     /// Cumulative rent/return/outstanding counters legitimately move under long-run relay churn:
     /// TCP relays finish or fall silent and hand their relay-pool leases back, so relay outstanding
-    /// drifts down (16 -> 14 over the 30-minute run that motivated this check). That is a return,
-    /// not a leak, and outstanding is therefore deliberately not compared here; the leak signal is
+    /// drifts down — a return, not a leak, and deliberately not compared here; the leak signal is
     /// the post-teardown <see cref="AssertNoLeakedLeasesAsync"/>. Only fresh <c>NativeMemory</c>
     /// allocations beyond recycled buffers (overflow growth) indicate a sizing regression.
     /// </summary>

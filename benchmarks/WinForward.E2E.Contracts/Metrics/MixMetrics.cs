@@ -157,10 +157,9 @@ public sealed record MixPageClassMetrics : IJsonWritable
 
 /// <summary>The <c>classes.bulk</c> block: the bulk-transfer class, in write order.</summary>
 /// <remarks>
-/// <see cref="GoodputBps"/> is the one reading here without a measurement it can be null for: it is
-/// written through <see cref="Reading"/> so a quotient that is not finite -- no wall time passed at
-/// all -- publishes JSON <see langword="null"/> exactly as the pre-typed writer did, rather than
-/// throwing at the record writer.
+/// <see cref="GoodputBps"/> is the one reading here without a measurement it can be null for: it goes
+/// through <see cref="Reading"/> so a non-finite quotient -- no wall time passed at all -- publishes
+/// JSON <see langword="null"/> rather than throwing at the record writer.
 /// </remarks>
 public sealed record MixBulkClassMetrics : IJsonWritable
 {
