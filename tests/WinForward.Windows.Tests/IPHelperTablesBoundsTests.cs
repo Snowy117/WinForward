@@ -3,7 +3,7 @@ using Xunit;
 namespace WinForward.Windows.Tests;
 
 /// <summary>
-/// Pure bounds validation of <see cref="IPHelperTables"/> owner tables (P0 R3): the
+/// Pure bounds validation of <see cref="IPHelperTables"/> owner tables: the
 /// driver-written byte count must hold the announced row count before any row dereference —
 /// fail closed, never clamp or partially read, so an inconsistent table yields "no
 /// attribution" instead of out-of-bounds reads or a wrong PID.

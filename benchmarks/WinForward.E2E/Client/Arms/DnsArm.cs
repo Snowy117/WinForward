@@ -54,7 +54,7 @@ internal static class DnsArm
                 // The only query this arm destroys itself is the pacing slot it skipped because the
                 // in-flight window was full: it never reached the socket, so it is the same client send
                 // loss the udp arms publish. socketErrors counts failures that belong to no single query
-                // and is a different population, so it is not a term here (D19.2 ④).
+                // and is a different population, so it is not a term here.
                 [ArmKeys.Common.Gates.ClientSendLoss] = metrics.Unsent,
                 [ArmKeys.Common.Gates.WindowMs] = 0L,
             },

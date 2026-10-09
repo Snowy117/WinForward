@@ -73,8 +73,8 @@ public sealed class FillerTests
     }
 
     // The seed folds the sequence into 32 bits, so two sequences 2^32 apart are the same on the
-    // wire. Recorded here because a future change that made the high bits significant would
-    // silently invalidate replay/filler checks that today cannot distinguish them.
+    // wire; a change that made the high bits significant would invalidate replay/filler checks
+    // that today cannot distinguish them.
     [Fact]
     public void OnlyTheLowThirtyTwoBitsOfTheSequenceReachTheSeed()
     {

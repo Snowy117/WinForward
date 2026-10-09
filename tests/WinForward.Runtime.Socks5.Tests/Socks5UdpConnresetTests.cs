@@ -10,7 +10,7 @@ using static WinForward.TestSupport.Socks5TestServer;
 namespace WinForward.Runtime.Socks5.Tests;
 
 /// <summary>
-/// S2 socket-level contracts for the UDP relay transport: SIO_UDP_CONNRESET is applied to the relay
+/// Socket-level contracts for the UDP relay transport: SIO_UDP_CONNRESET is applied to the relay
 /// socket before bind (asserted through the injectable seam — the Linux test host cannot execute
 /// vendor IOCTLs), and an ICMP-driven ConnectionReset on the receive path is classified as a skip
 /// instead of a socket-level failure.

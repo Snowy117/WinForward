@@ -5,10 +5,10 @@ namespace WinForward.E2E.Tests;
 
 public sealed class TcpCommandTests
 {
-    // Regression guard (green today by construction): the arm publishes Name(mode) as a metric and
-    // the analyzer keys on those strings, so a new enum member that shares a name, or a defined
-    // member without a name of its own, would silently merge two rows. An unnamed member cannot reach
-    // a published record at all: Name throws instead of returning a fallback literal.
+    // The arm publishes Name(mode) as a metric and the analyzer keys on those strings, so a new
+    // enum member that shares a name, or a defined member without a name of its own, would
+    // silently merge two rows. An unnamed member cannot reach a published record at all: Name
+    // throws instead of returning a fallback literal.
     [Fact]
     public void EveryDefinedModeHasItsOwnName()
     {

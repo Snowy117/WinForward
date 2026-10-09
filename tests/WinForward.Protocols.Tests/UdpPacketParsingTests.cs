@@ -25,8 +25,6 @@ public sealed class UdpPacketParsingTests
     [Fact]
     public void SocksUdpIPv4RoundTripDecodesToTheRawAddressValue()
     {
-        // R2: address-typed datagrams decode straight to IPAddressValue — no framework address
-        // on the decode path; IPv4 keeps its four big-endian bytes in the low 32 bits.
         var payload = new byte[] { 0x01 };
         var encoded = Encode(IPAddress.Parse("192.0.2.53"), 53, payload);
 
@@ -67,7 +65,7 @@ public sealed class UdpPacketParsingTests
     [Fact]
     public void SocksUdpDomainDecodesAsAsciiAndReplacesNonAsciiBytes()
     {
-        // R5: RFC 1928 domain names are ASCII. Non-ASCII bytes are replaced ('?') by the ASCII
+        // RFC 1928 domain names are ASCII: non-ASCII bytes are replaced ('?') by the ASCII
         // decoder rather than throwing, preserving the codec's fail-closed no-throw style.
         var asciiFrame = new byte[] { 0, 0, 0, 3, 3, (byte)'d', (byte)'n', (byte)'s', 0, 53, 0xab };
         Assert.True(Socks5UdpCodec.TryDecode(asciiFrame, out var ascii));
@@ -83,7 +81,7 @@ public sealed class UdpPacketParsingTests
     [Fact]
     public void Socks5UdpDecodeCarriesRelayScopeForIPv6Address()
     {
-        // M2: the SOCKS5 UDP wire format carries no scope, so TryDecode accepts an explicit scope
+        // The SOCKS5 UDP wire format carries no scope, so TryDecode accepts an explicit scope
         // and reconstructs an IPv6 destination with a non-zero ScopeId.
         var address = IPAddress.Parse("fe80::53");
         var encoded = Encode(address, 53, [1, 2, 3]);

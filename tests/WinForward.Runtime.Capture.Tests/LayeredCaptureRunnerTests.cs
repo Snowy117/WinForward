@@ -108,7 +108,7 @@ public sealed class LayeredCaptureRunnerTests
         Assert.Equal(0, harness.Generation(0).DisposeCount);
         Assert.False(harness.RunTask.IsCompleted);
 
-        // Other native errors never feed the refresh channel (R3 gates on 87 only).
+        // Only 87 feeds the refresh channel; other native errors never do.
         harness.Runner.SignalDegraded(new WindowsAdapter("id-a", "id-a", "id-a", 101, 0), 31);
         await Task.Delay(50).ConfigureAwait(false);
         Assert.Single(harness.RefreshEvents);

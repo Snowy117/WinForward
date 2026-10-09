@@ -48,7 +48,7 @@ internal struct UdpTotals
         _outOfRange += tracker.OutOfRange;
         _sentOutOfRange += tracker.SentOutOfRange;
 
-        // The same four terms LOSS publishes (D2/D7): the MIX UDP class has no in-flight window, so
+        // The same four terms the LOSS class publishes: the MIX UDP class has no in-flight window, so
         // its third term is structurally zero and is published as such beside the other three.
         _clientSendLoss += tracker.SendFailure + tracker.WindowOverflow + counts.Undetermined + tracker.SentOutOfRange;
     }

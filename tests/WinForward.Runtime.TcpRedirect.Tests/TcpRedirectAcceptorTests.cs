@@ -8,7 +8,7 @@ using static WinForward.TestSupport.TcpCoordinatorFakes;
 namespace WinForward.Runtime.TcpRedirect.Tests;
 
 /// <summary>
-/// The accept-loop attach contract (R7): a relay the store refuses to attach is discarded together
+/// The accept-loop attach contract: a relay the store refuses to attach is discarded together
 /// with its accepted connection and the session is torn down, so a refused attach can never leave a
 /// half-open redirect registered.
 /// </summary>
