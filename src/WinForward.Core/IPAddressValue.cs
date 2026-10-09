@@ -36,14 +36,14 @@ public readonly struct IPAddressValue : IEquatable<IPAddressValue>
 
     public static IPAddressValue FromIPv4(ReadOnlySpan<byte> fourBytes)
     {
-        // ReSharper disable once ConvertIfStatementToReturnStatement // Guard-clause + throw reads failure-first; the suggested `cond ? throw ... : value` form has no precedent in this repo (B1 disposition).
+        // ReSharper disable once ConvertIfStatementToReturnStatement // Guard-clause + throw reads failure-first; the suggested `cond ? throw ... : value` form has no precedent in this repo.
         if (fourBytes.Length != 4) throw new ArgumentException("An IPv4 address requires exactly four bytes.", nameof(fourBytes));
         return new(BinaryPrimitives.ReadUInt32BigEndian(fourBytes), AddressFamilyKind.IPv4);
     }
 
     public static IPAddressValue FromIPv6(ReadOnlySpan<byte> sixteenBytes, uint scopeId = 0)
     {
-        // ReSharper disable once ConvertIfStatementToReturnStatement // Guard-clause + throw reads failure-first; the suggested `cond ? throw ... : value` form has no precedent in this repo (B1 disposition).
+        // ReSharper disable once ConvertIfStatementToReturnStatement // Guard-clause + throw reads failure-first; the suggested `cond ? throw ... : value` form has no precedent in this repo.
         if (sixteenBytes.Length != 16) throw new ArgumentException("An IPv6 address requires exactly sixteen bytes.", nameof(sixteenBytes));
         return new(BinaryPrimitives.ReadUInt128BigEndian(sixteenBytes), AddressFamilyKind.IPv6, scopeId);
     }

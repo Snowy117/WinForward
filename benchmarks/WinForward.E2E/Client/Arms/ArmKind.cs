@@ -109,9 +109,9 @@ internal sealed class ArmKind
         ValidateOfferedSequences(spec.RatePerSecond > 0 ? spec.RatePerSecond : ControlArm.DefaultLossRatePerSecond, spec.Seconds);
 
     /// <summary>
-    /// D14.4: the schedule of the three kinds that hold a <see cref="UdpReliabilityTracker"/> must fit
-    /// the tracker's bounded sequence space. Latency, dns, reliability, throughput and persistent do
-    /// not index arrays by sequence, so they must not be given this check "for consistency".
+    /// The three kinds that hold a <see cref="UdpReliabilityTracker"/> must fit the tracker's bounded
+    /// sequence space. Latency, dns, reliability, throughput and persistent do not index arrays by
+    /// sequence, so they must not be given this check "for consistency".
     /// </summary>
     private static string? ValidateOfferedSequences(double effectiveRatePerSecond, double seconds)
     {

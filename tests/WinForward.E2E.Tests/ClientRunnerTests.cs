@@ -6,7 +6,7 @@ using Xunit;
 namespace WinForward.E2E.Tests;
 
 /// <summary>
-/// The arm-level failure boundary of a whole client run (D1/D4). The plan used here is legal and its
+/// The arm-level failure boundary of a whole client run. The plan used here is legal and its
 /// arm observes the token as its only work, so the run is decided by the cancellation alone and not
 /// by a target, a socket or a clock.
 /// </summary>
@@ -15,11 +15,10 @@ public sealed class ClientRunnerTests
     private static readonly string[] s_errorRecordKeys =
         ["type", "arm", "kind", "label", "error", "message", "detail", "startedTicks", "endedTicks"];
 
-    // D14.12: a cancellation is booked exactly like an arm-level error -- the record exists, the arm
-    // and the run are marked failed and the client exits 1 -- because the point of the boundary is
-    // that no arm can end without evidence. The message stays the fixed literal the harness has
-    // always written for it while `error` names the cancellation, so a consumer can still tell a
-    // stopped run from a broken arm.
+    // A cancellation is booked exactly like an arm-level error -- the record exists, the arm and the
+    // run are marked failed and the client exits 1 -- so no arm can end without evidence. The message
+    // stays the fixed literal the harness has always written for it while `error` names the
+    // cancellation, so a consumer can still tell a stopped run from a broken arm.
     [Fact]
     public async Task ACancelledArmLeavesAnErrorRecordAndAFailedRunFile()
     {
@@ -57,7 +56,7 @@ public sealed class ClientRunnerTests
 
             var errorIndex = Array.IndexOf(types, "error");
             Assert.True(errorIndex >= 0, "the arm file carries no error record");
-            // One per arm, whichever step of the failure boundary raised it (D14.7): a second record
+            // One per arm, whichever step of the failure boundary raised it: a second record
             // would mean the arm's failure was booked twice.
             Assert.Equal(1, types.Count(static type => type == "error"));
             Assert.True(errorIndex < Array.IndexOf(types, "result"), "the error record must precede the arm's result record");
@@ -72,7 +71,7 @@ public sealed class ClientRunnerTests
             Assert.Equal("OperationCanceledException", record.GetProperty("error").GetString());
             Assert.Equal("cancelled", record.GetProperty("message").GetString());
 
-            // `detail` is the innermost exception's own type (D14.12). Which await observes the token
+            // `detail` is the innermost exception's own type. Which await observes the token
             // decides the concrete subtype -- Task.Delay raises TaskCanceledException -- so the
             // assertion accepts the cancellation family rather than one member of it.
             var detail = record.GetProperty("detail").GetString();

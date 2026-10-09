@@ -9,7 +9,7 @@ using static WinForward.TestSupport.AsyncTestExtensions;
 namespace WinForward.Runtime.Flow.Tests;
 
 /// <summary>
-/// R4 retention cadence: the UDP leg releases idle relay sockets on its own fast cadence
+/// The UDP leg releases idle relay sockets on its own fast cadence
 /// (half the configured idle timeout, floored at 5 s) while the TCP-session and flow-table legs
 /// keep the main sweep interval, so shortening UDP retention does not multiply the expensive
 /// table sweeps. The fake clock gating the main legs starts ahead of the real clock, so the TCP
