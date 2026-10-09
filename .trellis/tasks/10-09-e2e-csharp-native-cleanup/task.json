@@ -1,0 +1,31 @@
+{
+  "id": "e2e-csharp-native-cleanup",
+  "name": "e2e-csharp-native-cleanup",
+  "title": "E2E benchmark projects: finish the C#-native cleanup",
+  "description": "Repair benchmarks/WinForward.E2E, WinForward.E2E.Contracts, WinForward.E2E.Analysis and their support scripts so they read as idiomatic C#/.NET projects of this repository rather than as a transliteration of the retired Python harness: remove the zero-value Python emulation (CPython RNG, %g/repr number and json.dumps text, glob and path spellings), normalise identifiers and conventions to the house style, and prune or relocate the scripts/ scaffolding that is dead, migration-only, or solution-scoped. Behavioural contract (record keys, table structure, disclosures) is preserved; the semantic oracle stays green.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "qmazon",
+  "assignee": "qmazon",
+  "createdAt": "2026-10-09",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "10-09-e2e-analysis-native-rng-and-format",
+    "10-09-e2e-naming-and-idiom-pass",
+    "10-09-e2e-scripts-triage",
+    "10-09-e2e-docs-and-scaffolding"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

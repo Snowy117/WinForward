@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/10-09-e2e-csharp-native-cleanup/design.md", "reason": "The two-class rule and the S0-S6 step design, including the exact oracle relaxation paths."}
+{"file": ".trellis/tasks/10-09-e2e-csharp-native-cleanup/research/01-python-emulation.md", "reason": "Per-item evidence for all 18 emulations, the removal order, and the 18-entry do-not-touch list (section 5)."}
+{"file": ".trellis/tasks/10-09-e2e-csharp-native-cleanup/research/00-rng-swap-spike.md", "reason": "The measured RNG swap: 75 value diffs, 0 structure, 0 verdict flips; S4's acceptance numbers."}
+{"file": ".trellis/spec/backend/measurement-tooling.md", "reason": "The gate table, the oracle contract and the analyzer's published surface that must survive."}
+{"file": ".trellis/spec/backend/measurement-record-contract.md", "reason": "The record and JSON contract the analyzer reads; key spellings are frozen."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Build/test/format/JB gates and the narrow-suppression policy every step must satisfy."}
+{"file": ".trellis/spec/backend/measurement-judgement.md", "reason": "How the numbers are judged (tolerance, bands, manual procedure) - the rules the oracle relaxation must not weaken."}

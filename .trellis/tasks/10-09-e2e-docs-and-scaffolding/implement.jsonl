@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/10-09-e2e-csharp-native-cleanup/research/04-scaffolding-build-docs.md", "reason": "The 16 stale-claim table with both sides cited, the safe-to-delete list, the plan/config duplication measurements and the gate-load-bearing README window."}
+{"file": ".trellis/tasks/10-09-e2e-csharp-native-cleanup/prd.md", "reason": "Requirements R5/R6, AC7 and the recorded decisions D5 (CI gap as its own task) and D7 (wire the oracle into analyzer-gate.yml)."}
+{"file": ".trellis/spec/backend/measurement-tooling.md", "reason": "The README contract table is a gate: the coverage window, the by-line-number references and the exit-code contract."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Where the build/test/format/JB gates really live, and the analyzer-coverage question this task must leave documented."}
