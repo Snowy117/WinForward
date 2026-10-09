@@ -254,7 +254,7 @@ internal sealed class BurstCountingSink(int backgroundFlows, int burstFlows, InF
             }
             else
             {
-                // A stamp degraded by the in-flight bound or a lost entry — a real miss.
+                // A stamp degraded by the in-flight bound or already gone.
                 Interlocked.Increment(ref _unattributed);
             }
         }

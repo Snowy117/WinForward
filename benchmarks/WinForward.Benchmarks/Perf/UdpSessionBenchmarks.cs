@@ -73,13 +73,11 @@ public class UdpSessionBenchmarks
         using var setupQueuePool = new NativeBufferPool(maximumFrameSize);
         using var receiveWindowPool = new NativeBufferPool(UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize));
         using var setupExecutor = new SetupExecutor();
-        // The in-process shape keeps the singleton no-op sink so its numbers stay byte-identical to
-        // the recorded runs; only the out-of-process shape needs a counter, because the child owns
-        // the relay's forwarded total and the echoed response is the parent-visible flush proof.
+        // The in-process shape keeps the singleton no-op sink; only the out-of-process shape needs a
+        // counter, because the child owns the relay's forwarded total and the echoed response is the
+        // parent-visible flush proof.
         var countingSink = _externalServer is null ? null : new ResponseCountingSink();
         var registry = new SelfTrafficRegistry();
-        // One dial + ASSOCIATE + relay socket per session is what this instrument's recorded
-        // per-session framework anchor was derived from.
         await using var coordinator = new UdpProxyCoordinator(new Socks5UdpTransportFactory(registry, maximumFrameSize), (IUdpResponseSink?)countingSink ?? NoopUdpResponseSink.Instance, setupQueuePool, receiveWindowPool, setupExecutor, new UdpProxyOptions { Capacity = Sessions });
         var forwardedBaseline = _server?.RelayForwarded ?? 0;
         for (var index = 0; index < Sessions; index++)

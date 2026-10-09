@@ -65,8 +65,8 @@ internal sealed class TargetOptions
     {
         options = new TargetOptions();
 
-        // The port checks run only once the whole line was read, which is what the short circuit
-        // says: a rejected option leaves `error` as the walk left it and nothing is compared.
+        // The `&&` is deliberate: on the rejected-option path the walk leaves `error` set, and no
+        // port is compared with another.
         return CommandLine.TryParse(args, s_knownOptions, options, Apply, out error)
             && ValidatePorts(options, out error);
     }
@@ -88,7 +88,7 @@ internal sealed class TargetOptions
 
         // The dns responder binds its port on tcp and udp at once, so a colliding dns port would put
         // two listeners of the same protocol on one port. Both options are named in the message: the
-        // two numbers are equal by definition, so the option names are what tell the two ports apart.
+        // numbers are equal by definition, so the option names are what tell them apart.
         if (options.DnsPort == options.TcpPort || options.DnsPort == options.UdpPort)
         {
             var collided = options.DnsPort == options.TcpPort ? "tcp" : "udp";

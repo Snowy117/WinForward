@@ -50,12 +50,11 @@ internal static class BenchmarkShared
     }
 
     /// <summary>
-    /// Builds a TCP frame variant for the redirect-rewrite benchmarks: a bare SYN carries no
-    /// payload (IP total length covers only the headers; trailing bytes are Ethernet padding),
-    /// while the mid-flow data variant fills the frame to the end. TCP flags distinguish the
-    /// shapes (SYN vs ACK). Both variants carry valid IPv4 header and TCP checksums, matching
-    /// captured traffic — required since the endpoint rewriter updates checksums incrementally
-    /// from the incoming values (RFC 1624).
+    /// A TCP frame variant for the redirect-rewrite benchmarks: a bare SYN carries no payload (IP total
+    /// length covers only the headers; trailing bytes are Ethernet padding), the mid-flow variant fills
+    /// the frame to the end, and TCP flags distinguish the two (SYN vs ACK). Both carry valid IPv4 and
+    /// TCP checksums, because the endpoint rewriter updates them incrementally from the incoming values
+    /// (RFC 1624).
     /// </summary>
     public static byte[] CreateIPv4TcpFrame(int frameSize, bool bareSyn)
     {
@@ -190,8 +189,8 @@ internal static class BenchmarkShared
         return FlowKey.Create(local, remote, TransportProtocol.Udp, FlowOriginKind.Host, SlotOf(string.Create(CultureInfo.InvariantCulture, $"adapter-{index % 4}"), index % 4), index % 4);
     }
 
-    /// <summary>A TCP flow key with a controllable local (source) port, for the reverse-prefilter
-    /// benchmark shapes (X1): a candidate key's source port matches a claimed listener port.</summary>
+    /// <summary>A TCP flow key with a controllable local (source) port: the source port matches a
+    /// claimed listener port, the reverse-prefilter shape.</summary>
     public static FlowKey CreateTcpFlowKey(ushort localPort)
     {
         var local = Endpoint.From(IPAddress.Parse("10.0.0.1"), localPort);
@@ -253,7 +252,7 @@ internal sealed class BenchmarkUdpTransportFactory : IUdpProxyTransportFactory
     private int _nextPort = 10_000;
     private long _sends;
 
-    /// <summary>Total datagrams handed to fake transports' <c>SendSpanAsync</c>; the setup-queue flush increments it once per drained datagram.</summary>
+    /// <summary>Total datagrams handed to fake transports' <c>SendSpanAsync</c>.</summary>
     public long Sends => Interlocked.Read(ref _sends);
 
     internal void NoteSend() => Interlocked.Increment(ref _sends);
@@ -295,7 +294,7 @@ internal sealed class BenchmarkExchangeTransport(int localPort) : IUdpProxyTrans
     public IPEndPoint PeerEndpoint { get; } = new(IPAddress.Loopback, 50_000);
     public IPEndPoint LocalEndpoint { get; } = new(IPAddress.Loopback, localPort);
 
-    /// <summary>The datagrams handed to this transport: the flush proof a scenario waits on.</summary>
+    /// <summary>The datagrams handed to this transport.</summary>
     public int SentCount => Volatile.Read(ref _sent);
 
     public int DatagramsSent { get; set; }

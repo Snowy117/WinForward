@@ -4,8 +4,8 @@ using WinForward.NdisApi;
 namespace WinForward.Runtime.Capture;
 
 /// <summary>
-/// A source of "the NDISRD TCP/IP bound-adapter list was rebuilt" observations (design §3.2 of
-/// task 09-07-adapter-list-refresh). <see cref="WaitOne"/> blocks the caller's watcher loop
+/// A source of "the NDISRD TCP/IP bound-adapter list was rebuilt" observations.
+/// <see cref="WaitOne"/> blocks the caller's watcher loop
 /// until the list changed (true) or the wait resolved as cancelled (false): the token fired, or
 /// the source was disposed while waiting. After a true observation every enumeration handle
 /// previously returned by the driver is stale and must be re-enumerated.

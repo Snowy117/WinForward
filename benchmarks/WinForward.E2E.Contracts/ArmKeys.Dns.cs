@@ -4,7 +4,7 @@ namespace WinForward.E2E.Contracts;
 /// The <c>metrics</c> object of a <c>dns</c> result record: the keys the arm writes, in write order. A
 /// constant here is the member name under <c>metrics</c>, so <see cref="Dns.Sent"/> declares the path
 /// <c>metrics/sent</c>; <see cref="Dns.UdpSent"/> is one dotted member name, not an object named
-/// <c>udp</c> (the canonical path walker keeps a dot inside a key whole, D14.6).
+/// <c>udp</c> (the canonical path walker keeps a dot inside a key whole).
 /// </summary>
 /// <remarks>
 /// <para><b>Nothing here is conditional.</b> Every key is published by every DNS run: a run that

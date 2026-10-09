@@ -9,7 +9,7 @@ namespace WinForward.E2E.Client.Arms;
 /// that books what comes back.
 /// </summary>
 /// <remarks>
-/// The lane's threading contract is the MIX mirror of the latency arm's (D19.3 F): the same shape as
+/// The lane's threading contract mirrors the latency arm's: the same shape as
 /// <c>ILanePolicy.Settle</c>, carried by <see cref="MixUdpBook"/>'s own types rather than by the lane
 /// seam. The receive task classifies and enqueues only — the settlement carries the classifier's
 /// <b>unresolved</b> verdict and the instant the datagram arrived — and the send side drains it at
@@ -59,8 +59,8 @@ internal static class MixUdpLoop
                 // ReSharper disable once MethodHasAsyncOverload // The pacing must block: WaitUntilAsync's Task.Delay resolves to the 15.6 ms Windows timer tick and cannot hold these instants.
                 Pacer.WaitUntil(intended, laneCancellation.Token);
 #pragma warning restore S6966, VSTHRD103, MA0042
-                // The lane's settlement point (D18.2 step 2): everything the receive task offered since
-                // the last pace is booked here, on this side of the lane.
+                // The lane's settlement point: everything the receive task offered since the last
+                // pace is booked here, on this side of the lane.
                 book.Settle();
                 index++;
                 drainUntilTicks = await SendDatagramAsync(counters, book, socket, frame, connectionId, index, intended, windowTicks, laneCancellation.Token).ConfigureAwait(false);
@@ -107,7 +107,7 @@ internal static class MixUdpLoop
     /// <summary>
     /// Connects the lane's socket, booking a failure as client send loss and ending this desktop's
     /// observation where it stands: the lane offered nothing, so the record says the client destroyed
-    /// its own share of the schedule rather than failing the whole arm (D18.4's connect ruling).
+    /// its own share of the schedule rather than failing the whole arm.
     /// </summary>
     private static async ValueTask<bool> TryOpenAsync(
         ArmContext context,

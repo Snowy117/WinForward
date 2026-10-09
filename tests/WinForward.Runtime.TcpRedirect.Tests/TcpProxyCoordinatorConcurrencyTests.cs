@@ -113,7 +113,7 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
             .ToArray();
         var outcomes = await Task.WhenAll(tasks);
 
-        // R8: callers inside the pending window return SetupPending; a caller that lands after
+        // Callers inside the pending window return SetupPending; a caller that lands after
         // the background setup completes resolves the association and re-injects (Injected).
         // Both are exactly-once accepts — one association, at most one LIVE listener: a racer
         // whose fast path missed the claim but whose retain landed after the entry removal may
@@ -128,8 +128,8 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
     [Fact]
     public async Task ConcurrentSynBurstWhileListenerSetupIsParkedIsAbsorbedIntoOneSetup()
     {
-        // R8 moved new-flow setup off the pump path, so the redirect-table exactly-once race the
-        // historical barrier test forced is now unreachable through the coordinator: every burst
+        // New-flow setup runs off the pump path, so the redirect-table exactly-once race a
+        // synchronous setup would force is unreachable through the coordinator: every burst
         // caller returns SetupPending immediately and the pending index absorbs retransmissions
         // (overwrite, never a second setup task) while the ONE background setup is parked inside
         // the gated factory. Exactly-once now holds by construction; the loser branch keeps its
@@ -209,7 +209,7 @@ public sealed class TcpProxyCoordinatorConcurrencyTests
     [Fact]
     public async Task RemoveExpiredAsyncExpiresOnlyRedirectingNotRelayingSessions()
     {
-        // M4: a session stuck in Redirecting (never relayed) is expired by the wall-clock sweep,
+        // A session stuck in Redirecting (never relayed) is expired by the wall-clock sweep,
         // while a session whose relay is live (Relaying) is NOT torn down by remove-expiry — a live
         // connection silent at the packet level must not be force-terminated.
         var listenerFactory = new FakeListenerFactory();

@@ -7,8 +7,8 @@ using WinForward.E2E.Contracts;
 namespace WinForward.E2E.Analysis.Tables;
 
 /// <summary>
-/// §7, "Memory detail": one line per row, the product's steady-state private bytes and working set, the
-/// peak the sampler saw, and the OLS slope that decides whether the row leaks.
+/// The "Memory detail" section: one line per row, the product's steady-state private bytes and working
+/// set, the peak the sampler saw, and the OLS slope that decides whether the row leaks.
 /// </summary>
 /// <remarks>
 /// <para><b>Steady state is per arm, not per run.</b> Each arm's warmup window starts at that arm's own
@@ -206,7 +206,7 @@ internal static class TableMemory
         return cells;
     }
 
-    /// <summary>Every pass's contribution to one row's line.</summary>
+    /// <summary>One row's accumulated reading, one list per statistic.</summary>
     private sealed class MemoryReading
     {
         internal List<double> PrivateP50 { get; } = [];
