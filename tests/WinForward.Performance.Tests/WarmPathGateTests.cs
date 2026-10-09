@@ -6,11 +6,11 @@ using Xunit;
 namespace WinForward.Performance.Tests;
 
 /// <summary>
-/// The structural proof class for the warm packet path: the bucketed activity boundaries of Step 2 and
+/// The structural proof class for the warm packet path: the activity clock's bucket boundaries and
 /// the direct-mapped warm cache's facts — gate/clock counts, the collision fallback, the removal
 /// invalidation and the transport-tuple invariant the cache's corroboration rests on. Unlike the
-/// allocation gate classes this one drives concurrency structure, so its repetition proof is its own
-/// (see the warm-path task record) rather than an entry in the allocation-gate loop.
+/// allocation gate classes this one drives concurrency structure, so it carries its own repetition
+/// proof rather than an entry in the allocation-gate loop.
 /// </summary>
 public sealed class WarmPathGateTests
 {
@@ -115,8 +115,7 @@ public sealed class WarmPathGateTests
         for (var index = 0; index < 256; index++) hits += table.TryResolveWarm(key, out _) ? 1 : 0;
         table.GateHoldProbe = null;
 
-        // The probe resolves every time and never enters the gate: the pre-change tree measured
-        // `Expected: 0, Actual: 256` here (recorded in warm-path-gate-counts.txt).
+        // The probe must resolve every time and never enter the gate.
         Assert.Equal(256, hits);
         Assert.Equal(0, entries);
     }

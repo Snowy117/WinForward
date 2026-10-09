@@ -5,7 +5,7 @@ using WinForward.E2E.Analysis.Stats;
 
 namespace WinForward.E2E.Analysis.Checks;
 
-/// <summary>One control metric's comparison across passes, as the drift check and §13 both read it.</summary>
+/// <summary>One control metric's comparison across passes, as the drift check reads it.</summary>
 /// <param name="Metric">The metric's label, as the reference spells it.</param>
 /// <param name="Key">The metric's identifier.</param>
 /// <param name="Kind">Ratio or diff, which decides the threshold band's shape.</param>

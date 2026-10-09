@@ -10,7 +10,7 @@ using Xunit;
 namespace WinForward.Runtime.Capture.Tests;
 
 /// <summary>
-/// R7 transient read-error resilience: the capture pump retries classified transient failures
+/// Transient read-error resilience: the capture pump retries classified transient failures
 /// with bounded backoff, degrades on exhaustion or permanent failure (no rethrow, batch buffers
 /// still released, degradation callback fired exactly once), and the multi-adapter loop keeps
 /// sibling pumps running while forwarding the degradation to the wiring callback.
@@ -173,7 +173,7 @@ public sealed class NdisCaptureResilienceTests
 }
 
 /// <summary>
-/// R7 degradation plumbing at the loop and runtime layers: a degraded pump does not cancel its
+/// Degradation plumbing at the loop and runtime layers: a degraded pump does not cancel its
 /// siblings or rethrow, the loop forwards the event to the wiring callback once per adapter, and
 /// <see cref="TransactionalCaptureRuntime.MarkAdapterDegradedAsync"/> restores exactly the
 /// degraded adapter's mode snapshot once.
@@ -299,7 +299,7 @@ public sealed class CaptureDegradationPlumbingTests
         var start = Task.Run(async () => await runtime.StartAsync(CancellationToken.None));
         await capture.Started.Task;
 
-        // The applied set exists only while the run is live (R7 degradations fire from a pump).
+        // The applied set exists only while the run is live (degradations fire from a pump).
         await runtime.MarkAdapterDegradedAsync("a");
         await runtime.MarkAdapterDegradedAsync("a");
 

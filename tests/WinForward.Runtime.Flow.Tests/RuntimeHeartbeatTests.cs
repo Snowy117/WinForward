@@ -6,7 +6,7 @@ using Xunit;
 namespace WinForward.Runtime.Flow.Tests;
 
 /// <summary>
-/// The periodic <c>runner.heartbeat</c> summary (task 09-17 R2.3): one info event per tick with
+/// The periodic <c>runner.heartbeat</c> summary: one info event per tick with
 /// uptime, usage counts, interception-health state, and the counter movement since the previous
 /// heartbeat; a zero-valued optional field is passed as null rather than omitted, which renders as
 /// an empty slot, and disposal stops the loop. Timing follows the periodic-refresh test pattern (real short intervals plus polling),
@@ -25,7 +25,7 @@ public sealed class RuntimeHeartbeatTests
     private static object? Field(IReadOnlyList<KeyValuePair<string, object?>> fields, string key) =>
         fields.FirstOrDefault(field => string.Equals(field.Key, key, StringComparison.Ordinal)).Value;
 
-    /// <summary>The per-key delta tokens of one heartbeat, parsed back into the counter values the old per-key fields carried.</summary>
+    /// <summary>The per-key delta tokens of one heartbeat, parsed back into counter values.</summary>
     private static Dictionary<string, long> Deltas(RecordedEvent heartbeat)
     {
         var deltas = new Dictionary<string, long>(StringComparer.Ordinal);
@@ -219,9 +219,8 @@ public sealed class RuntimeHeartbeatTests
         await AsyncTestExtensions.WaitForAsync(() => Heartbeats(logger).Count >= 1).ConfigureAwait(false);
 
         await heartbeat.DisposeAsync().ConfigureAwait(false);
-        // Regression: the loop is now a scope child and the scope owns the CTS. Before the migration
-        // a second dispose called CancelAsync on the already-disposed source and threw
-        // ObjectDisposedException; it must now join the same drain.
+        // Regression: the loop is a scope child and the scope owns the CTS, so a second dispose must
+        // join the same drain instead of cancelling an already-disposed source.
         await heartbeat.DisposeAsync().ConfigureAwait(false);
 
         var countAtDispose = Heartbeats(logger).Count;
