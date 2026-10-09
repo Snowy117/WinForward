@@ -67,3 +67,57 @@ Session summary was not supplied.
 
 - Decide whether to fix the archived rename-table path in benchmarks/WinForward.E2E/scripts/check-readme-contract.py:47 (and check-fixture-drift.py:40) — the README contract gate currently exits 2
 - Review the two families that grew (tcp-local-redirect +25.9 % words, measurement-harness +15.7 %) if the scaffolding cost is judged too high
+
+
+## Session 61: E2E C#-native cleanup: four children, one parent, 1663 tests green
+<!-- trellis-session: v=2 fp=8311db40a10857b9 -->
+
+**Date**: 2026-10-09
+**Task**: E2E C#-native cleanup: four children, one parent, 1663 tests green
+**Branch**: `master`
+
+### Summary
+
+Finish what D21 deferred: remove the CPython emulation the analyzer was ported with, bring the four E2E trees to the repository's naming and structure, give every script a home that matches its scope, and make the documents true - including wiring the frozen-tree oracle into CI as its own ubuntu-latest gate.
+
+### Main Changes
+
+- C1: the CPython emulation is gone - System.Random for the bootstrap, the half-even BigInteger formatter deleted (VerbatimNumber 342 -> 105 lines), PythonExponential one format string, the three vector tables and their generator retired; the six resampled leaves carry a tolerance measured from the quantity's own seed-to-seed spread (5e-2), not from its print granularity
+- C2: the acronym rule applied (SocketIO, IOError, OSDescription - member only, the value is frozen) and written into the spec, the (value, reason) tuples collapsed into one Measured<T>, LedgerViews/ArmContext/LaneTestDoubles split, five git mv, migration vocabulary cleared, the E2E test project's analyzer exemption documented with the 31 findings that justify it
+- C3: two spent migration scripts deleted, effective-lines.py to a root tools/ (it is a solution-wide rule), the differ and the fairness guard into Analysis/verification/, seven broken paths repaired - the orchestrator's exit-code log, fixture-drift's exit code, publish-campaign's ledger names, deploy-campaign's staging directory
+- C4: the sixteen stale claims disposed (none left false), the plan sets and configs documented by measurement instead of assertion, FROZEN.md's coverage overstatement corrected, and the oracle became a CI gate - a new ubuntu-latest job, because the differ's apphost has no extension and its frozen tree is pinned to /tmp
+- 172 files changed, +9667/-8556. Eleven plan items were falsified by measurement along the way and each is recorded with its evidence, from the Truthy call sites and the JSON encoder direction to the 1e-2 tolerance that had to become 5e-2 and the four 'unused' usings that were load bearing
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a402289` | refactor(analysis): drop the free Python-emulation items (S0-S1) |
+| `90bc922` | refactor(analysis): stop narrating CPython and drop the half-even formatter (S2-S3) |
+| `9310eda` | refactor(analysis): draw the bootstrap from System.Random and register the statistical tolerance (S4-S6) |
+| `8cfff82` | docs(analysis): correct three claims the check round falsified |
+| `ed436af` | refactor(e2e): bring the four trees to the house naming and structure (C2 N0-N5) |
+| `0d1edda` | chore(e2e): give every script a home, and make the broken ones work (C3 A-D) |
+| `f1b556e` | docs(task): correct two false statements the C3 check round found |
+| `b23eceb` | docs(e2e): make the documents true and wire the oracle into CI (C4 P0-P5) |
+| `bf4bced` | docs(e2e): three corrections the C4 check round found |
+| `836db2b` | chore(task): archive 10-09-e2e-csharp-native-cleanup |
+
+### Testing
+
+- [OK] dotnet test WinForward.slnx -c Release -m:1 -> 14 projects, 1663 passed, 0 failed, exit 0
+- [OK] Release build 0 warnings; dotnet format empty; jb inspectcode 0 issues
+- [OK] oracle 51 slices rc=0; check-fairness 14/14; boundary trees 5 trees + 12 controls; check-fixture-drift rc=0 (rc=2 when its input is missing); check-readme-contract 111 keys against 401 constants; effective-lines clean
+- [OK] harness self-test end to end: 159.9 Mbps goodput, 0 protocol errors, 0 send failures
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Add the PlanFile override/merge mechanism if the plan sets are to be deduplicated (needs loader behaviour, validation and PlanFileTests' 12-file count)
+- Close the CI gap: no workflow runs dotnet build or dotnet test for the solution (D5)
+- Local glue still needs attention: wf.sh's transfer race (T5), deploy-campaign.sh's missing C:\wfbench\stage, orchestrator's unused -Pass parameters, selftest.sh's heredoc
+- Two wording items were left deliberately: DescriptiveStats.cs:119's CPython sum sentence (deleting the words deletes the reason) and oracle-diff.py's Report.show() 160-character truncation
+- 10-06-e2e-competitor-benchmark's design.md:214 and implement.md:96 still list plots/ as an output though the C# analysis draws none
