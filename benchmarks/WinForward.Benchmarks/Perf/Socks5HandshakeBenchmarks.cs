@@ -14,7 +14,7 @@ namespace WinForward.Benchmarks.Perf;
 /// negotiation, TCP CONNECT for the destination, and teardown, against a loopback fake SOCKS5
 /// server. Attempt caps and per-attempt timeout mirror the production relay call site
 /// (<see cref="TcpProxyRelayFactory"/>) so the number transfers to the real redirect path.
-/// Baseline-only per the task decision of 2026-08-29: no optimization work rides on this.
+/// Baseline-only: no optimization work rides on this.
 /// </summary>
 [MemoryDiagnoser]
 public class Socks5HandshakeBenchmarks

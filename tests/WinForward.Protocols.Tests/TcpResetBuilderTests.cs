@@ -92,7 +92,7 @@ public class TcpResetBuilderTests
     [Fact]
     public void BuildResetFromSynReadsClientIsnAndBuildsSynSentAbort()
     {
-        // S4: a capacity-rejected SYN must draw an RST|ACK whose ack = client-ISN + 1 — the
+        // A capacity-rejected SYN must draw an RST|ACK whose ack = client-ISN + 1 — the
         // value a SYN_SENT stack accepts as acknowledging its SYN — with seq = 0.
         var syn = FrameBuilders.BuildIPv4TcpFrame(s_clientV4, s_serverV4, 53000, 443, FrameBuilders.TcpFlagSyn, sequence: 0x11223344);
         var frame = BuildResetFromSyn(syn, IPAddressValue.From(s_serverV4), 443, IPAddressValue.From(s_clientV4), 53000);

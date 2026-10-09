@@ -8,10 +8,8 @@ using Xunit.Abstractions;
 namespace WinForward.Core.Tests;
 
 /// <summary>
-/// The struct-size contract of the per-packet value types (hot-path.md, "Packets are structs with
-/// pinned shapes"): the sizes are
-/// asserted exactly, so a shape change fails here instead of silently growing the structs a packet
-/// copies.
+/// The struct-size contract of the per-packet value types: the sizes are asserted exactly, so a shape
+/// change fails here instead of silently growing the structs a packet copies.
 /// </summary>
 public sealed class FlowKeyShapeTests(ITestOutputHelper output)
 {

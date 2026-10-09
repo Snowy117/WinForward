@@ -8,7 +8,7 @@ using static WinForward.TestSupport.TcpCoordinatorFakes;
 namespace WinForward.Runtime.TcpRedirect.Tests;
 
 /// <summary>
-/// The registration contract of the redirect setup (R7): a fault between the flow claim and a
+/// The registration contract of the redirect setup: a fault between the flow claim and a
 /// registered session releases the claimed listener, the table alias, and the self-traffic token
 /// exactly once, so a hard fault cannot leave half-registered redirect state behind.
 /// </summary>
