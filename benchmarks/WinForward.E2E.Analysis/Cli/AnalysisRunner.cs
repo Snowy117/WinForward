@@ -70,7 +70,7 @@ internal static class AnalysisRunner
 
     /// <summary>
     /// Opens one output file for writing, truncating it, as UTF-8 without a byte-order mark and with
-    /// <c>\n</c> line endings: both are part of the bytes the oracle compares (D20.5).
+    /// <c>\n</c> line endings: both are part of the bytes the oracle compares.
     /// </summary>
     private static StreamWriter OpenOutput(string path) =>
         new(path, append: false, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false))

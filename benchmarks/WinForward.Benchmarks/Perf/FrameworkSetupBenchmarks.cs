@@ -11,16 +11,15 @@ using WinForward.Runtime.Socks5;
 namespace WinForward.Benchmarks.Perf;
 
 /// <summary>
-/// Framework-side decomposition of the real-transport UDP session probe (task
-/// 09-21-session-creation-cost, design §3): every component of
+/// Framework-side decomposition of the real-transport UDP session probe: every component of
 /// <c>Socks5UdpTransport.CreateAsync</c> is measured against the same loopback SOCKS5 server the
 /// real-transport probe uses, so the per-session components can be checked against the full
 /// create+dispose path and against the real-transport minus Noop probe total. A fake control
 /// connection is not expressible (<see cref="Socks5ControlConnection"/> is sealed with a private
-/// constructor and the seam's return type is the concrete class), so connect+handshake and UDP
-/// ASSOCIATE are one measured sequence against its connect-only prefix instead of a
-/// real-versus-fake pair; the relay socket's "fake" side is measured directly (create + production
-/// socket options + bind + close). Every variant asserts its own stage actually executed.
+/// constructor and the seam returns the concrete class), so connect+handshake and UDP ASSOCIATE are
+/// one measured sequence against its connect-only prefix instead of a real-versus-fake pair; the
+/// relay socket's "fake" side is measured directly (create + production socket options + bind +
+/// close). Every variant asserts its own stage actually executed.
 /// </summary>
 [MemoryDiagnoser]
 public class FrameworkSetupBenchmarks

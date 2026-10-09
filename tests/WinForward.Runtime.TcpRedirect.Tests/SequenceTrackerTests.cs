@@ -8,10 +8,8 @@ namespace WinForward.Runtime.TcpRedirect.Tests;
 
 /// <summary>
 /// The atomic sequence-tracker contract: two <see cref="long"/> words per association
-/// (<c>-1</c> unobserved) written by a CAS-max loop and read with <c>Volatile.Read</c>, replacing the
-/// two <c>uint?</c> fields a lock guarded. The predicate is unchanged (<c>IsSequenceAhead</c>), so
-/// the observable tracker semantics are unchanged — retransmissions and pure ACKs never move a
-/// tracker backwards.
+/// (<c>-1</c> unobserved) written by a CAS-max loop and read with <c>Volatile.Read</c>.
+/// Retransmissions and pure ACKs never move a tracker backwards.
 /// </summary>
 public sealed class SequenceTrackerTests
 {

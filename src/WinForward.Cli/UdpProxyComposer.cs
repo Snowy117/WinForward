@@ -11,12 +11,12 @@ using WinForward.Runtime.UdpProxy;
 namespace WinForward.Cli;
 
 /// <summary>
-/// The bundle-created collaborators the durable UDP coordinator is wired from (P3): the
-/// refreshable reinjection-target snapshot, the pinned frame cap, the shared native pools and
-/// setup executor, and the shared SOCKS5 address cache. Creation, registration, rollback, and
-/// disposal stay in <see cref="DurableCaptureBundle"/>; the coordinator borrows the pools, the
-/// executor, and the address cache and never disposes them. Every UDP flow's association is the
-/// flow transport's own, so the composition carries no association owner.
+/// The bundle-created collaborators the durable UDP coordinator is wired from: the refreshable
+/// reinjection-target snapshot, the pinned frame cap, the shared native pools and setup executor,
+/// and the shared SOCKS5 address cache. Creation, registration, rollback, and disposal stay in
+/// <see cref="DurableCaptureBundle"/>; the coordinator borrows the pools, the executor, and the
+/// address cache and never disposes them. Every UDP flow's association is the flow transport's
+/// own, so the composition carries no association owner.
 /// </summary>
 internal sealed record UdpProxyComposition(
     UdpAdapterTargetSource Targets,

@@ -8,7 +8,7 @@ namespace WinForward.E2E.Analysis.Verdict;
 /// <para><b>An unimplemented key is absent, never empty.</b> The oracle slices this file by top-level
 /// key, and a key that is missing is reported as a *missing slice* (exit code 2) rather than compared
 /// as an empty object — which is what makes the batch boundary enforceable: a key the C# side has not
-/// reached yet cannot be mistaken for one it renders as nothing (D20.2).</para>
+/// reached yet cannot be mistaken for one it renders as nothing.</para>
 /// <para><b>Order is output.</b> The reference writes with <c>sort_keys=False</c>, so the order below
 /// is part of the compared bytes and is the reference's own declaration order.</para>
 /// </remarks>

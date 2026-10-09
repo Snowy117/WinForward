@@ -37,7 +37,7 @@ internal static partial class LedgerFindings
         internal List<string> LedgerPaths { get; } = [];
     }
 
-    /// <summary>One row's endpoints, split by the path the arm that saw them was configured to take.</summary>
+    /// <summary>Every run of the campaign, with both lanes of every row, in pass order.</summary>
 
     private static List<ClientRun> EveryRun(CampaignModel campaign)
     {

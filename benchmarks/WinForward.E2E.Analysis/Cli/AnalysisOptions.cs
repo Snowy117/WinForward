@@ -7,7 +7,7 @@ namespace WinForward.E2E.Analysis.Cli;
 /// The defaults are not conveniences: <c>--resamples 10000</c> and <c>--seed 20261006</c> are the
 /// numbers every bootstrap interval in <c>verdict.json</c> is drawn with, and
 /// <c>--warmup-seconds 5.0</c> is the window every CPU and memory cell discards. The oracle calls
-/// both sides without any of them, which is exactly why they must agree (D20.5).
+/// both sides without any of them, which is exactly why they must agree.
 /// </remarks>
 internal sealed record AnalysisOptions
 {

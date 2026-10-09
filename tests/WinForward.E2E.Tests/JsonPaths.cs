@@ -10,7 +10,7 @@ internal sealed record JsonPathObservation(string Kind, JsonElement Value, int A
 
 /// <summary>
 /// Flattens JSONL records into canonical paths, using the same alphabet as the inventory and the
-/// comparison script (<c>benchmarks/WinForward.E2E/scripts/jsonl_paths.py</c>, D7 item 4/D14.6): a
+/// comparison script (<c>benchmarks/WinForward.E2E/scripts/jsonl_paths.py</c>): a
 /// path is its member names joined with '/', a dot inside a member name never splits, an array
 /// contributes its own path once and its elements are flattened under that same path (no <c>[i]</c>
 /// segment), and the document root has no path of its own.

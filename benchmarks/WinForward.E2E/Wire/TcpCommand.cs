@@ -19,7 +19,7 @@ internal static class TcpCommand
     /// The published name of every mode, keyed by the member itself. The name is a table entry rather
     /// than a switch arm because the arm that would cover "anything else" is the one thing that must
     /// not exist: an undefined member has no name, so a miss throws instead of publishing a mode the
-    /// run never used (which the analyzer's per-mode row would silently absorb, D14.23).
+    /// run never used (which the analyzer's per-mode row would silently absorb).
     /// </summary>
     private static readonly Dictionary<TcpMode, string> s_modeNames = new()
     {
@@ -32,7 +32,7 @@ internal static class TcpCommand
 
     /// <summary>
     /// The published name of every verdict. <see cref="TcpVerdict.Error"/> spells "error" out like
-    /// every other member does, so the ledger's verdict keys are exactly the enum's (D14.23).
+    /// every other member does, so the ledger's verdict keys are exactly the enum's.
     /// </summary>
     private static readonly Dictionary<TcpVerdict, string> s_verdictNames = new()
     {
