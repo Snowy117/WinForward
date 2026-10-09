@@ -7,8 +7,8 @@ using Xunit;
 namespace WinForward.E2E.Tests.Lanes;
 
 /// <summary>
-/// The arm's side of <c>outstandingAtTeardown</c> (D18.5 #12, D18.6 #1): the sum of the two halves the
-/// policy and the engine each own. The lane facts pin where each half comes from; this one pins that
+/// The arm's side of <c>outstandingAtTeardown</c>: the sum of the two halves the policy and the
+/// engine each own. The lane facts pin where each half comes from; this one pins that
 /// the arm publishes their sum, so dropping either term fails a fact instead of passing unnoticed
 /// because the counter is zero in every baseline.
 /// </summary>

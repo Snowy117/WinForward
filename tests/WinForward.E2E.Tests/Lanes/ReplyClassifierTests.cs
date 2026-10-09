@@ -6,7 +6,7 @@ using Xunit;
 namespace WinForward.E2E.Tests.Lanes;
 
 /// <summary>
-/// The one reply ladder the three udp arms share (D18.3), as a pure function: every fact here builds
+/// The one reply ladder the three udp arms share, as a pure function: every fact here builds
 /// bytes and reads a verdict, with no book, no counter and no arm involved. The ordering facts are the
 /// load-bearing ones — the connection id is checked before the filler, and a bad checksum whose header
 /// still decodes keeps its sequence — because that is where the three hand-written ladders had drifted.

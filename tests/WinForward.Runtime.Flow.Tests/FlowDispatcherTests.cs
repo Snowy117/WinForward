@@ -34,7 +34,7 @@ public sealed class FlowDispatcherTests
     [Fact]
     public async Task UdpFlowWithTcpListenerPortCollisionIsNotDroppedByReverseHandler()
     {
-        // H1: the dispatcher invokes the TCP reverse handler only for TCP packets. A UDP datagram
+        // The dispatcher invokes the TCP reverse handler only for TCP packets. A UDP datagram
         // whose local AND remote ports equal an active TCP proxy-listener port value must be
         // evaluated by normal flow/policy (here proxied) and never routed into the reverse handler,
         // whose numeric-port matching could otherwise drop it.
@@ -158,8 +158,7 @@ public sealed class FlowDispatcherTests
     private static FlowContext Context(FlowKey key) => FlowBuilders.Context(key, "dns.exe");
 
     /// <summary>
-    /// A reverse handler whose <see cref="WantsPacket"/> always diverts — the pre-X1 dispatcher
-    /// shape these slow-path tests were written against — and whose handling outcome is scripted.
+    /// A reverse handler whose <see cref="WantsPacket"/> always diverts, with a scripted outcome.
     /// </summary>
     private sealed class RecordingReverseHandler(Func<TcpRedirectOutcome>? outcome = null) : ITcpReverseHandler
     {

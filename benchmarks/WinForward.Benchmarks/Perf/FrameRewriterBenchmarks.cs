@@ -72,8 +72,8 @@ public class FrameRewriterBenchmarks
     }
 
     /// <summary>
-    /// Direct endpoint rewrite (the checksum work P2a isolates): addresses + ports + checksum
-    /// update only, no MAC swap or association branching. Same restore-then-rewrite structure.
+    /// Direct endpoint rewrite: addresses + ports + checksum update only, no MAC swap or
+    /// association branching. Same restore-then-rewrite structure.
     /// </summary>
     [Benchmark]
     public bool TryRewriteEndpointsDirect()

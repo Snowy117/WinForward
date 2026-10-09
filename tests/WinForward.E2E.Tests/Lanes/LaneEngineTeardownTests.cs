@@ -7,7 +7,7 @@ namespace WinForward.E2E.Tests.Lanes;
 /// <summary>
 /// How a lane ends: a transport that never opened offers nothing, and the grace drain runs to the
 /// policy's <c>BookEmpty</c> or to its bound — never forever, and never past a book that is already
-/// empty (D18.5 #4).
+/// empty.
 /// </summary>
 public sealed class LaneEngineTeardownTests
 {

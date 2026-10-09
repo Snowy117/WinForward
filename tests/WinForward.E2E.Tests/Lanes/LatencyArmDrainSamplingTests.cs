@@ -7,7 +7,7 @@ using Xunit;
 namespace WinForward.E2E.Tests.Lanes;
 
 /// <summary>
-/// #9: a request that is still in flight when the offer loop ends is sampled, not cancelled with the
+/// A request that is still in flight when the offer loop ends is sampled, not cancelled with the
 /// socket. The fact stages the lane's only reply for an instant past the deadline, so the histogram
 /// sample can only come from the drain that keeps receiving and settling after the last offer.
 /// </summary>

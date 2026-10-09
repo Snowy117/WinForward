@@ -9,7 +9,7 @@ using static WinForward.TestSupport.ChecksumMath;
 namespace WinForward.Protocols.Tests;
 
 /// <summary>
-/// Property coverage for the RFC 1624 incremental endpoint rewrite (P2a): for randomized
+/// Property coverage for the RFC 1624 incremental endpoint rewrite: for randomized
 /// frames the incremental path must be byte-identical to the retained full-recompute oracle
 /// and must produce checksums that validate through the independently reimplemented test-side
 /// math — including odd payload lengths, carry-heavy deltas, and the 0x0000/0xFFFF sum
@@ -115,7 +115,7 @@ public sealed class TcpEndpointRewriteIncrementalTests
     [Fact]
     public void InternetChecksumMatchesIndependentScalarAcrossSizesAndBoundaries()
     {
-        // P2b: the vectorized production checksum must stay bit-identical to the independently
+        // The vectorized production checksum must stay bit-identical to the independently
         // reimplemented scalar fold across vector-threshold boundaries, odd tails, all-zero and
         // all-ones inputs, and the 64 KiB IP-maximum span.
         var random = new Random(0xBEEF);

@@ -15,9 +15,9 @@ internal sealed class LedgerPassView
     /// </summary>
     /// <remarks>
     /// The reference counts the records by iterating a <b>set</b> of the types, so its member order is a
-    /// hash-table artefact rather than a decision. Every reader sorts these keys before printing them
-    /// (§14.1 does), and the semantic oracle ignores object member order, so the two orders are the same
-    /// answer everywhere except a byte-for-byte comparison of the <c>types</c> object.
+    /// hash-table artefact rather than a decision. Every reader sorts these keys before printing them,
+    /// and the semantic oracle ignores object member order, so the two orders are the same answer
+    /// everywhere except a byte-for-byte comparison of the <c>types</c> object.
     /// </remarks>
     internal required IReadOnlyDictionary<string, int> Types { get; init; }
 

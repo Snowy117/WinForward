@@ -5,8 +5,8 @@ using WinForward.E2E.Analysis.Stats;
 namespace WinForward.E2E.Analysis.Tables;
 
 /// <summary>
-/// §13, "Control block comparison": the two <c>BASE</c> blocks' path-quality metrics, bootstrapped across
-/// passes, and each pass's statement of whether the blocks bracketed the product block.
+/// The two <c>BASE</c> blocks' path-quality metrics, bootstrapped across passes, and each pass's
+/// statement of whether the blocks bracketed the product block.
 /// </summary>
 /// <remarks>
 /// <para><b>The post block is the only instrument that can detect a product that left a driver filtering
