@@ -34,7 +34,7 @@ public sealed class TcpProxyCoordinatorCapacityTests
         Assert.Equal(TcpRedirectOutcome.SetupPending, first);
         Assert.Equal(TcpRedirectOutcome.Blocked, second);
         Assert.Single(listenerFactory.Listeners);
-        // Frame 1 is the accepted flow's rewritten SYN; frame 2 is the S4 capacity RST|ACK that
+        // Frame 1 is the accepted flow's rewritten SYN; frame 2 is the capacity RST|ACK that
         // fails the rejected client fast instead of leaving it to retransmit for the OS timeout.
         Assert.Equal(2, injector.InjectedFrames.Count);
         Assert.Equal(0x14, injector.InjectedFrames[1].Frame[47]);
@@ -84,7 +84,7 @@ public sealed class TcpProxyCoordinatorCapacityTests
     [Fact]
     public async Task ReverseInjectionWin32FailureFailsExplicitlyWithReasonTombstoneAndReset()
     {
-        // D2: a stale-handle SendPacketToAdapter/ToMstcp failure (Win32Exception from the driver)
+        // A stale-handle SendPacketToAdapter/ToMstcp failure (Win32Exception from the driver)
         // must surface as a warned, observable teardown — reason=injectionFailure with the native
         // error and flow key — plus a best-effort client reset and the grace tombstone, never a
         // silent passive fail.
@@ -359,8 +359,8 @@ public sealed class TcpProxyCoordinatorCapacityTests
     [Fact]
     public async Task HoldsFlowGraceBoundaryFollowsInjectedClock()
     {
-        // F1: HoldsFlow's grace probe consumes the injected clock, so the tombstone boundary is
-        // deterministic — proving it end-to-end previously required 60 s of real time.
+        // HoldsFlow's grace probe consumes the injected clock, so the tombstone boundary is
+        // deterministic rather than tied to real elapsed time.
         var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
         var listenerFactory = new FakeListenerFactory();
         var table = new TcpRedirectTable();
@@ -405,7 +405,7 @@ public sealed class TcpProxyCoordinatorCapacityTests
     [Fact]
     public async Task CapacityRejectedSynInjectsSingleRstPerTuplePerCooldownWindow()
     {
-        // S4: the client is still in SYN_SENT, so the RST|ACK (ack = ISN+1) aborts it with
+        // The client is still in SYN_SENT, so the RST|ACK (ack = ISN+1) aborts it with
         // ECONNREFUSED; retransmissions inside the 1s window stay silent so a spoofed-source
         // flood cannot use the proxy as a reflection amplifier.
         var listenerFactory = new FakeListenerFactory();

@@ -6,10 +6,8 @@ namespace WinForward.Core;
 /// and a sweep compares buckets, so a warm hit writes one integer and never reads a clock.
 /// <para>
 /// Width: 500 ms. The binding half of the retention contract is "at least eight buckets per retention
-/// window"; the shortest accepted idle timeout is <c>MinimumUdpSessionIdleSeconds = 5</c>
-/// (<c>ConfigurationLimits.cs</c>), whose eighth is 0.625 s, so the historical "at least one second"
-/// lower bound cannot hold at the configuration floor and 500 ms is the finer of the two constraints
-/// that still keeps ten buckets in a five-second window.</para>
+/// window"; the shortest accepted idle timeout is <c>MinimumUdpSessionIdleSeconds = 5</c>, whose eighth
+/// is 0.625 s, so 500 ms is the coarsest width that still keeps ten buckets in a five-second window.</para>
 /// <para>
 /// Retention is never early: a state stamped at <c>t0</c> retires at age
 /// <c>idleTimeout + w − (t0 mod w)</c>, i.e. in <c>(idleTimeout, idleTimeout + w]</c>, because the

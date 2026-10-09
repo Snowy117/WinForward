@@ -184,7 +184,7 @@ public sealed class NdisCapturePumpTests
 
         await using var pump = new NdisCapturePump(reader, 0x99, (_, _) =>
         {
-            // ReSharper disable once ConvertIfStatementToReturnStatement // TrySetResult is the gate signal itself (side effect); the ternary would hide the pump-handshake early exit (B1 disposition).
+            // ReSharper disable once ConvertIfStatementToReturnStatement // TrySetResult is the gate signal itself (side effect); the ternary would hide the pump-handshake early exit.
             if (!handlerStarted.TrySetResult()) return ValueTask.CompletedTask;
             return new ValueTask(handlerReleased.Task);
         }, new NdisCapturePumpOptions { PollDelay = TimeSpan.FromMilliseconds(1) });
@@ -306,9 +306,8 @@ public sealed class NdisCapturePumpTests
         for (var warm = 0; warm < 64; warm++) pump.RunIterationForTests(CancellationToken.None);
 
         // Open the measured window only after the instrument itself is quiet: the per-thread counter
-        // can move by a host-level lump that no driven code caused (allocation-gates.md, "Allocation-gate
-        // stability"). Every probe batch must read an exactly-zero delta, so a genuine per-call
-        // allocation still fails before the window opens.
+        // can move by a host-level lump that no driven code caused. Every probe batch must read an
+        // exactly-zero delta, so a genuine per-call allocation still fails before the window opens.
         const int iterations = 1_000;
         const int maximumProbeBatches = 8;
         var probeKeepGoing = true;
