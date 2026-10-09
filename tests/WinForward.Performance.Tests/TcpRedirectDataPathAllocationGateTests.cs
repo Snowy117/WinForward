@@ -5,11 +5,12 @@ namespace WinForward.Performance.Tests;
 
 /// <summary>
 /// The allocation gate for the proxy path's rewrite legs: the BenchmarkDotNet <c>[MemoryDiagnoser]</c>
-/// 0 B column is enforced here instead of only reported. Each composed leg — sequence tracking plus the
-/// leg's rewrite, as the micro rows define it — runs through <see cref="TcpRedirectDataPathBenchmarks"/>
-/// itself, the same methods the rows time, so the gate cannot drift from the number it pins. Both address
-/// families are covered at the full-size frame; the IPv6 reverse leg's distinct rewrite is the most likely
-/// of the four to start allocating a header buffer.
+/// 0 B column is enforced here instead of only reported. Each composed leg — sequence and
+/// client-acknowledgement tracking plus the leg's rewrite, as the micro rows define it — runs through
+/// <see cref="TcpRedirectDataPathBenchmarks"/> itself, the same methods the rows time, so the gate
+/// cannot drift from the number it pins. Both address families are covered at the full-size frame; the
+/// IPv6 reverse leg's distinct rewrite is the most likely of the legs to start allocating a header
+/// buffer.
 /// <para>
 /// Measurement shape follows <c>HotPathAllocationGateTests</c>: warm the identical synchronous body
 /// first, then bracket exactly one invocation with <see cref="GC.GetAllocatedBytesForCurrentThread"/>.
@@ -34,6 +35,11 @@ public sealed class TcpRedirectDataPathAllocationGateTests
     [InlineData(false)]
     [InlineData(true)]
     public void ForwardForwardedLegAllocatesNoManagedBytes(bool ipv6) => AssertLegAllocatesNoManagedBytes(CreateBenchmarks(ipv6).ForwardLegForwarded);
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ForwardHostDrainArmedLegAllocatesNoManagedBytes(bool ipv6) => AssertLegAllocatesNoManagedBytes(CreateBenchmarks(ipv6).ForwardLegHostDrainArmed);
 
     [Theory]
     [InlineData(false)]

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using WinForward.Runtime.Logging;
 
@@ -10,11 +11,29 @@ namespace WinForward.Runtime.TcpRedirect;
 /// from retransmitted SYNs are drained and closed instead of starting a second relay. Transient
 /// accept errors are retried with a bounded delay so a failing loop never spins flat-out.
 /// </summary>
-internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, ILogger logger, ClientResetInjector clientReset, Func<TcpRedirectSession, ITcpRelay, bool> tryAttachRelay, Func<TcpRedirectSession, ValueTask> tearDownSession)
+internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, ILogger logger, ClientResetInjector clientReset, Func<TcpRedirectSession, ITcpRelay, bool> tryAttachRelay, Func<TcpRedirectSession, ValueTask> tearDownSession, TimeSpan? drainDeadline = null)
 {
 
     /// <summary>A short bounded back-off between retries of a transient accept error.</summary>
     private static readonly TimeSpan s_boundedAcceptRetryDelay = TimeSpan.FromMilliseconds(100);
+
+    /// <summary>
+    /// How long a clean end waits for the client's acknowledgement of the close before retiring
+    /// anyway. It must exceed the RTO floor: a FIN or a tail segment lost on the way is recovered
+    /// only by MSTCP's retransmission timer, so a shorter window would give up on the alias before
+    /// the retransmission that justifies the drain.
+    /// </summary>
+    private static readonly TimeSpan s_defaultDrainDeadline = TimeSpan.FromSeconds(5);
+
+    private readonly TimeSpan _drainDeadline = ResolveDrainDeadline(drainDeadline);
+
+    private static TimeSpan ResolveDrainDeadline(TimeSpan? drainDeadline)
+    {
+        if (drainDeadline is not { } deadline) return s_defaultDrainDeadline;
+        // ReSharper disable once ConvertIfStatementToReturnStatement // Guard-clause throw reads failure-first and names the constructor parameter in ParamName; the ternary-throw form has no precedent in this repo.
+        if (deadline <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(drainDeadline), deadline, "The drain deadline must be positive.");
+        return deadline;
+    }
 
     public async Task RunAcceptLoopAsync(TcpRedirectSession session)
     {
@@ -216,11 +235,11 @@ internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IL
             {
                 // A relay that errored or ended removes the flow so a future SYN re-arms setup.
             }
-            // Every end is surfaced client-visibly before the teardown, while the association still
-            // holds the SYN template and the sequence trackers: RST|ACK for a stalled or faulted
-            // relay, FIN|ACK for a clean end.
             var endKind = relay is ITcpRelayEndInfo endInfo ? endInfo.EndKind : RelayEndKind.CleanEnded;
-            await InjectClientVisibleCloseAsync(relay, session, endKind).ConfigureAwait(false);
+            if (endKind != RelayEndKind.CleanEnded)
+            {
+                await InjectAbnormalEndResetAsync(session).ConfigureAwait(false);
+            }
             var endKindName = EndKindName(endKind);
             TcpRedirectLog.TcpRelayEnded(
                 logger,
@@ -231,6 +250,13 @@ internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IL
                 session.Association.TranslatedListenerTuple,
                 session.Server.Name,
                 endKindName);
+            if (endKind == RelayEndKind.CleanEnded)
+            {
+                // A clean end is not a completed close: the client-visible connection lives through
+                // the close handshake, and the alias is what carries it. Hold the session until the
+                // client acknowledges, then retire as usual.
+                await DrainCleanEndAsync(session, relay, token).ConfigureAwait(false);
+            }
             await tearDownSession(session).ConfigureAwait(false);
         }
         catch (Exception exception)
@@ -239,30 +265,78 @@ internal sealed class TcpRedirectAcceptor(ITcpProxyRelayFactory relayFactory, IL
         }
     }
 
-    private async ValueTask InjectClientVisibleCloseAsync(ITcpRelay relay, TcpRedirectSession session, RelayEndKind endKind)
+    /// <summary>
+    /// Keeps the session — and therefore the reverse alias — alive through the close handshake after
+    /// a clean relay end: the retire waits for the client's acknowledgement, the deadline, or
+    /// another teardown path. Holding the alias is what lets MSTCP's own FIN — emitted by the
+    /// client-facing socket close inside RunPumpAsync — and any unacknowledged tail data before it
+    /// reach the client, which the retire would cut off. The relay is disposed here rather than at
+    /// the retire so the upstream budget is released at the drain's start. With no computable target
+    /// there is no drain and the caller retires immediately.
+    /// </summary>
+    private async ValueTask DrainCleanEndAsync(TcpRedirectSession session, ITcpRelay relay, CancellationToken token)
     {
+        var association = session.Association;
+        if (!TryComputeDrainTargetAck(association, relay, out var targetAck)) return;
         try
         {
-            if (endKind != RelayEndKind.CleanEnded)
-            {
-                await clientReset.TryInjectClientResetAsync(session.Association, CancellationToken.None).ConfigureAwait(false);
-            }
-            else
-            {
-                var serverStreamBytes = relay is ITcpRelayEndInfo byteInfo ? byteInfo.ServerStreamBytes : (long?)null;
-                await clientReset.TryInjectClientCloseAsync(session.Association, serverStreamBytes, CancellationToken.None).ConfigureAwait(false);
-            }
+            await relay.DisposeAsync().ConfigureAwait(false);
         }
         catch (Exception exception)
         {
-            if (endKind != RelayEndKind.CleanEnded)
-            {
-                TcpRedirectLog.TcpRedirectRelayEndResetFailed(logger, exception);
-            }
-            else
-            {
-                TcpRedirectLog.TcpRedirectRelayEndCloseFailed(logger, exception);
-            }
+            // A disposal fault must not pin the session: the drain still runs, bounded by its deadline.
+            TcpRedirectLog.TcpRedirectRelayDisposalFailed(logger, exception);
+        }
+
+        var completion = association.ArmDrainAsync(targetAck);
+        var startedTicks = Stopwatch.GetTimestamp();
+        var outcome = "acknowledged";
+        try
+        {
+            await completion.WaitAsync(_drainDeadline, token).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            outcome = "deadline";
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            // Another retire path (an injection failure, a fragment, capacity, the sweep, shutdown)
+            // won and cancelled the session; its teardown already owns the alias.
+            outcome = "retired";
+        }
+
+        var elapsedMilliseconds = (long)Stopwatch.GetElapsedTime(startedTicks).TotalMilliseconds;
+        TcpRedirectLog.TcpRedirectDrain(logger, association.Generation, association.OriginalKey.Local, association.OriginalKey.Remote, outcome, elapsedMilliseconds);
+    }
+
+    /// <summary>
+    /// The acknowledgement a client sends once it has received the close: the listener's SYN-ACK and
+    /// the FIN each consume one sequence number on top of the bytes the relay delivered to the
+    /// client-facing socket. Any unknown input — no recorded SYN template, no listener-side ISN, or a
+    /// relay without the end-info capability — means no computable target.
+    /// </summary>
+    private static bool TryComputeDrainTargetAck(TcpRedirectAssociation association, ITcpRelay relay, out uint targetAck)
+    {
+        targetAck = 0;
+        if (!association.HasOriginalSynTemplate) return false;
+        if (association.ServerInitialSeq is not { } serverInitialSeq) return false;
+        if (relay is not ITcpRelayEndInfo endInfo) return false;
+        var delivered = endInfo.ServerStreamBytes;
+        if (delivered < 0) return false;
+        targetAck = unchecked((uint)((long)serverInitialSeq + 2 + delivered));
+        return true;
+    }
+
+    private async ValueTask InjectAbnormalEndResetAsync(TcpRedirectSession session)
+    {
+        try
+        {
+            await clientReset.TryInjectClientResetAsync(session.Association, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            TcpRedirectLog.TcpRedirectRelayEndResetFailed(logger, exception);
         }
     }
 

@@ -4,12 +4,12 @@ using WinForward.Core;
 namespace WinForward.Protocols;
 
 /// <summary>
-/// Builds the standalone close frames one connection's original server endpoint sends when
-/// WinForward ends it itself: a TCP RST|ACK that aborts, and a TCP FIN|ACK that closes cleanly.
-/// Used to surface a failed upstream relay to the client as an immediate, protocol-correct close
-/// instead of a silent hang. The Ethernet header is mirrored from the recorded client SYN
-/// (addresses swapped) so the frame is deliverable on the same L2 segment; everything at L3/L4 is
-/// constructed fresh with its own checksums, so the result never depends on parser or rewrite state.
+/// Builds the standalone abort frame one connection's original server endpoint sends when
+/// WinForward ends it itself: a TCP RST|ACK that aborts. Used to surface a failed upstream relay
+/// to the client as an immediate, protocol-correct close instead of a silent hang. The Ethernet
+/// header is mirrored from the recorded client SYN (addresses swapped) so the frame is deliverable
+/// on the same L2 segment; everything at L3/L4 is constructed fresh with its own checksums, so the
+/// result never depends on parser or rewrite state.
 /// </summary>
 public static class TcpResetBuilder
 {
@@ -19,7 +19,6 @@ public static class TcpResetBuilder
     private const int TcpHeaderLength = 20;
     private const byte TcpFlagsOffset = 13;
     private const byte TcpResetAck = 0x14;
-    private const byte TcpFinAck = 0x11;
 
     /// <summary>The largest reset frame the builder can produce (IPv6: 14 + 40 + 20 = 74).</summary>
     public const int MaxResetFrameLength = EthernetHeaderLength + IPv6HeaderLength + TcpHeaderLength;
@@ -44,18 +43,6 @@ public static class TcpResetBuilder
         Span<byte> destination,
         out int written)
         => TryBuild(originalSynFrame, serverAddress, serverPort, clientAddress, clientPort, serverSequenceNext, clientSequenceNext, TcpResetAck, destination, out written);
-
-    public static bool TryBuildFin(
-        ReadOnlySpan<byte> originalSynFrame,
-        IPAddressValue serverAddress,
-        ushort serverPort,
-        IPAddressValue clientAddress,
-        ushort clientPort,
-        uint serverSequenceNext,
-        uint clientSequenceNext,
-        Span<byte> destination,
-        out int written)
-        => TryBuild(originalSynFrame, serverAddress, serverPort, clientAddress, clientPort, serverSequenceNext, clientSequenceNext, TcpFinAck, destination, out written);
 
     private static bool TryBuild(
         ReadOnlySpan<byte> originalSynFrame,

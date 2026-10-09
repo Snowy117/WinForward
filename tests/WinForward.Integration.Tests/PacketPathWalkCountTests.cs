@@ -109,10 +109,11 @@ public sealed class PacketPathWalkCountTests
     }
 
     /// <summary>
-    /// The sequence-gate removal, driven on both legs: the association carries no reference-typed
-    /// instance field (a gate cannot exist without one), so a redirected packet pair takes zero gate
-    /// entries — and the drive is not vacuous, because both trackers advanced. The red-before count
-    /// was two entries for the same drive, one per leg.
+    /// The sequence-gate removal, driven on both legs: the association carries no gate — no
+    /// reference-typed instance field beyond the close drain's completion cell, which is null outside
+    /// a clean end's drain — so a redirected packet pair takes zero gate entries, and the drive is not
+    /// vacuous, because both trackers advanced. The red-before count was two entries for the same
+    /// drive, one per leg.
     /// </summary>
     [Fact]
     public async Task RedirectPacketTakesZeroSequenceGateEntries()
@@ -120,9 +121,10 @@ public sealed class PacketPathWalkCountTests
         await using var composition = await Composition.CreateAsync();
         var association = composition.Association;
 
-        Assert.DoesNotContain(
-            typeof(TcpRedirectAssociation).GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic),
-            field => !field.FieldType.IsValueType);
+        var fields = typeof(TcpRedirectAssociation).GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+        var drainCell = Assert.Single(fields, field => !field.FieldType.IsValueType);
+        Assert.Equal("_drainCompletion", drainCell.Name);
+        Assert.Null(drainCell.GetValue(association));
 
         await composition.DriveForwardMidFlowAsync();
         await composition.DriveReverseAsync();

@@ -254,6 +254,9 @@ public sealed partial class TcpProxyCoordinator
             // Read-then-write: advance the client sequence tracker on the pre-rewrite bytes,
             // keeping the reset builder's ack in the client's window.
             TcpSequenceObservation.TrackClientSequence(frame, packet.Layout, association);
+            // The acknowledgement is observed on every forward packet, not only while draining: the
+            // client can acknowledge our FIN piggybacked on its own FIN, before the drain is armed.
+            TcpSequenceObservation.TrackClientAck(frame, packet.Layout, association);
             var originalClient = packet.Context.Key.Local;
             var originalServer = association.OriginalKey.Remote;
             if (!TcpFrameRewriter.TryRewriteForwardLeg(frame, packet.Layout, originalClient, originalServer, association, association.TranslatedListenerTuple.Port))

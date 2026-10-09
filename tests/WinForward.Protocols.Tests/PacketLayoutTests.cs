@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Net;
 using System.Runtime.CompilerServices;
 using WinForward.Core;
@@ -176,6 +177,25 @@ public sealed class PacketLayoutTests
         Assert.Null(unparsed.ServerNextSeq);
     }
 
+    /// <summary>
+    /// The same hazard on the acknowledgement read: a defaulted layout carries the zero transport byte
+    /// that reads as TCP with the transport header at the IP header's own offset, so the layout entry
+    /// must refuse it while the span oracle still observes the frame's real acknowledgement.
+    /// </summary>
+    [Fact]
+    public void DefaultedLayoutObservesNoAcknowledgement()
+    {
+        var frame = BuildIPv4TcpFrame(s_clientIPv4, s_destIPv4, 53_000, 443, payload: new byte[16]);
+        WriteAcknowledgement(frame, 0x1234_5678);
+
+        var oracle = AcknowledgementViaSpan(frame);
+        Assert.Equal(0x1234_5678u, oracle);
+
+        var unparsed = CreateHostAssociation(Endpoint.From(IPAddress.Loopback, 40_000));
+        TcpSequenceObservation.TrackClientAck(frame, default, unparsed);
+        Assert.Null(unparsed.ClientAckMax);
+    }
+
     [Fact]
     public void SequenceAdvanceIgnoresEthernetPadding()
     {
@@ -197,6 +217,37 @@ public sealed class PacketLayoutTests
         Assert.Equal(AdvanceViaLayout(frame, view), AdvanceViaSpan(frame));
     }
 
+    /// <summary>
+    /// The acknowledgement read has the same twin contract as the sequence read: the span entry point
+    /// is the independent oracle for the layout one. The TCP-options and IPv6 extension-header shapes
+    /// move the transport offset the acknowledgement sits at, so an offset that stopped following the
+    /// parse would disagree with the oracle. A frame without the ACK control bit carries no
+    /// acknowledgement, and neither entry point may track one.
+    /// </summary>
+    [Fact]
+    public void AcknowledgementEntryPointsAgree()
+    {
+        foreach (var frame in new[]
+        {
+            BuildIPv4TcpFrame(s_clientIPv4, s_destIPv4, 53_000, 443, payload: new byte[16]),
+            BuildIPv4TcpFrame(s_clientIPv4, s_destIPv4, 53_000, 443, tcpDataOffsetWords: 6, options: [0x01, 0x01, 0x01, 0x01], payload: new byte[16]),
+            BuildIPv6TcpFrame(s_clientIPv6, s_destIPv6, 53_000, 443, payload: new byte[16]),
+            BuildIPv6TcpFrameWithHopByHop(s_clientIPv6, s_destIPv6, 53_000, 443),
+        })
+        {
+            WriteAcknowledgement(frame, 0x89AB_CDEF);
+            var oracle = AcknowledgementViaSpan(frame);
+            Assert.Equal(0x89AB_CDEFu, oracle);
+            Assert.Equal(oracle, AcknowledgementViaLayout(frame));
+        }
+
+        // A SYN's acknowledgement field is zero and carries no value: a tracked zero would look like
+        // it covers a drain target in the sequence space's upper half.
+        var syn = BuildIPv4TcpFrame(s_clientIPv4, s_destIPv4, 53_000, 443, TcpFlagSyn);
+        Assert.Null(AcknowledgementViaSpan(syn));
+        Assert.Null(AcknowledgementViaLayout(syn));
+    }
+
     private static uint AdvanceViaLayout(byte[] frame, PacketView view)
     {
         var association = CreateHostAssociation(Endpoint.From(IPAddress.Loopback, 40_000));
@@ -209,5 +260,34 @@ public sealed class PacketLayoutTests
         var association = CreateHostAssociation(Endpoint.From(IPAddress.Loopback, 40_000));
         TcpSequenceObservation.TrackClientSequence(frame, association);
         return Assert.IsType<uint>(association.ClientNextSeq);
+    }
+
+    /// <summary>
+    /// Writes the ACK control bit and an acknowledgement value through the parse's transport offset,
+    /// so the frame exercises the shape under test whatever options or extension headers precede the
+    /// TCP header. The checksum is left alone, as in the coordinator tests' acknowledgement frames:
+    /// neither the parser nor the observation reads it.
+    /// </summary>
+    private static void WriteAcknowledgement(byte[] frame, uint acknowledgement)
+    {
+        Assert.True(IPTcpUdpPacket.TryParse(frame, out var view));
+        var tcpOffset = 14 + view.IPHeaderLength;
+        frame[tcpOffset + 13] = TcpFlagAck;
+        BinaryPrimitives.WriteUInt32BigEndian(frame.AsSpan(tcpOffset + 8, 4), acknowledgement);
+    }
+
+    private static uint? AcknowledgementViaLayout(byte[] frame)
+    {
+        Assert.True(IPTcpUdpPacket.TryParse(frame, out var view));
+        var association = CreateHostAssociation(Endpoint.From(IPAddress.Loopback, 40_000));
+        TcpSequenceObservation.TrackClientAck(frame, PacketLayout.From(view), association);
+        return association.ClientAckMax;
+    }
+
+    private static uint? AcknowledgementViaSpan(byte[] frame)
+    {
+        var association = CreateHostAssociation(Endpoint.From(IPAddress.Loopback, 40_000));
+        TcpSequenceObservation.TrackClientAck(frame, association);
+        return association.ClientAckMax;
     }
 }

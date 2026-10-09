@@ -7,13 +7,15 @@ namespace WinForward.Runtime.TcpRedirect;
 /// <summary>
 /// The lifecycle phase of a TCP redirect flow. A flow starts <see cref="Redirecting"/> when its SYN
 /// has been rewritten toward the local listener, advances to <see cref="Relaying"/> once the local
-/// connection is accepted and the upstream relay is established, and enters <see cref="Closing"/>
+/// connection is accepted and the upstream relay is established, holds <see cref="Draining"/> while
+/// a clean relay end keeps the alias carrying the close handshake, and enters <see cref="Closing"/>
 /// during teardown so concurrent observations do not re-arm setup.
 /// </summary>
 public enum RelayPhase
 {
     Redirecting,
     Relaying,
+    Draining,
     Closing,
 }
 
@@ -179,6 +181,96 @@ public sealed class TcpRedirectAssociation
     /// <summary>RFC 793-style serial-number comparison: candidate is ahead when the wrapped
     /// difference is positive and non-zero (strictly forward within the comparison window).</summary>
     private static bool IsSequenceAhead(uint candidate, uint current) => candidate != current && (int)(candidate - current) > 0;
+
+    /// <summary>Whether <paramref name="observed"/> reaches <paramref name="target"/> in the
+    /// wraparound-aware serial space; equality counts as covering.</summary>
+    private static bool IsSequenceCovered(uint observed, uint target) => observed == target || IsSequenceAhead(observed, target);
+
+    /// <summary>
+    /// The highest client acknowledgement (the forward leg's ACK field) observed on the
+    /// association, or null before any acknowledgement-bearing frame passed the redirect. Tracked
+    /// on every forward packet, not only while draining, because the client can acknowledge our FIN
+    /// piggybacked on its own FIN — before a drain exists to arm.
+    /// </summary>
+    public uint? ClientAckMax
+    {
+        get
+        {
+            var value = Volatile.Read(ref _clientAckMax);
+            return value < 0 ? null : (uint)value;
+        }
+    }
+
+    private long _clientAckMax = Unobserved;
+    private long _drainTargetAck = Unobserved;
+    private int _draining;
+
+    /// <summary>
+    /// The drain's completion cell, allocated when a clean relay end arms the drain and completed by
+    /// the acknowledgement that covers <see cref="_drainTargetAck"/>. Asynchronous continuations are
+    /// required: the retire that follows the drain must never run on the capture pump thread that
+    /// observed the acknowledgement.
+    /// </summary>
+    private TaskCompletionSource? _drainCompletion;
+
+    /// <summary>
+    /// Advances the client-acknowledgement tracker by the same CAS-max rule as
+    /// <see cref="ObserveClientSequence"/> — retransmissions never move it backwards — and completes
+    /// an armed drain as soon as the value covers its target.
+    /// </summary>
+    internal void ObserveClientAck(uint acknowledgement)
+    {
+        while (true)
+        {
+            var current = Volatile.Read(ref _clientAckMax);
+            if (current >= 0 && !IsSequenceAhead(acknowledgement, (uint)current)) break;
+            if (Interlocked.CompareExchange(ref _clientAckMax, acknowledgement, current) == current) break;
+        }
+
+        TryCompleteDrain();
+    }
+
+    /// <summary>
+    /// Arms the bounded close drain for <paramref name="targetAck"/> and returns its completion,
+    /// already completed when the tracked acknowledgement covers the target at arm time. Armed once
+    /// per association, by the acceptor's clean-end path: the first caller publishes the target, and
+    /// every later caller joins the published cell and keeps that first target, so a second call can
+    /// never replace the predicate the first arm is already completing on. The publish-then-recheck
+    /// handshake mirrors the quiescence scope's seal-vs-decrement rule: the observing side
+    /// compares-and-swaps before reading the flag, so the flag's compare-exchange is the full fence
+    /// that pairs with it and no wakeup is lost.
+    /// </summary>
+    internal Task ArmDrainAsync(uint targetAck)
+    {
+        var completion = LazyInitializer.EnsureInitialized(
+            ref _drainCompletion,
+            static () => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
+        // Single-flight target publication: only the first caller writes the target ("armed once per
+        // association"), and the exchange is the full fence that orders it before the flag below.
+        if (Interlocked.CompareExchange(ref _drainTargetAck, targetAck, Unobserved) != Unobserved) return completion.Task;
+        // The target precedes the flag: the observing side may read the flag the moment the claim
+        // lands, and an unpublished target would read as -1 — all-ones in the comparison.
+        Interlocked.CompareExchange(ref _draining, 1, 0);
+        // Best-effort guard: the read and the store are not one atomic step, so a concurrent retire
+        // that moved the phase to Closing in between can be overwritten back to Draining. The race is
+        // benign: the retired association is already out of the session dictionary and both indexes,
+        // every production phase reader either requires Redirecting (which Draining already differs
+        // from) or does not distinguish Draining from Closing, and drain completion is gated by the
+        // armed flag, never by the phase.
+        if (Phase != RelayPhase.Closing) Phase = RelayPhase.Draining;
+        Interlocked.MemoryBarrier();
+        TryCompleteDrain();
+        return completion.Task;
+    }
+
+    private void TryCompleteDrain()
+    {
+        if (Volatile.Read(ref _draining) == 0) return;
+        var target = Volatile.Read(ref _drainTargetAck);
+        var observed = Volatile.Read(ref _clientAckMax);
+        if (observed < 0 || !IsSequenceCovered((uint)observed, (uint)target)) return;
+        Volatile.Read(ref _drainCompletion)?.TrySetResult();
+    }
 
     public void Touch(DateTimeOffset now) => Volatile.Write(ref _activityBucket, ActivityBucket.FromUtc(now));
 }

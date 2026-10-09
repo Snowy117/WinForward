@@ -20,7 +20,6 @@ public sealed class TcpRelayEndCloseTests
     private static readonly NativeBufferPool s_synCopyPool = new(NdisApiAbi.MaximumEthernetFrame);
     private static readonly string[] s_injectThenTeardownOrder = ["inject", "teardown"];
     private static readonly string[] s_teardownOnlyOrder = ["teardown"];
-    private const uint RelayServerStreamBytes = 5;
 
     [Fact]
     public async Task FaultedRelayEndInjectsInWindowClientResetBeforeTeardown()
@@ -57,23 +56,6 @@ public sealed class TcpRelayEndCloseTests
     }
 
     [Fact]
-    public async Task CleanRelayEndInjectsClientFinBeforeTeardown()
-    {
-        var relay = new EndKindRelay { EndKind = RelayEndKind.CleanEnded, ServerStreamBytes = RelayServerStreamBytes };
-        var (acceptor, injector, order, session, listener) = CreateAcceptor(relay);
-        await listener.AcceptChannel.Writer.WriteAsync(new FakeAcceptedConnection(session.Association.AcceptedPeerEndpoint), CancellationToken.None);
-        var acceptLoop = acceptor.RunAcceptLoopAsync(session);
-
-        relay.Complete();
-        await WaitForAsync(() => order.Count == 2);
-
-        AssertFin(injector, session.Association.ServerInitialSeq!.Value + 1 + RelayServerStreamBytes);
-        Assert.Equal(s_injectThenTeardownOrder, order);
-        session.Retire();
-        await acceptLoop;
-    }
-
-    [Fact]
     public async Task CleanRelayEndWithoutObservedSequencesInjectsNothing()
     {
         var relay = new EndKindRelay { EndKind = RelayEndKind.CleanEnded };
@@ -99,10 +81,12 @@ public sealed class TcpRelayEndCloseTests
         var acceptLoop = acceptor.RunAcceptLoopAsync(session);
 
         relay.Fault(new IOException("legacy relay fault"));
-        await WaitForAsync(() => order.Count == 2);
+        await WaitForAsync(() => order.Count == 1);
 
-        AssertFinFromTrackers(injector);
-        Assert.Equal(s_injectThenTeardownOrder, order);
+        // No end info means no delivered byte count, so there is no drain target and the clean
+        // end injects nothing; the retire is immediate.
+        Assert.Empty(injector.Frames);
+        Assert.Equal(s_teardownOnlyOrder, order);
         session.Retire();
         await acceptLoop;
     }
@@ -168,25 +152,6 @@ public sealed class TcpRelayEndCloseTests
         Assert.Equal(7u, BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(42, 4)));
         Assert.Equal(0x14, frame[47]);
     }
-
-    /// <summary>
-    /// Asserts the crafted FIN|ACK: same endpoints and close direction as the reset, the given
-    /// server sequence and the tracked client ack.
-    /// </summary>
-    private static void AssertFin(OrderingInjector injector, uint expectedServerSequence)
-    {
-        var (frame, towardMstcp, _) = Assert.Single(injector.Frames);
-        Assert.True(towardMstcp);
-        Assert.Equal(s_destIPv4, new IPAddress(frame.AsSpan(26, 4).ToArray()));
-        Assert.Equal(443u, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(34, 2)));
-        Assert.Equal(s_clientIPv4, new IPAddress(frame.AsSpan(30, 4).ToArray()));
-        Assert.Equal(53000u, BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(36, 2)));
-        Assert.Equal(expectedServerSequence, BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(38, 4)));
-        Assert.Equal(7u, BinaryPrimitives.ReadUInt32BigEndian(frame.AsSpan(42, 4)));
-        Assert.Equal(0x11, frame[47]);
-    }
-
-    private static void AssertFinFromTrackers(OrderingInjector injector) => AssertFin(injector, 10u);
 
     private static (TcpRedirectAcceptor Acceptor, OrderingInjector Injector, List<string> Order, TcpRedirectSession Session, FakeListener Listener) CreateAcceptor(ITcpRelay relay, bool observedSequences = true)
     {
@@ -274,7 +239,10 @@ public sealed class TcpRelayEndCloseTests
 
         public Task Completion => _completion.Task;
         public RelayEndKind EndKind { get; init; }
-        public long ServerStreamBytes { get; init; }
+
+        /// <summary>No fact in this suite arms a drain on an end-kind relay, so there is no
+        /// delivered byte count to report.</summary>
+        public long ServerStreamBytes => 0;
 
         public void Complete() => _completion.TrySetResult();
         public void Fault(Exception exception) => _completion.TrySetException(exception);

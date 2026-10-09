@@ -7,9 +7,10 @@ using static WinForward.TestSupport.TcpCoordinatorFakes;
 namespace WinForward.Runtime.TcpRedirect.Tests;
 
 /// <summary>
-/// The atomic sequence-tracker contract: two <see cref="long"/> words per association
-/// (<c>-1</c> unobserved) written by a CAS-max loop and read with <c>Volatile.Read</c>.
-/// Retransmissions and pure ACKs never move a tracker backwards.
+/// The atomic sequence-tracker contract: <see cref="long"/> words per association (<c>-1</c>
+/// unobserved) written by a CAS-max loop and read with <c>Volatile.Read</c>. Retransmissions and
+/// pure ACKs never move a tracker backwards, and the client-acknowledgement tracker follows the
+/// same rule.
 /// </summary>
 public sealed class SequenceTrackerTests
 {
@@ -18,7 +19,11 @@ public sealed class SequenceTrackerTests
     {
         var fields = typeof(TcpRedirectAssociation).GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
 
-        Assert.DoesNotContain(fields, field => !field.FieldType.IsValueType);
+        // The per-packet contract is "no lock and no gate entry": the drain's completion cell is the
+        // only reference-typed member, and a fresh association has not allocated it yet.
+        var drainCell = Assert.Single(fields, field => !field.FieldType.IsValueType);
+        Assert.Equal("_drainCompletion", drainCell.Name);
+        Assert.Null(drainCell.GetValue(CreateHostAssociation(Endpoint.From(IPAddress.Loopback, 40_000))));
     }
 
     [Fact]

@@ -155,6 +155,55 @@ internal static class TcpSequenceObservation
         if (TryReadTcpSequenceAdvance(frame, out var next)) association.ObserveClientSequence(next);
     }
 
+    /// <summary>
+    /// Advances the client-acknowledgement tracker on the forward leg by the frame's ACK field
+    /// (transport offset +8). Must run on the original (pre-rewrite) frame, the same read-then-write
+    /// invariant as <see cref="TrackClientSequence(ReadOnlySpan{byte}, in PacketLayout, TcpRedirectAssociation)"/>.
+    /// A frame without the ACK control bit leaves the tracker untouched: its acknowledgement field
+    /// carries no value (a SYN's is zero), and a tracked zero would look like it covers a drain
+    /// target in the upper half of the sequence space — an arm that exits before the close was
+    /// acknowledged.
+    /// </summary>
+    public static void TrackClientAck(ReadOnlySpan<byte> frame, in PacketLayout layout, TcpRedirectAssociation association)
+    {
+        if (TryReadTcpAcknowledgement(frame, layout, out var acknowledgement)) association.ObserveClientAck(acknowledgement);
+    }
+
+    /// <summary>
+    /// The span-taking twin of
+    /// <see cref="TrackClientAck(ReadOnlySpan{byte}, in PacketLayout, TcpRedirectAssociation)"/> and
+    /// its independent oracle: it parses the frame itself, so an accepted packet's TCP header — the
+    /// acknowledgement field included — is proven present and needs no separate bound check. Must run
+    /// on the original (pre-rewrite) frame, the same read-then-write invariant as the layout entry.
+    /// </summary>
+    public static void TrackClientAck(ReadOnlySpan<byte> frame, TcpRedirectAssociation association)
+    {
+        if (TryReadTcpAcknowledgement(frame, out var acknowledgement)) association.ObserveClientAck(acknowledgement);
+    }
+
+    private static bool TryReadTcpAcknowledgement(ReadOnlySpan<byte> frame, in PacketLayout layout, out uint acknowledgement)
+    {
+        acknowledgement = 0;
+        if (!layout.IsTcp) return false;
+        const byte ack = 0x10;
+        if ((layout.TcpFlags & ack) == 0) return false;
+        var acknowledgementOffset = layout.TransportOffset + 8;
+        if (frame.Length < acknowledgementOffset + 4) return false;
+        acknowledgement = BinaryPrimitives.ReadUInt32BigEndian(frame.Slice(acknowledgementOffset, 4));
+        return true;
+    }
+
+    private static bool TryReadTcpAcknowledgement(ReadOnlySpan<byte> frame, out uint acknowledgement)
+    {
+        acknowledgement = 0;
+        if (!IPTcpUdpPacket.TryParse(frame, out var view) || view.Transport != PacketTransport.Tcp) return false;
+        const byte ack = 0x10;
+        var tcpOffset = 14 + view.IPHeaderLength;
+        if ((frame[tcpOffset + 13] & ack) == 0) return false;
+        acknowledgement = BinaryPrimitives.ReadUInt32BigEndian(frame.Slice(tcpOffset + 8, 4));
+        return true;
+    }
+
     /// <summary>Advances the server-side sequence tracker on the reverse leg (pre-rewrite frame).</summary>
     public static void TrackServerSequence(ReadOnlySpan<byte> frame, in PacketLayout layout, TcpRedirectAssociation association)
     {

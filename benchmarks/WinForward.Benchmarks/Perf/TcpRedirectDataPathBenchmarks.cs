@@ -7,9 +7,9 @@ using WinForward.Runtime.TcpRedirect;
 namespace WinForward.Benchmarks.Perf;
 
 /// <summary>
-/// The composed per-packet cost of the proxy data path: sequence tracking followed by the leg's
-/// rewrite, in both association shapes and both address families, at a small and a full-size frame.
-/// This is the number the proxy adds to every packet of a proxied connection.
+/// The composed per-packet cost of the proxy data path: sequence and client-acknowledgement tracking
+/// followed by the leg's rewrite, in both association shapes and both address families, at a small and
+/// a full-size frame. This is the number the proxy adds to every packet of a proxied connection.
 /// <para>
 /// The rows stop at the rewrite: the send itself is a driver IOCTL, so a counting fake would add noise
 /// rather than information, and the Windows driver's cost is out of scope for a Linux micro row. What is
@@ -18,7 +18,9 @@ namespace WinForward.Benchmarks.Perf;
 /// <para>
 /// Setup proves every row would <em>succeed</em> on the pristine frame before any of them is timed: a
 /// row that silently measured a rejected rewrite (wrong family, short header) would report a plausible
-/// number for the wrong question.
+/// number for the wrong question. The drain-armed forward row carries the same composition while a
+/// close drain is waiting, which is the state that takes the acknowledgement tracker into its target
+/// comparison instead of returning at its unarmed check.
 /// </para>
 /// </summary>
 [MemoryDiagnoser]
@@ -40,6 +42,7 @@ public class TcpRedirectDataPathBenchmarks
     private Endpoint _server;
     private TcpRedirectAssociation _host = null!;
     private TcpRedirectAssociation _forwarded = null!;
+    private TcpRedirectAssociation _drainArmed = null!;
     private PacketLayout _layout;
 
     [GlobalSetup]
@@ -65,6 +68,10 @@ public class TcpRedirectDataPathBenchmarks
         // adapter, and a mismatched family makes the rewriter reject every packet.
         var forwardLocal = IPAddress.Parse(IPv6 ? "2001:db8::1" : "192.168.77.1");
         _forwarded = new TcpRedirectAssociation(forwardedKey, _server, 0, translated, IPAddressValue.From(forwardLocal), 2, now);
+        // The frame's acknowledgement field is zero, so a drain target of one stays uncovered: every
+        // call runs the armed comparison, and the drain stays pending for the row's lifetime.
+        _drainArmed = new TcpRedirectAssociation(hostKey, _server, 0, translated, forwardLocalAddress: null, 3, now);
+        _ = _drainArmed.ArmDrainAsync(targetAck: 1);
         // Production carries the classification parse's layout on the packet; the rows below
         // consume it the way the coordinator's data legs do, so they measure the shipped shape.
         if (!IPTcpUdpPacket.TryParse(_pristine, out var view)) throw new InvalidOperationException("The benchmark frame does not parse.");
@@ -78,6 +85,7 @@ public class TcpRedirectDataPathBenchmarks
     {
         _pristine.AsSpan().CopyTo(_scratch);
         TcpSequenceObservation.TrackClientSequence(_scratch, _layout, _host);
+        TcpSequenceObservation.TrackClientAck(_scratch, _layout, _host);
         return TcpFrameRewriter.TryRewriteForwardLeg(_scratch, _layout, _client, _server, _host, ListenerPort);
     }
 
@@ -86,7 +94,17 @@ public class TcpRedirectDataPathBenchmarks
     {
         _pristine.AsSpan().CopyTo(_scratch);
         TcpSequenceObservation.TrackClientSequence(_scratch, _layout, _forwarded);
+        TcpSequenceObservation.TrackClientAck(_scratch, _layout, _forwarded);
         return TcpFrameRewriter.TryRewriteForwardLeg(_scratch, _layout, _client, _server, _forwarded, ListenerPort);
+    }
+
+    [Benchmark]
+    public bool ForwardLegHostDrainArmed()
+    {
+        _pristine.AsSpan().CopyTo(_scratch);
+        TcpSequenceObservation.TrackClientSequence(_scratch, _layout, _drainArmed);
+        TcpSequenceObservation.TrackClientAck(_scratch, _layout, _drainArmed);
+        return TcpFrameRewriter.TryRewriteForwardLeg(_scratch, _layout, _client, _server, _drainArmed, ListenerPort);
     }
 
     [Benchmark]
@@ -113,17 +131,18 @@ public class TcpRedirectDataPathBenchmarks
     /// </summary>
     private void ProveRowsSucceed()
     {
-        if (!Rewrite(host: true)) throw new InvalidOperationException("The forward host-shape row rejects the pristine frame.");
-        if (!Rewrite(host: false)) throw new InvalidOperationException("The forward forwarded-shape row rejects the pristine frame.");
+        if (!Rewrite(_host)) throw new InvalidOperationException("The forward host-shape row rejects the pristine frame.");
+        if (!Rewrite(_forwarded)) throw new InvalidOperationException("The forward forwarded-shape row rejects the pristine frame.");
+        if (!Rewrite(_drainArmed)) throw new InvalidOperationException("The forward drain-armed row rejects the pristine frame.");
         if (!Reverse(host: true)) throw new InvalidOperationException("The reverse host-shape row rejects the pristine frame.");
         if (!Reverse(host: false)) throw new InvalidOperationException("The reverse forwarded-shape row rejects the pristine frame.");
     }
 
-    private bool Rewrite(bool host)
+    private bool Rewrite(TcpRedirectAssociation association)
     {
         _pristine.AsSpan().CopyTo(_scratch);
-        var association = host ? _host : _forwarded;
         TcpSequenceObservation.TrackClientSequence(_scratch, _layout, association);
+        TcpSequenceObservation.TrackClientAck(_scratch, _layout, association);
         return TcpFrameRewriter.TryRewriteForwardLeg(_scratch, _layout, _client, _server, association, ListenerPort);
     }
 
