@@ -14,7 +14,7 @@ using Xunit;
 namespace WinForward.E2E.Tests;
 
 /// <summary>
-/// The behavioural half of the teardown contract (D19.2 ⑨): a site whose socket teardown closed books
+/// The behavioural half of the teardown contract: a site whose socket teardown closed books
 /// nothing, while the same site's arm for a failure the harness really saw still books exactly what it
 /// always did. Each fact drives one of the two shapes and reads the value back out of the published
 /// record, so a counter that stopped moving for the wrong reason is as red as one that moved for

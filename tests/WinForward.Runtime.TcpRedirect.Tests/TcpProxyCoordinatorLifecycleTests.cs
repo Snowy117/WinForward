@@ -27,7 +27,7 @@ public sealed class TcpProxyCoordinatorLifecycleTests
 
         var outcome = await coordinator.HandleSynAsync(MakeSynPacket(s_clientIPv4, s_destIPv4, 53000, 443), s_server, CancellationToken.None);
 
-        // R8: the SYN dispatch returns SetupPending; the failure lands in the background task,
+        // The SYN dispatch returns SetupPending; the failure lands in the background task,
         // which logs, fails closed, and arms the per-flow setup cooldown.
         Assert.Equal(TcpRedirectOutcome.SetupPending, outcome);
         await coordinator.DrainPendingSetupsAsync();
@@ -276,10 +276,10 @@ public sealed class TcpProxyCoordinatorLifecycleTests
     [Fact]
     public async Task RetireRemovesTableAliasAndArmsTombstoneBeforeListenerDisposalCompletes()
     {
-        // R2: retire (store gate) and table-alias removal + tombstone arming (table gate) are one
+        // Retire (store gate) and table-alias removal + tombstone arming (table gate) are one
         // atomic step. The teardown's trailing listener disposal is parked mid-flight — at that
-        // point the session is already retired, and in the old retire→removal gap a same-tuple
-        // SYN/data was still resolved and honored against the dying listener (reinject →
+        // point the session is already retired, and in a retire→removal gap a same-tuple
+        // SYN/data would still be resolved and honored against the dying listener (reinject →
         // connect-then-death). Atomic retire makes the same packets observe tombstone grace.
         var listenerFactory = new ParkingListenerFactory();
         var injector = new FakeInjector();
@@ -337,7 +337,7 @@ public sealed class TcpProxyCoordinatorLifecycleTests
         var table = new TcpRedirectTable();
         var coordinator = CreateCoordinator(listenerFactory, new FakeRelayFactory(), injector, table, selfTraffic, new FakeLocalAddressProvider());
 
-        // R8: the SYN dispatch returns immediately; the background setup task is the part that
+        // The SYN dispatch returns immediately; the background setup task is the part that
         // parks inside the gated listener factory, and dispose must drain it (the inflight-setup
         // counter covers background setups) before reclaiming the session set.
         Assert.Equal(TcpRedirectOutcome.SetupPending, await coordinator.HandleSynAsync(MakeSynPacket(s_clientIPv4, s_destIPv4, 53000, 443), s_server, CancellationToken.None));

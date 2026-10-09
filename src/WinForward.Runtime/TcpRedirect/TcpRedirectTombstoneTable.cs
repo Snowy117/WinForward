@@ -115,7 +115,7 @@ internal sealed class TcpRedirectTombstoneTable
     /// newer expiry, so queue order tracks expiry order — once the head is a live, unexpired,
     /// current record, nothing behind it can be drainable. Records that go stale deeper in the
     /// queue surface at the head on later sweeps, so the queue length converges to the live entry
-    /// count under refresh/expiry churn instead of growing with total TryAdd calls.
+    /// count instead of growing with total TryAdd calls.
     /// </summary>
     private void DrainStaleQueueHeadUnderGate(DateTimeOffset now)
     {

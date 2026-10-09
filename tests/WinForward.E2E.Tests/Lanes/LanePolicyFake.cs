@@ -121,7 +121,7 @@ internal sealed class LanePolicyFake : ILanePolicy
 
     /// <summary>
     /// Settles that ran after the offer loop: one per grace tick until the staged book emptied, plus
-    /// the single settle the engine always runs once it has joined the receive loop (D18.5 #4).
+    /// the single settle the engine always runs once it has joined the receive loop.
     /// </summary>
     internal long SettlesAfterTheOfferLoop => Math.Max(0, SettleCalls - OfferedSlots);
 
@@ -242,7 +242,7 @@ internal sealed class LanePolicyFake : ILanePolicy
     }
 
     /// <summary>
-    /// Decode, classify, enqueue — and nothing else (D18.5 #2). The fake keeps no counter here on
+    /// Decode, classify, enqueue — and nothing else. The fake keeps no counter here on
     /// purpose: a policy that counted on the receive thread would be exactly what the contract forbids.
     /// </summary>
     public void OnReceive(in LaneReceiveResult result, ReadOnlySpan<byte> payload, long receivedTicks)

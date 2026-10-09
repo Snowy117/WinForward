@@ -112,7 +112,7 @@ public sealed class PacketPathWalkCountTests
     /// The sequence-gate removal, driven on both legs: the association carries no reference-typed
     /// instance field (a gate cannot exist without one), so a redirected packet pair takes zero gate
     /// entries — and the drive is not vacuous, because both trackers advanced. The red-before count
-    /// was two entries for the same drive (one per leg), recorded in the task artifact.
+    /// was two entries for the same drive, one per leg.
     /// </summary>
     [Fact]
     public async Task RedirectPacketTakesZeroSequenceGateEntries()

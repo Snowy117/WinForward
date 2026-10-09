@@ -108,8 +108,8 @@ internal sealed class ArmRunFixture : IAsyncDisposable
     /// <summary>
     /// A port nothing holds right now, and none this process has handed out before: a probe releases
     /// the number it picked, so two facts running in parallel can otherwise be given the same one and
-    /// the second listener fails to bind (measured: one shape fact lost its udp port to another class's
-    /// probe). A port stays spoken for even if its caller never binds it, which costs a number and
+    /// the second listener fails to bind — one shape fact has already lost its udp port that way.
+    /// A port stays spoken for even if its caller never binds it, which costs a number and
     /// removes the race.
     /// </summary>
     internal static int FreePort(SocketType socketType, ProtocolType protocolType)
