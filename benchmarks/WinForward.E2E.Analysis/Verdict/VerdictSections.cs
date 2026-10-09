@@ -14,16 +14,16 @@ namespace WinForward.E2E.Analysis.Verdict;
 /// <para><b>A key that is not here is left out of the document.</b> The differ slices the file by
 /// top-level key and reports a key the batch owns but the analysis did not write as a *missing slice*
 /// (exit code 2), which is what makes the batch boundary enforceable: a key nobody has implemented yet
-/// cannot be mistaken for one that renders as nothing (D20.2).</para>
+/// cannot be mistaken for one that renders as nothing.</para>
 /// <para><b>The identity string names the analysis, not this repository.</b> The reference used to
 /// publish its own path here; both sides now write the neutral program name, so the two files can be
-/// compared at all (D6.4).</para>
+/// compared at all.</para>
 /// <para><b><c>bootstrap</c> and <c>thresholds</c> are the run's parameters, published.</b> They are
 /// unconditional — the reference emits them for every campaign, including one whose comparisons all
 /// come out <c>inconclusive</c> — and they state what the intervals below them were drawn with rather
-/// than what any of them came out to, which is why they belong to the same batch as the generator
-/// (D20.5). The thresholds text is the reference's own prose, down to its en dash and its asterisks:
-/// it is compared as text, and its <c>'</c> characters are deliberately not escaped by
+/// than what any of them came out to, which is why they belong to the same batch as the generator.
+/// The thresholds text is the reference's own prose, down to its en dash and its asterisks: it is
+/// compared as text, and its <c>'</c> characters are deliberately not escaped by
 /// <see cref="VerbatimJson"/>.</para>
 /// </remarks>
 internal static class VerdictSections

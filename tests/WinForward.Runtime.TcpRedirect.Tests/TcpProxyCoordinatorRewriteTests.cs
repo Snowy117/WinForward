@@ -238,7 +238,7 @@ public sealed class TcpProxyCoordinatorRewriteTests
 
         var outcome = await coordinator.HandleSynAsync(packet, s_server, CancellationToken.None);
 
-        // R8: the dispatch defers to the background setup; the rewrite failure fails closed there.
+        // The dispatch defers to the background setup; the rewrite failure fails closed there.
         Assert.Equal(TcpRedirectOutcome.SetupPending, outcome);
         await coordinator.DrainPendingSetupsAsync();
         Assert.Equal(0, table.Count);
@@ -271,7 +271,7 @@ public sealed class TcpProxyCoordinatorRewriteTests
     [Fact]
     public async Task HandleReverseIfApplicableAsyncReturnsNotRelevantForUdp()
     {
-        // H1: the numeric-port reverse gateway must not misclassify a UDP datagram whose local and
+        // The numeric-port reverse gateway must not misclassify a UDP datagram whose local and
         // remote ports collide with an active TCP listener port. On UDP it returns NotRelevant so
         // the dispatcher leaves the datagram to normal flow/policy instead of dropping it.
         var listenerFactory = new FakeListenerFactory();
@@ -297,7 +297,7 @@ public sealed class TcpProxyCoordinatorRewriteTests
     [Fact]
     public async Task IPv6ReverseFrameWithCollidingPortDoesNotMatchIPv4Association()
     {
-        // M5: an IPv6 frame whose port collides with an IPv4 flow's listener port shares the same
+        // An IPv6 frame whose port collides with an IPv4 flow's listener port shares the same
         // numeric port value; the reverse gateway must not route it into the IPv4 association, or a
         // rewritten frame would cross address families.
         var listenerFactory = new FakeListenerFactory();

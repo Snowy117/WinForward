@@ -14,13 +14,11 @@ using static WinForward.TestSupport.TcpCoordinatorFakes;
 namespace WinForward.Runtime.TcpRedirect.Tests;
 
 /// <summary>
-/// S1: an IP fragment whose address pair belongs to an active TCP redirect association is
-/// consumed (never passed toward the real server), tears the association down client-visibly
-/// (RST|ACK via the tracked sequences; a warned silent teardown when they were never observed),
-/// emits a reason=fragment trace, and arms the grace tombstone. Unattributable fragments keep
-/// the unconditional non-flow pass. These tests replaced the pre-fix characterization suite
-/// that pinned the old behavior (every fragment passed: host forward leg reinjected toward the
-/// real server, reverse leg and forwarded fragments delivered toward MSTCP).
+/// An IP fragment whose address pair belongs to an active TCP redirect association is consumed
+/// (never passed toward the real server), tears the association down client-visibly (RST|ACK via
+/// the tracked sequences; a warned silent teardown when they were never observed), emits a
+/// reason=fragment trace, and arms the grace tombstone. Unattributable fragments keep the
+/// unconditional non-flow pass.
 /// </summary>
 public sealed class TcpFragmentHandlingTests
 {
@@ -258,7 +256,7 @@ public sealed class TcpFragmentHandlingTests
                 ? MakeForwardedSynPacket(s_clientIPv4, s_destIPv4, 53000, 443)
                 : MakeSynPacket(Client, Destination, 53000, 443);
             await Dispatcher.DispatchAsync(syn, CancellationToken.None);
-            // R8: the SYN dispatch defers the redirect setup to the background; the listener
+            // The SYN dispatch defers the redirect setup to the background; the listener
             // exists only after the pending setup settles.
             await Coordinator.DrainPendingSetupsAsync();
             var listener = listenerFactory.Listeners[0];

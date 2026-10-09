@@ -8,7 +8,7 @@ namespace WinForward.E2E.Tests;
 /// The Tier 0 load-time contract: every plan that crashes an arm, silently keeps an arm's default or
 /// truncates another arm's records is refused by <see cref="PlanFile.TryLoad"/> with a message that
 /// names the arm and the value. The exit code those errors produce is checked against the published
-/// binary, not here (D14.19).
+/// binary, not here.
 /// </summary>
 public sealed class PlanFileValidationTests
 {
@@ -25,7 +25,7 @@ public sealed class PlanFileValidationTests
             StringComparison.Ordinal);
     }
 
-    // D14.4's boundary, one kind per side: the check has to reject exactly what the tracker cannot
+    // The loader's boundary, one kind per side: the check has to reject exactly what the tracker cannot
     // hold, so the last sequence inside the space loads and the first one past it does not.
     [Theory]
     [InlineData("max-sequence-loss-at.json", true)]
@@ -41,7 +41,7 @@ public sealed class PlanFileValidationTests
         }
     }
 
-    // D14.4's scope, from the other side: only the three kinds that index arrays by sequence carry
+    // The bound's scope: only the three kinds that index arrays by sequence carry
     // the check. A latency arm offering 300000 sequences has to load, and base and mix reach their
     // effective rate without a key of their own -- base from its declaration or its loss phase's
     // 500/s, mix from UdpPacketsPerSecond -- so each row states the rate the bound is measured
@@ -65,7 +65,7 @@ public sealed class PlanFileValidationTests
         Assert.Contains("past the tracker's MaxSequence", error, StringComparison.Ordinal);
     }
 
-    // D5's rule for the two text keys: a value of another JSON type must not be read as the key's
+    // The rule for the two text keys: a value of another JSON type must not be read as the key's
     // default, because that publishes a run nothing asked for (`"protocol": 5` becoming a tcp arm).
     [Theory]
     [InlineData("LATBADPROTO", """ "kind":"latency","protocol":5""", "protocol", "5")]
@@ -142,7 +142,7 @@ public sealed class PlanFileValidationTests
         Assert.True(TryLoadJson("LATNOPAYLOAD", """ "kind":"latency","payloadBytes":0""", out var error), error);
     }
 
-    // D5: a fractional value on an integer key is refused with the value as written, rather than
+    // A fractional value on an integer key is refused with the value as written, rather than
     // falling back to the arm's default and publishing a number the plan never declared.
     [Fact]
     public void AFractionalValueOnAnIntegerKeyIsRefusedWithTheValueAsWritten()
@@ -203,7 +203,7 @@ public sealed class PlanFileValidationTests
         Assert.Equal(kind, arms[0].Kind);
     }
 
-    // D14.4's boundary is the loader's; this one is not. A plan the loader cannot reject still has to
+    // Not every bad plan is the loader's to catch. A plan the loader cannot reject still has to
     // fail inside the arm, which is what makes the arm loop's catch-all -- not the loader, and not the
     // process -- the last thing between a bad plan and a lost run. The arm body turns 1e18 seconds
     // into a TimeSpan and overflows; the harness is expected to book that as an arm failure.

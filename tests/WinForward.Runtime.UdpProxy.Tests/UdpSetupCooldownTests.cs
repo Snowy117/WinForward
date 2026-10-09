@@ -8,7 +8,7 @@ using static WinForward.TestSupport.FlowBuilders;
 namespace WinForward.Runtime.UdpProxy.Tests;
 
 /// <summary>
-/// R1: the cooldown tombstone and the cap that must not swallow it. A failed setup writes a
+/// The cooldown tombstone and the cap that must not swallow it. A failed setup writes a
 /// fail-closed cooldown tombstone (bounded by the session capacity, evicting the oldest retry
 /// deadline); the 8-wide concurrent-setup cap must instead queue flows beyond the cap (patient
 /// admission) rather than fail them into that tombstone — the 64-flow flash crowd pins that
@@ -44,9 +44,9 @@ public sealed class UdpSetupCooldownTests
     [Fact]
     public async Task SetupCooldownsAreBoundedAndEvictTheOldestAtCapacity()
     {
-        // R3-UDP: the cooldown dictionary is bounded by the session capacity; at capacity the
-        // oldest retry deadline is evicted, so a failing-server storm cannot grow it without
-        // bound while every recent flow keeps its cooldown (eviction, never refusal).
+        // The cooldown dictionary is bounded by the session capacity; at capacity the oldest retry
+        // deadline is evicted, so a failing-server storm cannot grow it without bound while every
+        // recent flow keeps its cooldown (eviction, never refusal).
         var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
         var factory = new FailingTransportFactory();
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 4, TimeProvider = time });
@@ -111,11 +111,11 @@ public sealed class UdpSetupCooldownTests
     [Fact]
     public async Task SetupFlashCrowdOfDistinctFlowsQueuesThroughTheCapWithoutLoss()
     {
-        // A flash crowd of first datagrams (the 2026-08-29 soak shape: every flow starts at
-        // once) must all be admitted through the 8-wide setup gate: every accepted datagram
-        // is forwarded, no setup queue is drained, no tombstone is written. The barrier holds
-        // the first eight handshakes until all 64 datagrams have been accepted, proving the
-        // burst is genuinely concurrent rather than scheduler luck.
+        // A flash crowd of first datagrams (every flow starts at once) must all be admitted
+        // through the 8-wide setup gate: every accepted datagram is forwarded, no setup queue is
+        // drained, no tombstone is written. The barrier holds the first eight handshakes until all
+        // 64 datagrams have been accepted, proving the burst is genuinely concurrent rather than
+        // scheduler luck.
         const int flowCount = 64;
         const int concurrentSetupCap = 8;
         var barrier = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

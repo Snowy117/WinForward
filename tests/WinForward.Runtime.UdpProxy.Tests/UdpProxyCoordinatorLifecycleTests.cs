@@ -125,10 +125,10 @@ public sealed class UdpProxyCoordinatorLifecycleTests
     [Fact]
     public async Task ReceiveFailureTeardownInFlightAcrossDisposalIsStillJoined()
     {
-        // D-C3-8/F1: the receive-failure teardown runs as a coordinator-scope child (Run), so a
-        // disposal that begins while it is mid-flight seals after admitting it and joins it in the
-        // drain. Gating the session transport's disposal parks the teardown, so the pending
-        // coordinator dispose is the discriminator: without the scope join it would complete early.
+        // The receive-failure teardown runs as a coordinator-scope child (Run), so a disposal that
+        // begins while it is mid-flight seals after admitting it and joins it in the drain. Gating
+        // the session transport's disposal parks the teardown, so the pending coordinator dispose is
+        // the discriminator: without the scope join it would complete early.
         var factory = new FakeTransportFactory();
         var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, new FakeResponseSink(), new UdpProxyOptions { Capacity = 1 });
         var flow = CreateFlow("192.0.2.53");
@@ -165,9 +165,9 @@ public sealed class UdpProxyCoordinatorLifecycleTests
     [Fact]
     public async Task FaultingReceiveFailureTeardownLogsTheWarningAndNeverEscapes()
     {
-        // D-C3-9/D4: Run records and swallows a teardown fault, so the body itself must log the
-        // owner's domain-specific warning — and the swallowed fault must not surface as an
-        // unobserved task exception nor fail the coordinator's own disposal.
+        // Run records and swallows a teardown fault, so the body itself must log the owner's
+        // domain-specific warning — and the swallowed fault must not surface as an unobserved task
+        // exception nor fail the coordinator's own disposal.
         var logger = new RecordingLogger();
         var factory = new FakeTransportFactory();
         var coordinator = UdpCoordinatorFakes.CreateCoordinator(

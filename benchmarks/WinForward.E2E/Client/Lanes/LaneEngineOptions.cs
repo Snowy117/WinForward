@@ -45,7 +45,7 @@ internal readonly record struct LaneEngineOptions
     internal required int ReceiveBufferBytes { get; init; }
 
     /// <summary>
-    /// The bound on the arm-end grace drain (D18.5 #4). Production uses one second, the bound
+    /// The bound on the arm-end grace drain. Production uses one second, the bound
     /// <c>GraceDrainAsync</c> has always had; tests inject something shorter.
     /// </summary>
     internal long DrainLimitTicks { get; init; } = Clock.FromSeconds(1);
