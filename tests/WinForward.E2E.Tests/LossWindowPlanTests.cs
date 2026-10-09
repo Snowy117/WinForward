@@ -8,11 +8,10 @@ using Xunit;
 namespace WinForward.E2E.Tests;
 
 /// <summary>
-/// #6: the loss window a plan declares is the window the record publishes and classifies against. The
-/// fact runs the arm from the plan file rather than from a spec built in the test, so the chain it
-/// pins is plan file → loader → arm → <c>metrics.window</c>, and the declared value is deliberately
-/// not the 200 ms default: a fact that declared the default would pass for a fallback that always
-/// won.
+/// The loss window a plan declares is the window the record publishes and classifies against. The
+/// fact runs the arm from the plan file, so it pins plan file → loader → arm → <c>metrics.window</c>,
+/// and it declares a value other than the 200 ms default: a fact that declared the default would
+/// pass for a fallback that always won.
 /// </summary>
 public sealed class LossWindowPlanTests
 {

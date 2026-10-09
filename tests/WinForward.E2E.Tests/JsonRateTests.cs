@@ -34,10 +34,9 @@ public sealed class JsonRateTests
     public void PerSecondIsTheCountedRate(long count, long ticks, long frequency, double expected) =>
         Assert.Equal(expected, JsonPerSecond.PerSecond(count, ticks, frequency));
 
-    // The counter-target of this test is the pre-change expression, which answered 0 for
-    // `ticks <= 0`: a run with no elapsed time published a rate of zero, the same value a run that
-    // measured perfectly publishes. A rate needs a duration to exist, exactly as Rate needs a
-    // population, so the answer is "no measurement" and the record writes null.
+    // A rate needs a duration to exist, exactly as Rate needs a population: a run with no elapsed
+    // time has no measurement to publish, so the record writes null. Zero is the answer of a run
+    // that measured perfectly, which is why the two must not share a value.
     [Theory]
     [InlineData(100, 0, 1000)]
     [InlineData(100, -1, 1000)]

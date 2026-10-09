@@ -7,10 +7,9 @@ using static WinForward.TestSupport.Socks5TestServer;
 namespace WinForward.Runtime.Socks5.Tests;
 
 /// <summary>
-/// R3/B9 (task 09-18): the configured SOCKS5 endpoint is resolved once and cached; steady-state
-/// connections consume the cached value with no DNS involvement, and a connection failure marks
-/// the cache dirty so the next attempt re-resolves. Both TCP relay and UDP session setup share
-/// one cache.
+/// The configured SOCKS5 endpoint is resolved once and cached; steady-state connections consume
+/// the cached value with no DNS involvement, and a connection failure marks the cache dirty so the
+/// next attempt re-resolves. Both TCP relay and UDP session setup share one cache.
 /// </summary>
 public sealed class Socks5AddressCacheTests
 {

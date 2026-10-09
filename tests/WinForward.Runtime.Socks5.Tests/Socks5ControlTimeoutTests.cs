@@ -90,7 +90,7 @@ public sealed class Socks5ControlTimeoutTests
     [Fact]
     public async Task UpstreamStreamClearsPerAttemptSocketTimeouts()
     {
-        // R1: the per-attempt 30s socket timeouts bound connect/authentication only. Once the
+        // The per-attempt 30s socket timeouts bound connect/authentication only. Once the
         // connection enters the long-lived relay phase the socket timeouts must be cleared so an
         // idle upstream is governed by the relay's stall window, not by a stale connect timeout.
         using var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -112,7 +112,7 @@ public sealed class Socks5ControlTimeoutTests
     [Fact]
     public async Task UpstreamSocketDisablesNagle()
     {
-        // X4: the upstream leg is a byte pipe; Nagle x delayed-ACK would stall small proxied
+        // The upstream leg is a byte pipe; Nagle x delayed-ACK would stall small proxied
         // writes 40-200 ms, so the connect path must turn TCP_NODELAY on for the relay socket.
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -130,7 +130,7 @@ public sealed class Socks5ControlTimeoutTests
     [Fact]
     public async Task RelayDatagramFromSiblingAddressIsAccepted()
     {
-        // R3: RFC 1928 does not pin the relay reply to the BND address. A multi-homed/anycast relay
+        // RFC 1928 does not pin the relay reply to the BND address. A multi-homed/anycast relay
         // may answer from another address of the same scope; the source check must accept it as
         // long as the port and address family match the negotiated relay endpoint.
         using var tcpListener = new TcpListener(IPAddress.Loopback, 0);

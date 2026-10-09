@@ -15,7 +15,7 @@ using static WinForward.TestSupport.AsyncTestExtensions;
 namespace WinForward.Integration.Tests;
 
 /// <summary>
-/// The composition seam between the validated UDP budget and the coordinator (R4): the two adjacent
+/// The composition seam between the validated UDP budget and the coordinator: the two adjacent
 /// int members of <see cref="UdpProxyComposition"/> — session capacity and relay receive buffer
 /// bytes — must reach the coordinator as distinct values, so a positional transposition (which
 /// would silently install a 16 KiB relay buffer) fails here instead of in the relay. Every flow's

@@ -11,7 +11,7 @@ public sealed class TcpRedirectInjectorTests
     [SupportedOSPlatform("windows")]
     public async Task HostDirectionInjectsTowardMstcpWithOnReceiveFlag()
     {
-        // H3: a frame injected toward MSTCP simulates an interface receive (ON_RECEIVE). The TCP
+        // A frame injected toward MSTCP simulates an interface receive (ON_RECEIVE). The TCP
         // redirect injector must tag the buffer with PacketFlagOnReceive for the host (toward-MSTCP)
         // direction — the correct half of the WinpkFilter pass/revert matrix.
         var reinjector = new RecordingRedirectReinjector();
@@ -30,9 +30,8 @@ public sealed class TcpRedirectInjectorTests
     [SupportedOSPlatform("windows")]
     public async Task ForwardedDirectionInjectsTowardAdapterWithOnSendFlag()
     {
-        // H3: a frame injected toward an adapter leaves the stack for the interface, which is an
-        // ON_SEND. The forwarded (Hyper-V) direction previously reused ON_RECEIVE and could not
-        // reach the VM; the injector must tag PacketFlagOnSend for the toward-adapter path.
+        // A frame injected toward an adapter leaves the stack for the interface, which is an
+        // ON_SEND. The injector must tag PacketFlagOnSend for the toward-adapter path.
         var reinjector = new RecordingRedirectReinjector();
         var injector = new TcpRedirectInjector(reinjector);
         var frame = new byte[] { 0x01, 0x02, 0x03 };
