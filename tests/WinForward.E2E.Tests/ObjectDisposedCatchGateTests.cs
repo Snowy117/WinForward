@@ -4,29 +4,27 @@ using Xunit;
 namespace WinForward.E2E.Tests;
 
 /// <summary>
-/// The teardown gate of D19.2 ⑨: every <c>catch (ObjectDisposedException)</c> the harness writes is one
-/// of a registered set of shapes, and the shape says whether the catch books anything. Teardown is not a
-/// measurement, so a catch that swallows one is either empty or books the explicit non-observation the
-/// site publishes; a catch that writes a counter, a verdict or an observation is a measurement fabricated
-/// from teardown and fails here.
+/// The teardown gate: every <c>catch (ObjectDisposedException)</c> the harness writes is one of a
+/// registered set of shapes, and the shape says whether the catch books anything. Teardown is not a
+/// measurement, so a catch that swallows one is either empty or books the explicit non-observation
+/// the site publishes; a catch that writes a counter, a verdict or an observation is a measurement
+/// fabricated from teardown and fails here.
 /// </summary>
 /// <remarks>
 /// <para><b>The baseline.</b> <c>benchmarks/WinForward.E2E</c> holds <b>31</b> of these catches in
-/// <b>19</b> files (the premise re-verification's count, <c>research/semantic-fixes/E3-premises.md</c>
-/// item 19), and the registry below is that list, per file and in source order. The three sites whose
-/// catch no longer writes a counter -- <c>MixBulkLoop</c>, <c>MixPageLoop</c>'s page connection
-/// and <c>DnsServer</c>'s stream handler -- are registered as <see cref="Ignored"/> like their
-/// 19 siblings: putting the increment back is an <see cref="Unregistered"/> shape and fails.</para>
+/// <b>19</b> files, and the registry below is that list, per file and in source order. The three
+/// sites whose catch no longer writes a counter -- <c>MixBulkLoop</c>, <c>MixPageLoop</c>'s page
+/// connection and <c>DnsServer</c>'s stream handler -- are registered as <see cref="Ignored"/> like
+/// their 19 siblings: putting the increment back is an <see cref="Unregistered"/> shape and fails.</para>
 /// <para><b>What is not in the baseline.</b> <c>WinForward.E2E.Contracts</c> holds three more of these
 /// catches, in <c>JsonlSink</c>, and they are deliberately outside this gate: the sink's policy is
-/// "swallow and count the write failure" (D14.7), so one of them books a
-/// <c>ledgerWriteErrors</c> failure by design -- that is a real write failure, not teardown.</para>
+/// "swallow and count the write failure", so one of them books a <c>ledgerWriteErrors</c> failure by
+/// design -- that is a real write failure, not teardown.</para>
 /// <para><b>Why the gate scans sources.</b> The shape of a catch body is exactly what a mutation that
-/// re-books teardown changes, and it is the only check the counters have: the sockets these catches sit
-/// over are owned by the call they wrap, so nothing in the harness can dispose one under them (measured:
-/// disposing a socket under a pending receive ends the operation as <c>SocketException(OperationAborted)</c>,
-/// which the socket sites book in a socket-error arm -- their own, or the transport's one level down --
-/// and never here).</para>
+/// re-books teardown changes, and it is the only check the counters have: the sockets these catches
+/// sit over are owned by the call they wrap, so nothing in the harness can dispose one under them --
+/// disposing a socket under a pending receive surfaces as <c>SocketException(OperationAborted)</c>,
+/// which the socket sites book in a socket-error arm and never here.</para>
 /// </remarks>
 public sealed class ObjectDisposedCatchGateTests
 {
@@ -41,10 +39,10 @@ public sealed class ObjectDisposedCatchGateTests
     /// <summary>The body answers the caller with a connect failure, which is the caller's own result.</summary>
     private const string ConnectFailure = "connectFailure";
 
-    /// <summary>The body returns the explicit torn-down outcome: no verdict, no record (D19.2 ⑨).</summary>
+    /// <summary>The body returns the explicit torn-down outcome: no verdict, no record.</summary>
     private const string NoVerdict = "noVerdict";
 
-    /// <summary>The body books the explicit cancelled status: no observation (D19.2 ⑨).</summary>
+    /// <summary>The body books the explicit cancelled status: no observation.</summary>
     private const string NoObservation = "noObservation";
 
     /// <summary>A shape the registry does not register: a counter, a verdict or an observation.</summary>
@@ -133,14 +131,12 @@ public sealed class ObjectDisposedCatchGateTests
             failures.Add($"{file}: {found[file].Count} catch(es) the registry does not know");
         }
 
-        // The two counts the premise re-verification established, so a site removed by a refactor is as
-        // visible as one added.
+        // Fixed baseline counts, so a site removed by a refactor is as visible as one added.
         Assert.Equal(31, found.Sum(pair => pair.Value.Count));
         Assert.Equal(19, found.Count);
 
-        // No site of any shape may book a counter: the ignored bodies are empty and the two explicit
-        // outcomes write a named status, so this holds for the whole set rather than for the five the
-        // batch moved.
+        // No site of any shape may book a counter: the ignored bodies are empty and the explicit
+        // outcomes write a named status, so this holds for the whole set.
         foreach (var (file, sites) in found)
         {
             failures.AddRange(sites

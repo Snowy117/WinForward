@@ -102,12 +102,11 @@ internal sealed class ClientResetInjector(ITcpRedirectInjector injector, ILogger
 
     /// <summary>
     /// Surfaces a capacity-gate rejection to the client as an immediate RST|ACK from the server
-    /// tuple it dialed (S4). The client is still in SYN_SENT, so <c>ack = ISN + 1</c> aborts the
+    /// tuple it dialed. The client is still in SYN_SENT, so <c>ack = ISN + 1</c> aborts the
     /// connect with ECONNREFUSED instead of a 20-60s retransmission timeout. Guarded by the
     /// per-tuple cooldown so retransmitted SYNs inside the window stay silently dropped; host
-    /// shape injects toward MSTCP, forwarded shape toward the origin adapter (the capture
-    /// handle), matching the redirect direction matrix. Never throws: a failed best-effort
-    /// reset is warned and the Blocked rejection outcome stands unchanged.
+    /// shape injects toward MSTCP, forwarded shape toward the origin adapter. Never throws: a
+    /// failed best-effort reset is warned and the Blocked rejection outcome stands unchanged.
     /// </summary>
     public ValueTask InjectCapacityRejectedResetAsync(CapturedFlowPacket packet, CancellationToken cancellationToken)
     {
@@ -135,11 +134,11 @@ internal sealed class ClientResetInjector(ITcpRedirectInjector injector, ILogger
     }
 
     /// <summary>
-    /// Releases a flow whose association was hit by an IP fragment it can never rewrite or relay
-    /// (S1). The teardown is client-visible whenever the tracked sequences allow an in-window
-    /// RST|ACK; otherwise it degrades to a warned silent teardown (the client then observes the
-    /// connection failing on its own retransmission timeout). The removal still funnels through
-    /// the single tombstone write point.
+    /// Releases a flow whose association was hit by an IP fragment it can never rewrite or relay.
+    /// The teardown is client-visible whenever the tracked sequences allow an in-window RST|ACK,
+    /// and degrades to a warned silent teardown otherwise (the client then observes the connection
+    /// failing on its own retransmission timeout). The removal still funnels through the single
+    /// tombstone write point.
     /// </summary>
     public async ValueTask HandleFragmentTeardownAsync(TcpRedirectAssociation association)
     {

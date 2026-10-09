@@ -9,15 +9,14 @@ using static WinForward.TestSupport.FrameBuilders;
 namespace WinForward.Runtime.Capture.Tests;
 
 /// <summary>
-/// Batched pass accumulation of <see cref="NdisPacketActionExecutor"/> (task 08-30-batched-ioctls
-/// D2): same-(adapter, direction) passes accumulate in capture order and leave in one batched
-/// reinjector call at flush; rented pooled buffers return exactly once; in-place capture buffers
-/// are never returned; lane overflow degrades to the immediate single send. Since task
-/// 09-12-lane-table-scope-sizing the lane table is sized from the capture scope: every
-/// <see cref="NdisPacketActionExecutor.RetireLanesExcept"/> call (the scope-installed callback)
-/// rebuilds the table at 2 × scope-count lanes, migrating in-scope lanes with their pending
-/// frames, so in-scope keys never overflow; overflow remains reachable only against the
-/// pre-install table (capacity 8) or the zero-capacity paused table.
+/// Batched pass accumulation of <see cref="NdisPacketActionExecutor"/>: same-(adapter,
+/// direction) passes accumulate in capture order and leave in one batched reinjector call at
+/// flush; rented pooled buffers return exactly once; in-place capture buffers are never
+/// returned; lane overflow degrades to the immediate single send. The lane table is sized from
+/// the capture scope: every <see cref="NdisPacketActionExecutor.RetireLanesExcept"/> call (the
+/// scope-installed callback) rebuilds it at 2 × scope-count lanes, migrating in-scope lanes
+/// with their pending frames, so in-scope keys never overflow; overflow is reachable only
+/// against the pre-install table (capacity 8) or the zero-capacity paused table.
 /// </summary>
 public sealed class NdisPacketActionExecutorBatchingTests
 {
@@ -174,9 +173,8 @@ public sealed class NdisPacketActionExecutorBatchingTests
     [Fact]
     public async Task LaneOverflowSendFailureStillReturnsTheRentedBuffer()
     {
-        // L1 regression: the overflow path's immediate single send can throw, and the rented
-        // pooled copy must still return exactly once — the release used to sit after the
-        // catch-rethrow, where a throw made it unreachable and leaked the native buffer.
+        // The overflow path's immediate single send can throw; the rented pooled copy must still
+        // return exactly once even then, so the release cannot sit after the catch-rethrow.
         var reinjector = new ThrowingSingleReinjector();
         var logger = new RecordingLogger();
         var pool = new NdisPacketBufferPool(4);

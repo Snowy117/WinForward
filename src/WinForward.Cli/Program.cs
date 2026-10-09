@@ -227,7 +227,7 @@ internal static class Program
         using var driver = NdisApiDriver.Open();
         // Startup pre-flight for the exit-code surface (exit 1 selector errors, exit 3 empty
         // enumeration): the layered capture runner re-enumerates and owns the live scope,
-        // repeating this resolution fail-closed for generation 0 (design §3.5/§3.6).
+        // repeating this resolution fail-closed for generation 0.
         var adapters = EnumerateAdapters(driver);
         if (adapters.Count == 0)
         {
@@ -242,7 +242,7 @@ internal static class Program
         StartupLog.CaptureScopePreflightResolved(logger, scope.Count);
 
         // Shared by the durable bundle (its failure-reporting sites) and the capture runner
-        // (its forced-refresh trigger) — task 09-17 R1-B.
+        // (its forced-refresh trigger).
         var healthMonitor = new InterceptionHealthMonitor(loggerFactory.CreateLogger<InterceptionHealthMonitor>());
         return await RunCaptureLoopAsync(configuration, driver, loggerFactory, logger, healthMonitor).ConfigureAwait(false);
     }
@@ -255,8 +255,8 @@ internal static class Program
         try
         {
             // Scoped 1 ms timer resolution for the whole run: the pump's empty-queue poll delay
-            // rounds up to ~15.6 ms at the default resolution (task 08-28 R6). Declared first so
-            // the scope outlives the capture runtime and its teardown-time reinjections.
+            // rounds up to ~15.6 ms at the default resolution. Declared first so the scope
+            // outlives the capture runtime and its teardown-time reinjections.
             using var timerScope = new HighResolutionTimerScope();
             if (!timerScope.IsEnabled)
             {
@@ -266,12 +266,12 @@ internal static class Program
             WireFramePoolDiagnostics();
 
             // The durable layer survives every adapter-list refresh; the runner disposes it exactly
-            // once after the final generation (design §3.6). The local finally only covers failures
-            // around the runner itself — bundle disposal is single-flight, so it never runs twice.
+            // once after the final generation. The local finally only covers failures around the
+            // runner itself — bundle disposal is single-flight, so it never runs twice.
             var bundle = await DurableCaptureBundle.CreateAsync(configuration, reinjector, selfTraffic, loggerFactory, healthSignal: healthMonitor).ConfigureAwait(false);
             try
             {
-                // The degraded forwarder feeds error 87 into the runner's refresh channel (R3); the
+                // The degraded forwarder feeds error 87 into the runner's refresh channel; the
                 // callback closure dereferences the runner only while a generation runs, after the
                 // reference below is assigned.
                 LayeredCaptureRunner? runnerRef = null;
@@ -286,8 +286,8 @@ internal static class Program
                     });
                 runnerRef = runner;
 
-                // Observational periodic summary (task 09-17 R2.3); the using disposes it before
-                // the bundle's finally, so its last ticks never observe coordinator teardown.
+                // Observational periodic summary; the using disposes it before the bundle's
+                // finally, so its last ticks never observe coordinator teardown.
                 await using var heartbeat = StartHeartbeat(bundle, runner, healthMonitor, loggerFactory.CreateLogger<RuntimeHeartbeat>());
 
                 return await RunUntilCancelledAsync(runner, logger).ConfigureAwait(false);
@@ -307,14 +307,13 @@ internal static class Program
     }
 
     /// <summary>
-    /// Registers the shared native frame pool with the diagnostics counter registry (task
-    /// 09-18 M1): the heartbeat then reports the pool's rent and return deltas and its occupancy
-    /// (rents minus returns) in every periodic summary. The sink is set once, before any capture
-    /// pump can rent, and only ever increments counters — it cannot throw and never touches
-    /// packet disposition. The sink fires per injected packet on the hot path, so it must stay
-    /// allocation-free: the counter key strings are built once here (the <c>RecordPoolRent</c>
-    /// helpers rebuild their keys per call, which would allocate on every rent/return) and the
-    /// sink increments the pre-created counter boxes through the cached references.
+    /// Registers the shared native frame pool with the diagnostics counter registry: the heartbeat
+    /// then reports the pool's rent and return deltas and its occupancy. The sink is set once,
+    /// before any capture pump can rent, and only ever increments counters — it cannot throw and
+    /// never touches packet disposition. It fires per injected packet on the hot path, so it must
+    /// stay allocation-free: the counter key strings are built once here (the <c>RecordPoolRent</c>
+    /// helpers rebuild their keys per call, which would allocate on every rent/return) and the sink
+    /// increments the pre-created counter boxes through the cached references.
     /// </summary>
     private static void WireFramePoolDiagnostics()
     {
@@ -330,7 +329,7 @@ internal static class Program
     /// Composes the layered capture runner over the durable bundle's shared packet processor: the
     /// generation factory logs <c>adapter.degraded</c>, restores the degraded adapter's mode through
     /// its own runtime, and forwards to <paramref name="onAdapterDegraded"/> so the runner can feed
-    /// error 87 into its refresh channel (R3); transient-read retries ride the shared log gate.
+    /// error 87 into its refresh channel; transient-read retries ride the shared log gate.
     /// </summary>
     [SupportedOSPlatform("windows")]
     private static LayeredCaptureRunner CreateCaptureRunner(
@@ -364,9 +363,9 @@ internal static class Program
     }
 
     /// <summary>
-    /// Starts the periodic <c>runner.heartbeat</c> info summary (task 09-17 R2.3): flow/TCP/UDP
-    /// usage against capacities, the current generation's pump counts, interception-health state,
-    /// and per-counter deltas since the previous heartbeat. Purely observational — a fault while
+    /// Starts the periodic <c>runner.heartbeat</c> info summary: flow/TCP/UDP usage against
+    /// capacities, the current generation's pump counts, interception-health state, and
+    /// per-counter deltas since the previous heartbeat. Purely observational — a fault while
     /// gathering usage is logged and retried on the next tick.
     /// </summary>
     [SupportedOSPlatform("windows")]

@@ -5,10 +5,10 @@ using WinForward.Runtime.Logging;
 namespace WinForward.Runtime;
 
 /// <summary>
-/// The component usage counts one <c>runner.heartbeat</c> line summarizes (task 09-17 R2.3):
-/// live flow decisions, TCP redirect sessions, UDP sessions (each against its capacity), and
-/// the current capture generation's pump counts. Zero-valued members are omitted from the
-/// emitted line, so an idle runtime keeps the heartbeat to its uptime alone.
+/// The component usage counts one <c>runner.heartbeat</c> line summarizes: live flow decisions,
+/// TCP redirect sessions, UDP sessions (each against its capacity), and the current capture
+/// generation's pump counts. Zero-valued members are omitted from the emitted line, so an idle
+/// runtime keeps the heartbeat to its uptime alone.
 /// </summary>
 /// <param name="UdpRelayBufferBytes">
 /// The estimated aggregate relay receive-buffer bytes: live UDP sessions multiplied by the
@@ -28,9 +28,9 @@ public readonly record struct RuntimeHeartbeatUsage(
     long UdpRelayBufferBytes = 0);
 
 /// <summary>
-/// A GC observability sample (task 09-18 M0): per-generation collection counts plus the
-/// process-wide allocated-bytes total. The heartbeat records a startup mark and reports
-/// deltas against it; tests inject a fixed source so collection-delta coverage is deterministic.
+/// A GC observability sample: per-generation collection counts plus the process-wide
+/// allocated-bytes total. The heartbeat records a startup mark and reports deltas against
+/// it; tests inject a fixed source so collection-delta coverage is deterministic.
 /// </summary>
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
 public readonly record struct RuntimeGcSnapshot(
@@ -40,16 +40,15 @@ public readonly record struct RuntimeGcSnapshot(
     long AllocatedBytes);
 
 /// <summary>
-/// Emits the periodic <c>runner.heartbeat</c> info summary (task 09-17 R2.3, default every 60 s):
-/// uptime, the <see cref="RuntimeHeartbeatUsage"/> counts, the interception-health state, and the
-/// per-counter deltas since the previous heartbeat computed from <see cref="RuntimeCounters"/>.
-/// The heartbeat is purely observational — it must never influence packet disposition, refresh,
-/// or shutdown decisions — so a fault while gathering usage is logged and retried on the next
-/// tick instead of killing the loop. Counter fields are deltas since the previous heartbeat
-/// (only non-zero deltas are emitted; the aggregates live in the counters themselves). Since
-/// task 09-18 M0 each tick also reports the GC posture (collection-count deltas and allocated
-/// bytes since the startup mark) and the aggregate native-pool occupancy, and warns
-/// <c>gc.collected</c> on any tick that observes new collections (the GC-off-posture alarm).
+/// Emits the periodic <c>runner.heartbeat</c> info summary (default every 60 s): uptime, the
+/// <see cref="RuntimeHeartbeatUsage"/> counts, the interception-health state, and the per-counter
+/// deltas since the previous heartbeat computed from <see cref="RuntimeCounters"/>. It also reports
+/// the GC posture (collection-count deltas and allocated bytes since the startup mark) and the
+/// aggregate native-pool occupancy, and warns <c>gc.collected</c> on any tick that observes new
+/// collections. The heartbeat is purely observational — it must never influence packet
+/// disposition, refresh, or shutdown decisions — so a fault while gathering usage is logged and
+/// retried on the next tick instead of killing the loop. Only non-zero counter deltas are
+/// emitted; the aggregates live in the counters themselves.
 /// </summary>
 public sealed class RuntimeHeartbeat : IAsyncDisposable
 {
@@ -232,10 +231,10 @@ public sealed class RuntimeHeartbeat : IAsyncDisposable
             GC.GetTotalAllocatedBytes(precise: false));
 
     /// <summary>
-    /// The GC-off-posture alarm (task 09-18 R5): fires on every tick that observes NEW collections
-    /// (deltas against the previous tick; the first tick compares against the startup mark), not
-    /// on every tick after the first collection, so a single historical collection warns exactly
-    /// once while the cumulative total stays visible in the heartbeat's <c>gcCollections</c> field.
+    /// The GC-off-posture alarm: fires on every tick that observes NEW collections (deltas against
+    /// the previous tick; the first tick compares against the startup mark), not on every tick
+    /// after the first collection, so a single historical collection warns exactly once while the
+    /// cumulative total stays visible in the heartbeat's <c>gcCollections</c> field.
     /// </summary>
     private void WarnGcCollected(RuntimeGcSnapshot gc, int intervalGen0, int intervalGen1, int intervalGen2)
     {
