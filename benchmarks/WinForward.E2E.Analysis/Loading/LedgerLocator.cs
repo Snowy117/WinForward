@@ -13,9 +13,8 @@ namespace WinForward.E2E.Analysis.Loading;
 /// <para><b>A campaign runs more than one target instance</b> — the shipped launcher starts a proxied
 /// target and a separate direct-lane target, each with its own ledger — so "the ledger" is never a
 /// single file, and a first-seen order that disagrees with the reference would change §2's text and
-/// §14's rows.</para>
-/// <para><b><c>--ledger</c> replaces the search rather than extending it</b>, may be repeated, and is
-/// used verbatim, filtered to the paths that exist: a caller that names a ledger which is not there
+/// §14's rows. <c>--ledger</c> replaces that search rather than extending it: it may be repeated and
+/// is used verbatim, filtered to the paths that exist, so a caller naming a ledger which is not there
 /// gets no ledger rather than a fallback to the tree's own.</para>
 /// </remarks>
 internal static class LedgerLocator

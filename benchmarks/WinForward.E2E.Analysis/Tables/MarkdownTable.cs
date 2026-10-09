@@ -6,10 +6,9 @@ namespace WinForward.E2E.Analysis.Tables;
 /// the header.
 /// </summary>
 /// <remarks>
-/// <para><b>The cell count is not checked on purpose.</b> One of §5's tables hands a row eleven cells
-/// while its header names ten, and the frozen golden carries that shape: 154 eleven-cell lines. A
-/// renderer that padded or refused the row would differ from the published output and lose the
-/// oracle.</para>
+/// <para><b>The cell count is not checked on purpose.</b> The reference's tables carry rows whose cell
+/// count disagrees with their header, and a renderer that padded or refused such a row would differ
+/// from the published output and lose the oracle.</para>
 /// <para><b>The separator is exactly <c>|---|---|</c>…</b> for the header's arity: no spaces, no
 /// alignment colons, no trailing space.</para>
 /// </remarks>

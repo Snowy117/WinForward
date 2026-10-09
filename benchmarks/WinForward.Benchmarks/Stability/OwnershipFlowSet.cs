@@ -3,12 +3,11 @@ namespace WinForward.Benchmarks.Stability;
 /// <summary>
 /// The set of flow ids an ownership-aware response sink saw a <em>foreign</em> delivery for: one bit
 /// per flow, set by <see cref="Mark"/>, counted once by <see cref="Count"/>. The sinks key the mark by
-/// the reply's <em>sender</em>, which is what makes misdelivery a per-flow fact rather than a
-/// per-reply count — a flow whose echo landed on a sibling is one flow the wave failed to answer,
-/// however many foreign replies it also received — so the row's count is derived at the measurement
-/// boundary instead of incrementing a per-reply counter. That is what makes the identities
-/// <c>own + noResponse == flows</c> (no misdelivery) and
-/// <c>own + misdelivered + noResponse == flows</c> (sharing) read straight off the emitted row.
+/// the reply's <em>sender</em>, so misdelivery is a per-flow fact rather than a per-reply count: a
+/// flow whose echo landed on a sibling is one flow the wave failed to answer, however many foreign
+/// replies it also received. That is what lets the identities <c>own + noResponse == flows</c> (no
+/// misdelivery) and <c>own + misdelivered + noResponse == flows</c> (sharing) read straight off the
+/// emitted row.
 /// </summary>
 internal sealed class OwnershipFlowSet(int flowCapacity)
 {

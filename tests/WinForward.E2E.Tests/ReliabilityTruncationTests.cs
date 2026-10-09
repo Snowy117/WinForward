@@ -50,7 +50,7 @@ public sealed class ReliabilityTruncationTests
         Assert.Equal(0, attempt.Echoed);
 
         // The observation is what the peer did, not a teardown: the exchange ran to its end, which is the
-        // status a teardown-ended attempt must not publish (D19.2 ⑨).
+        // status a teardown-ended attempt must not publish.
         Assert.Equal(ExchangeStatus.Completed, attempt.Status);
     }
 

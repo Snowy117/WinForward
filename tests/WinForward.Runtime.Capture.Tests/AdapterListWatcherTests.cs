@@ -102,7 +102,7 @@ public sealed class AdapterListWatcherTests
         watcher.Dispose();
     }
 
-    // ---- FakeAdapterListChangeSource semantics (the S5 runner seam) ----
+    // ---- FakeAdapterListChangeSource semantics (the capture runner seam) ----
 
     [Fact]
     public void FakeTriggerBeforeWaitIsConsumedExactlyOnce()

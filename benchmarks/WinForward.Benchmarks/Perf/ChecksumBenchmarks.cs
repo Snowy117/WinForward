@@ -5,13 +5,11 @@ using WinForward.Protocols;
 namespace WinForward.Benchmarks.Perf;
 
 /// <summary>
-/// Internet-checksum micro for the P2b decision: the production entry point against a scalar form on
-/// the same 4 096-word fold cadence, so the ratio measures vectorization rather than fold frequency.
-/// Which tier the production side exercises depends on the build — 512-bit under the JIT, 128-bit
+/// Internet-checksum micro: the production entry point against a scalar form on the same 4 096-word
+/// fold cadence, so the ratio measures vectorization rather than fold frequency. Which tier the
+/// production side exercises depends on the build — 512-bit under the JIT, 128-bit
 /// <c>Vector&lt;T&gt;</c> in a Native AOT build at <c>IlcInstructionSet=base</c>.
-/// <c>FrameBytes=20</c> is the IPv4-header case: below the 256/512-bit widths, so it is entirely
-/// tail there, and one 128-bit <c>Vector&lt;T&gt;</c> iteration plus a 4-byte tail at
-/// <c>IlcInstructionSet=base</c>.
+/// <c>FrameBytes=20</c> is the IPv4-header case: below both widths, so it is entirely tail.
 /// </summary>
 [MemoryDiagnoser]
 public class ChecksumBenchmarks
@@ -44,8 +42,8 @@ public class ChecksumBenchmarks
 }
 
 /// <summary>
-/// The scalar reference the vector path must beat: fold-while-adding on the same 4 096-word cadence
-/// the production tail uses, so the comparison isolates vectorization rather than fold frequency.
+/// The scalar reference: fold-while-adding on the same 4 096-word cadence the production tail uses,
+/// so the comparison isolates vectorization rather than fold frequency.
 /// </summary>
 internal static class ScalarReference
 {
