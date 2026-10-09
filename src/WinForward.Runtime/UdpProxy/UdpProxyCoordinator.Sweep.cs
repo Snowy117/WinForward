@@ -3,22 +3,22 @@ using WinForward.Runtime.Logging;
 
 namespace WinForward.Runtime.UdpProxy;
 
-// Mechanical file-size split of UdpProxyCoordinator (behavior-zero): the idle-expiry sweep moved
-// here verbatim — plus its new two-class overload — because the coordinator's main file is at the
-// 400-effective-line cap and UdpProxyCoordinator.Send.cs is the established precedent for splitting
-// on a seam rather than growing it.
+// The idle-expiry sweep lives in its own file rather than UdpProxyCoordinator's main file, which
+// is at the 400-effective-line cap; UdpProxyCoordinator.Send.cs set the precedent of splitting on
+// a seam instead of growing it.
 public sealed partial class UdpProxyCoordinator
 {
     /// <summary>
     /// Removes sessions whose last send or receive is older than <paramref name="idleTimeout"/>
     /// and releases their associations, so short-lived DNS/QUIC-style flows do not accumulate to
-    /// the bounded capacity. Also prunes expired setup cooldowns. Idle expiry
-    /// (design §7/§8) runs on a periodic sweep in the runtime.
+    /// the bounded capacity. Also prunes expired setup cooldowns. Idle expiry runs on a periodic
+    /// sweep in the runtime.
     /// <para>
-    /// The scan collects candidates into a reused scratch under one gate hold, then the teardown loop runs
-    /// outside the gate with the same <see cref="UdpProxySession.TryBeginExpiry(DateTimeOffset, TimeSpan, TimeSpan)"/> re-verifier as before.
-    /// The whole tick is single-flight through <see cref="_sweepGate"/> because the scratch's lifetime is no
-    /// longer covered by <c>_gate</c> and this method is public.
+    /// The scan collects candidates into a reused scratch under one gate hold, then tears them down
+    /// outside the gate, re-verifying each candidate with
+    /// <see cref="UdpProxySession.TryBeginExpiry(DateTimeOffset, TimeSpan, TimeSpan)"/>.
+    /// The whole tick is single-flight through <see cref="_sweepGate"/> because the scratch's lifetime is not
+    /// covered by <c>_gate</c> and this method is public.
     /// </para>
     /// </summary>
     public ValueTask<int> RemoveExpiredAsync(DateTimeOffset now, TimeSpan idleTimeout) =>

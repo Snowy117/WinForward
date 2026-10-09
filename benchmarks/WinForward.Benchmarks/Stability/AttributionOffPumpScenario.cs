@@ -11,7 +11,7 @@ using WinForward.Windows;
 namespace WinForward.Benchmarks.Stability;
 
 /// <summary>
-/// The acceptance instrument for F8 (process attribution off the capture pump). It drives the
+/// The acceptance instrument for process attribution off the capture pump. It drives the
 /// <b>real</b> <see cref="FlowDispatcher"/> from one dedicated "pump" thread over a scripted
 /// sequence of new host flows, with an attributor that costs <c>--attribution-cost-ms</c> and
 /// records the thread every call ran on.
@@ -86,7 +86,7 @@ internal static class AttributionOffPumpScenario
                 gen0Collections = gen0,
                 allocatedBytesPerNewFlow = flows == 0 ? 0 : allocated / flows,
                 gated = false,
-                note = "Report-only series (design §7). The exact acceptance counts are attributionsOnPumpThread (pre-change: one per new flow; post-change: 0) and attributionsOnSetupWorker (post-change: one per admitted entry). The row measures the PIPELINE over a fake attributor, never iphlpapi: the system-wide enumeration cannot run on this host, so its cost is modelled by --attribution-cost-ms. ownerTableScansPerBurst here is the modelled attribution-attempt count; the real epoch-coalescing series is the attribution.ownerBurst row plus the ProcessOwnerTableCacheTests facts. allocatedBytesPerNewFlow is process-wide and includes the harness, so it compares only between runs of this row.",
+                note = "Report-only series. The exact acceptance counts are attributionsOnPumpThread (0) and attributionsOnSetupWorker (one per admitted entry). The row measures the PIPELINE over a fake attributor, never iphlpapi: the system-wide enumeration cannot run on this host, so its cost is modelled by --attribution-cost-ms. ownerTableScansPerBurst here is the modelled attribution-attempt count; the real epoch-coalescing series is the attribution.ownerBurst row plus the ProcessOwnerTableCacheTests facts. allocatedBytesPerNewFlow is process-wide and includes the harness, so it compares only between runs of this row.",
             });
 
         await WriteOwnerBurstRowAsync(context, costMs).ConfigureAwait(false);
@@ -189,7 +189,7 @@ internal static class AttributionOffPumpScenario
                 scansPerFlow = Math.Round((double)reads / burst, 6, MidpointRounding.ToEven),
                 scriptedRows = rows.Length,
                 gated = false,
-                note = "Report-only series, never a threshold (amended AC-4): a burst's own sockets bind after any snapshot taken before it, so serving them costs at least one scan per epoch. What is exact is that the burst costs one scan rather than one per flow, asserted by ProcessOwnerTableCacheTests.NConcurrentMissesInsideTheWindowReadTheTableExactlyOnce. The scripted PIDs are synthetic, so the identity is not the claim.",
+                note = "Report-only series, never a threshold: a burst's own sockets bind after any snapshot taken before it, so serving them costs at least one scan per epoch. What is exact is that the burst costs one scan rather than one per flow, asserted by ProcessOwnerTableCacheTests.NConcurrentMissesInsideTheWindowReadTheTableExactlyOnce. The scripted PIDs are synthetic, so the identity is not the claim.",
             });
     }
 

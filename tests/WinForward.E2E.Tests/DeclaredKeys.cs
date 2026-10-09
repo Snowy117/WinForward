@@ -6,13 +6,13 @@ namespace WinForward.E2E.Tests;
 /// <summary>
 /// Reads an <c>ArmKeys</c> subtree as the canonical paths it declares, with the same alphabet the
 /// published bytes are flattened with (<see cref="JsonPaths"/>): one path per constant, and a
-/// constant's value is one whole member name even when it contains a dot (D5/D14.6).
+/// constant's value is one whole member name even when it contains a dot.
 /// </summary>
 /// <remarks>
 /// Every subtree arrives as a <c>typeof(...)</c> literal. The trim and AOT analyzers only follow a
 /// type they can see, so the parameters below carry the member annotations the reflection needs and
 /// every call site names one of those literals: an unannotated <see cref="Type"/> would be an IL2075
-/// build error under <c>TreatWarningsAsErrors</c> (D14.20). A generic type parameter cannot carry the
+/// build error under <c>TreatWarningsAsErrors</c>. A generic type parameter cannot carry the
 /// subtree because C# forbids a static class as a type argument (CS0718), which every ArmKeys shard
 /// is.
 /// </remarks>
