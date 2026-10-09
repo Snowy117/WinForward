@@ -13,7 +13,7 @@ namespace WinForward.E2E.Target;
 /// <summary>
 /// The key names one tcp totals block is written with, in write order. The same counters reach the
 /// ledger at two levels -- the <c>tcpSummary</c> record's own root and <c>targetSummary/tcp</c> -- and
-/// a leaf written at another level is another constant (D14.17), so the writer takes the level's set
+/// a leaf written at another level is another constant, so the writer takes the level's set
 /// instead of spelling a name at the call site.
 /// </summary>
 [StructLayout(LayoutKind.Auto)]
@@ -168,8 +168,7 @@ internal sealed class TcpTargetServer : IAsyncDisposable
             {
                 // Teardown closed the socket under the connection before the protocol measured
                 // anything: no verdict and no connection record, because teardown is not a data
-                // point. The accept itself is already counted by the connection census above
-                // (D19.2 ⑨).
+                // point. The accept itself is already counted by the connection census above.
                 return;
             }
 
@@ -187,7 +186,7 @@ internal sealed class TcpTargetServer : IAsyncDisposable
             // covers a body the sink was asked to propagate, and it keeps the fire-and-forget task
             // from faulting into the shutdown join. The connection is reset so an unrecorded
             // attempt is visible to its peer rather than indistinguishable from a recorded one, and
-            // the listener keeps serving (D14.7 item 1).
+            // the listener keeps serving.
             try
             {
                 await WriteConnectionAsync(reader.Header.ConnectionId, command, outcome, peer, startedTicks, endedTicks).ConfigureAwait(false);

@@ -16,7 +16,7 @@ internal sealed class TruncationTotals
     /// </summary>
     internal SortedDictionary<string, double> DnsFrames { get; } = new(StringComparer.Ordinal);
 
-    /// <summary>Whether this target cut anything off at all, which is what §14.7 discloses.</summary>
+    /// <summary>Whether this target cut anything off at all.</summary>
     internal bool Any =>
         TcpFrames is > 0.0 || DnsFrames.Values.Any(frames => frames > 0.0);
 }
@@ -28,7 +28,7 @@ internal sealed class TruncationTotals
 /// <remarks>
 /// <para><b>Two mechanisms share one leaf name.</b> <c>truncatedFrames</c> sits at the root of both
 /// <c>tcpSummary</c> and <c>dnsSummary</c>, and each family's value is read only against its own
-/// mechanism (D19.3 C); they are kept in two separate slots here for exactly that reason.</para>
+/// mechanism; they are kept in two separate slots here for exactly that reason.</para>
 /// <para><b>Keyed by path, not by pass.</b> The counter is a running total for the ledger's whole
 /// lifetime and the same ledger is attached to every pass it spans, so keying by pass would count one
 /// target's frames once per pass. The largest value seen wins, which is the later record of a running

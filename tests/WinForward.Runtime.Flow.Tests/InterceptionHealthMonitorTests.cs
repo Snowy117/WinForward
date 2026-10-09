@@ -5,10 +5,10 @@ using Xunit;
 namespace WinForward.Runtime.Flow.Tests;
 
 /// <summary>
-/// The interception-health monitor's threshold/cooldown/degrade state machine (task 09-17
-/// R1-B), driven entirely through a mutable time provider: window counting, the shared
-/// cooldown, the three-trigger degrade budget with its single error event and 5-minute
-/// spacing, and the <see cref="InterceptionHealthMonitor.NoteRefreshCompleted"/> reset.
+/// The interception-health monitor's threshold/cooldown/degrade state machine, driven entirely
+/// through a mutable time provider: window counting, the shared cooldown, the three-trigger
+/// degrade budget with its single error event and 5-minute spacing, and the
+/// <see cref="InterceptionHealthMonitor.NoteRefreshCompleted"/> reset.
 /// </summary>
 public sealed class InterceptionHealthMonitorTests
 {

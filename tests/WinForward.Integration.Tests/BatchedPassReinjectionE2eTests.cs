@@ -12,12 +12,11 @@ using static WinForward.TestSupport.FrameBuilders;
 namespace WinForward.Integration.Tests;
 
 /// <summary>
-/// End-to-end batched pass reinjection (task 08-30-batched-ioctls S5/D3): a capture pump wired
-/// like the runtime composition (pump → processor → dispatcher → executor, with the executor
-/// flush as the pump's batch-completed callback) must send each iteration's passes as one batched
-/// reinjector call per direction — the ≥10× call-reduction acceptance under mixed pass load —
-/// while per-direction frames keep capture order, and the loop-exit flush must never strand
-/// accumulated frames.
+/// End-to-end batched pass reinjection: a capture pump wired like the runtime composition
+/// (pump → processor → dispatcher → executor, with the executor flush as the pump's
+/// batch-completed callback) must send each iteration's passes as one batched reinjector call
+/// per direction — a ≥10× call reduction under mixed pass load — while per-direction frames
+/// keep capture order, and the loop-exit flush must never strand accumulated frames.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class BatchedPassReinjectionE2eTests
@@ -57,8 +56,8 @@ public sealed class BatchedPassReinjectionE2eTests
         Assert.Equal(0, reinjector.ToAdapterCount + reinjector.ToMstcpCount);
         Assert.Equal(0, executor.PendingPassCount);
 
-        // Mixed send/receive load: one batched call per direction per iteration => 2 * Batches
-        // calls for 96 packets — a 16x reduction versus the per-packet path (>= 10x acceptance).
+        // Mixed send/receive load: one batched call per direction per iteration, so 96 packets leave
+        // in 2 * Batches calls rather than one call per packet.
         Assert.Equal(2 * Batches, reinjector.BatchToAdapterCount + reinjector.BatchToMstcpCount);
         Assert.Equal(Batches * BatchCapacity / 2, reinjector.BatchCalls.Where(call => call.ToAdapter).Sum(call => call.Frames.Length));
         Assert.Equal(Batches * BatchCapacity / 2, reinjector.BatchCalls.Where(call => !call.ToAdapter).Sum(call => call.Frames.Length));

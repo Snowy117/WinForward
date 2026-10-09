@@ -84,7 +84,7 @@ internal static class ArmRecordWriter
     /// Writes the arm's <c>result</c> record: the one place a record's skeleton and its
     /// <c>metrics</c> object meet. Every arm reaches this writer with an <see cref="IJsonWritable"/>
     /// for its metrics, so the shape of the published file is decided by the metrics type rather than
-    /// by a dictionary the writer has to interpret (D14.15).
+    /// by a dictionary the writer has to interpret.
     /// </summary>
     internal static async ValueTask WriteResultAsync(
         JsonlSink sink,

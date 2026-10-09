@@ -11,10 +11,10 @@ namespace WinForward.Runtime.Capture.Tests;
 
 /// <summary>
 /// How one capture generation's per-adapter packet-arrival signals reach the pumps and when they are
-/// released (finding F5.2). The signals are positionally paired with the loop's bindings and owned by
-/// the loop, so the pairing and the release ordering are checkable without a driver: a signal
-/// disposed while a pump is still parked in it is a use-after-dispose, and a mis-paired list would
-/// silently wire one adapter's wake to another's pump.
+/// released. The signals are positionally paired with the loop's bindings and owned by the loop, so
+/// the pairing and the release ordering are checkable without a driver: a signal disposed while a
+/// pump is still parked in it is a use-after-dispose, and a mis-paired list would silently wire one
+/// adapter's wake to another's pump.
 /// </summary>
 public sealed class MultiAdapterCaptureLoopArrivalSignalTests
 {

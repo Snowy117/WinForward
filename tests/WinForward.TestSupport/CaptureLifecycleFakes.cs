@@ -25,7 +25,7 @@ internal sealed class FakeModes(IReadOnlyList<AdapterModeSnapshot> snapshots, in
 
     public ValueTask<IReadOnlyList<AdapterModeSnapshot>> SnapshotAsync()
     {
-        // ReSharper disable once ConvertIfStatementToReturnStatement // Failure-injection seam: the throw is the injected behavior and must read as a standalone guard (B1 disposition).
+        // ReSharper disable once ConvertIfStatementToReturnStatement // Failure-injection seam: the throw is the injected behavior and must read as a standalone guard.
         if (failOnSnapshot) throw new InvalidOperationException("mode snapshot failed");
         return ValueTask.FromResult(snapshots);
     }

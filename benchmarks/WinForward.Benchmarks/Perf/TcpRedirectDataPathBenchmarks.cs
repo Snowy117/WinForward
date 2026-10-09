@@ -7,10 +7,9 @@ using WinForward.Runtime.TcpRedirect;
 namespace WinForward.Benchmarks.Perf;
 
 /// <summary>
-/// The composed per-packet cost of the proxy data path (research F1 follow-up / F4): sequence tracking
-/// followed by the leg's rewrite, in both association shapes and both address families, at a small and
-/// a full-size frame. This is the number the proxy adds to every packet of a proxied connection, and
-/// the baseline the parse-once (F4.2) and direction-normalized-key (F3/F4.1) work is measured against.
+/// The composed per-packet cost of the proxy data path: sequence tracking followed by the leg's
+/// rewrite, in both association shapes and both address families, at a small and a full-size frame.
+/// This is the number the proxy adds to every packet of a proxied connection.
 /// <para>
 /// The rows stop at the rewrite: the send itself is a driver IOCTL, so a counting fake would add noise
 /// rather than information, and the Windows driver's cost is out of scope for a Linux micro row. What is
