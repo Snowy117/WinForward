@@ -10,7 +10,7 @@ loopback — they never exercise WinpkFilter, NDISAPI, Windows IP Helper, or ETW
 
 Numbers produced before 2026-08-29 (the hand-rolled JSONL harness) are **not comparable** with
 BenchmarkDotNet output — different methodology, different statistics. The old baselines stay
-archived under `.trellis/tasks/08-17-performance-hotspots/research/`.
+archived under `.trellis/tasks/archive/2026-08/08-17-performance-hotspots/research/`.
 
 ## Perf mode
 

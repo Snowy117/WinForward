@@ -11,6 +11,7 @@
 
 - Build with nullable analysis, `TreatWarningsAsErrors`, and the Native AOT/trim analyzers (`Directory.Build.props`).
 - Analyzer packages are pinned centrally in `Directory.Packages.props`; the WF0001–WF0004 lifetime rules apply to `src/**` only (`src/Directory.Build.props`, `analyzers/WinForward.Analyzers/`).
+- **One project opts out of the four analyzer packages on purpose.** `tests/WinForward.E2E.Tests` declares `<IsTestProject>true</IsTestProject>`, which at restore time is the only thing that makes the root `Directory.Build.props` analyzer `ItemGroup` false; deleting it turns on Meziantou/Roslynator/Sonar/VSTHRD and the test sources then report 31 findings that `TreatWarningsAsErrors` turns into build errors. The measurement, the reason (NuGet restores with `ExcludeRestorePackageImports=true`, so `xunit.core.props` never runs) and the revisit trigger (clear the 31, then drop the line) are in [directory-structure.md](./directory-structure.md) and beside the property itself.
 - Keep packet/ABI hot paths allocation-conscious, but preserve their explicit bounds checks and ownership guards.
 - Use a localized `#pragma warning disable <RULE> // <reason>` only when the behavior is intentional; e.g. rollback cleanup must continue after one restore failure.
 
@@ -122,7 +123,7 @@
 
 ### Analyzer suppression policy — the `dotnet format` gate
 
-- The format gate is the repo's zero-diagnostic bar: `dotnet format WinForward.slnx --severity info --verify-no-changes --no-restore` must exit 0 with empty output before commit, alongside the `-c Release` zero-warning build and a green `-c Release` test run (`AGENTS.md`; `.github/workflows/analyzer-gate.yml`).
+- The format gate is the repo's zero-diagnostic bar: `dotnet format WinForward.slnx --severity info --verify-no-changes --no-restore` must exit 0 with empty output before commit, alongside the `-c Release` zero-warning build and a green `-c Release` test run (`AGENTS.md`). Those two are **local-only**: `.github/workflows/analyzer-gate.yml` runs `dotnet format` and `jb inspectcode`, and `.github/workflows/release-build.yml` publishes `src/WinForward.Cli`; neither runs `dotnet build` or `dotnet test`, so the 1,660-test suite has no CI enforcement point yet (registered as its own task, not a silent gap).
 - Every suppression — an inline `#pragma warning disable <RULE>` with a reason, or an `.editorconfig` `severity = none` with a comment — must state a reason verifiable against **this** repository. Never inherit text from another codebase: no foreign type names, hosts, or workflows.
 - Scope `.editorconfig` entries with globs to exactly the paths the evidence covers (`[tests/**.cs]`, `[tests/<project>/TestHelpers/**.cs]`, …). Never suppress globally on a "the rest of the tree currently has none" rationale — future code in those paths must still hit the rule.
 - Fixers run batched and may need a second invocation to converge; always build the Release gates after a fixer pass.

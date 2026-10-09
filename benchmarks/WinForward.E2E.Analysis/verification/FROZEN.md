@@ -49,6 +49,13 @@ tree from the edited generator reproduced `723b7378…` byte for byte, so the go
 The two contract tables (`contract-inventory.json`, `contract-rename.json`) and `contract-rename.md`
 also live in this directory now rather than in an archived task's `research/`.
 
+**The step IDs are provenance labels, not definitions.** `E4-a`, `E4-b1b`, `E4-c`, `E2-d`, `E3-d` and
+`D6.6`/`D20.1`/`D21.1` name steps and decisions of the archived task
+`.trellis/tasks/archive/2026-10/10-07-e2e-harness-refactor/` (its `design-decisions.md` and
+`research/baseline/`), which is where every one of them is defined. They are kept here because they
+say *which* era a frozen byte or a snapshot tree belongs to; a reader who deletes one cannot tell two
+records of the same artifact apart.
+
 ### 1.1 The retired vector tables (E4-b1b, retired 2026-10-09)
 
 Three files under `golden/` and their generator used to be frozen beside the golden, taking no part in
@@ -139,7 +146,8 @@ the clean campaign the two implementations are diffed on. A tree built with one 
 **boundary tree**: the Python reference does not disclose window overflows in the latency cells,
 truncated frames or undecodable datagrams beyond what it already renders, it has no answer for a
 denominator of exactly zero, and on that last tree it raises `TypeError`
-(`research/baseline/E4b5-semantic.md` §7.3). Boundary trees are therefore asserted against the **C#
+(`.trellis/tasks/archive/2026-10/10-07-e2e-harness-refactor/research/baseline/E4b5-semantic.md` §7.3).
+Boundary trees are therefore asserted against the **C#
 output alone** — a pointed assertion per shape, each with a negative control — and never take part in
 the two-implementation diff (D20.1).
 
@@ -151,17 +159,19 @@ in any other directory hashes differently (measured: all five reproduce only und
 
 | Flag | sha256 of the tree tarball | asserted by |
 |---|---|---|
-| `--window-overflow wf-aot-opt` | `d346f89d238102ea13108aae12cab679aeb3949638b179c71f4f6a905a155c19` | the §5 latency cells (`research/baseline/E4b3-semantic.md` §5) |
+| `--window-overflow wf-aot-opt` | `d346f89d238102ea13108aae12cab679aeb3949638b179c71f4f6a905a155c19` | the §5 latency cells, recorded in `.trellis/tasks/archive/2026-10/10-07-e2e-harness-refactor/research/baseline/E4b3-semantic.md` §5 — **no live checker asserts this tree** |
 | `--undecodable 7` | `d3af3e07f934f7d13a6beb19aeebb4d9dbea23bd2a7b91418f3a507437f01039` | `check-fairness.py --tables` (`#11/arms`) |
 | `--truncated-tcp 3` | `14ab9a6a25bc13656ad744e19054444b3f59baecc1ed13a757dcbf1d69402968` | `check-boundary-trees.py` (`#14.7/tcp`) |
 | `--truncated-dns 2` | `f55f897dc801950e8854bbc41ce940c2e0ccadecaa9b94722996adbfb60d3ed9` | `check-boundary-trees.py` (`#14.7/dns`) |
 | `--zero-denominator` | `e83268847ae24e2b17d2c7d348292c2977d913d9bc568f010dcf9d3e7ea56cb4` | `check-boundary-trees.py` (`#zero-denominator/*`) |
 
-`python3 check-boundary-trees.py` builds each of the first, third, fourth and fifth trees at
-`/tmp/wf-synth`, runs the built analysis over it and judges the produced documents; the second is
-covered by `check-fairness.py`, whose `#11` guard reads the `undecodable` disclosure of any
-document it is handed (`--tables`). Both carry their negative controls inside themselves, so
-`--self-check`-style red is one command away.
+`python3 check-boundary-trees.py` builds the truncated-TCP, truncated-DNS and zero-denominator trees
+(rows 3–5) at `/tmp/wf-synth`, runs the built analysis over each and judges the produced documents. It
+does **not** build rows 1–2: the `--undecodable` tree is covered by `check-fairness.py`, whose `#11`
+guard reads the `undecodable` disclosure of any document it is handed (`--tables`), and the
+`--window-overflow` tree has no live consumer — its assertions are the §5 latency cells recorded in
+the archived E4-b3 research note. Both live checkers carry their negative controls inside themselves,
+so `--self-check`-style red is one command away.
 
 ## 5. What the clean tree does not exercise
 

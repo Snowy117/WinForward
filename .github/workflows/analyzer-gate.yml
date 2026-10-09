@@ -65,3 +65,16 @@ jobs:
         with:
           name: jb-inspectcode-report
           path: ${{ runner.temp }}\jb-report.xml
+
+  # Deliberately not a step in the windows jobs above: the differ executes the analyzer's
+  # extension-less apphost and both it and the tree generator are bound to /tmp/wf-synth.
+  oracle-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '10.0.x' }
+      - run: dotnet build benchmarks/WinForward.E2E.Analysis/WinForward.E2E.Analysis.csproj -c Release
+      - run: python3 benchmarks/WinForward.E2E.Analysis/verification/oracle-diff.py
+      - run: python3 benchmarks/WinForward.E2E.Analysis/verification/check-fairness.py

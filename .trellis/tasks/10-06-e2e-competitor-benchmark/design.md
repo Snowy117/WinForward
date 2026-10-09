@@ -13,9 +13,9 @@ test and the analysis host.
  │  UDP echo   :30010     │                │   └─ WinForward.E2E client (all arms)    │
  │  DNS answer :30053     │                │        ├─ load generation                │
  └────────────────────────┘                │        ├─ resource sampler               │
- ┌────────────────────────┐                │        └─ JSONL writer                   │
- │ analysis/analyze.py    │◄── results ────│                                          │
- └────────────────────────┘                │   sing-box 127.0.0.1:1080 (SOCKS5)       │
+ ┌──────────────────────────┐              │        └─ JSONL writer                   │
+ │ WinForward.E2E.Analysis  │◄─ results ───│                                          │
+ └──────────────────────────┘              │   sing-box 127.0.0.1:1080 (SOCKS5)       │
                                            │   product under test                     │
                                            └──────────────────────────────────────────┘
 ```

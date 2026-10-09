@@ -51,7 +51,7 @@ directly, and a transparent proxy rewrites the path beneath it.
 | `Client/ResourceSampleWriter.cs` | the `sample` and `samplerError` record shapes |
 | `Client/FrameBuffer.cs` | the frame buffer an arm builds its requests in, and the socket helpers the lanes share |
 | `../WinForward.E2E.Contracts/` | what both verbs share: the record key constants (`ArmKeys.*.cs`, one shard per family), the typed metrics and parameters value objects, the JSONL sink, its failure policy, and the number formats the records publish |
-| `../WinForward.E2E.Analysis/` | the campaign analysis, a .NET project of its own: the report tables, `verdict.json`, the frozen oracle under `verification/`, and the entry point `scripts/analyze.sh` |
+| `../WinForward.E2E.Analysis/` | the campaign analysis, a .NET project of its own: the report tables, `verdict.json`, the frozen oracle under `verification/`, and the entry point `../WinForward.E2E.Analysis/scripts/analyze.sh` |
 | `../../tests/WinForward.E2E.Tests/` | the harness's own tests: the per-kind record shape tests, the lane seam with a fake transport, the ledger shape tests, the CLI snapshots, the key-literal gate and the teardown-vocabulary gate |
 | `Target/` | the target: TCP echo/command server, UDP echo server, DNS responder, the ledger summaries, the target log and the runner |
 | `Target/TcpConnectionProtocol.cs` | one TCP connection's command/echo state machine and its verdicts |
@@ -63,25 +63,26 @@ directly, and a transparent proxy rewrites the path beneath it.
 | `Wire/` | the protocol both verbs share: frame codec, stream reader, CRC32C, command payload, half-close trailer, DNS wire subset, payload filler |
 | `scripts/plans/` | the committed plans: `full-plan`, `udp-plan`, `dns-plan`, `dual-plan`, `base-plan`, `selftest-plan` |
 | `scripts/plans-short/` | the same arm shapes at short durations and lower rates, for validating a change |
-| `scripts/plans-windows/` | `full-plan`'s load shape — `LOSS 120s × 500/s`, `LATLOAD 500 rps`, the `PERSIST` idle window, `DNS 200 rps` — at compressed arm durations, for validating a change through a real product without a full-length campaign |
-| `scripts/configs/` | the product configurations each row is measured with |
+| `scripts/plans-windows/` | one file, `full-shape-plan.json`: `full-plan`'s load shape — `LOSS 120s × 500/s`, `LATLOAD 500 rps`, the `PERSIST` idle window, `DNS 200 rps` — for validating a change through a real product without a full-length campaign. Its arm order, arm names and key sets are identical to `scripts/plans/full-plan.json`; the only differences are nine `seconds` values, and `LOSS` (120 s) is the one arm left uncompressed. The loader has no override or merge mechanism, so the shape is repeated rather than patched — see "The configs and the plan sets" |
+| `scripts/configs/` | the six committed product configurations — six of the seven rows, since the Proxifier row's profile is machine-local; the repo-file → row → deployed-path mapping is in "The configs and the plan sets" |
 | `scripts/orchestrator.ps1` | the campaign driver, run on the machine under test |
 | `scripts/publish.sh` | build and publish the artifacts |
 | `scripts/selftest.sh` | run the harness against itself on one host |
 | `scripts/jsonl_paths.py` | the one canonical flattener (`join('/', member names)`) the comparator and the fixture-drift guard share |
 | `scripts/compare-records.py` | compare two artifact trees run-to-run: structural / identity / contract / reading classes, a per-key jitter band and the rename table; the procedure is [measurement-judgement.md](../../.trellis/spec/backend/measurement-judgement.md)'s |
 | `scripts/check-readme-contract.py` | assert that every key in this file's contract table is a constant in `ArmKeys` that a write site publishes, and that no stale spelling survives |
-| `scripts/cli-snapshots.py` | record the 28 CLI commands (both helps and every error path) as exit code plus stdout and stderr bytes |
+| `scripts/cli-snapshots.py` | record a CLI surface as exit code plus stdout and stderr bytes; its `CASES` list holds **31** commands (both helps, the three role forms and every rejection either verb can print), while the frozen `before/` tree it was recorded against holds 28 |
 | `../../tools/effective-lines.py` | report the `.cs` files above the repository's 400-effective-line limit — a **solution-wide** rule, not this harness's own |
-| `../WinForward.E2E.Analysis/verification/` | the analysis's instruments, beside the frozen tree, the golden, the two contract tables and the row profiles: `oracle-diff.py` (diff this file's frozen reference against the C# output: `--mode semantic` (default) or `--mode byte`, `--batch N`, `--tolerance`), `check-fairness.py` (the `not carried` rows, the port-53 carriage labels, the CPU scope and the unattributable `undecodable` token against the analysis's own `tables.md`), `check-boundary-trees.py` and `check-fixture-drift.py` |
+| `../WinForward.E2E.Analysis/verification/` | the analysis's instruments, beside the frozen tree, the golden, the two contract tables and the row profiles: `oracle-diff.py` (diff this file's frozen reference against the C# output: `--mode semantic` (default) or `--mode byte`, `--batch N`, `--tolerance`), `check-fairness.py` (the `not carried` rows, the port-53 carriage labels, the CPU scope and the unattributable `undecodable` token against the analysis's own `tables.md`), `check-boundary-trees.py` (the truncated-TCP, truncated-DNS and zero-denominator trees; the `--undecodable` tree is `check-fairness.py`'s and the `--window-overflow` tree is asserted by no live checker) and `check-fixture-drift.py` |
 
-**No CI runs any script in this document, and no test invokes one.** `.github/workflows/` holds exactly
-`analyzer-gate.yml` (`dotnet format`, `jb inspectcode`) and `release-build.yml` (the product CLI's
-publishes); neither mentions E2E, Python or `tools/`. Every gate below is a hand-run command whose
-output a human has to read.
+**One CI job runs two of these scripts, and no test invokes any of them.** `.github/workflows/` holds
+exactly `analyzer-gate.yml` and `release-build.yml` (the product CLI's publishes). `analyzer-gate.yml`'s
+`oracle-regression` job runs `verification/oracle-diff.py` and `verification/check-fairness.py` on
+`ubuntu-latest`; every other gate below is a hand-run command whose output a human has to read, and
+neither workflow mentions the harness, `tools/` or any other Python script.
 
 Machine-specific **local glue**, listed in `.gitignore` and **absent from a fresh checkout** (none of
-these four is in `git ls-files`, so a fix to one can never be committed):
+these five is in `git ls-files`, so a fix to one can never be committed):
 
 | Path | Why it is not in the repository |
 |---|---|
@@ -91,8 +92,10 @@ these four is in `git ls-files`, so a fix to one can never be committed):
 | `scripts/start-targets.sh` | starts the targets with one particular set of addresses and ports |
 | `scripts/publish-campaign.sh` | collects a campaign from one particular machine and runs the analysis on it |
 
-Nothing in this document depends on those files. `bin/` and `obj/` are build output and are
-gitignored as well.
+A campaign is not reproducible from a fresh checkout: those five files are how it is driven, and the
+Proxifier row's `bench.ppx` is machine-local too (see "The configs and the plan sets"). What the
+document describes — the record, the keys, the gates, the plans and the target's protocol — is
+checkout-independent. `bin/` and `obj/` are build output and are gitignored as well.
 
 ## Build and run
 
@@ -234,7 +237,7 @@ Kinds: `latency`, `loss`, `reliability`, `throughput`, `dns`, `mix`, `idle`, `pe
 |---|---|---|---|
 | `seconds` | every arm | 60 | greater than 0 |
 | `ratePerSecond` | latency, loss, dns, and both BASE phases | 20 / 500 / 200 / 20 and 500 | 0 or more |
-| `payloadBytes` | latency, loss, persistent, both BASE phases | 120 / 200 / 120 / 120 and 200 | 0 or more |
+| `payloadBytes` | latency, loss, persistent, both BASE phases | 120 / 200 / 120 / 120 and 200 | 0..4194304 (the frame codec's ceiling) |
 | `protocol` | latency, and BASE's latency phase (BASE's loss phase always runs udp) | `"tcp"` | `tcp`, `udp` or `tcp+udp` |
 | `window` | in-flight requests per lane: latency, loss, both BASE phases | 64 / 4096 / 64 and 4096 | 0 or more |
 | `lanes` | latency, both BASE phases | 1 | 0 or more |
@@ -248,11 +251,13 @@ Kinds: `latency`, `loss`, `reliability`, `throughput`, `dns`, `mix`, `idle`, `pe
 | `desktops` | mix | 4 | 0 or more |
 | `intervalMs`, `idleSeconds` | persistent: the pacing interval and the idle window | 1000 / 20 | 0 or more |
 
-Every numeric key is an integer, and `0` means "not declared": the arm then uses the default in the
-table rather than the zero. A fractional value on an integer key (`"window": 100.5`) is a load error
-instead of a silent fall back to the default, and so is any value outside the accepted range. The
-one exception to "0 = not declared" is `dnsPort`, where 0 is the same "use the run's `--dns-port`"
-the table documents, not port 0.
+Every numeric key **except `seconds`** is an integer, and `0` on one of them means "not declared": the
+arm then uses the default in the table rather than the zero. A fractional value on an integer key
+(`"window": 100.5`) is a load error instead of a silent fall back to the default, and so is any value
+outside the accepted range. The two exceptions to "0 = not declared" are `dnsPort`, where 0 is the same
+"use the run's `--dns-port`" the table documents, not port 0, and `seconds`, whose domain starts above
+zero: `seconds` is the one `double` key (`"seconds": 12.5` loads), and `0` or a negative value is a load
+error — `'seconds' is 0, which is not a positive number` — not a default.
 
 `window` is a count, `lossWindowMs` is a duration; the two are different keys because the latency
 arm's window is a number of requests and the loss arm's is a millisecond threshold.
@@ -296,6 +301,47 @@ block, and one directory per product row. The orchestrator writes each row's `pr
 copies the product's effective configuration into the row and writes the `environment.json` block;
 deploying the artifacts, the plans and the product configurations to that machine is machine-specific
 work (`scripts/deploy-campaign.sh`, local).
+
+### The configs and the plan sets
+
+Six configuration files under `scripts/configs/`, one per product row. Until this section, no repository
+file named any of them: the rows are wired by the **deployed** path, and the only mapper is the local
+`scripts/deploy-campaign.sh`, which stages each repo file and verifies the upload by the remote file's
+size. Measured 2026-10-09:
+
+| Repo file | Row id (`scripts/orchestrator.ps1`) | Deployed path the orchestrator reads |
+|---|---|---|
+| `wf-aot-opt.json` | `wf-aot-opt` — the reference build | `C:\wfbench\wf-aot\config.json` |
+| `wf-fdd-opt.json` | `wf-fdd-opt` — the framework-dependent build of the same configuration | `C:\wfbench\wf-fdd\config.json` |
+| `wf-aot-nativeudp.json` | `wf-aot-nativeudp` — the reference build with `udpOverTcp` off | `C:\wfbench\wf-aot\config-nativeudp.json` |
+| `wf-aot-dnsrelay.json` | `wf-aot-dnsrelay` — the reference build with the DNS relay rule | `C:\wfbench\wf-aot\config-dnsrelay.json` |
+| `proxifyre-app-config.json` | `proxifyre` | `C:\wfbench\stage\proxifyre-app-config.json`, then copied over `C:\Program Files\ProxiFyre\app-config.json` |
+| `proxybridge.pbprofile` | `proxybridge` | `C:\wfbench\proxybridge\bench.pbprofile` |
+
+`wf-fdd-opt.json` and `wf-aot-opt.json` are **byte-identical** (both sha256 `15e49373…`), and that is
+deliberate: the `wf-fdd-opt` row changes only the build, so the delta between those two rows is
+attributable only while the two files stay byte-identical. The second file is a named deploy-time copy,
+not a second configuration; collapsing it to one upload is a registered follow-up, not a cleanup to do
+casually.
+
+The Proxifier row has **no repository configuration file**: `bench.ppx` is a GUI export that exists
+only on the machine (`/tmp/wf-bench/bench.ppx`) and is staged to `C:\wfbench\proxifier\bench.ppx`, so a
+fresh checkout cannot reproduce that row.
+
+The three plan directories are three **independent sets**, not one set with overrides. `Client/PlanFile.cs`
+reads exactly one `--plan` path and has no `extends`, patch or merge token (repeating the flag is
+last-one-wins), so every variant is a full copy of the arms it runs:
+
+| Directory | Files | Relationship to `scripts/plans/` (measured 2026-10-09) |
+|---|---|---|
+| `scripts/plans/` | 6: `base`, `dns`, `dual`, `full`, `selftest`, `udp` | the canonical set; the campaign stages five of them, and `selftest-plan.json` — `full`'s ten arms plus `BASE`, at 5–10 s per arm on smaller, lower-rate shapes — is the self-test's |
+| `scripts/plans-short/` | 5: the same set minus `selftest-plan` | the same arm shapes at short durations **and lower rates**: against `plans/full-plan.json` it differs in 17 leaves, 10 `seconds` and 7 not — four `ratePerSecond`, `connectionsPerSecond`, `targetBytesPerSecond` and `idleSeconds`. It is not a pure duration compression |
+| `scripts/plans-windows/` | 1: `full-shape-plan.json` | `plans/full-plan.json` with nine `seconds` values overridden and **nothing else**: 47 of its 56 leaves are identical, 0 leaves differ in any key other than `seconds`, and `LOSS` keeps its full 120 s. `deploy-campaign.sh` stages it as `C:\wfbench\e2e-win\full-plan.json` |
+
+Every file in `plans-short/` and `plans-windows/` is derivable from `plans/` plus two override tables —
+`plans/` itself is the irreducible set — so deduplicating the twelve is tempting, but it needs a new
+`PlanFile` override/merge mechanism with its own validation and tests. **Do not add one as part of a
+data cleanup**; it is registered as a follow-up instead.
 
 ## The record
 
@@ -701,12 +747,15 @@ hold. All of them are visible in the record itself.
 | the sampler worked | no `samplerError` record and no sample carrying `readError` |
 | a campaign is trustworthy | the analysis's own gates: the three identities, the lane witnesses, `clientSendLoss`, the two control blocks against each other, and `directLeak == 0` in the dual phase — see [README.md](../WinForward.E2E.Analysis/README.md) |
 
-The harness's own gates run the same way, by hand: `scripts/check-readme-contract.py` fails when a key
-in the table above is no longer a constant in `ArmKeys`, and `CliSnapshotTests` fails when a CLI message
-is reworded. The 400-effective-line limit is **not** one of them — it is a repository-wide rule, and its
-tool is `../../tools/effective-lines.py`, which counts every `.cs` file it is given, this harness's and
-`WinForward.Benchmarks`'s alike. No CI runs any of these: `.github/workflows/` holds only
-`analyzer-gate.yml` and `release-build.yml`.
+The harness's own checks are not one thing. `CliSnapshotTests` is a test: `dotnet test` replays the
+recorded CLI commands through `Program.Main` and fails when a message is reworded.
+`scripts/check-readme-contract.py` is a hand-run gate: it fails when a key in the contract table above
+is no longer a constant in `ArmKeys` that a write site publishes. The 400-effective-line limit is
+**not** one of them — it is a repository-wide rule, and its tool is `../../tools/effective-lines.py`,
+which counts every `.cs` file it is given, this harness's and `WinForward.Benchmarks`'s alike, and is
+run by hand too. Of these, **only the analysis's own oracle and fairness checks are wired into CI**
+(`analyzer-gate.yml`'s `oracle-regression` job); nothing else here is, and
+`release-build.yml` publishes the product CLI only.
 
 A healthy self-test run prints the analysis's summary line —
 `1 pass(es), 1 row(s), 1 ledger(s), 1 loaded run(s)` — and reports zero `correctness-failure` and zero

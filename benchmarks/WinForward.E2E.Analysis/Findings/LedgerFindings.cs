@@ -30,6 +30,7 @@ internal static partial class LedgerFindings
 
     private const double SummaryIntervalSeconds = 1.0;
 
+    /// <summary>Every finding the ledger contributes.</summary>
     internal static List<Finding> Collect(CampaignModel campaign)
     {
         ArgumentNullException.ThrowIfNull(campaign);

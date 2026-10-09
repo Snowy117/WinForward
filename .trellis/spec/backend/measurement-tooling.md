@@ -6,8 +6,9 @@
 
 ## The README contract table is a gate, not prose
 
-`benchmarks/WinForward.E2E/README.md`'s "Which keys are contract" section (line 382) is what a reader
-consults when a cell looks wrong, and it is the one place a rename can go stale without anything failing:
+`benchmarks/WinForward.E2E/README.md`'s "Which keys are contract" section (line 428, bounded by the
+next `## ` heading) is what a reader consults when a cell looks wrong, and it is the one place a
+rename can go stale without anything failing:
 the analysis resolves most paths by arm kind, so a misspelt key renders an empty cell and the report still
 builds. `check-readme-contract.py` reads the section — tables *and* prose — and for every backticked key
 path it names, and for the five root names the table spells bare, it:
@@ -25,7 +26,8 @@ path it names, and for the five root names the table spells bare, it:
 3. fails on any token that is an `old_path` of `contract-rename.json` whose `new_path` differs, so a
    rename cannot leave the table describing a record that no longer exists.
 
-Three tokens are declared rather than inferred, in two sets (`check-readme-contract.py:123-131`), so that
+Three tokens are declared rather than inferred, in two sets
+(`check-readme-contract.py`'s `LEGACY_TOKENS` and `DOCUMENTED_NON_KEYS`), so that
 dropping them is an edit and not a silent pass: `LEGACY_TOKENS = {"metrics/clientSendLoss"}` (the
 analysis's legacy gate fallback, published by no current latency arm) and
 `DOCUMENTED_NON_KEYS = {"parameters/window", "parameters/loss.lossWindowMs"}` (plan-key spellings the
@@ -57,11 +59,13 @@ it: the gate catches a duplicated spelling, not a stale one
 
 ## The scripts
 
-**No CI runs any of these scripts, and no test invokes one.** `.github/workflows/` holds exactly
-`analyzer-gate.yml` (`dotnet format` + `jb inspectcode`) and `release-build.yml` (the CLI's publishes);
-neither mentions E2E, Python or `tools/`. Each script is run by hand unless a test says otherwise; the
-two READMEs' layout tables (`benchmarks/WinForward.E2E/README.md`,
-`benchmarks/WinForward.E2E.Analysis/README.md`) list where each one lives.
+**Almost none of these scripts runs in CI, and no test invokes one.** `.github/workflows/` holds
+exactly `analyzer-gate.yml` and `release-build.yml` (the CLI's publishes). The one exception is
+`analyzer-gate.yml`'s `oracle-regression` job, which builds the analysis in Release on `ubuntu-latest`
+and runs `verification/oracle-diff.py` followed by `verification/check-fairness.py`; every other script
+is run by hand unless a test says otherwise. The two READMEs' layout tables
+(`benchmarks/WinForward.E2E/README.md`, `benchmarks/WinForward.E2E.Analysis/README.md`) list where each
+one lives.
 
 Scripts under `benchmarks/WinForward.E2E/scripts/`:
 
@@ -77,9 +81,9 @@ instruments, so a checker of the analysis is not split across a project boundary
 
 | Script | What it checks |
 |---|---|
-| `oracle-diff.py` | the differ the analysis is judged with (below) |
-| `check-fairness.py` | asserts the fairness disclosures in `row-profiles.json` against the analysis's own `tables.md` |
-| `check-boundary-trees.py` | the knob trees (window overflow, undecodable, truncated, zero denominator) |
+| `oracle-diff.py` | the differ the analysis is judged with (below); run in CI by `analyzer-gate.yml`'s `oracle-regression` job |
+| `check-fairness.py` | asserts the fairness disclosures in `row-profiles.json` against the analysis's own `tables.md`; also owns the `--undecodable` boundary tree, through its `#11` guard; run in the same CI job |
+| `check-boundary-trees.py` | the three knob trees it builds and asserts — truncated TCP, truncated DNS and zero denominator. It does **not** cover `--window-overflow` (no live checker asserts that tree) or `--undecodable` (`check-fairness.py`'s) |
 | `check-fixture-drift.py` | the fixture's key set against the contract, in both directions |
 
 Two more tools live elsewhere, because neither belongs to the harness directory:
@@ -135,9 +139,9 @@ byte-identical copy of the last one is `verification/plots-SKIPPED.md`.
 | `verification/synthetic-tree.tar.gz` | the campaign every regression runs on (deterministic tar: sorted entries, fixed mtime/owner) |
 | `verification/golden/{py-tables.md,py-verdict.json}` | the reference output for that tree |
 | `verification/synthetic/make_tree.py` + `FROZEN.md` | how the tree is built, and how to refreeze (any change means refreezing and re-diffing from batch 1) |
-| `verification/oracle-diff.py` | the differ: `--mode semantic` (default) or `--mode byte`, `--batch N`, `--tolerance` |
-| `verification/row-profiles.json` + `verification/check-fairness.py` | the fairness rules as data, asserted against the C# output |
-| `verification/check-boundary-trees.py` | the knob trees (window overflow, undecodable, truncated, zero denominator) |
+| `verification/oracle-diff.py` | the differ: `--mode semantic` (default) or `--mode byte`, `--batch N`, `--tolerance`; run in CI by the `oracle-regression` job |
+| `verification/row-profiles.json` + `verification/check-fairness.py` | the fairness rules as data, asserted against the C# output; the same job runs it |
+| `verification/check-boundary-trees.py` | it builds and asserts the truncated-TCP, truncated-DNS and zero-denominator trees; the `--undecodable` tree belongs to `check-fairness.py` and the `--window-overflow` tree to no live checker |
 | `verification/contract-{inventory,rename}.json` | the frozen contract tables `check-readme-contract.py` and `check-fixture-drift.py` read; their generator (`contract-inventory.py`) was a spent migration tool and is deleted, so the tables are ground truth rather than regenerable output |
 | `verification/check-fixture-drift.py` | fixture paths no green run observes, against the contract constants; both it and the differ address `verification/` directly |
 

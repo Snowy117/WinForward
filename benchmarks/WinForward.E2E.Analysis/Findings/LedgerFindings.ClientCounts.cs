@@ -35,8 +35,6 @@ internal static partial class LedgerFindings
         }
     }
 
-    /// <summary>Every finding the ledger contributes.</summary>
-
     /// <summary>The endpoints one row's UDP echo arms saw, split by the path each arm was configured to take.</summary>
     internal static Dictionary<string, EndpointSlot> EndpointPartition(CampaignModel campaign, string passId, LedgerPassView entry)
     {
@@ -189,8 +187,7 @@ internal static partial class LedgerFindings
                 Reason: "metrics.latency.udp.sent + metrics.loss.sent (both phases send datagrams)");
     }
 
-    /// <summary>One DNS port's ledger totals and the client totals they are read against.</summary>
-
+    /// <summary>One row's UDP echo endpoints, bucketed by the path their arms were configured to take.</summary>
     internal sealed class EndpointSlot
     {
         /// <summary>Endpoints a proxied-path arm's window saw.</summary>

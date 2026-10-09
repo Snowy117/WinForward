@@ -335,6 +335,8 @@ function Invoke-DualPhase {
         [void]$script:Failures.Add(('{0}: {1} proxied flow(s) to the direct lane''s target' -f $Product.Id, $truth.directLeak))
     }
 
+    # Test-ClientRun returns a verdict but never logs one, so discarding it with [void] cannot swallow
+    # a log line here; the verdict itself is already recorded in $script:Failures.
     [void](Test-ClientRun -OutDir $proxiedDir -Label ($Product.Id + '-dual-proxied'))
     [void](Test-ClientRun -OutDir $directDir -Label ($Product.Id + '-dual-direct'))
 }

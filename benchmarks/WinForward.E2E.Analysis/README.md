@@ -46,7 +46,7 @@ for the caller. `<repo>` is the checkout that holds this file.
 | `--flat` | off | treat `--raw` itself (when it holds the run files) or its immediate subdirectories as rows of one implicit pass |
 | `--warmup-seconds` | 5 | seconds of each arm excluded from the steady-state **memory** cells; the CPU cells are not warmed up (see "What the tables cannot see") |
 | `--resamples` | 10000 | bootstrap resamples (over passes, never samples) |
-| `--seed` | 20261006 | bootstrap seed; the per-pair seeds are derived from it deterministically |
+| `--seed` | 20261006 | bootstrap seed; the per-pair seeds are derived from it deterministically. A report is reproducible for a given seed **and .NET runtime**: the resampling draws come from `System.Random`, whose sequence is documented as not guaranteed across runtimes |
 
 A missing input directory prints a `usage:` line and exits 2, as does a tree with no rows in it.
 
@@ -498,5 +498,6 @@ The tree and the documents it is judged against are frozen under
 was produced, and what the boundary trees are. That directory also holds this project's own instruments:
 `verification/check-fairness.py`, `verification/oracle-diff.py`,
 `verification/check-boundary-trees.py` and `verification/check-fixture-drift.py` assert the disclosures
-and the key sets this document describes. **No CI runs any of them** — `.github/workflows/` holds only
-`analyzer-gate.yml` and `release-build.yml` — so each is run by hand.
+and the key sets this document describes. Two of them — `oracle-diff.py` and `check-fairness.py` — run
+in CI: `.github/workflows/analyzer-gate.yml`'s `oracle-regression` job builds this project in Release on
+`ubuntu-latest` and runs them in that order. The other two are run by hand, as is every other gate here.
