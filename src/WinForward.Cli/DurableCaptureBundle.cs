@@ -14,14 +14,13 @@ using WinForward.Windows;
 namespace WinForward.Cli;
 
 /// <summary>
-/// The durable capture layer (task 09-07-adapter-list-refresh, design §2): built once per run and
-/// never rebuilt across adapter-list refreshes. Owns the redirect table and both proxy
-/// coordinators, the dispatcher/executor chain, the idle sweeper, and the refreshable UDP
-/// reinjection-target snapshot; per-generation state (mode controller, pumps, transactional
-/// runtime) is built around the shared packet processor by <see cref="LayeredCaptureRunner"/>
-/// generations instead. Disposal is single-flight, ordered sweeper → UDP → TCP, and runs exactly
-/// once after the final generation completes — that generation's cleanup has already released the
-/// pumps and restored adapter modes (design R-1).
+/// The durable capture layer: built once per run and never rebuilt across adapter-list refreshes.
+/// Owns the redirect table and both proxy coordinators, the dispatcher/executor chain, the idle
+/// sweeper, and the refreshable UDP reinjection-target snapshot; per-generation state (mode
+/// controller, pumps, transactional runtime) is built around the shared packet processor by
+/// <see cref="LayeredCaptureRunner"/> generations instead. Disposal is single-flight, ordered
+/// sweeper → UDP → TCP, and runs exactly once after the final generation completes — that
+/// generation's cleanup has already released the pumps and restored adapter modes.
 /// </summary>
 [SupportedOSPlatform("windows")]
 internal sealed class DurableCaptureBundle : IAsyncDisposable
@@ -124,7 +123,7 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
     /// Builds the durable layer for a run. Nothing in the bundle references a specific adapter
     /// enumeration: the UDP target snapshot starts scope-less and is populated by the capture
     /// runner's scope-installed callback at generation 0 and after every refresh.
-    /// <paramref name="healthSignal"/> (task 09-17 R1-B) receives the interception-path failure
+    /// <paramref name="healthSignal"/> receives the interception-path failure
     /// observations the capture runner may answer with a forced refresh; null keeps every site
     /// on the no-op signal, so existing compositions are unchanged.
     /// </summary>
@@ -138,25 +137,25 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
     {
         var runtimeCounters = counters ?? RuntimeCounters.Shared;
         // One interning table for the whole process: keys carry a slot, so it must outlive every
-        // capture generation and every adapter-list refresh (design §3.1).
+        // capture generation and every adapter-list refresh.
         var adapterSlots = new AdapterSlotTable();
         // One activity clock for the whole composition: the flow table's warm stamps, both
         // coordinators' per-packet stamps and both sweeps' cutoffs must all land on the same bucket.
         var activityClock = new ActivityBucketClock();
         // The tcpFlowCapacity budget is the single source of truth for both the coordinator's
-        // session gate and the redirect table's bounded capacity (design §4).
+        // session gate and the redirect table's bounded capacity.
         var redirectTable = new TcpRedirectTable(capacity: configuration.TcpFlowCapacity);
-        // One native pool backs retained SYNs and association reset templates (B1/B2); the
-        // bundle owns it and the coordinator borrows it, so it is disposed here after teardown.
+        // One native pool backs retained SYNs and association reset templates; the bundle owns it
+        // and the coordinator borrows it, so it is disposed here after teardown.
         var synCopyPool = new NativeBufferPool(NdisApiAbi.MaximumEthernetFrame);
         RegisterPool(runtimeCounters, SynCopyPoolName, synCopyPool);
-        // One native pool backs the two per-direction relay pump windows (B11).
+        // One native pool backs the two per-direction relay pump windows.
         var relayPool = new NativeBufferPool(TcpProxyRelayFactory.PumpBufferSize);
         RegisterPool(runtimeCounters, RelayPoolName, relayPool);
-        // One address cache backs both proxies' SOCKS5 control connections (B9/R3): the configured
-        // endpoint is resolved once here and reused on every TCP relay and UDP session setup.
+        // One address cache backs both proxies' SOCKS5 control connections: the configured endpoint
+        // is resolved once here and reused on every TCP relay and UDP session setup.
         var addressCache = new Socks5AddressCache();
-        // One pooled setup executor is shared by both coordinators (B5); the bundle owns it. The
+        // One pooled setup executor is shared by both coordinators; the bundle owns it. The
         // configuration layer keeps 0 = auto (absent); the sentinel is translated here so the
         // executor's worker count has exactly one meaning (null = platform default).
         var setupExecutor = new SetupExecutor(configuration.SetupWorkerCount == 0 ? null : configuration.SetupWorkerCount);
@@ -221,14 +220,14 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         const int maximumFrameSize = NdisApiAbi.MaximumEthernetFrame;
         var udpTargets = new UdpAdapterTargetSource(adapterSlots);
         await UdpProxyComposer.PrimeSocks5AddressCacheAsync(configuration, addressCache, loggerFactory.CreateLogger(typeof(Program).FullName!)).ConfigureAwait(false);
-        // One native pool backs every queued setup datagram (B4); the bundle owns it and the
-        // coordinator borrows it, so it is disposed here after release.
+        // One native pool backs every queued setup datagram; the bundle owns it and the coordinator
+        // borrows it, so it is disposed here after release.
         var udpDatagramPool = new NativeBufferPool(maximumFrameSize);
         RegisterPool(counters, UdpDatagramPoolName, udpDatagramPool);
-        // One native pool backs every session receive window (B11); its size comes from the
-        // coordinator so the pool and the session window can never disagree, and its capacity from
-        // the coordinator's session-capacity rule so one lease per live session plus the
-        // retire/admit allowance fits without a tracked overflow allocation.
+        // One native pool backs every session receive window; its size comes from the coordinator so
+        // the pool and the session window can never disagree, and its capacity from the
+        // coordinator's session-capacity rule so one lease per live session plus the retire/admit
+        // allowance fits without a tracked overflow allocation.
         var udpWindowPool = new NativeBufferPool(UdpProxyCoordinator.ReceiveWindowSize(maximumFrameSize), UdpProxyCoordinator.ReceiveWindowPoolCapacity(configuration.UdpSessionCapacity));
         RegisterPool(counters, UdpWindowPoolName, udpWindowPool);
         // One native pool backs every retained attribution packet. Its capacity is the pipeline's
@@ -298,15 +297,14 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
 
     /// <summary>
     /// The capture runner's scope-installed callback: swaps the UDP reinjection-target snapshot to
-    /// the installed scope (design §3.4/R-5). The scope's first adapter becomes the host-flow
-    /// fallback; adapters reporting an all-zero MAC are skipped with a warn (forwarded responses
-    /// toward them drop fail-closed, host responses use the fallback), and a zero-MAC host
-    /// fallback keeps today's zero-placeholder semantics. An empty scope clears the snapshot —
-    /// interception is paused, so every response resolution drops fail-closed. The no-MAC warns
-    /// are change-gated (task 09-17 R2.4): every refresh re-installs the scope, so per-install
-    /// warns flooded the log with the same line — the group warn fires only on the first
-    /// occurrence and whenever the zero-MAC adapter set changes, and an empty zero-MAC set
-    /// resets the memory so the next occurrence warns again.
+    /// the installed scope. The scope's first adapter becomes the host-flow fallback; adapters
+    /// reporting an all-zero MAC are skipped with a warn (forwarded responses toward them drop
+    /// fail-closed, host responses use the fallback), and a zero-MAC host fallback keeps the
+    /// zero-placeholder semantics. An empty scope clears the snapshot — interception is paused, so
+    /// every response resolution drops fail-closed. The no-MAC warns are change-gated: every
+    /// refresh re-installs the scope, so per-install warns flooded the log with the same line — the
+    /// group warn fires only on the first occurrence and whenever the zero-MAC adapter set changes,
+    /// and an empty zero-MAC set resets the memory so the next occurrence warns again.
     /// </summary>
     internal void UpdateUdpTargets(IReadOnlyList<AdapterEnumerationItem> scope)
     {

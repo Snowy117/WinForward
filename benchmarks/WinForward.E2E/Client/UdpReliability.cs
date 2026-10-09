@@ -134,7 +134,7 @@ internal readonly struct LossCounts
 /// verdict, with the instant the datagram arrived, to the send side (the MIX arm's
 /// <c>MixUdpBook</c> settlement queue); the send side then performs the <see cref="WasSent"/>
 /// question, the pending removal, the round-trip sample and the booking, in that order — the same
-/// ladder <c>UdpLatencyPolicy.Settle</c> pins for the latency arm (D19.3 F). The reason is not
+/// ladder <c>UdpLatencyPolicy.Settle</c> pins for the latency arm. The reason is not
 /// style: with two writers, <see cref="SentOk"/>, <see cref="Outstanding"/> and the sequence
 /// bitmaps interleave, and every identity this class exists to keep holds only "mostly".
 /// </para>
@@ -235,7 +235,7 @@ internal sealed class UdpReliabilityTracker
     {
         // The guard has to come first: Ensure refuses to grow the two arrays below past
         // MaxSequence + 1 elements, so a sequence outside the space would be indexed straight out
-        // of bounds (D7). The bitmap still books the refusal, so it lands in OutOfRange.
+        // of bounds. The bitmap still books the refusal, so it lands in OutOfRange.
         if (sequence is < 0 or > MaxSequence)
         {
             _sent.TrySet(sequence);
@@ -473,8 +473,8 @@ internal static class UdpLossMath
 {
     /// <summary>
     /// The loss threshold used when a plan does not declare one. W is a declared, published
-    /// parameter (RFC 2680 style) and is never derived from a latency histogram: a derived W
-    /// silently collapsed to this floor in every arm that recorded no UDP RTT of its own.
+    /// parameter (RFC 2680 style), never derived from a latency histogram: a derived W collapsed
+    /// to this floor in every arm that recorded no UDP RTT of its own.
     /// </summary>
     internal const int DefaultWindowMilliseconds = 200;
 

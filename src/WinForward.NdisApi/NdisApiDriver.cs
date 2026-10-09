@@ -7,18 +7,16 @@ using System.Runtime.Versioning;
 namespace WinForward.NdisApi;
 
 /// <summary>
-/// NDISAPI driver wrapper. Native calls use a two-level gate topology (design D3 of task
-/// 08-28-udp-loss-design-flaws): cold control operations (adapter enumeration, adapter mode
-/// snapshot/set, close) share one control gate, while hot data operations (batched reads,
-/// packet reinjection) serialize per adapter enumeration handle, so a slow IOCTL on one
-/// adapter cannot stall every pump.
+/// NDISAPI driver wrapper. Native calls use a two-level gate topology: cold control operations
+/// (adapter enumeration, adapter mode snapshot/set, close) share one control gate, while hot data
+/// operations (batched reads, packet reinjection) serialize per adapter enumeration handle, so a
+/// slow IOCTL on one adapter cannot stall every pump.
 /// </summary>
 /// <remarks>
-/// The per-adapter split deliberately supersedes the single process-wide gate previously pinned
-/// in .trellis/spec/backend/windows-ndisapi.md: the mutable-OVERLAPPED concern is scoped to each
-/// request structure (all of them are method-local here), ndisrd already serves concurrent
-/// client processes, and within one adapter handle every call remains serialized, preserving
-/// per-adapter reinjection order.
+/// The per-adapter split deliberately supersedes the previous single process-wide gate: the
+/// mutable-OVERLAPPED concern is scoped to each request structure (all of them are method-local
+/// here), ndisrd already serves concurrent client processes, and within one adapter handle every
+/// call remains serialized, preserving per-adapter reinjection order.
 /// </remarks>
 [SupportedOSPlatform("windows")]
 public sealed class NdisApiDriver : IDisposable, INdisPacketReader
@@ -431,9 +429,8 @@ public sealed class NdisApiDriver : IDisposable, INdisPacketReader
     /// batched request (chunks of at most <see cref="MaxPacketsPerSendRequest"/> keep each
     /// ETH_M_REQUEST inside the stackalloc budget; one adapter-gate lease spans the whole call).
     /// The batched send IOCTLs report no per-packet success count — the user-mode DLL passes no
-    /// output buffer, so <c>dwPacketsSuccess</c> never returns (task 08-30-batched-ioctls research:
-    /// wiresock/ndisapi@417b8734 ndisapi.cpp + local DLL disassembly) — so a failed batch throws
-    /// with the same fail-closed semantics as a failed single send.
+    /// output buffer, so <c>dwPacketsSuccess</c> never returns — so a failed batch throws with the
+    /// same fail-closed semantics as a failed single send.
     /// </summary>
     public void SendPacketsToMstcp(nint adapterHandle, NdisPacketBuffer[] buffers, int count) =>
         SendPacketsBatch(adapterHandle, buffers, count, toMstcp: true);

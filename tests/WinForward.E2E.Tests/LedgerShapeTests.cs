@@ -37,7 +37,7 @@ public sealed partial class LedgerShapeTests
 
     private const int PayloadBytes = 32;
 
-    // The record kinds as the writers spell them. They are values, not keys (D14.16), so no constant
+    // The record kinds as the writers spell them. They are values, not keys, so no constant
     // declares them; the shape test reads them off the bytes it published.
     private const string TcpKind = "tcp";
     private const string TcpSummaryKind = "tcpSummary";
@@ -189,8 +189,8 @@ public sealed partial class LedgerShapeTests
     /// The truncation counters reach the ledger the way every other total does -- at the summary's own
     /// root and one level down under <c>targetSummary</c> -- and each listener counts its own stream.
     /// The TCP listener counts the connection whose close landed inside a frame; a DNS listener counts
-    /// a length-prefixed read that ended short, which is a different mechanism under the same key name
-    /// (D19.3 C). The second DNS listener served nothing here, so the two blocks are also shown to be
+    /// a length-prefixed read that ended short, which is a different mechanism under the same key name.
+    /// The second DNS listener served nothing here, so the two blocks are also shown to be
     /// two counters rather than one written twice.
     /// </summary>
     [Fact]
