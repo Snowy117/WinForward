@@ -24,12 +24,12 @@ internal sealed record JsonLines(IReadOnlyList<JsonElement> Records, int BadLine
 /// because these files are written by a harness running under load and a campaign can produce a
 /// truncated line.</para>
 /// <para><b>One value per file or line, and nothing after it.</b> A record followed by more text is
-/// rejected, as <c>json.loads</c>'s "Extra data" rejects it, rather than read as its first value. The
-/// one input the reference accepts and this reader does not is the named floating-point literal
-/// (<c>NaN</c>/<c>Infinity</c>): <see cref="System.Text.Json"/> has no reader option for it. It cannot
-/// occur in a tree this harness wrote, because its own writer refuses to serialize those values.</para>
+/// rejected rather than read as its first value. The one input this reader cannot accept is the named
+/// floating-point literal (<c>NaN</c>/<c>Infinity</c>): <see cref="System.Text.Json"/> has no reader
+/// option for it. It cannot occur in a tree this harness wrote, because its own writer refuses to
+/// serialize those values.</para>
 /// <para>The BOM, the replacement of invalid UTF-8 and the treating of every kind of line break as a
-/// break all follow <c>utf-8-sig</c> and universal newlines.</para>
+/// break are one defence with three parts: a file written under load can carry any of the three.</para>
 /// </remarks>
 internal static class JsonReader
 {

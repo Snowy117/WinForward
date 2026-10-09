@@ -1,9 +1,8 @@
 namespace WinForward.E2E.Analysis.Model;
 
 /// <summary>
-/// The reference's <c>natural_key</c>: a name is split into digit and non-digit runs, a digit run
-/// compares as the number it spells and everything else compares as text, so <c>pass2</c> sorts
-/// before <c>pass10</c>.
+/// A name is split into digit and non-digit runs, a digit run compares as the number it spells and
+/// everything else compares as text, so <c>pass2</c> sorts before <c>pass10</c>.
 /// </summary>
 /// <remarks>
 /// The order is not cosmetic: it is the order passes are listed in <c>verdict.json</c>, the order rows
@@ -13,7 +12,7 @@ namespace WinForward.E2E.Analysis.Model;
 /// </remarks>
 internal static class NaturalKey
 {
-    /// <summary>Orders two names the way the reference's key does.</summary>
+    /// <summary>Orders two names by that key.</summary>
     internal static int Compare(string left, string right)
     {
         ArgumentNullException.ThrowIfNull(left);
@@ -52,7 +51,7 @@ internal static class NaturalKey
         return (left.Length - leftIndex).CompareTo(right.Length - rightIndex);
     }
 
-    /// <summary>The names in natural-key order; the reference's <c>sorted(..., key=natural_key)</c>.</summary>
+    /// <summary>The names in natural-key order.</summary>
     internal static List<string> Sort(IEnumerable<string> names)
     {
         ArgumentNullException.ThrowIfNull(names);

@@ -1,9 +1,7 @@
 namespace WinForward.E2E.Analysis.Cli;
 
 /// <summary>
-/// The analysis's command line: the reference implementation's own options, name for name and
-/// default for default, so switching a campaign's invocation between the two implementations is not
-/// part of the migration.
+/// The analysis's command line: the published options, name for name and default for default.
 /// </summary>
 /// <remarks>
 /// The defaults are not conveniences: <c>--resamples 10000</c> and <c>--seed 20261006</c> are the

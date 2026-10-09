@@ -171,12 +171,8 @@ internal static class TableLedger
     private static bool UdpSilent(LedgerArmView arm) =>
         arm.UdpDatagrams.Equals(0.0) && !NonZero(arm.ClientConnections) && !NonZero(arm.ClientDatagrams);
 
-    /// <summary>
-    /// The window's datagram census as the reference prints it: an empty census is python's <c>sum([])</c>,
-    /// which is the integer zero, while any census that named a source is a float and prints its point.
-    /// </summary>
-    private static string DatagramCount(LedgerArmView arm) =>
-        arm.UdpEndpoints.Count == 0 ? "0" : VerbatimNumber.Json(arm.UdpDatagrams);
+    /// <summary>The window's datagram census.</summary>
+    private static string DatagramCount(LedgerArmView arm) => VerbatimNumber.Json(arm.UdpDatagrams);
 
     private static string ConnectionCheck(bool? check, double? connections)
     {
@@ -229,7 +225,7 @@ internal static class TableLedger
             : text;
     }
 
-    /// <summary>Whether a reading is present and not exactly zero, which is python's own truthiness.</summary>
+    /// <summary>Whether a reading is present and not exactly zero.</summary>
     private static bool NonZero(double? value) => value is not null && !value.Value.Equals(0.0);
 
     private const string Intro =

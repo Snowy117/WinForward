@@ -101,7 +101,7 @@ internal static partial class FindingsCollector
                             Severity.CorrectnessFailure,
                             "direct-leak",
                             $"{passId}/{row.RunId} (dual/direct)",
-                            $"directLeak={Int(leak)}: the product intercepted {Int(leak)} application connection(s) it was configured to send direct"));
+                            $"directLeak={JsonNumber.IntText(leak)}: the product intercepted {JsonNumber.IntText(leak)} application connection(s) it was configured to send direct"));
                         break;
                 }
 
@@ -329,7 +329,4 @@ internal static partial class FindingsCollector
         var seen = new HashSet<(string, string, string, string)>();
         return [.. findings.Where(finding => seen.Add((finding.Severity, finding.Kind, finding.Scope, finding.Detail)))];
     }
-
-    /// <summary>Python's <c>%d</c> on a double: the integer part, toward zero.</summary>
-    private static string Int(double value) => ((long)Math.Truncate(value)).ToString(CultureInfo.InvariantCulture);
 }

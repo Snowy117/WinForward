@@ -149,7 +149,7 @@ internal static class ArmAccess
             return (null, denominatorWhy);
         }
 
-#pragma warning disable S1244 // An exact zero is the reference's own test here.
+#pragma warning disable S1244 // An exact zero: a near-zero denominator still yields a ratio.
         return denominator.Value == 0.0
 #pragma warning restore S1244
             ? (null, $"{armName} {denominatorPath.Replace(JsonValue.Separator, '.')} is zero")

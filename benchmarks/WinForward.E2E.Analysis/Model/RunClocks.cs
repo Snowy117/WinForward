@@ -24,9 +24,9 @@ internal static class RunClocks
         var started = JsonValue.Number(run.Document, ArmKeys.Run.StartedTicks);
         var ended = JsonValue.Number(run.Document, ArmKeys.Run.EndedTicks);
         var wall = JsonValue.Number(run.Document, ArmKeys.Run.WallSeconds);
-        // The reference tests the wall time's Python truthiness, so an exactly-zero wall time is the case
-        // to reject rather than a near-zero one.
-#pragma warning disable S1244 // An exact zero is the reference's own test here.
+        // An exactly-zero wall time is the case to reject rather than a near-zero one: a near-zero wall
+        // time still yields a frequency estimate.
+#pragma warning disable S1244 // An exact zero: a near-zero wall time still yields a frequency estimate.
         if (started is null || ended is null || wall is null || wall.Value == 0.0)
 #pragma warning restore S1244
         {

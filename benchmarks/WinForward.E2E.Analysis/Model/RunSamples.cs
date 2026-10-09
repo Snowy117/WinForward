@@ -83,7 +83,7 @@ internal static class RunSamples
     }
 
     /// <summary>Whether a sample's counters were read completely enough to be used.</summary>
-    internal static bool IsReadable(JsonElement sample) => !JsonValue.Truthy(sample, ArmKeys.Sample.ReadError);
+    internal static bool IsReadable(JsonElement sample) => !JsonValue.IsTrue(sample, ArmKeys.Sample.ReadError);
 
     /// <summary>One arm's samples, in file order, or an empty list when the run has no such arm.</summary>
     /// <param name="run">The run to read.</param>
@@ -266,7 +266,7 @@ internal static class RunSamples
                     IdentityPart(JsonValue.Member(process, ArmKeys.Sample.ProcessEntry.Pid)),
                     IdentityPart(JsonValue.Member(process, ArmKeys.Sample.ProcessEntry.StartUtc))),
                 JsonValue.Number(process, ArmKeys.Sample.ProcessEntry.CpuSeconds),
-                JsonValue.Truthy(process, ArmKeys.Sample.ProcessEntry.CountersRead)));
+                JsonValue.IsTrue(process, ArmKeys.Sample.ProcessEntry.CountersRead)));
         }
 
         return identities;

@@ -32,13 +32,12 @@ internal static class Program
         Console.WriteLine(string.Create(
             System.Globalization.CultureInfo.InvariantCulture,
             $"""
-            WinForward.E2E.Analysis - the end-to-end campaign analysis, as a compiled replacement for the
-            reference implementation it is diffed against.
+            WinForward.E2E.Analysis - the end-to-end campaign analysis.
 
             Usage:
               {AnalysisOptions.Usage}
 
-            The parameters and their defaults are the reference implementation's own:
+            The parameters and their defaults are the published interface:
             raw {AnalysisOptions.DefaultRaw}, out {AnalysisOptions.DefaultOut}, warmup {AnalysisOptions.DefaultWarmupSeconds:0.0#} s,
             {AnalysisOptions.DefaultResamples} resamples, seed {AnalysisOptions.DefaultSeed}.
             """));

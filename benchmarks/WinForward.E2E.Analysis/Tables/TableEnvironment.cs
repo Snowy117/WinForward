@@ -219,7 +219,7 @@ internal static class TableEnvironment
         {
             var samples = RunSamples.Product(run);
             var (primary, allNames) = PrimaryProductProcess(run);
-            var absent = samples.Count(sample => JsonValue.Truthy(sample, "absent"));
+            var absent = samples.Count(sample => JsonValue.IsTrue(sample, "absent"));
             var rejected = samples.Count(sample => !RunSamples.IsReadable(sample));
             rows.Add(
             [
@@ -314,7 +314,7 @@ internal static class TableEnvironment
             return "n/a (no run.json)";
         }
 
-        return JsonValue.Truthy(run.Document, Contracts.ArmKeys.Run.Failed) ? "yes" : "no";
+        return JsonValue.IsTrue(run.Document, Contracts.ArmKeys.Run.Failed) ? "yes" : "no";
     }
 
     private static (string? Primary, List<(string Name, int Count)> All) PrimaryProductProcess(ClientRun run)

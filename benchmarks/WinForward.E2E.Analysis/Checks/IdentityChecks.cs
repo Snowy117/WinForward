@@ -273,9 +273,9 @@ internal static class IdentityChecks
             + fields["corruptDatagrams"];
         if (!total.Equals(fields["sent"]))
         {
-            return (false, $"arrived({Int(fields["arrived"])}) + late({Int(fields["late"])}) + never({Int(fields["never"])}) "
-                + $"+ abandonedAtTeardown({Int(fields["abandonedAtTeardown"])}) "
-                + $"+ corruptDatagrams({Int(fields["corruptDatagrams"])}) = {Int(total)} != sent({Int(fields["sent"])})");
+            return (false, $"arrived({JsonNumber.IntText(fields["arrived"])}) + late({JsonNumber.IntText(fields["late"])}) + never({JsonNumber.IntText(fields["never"])}) "
+                + $"+ abandonedAtTeardown({JsonNumber.IntText(fields["abandonedAtTeardown"])}) "
+                + $"+ corruptDatagrams({JsonNumber.IntText(fields["corruptDatagrams"])}) = {JsonNumber.IntText(total)} != sent({JsonNumber.IntText(fields["sent"])})");
         }
 
         return (true, null);
@@ -298,9 +298,9 @@ internal static class IdentityChecks
         var total = values["answered"] + values["servfail"] + values["timeout"] + values["other"];
         if (!total.Equals(values["sent"]))
         {
-            return (false, $"answered({Int(values["answered"])}) + servfail({Int(values["servfail"])}) "
-                + $"+ timeout({Int(values["timeout"])}) + other({Int(values["other"])}) "
-                + $"= {Int(total)} != sent({Int(values["sent"])})");
+            return (false, $"answered({JsonNumber.IntText(values["answered"])}) + servfail({JsonNumber.IntText(values["servfail"])}) "
+                + $"+ timeout({JsonNumber.IntText(values["timeout"])}) + other({JsonNumber.IntText(values["other"])}) "
+                + $"= {JsonNumber.IntText(total)} != sent({JsonNumber.IntText(values["sent"])})");
         }
 
         return (true, null);
@@ -324,7 +324,7 @@ internal static class IdentityChecks
         if (!scheduled.Value.Equals(attempts.Value))
         {
             return (false,
-                $"connectAttempts({Int(attempts.Value)}) != scheduledAttempts({Int(scheduled.Value)}): "
+                $"connectAttempts({JsonNumber.IntText(attempts.Value)}) != scheduledAttempts({JsonNumber.IntText(scheduled.Value)}): "
                 + "the arm ended with work in flight");
         }
 
@@ -337,10 +337,6 @@ internal static class IdentityChecks
         var total = published.EnumerateObject().Sum(property => JsonValue.AsNumber(property.Value) ?? 0.0);
         return total.Equals(attempts.Value)
             ? (true, null)
-            : (false, $"outcomes sum to {Int(total)} != connectAttempts({Int(attempts.Value)})");
+            : (false, $"outcomes sum to {JsonNumber.IntText(total)} != connectAttempts({JsonNumber.IntText(attempts.Value)})");
     }
-
-    /// <summary>Python's <c>%d</c> on a double: the integer part, toward zero.</summary>
-    private static string Int(double value) =>
-        ((long)Math.Truncate(value)).ToString(CultureInfo.InvariantCulture);
 }

@@ -87,10 +87,10 @@ internal static class GateFlow
             passId,
             row.RunId,
             Presence(row),
-            Int(model.TcpAttempts),
+            JsonNumber.IntText(model.TcpAttempts),
             VerbatimNumber.Cell(truthTcp, 0),
             tcpGate,
-            Int(model.UdpArms),
+            JsonNumber.IntText(model.UdpArms),
             VerbatimNumber.Cell(truthNative, 0),
             VerbatimNumber.Cell(truthUtcp, 0),
             udpGate,
@@ -183,7 +183,7 @@ internal static class GateFlow
         }
 
         return (
-            $"{Int(truthUdpTotal)} flow(s) over {Int(model.UdpArms)} UDP-carrying arm(s)",
+            $"{JsonNumber.IntText(truthUdpTotal)} flow(s) over {JsonNumber.IntText(model.UdpArms)} UDP-carrying arm(s)",
             truthUdpTotal / model.UdpArms);
     }
 
@@ -230,7 +230,7 @@ internal static class GateFlow
             notes.Add(string.Join("; ", row.LoadErrors));
         }
 
-        if (JsonValue.Truthy(row.Document, Contracts.ArmKeys.Run.Failed))
+        if (JsonValue.IsTrue(row.Document, Contracts.ArmKeys.Run.Failed))
         {
             notes.Add("harness marked this run failed");
         }
@@ -386,7 +386,4 @@ internal static class GateFlow
             ? ("native", "the row runs the native UDP relay")
             : (null, "row does not declare a UDP carriage");
     }
-
-    /// <summary>Python's <c>%d</c> on a double: the integer part, toward zero.</summary>
-    private static string Int(double value) => ((long)Math.Truncate(value)).ToString(CultureInfo.InvariantCulture);
 }
