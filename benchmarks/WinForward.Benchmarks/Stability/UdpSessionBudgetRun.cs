@@ -9,10 +9,10 @@ namespace WinForward.Benchmarks.Stability;
 
 /// <summary>
 /// One run's state: the churn counters, the sweeper schedule, the sampled series, and the verdict.
-/// The churn counters are written only by the churn loop (the response sink owns the
-/// cross-thread counters), so plain fields are enough; the sample list is read only after the
-/// load phases have returned. The assertions live in <see cref="SessionBudgetAcceptance"/>: this
-/// type drives the phases and writes the rows, that one owns the thresholds.
+/// The churn counters are written only by the churn loop (the response sink owns the cross-thread
+/// counters), so plain fields are enough. The assertions live in
+/// <see cref="SessionBudgetAcceptance"/>: this type drives the phases and writes the rows, that one
+/// owns the thresholds.
 /// </summary>
 internal sealed class UdpSessionBudgetRun(
     StabilityContext context,
@@ -69,8 +69,8 @@ internal sealed class UdpSessionBudgetRun(
 
     /// <summary>
     /// Fires the warm-up flows, waits for their echoes, and retires them through the same expiry
-    /// path the sweeper drives, so the churn window opens on a settled population and the descriptor
-    /// and managed-memory baselines are the post-JIT, post-dial shape rather than a cold process.
+    /// path the sweeper drives, so the churn window opens on a settled population and the baseline
+    /// is sampled after JIT and dialling rather than on a cold process.
     /// </summary>
     public async Task WarmUpAsync(Socks5Server socksServer)
     {
@@ -90,10 +90,8 @@ internal sealed class UdpSessionBudgetRun(
             await DelayAsync(s_warmupPollInterval).ConfigureAwait(false);
         }
 
-        // Every warm-up flow answering is the per-flow-association shape, and anything short of that
-        // means the instrument is not delivering: each flow owns its association, so its echo can
-        // only come back to it. Zero own echoes means nothing is being delivered at all, and the
-        // churn measurement would be meaningless.
+        // Anything short of every warm-up flow answering means the instrument is not delivering:
+        // the churn measurement would be meaningless, so the run fails here instead.
         if (sink.WarmupFirstResponses < warmupFlows)
         {
             throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture, $"Only {sink.WarmupFirstResponses} of {warmupFlows} warm-up flows saw their own echo within {s_warmupTimeout.TotalSeconds:0} s; the proxy path or the harness server is not delivering, so the churn measurement would be meaningless."));
@@ -123,9 +121,8 @@ internal sealed class UdpSessionBudgetRun(
     /// <summary>
     /// The churn window: one new flow every 1 / <c>--rate</c> seconds, each sending exactly one
     /// datagram whose echo is the flow's establishment proof. Arrivals are paced against an absolute
-    /// schedule anchored at the churn window's own start, so a sweep that overran its slot is caught
-    /// up immediately instead of shifting the realized rate, and the warm-up duration is never
-    /// emitted as a burst of catch-up arrivals.
+    /// schedule, so an overrunning sweep is caught up immediately instead of shifting the realized
+    /// rate, and the warm-up duration is never emitted as a burst of catch-up arrivals.
     /// </summary>
     public async Task ChurnAsync(Socks5Server socksServer)
     {
@@ -135,8 +132,8 @@ internal sealed class UdpSessionBudgetRun(
         var nextSample = s_sampleInterval;
         for (var flow = 0; flow < churnFlows; flow++)
         {
-            // The pump's per-iteration tick, before this arrival: the new session's first stamp and the
-            // cutoff its sweep compares are then the same instant, exactly as in production.
+            // The activity tick runs before this arrival, so the new session's first stamp and the
+            // cutoff its sweep compares are the same instant, exactly as in production.
             TickActivityClock();
             var flowId = warmupFlows + flow;
             DatagramHeader.Write(payload, flow + 1, flowId);
@@ -157,8 +154,8 @@ internal sealed class UdpSessionBudgetRun(
             }
 
             var elapsed = _watch.Elapsed;
-            // The peak is read at arrival granularity, before the sweep of this iteration: the 5 s rows
-            // sample the sawtooth and can miss its peak by up to a sample interval of arrivals.
+            // The peak is read before the sweep of this iteration, at arrival granularity: sampled
+            // only every 5 s, the sawtooth peak can be missed by up to a sample interval of arrivals.
             if (elapsed.TotalSeconds >= steadyThreshold)
             {
                 _steadyPeakSessions = Math.Max(_steadyPeakSessions, coordinator.SessionCount);
@@ -176,10 +173,9 @@ internal sealed class UdpSessionBudgetRun(
     }
 
     /// <summary>
-    /// The drain window: no new flows, the sweeper still on its production cadence, and a sample
-    /// every <see cref="s_sampleInterval"/>. The tail of the window plus a short settle is what
-    /// the drain assertions read, so a straggling echo, the flow's own association teardown, or an
-    /// idle session retirement has landed before the final descriptor count is taken.
+    /// The drain window: no new flows and the sweeper still on its production cadence, sampled every
+    /// <see cref="s_sampleInterval"/>. The trailing settle is what lets a straggling echo or an idle
+    /// retirement land before the final descriptor count is taken.
     /// </summary>
     public async Task DrainAsync()
     {
@@ -202,10 +198,9 @@ internal sealed class UdpSessionBudgetRun(
         if (_final.Sessions == 0 && _sessionsZeroAtSeconds is null) _sessionsZeroAtSeconds = _final.ElapsedSeconds;
     }
 
-    /// <summary>The run's pacing waits; the windows are sub-second, so each sleep is short and bounded.</summary>
     private static Task DelayAsync(TimeSpan delay) => Task.Delay(delay, TimeProvider.System);
 
-    /// <summary>Drives the coordinator's idle expiry on the production sweeper cadence for the whole run, warm-up included.</summary>
+    /// <summary>Drives the coordinator's idle expiry on the production sweeper cadence, warm-up included.</summary>
     private async ValueTask SweepAsync(TimeSpan elapsed)
     {
         while (elapsed >= _nextSweep)
@@ -216,12 +211,11 @@ internal sealed class UdpSessionBudgetRun(
     }
 
     /// <summary>
-    /// Mirrors the capture pump's per-iteration activity tick
-    /// (<c>DurableCaptureBundle.FlushPendingInjections</c>), which is what advances the composition's
-    /// <see cref="WinForward.Core.ActivityBucketClock"/> in production. The soak drives the sweep directly and has no
-    /// pump, so without this tick the clock would stay frozen at the coordinator's construction bucket,
-    /// every session would carry the same stamp, and the sweep would mass-retire the whole population at
-    /// the first tick past the retention — a sawtooth artifact instead of the retention the verdicts name.
+    /// Advances the composition's <see cref="WinForward.Core.ActivityBucketClock"/> the way the capture
+    /// pump's per-iteration tick does in production. The soak drives the sweep directly and has no pump,
+    /// so without this tick the clock would stay frozen at the coordinator's construction bucket and the
+    /// sweep would mass-retire the whole population at the first tick past the retention — a sawtooth
+    /// artifact instead of the retention the verdicts name.
     /// </summary>
     private void TickActivityClock() => coordinator.ActivityClock.Tick();
 
@@ -236,8 +230,8 @@ internal sealed class UdpSessionBudgetRun(
             Index: _samples.Count + 1,
             ElapsedSeconds: _watch.Elapsed.TotalSeconds,
             Sessions: sessions,
-            // The server's own view of the flow's association — the control connection it accepted and
-            // has not seen close — so the row reads the peer's side of the 1:1 shape.
+            // The harness's own view of the flow's association, so the row reads the peer's side of
+            // the 1:1 shape.
             Associations: resources.HarnessControlConnections,
             FileDescriptors: resources.ProxyFileDescriptors,
             RawFileDescriptors: resources.RawFileDescriptors,
@@ -246,7 +240,6 @@ internal sealed class UdpSessionBudgetRun(
             WorkingSetBytes: resources.WorkingSetBytes,
             BaselineFileDescriptors: _baselineFileDescriptors,
             BaselineManagedBytes: _baselineManagedBytes,
-            // The heartbeat's estimate (Cli/Program.cs): live sessions × the configured relay receive buffer.
             RelayReceiveBufferBytes: (long)sessions * coordinator.RelayReceiveBufferBytes,
             Accepted: accepted,
             Rejected: _rejected,
@@ -267,8 +260,7 @@ internal sealed class UdpSessionBudgetRun(
     private static long ProductDelta(string counter, long before) => RuntimeCounters.Shared.Get(counter) - before;
 
     /// <summary>
-    /// Writes the verdict row and then fails the run, so a failed soak still records its evidence —
-    /// including which half of the acceptance held — before the harness reports the exception.
+    /// Writes the verdict row before failing the run, so a failed soak still records its evidence.
     /// </summary>
     public void WriteSummary()
     {
@@ -287,8 +279,7 @@ internal sealed class UdpSessionBudgetRun(
 
     /// <summary>
     /// The summary row. Fields derived from the worst steady-state sample are null when the run never
-    /// reached steady state, so a missing sample is omitted instead of printing zeros that read like
-    /// a measured flat shape.
+    /// reached steady state, so a missing sample is omitted instead of a zero that reads as measured.
     /// </summary>
     private object BuildSummaryRow(SessionBudgetAcceptance acceptance)
     {
@@ -345,7 +336,7 @@ internal sealed class UdpSessionBudgetRun(
         };
     }
 
-    /// <summary>The verdict term and the failure list it was computed from, so a failed soak's row carries its own reasons.</summary>
+    /// <summary>The verdict term and the failure list it was computed from.</summary>
     private static object BuildVerdictRow(SessionBudgetAcceptance acceptance) => new
     {
         passed = acceptance.Passed,

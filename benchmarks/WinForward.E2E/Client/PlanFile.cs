@@ -41,7 +41,7 @@ internal static class PlanFile
 
     /// <summary>
     /// How far a JSON number may sit from an integer and still name one. Only floating point noise
-    /// should land inside it: <c>100.5</c> on an integer key is a load error, not a rounding.
+    /// should land inside it: <c>100.5</c> is a load error, not a rounding.
     /// </summary>
     private const double IntegerTolerance = 1e-9;
 
@@ -69,15 +69,15 @@ internal static class PlanFile
         OutOfRange,
     }
 
-    // D14.14: zero means "not declared" for every numeric key, so the lower bound is zero throughout
-    // and a declared negative value is a load error instead of a silent clamp; only dnsPort,
-    // tcpPercent and payloadBytes have a real ceiling. The arms keep their own Math.Max/Math.Clamp as
-    // a defence in depth: those calls are not what makes an illegal value legal.
+    // Zero means "not declared" for every numeric key, so the lower bound is zero and a declared
+    // negative value is a load error instead of a silent clamp; only dnsPort, tcpPercent and
+    // payloadBytes have a real ceiling. The arms keep their own Math.Max/Math.Clamp as a defence in
+    // depth: those calls are not what makes an illegal value legal.
     private static readonly NumberKey[] s_numberKeys =
     [
         new("ratePerSecond", 0, int.MaxValue, static (spec, value) => spec.RatePerSecond = value),
         // The codec's own bound: a frame above it is refused on decode, so a plan that declared one
-        // could only measure a run where every frame is malformed (D18.4).
+        // could only measure a run where every frame is malformed.
         new("payloadBytes", 0, (int)FrameCodec.MaxPayloadLength, static (spec, value) => spec.PayloadBytes = value),
         new("connectionsPerSecond", 0, int.MaxValue, static (spec, value) => spec.ConnectionsPerSecond = value),
         new("streams", 0, int.MaxValue, static (spec, value) => spec.Streams = value),
@@ -150,8 +150,7 @@ internal static class PlanFile
             }
 
             // Two arm names can differ while their output file names collide, and the second arm
-            // would truncate the first one's records: the check has to run on the name the file
-            // is actually built from.
+            // would truncate the first one's records: the check runs on the file name.
             var fileName = SanitizeFileName(spec.Name);
             if (fileName.Length > MaxArmFileNameLength)
             {
@@ -182,7 +181,7 @@ internal static class PlanFile
         error = null;
 
         // A missing path is the one way to ask for the built-in plan; an empty one is rejected by the
-        // command line before it gets here (D14.1), so it never reaches this method.
+        // command line before it gets here, so it never reaches this method.
         if (path is null)
         {
             planBytes = Encoding.UTF8.GetBytes(DefaultPlanJson);

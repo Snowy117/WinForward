@@ -5,11 +5,10 @@ using Xunit;
 namespace WinForward.E2E.Tests;
 
 /// <summary>
-/// The CLI's user-visible text, frozen before the two argument parsers became one shared walk
-/// (<c>research/cli-snapshots</c>). The commands in <c>before/index.json</c> are replayed
-/// through <see cref="Program.Main"/> and compared -- exit code, stdout and stderr -- with what the
-/// published binary printed, so a changed message, a changed exit code, or a help that lost a line
-/// fails here instead of in a campaign.
+/// The CLI's user-visible text, frozen before the two argument parsers became one shared walk. The
+/// commands in <c>before/index.json</c> are replayed through <see cref="Program.Main"/> and compared
+/// -- exit code, stdout and stderr -- with what the published binary printed, so a changed message, a
+/// changed exit code, or a help that lost a line fails here instead of in a campaign.
 /// </summary>
 /// <remarks>
 /// <para><b>Replaying the process.</b> The comparison is against the entry point rather than against
@@ -18,10 +17,10 @@ namespace WinForward.E2E.Tests;
 /// before it opens a socket or creates a directory for every recorded case, which is what makes the
 /// replay safe inside the test host.</para>
 /// <para><b>The registered changes.</b> The before tree is what the last binary carrying the two
-/// separate parsers printed, and every change to user-visible text registers its substitution in
-/// <c>INTENTIONAL.md</c>: the target help sentence naming the exit code 1, and the receive-loop
-/// option line. <see cref="TheRegisteredChangesAreTheOnlyDifferenceBetweenTheTrees"/> pins the two
-/// trees to exactly those substitutions.</para>
+/// separate parsers printed, and every later change to user-visible text registers its substitution in
+/// <c>INTENTIONAL.md</c>: the target help sentence naming the exit code 1, and the receive-loop option
+/// line. <see cref="TheRegisteredChangesAreTheOnlyDifferenceBetweenTheTrees"/> pins the two trees to
+/// exactly those substitutions.</para>
 /// <para><b>The cases the before tree never printed.</b> A command the before binary already carried
 /// is replayable against the before tree; one whose option it refused as unknown is not, so those
 /// cases live only in the after tree and are replayed against it
@@ -108,8 +107,8 @@ public sealed class CliSnapshotTests
             Assert.Equal(WithRegisteredChanges(frozen), Text(Path.Combine(After, $"{recorded.Stem}.stdout")));
         }
 
-        // The substitutions above are no-ops for the cases that carry no help, so each change needs its
-        // own assertion: the target's help is the case that shows both of them.
+        // The substitutions above are no-ops for the cases that carry no help, so each change needs a
+        // test of its own: the target's help is the case that shows both.
         var stem = ReadIndex(Before).Single(recorded => recorded.Name == TargetHelpCase).Stem;
         var help = Text(Path.Combine(After, $"{stem}.stdout"));
 
@@ -118,14 +117,14 @@ public sealed class CliSnapshotTests
         Assert.DoesNotContain(TargetHelpBefore, help, StringComparison.Ordinal);
 
         // The option is the one thing the before tree cannot contain; the sentence it replaced is
-        // the other, and its absence is stated by the line above.
+        // the other, and the line above states its absence.
         Assert.DoesNotContain(UdpReceiverOption, Text(Path.Combine(Before, $"{stem}.stdout")), StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// One recorded command replayed through the entry point, with the exit code, stdout and stderr a
-    /// user would have seen. The three are compared against the tree that recorded them, except for a
-    /// stdout the caller already put through <see cref="WithRegisteredChanges"/>.
+    /// One recorded command replayed through the entry point, comparing the exit code, stdout and
+    /// stderr a user would have seen -- against the tree that recorded them, except for a stdout the
+    /// caller already put through <see cref="WithRegisteredChanges"/>.
     /// </summary>
     private static async Task ReplayAsync(RecordedCase recorded, string tree, string? stdout)
     {

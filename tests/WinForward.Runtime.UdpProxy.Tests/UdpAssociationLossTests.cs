@@ -58,7 +58,7 @@ public sealed class UdpAssociationLossTests
             Assert.Contains(logger.Events, static recorded => string.Equals(recorded.Name, "udp.association.lost", StringComparison.Ordinal));
             await WaitForAsync(() => server.LiveConnectionCount == 0);
 
-            // I5: no setup cooldown was armed for the association loss.
+            // No setup cooldown was armed for the association loss.
             Assert.Equal(0, coordinator.Diagnostics.SetupCooldownCount);
             Assert.Equal(0, coordinator.SessionCount);
 
@@ -149,9 +149,9 @@ public sealed class UdpAssociationLossTests
         factory.LoseAssociationOnFlush();
 
         await WaitForAsync(() => coordinator.SessionCount == 0);
-        // I5/R3: the flush-window loss is the same association loss the ready path reports — its own
-        // counter (asserted in its counted direction only: the global counter is shared with parallel
-        // collections) and no 1 s cooldown, which is the local discriminator from a setup failure.
+        // The flush-window loss is the same association loss the ready path reports: its own
+        // counter (asserted in its counted direction only, because the global counter is shared
+        // with parallel collections) and no 1 s cooldown, the discriminator from a setup failure.
         Assert.True(RuntimeCounters.Shared.Get(RuntimeCounters.UdpAssociationLost) >= lostBefore + 1);
         Assert.Equal(0, coordinator.Diagnostics.SetupCooldownCount);
 

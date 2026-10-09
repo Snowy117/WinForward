@@ -3,13 +3,12 @@ namespace WinForward.E2E.Analysis.Model;
 /// <summary>
 /// The text a <see cref="System.IO.Path"/>-like argument is printed as: the reference turns
 /// <c>--raw</c> into a <c>Path</c> and publishes <c>str(path)</c> in <c>verdict.json</c> and in
-/// <c>tables.md</c>'s third line, so the spelling of the argument is part of the compared bytes.
+/// <c>tables.md</c>, so the spelling of the argument is part of the compared bytes.
 /// </summary>
 /// <remarks>
 /// <para><b>Normalization, not resolution.</b> A <c>Path</c> collapses repeated separators, drops
 /// <c>.</c> components and strips a trailing separator; it never resolves <c>..</c> and never makes a
-/// relative path absolute. <c>/tmp/wf-synth/raw/</c> prints as <c>/tmp/wf-synth/raw</c> and
-/// <c>a/../b</c> stays <c>a/../b</c>, which is what keeps the ledger paths §2 prints comparable.</para>
+/// relative path absolute, which is what keeps the ledger paths §2 prints comparable.</para>
 /// <para><b>Only POSIX separators are handled.</b> Both implementations read the same trees with the
 /// same slash-separated arguments; a backslash is an ordinary character in a POSIX path and is left
 /// where it is.</para>
@@ -54,8 +53,7 @@ internal static class PosixPathText
 
     /// <summary>
     /// The parent directory's text, the way <c>Path.parent</c> answers it: a lexical answer, so
-    /// <c>..</c> is never resolved and a relative path stays relative. This is the third directory the
-    /// ledger search looks in, so its spelling ends up in §2.
+    /// <c>..</c> is never resolved and a relative path stays relative.
     /// </summary>
     internal static string Parent(string path)
     {
@@ -76,8 +74,7 @@ internal static class PosixPathText
 
     /// <summary>
     /// One name inside a directory, the way <c>Path / name</c> spells it: an absolute name replaces
-    /// the directory, and a <c>.</c> directory adds no prefix at all — so a ledger found beside a
-    /// relative <c>--raw</c> is printed as <c>ledger-main.jsonl</c>, not as <c>./ledger-main.jsonl</c>.
+    /// the directory, and a <c>.</c> directory adds no prefix.
     /// </summary>
     internal static string Join(string directory, string name)
     {

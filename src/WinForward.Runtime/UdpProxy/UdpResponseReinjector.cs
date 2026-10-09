@@ -23,13 +23,13 @@ public interface IUdpResponseSink
 /// arrives from the relay with the real server endpoint as its source; the sink rebuilds a complete
 /// Ethernet II + IPv4/IPv6 + UDP frame with that server as source and the original flow's local
 /// endpoint as destination, then injects it toward MSTCP (host flow) or back to the origin adapter
-/// (forwarded flow), mirroring the TCP forwarded-direction fix. Reinjection targets are resolved
-/// per response through <see cref="IUdpAdapterTargetSource"/> so a capture refresh that
-/// re-enumerates adapter handles is picked up without reconstructing the sink. Frame-build
-/// failures, an unresolved forwarded origin adapter, or a payload over the pinned frame cap drop
-/// the response (fail-closed) without throwing into the coordinator's receive loop. A host flow
-/// whose origin adapter has disappeared falls back to the source's host adapter with a
-/// rate-limited warning; when no host target exists either, the response drops fail-closed.
+/// (forwarded flow). Reinjection targets are resolved per response through
+/// <see cref="IUdpAdapterTargetSource"/> so a capture refresh that re-enumerates adapter handles is
+/// picked up without reconstructing the sink. Frame-build failures, an unresolved forwarded origin
+/// adapter, or a payload over the pinned frame cap drop the response (fail-closed) without throwing
+/// into the coordinator's receive loop. A host flow whose origin adapter has disappeared falls back
+/// to the source's host adapter with a rate-limited warning; when no host target exists either, the
+/// response drops fail-closed.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class UdpResponseReinjector : IUdpResponseSink
@@ -58,7 +58,7 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
     /// <paramref name="adapterTargets"/> (the refreshable capture-scope snapshot: the host
     /// fallback target plus a stable-ID → target map so a flow's response can be sent toward
     /// its origin adapter). <paramref name="maximumFrameSize"/> is the pinned NDISAPI frame cap
-    /// (default 1514, or 9014 for a jumbo-capable ABI) that bounds rebuilt frames (M3).
+    /// (default 1514, or 9014 for a jumbo-capable ABI) that bounds rebuilt frames.
     /// <paramref name="bufferPool"/> supplies the native buffers responses are built into
     /// (pooled reuse instead of a per-response allocation). <paramref name="healthSignal"/>
     /// receives the staleness-shaped failures (host fallback and fail-closed drops) that the
@@ -95,8 +95,8 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
         var buffer = _bufferPool.Rent();
         try
         {
-            // The frame is built in place into the pooled native buffer (R4): no managed byte[]
-            // per response on the steady path.
+            // The frame is built in place into the pooled native buffer: no managed byte[] per
+            // response on the steady path.
             if (!TryBuildResponseFrame(originalFlow, remoteSource, payload, target, towardMstcp, clientMac, buffer.GetFrameStorage(), out var frameLength))
             {
                 UdpProxyLog.UdpResponseDropped(_logger, originalFlow.Protocol, originalFlow.Origin, originalFlow.Local, originalFlow.Remote, "frameBuild", payload.Length);
@@ -104,9 +104,9 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
                 return ValueTask.CompletedTask;
             }
 
-            // Per the WinpkFilter pass/revert matrix (design §1): toward MSTCP the frame simulates a
-            // receive (ON_RECEIVE); toward an adapter it is an ON_SEND. The forwarded (Hyper-V)
-            // direction previously reused the ON_RECEIVE flag and could not reach the VM (H3).
+            // Toward MSTCP the frame simulates a receive (ON_RECEIVE); toward an adapter it is an
+            // ON_SEND. The forwarded (Hyper-V) direction cannot use ON_RECEIVE: such a frame never
+            // reaches the VM.
             buffer.CompleteFrame(frameLength, towardMstcp ? NdisApiAbi.PacketFlagOnReceive : NdisApiAbi.PacketFlagOnSend, target.Handle);
             if (towardMstcp)
             {
@@ -154,11 +154,10 @@ public sealed class UdpResponseReinjector : IUdpResponseSink
     /// the adapter-target source per response. Host flows reinject toward MSTCP on their capture
     /// adapter with that adapter's MAC on both header slots; a missing capture adapter falls back
     /// to the source's host target, dropping fail-closed when no host target exists either.
-    /// Forwarded flows reinject toward the origin adapter (H2) with the origin adapter's MAC as
-    /// source and the recorded client MAC as destination so the vSwitch delivers to the VM instead
-    /// of the host stack. A forwarded flow with an unresolved origin adapter or without a recorded
-    /// client MAC is dropped fail-closed with a rate-limited log rather than sent out the wrong
-    /// adapter.
+    /// Forwarded flows reinject toward the origin adapter with the origin adapter's MAC as source and
+    /// the recorded client MAC as destination so the vSwitch delivers to the VM instead of the host
+    /// stack. A forwarded flow with an unresolved origin adapter or without a recorded client MAC is
+    /// dropped fail-closed with a rate-limited log rather than sent out the wrong adapter.
     /// </summary>
     private bool TryResolveTarget(FlowKey originalFlow, MacAddress clientMac, out UdpAdapterTarget target, out bool towardMstcp)
     {

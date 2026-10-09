@@ -14,7 +14,7 @@ namespace WinForward.Runtime.TcpRedirect;
 /// sequence read demands:
 /// <c>frame.Length &gt;= layout.TransportOffset + 8</c> covers the whole read, so a short frame takes
 /// the reject path instead of throwing out of <c>Slice</c>. The span-taking entries remain the
-/// independent oracle and are kept adjacent to their layout twin.
+/// independent oracle and sit next to their layout twin.
 /// </para>
 /// </summary>
 internal static class TcpSequenceObservation
@@ -22,8 +22,8 @@ internal static class TcpSequenceObservation
     /// <summary>
     /// Records the client ISN and a bounded copy of the original SYN frame on the association.
     /// Together with the server ISN captured by <see cref="RecordServerSynAck(ReadOnlySpan{byte}, in PacketLayout, TcpRedirectAssociation)"/>
-    /// this is everything a relay setup failure needs to abort the client-visible connection with
-    /// an in-window RST.
+    /// this is what a relay setup failure needs to abort the client-visible connection with an
+    /// in-window RST.
     /// </summary>
     public static void RecordClientSyn(ReadOnlySpan<byte> frame, in PacketLayout layout, TcpRedirectAssociation association, NativeBufferPool synCopyPool)
     {
@@ -41,8 +41,8 @@ internal static class TcpSequenceObservation
     /// <summary>
     /// Records the client ISN and a bounded copy of the original SYN frame on the association.
     /// Together with the server ISN captured by <see cref="RecordServerSynAck(ReadOnlySpan{byte}, TcpRedirectAssociation)"/>
-    /// this is everything a relay setup failure needs to abort the client-visible connection with
-    /// an in-window RST.
+    /// this is what a relay setup failure needs to abort the client-visible connection with an
+    /// in-window RST.
     /// </summary>
     public static void RecordClientSyn(ReadOnlySpan<byte> frame, TcpRedirectAssociation association, NativeBufferPool synCopyPool)
     {

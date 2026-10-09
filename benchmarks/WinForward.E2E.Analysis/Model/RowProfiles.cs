@@ -12,7 +12,7 @@ namespace WinForward.E2E.Analysis.Model;
 /// <param name="Udp">One of the <c>Udp*</c> carriage names.</param>
 /// <remarks>
 /// <b>This table is the analysis's own, not the campaign's.</b> It is what makes a row's absence of a
-/// number a design statement rather than an unknown: §15 reads
+/// number a design statement rather than an unknown: the availability table reads
 /// <see cref="RowProfiles.PlanArms"/> to tell "declared but absent" from "present but undeclared", and
 /// the UDP/DNS tables read <see cref="Udp"/> and <see cref="Udp53"/> to label a path instead of
 /// printing a number that measures nothing.
@@ -31,8 +31,8 @@ internal sealed record RowProfile(
 /// </summary>
 /// <remarks>
 /// <para><b>Declared, never discovered.</b> A row's id would otherwise be whatever a directory is
-/// called; here each id carries what the campaign meant by it, so a row that stopped running an arm
-/// is reported as a gap (15) instead of quietly losing a column.</para>
+/// called, and a row that stopped running an arm would quietly lose a column instead of being reported
+/// as a gap.</para>
 /// <para><b>The order is output.</b> <see cref="Order"/> is the order rows are introduced in, and
 /// <c>verdict.json</c>'s <c>rows</c> is sorted by it before anything else; a row outside it sorts
 /// after every declared one, by <see cref="NaturalKey"/>.</para>
@@ -128,8 +128,8 @@ internal static class RowProfiles
     };
 
     /// <summary>
-    /// The rows that leave every UDP datagram on the direct path, derived from the table rather than
-    /// hand-maintained: a product that cannot carry UDP at all is exempt from the UDP gate.
+    /// The rows that leave every UDP datagram on the direct path, derived from the table so a product
+    /// that cannot carry UDP at all is exempt from the UDP gate without a second list to maintain.
     /// </summary>
     internal static IReadOnlySet<string> UdpIncapableRows => field ??=
         Profiles.Where(entry => string.Equals(entry.Value.Udp, UdpNotCarried, StringComparison.Ordinal))
