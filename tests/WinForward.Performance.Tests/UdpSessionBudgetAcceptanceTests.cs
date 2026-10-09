@@ -28,16 +28,9 @@ public sealed class UdpSessionBudgetAcceptanceTests
 
     /// <summary>
     /// The acceptance load's steady-state peak at <c>--rate 100</c>: the resident set the shipped
-    /// two-class retention and 5 s sweep produce, which is what the retention ceiling and the
-    /// descriptor budget are asserted against. It is the measured median <c>steadyStateSessions</c>
-    /// of the three after-arm runs in
-    /// <c>benchmarks/results/2026-10-01-udp-session-footprint/session-budget-after.jsonl</c>
-    /// (1,014 / 1,038 / 1,014), i.e. the one-shot band
-    /// <c>rate × (short 5 s + 2 × sweep 5 s) ≈ 1,500</c> with the sawtooth's phase. The same instrument
-    /// measures 4,539 on the pre-change uniform-retention arm, so the load's meaning is "the resident set
-    /// the shipped retention produces", not the pre-change peak; with a frozen activity clock — the
-    /// defect the scenario now mirrors the pump's tick to avoid — it read 500 here, which was a
-    /// mass-wipe artifact.
+    /// two-class retention and 5 s sweep produce, i.e. the one-shot band
+    /// <c>rate × (short 5 s + 2 × sweep 5 s) ≈ 1,500</c> with the sawtooth's phase. The retention
+    /// ceiling and the descriptor budget are asserted against it.
     /// </summary>
     private const int AcceptanceLoadSessions = 1_014;
 

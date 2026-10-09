@@ -30,14 +30,14 @@ public interface IInterceptionHealthSignal
 public readonly record struct ForcedRefreshTrigger(string Counter, int Consecutive, bool Degraded, TimeSpan CooldownRemaining, IReadOnlyDictionary<string, int> WindowCounts);
 
 /// <summary>
-/// Thresholds interception-path failure signals and paces the forced refreshes they request
-/// (task 09-17 R1-B, design §3.1): a per-counter 30 s sliding-window count crossing its
-/// threshold fires the attached trigger once, then a 60 s cooldown shared by every counter
-/// suppresses further triggers while reports keep counting. Three consecutive triggers with no
-/// successful refresh in between (<see cref="NoteRefreshCompleted"/>) degrade the monitor: one
-/// error-level <c>runner.forcedRefresh.degraded</c> event is emitted and the trigger cadence
-/// drops to one per 5 minutes — the forced-rebuild counterpart of the runner's startup-recovery
-/// budget, so a persistent failure source cannot drive a rebuild loop at cooldown rate.
+/// Thresholds interception-path failure signals and paces the forced refreshes they request:
+/// a per-counter 30 s sliding-window count crossing its threshold fires the attached trigger
+/// once, then a 60 s cooldown shared by every counter suppresses further triggers while reports
+/// keep counting. Three consecutive triggers with no successful refresh in between
+/// (<see cref="NoteRefreshCompleted"/>) degrade the monitor: one error-level
+/// <c>runner.forcedRefresh.degraded</c> event is emitted and the trigger cadence drops to one
+/// per 5 minutes — the forced-rebuild counterpart of the runner's startup-recovery budget, so a
+/// persistent failure source cannot drive a rebuild loop at cooldown rate.
 /// All state sits behind one gate; a report costs a locked ring append with no allocation
 /// (the reinjector sites fire per datagram under failure, so the report path stays lean), and the
 /// only allocation on that path is the trigger snapshot, which is built once per threshold

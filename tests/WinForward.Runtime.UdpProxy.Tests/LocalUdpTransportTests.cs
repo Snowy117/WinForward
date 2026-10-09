@@ -119,8 +119,8 @@ public sealed class LocalUdpTransportTests
         session.Start(static _ => { });
 
         // The transport declares the destination it was last given as the reply's source, so sending a
-        // destination this session's flow does not own is contract drift — and the R2 counter is what
-        // makes the drift visible instead of letting the reply pass as the flow's own.
+        // destination this session's flow does not own is contract drift — and the source-mismatch
+        // counter is what makes the drift visible instead of letting the reply pass as the flow's own.
         var drifted = Endpoint.From(s_flowDestination, 54);
         var before = RuntimeCounters.Shared.Get(RuntimeCounters.UdpResponseSourceMismatch);
         Assert.True(await session.SendSpanAsync(drifted, [0x5a], sendTimeout.Token));
@@ -294,8 +294,8 @@ public sealed class LocalUdpTransportTests
         Assert.Equal(new byte[] { 0x01 }, firstPayload);
         Assert.Equal(1, factory.CreateCalls);
 
-        // The second must take the warm path — the same transport, no new setup, nothing queued. The
-        // design's top risk is that a ready local flow stops resolving and pays setup per datagram.
+        // The second must take the warm path — the same transport, no new setup, nothing queued: a
+        // ready local flow that stopped resolving would pay setup per datagram.
         Assert.True(await coordinator.TrySendSpanAsync(flow, target, [0x02], default, sendTimeout.Token));
         var (secondFlow, secondSource, secondPayload, _) = await sink.Responses.Reader.ReadAsync(sendTimeout.Token);
 

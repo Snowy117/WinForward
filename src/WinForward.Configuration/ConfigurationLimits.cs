@@ -52,9 +52,7 @@ internal static class ConfigurationLimits
     /// <summary>The session capacity above which a large per-socket receive buffer warns: buffers multiply by concurrent sessions.</summary>
     private const int UdpRelayReceiveBufferWarningSessionCapacity = 2_048;
 
-    /// <summary>The smallest accepted UdpSessionIdleSeconds.</summary>
     private const int MinimumUdpSessionIdleSeconds = 5;
-    /// <summary>The largest accepted UdpSessionIdleSeconds.</summary>
     private const int MaximumUdpSessionIdleSeconds = 600;
 
     /// <summary>
@@ -77,9 +75,9 @@ internal static class ConfigurationLimits
     }
 
     /// <summary>
-    /// Normalizes the optional TcpFlowCapacity budget. Omitted values fall back to the default;
-    /// out-of-range values are rejected with the accepted range, and values above the default
-    /// collect a non-blocking warning because they shrink the reserved ephemeral-port headroom.
+    /// Normalizes the optional TcpFlowCapacity budget. Out-of-range values are rejected with the
+    /// accepted range, and values above the default collect a non-blocking warning because they
+    /// shrink the reserved ephemeral-port headroom.
     /// </summary>
     private static int ParseTcpFlowCapacity(WinForwardConfigDto dto, List<ConfigDiagnostic> errors, List<ConfigDiagnostic> warnings)
     {
@@ -113,7 +111,7 @@ internal static class ConfigurationLimits
     }
 
     /// <summary>
-    /// Normalizes the optional UdpSessionCapacity budget (R4): the bound on concurrent UDP
+    /// Normalizes the optional UdpSessionCapacity budget: the bound on concurrent UDP
     /// sessions. Omitted values keep the historical default; out-of-range values are rejected, and
     /// values above the default collect the ephemeral-port warning the TCP budget carries (each UDP
     /// session also consumes 2 local ports), extended with the aggregate kernel receive buffer the
@@ -138,11 +136,11 @@ internal static class ConfigurationLimits
     }
 
     /// <summary>
-    /// Normalizes the optional UdpRelayReceiveBufferKb value (R4): the per-session relay socket
-    /// buffer, bounded because it multiplies by the concurrent session count. Omitted values fall
-    /// back to the default; out-of-range values are rejected with the accepted range. The aggregate
-    /// kernel-memory warnings live in <see cref="Parse"/> and
-    /// <see cref="WarnOnAggregateRelayReceiveBuffer"/>, which also need the validated capacity.
+    /// Normalizes the optional UdpRelayReceiveBufferKb value: the per-session relay socket buffer,
+    /// bounded because it multiplies by the concurrent session count. Out-of-range values are
+    /// rejected with the accepted range; the aggregate kernel-memory warnings live in
+    /// <see cref="Parse"/> and <see cref="WarnOnAggregateRelayReceiveBuffer"/>, which also need the
+    /// validated capacity.
     /// </summary>
     private static int ParseUdpRelayReceiveBufferKb(WinForwardConfigDto dto, List<ConfigDiagnostic> errors)
     {
@@ -172,11 +170,10 @@ internal static class ConfigurationLimits
     }
 
     /// <summary>
-    /// Normalizes the optional UdpSessionIdleSeconds value (R4): how long an idle UDP session is
-    /// retained before the sweeper releases its relay socket and control connection. Omitted values
-    /// fall back to the default; out-of-range values are rejected. The sweeper's UDP cadence derives
-    /// from this value (half the timeout, at least 5 seconds), so a shorter retention also shortens
-    /// the steady-state resource tail.
+    /// Normalizes the optional UdpSessionIdleSeconds value: how long an idle UDP session is
+    /// retained before the sweeper releases its relay socket and control connection. Out-of-range
+    /// values are rejected. The sweeper's UDP cadence derives from this value (half the timeout, at
+    /// least 5 seconds), so a shorter retention also shortens the steady-state resource tail.
     /// </summary>
     private static TimeSpan ParseUdpSessionIdleTimeout(WinForwardConfigDto dto, List<ConfigDiagnostic> errors)
     {
