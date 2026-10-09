@@ -25,9 +25,9 @@ public sealed class Socks5UotTransportTests
     [Fact]
     public async Task FirstFrameIsWrittenBeforeTheConnectReplyIsWritten()
     {
-        // R2, the acceptance observation: the fixture defers its CONNECT reply until the first frame
-        // has been read, so reaching its reply gate proves the flow's first datagram did not wait for
-        // any handshake reply. A client that waited could never reach the gate.
+        // The fixture defers its CONNECT reply until the first frame has been read, so reaching its
+        // reply gate proves the flow's first datagram did not wait for any handshake reply. A client
+        // that waited could never reach the gate.
         var replyGateReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseReply = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var server = new ScriptedSocks5UotServer();
@@ -203,9 +203,9 @@ public sealed class Socks5UotTransportTests
     [Fact]
     public async Task JumboCapFramesAPayloadBeyondTheDefaultCap()
     {
-        // R3/jumbo: the frame ceiling follows the pinned frame cap, exactly as the native transport's
-        // send buffer does — a 2000-byte payload is far beyond the default ABI's deliverable ceiling
-        // and must still be framed, read, and echoed.
+        // The frame ceiling follows the pinned frame cap, exactly as the native transport's send buffer
+        // does — a 2000-byte payload is far beyond the default ABI's deliverable ceiling and must still
+        // be framed, read, and echoed.
         const int jumboCap = 9014;
         await using var server = new ScriptedSocks5UotServer();
         await using var transport = await CreateTransportAsync(server, maximumFrameSize: jumboCap);
@@ -463,8 +463,8 @@ public sealed class Socks5UotTransportTests
     [Fact]
     public async Task FactoryCreatesTheUotTransportWithoutWritingTheConnectRequest()
     {
-        // R2 at the factory seam: create dials and publishes the endpoints, and returns before the
-        // CONNECT request or the UoT header exists — the fixture cannot have read a destination yet.
+        // Create dials and publishes the endpoints, and returns before the CONNECT request or the UoT
+        // header exists — the fixture cannot have read a destination yet.
         await using var server = new ScriptedSocks5UotServer();
         var transport = await CreateTransportAsync(server);
 
@@ -500,8 +500,8 @@ public sealed class Socks5UotTransportTests
 
     /// <summary>
     /// Observes every frame the fixture reads, recording whether the CONNECT reply was still
-    /// unwritten at that moment: the ordering fact the R2 observation asserts, taken from the
-    /// fixture's own frame hook rather than from the reply gate.
+    /// unwritten at that moment — taken from the fixture's own frame hook rather than from the
+    /// reply gate.
     /// </summary>
     private static TaskCompletionSource<bool> ObserveFramesBeforeTheConnectReply(ScriptedSocks5UotServer server)
     {

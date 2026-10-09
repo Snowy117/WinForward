@@ -88,9 +88,9 @@ public sealed class RuntimeCounters
     public const string UdpLocalTargetFailures = "udpLocalTargetFailures";
 
     /// <summary>
-    /// The native-pool diagnostic key prefix (task 09-18 M0): every registered pool records
-    /// cumulative rents and returns under <c>pool.&lt;name&gt;.rented</c> / <c>pool.&lt;name&gt;.returned</c>,
-    /// which the heartbeat surfaces as per-key deltas plus the aggregate occupancy (rented − returned).
+    /// The native-pool diagnostic key prefix: every registered pool records cumulative rents and
+    /// returns under <c>pool.&lt;name&gt;.rented</c> / <c>pool.&lt;name&gt;.returned</c>, which the heartbeat
+    /// surfaces as per-key deltas plus the aggregate occupancy (rented − returned).
     /// </summary>
     public const string PoolCounterPrefix = "pool.";
 
@@ -141,8 +141,7 @@ public sealed class RuntimeCounters
 
     /// <summary>
     /// Registers a native buffer pool under <paramref name="poolName"/> (idempotent) and pre-creates
-    /// its counters so occupancy reads are race-free. Task 09-18 M0 wires the registry; M1 registers
-    /// <c>NdisPacketBufferPool</c> and later pools follow.
+    /// its counters so occupancy reads are race-free.
     /// </summary>
     public void RegisterPool(string poolName)
     {

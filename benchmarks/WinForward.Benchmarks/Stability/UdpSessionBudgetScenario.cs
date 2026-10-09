@@ -8,8 +8,8 @@ using WinForward.Runtime.UdpProxy;
 namespace WinForward.Benchmarks.Stability;
 
 /// <summary>
-/// The UDP session-budget soak (PRD acceptance 1, design §6/R4): a sustained new-flow churn at
-/// <c>--rate</c> flows/s for <c>--churn-seconds</c>, then a <c>--drain-seconds</c> window with no new
+/// The UDP session-budget soak: a sustained new-flow churn at <c>--rate</c> flows/s for
+/// <c>--churn-seconds</c>, then a <c>--drain-seconds</c> window with no new
 /// flows, with the coordinator's idle expiry driven on the production sweeper cadence for the
 /// validated 30 s UDP idle retention. Every ~5 s one row reports the live sessions, the proxy's own
 /// descriptors, the estimated kernel receive buffer, the harness SOCKS5 server's live control
@@ -79,11 +79,9 @@ internal static class UdpSessionBudgetScenario
         // The production UDP cadence for the effective retention floor — the shorter of the configured
         // retention and the one-shot class — taken from the sweeper itself instead of re-derived here:
         // max(5 s, floor / 2), capped by the 60 s main-leg interval (5 s for the default 30 s retention
-        // and the 5 s one-shot class, was 15 s under uniform retention).
+        // and the 5 s one-shot class).
         var sweepInterval = IdleExpirySweeper.DeriveUdpSweepInterval(s_mainSweepInterval, IdleExpirySweeper.EffectiveUdpRetentionFloor(idleTimeout, oneShotIdleTimeout), udpSweepInterval: null);
         ValidateChurnWindow(options, idleTimeout, sweepInterval);
-        // Warm-up flows: one churn-second's worth of preliminary arrivals, without dominating a
-        // short churn window.
         var warmupFlows = Math.Min(options.Rate, MaximumWarmupFlows);
         var churnFlows = checked(options.Rate * options.ChurnSeconds);
         var flowCapacity = checked(warmupFlows + churnFlows);
