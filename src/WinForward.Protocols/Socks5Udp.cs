@@ -70,7 +70,7 @@ public static class Socks5UdpCodec
     /// <summary>
     /// Reads an IPv4 or IPv6 address from SOCKS5 UDP frame bytes into a raw
     /// <see cref="IPAddressValue"/> without allocating. <paramref name="scopeId"/> is the
-    /// interface scope to apply to a decoded IPv6 address (M2): the SOCKS5 UDP wire format does not
+    /// interface scope to apply to a decoded IPv6 address: the SOCKS5 UDP wire format does not
     /// carry a scope, so the caller propagates one from the known relay/control endpoint so a
     /// link-local address reconstructed from raw bytes keeps a non-zero
     /// <see cref="IPAddressValue.ScopeId"/> and can route on the correct interface.

@@ -4,11 +4,10 @@ namespace WinForward.Runtime;
 /// Per-event-site wall-clock throttle for rate-limited diagnostic logging: at most one caller per
 /// window is allowed to emit, the first occurrence always emits, and suppressed callers simply do
 /// nothing (each call site still increments its own <see cref="RuntimeCounters"/> counter, so the
-/// aggregate stays observable even while individual lines are suppressed). One shared instance per
-/// event site (owned by the long-lived component that emits the event) replaces the historical
-/// bare <c>_last...LogTicks</c> + CAS idiom: check-first so a suppressed call never allocates the
-/// message or the structured fields, matching the logging contract that rate-limiting must stay
-/// out of packet disposition and hot-path allocation budgets.
+/// aggregate stays observable while individual lines are suppressed). One shared instance per event
+/// site, owned by the long-lived component that emits the event, and the check runs before the
+/// message or its structured fields are built: rate-limiting must stay out of packet disposition
+/// and hot-path allocation budgets.
 /// </summary>
 public sealed class RuntimeLogThrottle
 {

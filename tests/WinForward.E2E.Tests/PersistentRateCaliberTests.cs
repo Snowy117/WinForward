@@ -10,19 +10,14 @@ using Xunit;
 namespace WinForward.E2E.Tests;
 
 /// <summary>
-/// PERSIST's two rate calibers (D19.2 ⑧): <c>achievedRate</c> counts the requests whose send completed
-/// per elapsed second and <c>completionRate</c> counts the responses per elapsed second -- the population
-/// <c>achievedRate</c> carried before the harness unified that name. Both facts drive a real arm and read
-/// the published pair beside the counters it is built from, so the rename is pinned on one run's own
-/// numbers rather than against another run's.
+/// PERSIST's two rate calibers: <c>achievedRate</c> counts the requests whose send completed per
+/// elapsed second and <c>completionRate</c> counts the responses per elapsed second. Both tests drive a
+/// real arm and read the published pair beside the counters it is built from, so the calibers are pinned
+/// on one run's own numbers rather than against another run's.
 /// </summary>
 public sealed class PersistentRateCaliberTests
 {
-    /// <summary>
-    /// Every request answered: the two calibers carry the same value, which is the value the old
-    /// expression (<c>responses</c> over the elapsed span) published under the old name, so the rename
-    /// moved no number.
-    /// </summary>
+    /// <summary>Every request answered, so both calibers count the same population and their values agree.</summary>
     [Fact]
     public async Task EveryRequestAnsweredPublishesBothCalibersWithTheSameValue()
     {
@@ -49,9 +44,8 @@ public sealed class PersistentRateCaliberTests
     }
 
     /// <summary>
-    /// Requests sent and never answered: the send caliber moves and the completion caliber stays at the
-    /// zero the old expression yields for an empty response population, which is what makes the two
-    /// names two populations rather than one written twice.
+    /// Requests sent and never answered: the send caliber moves while the completion caliber stays at
+    /// zero, which is what makes the two names two populations rather than one written twice.
     /// </summary>
     [Fact]
     public async Task RequestsSentButNeverAnsweredSeparateTheTwoCalibers()

@@ -5,7 +5,7 @@ using WinForward.E2E.Analysis.Stats;
 namespace WinForward.E2E.Analysis.Tables;
 
 /// <summary>
-/// §10, "Long-lived connection detail": one line per row, the <c>PERSIST</c> arm's throughput, its idle
+/// The long-lived connection detail: one line per row, the <c>PERSIST</c> arm's throughput, its idle
 /// gap, the round trips either side of it, and the one-sentence verdict on whether the connection held.
 /// </summary>
 /// <remarks>

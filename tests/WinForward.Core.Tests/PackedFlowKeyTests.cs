@@ -9,11 +9,10 @@ using static WinForward.TestSupport.FlowBuilders;
 namespace WinForward.Core.Tests;
 
 /// <summary>
-/// The packed-key contract and the F2 re-proof it owes: the key compares and hashes with integer
-/// operations only, the packing round-trips every endpoint fact (including the IPv6 scope id), the
-/// packed hash and canonical slot are the same values as their materialized twins over the corpus
-/// that can tell them apart, and the two warm-cache validations that consume them still corroborate
-/// the full key and the transport tuple.
+/// The packed-key contract: the key compares and hashes with integer operations only, the packing
+/// round-trips every endpoint fact (including the IPv6 scope id), the packed hash and canonical slot
+/// match their materialized twins over the corpus that can tell them apart, and the two warm-cache
+/// validations that consume them still corroborate the full key and the transport tuple.
 /// </summary>
 public sealed class PackedFlowKeyTests
 {
@@ -183,7 +182,7 @@ public sealed class PackedFlowKeyTests
         key.RemoteLow, key.RemoteHigh, key.RemotePort);
 
     /// <summary>
-    /// The independent materialized canonical form: the pre-F4 total order over materialized
+    /// The independent materialized canonical form: the total order over materialized
     /// endpoints (address bits via <c>UInt128.CompareTo</c>, then port — equal endpoints order either
     /// way) hashed through the key's materialized side. The production canonical entry point now
     /// delegates to the packed expression, so without this local oracle the corpus's divergent

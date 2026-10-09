@@ -4,18 +4,17 @@ using Xunit;
 namespace WinForward.Performance.Tests;
 
 /// <summary>
-/// The R5 allocation gate: design §3 classifies the proxy path's allocation bytes as a gate, so the
-/// BenchmarkDotNet <c>[MemoryDiagnoser]</c> 0 B column is enforced here instead of only reported. Each
-/// composed leg — sequence tracking plus the leg's rewrite, as the micro rows define it — runs through
-/// <see cref="TcpRedirectDataPathBenchmarks"/> itself, the same methods the rows time, so the gate
-/// cannot drift from the number it pins. Both address families are covered at the full-size frame; the
-/// IPv6 reverse leg's distinct rewrite is the one the 09-29 series flagged as 2.0× the IPv4 leg, and it
-/// is the most likely of the four to start allocating a header buffer.
+/// The allocation gate for the proxy path's rewrite legs: the BenchmarkDotNet <c>[MemoryDiagnoser]</c>
+/// 0 B column is enforced here instead of only reported. Each composed leg — sequence tracking plus the
+/// leg's rewrite, as the micro rows define it — runs through <see cref="TcpRedirectDataPathBenchmarks"/>
+/// itself, the same methods the rows time, so the gate cannot drift from the number it pins. Both address
+/// families are covered at the full-size frame; the IPv6 reverse leg's distinct rewrite is the most likely
+/// of the four to start allocating a header buffer.
 /// <para>
 /// Measurement shape follows <c>HotPathAllocationGateTests</c>: warm the identical synchronous body
 /// first, then bracket exactly one invocation with <see cref="GC.GetAllocatedBytesForCurrentThread"/>.
 /// One invocation per window is deliberate — a per-packet allocation cannot hide behind an average, and
-/// the exact zero is the contract <c>design.md</c> §3 gates.
+/// the exact zero is the contract.
 /// </para>
 /// </summary>
 public sealed class TcpRedirectDataPathAllocationGateTests

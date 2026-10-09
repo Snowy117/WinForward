@@ -144,7 +144,7 @@ public sealed class LaneEngineSendTests
         {
             // The shape a real adapter produces when the kernel refuses and the await is what fails:
             // the send did not complete synchronously and it did not succeed either, and the two
-            // published counters have to say both (D18.6 #2).
+            // published counters have to say both.
             Behavior = LaneSendBehavior.Refuse,
             IncompleteSends = true,
             CancelAfter = cancellation,
@@ -247,7 +247,7 @@ public sealed class LaneEngineSendTests
         Assert.True(counts.DeferredDropped < counts.DeferredQueued, "a dropped slot still found the window closed, so it counts as deferred too");
 
         // Nothing ever answered, so the queue still holds what it could: the dropped ones are gone and
-        // the occupancy is the queue's own size, not the deferral history (D18.6 #1).
+        // the occupancy is the queue's own size, not the deferral history.
         Assert.Equal(2, counts.DeferredPending);
         Assert.Equal([1], transport.SentSequences);
     }

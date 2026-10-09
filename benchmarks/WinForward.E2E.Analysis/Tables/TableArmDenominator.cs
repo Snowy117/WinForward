@@ -4,7 +4,7 @@ namespace WinForward.E2E.Analysis.Tables;
 
 /// <summary>
 /// What one arm's CPU should be divided by to become a per-transaction figure: the two denominators,
-/// and the words §6's last two columns name them with.
+/// and the words the CPU detail table's last two columns name them with.
 /// </summary>
 /// <param name="Transactions">Transactions the arm completed, or null when it has no such denominator.</param>
 /// <param name="Datagrams">Datagrams the arm sent, or null when the row carries no UDP on this arm.</param>
@@ -17,7 +17,7 @@ internal sealed record ArmDenominators(
     string? DatagramLabel);
 
 /// <summary>
-/// The per-arm transaction and datagram denominators §6 normalises CPU by, read from the arm's own kind.
+/// The transaction and datagram denominators the CPU detail table normalises CPU by, read from the arm's own kind.
 /// </summary>
 /// <remarks>
 /// <para><b>The denominator is a property of the arm's kind, not of its name.</b> A latency arm counts

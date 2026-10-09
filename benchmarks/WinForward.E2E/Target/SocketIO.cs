@@ -5,7 +5,7 @@ namespace WinForward.E2E.Target;
 /// <summary>
 /// How a fixed-length stream read ended. The DNS listener reads a two-byte length prefix and then that
 /// many bytes, so it has to tell the two ends of a stream apart: a peer that stopped between messages
-/// closed cleanly, while one that stopped inside either read cut a message in half (D19.3 C).
+/// closed cleanly, while one that stopped inside either read cut a message in half.
 /// </summary>
 internal enum ReadExactOutcome
 {

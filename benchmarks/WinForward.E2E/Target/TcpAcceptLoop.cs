@@ -24,9 +24,9 @@ internal sealed class TcpAcceptLoop : IDisposable
 
     /// <summary>
     /// The loop over the caller's accept call. Whether an accept is refused is the kernel's decision,
-    /// so the only way to pin what the loop does with a refusal is to script the call that produces it
-    /// (D14.18): the test that drives <see cref="AcceptErrors"/> refuses the first calls and then hands
-    /// the loop the real one, which is also what shows that a refusal does not end its service.
+    /// so the only way to pin what the loop does with a refusal is to script the call that produces it:
+    /// the test that drives <see cref="AcceptErrors"/> refuses the first calls and then hands the loop
+    /// the real one, which is also what shows that a refusal does not end its service.
     /// </summary>
     internal TcpAcceptLoop(Socket listener, Func<Socket, CancellationToken, ValueTask<Socket>> accept)
     {
