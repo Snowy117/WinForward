@@ -49,15 +49,12 @@ public static class PacketChecksums
 
     /// <summary>
     /// The layout-driven TCP endpoint rewrite for a frame a successful
-    /// <see cref="IPTcpUdpPacket.TryParse"/> already proved: it consumes the parse's proofs
-    /// (Ethernet II framing, IP version, header length in range, the transport protocol, no IPv4
-    /// fragmentation, the total/payload length inside the frame, the IPv6 extension chain, the TCP
-    /// header's presence and the <c>dataOffset</c> bound) and keeps only what the layout cannot
-    /// prove — the layout is a parsed TCP layout (never the defaulted one a packet without a parse
-    /// carries), the frame still covers the IP datagram the layout describes, and the argument
-    /// addresses' family is the frame's family, because the write geometry depends on it and the
-    /// addresses come from an association rather than the frame. It rejects without mutating,
-    /// exactly like the span entry point that remains the independent oracle.
+    /// <see cref="IPTcpUdpPacket.TryParse"/> already proved: it consumes the parse's proofs and keeps
+    /// only what the layout cannot prove — the layout is a parsed TCP layout (never the defaulted one
+    /// a packet without a parse carries), the frame still covers the IP datagram the layout describes,
+    /// and the argument addresses' family is the frame's family, because the write geometry depends on
+    /// it and the addresses come from an association rather than the frame. It rejects without
+    /// mutating, exactly like the span entry point that remains the independent oracle.
     /// </summary>
     public static bool TryRewriteTcpEndpoints(Span<byte> ethernetFrame, in PacketLayout layout, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
     {
@@ -112,11 +109,10 @@ public static class PacketChecksums
     }
 
     // RFC 1624 (HC' = ~(~HC + ~m + m')) incremental checksum update over only the changed
-    // 16-bit words. Folding the existing checksum in makes the result bit-identical to a full
-    // recompute only when the incoming checksum is correct — frames captured from the wire, or
-    // emitted by MSTCP in answer to an injected leg, always carry valid checksums, and the
-    // capture pipeline never hands this rewriter an offload-zeroed segment. The full-recompute
-    // oracle below pins that equivalence by property.
+    // 16-bit words. Folding the existing checksum in is bit-identical to a full recompute only
+    // when the incoming checksum is correct — frames from the wire, or emitted by MSTCP in answer
+    // to an injected leg, always carry valid checksums, and the capture pipeline never hands this
+    // rewriter an offload-zeroed segment. The full-recompute oracle below pins that equivalence.
     private static bool TryRewriteIPv4Tcp(Span<byte> frame, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
     {
         const int ipOffset = 14;
@@ -151,9 +147,9 @@ public static class PacketChecksums
         destinationAddress.TryWrite(frame.Slice(ipOffset + 16, 4), out _);
         WritePorts(frame, tcpOffset, sourcePort, destinationPort);
 
-        // Both checksums share the address delta (IPv4 header sum and TCP pseudo-header carry
-        // the same address words); new words are read back after the write so the encoding has
-        // a single source.
+        // Both checksums share the address delta: the IPv4 header sum and the TCP pseudo-header
+        // carry the same address words. New words are read back after the write so the encoding
+        // has a single source.
         var addressDelta = WordDelta(oldSource0, ReadWord(frame, ipOffset + 12))
             + WordDelta(oldSource1, ReadWord(frame, ipOffset + 14))
             + WordDelta(oldDestination0, ReadWord(frame, ipOffset + 16))
@@ -202,9 +198,9 @@ public static class PacketChecksums
         return true;
     }
 
-    /// <summary>Full-segment endpoint rewrite kept as the property-test oracle for the
-    /// incremental TCP paths: identical validation and mutation, but every checksum is
-    /// recomputed over the whole header/segment.</summary>
+    /// <summary>Full-segment endpoint rewrite kept as the property-test oracle for the incremental
+    /// TCP paths: the same validation and mutation, with every checksum recomputed over the whole
+    /// header/segment.</summary>
     internal static bool TryRewriteTcpEndpointsFullRecompute(Span<byte> ethernetFrame, IPAddressValue sourceAddress, ushort sourcePort, IPAddressValue destinationAddress, ushort destinationPort)
     {
         if (ethernetFrame.Length < 14) return false;
@@ -293,7 +289,7 @@ public static class PacketChecksums
         sum += isIPv6 ? (uint)tcpLength : (ushort)tcpLength;
         sum += Sum(frame.Slice(tcpOffset, tcpLength));
         // TCP has no UDP-style optional-zero-checksum: the folded value is stored verbatim,
-        // so the rare 0x0000 result is written directly rather than inverted to 0xFFFF.
+        // so a 0x0000 result is written directly rather than inverted to 0xFFFF.
         BinaryPrimitives.WriteUInt16BigEndian(frame.Slice(tcpOffset + 16, 2), Finish(sum));
     }
 
@@ -314,7 +310,7 @@ public static class PacketChecksums
         BinaryPrimitives.WriteUInt16BigEndian(frame.Slice(udpOffset + 6, 2), checksum == 0 ? ushort.MaxValue : checksum);
     }
 
-    // One's-complement accumulation invariants (P2b): uint wrap is NOT one's-complement neutral
+    // One's-complement accumulation invariants: uint wrap is NOT one's-complement neutral
     // (2^32 == 1 mod 65 535) and this method is size-public, so no tier may accumulate a span
     // without folding. A vector block adds two words per lane, so 2 048 blocks put at most
     // 4 096 words = 0x0FFF_F000 in a lane; the widest tier's sixteen lanes reduce to at most

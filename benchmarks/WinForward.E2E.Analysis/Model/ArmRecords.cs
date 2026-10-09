@@ -19,8 +19,8 @@ namespace WinForward.E2E.Analysis.Model;
 /// <para><b>The record kinds are the file's own, not a schema.</b> A file may hold several kinds in any
 /// order: the arm writes its samples while it runs and its <c>result</c> when it ends.</para>
 /// <para><b>A missing file is an empty arm, not an error.</b> The roster can name a file the run never
-/// wrote; §15 reports such an arm as present without a result, which is the distinction the campaign's
-/// own gap analysis needs.</para>
+/// wrote, and such an arm is reported as present without a result — the distinction the campaign's own
+/// gap analysis needs.</para>
 /// </remarks>
 internal sealed record ArmRecords(
     string Name,
@@ -52,7 +52,7 @@ internal sealed record ArmRecords(
         ? JsonValue.String(Result, "kind")
         : JsonValue.String(ArmSummary, "kind");
 
-    /// <summary>The <c>type</c> value a record carries, or the empty string when it carries none.</summary>
+    /// <summary>The <c>result</c> value a record's <c>type</c> carries.</summary>
     internal const string ResultKind = "result";
 
     internal const string ArmSummaryKind = "armSummary";

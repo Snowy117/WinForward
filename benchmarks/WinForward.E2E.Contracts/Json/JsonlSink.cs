@@ -8,9 +8,8 @@ namespace WinForward.E2E.Contracts.Json;
 /// flushed on a timer so a crash costs at most the records written since the last tick.
 /// </summary>
 /// <remarks>
-/// The two sides of the harness need opposite failure semantics from the same file format, so the
-/// policy is a constructor argument rather than a second implementation: one writer also means one
-/// record shape, which is the part of this contract that crosses between the two binaries.
+/// The failure policy is a constructor argument rather than a second implementation: one writer also
+/// means one record shape, which is the part of this contract that crosses between the two binaries.
 /// </remarks>
 public sealed class JsonlSink : IAsyncDisposable
 {
@@ -59,8 +58,7 @@ public sealed class JsonlSink : IAsyncDisposable
 
     /// <summary>
     /// Writes to a stream this sink then owns: closing the sink flushes and disposes it. It exists so
-    /// a test can hand the sink a stream that fails on demand, which is the only way to exercise the
-    /// policy without filling a disk.
+    /// a test can hand the sink a stream that fails on demand.
     /// </summary>
     internal JsonlSink(Stream stream, JsonlPolicy policy, Action<Utf8JsonWriter>? envelope, TimeSpan flushInterval)
     {

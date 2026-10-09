@@ -73,7 +73,7 @@ internal sealed class SessionBudgetAcceptance
     /// </summary>
     internal int SteadyPeakSessions { get; private set; }
 
-    /// <summary>The steady-state row with the largest live population, or null when there was none: the sampled half of the series, and the only instants that carry a descriptor and managed-memory reading.</summary>
+    /// <summary>The steady-state row with the largest live population, or null when there was none: the sampled half of the series.</summary>
     internal SessionBudgetSample? WorstSteady { get; private set; }
 
     /// <summary>The smallest descriptor-budget headroom over the steady-state samples; null when there was no steady-state sample.</summary>
@@ -138,12 +138,10 @@ internal sealed class SessionBudgetAcceptance
     }
 
     /// <summary>
-    /// The retention half: the churn window must be able to discriminate retention from accumulation
-    /// before the population, the descriptor-scaled shape, or the estimated kernel receive buffer may
-    /// claim the bound. The population is the arrival-granular steady peak (the 5 s rows can miss the
-    /// sawtooth's peak by up to a sample interval of arrivals) and the buffer is the byte form of the
-    /// same ceiling; its per-session ratio must reproduce the configured buffer, so the reported
-    /// estimate cannot drift away from the population it is derived from.
+    /// The retention half: nothing may claim the bound until the churn window can discriminate
+    /// retention from accumulation. The buffer is the byte form of the same ceiling and its
+    /// per-session ratio must reproduce the configured buffer, so the reported estimate cannot drift
+    /// from the population it is derived from.
     /// </summary>
     private void AssertRetention()
     {
@@ -182,12 +180,10 @@ internal sealed class SessionBudgetAcceptance
     }
 
     /// <summary>
-    /// The per-session descriptor budget: every steady-state sample must fit the shipped shape's two
-    /// descriptors per live session — one relay socket and one control connection — which the budget
-    /// charges as one relay socket per session with <see cref="SessionBudgetMath.DescriptorSlackPerSession"/>
-    /// slack plus the control connections the sample's own <c>associations</c> column carries (the
-    /// harness server's observation, or the one-per-session allowance when it ran out of process).
-    /// The worst (smallest) headroom is kept for the summary row.
+    /// The per-session descriptor budget: every steady-state sample must fit one relay socket per live
+    /// session with <see cref="SessionBudgetMath.DescriptorSlackPerSession"/> slack, plus the control
+    /// connections the sample's own <c>associations</c> column carries. The worst (smallest) headroom
+    /// is kept for the summary row.
     /// </summary>
     private void AssertDescriptorBudget(List<SessionBudgetSample> steady)
     {
@@ -217,8 +213,8 @@ internal sealed class SessionBudgetAcceptance
     /// The drain half: no live session, no control connection the harness SOCKS5 server still sees, and
     /// the descriptor count back at its pre-churn baseline. The association term reads the server's own
     /// count, so it fires on a flow whose control connection outlived its session even when the session
-    /// count is already zero — a subject the sessions term cannot show — and it is left unevaluated when
-    /// the server ran out of process and nobody reported the count (<c>associations</c> is null).
+    /// count is already zero; it is left unevaluated when the server ran out of process and nobody
+    /// reported the count (<c>associations</c> is null).
     /// </summary>
     private void AssertDrain(SessionBudgetSample final)
     {

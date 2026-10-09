@@ -23,7 +23,7 @@ public sealed class Socks5ProtocolTests
     [Fact]
     public void Socks5UsernamePasswordAllowsEmptySecret()
     {
-        // R4: RFC 1929 permits a zero-length password; the encoded message carries a 0-length field.
+        // RFC 1929 permits a zero-length password; the encoded message carries a 0-length field.
         var credentials = new byte[Socks5Messages.UsernamePasswordLength("user", "")];
         _ = Socks5Messages.WriteUsernamePassword("user", "", credentials);
         Assert.Equal(new byte[] { 1, 4, (byte)'u', (byte)'s', (byte)'e', (byte)'r', 0 }, credentials);
@@ -229,7 +229,7 @@ public sealed class Socks5ProtocolTests
     [Fact]
     public void Socks5TruncatedFailureReplyIsRejectedNotParsedAsSuccess()
     {
-        // L2: a failure reply (REP 1-8) must be reported as a definite Failure without a bound
+        // A failure reply (REP 1-8) must be reported as a definite Failure without a bound
         // address; it must never "parse" into a success. An undersized failure reply is still a
         // definite failure (the status is the diagnostic).
         var undersizedFailure = new byte[] { 5, 5 };
@@ -245,7 +245,7 @@ public sealed class Socks5ProtocolTests
     [Fact]
     public void UdpAssociateWildcardReplySubstitutesControlPeerButKeepsPort()
     {
-        // M1: a UDP ASSOCIATE reply returning 0.0.0.0/:: is those-substituted with the TCP control
+        // A UDP ASSOCIATE reply returning 0.0.0.0/:: is substituted with the TCP control
         // peer (RFC-endorsed fallback), but the server-provided BND port is preserved.
         var controlPeer = IPAddress.Parse("192.0.2.100");
         var mappedAny = IPAddress.Parse("::ffff:0.0.0.0");
@@ -259,7 +259,7 @@ public sealed class Socks5ProtocolTests
     [Fact]
     public void ConnectReplyIsNeverSubstituted()
     {
-        // M1: a CONNECT reply's BND.ADDR is not used for routing, so an unspecified/mapped reply
+        // A CONNECT reply's BND.ADDR is not used for routing, so an unspecified/mapped reply
         // must NOT be substituted with the control peer.
         var mappedAny = IPAddress.Parse("::ffff:0.0.0.0");
         var normalized = Socks5Messages.NormalizeBndAddress(mappedAny, IPAddress.Parse("192.0.2.100"), Socks5Command.Connect);
@@ -269,7 +269,7 @@ public sealed class Socks5ProtocolTests
     [Fact]
     public void NormalizeBndAddressMapsIPv4MappedToPlainIPv4()
     {
-        // M1: an IPv4-mapped ::ffff:a.b.c.d reply is normalized to its IPv4 form.
+        // An IPv4-mapped ::ffff:a.b.c.d reply is normalized to its IPv4 form.
         var mapped = IPAddress.Parse("::ffff:192.0.2.53");
         var controlPeer = IPAddress.Parse("192.0.2.100");
         var normalized = Socks5Messages.NormalizeBndAddress(mapped, controlPeer, Socks5Command.UdpAssociate);
@@ -279,7 +279,7 @@ public sealed class Socks5ProtocolTests
     [Fact]
     public void NormalizeBndAddressCarriesControlPeerScopeOverIPv6Reply()
     {
-        // M2: a genuine IPv6 relay address reconstructed from raw bytes has ScopeId 0; it inherits
+        // A genuine IPv6 relay address reconstructed from raw bytes has ScopeId 0; it inherits
         // the control peer's non-zero interface scope so a link-local relay routes correctly.
         var linkLocal = new IPAddress(IPAddress.Parse("fe80::1").GetAddressBytes(), 0);
         var scopeSource = new IPAddress(IPAddress.Parse("fe80::10").GetAddressBytes(), 7);
@@ -290,7 +290,7 @@ public sealed class Socks5ProtocolTests
     [Fact]
     public async Task Socks5ConnectAsyncHonorsAttemptCapOnSocketCreationFailure()
     {
-        // L1: each candidate address is one attempt; a socket-creation failure is a failed attempt.
+        // Each candidate address is one attempt; a socket-creation failure is a failed attempt.
         // The global attempt cap stops the sequential loop, and exhausting candidates fails closed
         // (an exception surfaces as blocked) rather than hanging the capture path.
         var server = new Socks5Server("test", "host.invalid", 1080, Username: null, Password: null);
@@ -318,7 +318,7 @@ public sealed class Socks5ProtocolTests
     [Fact]
     public async Task Socks5ConnectAsyncDisposesEveryCreatedSocketOnFailure()
     {
-        // L1: when every connect attempt fails, the sequential loop must dispose each socket it
+        // When every connect attempt fails, the sequential loop must dispose each socket it
         // created before advancing to the next candidate. A leaked socket would hold the local
         // ephemeral endpoint and a file descriptor. The attempt cap is also honored: only the
         // capped number of sockets are created, never the full address list.

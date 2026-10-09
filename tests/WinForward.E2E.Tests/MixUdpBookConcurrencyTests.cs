@@ -8,7 +8,7 @@ using Xunit;
 namespace WinForward.E2E.Tests;
 
 /// <summary>
-/// The MIX lane's two-sided book (D19.3 F): the receive task only offers a settlement carrying the
+/// The MIX lane's two-sided book: the receive task only offers a settlement carrying the
 /// classifier's <b>unresolved</b> verdict and the instant the datagram arrived, the send side answers
 /// <c>WasSent</c>, removes the pending slot, samples the round trip and books the arrival — and the
 /// identity <c>delivered == sent == settled</c> holds with no reply lost and none booked twice.
@@ -21,8 +21,7 @@ namespace WinForward.E2E.Tests;
 /// thread of its own, so "both sides really ran, and they are not the same side" is a fact of the run.
 /// </para>
 /// <para>
-/// Counter-proofs — each was applied to the production code and watched this file turn red, and the
-/// evidence records the restored hashes (D11):
+/// Counter-proofs — each was applied to the production code and watched this file turn red:
 /// </para>
 /// <list type="bullet">
 /// <item>make <see cref="MixUdpBook.Offer"/> book the arrival itself (<c>tracker.MarkArrival</c>)
@@ -144,9 +143,9 @@ public sealed class MixUdpBookConcurrencyTests
                 replies.Add(sequence);
                 if (sequence == 1)
                 {
-                    // Stage the overlap instead of hoping for it (test-stability 2.5): by the time the
-                    // first pacing point settles, a settlement is already in the queue, so "a settle that
-                    // found the queue non-empty" is a fact of this run rather than of the host's mood.
+                    // Stage the overlap instead of hoping for it: by the time the first pacing point
+                    // settles, a settlement is already in the queue, so "a settle that found the queue
+                    // non-empty" is a fact of this run rather than of the host's mood.
                     Assert.True(firstOffer.Task.Wait(s_budget), $"the receive thread never offered a settlement — {round}");
                 }
             }

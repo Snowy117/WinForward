@@ -55,7 +55,7 @@ internal sealed class LaneTransportFake : ILaneTransport
     /// Answers asynchronously, so the returned <c>ValueTask</c> is incomplete when the engine reads
     /// <c>IsCompleted</c>. The completion is delayed rather than merely yielded: a yield's continuation
     /// can win that race on a loaded host — a property of this fake, not of the engine, whose reading is
-    /// a point-in-time observation by design (<c>sendWouldBlock</c> means "not synchronous", audit §9.6).
+    /// a point-in-time observation by design (<c>sendWouldBlock</c> means "not synchronous").
     /// </summary>
     internal bool IncompleteSends { get; init; }
 
