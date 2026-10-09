@@ -3,23 +3,26 @@ using System.Globalization;
 namespace WinForward.E2E.Analysis.Json;
 
 /// <summary>
-/// The numbers the analysis publishes: a fixed number of decimals for the table cells, the general form
-/// that keeps a small non-zero value visible where the fixed form would print it as zero, and the
-/// shortest text that reads back as the same value for the floats inside <c>verdict.json</c>.
+/// The numbers the analysis publishes: a fixed number of decimals for the table cells, the exponential
+/// form the gate's floor cells use, the general form that keeps a small non-zero value visible where the
+/// fixed form would print it as zero, and the shortest text that reads back as the same value for the
+/// floats inside <c>verdict.json</c>.
 /// </summary>
 /// <remarks>
-/// <para>These are .NET's formatting rules. <see cref="Fixed"/> is .NET's fixed-point formatting, which
-/// rounds the exact binary value to the nearest digit with a midpoint going to the even one, and the
-/// reference's <c>%.*f</c> rounds the same way — the frozen <c>tables.md</c> reproduces cell for cell,
-/// midpoints included. <see cref="General"/> is <c>G</c> with the exponent lower-cased, and
-/// <see cref="Json"/> is the round-trip form, which is where the published text of
-/// <c>verdict.json</c>'s floats parts company with the reference's <c>repr</c>; the oracle compares
-/// those numbers as values.</para>
+/// <para>These are .NET's formatting rules, and every form that keeps a fixed number of digits rounds
+/// the same way: the exact binary value to the nearest digit with a midpoint going to the even one.
+/// <see cref="Fixed"/>, <see cref="Exponential"/> and <see cref="General"/> are the standard
+/// <c>F</c>/<c>E</c>/<c>G</c> specifiers, which do that on the exact binary value; a custom specifier
+/// such as <c>0.000e+00</c> would not, because it rounds the decimal the scaling produced and so moves the halves away from zero
+/// (measured: 1.0625 and 1234.5 both round up under it and down under <c>E3</c>). The reference's
+/// <c>%.*f</c>/<c>%.*e</c> rounded the exact binary value the same way the standard specifiers do — the
+/// frozen <c>tables.md</c> reproduces cell for cell, midpoints included. <see cref="Json"/> is the
+/// round-trip form, which is where the published text of <c>verdict.json</c>'s floats parts company with
+/// the reference's <c>repr</c>; the oracle compares those numbers as values.</para>
 /// <para>A value that is not a number at all is written the way .NET spells it (<c>NaN</c>,
 /// <c>Infinity</c>, <c>-Infinity</c>) rather than the way <c>printf</c> does.</para>
-/// <para>Public because the test project drives it against the reference's own vector table
-/// (<c>verification/golden/py-number-vectors.json</c>); D20.6 keeps the analyzer free of an
-/// <c>InternalsVisibleTo</c>.</para>
+/// <para>Public because the test project drives it value by value, midpoints included; D20.6 keeps the
+/// analyzer free of an <c>InternalsVisibleTo</c>.</para>
 /// </remarks>
 public static class VerbatimNumber
 {
@@ -39,6 +42,34 @@ public static class VerbatimNumber
 
         var format = "F" + digits.ToString(CultureInfo.InvariantCulture);
         return value.ToString(format, CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// One value in the exponential form with <paramref name="digits"/> decimals in the significand, the
+    /// way a table renders a rate that the fixed form would print as a row of zeros: <c>8.000e-03</c>,
+    /// with the exponent lower-cased and at least two digits wide.
+    /// </summary>
+    /// <param name="value">The value to write.</param>
+    /// <param name="digits">How many digits to keep after the significand's point.</param>
+    /// <returns>The text, without a unit.</returns>
+    public static string Exponential(double value, int digits)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(digits);
+
+        var format = "E" + digits.ToString(CultureInfo.InvariantCulture);
+        var text = value.ToString(format, CultureInfo.InvariantCulture);
+        var marker = text.IndexOf('E', StringComparison.Ordinal);
+        if (marker < 0)
+        {
+            // A non-finite value: .NET spells it `NaN`/`Infinity`/`-Infinity` under every format.
+            return text;
+        }
+
+        var exponent = text.AsSpan(marker + 1);
+        var sign = exponent[0] is '+' or '-' ? exponent[..1] : default;
+        var start = sign.IsEmpty ? 0 : 1;
+        var magnitude = exponent[start..].TrimStart('0');
+        return $"{text.AsSpan(0, marker)}e{sign}{magnitude.ToString().PadLeft(2, '0')}";
     }
 
     /// <summary>

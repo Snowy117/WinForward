@@ -188,20 +188,17 @@ internal static class RunLoader
     }
 
     /// <summary>
-    /// One JSON file as the reference's <c>_load_json_file</c> answers it, with the load error recorded
-    /// on <paramref name="run"/>.
+    /// One JSON file as the analysis's own reader answers it, with the load error recorded on
+    /// <paramref name="run"/>.
     /// </summary>
     /// <remarks>
-    /// <para>A document that is just <see langword="null"/> reads as no value here, because the reference
-    /// parses it into Python's <c>None</c> and every caller tests <c>is None</c> — the run has no truth,
+    /// <para>A document that is just <see langword="null"/> reads as no value here: the run has no truth,
     /// §15 prints <c>no</c>, and a dual truth reads as <c>no dual/proxy-truth.json</c>. A
     /// <see cref="JsonElement"/> cannot carry that distinction for this model, so the file's own
-    /// <see langword="null"/> and its absence are answered the same way, which is what the reference does
-    /// with them.</para>
-    /// <para>The note names the failure the way the reference's <c>exc.__class__.__name__</c> would: the
-    /// two implementations raise different exception types for the same unreadable file, and this string
-    /// is part of §15's compared bytes. A truncated <c>run.json</c> is reachable — the harness creates it
-    /// in place, so an interrupted write leaves a file that is valid UTF-8 and not valid JSON.</para>
+    /// <see langword="null"/> and its absence are answered the same way.</para>
+    /// <para>The note names the failure by its .NET exception type, and that string is part of §15's
+    /// compared bytes. A truncated <c>run.json</c> is reachable — the harness creates it in place, so an
+    /// interrupted write leaves a file that is valid UTF-8 and not valid JSON.</para>
     /// </remarks>
     private static JsonElement? ReadJsonFile(ClientRun run, string path, string label)
     {
@@ -213,20 +210,21 @@ internal static class RunLoader
         var value = JsonReader.ReadFile(path, out var error);
         if (error is not null)
         {
-            run.LoadErrors.Add($"{label} unreadable ({ReferenceName(error)})");
+            run.LoadErrors.Add($"{label} unreadable ({FailureName(error)})");
             return null;
         }
 
         return value is { ValueKind: JsonValueKind.Null } ? null : value;
     }
 
-    /// <summary>The name CPython would print for the failure <paramref name="error"/> reports.</summary>
-    private static string ReferenceName(Exception error) => error switch
+    /// <summary>The failure's .NET type name, which is what a load note prints in its parentheses.</summary>
+    private static string FailureName(Exception error) => error switch
     {
-        JsonException => "JSONDecodeError",
-        UnauthorizedAccessException => "PermissionError",
-        FileNotFoundException or DirectoryNotFoundException => "FileNotFoundError",
-        _ => "OSError",
+        JsonException => "JsonException",
+        UnauthorizedAccessException => "UnauthorizedAccessException",
+        FileNotFoundException => "FileNotFoundException",
+        DirectoryNotFoundException => "DirectoryNotFoundException",
+        _ => "IOException",
     };
 
     private static void LoadArms(ClientRun run)

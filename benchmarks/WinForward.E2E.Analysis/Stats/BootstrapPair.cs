@@ -23,9 +23,9 @@ internal sealed record Comparison(
     bool Degenerate);
 
 /// <summary>
-/// The bootstrap the reference draws every interval and p-value from: paired ratio or difference
-/// statistics over **passes**, never over samples, resampled <c>--resamples</c> times with a seed
-/// derived from the metric and the two rows.
+/// The bootstrap every interval and p-value is drawn from: paired ratio or difference statistics over
+/// **passes**, never over samples, resampled <c>--resamples</c> times with a seed derived from the metric
+/// and the two rows.
 /// </summary>
 /// <remarks>
 /// <para><b>Passes are the resampling unit.</b> A campaign has as many passes as it was run for, so a
@@ -34,6 +34,9 @@ internal sealed record Comparison(
 /// <para><b>Paired when both sides ran the same passes.</b> A ratio is computed in log space so the
 /// interval is multiplicative; a pair with a non-positive side has no ratio at all and is reported as
 /// an error rather than as a number.</para>
+/// <para><b>The generator is <see cref="Random"/>.</b> The resampling unit, the paired rule and the seed
+/// derivation are the comparison's contract; the sequence a seed produces is not, so the draws come from
+/// the standard library rather than from a reproduction of another implementation's generator.</para>
 /// </remarks>
 internal static class BootstrapPair
 {
@@ -57,7 +60,7 @@ internal static class BootstrapPair
 
         var shared = valuesA.Keys.Where(valuesB.ContainsKey).Order(StringComparer.Ordinal).ToList();
         var paired = shared.Count >= 2 && shared.Count == valuesA.Count && shared.Count == valuesB.Count;
-        var random = new CpRandom(seed);
+        var random = new Random(seed);
         var (estimates, point, mode, error) = string.Equals(kind, "ratio", StringComparison.Ordinal)
             ? RatioEstimates(valuesA, valuesB, shared, paired, random, resamples)
             : DifferenceEstimates(valuesA, valuesB, shared, paired, random, resamples);
@@ -110,7 +113,7 @@ internal static class BootstrapPair
         IReadOnlyDictionary<string, double> valuesB,
         List<string> shared,
         bool paired,
-        CpRandom random,
+        Random random,
         int resamples)
     {
         var estimates = new List<double>(resamples);
@@ -157,7 +160,7 @@ internal static class BootstrapPair
         IReadOnlyDictionary<string, double> valuesB,
         List<string> shared,
         bool paired,
-        CpRandom random,
+        Random random,
         int resamples)
     {
         var estimates = new List<double>(resamples);
@@ -246,12 +249,12 @@ internal static class BootstrapPair
         return ("inconclusive", string.Format(CultureInfo.InvariantCulture, "CI straddles the ±{0:0.00} threshold band", threshold.Value));
     }
 
-    private static List<double> Resample(List<double> values, CpRandom random)
+    private static List<double> Resample(List<double> values, Random random)
     {
         var draw = new List<double>(values.Count);
         for (var index = 0; index < values.Count; index++)
         {
-            draw.Add(values[(int)random.RandBelow(values.Count)]);
+            draw.Add(values[random.Next(values.Count)]);
         }
 
         return draw;

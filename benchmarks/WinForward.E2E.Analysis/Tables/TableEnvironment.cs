@@ -339,7 +339,7 @@ internal static class TableEnvironment
     [
         .. documents
             .Select(document => JsonText.Of(JsonValue.Member(document, name)))
-            .Where(value => !string.Equals(value, "None", StringComparison.Ordinal))
+            .Where(value => !string.Equals(value, JsonText.Of(element: null), StringComparison.Ordinal))
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal),
     ];

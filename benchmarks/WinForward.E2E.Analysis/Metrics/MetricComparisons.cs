@@ -19,7 +19,7 @@ internal sealed record MetricPair(string A, string B, bool Comparable, string? R
 /// <remarks>
 /// <para><b>Passes are the resampling unit and the seed is derived, not drawn.</b> A comparison's
 /// generator is seeded from the metric's key and the two row ids, so the same campaign re-analysed
-/// produces the same intervals (see <see cref="CpRandom.DeriveSeed"/>).</para>
+/// produces the same intervals (see <see cref="ComparisonSeed.DeriveSeed"/>).</para>
 /// <para><b>A pair that cannot be claimed is reported, not dropped.</b> A row that never ran the arm, a
 /// product that does not carry UDP, and a port-53 arm measuring a different path all make no claim, and
 /// the pair is listed as <c>n/a (not comparable)</c> outside the Holm family rather than silently
@@ -222,7 +222,7 @@ internal static class MetricComparisons
                 threshold.Kind,
                 threshold.Value,
                 campaign.Resamples,
-                CpRandom.DeriveSeed(campaign.Seed, $"{spec.Key}|{pair.A}|{pair.B}"));
+                ComparisonSeed.DeriveSeed(campaign.Seed, $"{spec.Key}|{pair.A}|{pair.B}"));
             comparisons[pair.TestedIndex] = comparison;
             errors[pair.TestedIndex] = error;
         }

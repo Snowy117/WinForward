@@ -1,87 +1,18 @@
 using System.Globalization;
-using System.Text.Json;
 using WinForward.E2E.Analysis.Json;
 using Xunit;
 
 namespace WinForward.E2E.Tests;
 
 /// <summary>
-/// Holds the analysis's numbers to the text it publishes: the fixed form of the table cells, the general
-/// form that keeps a small non-zero value visible, and the round-trip text of the floats inside
-/// <c>verdict.json</c>. The frozen vector table is the reference's own answer for the same values and
-/// stands in as the expected column where the two still agree — .NET's fixed-point formatting rounds the
-/// exact binary value the way <c>%.*f</c> did, midpoints included, so every fixed entry is reproduced
-/// character for character — while a float's published text is this writer's own and is held to reading
-/// back as the same value instead.
+/// Holds the analysis's numbers to the text it publishes: the fixed form of the table cells, the
+/// exponential form of the gate's floor cells, the general form that keeps a small non-zero value
+/// visible, and the round-trip text of the floats inside <c>verdict.json</c>. The decisions a gate
+/// cannot see are pinned here value by value — the exact binary midpoints in particular — each with the
+/// negative control that would move if the formatter used the neighbouring rule instead.
 /// </summary>
 public sealed class AnalyzerNumberGoldenTests
 {
-    [Fact]
-    public void EveryGoldenFixedValueIsReproduced()
-    {
-        using var document = JsonDocument.Parse(
-            File.ReadAllText(RepoPaths.AnalyzerGolden("py-number-vectors.json")));
-
-        var seen = 0;
-        foreach (var entry in document.RootElement.GetProperty("fixed").EnumerateArray())
-        {
-            var expected = entry.GetProperty("text").GetString()!;
-            Assert.Equal(
-                expected,
-                VerbatimNumber.Fixed(entry.GetProperty("value").GetDouble(), entry.GetProperty("digits").GetInt32()));
-            seen++;
-        }
-
-        Assert.True(seen >= 200, $"the vector table holds {seen} fixed value(s)");
-    }
-
-    [Fact]
-    public void EveryGoldenGeneralValueIsReproduced()
-    {
-        // The general form is .NET's `G<precision>` with the exponent lower-cased, which is the same
-        // choice between the plain and the exponential spelling and the same digits as `%.*g` made.
-        using var document = JsonDocument.Parse(
-            File.ReadAllText(RepoPaths.AnalyzerGolden("py-number-vectors.json")));
-
-        var seen = 0;
-        foreach (var entry in document.RootElement.GetProperty("general").EnumerateArray())
-        {
-            Assert.Equal(
-                entry.GetProperty("text").GetString(),
-                VerbatimNumber.General(
-                    entry.GetProperty("value").GetDouble(),
-                    entry.GetProperty("precision").GetInt32()));
-            seen++;
-        }
-
-        Assert.True(seen >= 120, $"the vector table holds {seen} general value(s)");
-    }
-
-    [Fact]
-    public void EveryGoldenFloatReadsBackAsTheSameValue()
-    {
-        using var document = JsonDocument.Parse(
-            File.ReadAllText(RepoPaths.AnalyzerGolden("py-number-vectors.json")));
-
-        var repr = document.RootElement.GetProperty("repr");
-        var seen = 0;
-        foreach (var entry in repr.GetProperty("finite").EnumerateArray())
-        {
-            var value = entry.GetProperty("value").GetDouble();
-            Assert.Equal(value, double.Parse(VerbatimNumber.Json(value), CultureInfo.InvariantCulture));
-            seen++;
-        }
-
-        foreach (var entry in repr.GetProperty("named").EnumerateArray())
-        {
-            var value = double.Parse(entry.GetProperty("value").GetString()!, CultureInfo.InvariantCulture);
-            Assert.Equal(entry.GetProperty("text").GetString(), VerbatimNumber.Json(value));
-            seen++;
-        }
-
-        Assert.True(seen >= 36, $"the vector table holds {seen} float(s)");
-    }
-
     /// <summary>
     /// The eight exact binary midpoints of the three-digit grid, with the answer beside each. Four of
     /// them round down to an even digit and four round up to one, so a formatter that rounded halves
@@ -112,6 +43,59 @@ public sealed class AnalyzerNumberGoldenTests
             var awayFromZero = Math.Round(midpoint, 3, MidpointRounding.AwayFromZero)
                 .ToString("F3", CultureInfo.InvariantCulture);
             if (!string.Equals(awayFromZero, VerbatimNumber.Fixed(midpoint, 3), StringComparison.Ordinal))
+            {
+                moved++;
+            }
+        }
+
+        Assert.Equal(4, moved);
+    }
+
+    /// <summary>
+    /// The eight exact binary midpoints of the exponential form's grid, with the answer beside each:
+    /// four round down to an even digit and four round up to one, the rule the fixed form follows too.
+    /// </summary>
+    [Theory]
+    [InlineData(1.0625, "1.062e+00")]
+    [InlineData(1.1875, "1.188e+00")]
+    [InlineData(1.3125, "1.312e+00")]
+    [InlineData(1.4375, "1.438e+00")]
+    [InlineData(1.5625, "1.562e+00")]
+    [InlineData(1.6875, "1.688e+00")]
+    [InlineData(1.8125, "1.812e+00")]
+    [InlineData(1.9375, "1.938e+00")]
+    public void TheExponentialMidpointsRoundToTheEvenNeighbour(double value, string expected) =>
+        Assert.Equal(expected, VerbatimNumber.Exponential(value, 3));
+
+    [Fact]
+    public void TheExponentialFormKeepsTwoExponentDigitsAndTheWritersSpelling()
+    {
+        // The gate's cell is this text plus its bound — `8.000e-03 < 1e-06`, the shape the frozen
+        // tables carry — so the exponent is lower-cased and trimmed from `E3`'s three digits to two.
+        Assert.Equal("8.000e-03", VerbatimNumber.Exponential(0.008, 3));
+        Assert.Equal("1.000e-06", VerbatimNumber.Exponential(1e-06, 3));
+        Assert.Equal("1.234e+03", VerbatimNumber.Exponential(1234.5, 3));
+        Assert.Equal("1.000e+100", VerbatimNumber.Exponential(1e100, 3));
+        Assert.Equal("0.000e+00", VerbatimNumber.Exponential(0.0, 3));
+        Assert.Equal("-0.000e+00", VerbatimNumber.Exponential(-0.0, 3));
+        Assert.Equal("NaN", VerbatimNumber.Exponential(double.NaN, 3));
+        Assert.Equal("Infinity", VerbatimNumber.Exponential(double.PositiveInfinity, 3));
+    }
+
+    [Fact]
+    public void TheExponentialFormTellsHalfToEvenFromTheCustomSpecifier()
+    {
+        // The negative control: `0.000e+00` is the custom specifier this cell used to carry, and it
+        // rounds the decimal its own scaling produced away from zero, so exactly these four midpoints
+        // would move.
+        double[] midpoints = [1.0625, 1.1875, 1.3125, 1.4375, 1.5625, 1.6875, 1.8125, 1.9375];
+        var moved = 0;
+        foreach (var midpoint in midpoints)
+        {
+            if (!string.Equals(
+                midpoint.ToString("0.000e+00", CultureInfo.InvariantCulture),
+                VerbatimNumber.Exponential(midpoint, 3),
+                StringComparison.Ordinal))
             {
                 moved++;
             }

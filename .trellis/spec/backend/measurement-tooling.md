@@ -122,7 +122,6 @@ byte-identical copy of the last one is `verification/plots-SKIPPED.md`.
 |---|---|
 | `verification/synthetic-tree.tar.gz` | the campaign every regression runs on (deterministic tar: sorted entries, fixed mtime/owner) |
 | `verification/golden/{py-tables.md,py-verdict.json}` | the reference output for that tree |
-| `verification/golden/{cp-random-vectors,py-number-vectors,py-json-vectors}.json` | the primitives' vectors, not compared by the differ |
 | `verification/synthetic/make_tree.py` + `FROZEN.md` | how the tree is built, and how to refreeze (any change means refreezing and re-diffing from batch 1) |
 | `benchmarks/WinForward.E2E/scripts/oracle-diff.py` | the differ — the harness's `scripts/`, not this project's: `--mode semantic` (default) or `--mode byte`, `--batch N`, `--tolerance` |
 | `verification/row-profiles.json` + `benchmarks/WinForward.E2E/scripts/check-fairness.py` | the fairness rules as data, asserted against the C# output |
@@ -136,6 +135,16 @@ decodes strings before comparing, and ignores object key order and row order. By
 structure-surface regression, not a batch criterion. Every section and every verdict key belongs to
 exactly one batch in `BATCH_SECTIONS`; a new section must be added there, and a key without a batch is a
 usage error.
+
+**Six leaves are exempt from the printed-precision rule**, because they are resampled rather than
+published: inside a `metrics/<member>.pairs[i]` entry, the four p-values (`p_value`, `holm_p_value`,
+`p_equivalence`, `holm_p_equivalence`) are compared within an absolute `5e-2` and the two interval edges
+(`ci95[0]`, `ci95[1]`) within `max(1e-2, 1e-2 · abs(expected))` (`oracle-diff.py`:
+`STATISTICAL_PATH`/`statistical_tolerance`). The bound is measured, not chosen: the p-value is a
+`--resamples`-draw estimate of a probability doubled by the two-sided rule, so two generator sequences
+differ by SD 6.4e-3 and 3.5e-2 at worst on the frozen tree — wider than one printed unit, narrower than
+any real change. The path must match exactly, so no table cell, `estimate`/`median`/`iqr`, verdict string
+or key set is relaxed, and widening the pattern or the bound is an edit that owes a new measurement.
 
 A boundary state the reference cannot render (a zero denominator makes it raise) is asserted from the C#
 side alone: build the knob tree, assert the C# output, and add a negative control that must turn red.

@@ -194,7 +194,7 @@ internal static class ControlDrift
             }
         }
 
-        var seed = CpRandom.DeriveSeed(campaign.Seed, $"control|{metric.Key}");
+        var seed = ComparisonSeed.DeriveSeed(campaign.Seed, $"control|{metric.Key}");
         var (comparison, error) = BootstrapPair.Draw(post, pre, metric.Kind, threshold, campaign.Resamples, seed);
         var passesUsed = pre.Keys.Count(post.ContainsKey);
         var (verdict, reason) = comparison is null

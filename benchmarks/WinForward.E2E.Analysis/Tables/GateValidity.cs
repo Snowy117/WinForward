@@ -260,7 +260,7 @@ internal static class GateValidity
                 checks.Add(new GateCheck(
                     $"BASE floor ({source})",
                     value < FloorThreshold ? CheckState.Pass : CheckState.Fail,
-                    $"{value.Value.ToString("0.000e+00", CultureInfo.InvariantCulture)} < 1e-06"));
+                    $"{VerbatimNumber.Exponential(value.Value, 3)} < 1e-06"));
             }
         }
 

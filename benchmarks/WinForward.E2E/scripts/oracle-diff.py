@@ -54,6 +54,24 @@ Two comparison modes:
                                     identity key rather than by position (the row *sets* must still
                                     be equal).
 
+                                One class of number gets a declared tolerance of its own, because it
+                                is resampling noise rather than a published statistic: inside a
+                                `metrics/<member>.pairs[i]` entry, the four p-value leaves
+                                (`p_value`, `holm_p_value`, `p_equivalence`, `holm_p_equivalence`)
+                                are compared within an absolute `5e-2` and the two interval edges
+                                (`ci95[0]`, `ci95[1]`) within `max(1e-2, 1e-2 * abs(expected))`.
+                                A p-value is a `--resamples`-draw estimate of a probability,
+                                doubled, so two generator sequences estimate the same one with a
+                                difference of 6.4e-3 on average and 3.5e-2 at worst -- wider than
+                                the last-printed-digit rule allows and narrower than any real
+                                change. `holm_p_value` and both `ci95` edges move nowhere on this
+                                tree (3 passes leave the 2.5 % quantile on the smallest atom) and
+                                stay in the set for the longer campaigns where they do. The bound is
+                                the width of that noise, the path has to match exactly, and the
+                                leaves are the only numbers the relaxation touches; the estimates
+                                `estimate`/`median`/`iqr`, every verdict string, every table cell and
+                                all key sets keep the rules above.
+
                                 Markers (`FAIL`, `n/a (not comparable)`, `not carried (UDP bypassed)`,
                                 ...) go through an explicit equivalence-class table; a marker is never
                                 silently equal to arbitrary text.
@@ -394,6 +412,52 @@ def numbers_equivalent(expected: str, actual: str, tolerance: Decimal) -> bool:
     if PURE_INTEGER.fullmatch(actual):
         return False
     return abs(left - right) <= tolerance * max(number_unit(expected), number_unit(actual))
+
+
+# The statistical leaves of a comparison, matched on the path `compare_json` actually receives: the
+# slice name, `metrics/`, the member (its own name is dotted, hence the `.+`), the pair index and the
+# field. Nothing else may match -- in particular no table cell, no `estimate`/`median`/`iqr` and no
+# verdict string.
+STATISTICAL_PATH = re.compile(
+    r"verdict\.json:metrics/.+\.pairs\[\d+\]\."
+    r"(p_value|holm_p_value|p_equivalence|holm_p_equivalence|ci95\[[01]\])$"
+)
+
+# The four p-values are `count/10000` and the interval edges are on the metric's own comparison scale
+# (a ratio, or a difference in the metric's units, spanning 0.09 to 0.8 on the frozen tree), so they
+# need two rules.
+#
+# The p-value bound is not the print granularity (1e-4, which is what the field is stored in but not
+# how far it moves): a p-value is a `--resamples`-draw Monte-Carlo estimate doubled, so two generator
+# sequences estimate the same probability with a difference whose measured standard deviation is
+# 6.4e-3 over the frozen tree's 192 p-values, worst case 3.5e-2 (the RNG swap) and 3.0e-2 (the same
+# binary re-run with the next seed, measured). An absolute 5e-2 is eight of those deviations and 1.4x
+# the worst movement, so two estimates of one probability pass while a real change in the underlying
+# probability -- which moves a p-value by a tenth or more -- does not. A narrower 1e-2 bound was tried
+# and left 27 of the 75 moved leaves unexplained.
+STATISTICAL_P_ABSOLUTE = Decimal("0.05")
+STATISTICAL_P_VALUES = frozenset({"p_value", "holm_p_value", "p_equivalence", "holm_p_equivalence"})
+
+# The interval edges get a relative tolerance with the same order of absolute floor, because their
+# scale is the metric's, not the p-value's.
+STATISTICAL_EDGE_ABSOLUTE = Decimal("0.01")
+STATISTICAL_EDGE_RELATIVE = Decimal("0.01")
+
+
+def statistical_tolerance(path: str, expected: str, actual: str) -> bool | None:
+    """Whether a statistical leaf is equal under its own rule; `None` when the path is not one.
+
+    Called before the last-printed-digit rule, which the resampling noise exceeds; see the module
+    docstring for why these six leaves are the only ones that get it.
+    """
+    field = STATISTICAL_PATH.fullmatch(path)
+    if field is None:
+        return None
+    left = Decimal(expected)
+    right = Decimal(actual)
+    if field.group(1) in STATISTICAL_P_VALUES:
+        return abs(left - right) <= STATISTICAL_P_ABSOLUTE
+    return abs(left - right) <= max(STATISTICAL_EDGE_ABSOLUTE, STATISTICAL_EDGE_RELATIVE * abs(left))
 
 
 def text_tokens(text: str) -> list[str]:
@@ -967,7 +1031,13 @@ class Comparer:
             return
         if here == "number":
             assert isinstance(expected, VerdictNumber) and isinstance(actual, VerdictNumber)
-            if not numbers_equivalent(expected.raw, actual.raw, self.tolerance):
+            statistical = statistical_tolerance(path, expected.raw, actual.raw)
+            equal = (
+                statistical
+                if statistical is not None
+                else numbers_equivalent(expected.raw, actual.raw, self.tolerance)
+            )
+            if not equal:
                 self.report.value(path, expected.raw, actual.raw)
             return
         if here == "string":

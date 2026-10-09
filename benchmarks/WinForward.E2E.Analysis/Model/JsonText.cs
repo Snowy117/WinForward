@@ -4,26 +4,26 @@ using System.Text.Json;
 namespace WinForward.E2E.Analysis.Model;
 
 /// <summary>
-/// A JSON value as Python's <c>str()</c> spells it, which is how a few reference messages interpolate a
-/// record's own field: a number keeps the form it was written in, a boolean is <c>True</c>/<c>False</c>,
-/// null is <c>None</c>, and a string is itself.
+/// A JSON value as the analysis spells it when a message quotes a record's own field: a number keeps the
+/// form it was written in, a boolean is <see langword="true"/>/<see langword="false"/>, null is
+/// <see langword="null"/>, and a string is itself.
 /// </summary>
 internal static class JsonText
 {
-    /// <summary>The value as the reference's own string interpolation writes it.</summary>
+    /// <summary>The value as JSON spells it, which is what a message interpolating the field carries.</summary>
     internal static string Of(JsonElement? element)
     {
         if (element is not { } value)
         {
-            return "None";
+            return "null";
         }
 
         return value.ValueKind switch
         {
             JsonValueKind.String => value.GetString() ?? string.Empty,
-            JsonValueKind.True => "True",
-            JsonValueKind.False => "False",
-            JsonValueKind.Null or JsonValueKind.Undefined => "None",
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            JsonValueKind.Null or JsonValueKind.Undefined => "null",
             JsonValueKind.Number => Number(value),
             _ => value.GetRawText(),
         };

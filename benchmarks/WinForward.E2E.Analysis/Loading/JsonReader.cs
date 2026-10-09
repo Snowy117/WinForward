@@ -77,7 +77,7 @@ internal static class JsonReader
 
     /// <summary>
     /// Reads one JSON file whole. Returns null when it is missing, unreadable or not JSON, with the
-    /// reason on <paramref name="error"/> so the caller can name it the way the reference does.
+    /// reason on <paramref name="error"/> so the caller can name it in its note.
     /// </summary>
     internal static JsonElement? ReadFile(string path, out Exception? error)
     {
