@@ -17,7 +17,7 @@ namespace WinForward.Runtime.UdpProxy.Tests;
 /// next datagram with a fresh connection and no cooldown; one flow owns one connection, so two
 /// concurrent flows keep two connections and two distinct alias claims; and a reset stream tears the
 /// flow down instead of being swallowed as the per-datagram <c>ConnectionReset</c> skip the session's
-/// receive loop would spin on (design §6).
+/// receive loop would spin on.
 /// <para>
 /// The class joins the association-lost counter collection: three of its facts read that
 /// process-wide counter as an exact delta (one death is exactly one count, a rejection is none), so
@@ -35,9 +35,9 @@ public sealed class UdpUotFlowLifecycleTests
     private static readonly byte[] s_answer = "ANSWER"u8.ToArray();
 
     /// <summary>
-    /// R4/design §7: a CONNECT the server refuses is discovered on the receive path after the
-    /// pipelined flight, and the flow must leave as the setup failure the cooldown exists for —
-    /// never as a counted association loss, which would re-dial once per client retransmit.
+    /// A CONNECT the server refuses is discovered on the receive path after the pipelined flight, and
+    /// the flow must leave as the setup failure the cooldown exists for — never as a counted
+    /// association loss, which would re-dial once per client retransmit.
     /// </summary>
     [Fact]
     public async Task ARefusedConnectReplyIsASetupFailureThatArmsTheCooldown()
@@ -51,7 +51,7 @@ public sealed class UdpUotFlowLifecycleTests
         var lostBefore = RuntimeCounters.Shared.Get(RuntimeCounters.UdpAssociationLost);
 
         // Admitted and buffered while the flow dials; the refusal arrives only after the server has
-        // read the pipelined first datagram, so the frame count is the R2 observation at this layer.
+        // read the pipelined first datagram, which is what the frame count below witnesses.
         Assert.True(await coordinator.TrySendSpanAsync(flow, ProxyTarget.FromServer(target), new byte[PayloadLength], default, CancellationToken.None));
         await WaitForAsync(() => coordinator.SessionCount == 0);
         Assert.Equal(1, server.FrameCount);
@@ -63,10 +63,10 @@ public sealed class UdpUotFlowLifecycleTests
     }
 
     /// <summary>
-    /// The sibling refusal shape R4 names: the server selects the credential method and refuses the
-    /// presented pair, so the rejection is the method/auth exchange rather than the CONNECT reply.
-    /// It must land on the same setup-failure contract — the refusal is a cooldown, not a loss —
-    /// whether the receive path or the setup flush's fail-closed send discovers it first.
+    /// The sibling refusal shape: the server selects the credential method and refuses the presented
+    /// pair, so the rejection is the method/auth exchange rather than the CONNECT reply. It must land
+    /// on the same setup-failure contract — the refusal is a cooldown, not a loss — whether the
+    /// receive path or the setup flush's fail-closed send discovers it first.
     /// </summary>
     [Fact]
     public async Task ARefusedCredentialExchangeIsASetupFailureThatArmsTheCooldown()
@@ -87,10 +87,10 @@ public sealed class UdpUotFlowLifecycleTests
     }
 
     /// <summary>
-    /// R4/I5: a connection that ends after establishment is the flow's association death. The
-    /// receive path records the transport's typed <c>UdpAssociationLostException</c>, the coordinator
-    /// removes the slot as exactly one counted association loss with no setup cooldown, and the very
-    /// next datagram establishes a fresh connection instead of waiting out a cooldown.
+    /// A connection that ends after establishment is the flow's association death. The receive path
+    /// records the transport's typed <c>UdpAssociationLostException</c>, the coordinator removes the
+    /// slot as exactly one counted association loss with no setup cooldown, and the very next datagram
+    /// establishes a fresh connection instead of waiting out a cooldown.
     /// </summary>
     [Fact]
     public async Task AMidFlowConnectionDeathIsAnAssociationLossThatReestablishesOnTheNextDatagram()
@@ -128,11 +128,11 @@ public sealed class UdpUotFlowLifecycleTests
     }
 
     /// <summary>
-    /// R1/design §2: one flow, one connection. Two concurrent flows dial two connections, and both
-    /// alias claims succeed — the claim is keyed on the transport's own endpoint pair, so a shared
-    /// connection would claim one alias twice and tear the second flow down as a setup failure. The
-    /// converse is the same fact read backwards: a second flow never shares a connection, which is
-    /// why the pair stays unique and the <c>UdpSessionSetup</c> alias guard is satisfied.
+    /// One flow, one connection. Two concurrent flows dial two connections, and both alias claims
+    /// succeed — the claim is keyed on the transport's own endpoint pair, so a shared connection would
+    /// claim one alias twice and tear the second flow down as a setup failure. The converse is the
+    /// same fact read backwards: a second flow never shares a connection, which is why the pair stays
+    /// unique and the <c>UdpSessionSetup</c> alias guard is satisfied.
     /// </summary>
     [Fact]
     public async Task TwoConcurrentUotFlowsOwnTwoConnectionsAndBothAliasClaimsSucceed()
@@ -161,7 +161,7 @@ public sealed class UdpUotFlowLifecycleTests
         Assert.NotEqual(firstAlias, secondAlias);
         Assert.Equal(0, coordinator.Diagnostics.SetupCooldownCount);
 
-        // R1's ownership half: the connections are disposed with the flows, none outlives them.
+        // Ownership: the connections are disposed with the flows, none outlives them.
         // ReSharper disable once DisposeOnUsingVariable // The explicit DisposeAsync is the act under test: the wait below reads the fixture's live-connection count only after the coordinator released both connections; the await using declaration only backstops assertion-failure paths.
         await coordinator.DisposeAsync();
         await WaitForAsync(() => server.LiveConnectionCount == 0);
@@ -203,11 +203,10 @@ public sealed class UdpUotFlowLifecycleTests
     }
 
     /// <summary>
-    /// The cooldown contract a refused UoT establishment leaves behind, asserted the way batch 2's
-    /// classification facts assert it: the tombstone is armed, the next datagram is refused
-    /// fail-closed at the frozen clock without a new dial (a systematically refusing server is
-    /// re-dialed once per cooldown, not once per client retransmit), and the flow sets up again once
-    /// the one-second window elapses.
+    /// The cooldown contract a refused UoT establishment leaves behind: the tombstone is armed, the
+    /// next datagram is refused fail-closed at the frozen clock without a new dial (a systematically
+    /// refusing server is re-dialed once per cooldown, not once per client retransmit), and the flow
+    /// sets up again once the one-second window elapses.
     /// </summary>
     private static async Task AssertCooldownContractAsync(
         UdpProxyCoordinator coordinator,
@@ -249,7 +248,7 @@ public sealed class UdpUotFlowLifecycleTests
         var (answeredFlow, source, answered, _) = await sink.Responses.Reader.ReadAsync(budget.Token);
         Assert.Equal(flow, answeredFlow);
         // Connect mode carries no on-wire source: the transport declares the flow's own destination,
-        // which is what keeps the session's source check and the reinjector unchanged (design §6).
+        // which is what keeps the session's source check and the reinjector unchanged.
         Assert.Equal(flow.Remote, source);
         Assert.Equal(s_answer, answered);
 

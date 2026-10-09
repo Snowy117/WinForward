@@ -4,10 +4,9 @@ using WinForward.E2E.Wire;
 namespace WinForward.E2E.Client.Lanes;
 
 /// <summary>
-/// What one datagram turned out to be, in the vocabulary the three UDP ladders share (D18.3). The
-/// verdict is about the wire format and this lane's connection id only; whether the sequence was ever
-/// sent is the caller's question, because only the caller owns a send book (see
-/// <see cref="ReplyKind.Unmatched"/>).
+/// What one datagram turned out to be, in the vocabulary the three UDP ladders share. The verdict is
+/// about the wire format and this lane's connection id only; whether the sequence was ever sent is the
+/// caller's question, because only the caller owns a send book (see <see cref="ReplyKind.Unmatched"/>).
 /// </summary>
 internal enum ReplyKind
 {
@@ -38,9 +37,9 @@ internal enum ReplyKind
 
     /// <summary>
     /// A reply that corresponds to no request this lane sent. <see cref="ReplyClassifier.Classify"/>
-    /// cannot answer that question — it holds no book and has no side effects (D18.3) — so the ladder's
-    /// own WasSent step produces this verdict from the book it owns: the tracker's sent bitmap in the
-    /// loss and mix arms, the pending book in the latency arm (D18.5 #3).
+    /// cannot answer that question — it holds no book and has no side effects — so the ladder's own
+    /// WasSent step produces this verdict from the book it owns: the tracker's sent bitmap in the
+    /// loss and mix arms, the pending book in the latency arm.
     /// </summary>
     Unmatched = 4,
 
@@ -69,18 +68,16 @@ internal readonly record struct ReplyVerdict(ReplyKind Kind, long Sequence, int 
 }
 
 /// <summary>
-/// The reply ladder the three UDP arms share (D18.3), as a pure function: decode, connection id,
-/// filler — and nothing else. It takes no tracker, keeps no book, counts nothing and enqueues nothing,
-/// so it is as usable from a unit test as from a receive loop, and the WasSent step the latency arm was
-/// missing stays visible at each call site instead of hiding inside a shared helper.
+/// The reply ladder the three UDP arms share, as a pure function: decode, connection id, filler — and
+/// nothing else. It takes no tracker, keeps no book, counts nothing and enqueues nothing, so a unit
+/// test can drive it as well as a receive loop and each call site keeps its own WasSent step visible.
 /// </summary>
 internal static class ReplyClassifier
 {
     /// <summary>
     /// Classifies one datagram against the connection id this lane's socket uses. The caller books the
     /// verdict, which is why nothing here touches a counter: the same ladder runs on the latency arm's
-    /// receive thread (which may only classify and enqueue, D18.5 #2) and inside the loss and mix arms'
-    /// drain loops.
+    /// receive thread (classify-and-enqueue only) and in the loss and mix arms' drain loops.
     /// </summary>
     internal static ReplyVerdict Classify(ReadOnlySpan<byte> datagram, uint expectedConnectionId)
     {

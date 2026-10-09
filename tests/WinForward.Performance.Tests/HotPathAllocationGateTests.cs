@@ -16,10 +16,10 @@ using static WinForward.TestSupport.TcpCoordinatorFakes;
 namespace WinForward.Performance.Tests;
 
 /// <summary>
-/// Allocation gates for the per-packet hot paths (task 09-18 M2, AC2): each gate drives one
-/// steady-state packet shape through its production code and asserts the managed-heap delta is
-/// exactly zero. The fakes are counting-only (no recording lists, no frame copies) so test
-/// scaffolding never pollutes the measurement; every production trace is off (null loggers).
+/// Allocation gates for the per-packet hot paths: each gate drives one steady-state packet shape
+/// through its production code and asserts the managed-heap delta is exactly zero. The fakes are
+/// counting-only (no recording lists, no frame copies) so test scaffolding never pollutes the
+/// measurement; every production trace is off (null loggers).
 /// </summary>
 public sealed class HotPathAllocationGateTests
 {
@@ -202,10 +202,10 @@ public sealed class HotPathAllocationGateTests
 
         Assert.Equal(measuredThreadId, Environment.CurrentManagedThreadId);
         Assert.Equal(0, allocated);
-        // A4/B4 mutation gate: the measured window must ride the span overload, and the cold
-        // setup flush is a span send too (the queue holds native leases, not managed buffers).
-        // The memory send overload no longer exists; the gate pins the span counter so a
-        // regression that stops sending (or sends a managed copy) fails here.
+        // The measured window must ride the span overload, and the cold setup flush is a span send
+        // too (the queue holds native leases, not managed buffers). The memory send overload no
+        // longer exists; the gate pins the span counter so a regression that stops sending (or
+        // sends a managed copy) fails here.
         Assert.True(spanSendsBeforeMeasure >= 1);
         Assert.Equal(factory.Transport!.SpanSends, factory.Transport!.Sends);
         Assert.Equal(count, factory.Transport!.SpanSends - spanSendsBeforeMeasure);
@@ -217,9 +217,9 @@ public sealed class HotPathAllocationGateTests
     [Fact]
     public async Task UdpSetupEnqueuePathAllocatesNoManagedBytes()
     {
-        // B4: while a flow's setup is stalled, every accepted datagram is copied into a pooled
-        // native lease and appended to the bounded setup queue. Once the per-flow bound is reached
-        // the drop-oldest steady state rents and releases one lease per datagram, so the measured
+        // While a flow's setup is stalled, every accepted datagram is copied into a pooled native
+        // lease and appended to the bounded setup queue. Once the per-flow bound is reached the
+        // drop-oldest steady state rents and releases one lease per datagram, so the measured
         // window must not touch the managed heap (no ToArray, no Queue growth).
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var factory = new StalledTransportFactory(gate.Task);
@@ -346,8 +346,8 @@ public sealed class HotPathAllocationGateTests
     [Fact]
     public async Task DispatcherWarmFastPathAllocatesNoManagedBytes()
     {
-        // AC2: a resolved warm flow riding the non-async DispatchAsync entry must not allocate.
-        // The DispatcherBenchmarks ~160 B/op figure is harness allocation (a fresh lease byte[]
+        // A resolved warm flow riding the non-async DispatchAsync entry must not allocate. The
+        // DispatcherBenchmarks ~160 B/op figure is harness allocation (a fresh lease byte[]
         // and FlowContext per iteration), so this gate measures DispatchAsync alone over a
         // pre-built packet. The reverse handler runs the production predicate shape (protocol
         // gate + a real TcpRedirectTable port array) and declines, keeping the UDP pass warm.
@@ -373,8 +373,7 @@ public sealed class HotPathAllocationGateTests
 
         // The measured window drives a synchronously-completing dispatch, so no continuation can
         // migrate and the per-thread reading is valid; the thread is asserted unchanged to keep
-        // that property honest (allocation-gates.md, "An allocation gate must open only after its path is
-        // ready, and must verify it stayed on one thread").
+        // that property honest.
         var measuredThreadId = Environment.CurrentManagedThreadId;
         var before = GC.GetAllocatedBytesForCurrentThread();
         for (var index = 0; index < count; index++)
@@ -420,9 +419,9 @@ public sealed class HotPathAllocationGateTests
     [Fact]
     public void FlowTableClaimAndExpireCycleAllocatesNoManagedBytes()
     {
-        // B10: a new-flow claim rents a pooled FlowState (no per-flow allocation) and expiry
-        // returns it. Once the dictionaries are pre-sized and the state free list and expiry
-        // scratch buffer are warm, a claim + expire cycle must not touch the managed heap.
+        // A new-flow claim rents a pooled FlowState (no per-flow allocation) and expiry returns it.
+        // Once the dictionaries are pre-sized and the state free list and expiry scratch buffer are
+        // warm, a claim + expire cycle must not touch the managed heap.
         const int capacity = 64;
         var table = new FlowTable(capacity);
         var idleTimeout = TimeSpan.FromMinutes(1);

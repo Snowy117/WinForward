@@ -9,22 +9,20 @@ using WinForward.Windows;
 namespace WinForward.Runtime.Capture;
 
 /// <summary>
-/// Point-in-time adapter-pump counts for one generation (the heartbeat's pump summary,
-/// task 09-17 R2.3): how many pumps are still running and how many exited through the
-/// degraded path. A generation that reports the default value (0/0) simply has no pump
-/// state to share.
+/// Point-in-time adapter-pump counts for one generation: how many pumps are still running and how
+/// many exited through the degraded path. A generation that reports the default value (0/0) simply
+/// has no pump state to share.
 /// </summary>
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Auto)]
 public readonly record struct CapturePumpState(int Running, int Degraded);
 
 /// <summary>
-/// One capture generation (task 09-07-adapter-list-refresh, design §3.5): a full
-/// <see cref="TransactionalCaptureRuntime"/> lifetime — mode snapshot, tunnel apply, the pump
-/// run, and the cleanup/mode-restore tail — over the durable shared packet processor.
-/// <see cref="RunAsync"/> completes when the generation ends: its (runner-linked) cancellation
-/// token fired, the capture loop faulted (the fault propagates), or every pump exited on its own.
-/// Disposing after completion is idempotent; disposing a still-running generation cancels it and
-/// awaits the cleanup tail.
+/// One capture generation: a full <see cref="TransactionalCaptureRuntime"/> lifetime — mode snapshot,
+/// tunnel apply, the pump run, and the cleanup/mode-restore tail — over the durable shared packet
+/// processor. <see cref="RunAsync"/> completes when the generation ends: its runner-linked
+/// cancellation token fired, the capture loop faulted (the fault propagates), or every pump exited on
+/// its own. Disposing after completion is idempotent; disposing a still-running generation cancels it
+/// and awaits the cleanup tail.
 /// </summary>
 public interface ICaptureGeneration : IAsyncDisposable
 {
@@ -32,17 +30,15 @@ public interface ICaptureGeneration : IAsyncDisposable
     Task RunAsync(CancellationToken cancellationToken);
 
     /// <summary>
-    /// Whether this generation's start sequence reached its pump run (task 09-11): still false
-    /// while the mode snapshot/apply phase is in flight. A fault observed on a completed
-    /// generation whose latch is still false never reached the pumps, which distinguishes a
-    /// recoverable startup stale-handle fault from an in-run fault.
+    /// Whether this generation's start sequence reached its pump run: still false while the mode
+    /// snapshot/apply phase is in flight. A fault on a completed generation whose latch is still false
+    /// never reached the pumps, so it reads as a recoverable startup stale-handle fault, not an in-run one.
     /// </summary>
     bool ReachedPumpRun { get; }
 
     /// <summary>
-    /// This generation's live pump counts (task 09-17 R2.3, heartbeat source). Reading is
-    /// observational: a benign stale value during a generation swap is acceptable, and a
-    /// generation without pump telemetry reports the default.
+    /// This generation's live pump counts. Reading is observational: a benign stale value during a
+    /// generation swap is acceptable, and a generation without pump telemetry reports the default.
     /// </summary>
     CapturePumpState Pumps { get; }
 }
@@ -60,13 +56,11 @@ public interface ICaptureGenerationFactory
 }
 
 /// <summary>
-/// The Windows composition of one capture generation, mirroring the wiring
-/// <c>Program.cs</c> performs today: a <see cref="NdisAdapterModeController"/> and a
+/// The Windows composition of one capture generation: a <see cref="NdisAdapterModeController"/> and a
 /// <see cref="MultiAdapterCaptureLoop"/> over the durable driver and processor, wrapped in one
-/// <see cref="TransactionalCaptureRuntime"/>. The degraded-pump callback logs
-/// <c>adapter.degraded</c> and restores that adapter's mode through the owning runtime, then
-/// forwards to the optional <c>onAdapterDegraded</c> notification so the runner can feed
-/// error 87 into its refresh channel (R3).
+/// <see cref="TransactionalCaptureRuntime"/>. The degraded-pump callback logs <c>adapter.degraded</c>
+/// and restores that adapter's mode through the owning runtime, then forwards to the optional
+/// <c>onAdapterDegraded</c> notification so the runner can feed error 87 into its refresh channel.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class NdisCaptureGenerationFactory : ICaptureGenerationFactory
@@ -80,9 +74,8 @@ public sealed class NdisCaptureGenerationFactory : ICaptureGenerationFactory
     private readonly TimeSpan? _pollDelay;
     private readonly RuntimeLogThrottle _slotExhaustedWarn = new(TimeSpan.FromMinutes(1));
     private readonly RuntimeLogThrottle _packetEventUnavailableWarn = new(TimeSpan.FromMinutes(1));
-    // One throttle per adapter handle, so every adapter's single arming can be logged: a shared
-    // window would suppress each sibling's line, which is the only evidence the Windows experiment
-    // reads.
+    // One throttle per adapter handle: a shared window would suppress each sibling's line, and that
+    // line is the only evidence the read-shape guard produces.
     private readonly ConcurrentDictionary<nint, RuntimeLogThrottle> _readShapeMismatchWarns = new();
 
     public NdisCaptureGenerationFactory(
@@ -193,9 +186,9 @@ public sealed class NdisCaptureGenerationFactory : ICaptureGenerationFactory
     }
 
     /// <summary>
-    /// One rate-limited warn per arming of the read-shape guard, carrying everything the Windows
-    /// experiment needs: which adapter healed, what it asked for, what the queue held and the native
-    /// error of the failed read. No line means the driver conforms to the full-capacity request.
+    /// One rate-limited warn per arming of the read-shape guard: which adapter healed, what it asked
+    /// for, what the queue held and the native error of the failed read. No line means the driver
+    /// conforms to the full-capacity request.
     /// </summary>
     private void ReportReadShapeMismatch(IReadOnlyList<AdapterCaptureBinding> bindings, NdisReadShapeMismatch mismatch)
     {

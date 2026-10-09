@@ -372,9 +372,9 @@ public sealed class ContractShapeTests
     }
 
     /// <summary>
-    /// The declared loss window is the one the record publishes (audit #6): both arms take W from the
-    /// plan's <c>lossWindowMs</c> and publish it as the window their arrived/late/never split used, so
-    /// the value a consumer reads back is the one the classification ran with.
+    /// The declared loss window is the one the record publishes: both arms take W from the plan's
+    /// <c>lossWindowMs</c> and publish it as the window their arrived/late/never split used, so a
+    /// consumer reads back the value the classification ran with.
     /// </summary>
     [Fact]
     public async Task ThePublishedLossWindowIsTheDeclaredOne()

@@ -5,23 +5,21 @@ using WinForward.NdisApi;
 namespace WinForward.Runtime.TcpRedirect;
 
 /// <summary>
-/// The redirect data legs' deferred-injection lanes (R2): one lane per (adapter handle, target
-/// direction) accumulates a pump iteration's rewritten frames and hands them to one batched
-/// reinjection call at that iteration's flush. Mechanics mirror the proven pass lanes
+/// The redirect data legs' deferred-injection lanes: one lane per adapter handle and target direction
+/// accumulates a pump iteration's rewritten frames and hands them to one batched reinjection call at
+/// that iteration's flush. Mechanics mirror the proven pass lanes
 /// (<c>NdisPacketActionExecutor.PendingPassLane</c>): a lock-free linear scan of the
-/// volatile-published entry array once a lane exists, lane creation under one small lock,
-/// doubling growth with a cap, and parallel per-frame arrays (buffer, rented flag, association)
-/// in append (= capture) order. A refused append tells the caller to send that frame immediately;
-/// the container counts the refusal in <see cref="OverflowCount"/>.
+/// volatile-published entry array once a lane exists, lane creation under one small lock, doubling
+/// growth with a cap, and parallel per-frame arrays (buffer, rented flag, association) in append
+/// (= capture) order. A refused append tells the caller to send that frame immediately; the container
+/// counts the refusal in <see cref="OverflowCount"/>.
 /// <para>
 /// Unlike the pass lane table, entries are recycled every iteration: the flush takes a lane,
 /// <see cref="Release"/> frees its slot and returns the lane object — with its per-frame arrays —
-/// to a spare pool, so no adapter-handle entry can outlive the iteration that created it, no
-/// scope-install retirement hook is needed, and steady-state lane creation allocates nothing.
-/// Serialization is the pump's, not this container's: every append and every flush of one key runs
-/// on that adapter's strictly-ordered pump handler chain (ndis-batched-send.md, "Batched reinjection
-/// sends" — serialization rests on the pump's await chain, not thread identity), so a lane needs no
-/// lock of its own, and a caller outside that chain must not append at all.
+/// to a spare pool, so no entry outlives the iteration that created it and steady-state lane creation
+/// allocates nothing. Serialization is the pump's, not this container's: every append and every flush
+/// of one key runs on that adapter's strictly-ordered pump handler chain, so a lane needs no lock of
+/// its own, and a caller outside that chain must not append at all.
 /// </para>
 /// </summary>
 internal sealed class RedirectInjectionLanes
