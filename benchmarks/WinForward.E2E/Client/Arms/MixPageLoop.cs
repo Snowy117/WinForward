@@ -118,7 +118,7 @@ internal static class MixPageLoop
         }
         catch (ObjectDisposedException)
         {
-            /* teardown closed the socket first: a teardown is not a page error and books nothing (D19.2 ⑨) */
+            /* teardown closed the socket first: not a page error, books nothing */
         }
     }
 
@@ -132,9 +132,8 @@ internal static class MixPageLoop
         using var socket = context.CreateUdpSocket();
         if (!(await SocketOps.TryConnectAsync(socket, context.DnsEndPoint, cancellationToken).ConfigureAwait(false)).Ok)
         {
-            // This desktop's page dns phase never reached the resolver, so none of its queries were
-            // handed to a socket: booked in the phase's own catch-all bucket and the desktop's other
-            // phases carry on.
+            // The phase never reached the resolver, so none of its queries were handed to a socket:
+            // booked in the phase's catch-all bucket, and the desktop's other phases carry on.
             Interlocked.Increment(ref counters._dnsOther);
             return;
         }

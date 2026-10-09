@@ -67,8 +67,8 @@ public sealed class FrameCodecTests
         Assert.Equal(FrameDecodeError.BadChecksum, error);
     }
 
-    // The trailer is located from the header's length, never from the end of the span, so a reader
-    // that hands over its whole buffer with more frames behind this one still decodes this one.
+    // The trailer is located from the header's length, never the span end, so a reader handing over
+    // its whole buffer with frames behind this one still decodes this one.
     [Fact]
     public void BytesAfterTheFrameAreAccepted()
     {

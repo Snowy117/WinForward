@@ -7,9 +7,8 @@ using WinForward.Runtime.TcpRedirect;
 
 namespace WinForward.Benchmarks.Perf;
 
-// MemoryDiagnoser gates P1: per-chunk managed allocation of the relay pumps (the absolute
-// number includes one-time socket-buffer scaffolding per invocation; the gate is the
-// before/after delta at equal chunk sizes).
+// MemoryDiagnoser gates per-chunk managed allocation of the relay pumps; the absolute number
+// includes one-time socket-buffer scaffolding, so only the delta at equal chunk sizes counts.
 [MemoryDiagnoser]
 public class TcpRelayBenchmarks
 {

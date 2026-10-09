@@ -175,8 +175,8 @@ public sealed class UdpWarmPathGateTests
         }
         finally
         {
-            // Disposal runs only after every thread that captured the coordinator has been joined; the
-            // release first so a parked sweeper can never hold a session gate across the teardown.
+            // The release comes first so a parked sweeper can never hold a session gate across the
+            // teardown, which runs only after every capturing thread is joined.
             release.TrySetResult();
             sweeper?.Join(TimeSpan.FromSeconds(10));
             sender?.Join(TimeSpan.FromSeconds(10));

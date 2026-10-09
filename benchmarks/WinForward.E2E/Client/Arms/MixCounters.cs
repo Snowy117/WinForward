@@ -9,9 +9,8 @@ internal sealed class MixCounters
         DnsSentPerDesktop = new long[desktops];
     }
 
-    // One witness per flow class is kept per desktop so that a lane which never ran is visible in
-    // the record instead of being averaged into a total that still looks plausible. The arm-wide
-    // values are summed from these, so a witness and its total cannot drift apart.
+    // One witness per flow class per desktop: a lane that never ran stays visible instead of being
+    // averaged into a plausible-looking total, and the arm-wide sums cannot drift from it.
     internal long[] PageConnectionsPerDesktop { get; }
 
     internal long[] BulkFramesPerDesktop { get; }

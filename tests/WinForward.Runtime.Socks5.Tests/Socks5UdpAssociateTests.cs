@@ -26,8 +26,8 @@ public sealed class Socks5UdpAssociateTests
         await Assert.ThrowsAsync<IOException>(() => factory.CreateAsync(ProxyTarget.FromServer(new Socks5Server("test", "127.0.0.1", 1080, Username: null, Password: null)), CancellationToken.None).AsTask());
 
         // The relay socket is only created once the association exists, so a control-setup failure
-        // can never leave one behind. The socket factory is wired and would record the socket, so a
-        // regression that binds the relay before the dial is refused fails here instead of passing.
+        // cannot leave one behind; the wired factory would record it, so a regression that binds
+        // the relay before the dial fails here rather than passing.
         Assert.Null(socket);
     }
 
