@@ -5,8 +5,8 @@ using Xunit;
 namespace WinForward.Runtime.Capture.Tests;
 
 /// <summary>
-/// The capture lifecycle milestones an operator reads at <c>info</c> (task 10-06 R7): the resolved
-/// capture scope and every generation start, each carrying the adapter count and identity.
+/// The capture lifecycle milestones an operator reads at <c>info</c>: the resolved capture scope and
+/// every generation start, each carrying the adapter count and identity.
 /// </summary>
 public sealed class CaptureMilestoneLoggingTests
 {

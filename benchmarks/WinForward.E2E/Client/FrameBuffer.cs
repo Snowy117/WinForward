@@ -35,9 +35,9 @@ internal sealed class FrameBuffer
 }
 
 /// <summary>
-/// The socket operations every TCP arm shares. A connect failure is a result rather than an exception
-/// (D18.4): an arm that cannot reach its target records that and keeps going instead of unwinding the
-/// whole run, and the deadline still bounds whatever it does next.
+/// The socket operations every TCP arm shares. A connect failure is a result rather than an exception:
+/// an arm that cannot reach its target records that and keeps going instead of unwinding the whole
+/// run, and the deadline still bounds whatever it does next.
 /// </summary>
 internal static class SocketOps
 {

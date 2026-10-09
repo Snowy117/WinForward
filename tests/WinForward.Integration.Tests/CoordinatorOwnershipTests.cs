@@ -9,8 +9,8 @@ using Xunit;
 namespace WinForward.Integration.Tests;
 
 /// <summary>
-/// R6 ownership consolidation: a coordinator borrows its native pools and setup executor from
-/// composition and must never dispose them, and repeated disposal is single-flight.
+/// A coordinator borrows its native pools and setup executor from composition and must never dispose
+/// them, and repeated disposal is single-flight.
 /// </summary>
 public sealed class CoordinatorOwnershipTests
 {

@@ -164,8 +164,8 @@ public sealed class UdpProxyCoordinatorTests
     [Fact]
     public async Task RelayResponseCarriesRecordedClientMac()
     {
-        // R2: the client MAC captured with the first datagram must travel with the session into
-        // every response sink call so forwarded responses can be rebuilt toward the client.
+        // The client MAC captured with the first datagram must travel with the session into every
+        // response sink call so forwarded responses can be rebuilt toward the client.
         var factory = new FakeTransportFactory();
         var sink = new FakeResponseSink();
         await using var coordinator = UdpCoordinatorFakes.CreateCoordinator(factory, sink);

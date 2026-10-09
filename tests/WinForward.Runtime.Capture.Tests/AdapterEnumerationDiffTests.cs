@@ -79,8 +79,8 @@ public sealed class AdapterEnumerationDiffTests
     [Fact]
     public void AddressFingerprintChangeAloneIsChanged()
     {
-        // The task 09-17 outage shape: identical handle/MAC/MTU, only the host addresses rotated
-        // (IPv6 temporary-address churn) while the NDISRD bound-adapter list never rebuilt.
+        // The outage shape: identical handle/MAC/MTU, only the host addresses rotated (IPv6
+        // temporary-address churn) while the NDISRD bound-adapter list never rebuilt.
         var current = new[] { CaptureRunnerFakes.AdapterItem("id-a", 101, addressFingerprint: "192.168.77.2;240c:c001:101::1") };
         var next = new[] { CaptureRunnerFakes.AdapterItem("id-a", 101, addressFingerprint: "192.168.77.2;240c:c001:202::9") };
 

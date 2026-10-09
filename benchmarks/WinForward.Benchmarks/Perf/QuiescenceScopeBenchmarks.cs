@@ -4,9 +4,8 @@ using WinForward.Runtime;
 namespace WinForward.Benchmarks.Perf;
 
 /// <summary>
-/// Gate-choice comparison for <see cref="QuiescenceScope"/> (task 09-20-quiescence-scope §7).
-/// The production type uses the winning gate; the two state helpers below keep both variants
-/// measurable side by side so a future session can re-run the comparison.
+/// Gate-choice comparison for <see cref="QuiescenceScope"/>: the production type uses the winning
+/// gate, and the two state helpers below keep both variants measurable side by side.
 /// </summary>
 [MemoryDiagnoser]
 public class QuiescenceScopeBenchmarks

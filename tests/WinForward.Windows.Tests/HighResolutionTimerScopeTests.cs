@@ -73,7 +73,7 @@ public sealed class HighResolutionTimerScopeTests
         public uint Begin(uint period)
         {
             BeginPeriods.Add(period);
-            // ReSharper disable once ConvertIfStatementToReturnStatement // Failure-injection seam: the throw is the injected behavior and must read as a standalone guard (B1 disposition).
+            // ReSharper disable once ConvertIfStatementToReturnStatement // Failure-injection seam: the throw is the injected behavior and must read as a standalone guard.
             if (ThrowOnBegin) throw new DllNotFoundException("simulated winmm failure");
             return BeginResult;
         }
