@@ -19,17 +19,16 @@ namespace WinForward.Runtime.Capture;
 /// exactly once in its captured direction through the <see cref="IPacketReinjector"/>: unmodified
 /// frames are deferred in their capture buffer, materialized frames in a pooled native copy, and
 /// <see cref="FlushPendingPasses"/> sends each (adapter, direction) lane as one batched request at
-/// the end of the pump iteration that accumulated it (the pump's batch-completed callback; see
-/// design 08-30-batched-ioctls D2 — every <see cref="PassAsync"/> caller lives inside the pump's
-/// serialized batch-loop chain). The lane table is sized from the capture scope:
-/// <see cref="RetireLanesExcept"/> rebuilds it at <c>2 × scope-count</c> lanes when a scope
-/// installs (task 09-12-lane-table-scope-sizing), so in-scope adapters can never overflow to
+/// the end of the pump iteration that accumulated it (the pump's batch-completed callback; every
+/// <see cref="PassAsync"/> caller lives inside the pump's serialized batch-loop chain). The lane
+/// table is sized from the capture scope: <see cref="RetireLanesExcept"/> rebuilds it at
+/// <c>2 × scope-count</c> lanes when a scope installs, so in-scope adapters can never overflow to
 /// immediate single sends and refresh-churned handles can never fill the table with dead keys —
 /// the rebuild subsumes lane retirement because the fresh table only ever holds live-scope lanes.
-/// A block consumes the frame without reinjection. A proxy decision
-/// routes TCP packets through the <see cref="TcpProxyCoordinator"/> and UDP datagrams through the
-/// <see cref="UdpProxyCoordinator"/> when one is configured; if no matching coordinator is provided
-/// the flow fails closed with a rate-limited structured log.
+/// A block consumes the frame without reinjection. A proxy decision routes TCP packets through the
+/// <see cref="TcpProxyCoordinator"/> and UDP datagrams through the <see cref="UdpProxyCoordinator"/>
+/// when one is configured; if no matching coordinator is provided the flow fails closed with a
+/// rate-limited structured log.
 /// </summary>
 public sealed class NdisPacketActionExecutor : IPacketActionExecutor
 {
@@ -74,7 +73,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
 
     public ValueTask PassAsync(CapturedFlowPacket packet)
     {
-        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease; CapturedFlowPacketGuards.ThrowLeaseRequired reports the null member (quality-guidelines.md).
+        // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract // Deliberate fail-closed capture-boundary guard: Lease is declared non-nullable, but a default CapturedFlowPacket reaches runtime entries with a null lease; CapturedFlowPacketGuards.ThrowLeaseRequired reports the null member.
         if (packet.Lease is null) CapturedFlowPacketGuards.ThrowLeaseRequired();
         var metadata = packet.Metadata;
         if (packet.NativeFrame.Buffer is { } captureBuffer && !packet.Lease.IsMaterialized)
@@ -110,7 +109,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
             // More concurrent (adapter, direction) lanes than the current table holds — possible
             // only pre-install or while interception is paused with an empty scope: send now so
             // the frame still goes out exactly once instead of being dropped from batching. The
-            // degradation is observable by design (P0-1): counted for tests/telemetry, warned
+            // degradation is observable by design: counted for tests/telemetry, warned
             // rate-limited for operators.
             Interlocked.Increment(ref _immediateSendLaneOverflowCount);
             if (ShouldWarn(ref _lastLaneOverflowLogTicks))
@@ -231,29 +230,26 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
 
     /// <summary>
     /// Rebuilds the lane table at <c>2 × <paramref name="activeAdapterHandles"/>.Length</c> slots
-    /// — the scope-installed callback's between-generations contract (task
-    /// 09-12-lane-table-scope-sizing), which sizes the table from the installed capture scope so
-    /// an in-scope adapter can never overflow to immediate single sends, and subsumes lane
-    /// retirement: the fresh table only ever holds live-scope keys. Lanes whose adapter handle is
-    /// in scope are MIGRATED — the lane object moves with its identity and any pending frames
-    /// intact. Migration is mandatory, not an optimization:
+    /// — the scope-installed callback's between-generations contract — sizing the table from the
+    /// installed capture scope so an in-scope adapter can never overflow to immediate single
+    /// sends, and subsuming lane retirement: the fresh table only ever holds live-scope keys.
+    /// Lanes whose adapter handle is in scope are MIGRATED — the lane object moves with its
+    /// identity and any pending frames intact. Migration is mandatory, not an optimization:
     /// <see cref="LayeredCaptureRunner"/> starts the new generation's run before invoking the
     /// scope-installed callback, so the new generation's pumps may already have appended passes
     /// to the old table; lane creation is serialized by this same lock, so no lane can be created
     /// in the old table while the rebuild runs, and lock-free appends only touch lane objects
     /// that migration preserves. Dropping in-scope lanes instead of migrating them would silently
-    /// stranded those pending frames. A lane absent from
-    /// <paramref name="activeAdapterHandles"/> is retired with today's breach semantics; an empty
-    /// span therefore retires every lane and installs a zero-capacity table (interception paused;
-    /// a stray pass then takes the immediate single-send backstop). Precondition: no pump for a
-    /// retired handle may still be running —
-    /// the capture runner invokes this from its scope-installed callback, strictly after the
-    /// outgoing generation's run task (including its loop-exit flush) has completed and before
-    /// the next generation starts. A retired lane that still holds frames indicates a breach of
-    /// that contract: the frames are dropped fail-closed (their adapter is gone) with a
-    /// rate-limited warn, and their rented buffers are still returned exactly once. Driver
-    /// handle-value reuse is safe: a numerically reused handle is indistinguishable from — and
-    /// behaviorally equivalent to — the old lane key.
+    /// strand those pending frames. A lane absent from <paramref name="activeAdapterHandles"/> is
+    /// retired: its pending frames are dropped fail-closed (their adapter is gone) with a
+    /// rate-limited warn, and their rented buffers are still returned exactly once. An empty span
+    /// therefore retires every lane and installs a zero-capacity table (interception paused; a
+    /// stray pass then takes the immediate single-send backstop). Precondition: no pump for a
+    /// retired handle may still be running — the capture runner invokes this from its
+    /// scope-installed callback, strictly after the outgoing generation's run task (including its
+    /// loop-exit flush) has completed and before the next generation starts. Driver handle-value
+    /// reuse is safe: a numerically reused handle is indistinguishable from — and behaviorally
+    /// equivalent to — the old lane key.
     /// </summary>
     internal void RetireLanesExcept(ReadOnlySpan<nint> activeAdapterHandles)
     {
@@ -392,10 +388,10 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
             }
             else if (outcome == TcpRedirectOutcome.SetupPending)
             {
-                // R8: the SYN was retained by the coordinator and its listener setup continues in
-                // the background; nothing was injected now and nothing failed. Consume silently
-                // (same family as the grace drop — no pass, no block warning): the background
-                // setup injects the rewritten SYN from the retained copy.
+                // The SYN was retained by the coordinator and its listener setup continues in the
+                // background; nothing was injected now and nothing failed. Consume silently (same
+                // family as the grace drop — no pass, no block warning): the background setup
+                // injects the rewritten SYN from the retained copy.
                 CaptureLog.PacketDropped(_logger, packet.PacketSequence == 0 ? null : packet.PacketSequence, packet.FlowGeneration == 0 ? null : packet.FlowGeneration, packet.Context.Key.Protocol, "setupPending");
             }
             else if (outcome == TcpRedirectOutcome.NotRelevant)
@@ -450,7 +446,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     /// it to the transport of the flow's resolved target. The datagram is parsed and dispatched
     /// from the synchronous frame view
     /// (<see cref="CapturedFlowPacket.InspectionSpan"/>) — the native capture buffer when the
-    /// lease never materialized — so an established flow's datagram allocates nothing (A4): the
+    /// lease never materialized — so an established flow's datagram allocates nothing: the
     /// coordinator's ready-session path consumes the payload synchronously and only the setup
     /// window copies it into the bounded queue. The original datagram is consumed (the transport
     /// owns forwarding, including any buffered setup traffic); it is never reinjected. A
@@ -497,7 +493,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     /// <summary>
     /// The genuinely-uninitialized case: no proxy coordinator was wired, so no relay could ever
     /// exist. Every other blocked path reports its own reason through <see cref="LogProxyBlocked"/>
-    /// instead — claiming "not initialized" for a capacity or parse rejection misleads diagnosis (S6c).
+    /// instead — claiming "not initialized" for a capacity or parse rejection misleads diagnosis.
     /// </summary>
     private void LogProxyNotInitialized()
     {
@@ -506,7 +502,7 @@ public sealed class NdisPacketActionExecutor : IPacketActionExecutor
     }
 
     /// <summary>
-    /// Reports why a proxy-selected flow was blocked (S6c). The reason values mirror the
+    /// Reports why a proxy-selected flow was blocked. The reason values mirror the
     /// executor-level trace vocabulary: <c>redirect</c> (the TCP redirect coordinator rejected the
     /// flow — its per-event <c>tcp.redirect.rejected</c> trace carries the specific sub-reason),
     /// <c>target</c> (a TCP packet whose target carries no SOCKS5 server), and <c>parse</c> and

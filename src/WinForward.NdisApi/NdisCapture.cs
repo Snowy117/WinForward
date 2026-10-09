@@ -109,8 +109,8 @@ public sealed class NdisCapturePump : IAsyncDisposable
     private const int DefaultBatchCapacity = 32;
 
     /// <summary>
-    /// How many consecutive transient read failures one incident may retry before the adapter's
-    /// interception degrades (R7). With the doubling base delay capped per attempt, the worst-case
+    /// How many consecutive transient read failures one incident retries before the adapter's
+    /// interception degrades. With the doubling base delay capped per attempt, the worst-case
     /// incident window is ~3.1 s.
     /// </summary>
     private const int TransientRetryMaxAttempts = 5;
@@ -272,16 +272,15 @@ public sealed class NdisCapturePump : IAsyncDisposable
         // resumes into a pump whose native memory is already gone.
         _runCompletion.TrySetResult();
 
-        // The run outcome completes last: awaiting RunAsync observes released buffers, matching the
-        // historical async method, whose finally ran before the returned task transitioned.
+        // The run outcome completes last, so awaiting RunAsync observes released buffers.
         if (failure is not null) outcome.TrySetException(failure);
         else if (canceled) outcome.TrySetCanceled(cancellationToken);
         else outcome.TrySetResult();
     }
 
     /// <summary>
-    /// Cancellation surfaces as <see cref="OperationCanceledException"/> (RunAsync's historical
-    /// contract); a stop (<see cref="DisposeAsync"/>) is a normal, non-throwing exit.
+    /// Cancellation surfaces as <see cref="OperationCanceledException"/>; a stop
+    /// (<see cref="DisposeAsync"/>) is a normal, non-throwing exit.
     /// </summary>
     private bool ShouldContinue(CancellationToken cancellationToken)
     {
@@ -333,7 +332,7 @@ public sealed class NdisCapturePump : IAsyncDisposable
         {
             // NDISAPI contract: reinjection requests must carry the enumeration handle
             // (GetTcpipBoundAdaptersInfo); the captured buffer's m_hAdapter is rejected
-            // by the driver with ERROR_INVALID_PARAMETER. See spec/backend/windows-ndisapi.md.
+            // by the driver with ERROR_INVALID_PARAMETER.
             var packet = NdisCapturedPacket.FromCapture(_batchBuffers[index], _adapterHandle);
             InvokeHandler(packet, cancellationToken);
         }
@@ -360,8 +359,8 @@ public sealed class NdisCapturePump : IAsyncDisposable
     /// Invokes the packet handler and waits for its <see cref="ValueTask"/> to complete before the
     /// caller can process the next slot or start the next batch read. The steady-state
     /// synchronously-completing shape is a plain allocation-free result read; a still-pending
-    /// handler blocks this dedicated pump thread (documented deviation from design §3.1 — see the
-    /// class doc). <c>AsTask()</c> is only paid on that genuinely-pending path.
+    /// handler blocks this dedicated pump thread (see the class doc). <c>AsTask()</c> is only paid
+    /// on that genuinely-pending path.
     /// </summary>
     private void InvokeHandler(NdisCapturedPacket packet, CancellationToken cancellationToken)
     {
@@ -420,7 +419,7 @@ public sealed class NdisCapturePump : IAsyncDisposable
 
     /// <summary>
     /// One read-only telemetry snapshot of this pump's transient-retry counters and degraded
-    /// state (see <see cref="NdisPumpDiagnostics"/>; R7). The control/test seams
+    /// state (see <see cref="NdisPumpDiagnostics"/>). The control/test seams
     /// (<see cref="PumpThread"/> and <c>RunIterationForTests</c>) stay on the pump itself.
     /// </summary>
     internal NdisPumpDiagnostics Diagnostics => new(
@@ -445,12 +444,11 @@ public sealed class NdisCapturePump : IAsyncDisposable
     /// <summary>
     /// Stops the pump and returns only once an in-flight run has fully exited, so the native
     /// batch buffers are never freed while the loop — or a handler it awaits — may still be
-    /// using them (previously safe only by the caller convention of awaiting
-    /// <see cref="RunAsync"/> first). Disposal signals stop but never cancels the run: the loop
-    /// re-checks the stop flag every iteration and its only waits are bounded by the configured
-    /// poll delay (default 1 ms) or the arrival wait's timeout (default 100 ms), a single
-    /// transient-retry backoff sleep, or an in-flight handler, so this await is bounded too. A
-    /// run that already started owns the buffer release in its own exit sequence; a pump whose run
+    /// using them. Disposal signals stop but never cancels the run: the loop re-checks the stop
+    /// flag every iteration and its only waits are bounded by the configured poll delay
+    /// (default 1 ms) or the arrival wait's timeout (default 100 ms), a single transient-retry
+    /// backoff sleep, or an in-flight handler, so this await is bounded too. A run started by
+    /// <see cref="RunAsync"/> owns the buffer release in its own exit sequence; a pump whose run
     /// never started releases the buffers directly and completes synchronously.
     /// </summary>
     public ValueTask DisposeAsync()

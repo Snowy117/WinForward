@@ -8,9 +8,9 @@ namespace WinForward.Runtime.Socks5;
 
 public sealed class Socks5ControlConnection : IAsyncDisposable
 {
-    // L1: the connect-attempt loop is bounded by a global attempt cap and a per-attempt socket
-    // timeout so DNS resolution plus sequential connects cannot hang the capture path indefinitely.
-    // Each candidate address is one attempt; exhausted candidates fail closed (exception -> blocked)
+    // The connect-attempt loop is bounded by a global attempt cap and a per-attempt socket timeout
+    // so DNS resolution plus sequential connects cannot hang the capture path indefinitely. Each
+    // candidate address is one attempt; exhausted candidates fail closed (exception -> blocked)
     // without changing policy.
     private const int MaxConnectionAttempts = 4;
     private static readonly TimeSpan s_connectAttemptTimeout = TimeSpan.FromSeconds(30);
@@ -36,7 +36,7 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
 
     // Admission + quiescence for the operations that read the attempt deadline (`AttemptToken`).
     // The scope is linked to the caller's lifetime token, so it is canceled once the connection is
-    // disposed; it is also what makes the epoch CTS release ordered after every reader (D-C4-7).
+    // disposed; it is also what makes the epoch CTS release ordered after every reader.
     private readonly QuiescenceScope _scope;
     private int _disposeStarted;
 
@@ -76,10 +76,10 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
     /// socket is bound to a wildcard local endpoint (so the local port is already known) but before
     /// the SYN leaves the host; it returns an optional loop-prevention registration that the
     /// connection owns and disposes with itself. Registering before the SYN closes the race where a
-    /// catch-all proxy rule could capture WinForward's own SOCKS5 control traffic (design §10).
-    /// Attempts are capped by <paramref name="maxAttempts"/> and each attempt is bounded by
+    /// catch-all proxy rule could capture WinForward's own SOCKS5 control traffic. Attempts are
+    /// capped by <paramref name="maxAttempts"/> and each attempt is bounded by
     /// <paramref name="perAttemptTimeout"/>; a failed attempt waits out of the loop to the next
-    /// candidate, exhausting candidates fails closed (L1).
+    /// candidate, exhausting candidates fails closed.
     /// </summary>
     public static ValueTask<Socks5ControlConnection> ConnectAsync(
         Socks5Server server,
@@ -98,10 +98,10 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
     /// <see cref="ConnectAsync(Socks5Server, CancellationToken, Func{IPEndPoint, IPEndPoint, IDisposable?}?, int, TimeSpan?, Socks5AddressCache?)"/>,
     /// but the dial writes the greeting — and, when the server carries credentials, the RFC 1929
     /// username/password message — and returns <b>without reading a single reply byte</b>. The
-    /// credential message therefore precedes the method-selection reply, the pipelining's deliberate
-    /// protocol rudeness (design §3). The caller therefore writes its first request flight (and, for
+    /// credential message therefore precedes the method-selection reply: the pipelining's deliberate
+    /// protocol rudeness. The caller therefore writes its first request flight (and, for
     /// UDP-over-TCP, the flow's first datagram) before any handshake round trip completes.
-    /// A failure that aborts an attempt today — DNS, socket creation, connect, a write fault, caller
+    /// A failure that aborts an attempt — DNS, socket creation, connect, a write fault, caller
     /// cancellation, the per-attempt deadline — aborts this dial exactly the same way; only the
     /// failures the unwritten replies could reveal are unobserved until
     /// <see cref="CompleteDeferredHandshakeAsync(CancellationToken)"/>.
@@ -276,7 +276,7 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
             attemptCancellation.CancelAfter(timeout);
             await socket.ConnectAsync(new IPEndPoint(address, server.Port), attemptCancellation.Token).ConfigureAwait(false);
             // The upstream leg is a byte pipe: Nagle x delayed-ACK would stall small proxied
-            // writes 40-200 ms (X4), so TCP_NODELAY goes on as soon as the connect succeeds.
+            // writes 40-200 ms, so TCP_NODELAY goes on as soon as the connect succeeds.
             socket.NoDelay = true;
 
             connection = new Socks5ControlConnection(socket, registration, attemptCancellation, addressCache, cancellationToken);
@@ -407,7 +407,7 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        // D11: one caller owns the teardown; every other caller joins the same drain.
+        // One caller owns the teardown; every other caller joins the same drain.
         if (Interlocked.Exchange(ref _disposeStarted, 1) != 0)
         {
             await _scope.DrainAsync().ConfigureAwait(false);
@@ -417,7 +417,7 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
         // Sealing first is what makes the late-reader refusal meaningful: a reader is either
         // admitted below (and the drain then waits for its lease) or refused before it can touch
         // AttemptToken. The epoch deadline is released last, after the drain, so no admitted reader
-        // can evaluate AttemptToken on a disposed source (D-C4-7).
+        // can evaluate AttemptToken on a disposed source.
         var drain = _scope.DrainAsync();
         try
         {
@@ -467,7 +467,7 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
     {
         // The per-attempt socket timeouts must not survive into the long-lived relay phase: the
         // relay's own 30-minute stall window is the only idle guard from here on, and an idle
-        // upstream would otherwise be killed by a stale 30s connect timeout (R1).
+        // upstream would otherwise be killed by a stale 30s connect timeout.
         _socket.ReceiveTimeout = Timeout.Infinite;
         _socket.SendTimeout = Timeout.Infinite;
         return _stream;
@@ -583,7 +583,7 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
     private async ValueTask<byte> ReadMethodSelectionAsync(CancellationToken cancellationToken)
     {
         await _stream.ReadExactlyAsync(_handshakeScratch.AsMemory(0, 2), cancellationToken).ConfigureAwait(false);
-        // ReSharper disable once ConvertIfStatementToReturnStatement // Guard-clause + throw reads failure-first; the suggested `cond ? throw ... : value` form has no precedent in this repo (B1 disposition).
+        // ReSharper disable once ConvertIfStatementToReturnStatement // Guard-clause + throw reads failure-first; the suggested `cond ? throw ... : value` form has no precedent in this repo.
         if (_handshakeScratch[0] != 5) throw new IOException("SOCKS5 server returned an invalid greeting version.");
         return _handshakeScratch[1];
     }
@@ -611,8 +611,8 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
         // The scratch buffer holds the largest handshake frame (513), so every reply length the
         // prefix parser computes (<= 262) fits; the body lands in place directly after the prefix.
         await _stream.ReadExactlyAsync(_handshakeScratch.AsMemory(5, totalLength - 5), cancellationToken).ConfigureAwait(false);
-        // L2: the full-reply parser is now discriminated. A success reply must parse exactly as
-        // Success; a truncated or malformed success body is rejected, never parsed into garbage.
+        // The full-reply parser is discriminated: a success reply must parse exactly as Success, so
+        // a truncated or malformed success body is rejected, never parsed into garbage.
         if (Socks5Messages.TryParseReply(_handshakeScratch.AsSpan(0, totalLength), out _, out var addressType, out var port) != Socks5ReplyKind.Success)
         {
             throw new IOException("SOCKS5 command returned a malformed reply.");
@@ -622,14 +622,14 @@ public sealed class Socks5ControlConnection : IAsyncDisposable
         {
             1 => new IPAddress(_handshakeScratch.AsSpan(4, 4)),
             4 => new IPAddress(_handshakeScratch.AsSpan(4, 16)),
-            // RFC 1928 domain names are ASCII; non-ASCII bytes decode as '?' rather than throwing (R5).
+            // RFC 1928 domain names are ASCII; non-ASCII bytes decode as '?' rather than throwing.
             3 => await ResolveDomainAsync(System.Text.Encoding.ASCII.GetString(_handshakeScratch.AsSpan(5, _handshakeScratch[4])), cancellationToken).ConfigureAwait(false),
             _ => throw new IOException("SOCKS5 server returned an unsupported address type."),
         };
 
-        // M1: only a UDP ASSOCIATE reply may substitute an unspecified wildcard with the control
-        // peer; the server-provided BND port is always preserved. M2: a genuine IPv6 reply inherits
-        // the control peer's interface scope so a link-local relay routes on the correct interface.
+        // Only a UDP ASSOCIATE reply may substitute an unspecified wildcard with the control peer,
+        // and the server-provided BND port is always preserved. A genuine IPv6 reply inherits the
+        // control peer's interface scope so a link-local relay routes on the correct interface.
         var controlPeer = ((IPEndPoint)_socket.RemoteEndPoint!).Address;
         address = Socks5Messages.NormalizeBndAddress(address, controlPeer, command);
         return new IPEndPoint(address, port);

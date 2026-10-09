@@ -5,9 +5,9 @@ namespace WinForward.E2E.Client.Lanes;
 
 /// <summary>
 /// What a lane transport observed on its socket, with no verdict about the wire format: the transport
-/// reports the arrival, the policy decides what it means (D18.1). A stream transport has to find frame
+/// reports the arrival, the policy decides what it means. A stream transport must find frame
 /// boundaries to hand a message up at all, so it may report <see cref="Malformed"/> with the framing
-/// reason it hit; it still does not judge whether the bytes were legal, it says which read failed.
+/// reason it hit; it does not judge whether the bytes were legal, only which read failed.
 /// </summary>
 internal enum LaneReceiveKind
 {
@@ -18,8 +18,7 @@ internal enum LaneReceiveKind
     Payload = 0,
 
     /// <summary>
-    /// The peer closed its side. Terminal: the receive loop stops once the policy has seen it, exactly
-    /// as a stream lane stopped at end of stream before.
+    /// The peer closed its side. Terminal: the receive loop stops once the policy has seen it.
     /// </summary>
     EndOfStream = 1,
 
@@ -50,16 +49,16 @@ internal readonly record struct LaneReceiveResult(LaneReceiveKind Kind, int Leng
 
 /// <summary>
 /// The outcome of <see cref="ILaneTransport.OpenAsync"/>. Connect failure is a result, never an
-/// exception (D18.1): a lane that cannot connect is an expected outcome — it offered none of its share
-/// of the schedule, so the arm records a short schedule and keeps running.
+/// exception: a lane that cannot connect offered none of its share of the schedule, so the arm
+/// records a short schedule and keeps running.
 /// </summary>
 [StructLayout(LayoutKind.Auto)]
 internal readonly record struct LaneOpenResult(bool Ok, string? Error);
 
 /// <summary>
 /// The outcome of one <see cref="ILaneTransport.SendAsync"/>. <see cref="WouldBlock"/> is the
-/// transport's own pre-await observation of its socket send (audit §9.6, the one source of the
-/// published <c>sendWouldBlock</c> counter); <see cref="Error"/> carries the failure text when
+/// transport's own pre-await observation of its socket send, the one source of the published
+/// <c>sendWouldBlock</c> counter; <see cref="Error"/> carries the failure text when
 /// <see cref="Accepted"/> is false.
 /// </summary>
 [StructLayout(LayoutKind.Auto)]
@@ -91,8 +90,8 @@ internal interface ILaneTransport : IDisposable
     /// <summary>
     /// Sends one framed message. An implementation sets <see cref="LaneSendResult.WouldBlock"/> from
     /// its own socket send before it awaits it — the engine reads <c>IsCompleted</c> off the returned
-    /// task before its single await (audit §9.6), and the two observations are the same property on
-    /// either side of the seam.
+    /// task before its single await, and the two observations are the same property on either side of
+    /// the seam.
     /// </summary>
     // ReSharper disable once UnusedParameter.Global // The token is the lane's cancellation channel; an adapter that sends without it still has to accept it.
     ValueTask<LaneSendResult> SendAsync(ReadOnlyMemory<byte> payload, CancellationToken cancellationToken);
