@@ -12,8 +12,8 @@ Checks, in the order of the task's acceptance criteria:
 
 Run from the repo root:
 
-    python3 .trellis/tasks/10-09-spec-revision/research/verify-specs.py
-    python3 .trellis/tasks/10-09-spec-revision/research/verify-specs.py --doc backend/udp-relay.md
+    python3 .trellis/tasks/archive/2026-10/10-09-spec-revision/research/verify-specs.py
+    python3 .trellis/tasks/archive/2026-10/10-09-spec-revision/research/verify-specs.py --doc backend/udp-relay.md
 
 Exit code is 0 only when every check passes. `--doc` narrows the identifier and language
 checks to one document (size/link/structure checks always cover the whole library).
@@ -27,7 +27,10 @@ import re
 import subprocess
 import sys
 
-ROOT = pathlib.Path(__file__).resolve().parents[4]
+# The harness lives under .trellis/tasks/**, but at which depth depends on whether the task is
+# still active or has been archived, so the repo root is found by walking up to the directory that
+# owns .trellis rather than by counting parents.
+ROOT = next(p for p in pathlib.Path(__file__).resolve().parents if (p / ".trellis").is_dir())
 SPEC = ROOT / ".trellis" / "spec"
 
 MAX_DOC_LINES = 400

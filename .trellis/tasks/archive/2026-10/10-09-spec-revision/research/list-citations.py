@@ -11,8 +11,8 @@ Prints, grouped by citing file:
   - spec-document citations in code comments (excluding the frozen benchmarks/results records)
 
 Usage, from the repo root:
-    python3 .trellis/tasks/10-09-spec-revision/research/list-citations.py
-    python3 .trellis/tasks/10-09-spec-revision/research/list-citations.py --code-only
+    python3 .trellis/tasks/archive/2026-10/10-09-spec-revision/research/list-citations.py
+    python3 .trellis/tasks/archive/2026-10/10-09-spec-revision/research/list-citations.py --code-only
 """
 
 from __future__ import annotations
@@ -22,7 +22,10 @@ import pathlib
 import re
 import subprocess
 
-ROOT = pathlib.Path(__file__).resolve().parents[4]
+# The harness lives under .trellis/tasks/**, but at which depth depends on whether the task is
+# still active or has been archived, so the repo root is found by walking up to the directory that
+# owns .trellis rather than by counting parents.
+ROOT = next(p for p in pathlib.Path(__file__).resolve().parents if (p / ".trellis").is_dir())
 SPEC = ROOT / ".trellis" / "spec"
 DOCS = sorted(p.name for p in SPEC.rglob("*.md") if p.name != "index.md")
 DOC_PATTERN = "|".join(re.escape(name) for name in DOCS)
