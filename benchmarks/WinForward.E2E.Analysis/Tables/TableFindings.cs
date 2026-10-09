@@ -8,7 +8,7 @@ using WinForward.E2E.Analysis.Model;
 namespace WinForward.E2E.Analysis.Tables;
 
 /// <summary>
-/// §0, "Correctness findings": the severity counts, the three tables that show a reader what went wrong
+/// "Correctness findings": the severity counts, the three tables that show a reader what went wrong
 /// rather than how fast it went, and the whole finding list grouped by severity.
 /// </summary>
 /// <remarks>

@@ -6,9 +6,9 @@ using Xunit;
 namespace WinForward.Runtime.TcpRedirect.Tests;
 
 /// <summary>
-/// R2: the store is the single teardown authority. DisposeAsync is single-flight and, once it has
-/// begun, a late teardown or fail-closed release must not re-enter — no second relay release, no
-/// second session, no second tombstone.
+/// The store is the single teardown authority. DisposeAsync is single-flight and, once it has begun,
+/// a late teardown or fail-closed release must not re-enter — no second relay release, no second
+/// session, no second tombstone.
 /// </summary>
 public sealed class TcpRedirectSessionStoreTests
 {

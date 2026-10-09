@@ -4,10 +4,10 @@ using Xunit;
 namespace WinForward.NdisApi.Tests;
 
 /// <summary>
-/// ABI-layer tests of the batched send request construction (task 08-30-batched-ioctls S3).
-/// The native send calls themselves need ndisapi.dll and stay on the Windows path; these tests
-/// pin the host-agnostic contract: the chunk-size budget derivation and the exact
-/// ETH_M_REQUEST header/slot layout that <see cref="NdisApiDriver"/> sends to the driver.
+/// ABI-layer tests of the batched send request construction. The native send calls themselves need
+/// ndisapi.dll and stay on the Windows path; these tests pin the host-agnostic contract: the
+/// chunk-size budget derivation and the exact ETH_M_REQUEST header/slot layout that
+/// <see cref="NdisApiDriver"/> sends to the driver.
 /// </summary>
 public sealed class NdisApiBatchedSendAbiTests
 {

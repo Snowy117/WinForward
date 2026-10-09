@@ -108,9 +108,9 @@ public sealed class AdapterScopeAndFlowTableTests
     [Fact]
     public void AdapterScopeFailsWhenAdapterIdAndAdapterNameResolveToDifferentAdapters()
     {
-        // Design §3: an ID/name selector must resolve to the same current adapter. A rule whose
-        // adapterId and adapterName point at different adapters can never match (AND semantics) and
-        // is a startup error, not a silent fallback.
+        // An ID/name selector must resolve to the same current adapter. A rule whose adapterId and
+        // adapterName point at different adapters can never match (AND semantics) and is a startup
+        // error, not a silent fallback.
         var adapters = new[]
         {
             new WindowsAdapter("id-a", "Ethernet", "a", 1, 1),

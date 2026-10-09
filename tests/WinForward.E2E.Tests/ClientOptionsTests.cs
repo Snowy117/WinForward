@@ -4,9 +4,9 @@ using Xunit;
 namespace WinForward.E2E.Tests;
 
 /// <summary>
-/// The client's argument surface (D2/D6, and the operator-typo case behind D14.23's leading-dash
-/// rule). These are the checks that run before any plan is read, so a rejected argument can only be
-/// a usage error.
+/// The client's argument surface, including the leading-dash refusal an operator typo provokes.
+/// These are the checks that run before any plan is read, so a rejected argument can only be a
+/// usage error.
 /// </summary>
 public sealed class ClientOptionsTests
 {

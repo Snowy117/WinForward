@@ -8,12 +8,12 @@ using Xunit;
 namespace WinForward.E2E.Tests;
 
 /// <summary>
-/// The resource sampler's two records are part of the contract (D12/D14.16): a <c>sample</c> record has
-/// three shapes -- the sampler's own process, a named process that matched, and a named process that
+/// The resource sampler's two records are part of the contract: a <c>sample</c> record has three
+/// shapes -- the sampler's own process, a named process that matched, and a named process that
 /// matched nothing -- and <c>samplerError</c> has one. Every key of all four is declared by
-/// <see cref="ArmKeys.Sample"/> (with <c>type</c> and <c>arm</c> from the shared record root), and the
-/// records here are published through the production writer, so the shapes compared are the shapes an
-/// arm's file receives.
+/// <see cref="ArmKeys.Sample"/> (with <c>type</c> and <c>arm</c> from the shared record root), and
+/// the records here are published through the production writer, so the shapes compared are the
+/// shapes an arm's file receives.
 /// </summary>
 public sealed class SampleRecordShapeTests
 {
