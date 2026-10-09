@@ -104,13 +104,23 @@ if (_selfTraffic.IsWildcardOwned(packet.Context)) return DispatchSlowAsync(packe
 ## Sequence trackers are atomic, not locked
 
 `TcpRedirectAssociation`'s two trackers are `long` (−1 = unobserved) written by a CAS-max loop over
-the unchanged wrap-aware `IsSequenceAhead` predicate and read with `Volatile.Read`. The association
-holds no reference-typed instance field (no `Lock`), so a redirected forward+reverse packet pair
-takes **zero** gate entries and no per-association lock allocation; the cold RST readers tolerate a
-weakly consistent value by construction. Facts: `RedirectPacketTakesZeroSequenceGateEntries`,
+the unchanged wrap-aware `IsSequenceAhead` predicate and read with `Volatile.Read`; the client
+acknowledgement tracker (`TrackClientAck` → `ObserveClientAck`) follows the same shape. The
+association holds exactly **one** reference-typed instance field: the close drain's completion cell,
+allocated once per clean end and null while no drain is armed. A redirected forward+reverse packet
+pair therefore still takes **zero** gate entries and no per-association lock or per-packet allocation;
+the cold RST readers and the drain tolerate a weakly consistent value because it only ever moves
+forward inside the comparison window. Facts: `RedirectPacketTakesZeroSequenceGateEntries`,
 `TcpRedirectAssociationHoldsNoLockField`, `ConcurrentSequenceObservationsKeepTheLargerValue`,
-`UnobservedTrackerReadsNullAndObservedZeroReadsZero`. The redirect shapes that write these trackers
-are [tcp-redirect-transform.md](./tcp-redirect-transform.md); the close paths that read them are
+`UnobservedTrackerReadsNullAndObservedZeroReadsZero`. The two reflection facts assert the field form
+rather than a lock absence — exactly one non-value-type field (the drain completion cell), null on a
+fresh association (`SequenceTrackerTests.TcpRedirectAssociationHoldsNoLockField` and
+`PacketPathWalkCountTests.RedirectPacketTakesZeroSequenceGateEntries`) — and the structural zero-gate
+proof is the measured warm composition
+`TcpRedirectWarmPathGateTests.TcpRedirectWarmPacketTakesZeroGateEntriesAndZeroClockReads`: a real
+forward packet carrying the ACK tracker takes 0 gate entries, 0 clock reads and 0 reverse probes, and
+the reverse packet adds exactly 1 reverse probe. The redirect shapes that write these trackers are
+[tcp-redirect-transform.md](./tcp-redirect-transform.md); the close paths that read them are
 [tcp-client-close-injection.md](./tcp-client-close-injection.md).
 
 ## The activity bucket

@@ -44,7 +44,7 @@ The zero-allocation pipeline: what a packet is made of, what it may cost, and ho
 |-------|-------------|
 | [TCP Local Redirect](./tcp-local-redirect.md) | **Hub.** The redirect pipeline, the two wire shapes, the cross-cutting invariants |
 | [Redirect Transform](./tcp-redirect-transform.md) | The host IP-swap transform, the forwarded DNAT-to-local shape, the reverse hook, mid-flow data, accept-loop identity |
-| [Client Close Injection](./tcp-client-close-injection.md) | The RST\|ACK and FIN\|ACK shapes, their sequences, and what a failed injection does |
+| [Client Close Injection](./tcp-client-close-injection.md) | The abnormal-end RST\|ACK shape, its sequences, the clean-end close drain, and what a failed injection does |
 | [SYN Setup Admission](./tcp-syn-setup-admission.md) | The pump-side fast paths, the capacity gate and its RST, the bounded pending-SYN index, the setup cooldown |
 | [Redirect Teardown Grace](./tcp-redirect-teardown-grace.md) | The atomic retire, the TIME_WAIT tombstone, late-packet consumption, held flows under idle expiry |
 | [Relay Lifecycle](./tcp-relay-lifecycle.md) | How a relay pump ends, fault observation, the stall window, dispose ordering and single-flight |

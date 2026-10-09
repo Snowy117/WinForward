@@ -1,7 +1,8 @@
-# TCP Client-Visible Close Injection
+# TCP Client-Visible Close: Abort Injection and Clean-End Drain
 
-> How WinForward ends a client-visible connection it owns: the RST|ACK and FIN|ACK
-> shapes, how their sequences are derived, which end produces which, and what a failed injection does.
+> How WinForward ends a client-visible connection it owns: the crafted RST|ACK that aborts an
+> abnormal end, the bounded drain that carries a clean end's real FIN, how their sequences are
+> derived, and what a failed injection does.
 > Read it when you change `ClientResetInjector`, `TcpResetBuilder`, `TcpResetCooldownTable`, a sequence
 > tracker, the acceptor's relay-end handling, or any teardown path whose client must see a close. Part
 > of the TCP local-redirect family; the hub
@@ -10,30 +11,25 @@
 > `Faulted`, and what `Completion` means — is in
 > [tcp-relay-lifecycle.md](./tcp-relay-lifecycle.md).
 
-## The two shapes
+## The abort shape (RST|ACK)
 
-Both are crafted by `TcpResetBuilder` from the association's recorded client-SYN template: the Ethernet
+`TcpResetBuilder` crafts the abort from the association's recorded client-SYN template: the Ethernet
 header is mirrored with the addresses swapped, and everything at L3/L4 is built fresh with its own
-checksums, so the frame never depends on parser or rewrite state. Both are header-only
+checksums, so the frame never depends on parser or rewrite state. It is header-only
 (`MaxResetFrameLength` = 74 B for IPv6).
 
 | Frame | Flags | Sequence | Acknowledgement | Meaning |
 |---|---|---|---|---|
 | Abort | RST\|ACK, `0x14` | `ServerNextSeq ?? serverInitialSeq + 1` | `ClientNextSeq ?? clientInitialSeq + 1` | The connection ends abnormally: relay setup failed, the relay stalled or faulted, a fragment hit an associated flow, or an injection failed. |
-| Close | FIN\|ACK, `0x11` | `serverInitialSeq + 1 + ServerStreamBytes` when the delivered count is known, otherwise `ServerNextSeq ?? serverInitialSeq + 1` | `ClientNextSeq ?? clientInitialSeq + 1` | The relay ended cleanly. |
 
-`ClientResetInjector.TryInjectClientResetAsync` builds the abort and `TryInjectClientCloseAsync` the
-close; a relay-less caller uses the association-level overloads. The abort acknowledges the client's
-tracked progress so it stays in-window (RFC 5961) after a slow relay setup; a stale `ISN + 1` is
-out-of-window once the client has sent data and the stack silently discards the reset, producing the
-slow-EOF symptom. The **delivered byte count wins for the close's sequence**: `ServerStreamBytes` is
-counted per successful write to the client-facing socket, while the packet-path tracker can lag the
-capture pipeline and also counts the SYN-ACK and the client-facing socket's own FIN, either of which
-would place the FIN past the client's receive sequence — a FIN the client queues forever. Degradation is
-uniform: no SYN template, or an unobserved initial sequence number, means nothing is injected and the
-teardown is plain (the client then observes the failure on its own retransmission timeout).
+`ClientResetInjector.TryInjectClientResetAsync` builds the abort; a relay-less caller uses the
+association-level overload. The abort acknowledges the client's tracked progress so it stays in-window
+(RFC 5961) after a slow relay setup; a stale `ISN + 1` is out-of-window once the client has sent data
+and the stack silently discards the reset, producing the slow-EOF symptom. Degradation is uniform: no
+SYN template, or an unobserved initial sequence number, means nothing is injected and the teardown is
+plain (the client then observes the failure on its own retransmission timeout).
 
-## Sequence tracking (F4, 2026-09-30)
+## Sequence and acknowledgement tracking (F4, 2026-09-30)
 
 `TcpRedirectAssociation` observes both directions at the two pre-rewrite points, wrap-aware and
 advance-only: two `long` fields (`-1` = unobserved, so `0xFFFFFFFF` stays a legal tracked value) written
@@ -49,38 +45,63 @@ span-taking twin kept adjacent as the oracle); the private `TryReadTcpSequenceAd
 would otherwise be counted as payload. New observation sites must read the frame **before** the rewrite
 (original bytes) and synchronously (a span must not cross an `await`).
 
-## Every relay end injects its client-visible close before the retire
+`TrackClientAck` extends the same shape to the forward leg's ACK field and feeds the close drain
+through `ObserveClientAck`, which keeps `ClientAckMax` as an advance-only serial maximum. It requires
+the ACK control bit (`0x10`) before reading, so a SYN's zero field is never tracked as an
+acknowledgement — a tracked zero would cover a drain target in the upper half of the serial space and
+end a drain before the close was acknowledged. It runs on the forward data path
+(`ReinjectExistingFlowDataAsync`), not only while draining, because the client can acknowledge a FIN
+piggybacked on its own FIN before the drain arms. It is exposed as the same `PacketLayout` overload
+plus span-taking twin as the sequence trackers.
 
-This is the relay-end section: `TcpRedirectAcceptor.ObserveRelayCompletionAsync` runs
-`InjectClientVisibleCloseAsync` **before** `tearDownSession`, while the association still holds the SYN
-template and the trackers. `RelayEndKind.Stalled` and `Faulted` get the RST|ACK; `CleanEnded` gets the
-FIN|ACK. A relay that does not implement `ITcpRelayEndInfo` is treated as `CleanEnded`.
+## A clean end drains the close handshake instead of injecting a FIN
 
-- **The clean-end FIN is not left to the socket close.** `TcpProxyRelay.RunPumpAsync` closes the
-  client-facing socket as it returns, i.e. in the same instant `Completion` completes, so the socket's own
-  FIN races the retire that releases the reverse index and arms the tombstone. A client that half-closed
-  (`shutdown(SD_SEND)`) has already ended the read direction, so the race normally loses and the client
-  observes **no end of stream at all** — measured 545 of 601 half-closing attempts at the time of the fix,
-  hanging to the client's own 10 s timeout with no FIN, no RST and no truncation (task
-  10-06-tcp-half-close-fidelity, 2026-10-06).
-- **Ordering and containment.** Reset → teardown (the injector reads live-association state, matching the
-  `HandleRelaySetupFailureAsync` precedent); a close-injection failure warns (rate-limited, per kind) but
-  never blocks the teardown, and the whole completion tail is wrapped so nothing escapes the
-  fire-and-forget task. An `OperationCanceledException` on an externally cancelled (retired) session
-  returns early without injecting.
-- **Locked by** `TcpRelayEndCloseTests` (clean end → FIN|ACK sequenced from the delivered byte count,
-  injected before the teardown; end-info-less relay → FIN|ACK sequenced from the trackers; unobserved
-  sequences → nothing injected; fault/stall → RST|ACK with seq/ack from the advanced trackers, not
-  `ISN+1`; real-relay `EndKind` on all three terminal paths, including
-  `RelayEndKindIsStalledWhenPumpStalls`) and `TcpProxyRelayTests.RelayReportsTheServerStreamBytesItWroteToTheClient`.
-- **Residual (state of the current code).** The close is injected exactly once; the retire that follows it
-  is immediate, and once the alias is gone neither the crafted close, nor the socket's own FIN, nor any
-  unacknowledged tail data can be retransmitted — a close packet dropped at the client is lost for good
-  (the parent task's arm evidence: 23 of 1201 four-mode attempts and 50 of 601 single-mode `halfClose`
-  attempts still hung, with the close injected exactly once and no injection-path warning). **The redesign
-  is active in task `10-07-tcp-close-drain`** — a bounded drain that keeps the alias alive until the
-  client acknowledges the close. Until that lands, this document states the immediate-retire contract and
-  does not describe the drain.
+A clean end needs no crafted packet. `TcpProxyRelay.RunPumpAsync`'s graceful socket close makes MSTCP
+emit the real FIN — in order behind everything the relay delivered, on the stack's own retransmission
+timer — and the only thing that must outlive the relay is the alias that resolves the client's
+acknowledgement and any retransmitted FIN. The drain moves the session lifetime, not a packet.
+
+- **Trigger and order.** `TcpRedirectAcceptor.ObserveRelayCompletionAsync` drains only
+  `RelayEndKind.CleanEnded`: `DrainCleanEndAsync` computes the target, disposes the relay, calls
+  `ArmDrainAsync`, waits, and only then runs the retire. The disposal precedes the arm because it
+  releases the upstream and control sockets when the handshake starts rather than after it; the FIN
+  itself is already emitted by the pump's own socket close, before `Completion` completes. Disposal is
+  single-flight, so the store's later release joins the acceptor's teardown instead of repeating it.
+- **The target is computed, not observed.** `TryComputeDrainTargetAck` needs all three inputs and
+  derives `association.ServerInitialSeq + 2 + ServerStreamBytes`: the listener-side ISN (recorded from
+  the reverse SYN-ACK), one for that SYN-ACK and one for the FIN, and the bytes the relay delivered to
+  the client-facing socket — together, the acknowledgement that covers the close. Any unknown input
+  degrades uniformly — no recorded SYN template, no listener-side ISN, or a relay without
+  `ITcpRelayEndInfo` — to no drain and an immediate retire.
+- **The arm publishes one target and one completion cell.** `ArmDrainAsync` is single-flight per
+  association: the first caller wins the target and every later caller joins the first cell. The
+  association enters `RelayPhase.Draining` while the handshake is in flight; the data path never gates
+  on the phase, so a straggler still resolves through the live alias to this association and arms no
+  setup.
+- **Three exits, one event.** The wait ends as `acknowledged` when `ClientAckMax` covers the target
+  (rechecked at arm time, so an acknowledgement that arrived before the arm exits with no wait), as
+  `deadline` when the 5 s default elapses (`TcpRedirectAcceptor`, injectable for tests, no
+  configuration surface), and as `retired` when the session token is cancelled because another retire
+  path won. `tcp.redirect.drain` records the association, both endpoints, `Outcome` and `ElapsedMs`
+  at Debug.
+- **The retire is untouched.** The drain delays *when* the store's atomic critical section runs, never
+  splits it: session-dict removal, `Phase = Closing`, lifetime cancel, alias removal and tombstone
+  arming stay one step inside the store gate. Order is resolve-then-retire, never the reverse — the
+  drain's stragglers consume the live alias, and only what arrives after the retire hits the tombstone.
+- **Locked by** `TcpCloseDrainTests` — `CleanEndInjectsNoCraftedPacketAndDrainsUntilTheClientAcknowledges`
+  (nothing is crafted from the SYN template; dispose → drain → retire),
+  `CleanEndDrainsUntilTheClientAcknowledgesThenRetires`
+  (dispose before the wait, retire only after the acknowledgement),
+  `CleanEndWithoutAnAcknowledgementRetiresAtTheDeadline`,
+  `CleanEndWithoutObservedSequencesRetiresImmediatelyWithoutADrain`,
+  `CleanEndWithoutEndInfoRetiresImmediatelyWithoutADrain`, `TheRetireNeverPrecedesTheDrainExit`,
+  `AStragglerDuringTheDrainResolvesToTheSameAssociationAndArmsNoSetup`,
+  `AForwardAckThatCoversTheCloseCompletesTheArmedDrain`, `ArmingADrainNeverRewritesAClosingPhase`,
+  `AnotherRetirePathEndsTheDrainImmediately`, `APiggybackedAcknowledgementEndsTheDrainWithoutWaiting`,
+  and `ClientAckTrackingIsAdvanceOnlyWrapsAndIgnoresFramesWithoutTheAckFlag` — plus the retained RST
+  facts `TcpRelayEndCloseTests.FaultedRelayEndInjectsInWindowClientResetBeforeTeardown` /
+  `StalledRelayEndInjectsClientResetBeforeTeardown` and
+  `TcpProxyRelayTests.RelayReportsTheServerStreamBytesItWroteToTheClient` for the target's byte input.
 
 ## Relay setup failure resets the client (fixed 2026-08-14)
 

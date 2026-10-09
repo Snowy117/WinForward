@@ -21,8 +21,10 @@ enum is internal, so it lives on a separate capability interface rather than on 
 first classification write (for example during `NetworkStream`/CTS construction) must still surface as a
 client reset, so `CleanEnded` is assigned only explicitly, after both pumps verifiably completed (caught in
 review 2026-08-30). `ServerStreamBytes` is the server→client delivered byte count, read with `Volatile.Read`.
-The acceptor turns the kind into the client-visible close (RST|ACK for a non-clean end, FIN|ACK for a clean
-one) as described in [tcp-client-close-injection.md](./tcp-client-close-injection.md).
+The acceptor turns the kind into the client-visible close: a crafted RST|ACK for a non-clean end, and for a
+clean one the bounded drain — the relay is released, the stack's own FIN is carried by the live alias, and
+the retire waits for the client's acknowledgement — described in
+[tcp-client-close-injection.md](./tcp-client-close-injection.md).
 
 ## Pump result classification
 
@@ -78,6 +80,9 @@ drain → `ObserveCompletionAsync()`.
   the claim is an explicit `Interlocked` flag rather than a scope query.
 - **A late caller does not observe the claimant's teardown fault** — it joins only the drain, then observes
   `Completion`.
+- **On a clean end the acceptor's drain is the first caller.** It disposes the relay before the retire, and
+  the store's later release joins that single-flight teardown instead of owning it: the same D11 shape with
+  one caller earlier, so no socket is disposed twice and no `tcp.redirect.closed` record repeats.
 
 ## Setup admission is a bool, not an exception
 
@@ -96,7 +101,8 @@ disposal is a no-op through the `IsSealed` gate.
 ## The accept loop owns the session lifetime
 
 - `TcpRedirectAcceptor.RunAcceptLoopAsync` awaits **both** terminal steps in order —
-  `ObserveRelayCompletionAsync` (which injects the client-visible close, then tears the session down) and
+  `ObserveRelayCompletionAsync` (which delivers the client-visible close — the crafted RST for an
+  abnormal end, the bounded drain for a clean one — and then tears the session down) and
   `DrainRedundantConnectionsAsync` — with no `_ =` discards. The loop owns
   `session.DisposeLifetimeAsync()`, so `session.AcceptLoop` spans the whole session lifetime and the
   store's `await session.AcceptLoop` in `DisposeCoreAsync` is a true quiescence wait.

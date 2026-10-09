@@ -22,7 +22,7 @@
 | Rewrite | The forward leg is reshaped in place or into a pooled stage: host shape swaps addresses, forwarded shape moves only the destination. Sequence trackers read the **pre-rewrite** bytes. | [tcp-redirect-transform.md](./tcp-redirect-transform.md) |
 | Inject and accept | The rewritten frame is injected toward the listener (immediate on the setup path, deferred to the iteration-end lane flush on the data legs); the accept loop validates the peer and establishes the SOCKS5 relay. | [tcp-redirect-transform.md](./tcp-redirect-transform.md), [tcp-relay-lifecycle.md](./tcp-relay-lifecycle.md) |
 | Relay | Two pumps copy bytes in both directions under one scope-owned lifetime and a 30-minute stall window; the reverse leg is reversed back to the client. | [tcp-relay-lifecycle.md](./tcp-relay-lifecycle.md) |
-| Close | Every relay end injects the client-visible close — RST\|ACK for `Stalled`/`Faulted`, FIN\|ACK for `CleanEnded` — while the association still holds the SYN template and its trackers. | [tcp-client-close-injection.md](./tcp-client-close-injection.md) |
+| Close | The relay end delivers the client-visible close: a crafted RST\|ACK for `Stalled`/`Faulted`, and for `CleanEnded` a bounded drain that releases the relay, keeps the alias live until the client acknowledges the stack's own FIN, then retires. | [tcp-client-close-injection.md](./tcp-client-close-injection.md) |
 | Retire | The session retires under the store gate: session-dict removal, table-alias removal and tombstone arming in one critical section, then the disposals trail. | [tcp-redirect-teardown-grace.md](./tcp-redirect-teardown-grace.md) |
 
 ## The two wire shapes
@@ -42,8 +42,10 @@ always returns to where the flow came from.
 - **A proxy-selected flow is never silently passed.** Every setup failure fails closed (`Blocked`) or
   is surfaced client-visibly; the reverse hook runs before flow-table lookup and policy so a reverse
   packet is never re-evaluated as a new client flow.
-- **Every relay end injects its client-visible close before the retire.** The association is still
-  complete when the close is crafted; see [tcp-client-close-injection.md](./tcp-client-close-injection.md).
+- **A relay end does not retire until its client-visible close has landed.** An abnormal end injects
+  the crafted RST|ACK before the retire; a clean end releases the relay, arms a bounded drain on the
+  acknowledgement that covers the stack's FIN, and retires when it lands, when the deadline elapses, or
+  when another teardown path wins; see [tcp-client-close-injection.md](./tcp-client-close-injection.md).
 - **One atomic retire arms the grace window.** Session-dict removal, table-alias removal and tombstone
   arming happen in one store-gate critical section, and every teardown path funnels through the single
   tombstone write point; see [tcp-redirect-teardown-grace.md](./tcp-redirect-teardown-grace.md).
@@ -72,7 +74,7 @@ why the failure first showed on the public-profile WLAN host path (hardware-veri
 | Read it when you are changing… | Document |
 |---|---|
 | The frame shape, the reverse hook, mid-flow data legs, deferred injection, redundant accepts, forwarded DNAT, the IPv6-zone peer rule | [tcp-redirect-transform.md](./tcp-redirect-transform.md) |
-| The client-visible close: RST\|ACK/FIN\|ACK shapes, their sequences, capacity resets, fragment teardown, injection-failure exits, the relay-end close contract | [tcp-client-close-injection.md](./tcp-client-close-injection.md) |
+| The client-visible close: the abnormal-end RST\|ACK shape, its sequences, the clean-end drain's target and exits, capacity resets, fragment teardown, injection-failure exits | [tcp-client-close-injection.md](./tcp-client-close-injection.md) |
 | Admitting a new SYN: pump fast paths, the capacity gate, the bounded pending index, the setup executor and cooldown | [tcp-syn-setup-admission.md](./tcp-syn-setup-admission.md) |
 | What happens after a redirect retires: the single tombstone write point, atomic retire, grace consumption, the flow-hold predicate, the warm reverse probe | [tcp-redirect-teardown-grace.md](./tcp-redirect-teardown-grace.md) |
 | The relay and store lifetime: pump result classification, `EndKind`, the stall window, dispose ordering and single-flight, setup leases, the accept loop's lifetime | [tcp-relay-lifecycle.md](./tcp-relay-lifecycle.md) |
@@ -101,7 +103,7 @@ were template scaffolding; their content is in the child named for the topic.
 | "Fragments on associated flows" | [tcp-client-close-injection.md](./tcp-client-close-injection.md) |
 | "Faulted relay completions must be observed (S3)" | Deleted: the `ContinueWith` observer is gone; the surviving rule is in [tcp-relay-lifecycle.md](./tcp-relay-lifecycle.md). |
 | "Mid-flow relay fault/stall must reset the client" | [tcp-client-close-injection.md](./tcp-client-close-injection.md), [tcp-relay-lifecycle.md](./tcp-relay-lifecycle.md) |
-| "Every end injects its client-visible close before the retire" | [tcp-client-close-injection.md](./tcp-client-close-injection.md) (same heading) |
+| "Every end injects its client-visible close before the retire" | [tcp-client-close-injection.md](./tcp-client-close-injection.md) (its contract now lives in "The abort shape (RST\|ACK)" and "A clean end drains the close handshake instead of injecting a FIN") |
 | "New-flow SYN setup never blocks the capture pump" | [tcp-syn-setup-admission.md](./tcp-syn-setup-admission.md) |
 | "SOCKS5 control-socket timeout lifecycle" | [tcp-relay-lifecycle.md](./tcp-relay-lifecycle.md) |
 | "Deployment: Windows Firewall inbound rule is required" | this hub, "Deployment prerequisite" |

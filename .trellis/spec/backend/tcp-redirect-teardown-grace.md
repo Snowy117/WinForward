@@ -6,7 +6,8 @@
 > `TcpRedirectTable`'s removal or resolve paths, `TcpProxyCoordinator.HoldsFlow`, or the idle sweeper's
 > leg order. Part of the TCP local-redirect family; the hub
 > [tcp-local-redirect.md](./tcp-local-redirect.md) has the pipeline overview, the cross-cutting
-> invariants and the topic map. The close frame a relay end injects *before* its retire is
+> invariants and the topic map. The close a relay end delivers *before* its retire — the crafted RST for
+> an abnormal end, the bounded drain of the stack's FIN for a clean one — is
 > [tcp-client-close-injection.md](./tcp-client-close-injection.md)'s; the store's quiescence scope and
 > dispose ordering are [tcp-relay-lifecycle.md](./tcp-relay-lifecycle.md)'s.
 
@@ -30,7 +31,7 @@
   global dispose — funnels through `TcpRedirectSessionStore.RemoveAssociationFromTable`, the only caller
   of `TcpRedirectTable.TryRemove`, and that point writes the tombstone in the same table critical section
   as the removal (grace `s_tombstoneGracePeriod` = 60 s, owned by `TcpRedirectSessionStore`; it covers the
-  client's final ACK and common FIN retransmissions without parking entries for a full 240 s TIME_WAIT).
+  client's post-retire ACK and common FIN retransmissions without parking entries for a full 240 s TIME_WAIT).
   Any new teardown path must go through it.
 - **Atomic retire (task 08-30-atomic-retire, 2026-08-30).** `RetireSessionUnderGate` performs the
   session-dictionary removal, `Phase = Closing`, `Retire()`, the table alias removal **and** the tombstone
@@ -106,8 +107,8 @@
 
 ## Good/Base/Bad
 
-- Good: the client's final ACK after relay completion hits the tombstone and is consumed — no RST bounces
-  from the real server.
+- Good: a post-retire straggler — a retransmitted FIN, or an ACK that missed the clean-end drain — hits
+  the tombstone and is consumed, so no RST bounces from the real server.
 - Base: a packet for a connection torn down 90 s ago (grace lapsed) passes as `NotRelevant`, the same as
   pre-capture traffic.
 - Bad: reusing `Blocked` for grace drops (mislabels a grace consume as proxy-unavailable); holding flows by

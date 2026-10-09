@@ -85,7 +85,7 @@ dispatched by a capture pump and its lease never materialized, the rewrite runs 
 itself** and the slot is queued — no pool rental, no frame copy; every other shape (a materialized lease,
 or the setup worker's reconstructed packet, which carries no native slot) keeps the rented pooled stage
 and takes an immediate single send. **The deferred lane carries data frames only.** Every
-`ClientResetInjector` reset — the relay-end/FIN close, the capacity reset, the fragment-teardown reset and
+`ClientResetInjector` reset — the relay-end abort, the capacity reset, the fragment-teardown reset and
 the injection-failure reset — is an immediate single send issued during dispatch, so it can never be
 overtaken by a batched data frame of the same iteration. The SYN setup injection is also an immediate
 single send, but it is issued by the **background setup worker**
@@ -104,7 +104,7 @@ A client SYN carrying data (TFO, RFC 7413) rides the exact same redirect pipelin
 and `TcpProxyCoordinator.HandlePacketAsync` routes every SYN into `HandleSynAsync`. No extra support is
 needed: the forward-leg rewrite is an RFC 1624 incremental update over addresses/ports only (payload
 bytes are never touched), `TcpSequenceObservation` counts SYN data in the sequence advance
-(`payloadLen + SYN + FIN`, from the IP-derived transport length), the close templates are header-only, and
+(`payloadLen + SYN + FIN`, from the IP-derived transport length), the reset templates are header-only, and
 the non-TFO local listener stack queues or drops the SYN data, after which the client retransmits it
 post-handshake (RFC 7413 graceful degradation) — the relay sees a normal stream either way. Blocking
 data-bearing SYNs (the pre-2026-09-06 payload-discriminating fast path) only blackholed TFO clients: the
