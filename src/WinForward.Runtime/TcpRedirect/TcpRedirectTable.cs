@@ -51,8 +51,8 @@ public sealed class TcpRedirectAssociation
     public nint OriginAdapterHandle { get; }
     public Endpoint TranslatedListenerTuple { get; }
     /// <summary>
-    /// The adapter-local DNAT destination for forwarded flows. Stored raw (hot-path contract 1)
-    /// because the per-packet rewrite consumes it directly; null selects the host IP-swap shape.
+    /// The adapter-local DNAT destination for forwarded flows. Stored raw because the per-packet
+    /// rewrite consumes it directly; null selects the host IP-swap shape.
     /// </summary>
     public IPAddressValue? ForwardLocalAddress { get; }
     public Endpoint ReverseSourceEndpoint { get; }
@@ -203,7 +203,7 @@ public sealed class TcpRedirectTable
     private readonly Lock _sweepGate = new();
     private readonly List<TcpRedirectAssociation> _expiredScratch = [];
     private readonly int _capacity;
-    // X1: reference count per listener port. A reverse candidate's source port is always a live
+    // Reference count per listener port. A reverse candidate's source port is always a live
     // listener port, so a zero count proves the packet cannot match the reverse index. Mutations
     // run under _gate with Interlocked ops; consults are lock-free Volatile reads safe for the
     // per-packet warm path.
@@ -311,13 +311,13 @@ public sealed class TcpRedirectTable
             _byReverse.Add(new ReverseRedirectTuple(created.ReverseSourceEndpoint, created.ReverseDestinationEndpoint), created);
             // Last writer wins when several associations share an address pair: a fragment
             // carries no ports, so attribution is inherently ambiguous there and the newest
-            // claim is the best guess (S1).
+            // claim is the best guess.
             _byAddressPair[NormalizeAddressPair(originalKey.Local.Address, originalKey.Remote.Address)] = created;
             Volatile.Write(ref _warmReverse[ReverseSlot(created.ReverseSourceEndpoint, created.ReverseDestinationEndpoint)], created);
             Volatile.Write(ref _warmOriginal[OriginalSlot(originalKey)], created);
-            // X1: the count rises inside the claim gate before the caller can rewrite and inject
-            // the SYN, so the listener's first reverse candidate (the SYN-ACK) can never arrive
-            // before its port is observable on the warm path.
+            // The count rises inside the claim gate before the caller can rewrite and inject the
+            // SYN, so the listener's first reverse candidate (the SYN-ACK) can never arrive before
+            // its port is observable on the warm path.
             Interlocked.Increment(ref _candidatePorts[translatedTuple.Port]);
             association = created;
             return true;
@@ -359,7 +359,7 @@ public sealed class TcpRedirectTable
     }
 
     /// <summary>
-    /// Whether any live association's listener occupies <paramref name="port"/> (the X1 warm-path
+    /// Whether any live association's listener occupies <paramref name="port"/> (the warm-path
     /// prefilter). A reverse candidate's source port is always a listener port — the reference count
     /// rises in <see cref="TryClaim"/> in the same hold that adds the reverse index entry, and falls in
     /// the same hold that removes it — so a miss proves the packet cannot match the reverse index; a hit
@@ -398,10 +398,10 @@ public sealed class TcpRedirectTable
 
     /// <summary>
     /// Resolves an association whose original flow endpoints match the given IP address pair in
-    /// either orientation — the fragment match (S1): a non-first IP fragment carries no ports,
-    /// so the address pair is the finest key it can be attributed by. When several associations
-    /// share the pair, the most recently claimed one wins (see <see cref="TryClaim"/>). A
-    /// mixed-family pair never matches: a flow's endpoints always share one family.
+    /// either orientation — the fragment match: a non-first IP fragment carries no ports, so the
+    /// address pair is the finest key it can be attributed by. When several associations share the
+    /// pair, the most recently claimed one wins (see <see cref="TryClaim"/>). A mixed-family pair
+    /// never matches: a flow's endpoints always share one family.
     /// </summary>
     public bool TryResolveByAddressPair(IPAddressValue first, IPAddressValue second, DateTimeOffset now, out TcpRedirectAssociation? association)
     {
@@ -455,8 +455,8 @@ public sealed class TcpRedirectTable
         _byReverse.Remove(new ReverseRedirectTuple(association.ReverseSourceEndpoint, association.ReverseDestinationEndpoint));
         RemoveAddressPairUnderGate(association);
         association.ReleaseOriginalSynTemplate();
-        // X1: released under the same gate as the index removal; the caller's ReferenceEquals guard
-        // makes idempotent removals a no-op here, so the count never double-decrements.
+        // Released under the same gate as the index removal; the caller's ReferenceEquals guard makes
+        // idempotent removals a no-op here, so the count never double-decrements.
         Interlocked.Decrement(ref _candidatePorts[association.TranslatedListenerTuple.Port]);
         var reverseSlot = ReverseSlot(association.ReverseSourceEndpoint, association.ReverseDestinationEndpoint);
         if (ReferenceEquals(Volatile.Read(ref _warmReverse[reverseSlot]), association)) Volatile.Write(ref _warmReverse[reverseSlot], null);

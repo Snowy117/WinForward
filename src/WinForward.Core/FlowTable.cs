@@ -9,11 +9,9 @@ public sealed class FlowTable
     /// <summary>
     /// Entries one scan hold may examine. Hold granularity is deliberately minimal: a scan hold collects
     /// nothing, and a removal hold removes exactly one entry at the cursor. The unit is the examination
-    /// because that is what bounds the work a concurrent <see cref="TryResolve"/> can queue behind, and the
-    /// acceptance evidence is the countable <see cref="SweepHoldProbe"/>, not a wall-clock reading. The
-    /// sweep's own duration is report-only and deliberately pays for this granularity: measured, one
-    /// removal per hold keeps 11.6–14.2 M resolves inside the sweep window per 15 s against ~0.1 M for
-    /// 256-removal holds, at the cost of a ~120 ms all-expired round against the before-series' 26.2 ms.
+    /// because that is what bounds the work a concurrent <see cref="TryResolve"/> can queue behind, and
+    /// the countable <see cref="SweepHoldProbe"/> is the evidence — the sweep's own duration is
+    /// report-only and deliberately pays for this granularity.
     /// </summary>
     internal const int SweepChunkEntries = 256;
 
@@ -59,10 +57,9 @@ public sealed class FlowTable
         ActivityClock = activityClock ?? new ActivityBucketClock(timeProvider);
         _states = new Dictionary<FlowKey, FlowState>(capacity);
         _transportIndex = new Dictionary<TransportTuple, FlowState>(capacity * 2);
-        // Four slots per expected live flow (lambda ~= 0.016 for the realistic working set) keeps the
-        // modelled collision miss rate near 2 %, which the acceptance arithmetic needs; the cap bounds
-        // the array at 2 MB and is the single tunable if the measured ratio wants more headroom. A power
-        // of two lets the slot index mask instead of divide.
+        // Four slots per expected live flow (lambda ~= 0.016) keeps the modelled collision miss rate
+        // near 2 %; the cap bounds the array at 2 MB. A power of two lets the slot index mask instead
+        // of divide.
         var slotTarget = (int)Math.Clamp((long)capacity * 64, 4_096, 262_144);
         _warm = new FlowState?[BitOperations.RoundUpToPowerOf2((uint)slotTarget)];
         _liveStates = new FlowState[capacity];
@@ -318,7 +315,7 @@ public sealed class FlowTable
         lock (_sweepGate)
         {
             // One comparison per entry instead of a DateTimeOffset subtraction, and the shape a bucketed
-            // activity stamp needs: cut off at an integer computed once per call (research F3.4).
+            // activity stamp needs: cut off at an integer computed once per call.
             var cutoffBucket = ActivityBucket.Cutoff(now, idleTimeout);
             // Publish the caller's instant: the sweep compares against the clock it was handed instead of
             // reading the clock a second time, so the two cannot drift apart inside the call.
@@ -347,8 +344,8 @@ public sealed class FlowTable
                 // The chunk held only live entries: take the next chunk, or finish when a bound is reached.
                 if (candidate is null) continue;
 
-                // No table lock is held around the predicate (requirement 3). A hold skips its entry
-                // without touching its activity, so it expires at its original idle point.
+                // No table lock is held around the predicate. A hold skips its entry without touching
+                // its activity, so it expires at its original idle point.
                 if (isHeld is not null && isHeld(candidate.Key))
                 {
                     lock (_gate)

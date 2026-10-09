@@ -78,9 +78,9 @@ public sealed class Socks5UdpTransportFactory : IUdpProxyTransportFactory
             throw new InvalidOperationException($"The SOCKS5 UDP transport factory was asked for local target '{target.Name}'.");
         }
 
-        // UoT is a mode of the SOCKS5 target, not a third kind (design §1): the opt-in flag picks
-        // the per-flow connection whose stream carries the flow's datagrams, and every other SOCKS5
-        // server keeps the native per-flow association and relay socket path below unchanged.
+        // UoT is a mode of the SOCKS5 target, not a third kind: the opt-in flag picks the per-flow
+        // connection whose stream carries the flow's datagrams, and every other SOCKS5 server keeps
+        // the native per-flow association and relay socket path below unchanged.
         if (server.UdpOverTcp)
         {
             var control = await Socks5UotTransport.DialAsync(server, _associations, cancellationToken).ConfigureAwait(false);
@@ -113,28 +113,24 @@ public sealed class Socks5UdpTransportFactory : IUdpProxyTransportFactory
 public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounters
 {
     /// <summary>
-    /// The relay socket's default receive buffer, wired from the validated
-    /// <c>udpRelayReceiveBufferKb</c> configuration key (default 64 KiB, range 16..1024 KiB).
-    /// Relay responses can burst faster than the single receive loop reinjects them, so the OS
-    /// default datagram buffer would overflow and drop responses that were already relayed; the
-    /// historical 512 KiB absorbed that. It is bounded because this buffer is per session: the
-    /// aggregate kernel memory is per-session bytes x concurrent sessions, and relay sockets are
-    /// retained for the session's whole life, so a large constant multiplies by flow churn instead
-    /// of following the active flow set. 64 KiB holds ≈44 maximum-size (standard-MTU) responses or
-    /// ≈128 512-byte ones per socket — orders of magnitude above the receive loop's per-datagram
-    /// latency at the recorded load — and halves the aggregate at any population. A response burst
-    /// larger than the buffer arriving between two decode passes is dropped silently by the kernel;
-    /// the recorded loss/burst/churn anchors are the only instrument that can observe that, and
-    /// <c>udpRelayReceiveBufferKb: 128</c> restores the previous value. Config validation warns when
-    /// the per-session value times a large session budget exceeds ~512 MiB.
+    /// The relay socket's default receive buffer, wired from the validated <c>udpRelayReceiveBufferKb</c>
+    /// configuration key (default 64 KiB, range 16..1024 KiB). Relay responses can burst faster than the
+    /// single receive loop reinjects them, so the OS default datagram buffer would overflow and drop
+    /// responses that were already relayed. The value is bounded because the buffer is per session:
+    /// aggregate kernel memory is per-session bytes x concurrent sessions, and relay sockets are retained
+    /// for the session's whole life, so a large constant multiplies by flow churn instead of following the
+    /// active flow set. 64 KiB holds ≈44 maximum-size (standard-MTU) responses or ≈128 512-byte ones per
+    /// socket — far above the receive loop's per-datagram latency — and halves the aggregate at any
+    /// population. A response burst larger than the buffer arriving between two decode passes is dropped
+    /// silently by the kernel. Config validation warns when the per-session value times a large session
+    /// budget exceeds ~512 MiB.
     /// </summary>
     public const int DefaultRelaySocketReceiveBufferSize = 64 * 1024;
 
     /// <summary>
-    /// SIO_UDP_CONNRESET (vendor IOCTL 0x9800000C). While TRUE (the Windows default for UDP
-    /// sockets), an ICMP port-unreachable answering one of this socket's sends is surfaced as
-    /// <see cref="SocketError.ConnectionReset"/> on the next receive, which would terminate the
-    /// relay session's receive loop (S2).
+    /// SIO_UDP_CONNRESET (vendor IOCTL 0x9800000C). While TRUE (the Windows default for UDP sockets), an
+    /// ICMP port-unreachable answering one of this socket's sends surfaces as
+    /// <see cref="SocketError.ConnectionReset"/> on the next receive and would terminate the receive loop.
     /// </summary>
     private const int SIOUdpConnreset = unchecked((int)0x9800000C);
 
@@ -228,8 +224,8 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
             var relayAddressFamily = association.RelayAddressFamily;
             socket = (socketFactory ?? (family => new Socket(family, SocketType.Dgram, ProtocolType.Udp)))(relayAddressFamily);
             socket.ReceiveBufferSize = relayReceiveBufferBytes;
-            // Applied before bind per the IOCTL's contract (S2): an ICMP-driven reset must never
-            // reach the receive loop. Injectable so tests can assert the call without a Windows socket.
+            // Applied before bind per the IOCTL's contract: an ICMP-driven reset must never reach the
+            // receive loop. Injectable so tests can assert the call without a Windows socket.
             (disableUdpConnectionReset ?? s_disableUdpConnectionResetAction)(socket);
             socket.Bind(new IPEndPoint(relayAddressFamily == AddressFamily.InterNetwork ? IPAddress.Any : IPAddress.IPv6Any, 0));
             // Non-blocking mode keeps the send warm path synchronous: the kernel either takes
@@ -240,7 +236,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
             var localRelayEndpoint = Endpoint.From(local.Address, checked((ushort)local.Port));
             var relay = association.RelayEndpoint;
             // Register the relay transport tuple in the loop-prevention registry so catch-all proxy
-            // rules never recursively intercept WinForward's own UDP relay traffic (design §10).
+            // rules never recursively intercept WinForward's own UDP relay traffic.
             selfTrafficToken = selfTraffic.Register(new SelfTrafficRegistry.SelfTrafficKey(
                 TransportProtocol.Udp,
                 localRelayEndpoint,
@@ -268,25 +264,25 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
     public ValueTask SendSpanAsync(Endpoint destination, ReadOnlySpan<byte> payload, CancellationToken cancellationToken)
 #pragma warning restore RCS1229
     {
-        // Non-async warm entry (hot-path convention #3); only the contended-gate shape differs,
-        // because a span over native capture memory must not cross the gate await — it is copied
-        // there and rides the async slow path.
+        // Non-async warm entry: only the contended-gate shape differs, because a span over native
+        // capture memory must not cross the gate await — it is copied there and rides the async slow
+        // path.
         // The gate is disposed last, so a sender that has not yet entered it must be refused here;
         // otherwise `_sendGate.WaitAsync` would observe the disposed gate. A single volatile read
         // keeps the warm shape allocation-free.
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
-        // I4 fail-closed: an association whose control stream ended refuses the datagram before the
-        // gate and before the socket, so the coordinator tears the flow down with the
-        // association-lost reason instead of writing to a relay no one is watching. One volatile
-        // read plus a reference read; the exception itself is cold and already carries the death.
+        // Fail-closed: an association whose control stream ended refuses the datagram before the gate
+        // and before the socket, so the coordinator tears the flow down with the association-lost
+        // reason instead of writing to a relay no one is watching. One volatile read plus a reference
+        // read; the exception itself is cold and already carries the death.
         if (_association.Fault is { } lost) throw lost;
         var gateWait = _sendGate.WaitAsync(cancellationToken);
         if (!gateWait.IsCompletedSuccessfully)
         {
-            // Documented cold-path exemption (task 09-18 M2): this copy allocates, but only on the
-            // contended-gate branch. The span cannot cross the gate await (it views native capture
-            // memory that recycles once the dispatch returns), so the datagram is materialized and
-            // rides the memory slow path; the warm uncontended shape below stays zero-alloc.
+            // Cold-path exemption: this copy allocates only on the contended-gate branch. The span
+            // cannot cross the gate await (it views native capture memory that recycles once the dispatch
+            // returns), so the datagram is materialized and rides the memory slow path; the warm
+            // uncontended shape below stays zero-alloc.
             return SendAfterGateAsync(gateWait, destination, payload.ToArray(), cancellationToken);
         }
 
@@ -307,7 +303,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
             }
 
             // Recorded only after the kernel accepted the datagram, so the one-shot retention class
-            // reads sends that actually went out (I3: one interlocked increment, no allocation).
+            // reads sends that actually went out: one interlocked increment, no allocation.
             RecordDatagramSent();
             _sendGate.Release();
             return ValueTask.CompletedTask;
@@ -358,7 +354,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
 
     /// <summary>
     /// Records one datagram this flow sent successfully. One interlocked increment, no allocation —
-    /// this is the whole hot-path accounting addition (I3).
+    /// this is the whole hot-path accounting addition.
     /// </summary>
     private void RecordDatagramSent() => Interlocked.Increment(ref _datagramsSent);
 
@@ -395,17 +391,17 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
             return UdpTransportReceiveResult.Skipped(skipReason);
         }
         // Per-datagram anomalies skip one datagram instead of throwing: a single bad relay
-        // datagram must not terminate the session's receive loop (R2).
+        // datagram must not terminate the session's receive loop.
         var relay = _association.RelayEndpoint;
         if (!IsAcceptableRelaySource(result.RemoteEndPoint, relay)) return UdpTransportReceiveResult.Skipped(UdpTransportSkipReason.UnexpectedSource);
         if (IsPossiblyTruncated(result.ReceivedBytes, buffer.Length)) return UdpTransportReceiveResult.Skipped(UdpTransportSkipReason.Oversized);
-        // M2: the SOCKS5 UDP wire format carries no interface scope, so propagate the relay
-        // endpoint's IPv6 scope into reconstruction to keep a link-local decoded address routable.
+        // The SOCKS5 UDP wire format carries no interface scope, so propagate the relay endpoint's
+        // IPv6 scope into reconstruction to keep a link-local decoded address routable.
         var scopeId = relay.Address.AddressFamily == AddressFamily.InterNetworkV6 ? relay.Address.ScopeId : 0;
-        // ReSharper disable once ConvertIfStatementToReturnStatement // TryDecode decodes into an out parameter (side effect + binding); the early exit on malformed input must stay a separate step (B1 disposition).
+        // ReSharper disable once ConvertIfStatementToReturnStatement // TryDecode decodes into an out parameter (side effect + binding); the early exit on malformed input must stay a separate step.
         if (!Socks5UdpCodec.TryDecode(buffer[..result.ReceivedBytes], out var datagram, scopeId)) return UdpTransportReceiveResult.Skipped(UdpTransportSkipReason.Malformed);
         // Only a datagram that decoded proves this flow's replies come back: a skip is one anomaly,
-        // not evidence that the server answered (design §5).
+        // not evidence that the server answered.
         RecordResponseReceived();
         // Both types are readonly record structs, so this field-for-field mapping is a plain struct
         // copy and adds no allocation to the receive path.
@@ -416,7 +412,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
     /// Validates the observed sender of a relay datagram against the negotiated relay endpoint.
     /// RFC 1928 does not pin relay replies to the BND address, so a multi-homed or anycast relay
     /// may answer from another address of the same scope; the port and address family must still
-    /// match exactly so clearly unrelated sources stay rejected (R3).
+    /// match exactly so clearly unrelated sources stay rejected.
     /// </summary>
     internal static bool IsAcceptableRelaySource(EndPoint observed, IPEndPoint relay) =>
         observed is IPEndPoint ip && ip.Port == relay.Port && ip.AddressFamily == relay.AddressFamily;
@@ -433,9 +429,9 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
 
     /// <summary>
     /// Disables SIO_UDP_CONNRESET on a relay socket so an ICMP port-unreachable answering one of
-    /// its sends is not surfaced as <see cref="SocketError.ConnectionReset"/> on the next receive
-    /// (S2). Windows-only at runtime: the Linux test host rejects vendor IOCTLs, and tests assert
-    /// the call through the injectable seam instead of executing it.
+    /// its sends is not surfaced as <see cref="SocketError.ConnectionReset"/> on the next receive.
+    /// Windows-only at runtime: the Linux test host rejects vendor IOCTLs, and tests assert the
+    /// call through the injectable seam instead of executing it.
     /// </summary>
     private static void DisableUdpConnectionReset(Socket socket)
     {
@@ -445,7 +441,7 @@ public sealed class Socks5UdpTransport : IUdpProxyTransport, IUdpExchangeCounter
 
     /// <summary>
     /// Maps a receive-path fault to its skip reason, or null when the fault is socket-level fatal
-    /// and must keep tearing the session down. Only the ICMP-driven reset is skip-class (S2); the
+    /// and must keep tearing the session down. Only the ICMP-driven reset is skip-class; the
     /// adjudication itself is the seam's <see cref="UdpTransportReceiveClassifier"/>, the rule every
     /// transport implementation shares.
     /// </summary>
