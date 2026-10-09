@@ -6,12 +6,12 @@ namespace WinForward.E2E.Client.Lanes;
 /// <summary>
 /// The send half of a lane: pacing, the offer loop (<c>BuildRequest → SendAsync → OnSent</c>, strictly
 /// serial), the bounded defer queue and the schedule-truncation verdict. It owns no window and no
-/// in-flight count — the policy answers admission (D18.1) — and it never touches the wire format: the
+/// in-flight count — the policy answers admission — and it never touches the wire format: the
 /// policy frames into the engine's buffer and says how many bytes to send.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Threading contract (D18.2).</b> The send thread — the caller's thread, the one running
+/// <b>Threading contract.</b> The send thread — the caller's thread, the one running
 /// <see cref="RunAsync"/> — exclusively calls <see cref="ILanePolicy.BuildRequest"/>,
 /// <see cref="ILaneTransport.SendAsync"/>, <see cref="ILanePolicy.OnSent"/> and
 /// <see cref="ILanePolicy.Settle"/>, in that order per slot and never re-entrantly. The receive loop
@@ -22,7 +22,7 @@ namespace WinForward.E2E.Client.Lanes;
 /// </para>
 /// <para>
 /// <b>Run shape.</b> Open → offer loop → bounded grace drain → cancel and join the receive loop → final
-/// settle → <see cref="LaneCounts"/> (D18.5 #4). The engine starts no threads and disposes nothing: the
+/// settle → <see cref="LaneCounts"/>. The engine starts no threads and disposes nothing: the
 /// transport's lifetime belongs to the caller, and running on the calling thread is what lets an
 /// allocation gate measure the send path with <see cref="GC.GetAllocatedBytesForCurrentThread"/>.
 /// </para>
@@ -120,12 +120,12 @@ internal sealed class LaneEngine<TTransport>
                 Pacer.WaitUntil(pacer.IntendedTicks(slot), cancellationToken);
 #pragma warning restore S6966, VSTHRD103, MA0042
 
-                // Sequences are 1-based, as they have always been: slot 0 offers sequence 1 and
-                // carries the instant slot 0 was intended for.
+                // Sequences are 1-based: slot 0 offers sequence 1 and carries the instant slot 0 was
+                // intended for.
                 _state.Supplied = slot + 1;
 
-                // The offer loop's one ordering rule (D18.5 #3): the previous slot's settlements are
-                // booked after this slot's pace and before this slot's request.
+                // The offer loop's one ordering rule: the previous slot's settlements are booked after
+                // this slot's pace and before this slot's request.
                 _policy.Settle(Clock.Now);
                 await OfferSlotAsync(_state.Supplied, pacer.IntendedTicks(slot), cancellationToken).ConfigureAwait(false);
             }
@@ -199,9 +199,9 @@ internal sealed class LaneEngine<TTransport>
         {
             var send = _transport.SendAsync(_state.Buffer.AsMemory(0, length), cancellationToken);
 
-            // The ValueTask reuse trick (audit §9.6): IsCompleted is read before the single await. It
-            // is the engine's own reading of the same property the transport reports, and either one
-            // means this send did not complete synchronously, so the counter moves once per send.
+            // The engine reads IsCompleted before the single await: the same property the transport
+            // reports, and either reading means this send did not complete synchronously, so the
+            // counter moves once per send.
             wouldBlock = !send.IsCompleted;
             result = await send.ConfigureAwait(false);
         }
@@ -217,7 +217,7 @@ internal sealed class LaneEngine<TTransport>
 
         // One reading of "did this send block", from either side of the seam, and one increment per
         // send: a failed send that parked on the socket counts in both the would-block and the failure
-        // counters, which is the pair the two counters published before the engine existed.
+        // counters.
         if (wouldBlock || result.WouldBlock)
         {
             _state.SendWouldBlock++;
@@ -232,7 +232,7 @@ internal sealed class LaneEngine<TTransport>
             _state.SendFailures++;
         }
 
-        // Called on success and on failure alike (D18.5 #6), and always before the next BuildRequest.
+        // Called on success and on failure alike, and always before the next BuildRequest.
         _policy.OnSent(sequence, intendedTicks, result);
     }
 
@@ -246,8 +246,7 @@ internal sealed class LaneEngine<TTransport>
                 var received = await _transport.ReceiveAsync(destination, cancellationToken).ConfigureAwait(false);
 
                 // The receive instant is read here, on the receive thread, and travels on the
-                // settlement: a round trip is measured against arrival, never against the later
-                // Settle (D18.5 #1).
+                // settlement: a round trip is measured against arrival, never against the later Settle.
                 _policy.OnReceive(received, destination.Span[..received.Length], Clock.Now);
 
                 if (received.Kind is LaneReceiveKind.EndOfStream or LaneReceiveKind.IOError)
@@ -330,8 +329,8 @@ internal sealed class LaneEngine<TTransport>
 
         /// <summary>
         /// The queue's occupancy, read when the run returns: the intents no window ever let out. It is
-        /// the engine's half of <c>outstandingAtTeardown</c> (D18.6 #1) and deliberately not derived
-        /// from the other counters, which cannot see a slot the policy skipped.
+        /// the engine's half of <c>outstandingAtTeardown</c> and deliberately not derived from the other
+        /// counters, which cannot see a slot the policy skipped.
         /// </summary>
         private long DeferredPending => Deferred.Count;
 

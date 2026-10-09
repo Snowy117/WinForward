@@ -13,21 +13,19 @@ namespace WinForward.E2E.Analysis.Json;
 /// two escapes JSON requires, the five short control escapes, <c>\uXXXX</c> for every other code unit
 /// outside printable ASCII — an astral code point therefore comes out as the surrogate pair JSON spells
 /// it with — and <c>'</c>, <c>+</c>, <c>&lt;</c>, <c>&gt;</c>, <c>&amp;</c> and <c>/</c> left as they
-/// are. In the oracle's semantic mode both sides are decoded before they are compared, so these bytes
-/// are observed only by <c>--mode byte</c> and by a reader that takes the file as text; the rule is kept
-/// stable because it is what the frozen reference wrote for the same documents.</para>
+/// are. Only <c>--mode byte</c> and a reader that takes the file as text see these bytes, but the rule
+/// is kept fixed because the frozen reference wrote it for the same documents.</para>
 /// <para><see cref="System.Text.Json"/>'s encoders each write half of that rule — the default one
 /// escapes <c>&lt;</c>, <c>&gt;</c>, <c>&amp;</c>, <c>'</c> and <c>+</c>, and the relaxed one leaves
-/// every non-ASCII code point alone — so the escaping is explicit rather than delegated (D20.5).</para>
+/// every non-ASCII code point alone — so the escaping is explicit rather than delegated.</para>
 /// <para>Every value is rendered as text at the nesting level it sits at, and a container renders its
 /// own members one level deeper, so the indentation of a whole document falls out of the level each
 /// call is given: <c>verdict.json</c>'s top-level keys are values at level 1, and a nested object's
 /// members are at level 2.</para>
-/// <para>The newline at the end of the file is part of the compared bytes: <c>oracle-diff.py</c> reads
-/// the produced file as text and the golden was written by <c>Path.write_text</c> of a string that ends
-/// in exactly one <c>\n</c>.</para>
-/// <para>Public because the test project drives it against the frozen reference's own text; D20.6 keeps
-/// the analyzer free of an <c>InternalsVisibleTo</c>.</para>
+/// <para>The newline at the end of the file is part of the compared bytes: the oracle reads the
+/// produced file as text, and the golden is a string ending in exactly one <c>\n</c>.</para>
+/// <para>Public because the test project drives it against the frozen reference's own text, without an
+/// <c>InternalsVisibleTo</c>.</para>
 /// </remarks>
 public static class VerbatimJson
 {
@@ -186,8 +184,8 @@ public static class VerbatimJson
     private static string Indent(int level) => new(' ', IndentWidth * level);
 
     /// <summary>
-    /// One code unit, escaped when it is outside printable ASCII. An astral code point is two UTF-16
-    /// code units and so becomes the surrogate pair JSON spells it with, with no special case needed.
+    /// One code unit, escaped when it is outside printable ASCII; an astral code point is two code units
+    /// and so needs no special case.
     /// </summary>
     private static void AppendCharacter(StringBuilder text, char character)
     {

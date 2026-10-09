@@ -105,10 +105,10 @@ internal sealed record AbortMix(int Clean, int ClientRst, int RelayCancel, int U
 internal sealed record SoakOptions
 {
     /// <summary>
-    /// Default duration for the long-form <see cref="SoakScenario.GcSoak"/> scenario. Every other
-    /// scenario keeps the shared 60 s default (15 s under <c>--quick</c>); <c>gc-soak</c> is the
-    /// only one that must prove hour-scale steady-state behavior, so it resolves its own default
-    /// when the caller neither passed <c>--duration</c> nor <c>--quick</c>.
+    /// Duration of the long-form <see cref="SoakScenario.GcSoak"/> scenario, the only one that must
+    /// prove hour-scale steady state: it resolves this default when the caller passed neither
+    /// <c>--duration</c> nor <c>--quick</c>. Other scenarios keep the shared 60 s default, 15 s
+    /// under <c>--quick</c>.
     /// </summary>
     public const int GcSoakDefaultDurationSeconds = 1_800;
 
@@ -119,9 +119,9 @@ internal sealed record SoakOptions
     public int Flows { get; private init; } = 256;
 
     /// <summary>
-    /// Residency census (<c>--udp-flows</c>): the live UDP session population, kept separate from
-    /// <see cref="Flows"/> so the TCP relay population and the UDP session population can be sized
-    /// independently (they are different resources with different per-unit costs).
+    /// Residency census (<c>--udp-flows</c>): the live UDP session population, sized independently of
+    /// <see cref="Flows"/>, because the TCP relay and the UDP session are different resources with
+    /// different per-unit costs.
     /// </summary>
     public int UdpFlows { get; private init; } = 100;
 
@@ -130,14 +130,13 @@ internal sealed record SoakOptions
     public TcpRelayMode TcpRelayMode { get; private init; } = TcpRelayMode.Socks5;
 
     /// <summary>
-    /// UDP flow placement (<c>--target</c>): which transport the establishment scenarios send
-    /// through. <see cref="SoakTargetKind.Socks5"/> is the shipped default — one association per
-    /// flow, the shape the surviving series measures; <see cref="SoakTargetKind.Local"/> points the
-    /// same flows at a local endpoint through the product <c>UdpTransportFactory</c> composite, with
-    /// the loopback SOCKS5 server still up so its handshake counters can be read as the column's
-    /// zeros; <see cref="SoakTargetKind.Uot"/> sends the same flows through the
-    /// <c>Socks5UdpTransportFactory</c> to a loopback UoT v2 server, the mode being carried by the
-    /// target's <c>udpOverTcp</c> field.
+    /// UDP flow placement (<c>--target</c>): which transport the establishment scenarios send through.
+    /// <see cref="SoakTargetKind.Socks5"/> is the shipped default: one association per flow.
+    /// <see cref="SoakTargetKind.Local"/> aims the same flows at a local endpoint through the product
+    /// <c>UdpTransportFactory</c> composite, with the loopback SOCKS5 server still up so its handshake
+    /// counters read zero. <see cref="SoakTargetKind.Uot"/> sends the same flows through
+    /// <c>Socks5UdpTransportFactory</c> to a loopback UoT v2 server, carrying the mode in the target's
+    /// <c>udpOverTcp</c> field.
     /// </summary>
     public SoakTargetKind Target { get; private init; } = SoakTargetKind.Socks5;
 
@@ -158,11 +157,10 @@ internal sealed record SoakOptions
     public int Capacity { get; private init; } = ConfigurationLoader.DefaultUdpSessionCapacity;
 
     /// <summary>
-    /// Sweep probe calibration (<c>--sweep-window-control-ms</c>): when positive, the sweep scenario arms
-    /// its in-window flag and then waits this long <em>instead of calling the sweep at all</em>, so the
-    /// recorded pause figures can be quoted against a run that performed no product work inside the
-    /// window. Zero runs the real sweep. This is the noise-floor control the F3 acceptance evidence needs:
-    /// the in-window maximum measures host scheduling and lock queueing, not hold length.
+    /// Sweep probe calibration (<c>--sweep-window-control-ms</c>): when positive, the sweep scenario
+    /// arms its in-window flag and then waits this long <em>instead of calling the sweep at all</em>,
+    /// so the recorded pause figures are the noise floor — the in-window maximum measures host
+    /// scheduling and lock queueing, not hold length. Zero runs the real sweep.
     /// </summary>
     public int SweepWindowControlMs { get; private init; }
 
@@ -184,8 +182,8 @@ internal sealed record SoakOptions
 
     /// <summary>
     /// TCP churn (<c>--attribution-delay-ms</c>): a synthetic per-flow stall on the selected fraction
-    /// of new connections, standing in for the pump-thread process attribution (research F8) that only
-    /// runs on Windows. Zero disables it.
+    /// of new connections, standing in for the Windows-only pump-thread process attribution. Zero
+    /// disables it.
     /// </summary>
     public int AttributionDelayMs { get; private init; }
 
@@ -197,10 +195,9 @@ internal sealed record SoakOptions
     public int AttributionDelayPercent { get; private init; } = 5;
 
     /// <summary>
-    /// The F8 acceptance arm (<c>--attribution-cost-ms</c>): the modelled cost of one process
+    /// The attribution-cost arm (<c>--attribution-cost-ms</c>): the modelled cost of one process
     /// attribution — the system-wide owner-table enumeration plus the process open — charged by the
-    /// scenario's attributor. Zero is the control arm, which measures the pipeline with no
-    /// attribution cost at all.
+    /// scenario's attributor. Zero is the control arm, which charges none.
     /// </summary>
     public int AttributionCostMs { get; private init; }
 
@@ -421,9 +418,9 @@ internal sealed record SoakOptions
 
     /// <summary>
     /// The coordinator's session capacity, constrained to the product's own range
-    /// (<c>ConfigurationLimits</c> accepts 1..16,384, the default being the historical maximum). The
-    /// soak's "strictly below <c>--capacity</c>" assertion is vacuous for a capacity the product would
-    /// refuse, so the out-of-range value is rejected at parse time instead.
+    /// (<c>ConfigurationLimits</c> accepts 1..16,384). The soak's "strictly below <c>--capacity</c>"
+    /// assertion is vacuous for a capacity the product would refuse, so an out-of-range value is
+    /// rejected at parse time.
     /// </summary>
     private static int UdpCapacity(string raw) =>
         int.TryParse(raw, CultureInfo.InvariantCulture, out var value) && value is >= 1 and <= ConfigurationLoader.DefaultUdpSessionCapacity

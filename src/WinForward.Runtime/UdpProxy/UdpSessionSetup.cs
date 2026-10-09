@@ -13,8 +13,8 @@ namespace WinForward.Runtime.UdpProxy;
 /// through the single ctor-injected <see cref="IUdpSessionSlotHost"/> seam (attach, re-stamp,
 /// flush dequeue, slot removal, receive-failure removal), whose members each take the coordinator
 /// gate internally, so the gate stays the single arbiter of slot state. The analog of the TCP
-/// redirect setup/acceptor pair. Owns the 2026-09-06 dial-start re-stamp fix (limiter queue-wait
-/// is not client staleness) as one cohesive unit.
+/// redirect setup/acceptor pair; the re-stamp exists because limiter queue-wait is not client
+/// staleness.
 /// </summary>
 internal sealed class UdpSessionSetup(
     IUdpProxyTransportFactory transportFactory,
@@ -39,10 +39,8 @@ internal sealed class UdpSessionSetup(
     private static readonly TimeSpan s_setupQueueDatagramTtl = TimeSpan.FromSeconds(5);
 
     /// <summary>
-    /// The activity observer handed to every session context. Converted from its method group once
-    /// per setup instance instead of once per session: a method-group conversion allocates a
-    /// delegate (64 B/session measured — the C2a2 − C2a1 delta production pays and the static-lambda
-    /// probes hid), while this setup instance outlives every session it constructs.
+    /// The activity observer handed to every session context, allocated once per setup instance instead
+    /// of once per session: this setup instance outlives every session it constructs.
     /// </summary>
     private readonly Action<UdpAssociation, DateTimeOffset> _activityObserver =
         (association, now) => associations.TryTouch(association, now);
@@ -85,10 +83,10 @@ internal sealed class UdpSessionSetup(
     {
         // Patient admission: a flash crowd of new flows must queue behind the 8-wide setup
         // gate rather than fail into the setup cooldown, because a failed setup's teardown
-        // drains the setup queue and drops the already-accepted triggering datagram (that
-        // drop, not the steady-state relay, was the entire measured in-window soak loss).
-        // Queued setups observe shutdown cancellation here (no cooldown is armed); genuine
-        // setup failures below still fail closed with the setup cooldown.
+        // drains the setup queue and drops the already-accepted triggering datagram — the
+        // dominant in-window loss, not the steady-state relay. Queued setups observe shutdown
+        // cancellation here (no cooldown is armed); genuine setup failures below still fail
+        // closed with the setup cooldown.
         await _setupLimiter.WaitAsync(cancellationToken).ConfigureAwait(false);
 
         IUdpProxyTransport? transport = null;
@@ -147,7 +145,7 @@ internal sealed class UdpSessionSetup(
     /// not counted as a setup failure — only what arms the cooldown is what the counter reports.
     /// <para>
     /// An association that died while the setup queue was flushing reaches this sink through the
-    /// same flush-window send the ready path uses, so it is mapped the same way (I4/I5): counted as
+    /// same flush-window send the ready path uses, so it is mapped the same way: counted as
     /// <c>udpAssociationLost</c>, removed without arming the setup cooldown, and never counted as a
     /// setup failure. A failed dial or ASSOCIATE is what the setup-failure counter and cooldown are
     /// for.

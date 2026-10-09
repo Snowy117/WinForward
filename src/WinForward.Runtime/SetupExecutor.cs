@@ -103,11 +103,9 @@ internal sealed class FlowAttributionWork
 /// <summary>The seam coordinators use to hand new-flow setup off the pump thread.</summary>
 /// <remarks>
 /// This seam exists for composition and test infrastructure: the production adapter is
-/// <see cref="SetupExecutor"/>, and callers may inject their own to change the enqueue policy.
-/// No substituting fake ships with it, because none would exercise a scenario beyond what the
-/// real executor's own tests already cover (pool balance, capacity rejection, worker survival
-/// after a fault, and the dispose drain) — tests assert the ring semantics against the real
-/// executor instead.
+/// <see cref="SetupExecutor"/>, and callers may inject their own to change the enqueue policy. No
+/// fake ships with it — the real executor's own tests assert the ring semantics (pool balance,
+/// capacity rejection, worker survival after a fault, the dispose drain).
 /// </remarks>
 public interface ISetupExecutor : IDisposable
 {

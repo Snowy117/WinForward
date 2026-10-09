@@ -121,9 +121,8 @@ public sealed record LatencyTcpMetrics
     public required double? MeanConnectMs { get; init; }
 
     /// <summary>
-    /// Writes the block's members into the object the caller has open. The published keys are this
-    /// record's member names under <c>metrics</c> (dotted, not nested), so the block never writes
-    /// braces of its own.
+    /// Writes the block's members into the object the caller has open: dotted members under
+    /// <c>metrics</c>, so the block never writes braces of its own.
     /// </summary>
     internal void WriteMembers(Utf8JsonWriter writer)
     {
@@ -238,9 +237,8 @@ public sealed record LatencyUdpMetrics
     public required double? AchievedRate { get; init; }
 
     /// <summary>
-    /// Writes the block's members into the object the caller has open. The published keys are this
-    /// record's member names under <c>metrics</c> (dotted, not nested), so the block never writes
-    /// braces of its own.
+    /// Writes the block's members into the object the caller has open: dotted members under
+    /// <c>metrics</c>, so the block never writes braces of its own.
     /// </summary>
     internal void WriteMembers(Utf8JsonWriter writer)
     {
