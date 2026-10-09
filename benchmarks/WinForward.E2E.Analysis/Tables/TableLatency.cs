@@ -6,7 +6,7 @@ using WinForward.E2E.Analysis.Stats;
 namespace WinForward.E2E.Analysis.Tables;
 
 /// <summary>
-/// §5, "Latency detail": the harness's own histograms, one sub-table per latency class, one row per
+/// "Latency detail": the harness's own histograms, one sub-table per latency class, one row per
 /// (row, arm) pair the campaign actually ran.
 /// </summary>
 /// <remarks>
@@ -21,7 +21,7 @@ namespace WinForward.E2E.Analysis.Tables;
 /// carry no numbers at all — a design absence and a histogram nobody published — hand the renderer one
 /// id, one arm, one explanation and eight <c>n/a</c> cells against a ten-column header. The renderer
 /// joins what it is given, so the golden carries those lines as they are and the port reproduces them
-/// rather than padding or refusing them (<c>python-oracle-changes.md</c> §5.1).</para>
+/// rather than padding or refusing them.</para>
 /// </remarks>
 internal static class TableLatency
 {

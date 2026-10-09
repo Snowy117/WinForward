@@ -17,8 +17,8 @@ namespace WinForward.E2E.Tests;
 /// listener and a ledger file -- rather than one listener on its own, because the option is the thing
 /// being pinned: a run that parsed the count and then ignored it would pass every fact about a listener
 /// built with an explicit count and still publish nothing about the concurrency it actually ran. The
-/// receive loops' own counters are a separate fact (<c>LedgerShapeTests</c>), so this file is the chain
-/// from the command line to the published number and not a second measurement of the loops.
+/// receive loops' own counters are measured elsewhere, so this file is the chain from the command line
+/// to the published number and not a second measurement of the loops.
 /// </remarks>
 public sealed class UdpReceiverOptionTests
 {

@@ -7,10 +7,10 @@ using Xunit;
 namespace WinForward.E2E.Tests.Lanes;
 
 /// <summary>
-/// The one-truth-per-number contract (D18.1, D18.5 #13): no name a <see cref="LaneCounts"/> member
-/// carries may also appear on the policy — neither as a counter property nor as a private field, since
-/// deleting the property and keeping the field is the regression the reflection pair exists to catch.
-/// The second fact is the negative control: the same check has to see a collision it is given.
+/// The one-truth-per-number contract: no name a <see cref="LaneCounts"/> member carries may also
+/// appear on the policy — neither as a counter property nor as a private field, since deleting the
+/// property and keeping the field is the regression the reflection pair exists to catch. The second
+/// fact is the negative control: the same check has to see a collision it is given.
 /// </summary>
 public sealed class LaneCountsDisjointnessTests
 {
@@ -34,9 +34,9 @@ public sealed class LaneCountsDisjointnessTests
     public void NoLaneCountsNameIsAlsoARealPolicyCounter()
     {
         // The two lane policies of the latency arm: the send side is the engine's (LaneCounts) and the
-        // receive side is theirs (D18.1). Both halves of the check apply to each — a counter property
-        // under an engine name, or the private field left behind after renaming one, would be two
-        // truths about one number.
+        // receive side is theirs. Both halves of the check apply to each — a counter property under an
+        // engine name, or the private field left behind after renaming one, would be two truths about
+        // one number.
         AssertDisjoint(typeof(LatencyTcpState), "Started", "Received", "RemoteClosed", "Pending", "InFlight");
         AssertDisjoint(typeof(UdpLatencyState), "Started", "Received", "ForeignConnection", "Pending", "InFlight");
     }

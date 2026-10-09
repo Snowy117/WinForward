@@ -7,18 +7,17 @@ using WinForward.E2E.Contracts;
 namespace WinForward.E2E.Analysis.Tables;
 
 /// <summary>
-/// §6, "CPU detail": one line per (row, arm), the proxy and generator CPU each as a share of one
-/// logical processor, the headroom, the two per-work denominators, and the shape of the reading.
+/// "CPU detail": one line per (row, arm), the proxy and generator CPU each as a share of one logical
+/// processor, the headroom, the two per-work denominators, and the shape of the reading.
 /// </summary>
 /// <remarks>
 /// <para><b>Proxy and generator are different processes.</b> The proxy cells are the product process the
 /// sampler matched; the generator cells are the sampler's own records, read through the same per-identity
-/// accumulation but from the <c>self</c> series, so the cost of generating the load is never attributed
-/// to the product.</para>
+/// accumulation but from the <c>self</c> series, so generating the load is never charged to the product.</para>
 /// <para><b>The scope disclosure is part of the table.</b> Every number here is the sampled process's own
 /// <c>Process.TotalProcessorTime</c>, so kernel-mode work the product causes outside its own threads is
-/// measured nowhere; the paragraph below the table says so in full rather than leaving the reader to
-/// assume the column is a machine cost.</para>
+/// measured nowhere; the paragraph below the table says so rather than leaving the reader to assume the
+/// column is a machine cost.</para>
 /// <para><b>A row with no product process still gets a line.</b> The two control blocks load no product,
 /// so their lines say so once and repeat <c>n/a</c> for every column the reason would not fit, rather
 /// than being dropped from a table whose subject is every measured arm.</para>

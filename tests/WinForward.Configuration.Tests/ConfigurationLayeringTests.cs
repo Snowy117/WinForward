@@ -189,7 +189,7 @@ public sealed class ConfigurationLayeringTests : IDisposable
         Assert.Contains("PascalCase", diagnostic.Message, StringComparison.Ordinal);
     }
 
-    /// <summary>A pre-migration <c>config.json</c> is exactly this document: no wrapper, camelCase keys.</summary>
+    /// <summary>A camelCase document fails closed: the wrapper and the section name have to match exactly.</summary>
     [Theory]
     [InlineData("""{"socks5Servers":[],"host":{"fallbackAction":"pass","rules":[]}}""", "WinForward")]
     [InlineData("""{"WinForward":{"socks5Servers":[]}}""", "WinForward.socks5Servers")]

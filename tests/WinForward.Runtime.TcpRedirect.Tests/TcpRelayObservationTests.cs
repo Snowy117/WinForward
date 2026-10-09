@@ -11,10 +11,10 @@ using static WinForward.TestSupport.AsyncTestExtensions;
 namespace WinForward.Runtime.TcpRedirect.Tests;
 
 /// <summary>
-/// S3/F2: fault observation is intrinsic to the pump body — a faulting pump records the fault and
-/// reports it as a pump result, so an abandoned pump can never surface as an unobserved task
-/// exception. The acceptor's attach-failure branch observes a discarded relay by disposing it, and
-/// the `tcp.relay.faulted` debug event is emitted from the pump's own catch.
+/// Fault observation is intrinsic to the pump body — a faulting pump records the fault and reports it
+/// as a pump result, so an abandoned pump can never surface as an unobserved task exception. The
+/// acceptor's attach-failure branch observes a discarded relay by disposing it, and the
+/// `tcp.relay.faulted` debug event is emitted from the pump's own catch.
 /// </summary>
 public sealed class TcpRelayObservationTests
 {
@@ -35,7 +35,7 @@ public sealed class TcpRelayObservationTests
         await acceptor.RunAcceptLoopAsync(session);
 
         // Observation is now the relay's own dispose: a discarded relay must have been disposed,
-        // so its completion is awaited by construction rather than by an attached observer.
+        // so its completion is awaited by construction.
         Assert.True(relay.IsDisposed);
     }
 
@@ -43,9 +43,9 @@ public sealed class TcpRelayObservationTests
     [SupportedOSPlatform("windows")]
     public async Task PumpFaultFaultsCompletionAndEmitsExactlyOneFaultEvent()
     {
-        // F2 fault injection: a genuine pump failure still faults the relay completion and is
-        // recorded as the `tcp.relay.faulted` debug event — the event did not die with the
-        // deleted external observer, it moved into the pump's own catch.
+        // Fault injection: a genuine pump failure still faults the relay completion and is
+        // recorded as the `tcp.relay.faulted` debug event — the event lives in the pump's own
+        // catch, not in an external observer.
         var (localPeer, relayLocal) = await CreateSocketPairAsync();
         using var local = localPeer;
         var logger = new RecordingLogger();
@@ -67,12 +67,11 @@ public sealed class TcpRelayObservationTests
     [SupportedOSPlatform("windows")]
     public async Task DisposingARelayObservesItsFaultedCompletionSoItNeverEscapes()
     {
-        // The deleted external observer's remaining job — never let a faulted completion go
-        // unobserved — is now the relay's own dispose. A pump fault is recorded and reported as a
-        // result rather than thrown, so Completion is the only faultable task a relay owns, and a
-        // foreign observer must be unnecessary. The probe is filtered to the injected fault, and it
-        // is the only reader of that completion in this test: if the disposal observation regresses,
-        // the faulted task becomes collectable and this count turns non-zero.
+        // A pump fault is recorded and reported as a result rather than thrown, so Completion is the
+        // only faultable task a relay owns and no foreign observer is needed. The probe is filtered to
+        // the injected fault, and it is the only reader of that completion in this test: if the
+        // disposal observation regresses, the faulted task becomes collectable and this count turns
+        // non-zero.
         var probe = new UnobservedExceptionProbe();
         TaskScheduler.UnobservedTaskException += probe.OnUnobserved;
         try
@@ -135,9 +134,8 @@ public sealed class TcpRelayObservationTests
     [SupportedOSPlatform("windows")]
     public async Task FaultEventIsSuppressedWhenDebugLoggingIsDisabled()
     {
-        // S3: the production default threshold (info) disables debug, so observation must not
-        // depend on the event being emitted — the fault still faults the completion, it simply
-        // produces no event.
+        // The production default threshold (info) disables debug, so observation must not depend on the
+        // event being emitted — the fault still faults the completion, it simply produces no event.
         var (localPeer, relayLocal) = await CreateSocketPairAsync();
         using var local = localPeer;
         var logger = new RecordingLogger(level => level != LogLevel.Debug);

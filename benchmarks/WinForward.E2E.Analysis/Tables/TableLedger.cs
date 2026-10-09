@@ -7,7 +7,7 @@ using WinForward.E2E.Analysis.Stats;
 namespace WinForward.E2E.Analysis.Tables;
 
 /// <summary>
-/// §14, "Target-ledger cross-check": the target's own account of what arrived, set beside the client's,
+/// "Target-ledger cross-check": the target's own account of what arrived, set beside the client's,
 /// with the attribution that made each number possible.
 /// </summary>
 /// <remarks>
@@ -18,7 +18,7 @@ namespace WinForward.E2E.Analysis.Tables;
 /// overlap and a ledger with no per-run label mean the records cannot be assigned to one of them, and
 /// merging would double-count a lane.</para>
 /// <para><b>Where the traffic went, what each DNS listener counted, how the target's TCP verdicts compare
-/// and what it could not decode are §14.3 to §14.6</b>, in <see cref="TableLedgerCross"/>.</para>
+/// and what it could not decode are separate tables</b>, in <see cref="TableLedgerCross"/>.</para>
 /// </remarks>
 internal static class TableLedger
 {
@@ -29,7 +29,7 @@ internal static class TableLedger
         + "second opinion the campaign is designed around — the client counts what it supplied and the "
         + "target counts what arrived — so without it every arrival number above rests on the client alone.";
 
-    /// <summary>What §14.2 prints when no arm published a count either side could check.</summary>
+    /// <summary>What the accounting table prints when no arm published a count either side could check.</summary>
     private const string NoAccounting =
         "n/a (no arm in this tree published a client-side connection or datagram count)";
 
@@ -85,7 +85,7 @@ internal static class TableLedger
         return string.Join('\n', lines);
     }
 
-    /// <summary>§14.1: who wrote each pass's ledger, and what let a record be attributed to a run.</summary>
+    /// <summary>Who wrote each pass's ledger, and what let a record be attributed to a run.</summary>
     private static List<string> Provenance(LedgerViews views)
     {
         var rows = new List<IReadOnlyList<string>>(views.Passes.Count);
@@ -113,7 +113,7 @@ internal static class TableLedger
         ];
     }
 
-    /// <summary>§14.2: every arm window the ledger and the client can both speak about.</summary>
+    /// <summary>Every arm window the ledger and the client can both speak about.</summary>
     private static List<string> Accounting(LedgerViews views)
     {
         var rows = new List<IReadOnlyList<string>>();

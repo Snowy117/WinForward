@@ -4,20 +4,18 @@ using WinForward.E2E.Analysis.Model;
 namespace WinForward.E2E.Analysis.Tables;
 
 /// <summary>
-/// Writes <c>tables.md</c>: one section per `## N.` heading, in the reference's own order, with the
-/// batch that owns each section's body.
+/// Writes <c>tables.md</c>: one section per `## N.` heading, in the order the sections are taken from
+/// the reference, with the batch that owns each section's body.
 /// </summary>
 /// <remarks>
 /// <para><b>A section is a slice of the oracle.</b> The comparison between the two implementations
 /// cuts <c>tables.md</c> at these headings and compares each section on its own, so the headings — not
 /// just their bodies — are the batch boundaries: all sixteen exist from the first commit, their
-/// bodies carry <c>&lt;!-- TODO(batch N) --&gt;</c> until the batch that owns them renders them
-/// (D20.2). A missing heading would be reported as a missing slice, which is the one failure the
-/// differ must never confuse with a pass.</para>
+/// bodies carrying <c>&lt;!-- TODO(batch N) --&gt;</c> until a batch renders them. A missing heading
+/// would be reported as a missing slice, the one failure the differ must never confuse with a pass.</para>
 /// <para><b>The preamble is a slice too.</b> Everything before <c>## 0.</c> — the title, the
 /// program-name line and the reading instructions — belongs to batch 1a, and the line that names the
-/// program is neutral on purpose: it names neither implementation, so the two can be compared
-/// (D6.4/D20.7).</para>
+/// program is neutral on purpose: it names neither implementation, so the two can be compared.</para>
 /// <para><b>The document is trimmed, then newline-terminated.</b> The reference joins its parts and
 /// strips the result, so a section that ends in a blank line does not add one at the end of the file:
 /// the golden ends in exactly one newline, and the compared bytes are the whole slice.</para>
@@ -71,7 +69,7 @@ internal static class TablesWriter
     /// <summary>Writes the document: the sections a batch has rendered, and a placeholder for the rest.</summary>
     /// <param name="writer">Where the document goes; the caller owns the encoding and the newline.</param>
     /// <param name="campaign">The tree every rendered section is read from.</param>
-    /// <param name="findings">The findings §0 counts and lists, as §0.4 and the severity line both read them.</param>
+    /// <param name="findings">The findings the first section counts and lists.</param>
     internal static void Write(TextWriter writer, CampaignModel campaign, IReadOnlyList<Finding> findings)
     {
         ArgumentNullException.ThrowIfNull(writer);

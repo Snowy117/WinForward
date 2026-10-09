@@ -161,8 +161,8 @@ internal static class UdpLossScenario
     private sealed record SenderStats(long SentDatagrams, long SendLoopOverflows, double ElapsedSeconds);
 
     /// <summary>
-    /// Owns the borrowed native pools and setup executor a coordinator requires (Phase A / R6) and
-    /// disposes them after the coordinator, since a coordinator never disposes its collaborators.
+    /// Owns the borrowed native pools and setup executor a coordinator requires, and disposes them
+    /// after the coordinator: a coordinator never disposes its collaborators.
     /// </summary>
     private sealed class CoordinatorScope : IAsyncDisposable
     {

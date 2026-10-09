@@ -5,7 +5,7 @@ using WinForward.Runtime.Logging;
 namespace WinForward.Runtime.UdpProxy;
 
 /// <summary>
-/// The cross-flow bound on aggregate setup-queue memory (R4): every buffered setup datagram is
+/// The cross-flow bound on aggregate setup-queue memory: every buffered setup datagram is
 /// charged against one global byte budget before the per-flow enqueue, and every charged byte is
 /// credited back exactly once at whichever sink dequeues it (flush send/TTL drop, drop-oldest
 /// eviction, per-flow-bounds rejection rollback, slot drain, dispose drain). Pure Interlocked
