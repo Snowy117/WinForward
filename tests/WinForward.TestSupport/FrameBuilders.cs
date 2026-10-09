@@ -20,7 +20,7 @@ internal static class FrameBuilders
     /// </summary>
     internal static PacketLayout LayoutOf(byte[] frame)
     {
-        // ReSharper disable once ConvertIfStatementToReturnStatement // Guard-clause + throw reads failure-first; the suggested `cond ? throw ... : value` form has no precedent in this repo (B1 disposition).
+        // ReSharper disable once ConvertIfStatementToReturnStatement // Guard-clause + throw reads failure-first; the suggested `cond ? throw ... : value` form has no precedent in this repo.
         if (!IPTcpUdpPacket.TryParse(frame, out var view)) throw new InvalidOperationException("the test frame does not parse");
         return PacketLayout.From(view);
     }

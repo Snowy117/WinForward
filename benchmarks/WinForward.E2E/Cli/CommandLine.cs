@@ -11,8 +11,7 @@ namespace WinForward.E2E.Cli;
 /// <para>What a name means is not here. The applier a verb passes in owns the semantics: which
 /// values it refuses, what it refuses them with, and (the client's case) whether a value that
 /// starts with <c>-</c> is a forgotten option rather than a value. Keeping that with the verb is
-/// what lets the target accept a <c>--label</c> of <c>--out</c> while the client refuses one
-/// (D14.23).</para>
+/// what lets the target accept a <c>--label</c> of <c>--out</c> while the client refuses one.</para>
 /// </remarks>
 internal static class CommandLine
 {

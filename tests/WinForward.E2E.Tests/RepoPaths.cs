@@ -20,23 +20,21 @@ internal static class RepoPaths
     internal static string WindowsPlansDirectory => Path.Combine(Root, "benchmarks", "WinForward.E2E", "scripts", "plans-windows");
 
     /// <summary>
-    /// The minimal plans a fact loads by path: the Tier 0 defect repros (D1-D7), which are either
-    /// rejected at load time or would need a live target, and the semantic fixtures that pin one plan
-    /// key to one published value. They live with the tests, not in <c>scripts/plans/</c>, because none
-    /// of them is a campaign plan.
+    /// The minimal plans a fact loads by path: the Tier 0 defect repros, which are either rejected at
+    /// load time or would need a live target, and the semantic fixtures that pin one plan key to one
+    /// published value. They live with the tests, not in <c>scripts/plans/</c>, because none of them is
+    /// a campaign plan.
     /// </summary>
     private static string Tier0PlansDirectory => Path.Combine(Root, "tests", "WinForward.E2E.Tests", "Fixtures", "plans");
 
     internal static string Tier0Plan(string name) => Path.Combine(Tier0PlansDirectory, name);
 
     /// <summary>
-    /// The CLI's recorded text (research/cli-snapshots: the before/ tree from the last binary
-    /// published before the two argument parsers became one shared walk, the after/ tree from the
-    /// binary that carries it), which lives with the task's research rather than with the tests
-    /// because the record has to outlive the change that took it. Archiving a task moves its whole
-    /// directory under
-    /// <c>.trellis/tasks/archive/&lt;month&gt;/</c>, so the lookup follows it there instead of
-    /// breaking the suite the day the task is closed.
+    /// The CLI's recorded text — the before/ tree from the last binary published before the two argument
+    /// parsers became one shared walk, the after/ tree from the binary that carries it. The record has to
+    /// outlive the change that took it, so the lookup follows the task directory under
+    /// <c>.trellis/tasks/archive/&lt;month&gt;/</c> rather than breaking the suite the day the task is
+    /// closed.
     /// </summary>
     internal static string CliSnapshotsDirectory { get; } = FindCliSnapshots();
 

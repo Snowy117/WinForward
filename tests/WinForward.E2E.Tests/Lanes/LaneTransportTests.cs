@@ -8,11 +8,10 @@ using Xunit;
 namespace WinForward.E2E.Tests.Lanes;
 
 /// <summary>
-/// The two real adapters against a real peer on loopback: what they report, and — the part that is not
-/// inferable from the seam's contract — how each transport outcome is reached. The framing terminality
-/// is D18.6 #3's mapping (a lost frame boundary stops the lane, one bad checksum does not), and the udp
-/// truncation facts are the registration the task asks for: .NET exposes no <c>MSG_TRUNC</c>, so an
-/// oversized datagram is named by the transport rather than read as a corrupt frame.
+/// The two real adapters against a real peer on loopback: what they report, and — the part not
+/// inferable from the seam's contract — how each transport outcome is reached. A lost frame boundary
+/// stops the lane, one bad checksum does not. .NET exposes no <c>MSG_TRUNC</c>, so an oversized
+/// datagram is named by the transport rather than read as a corrupt frame.
 /// </summary>
 public sealed class LaneTransportTests
 {
@@ -74,7 +73,7 @@ public sealed class LaneTransportTests
     public async Task AUdpTransportThatCannotConnectAnswersWithAResultRatherThanThrowing()
     {
         // A socket that is already closed cannot connect at all: the adapter has to answer with a result
-        // rather than throw, because a lane that never opened is an outcome the arm records (D18.1).
+        // rather than throw, because a lane that never opened is an outcome the arm records.
         var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
         socket.Dispose();
         using var transport = new UdpLaneTransport(socket, new IPEndPoint(IPAddress.Loopback, 9), DestinationBytes());
@@ -139,7 +138,7 @@ public sealed class LaneTransportTests
         var received = new byte[DestinationBytes()];
 
         // A frame whose payload was flipped without recomputing its checksum: the boundary is intact,
-        // so the lane reads the next message (D18.6 #3).
+        // so the lane reads the next message.
         var damaged = new FrameBuffer(PayloadBytes);
         damaged.Build(0x7400_0002u, 1, 0);
         damaged.FlipPayloadByte(PayloadBytes, 0);
@@ -178,7 +177,7 @@ public sealed class LaneTransportTests
     /// <summary>
     /// The other side of the pair above: the same close, ten bytes into a frame, is a lost boundary
     /// rather than the end of a stream. The lane stops either way, and the reason it carries is what
-    /// separates a clean half-close from a truncation (D19.3 D).
+    /// separates a clean half-close from a truncation.
     /// </summary>
     [Fact]
     public async Task APeerFinInsideAFrameIsTerminalTruncation()

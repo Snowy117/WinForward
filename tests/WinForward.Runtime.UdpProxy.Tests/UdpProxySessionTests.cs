@@ -8,7 +8,7 @@ using Xunit;
 namespace WinForward.Runtime.UdpProxy.Tests;
 
 /// <summary>
-/// D3 activity propagation: the association-table touch is throttled to one propagation per activity
+/// Activity propagation: the association-table touch is throttled to one propagation per activity
 /// bucket, while the session's own <see cref="UdpProxySession.LastActivityUtc"/> is a bucket-derived
 /// stamp (exact to 500 ms) driven by the published clock, so idle-expiry semantics stay never-early.
 /// </summary>
@@ -65,8 +65,8 @@ public sealed class UdpProxySessionTests
     [Fact]
     public async Task SendSpanAsyncForwardsTheSessionEndpointToTheTransportUnchanged()
     {
-        // R1: the session hands its Endpoint struct straight through to the transport — no
-        // IPEndPoint round-trip on the forward leg — so address, port, and family arrive intact.
+        // The session hands its Endpoint struct straight through to the transport — no IPEndPoint
+        // round-trip on the forward leg — so address, port, and family arrive intact.
         var transport = new FakeTransport(System.Net.Sockets.AddressFamily.InterNetwork, 40000);
         var session = CreateSession(new MutableTimeProvider(DateTimeOffset.UnixEpoch), [], transport);
         await using (session)
@@ -84,9 +84,9 @@ public sealed class UdpProxySessionTests
     [Fact]
     public async Task IdleExpiryEndsTheReceiveLoopWithoutRecordingAFailure()
     {
-        // R3: the receive loop reads through the session lifetime token, so an admitted idle
-        // expiry cancels it as normal teardown — no receive failure is recorded and the
-        // coordinator's failure handler stays untouched.
+        // The receive loop reads through the session lifetime token, so an admitted idle expiry
+        // cancels it as normal teardown — no receive failure is recorded and the coordinator's
+        // failure handler stays untouched.
         var time = new MutableTimeProvider(DateTimeOffset.UnixEpoch);
         var failureHandlerCalls = 0;
         var session = CreateSession(time, [], new FakeTransport(System.Net.Sockets.AddressFamily.InterNetwork, 40000));
@@ -129,10 +129,9 @@ public sealed class UdpProxySessionTests
     [Fact]
     public async Task DisposeAsyncWaitsForAnOutstandingSendLease()
     {
-        // Per-owner quiescence (F1): the send admission holds a scope lease for the whole transport
-        // await, so disposal must not return while the send is still in flight. The gate keeps the
-        // send outstanding; the pending dispose is the discriminator (a send that did not hold a
-        // lease would let disposal complete immediately).
+        // Per-owner quiescence: the send admission holds a scope lease for the whole transport await,
+        // so disposal must not return while a send is in flight. The pending dispose is the
+        // discriminator: without that lease, disposal would complete immediately.
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var transport = new FakeTransport(System.Net.Sockets.AddressFamily.InterNetwork, 40000) { SendGate = gate };
         var session = CreateSession(new MutableTimeProvider(DateTimeOffset.UnixEpoch), [], transport);
@@ -159,7 +158,7 @@ public sealed class UdpProxySessionTests
     [Fact]
     public void FaultedSessionStateHasNoParallelReceiveFailureField()
     {
-        // D-C3-5: the session's single failure representation is the scope's Fault. A reintroduced
+        // The session's single failure representation is the scope's Fault. A reintroduced
         // _receiveFailure field would be a second source of truth that can disagree with State and
         // the send admission (both read scope.Fault under _activityGate).
         Assert.Null(typeof(UdpProxySession).GetField("_receiveFailure", BindingFlags.Instance | BindingFlags.NonPublic));
@@ -168,16 +167,16 @@ public sealed class UdpProxySessionTests
     [Fact]
     public void SessionContextStaysAValueTypeSoConstructionDoesNotAllocate()
     {
-        // B (probe C2a1): the context is copied into the session constructor and never retained, so as
-        // a record class it cost one heap allocation per session (240 B measured). The shape is load-
-        // bearing for that saving; record value equality is unchanged by it.
+        // The context is copied into the session constructor and never retained, so a record class
+        // would heap-allocate once per session. The value shape is load-bearing for that saving,
+        // and record value equality is unaffected by it.
         Assert.True(typeof(UdpProxySessionContext).IsValueType);
     }
 
     [Fact]
     public void ReceiveLoopIsASingleAsyncMethod()
     {
-        // D: ReceiveLoopAsync + ReceiveDatagramsAsync boxed two state machines (and two Task objects)
+        // ReceiveLoopAsync + ReceiveDatagramsAsync boxed two state machines (and two Task objects)
         // per session for one loop. A reintroduced inner async method would silently pay the second
         // box again; the outer method called it exactly once, so there is no seam to preserve.
         Assert.Null(typeof(UdpProxySession).GetMethod("ReceiveDatagramsAsync", BindingFlags.Instance | BindingFlags.NonPublic));

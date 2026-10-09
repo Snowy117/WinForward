@@ -12,7 +12,7 @@ namespace WinForward.E2E.Target;
 /// <summary>
 /// The key names one dns totals block is written with, in write order. The same counters reach the
 /// ledger at two levels -- a <c>dnsSummary</c> record's own root and the <c>targetSummary</c> containers
-/// <c>dns</c> and <c>dnsAlt</c> -- and a leaf written at another level is another constant (D14.17), so
+/// <c>dns</c> and <c>dnsAlt</c> -- and a leaf written at another level is another constant, so
 /// the writer takes the level's set instead of spelling a name at the call site. Both containers of the
 /// target level are the same depth and the same writer, so they share <see cref="Target"/>.
 /// </summary>
@@ -154,8 +154,8 @@ internal sealed class DnsServer : IAsyncDisposable
         _workerCount = workerCount;
         _port = port;
 
-        // The receive template only has to be the socket's own address family, so it is taken from the
-        // socket rather than from an endpoint the caller would have to hand in twice.
+        // The receive template only has to match the socket's own address family, so it is taken from
+        // the socket rather than handed in twice by the caller.
         _sourceTemplate = Sockets.SourceTemplate(udp.LocalEndPoint ?? new IPEndPoint(IPAddress.Any, port));
 
         _udp = udp;
@@ -327,7 +327,7 @@ internal sealed class DnsServer : IAsyncDisposable
     /// Reads exactly <paramref name="buffer"/>'s length and books where the stream ended when it did
     /// not. A peer that stops inside the length prefix or inside the message leaves one message cut in
     /// half, which is this listener's own truncated frame; a peer that stops between messages ended
-    /// its stream cleanly and is not counted (D19.3 C).
+    /// its stream cleanly and is not counted.
     /// </summary>
     private async ValueTask<bool> ReadExactAsync(Socket socket, Memory<byte> buffer, CancellationToken cancellationToken)
     {
@@ -387,7 +387,7 @@ internal sealed class DnsServer : IAsyncDisposable
             }
             catch (ObjectDisposedException)
             {
-                /* teardown closed the socket under the handler: a teardown is not an aborted query and books nothing (D19.2 ⑨) */
+                /* teardown closed the socket under the handler: a teardown is not an aborted query and books nothing */
             }
         }
     }

@@ -85,7 +85,7 @@ public sealed class TargetOptionsTests
 
     // The client refuses a string value that starts with '-' because it is usually a forgotten
     // option; the target does not, and the shared walk must not have imported the rule with the rest
-    // of the parsing (D14.23). A target label that looks like an option is a label.
+    // of the parsing. A target label that looks like an option is a label.
     [Fact]
     public void AStringValueThatLooksLikeAnOptionIsStillAccepted()
     {

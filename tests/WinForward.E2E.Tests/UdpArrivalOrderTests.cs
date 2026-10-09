@@ -5,16 +5,16 @@ using Xunit;
 namespace WinForward.E2E.Tests;
 
 /// <summary>
-/// The reordering count over every arrival order of the first six sequences (#10). RFC 4737 counts a
+/// The reordering count over every arrival order of the first six sequences. RFC 4737 counts a
 /// datagram as reordered when it arrives after a higher sequence has already arrived, so each order's
 /// expectation is the number of its own descents below a running maximum — computed here rather than
 /// tabulated, which turns the spot case into a formula that all 720 orders are checked against.
 /// </summary>
 /// <remarks>
-/// Counter-proof (applied and watched red; the evidence records the restored hash): replace the
-/// <c>_highestArrived</c> comparison in <c>UdpReliabilityTracker.MarkArrival</c> with a comparison
-/// against the next expected sequence, and every unordered-looking case here collapses to zero while
-/// <c>(1,3,2)</c> stays red at its single-case assertion.
+/// Counter-proof (applied and watched red): replace the <c>_highestArrived</c> comparison in
+/// <c>UdpReliabilityTracker.MarkArrival</c> with a comparison against the next expected sequence, and
+/// every unordered-looking case here collapses to zero while <c>(1,3,2)</c> stays red at its
+/// single-case assertion.
 /// </remarks>
 public sealed class UdpArrivalOrderTests
 {
@@ -38,10 +38,10 @@ public sealed class UdpArrivalOrderTests
     [Fact]
     public void TheAuditArrivalPopulationIs1956OrderedSelections()
     {
-        // The audit's "1956 arrival orders", spelled out: every ordered selection of k distinct
-        // sequences out of the six, for k = 1..6 (6 + 30 + 120 + 360 + 720 + 720 = 1956). The full
-        // permutations are the 720 above; the shorter sequences are the same fact for a schedule that
-        // stopped arriving early, and both populations are checked against the same formula.
+        // 1956 arrival orders, spelled out: every ordered selection of k distinct sequences out of the
+        // six, for k = 1..6 (6 + 30 + 120 + 360 + 720 + 720 = 1956). The full permutations are the 720
+        // above; the shorter sequences are the same fact for a schedule that stopped arriving early, and
+        // both populations are checked against the same formula.
         var sequences = 0;
 
         for (var length = 1; length <= s_sequences.Length; length++)
@@ -65,9 +65,8 @@ public sealed class UdpArrivalOrderTests
     [Fact]
     public void ArrivingOneThreeTwoIsOneReorder()
     {
-        // The audit's own example, called out on its own because "3,1,3" (a duplicate in the middle)
-        // was the only shape the suite used to pin: 3 arrives first, 1 arrives after a higher sequence
-        // and counts, 2 arrives after the same maximum and counts nothing new.
+        // The counted case, on its own: 3 arrives first, 1 arrives after a higher sequence and counts,
+        // 2 arrives after the same maximum and counts nothing new.
         AssertOrderCounts([1, 3, 2], reordered: 1, never: 3);
     }
 
