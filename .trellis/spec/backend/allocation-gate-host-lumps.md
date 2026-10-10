@@ -114,7 +114,10 @@ matches `UdpAdaptiveSweepAllocationGateTests`, so the loop stops on a false `VAC
 
 The expected total is **derived from the class source**, never remembered: a hard-coded per-class map
 rots silently (the shipped one was stale for two of the ten classes and aborted the loop on its first
-run), while the class file is the thing the filter actually selects.
+run), while the class file is the thing the filter actually selects. The Windows entry that carries
+an exact gate is `IPHelperOwnerTableParserTests`; `ProcessOwnerTableCacheTests` has no
+`GC.GetAllocatedBytesForCurrentThread` assertion (it pins the coalescing series), so its summary is a
+stability series rather than a lump-victim signature.
 
 ```bash
 log=/tmp/wf-lumps-proof.txt; : > "$log"; rev=$(git rev-parse --short HEAD); tree=$(git write-tree)
@@ -129,6 +132,7 @@ WinForward.NdisApi.Tests.NdisCapturePumpIdleWaitTests:tests/WinForward.NdisApi.T
 WinForward.Runtime.Flow.Tests.FlowAttributionPipelineTests:tests/WinForward.Runtime.Flow.Tests/FlowAttributionPipelineTests.cs
 WinForward.Runtime.Flow.Tests.FlowAttributionPendingIndexTests:tests/WinForward.Runtime.Flow.Tests/FlowAttributionPendingIndexTests.cs
 WinForward.Windows.Tests.ProcessOwnerTableCacheTests:tests/WinForward.Windows.Tests/ProcessOwnerTableCacheTests.cs
+WinForward.Windows.Tests.IPHelperOwnerTableParserTests:tests/WinForward.Windows.Tests/IPHelperOwnerTableParserTests.cs
 WinForward.NdisApi.Tests.CompositePacketArrivalSignalTests:tests/WinForward.NdisApi.Tests/CompositePacketArrivalSignalTests.cs
 WinForward.Performance.Tests.UdpAdaptiveSweepAllocationGateTests:tests/WinForward.Performance.Tests/UdpAdaptiveSweepAllocationGateTests.cs'
 for entry in $gates; do

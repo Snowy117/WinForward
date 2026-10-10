@@ -98,7 +98,7 @@ keeps a scan from allocating even though it is a system-wide enumeration:
   publishes it, so an interrupted fill is unsearchable and a failed scan cannot leave stale answers.
 - A scan is affordable only because its rate is the new-flow rate, not the packet rate: the counter
   `attributionOwnerTableScans` tracks it. Its zero-allocation gate is
-  `IPHelperOwnerTableParserTests.AFillAndItsLookupsAllocateNothingInSteadyState`, which is why the row
+  `IPHelperOwnerTableParserTests.AFillAndItsLookupsAllocateNoManagedBytes`, which is why the row
   decode lives behind `IPHelperOwnerTableParser` rather than inside the `iphlpapi` boundary — the
   gate must run on a host without the native tables.
 

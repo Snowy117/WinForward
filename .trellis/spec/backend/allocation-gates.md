@@ -66,7 +66,7 @@ private bool ScheduleSessionSetup(FlowKey flow, ProxyTarget target, long flowGen
 - When the allocating work sits behind a platform seam that the test host cannot call (an
   `iphlpapi` enumeration), the decode is the thing that allocates, so it belongs on this side of the
   seam: `IPHelperOwnerTableParser` takes the driver-written image and fills a slot, and its gate
-  (`AFillAndItsLookupsAllocateNothingInSteadyState`) proves the 0 B while the `iphlpapi` call stays
+  (`AFillAndItsLookupsAllocateNoManagedBytes`) proves the 0 B while the `iphlpapi` call stays
   inside `IPHelperOwnerTableReader`. A gate that needed the native table would never run.
 
 ## An allocation gate must open only after its path is ready, and must verify it stayed on one thread

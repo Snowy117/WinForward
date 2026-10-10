@@ -91,38 +91,43 @@ the slot table does not know sees `AdapterId == null`, the same shape as an adap
 
 ## Process Attribution: The Owner-Table Cache
 
-A cold process-attribution cache: it allocates, it awaits, and it never runs on the packet
-path. It is what turns a policy rule's `process` selector into a decided owner.
+A process-attribution cache on the setup-worker path: it awaits, it never runs on the packet path,
+and it is entered once per new flow rather than once per packet — so it carries an allocation budget
+instead of the packet path's exemption: one reusable slot per kind, no row array and no framework
+address per scan (see `hot-path.md`'s scope note and
+[native-lease-and-pool-lifetime.md](./native-lease-and-pool-lifetime.md#owner-table-slots)). It is
+what turns a policy rule's `process` selector into a decided owner.
 
-A cold process-attribution cache: it allocates, it awaits, and it never runs on the packet path.
-
-- **One snapshot slot and one single-flight refresh gate per `OwnerTableKind`** (Tcp4, Tcp6, Udp4,
-  Udp6). Concurrent missers join one in-flight read whose snapshot is published after the last of them
-  asked, so a burst's own newly-bound sockets are visible to the shared read — a window alone cannot
-  deliver that, because a socket's row appears at bind, microseconds before the packet that triggers
-  the lookup. Recorded series: the `attribution.ownerBurst` row costs **1** read for 16 concurrent
+- **One reusable slot and one single-flight refresh gate per `OwnerTableKind`** (Tcp4, Tcp6, Udp4,
+  Udp6). The reader refills that slot in place and the cache searches it under the same gate, which is
+  what keeps a scan free of managed allocation; the slot's rows are `IPAddressValue` values and its
+  storage grows once to the widest table seen. Concurrent missers join one in-flight fill whose
+  contents are published after the last of them asked, so a burst's own newly-bound sockets are
+  visible to the shared read — a window alone cannot deliver that, because a socket's row appears at
+  bind, microseconds before the packet that triggers the lookup. Recorded series: the `attribution.ownerBurst` row costs **1** read for 16 concurrent
   flows over one scripted table, and the exact form is
   `ProcessOwnerTableCacheTests.NConcurrentMissesInsideTheWindowReadTheTableExactlyOnce`. The scan
   count is a **series, never a threshold**.
-- **The freshness rule is the request instant, not a flag.** A snapshot taken before the caller asked
-  may only answer a **positive TCP row**; a miss always falls through to a read, so a flow whose
-  socket bound after the last read still gets a real scan. `WindowsProcessAttributor.FindAsync`'s 2 ms
-  retry is just a lookup with a later instant, which is what lets it coalesce onto an epoch that
-  started after it asked instead of forcing a second scan.
+- **The freshness rule is the request instant, not a flag.** A slot filled before the caller asked may
+  only answer a **positive TCP row**; a miss always falls through to a read, so a flow whose socket
+  bound after the last fill still gets a real scan. A fill published at or after the request is
+  authoritative both ways, which is what lets `WindowsProcessAttributor.FindAsync`'s 2 ms retry —
+  a lookup with a later instant — answer from the first attempt's fill instead of forcing a second.
 - **Positive caching is per kind, and the bound is the predicate's.** A TCP row matches all four tuple
   fields, so a row that survives into a later request describes the same connection; an
   exact-4-tuple reuse inside the 300 ms window is effectively impossible under TIME_WAIT, so TCP
   reuse is accepted. A UDP row matches the **local port alone**, so a recycled port inside the window
-  would attribute a flow to the previous process (fail-open) — **UDP never reuses a snapshot older
-  than the request**, only coalescing onto an epoch published at or after it. Closing the UDP half
+  would attribute a flow to the previous process (fail-open) — **UDP never answers from a slot filled
+  before the request**, only from a fill published at or after it. Closing the UDP half
   needs the `*_TABLE_OWNER_MODULE` creation timestamp, a recorded on-Windows follow-up.
 - **The seam is the platform boundary.** `IPHelperOwnerTableReader` is the single
-  `[SupportedOSPlatform("windows")]` type and owns the size probe, the fail-closed row-count
-  validation and the `FreeHGlobal`. The default reader off-Windows is `UnavailableOwnerTableReader`,
-  so the observable result there stays `null` while the managed cache logic is exercisable on any host
-  through an injected reader. The predicates moved into `OwnerTable` unchanged and the
-  `Where/Select/Distinct/ToArray` chain became one predicate pass, so a snapshot hit and a fresh scan
-  answer identically for identical rows.
+  `[SupportedOSPlatform("windows")]` type and owns the size probe, the table call and the
+  `NativeMemory` release; `IPHelperOwnerTableParser` owns the fail-closed row-count validation and the
+  row decode, which is what lets the decode's zero-allocation gate run on a host without the native
+  tables. The default reader off-Windows is `UnavailableOwnerTableReader`, so the observable result
+  there stays `null` while the managed cache logic is exercisable on any host through an injected
+  reader. The predicates live in `OwnerTable` unchanged and the `Where/Select/Distinct/ToArray` chain
+  became one predicate pass, so a slot hit and a fresh scan answer identically for identical rows.
 - **The wake signal is latency, never correctness, and its ownership is split three ways.**
   `CompositePacketArrivalSignal` composes the **borrowed** driver signal with one event the
   `FlowAttributionWakeRegistry` owns: the composite disposes the driver signal in place of the list
@@ -136,22 +141,29 @@ A cold process-attribution cache: it allocates, it awaits, and it never runs on 
   `FlowAttributionPipelineTests.ThePipelineSignalsOnlyItsOwnAdaptersEvent`).
 
 ```csharp
-// Wrong: serve a UDP answer from a snapshot taken before the request — the predicate is the local
-// port alone, so a recycled port attributes the flow to the previous process (fail-open).
+// Wrong: serve a UDP answer from a slot filled before the request — the predicate is the local port
+// alone, so a recycled port attributes the flow to the previous process (fail-open).
 return snapshot.Table.Lookup(key);
 
-// Correct: only a positive TCP row may be reused; a UDP lookup coalesces onto an epoch published at
-// or after its request instant and otherwise reads.
-if (snapshot is not null && ReusesSnapshot(kind) && snapshot.IsUsable && IsFresh(snapshot, now) && snapshot.TakenUtc <= requestInstant
-    && snapshot.Table.Lookup(key) is { } cached)
+// Correct (all under the kind's gate): a fill published at or after the request answers positively or
+// negatively; anything older may only confirm a positive TCP row; a miss reads.
+if (snapshot is not null && snapshot.IsUsable)
 {
-    return cached;
+    if (snapshot.TakenUtc >= requestInstant) return snapshot.Table.Lookup(key);
+    if (ReusesSnapshot(kind) && IsFresh(snapshot, _clock()) && snapshot.Table.Lookup(key) is { } reused) return reused;
 }
+
+var table = _reader.Read(kind);
+return table.IsAvailable ? table.Lookup(key) : null;
 ```
 
-Tests: `ProcessOwnerTableCacheTests` — coalescing, the retry joining a later epoch, a post-read bind
+Tests: `ProcessOwnerTableCacheTests` — coalescing, the retry joining a later fill, a post-read bind
 forcing exactly one more read, a cached TCP hit, UDP never reusing, window expiry, scan/snapshot
 agreement, the recycled-port asymmetry, `window = 0`, and the unavailable reader.
+`IPHelperOwnerTableParserTests` locks the decode and the fill protocol: the four row images
+(TCP4/TCP6/UDP4/UDP6, including the IPv6 scope ids), a begun fill being unsearchable, a rejected row
+count leaving the slot's contents answering, the non-fillable `Unavailable` constant, and the 0 B
+allocation gate.
 
 ---
 
