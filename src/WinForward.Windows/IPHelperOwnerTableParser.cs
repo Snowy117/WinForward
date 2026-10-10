@@ -15,7 +15,7 @@ namespace WinForward.Windows;
 /// </summary>
 internal static class IPHelperOwnerTableParser
 {
-    internal static unsafe void FillUdp4(OwnerTable table, nint buffer, int rowCount, uint bytesWritten)
+    internal static unsafe void FillUdp4(OwnerTable table, void* buffer, int rowCount, uint bytesWritten)
     {
         IPHelperTables.ValidateRowCount(rowCount, bytesWritten, sizeof(IPHelperAbi.MibUdpRowOwnerPid), "IPv4 UDP owner table");
         var rows = table.BeginUdpFill(rowCount);
@@ -28,20 +28,20 @@ internal static class IPHelperOwnerTableParser
         table.CompleteFill();
     }
 
-    internal static unsafe void FillUdp6(OwnerTable table, nint buffer, int rowCount, uint bytesWritten)
+    internal static unsafe void FillUdp6(OwnerTable table, void* buffer, int rowCount, uint bytesWritten)
     {
         IPHelperTables.ValidateRowCount(rowCount, bytesWritten, sizeof(IPHelperAbi.MibUdp6RowOwnerPid), "IPv6 UDP owner table");
         var rows = table.BeginUdpFill(rowCount);
         for (var index = 0; index < rows.Length; index++)
         {
             var row = IPHelperTables.ReadRow<IPHelperAbi.MibUdp6RowOwnerPid>(buffer, index);
-            rows[index] = new UdpOwnerRow(DecodeIPv6Value(new ReadOnlySpan<byte>(row.LocalAddress, 16), row.ScopeId), IPHelperAbi.DecodeNetworkPort(row.LocalPort), row.ProcessId);
+            rows[index] = new UdpOwnerRow(IPAddressValue.FromIPv6(new ReadOnlySpan<byte>(row.LocalAddress, 16), row.ScopeId), IPHelperAbi.DecodeNetworkPort(row.LocalPort), row.ProcessId);
         }
 
         table.CompleteFill();
     }
 
-    internal static unsafe void FillTcp4(OwnerTable table, nint buffer, int rowCount, uint bytesWritten)
+    internal static unsafe void FillTcp4(OwnerTable table, void* buffer, int rowCount, uint bytesWritten)
     {
         IPHelperTables.ValidateRowCount(rowCount, bytesWritten, sizeof(IPHelperAbi.MibTcpRowOwnerPid), "IPv4 TCP owner table");
         var rows = table.BeginTcpFill(rowCount);
@@ -57,7 +57,7 @@ internal static class IPHelperOwnerTableParser
         table.CompleteFill();
     }
 
-    internal static unsafe void FillTcp6(OwnerTable table, nint buffer, int rowCount, uint bytesWritten)
+    internal static unsafe void FillTcp6(OwnerTable table, void* buffer, int rowCount, uint bytesWritten)
     {
         IPHelperTables.ValidateRowCount(rowCount, bytesWritten, sizeof(IPHelperAbi.MibTcp6RowOwnerPid), "IPv6 TCP owner table");
         var rows = table.BeginTcpFill(rowCount);
@@ -65,8 +65,8 @@ internal static class IPHelperOwnerTableParser
         {
             var row = IPHelperTables.ReadRow<IPHelperAbi.MibTcp6RowOwnerPid>(buffer, index);
             rows[index] = new TcpOwnerRow(
-                Endpoint.From(DecodeIPv6Value(new ReadOnlySpan<byte>(row.LocalAddress, 16), row.LocalScopeId), IPHelperAbi.DecodeNetworkPort(row.LocalPort)),
-                Endpoint.From(DecodeIPv6Value(new ReadOnlySpan<byte>(row.RemoteAddress, 16), row.RemoteScopeId), IPHelperAbi.DecodeNetworkPort(row.RemotePort)),
+                Endpoint.From(IPAddressValue.FromIPv6(new ReadOnlySpan<byte>(row.LocalAddress, 16), row.LocalScopeId), IPHelperAbi.DecodeNetworkPort(row.LocalPort)),
+                Endpoint.From(IPAddressValue.FromIPv6(new ReadOnlySpan<byte>(row.RemoteAddress, 16), row.RemoteScopeId), IPHelperAbi.DecodeNetworkPort(row.RemotePort)),
                 row.ProcessId);
         }
 
@@ -77,7 +77,4 @@ internal static class IPHelperOwnerTableParser
     // reading its raw image reproduces the wire address without an endian conversion.
     private static unsafe IPAddressValue DecodeIPv4Address(uint address) =>
         IPAddressValue.FromIPv4(new ReadOnlySpan<byte>(&address, sizeof(uint)));
-
-    private static IPAddressValue DecodeIPv6Value(ReadOnlySpan<byte> address, uint scopeId) =>
-        IPAddressValue.FromIPv6(address, scopeId);
 }

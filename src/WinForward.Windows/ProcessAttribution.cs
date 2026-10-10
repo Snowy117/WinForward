@@ -207,6 +207,6 @@ internal static class IPHelperTables
     /// <c>Table[0]</c> to <paramref name="firstRowOffset"/> 8 (documented in netioapi.h: access
     /// must assume padding between <c>NumEntries</c> and the first row).
     /// </summary>
-    internal static unsafe T ReadRow<T>(nint buffer, int index, int firstRowOffset = 4) where T : unmanaged =>
-        Unsafe.ReadUnaligned<T>((void*)(buffer + firstRowOffset + (index * sizeof(T))));
+    internal static unsafe T ReadRow<T>(void* buffer, int index, int firstRowOffset = 4) where T : unmanaged =>
+        Unsafe.ReadUnaligned<T>((byte*)buffer + firstRowOffset + (index * sizeof(T)));
 }

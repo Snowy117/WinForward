@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Globalization;
 using System.Net;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 
@@ -62,7 +63,7 @@ public static partial class UnicastAddressInventory
 
     private static unsafe IReadOnlyList<UnicastAddressObservation> ReadRows()
     {
-        nint table;
+        void* table;
         var result = Native.GetUnicastIpAddressTable(AfUnspec, &table);
         if (result != 0) throw new Win32Exception(result);
         try
@@ -76,10 +77,10 @@ public static partial class UnicastAddressInventory
     }
 
     /// <summary>Parses a MIB_UNICASTIPADDRESS_TABLE-shaped buffer: 4-byte entry count, then rows.</summary>
-    internal static IReadOnlyList<UnicastAddressObservation> ParseRows(nint tableBuffer)
+    internal static unsafe IReadOnlyList<UnicastAddressObservation> ParseRows(void* tableBuffer)
     {
-        if (tableBuffer == nint.Zero) throw new ArgumentNullException(nameof(tableBuffer));
-        var rowCount = Marshal.ReadInt32(tableBuffer);
+        if (tableBuffer is null) throw new ArgumentNullException(nameof(tableBuffer));
+        var rowCount = Unsafe.ReadUnaligned<int>(tableBuffer);
         ValidateEntryCount(rowCount);
         var rows = new UnicastAddressObservation[rowCount];
         for (var index = 0; index < rows.Length; index++)
@@ -175,10 +176,10 @@ public static partial class UnicastAddressInventory
     private static partial class Native
     {
         [LibraryImport("iphlpapi.dll", EntryPoint = "GetUnicastIpAddressTable", SetLastError = true)]
-        internal static unsafe partial int GetUnicastIpAddressTable(ushort family, nint* table);
+        internal static unsafe partial int GetUnicastIpAddressTable(ushort family, void** table);
 
         [LibraryImport("iphlpapi.dll", EntryPoint = "FreeMibTable", SetLastError = true)]
-        internal static partial void FreeMibTable(nint buffer);
+        internal static unsafe partial void FreeMibTable(void* buffer);
 
         [LibraryImport("iphlpapi.dll", EntryPoint = "ConvertInterfaceLuidToGuid", SetLastError = true)]
         internal static partial int ConvertInterfaceLuidToGuid(in ulong interfaceLuid, out Guid interfaceGuid);

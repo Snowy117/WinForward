@@ -14,7 +14,7 @@ namespace WinForward.Windows.Tests;
 public sealed class UnicastAddressInventoryTests
 {
     [Fact]
-    public void ParseRowsReadsIPv4AndIPv6RowsWithLuidAndScope()
+    public unsafe void ParseRowsReadsIPv4AndIPv6RowsWithLuidAndScope()
     {
         var buffer = BuildTable(
             (UnicastAddressInventory.AfInet, ToBytes(IPAddress.Parse("192.168.77.2")), 0u, 11uL),
@@ -32,12 +32,12 @@ public sealed class UnicastAddressInventoryTests
         }
         finally
         {
-            Marshal.FreeHGlobal(buffer);
+            NativeMemory.Free(buffer);
         }
     }
 
     [Fact]
-    public void ParseRowsRejectsAnUnknownAddressFamily()
+    public unsafe void ParseRowsRejectsAnUnknownAddressFamily()
     {
         var buffer = BuildTable((999, ToBytes(IPAddress.Parse("192.168.77.2")), 0u, 11uL));
         try
@@ -46,28 +46,28 @@ public sealed class UnicastAddressInventoryTests
         }
         finally
         {
-            Marshal.FreeHGlobal(buffer);
+            NativeMemory.Free(buffer);
         }
     }
 
     [Fact]
-    public void ParseRowsRejectsACountThatCannotBelongToARealHostTable()
+    public unsafe void ParseRowsRejectsACountThatCannotBelongToARealHostTable()
     {
-        var buffer = Marshal.AllocHGlobal(4);
+        var buffer = NativeMemory.AllocZeroed(4);
         try
         {
-            Marshal.WriteInt32(buffer, -1);
+            *(int*)buffer = -1;
             Assert.Throws<InvalidOperationException>(() => UnicastAddressInventory.ParseRows(buffer));
 
-            Marshal.WriteInt32(buffer, UnicastAddressInventory.MaxUnicastAddressRows + 1);
+            *(int*)buffer = UnicastAddressInventory.MaxUnicastAddressRows + 1;
             Assert.Throws<InvalidOperationException>(() => UnicastAddressInventory.ParseRows(buffer));
 
-            Marshal.WriteInt32(buffer, 0);
+            *(int*)buffer = 0;
             Assert.Empty(UnicastAddressInventory.ParseRows(buffer));
         }
         finally
         {
-            Marshal.FreeHGlobal(buffer);
+            NativeMemory.Free(buffer);
         }
     }
 
@@ -81,9 +81,9 @@ public sealed class UnicastAddressInventoryTests
     }
 
     [Fact]
-    public void ParseRowsRejectsANullBuffer()
+    public unsafe void ParseRowsRejectsANullBuffer()
     {
-        Assert.Throws<ArgumentNullException>(() => UnicastAddressInventory.ParseRows(nint.Zero));
+        Assert.Throws<ArgumentNullException>(() => UnicastAddressInventory.ParseRows(tableBuffer: null));
     }
 
     [Fact]
@@ -163,11 +163,11 @@ public sealed class UnicastAddressInventoryTests
     /// padding (the row is 8-byte aligned, so the native layout starts Table[0] at offset 8 —
     /// poisoned here to prove the parser never reads it), then native rows.
     /// </summary>
-    private static unsafe nint BuildTable(params (ushort Family, byte[] Address, uint ScopeId, ulong Luid)[] rows)
+    private static unsafe void* BuildTable(params (ushort Family, byte[] Address, uint ScopeId, ulong Luid)[] rows)
     {
-        var buffer = Marshal.AllocHGlobal(IPHelperAbi.UnicastTableFirstRowOffset + (rows.Length * sizeof(IPHelperAbi.MibUnicastIpAddressRow)));
-        Marshal.WriteInt32(buffer, rows.Length);
-        Marshal.WriteInt32(buffer, 4, unchecked((int)0xDeadBeef));
+        var buffer = NativeMemory.AllocZeroed((nuint)(IPHelperAbi.UnicastTableFirstRowOffset + (rows.Length * sizeof(IPHelperAbi.MibUnicastIpAddressRow))));
+        *(int*)buffer = rows.Length;
+        *(int*)((byte*)buffer + 4) = unchecked((int)0xDeadBeef);
         for (var index = 0; index < rows.Length; index++)
         {
             var row = (IPHelperAbi.MibUnicastIpAddressRow*)((byte*)buffer + IPHelperAbi.UnicastTableFirstRowOffset + (index * sizeof(IPHelperAbi.MibUnicastIpAddressRow)));
