@@ -174,3 +174,29 @@ Implemented the bounded close drain: a clean relay end keeps the session and its
 ### Status
 
 [OK] **Completed**
+
+---
+
+## Session 60: Owner-table attribution: stop the per-connection system scan from allocating
+<!-- trellis-session: v=2 -->
+
+**Date**: 2026-10-10
+**Task**: Owner-table attribution: make the per-connection system scan allocation-free
+**Branch**: `master`
+
+### Summary
+
+Traced the REL arm's 28 MB/s allocation rate and private-memory staircase to its root cause and fixed it. A `dotnet-trace --profile gc-verbose` capture of a re-run 20 cps REL load put 96% of all sampled allocation (1802 of 1879 MiB) under one stack: `IPHelperOwnerTableReader.ReadTcp4` ← `ProcessOwnerTableCache.Lookup` ← `WindowsProcessAttributor.FindOwnerSafely` ← `FlowAttributionPipeline.RunAttributionAsync`, allocating a fresh `TcpOwnerRow[]` plus two `IPAddress` objects per row. The scan rate is the new-flow rate by design (a new socket is never in an existing snapshot, so its lookup always misses), and the hot-path spec's "process attribution is a cold edge" exemption is what let it stay. The reader now owns one reusable `OwnerTable` slot per kind, the parser fills it with `IPAddressValue` rows and no array, and the cache searches it under the same per-kind gate as the read; the decode moved behind `IPHelperOwnerTableParser` so the new 0 B gate runs without `iphlpapi`. Committed-revision measurements: allocation 27.8 → **0.53 MB/s** (52×), GC collections ~556/180 s → 8/120 s, scans = 2402 for 2400 connections, private-memory step +29.6 → **+11.2 MiB** with the sawtooth gone, REL A/B 0/1795 connect failures against 110/1745 and connect p50 8.75 → 7.20 ms. Residual, recorded as follow-ups rather than fixed here: the remaining step is GC segment commitment (one LOH segment for >85 KB per-flow arrays: tombstone dictionaries 1.2 MiB, the slot's own growth 1.64 MiB), and `DOTNET_GCHeapHardLimit=0x2000000` lowers the plateau by ~8 MB. The full-plan campaign row was narrowed to a REL A/B because the local stand-in upstream speaks CONNECT only. Gates: zero-warning Release build, all 14 test projects green (1680 tests), dotnet format empty, jb inspectcode 0 issues.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9c6aff7` | fix(attribution): reuse one owner-table slot per kind so a scan allocates nothing |
+| `4fba0a4` | docs(spec): budget the owner-table scan that runs once per new flow |
+| `c7e977f` | chore(task): record the owner-table scan allocation task artifacts |
+
+### Status
+
+[PARTIAL] Allocation defect fixed and verified; AC1's private-memory target (≤5 MiB) is unmet at +11.2 MiB and its cause is characterized — task left `in_progress` with the follow-up levers in the PRD.
+
