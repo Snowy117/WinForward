@@ -280,8 +280,9 @@ internal sealed class DurableCaptureBundle : IAsyncDisposable
         ActivityBucketClock activityClock)
     {
         var executor = new NdisPacketActionExecutor(reinjector, loggerFactory.CreateLogger<NdisPacketActionExecutor>(), tcpCoordinator, udpCoordinator, healthSignal: healthSignal);
+        var attributor = new WindowsProcessAttributor(ownerTableReadSink: static () => RuntimeCounters.Shared.Increment(RuntimeCounters.AttributionOwnerTableScans));
         var dispatcher = new FlowDispatcher(
-            configuration, selfTraffic, executor, new WindowsProcessAttributor(),
+            configuration, selfTraffic, executor, attributor,
             reverseHandler: tcpCoordinator,
             fragmentHandler: tcpCoordinator.HandleFragmentAsync,
             logger: loggerFactory.CreateLogger<FlowDispatcher>(),

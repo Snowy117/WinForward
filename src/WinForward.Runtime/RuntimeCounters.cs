@@ -31,6 +31,9 @@ public sealed class RuntimeCounters
     /// <summary>Host-flow process attribution returned no owner (after the attributor's internal retry); see <c>flow.attribution-miss</c>.</summary>
     public const string AttributionMiss = "attributionMiss";
 
+    /// <summary>A successful system-wide owner-table scan for process attribution — runs once per flow whose lookup no snapshot could answer, so it tracks the new-flow rate, not the packet rate.</summary>
+    public const string AttributionOwnerTableScans = "attributionOwnerTableScans";
+
     /// <summary>A new-flow packet was refused a pending-attribution entry (entry cap or global retained-byte budget); see the rate-limited <c>flow.attribution.pending-rejected</c> warn.</summary>
     public const string AttributionPendingRejected = "attributionPendingRejected";
 

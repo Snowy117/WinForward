@@ -19,9 +19,10 @@ public sealed partial class WindowsProcessAttributor : IProcessAttributor
     private readonly Lock _cacheGate = new();
     private readonly ProcessOwnerTableCache _ownerTables;
 
-    public WindowsProcessAttributor(int cacheCapacity = 1024)
+    public WindowsProcessAttributor(int cacheCapacity = 1024, Action? ownerTableReadSink = null)
         : this(cacheCapacity, CreateDefaultOwnerTableReader(), ProcessOwnerTableCache.DefaultWindowMs)
     {
+        _ownerTables.ReadSink = ownerTableReadSink;
     }
 
     /// <summary>

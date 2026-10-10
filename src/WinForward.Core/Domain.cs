@@ -31,13 +31,6 @@ public enum FlowAction
 [StructLayout(LayoutKind.Auto)]
 public readonly struct Endpoint : IEquatable<Endpoint>
 {
-    // ReSharper disable once ParameterOnlyUsedForPreconditionCheck.Local // Caller-facing boundary contract: ProcessAttribution decodes raw Win32 rows and must state the family; the parameter exists to fail closed on a family/address mismatch, not to feed the value (the family is derived from the address afterwards).
-    public Endpoint(AddressFamilyKind addressFamily, IPAddress address, ushort port)
-        : this(IPAddressValue.From(address), port)
-    {
-        if (addressFamily != AddressFamily) throw new ArgumentException("Endpoint address family does not match the address.", nameof(addressFamily));
-    }
-
     private Endpoint(IPAddressValue address, ushort port)
     {
         Address = address;
