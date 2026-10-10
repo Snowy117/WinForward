@@ -200,3 +200,8 @@ Traced the REL arm's 28 MB/s allocation rate and private-memory staircase to its
 
 [PARTIAL] Allocation defect fixed and verified; AC1's private-memory target (≤5 MiB) is unmet at +11.2 MiB and its cause is characterized — task left `in_progress` with the follow-up levers in the PRD.
 
+
+### Review follow-up (external review of `9c6aff7`)
+
+The first commit skipped the workflow's quality-check step; an external review (`/tmp/winforward-9c6aff7-review.md`, kept at `research/review-9c6aff7.md`) ran the gates and reported 13 findings, all folded in: the cache's owner spec (`traffic-policy-lifecycle.md`) still described the immutable-snapshot implementation, including a duplicated "it allocates" claim; the new 0 B gate was missing from the per-gate lump registry (whose Windows entry had no exact gate); the fill protocol and the UDP4/UDP6/TCP6 decodes had no facts; the cache's failure wording conflated a pre-fill validation failure with an invalidating one; the design's native-buffer sketch and counter name were stale; and the gate name, `ReadCount` and the one-line IPv6 forwarder drifted from repository conventions. Two extras came out of the discussion: the last `Marshal.AllocHGlobal`/`FreeHGlobal` pair in `src/` became `NativeMemory`, and the iphlpapi table buffers (owner-table path *and* the shared `IPHelperTables.ReadRow`, hence `UnicastAddressInventory` and its tests) went from `nint` to `void*` — `nint` is this repository's handle spelling, not its buffer spelling, and the `NativeMemory` switch had left a cast on each side of every fill. Gates on the final revision: zero-warning Release build, all 14 test projects green, `dotnet format` exit 0 with empty output, `jb inspectcode` 0 issues.
+
