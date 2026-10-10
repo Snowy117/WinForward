@@ -4,8 +4,12 @@
 > allocation/GC counters are exact, ns/pps on the dev box carry ±50 % noise.
 
 **Scope**: any code on the per-packet path — capture processing, parsing, classification, dispatch,
-pass/block execution, flow-table probes, SOCKS5 UDP encode. Cold edges (config, process attribution,
-socket setup, logging, tests) are exempt. Read this hub first; each child owns one topic.
+pass/block execution, flow-table probes, SOCKS5 UDP encode. Cold edges (config, socket setup,
+logging, tests) are exempt. Process attribution is skipped by the per-packet rules but not by an
+allocation budget: it is cold per call and runs once per new flow, so an owner-table scan may not
+allocate in proportion to the system's connection table (see
+[native-lease-and-pool-lifetime.md](./native-lease-and-pool-lifetime.md#owner-table-slots)). Read
+this hub first; each child owns one topic.
 
 ## The pipeline's shape
 

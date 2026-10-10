@@ -82,6 +82,26 @@ The pool's size-class pools are the relay pump (64 KiB), the UDP receive window
   states, the warm cache that serves them and the deadline comparison all live in
   [warm-path-dispatch.md](./warm-path-dispatch.md).
 
+## Owner-table slots
+
+`WinForward.Windows.OwnerTable` is the reusable slot behind process attribution's owner-table scans.
+One slot per `OwnerTableKind` is refilled in place by `IPHelperOwnerTableReader` /
+`IPHelperOwnerTableParser` and searched under `ProcessOwnerTableCache`'s per-kind gate, which is what
+keeps a scan from allocating even though it is a system-wide enumeration:
+
+- Rows carry `IPAddressValue` by value and the slot's arrays grow by doubling to the widest table
+  seen and are then reused: no per-scan row array, no per-row `IPAddress`.
+- The gate covers the **search**, not only the read. One shared slot replaces the immutable snapshot
+  the design used to publish, so a search must never overlap a refill; the search is a linear scan on
+  a setup worker, and the cache's reuse/negative/coalescing rules are unchanged.
+- `BeginUdpFill`/`BeginTcpFill` invalidate the slot before any row is written and `CompleteFill`
+  publishes it, so an interrupted fill is unsearchable and a failed scan cannot leave stale answers.
+- A scan is affordable only because its rate is the new-flow rate, not the packet rate: the counter
+  `attributionOwnerTableScans` tracks it. Its zero-allocation gate is
+  `IPHelperOwnerTableParserTests.AFillAndItsLookupsAllocateNothingInSteadyState`, which is why the row
+  decode lives behind `IPHelperOwnerTableParser` rather than inside the `iphlpapi` boundary — the
+  gate must run on a host without the native tables.
+
 ## SetupExecutor
 
 - Per-item exception containment (`TrySetException`), balanced pending/enqueued/completed/rejected

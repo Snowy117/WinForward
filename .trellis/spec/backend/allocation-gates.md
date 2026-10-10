@@ -63,6 +63,11 @@ private bool ScheduleSessionSetup(FlowKey flow, ProxyTarget target, long flowGen
   **and** that the fake's `SpanSends` advanced by exactly the expected count. A future
   re-materialization on the send path (a new memory overload, `ToArray()`, or `new byte[]`) must make
   that 0-B assertion fail.
+- When the allocating work sits behind a platform seam that the test host cannot call (an
+  `iphlpapi` enumeration), the decode is the thing that allocates, so it belongs on this side of the
+  seam: `IPHelperOwnerTableParser` takes the driver-written image and fills a slot, and its gate
+  (`AFillAndItsLookupsAllocateNothingInSteadyState`) proves the 0 B while the `iphlpapi` call stays
+  inside `IPHelperOwnerTableReader`. A gate that needed the native table would never run.
 
 ## An allocation gate must open only after its path is ready, and must verify it stayed on one thread
 
