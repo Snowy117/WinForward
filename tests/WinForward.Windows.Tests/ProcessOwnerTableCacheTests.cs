@@ -183,7 +183,7 @@ public sealed class ProcessOwnerTableCacheTests
         var cache = new ProcessOwnerTableCache(UnavailableOwnerTableReader.Instance);
         Assert.Null(cache.Lookup(TcpKey(53013), s_start));
         Assert.Null(cache.Lookup(TcpKey(53013), s_start));
-        Assert.Equal(0, cache.ReadCount);
+        Assert.Equal(0, cache.ScanCount);
     }
 
     [Fact]

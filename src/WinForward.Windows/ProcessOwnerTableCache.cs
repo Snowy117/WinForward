@@ -22,9 +22,11 @@ namespace WinForward.Windows;
 /// <para>
 /// Every search runs under the same per-kind gate as the read, because the reader's slot is
 /// refilled in place rather than replaced: that is what lets a scan allocate nothing, and it is
-/// also why a snapshot record is only read while it is the slot's newest record. A read that fails
-/// leaves the slot unavailable, so its previous contents stop answering until a later read
-/// succeeds.
+/// also why a record is only read while it is the slot's newest one. A fill invalidates the slot as
+/// soon as it begins, so a fill that fails after that point leaves the slot unavailable until a
+/// later fill completes; a failure before the fill begins (the row-count validation the parser runs
+/// first) leaves the slot and its previous contents untouched, exactly as if the read had not
+/// happened.
 /// </para>
 /// </summary>
 internal sealed class ProcessOwnerTableCache
@@ -47,8 +49,12 @@ internal sealed class ProcessOwnerTableCache
         _clock = clock ?? (static () => DateTimeOffset.UtcNow);
     }
 
-    /// <summary>Successful owner-table scans this cache performed (the coalescing series' source).</summary>
-    public long ReadCount => Interlocked.Read(ref _readCount);
+    /// <summary>
+    /// Owner-table fills this cache published (the coalescing series' source). Only a completed fill
+    /// counts: a read that throws before it fills — the row-count validation — leaves the slot and its
+    /// previous contents untouched, exactly as if the read had not happened.
+    /// </summary>
+    public long ScanCount => Interlocked.Read(ref _readCount);
 
     /// <summary>
     /// Optional per-scan sink for process-wide diagnostics: invoked once per successful scan.
