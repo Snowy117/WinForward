@@ -41,7 +41,8 @@
     "10-01-attribution-off-pump",
     "10-01-udp-session-footprint",
     "10-03-tcp-udp-path-perf-review",
-    "10-06-uot-per-flow-transport"
+    "10-06-uot-per-flow-transport",
+    "10-10-owner-table-scan-alloc"
   ],
   "parent": null,
   "relatedFiles": [],
