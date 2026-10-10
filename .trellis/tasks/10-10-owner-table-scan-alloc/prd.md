@@ -47,7 +47,8 @@ connections, `DOTNET` defaults) and attributed it:
   be served from a snapshot within the reuse window exactly when the four-tuple matched; negative
   answers require a read taken at or after the request instant; UDP never reuses (its predicate
   matches the local port alone); concurrent missers coalesce onto one scan; an unavailable table is
-  never cached and never answers; `ReadCount` accounting is unchanged.
+  never cached and never answers; scan accounting is unchanged (`ProcessOwnerTableCache.ScanCount`
+  still counts successful fills only).
 - **R3 — no framework address on the scan path.** Rows and predicates stay in `IPAddressValue`
   domain, per the "raw addresses only on the hot path" convention.
 - **R4 — observability.** The heartbeat reports owner-table scans as a counter delta, so a campaign
@@ -79,7 +80,7 @@ Measured outcomes are in `research/after-20cps.md`.
 - [x] AC2: a `gc-verbose` trace of the same load attributes **4.7 %** of sampled allocation to the
   owner-table stack (baseline 96 %), and no `IPAddress` allocation remains on the path; the sampled
   total drops from 1878.9 MiB to 61.7 MiB.
-- [x] AC3: `IPHelperOwnerTableParserTests.AFillAndItsLookupsAllocateNothingInSteadyState` asserts
+- [x] AC3: `IPHelperOwnerTableParserTests.AFillAndItsLookupsAllocateNoManagedBytes` asserts
   exactly 0 B across a refill and two lookups over a 256-row scripted table, and was proved to fail
   by injecting a per-row `IPAddress.Parse` (see `implement.md`, step 5).
 - [x] AC4: `dotnet build WinForward.slnx -c Release` is zero-warning (0 warnings, 0 errors) and the

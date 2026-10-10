@@ -65,14 +65,22 @@ nothing, and the native rows are raw bytes:
 `(IPAddressValue Address, ushort Port, uint ProcessId)`; its predicate compares
 `IPAddressValue`s directly instead of converting per row.
 
-### Native buffer retention
+### Native buffer: per scan, spelled like the rest of the tree (retention decided against)
 
-`IPHelperOwnerTableReader` becomes an instance type holding one `nint` buffer that grows
-(`Marshal.ReAllocHGlobal`) instead of allocating and freeing one per scan. The size probe
-(`GetExtendedTcpTable(null, ref size, …)`) stays; the second call writes into the retained buffer.
-A buffer that is short because the table grew between the two calls is handled by the existing
-retry-free path: the second call returns `ERROR_INSUFFICIENT_BUFFER`, which today throws — keep the
-throw and the row-count validation exactly as they are, so failure behaviour is unchanged.
+The reader stays an instance type with one slot per kind, but it does **not** retain a native buffer:
+each scan allocates and frees one through `NativeMemory` (the release moved off
+`Marshal.AllocHGlobal`/`FreeHGlobal`, the last such spelling in `src/`), so one unmanaged
+allocation and one system-wide enumeration remain per scan. The same pass put the buffer back on
+`void*`: the `nint` spelling came from `Marshal.AllocHGlobal`/`IntPtr` and the
+`GetUnicastIpAddressTable(ushort, nint*)` companion, while this repository reserves `nint` for
+handles (`adapterHandle`, `win32Event`, `nint.Zero`) and spells memory buffers as raw pointers.
+`IPHelperTables.ReadRow<T>` is shared with the unicast reader, so the honest spelling moved there
+too and `UnicastAddressInventory` (production and tests) followed — no cast remains on either
+path. Retention was designed and rejected:
+four kinds fill under four independent gates, so a shared buffer is a data race unless it is per
+kind; freeing it needs an `IDisposable` chain the composition does not have (reader and attributor
+are process-lifetime); and the retained size would sit at the widest table ever seen, which is the
+committed-memory budget this task exists to shrink. Recorded as not implemented, not as pending.
 
 ## Invariants to hold
 
@@ -83,17 +91,18 @@ throw and the row-count validation exactly as they are, so failure behaviour is 
 4. `Unavailable` is never published, never answers, and cannot be filled: the shared constant is
    marked non-fillable at construction, because filling it would make one caller's rows visible to
    every caller that asks for "no table".
-5. `ReadCount` counts successful publishes only (unchanged accounting).
+5. `ScanCount` counts successful fills only (unchanged accounting).
 6. The seam stays injectable: a fake reader that returns a *fresh* table per `Read` remains valid,
    because the cache stores what it was handed and never compares instances.
 
 ## Observability
 
-`ProcessOwnerTableCache` gains a read sink (`Action` invoked once per successful scan) and
-`WindowsProcessAttributor` forwards it; `DurableCaptureBundle` composes
-`RuntimeCounters.Shared.Increment(RuntimeCounters.AttributionOwnerTableReads)` into it. The heartbeat
-already reports counter deltas, so a campaign log gains an `attributionOwnerTableReads` series with
-no heartbeat change.
+`ProcessOwnerTableCache` gains a read sink (`Action` invoked once per successful fill, alongside
+`ScanCount`) and `WindowsProcessAttributor` forwards it; `DurableCaptureBundle` composes
+`RuntimeCounters.Shared.Increment(RuntimeCounters.AttributionOwnerTableScans)` into it. The landed
+counter is `attributionOwnerTableScans` (the design drafted `attributionOwnerTableReads`): the
+heartbeat already reports counter deltas, so a campaign log gains that series with no heartbeat
+change.
 
 ## Verification
 
@@ -108,6 +117,26 @@ no heartbeat change.
    below 5 % of sampled allocation.
 4. Campaign: one `wf-fdd-opt` full-plan row; analyzer gates green and REL/latency/throughput inside
    the pre-fix row's noise.
+
+## Recorded design trade-offs from the review
+
+- **The slot/gate coupling is a documented timing invariant, not a type-level one** (S11). `OwnerTable`
+  now carries a begin → write → complete protocol plus an availability state, and the rule that a
+  search must run under the same per-kind gate as the refill is stated in the interface and type
+  docs. It holds because the cache owns both the gate and the reader's slot; a second reader
+  implementation or a second cache instance would have to re-establish it. Keeping the slot in the
+  reader is what lets a fake replace the native enumeration in tests, which is the trade this task
+  chose.
+- **The non-fillable constant is a constructor boolean** (S12), where the repository's deep-module
+  guideline prefers ownership expressed in the signature. Kept because it guards exactly one shared
+  instance (`OwnerTable.Unavailable`) and a subtype would widen the seam for every implementer; the
+  guard throws rather than silently mutating shared state.
+- **`OwnerTableCache.ReadSink` is invoked while the per-kind gate is held** (S13), unlike
+  `NativeBufferPool.AccountingSink`, which runs on the lock-free rent/return path. The sink contract
+  ("composition sets it once, it must not throw, it never influences behaviour") is the same; moving
+  the call outside the gate is a future unification, not a defect in this change.
+- **Commit-title wording** (S7): "allocates nothing" means the managed heap. The PRD and the spec say
+  so exactly; the title is not rewritten.
 
 ## Rollback
 

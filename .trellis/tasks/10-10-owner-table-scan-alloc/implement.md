@@ -32,3 +32,19 @@ Ordered; every step keeps the solution buildable and the cache facts green.
    in the PRD (AC5); the real sing-box row stays available for the campaign axis.
 9. **Gates and close-out** — spec updated (`.trellis/spec/backend/hot-path.md` scope note and the
    reusable-slot rule in `native-lease-and-pool-lifetime.md`), commit carries the task id.
+10. **Review follow-up** — the first commit skipped the workflow's quality-check step, so an external
+   review of `9c6aff7` was run and folded in (`research/review-9c6aff7.md`):
+   - the cache's owner spec (`traffic-policy-lifecycle.md`) still described the old snapshot
+     implementation and its "it allocates" claim — rewritten around the reusable slot, the new seam
+     ownership and the current predicate snippet;
+   - `IPHelperOwnerTableParserTests` registered as the Windows entry of the per-gate lump proof
+     (the previous Windows entry carries no exact gate);
+   - added the fill-protocol facts (a begun fill is unsearchable, a rejected row count leaves the
+     contents answering, the `Unavailable` constant refuses a fill) and the UDP4/UDP6/TCP6 row-image
+     decode facts, including IPv6 scope ids;
+   - inlined the one-line IPv6 forwarder, renamed the gate to the `*AllocateNoManagedBytes` family,
+     renamed `ProcessOwnerTableCache.ReadCount` to `ScanCount`, replaced the last
+     `Marshal.AllocHGlobal`/`FreeHGlobal` pair in `src/` with `NativeMemory`, and tightened the
+     cache's failure-timing wording;
+   - the design's native-buffer retention sketch is recorded as decided against, and the review's
+     S11–S13 trade-offs are recorded in the design.
