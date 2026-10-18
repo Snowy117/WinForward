@@ -24,6 +24,7 @@ internal static partial class FindingsCollector
         ArgumentNullException.ThrowIfNull(campaign);
 
         var collected = new List<Finding>();
+        collected.AddRange(CampaignFailures(campaign));
         collected.AddRange(DualTruth(campaign));
         collected.AddRange(ForeignConnections(campaign));
         collected.AddRange(Identities(campaign));

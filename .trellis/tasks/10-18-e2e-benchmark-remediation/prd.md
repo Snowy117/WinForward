@@ -20,7 +20,7 @@ it is to make the claim boundary, the instrument and the evidence chain match.
 - Row profiles: both WinForward configurations run the full plan. `wf-aot-nativeudp` (default) is
   the reference row; `wf-aot-opt` (opt-in UoT) is a declared variant.
 - Instrument: positive control, clock gate, environment read-before-change, gate-into-verdict,
-  arm-order randomization, clean-slate failures, `failures.json`, `BASE-singbox` calibration control.
+  product-row order randomization, clean-slate failures, `failures.json`, `BASE-singbox` calibration control.
 - Verdict model: four inferential primary metrics plus a REL capability gate, a noise-derived band,
   `unevaluable` instead of degenerate `same`, a band-aligned test, and a Holm family of
   reference-vs-opponent comparisons.
@@ -68,7 +68,7 @@ it is to make the claim boundary, the instrument and the evidence chain match.
 - [ ] Positive control moves p99.9 to about 1 s; the clock gate aborts on probe failure, an
       absolute offset above 5 s, or more than 100 ms drift (with `-RequireClockSync` enforcing
       ±0.2 s); the environment block records the required fields before any change; a gate failure
-      invalidates the verdict cell; arm order is randomized.
+       invalidates the verdict cell; the product-row order is randomized (control blocks fixed).
 - [ ] The calibration band is written before the release campaign; the release campaign has seven
       archived passes (one discarded + six measured) with attempt metadata.
 - [ ] The report contains the release caliber, primary family, band/MDD, coverage, attempts and the

@@ -45,6 +45,13 @@ internal static class RepoPaths
         Path.Combine(Root, "tests", "WinForward.E2E.Tests", "Fixtures", "thresholds", name);
 
     /// <summary>
+    /// The reference product orders: the permutation the orchestrator's generator produced for each
+    /// recorded seed and pass, so the C# replay is pinned to the PowerShell implementation.
+    /// </summary>
+    internal static string OrderFixture =>
+        Path.Combine(Root, "tests", "WinForward.E2E.Tests", "Fixtures", "orders", "reference-orders.json");
+
+    /// <summary>
     /// The minimal plans a fact loads by path: the Tier 0 defect repros, which are either rejected at
     /// load time or would need a live target, and the semantic fixtures that pin one plan key to one
     /// published value. They live with the tests, not in <c>scripts/plans/</c>, because none of them is

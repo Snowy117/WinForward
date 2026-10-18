@@ -379,7 +379,11 @@ only; they are not the release evidence.
 <raw>/pass<N>/<row>/config*                the effective product configuration (hashed, not parsed)
 <raw>/pass<N>/target-ledger.jsonl          the target's own ledger (one per target instance)
 <raw>/pass<N>/order.txt                    optional within-pass run order
+<raw>/pass<N>/order.json                   optional seed and permutation the order.txt was drawn from
+<raw>/pass<N>/clean-slate.json             optional pass clean-slate verdict and its reason
 <raw>/environment.json                     optional orchestrator environment block
+<raw>/failures.jsonl                       optional append-only campaign failure record
+<raw>/failures.json                        optional same record as one JSON array
 ```
 
 Arms are `IDLE`, `LAT`, `LATLOAD`, `DNS`, `DNSALT`, `LOSS`, `REL`, `THRU`, `MIX`, `PERSIST` and
@@ -518,6 +522,28 @@ performance number, most serious first:
 | `harness-error` | a broken UDP accounting identity, a zero lane witness, a sampler error, a sample carrying `readError`, a ledger that cannot be parsed |
 | `measurement-caveat` | a reached in-flight ceiling (the affected arm's latency cells read `n/a (windowOverflow > 0)`), `connectAttempts != scheduledAttempts`, a ledger/client count outside its declared tolerance, a missing ledger |
 | `informational` | which rows' port-53 DNS arm is a direct-path measurement, and which rows do not carry UDP |
+
+The campaign's own failure evidence is read the same way, and a row that failed is a gap rather than
+a zero:
+
+| kind | severity | what it says |
+|---|---|---|
+| `failed-row` | `harness-error` | a `run.json` says `failed: true`; the skeleton's `stage`/`error` are quoted, and a row with no arm records is reported as a gap |
+| `declared-row-missing` | `harness-error` | the pass's `order.txt` (or the declared row table) names a row the tree holds no `run.json` or arm file for |
+| `clean-slate-failure` | `harness-error` | the orchestrator refused a pass, or skipped a row, whose clean slate failed; a refused pass is absent from `passes` rather than measured on an unclean machine |
+| `campaign-failure` | `harness-error` | a preflight, target or teardown failure, or a row-stage record the run's own `run.json` does not disclose |
+| `failure-log-unreadable` | `measurement-caveat` | the failure record could not be read, or lines of it were not records; a failure may be missing |
+| `order-unreproducible` | `harness-error` | the recorded permutation is not what the recorded seed produces |
+| `order-mismatch` | `harness-error` | `order.txt` and `order.json` record two different permutations |
+| `order-rows-mismatch` | `harness-error` | `order.json` names a row that is not one of the declared product rows (a restricted smoke run's subset is accepted) |
+| `order-algorithm-unknown` | `measurement-caveat` | `order.json` names a generator this analysis cannot replay, so the order is taken from `order.txt` as recorded |
+| `order-unreadable` | `measurement-caveat` | `order.json` could not be read (malformed JSON, no seed or no rows); the pass is still analyzed and its order is taken from `order.txt` |
+
+The **product order** is replayed, not trusted: `order.json` carries the pass's seed and the
+permutation it produced, and `OrderPermutation` re-derives that permutation from the seed and the
+declared product rows. A pass without `order.json` is read exactly as before. The permutation itself
+is always the one `order.txt` records — §2 prints that file, and no table re-sorts rows into a
+different order.
 
 The accounting identities are asserted per record:
 `arrived + late + never + abandonedAtTeardown + corruptDatagrams == sent` for every LOSS, MIX and

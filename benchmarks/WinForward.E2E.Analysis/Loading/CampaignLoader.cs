@@ -28,6 +28,8 @@ internal static class CampaignLoader
 
     private const string OrderFile = "order.txt";
 
+    private const string OrderPlanFile = "order.json";
+
     private const string EnvironmentFile = "environment.json";
 
     /// <summary>
@@ -40,6 +42,7 @@ internal static class CampaignLoader
 
         campaign = null;
         error = null;
+        var failureLog = FailureLog.Read(options.Raw);
         if (!Directory.Exists(options.Raw))
         {
             error = $"input directory not found: {options.Raw}";
@@ -54,6 +57,7 @@ internal static class CampaignLoader
                 : $"no rows found under {options.Raw} (pass*/<row>/ directories)";
             return false;
         }
+        var (orderRecords, orderRecordErrors) = ReadOrderRecords(options);
 
         campaign = new CampaignModel
         {
@@ -62,6 +66,11 @@ internal static class CampaignLoader
             Passes = passes,
             LedgerPaths = ledgerPaths,
             Order = order,
+            OrderRecords = orderRecords,
+            OrderRecordErrors = orderRecordErrors,
+            Failures = failureLog.Failures,
+            FailureLogError = failureLog.Error,
+            FailureLogBadLines = failureLog.BadLines,
             Environment = ReadEnvironment(options.Raw),
             WarmupSeconds = options.WarmupSeconds,
             Resamples = options.Resamples,
@@ -160,7 +169,85 @@ internal static class CampaignLoader
         return (passes, ledgers, order);
     }
 
-    /// <summary>The rows <c>order.txt</c> says the pass ran, or null when the file is absent or unreadable.</summary>
+    /// <summary>
+    /// Each pass's <c>order.json</c>, when the orchestrator wrote one: the seed the permutation was drawn
+    /// from and the rows it produced.
+    /// </summary>
+    private static (Dictionary<string, OrderRecord> Records, Dictionary<string, string> Errors) ReadOrderRecords(AnalysisOptions options)
+    {
+        var records = new Dictionary<string, OrderRecord>(StringComparer.Ordinal);
+        var errors = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (options.Flat)
+        {
+            return (records, errors);
+        }
+
+        foreach (var passDirectory in ListDirectories(options.Raw))
+        {
+            var passId = DirectoryName(passDirectory);
+            if (!passId.StartsWith(PassPrefix, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var (record, error) = ReadOrderRecord(passDirectory);
+            if (record is not null)
+            {
+                records[passId] = record;
+            }
+
+            if (error is not null)
+            {
+                errors[passId] = error;
+            }
+        }
+
+        return (records, errors);
+    }
+
+    /// <summary>
+    /// One pass's recorded permutation, or the reason its <c>order.json</c> could not be read. An absent
+    /// file is neither: the campaign simply did not record an order.
+    /// </summary>
+    private static (OrderRecord? Record, string? Error) ReadOrderRecord(string passDirectory)
+    {
+        var path = PosixPathText.Join(passDirectory, OrderPlanFile);
+        if (!File.Exists(path))
+        {
+            return (null, null);
+        }
+
+        var document = JsonReader.ReadFile(path, out var readError);
+        if (readError is not null)
+        {
+            return (null, $"{OrderPlanFile} unreadable ({readError.GetType().Name})");
+        }
+
+        if (document is not { ValueKind: JsonValueKind.Object })
+        {
+            return (null, $"{OrderPlanFile} is not a JSON object");
+        }
+
+        var seed = JsonValue.Number(document, "seed");
+        var rows = new List<string>();
+        foreach (var row in JsonValue.Array(document, "rows") ?? [])
+        {
+            if (row.ValueKind == JsonValueKind.String && row.GetString() is { Length: > 0 } name)
+            {
+                rows.Add(name);
+            }
+        }
+
+        if (seed is null)
+        {
+            return (null, $"{OrderPlanFile} names no seed");
+        }
+
+        return rows.Count == 0
+            ? (null, $"{OrderPlanFile} names no rows")
+            : (new OrderRecord((int)seed.Value, JsonValue.String(document, "algorithm"), rows), null);
+    }
+
     private static List<string>? ReadOrder(string passDirectory)
     {
         var path = PosixPathText.Join(passDirectory, OrderFile);

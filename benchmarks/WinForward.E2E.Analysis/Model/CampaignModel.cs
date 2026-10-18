@@ -35,6 +35,28 @@ internal sealed class CampaignModel
     /// </summary>
     internal required IReadOnlyDictionary<string, IReadOnlyList<string>> Order { get; init; }
 
+    /// <summary>
+    /// Each pass's <c>order.json</c>, when the orchestrator wrote one: the seed the permutation was drawn
+    /// from and the rows in the order it produced. A pass with no file has no entry, which is how the order
+    /// checks tell "this campaign never recorded its seed" from "the seed reproduces the order".
+    /// </summary>
+    internal required IReadOnlyDictionary<string, OrderRecord> OrderRecords { get; init; }
+
+    /// <summary>
+    /// Why a pass's <c>order.json</c> could not be read, keyed by pass id. The pass is still read; the
+    /// permutation is simply not replayed for it, which is a caveat rather than a refusal.
+    /// </summary>
+    internal required IReadOnlyDictionary<string, string> OrderRecordErrors { get; init; }
+
+    /// <summary>The campaign's failure record, one entry per record the orchestrator wrote.</summary>
+    internal required IReadOnlyList<CampaignFailure> Failures { get; init; }
+
+    /// <summary>Why the failure record could not be read, or null when it is absent or readable.</summary>
+    internal required string? FailureLogError { get; init; }
+
+    /// <summary>How many failure-log lines were not records; a record may be missing.</summary>
+    internal required int FailureLogBadLines { get; init; }
+
     /// <summary>The campaign's <c>environment.json</c>, or null when it is missing or unreadable.</summary>
     internal required JsonElement? Environment { get; init; }
 

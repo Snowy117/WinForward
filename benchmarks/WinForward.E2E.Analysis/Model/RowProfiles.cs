@@ -90,6 +90,14 @@ public static class RowProfiles
         "control-post",
     ];
 
+
+    /// <summary>
+    /// The product rows in declaration order: <see cref="Order"/> without the two control blocks. This is
+    /// the set the campaign shuffles per pass, so it is also the set an <c>order.json</c> permutation must
+    /// be a permutation of.
+    /// </summary>
+    internal static IReadOnlyList<string> ProductOrder => field ??=
+        [.. Order.Where(rowId => !IsControlPre(rowId) && !IsControlPost(rowId))];
     /// <summary>The carriage name of a port-53 path that goes through the proxy.</summary>
     internal const string Udp53Relayed = "relayed";
 

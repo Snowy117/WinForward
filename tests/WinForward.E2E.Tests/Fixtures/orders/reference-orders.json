@@ -1,0 +1,141 @@
+{
+  "algorithm": "lcg1103515245-fisher-yates/1",
+  "source": "orchestrator.ps1 Get-OrderPlan (Get-MixedOrderSeed + Get-OrderPermutation)",
+  "rows": [
+    "wf-aot-opt",
+    "wf-fdd-opt",
+    "wf-aot-nativeudp",
+    "wf-aot-dnsrelay",
+    "proxifyre",
+    "proxifier",
+    "proxybridge"
+  ],
+  "cases": [
+    {
+      "baseSeed": 20261006,
+      "pass": 1,
+      "seed": 1685337964,
+      "order": [
+        "proxifyre",
+        "wf-aot-opt",
+        "proxybridge",
+        "wf-aot-nativeudp",
+        "wf-fdd-opt",
+        "wf-aot-dnsrelay",
+        "proxifier"
+      ]
+    },
+    {
+      "baseSeed": 20261006,
+      "pass": 2,
+      "seed": 655805079,
+      "order": [
+        "wf-aot-dnsrelay",
+        "wf-aot-nativeudp",
+        "wf-aot-opt",
+        "proxybridge",
+        "proxifier",
+        "proxifyre",
+        "wf-fdd-opt"
+      ]
+    },
+    {
+      "baseSeed": 20261006,
+      "pass": 3,
+      "seed": 1773792851,
+      "order": [
+        "wf-fdd-opt",
+        "wf-aot-dnsrelay",
+        "proxifyre",
+        "wf-aot-opt",
+        "proxifier",
+        "wf-aot-nativeudp",
+        "proxybridge"
+      ]
+    },
+    {
+      "baseSeed": 7,
+      "pass": 1,
+      "seed": 252633235,
+      "order": [
+        "wf-fdd-opt",
+        "wf-aot-opt",
+        "proxifyre",
+        "proxybridge",
+        "wf-aot-dnsrelay",
+        "wf-aot-nativeudp",
+        "proxifier"
+      ]
+    },
+    {
+      "baseSeed": 7,
+      "pass": 2,
+      "seed": 1370610615,
+      "order": [
+        "wf-fdd-opt",
+        "wf-aot-nativeudp",
+        "proxifier",
+        "wf-aot-opt",
+        "proxybridge",
+        "proxifyre",
+        "wf-aot-dnsrelay"
+      ]
+    },
+    {
+      "baseSeed": 7,
+      "pass": 3,
+      "seed": 341061691,
+      "order": [
+        "wf-aot-dnsrelay",
+        "proxifyre",
+        "proxifier",
+        "wf-fdd-opt",
+        "proxybridge",
+        "wf-aot-opt",
+        "wf-aot-nativeudp"
+      ]
+    },
+    {
+      "baseSeed": 12345,
+      "pass": 1,
+      "seed": 377398937,
+      "order": [
+        "wf-aot-nativeudp",
+        "proxifyre",
+        "proxybridge",
+        "wf-aot-dnsrelay",
+        "wf-aot-opt",
+        "wf-fdd-opt",
+        "proxifier"
+      ]
+    },
+    {
+      "baseSeed": 12345,
+      "pass": 2,
+      "seed": 1495339633,
+      "order": [
+        "proxifier",
+        "wf-fdd-opt",
+        "wf-aot-nativeudp",
+        "wf-aot-opt",
+        "wf-aot-dnsrelay",
+        "proxybridge",
+        "proxifyre"
+      ]
+    },
+    {
+      "baseSeed": 12345,
+      "pass": 3,
+      "seed": 465829498,
+      "order": [
+        "proxifyre",
+        "wf-aot-nativeudp",
+        "wf-fdd-opt",
+        "proxifier",
+        "wf-aot-dnsrelay",
+        "wf-aot-opt",
+        "proxybridge"
+      ]
+    }
+  ]
+}

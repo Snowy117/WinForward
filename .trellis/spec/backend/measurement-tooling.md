@@ -38,8 +38,10 @@ counters and `completionRate` — belongs in the section's prose paragraph, wher
 **The gate is green.** The script reads the rename table at
 `benchmarks/WinForward.E2E.Analysis/verification/contract-rename.json` (`check-readme-contract.py:47`),
 beside the inventory and the row profiles it belongs with. It prints
-`111 key(s) checked against 401 declared constant path(s): ok` and exits 0; those two counts read the
+`111 key(s) checked against 403 declared constant path(s): ok` and exits 0; those two counts read the
 README's tokens and the `ArmKeys` constants, never the table, so moving the table cannot change them.
+The extra two are the failure-only `run.json` skeleton keys `stage`/`error`: the client's
+`RunFileWriter` never writes them, and the frozen inventory/golden is unchanged.
 Exit codes: `0` every key resolved; `1` at least one key is stale, unwritten or unspellable, one
 `FAIL: <token>: <reason>` line per key; `2` an input could not be read, the `ArmKeys` shards declare
 nothing, or the section names no key.

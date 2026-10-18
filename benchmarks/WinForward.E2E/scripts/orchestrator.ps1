@@ -26,10 +26,26 @@
   beyond 5 s, or more than 100 ms of drift across a pass. -RequireClockSync restores the 200 ms bound.
   The environment block is written before the firewall change or any benchmark process start, and every change is
   recorded beside the state it replaced. -PreflightOnly stops after that block.
+
+  Every failure the campaign can detect is appended to failures.jsonl beside a derived
+  failures.json: the preflight gates, a pass clean-slate, a product that did not start, a row that
+  timed out, an unreachable target and a teardown fault. A row that never produced a run writes a
+  run.json skeleton (failed = true, stage, error) so the analysis reports the row instead of reading
+  the pass as if it had not been scheduled. A pass whose clean-slate fails is refused rather than
+  measured, and the campaign stops: a pass measured on an unclean machine cannot be told apart from
+  a fast product.
+
+  The product rows are shuffled per pass from a recorded seed. environment.json carries the whole
+  permutation plan before the first pass, and each pass writes it as order.txt and order.json; the
+  analysis replays the seed to check the recorded order is the one the generator produces.
 #>
 [CmdletBinding()]
 param(
     [int]$Passes = 4,
+    # Restrict the campaign to these row ids (a one-row smoke run); empty runs the whole matrix. A
+    # restricted tree is a check of the instrument, not a campaign: the analysis reports every other
+    # declared row as absent, which is why a real campaign never passes this.
+    [string[]]$Rows = @(),
     [string]$OutRoot = 'C:\wfbench\results',
     [string]$PlanRoot = 'C:\wfbench\e2e',
     [string]$TargetAddress = '192.168.100.4',
@@ -54,12 +70,25 @@ param(
     [string]$SingBoxConfig = 'C:\wfbench\singbox\config.json',
     [string]$SingBoxLog = 'C:\wfbench\singbox\singbox.log',
     [string]$HeartbeatPath = 'C:\wfbench\heartbeat.txt',
-    [int]$Seed = 20261006
+    # Recorded in environment.json; seeds the per-pass product order unless -OrderSeed overrides it.
+    [int]$Seed = 20261006,
+    # The product-order seed alone; 0 derives it from -Seed. Recorded in environment.json and in every
+    # pass's order.json, so a fixed value reproduces the campaign's row order exactly.
+    [int]$OrderSeed = 0,
+    # One row's client run, in seconds; a timeout records the failure and writes the row skeleton. 0 waits
+    # forever (the old behaviour). The release full plan is 480 s plus a 120 s dual phase per row.
+    [int]$RowTimeoutSeconds = 1800
 )
 
 $ErrorActionPreference = 'Continue'
 $ProgressPreference = 'SilentlyContinue'
 $script:Failures = New-Object System.Collections.ArrayList
+# Both are set once -OutRoot exists; a failure before that (an unusable -OutRoot) has nowhere to go.
+$script:FailuresPath = $null
+$script:FailuresDocumentPath = $null
+# The order generator's identifier, written beside every permutation and into environment.json so
+# the analysis knows which replay this campaign's order claims to be.
+$script:OrderAlgorithm = 'lcg1103515245-fisher-yates/1'
 
 function Write-JsonNoBom {
     # Windows PowerShell 5.1's `Set-Content -Encoding UTF8` prefixes a byte-order mark, which every
@@ -75,8 +104,11 @@ function Touch-Heartbeat {
 }
 
 function Write-Log {
+    # Log lines go to the process stdout rather than the pipeline: every function here returns a
+    # value, and a log line sharing that stream turns a boolean into an array. The campaign log is
+    # this stdout, which the operator redirects to orch.log.
     param([string]$Message)
-    Write-Output ('{0} {1}' -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $Message)
+    [Console]::Out.WriteLine(('{0} {1}' -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $Message))
 }
 
 function Get-ProcessSet {
@@ -128,13 +160,22 @@ function Get-Products {
 }
 
 function Start-Product {
+    # A product that cannot be launched is a row failure, not a campaign abort: the caller records it,
+    # writes the row skeleton and moves on. On Windows the usual cause is a stale image or a locked
+    # DLL; the exception text is what names it.
     param($Product)
-    if ($Product.Kind -eq 'service') {
-        Start-Service -Name $Product.Service -ErrorAction SilentlyContinue
+    try {
+        if ($Product.Kind -eq 'service') {
+            Start-Service -Name $Product.Service -ErrorAction SilentlyContinue
+        }
+        else {
+            Start-Process -FilePath $Product.Exe -ArgumentList $Product.Args -WindowStyle Hidden `
+                -WorkingDirectory (Split-Path $Product.Exe) | Out-Null
+        }
     }
-    else {
-        Start-Process -FilePath $Product.Exe -ArgumentList $Product.Args -WindowStyle Hidden `
-            -WorkingDirectory (Split-Path $Product.Exe) | Out-Null
+    catch {
+        Write-Log ('  {0} could not be launched: {1}' -f $Product.Id, $_.Exception.Message)
+        return $false
     }
 
     for ($attempt = 0; $attempt -lt 40; $attempt++) {
@@ -165,18 +206,255 @@ function Stop-Product {
     Start-Sleep -Seconds 3
 }
 
-function Assert-CleanSlate {
-    param($Except)
-    $busy = @()
-    foreach ($product in @(Get-Products)) {
-        # Several rows share one image name, so the exclusion is by process name, not by row id.
-        if ($Except -and $product.ProcessName -eq $Except.ProcessName) { continue }
-        if ((Get-ProcessSet $product.ProcessName).Count -gt 0) { $busy += $product.ProcessName }
+function Add-CampaignFailure {
+    # The campaign's failure record. failures.jsonl is the authoritative copy because a campaign can
+    # be killed between failures; failures.json is the same list rewritten as one array after every
+    # entry, for a reader that wants one document rather than a stream.
+    param(
+        [int]$PassNumber = 0,
+        [string]$Row = $null,
+        [string]$Arm = $null,
+        [string]$Stage,
+        [string]$Message,
+        [string]$Detail = $null,
+        [switch]$CleanSlate
+    )
+    $record = [ordered]@{
+        when = (Get-Date).ToString('o')
+        pass = $(if ($PassNumber -gt 0) { $PassNumber } else { $null })
+        row = $(if ([string]::IsNullOrEmpty($Row)) { $null } else { $Row })
+        arm = $(if ([string]::IsNullOrEmpty($Arm)) { $null } else { $Arm })
+        stage = $Stage
+        error = $Message
+        detail = $(if ([string]::IsNullOrEmpty($Detail)) { $null } else { $Detail })
+        cleanSlate = [bool]$CleanSlate
     }
 
-    if ($busy.Count -gt 0) {
-        Write-Log ('  WARNING foreign interceptor(s) running: ' + ($busy -join ', '))
+    [void]$script:Failures.Add($record)
+    Write-Log ('  FAILURE [{0}] {1}' -f $Stage, $Message)
+    if ([string]::IsNullOrEmpty($script:FailuresPath)) { return }
+
+    try {
+        $line = ($record | ConvertTo-Json -Compress -Depth 4)
+        [System.IO.File]::AppendAllText($script:FailuresPath, $line + "`n", (New-Object System.Text.UTF8Encoding($false)))
+        $document = '[' + (($script:Failures | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 4 }) -join ',') + ']'
+        Write-JsonNoBom -Path $script:FailuresDocumentPath -Value $document
     }
+    catch {
+        Write-Log ('  WARNING could not write the failure record: ' + $_.Exception.Message)
+    }
+}
+function Show-FailureSummary {
+    # The same records failures.json holds, for the operator reading the campaign log after it stops.
+    if ($script:Failures.Count -eq 0) {
+        Write-Log '=== no failures ==='
+        return
+    }
+
+    Write-Log ('=== FAILURES ({0}) ===' -f $script:Failures.Count)
+    foreach ($failure in $script:Failures) {
+        $scope = if ($null -ne $failure.pass) { 'pass ' + $failure.pass } else { 'campaign' }
+        if (-not [string]::IsNullOrEmpty($failure.row)) { $scope += '/' + $failure.row }
+        if (-not [string]::IsNullOrEmpty($failure.arm)) { $scope += ' ' + $failure.arm }
+        Write-Log ('  [{0}] {1}: {2}' -f $failure.stage, $scope, $failure.error)
+    }
+}
+
+function Write-RowSkeleton {
+    # A row that never produced a run writes one, so the analysis sees the row and reports a failed
+    # row instead of reading the pass as if the row had never been scheduled. A run.json the client
+    # wrote is never overwritten: its verdict and roster are evidence even when the run failed.
+    param([string]$RowDir, [string]$Row, [int]$Pass, [string]$Stage, [string]$Message)
+    $path = Join-Path $RowDir 'run.json'
+    if (Test-Path $path) { return $false }
+
+    New-Item -ItemType Directory -Force -Path $RowDir | Out-Null
+    Write-JsonNoBom -Path $path -Value ([ordered]@{
+            type = 'run'
+            label = ('{0}-p{1}' -f $Row, $Pass)
+            failed = $true
+            stage = $Stage
+            error = $Message
+            pass = $Pass
+            row = $Row
+            startedUtc = (Get-Date).ToUniversalTime().ToString('o')
+            arms = @()
+        })
+    Write-Log ('  wrote failed-row skeleton: ' + $path)
+    return $true
+}
+
+function Get-LeftoverInterceptors {
+    # Every process that could move traffic: each product image, the harness's own client images and,
+    # when asked, the relay. A leftover from an earlier pass or an earlier campaign filters traffic
+    # the campaign did not offer it, which is a measurement defect rather than a warning.
+    param($Products, [switch]$IncludeSingBox, [switch]$IncludeClients)
+    $names = @{}
+    foreach ($product in $Products) { $names[[string]$product.ProcessName] = $true }
+    if ($IncludeSingBox) { $names['sing-box'] = $true }
+    if ($IncludeClients) {
+        $names[[System.IO.Path]::GetFileNameWithoutExtension($ClientExe)] = $true
+        $names[[System.IO.Path]::GetFileNameWithoutExtension($ClientExeDirect)] = $true
+    }
+
+    $found = @()
+    foreach ($name in @($names.Keys | Sort-Object)) {
+        foreach ($process in (Get-ProcessSet $name)) {
+            $found += ('{0}:{1}' -f $name, $process.Id)
+        }
+    }
+
+    return $found
+}
+
+function Stop-LeftoverProcesses {
+    # Stops every interceptor and client process so the next measurement starts from a known state.
+    # The settling wait is paid only when something was running, because a clean VM is the common case
+    # and the old per-row stop paid it unconditionally.
+    param($Products, [switch]$StopSingBox)
+    $stopped = @()
+    foreach ($product in $Products) {
+        foreach ($process in (Get-ProcessSet $product.ProcessName)) {
+            $stopped += ('{0}:{1}' -f $product.ProcessName, $process.Id)
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        }
+
+        if ($product.Kind -eq 'service') {
+            Stop-Service -Name $product.Service -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    foreach ($name in @([System.IO.Path]::GetFileNameWithoutExtension($ClientExe), [System.IO.Path]::GetFileNameWithoutExtension($ClientExeDirect))) {
+        foreach ($process in (Get-ProcessSet $name)) {
+            $stopped += ('{0}:{1}' -f $name, $process.Id)
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    if ($StopSingBox) {
+        foreach ($process in (Get-ProcessSet 'sing-box')) {
+            $stopped += ('sing-box:{0}' -f $process.Id)
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    if ($stopped.Count -gt 0) {
+        $expected = @($stopped | ForEach-Object { ($_ -split ':')[0] })
+        for ($attempt = 0; $attempt -lt 20; $attempt++) {
+            $remaining = @(Get-Process -Name $expected -ErrorAction SilentlyContinue)
+            if ($remaining.Count -eq 0) { break }
+            Start-Sleep -Milliseconds 250
+        }
+
+        # A driver can outlive its user-mode client and keep filtering; give the stack time to unwind,
+        # which is the grace the per-row stop used to pay unconditionally.
+        Start-Sleep -Seconds 2
+    }
+
+    return $stopped
+}
+
+function Invoke-CleanSlate {
+    # Before a pass: stop everything the campaign can have left behind, restart the relay the opponent
+    # rows flow through, and verify the state the pass is about to measure from. A failure refuses the
+    # pass rather than continuing, because a pass measured on an unclean machine cannot be told apart
+    # from a fast product. The evidence is written whether it passed or not.
+    param($Products, [int]$Pass, [string]$EvidencePath, [switch]$RestartSingBox)
+
+    $result = [ordered]@{
+        pass = $Pass
+        when = (Get-Date).ToString('o')
+        passed = $false
+        stopped = @()
+        leftovers = @()
+        singBoxStarted = $null
+        firewallProfiles = $null
+        reason = $null
+    }
+
+    try {
+        $result.stopped = @(Stop-LeftoverProcesses -Products $Products -StopSingBox:$RestartSingBox)
+        if ($RestartSingBox) {
+            $result.singBoxStarted = Start-SingBox
+            if (-not $result.singBoxStarted) { throw 'sing-box did not start' }
+        }
+
+        # sing-box is the one process that must be running, so it is verified by its own start above
+        # rather than by this leftover sweep; a product or client image the sweep still finds is residue.
+        $result.leftovers = @(Get-LeftoverInterceptors -Products $Products -IncludeClients)
+        if ($result.leftovers.Count -gt 0) {
+            throw ('leftover process(es) after the clean-slate stop: ' + ($result.leftovers -join ', '))
+        }
+
+        $firewall = Get-FirewallProfileState
+        $result.firewallProfiles = $firewall.value
+        if ($null -eq $firewall.value) { throw ('the firewall state could not be read: ' + $firewall.reason) }
+        $enabled = @($firewall.value | Where-Object { $_.enabled })
+        if ($enabled.Count -gt 0) {
+            throw ('firewall profile(s) are still enabled: ' + (($enabled | ForEach-Object { $_.name }) -join ', '))
+        }
+
+        $result.passed = $true
+    }
+    catch {
+        $result.reason = $_.Exception.Message
+    }
+
+    Write-JsonNoBom -Path $EvidencePath -Value $result
+    return $result
+}
+
+function Get-MixedOrderSeed {
+    # One pass's generator seed: a 31-bit linear congruential step removes the adjacency between
+    # consecutive pass numbers that a bare `seed + pass` would hand the shuffle. Integer-only and
+    # spelled identically in Analysis/Model/OrderPermutation.cs, because the analysis replays it.
+    param([int]$BaseSeed, [int]$Pass)
+    $mask = 0x7FFFFFFF
+    $state = ([int64]$BaseSeed -band $mask)
+    $state = ($state + ([int64]$Pass * 1103515245)) -band $mask
+    $state = (($state * 1103515245) + 12345) -band $mask
+    $state = $state -bxor ($state -shr 16)
+    return [int]($state -band $mask)
+}
+
+function Get-OrderPermutation {
+    # Fisher-Yates over the product rows. The draw's low byte is discarded before the modulo because an
+    # LCG's low bits are the part with the shortest period.
+    param([int]$Seed, [string[]]$Rows)
+    $mask = 0x7FFFFFFF
+    $state = [int64]($Seed -band $mask)
+    # A copy, never the caller's array. Windows PowerShell 5.1 hands a [string[]] parameter through
+    # by reference, so swapping items in place would feed the previous pass's permutation into the
+    # next pass's shuffle and make the recorded order depend on the caller's history.
+    $items = [string[]]$Rows.Clone()
+    for ($index = $items.Count - 1; $index -gt 0; $index--) {
+        $state = (($state * 1103515245) + 12345) -band $mask
+        $target = [int](($state -shr 8) % ($index + 1))
+        $swap = $items[$index]
+        $items[$index] = $items[$target]
+        $items[$target] = $swap
+    }
+
+    return , @($items)
+}
+
+function Get-OrderPlan {
+    # Every pass's permutation, computed before the first pass runs so environment.json records the
+    # campaign's whole order before any of it is executed.
+    param([int]$BaseSeed, [int]$Passes, [string[]]$Rows)
+    $plan = @()
+    for ($pass = 1; $pass -le $Passes; $pass++) {
+        $seed = Get-MixedOrderSeed -BaseSeed $BaseSeed -Pass $pass
+        $permutation = Get-OrderPermutation -Seed $seed -Rows $Rows
+        $plan += [ordered]@{
+            pass = $pass
+            seed = $seed
+            rows = $permutation
+            algorithm = $script:OrderAlgorithm
+        }
+    }
+
+    return , @($plan)
 }
 
 function Start-SingBox {
@@ -240,6 +518,27 @@ function Copy-EffectiveConfig {
     }
 }
 
+function Wait-RowProcess {
+    # Waits for one client process with the campaign's row timeout. Returns $null when it exited on
+    # its own, or the reason after stopping it; the caller records the failure.
+    param($Process, [string]$What)
+    if ($RowTimeoutSeconds -le 0) {
+        $Process.WaitForExit()
+        return $null
+    }
+
+    if ($Process.WaitForExit($RowTimeoutSeconds * 1000)) {
+        # The parameterless wait after a completed one flushes the redirected streams.
+        $Process.WaitForExit()
+        return $null
+    }
+
+    $reason = ('{0} exceeded {1} s and was stopped' -f $What, $RowTimeoutSeconds)
+    Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue
+    [void]$Process.WaitForExit(30000)
+    return $reason
+}
+
 function Invoke-Client {
     param(
         [string]$Label,
@@ -248,7 +547,9 @@ function Invoke-Client {
         [int]$TcpPortValue,
         [int]$DnsPortValue,
         [string]$Exe = $ClientExe,
-        [string[]]$SamplerProcess = @()
+        [string[]]$SamplerProcess = @(),
+        [int]$PassNumber = 0,
+        [string]$RowId = ''
     )
 
     if (Test-Path $OutDir) { Remove-Item $OutDir -Recurse -Force -ErrorAction SilentlyContinue }
@@ -267,39 +568,69 @@ function Invoke-Client {
     foreach ($name in $SamplerProcess) { $clientArgs += @('--sampler-process', $name) }
 
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-    # -Wait -PassThru is the only combination that reliably populates ExitCode; a bare WaitForExit()
-    # on a -PassThru handle leaves it empty, which would read as a failure.
-    $process = Start-Process -FilePath $Exe -ArgumentList $clientArgs -PassThru -Wait -WindowStyle Hidden `
-        -RedirectStandardOutput (Join-Path $OutDir 'client.out') -RedirectStandardError (Join-Path $OutDir 'client.err')
+    # -PassThru is what populates ExitCode; the exit is awaited explicitly rather than with -Wait so a
+    # row can time out and still be recorded.
+    try {
+        $process = Start-Process -FilePath $Exe -ArgumentList $clientArgs -PassThru -WindowStyle Hidden `
+            -RedirectStandardOutput (Join-Path $OutDir 'client.out') -RedirectStandardError (Join-Path $OutDir 'client.err')
+    }
+    catch {
+        $reason = ('the client could not start: ' + $_.Exception.Message)
+        Add-CampaignFailure -PassNumber $PassNumber -Row $RowId -Stage 'row' -Message $reason -Detail $Label
+        [void](Write-RowSkeleton -RowDir $OutDir -Row $RowId -Pass $PassNumber -Stage 'row' -Message $reason)
+        return
+    }
+
+    $timeout = Wait-RowProcess -Process $process -What $Label
     $stopwatch.Stop()
+    if ($null -ne $timeout) {
+        Add-CampaignFailure -PassNumber $PassNumber -Row $RowId -Stage 'row' -Message $timeout -Detail ('pid ' + $process.Id)
+        [void](Write-RowSkeleton -RowDir $OutDir -Row $RowId -Pass $PassNumber -Stage 'row' -Message $timeout)
+        return
+    }
 
     $exit = if ($null -eq $process.ExitCode) { 'unknown' } else { $process.ExitCode }
     Write-Log ('  client {0} exit={1} in {2:n0}s' -f $Label, $exit, $stopwatch.Elapsed.TotalSeconds)
-    # This function publishes no return value: a log line and a value on the same stream would let a
-    # caller that captures or discards the value take the exit-code line with it. The verdict is
-    # recorded in $script:Failures by Test-ClientRun, so callers need nothing back.
-    [void](Test-ClientRun -OutDir $OutDir -Label $Label)
+    # This function publishes no return value: the verdict is recorded by Test-ClientRun, so a caller
+    # that captures or discards the value takes nothing with it.
+    $ok = Test-ClientRun -OutDir $OutDir -Label $Label -PassNumber $PassNumber -RowId $RowId
+    if ($ok -and $exit -ne 0) {
+        Add-CampaignFailure -PassNumber $PassNumber -Row $RowId -Stage 'row' -Message ('the client exited {0} but its run.json reports no failed arm' -f $exit) -Detail $Label
+    }
+    elseif (-not (Test-Path (Join-Path $OutDir 'run.json'))) {
+        [void](Write-RowSkeleton -RowDir $OutDir -Row $RowId -Pass $PassNumber -Stage 'row' -Message ('the client exited {0} without writing run.json' -f $exit))
+    }
 }
 
 function Test-ClientRun {
     # The harness's own run.json is the authority on whether a run was good: it knows which arms
     # completed, and an exit code cannot express a partially failed plan.
-    param([string]$OutDir, [string]$Label)
+    param([string]$OutDir, [string]$Label, [int]$PassNumber = 0, [string]$RowId = '')
 
     $runPath = Join-Path $OutDir 'run.json'
     if (-not (Test-Path $runPath)) {
-        [void]$script:Failures.Add(('client {0} wrote no run.json' -f $Label))
+        Add-CampaignFailure -PassNumber $PassNumber -Row $RowId -Stage 'row' -Message ('the client wrote no run.json in {0}' -f $OutDir) -Detail $Label
         return $false
     }
 
-    $run = Get-Content $runPath -Raw | ConvertFrom-Json
+    try {
+        $run = Get-Content $runPath -Raw | ConvertFrom-Json
+    }
+    catch {
+        Add-CampaignFailure -PassNumber $PassNumber -Row $RowId -Stage 'row' -Message ('run.json is not readable: ' + $_.Exception.Message) -Detail $Label
+        return $false
+    }
+
     $failedArms = @($run.arms | Where-Object { $_.failed } | ForEach-Object { $_.name })
-    if ($run.failed -or $failedArms.Count -gt 0) {
-        [void]$script:Failures.Add(('client {0} failed: run={1} arms={2}' -f $Label, $run.failed, ($failedArms -join ',')))
-        return $false
+    if ($run.failed) {
+        Add-CampaignFailure -PassNumber $PassNumber -Row $RowId -Stage 'row' -Message ('run.json says failed=true ({0})' -f $Label) -Detail ('arms failed: ' + ($failedArms -join ','))
     }
 
-    return $true
+    foreach ($arm in $failedArms) {
+        Add-CampaignFailure -PassNumber $PassNumber -Row $RowId -Arm $arm -Stage 'row' -Message ('the {0} arm failed in {1}' -f $arm, $Label)
+    }
+
+    return (-not $run.failed -and $failedArms.Count -eq 0)
 }
 
 function Invoke-DualPhase {
@@ -309,7 +640,7 @@ function Invoke-DualPhase {
     # how all of these products are told to send an application around the proxy; a product that
     # intercepts it anyway produces a flow to a target nothing should reach through a proxy, and
     # that is a correctness failure rather than a slowdown.
-    param($Product, [string]$RowDir)
+    param($Product, [string]$RowDir, [int]$Pass)
 
     # Per row, never per pass: a pass-level directory is rebuilt by every dual row in turn, so only
     # the last row's lanes survive and the other rows' directLeak evidence is destroyed rather than
@@ -334,26 +665,53 @@ function Invoke-DualPhase {
     $directArgs = @('client', '--target', $TargetAddress, '--tcp-port', $TcpPortDirect, '--udp-port', $TcpPortDirect,
         '--dns-port', $DnsPortDirect, '--plan', $plan, '--out', $directDir, '--label', ($Product.Id + '-dual-direct'))
 
-    $proxied = Start-Process -FilePath $ClientExe -ArgumentList $proxiedArgs -PassThru -WindowStyle Hidden `
-        -RedirectStandardOutput (Join-Path $proxiedDir 'client.out') -RedirectStandardError (Join-Path $proxiedDir 'client.err')
-    $direct = Start-Process -FilePath $ClientExeDirect -ArgumentList $directArgs -PassThru -WindowStyle Hidden `
-        -RedirectStandardOutput (Join-Path $directDir 'client.out') -RedirectStandardError (Join-Path $directDir 'client.err')
+    $proxied = $null
+    $direct = $null
+    try {
+        $proxied = Start-Process -FilePath $ClientExe -ArgumentList $proxiedArgs -PassThru -WindowStyle Hidden `
+            -RedirectStandardOutput (Join-Path $proxiedDir 'client.out') -RedirectStandardError (Join-Path $proxiedDir 'client.err')
+    }
+    catch {
+        $reason = ('the dual/proxied client could not start: ' + $_.Exception.Message)
+        Add-CampaignFailure -PassNumber $Pass -Row $Product.Id -Stage 'row' -Message $reason -Detail 'dual/proxied'
+        [void](Write-RowSkeleton -RowDir $proxiedDir -Row ($Product.Id + '-dual-proxied') -Pass $Pass -Stage 'row' -Message $reason)
+    }
 
-    $proxied.WaitForExit()
-    $direct.WaitForExit()
-    Write-Log ('  dual: proxied exit={0} direct exit={1}' -f $proxied.ExitCode, $direct.ExitCode)
+    try {
+        $direct = Start-Process -FilePath $ClientExeDirect -ArgumentList $directArgs -PassThru -WindowStyle Hidden `
+            -RedirectStandardOutput (Join-Path $directDir 'client.out') -RedirectStandardError (Join-Path $directDir 'client.err')
+    }
+    catch {
+        $reason = ('the dual/direct client could not start: ' + $_.Exception.Message)
+        Add-CampaignFailure -PassNumber $Pass -Row $Product.Id -Stage 'row' -Message $reason -Detail 'dual/direct'
+        [void](Write-RowSkeleton -RowDir $directDir -Row ($Product.Id + '-dual-direct') -Pass $Pass -Stage 'row' -Message $reason)
+    }
+
+    # A lane that never exits is stopped and recorded like any other row timeout; the sibling lane is
+    # still awaited, so a dead proxied lane cannot leave the direct lane's process behind.
+    $proxiedTimeout = if ($null -ne $proxied) { Wait-RowProcess -Process $proxied -What ($Product.Id + '-dual-proxied') } else { $null }
+    $directTimeout = if ($null -ne $direct) { Wait-RowProcess -Process $direct -What ($Product.Id + '-dual-direct') } else { $null }
+    $proxiedExit = if ($null -eq $proxied) { 'n/a' } else { $proxied.ExitCode }
+    $directExit = if ($null -eq $direct) { 'n/a' } else { $direct.ExitCode }
+    Write-Log ('  dual: proxied exit={0} direct exit={1}' -f $proxiedExit, $directExit)
+    if ($null -ne $proxiedTimeout) {
+        Add-CampaignFailure -PassNumber $Pass -Row $Product.Id -Stage 'row' -Message $proxiedTimeout -Detail 'dual/proxied'
+        [void](Write-RowSkeleton -RowDir $proxiedDir -Row ($Product.Id + '-dual-proxied') -Pass $Pass -Stage 'row' -Message $proxiedTimeout)
+    }
+
+    if ($null -ne $directTimeout) {
+        Add-CampaignFailure -PassNumber $Pass -Row $Product.Id -Stage 'row' -Message $directTimeout -Detail 'dual/direct'
+        [void](Write-RowSkeleton -RowDir $directDir -Row ($Product.Id + '-dual-direct') -Pass $Pass -Stage 'row' -Message $directTimeout)
+    }
 
     $truth = Get-ProxyTruth -LeakPorts @($TcpPortDirect, $DnsPortDirect)
     Write-JsonNoBom -Path (Join-Path $dir 'proxy-truth.json') -Value $truth
     Write-Log ('  dual proxy truth: tcp={0} udp={1} uot={2} directLeak={3}' -f $truth.tcp, $truth.udp, $truth.utcp, $truth.directLeak)
     if ($truth.directLeak -gt 0) {
-        [void]$script:Failures.Add(('{0}: {1} proxied flow(s) to the direct lane''s target' -f $Product.Id, $truth.directLeak))
+        Add-CampaignFailure -PassNumber $Pass -Row $Product.Id -Stage 'row' -Message ('{0} proxied flow(s) reached the direct lane''s target' -f $truth.directLeak) -Detail 'dual proxy-truth'
     }
-
-    # Test-ClientRun returns a verdict but never logs one, so discarding it with [void] cannot swallow
-    # a log line here; the verdict itself is already recorded in $script:Failures.
-    [void](Test-ClientRun -OutDir $proxiedDir -Label ($Product.Id + '-dual-proxied'))
-    [void](Test-ClientRun -OutDir $directDir -Label ($Product.Id + '-dual-direct'))
+    if ($null -ne $proxied) { [void](Test-ClientRun -OutDir $proxiedDir -Label ($Product.Id + '-dual-proxied') -PassNumber $Pass -RowId $Product.Id) }
+    if ($null -ne $direct) { [void](Test-ClientRun -OutDir $directDir -Label ($Product.Id + '-dual-direct') -PassNumber $Pass -RowId $Product.Id) }
 }
 
 function Invoke-Row {
@@ -363,11 +721,22 @@ function Invoke-Row {
     New-Item -ItemType Directory -Force -Path $productDir | Out-Null
 
     Write-Log ('  --- {0} (plan {1}) ---' -f $Product.Id, $Product.Plan)
-    Assert-CleanSlate -Except $Product
+    # The per-row clean slate stops every other interceptor (and any client left behind) before this
+    # row is loaded. A process that will not die disqualifies the row, so it is refused rather than
+    # measured on a machine that still has something filtering.
+    [void](Stop-LeftoverProcesses -Products $allProducts)
+    $leftover = @(Get-LeftoverInterceptors -Products $allProducts -IncludeClients)
+    if ($leftover.Count -gt 0) {
+        $reason = ('leftover process(es) before the row: ' + ($leftover -join ', '))
+        Add-CampaignFailure -PassNumber $Pass -Row $Product.Id -Stage 'clean-slate' -Message $reason -CleanSlate
+        [void](Write-RowSkeleton -RowDir $productDir -Row $Product.Id -Pass $Pass -Stage 'clean-slate' -Message $reason)
+        return
+    }
 
     if (-not (Start-Product -Product $Product)) {
-        Write-Log ('  {0} did not start' -f $Product.Id)
-        [void]$script:Failures.Add(('{0} did not start' -f $Product.Id))
+        $reason = ('{0} did not start' -f $Product.Id)
+        Add-CampaignFailure -PassNumber $Pass -Row $Product.Id -Stage 'product-start' -Message $reason
+        [void](Write-RowSkeleton -RowDir $productDir -Row $Product.Id -Pass $Pass -Stage 'product-start' -Message $reason)
         return
     }
 
@@ -377,7 +746,7 @@ function Invoke-Row {
 
     Invoke-Client -Label ($Product.Id + '-p' + $Pass) -OutDir $productDir `
         -PlanPath (Join-Path $PlanRoot $Product.Plan) -TcpPortValue $TcpPort -DnsPortValue $DnsPort `
-        -SamplerProcess @($Product.ProcessName)
+        -SamplerProcess @($Product.ProcessName) -PassNumber $Pass -RowId $Product.Id
 
     $truth = Get-ProxyTruth
     Write-JsonNoBom -Path (Join-Path $productDir 'proxy-truth.json') -Value $truth
@@ -385,7 +754,7 @@ function Invoke-Row {
     Copy-EffectiveConfig -Product $Product -Destination (Join-Path $productDir (Split-Path $Product.ConfigSource -Leaf))
     if (Test-Path $SingBoxLog) { Copy-Item $SingBoxLog (Join-Path $productDir 'singbox.log') -Force -ErrorAction SilentlyContinue }
 
-    if ($Product.Dual) { Invoke-DualPhase -Product $Product -RowDir $productDir }
+    if ($Product.Dual) { Invoke-DualPhase -Product $Product -RowDir $productDir -Pass $Pass }
 
     Stop-Product -Product $Product
     Touch-Heartbeat
@@ -397,10 +766,10 @@ function Invoke-ControlBlock {
     # products is the only thing in the campaign that can detect a product which left a driver
     # filtering after it exited.
     Write-Log ('  --- control {0} (no product) ---' -f $Tag)
-    Assert-CleanSlate -Except $null
     $dir = Join-Path $PassDir ('control-' + $Tag)
     Invoke-Client -Label ('control-' + $Tag + '-p' + $Pass) -OutDir $dir `
-        -PlanPath (Join-Path $PlanRoot 'base-plan.json') -TcpPortValue $TcpPort -DnsPortValue $DnsPort
+        -PlanPath (Join-Path $PlanRoot 'base-plan.json') -TcpPortValue $TcpPort -DnsPortValue $DnsPort `
+        -PassNumber $Pass -RowId ('control-' + $Tag)
     Touch-Heartbeat
 }
 
@@ -1156,22 +1525,76 @@ function Get-EnvironmentBlock {
 # Campaign
 # ---------------------------------------------------------------------------------------------
 
-$products = Get-Products
+$allProducts = Get-Products
+$products = $allProducts
+if ($Rows.Count -gt 0) {
+    $products = @($allProducts | Where-Object { $Rows -contains $_.Id })
+    if ($products.Count -eq 0) {
+        Write-Log ('  no product row matches -Rows: ' + ($Rows -join ', '))
+        exit 1
+    }
+}
+
+$productIds = @($products | ForEach-Object { $_.Id })
+$productsById = @{}
+foreach ($product in $products) { $productsById[$product.Id] = $product }
 
 Write-Log '=== preflight ==='
 New-Item -ItemType Directory -Force -Path $OutRoot | Out-Null
 
+# The failure record and the order plan exist before the first gate runs, so an abort still leaves its
+# evidence at the campaign root. failures.jsonl is append-only; failures.json is the same list as one
+# array. A preflight-only run writes neither, because its contract is environment.json alone.
+$script:FailuresPath = Join-Path $OutRoot 'failures.jsonl'
+$script:FailuresDocumentPath = Join-Path $OutRoot 'failures.json'
 $existingCampaign = @(Get-ChildItem -LiteralPath $OutRoot -Force -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -eq 'environment.json' -or $_.Name -eq 'clock.jsonl' -or $_.Name -like 'pass*' })
+        Where-Object {
+            $_.Name -eq 'environment.json' -or $_.Name -eq 'clock.jsonl' -or $_.Name -eq 'failures.json' -or
+            $_.Name -eq 'failures.jsonl' -or $_.Name -like 'pass*'
+        })
 if ($PreflightOnly -and $existingCampaign.Count -gt 0) {
     Write-Log ('  preflight-only refused: {0} already holds a campaign ({1}); use a fresh -OutRoot' -f $OutRoot, (($existingCampaign | ForEach-Object { $_.Name }) -join ', '))
+    exit 1
+}
+if (-not $PreflightOnly) {
+    # This campaign's failure record, not the previous one's: the reset runs before any gate, so an
+    # early refusal (the order-plan check below) cannot append to a stale JSONL while the array
+    # starts empty.
+    $script:Failures.Clear()
+    [System.IO.File]::WriteAllText($script:FailuresPath, '', (New-Object System.Text.UTF8Encoding($false)))
+    Write-JsonNoBom -Path $script:FailuresDocumentPath -Value '[]'
+}
+$orderSeedSource = if ($OrderSeed -gt 0) { '-OrderSeed' } else { '-Seed' }
+$effectiveOrderSeed = if ($OrderSeed -gt 0) { $OrderSeed } else { $Seed }
+$productIdList = $productIds -join ','
+$orderPlan = Get-OrderPlan -BaseSeed $effectiveOrderSeed -Passes $Passes -Rows $productIds
+
+# The plan is drawn twice and the two draws must agree: a plan that depends on how many times it was
+# asked for is not one a seed reproduces. This is not the aliasing guard -- the explicit Clone() in
+# Get-OrderPermutation is (Windows PowerShell 5.1 can hand a [string[]] through by reference) -- and
+# neither is a substitute for the analysis's replay, which recomputes a recorded permutation from
+# its recorded seed and reports one the seed does not produce.
+$productIdsUnchanged = ($productIds -join ',') -eq $productIdList
+$replayedPlan = Get-OrderPlan -BaseSeed $effectiveOrderSeed -Passes $Passes -Rows $productIds
+$firstOrder = (@($orderPlan) | ForEach-Object { ($_.rows -join ',') }) -join ';'
+$secondOrder = (@($replayedPlan) | ForEach-Object { ($_.rows -join ',') }) -join ';'
+if (-not $productIdsUnchanged -or $firstOrder -ne $secondOrder) {
+    $reason = if ($productIdsUnchanged) {
+        'the same seed produced two different permutations'
+    }
+    else {
+        'the shuffle mutated the declared row list'
+    }
+
+    Write-Log ('  order plan FAILED: ' + $reason)
+    if (-not $PreflightOnly) { Add-CampaignFailure -Stage 'preflight' -Message ('the product-order plan is not reproducible: ' + $reason) }
     exit 1
 }
 
 $clockLogPath = Join-Path $OutRoot 'clock.jsonl'
 if (-not $PreflightOnly) {
     if ($existingCampaign.Count -gt 0) {
-        Write-Log ('  WARNING output root already holds campaign files ({0}); overwriting environment.json and clock.jsonl' -f (($existingCampaign | ForEach-Object { $_.Name }) -join ', '))
+        Write-Log ('  WARNING output root already holds campaign files ({0}); overwriting environment.json, clock.jsonl and the failure record' -f (($existingCampaign | ForEach-Object { $_.Name }) -join ', '))
     }
     # clock.jsonl is the per-pass evidence: one line per probe, pre and post each pass. Truncating it at
     # the start of the campaign keeps a previous run's samples from being read as this run's clock.
@@ -1182,9 +1605,13 @@ $started = (Get-Date).ToString('o')
 # The clock probe runs first so the host probe does not wait through the environment sweep; both the
 # probe and the sweep are read-only and precede every Set-* and benchmark process start.
 $clockGate = Invoke-ClockGate -Count 5 -SanityLimitMs 5000 -SyncLimitMs 200 -RequireSync:$RequireClockSync
-$environment = Get-EnvironmentBlock -Products $products -Started $started
+$environment = Get-EnvironmentBlock -Products $allProducts -Started $started
 $environment.clockGate = $clockGate
 $environment.clockOffsetMs = $clockGate.medianOffsetMs
+$environment.orderSeed = $effectiveOrderSeed
+$environment.orderSeedSource = $orderSeedSource
+$environment.orderAlgorithm = $script:OrderAlgorithm
+$environment.orderPlan = @($orderPlan)
 Write-JsonNoBom -Path (Join-Path $OutRoot 'environment.json') -Value $environment
 Write-Log ('  environment: ' + (Join-Path $OutRoot 'environment.json'))
 Write-Log ('  env: {0} build {1}, {2} cpus, {3} MB visible' -f $environment.os, $environment.build, $environment.logicalCpus, $environment.totalRamMb)
@@ -1200,6 +1627,7 @@ else {
 Write-Log ('  clock policy: ' + $clockGate.policy)
 if (-not $clockGate.passed) {
     Write-Log ('  clock gate FAILED: ' + $clockGate.reason)
+    if (-not $PreflightOnly) { Add-CampaignFailure -Stage 'preflight' -Message ('the preflight clock gate failed: ' + $clockGate.reason) }
     exit 1
 }
 if ($null -ne $clockGate.warning) {
@@ -1220,6 +1648,9 @@ if ($PreflightOnly) {
     exit 0
 }
 
+$exitCode = 0
+$aborted = $false
+
 try {
 # Every exit after the firewall change runs the teardown below: the clock aborts inside the pass loop
 # must stop the products, stop sing-box and restore the firewall, not leave the VM half-configured.
@@ -1229,26 +1660,27 @@ $firewallChange = Disable-FirewallProfiles -Before $environment.firewallProfiles
 $environment.environmentChanges += $firewallChange
 Write-JsonNoBom -Path (Join-Path $OutRoot 'environment.json') -Value $environment
 if ($firewallChange.Contains('error')) {
-    Write-Log ('  WARNING firewall could not be disabled: ' + $firewallChange.error)
-}
-else {
-    Write-Log ('  firewall disabled: ' + (($firewallChange.after | ForEach-Object { $_.name + '=' + $_.enabled }) -join ' '))
-}
-if (-not (Test-TargetReachable)) {
-    Write-Log ('  target unreachable at {0}:{1} - aborting' -f $TargetAddress, $TcpPort)
+    # A firewall that could not be disabled silently drops the inbound connections a product's local
+    # redirect depends on, so every row would measure a refused path. Refusing the campaign is the
+    # fail-closed direction; the teardown still restores the as-found state.
+    Write-Log ('  firewall could not be disabled: ' + $firewallChange.error)
+    Add-CampaignFailure -Stage 'preflight' -Message ('the firewall could not be disabled: ' + $firewallChange.error)
     exit 1
 }
+
+Write-Log ('  firewall disabled: ' + (($firewallChange.after | ForEach-Object { $_.name + '=' + $_.enabled }) -join ' '))
+if (-not (Test-TargetReachable)) {
+    Write-Log ('  target unreachable at {0}:{1} - aborting' -f $TargetAddress, $TcpPort)
+    Add-CampaignFailure -Stage 'target' -Message ('the target is unreachable at {0}:{1}' -f $TargetAddress, $TcpPort)
+    exit 1
+}
+
 Write-Log ('  target reachable at {0}:{1}' -f $TargetAddress, $TcpPort)
 if (-not (Test-TargetReachable -Port $TcpPortDirect)) {
     Write-Log ('  direct-lane target unreachable at {0}:{1} - the dual phase will fail' -f $TargetAddress, $TcpPortDirect)
+    Add-CampaignFailure -Stage 'target' -Message ('the direct-lane target is unreachable at {0}:{1}' -f $TargetAddress, $TcpPortDirect) -Detail 'the dual phase will fail on every dual row'
 }
 
-if (-not (Start-SingBox)) {
-    Write-Log '  sing-box did not start - aborting'
-    exit 1
-}
-
-$random = [System.Random]::new($Seed)
 
 for ($pass = 1; $pass -le $Passes; $pass++) {
     $passDir = Join-Path $OutRoot ('pass{0}' -f $pass)
@@ -1256,22 +1688,59 @@ for ($pass = 1; $pass -le $Passes; $pass++) {
     Write-Log ('=== pass {0}/{1} ===' -f $pass, $Passes)
 
     # Product order is randomised per pass so a drift in the machine shows up as scatter rather than
-    # as a difference between products, which would be indistinguishable from a real effect.
-    $order = @($products | Sort-Object { $random.Next() })
-    Write-JsonNoBom -Path (Join-Path $passDir 'order.txt') -Value (($order | ForEach-Object { $_.Id }) -join ',')
+    # as a difference between products, which would be indistinguishable from a real effect. The plan
+    # was computed before the first pass and is recorded in environment.json, order.json and order.txt.
+    $plan = $orderPlan[$pass - 1]
+    $order = @($plan.rows | ForEach-Object { $productsById[$_] })
+    $orderLine = (@('control-pre') + @($plan.rows) + @('control-post')) -join ', '
+    Write-JsonNoBom -Path (Join-Path $passDir 'order.txt') -Value $orderLine
+    Write-JsonNoBom -Path (Join-Path $passDir 'order.json') -Value ([ordered]@{
+            pass = $pass
+            seed = $plan.seed
+            baseSeed = $effectiveOrderSeed
+            seedSource = $orderSeedSource
+            algorithm = $script:OrderAlgorithm
+            controlPre = 'control-pre'
+            controlPost = 'control-post'
+            rows = @($plan.rows)
+        })
+
+    $clean = Invoke-CleanSlate -Products $allProducts -Pass $pass -EvidencePath (Join-Path $passDir 'clean-slate.json') -RestartSingBox
+    if (-not $clean.passed) {
+        $reason = ('pass {0} refused: {1}' -f $pass, $clean.reason)
+        Write-Log ('  clean-slate FAILED: ' + $reason)
+        Add-CampaignFailure -PassNumber $pass -Stage 'clean-slate' -Message $reason -CleanSlate
+        $aborted = $true
+        break
+    }
+
+    if (-not (Test-TargetReachable)) {
+        $reason = ('pass {0} refused: the target is unreachable at {1}:{2}' -f $pass, $TargetAddress, $TcpPort)
+        Write-Log ('  target FAILED: ' + $reason)
+        Add-CampaignFailure -PassNumber $pass -Stage 'target' -Message $reason
+        $aborted = $true
+        break
+    }
 
     try {
         $preClock = Measure-ClockPhase -Path $clockLogPath -Pass $pass -Phase 'pre'
     }
     catch {
-        Write-Log ('  clock probe failed before pass {0}: {1}' -f $pass, $_.Exception.Message)
-        exit 1
+        $reason = ('the clock probe failed before pass {0}: {1}' -f $pass, $_.Exception.Message)
+        Write-Log ('  ' + $reason)
+        Add-CampaignFailure -PassNumber $pass -Stage 'preflight' -Message $reason
+        $aborted = $true
+        break
     }
+
     $preBounds = Test-ClockPhaseBounds -PhaseResult $preClock -RequireSync:$RequireClockSync
     if (-not $preBounds.passed) {
         Write-Log ('  clock gate FAILED: ' + $preBounds.reason)
-        exit 1
+        Add-CampaignFailure -PassNumber $pass -Stage 'preflight' -Message ('the clock gate failed before the pass: ' + $preBounds.reason)
+        $aborted = $true
+        break
     }
+
     if ($null -ne $preBounds.warning) { Write-Log ('  clock WARNING: ' + $preBounds.warning) }
 
     Invoke-ControlBlock -PassDir $passDir -Pass $pass -Tag 'pre'
@@ -1286,35 +1755,57 @@ for ($pass = 1; $pass -le $Passes; $pass++) {
         $postClock = Measure-ClockPhase -Path $clockLogPath -Pass $pass -Phase 'post'
     }
     catch {
-        Write-Log ('  clock probe failed after pass {0}: {1}' -f $pass, $_.Exception.Message)
-        exit 1
+        $reason = ('the clock probe failed after pass {0}: {1}' -f $pass, $_.Exception.Message)
+        Write-Log ('  ' + $reason)
+        Add-CampaignFailure -PassNumber $pass -Stage 'preflight' -Message $reason
+        $aborted = $true
+        break
     }
+
     $postBounds = Test-ClockPhaseBounds -PhaseResult $postClock -RequireSync:$RequireClockSync
     if (-not $postBounds.passed) {
         Write-Log ('  clock gate FAILED: ' + $postBounds.reason)
-        exit 1
+        Add-CampaignFailure -PassNumber $pass -Stage 'preflight' -Message ('the clock gate failed after the pass: ' + $postBounds.reason)
+        $aborted = $true
+        break
     }
+
     if ($null -ne $postBounds.warning) { Write-Log ('  clock WARNING: ' + $postBounds.warning) }
 
     $driftMs = [Math]::Abs([double]$postClock.medianOffsetMs - [double]$preClock.medianOffsetMs)
     Write-Log ('  clock pass {0}: pre {1:+0.0;-0.0;0} ms, post {2:+0.0;-0.0;0} ms, drift {3:F1} ms (VM - host)' -f $pass, [double]$preClock.medianOffsetMs, [double]$postClock.medianOffsetMs, $driftMs)
     if ($driftMs -gt 100.0) {
-        Write-Log ('  clock drift gate FAILED: {0:F1} ms across pass {1} exceeds the 100 ms bound' -f $driftMs, $pass)
-        exit 1
+        $reason = ('the clock drifted {0:F1} ms across pass {1}, above the 100 ms bound' -f $driftMs, $pass)
+        Write-Log ('  clock drift gate FAILED: ' + $reason)
+        Add-CampaignFailure -PassNumber $pass -Stage 'preflight' -Message $reason
+        $aborted = $true
+        break
+    }
+
+    # A row that left no run.json at all is the one hole every other rule cannot see; the row loop
+    # writes a skeleton for it so the pass still declares what it was supposed to measure.
+    foreach ($productId in $plan.rows) {
+        $rowDir = Join-Path $passDir $productId
+        if (-not (Test-Path (Join-Path $rowDir 'run.json'))) {
+            $reason = ('{0} left no run.json in pass {1}' -f $productId, $pass)
+            Add-CampaignFailure -PassNumber $pass -Row $productId -Stage 'row' -Message $reason
+            [void](Write-RowSkeleton -RowDir $rowDir -Row $productId -Pass $pass -Stage 'row' -Message $reason)
+        }
     }
 
     Write-Log ('  pass {0} done' -f $pass)
 }
 
+if ($aborted) { $exitCode = 1 }
 }
 finally {
     Write-Log '=== teardown ==='
     try {
-        foreach ($product in $products) { Stop-Product -Product $product }
+        foreach ($product in $allProducts) { Stop-Product -Product $product }
         Get-Process -Name 'sing-box' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     }
     catch {
-        Write-Log ('  WARNING process teardown failed: ' + $_.Exception.Message)
+        Add-CampaignFailure -Stage 'teardown' -Message ('process teardown failed: ' + $_.Exception.Message)
     }
     if ($null -ne $firewallChange) {
         if ($null -eq $environment.firewallProfiles) {
@@ -1333,7 +1824,7 @@ finally {
                         Write-Log ('  WARNING could not write environment.json after firewall restore: ' + $_.Exception.Message)
                     }
                     if ($firewallRestore.Contains('error')) {
-                        Write-Log ('  WARNING firewall restore failed: ' + $firewallRestore.error)
+                        Add-CampaignFailure -Stage 'teardown' -Message ('the firewall restore failed: ' + $firewallRestore.error)
                     }
                     else {
                         Write-Log ('  firewall restored: ' + (($firewallRestore.after | ForEach-Object { $_.name + '=' + $_.enabled }) -join ' '))
@@ -1347,12 +1838,11 @@ finally {
     }
 }
 
-if ($script:Failures.Count -gt 0) {
-    Write-Log ('=== FAILURES ({0}) ===' -f $script:Failures.Count)
-    foreach ($failure in $script:Failures) { Write-Log ('  ' + $failure) }
-}
-else {
-    Write-Log '=== no failures ==='
-}
+
+# The campaign is only clean when nothing was recorded; a failed row still leaves its evidence and its
+# attempt for the archive, so the process exit code is what a driver reads.
+Show-FailureSummary
+if ($script:Failures.Count -gt 0) { $exitCode = 1 }
 
 Write-Log '=== orchestrator complete ==='
+exit $exitCode

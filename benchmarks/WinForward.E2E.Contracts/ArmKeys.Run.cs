@@ -74,6 +74,18 @@ public static partial class ArmKeys
         /// <summary>Whether any arm of the run failed.</summary>
         public const string Failed = "failed";
 
+        /// <summary>The stage the orchestrator refused the row at, in a skeleton it wrote.</summary>
+        /// <remarks>
+        /// <para>A row that never started publishes no client-run file, so the orchestrator writes a
+        /// skeleton carrying this key and <see cref="Error"/> beside the <c>pass</c>/<c>row</c> the
+        /// failure belongs to. The client never writes any of them: its own <c>run.json</c> is
+        /// identified by its roster, which a skeleton leaves empty.</para>
+        /// </remarks>
+        public const string Stage = "stage";
+
+        /// <summary>The one-line reason a skeleton records for the refusal.</summary>
+        public const string Error = "error";
+
         /// <summary>The members of one <c>arms</c> element, in write order.</summary>
         public static class Arm
         {

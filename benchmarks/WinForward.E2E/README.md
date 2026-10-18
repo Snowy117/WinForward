@@ -288,6 +288,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/orchestrator.ps1 `
 | Parameter | Default | Meaning |
 |---|---|---|
 | `-Passes` | 4 | passes to run |
+| `-Rows` | all | restrict the campaign to these row ids, for a one-row smoke run; the tree then holds only those rows, so it is a check of the instrument rather than a campaign |
 | `-OutRoot` | `C:\wfbench\results` | campaign output root; use a fresh directory for a new campaign |
 | `-PlanRoot` | `C:\wfbench\e2e` | directory holding the deployed plan files |
 | `-TargetAddress` | `192.168.100.4` | the Linux host running the targets |
@@ -300,14 +301,17 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/orchestrator.ps1 `
 | `-ClientExe`, `-ClientExeDirect` | `C:\wfbench\e2e\WinForward.E2E.exe`, `C:\wfbench\e2e-direct\WinForward.E2E.Direct.exe` | the two client images |
 | `-SingBoxExe`, `-SingBoxConfig`, `-SingBoxLog` | `C:\wfbench\singbox\*` | the proxy the traffic is relayed through, and the log its flow census is read from |
 | `-HeartbeatPath` | `C:\wfbench\heartbeat.txt` | touched around each arm |
-| `-Seed` | 20261006 | seeds the per-pass product order |
+| `-Seed` | 20261006 | the campaign seed recorded in `environment.json`; also the product-order seed when `-OrderSeed` is 0 |
+| `-OrderSeed` | 0 | the product-order seed alone; a fixed value reproduces every pass's permutation, and 0 derives it from `-Seed` |
+| `-RowTimeoutSeconds` | 1800 | one row's client run; a timeout stops the row, records the failure and writes the row skeleton. 0 waits forever |
 
 One product is loaded at a time, measured with that row's own plan, then stopped. The campaign root
-holds `environment.json` and `clock.jsonl`; each `pass<N>/` holds `order.txt`, a `control-pre/` and a `control-post/`
-block, and one directory per product row. The orchestrator writes each row's `proxy-truth.json`,
-copies the product's effective configuration into the row and writes the `environment.json` block;
-deploying the artifacts, the plans and the product configurations to that machine is machine-specific
-work (`scripts/deploy-campaign.sh`, local).
+holds `environment.json`, `clock.jsonl`, `failures.jsonl` (with its derived `failures.json`) and one
+`pass<N>/` per pass; each pass holds `order.txt`, `order.json`, `clean-slate.json`, a `control-pre/` and
+a `control-post/` block, and one directory per product row. The orchestrator writes each row's
+`proxy-truth.json`, copies the product's effective configuration into the row and writes the
+`environment.json` block; deploying the artifacts, the plans and the product configurations to that
+machine is machine-specific work (`scripts/deploy-campaign.sh`, local).
 
 #### Preflight: clock and environment
 
@@ -373,8 +377,54 @@ each `productVersions` entry, and the top-level `unavailable` map for `os`, `bui
 
 `-PreflightOnly` stops after `environment.json` is written, so the gate can be exercised in a short VM
 run without the firewall change or the pass loop. It writes only `environment.json` (no `clock.jsonl`)
-and refuses an `-OutRoot` that already holds `environment.json`, `clock.jsonl` or `pass*`; use a fresh
-directory. A full campaign warns when it reuses such a root and overwrites the two campaign files.
+and refuses an `-OutRoot` that already holds `environment.json`, `clock.jsonl`, `failures.json`, `failures.jsonl` or `pass*`; use a fresh
+directory. A full campaign warns when it reuses such a root and overwrites the two campaign files and the failure record.
+
+#### Failures, clean slate and the product order
+
+Every failure the campaign can detect is recorded at the campaign root, in an append-only
+`failures.jsonl` and in a `failures.json` rewritten as one JSON array after each entry. One record is
+`{"when", "pass", "row", "arm", "stage", "error", "detail", "cleanSlate"}`: `pass` is null for a
+campaign-level record, `row` and `arm` are null when the failure is not about one of them, and `stage`
+is one of `preflight`, `clean-slate`, `product-start`, `target`, `row` or `teardown`. Every entry is
+also printed in the campaign log, and the orchestrator exits `1` when the campaign recorded any
+failure — a non-zero status here means "read `failures.jsonl`", not "the campaign produced no data".
+
+A row that never produced a `run.json` — the product did not start, the client crashed, the row timed
+out — gets a **skeleton** at `pass<N>/<row>/run.json`: `failed: true`, the `stage`, the `error`, the
+`pass`/`row` it belongs to, a `startedUtc` and an empty `arms` roster. The analysis sees that file as a
+row and reports `failed-row` with the recorded stage, so the pass declares the row it was supposed to
+measure instead of silently dropping it; a row directory the orchestrator never even wrote is reported
+as `declared-row-missing`. A skeleton never overwrites a `run.json` the client wrote: that file's
+roster and verdict stay evidence even when the run failed.
+
+Before every pass the orchestrator runs a **clean slate**: it stops any leftover product, client or
+`sing-box` process, restarts `sing-box`, verifies that nothing is still running and that the firewall
+profiles are still disabled, and writes the verdict to `pass<N>/clean-slate.json`. The same stop runs
+before every row (without restarting `sing-box`). A failed pass clean slate refuses the pass and stops
+the campaign: the pass contributes no rows, the failure is recorded with `cleanSlate: true`, and the
+normal teardown still stops the products and `sing-box` and restores the firewall — a refused pass
+never leaves the machine half-configured. A row whose pre-run stop cannot clear the machine is
+skipped instead: it writes its skeleton and failure record and the pass continues. A later attempt is
+a new campaign, which also starts a new failure record.
+
+`-RowTimeoutSeconds` (default 1800) bounds one row's client run; the release full row is 480 s plus a
+120 s dual phase, so a hung row is stopped and recorded long before the night is lost.
+
+The **product order** is a seeded Fisher-Yates shuffle over the seven product rows, one generator
+stream per pass: `orderSeed = -OrderSeed` when it is positive and `-Seed` otherwise, and
+`passSeed = lcg-mix(orderSeed, pass)`. The whole campaign's permutation plan is computed before the
+first pass and recorded in `environment.json` (`orderSeed`, `orderSeedSource`, `orderAlgorithm`,
+`orderPlan`); each pass writes it to `order.txt` (the line the analysis prints in §2, with
+`control-pre` first and `control-post` last) and to `order.json` (`pass`, `seed`, `baseSeed`,
+`seedSource`, `algorithm`, `rows`). The analysis replays the seed and reports a permutation it cannot
+reproduce, two order records that disagree, or an order that names something other than the declared
+product rows. Re-running with the same seed reproduces the same order; there is no other source of
+randomness in the row order. Before the first pass the orchestrator draws the whole plan twice and
+refuses the campaign when the two draws disagree or when computing the plan changed the declared row
+list; that is a reproducibility check of the plan itself, not a guard against array aliasing — the
+shuffle clones its input for that reason, and the analysis's replay of the recorded seed is the
+backstop that catches an order the seed does not produce.
 
 ### The configs and the plan sets
 
@@ -440,7 +490,7 @@ One client run writes one directory. Every JSONL file is one JSON object per lin
 | | `samplerError` | one sampling failure: `process`, `error` (the exception type), `message` |
 | | `error` | an arm that threw: `arm`, `kind`, `label`, `error` (the exception type), `message`, `detail` (the innermost exception type, `GetBaseException()`), and the tick window |
 | | `attempt` | the reliability arm's per-attempt evidence: `connectionId`, `mode`, `status`, `observed`, `expected`, `truncated`, `echoedBytes`, `trailerBytes`, `eof`, `reset`, `protocolError`, `otherError`, `connectTicks`, `transferTicks` |
-| `run.json` | one object | the run's identity and environment, its plan hash, path and source, its per-arm tick windows, and whether any arm failed |
+| `run.json` | one object | the run's identity and environment, its plan hash, path and source, its per-arm tick windows, and whether any arm failed. A skeleton the orchestrator writes for a row that never ran adds `stage`, `error`, `pass` and `row` and leaves `arms` empty |
 | target ledger | `tcp` | one finished TCP connection: `connectionId`, `mode`, `expectedBytes`, `bytesEchoed`, `verdict`, `peer`, tick window |
 | | `udpSummary` | once a second while the target runs and once at shutdown: running totals (`received`, `undecodable`, `bytes`) and the source endpoints seen in that interval. Each receive loop holds 64 of them at once: an endpoint keeps the slot of its `(address, port)` while it keeps arriving, a slot the current interval has not touched yet is handed to the next endpoint (a fresh claim starts its count over, and its whole count is that interval's datagrams under its own key), and `sourceOverflow` counts the datagrams an interval could not place |
 | | `dnsSummary` | once per listener at shutdown: UDP and TCP query, answer, empty-answer, malformed, send-error and connection totals, plus the listener's refused accepts and its length-prefix short reads |
@@ -450,8 +500,12 @@ One client run writes one directory. Every JSONL file is one JSON object per lin
 | `<ledger-base>.injection.json` | one object | the target's delay audit: `injectDelayMs`, `label`, `ledger`, `writtenUtc`; written beside the ledger; not a ledger key and outside the `ArmKeys` literal gate; the analysis does not read it |
 | `proxy-truth.json` | one object | `tcp`, `udp`, `utcp` and `total` — the proxied flows observed in the proxy's log — plus `directLeak` in the dual phase's file |
 | `dual/proxied/`, `dual/direct/` | as a row | the two lanes of the dual phase: one run around the proxy and one configured to go direct, the same workload shape against two targets. Each lane is a full run directory, and `dual/proxy-truth.json` carries the row's flow census plus `directLeak` |
-| `order.txt` | one line | the row ids in the order this pass ran them |
-| `environment.json` | one object | the orchestrator's environment block: start time, OS and build, logical CPUs, visible RAM, pass count, seed, firewall profiles as found, the clock policy, median and preflight per-probe samples, NIC offload controls, dynamic-memory evidence, product hashes, power plan, driver and service versions, snapshot evidence, environment changes, proxy version and target ports |
+| `order.txt` | one line | the row ids in the order this pass ran them, `control-pre` first and `control-post` last |
+| `order.json` | one object | the permutation `order.txt` records: `pass`, `seed` (the pass's own generator seed), `baseSeed`, `seedSource` (`-OrderSeed` or `-Seed`), `algorithm`, `rows` (the seven product rows in run order) |
+| `clean-slate.json` | one object | the pass clean slate's verdict: `pass`, `when`, `passed`, the processes it `stopped`, the `leftovers` it still saw, `singBoxStarted`, the `firewallProfiles` it read, and `reason` when it failed |
+| `failures.jsonl` | one object per line | the campaign's failures, appended as they happen: `when`, `pass`, `row`, `arm`, `stage`, `error`, `detail`, `cleanSlate` |
+| `failures.json` | one array | the same records as one JSON document, rewritten after every entry; `failures.jsonl` is authoritative when both exist |
+| `environment.json` | one object | the orchestrator's environment block: start time, OS and build, logical CPUs, visible RAM, pass count, seed, the product-order seed/source/algorithm and the whole per-pass permutation plan, firewall profiles as found, the clock policy, median and preflight per-probe samples, NIC offload controls, dynamic-memory evidence, product hashes, power plan, driver and service versions, snapshot evidence, environment changes, proxy version and target ports |
 | `clock.jsonl` | one object per probe | the per-pass clock samples: `pass`, `phase` (`pre` or `post`), `offsetMs` (VM - host), `rttMs`, `vmUtc`, `hostUtc` |
 
 Every ledger record also carries `utc` (absolute wall clock) and `label`; every client record carries
@@ -548,7 +602,7 @@ key has no constant, when no write site references a declaring constant, or when
 | `base` (BASE) | `metrics/latency/udp.sent`, `metrics/latency/udp.lossRate`, `metrics/latency/tcp.connectAttempts`, `metrics/loss/lossRate`, `metrics/loss/sent`, `metrics/loss/window`, `metrics/loss/foreignConnection` |
 | every arm with a histogram | `latency/tcp-connect`, `latency/tcp-rtt`, `latency/udp-rtt`, `latency/dns-rtt`, each with `count` and `minUs`, `meanUs`, `p50Us`, `p90Us`, `p99Us`, `p999Us`, `maxUs` |
 | the UDP accuracy table | reads the fifteen fields it tabulates — `sent`, `arrived`, `late`, `never`, `corruptDatagrams`, `corrupt`, `duplicate`, `reordered`, `foreignConnection`, `abandonedAtTeardown`, `lossRate`, `strictLossRate`, `corruptRate`, `reorderRate`, `clientSendLoss` — from `metrics/…` for LOSS and from `metrics/classes/udp/…` for MIX, plus `sent` and `supplied` as the denominators behind its rule-of-three bounds. MIX does not publish `strictLossRate`, `corruptRate`, `reorderRate` or `supplied`, and the analysis prints an explicit `n/a (MIX does not publish …)` for those cells rather than a zero |
-| `run.json` | `label`, `planHash`, `clientVersion`, `osDescription`, `frameworkDescription`, `logicalProcessors`, `samplerProcesses`, `startedUtc`, `startedTicks`, `endedTicks`, `wallSeconds`, `arms[].{name,file,kind,startedTicks,endedTicks,failed}`, `target.{address,tcpPort,udpPort,dnsPort}`, `failed` |
+| `run.json` | `label`, `planHash`, `clientVersion`, `osDescription`, `frameworkDescription`, `logicalProcessors`, `samplerProcesses`, `startedUtc`, `startedTicks`, `endedTicks`, `wallSeconds`, `arms[].{name,file,kind,startedTicks,endedTicks,failed}`, `target.{address,tcpPort,udpPort,dnsPort}`, `failed`; a row skeleton adds `stage` and `error` (failure-only paths the orchestrator writes and the analysis reads) |
 | samples | `self`, `process`, `matched`, `absent`, `ticks`, `readError`, `readErrors`, `cpuSeconds`, `privateBytes`, `workingSetBytes`, `peakWorkingSetBytes`, `generatorCpuSeconds`, `processes[].{pid,startUtc,countersRead,cpuSeconds,privateBytes}` |
 | the ledger | `type`, `utc`, `label`; `error` records' `detail`; `tcp` records' `verdict`; `udpSummary`'s `received`, `undecodable`, `sources[].{address,port,datagrams}`, `sourceOverflow`; `tcpSummary`'s and `dnsSummary`'s `truncatedFrames`; `dnsSummary`'s `port`, `tcpQueries`, `udpQueries`; `targetSummary`'s `ledgerWriteErrors`, `tcp`, `dns`, `dnsAlt` and their `truncatedFrames` |
 

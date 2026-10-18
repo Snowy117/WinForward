@@ -58,7 +58,8 @@ reviews and commits; it does not write code. Every subagent prompt names the tas
       versions and snapshot id before any `Set-*`; record every change in `environmentChanges`.
 - [ ] `failures.json`; failed rows write a `run.json` skeleton; `declared-row-missing` finding.
 - [ ] Clean-slate failures enter `failures.json` and the result tree.
-- [ ] Arm-order randomization per pass, with the permutation seed recorded.
+- [ ] Product-row order randomization per pass (the campaign arms are rows; keep the control blocks
+      fixed), with the permutation seed recorded.
 - [ ] Defer the `connectionId` caption correction to the release-mode/oracle decision; do not
       change the frozen legacy `tables.md` in B3.
 - [ ] Verify: `pwsh -NoProfile -Command "$null=[scriptblock]::Create((Get-Content -Raw ...))"`;
