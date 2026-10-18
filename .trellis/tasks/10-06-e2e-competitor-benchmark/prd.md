@@ -1,6 +1,12 @@
 # End-to-end competitor benchmark: WinForward AOT/JIT vs ProxiFyre / Proxifier / ProxyBridge
 
+> **Superseded (2026-10-18).** The product-ranking goal below is superseded by the decision record in
+> `.trellis/tasks/10-11-e2e-benchmark-design-review/research/decisions.md` and the remediation task
+> `.trellis/tasks/10-18-e2e-benchmark-remediation/`. The original goal and acceptance criteria are
+> kept as the historical intent that the design review was written against.
+
 ## Goal
+
 
 Build and run a real end-to-end benchmark on the Windows dev VM comparing the CI-built WinForward
 AOT and framework-dependent artifacts against ProxiFyre 2.6.1, Proxifier 4.14 and ProxyBridge 4.0.0

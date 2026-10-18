@@ -1,0 +1,7 @@
+{"file":".trellis/tasks/10-11-e2e-benchmark-design-review/research/decisions.md","reason":"agreed decisions and claim boundary"}
+{"file":".trellis/tasks/10-11-e2e-benchmark-design-review/research/measurement-model.md","reason":"estimand, primary family, band and report contract"}
+{"file":".trellis/tasks/10-11-e2e-benchmark-design-review/research/glossary.md","reason":"canonical vocabulary"}
+{"file":".trellis/tasks/10-11-e2e-benchmark-design-review/research/design-problems.md","reason":"review evidence, recommendation IDs and cross-axis summary"}
+{"file":".trellis/spec/backend/index.md","reason":"spec hub and family map"}
+{"file":".trellis/spec/backend/benchmark-methodology.md","reason":"prove the measured path; prove gates can fail"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"commit gates, suppression policy, testing requirements"}

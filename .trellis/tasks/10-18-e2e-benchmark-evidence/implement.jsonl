@@ -1,0 +1,10 @@
+{"file":".trellis/tasks/10-11-e2e-benchmark-design-review/research/decisions.md","reason":"agreed decisions and archive policy"}
+{"file":".trellis/tasks/10-11-e2e-benchmark-design-review/research/measurement-model.md","reason":"caliber and report contract"}
+{"file":".trellis/tasks/10-11-e2e-benchmark-design-review/research/glossary.md","reason":"canonical vocabulary"}
+{"file":".trellis/tasks/10-11-e2e-benchmark-design-review/research/design-reproducibility.md","reason":"archive and driver evidence"}
+{"file":".trellis/spec/backend/index.md","reason":"spec hub"}
+{"file":".trellis/spec/backend/measurement-record-contract.md","reason":"campaign tree and record paths"}
+{"file":".trellis/spec/backend/measurement-tooling.md","reason":"analyzer invocation and gates"}
+{"file":".trellis/spec/backend/measurement-judgement.md","reason":"comparison classes and noise floor"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"commit gates"}
+{"file":"benchmarks/WinForward.E2E.Analysis/README.md","reason":"analyzer invocation and output contract"}

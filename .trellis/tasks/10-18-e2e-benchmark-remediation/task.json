@@ -1,0 +1,30 @@
+{
+  "id": "e2e-benchmark-remediation",
+  "name": "e2e-benchmark-remediation",
+  "title": "E2E benchmark remediation: release caliber, instrument gates, campaign",
+  "description": "Turn the 10-11 design-review decisions into a release-grade E2E benchmark: measurement model, release plan, falsifiable instrument, calibration, 7-pass campaign, report and archive.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "qmazon",
+  "assignee": "qmazon",
+  "createdAt": "2026-10-18",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "master",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "10-18-e2e-benchmark-evidence",
+    "10-18-e2e-benchmark-harness",
+    "10-18-e2e-benchmark-campaign"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

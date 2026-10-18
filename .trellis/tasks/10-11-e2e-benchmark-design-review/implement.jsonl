@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/10-11-e2e-benchmark-design-review/research/design-problems.md", "reason": "问题清单与 A/B/C/D 四组建议：本任务整改的唯一来源，含每条发现的证据锚点与消除关系"}
+{"file": ".trellis/spec/backend/benchmark-methodology.md", "reason": "行必须测到它命名的那条路径、gate 必须被证明能失败：整改（阳性对照、BASE-singbox、灵敏度注入）要按这条纪律落地"}
+{"file": ".trellis/spec/backend/measurement-judgement.md", "reason": "比较类别与噪声底纪律：噪声底、jitter band 与 reading/contract 分类的既有约定"}

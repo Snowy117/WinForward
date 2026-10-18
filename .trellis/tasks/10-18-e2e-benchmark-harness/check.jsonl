@@ -1,0 +1,18 @@
+{"file":".trellis/tasks/10-11-e2e-benchmark-design-review/research/decisions.md","reason":"agreed decisions and claim boundary"}
+{"file":".trellis/tasks/10-11-e2e-benchmark-design-review/research/measurement-model.md","reason":"estimand, primary family, band and report contract"}
+{"file":".trellis/tasks/10-11-e2e-benchmark-design-review/research/glossary.md","reason":"canonical vocabulary"}
+{"file":".trellis/tasks/10-11-e2e-benchmark-design-review/research/design-problems.md","reason":"review evidence, recommendation IDs and cross-axis summary"}
+{"file":".trellis/spec/backend/index.md","reason":"spec hub and family map"}
+{"file":".trellis/spec/backend/benchmark-methodology.md","reason":"prove the measured path; prove gates can fail"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"commit gates, suppression policy, testing requirements"}
+{"file":".trellis/spec/backend/measurement-record-contract.md","reason":"record contract, check the published paths"}
+{"file":".trellis/spec/backend/measurement-judgement.md","reason":"comparison classes and noise floor"}
+{"file":".trellis/spec/backend/measurement-harness.md","reason":"harness contract hub"}
+{"file":".trellis/spec/backend/measurement-tooling.md","reason":"which gate proves what"}
+{"file":".trellis/spec/backend/measurement-run-lifecycle.md","reason":"failed run and teardown shapes"}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"file placement and line ceiling"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"fail-closed review"}
+{"file":".trellis/tasks/10-11-e2e-benchmark-design-review/research/design-stats-and-decisions.md","reason":"statistical evidence for the verdict changes"}
+{"file":".trellis/tasks/10-11-e2e-benchmark-design-review/research/design-instrument-validity.md","reason":"instrument evidence"}
+{"file":".trellis/tasks/10-11-e2e-benchmark-design-review/research/design-experiment-fairness.md","reason":"row/config fairness evidence"}
+{"file":".trellis/tasks/10-11-e2e-benchmark-design-review/research/design-reproducibility.md","reason":"driver/archive evidence"}
