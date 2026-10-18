@@ -203,6 +203,28 @@ public sealed class AnalyzerReleaseComparisonTests
     }
 
     [Fact]
+    public void APrimaryMetricWithoutAnEquivalenceFamilyHasNoMarginClaim()
+    {
+        var thresholds = ParseFixture("comparison.json");
+        var passes = Passes(10);
+        var inputs = Inputs(thresholds, passes, required: 2);
+        var dataset = Dataset(
+            passes,
+            Row(Reference, passes).With(Loss, Series(1.0, 0.10, 10)),
+            Row("proxifyre", passes).With(Loss, Series(1.4, 0.10, 10)));
+
+        var metric = Metric(dataset, thresholds, inputs, Loss);
+        var pair = Pair(dataset, thresholds, inputs, Loss, "proxifyre");
+
+        Assert.Null(metric.EquivalenceMargin);
+        Assert.Null(pair.EquivalenceMargin);
+        Assert.DoesNotContain("TOST", metric.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("pre-registered", metric.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("TOST", pair.Reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("pre-registered", pair.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ExploratoryMetricsAreReportOnlyAndCarryNoAdjustedInterval()
     {
         var thresholds = ParseFixture("comparison.json");

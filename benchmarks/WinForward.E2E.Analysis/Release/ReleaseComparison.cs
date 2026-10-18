@@ -71,6 +71,7 @@ public static class ReleaseComparison
         foreach (var primary in thresholds.Primary)
         {
             var spec = Spec(primary.Metric);
+            double? equivalenceMargin = equivalence.TryGetValue(primary.Metric, out var margin) ? margin : null;
             metrics.Add(
                 EvaluatePrimary(
                     spec,
@@ -81,7 +82,7 @@ public static class ReleaseComparison
                     thresholds.Opponents,
                     inputs,
                     dataset,
-                    equivalence.GetValueOrDefault(primary.Metric),
+                    equivalenceMargin,
                     gates));
         }
 

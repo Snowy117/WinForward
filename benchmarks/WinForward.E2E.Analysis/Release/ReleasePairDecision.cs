@@ -352,7 +352,7 @@ internal static class ReleasePairDecision
             string.Concat(
                 bandText,
                 insideBand
-                    ? " lies inside the band; no pre-registered TOST family covers this pair"
+                    ? " lies inside the band"
                     : " straddles the band"));
     }
 
