@@ -78,8 +78,9 @@ The pass counts are the invocation's override of the thresholds file, in that or
 cannot be combined with `--flat`: a release run reads `pass1`, `pass2`, … directories and counts them.
 Every refusal exits 2 and names the field it refused — an unknown or repeated thresholds key, a missing
 or repeated primary metric, a band at or below zero, an equivalence family outside the primary family,
-a metric declared as both a primary and a capability gate, an undeclared row, a caliber digest that
-does not match its plan, declared arm durations that disagree with that plan, a non-finite
+a metric declared as both a primary and a capability gate, an undeclared row, the calibration
+control `BASE-singbox` named as the reference or an opponent, a caliber digest that does not
+match its plan, declared arm durations that disagree with that plan, a non-finite
 `--warmup-seconds`, or a warm-up that differs from the file's calibrated window. The file's own
 SHA-256, the verified caliber hash and the measured pass list are recorded in `release-inputs.json`;
 the legacy outputs are untouched.
@@ -434,6 +435,10 @@ of `tables.md` prints it.
 | `proxybridge` | full | relayed through the proxy | proxied (native relay) |
 | `control-pre`, `control-post` | BASE only | n/a | n/a |
 
+The `BASE-singbox` calibration control is deliberately not in this table: it is a separate control row
+with no product and no UDP (see "Control blocks"), so it never enters the product family, the product
+order or a pairwise comparison.
+
 The default WinForward configuration, `wf-aot-nativeudp`, is the **reference row** and runs the same
 full plan as `wf-aot-opt`, the declared **opt-in UoT variant**; `wf-fdd-opt` is the framework-dependent
 build of that variant's configuration. A delta between `wf-aot-nativeudp` and `wf-aot-opt` is
@@ -573,6 +578,22 @@ detect a product that left a driver filtering after it exited. A difference is a
 `correctness-failure` finding; the script also checks that the blocks really do bracket the
 product block in run order. The BASE floor check in section 3.2 is inherited by every row of the
 pass, and says so when it fails.
+
+### The `BASE-singbox` calibration control
+
+`BASE-singbox` is a calibration-only control, not a product row. A control tree runs one pass whose
+only row is `BASE-singbox`; section 1's row table and a `calibration-control` informational finding
+report it. It is deliberately outside the product row table (`RowProfiles.Declared`), the product order
+and therefore `verdict.json`'s `row_profiles`: it is never an opponent in the release family, and a
+thresholds file that names it as `referenceRow` or in `opponents` is refused. Its plan is one TCP-only
+`latency` arm (the BASE latency shape), so its LAT UDP-derived cells read
+`not run (TCP-only control)`; DNS and other arms it never ran read `n/a (...)`, and §1's UDP/53
+column carries the control's own longer not-run label. Any pairwise comparison involving it is
+`n/a (not comparable)`.
+
+Analyse a control tree with the legacy invocation (`analyze.sh --raw <tree> --out <dir>`); the release
+invocation is for the seven-pass product tree and the control is not part of it. The real hop record
+is calibration evidence written by B8 beside the calibrated band, not by the ordinary regression.
 
 ## The dual phase
 

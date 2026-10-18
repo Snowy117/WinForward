@@ -23,8 +23,11 @@ internal sealed record RowProfile(
     string Plan,
     bool Dual,
     string Udp53,
-    string Udp);
-
+    string Udp)
+{
+    /// <summary>Whether this row is a calibration-only control rather than a product row.</summary>
+    internal bool CalibrationControl { get; init; }
+}
 /// <summary>
 /// The nine rows the campaign is declared to have, keyed by row id, plus the plan and ordering tables
 /// every section reads.
@@ -57,12 +60,17 @@ public static class RowProfiles
     /// <summary>The control block that runs after the product block.</summary>
     internal const string ControlPost = "control-post";
 
+    /// <summary>The calibration-only SOCKS5 control row: TCP only, no product, never shuffled.</summary>
+    private const string CalibrationControlRow = "BASE-singbox";
+
     /// <summary>Whether a row id is the block that runs before the product block.</summary>
     internal static bool IsControlPre(string rowId) => string.Equals(rowId, ControlPre, StringComparison.Ordinal);
 
     /// <summary>Whether a row id is the block that runs after the product block.</summary>
     internal static bool IsControlPost(string rowId) => string.Equals(rowId, ControlPost, StringComparison.Ordinal);
 
+    /// <summary>Whether a row id is the calibration-only control, which is not a product row.</summary>
+    internal static bool IsCalibrationControl(string rowId) => string.Equals(rowId, CalibrationControlRow, StringComparison.Ordinal);
     /// <summary>The arms a plan runs; <c>full</c> is the whole measured set.</summary>
     internal static IReadOnlyDictionary<string, IReadOnlyList<string>> PlanArms { get; } =
         new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal)
@@ -71,6 +79,7 @@ public static class RowProfiles
             ["udp only"] = ["LAT", "LATLOAD", "LOSS"],
             ["dns only"] = ["DNS", "DNSALT"],
             ["BASE only"] = ["BASE"],
+            ["BASE-singbox (TCP only)"] = ["LAT"],
         };
 
     /// <summary>
@@ -110,6 +119,9 @@ public static class RowProfiles
     /// <summary>The carriage name of a port-53 path a product cannot carry at all.</summary>
     private const string Udp53NotCarried = "direct-not-carried";
 
+    /// <summary>The carriage name of a row that does not run UDP or DNS at all.</summary>
+    private const string Udp53NotRun = "not-run-tcp-only";
+
     /// <summary>The carriage name of a row that loads no product.</summary>
     internal const string Udp53NotApplicable = "n/a";
 
@@ -125,8 +137,14 @@ public static class RowProfiles
     /// <summary>The carriage name of general UDP on a row that loads no product.</summary>
     private const string UdpNotApplicable = "n/a";
 
+    /// <summary>The carriage name of a row that does not run UDP at all.</summary>
+    private const string UdpNotRun = "not-run-tcp-only";
+
     /// <summary>The cell every UDP number of a row whose product cannot carry UDP reads.</summary>
     internal const string NotCarriedCell = "not carried (UDP bypassed)";
+
+    /// <summary>The cell every UDP number of a row that does not run UDP at all reads.</summary>
+    internal const string NotRunCell = "not run (TCP-only control)";
 
     /// <summary>What each port-53 carriage means, in the reference's words.</summary>
     private static readonly Dictionary<string, string> s_udp53Labels = new(StringComparer.Ordinal)
@@ -135,6 +153,7 @@ public static class RowProfiles
         [Udp53LocalTarget] = "direct via the local DNS target (udp/53 forwarded verbatim, bypasses the proxy)",
         [Udp53Hardcoded] = "direct via the product's hardcoded port-53 pass-through",
         [Udp53NotCarried] = "direct (the product cannot carry UDP at all)",
+        [Udp53NotRun] = "not run (the calibration control is TCP only: CONNECT cannot carry UDP or DNS)",
         [Udp53NotApplicable] = "n/a (no product loaded: the direct path is the only path)",
     };
 
@@ -144,6 +163,7 @@ public static class RowProfiles
         [UdpProxiedUtcp] = "proxied (UDP-over-TCP v2)",
         [UdpProxiedNative] = "proxied (native UDP relay)",
         [UdpNotCarried] = "not carried (UDP bypassed)",
+        [UdpNotRun] = "not run (the calibration control is TCP only: CONNECT cannot carry UDP)",
         [UdpNotApplicable] = "n/a (no product loaded)",
     };
 
@@ -233,12 +253,33 @@ public static class RowProfiles
                 UdpNotApplicable),
         };
 
+    /// <summary>
+    /// The calibration-only controls. They are deliberately not in <see cref="Declared"/> or
+    /// <see cref="Order"/>: the product row table and the product shuffle must not grow a control row,
+    /// so a product tree's output stays byte-identical while a tree that holds the control still reports
+    /// it as one.
+    /// </summary>
+    private static IReadOnlyDictionary<string, RowProfile> CalibrationControls { get; } =
+        new Dictionary<string, RowProfile>(StringComparer.Ordinal)
+        {
+            [CalibrationControlRow] = new(
+                "sing-box 1.14.2-singfix (SOCKS5 hop)",
+                "calibration control: no product loaded; the BASE latency shape (60 s, 20 req/s x 120 B) runs through the SOCKS5 inbound, TCP only; UDP and DNS are not run (CONNECT cannot carry them)",
+                "BASE-singbox (TCP only)",
+                Dual: false,
+                Udp53NotRun,
+                UdpNotRun)
+            {
+                CalibrationControl = true,
+            },
+        };
+
     /// <summary>The row's declaration, or null for an id the table does not know.</summary>
     internal static RowProfile? Find(string rowId)
     {
         ArgumentNullException.ThrowIfNull(rowId);
 
-        return Profiles.GetValueOrDefault(rowId);
+        return Profiles.GetValueOrDefault(rowId) ?? CalibrationControls.GetValueOrDefault(rowId);
     }
 
     /// <summary>The arms the row's plan runs, or null when the row itself is undeclared.</summary>

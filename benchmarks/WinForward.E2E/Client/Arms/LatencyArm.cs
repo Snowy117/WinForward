@@ -138,7 +138,7 @@ internal static class LatencyArm
 
         // The transport owns the socket: it connects, sends the lane's command frame and reads the
         // stream, and the engine disposes nothing.
-        using var transport = new TcpLaneTransport(context.CreateTcpSocket(), context.TcpEndPoint, connectionId);
+        using var transport = new TcpLaneTransport(context.CreateTcpSocket(), context.TcpEndPoint, connectionId, context.Socks5);
         var policy = new LatencyTcpPolicy(lane.Book, connectionId, plan.PayloadBytes, plan.InFlightWindow, context.Latency.TcpRtt);
         var engine = new LaneEngine<TcpLaneTransport>(transport, policy, options);
         lane.Counts = await engine.RunAsync(cancellationToken).ConfigureAwait(false);
@@ -167,7 +167,7 @@ internal static class LatencyArm
                 await Pacer.WaitUntilAsync(intended, cancellationToken).ConfigureAwait(false);
                 using var socket = context.CreateTcpSocket();
                 var begin = Clock.Now;
-                var open = await SocketOps.TryConnectAsync(socket, context.TcpEndPoint, cancellationToken).ConfigureAwait(false);
+                var open = await context.TryConnectAsync(socket, context.TcpEndPoint, cancellationToken).ConfigureAwait(false);
                 var end = Clock.Now;
                 state.BookConnect(open.Ok, end - begin);
                 if (!open.Ok)

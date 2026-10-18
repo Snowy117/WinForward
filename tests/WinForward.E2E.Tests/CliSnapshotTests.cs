@@ -48,6 +48,14 @@ public sealed class CliSnapshotTests
         "  --inject-delay-ms <n>  Delay every measured response by n ms (default 0, max 60000)\n"
         + "  --dns-port <n>       DNS responder port, UDP and TCP (default 30053)\n";
 
+    private const string ClientHelpCase = "client-help";
+
+    private const string ClientDnsPortHelpBefore = "  --dns-port <n>            Target DNS port, UDP and TCP (default 53)\n";
+
+    private const string ClientDnsPortHelpAfter =
+        "  --dns-port <n>            Target DNS port, UDP and TCP (default 53)\n"
+        + "  --socks5 <host:port>      Relay every TCP connection through a SOCKS5 CONNECT proxy\n"
+        + "                            (no BIND, no UDP); a plan with a UDP or DNS arm is refused\n";
     private static string Before => Path.Combine(RepoPaths.CliSnapshotsDirectory, "before");
 
     private static string After => Path.Combine(RepoPaths.CliSnapshotsDirectory, "after");
@@ -129,6 +137,11 @@ public sealed class CliSnapshotTests
         Assert.Contains(DnsPortHelpAfter, help, StringComparison.Ordinal);
         Assert.DoesNotContain(InjectDelayOption, Text(Path.Combine(Before, $"{stem}.stdout")), StringComparison.Ordinal);
         Assert.DoesNotContain(UdpReceiverOption, Text(Path.Combine(Before, $"{stem}.stdout")), StringComparison.Ordinal);
+
+        var clientStem = ReadIndex(Before).Single(recorded => recorded.Name == ClientHelpCase).Stem;
+        var clientHelp = Text(Path.Combine(After, $"{clientStem}.stdout"));
+        Assert.Contains(ClientDnsPortHelpAfter, clientHelp, StringComparison.Ordinal);
+        Assert.DoesNotContain("--socks5", Text(Path.Combine(Before, $"{clientStem}.stdout")), StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -171,7 +184,8 @@ public sealed class CliSnapshotTests
     private static string WithRegisteredChanges(string stdout) => stdout
         .Replace(TargetHelpBefore, TargetHelpAfter, StringComparison.Ordinal)
         .Replace(UdpPortHelpBefore, UdpPortHelpAfter, StringComparison.Ordinal)
-        .Replace(DnsPortHelpBefore, DnsPortHelpAfter, StringComparison.Ordinal);
+        .Replace(DnsPortHelpBefore, DnsPortHelpAfter, StringComparison.Ordinal)
+        .Replace(ClientDnsPortHelpBefore, ClientDnsPortHelpAfter, StringComparison.Ordinal);
 
     private static List<RecordedCase> ReadIndex(string tree)
     {

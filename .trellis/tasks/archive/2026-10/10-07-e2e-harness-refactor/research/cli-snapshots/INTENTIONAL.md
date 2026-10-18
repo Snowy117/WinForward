@@ -104,3 +104,25 @@ E2-d 的判据是"**语义与错误文本逐字不变**"（`implement.md` 的 E2
 `DnsPortHelpAfter` 常量、`WithRegisteredChanges` 的第三条 `Replace`，以及
 `TheRegisteredChangesAreTheOnlyDifferenceBetweenTheTrees` 里"before 树不含该选项"的断言。
 这次没有新增 case：选项的拒绝路径由 `TargetOptionsTests` 覆盖，终端用户文本只有 help 一行变化。
+
+## 6. B6：`client --help` 新增 `--socks5` 两行
+
+| | |
+|---|---|
+| 位置 | `benchmarks/WinForward.E2E/Client/ClientRunner.cs` 的 `PrintHelp()` |
+| 来源 | B6 的 `BASE-singbox` 校准控制：客户端通过 SOCKS5 CONNECT 转发每一条被测 TCP 连接 |
+| 变更 | `--dns-port` 之后、`--sampler-process` 之前插入选项名 + 折行的说明 |
+| 影响面 | 11 个 `after/` stdout：`00-client-help` 与 10 条打印 help 的 `client` usage 错误 |
+| 不影响 | 全部 31 条的退出码、全部 stderr、`index.json`、根用法文本、`target` 的全部文本 |
+
+```diff
+   --dns-port <n>            Target DNS port, UDP and TCP (default 53)
++  --socks5 <host:port>      Relay every TCP connection through a SOCKS5 CONNECT proxy
++                            (no BIND, no UDP); a plan with a UDP or DNS arm is refused
+   --sampler-process <name>  Process name to sample at 1 Hz (repeatable, no .exe suffix)
+```
+
+测试侧的落地是 `CliSnapshotTests` 的 `ClientDnsPortHelpBefore` / `ClientDnsPortHelpAfter`
+常量、`WithRegisteredChanges` 的第四条 `Replace`，以及 `TheRegisteredChangesAreTheOnlyDifferenceBetweenTheTrees`
+里"before 树不含该选项"的断言。没有新增 case：选项的拒绝路径由 `ClientOptionsTests` 与
+`Socks5Plan` 的测试覆盖。

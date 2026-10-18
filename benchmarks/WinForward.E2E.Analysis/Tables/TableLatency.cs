@@ -97,6 +97,11 @@ internal static class TableLatency
             return [rowId, armName, .. MarkdownTable.Repeated(MetricCatalogue.Percentiles.Count + 2, RowProfiles.NotCarriedCell)];
         }
 
+        if (string.Equals(status, MetricStatus.NotRun, StringComparison.Ordinal))
+        {
+            return [rowId, armName, .. MarkdownTable.Repeated(MetricCatalogue.Percentiles.Count + 2, RowProfiles.NotRunCell)];
+        }
+
         var (cells, reasons) = Histograms(campaign, latencyClass, rowId, armName);
         if (cells["count"].Values.Count == 0
             && !MetricCatalogue.Percentiles.Any(stat => cells[stat].Values.Count > 0))

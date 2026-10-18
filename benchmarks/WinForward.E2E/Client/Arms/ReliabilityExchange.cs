@@ -70,7 +70,7 @@ internal static class ReliabilityExchange
 
         try
         {
-            if (!(await SocketOps.TryConnectAsync(socket, context.TcpEndPoint, token).ConfigureAwait(false)).Ok)
+            if (!(await context.TryConnectAsync(socket, context.TcpEndPoint, token).ConfigureAwait(false)).Ok)
             {
                 result._status = ExchangeStatus.ConnectFail;
                 return result;

@@ -7,6 +7,8 @@ Usage: WinForward.E2E client --target <ip> --out <dir> [options]
   --tcp-port <n>            Target TCP port (default 30010)
   --udp-port <n>            Target UDP echo port (default 30010)
   --dns-port <n>            Target DNS port, UDP and TCP (default 53)
+  --socks5 <host:port>      Relay every TCP connection through a SOCKS5 CONNECT proxy
+                            (no BIND, no UDP); a plan with a UDP or DNS arm is refused
   --sampler-process <name>  Process name to sample at 1 Hz (repeatable, no .exe suffix)
   --inject-corrupt-every <n>  Flip one payload byte of every n-th UDP datagram without
                             recomputing its CRC: the target drops the frame as undecodable,

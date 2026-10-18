@@ -38,6 +38,10 @@
   The product rows are shuffled per pass from a recorded seed. environment.json carries the whole
   permutation plan before the first pass, and each pass writes it as order.txt and order.json; the
   analysis replays the seed to check the recorded order is the one the generator produces.
+
+  -Rows BASE-singbox runs the calibration-only SOCKS5 control once instead of a campaign: no product,
+  the TCP-only base-singbox plan, and the client's --socks5 argument. The control row is never part of
+  the product table and is never shuffled; -DryRun checks its staging without changing the machine.
 #>
 [CmdletBinding()]
 param(
@@ -53,6 +57,9 @@ param(
     [int]$ClockProbePort = 40099,
     # Read the environment and run the clock gate, then exit before the firewall change and the loop.
     [switch]$PreflightOnly,
+    # Validate the selected row's staging and print the client command; change nothing and write no
+    # campaign. With -Rows BASE-singbox this is the calibration control's staging check.
+    [switch]$DryRun,
     # Demand a synchronized VM clock: the preflight and every pass phase must stay within 200 ms.
     [switch]$RequireClockSync,
     [int]$TcpPort = 40010,
@@ -69,6 +76,9 @@ param(
     [string]$SingBoxExe = 'C:\wfbench\singbox\sing-box.exe',
     [string]$SingBoxConfig = 'C:\wfbench\singbox\config.json',
     [string]$SingBoxLog = 'C:\wfbench\singbox\singbox.log',
+    # The SOCKS5 inbound the BASE-singbox control dials; sing-box must listen here.
+    [string]$SingBoxSocks5Address = '127.0.0.1',
+    [int]$SingBoxSocks5Port = 1080,
     [string]$HeartbeatPath = 'C:\wfbench\heartbeat.txt',
     # Recorded in environment.json; seeds the per-pass product order unless -OrderSeed overrides it.
     [int]$Seed = 20261006,
@@ -109,6 +119,16 @@ function Write-Log {
     # this stdout, which the operator redirects to orch.log.
     param([string]$Message)
     [Console]::Out.WriteLine(('{0} {1}' -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'), $Message))
+}
+
+function Format-CommandLine {
+    # One line for the log and the dry run. A value with whitespace is quoted so the printed command
+    # can still be copied into a shell; the campaign's own paths carry no whitespace.
+    param([string]$Exe, [string[]]$Arguments)
+    $quoted = @($Arguments | ForEach-Object {
+            if ($_ -match '\s') { '"' + $_ + '"' } else { $_ }
+        })
+    return ($Exe + ' ' + ($quoted -join ' '))
 }
 
 function Get-ProcessSet {
@@ -157,6 +177,59 @@ function Get-Products {
         }
     )
     , $rows
+}
+
+function Get-ControlRows {
+    # Calibration-only controls have no product executable and never enter the product shuffle. They
+    # are selected by -Rows like a product row, but run once and alone: a control row answers "is the
+    # proxy hop alive and what does it cost", not "which product is faster".
+    $rows = @(
+        [pscustomobject]@{
+            Id = 'BASE-singbox'
+            Kind = 'calibration-control'
+            Plan = 'base-singbox-plan.json'
+            Description = 'BASE latency shape (60 s, 20 req/s x 120 B) through the SOCKS5 inbound, TCP only'
+        }
+    )
+    , $rows
+}
+
+function Invoke-DryRun {
+    # The staging check: print the client commands and every file they need, and name the ones that
+    # are missing. It never starts a process or writes a campaign.
+    param($Products, $Controls)
+
+    $missing = New-Object System.Collections.ArrayList
+    Write-Log '=== dry run (no process is started and the machine is not changed) ==='
+
+    foreach ($control in $Controls) {
+        $planPath = Join-Path $PlanRoot $control.Plan
+        $socks5 = ('{0}:{1}' -f $SingBoxSocks5Address, $SingBoxSocks5Port)
+        Write-Log ('  control {0}: {1}' -f $control.Id, $control.Description)
+        Write-Log ('  plan    {0}' -f $planPath)
+        Write-Log ('  proxy   {0} (sing-box config {1})' -f $socks5, $SingBoxConfig)
+        $outDir = Join-Path $OutRoot ('pass1\' + $control.Id)
+        Invoke-Client -Label ($control.Id + '-p1') -OutDir $outDir -PlanPath $planPath `
+            -TcpPortValue $TcpPort -DnsPortValue $DnsPort -ExtraArgs @('--socks5', $socks5) -DryRun
+        foreach ($path in @($ClientExe, $SingBoxExe, $SingBoxConfig, $planPath)) {
+            if (-not (Test-Path -LiteralPath $path)) { [void]$missing.Add($path) }
+        }
+    }
+
+    foreach ($product in $Products) {
+        $planPath = Join-Path $PlanRoot $product.Plan
+        Write-Log ('  row {0}: plan {1}' -f $product.Id, $planPath)
+        $outDir = Join-Path $OutRoot ('pass1\' + $product.Id)
+        $sampler = @()
+        if (-not [string]::IsNullOrWhiteSpace($product.ProcessName)) { $sampler = @($product.ProcessName) }
+        Invoke-Client -Label ($product.Id + '-p1') -OutDir $outDir -PlanPath $planPath `
+            -TcpPortValue $TcpPort -DnsPortValue $DnsPort -SamplerProcess $sampler -DryRun
+        foreach ($path in @($ClientExe, $SingBoxExe, $SingBoxConfig, $product.Exe, $product.ConfigSource, $planPath)) {
+            if ($null -ne $path -and -not (Test-Path -LiteralPath $path)) { [void]$missing.Add($path) }
+        }
+    }
+
+    return @($missing | Select-Object -Unique)
 }
 
 function Start-Product {
@@ -466,6 +539,24 @@ function Start-SingBox {
     return (Get-ProcessSet 'sing-box').Count -gt 0
 }
 
+function Test-Socks5Inbound {
+    # The client's --socks5 connect is the real proof, but a named failure before the run is easier to
+    # read than an arm error. The probe opens and closes one connection, so the log is cleared after it.
+    param([string]$Address, [int]$Port)
+    $client = $null
+    try {
+        $client = [System.Net.Sockets.TcpClient]::new()
+        $client.Connect($Address, $Port)
+        return $true
+    }
+    catch {
+        return $false
+    }
+    finally {
+        if ($null -ne $client) { $client.Close() }
+    }
+}
+
 function Clear-SingBoxLog {
     if (Test-Path $SingBoxLog) { Clear-Content -Path $SingBoxLog -ErrorAction SilentlyContinue }
 }
@@ -549,11 +640,10 @@ function Invoke-Client {
         [string]$Exe = $ClientExe,
         [string[]]$SamplerProcess = @(),
         [int]$PassNumber = 0,
-        [string]$RowId = ''
+        [string]$RowId = '',
+        [string[]]$ExtraArgs = @(),
+        [switch]$DryRun
     )
-
-    if (Test-Path $OutDir) { Remove-Item $OutDir -Recurse -Force -ErrorAction SilentlyContinue }
-    New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
     $clientArgs = @(
         'client',
@@ -566,6 +656,15 @@ function Invoke-Client {
         '--label', $Label
     )
     foreach ($name in $SamplerProcess) { $clientArgs += @('--sampler-process', $name) }
+    $clientArgs += $ExtraArgs
+
+    if ($DryRun) {
+        Write-Log ('  client ' + (Format-CommandLine -Exe $Exe -Arguments $clientArgs))
+        return
+    }
+
+    if (Test-Path $OutDir) { Remove-Item $OutDir -Recurse -Force -ErrorAction SilentlyContinue }
+    New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     # -PassThru is what populates ExitCode; the exit is awaited explicitly rather than with -Wait so a
@@ -770,6 +869,106 @@ function Invoke-ControlBlock {
     Invoke-Client -Label ('control-' + $Tag + '-p' + $Pass) -OutDir $dir `
         -PlanPath (Join-Path $PlanRoot 'base-plan.json') -TcpPortValue $TcpPort -DnsPortValue $DnsPort `
         -PassNumber $Pass -RowId ('control-' + $Tag)
+    Touch-Heartbeat
+}
+
+function Invoke-BaseSingBoxControl {
+    # One calibration-only run: no product, one pass, the client dials the SOCKS5 inbound with the
+    # TCP-only base-singbox plan. The row is never part of the product order or a campaign.
+    param([string]$OutRoot, [string]$PlanRoot)
+
+    $pass = 1
+    $passDir = Join-Path $OutRoot 'pass1'
+    New-Item -ItemType Directory -Force -Path $passDir | Out-Null
+    $rowDir = Join-Path $passDir 'BASE-singbox'
+    New-Item -ItemType Directory -Force -Path $rowDir | Out-Null
+    $socks5 = ('{0}:{1}' -f $SingBoxSocks5Address, $SingBoxSocks5Port)
+    Write-Log ('=== calibration control: BASE-singbox (TCP only, SOCKS5 {0}) ===' -f $socks5)
+
+    $preClock = $null
+    try {
+        $preClock = Measure-ClockPhase -Path $clockLogPath -Pass $pass -Phase 'pre'
+    }
+    catch {
+        $reason = ('the clock probe failed before the calibration control: ' + $_.Exception.Message)
+        Write-Log ('  ' + $reason)
+        Add-CampaignFailure -PassNumber $pass -Stage 'preflight' -Message $reason
+        return
+    }
+
+    $preBounds = Test-ClockPhaseBounds -PhaseResult $preClock -RequireSync:$RequireClockSync
+    if (-not $preBounds.passed) {
+        Write-Log ('  clock gate FAILED: ' + $preBounds.reason)
+        Add-CampaignFailure -PassNumber $pass -Stage 'preflight' -Message ('the clock gate failed before the calibration control: ' + $preBounds.reason)
+        return
+    }
+    if ($null -ne $preBounds.warning) { Write-Log ('  clock WARNING: ' + $preBounds.warning) }
+
+    $clean = Invoke-CleanSlate -Products $allProducts -Pass $pass -EvidencePath (Join-Path $passDir 'clean-slate.json') -RestartSingBox
+    if (-not $clean.passed) {
+        $reason = ('calibration control refused: {0}' -f $clean.reason)
+        Write-Log ('  clean-slate FAILED: ' + $reason)
+        Add-CampaignFailure -PassNumber $pass -Stage 'clean-slate' -Message $reason -CleanSlate
+        [void](Write-RowSkeleton -RowDir $rowDir -Row 'BASE-singbox' -Pass $pass -Stage 'clean-slate' -Message $reason)
+        return
+    }
+
+    if (-not (Test-Socks5Inbound -Address $SingBoxSocks5Address -Port $SingBoxSocks5Port)) {
+        $reason = ('sing-box is not accepting SOCKS5 on {0}' -f $socks5)
+        Write-Log ('  ' + $reason)
+        Add-CampaignFailure -PassNumber $pass -Row 'BASE-singbox' -Stage 'product-start' -Message $reason
+        [void](Write-RowSkeleton -RowDir $rowDir -Row 'BASE-singbox' -Pass $pass -Stage 'product-start' -Message $reason)
+        return
+    }
+
+    Clear-SingBoxLog
+    Touch-Heartbeat
+
+    Invoke-Client -Label 'BASE-singbox-p1' -OutDir $rowDir `
+        -PlanPath (Join-Path $PlanRoot 'base-singbox-plan.json') -TcpPortValue $TcpPort -DnsPortValue $DnsPort `
+        -PassNumber $pass -RowId 'BASE-singbox' -ExtraArgs @('--socks5', $socks5)
+
+    $truth = Get-ProxyTruth
+    Write-JsonNoBom -Path (Join-Path $rowDir 'proxy-truth.json') -Value $truth
+    Write-JsonNoBom -Path (Join-Path $rowDir 'control.json') -Value ([ordered]@{
+            row = 'BASE-singbox'
+            kind = 'calibration-control'
+            plan = 'base-singbox-plan.json'
+            socks5 = $socks5
+            tcpOnly = $true
+            udp = 'not run: SOCKS5 CONNECT carries TCP only'
+            product = 'none'
+        })
+    if (Test-Path $SingBoxLog) { Copy-Item $SingBoxLog (Join-Path $rowDir 'singbox.log') -Force -ErrorAction SilentlyContinue }
+    Write-Log ('  proxy truth: tcp={0} udp={1} uot={2}' -f $truth.tcp, $truth.udp, $truth.utcp)
+
+    $postClock = $null
+    try {
+        $postClock = Measure-ClockPhase -Path $clockLogPath -Pass $pass -Phase 'post'
+    }
+    catch {
+        $reason = ('the clock probe failed after the calibration control: ' + $_.Exception.Message)
+        Write-Log ('  ' + $reason)
+        Add-CampaignFailure -PassNumber $pass -Stage 'preflight' -Message $reason
+        return
+    }
+
+    $postBounds = Test-ClockPhaseBounds -PhaseResult $postClock -RequireSync:$RequireClockSync
+    if (-not $postBounds.passed) {
+        Write-Log ('  clock gate FAILED: ' + $postBounds.reason)
+        Add-CampaignFailure -PassNumber $pass -Stage 'preflight' -Message ('the clock gate failed after the calibration control: ' + $postBounds.reason)
+        return
+    }
+    if ($null -ne $postBounds.warning) { Write-Log ('  clock WARNING: ' + $postBounds.warning) }
+
+    $driftMs = [Math]::Abs([double]$postClock.medianOffsetMs - [double]$preClock.medianOffsetMs)
+    Write-Log ('  clock control: pre {0:+0.0;-0.0;0} ms, post {1:+0.0;-0.0;0} ms, drift {2:F1} ms (VM - host)' -f [double]$preClock.medianOffsetMs, [double]$postClock.medianOffsetMs, $driftMs)
+    if ($driftMs -gt 100.0) {
+        $reason = ('the clock drifted {0:F1} ms across the calibration control, above the 100 ms bound' -f $driftMs)
+        Write-Log ('  clock drift gate FAILED: ' + $reason)
+        Add-CampaignFailure -PassNumber $pass -Stage 'preflight' -Message $reason
+    }
+
     Touch-Heartbeat
 }
 
@@ -1461,14 +1660,15 @@ function Get-SnapshotEvidence {
 function Get-EnvironmentBlock {
     # Reads the script's parameter values; every collector is read-only and returns its own reason
     # when the value is not available on this machine.
-    param($Products, [string]$Started)
+    param($Products, [string]$Started, [switch]$ControlOnly)
 
     $osInfo = Get-OperatingSystemInfo
     $firewallInfo = Get-FirewallProfileState
     $singBoxInfo = Get-SingBoxVersion
     $nicOffload = Get-NicOffload
     $dynamicMemory = Get-DynamicMemory
-    $productVersions = @(Get-ProductVersions -Products $Products)
+    $productVersions = @()
+    if (-not $ControlOnly) { $productVersions = @(Get-ProductVersions -Products $Products) }
     $powerPlan = Get-PowerPlan
     $driverVersions = Get-DriverVersions
     $snapshot = Get-SnapshotEvidence
@@ -1518,6 +1718,10 @@ function Get-EnvironmentBlock {
         $block.unavailable['freeRamMb'] = $osInfo.reason
     }
 
+    if ($ControlOnly) {
+        $block.unavailable['productVersions'] = 'not read: the BASE-singbox calibration control loads no product; the sing-box version is the singBox field'
+    }
+
     return $block
 }
 
@@ -1526,15 +1730,39 @@ function Get-EnvironmentBlock {
 # ---------------------------------------------------------------------------------------------
 
 $allProducts = Get-Products
+$allControls = @(Get-ControlRows)
 $products = $allProducts
+$controls = @()
 if ($Rows.Count -gt 0) {
     $products = @($allProducts | Where-Object { $Rows -contains $_.Id })
-    if ($products.Count -eq 0) {
-        Write-Log ('  no product row matches -Rows: ' + ($Rows -join ', '))
+    $controls = @($allControls | Where-Object { $Rows -contains $_.Id })
+    if ($products.Count -eq 0 -and $controls.Count -eq 0) {
+        Write-Log ('  no row matches -Rows: ' + ($Rows -join ', '))
+        exit 1
+    }
+    if ($products.Count -gt 0 -and $controls.Count -gt 0) {
+        Write-Log '  a calibration control row cannot share a campaign with product rows'
         exit 1
     }
 }
 
+$calibrationOnly = $controls.Count -gt 0
+if ($calibrationOnly -and $Passes -ne 1) {
+    Write-Log ('  the calibration control runs once; -Passes {0} is ignored' -f $Passes)
+    $Passes = 1
+}
+
+if ($DryRun) {
+    $missing = @(Invoke-DryRun -Products $products -Controls $controls)
+    if ($missing.Count -gt 0) {
+        foreach ($path in $missing) { Write-Log ('  missing: ' + $path) }
+        Write-Log '  dry run FAILED: stage the missing file(s) first'
+        exit 1
+    }
+
+    Write-Log '  dry run passed; no process was started and no campaign was written'
+    exit 0
+}
 $productIds = @($products | ForEach-Object { $_.Id })
 $productsById = @{}
 foreach ($product in $products) { $productsById[$product.Id] = $product }
@@ -1566,29 +1794,35 @@ if (-not $PreflightOnly) {
 }
 $orderSeedSource = if ($OrderSeed -gt 0) { '-OrderSeed' } else { '-Seed' }
 $effectiveOrderSeed = if ($OrderSeed -gt 0) { $OrderSeed } else { $Seed }
-$productIdList = $productIds -join ','
-$orderPlan = Get-OrderPlan -BaseSeed $effectiveOrderSeed -Passes $Passes -Rows $productIds
+if ($calibrationOnly) {
+    # A calibration control is one run with no product block, so there is no permutation to draw.
+    $orderPlan = @()
+}
+else {
+    $productIdList = $productIds -join ','
+    $orderPlan = Get-OrderPlan -BaseSeed $effectiveOrderSeed -Passes $Passes -Rows $productIds
 
-# The plan is drawn twice and the two draws must agree: a plan that depends on how many times it was
-# asked for is not one a seed reproduces. This is not the aliasing guard -- the explicit Clone() in
-# Get-OrderPermutation is (Windows PowerShell 5.1 can hand a [string[]] through by reference) -- and
-# neither is a substitute for the analysis's replay, which recomputes a recorded permutation from
-# its recorded seed and reports one the seed does not produce.
-$productIdsUnchanged = ($productIds -join ',') -eq $productIdList
-$replayedPlan = Get-OrderPlan -BaseSeed $effectiveOrderSeed -Passes $Passes -Rows $productIds
-$firstOrder = (@($orderPlan) | ForEach-Object { ($_.rows -join ',') }) -join ';'
-$secondOrder = (@($replayedPlan) | ForEach-Object { ($_.rows -join ',') }) -join ';'
-if (-not $productIdsUnchanged -or $firstOrder -ne $secondOrder) {
-    $reason = if ($productIdsUnchanged) {
-        'the same seed produced two different permutations'
-    }
-    else {
-        'the shuffle mutated the declared row list'
-    }
+    # The plan is drawn twice and the two draws must agree: a plan that depends on how many times it was
+    # asked for is not one a seed reproduces. This is not the aliasing guard -- the explicit Clone() in
+    # Get-OrderPermutation is (Windows PowerShell 5.1 can hand a [string[]] through by reference) -- and
+    # neither is a substitute for the analysis's replay, which recomputes a recorded permutation from
+    # its recorded seed and reports one the seed does not produce.
+    $productIdsUnchanged = ($productIds -join ',') -eq $productIdList
+    $replayedPlan = Get-OrderPlan -BaseSeed $effectiveOrderSeed -Passes $Passes -Rows $productIds
+    $firstOrder = (@($orderPlan) | ForEach-Object { ($_.rows -join ',') }) -join ';'
+    $secondOrder = (@($replayedPlan) | ForEach-Object { ($_.rows -join ',') }) -join ';'
+    if (-not $productIdsUnchanged -or $firstOrder -ne $secondOrder) {
+        $reason = if ($productIdsUnchanged) {
+            'the same seed produced two different permutations'
+        }
+        else {
+            'the shuffle mutated the declared row list'
+        }
 
-    Write-Log ('  order plan FAILED: ' + $reason)
-    if (-not $PreflightOnly) { Add-CampaignFailure -Stage 'preflight' -Message ('the product-order plan is not reproducible: ' + $reason) }
-    exit 1
+        Write-Log ('  order plan FAILED: ' + $reason)
+        if (-not $PreflightOnly) { Add-CampaignFailure -Stage 'preflight' -Message ('the product-order plan is not reproducible: ' + $reason) }
+        exit 1
+    }
 }
 
 $clockLogPath = Join-Path $OutRoot 'clock.jsonl'
@@ -1605,13 +1839,32 @@ $started = (Get-Date).ToString('o')
 # The clock probe runs first so the host probe does not wait through the environment sweep; both the
 # probe and the sweep are read-only and precede every Set-* and benchmark process start.
 $clockGate = Invoke-ClockGate -Count 5 -SanityLimitMs 5000 -SyncLimitMs 200 -RequireSync:$RequireClockSync
-$environment = Get-EnvironmentBlock -Products $allProducts -Started $started
+if ($calibrationOnly) {
+    $environment = Get-EnvironmentBlock -Products @() -Started $started -ControlOnly
+}
+else {
+    $environment = Get-EnvironmentBlock -Products $allProducts -Started $started
+}
 $environment.clockGate = $clockGate
 $environment.clockOffsetMs = $clockGate.medianOffsetMs
 $environment.orderSeed = $effectiveOrderSeed
 $environment.orderSeedSource = $orderSeedSource
 $environment.orderAlgorithm = $script:OrderAlgorithm
 $environment.orderPlan = @($orderPlan)
+if ($calibrationOnly) {
+    # The control's provenance: the hop, the TCP-only plan and the deferred UDP side. It is a control,
+    # not a product row, so it is recorded here rather than in the product/version block.
+    $environment.calibrationControl = [ordered]@{
+        row = 'BASE-singbox'
+        plan = 'base-singbox-plan.json'
+        socks5 = ('{0}:{1}' -f $SingBoxSocks5Address, $SingBoxSocks5Port)
+        tcpOnly = $true
+        udp = 'not run: SOCKS5 CONNECT carries TCP only'
+        productLoaded = $false
+        analysis = 'legacy invocation on this campaign root; the release invocation needs the seven-pass product tree'
+    }
+}
+
 Write-JsonNoBom -Path (Join-Path $OutRoot 'environment.json') -Value $environment
 Write-Log ('  environment: ' + (Join-Path $OutRoot 'environment.json'))
 Write-Log ('  env: {0} build {1}, {2} cpus, {3} MB visible' -f $environment.os, $environment.build, $environment.logicalCpus, $environment.totalRamMb)
@@ -1676,12 +1929,17 @@ if (-not (Test-TargetReachable)) {
 }
 
 Write-Log ('  target reachable at {0}:{1}' -f $TargetAddress, $TcpPort)
-if (-not (Test-TargetReachable -Port $TcpPortDirect)) {
+if (-not $calibrationOnly -and -not (Test-TargetReachable -Port $TcpPortDirect)) {
     Write-Log ('  direct-lane target unreachable at {0}:{1} - the dual phase will fail' -f $TargetAddress, $TcpPortDirect)
     Add-CampaignFailure -Stage 'target' -Message ('the direct-lane target is unreachable at {0}:{1}' -f $TargetAddress, $TcpPortDirect) -Detail 'the dual phase will fail on every dual row'
 }
+if ($calibrationOnly) { Write-Log '  direct-lane target check skipped: the calibration control has no dual phase' }
 
 
+if ($calibrationOnly) {
+    Invoke-BaseSingBoxControl -OutRoot $OutRoot -PlanRoot $PlanRoot
+}
+else {
 for ($pass = 1; $pass -le $Passes; $pass++) {
     $passDir = Join-Path $OutRoot ('pass{0}' -f $pass)
     New-Item -ItemType Directory -Force -Path $passDir | Out-Null
@@ -1794,6 +2052,7 @@ for ($pass = 1; $pass -le $Passes; $pass++) {
     }
 
     Write-Log ('  pass {0} done' -f $pass)
+}
 }
 
 if ($aborted) { $exitCode = 1 }

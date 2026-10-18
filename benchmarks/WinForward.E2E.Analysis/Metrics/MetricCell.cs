@@ -29,6 +29,9 @@ internal static class MetricStatus
     /// <summary>The product cannot carry UDP, so every UDP-derived number for this row measures nothing.</summary>
     internal const string NotCarried = "not-carried";
 
+    /// <summary>The row does not run UDP at all, so a UDP-derived number is not measured by design.</summary>
+    internal const string NotRun = "not-run";
+
     /// <summary>The port-53 arm is a direct-path measurement on this row.</summary>
     internal const string DnsCarriage = "dns-carriage";
 
@@ -65,6 +68,11 @@ internal static class MetricStatus
                     ? (DeclaredAbsent, $"{arm} is declared in the {profile!.Plan} plan but no arm file or result was found")
                     : (DeclaredAbsent, $"{arm} was not measured");
             }
+        }
+
+        if (profile is { CalibrationControl: true } && udpPath is not null)
+        {
+            return (NotRun, RowProfiles.NotRunCell);
         }
 
         if (profile is not null && udpPath is not null

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net;
+using WinForward.E2E.Client;
 
 namespace WinForward.E2E.Cli;
 
@@ -17,6 +18,8 @@ internal sealed class ClientOptions
     internal string Label { get; set; } = string.Empty;
 
     internal List<string> SamplerProcesses { get; } = [];
+
+    internal Socks5Proxy? Socks5 { get; set; }
 
     internal int TcpPort { get; private set; } = 30010;
 
@@ -40,6 +43,7 @@ internal sealed class ClientOptions
         "--dns-port",
         "--inject-corrupt-every",
         "--inject-rewrite-every",
+        "--socks5",
     ];
 
     private static readonly string[] s_stringOptions =
@@ -49,6 +53,7 @@ internal sealed class ClientOptions
         "--out",
         "--label",
         "--sampler-process",
+        "--socks5",
     ];
 
     /// <summary>
@@ -119,6 +124,8 @@ internal sealed class ClientOptions
             case "--label":
                 options.Label = value;
                 return true;
+            case "--socks5":
+                return TryAssignSocks5(value, options, out error);
             case "--sampler-process":
                 if (value.Length == 0)
                 {
@@ -142,6 +149,17 @@ internal sealed class ClientOptions
                 error = $"unknown argument '{name}'";
                 return false;
         }
+    }
+
+    private static bool TryAssignSocks5(string value, ClientOptions options, out string? error)
+    {
+        if (!Socks5Proxy.TryParse(value, out var proxy, out error))
+        {
+            return false;
+        }
+
+        options.Socks5 = proxy;
+        return true;
     }
 
     private static bool TryAssignPort(string value, out string? error, Action<ClientOptions, int> assign, ClientOptions options)

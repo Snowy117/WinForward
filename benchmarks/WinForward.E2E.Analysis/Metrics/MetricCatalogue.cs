@@ -142,7 +142,7 @@ internal static class MetricCatalogue
 
         var (status, reason) = MetricStatus.Resolve(campaign, spec.Arm, spec.UdpPath, spec.Dns53, rowId);
         var cell = new MetricCell { Status = status, StatusReason = reason };
-        if (status is MetricStatus.NotInPlan or MetricStatus.DeclaredAbsent or MetricStatus.NotCarried)
+        if (status is MetricStatus.NotInPlan or MetricStatus.DeclaredAbsent or MetricStatus.NotCarried or MetricStatus.NotRun)
         {
             return cell;
         }
@@ -188,6 +188,11 @@ internal static class MetricCatalogue
         if (string.Equals(cell.Status, MetricStatus.NotCarried, StringComparison.Ordinal))
         {
             return RowProfiles.NotCarriedCell;
+        }
+
+        if (string.Equals(cell.Status, MetricStatus.NotRun, StringComparison.Ordinal))
+        {
+            return RowProfiles.NotRunCell;
         }
 
         if (cell.Status is MetricStatus.NotInPlan or MetricStatus.DeclaredAbsent)

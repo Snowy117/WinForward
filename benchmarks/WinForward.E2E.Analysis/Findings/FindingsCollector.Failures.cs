@@ -171,6 +171,11 @@ internal static partial class FindingsCollector
 
         foreach (var passId in campaign.PassIds)
         {
+            if (IsCalibrationControlPass(campaign, passId))
+            {
+                continue;
+            }
+
             var declared = campaign.Order.TryGetValue(passId, out var ran) && ran.Count > 0 ? ran : RowProfiles.Order;
             var present = campaign.InPass(passId).Select(run => run.RunId).ToHashSet(StringComparer.Ordinal);
             var number = PassNumber(passId);

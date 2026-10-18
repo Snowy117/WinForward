@@ -98,6 +98,8 @@ public sealed class AnalyzerReleaseThresholdsTests
     [InlineData("equivalence-not-primary.json", "'equivalence.families[0].metric' is not a primary metric")]
     [InlineData("unknown-reference.json", "'referenceRow' names an undeclared row 'wf-aot-default'")]
     [InlineData("unknown-opponent.json", "'opponents[3]' names an undeclared row 'sing-box'")]
+    [InlineData("calibration-control-opponent.json", "names the calibration control 'BASE-singbox', which is report-only and cannot be a product opponent")]
+    [InlineData("calibration-control-reference.json", "names the calibration control 'BASE-singbox', which is report-only and cannot be a product reference")]
     [InlineData("missing-opponents.json", "'opponents' is required")]
     [InlineData("min-passes-one.json", "'minPasses' is 1, below the minimum of 2")]
     [InlineData("discard-pass-negative.json", "'discardPass' is -1, below the minimum of 0")]

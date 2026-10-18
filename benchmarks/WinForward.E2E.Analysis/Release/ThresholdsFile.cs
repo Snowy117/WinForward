@@ -414,13 +414,15 @@ public sealed record ThresholdsFile
             return false;
         }
 
-        if (RowProfiles.Declared.ContainsKey(referenceRow))
+        if (!RowProfiles.Declared.ContainsKey(referenceRow))
         {
-            return true;
+            error = RowProfiles.IsCalibrationControl(referenceRow)
+                ? $"{ThresholdsJson.Prefix}'referenceRow' names the calibration control '{referenceRow}', which is report-only and cannot be a product reference"
+                : $"{ThresholdsJson.Prefix}'referenceRow' names an undeclared row '{referenceRow}'";
+            return false;
         }
 
-        error = $"{ThresholdsJson.Prefix}'referenceRow' names an undeclared row '{referenceRow}'";
-        return false;
+        return true;
     }
 
     private static bool TryReadOpponents(
@@ -449,7 +451,9 @@ public sealed record ThresholdsFile
 
             if (!RowProfiles.Declared.ContainsKey(row))
             {
-                error = $"{ThresholdsJson.Prefix}'{path}' names an undeclared row '{row}'";
+                error = RowProfiles.IsCalibrationControl(row)
+                    ? $"{ThresholdsJson.Prefix}'{path}' names the calibration control '{row}', which is report-only and cannot be a product opponent"
+                    : $"{ThresholdsJson.Prefix}'{path}' names an undeclared row '{row}'";
                 return false;
             }
 

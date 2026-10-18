@@ -17,6 +17,12 @@ internal static class ClientRunner
             return ExitCodes.UsageError;
         }
 
+        if (options.Socks5 is not null && !Socks5Plan.TryValidate(arms, out var socks5Error))
+        {
+            await Console.Error.WriteLineAsync($"e2e client: {socks5Error}").ConfigureAwait(false);
+            return ExitCodes.UsageError;
+        }
+
         if (!IPAddress.TryParse(options.TargetAddress, out var targetAddress))
         {
             await Console.Error.WriteLineAsync($"e2e client: --target '{options.TargetAddress}' is not an IP address literal.").ConfigureAwait(false);
@@ -129,6 +135,7 @@ internal static class ClientRunner
             TargetAddress = targetAddress,
             Sink = sink,
             Latency = latency,
+            Socks5 = options.Socks5,
             CancellationToken = cancellationToken,
         };
 
@@ -247,6 +254,8 @@ internal static class ClientRunner
               --tcp-port <n>            Target TCP port (default 30010)
               --udp-port <n>            Target UDP echo port (default 30010)
               --dns-port <n>            Target DNS port, UDP and TCP (default 53)
+              --socks5 <host:port>      Relay every TCP connection through a SOCKS5 CONNECT proxy
+                                        (no BIND, no UDP); a plan with a UDP or DNS arm is refused
               --sampler-process <name>  Process name to sample at 1 Hz (repeatable, no .exe suffix)
               --inject-corrupt-every <n>  Flip one payload byte of every n-th UDP datagram without
                                         recomputing its CRC: the target drops the frame as undecodable,

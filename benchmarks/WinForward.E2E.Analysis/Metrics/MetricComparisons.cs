@@ -116,11 +116,21 @@ internal static class MetricComparisons
     /// <summary>Why one pair makes no claim about this metric, or null when it does.</summary>
     private static string? Comparability(MetricSpec spec, MetricCell cellA, MetricCell cellB, string rowA, string rowB)
     {
+        if (RowProfiles.IsCalibrationControl(rowA) || RowProfiles.IsCalibrationControl(rowB))
+        {
+            return "the BASE-singbox calibration control is report-only: it is not a product opponent";
+        }
+
         foreach (var (rowId, cell) in new[] { (rowA, cellA), (rowB, cellB) })
         {
             if (cell.Status is MetricStatus.NotInPlan or MetricStatus.DeclaredAbsent)
             {
                 return $"not measured in this row: {cell.StatusReason} ({rowId})";
+            }
+
+            if (string.Equals(cell.Status, MetricStatus.NotRun, StringComparison.Ordinal))
+            {
+                return $"{rowId}: {RowProfiles.NotRunCell}";
             }
 
             if (string.Equals(cell.Status, MetricStatus.NotCarried, StringComparison.Ordinal))

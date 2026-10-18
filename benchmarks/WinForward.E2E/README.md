@@ -20,8 +20,11 @@ installed, configured, loaded or measured in that loop; there is no proxy betwee
 target. A statement about a product exists only in a campaign run in which the product is loaded on
 the machine under test and the campaign's own `proxy-truth.json` shows flows reaching the proxy.
 
-The harness never speaks SOCKS5 and never impersonates a proxy. The client dials the target address
-directly, and a transparent proxy rewrites the path beneath it.
+The harness normally never speaks SOCKS5 and never impersonates a proxy: the client dials the
+target address directly, and a transparent proxy rewrites the path beneath it. The calibration
+control is the one exception: `--socks5` makes the client perform a no-auth SOCKS5 CONNECT per
+measured TCP connection so the `BASE-singbox` row can quantify the sing-box hop. Only a TCP-only
+plan may accompany it; UDP and DNS arms are refused rather than sent direct.
 
 ## Layout
 
@@ -61,10 +64,11 @@ directly, and a transparent proxy rewrites the path beneath it.
 | `Target/SourceCensus.cs` | the UDP echo server's per-receiver source-endpoint census |
 | `Target/TargetLog.cs` | the target's own stderr log, with the closed-pipe guard the teardown contract requires |
 | `Wire/` | the protocol both verbs share: frame codec, stream reader, CRC32C, command payload, half-close trailer, DNS wire subset, payload filler |
-| `scripts/plans/` | the committed plans: `full-plan`, `udp-plan`, `dns-plan`, `dual-plan`, `base-plan`, `sensitivity-plan`, `selftest-plan` |
+| `scripts/plans/` | the committed plans: `full-plan`, `udp-plan`, `dns-plan`, `dual-plan`, `base-plan`, `base-singbox-plan`, `sensitivity-plan`, `selftest-plan` |
 | `scripts/plans-short/` | the same arm shapes at short durations and lower rates, for validating a change |
 | `scripts/plans-windows/` | one file, `full-shape-plan.json`: `full-plan`'s load shape — `LOSS 120s × 500/s`, `LATLOAD 500 rps`, the `PERSIST` idle window, `DNS 200 rps` — for validating a change through a real product without a full-length campaign. Its arm order, arm names and key sets are identical to `scripts/plans/full-plan.json`; the only differences are nine `seconds` values, and `LOSS` (120 s) is the one arm left uncompressed. The loader has no override or merge mechanism, so the shape is repeated rather than patched — see "The configs and the plan sets" |
 | `scripts/plans-release/` | the release caliber: the five campaign plans with only their declared `seconds` changed, plus `caliber.json` — the machine-readable descriptor naming the plan set, `full-plan.json`'s SHA-256 and the per-arm seconds the report prints |
+| `scripts/singbox/` | the BASE-singbox calibration control's sing-box template: one no-auth SOCKS5 inbound on `127.0.0.1:1080` and a direct outbound. It is staged by hand from the calibration runbook; `deploy-campaign.sh` does not carry it |
 | `scripts/configs/` | the six committed product configurations — six of the seven rows, since the Proxifier row's profile is machine-local; the repo-file → row → deployed-path mapping is in "The configs and the plan sets" |
 | `scripts/orchestrator.ps1` | the campaign driver, run on the machine under test |
 | `scripts/clock-probe.py` | the Linux host's half of the preflight clock gate: one TCP connection per probe, one UTC receive instant in reply; see "Preflight: clock and environment" |
@@ -185,6 +189,7 @@ The client also runs against any plan directly, which is how the campaign drives
 ```bash
 WinForward.E2E client --target <ip> --plan <plan.json> --out <dir> [--label <name>]
                       [--tcp-port 40010] [--udp-port 40010] [--dns-port 53]
+                      [--socks5 <host:port>]
                       [--sampler-process <name>]...
                       [--inject-corrupt-every <n>] [--inject-rewrite-every <n>]
 ```
@@ -196,13 +201,14 @@ WinForward.E2E client --target <ip> --plan <plan.json> --out <dir> [--label <nam
 | `--out <dir>` | output directory, required; `<arm>.jsonl`, `run.json`. Its path is checked before the run: no component over 255 characters and no whole path over 250 |
 | `--label <name>` | free-form label copied into every result and into `run.json` |
 | `--tcp-port`, `--udp-port`, `--dns-port` | the target ports; defaults 30010, 30010 and 53 |
+| `--socks5 <host:port>` | relay every measured TCP connection through a no-auth SOCKS5 CONNECT proxy; only TCP-only plans are accepted (no `loss`/`mix`/`dns`/`base` and no UDP latency arm), any proxy/handshake/CONNECT failure fails the run, and there is no direct-connect fallback |
 | `--sampler-process <name>` | process name to sample at 1 Hz, repeatable, no `.exe` suffix; an empty name is a usage error |
 | `--inject-corrupt-every <n>` | flip one payload byte of every n-th UDP datagram without recomputing its CRC: the target drops the frame as undecodable, so the client can only report it as path loss |
 | `--inject-rewrite-every <n>` | flip one payload byte and recompute the CRC, so the target echoes it and the client books it corrupt |
 
 Both injection flags are read by the loss arm, so they apply to `LOSS` and to `BASE`'s loss phase.
 
-The value of a string option (`--target`, `--plan`, `--out`, `--label`, `--sampler-process`) must not
+The value of a string option (`--target`, `--plan`, `--out`, `--label`, `--socks5`, `--sampler-process`) must not
 start with `-`: an option consumes the next argument as its value, so `--label --out x` would have
 taken `--out` as the label and left the run without an output directory. It is a usage error
 naming the option and the value. Values of the numeric options cannot start with `-` either, since
@@ -263,7 +269,7 @@ Kinds: `latency`, `loss`, `reliability`, `throughput`, `dns`, `mix`, `idle`, `pe
 | `seconds` | every arm | 60 | greater than 0 |
 | `ratePerSecond` | latency, loss, dns, and both BASE phases | 20 / 500 / 200 / 20 and 500 | 0 or more |
 | `payloadBytes` | latency, loss, persistent, both BASE phases | 120 / 200 / 120 / 120 and 200 | 0..4194304 (the frame codec's ceiling) |
-| `protocol` | latency, and BASE's latency phase (BASE's loss phase always runs udp) | `"tcp"` | `tcp`, `udp` or `tcp+udp` |
+| `protocol` | latency, and BASE's latency phase (BASE's loss phase always runs udp) | `"tcp"` | `tcp`, `udp` or `tcp+udp`; under `--socks5` a plan is accepted only when every arm is TCP-only, so `base` is refused and a `latency` arm has to declare `tcp` |
 | `window` | in-flight requests per lane: latency, loss, both BASE phases | 64 / 4096 / 64 and 4096 | 0 or more |
 | `lanes` | latency, both BASE phases | 1 | 0 or more |
 | `lossWindowMs` | loss, mix, BASE's loss phase — the UDP loss threshold W in milliseconds | 200 | 0 or more |
@@ -309,18 +315,20 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/orchestrator.ps1 `
 | Parameter | Default | Meaning |
 |---|---|---|
 | `-Passes` | 4 | passes to run |
-| `-Rows` | all | restrict the campaign to these row ids, for a one-row smoke run; the tree then holds only those rows, so it is a check of the instrument rather than a campaign |
+| `-Rows` | all | restrict the campaign to these row ids, for a one-row smoke run; the tree then holds only those rows, so it is a check of the instrument rather than a campaign. `-Rows BASE-singbox` selects the calibration-only SOCKS5 control instead of a campaign |
 | `-OutRoot` | `C:\wfbench\results` | campaign output root; use a fresh directory for a new campaign |
 | `-PlanRoot` | `C:\wfbench\e2e` | directory holding the deployed plan files |
 | `-TargetAddress` | `192.168.100.4` | the Linux host running the targets |
 | `-ClockProbePort` | 40099 | TCP port of the Linux host's clock probe (`scripts/clock-probe.py`) |
 | `-PreflightOnly` | off | read the environment and run the clock gate, write `environment.json` only, then exit before the firewall change and the pass loop; use a fresh `-OutRoot` |
+| `-DryRun` | off | print the selected rows' client commands and the files they need (client, plan, product executable/configuration and sing-box), name every missing file and exit 0/1 without starting a process or writing a campaign; with `-Rows BASE-singbox` it is the control's staging check |
 | `-RequireClockSync` | off | enforce ±200 ms on the preflight and every pass phase instead of measure-and-correct |
 | `-TcpPort`, `-UdpPort`, `-DnsPort` | 40010, 40010, 53 | proxied-lane target ports |
 | `-DnsPortAlt` | 40053 | the alternate DNS responder port |
 | `-TcpPortDirect`, `-DnsPortDirect` | 40011, 40054 | direct-lane target ports |
 | `-ClientExe`, `-ClientExeDirect` | `C:\wfbench\e2e\WinForward.E2E.exe`, `C:\wfbench\e2e-direct\WinForward.E2E.Direct.exe` | the two client images |
 | `-SingBoxExe`, `-SingBoxConfig`, `-SingBoxLog` | `C:\wfbench\singbox\*` | the proxy the traffic is relayed through, and the log its flow census is read from |
+| `-SingBoxSocks5Address`, `-SingBoxSocks5Port` | `127.0.0.1`, 1080 | the SOCKS5 inbound the `BASE-singbox` control dials; sing-box must be configured to listen there |
 | `-HeartbeatPath` | `C:\wfbench\heartbeat.txt` | touched around each arm |
 | `-Seed` | 20261006 | the campaign seed recorded in `environment.json`; also the product-order seed when `-OrderSeed` is 0 |
 | `-OrderSeed` | 0 | the product-order seed alone; a fixed value reproduces every pass's permutation, and 0 derives it from `-Seed` |
@@ -333,6 +341,60 @@ a `control-post/` block, and one directory per product row. The orchestrator wri
 `proxy-truth.json`, copies the product's effective configuration into the row and writes the
 `environment.json` block; deploying the artifacts, the plans and the product configurations to that
 machine is the tracked `scripts/deploy-campaign.sh`; it also uploads the `deploy.json` record into the campaign root.
+
+#### The `BASE-singbox` calibration control
+
+`BASE` is a TCP latency phase followed by a UDP loss phase, and a SOCKS5 CONNECT cannot carry UDP or
+DNS. The calibration control therefore runs only the TCP half: `plans/base-singbox-plan.json`
+is one `latency` arm named `LAT` with the BASE latency phase's shape (60 s, 20 req/s × 120 B, a 4096
+request window, protocol `tcp`). It lives in the canonical plan set, not in `plans-release/`, because
+it is calibration evidence rather than a release caliber. It is a calibration-only control, not a
+per-pass product row: it is
+not in `Get-Products`, it never enters the seeded product shuffle, and `-Rows BASE-singbox` refuses to
+share a campaign with a product row.
+
+Stage `scripts/plans/base-singbox-plan.json` and the sing-box template on the VM (the plan is copied
+into the `-PlanRoot` directory beside the release plans), then check the staging without starting
+anything:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File C:\wfbench\orchestrator.ps1 `
+  -Rows BASE-singbox -Passes 1 -DryRun -OutRoot C:\wfbench\results\base-singbox `
+  -PlanRoot C:\wfbench\e2e -SingBoxConfig C:\wfbench\singbox\config.json
+```
+
+The dry run prints the exact client command, including `--socks5 127.0.0.1:1080`, and names every
+missing file (client, sing-box executable, sing-box config, plan). Run it once for real with the same
+arguments but without `-DryRun`. The run still passes the clock gate, the firewall/environment
+preflight and the clean slate, writes `pass1/BASE-singbox/{LAT.jsonl,run.json,proxy-truth.json,
+control.json,singbox.log}`, and records the hop in `environment.json`'s `calibrationControl` block
+(`tcpOnly: true`, `udp: "not run: SOCKS5 CONNECT carries TCP only"`). The control has no dual phase, so
+the preflight skips the direct-lane target check (the proxied target is still required), and
+`environment.json`'s `productVersions` is empty with an `unavailable.productVersions` reason because
+the control loads no product.
+
+The client forwards every measured TCP connection — the latency lane and the 1 Hz connect probe — with
+a no-auth SOCKS5 CONNECT. A proxy, handshake or refused-CONNECT failure fails the arm and the run; the
+client never falls back to a direct connection. A plan with a `loss`, `mix`, `dns` or `base` arm, or a
+`latency` arm whose protocol is `udp` or `tcp+udp`, is refused as a usage error before the output
+directory is created, because sending that traffic directly would measure a path the row did not
+declare. The control plan is accepted because it is TCP only.
+
+Analyse the downloaded tree with the legacy invocation (`analyze.sh --raw <campaign> --out <dir>`):
+section 1 reports the row as a calibration control and carries its own longer not-run label in the
+UDP/53 column. In the metric tables the LAT UDP-derived cells read `not run (TCP-only control)`;
+arms the plan never ran, including DNS, read `n/a (...)`. The row is outside the pairwise
+comparisons: it is not a product opponent and is not in the release primary family, and a
+thresholds file that names it as the reference or opponent is refused. `publish-campaign.sh` is for
+the seven-pass product tree and does not apply.
+
+**The real sing-box calibration record is deferred to B8.** The VM is not provisioned for this task
+(no sing-box, no product binaries, no benchmark layout), so no hop record exists yet; the loopback
+fake-SOCKS5 tests prove the client path, not the calibration. B8 must stage `scripts/plans/base-singbox-plan.json`
+and `scripts/singbox/base-singbox-socks5.json` (as `C:\wfbench\singbox\config.json`), run the dry run
+above, run the control once in the calibration session, archive the row, and record the measured hop
+beside the calibration band. `deploy-campaign.sh` does not carry the control plan or the template
+(the deploy drivers stage only the five named product plans), so the staging is an explicit calibration step.
 
 #### Preflight: clock and environment
 
@@ -381,7 +443,8 @@ any pass. It keeps the original `os`, `build`, `logicalCpus`, `totalRamMb`, `fre
 adapter, the RSC/LSO/checksum/interrupt-moderation advanced properties), `dynamicMemory` (visible and
 physical RAM, `Win32_ComputerSystem` / `Win32_OperatingSystem`, and the Hyper-V setting when the guest
 exposes it), `productVersions` (path, `FileVersion` and SHA-256 of the WinForward builds, their
-sidecars, the opponent executables and sing-box), `powerPlan` (`powercfg /getactivescheme`),
+sidecars, the opponent executables and sing-box; empty with `unavailable.productVersions` in a
+`BASE-singbox` control run, which loads no product), `powerPlan` (`powercfg /getactivescheme`),
 `driverVersions` (`driverquery /v` filtered to `ndisrd`, `ProxifierDrv` and `WinDivert`, plus the
 `Get-Service` rows), `snapshotId` (best effort; the guest has no checkpoint identifier) and
 `environmentChanges`. A value the machine cannot provide is `null` with a short reason, never a
@@ -390,6 +453,10 @@ fabricated one. `firewallProfiles` is the state **as found**; disabling the fire
 mistaken for the machine's environment. The pass loop's teardown runs on every exit path after the
 change: it stops the products and sing-box and restores the firewall to the as-found state, recording
 the restore as a second `environmentChanges` entry.
+
+A `-Rows` restricted product run still records the full product-version table: the environment is a
+property of the machine, not of the rows selected for measurement. Only the `BASE-singbox` control
+skips it, because that row loads no product.
 
 Every unreadable value carries its reason beside it: `firewallProfilesReason`, `singBoxReason`,
 `snapshotIdReason`, the `reason` inside `nicOffload`, `dynamicMemory`, `powerPlan`, `driverVersions` and
@@ -477,13 +544,13 @@ last-one-wins), so every variant is a full copy of the arms it runs:
 
 | Directory | Files | Relationship to `scripts/plans/` (measured 2026-10-18 for all four rows; the leaf counts below are current) |
 |---|---|---|
-| `scripts/plans/` | 7: `base`, `dns`, `dual`, `full`, `sensitivity`, `selftest`, `udp` | the canonical set; the release campaign stages `plans-release/` instead, and `selftest-plan.json` — `full`'s ten arms plus `BASE`, at 5–10 s per arm on smaller, lower-rate shapes — is the self-test's. `sensitivity-plan.json` is the calibration-only positive control: one target instance, no product, never staged as a campaign row |
-| `scripts/plans-short/` | 5: the same set minus `selftest-plan` and `sensitivity-plan` | the same arm shapes at short durations **and lower rates**: against `plans/full-plan.json` it differs in 18 leaves, 10 `seconds` and 8 not — four `ratePerSecond`, `connectionsPerSecond`, `targetBytesPerSecond`, `idleSeconds`, and `arms[6]/modeMix` (the canonical plan has `stall`, the short set does not). It is not a pure duration compression |
+| `scripts/plans/` | 8: `base`, `base-singbox`, `dns`, `dual`, `full`, `sensitivity`, `selftest`, `udp` | the canonical set; the release campaign stages `plans-release/` instead, and `selftest-plan.json` — `full`'s ten arms plus `BASE`, at 5–10 s per arm on smaller, lower-rate shapes — is the self-test's. `sensitivity-plan.json` is the calibration-only positive control: one target instance, no product, never staged as a campaign row. `base-singbox-plan.json` is the calibration-only SOCKS5 control: the BASE latency shape as one TCP-only `LAT` arm, never a product row and never in the product shuffle |
+| `scripts/plans-short/` | 5: the same set minus `selftest-plan`, `sensitivity-plan` and `base-singbox-plan` | the same arm shapes at short durations **and lower rates**: against `plans/full-plan.json` it differs in 18 leaves, 10 `seconds` and 8 not — four `ratePerSecond`, `connectionsPerSecond`, `targetBytesPerSecond`, `idleSeconds`, and `arms[6]/modeMix` (the canonical plan has `stall`, the short set does not). It is not a pure duration compression |
 | `scripts/plans-windows/` | 1: `full-shape-plan.json` | `plans/full-plan.json` with nine `seconds` values overridden and **nothing else**: 47 of its 56 leaves are identical, 0 leaves differ in any key other than `seconds`, and `LOSS` keeps its full 120 s. `deploy-campaign.sh --plan-set windows` stages it as `C:\wfbench\e2e-win\full-plan.json`; the release deploy stages `plans-release/full-plan.json` under `C:\wfbench\e2e` instead |
 | `scripts/plans-release/` | 5 plans plus `caliber.json`: `base`, `dns`, `dual`, `full`, `udp` | the **release caliber**: the canonical arm shapes with only the declared `seconds` values changed — `IDLE`, `LAT`, `LATLOAD`, `DNS`, `DNSALT` and `THRU` 30 s, `LOSS` 120 s, `REL` 60 s, `MIX` and `PERSIST` 60 s on the full plan — and every rate, count and `modeMix` identical to `plans/`. `caliber.json` names the set, `full-plan.json`, its SHA-256 and the per-arm seconds |
 
 Every file in `plans-short/`, `plans-windows/` and `plans-release/` is derivable from `plans/` plus
-three override tables — `plans/` itself is the irreducible set — so deduplicating the eighteen is
+three override tables — `plans/` itself is the irreducible set — so deduplicating the nineteen is
 tempting, but it needs a new `PlanFile` override/merge mechanism with its own validation and tests.
 **Do not add one as part of a data cleanup**; it is registered as a follow-up instead.
 
@@ -912,7 +979,9 @@ hold. All of them are visible in the record itself.
 | flows were not mixed | `foreignConnection == 0` in `LOSS`, `LAT`/`LATLOAD`'s udp block, `MIX`'s UDP class and per-desktop witnesses, and `BASE`'s loss phase |
 | the product behaved as configured | `REL`'s `fidelityMismatch == 0`; `PERSIST`'s `survivedIdle` true; a non-zero `unexpectedEof` excludes the early EOFs that `partialFin` deliberately provokes, which are counted separately as `expectedEarlyEof` |
 | the sampler worked | no `samplerError` record and no sample carrying `readError` |
+| the calibration control went through the hop | `pass1/BASE-singbox/proxy-truth.json` has `tcp > 0`, its `LAT` arm has `tcp.connectAttempts > 0`, and `environment.json`'s `calibrationControl.socks5` names the inbound; a zero TCP count means the hop did not carry the control |
 | a campaign is trustworthy | the analysis's own gates: the three identities, the lane witnesses, `clientSendLoss`, the two control blocks against each other, and `directLeak == 0` in the dual phase — see [README.md](../WinForward.E2E.Analysis/README.md) |
+
 
 The harness's own checks are not one thing. `CliSnapshotTests` is a test: `dotnet test` replays the
 recorded CLI commands through `Program.Main` and fails when a message is reworded.

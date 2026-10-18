@@ -1,0 +1,13 @@
+{
+  "arms": [
+    {
+      "kind": "latency",
+      "name": "LAT",
+      "seconds": 60,
+      "ratePerSecond": 20,
+      "payloadBytes": 120,
+      "protocol": "tcp",
+      "window": 4096
+    }
+  ]
+}

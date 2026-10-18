@@ -1,0 +1,21 @@
+{
+  "log": {
+    "level": "info",
+    "output": "C:\\wfbench\\singbox\\singbox.log",
+    "timestamp": true
+  },
+  "inbounds": [
+    {
+      "type": "socks",
+      "tag": "socks-in",
+      "listen": "127.0.0.1",
+      "listen_port": 1080
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
+  ]
+}

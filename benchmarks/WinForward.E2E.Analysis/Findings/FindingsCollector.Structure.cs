@@ -125,6 +125,11 @@ internal static partial class FindingsCollector
         var findings = new List<Finding>();
         foreach (var passId in campaign.PassIds)
         {
+            if (IsCalibrationControlPass(campaign, passId))
+            {
+                continue;
+            }
+
             var pre = campaign.InPass(passId, RowProfiles.ControlPre);
             var post = campaign.InPass(passId, RowProfiles.ControlPost);
             if (pre is null || post is null)
@@ -198,7 +203,7 @@ internal static partial class FindingsCollector
         foreach (var rowId in campaign.RowIds)
         {
             var profile = RowProfiles.Find(rowId);
-            if (profile is null || string.Equals(profile.Udp53, RowProfiles.Udp53NotApplicable, StringComparison.Ordinal))
+            if (profile is null || profile.CalibrationControl || string.Equals(profile.Udp53, RowProfiles.Udp53NotApplicable, StringComparison.Ordinal))
             {
                 continue;
             }
@@ -222,6 +227,40 @@ internal static partial class FindingsCollector
                     $"every UDP cell for this row reads '{RowProfiles.NotCarriedCell}' and the row is excluded from the "
                     + "UDP-accuracy and DNS-latency comparisons; its TCP results are unaffected"));
             }
+        }
+
+        return findings;
+    }
+
+    /// <summary>
+    /// Whether a pass holds a calibration control and no product row. Such a pass has no product block
+    /// to bracket and no product row table to satisfy; its calibration finding is the declaration it
+    /// needs.
+    /// </summary>
+    private static bool IsCalibrationControlPass(CampaignModel campaign, string passId)
+    {
+        var rows = campaign.InPass(passId);
+        return rows.Any(run => RowProfiles.IsCalibrationControl(run.RunId))
+            && !rows.Any(run => !CampaignQueries.IsControl(run.RunId) && !RowProfiles.IsCalibrationControl(run.RunId));
+    }
+
+    private static List<Finding> CalibrationControlRows(CampaignModel campaign)
+    {
+        var findings = new List<Finding>();
+        foreach (var rowId in campaign.RowIds)
+        {
+            if (!RowProfiles.IsCalibrationControl(rowId))
+            {
+                continue;
+            }
+
+            findings.Add(new Finding(
+                Severity.Informational,
+                "calibration-control",
+                rowId,
+                "the row runs the BASE latency shape (TCP only) through the SOCKS5 hop with no product loaded; "
+                + "it is report-only, is not a product opponent and is not in the release primary family, and "
+                + "its UDP and DNS side is not run because SOCKS5 CONNECT carries TCP only"));
         }
 
         return findings;

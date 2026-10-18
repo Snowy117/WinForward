@@ -20,12 +20,13 @@ internal sealed class TcpLaneTransport : ILaneTransport
     private readonly Socket _socket;
     private readonly EndPoint _endPoint;
     private readonly uint _connectionId;
+    private readonly Socks5Proxy? _proxy;
     private readonly FrameStreamReader _reader;
 
     /// <summary>
     /// Takes ownership of <paramref name="socket"/>: disposing this transport closes it.
     /// </summary>
-    internal TcpLaneTransport(Socket socket, EndPoint endPoint, uint connectionId)
+    internal TcpLaneTransport(Socket socket, EndPoint endPoint, uint connectionId, Socks5Proxy? proxy = null)
     {
         ArgumentNullException.ThrowIfNull(socket);
         ArgumentNullException.ThrowIfNull(endPoint);
@@ -33,6 +34,7 @@ internal sealed class TcpLaneTransport : ILaneTransport
         _socket = socket;
         _endPoint = endPoint;
         _connectionId = connectionId;
+        _proxy = proxy;
         _reader = new FrameStreamReader(socket);
     }
 
@@ -48,7 +50,7 @@ internal sealed class TcpLaneTransport : ILaneTransport
     public async ValueTask<LaneOpenResult> OpenAsync(CancellationToken cancellationToken)
     {
         var begin = Clock.Now;
-        var open = await SocketOps.TryConnectAsync(_socket, _endPoint, cancellationToken).ConfigureAwait(false);
+        var open = await ClientTransport.TryConnectAsync(_socket, _endPoint, _proxy, cancellationToken).ConfigureAwait(false);
         if (!open.Ok)
         {
             return open;

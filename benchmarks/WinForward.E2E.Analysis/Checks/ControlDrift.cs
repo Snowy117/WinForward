@@ -98,7 +98,7 @@ internal static class ControlDrift
         var problems = new List<string>();
         foreach (var row in rows)
         {
-            if (CampaignQueries.IsControl(row.RunId))
+            if (CampaignQueries.IsControl(row.RunId) || RowProfiles.IsCalibrationControl(row.RunId))
             {
                 continue;
             }

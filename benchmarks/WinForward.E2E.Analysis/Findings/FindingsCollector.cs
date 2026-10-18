@@ -36,6 +36,7 @@ internal static partial class FindingsCollector
         collected.AddRange(ControlBlocks(campaign));
         collected.AddRange(LedgerFindings.Collect(campaign));
         collected.AddRange(Design(campaign));
+        collected.AddRange(CalibrationControlRows(campaign));
         collected.AddRange(DualFindings.Collect(campaign));
         return Deduplicate(collected);
     }

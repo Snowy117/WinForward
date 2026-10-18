@@ -16,15 +16,15 @@ public sealed class PlanFileTests
             string.Join(',', arms.Select(arm => arm.Name)));
     }
 
-    // 7 long-form plans, 5 short-form ones, the Windows shape-preserving compression and the 5 release
-    // plans. The count is asserted so that a plan moved out of these directories fails the suite
-    // instead of quietly shrinking the set under test.
+    // 8 long-form plans (the TCP-only BASE-singbox control among them), 5 short-form ones, the
+    // Windows shape-preserving compression and the 5 release plans. The count is asserted so that a
+    // plan moved out of these directories fails the suite instead of quietly shrinking the set under test.
     [Fact]
     public void EveryShippedPlanLoads()
     {
         var plans = ShippedPlanPaths();
 
-        Assert.Equal(18, plans.Length);
+        Assert.Equal(19, plans.Length);
         foreach (var plan in plans)
         {
             Assert.True(PlanFile.TryLoad(plan, out var arms, out var planBytes, out var error), $"{plan}: {error}");
@@ -107,7 +107,26 @@ public sealed class PlanFileTests
         Assert.Equal(500, loss.RatePerSecond);
         Assert.Equal(200, loss.LossWindowMs);
     }
+    /// <summary>
+    /// The BASE-singbox calibration control plan: the BASE latency phase's shape, TCP only. The
+    /// plan-side validator must accept it, because the client refuses any UDP-bearing plan.
+    /// </summary>
+    [Fact]
+    public void TheBaseSingboxControlPlanIsTheTcpOnlyBaseLatencyShape()
+    {
+        var plan = Path.Combine(RepoPaths.PlansDirectory, "base-singbox-plan.json");
 
+        Assert.True(PlanFile.TryLoad(plan, out var arms, out _, out var error), error);
+        var arm = Assert.Single(arms);
+        Assert.Equal("LAT", arm.Name);
+        Assert.Equal("latency", arm.Kind);
+        Assert.Equal(60, arm.Seconds);
+        Assert.Equal(20, arm.RatePerSecond);
+        Assert.Equal(120, arm.PayloadBytes);
+        Assert.Equal("tcp", arm.Protocol);
+        Assert.Equal(4096, arm.Window);
+        Assert.True(Socks5Plan.TryValidate(arms, out var socks5Error), socks5Error);
+    }
     /// <summary>
     /// The reliability arm's fault mix is the one plan key that carries the target's stall mode.
     /// Canonical and release both declare it, so the release plan stays a duration-only variant and a
