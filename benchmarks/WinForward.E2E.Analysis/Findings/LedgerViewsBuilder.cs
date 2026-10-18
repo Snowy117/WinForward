@@ -59,18 +59,46 @@ internal static class LedgerViewsBuilder
 
     private static readonly ConditionalWeakTable<CampaignModel, LedgerViews> s_cache = [];
 
+    /// <summary>
+    /// Translates one arm's VM window into the time base the ledger writes, for a campaign whose client
+    /// clock was measured against the host's.
+    /// </summary>
+    /// <param name="passId">The pass the window belongs to.</param>
+    /// <param name="start">The window's start on the client's clock.</param>
+    /// <param name="end">The window's end on the client's clock.</param>
+    /// <returns>The window the attribution's record selection should use.</returns>
+    internal delegate (DateTimeOffset Start, DateTimeOffset End) LedgerWindowShift(
+        string passId,
+        DateTimeOffset start,
+        DateTimeOffset end);
+
     /// <summary>The campaign's ledger views, computed once per campaign.</summary>
     internal static LedgerViews For(CampaignModel campaign)
     {
         ArgumentNullException.ThrowIfNull(campaign);
 
-        return s_cache.GetValue(campaign, Build);
+        return s_cache.GetValue(campaign, model => Build(model, shift: null));
+    }
+
+    /// <summary>
+    /// The campaign's ledger views with every arm window translated before attribution. Never cached: a
+    /// corrected window's records are a different attribution than the cached untranslated one, and the
+    /// release path asks for it at most once per campaign.
+    /// </summary>
+    /// <param name="campaign">The campaign to read.</param>
+    /// <param name="shift">The translation from the client's window to the ledger's.</param>
+    internal static LedgerViews ForCorrected(CampaignModel campaign, LedgerWindowShift shift)
+    {
+        ArgumentNullException.ThrowIfNull(campaign);
+        ArgumentNullException.ThrowIfNull(shift);
+
+        return Build(campaign, shift);
     }
 
     /// <summary>The arms whose datagrams reach the UDP echo port, which the endpoint partition reads.</summary>
     internal static IReadOnlyList<string> UdpEchoArms => s_udpEchoArms;
 
-    private static LedgerViews Build(CampaignModel campaign)
+    private static LedgerViews Build(CampaignModel campaign, LedgerWindowShift? shift)
     {
         var passes = new Dictionary<string, LedgerPassView>(StringComparer.Ordinal);
         var attribution = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -90,7 +118,7 @@ internal static class LedgerViewsBuilder
             var discriminating = labels.Count > 1 && labels.Keys.Any(RunLabels(runs).Contains);
             var instances = InstancesOf(ledgers);
             var pools = PoolsOf(runs, instances);
-            var windows = WindowsOf(runs);
+            var windows = WindowsOf(runs, shift);
             passes[passId] = new LedgerPassView
             {
                 Paths = [.. ledgers.Select(ledger => ledger.Path)],
@@ -98,7 +126,7 @@ internal static class LedgerViewsBuilder
                 Types = TypesOf(records),
                 Labels = labels,
                 BadLines = ledgers.Sum(ledger => ledger.BadLines),
-                PerArm = ArmViews(passId, runs, records, windows, discriminating, pools),
+                PerArm = ArmViews(passId, runs, records, windows, discriminating, pools, shift),
             };
             attribution[passId] = Attribution(ledgers.Count, labels, discriminating, instances, pools);
         }
@@ -283,15 +311,33 @@ internal static class LedgerViewsBuilder
             .Select(entry => RunClocks.Label(entry.Run)!)
             .ToHashSet(StringComparer.Ordinal);
 
+    /// <summary>
+    /// One arm's window as the attribution should read it: the run's own VM window, translated when the
+    /// caller supplied a clock correction.
+    /// </summary>
+    private static (DateTimeOffset Start, DateTimeOffset End)? WindowOf(
+        ClientRun run,
+        string armName,
+        LedgerWindowShift? shift)
+    {
+        if (RunClocks.ArmUtcWindow(run, armName) is not { } window)
+        {
+            return null;
+        }
+
+        return shift?.Invoke(run.PassId, window.Start, window.End) ?? window;
+    }
+
     private static Dictionary<string, List<(string Arm, DateTimeOffset Start, DateTimeOffset End)>> WindowsOf(
-        List<(ClientRun Run, ClientRun Owner)> runs)
+        List<(ClientRun Run, ClientRun Owner)> runs,
+        LedgerWindowShift? shift)
     {
         var windows = new Dictionary<string, List<(string Arm, DateTimeOffset Start, DateTimeOffset End)>>(StringComparer.Ordinal);
         foreach (var run in runs.Select(entry => entry.Run))
         {
             foreach (var armName in ArmRecords.LoadOrder)
             {
-                if (RunClocks.ArmUtcWindow(run, armName) is not { } window)
+                if (WindowOf(run, armName, shift) is not { } window)
                 {
                     continue;
                 }
@@ -315,14 +361,15 @@ internal static class LedgerViewsBuilder
         List<LedgerRecord> records,
         Dictionary<string, List<(string Arm, DateTimeOffset Start, DateTimeOffset End)>> windows,
         bool discriminating,
-        Dictionary<string, HashSet<string>?> pools)
+        Dictionary<string, HashSet<string>?> pools,
+        LedgerWindowShift? shift)
     {
         var perArm = new List<LedgerArmView>();
         foreach (var (run, owner) in runs)
         {
             foreach (var armName in ArmRecords.LoadOrder)
             {
-                if (!run.Arms.Contains(armName) || RunClocks.ArmUtcWindow(run, armName) is not { } window)
+                if (!run.Arms.Contains(armName) || WindowOf(run, armName, shift) is not { } window)
                 {
                     continue;
                 }

@@ -118,6 +118,57 @@ still support is the verdict's decision, not the input reader's. `band` is the d
 unit `kind` names: `ratio` bands are fractions (±0.18 is ±18 %), `pp` bands are percentage points.
 `business` and `mdd` are report metadata.
 
+### The clock correction (release-only)
+
+The orchestrator measures the VM-to-host clock offset before and after every pass and appends one line
+per probe to the campaign root's `clock.jsonl`; the release path reads that file to put the client's
+arm windows on the ledger's clock before attribution. The legacy invocation never opens it, so
+`tables.md` and `verdict.json` are unchanged whether the file is there or not.
+
+```
+<raw>/clock.jsonl                          one object per probe: pass, phase (pre|post),
+                                           offsetMs, rttMs, vmUtc, hostUtc (release only)
+```
+
+The sign is the writer's: **`offsetMs = vm - host`**, so `host = vm - offset` and a VM running two
+seconds ahead (`+2000`) has its windows moved two seconds back. A line is a probe only when every
+member is present with its type — `pass` a positive integer, `phase` exactly `pre` or `post`, the two
+millisecond values finite, and both stamps parseable — and a line that is not a probe is counted,
+never thrown on.
+
+`ClockCorrection` is the public seam in `WinForward.E2E.Analysis.Release`:
+
+| member | what it answers |
+|---|---|
+| `ClockCorrection.Read(campaignRoot)` | the log at that root. A missing file reads `Absent`, a file with no usable probe `Incomplete`, a pass missing a phase `Partial`, both phases for every probed pass `Complete`; never an exception |
+| `ClockPass`, `Pass(passId)` | one pass's pre and post medians, its probe count, the drift `\|post − pre\|`, the residual (the largest probe deviation from the pre/post line; a one-phase pass has no line, so its probes are read against that phase's median) and the offset the correction applies |
+| `OffsetAt(passId, vmUtc)` | the pre/post line interpolated at one instant on the client's clock — the diagnostic view; `Apply` is what the attribution uses |
+| `Apply(passId, vmStart, vmEnd)` | the `CorrectedWindow`: the VM window, its host window, the signed offset and whether the pass had evidence. A pass with one phase uses that phase's median and is marked; a pass with no probe keeps its VM window |
+
+`Apply` translates every window of a pass by the same offset: the drift line evaluated at the midpoint
+between the two phase anchors. `OffsetAt` is the interpolated diagnostic view of that line at any one
+instant, and a window's own midpoint is at most half a pass away from the pass midpoint, so the two
+readings differ by at most half the pass's drift. The release clock rule bounds a campaign's pre/post
+drift at 100 ms (`clock.maxDriftMs`), which puts a gated pass's arm-level difference at 50 ms or less
+— inside the ledger's one-second summary band — while a campaign whose drift exceeds the rule is a
+release decision on `driftMs` and `residualMs`, not a parser error.
+
+A window is translated, never rescaled: its two edges are a duration the client measured with a
+monotonic stopwatch, so a drifting offset is reported rather than multiplied into the window.
+
+`ReleaseLedger.TryRead(campaignRoot, clock, out attribution, out error)` runs the analysis's own
+ledger attribution with the correction applied **before** the record selection and returns one entry
+per attributed arm window, with the target's connection and datagram counts beside the client's.
+Passing `null` — or a correction whose status is `Absent` or `Incomplete` — reads the cached,
+untranslated views the legacy documents are built from, which is how the release path gets the
+uncorrected negative control beside its corrected evidence.
+
+The seam is C#-only and is not compared by the Python oracle: the legacy path and its golden are
+untouched, and the correction is covered by `tests/WinForward.E2E.Tests/AnalyzerClock*`. The
+regression is a copied clean tree — every `run.json`'s `startedUtc` shifted by two seconds, a
+`clock.jsonl` at pre `+1800` / post `+2200` — where the corrected per-arm counts reproduce the
+unshifted tree's exactly, while the uncorrected read, an omitted log and an inverted sign do not.
+
 ## What it reads
 
 ```

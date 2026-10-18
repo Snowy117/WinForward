@@ -59,8 +59,10 @@ decision each estimate supports, and what the device cannot support.
 - 7 passes: 1 discarded warm-up + 6 measured. Every attempt archived; `attempt` recorded.
 - Per-run warm-up 30 s; per-arm trim 5 s. The deviation from the design's per-arm 30/60 s is in the
   report's limits section.
-- Clock: the probe writes per-pass `clock.jsonl`; the analyzer shifts the client arm window by
-  `-clockOffsetMs` before ledger attribution, interpolates pre/post, and reports the residual.
+- Clock: the probe writes per-pass `clock.jsonl`; the analyzer shifts the client arm window by one
+  per-pass offset (the pre/post line at the pass midpoint) before ledger attribution; `OffsetAt`
+  keeps the interpolated diagnostic view, and the residual/drift are reported. The 100 ms drift
+  gate bounds the per-arm-vs-pass difference to ≤50 ms, inside the ledger's 1 s summary band.
   Headline latency/CPU/memory/throughput are client-tick based and do not need this correction.
 - Rerun only for a pre-registered instrument gate; the failed pass is archived and disclosed.
 

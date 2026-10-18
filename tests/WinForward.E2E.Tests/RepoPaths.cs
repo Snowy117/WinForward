@@ -33,6 +33,13 @@ internal static class RepoPaths
     internal static string ReleaseThresholdsExample =>
         Path.Combine(Root, "benchmarks", "WinForward.E2E.Analysis", "release-thresholds.example.json");
 
+    /// <summary>
+    /// The frozen campaign every regression is defined on: a deterministic tarball whose root is the tree
+    /// beside the raw directory. A test copies it into a temporary directory rather than mutating it.
+    /// </summary>
+    internal static string FrozenSyntheticTree =>
+        Path.Combine(Root, "benchmarks", "WinForward.E2E.Analysis", "verification", "synthetic-tree.tar.gz");
+
     /// <summary>One negative thresholds fixture from the test project's own fixture tree.</summary>
     internal static string ThresholdFixture(string name) =>
         Path.Combine(Root, "tests", "WinForward.E2E.Tests", "Fixtures", "thresholds", name);

@@ -157,10 +157,13 @@ release matrix is a separate value object (`GateMatrix`) and does not change the
 
 - Parse `clock.jsonl` from the campaign root: `{pass:int, phase:"pre"|"post", offsetMs, rttMs,
   vmUtc, hostUtc}`. `pass` is the integer pass number; `passN` directories map directly.
-- For each measured pass, use the pre and post medians; interpolate the offset at each arm's
-  midpoint (linear in time). Convert the arm window to host time with `host = vm - offset`.
-  (Sign: `offsetMs = vm - host`; a VM that is behind has a negative offset and its window moves
-  forward.)
+- For each measured pass, use the pre and post medians. The window translation uses one offset per
+  pass, the value of the linear pre/post line at the pass midpoint: `host = vm - offset`.
+  `OffsetAt` still exposes the linear interpolation at any instant for diagnostics. The 100 ms
+  drift gate bounds the per-arm-vs-pass difference to ≤50 ms, inside the ledger's 1 s summary
+  band; the synthetic tree's records on arm-window edges make per-arm interpolation flip arbitrary
+  ties, so pass-level is the stable rule. (Sign: `offsetMs = vm - host`; a VM that is behind has a
+  negative offset and its window moves forward.)
 - `residualMs`: the maximum absolute deviation of the 10 probe samples from the line through the
   pre/post medians. `driftMs = |post - pre|`.
 - Run the ledger attribution twice: corrected and uncorrected. Report both mismatch counts. The
